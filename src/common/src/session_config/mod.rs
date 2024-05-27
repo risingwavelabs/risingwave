@@ -152,7 +152,11 @@ pub struct SessionConfig {
     #[parameter(default = true, rename = "rw_streaming_enable_bushy_join")]
     streaming_enable_bushy_join: bool,
 
-    /// Enable arrangement backfill for streaming queries. Defaults to false.
+    /// Enable arrangement backfill for streaming queries. Defaults to true.
+    /// When set to true, the parallelism of the upstream fragment will be
+    /// decoupled from the parallelism of the downstream scan fragment.
+    /// Or more generally, the parallelism of the upstream table / index / mv
+    /// will be decoupled from the parallelism of the downstream table / index / mv / sink.
     #[parameter(default = true)]
     streaming_use_arrangement_backfill: bool,
 
