@@ -25,7 +25,7 @@ use risingwave_common::util::sort_util::ColumnOrder;
 use super::top_n_cache::TopNCacheTrait;
 use super::utils::*;
 use super::{ManagedTopNState, TopNCache};
-use crate::cache::{new_unbounded, ManagedLruCache};
+use crate::cache::ManagedLruCache;
 use crate::common::metrics::MetricsInfo;
 use crate::executor::prelude::*;
 
@@ -129,8 +129,8 @@ pub struct GroupTopNCache<K: HashKey, const WITH_TIES: bool> {
 }
 
 impl<K: HashKey, const WITH_TIES: bool> GroupTopNCache<K, WITH_TIES> {
-    pub fn new(watermark_epoch: AtomicU64Ref, metrics_info: MetricsInfo) -> Self {
-        let cache = new_unbounded(watermark_epoch, metrics_info);
+    pub fn new(watermark_sequence: AtomicU64Ref, metrics_info: MetricsInfo) -> Self {
+        let cache = ManagedLruCache::unbounded(watermark_sequence, metrics_info);
         Self { data: cache }
     }
 }
@@ -229,10 +229,6 @@ where
 
     async fn try_flush_data(&mut self) -> StreamExecutorResult<()> {
         self.managed_state.try_flush().await
-    }
-
-    fn update_epoch(&mut self, epoch: u64) {
-        self.caches.update_epoch(epoch);
     }
 
     fn update_vnode_bitmap(&mut self, vnode_bitmap: Arc<Bitmap>) {
