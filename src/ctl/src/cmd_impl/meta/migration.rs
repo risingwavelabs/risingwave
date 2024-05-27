@@ -397,7 +397,9 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
 
     for table_fragment in table_fragments {
         let streaming_parallelism = match &table_fragment.assigned_parallelism {
-            TableParallelism::Adaptive => StreamingParallelism::Adaptive,
+            TableParallelism::Adaptive { percentile } => StreamingParallelism::Adaptive {
+                percentile: percentile.clone(),
+            },
             TableParallelism::Fixed(n) => StreamingParallelism::Fixed(*n),
             TableParallelism::Custom => StreamingParallelism::Custom,
         };

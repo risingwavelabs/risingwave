@@ -20,7 +20,6 @@ use risingwave_pb::meta::table_parallelism::{
 use risingwave_pb::meta::{PbTableParallelism, TableParallelism};
 use risingwave_sqlparser::ast::{ObjectName, SetVariableValue, SetVariableValueSingle, Value};
 use risingwave_sqlparser::keywords::Keyword;
-use thiserror_ext::AsReport;
 
 use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::root_catalog::SchemaPath;
@@ -127,20 +126,23 @@ fn extract_table_parallelism(parallelism: SetVariableValue) -> Result<TableParal
 
         SetVariableValue::Default => adaptive_parallelism,
         SetVariableValue::Single(SetVariableValueSingle::Literal(Value::Number(v))) => {
-            let fixed_parallelism = v.parse::<u32>().map_err(|e| {
-                ErrorCode::InvalidInputSyntax(format!(
-                    "target parallelism must be a valid number or adaptive: {}",
-                    e.as_report()
-                ))
-            })?;
-
-            if fixed_parallelism == 0 {
-                adaptive_parallelism
-            } else {
-                PbTableParallelism {
+            match (v.parse::<u32>(), v.parse::<f32>()) {
+                (Ok(0), _) => adaptive_parallelism,
+                (Ok(fixed), _) => PbTableParallelism {
                     parallelism: Some(PbParallelism::Fixed(FixedParallelism {
-                        parallelism: fixed_parallelism,
+                        parallelism: fixed,
                     })),
+                },
+                (_, Ok(percentile)) => PbTableParallelism {
+                    parallelism: Some(PbParallelism::Adaptive(AdaptiveParallelism {
+                        percentile: Some(percentile),
+                    })),
+                },
+                _ => {
+                    return Err(ErrorCode::InvalidInputSyntax(
+                        "target parallelism must be a valid number or adaptive".to_string(),
+                    )
+                    .into());
                 }
             }
         }

@@ -34,7 +34,9 @@ use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::types::DataType;
 use risingwave_pb::meta::list_table_fragment_states_response::TableFragmentState;
-use risingwave_pb::meta::table_parallelism::{PbFixedParallelism, PbParallelism};
+use risingwave_pb::meta::table_parallelism::{
+    PbAdaptiveParallelism, PbFixedParallelism, PbParallelism,
+};
 use risingwave_pb::user::grant_privilege::Object;
 
 use crate::catalog::catalog_service::CatalogReader;
@@ -227,7 +229,14 @@ fn extract_parallelism_from_table_state(state: &TableFragmentState) -> String {
         .as_ref()
         .and_then(|parallelism| parallelism.parallelism.as_ref())
     {
-        Some(PbParallelism::Auto(_)) | Some(PbParallelism::Adaptive(_)) => "adaptive".to_string(),
+        Some(PbParallelism::Auto(_))
+        | Some(PbParallelism::Adaptive(PbAdaptiveParallelism { percentile: None })) => {
+            "adaptive".to_string()
+        }
+        Some(PbParallelism::Adaptive(PbAdaptiveParallelism {
+            percentile: Some(percentile),
+        })) => format!("adaptive({:.2})", percentile),
+
         Some(PbParallelism::Fixed(PbFixedParallelism { parallelism })) => {
             format!("fixed({parallelism})")
         }

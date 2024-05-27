@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::{min, Ordering};
+use std::cmp::{max, min, Ordering};
 use std::collections::hash_map::DefaultHasher;
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, LinkedList, VecDeque};
 use std::hash::{Hash, Hasher};
 use std::iter::repeat;
 use std::sync::Arc;
@@ -1980,6 +1980,14 @@ impl ScaleController {
                 let all_available_parallel_unit_ids: BTreeSet<_> =
                     worker_parallel_units.values().flatten().cloned().collect();
 
+                assert_eq!(
+                    all_available_parallel_unit_ids.len(),
+                    worker_parallel_units
+                        .values()
+                        .map(|s| s.len())
+                        .sum::<usize>()
+                );
+
                 if all_available_parallel_unit_ids.is_empty() {
                     bail!(
                         "No schedulable ParallelUnits available for fragment {}",
@@ -2020,9 +2028,37 @@ impl ScaleController {
                     }
                     FragmentDistributionType::Hash => match parallelism {
                         TableParallelism::Adaptive { percentile } => {
-                            if let Some(_x) = percentile {
-                                todo!()
-                            }
+                            let all_available_parallel_unit_ids =
+                                if let Some(percentile) = percentile {
+                                    let n = all_available_parallel_unit_ids.len();
+                                    let target_parallelism =
+                                        max(1, (n as f64 * percentile as f64).floor() as usize);
+
+                                    let mut parallel_units: LinkedList<_> = worker_parallel_units
+                                        .values()
+                                        .cloned()
+                                        .map(|v| v.into_iter().sorted())
+                                        .collect();
+
+                                    let mut round_robin = Vec::new();
+                                    while !parallel_units.is_empty() {
+                                        parallel_units
+                                            .extract_if(|ps| {
+                                                if let Some(p) = ps.next() {
+                                                    round_robin.push(p);
+                                                    false
+                                                } else {
+                                                    true
+                                                }
+                                            })
+                                            .for_each(drop);
+                                    }
+                                    round_robin.truncate(target_parallelism);
+
+                                    round_robin.into_iter().collect()
+                                } else {
+                                    all_available_parallel_unit_ids
+                                };
 
                             target_plan.insert(
                                 fragment_id,

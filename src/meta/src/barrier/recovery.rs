@@ -714,7 +714,6 @@ impl GlobalBarrierManagerContext {
                 .get_all_created_streaming_parallelisms()
                 .await?;
 
-
             let mut result = HashMap::new();
 
             for (object_id, streaming_parallelism) in streaming_parallelisms {
@@ -1203,7 +1202,7 @@ mod tests {
 
         // total 10, assigned custom, actual 10, default full -> adaptive
         assert_eq!(
-            TableParallelism::Adaptive,
+            TableParallelism::Adaptive { percentile: None },
             GlobalBarrierManagerContext::derive_target_parallelism(
                 10,
                 TableParallelism::Custom,
@@ -1214,7 +1213,7 @@ mod tests {
 
         // total 10, assigned custom, actual 11, default full -> adaptive
         assert_eq!(
-            TableParallelism::Adaptive,
+            TableParallelism::Adaptive { percentile: None },
             GlobalBarrierManagerContext::derive_target_parallelism(
                 10,
                 TableParallelism::Custom,
@@ -1225,7 +1224,7 @@ mod tests {
 
         // total 10, assigned fixed(5), actual _, default full -> fixed(5)
         assert_eq!(
-            TableParallelism::Adaptive,
+            TableParallelism::Adaptive { percentile: None },
             GlobalBarrierManagerContext::derive_target_parallelism(
                 10,
                 TableParallelism::Custom,
@@ -1236,7 +1235,7 @@ mod tests {
 
         // total 10, assigned adaptive, actual _, default full -> adaptive
         assert_eq!(
-            TableParallelism::Adaptive,
+            TableParallelism::Adaptive { percentile: None },
             GlobalBarrierManagerContext::derive_target_parallelism(
                 10,
                 TableParallelism::Adaptive,
@@ -1258,7 +1257,7 @@ mod tests {
 
         // total 10, assigned adaptive, actual 6, default 5 -> adaptive
         assert_eq!(
-            TableParallelism::Adaptive,
+            TableParallelism::Adaptive { percentile: None },
             GlobalBarrierManagerContext::derive_target_parallelism(
                 10,
                 TableParallelism::Adaptive,

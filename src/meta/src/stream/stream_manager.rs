@@ -1120,7 +1120,7 @@ mod tests {
                 fragments,
                 &locations.actor_locations,
                 Default::default(),
-                TableParallelism::Adaptive,
+                TableParallelism::Adaptive { percentile: None },
             );
             let ctx = CreateStreamingJobContext {
                 building_locations: locations,
