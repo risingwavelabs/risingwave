@@ -284,6 +284,8 @@ message FilterNode {
   expr.ExprNode search_condition = 1;
 }
 
+message ChangeLogNode {}
+
 message CdcFilterNode {
   expr.ExprNode search_condition = 1;
   uint32 upstream_source_id = 2;
@@ -809,6 +811,7 @@ message StreamNode {
     StreamCdcScanNode stream_cdc_scan = 139;
     CdcFilterNode cdc_filter = 140;
     SourceBackfillNode source_backfill = 142;
+    ChangeLogNode change_log = 143;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.

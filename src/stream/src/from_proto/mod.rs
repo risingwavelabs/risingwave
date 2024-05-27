@@ -19,6 +19,7 @@ mod append_only_dedup;
 mod barrier_recv;
 mod batch_query;
 mod cdc_filter;
+mod change_log;
 mod dml;
 mod dynamic_filter;
 mod eowc_over_window;
@@ -95,6 +96,7 @@ use self::union::*;
 use self::watermark_filter::WatermarkFilterBuilder;
 use crate::error::StreamResult;
 use crate::executor::{Execute, Executor, ExecutorInfo};
+use crate::from_proto::change_log::ChangeLogExecutorBuilder;
 use crate::from_proto::values::ValuesExecutorBuilder;
 use crate::task::ExecutorParams;
 
@@ -172,5 +174,6 @@ pub async fn create_executor(
         NodeBody::OverWindow => OverWindowExecutorBuilder,
         NodeBody::StreamFsFetch => FsFetchExecutorBuilder,
         NodeBody::SourceBackfill => SourceBackfillExecutorBuilder,
+        NodeBody::ChangeLog => ChangeLogExecutorBuilder,
     }
 }
