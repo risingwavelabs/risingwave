@@ -20,6 +20,7 @@ use anyhow::anyhow;
 use bytes::Bytes;
 use futures_async_stream::try_stream;
 use futures_util::AsyncReadExt;
+use hashbrown::hash_map::Entry;
 use itertools::Itertools;
 use prost::Message;
 use risingwave_common::array::{DataChunk, StreamChunk};
@@ -509,10 +510,18 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
                     continue;
                 }
                 let mut new_group = false;
-                let states = groups.entry(key).or_insert_with(|| {
-                    new_group = true;
-                    self.aggs.iter().map(|agg| agg.create_state()).collect()
-                });
+                let states = match groups.entry(key) {
+                    Entry::Occupied(entry) => entry.into_mut(),
+                    Entry::Vacant(entry) => {
+                        new_group = true;
+                        let states = self
+                            .aggs
+                            .iter()
+                            .map(|agg| agg.create_state())
+                            .try_collect()?;
+                        entry.insert(states)
+                    }
+                };
 
                 // TODO: currently not a vectorized implementation
                 for (agg, state) in self.aggs.iter().zip_eq_fast(states) {
@@ -739,6 +748,7 @@ mod tests {
                 order_by: vec![],
                 filter: None,
                 direct_args: vec![],
+                udf: None,
             };
 
             let agg_prost = HashAggNode {
@@ -815,6 +825,7 @@ mod tests {
             order_by: vec![],
             filter: None,
             direct_args: vec![],
+            udf: None,
         };
 
         let agg_prost = HashAggNode {
@@ -929,6 +940,7 @@ mod tests {
             order_by: vec![],
             filter: None,
             direct_args: vec![],
+            udf: None,
         };
 
         let agg_prost = HashAggNode {

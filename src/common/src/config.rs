@@ -623,6 +623,7 @@ pub struct StorageConfig {
 
     /// The threshold for the number of immutable memtables to merge to a new imm.
     #[serde(default = "default::storage::imm_merge_threshold")]
+    #[deprecated]
     pub imm_merge_threshold: usize,
 
     /// Whether to enable write conflict detection

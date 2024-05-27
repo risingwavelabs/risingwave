@@ -33,6 +33,7 @@ pub struct PanicStateStore;
 impl StateStoreRead for PanicStateStore {
     type ChangeLogIter = PanicStateStoreIter<StateStoreReadLogItem>;
     type Iter = PanicStateStoreIter<StateStoreIterItem>;
+    type RevIter = PanicStateStoreIter<StateStoreIterItem>;
 
     #[allow(clippy::unused_async)]
     async fn get(
@@ -51,6 +52,16 @@ impl StateStoreRead for PanicStateStore {
         _epoch: u64,
         _read_options: ReadOptions,
     ) -> StorageResult<Self::Iter> {
+        panic!("should not read from the state store!");
+    }
+
+    #[allow(clippy::unused_async)]
+    async fn rev_iter(
+        &self,
+        _key_range: TableKeyRange,
+        _epoch: u64,
+        _read_options: ReadOptions,
+    ) -> StorageResult<Self::RevIter> {
         panic!("should not read from the state store!");
     }
 
@@ -77,6 +88,7 @@ impl StateStoreWrite for PanicStateStore {
 
 impl LocalStateStore for PanicStateStore {
     type Iter<'a> = PanicStateStoreIter<StateStoreIterItem>;
+    type RevIter<'a> = PanicStateStoreIter<StateStoreIterItem>;
 
     #[allow(clippy::unused_async)]
     async fn may_exist(
@@ -102,6 +114,15 @@ impl LocalStateStore for PanicStateStore {
         _key_range: TableKeyRange,
         _read_options: ReadOptions,
     ) -> StorageResult<Self::Iter<'_>> {
+        panic!("should not operate on the panic state store!");
+    }
+
+    #[allow(clippy::unused_async)]
+    async fn rev_iter(
+        &self,
+        _key_range: TableKeyRange,
+        _read_options: ReadOptions,
+    ) -> StorageResult<Self::RevIter<'_>> {
         panic!("should not operate on the panic state store!");
     }
 

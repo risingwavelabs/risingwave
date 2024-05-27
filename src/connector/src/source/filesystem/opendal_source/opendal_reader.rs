@@ -25,12 +25,12 @@ use tokio_util::io::{ReaderStream, StreamReader};
 use super::opendal_enumerator::OpendalEnumerator;
 use super::OpendalSource;
 use crate::error::ConnectorResult;
-use crate::parser::{ByteStreamSourceParserImpl, ParserConfig};
+use crate::parser::ParserConfig;
 use crate::source::filesystem::nd_streaming::need_nd_streaming;
 use crate::source::filesystem::{nd_streaming, OpendalFsSplit};
 use crate::source::{
-    BoxChunkSourceStream, Column, SourceContextRef, SourceMessage, SourceMeta, SplitMetaData,
-    SplitReader,
+    into_chunk_stream, BoxChunkSourceStream, Column, SourceContextRef, SourceMessage, SourceMeta,
+    SplitMetaData, SplitReader,
 };
 
 const MAX_CHANNEL_BUFFER_SIZE: usize = 2048;
@@ -65,46 +65,30 @@ impl<Src: OpendalSource> SplitReader for OpendalReader<Src> {
     }
 
     fn into_stream(self) -> BoxChunkSourceStream {
-        self.into_chunk_stream()
+        self.into_stream_inner()
     }
 }
 
 impl<Src: OpendalSource> OpendalReader<Src> {
     #[try_stream(boxed, ok = StreamChunk, error = crate::error::ConnectorError)]
-    async fn into_chunk_stream(self) {
+    async fn into_stream_inner(self) {
         for split in self.splits {
-            let actor_id = self.source_ctx.actor_id.to_string();
-            let fragment_id = self.source_ctx.fragment_id.to_string();
-            let source_id = self.source_ctx.source_id.to_string();
-            let source_name = self.source_ctx.source_name.to_string();
-            let source_ctx = self.source_ctx.clone();
-
-            let split_id = split.id();
-
             let data_stream =
                 Self::stream_read_object(self.connector.op.clone(), split, self.source_ctx.clone());
-
-            let parser =
-                ByteStreamSourceParserImpl::create(self.parser_config.clone(), source_ctx).await?;
-            let msg_stream = if need_nd_streaming(&self.parser_config.specific.encoding_config) {
-                parser.into_stream(nd_streaming::split_stream(data_stream))
+            let data_stream = if need_nd_streaming(&self.parser_config.specific.encoding_config) {
+                nd_streaming::split_stream(data_stream)
             } else {
-                parser.into_stream(data_stream)
+                data_stream
             };
+
+            let msg_stream = into_chunk_stream(
+                data_stream,
+                self.parser_config.clone(),
+                self.source_ctx.clone(),
+            );
             #[for_await]
             for msg in msg_stream {
                 let msg = msg?;
-                self.source_ctx
-                    .metrics
-                    .partition_input_count
-                    .with_label_values(&[
-                        &actor_id,
-                        &source_id,
-                        &split_id,
-                        &source_name,
-                        &fragment_id,
-                    ])
-                    .inc_by(msg.cardinality() as u64);
                 yield msg;
             }
         }
