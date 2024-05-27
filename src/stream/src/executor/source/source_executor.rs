@@ -489,6 +489,19 @@ impl<S: StateStore> SourceExecutor<S> {
         let mut last_barrier_time = Instant::now();
         let mut self_paused = false;
 
+        let source_output_row_count = self
+            .metrics
+            .source_output_row_count
+            .with_guarded_label_values(
+                &self
+                    .get_metric_labels()
+                    .iter()
+                    .map(AsRef::as_ref)
+                    .collect::<Vec<&str>>()
+                    .try_into()
+                    .unwrap(),
+            );
+
         while let Some(msg) = stream.next().await {
             let Ok(msg) = msg else {
                 tokio::time::sleep(Duration::from_millis(1000)).await;
@@ -635,18 +648,7 @@ impl<S: StateStore> SourceExecutor<S> {
                             .extend(state);
                     }
 
-                    self.metrics
-                        .source_output_row_count
-                        .with_guarded_label_values(
-                            &self
-                                .get_metric_labels()
-                                .iter()
-                                .map(AsRef::as_ref)
-                                .collect::<Vec<&str>>()
-                                .try_into()
-                                .unwrap(),
-                        )
-                        .inc_by(chunk.cardinality() as u64);
+                    source_output_row_count.inc_by(chunk.cardinality() as u64);
                     let chunk =
                         prune_additional_cols(&chunk, split_idx, offset_idx, &source_desc.columns);
                     yield Message::Chunk(chunk);

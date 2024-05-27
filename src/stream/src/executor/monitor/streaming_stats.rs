@@ -130,12 +130,12 @@ pub struct StreamingMetrics {
     temporal_join_cached_entry_count: LabelGuardedIntGaugeVec<3>,
 
     // Backfill
-    pub backfill_snapshot_read_row_count: LabelGuardedIntCounterVec<2>,
-    pub backfill_upstream_output_row_count: LabelGuardedIntCounterVec<2>,
+    backfill_snapshot_read_row_count: LabelGuardedIntCounterVec<2>,
+    backfill_upstream_output_row_count: LabelGuardedIntCounterVec<2>,
 
     // CDC Backfill
-    pub cdc_backfill_snapshot_read_row_count: LabelGuardedIntCounterVec<2>,
-    pub cdc_backfill_upstream_output_row_count: LabelGuardedIntCounterVec<2>,
+    cdc_backfill_snapshot_read_row_count: LabelGuardedIntCounterVec<2>,
+    cdc_backfill_upstream_output_row_count: LabelGuardedIntCounterVec<2>,
 
     // Over Window
     over_window_cached_entry_count: LabelGuardedIntGaugeVec<3>,
@@ -1371,27 +1371,6 @@ impl StreamingMetrics {
         }
     }
 
-    pub fn new_source_metrics(
-        &self,
-        id: &str,
-        name: &str,
-        actor_id: ActorId,
-        fragment_id: FragmentId,
-    ) -> SourceMetrics {
-        let label_list = &[id, name, &actor_id.to_string(), &fragment_id.to_string()];
-        SourceMetrics {
-            source_output_row_count: self
-                .source_output_row_count
-                .with_guarded_label_values(label_list),
-            source_split_change_count: self
-                .source_split_change_count
-                .with_guarded_label_values(label_list),
-            source_backfill_row_count: self
-                .source_backfill_row_count
-                .with_guarded_label_values(label_list),
-        }
-    }
-
     pub fn new_sink_exec_metrics(
         &self,
         id: SinkId,
@@ -1572,7 +1551,7 @@ impl StreamingMetrics {
         }
     }
 
-    pub fn new_backfill_metrics(&self, table_id: TableId, actor_id: ActorId) -> BackfillMetrics {
+    pub fn new_backfill_metrics(&self, table_id: u32, actor_id: ActorId) -> BackfillMetrics {
         let label_list: &[&str; 2] = &[&table_id.to_string(), &actor_id.to_string()];
         BackfillMetrics {
             backfill_snapshot_read_row_count: self
@@ -1679,12 +1658,6 @@ pub struct ActorMetrics {
     pub actor_poll_cnt: LabelGuardedIntGauge<1>,
     pub actor_idle_duration: LabelGuardedGauge<1>,
     pub actor_idle_cnt: LabelGuardedIntGauge<1>,
-}
-
-pub struct SourceMetrics {
-    pub source_output_row_count: LabelGuardedIntCounter<4>,
-    pub source_split_change_count: LabelGuardedIntCounter<4>,
-    pub source_backfill_row_count: LabelGuardedIntCounter<4>,
 }
 
 pub struct SinkExecutorMetrics {
