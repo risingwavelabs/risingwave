@@ -99,16 +99,16 @@ pub struct StreamingMetrics {
     pub barrier_align_duration: RelabeledGuardedHistogramVec<4>,
 
     // Streaming Aggregation
-    pub agg_lookup_miss_count: LabelGuardedIntCounterVec<3>,
-    pub agg_total_lookup_count: LabelGuardedIntCounterVec<3>,
-    pub agg_cached_entry_count: LabelGuardedIntGaugeVec<3>,
-    pub agg_chunk_lookup_miss_count: LabelGuardedIntCounterVec<3>,
-    pub agg_chunk_total_lookup_count: LabelGuardedIntCounterVec<3>,
+    agg_lookup_miss_count: LabelGuardedIntCounterVec<3>,
+    agg_total_lookup_count: LabelGuardedIntCounterVec<3>,
+    agg_cached_entry_count: LabelGuardedIntGaugeVec<3>,
+    agg_chunk_lookup_miss_count: LabelGuardedIntCounterVec<3>,
+    agg_chunk_total_lookup_count: LabelGuardedIntCounterVec<3>,
+    agg_dirty_groups_count: LabelGuardedIntGaugeVec<3>,
+    agg_dirty_groups_heap_size: LabelGuardedIntGaugeVec<3>,
     pub agg_distinct_cache_miss_count: LabelGuardedIntCounterVec<3>,
     pub agg_distinct_total_cache_count: LabelGuardedIntCounterVec<3>,
     pub agg_distinct_cached_entry_count: LabelGuardedIntGaugeVec<3>,
-    pub agg_dirty_groups_count: LabelGuardedIntGaugeVec<3>,
-    pub agg_dirty_groups_heap_size: LabelGuardedIntGaugeVec<3>,
 
     // Streaming TopN
     pub group_top_n_cache_miss_count: LabelGuardedIntCounterVec<3>,
@@ -1152,11 +1152,11 @@ impl StreamingMetrics {
             agg_cached_entry_count,
             agg_chunk_lookup_miss_count,
             agg_chunk_total_lookup_count,
+            agg_dirty_groups_count,
+            agg_dirty_groups_heap_size,
             agg_distinct_cache_miss_count,
             agg_distinct_total_cache_count,
             agg_distinct_cached_entry_count,
-            agg_dirty_groups_count,
-            agg_dirty_groups_heap_size,
             group_top_n_cache_miss_count,
             group_top_n_total_query_cache_count,
             group_top_n_cached_entry_count,
@@ -1471,18 +1471,18 @@ impl StreamingMetrics {
         }
     }
 
-    pub fn new_agg_metrics(
+    pub fn new_hash_agg_metrics(
         &self,
-        table_id: TableId,
+        table_id: u32,
         actor_id: ActorId,
         fragment_id: FragmentId,
-    ) -> AggregationMetrics {
+    ) -> HashAggMetrics {
         let label_list: &[&str; 3] = &[
             &table_id.to_string(),
             &actor_id.to_string(),
             &fragment_id.to_string(),
         ];
-        AggregationMetrics {
+        HashAggMetrics {
             agg_lookup_miss_count: self
                 .agg_lookup_miss_count
                 .with_guarded_label_values(label_list),
@@ -1497,15 +1497,6 @@ impl StreamingMetrics {
                 .with_guarded_label_values(label_list),
             agg_chunk_total_lookup_count: self
                 .agg_chunk_total_lookup_count
-                .with_guarded_label_values(label_list),
-            agg_distinct_cache_miss_count: self
-                .agg_distinct_cache_miss_count
-                .with_guarded_label_values(label_list),
-            agg_distinct_total_cache_count: self
-                .agg_distinct_total_cache_count
-                .with_guarded_label_values(label_list),
-            agg_distinct_cached_entry_count: self
-                .agg_distinct_cached_entry_count
                 .with_guarded_label_values(label_list),
             agg_dirty_groups_count: self
                 .agg_dirty_groups_count
@@ -1681,15 +1672,12 @@ pub struct LookupExecutorMetrics {
     pub lookup_cached_entry_count: LabelGuardedIntGauge<3>,
 }
 
-pub struct AggregationMetrics {
+pub struct HashAggMetrics {
     pub agg_lookup_miss_count: LabelGuardedIntCounter<3>,
     pub agg_total_lookup_count: LabelGuardedIntCounter<3>,
     pub agg_cached_entry_count: LabelGuardedIntGauge<3>,
     pub agg_chunk_lookup_miss_count: LabelGuardedIntCounter<3>,
     pub agg_chunk_total_lookup_count: LabelGuardedIntCounter<3>,
-    pub agg_distinct_cache_miss_count: LabelGuardedIntCounter<3>,
-    pub agg_distinct_total_cache_count: LabelGuardedIntCounter<3>,
-    pub agg_distinct_cached_entry_count: LabelGuardedIntGauge<3>,
     pub agg_dirty_groups_count: LabelGuardedIntGauge<3>,
     pub agg_dirty_groups_heap_size: LabelGuardedIntGauge<3>,
 }
