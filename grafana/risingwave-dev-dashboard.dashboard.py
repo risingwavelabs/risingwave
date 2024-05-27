@@ -3697,7 +3697,7 @@ def section_memory_manager(outer_panels):
                         ),
                     ],
                 ),
-                panels.timeseries_count(
+                panels.timeseries(
                     "LRU manager eviction policy",
                     "",
                     [
@@ -3707,7 +3707,7 @@ def section_memory_manager(outer_panels):
                         ),
                     ],
                 ),
-                panels.timeseries_count(
+                panels.timeseries(
                     "LRU manager sequence",
                     "",
                     [
