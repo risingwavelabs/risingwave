@@ -111,12 +111,13 @@ pub struct StreamingMetrics {
     agg_distinct_cached_entry_count: LabelGuardedIntGaugeVec<3>,
 
     // Streaming TopN
-    pub group_top_n_cache_miss_count: LabelGuardedIntCounterVec<3>,
-    pub group_top_n_total_query_cache_count: LabelGuardedIntCounterVec<3>,
-    pub group_top_n_cached_entry_count: LabelGuardedIntGaugeVec<3>,
-    pub group_top_n_appendonly_cache_miss_count: LabelGuardedIntCounterVec<3>,
-    pub group_top_n_appendonly_total_query_cache_count: LabelGuardedIntCounterVec<3>,
-    pub group_top_n_appendonly_cached_entry_count: LabelGuardedIntGaugeVec<3>,
+    group_top_n_cache_miss_count: LabelGuardedIntCounterVec<3>,
+    group_top_n_total_query_cache_count: LabelGuardedIntCounterVec<3>,
+    group_top_n_cached_entry_count: LabelGuardedIntGaugeVec<3>,
+    // TODO(rc): why not just use the above three?
+    group_top_n_appendonly_cache_miss_count: LabelGuardedIntCounterVec<3>,
+    group_top_n_appendonly_total_query_cache_count: LabelGuardedIntCounterVec<3>,
+    group_top_n_appendonly_cached_entry_count: LabelGuardedIntGaugeVec<3>,
 
     // Lookup executor
     lookup_cache_miss_count: LabelGuardedIntCounterVec<3>,
@@ -1412,19 +1413,19 @@ impl StreamingMetrics {
         }
     }
 
-    pub fn new_topn_metrics(
+    pub fn new_group_top_n_metrics(
         &self,
-        table_id: TableId,
+        table_id: u32,
         actor_id: ActorId,
         fragment_id: FragmentId,
-    ) -> TopNMetrics {
+    ) -> GroupTopNMetrics {
         let label_list: &[&str; 3] = &[
             &table_id.to_string(),
             &actor_id.to_string(),
             &fragment_id.to_string(),
         ];
 
-        TopNMetrics {
+        GroupTopNMetrics {
             group_top_n_cache_miss_count: self
                 .group_top_n_cache_miss_count
                 .with_guarded_label_values(label_list),
@@ -1434,13 +1435,29 @@ impl StreamingMetrics {
             group_top_n_cached_entry_count: self
                 .group_top_n_cached_entry_count
                 .with_guarded_label_values(label_list),
-            group_top_n_appendonly_cache_miss_count: self
+        }
+    }
+
+    pub fn new_append_only_group_top_n_metrics(
+        &self,
+        table_id: u32,
+        actor_id: ActorId,
+        fragment_id: FragmentId,
+    ) -> GroupTopNMetrics {
+        let label_list: &[&str; 3] = &[
+            &table_id.to_string(),
+            &actor_id.to_string(),
+            &fragment_id.to_string(),
+        ];
+
+        GroupTopNMetrics {
+            group_top_n_cache_miss_count: self
                 .group_top_n_appendonly_cache_miss_count
                 .with_guarded_label_values(label_list),
-            group_top_n_appendonly_total_query_cache_count: self
+            group_top_n_total_query_cache_count: self
                 .group_top_n_appendonly_total_query_cache_count
                 .with_guarded_label_values(label_list),
-            group_top_n_appendonly_cached_entry_count: self
+            group_top_n_cached_entry_count: self
                 .group_top_n_appendonly_cached_entry_count
                 .with_guarded_label_values(label_list),
         }
@@ -1681,13 +1698,10 @@ pub struct MaterializeMetrics {
     pub materialize_input_row_count: LabelGuardedIntCounter<3>,
 }
 
-pub struct TopNMetrics {
+pub struct GroupTopNMetrics {
     pub group_top_n_cache_miss_count: LabelGuardedIntCounter<3>,
     pub group_top_n_total_query_cache_count: LabelGuardedIntCounter<3>,
     pub group_top_n_cached_entry_count: LabelGuardedIntGauge<3>,
-    pub group_top_n_appendonly_cache_miss_count: LabelGuardedIntCounter<3>,
-    pub group_top_n_appendonly_total_query_cache_count: LabelGuardedIntCounter<3>,
-    pub group_top_n_appendonly_cached_entry_count: LabelGuardedIntGauge<3>,
 }
 
 pub struct LookupExecutorMetrics {
