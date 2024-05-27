@@ -3,7 +3,7 @@ FROM ubuntu:24.04 AS base
 ENV LANG en_US.utf8
 
 RUN apt-get update \
-  && apt-get -y install ca-certificates build-essential libsasl2-dev openjdk-11-jdk software-properties-common python3.12 python3.12-dev
+  && apt-get -y install ca-certificates build-essential libsasl2-dev openjdk-11-jdk software-properties-common python3.12 python3.12-dev openssl pkg-config
 
 FROM base AS dashboard-builder
 
@@ -96,6 +96,8 @@ RUN cargo fetch
 ARG JAVA_HOME_PATH
 ENV JAVA_HOME ${JAVA_HOME_PATH}
 ENV LD_LIBRARY_PATH ${JAVA_HOME_PATH}/lib/server:${LD_LIBRARY_PATH}
+
+ENV OPENSSL_STATIC=1
 
 RUN cargo fetch && \
   cargo build -p risingwave_cmd_all --release -p risingwave_object_store --features hdfs-backend --features "rw-static-link" --features all-udf && \

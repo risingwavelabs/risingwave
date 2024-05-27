@@ -459,6 +459,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             self.ctx.id,
             self.ctx.fragment_id,
             self.metrics.clone(),
+            "Join",
         );
         pin_mut!(aligned_stream);
 

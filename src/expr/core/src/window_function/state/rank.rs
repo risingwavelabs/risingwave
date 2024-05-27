@@ -197,7 +197,7 @@ mod tests {
     fn test_rank_state_bad_use() {
         let call = WindowFuncCall {
             kind: WindowFuncKind::RowNumber,
-            args: AggArgs::None,
+            args: AggArgs::default(),
             return_type: DataType::Int64,
             frame: Frame::rows(
                 FrameBound::UnboundedPreceding,
@@ -214,7 +214,7 @@ mod tests {
     fn test_row_number_state() {
         let call = WindowFuncCall {
             kind: WindowFuncKind::RowNumber,
-            args: AggArgs::None,
+            args: AggArgs::default(),
             return_type: DataType::Int64,
             frame: Frame::rows(
                 FrameBound::UnboundedPreceding,
@@ -256,7 +256,7 @@ mod tests {
     fn test_rank_state() {
         let call = WindowFuncCall {
             kind: WindowFuncKind::Rank,
-            args: AggArgs::None,
+            args: AggArgs::default(),
             return_type: DataType::Int64,
             frame: Frame::rows(
                 FrameBound::UnboundedPreceding,
@@ -297,7 +297,7 @@ mod tests {
     fn test_dense_rank_state() {
         let call = WindowFuncCall {
             kind: WindowFuncKind::DenseRank,
-            args: AggArgs::None,
+            args: AggArgs::default(),
             return_type: DataType::Int64,
             frame: Frame::rows(
                 FrameBound::UnboundedPreceding,

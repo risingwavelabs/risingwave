@@ -4,7 +4,6 @@ extend = [
   { path = "src/risedevtool/minio.toml" },
   { path = "src/risedevtool/etcd.toml" },
   { path = "src/risedevtool/tempo.toml" },
-  { path = "src/risedevtool/kafka.toml" },
   { path = "src/risedevtool/gcloud-pubsub.toml" },
   { path = "src/risedevtool/redis.toml" },
   { path = "src/risedevtool/connector.toml" },
@@ -498,7 +497,6 @@ dependencies = [
   "download-etcd",
   "download-grafana",
   "download-tempo",
-  "download-kafka",
   "download-mcli",
   "download-minio",
   "download-prometheus",
@@ -556,7 +554,6 @@ dependencies = [
   "download-grafana",
   "download-prometheus",
   "download-tempo",
-  "download-kafka",
   "download-redis",
 ]
 
@@ -707,19 +704,6 @@ script = '''
 
 set -euo pipefail
 
-wait_kafka_exit() {
-  # Follow kafka-server-stop.sh
-  while [[ -n "$(ps ax | grep ' kafka\.Kafka ' | grep java | grep -v grep | awk '{print $1}')" ]]; do
-    echo "Waiting for kafka to exit"
-    sleep 1
-  done
-}
-
-kill_kafka() {
-  ${PREFIX_BIN}/kafka/bin/kafka-server-stop.sh
-  wait_kafka_exit
-}
-
 if ! ${TMUX} ls &>/dev/null ; then
   echo "No risedev cluster to kill. Exiting..."
   exit 0
@@ -727,7 +711,6 @@ fi
 
 # Kill other components with Ctrl+C/Ctrl+D
 ${TMUX} list-windows -F "#{window_name} #{pane_id}" \
-| grep --invert-match --extended-regexp '(kafka)' \
 | awk '{ print $2 }' \
 | xargs -I {} ${TMUX} send-keys -t {} C-c C-d
 
@@ -736,13 +719,6 @@ containers=$(docker ps -a -q -f name=risedev- 2>/dev/null) || true
 if [[ -n ${containers} ]]; then
   echo "Stopping docker components..."
   docker stop ${containers}
-fi
-
-# Kill kafka cleanly. Ctrl+C will lose data.
-if [[ -n $(${TMUX} list-windows | grep kafka) ]];
-then
-  echo "kill kafka"
-  kill_kafka || true
 fi
 
 ${TMUX} kill-server
