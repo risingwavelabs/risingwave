@@ -54,8 +54,8 @@ pub struct DorisCommon {
     pub database: String,
     #[serde(rename = "doris.table")]
     pub table: String,
-    #[serde(rename = "doris.partial_columns")]
-    pub partial_columns: Option<String>,
+    #[serde(rename = "doris.partial_update")]
+    pub partial_update: Option<String>,
 }
 
 impl DorisCommon {
@@ -127,7 +127,7 @@ impl DorisSink {
             .collect();
 
         let rw_fields_name = self.schema.fields();
-        if rw_fields_name.len().gt(&doris_columns_desc.len()) {
+        if rw_fields_name.len() > doris_columns_desc.len() {
             return Err(SinkError::Doris(
                 "The columns of the sink must be equal to or a superset of the target table's columns."
                     .to_string(),
@@ -276,7 +276,7 @@ impl DorisSinkWriter {
             .add_common_header()
             .set_user_password(config.common.user.clone(), config.common.password.clone())
             .add_json_format()
-            .set_partial_columns(config.common.partial_columns.clone())
+            .set_partial_columns(config.common.partial_update.clone())
             .add_read_json_by_line();
         let header = if !is_append_only {
             header_builder.add_hidden_column().build()
