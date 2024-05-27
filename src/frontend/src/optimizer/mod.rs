@@ -251,6 +251,7 @@ impl PlanRoot {
                 order_by: self.required_order.column_orders,
                 filter: Condition::true_cond(),
                 direct_args: vec![],
+                user_defined: None,
             }],
             IndexSet::empty(),
             self.plan,
@@ -1099,11 +1100,7 @@ fn require_additional_exchange_on_root_in_local_mode(plan: PlanRef) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::catalog::Field;
-    use risingwave_common::types::DataType;
-
     use super::*;
-    use crate::optimizer::optimizer_context::OptimizerContext;
     use crate::optimizer::plan_node::LogicalValues;
 
     #[tokio::test]

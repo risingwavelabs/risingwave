@@ -38,10 +38,11 @@ use thiserror_ext::AsReport;
 
 use crate::binder::bind_context::Clause;
 use crate::binder::{Binder, UdfContext};
+use crate::catalog::function_catalog::FunctionCatalog;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{
-    AggCall, Expr, ExprImpl, ExprType, FunctionCall, FunctionCallWithLambda, Literal, Now, OrderBy,
-    TableFunction, TableFunctionType, UserDefinedFunction, WindowFunction,
+    AggCall, CastContext, Expr, ExprImpl, ExprType, FunctionCall, FunctionCallWithLambda, Literal,
+    Now, OrderBy, TableFunction, TableFunctionType, UserDefinedFunction, WindowFunction,
 };
 use crate::utils::Condition;
 
@@ -95,21 +96,6 @@ impl Binder {
             _ => bail_not_implemented!(issue = 112, "qualified function {}", f.name),
         };
 
-        // agg calls
-        if f.over.is_none()
-            && let Ok(kind) = function_name.parse()
-        {
-            return self.bind_agg(f, kind);
-        }
-
-        if f.distinct || !f.order_by.is_empty() || f.filter.is_some() {
-            return Err(ErrorCode::InvalidInputSyntax(format!(
-                    "DISTINCT, ORDER BY or FILTER is only allowed in aggregation functions, but `{}` is not an aggregation function", function_name
-                )
-                )
-                .into());
-        }
-
         // FIXME: This is a hack to support [Bytebase queries](https://github.com/TennyZhuang/bytebase/blob/4a26f7c62b80e86e58ad2f77063138dc2f420623/backend/plugin/db/pg/sync.go#L549).
         // Bytebase widely used the pattern like `obj_description(format('%s.%s',
         // quote_ident(idx.schemaname), quote_ident(idx.indexname))::regclass) AS comment` to
@@ -119,46 +105,17 @@ impl Binder {
         if function_name == "obj_description" || function_name == "col_description" {
             return Ok(ExprImpl::literal_varchar("".to_string()));
         }
-
         if function_name == "array_transform" {
             // For type inference, we need to bind the array type first.
             return self.bind_array_transform(f);
         }
 
-        // Used later in sql udf expression evaluation
-        let args = f.args.clone();
-
-        let mut inputs = f
+        let mut inputs: Vec<_> = f
             .args
-            .into_iter()
-            .map(|arg| self.bind_function_arg(arg))
+            .iter()
+            .map(|arg| self.bind_function_arg(arg.clone()))
             .flatten_ok()
             .try_collect()?;
-
-        // window function
-        let window_func_kind = WindowFuncKind::from_str(function_name.as_str());
-        if let Ok(kind) = window_func_kind {
-            if let Some(window_spec) = f.over {
-                return self.bind_window_function(kind, inputs, window_spec);
-            }
-            return Err(ErrorCode::InvalidInputSyntax(format!(
-                "Window function `{}` must have OVER clause",
-                function_name
-            ))
-            .into());
-        } else if f.over.is_some() {
-            bail_not_implemented!(
-                issue = 8961,
-                "Unrecognized window function: {}",
-                function_name
-            );
-        }
-
-        // table function
-        if let Ok(function_type) = TableFunctionType::from_str(function_name.as_str()) {
-            self.ensure_table_function_allowed()?;
-            return Ok(TableFunction::new(function_type, inputs)?.into());
-        }
 
         // user defined function
         // TODO: resolve schema name https://github.com/risingwavelabs/risingwave/issues/12422
@@ -200,7 +157,7 @@ impl Binder {
 
                 // The actual inline logic for sql udf
                 // Note that we will always create new udf context for each sql udf
-                let Ok(context) = UdfContext::create_udf_context(&args, &Arc::clone(func)) else {
+                let Ok(context) = UdfContext::create_udf_context(&f.args, &Arc::clone(func)) else {
                     return Err(ErrorCode::InvalidInputSyntax(
                         "failed to create the `udf_context`, please recheck your function definition and syntax".to_string()
                     )
@@ -268,9 +225,51 @@ impl Binder {
                         self.ensure_table_function_allowed()?;
                         return Ok(TableFunction::new_user_defined(func.clone(), inputs).into());
                     }
-                    Aggregate => todo!("support UDAF"),
+                    Aggregate => {
+                        return self.bind_agg(f, AggKind::UserDefined, Some(func.clone()));
+                    }
                 }
             }
+        }
+
+        // agg calls
+        if f.over.is_none()
+            && let Ok(kind) = function_name.parse()
+        {
+            return self.bind_agg(f, kind, None);
+        }
+
+        if f.distinct || !f.order_by.is_empty() || f.filter.is_some() {
+            return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "DISTINCT, ORDER BY or FILTER is only allowed in aggregation functions, but `{}` is not an aggregation function", function_name
+                )
+                )
+                .into());
+        }
+
+        // window function
+        let window_func_kind = WindowFuncKind::from_str(function_name.as_str());
+        if let Ok(kind) = window_func_kind {
+            if let Some(window_spec) = f.over {
+                return self.bind_window_function(kind, inputs, window_spec);
+            }
+            return Err(ErrorCode::InvalidInputSyntax(format!(
+                "Window function `{}` must have OVER clause",
+                function_name
+            ))
+            .into());
+        } else if f.over.is_some() {
+            bail_not_implemented!(
+                issue = 8961,
+                "Unrecognized window function: {}",
+                function_name
+            );
+        }
+
+        // table function
+        if let Ok(function_type) = TableFunctionType::from_str(function_name.as_str()) {
+            self.ensure_table_function_allowed()?;
+            return Ok(TableFunction::new(function_type, inputs)?.into());
         }
 
         self.bind_builtin_scalar_function(function_name.as_str(), inputs, f.variadic)
@@ -351,7 +350,12 @@ impl Binder {
         Ok(body)
     }
 
-    pub(super) fn bind_agg(&mut self, f: Function, kind: AggKind) -> Result<ExprImpl> {
+    pub(super) fn bind_agg(
+        &mut self,
+        f: Function,
+        kind: AggKind,
+        user_defined: Option<Arc<FunctionCatalog>>,
+    ) -> Result<ExprImpl> {
         self.ensure_aggregate_allowed()?;
 
         let distinct = f.distinct;
@@ -385,14 +389,26 @@ impl Binder {
             None => Condition::true_cond(),
         };
 
-        Ok(ExprImpl::AggCall(Box::new(AggCall::new(
-            kind,
-            args,
-            distinct,
-            order_by,
-            filter,
-            direct_args,
-        )?)))
+        if let Some(user_defined) = user_defined {
+            Ok(AggCall::new_user_defined(
+                args,
+                distinct,
+                order_by,
+                filter,
+                direct_args,
+                user_defined,
+            )?
+            .into())
+        } else {
+            Ok(ExprImpl::AggCall(Box::new(AggCall::new(
+                kind,
+                args,
+                distinct,
+                order_by,
+                filter,
+                direct_args,
+            )?)))
+        }
     }
 
     fn bind_ordered_set_agg(
@@ -1012,6 +1028,22 @@ impl Binder {
                 ("to_ascii", raw_call(ExprType::ToAscii)),
                 ("to_hex", raw_call(ExprType::ToHex)),
                 ("quote_ident", raw_call(ExprType::QuoteIdent)),
+                ("quote_literal", guard_by_len(1, raw(|_binder, mut inputs| {
+                    if inputs[0].return_type() != DataType::Varchar {
+                        // Support `quote_literal(any)` by converting it to `quote_literal(any::text)`
+                        // Ref. https://github.com/postgres/postgres/blob/REL_16_1/src/include/catalog/pg_proc.dat#L4641
+                        FunctionCall::cast_mut(&mut inputs[0], DataType::Varchar, CastContext::Explicit)?;
+                    }
+                    Ok(FunctionCall::new_unchecked(ExprType::QuoteLiteral, inputs, DataType::Varchar).into())
+                }))),
+                ("quote_nullable", guard_by_len(1, raw(|_binder, mut inputs| {
+                    if inputs[0].return_type() != DataType::Varchar {
+                        // Support `quote_nullable(any)` by converting it to `quote_nullable(any::text)`
+                        // Ref. https://github.com/postgres/postgres/blob/REL_16_1/src/include/catalog/pg_proc.dat#L4650
+                        FunctionCall::cast_mut(&mut inputs[0], DataType::Varchar, CastContext::Explicit)?;
+                    }
+                    Ok(FunctionCall::new_unchecked(ExprType::QuoteNullable, inputs, DataType::Varchar).into())
+                }))),
                 ("string_to_array", raw_call(ExprType::StringToArray)),
                 ("encode", raw_call(ExprType::Encode)),
                 ("decode", raw_call(ExprType::Decode)),
@@ -1303,6 +1335,51 @@ impl Binder {
                 ("pg_get_partkeydef", raw_literal(ExprImpl::literal_null(DataType::Varchar))),
                 ("pg_encoding_to_char", raw_literal(ExprImpl::literal_varchar("UTF8".into()))),
                 ("has_database_privilege", raw_literal(ExprImpl::literal_bool(true))),
+                ("has_table_privilege", raw(|binder, mut inputs|{
+                    if inputs.len() == 2 {
+                        inputs.insert(0, ExprImpl::literal_varchar(binder.auth_context.user_name.clone()));
+                    }
+                    if inputs.len() == 3 {
+                        if inputs[1].return_type() == DataType::Varchar {
+                            inputs[1].cast_to_regclass_mut()?;
+                        }
+                        Ok(FunctionCall::new(ExprType::HasTablePrivilege, inputs)?.into())
+                    } else {
+                        Err(ErrorCode::ExprError(
+                            "Too many/few arguments for pg_catalog.has_table_privilege()".into(),
+                        )
+                        .into())
+                    }
+                })),
+                ("has_any_column_privilege", raw(|binder, mut inputs|{
+                    if inputs.len() == 2 {
+                        inputs.insert(0, ExprImpl::literal_varchar(binder.auth_context.user_name.clone()));
+                    }
+                    if inputs.len() == 3 {
+                        if inputs[1].return_type() == DataType::Varchar {
+                            inputs[1].cast_to_regclass_mut()?;
+                        }
+                        Ok(FunctionCall::new(ExprType::HasAnyColumnPrivilege, inputs)?.into())
+                    } else {
+                        Err(ErrorCode::ExprError(
+                            "Too many/few arguments for pg_catalog.has_any_column_privilege()".into(),
+                        )
+                        .into())
+                    }
+                })),
+                ("has_schema_privilege", raw(|binder, mut inputs|{
+                    if inputs.len() == 2 {
+                        inputs.insert(0, ExprImpl::literal_varchar(binder.auth_context.user_name.clone()));
+                    }
+                    if inputs.len() == 3 {
+                        Ok(FunctionCall::new(ExprType::HasSchemaPrivilege, inputs)?.into())
+                    } else {
+                        Err(ErrorCode::ExprError(
+                            "Too many/few arguments for pg_catalog.has_schema_privilege()".into(),
+                        )
+                        .into())
+                    }
+                })),
                 ("pg_stat_get_numscans", raw_literal(ExprImpl::literal_bigint(0))),
                 ("pg_backend_pid", raw(|binder, _inputs| {
                     // FIXME: the session id is not global unique in multi-frontend env.

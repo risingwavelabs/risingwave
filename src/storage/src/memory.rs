@@ -40,6 +40,12 @@ pub trait RangeKv: Clone + Send + Sync + 'static {
         limit: Option<usize>,
     ) -> StorageResult<Vec<(BytesFullKey, Option<Bytes>)>>;
 
+    fn rev_range(
+        &self,
+        range: BytesFullKeyRange,
+        limit: Option<usize>,
+    ) -> StorageResult<Vec<(BytesFullKey, Option<Bytes>)>>;
+
     fn ingest_batch(
         &self,
         kv_pairs: impl Iterator<Item = (BytesFullKey, Option<Bytes>)>,
@@ -60,6 +66,21 @@ impl RangeKv for BTreeMapRangeKv {
         Ok(self
             .read()
             .range(range)
+            .take(limit)
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect())
+    }
+
+    fn rev_range(
+        &self,
+        range: BytesFullKeyRange,
+        limit: Option<usize>,
+    ) -> StorageResult<Vec<(BytesFullKey, Option<Bytes>)>> {
+        let limit = limit.unwrap_or(usize::MAX);
+        Ok(self
+            .read()
+            .range(range)
+            .rev()
             .take(limit)
             .map(|(key, value)| (key.clone(), value.clone()))
             .collect())
@@ -133,6 +154,43 @@ pub mod sled {
             let limit = limit.unwrap_or(usize::MAX);
             let mut ret = vec![];
             for result in self.inner.range((left_encoded, right_encoded)).take(limit) {
+                let (key, value) = result?;
+                let full_key = FullKey::decode_reverse_epoch(key.as_ref()).copy_into();
+                if !full_key_ref_bound.contains(&full_key.to_ref()) {
+                    continue;
+                }
+                let value = match value.as_ref() {
+                    [EMPTY] => None,
+                    [NON_EMPTY, rest @ ..] => Some(Bytes::from(Vec::from(rest))),
+                    _ => unreachable!("malformed value: {:?}", value),
+                };
+                ret.push((full_key, value))
+            }
+            Ok(ret)
+        }
+
+        fn rev_range(
+            &self,
+            range: BytesFullKeyRange,
+            limit: Option<usize>,
+        ) -> StorageResult<Vec<(BytesFullKey, Option<Bytes>)>> {
+            let (left, right) = range;
+            let full_key_ref_bound = (
+                left.as_ref().map(FullKey::to_ref),
+                right.as_ref().map(FullKey::to_ref),
+            );
+            let left_encoded = left.as_ref().map(|key| key.to_ref().encode_reverse_epoch());
+            let right_encoded = right
+                .as_ref()
+                .map(|key| key.to_ref().encode_reverse_epoch());
+            let limit = limit.unwrap_or(usize::MAX);
+            let mut ret = vec![];
+            for result in self
+                .inner
+                .range((left_encoded, right_encoded))
+                .rev()
+                .take(limit)
+            {
                 let (key, value) = result?;
                 let full_key = FullKey::decode_reverse_epoch(key.as_ref()).copy_into();
                 if !full_key_ref_bound.contains(&full_key.to_ref()) {
@@ -293,13 +351,15 @@ mod batched_iter {
         inner: R,
         range: BytesFullKeyRange,
         current: std::vec::IntoIter<(FullKey<Bytes>, Option<Bytes>)>,
+        rev: bool,
     }
 
     impl<R: RangeKv> Iter<R> {
-        pub fn new(inner: R, range: BytesFullKeyRange) -> Self {
+        pub fn new(inner: R, range: BytesFullKeyRange, rev: bool) -> Self {
             Self {
                 inner,
                 range,
+                rev,
                 current: Vec::new().into_iter(),
             }
         }
@@ -312,14 +372,20 @@ mod batched_iter {
         fn refill(&mut self) -> StorageResult<()> {
             assert!(self.current.is_empty());
 
-            let batch = self
-                .inner
-                .range(
+            let batch = if self.rev {
+                self.inner.rev_range(
                     (self.range.0.clone(), self.range.1.clone()),
                     Some(Self::BATCH_SIZE),
                 )?
-                .into_iter()
-                .collect_vec();
+            } else {
+                self.inner
+                    .range(
+                        (self.range.0.clone(), self.range.1.clone()),
+                        Some(Self::BATCH_SIZE),
+                    )?
+                    .into_iter()
+                    .collect_vec()
+            };
 
             if let Some((last_key, _)) = batch.last() {
                 let full_key = FullKey::new_with_gap_epoch(
@@ -327,7 +393,11 @@ mod batched_iter {
                     TableKey(last_key.user_key.table_key.0.clone()),
                     last_key.epoch_with_gap,
                 );
-                self.range.0 = Bound::Excluded(full_key);
+                if self.rev {
+                    self.range.1 = Bound::Excluded(full_key);
+                } else {
+                    self.range.0 = Bound::Excluded(full_key);
+                }
             }
             self.current = batch.into_iter();
             Ok(())
@@ -350,7 +420,6 @@ mod batched_iter {
     #[cfg(test)]
     mod tests {
         use rand::Rng;
-        use risingwave_hummock_sdk::key::FullKey;
 
         use super::*;
         use crate::memory::sled::SledRangeKv;
@@ -414,7 +483,7 @@ mod batched_iter {
 
                 let v1 = {
                     let mut v = vec![];
-                    let mut iter = Iter::new(map.clone(), range.clone());
+                    let mut iter = Iter::new(map.clone(), range.clone(), false);
                     while let Some((key, value)) = iter.next().unwrap() {
                         v.push((key, value));
                     }
@@ -540,6 +609,7 @@ impl<R: RangeKv> RangeKvStateStore<R> {
 impl<R: RangeKv> StateStoreRead for RangeKvStateStore<R> {
     type ChangeLogIter = RangeKvStateStoreChangeLogIter<R>;
     type Iter = RangeKvStateStoreIter<R>;
+    type RevIter = RangeKvStateStoreIter<R>;
 
     #[allow(clippy::unused_async)]
     async fn get(
@@ -570,6 +640,25 @@ impl<R: RangeKv> StateStoreRead for RangeKvStateStore<R> {
             batched_iter::Iter::new(
                 self.inner.clone(),
                 to_full_key_range(read_options.table_id, key_range),
+                false,
+            ),
+            epoch,
+            true,
+        ))
+    }
+
+    #[allow(clippy::unused_async)]
+    async fn rev_iter(
+        &self,
+        key_range: TableKeyRange,
+        epoch: u64,
+        read_options: ReadOptions,
+    ) -> StorageResult<Self::RevIter> {
+        Ok(RangeKvStateStoreIter::new(
+            batched_iter::Iter::new(
+                self.inner.clone(),
+                to_full_key_range(read_options.table_id, key_range),
+                true,
             ),
             epoch,
             true,
@@ -586,6 +675,7 @@ impl<R: RangeKv> StateStoreRead for RangeKvStateStore<R> {
             batched_iter::Iter::new(
                 self.inner.clone(),
                 to_full_key_range(options.table_id, key_range.clone()),
+                false,
             ),
             max_epoch,
             true,
@@ -594,6 +684,7 @@ impl<R: RangeKv> StateStoreRead for RangeKvStateStore<R> {
             batched_iter::Iter::new(
                 self.inner.clone(),
                 to_full_key_range(options.table_id, key_range),
+                false,
             ),
             min_epoch,
             false,

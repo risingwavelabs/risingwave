@@ -431,7 +431,7 @@ pub(crate) fn unix_epoch_days() -> i32 {
 #[cfg(test)]
 mod tests {
     use apache_avro::Decimal as AvroDecimal;
-    use risingwave_common::types::{Decimal, Timestamptz};
+    use risingwave_common::types::Decimal;
 
     use super::*;
 
@@ -478,8 +478,7 @@ mod tests {
     ///  - string: String
     ///  - Date (the number of days from the unix epoch, 1970-1-1 UTC)
     ///  - Timestamp (the number of milliseconds from the unix epoch,  1970-1-1 00:00:00.000 UTC)
-
-    pub(crate) fn from_avro_value(
+    fn from_avro_value(
         value: Value,
         value_schema: &Schema,
         shape: &DataType,
