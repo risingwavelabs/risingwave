@@ -101,7 +101,7 @@ pub struct InMemObjectStore {
 
 #[async_trait::async_trait]
 impl ObjectStore for InMemObjectStore {
-    fn get_object_prefix(&self, _obj_id: u64, devide_prefix: bool) -> String {
+    fn get_object_prefix(&self, _obj_id: u64, _devide_object_prefix: bool) -> String {
         String::default()
     }
 

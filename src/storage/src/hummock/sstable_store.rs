@@ -202,7 +202,7 @@ pub struct SstableStoreConfig {
     pub meta_file_cache: FileCache<HummockSstableObjectId, CachedSstable>,
     pub recent_filter: Option<Arc<RecentFilter<(HummockSstableObjectId, usize)>>>,
     pub state_store_metrics: Arc<HummockStateStoreMetrics>,
-    pub devide_prefix: bool,
+    pub devide_object_prefix: bool,
 }
 
 pub struct SstableStore {
@@ -221,7 +221,15 @@ pub struct SstableStore {
     prefetch_buffer_usage: Arc<AtomicUsize>,
     prefetch_buffer_capacity: usize,
     max_prefetch_block_number: usize,
-    devide_prefix: bool,
+    /// Whether the object store is divided into prefixes depends on two factors:
+    ///   1. The specific object store type.
+    ///   2. Whether the existing cluster is a new cluster.
+    ///
+    /// The value of 'devide_object_prefix' is determined by the 'is_new_cluster' field in the system parameters.
+    /// For a new cluster, 'devide_object_prefix' is set to True.
+    /// For an old cluster, 'devide_object_prefix' is set to False.
+    /// The final decision of whether to divide prefixes is based on this field and the specific object store type, this approach is implemented to ensure backward compatibility.
+    devide_object_prefix: bool,
 }
 
 impl SstableStore {
@@ -288,7 +296,7 @@ impl SstableStore {
             prefetch_buffer_usage: Arc::new(AtomicUsize::new(0)),
             prefetch_buffer_capacity: config.prefetch_buffer_capacity,
             max_prefetch_block_number: config.max_prefetch_block_number,
-            devide_prefix: config.devide_prefix,
+            devide_object_prefix: config.devide_object_prefix,
         }
     }
 
@@ -299,7 +307,7 @@ impl SstableStore {
         path: String,
         block_cache_capacity: usize,
         meta_cache_capacity: usize,
-        devide_prefix: bool,
+        devide_object_prefix: bool,
     ) -> Self {
         let meta_cache = Arc::new(Cache::lru(LruCacheConfig {
             capacity: meta_cache_capacity,
@@ -332,7 +340,7 @@ impl SstableStore {
             prefetch_buffer_capacity: block_cache_capacity,
             max_prefetch_block_number: 16, /* compactor won't use this parameter, so just assign a default value. */
             recent_filter: None,
-            devide_prefix,
+            devide_object_prefix,
         }
     }
 
@@ -626,7 +634,9 @@ impl SstableStore {
     }
 
     pub fn get_sst_data_path(&self, object_id: HummockSstableObjectId) -> String {
-        let obj_prefix = self.store.get_object_prefix(object_id, self.devide_prefix);
+        let obj_prefix = self
+            .store
+            .get_object_prefix(object_id, self.devide_object_prefix);
         format!(
             "{}/{}{}.{}",
             self.path, obj_prefix, object_id, OBJECT_SUFFIX

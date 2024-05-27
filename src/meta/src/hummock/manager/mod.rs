@@ -49,7 +49,7 @@ use risingwave_hummock_sdk::{
 };
 use risingwave_meta_model_v2::{
     compaction_status, compaction_task, hummock_pinned_snapshot, hummock_pinned_version,
-    hummock_version_delta, hummock_version_stats, object,
+    hummock_version_delta, hummock_version_stats,
 };
 use risingwave_pb::hummock::compact_task::{self, TaskStatus, TaskType};
 use risingwave_pb::hummock::group_delta::DeltaType;
