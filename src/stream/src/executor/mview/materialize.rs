@@ -742,7 +742,7 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
     ) -> StreamExecutorResult<()> {
         let mut futures = vec![];
         for key in keys {
-            metrics.materialize_cache_hit_count.inc();
+            metrics.materialize_cache_total_count.inc();
 
             if self.data.contains(key) {
                 metrics.materialize_cache_hit_count.inc();
