@@ -16,7 +16,7 @@ use risingwave_common::array::Op;
 use risingwave_common::row::RowExt;
 use risingwave_common_estimate_size::collections::{EstimatedHashSet, EstimatedVec};
 
-use crate::cache::{new_unbounded, ManagedLruCache};
+use crate::cache::ManagedLruCache;
 use crate::common::metrics::MetricsInfo;
 use crate::consistency::consistency_panic;
 use crate::executor::prelude::*;
@@ -70,18 +70,13 @@ impl LookupCache {
         self.data.len()
     }
 
-    /// Update the current epoch.
-    pub fn update_epoch(&mut self, epoch: u64) {
-        self.data.update_epoch(epoch);
-    }
-
     /// Clear the cache.
     pub fn clear(&mut self) {
         self.data.clear();
     }
 
-    pub fn new(watermark_epoch: AtomicU64Ref, metrics_info: MetricsInfo) -> Self {
-        let cache = new_unbounded(watermark_epoch, metrics_info);
+    pub fn new(watermark_sequence: AtomicU64Ref, metrics_info: MetricsInfo) -> Self {
+        let cache = ManagedLruCache::unbounded(watermark_sequence, metrics_info);
         Self { data: cache }
     }
 }

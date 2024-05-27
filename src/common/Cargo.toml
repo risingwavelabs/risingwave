@@ -14,6 +14,7 @@ ignored = ["workspace-hack"]
 normal = ["workspace-hack"]
 
 [dependencies]
+ahash = "0.8"
 anyhow = "1"
 arc-swap = "1"
 arrow-array = { workspace = true }
@@ -48,6 +49,7 @@ fixedbitset = "0.5"
 foyer = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 governor = { version = "0.6", default-features = false, features = ["std"] }
+hashbrown = "0.14"
 hex = "0.4.3"
 http = "0.2"
 humantime = "2.1"
@@ -135,6 +137,7 @@ libc = "0.2"
 mach2 = "0.4"
 
 [dev-dependencies]
+coarsetime = "0.1"
 criterion = { workspace = true }
 expect-test = "1"
 more-asserts = "0.3"
@@ -165,6 +168,14 @@ harness = false
 
 [[bench]]
 name = "bench_array"
+harness = false
+
+[[bench]]
+name = "bench_sequencer"
+harness = false
+
+[[bench]]
+name = "bench_lru"
 harness = false
 
 [lints]

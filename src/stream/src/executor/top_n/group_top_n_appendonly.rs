@@ -211,10 +211,6 @@ where
         self.caches.evict()
     }
 
-    fn update_epoch(&mut self, epoch: u64) {
-        self.caches.update_epoch(epoch)
-    }
-
     async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         self.managed_state.init_epoch(epoch);
         Ok(())
