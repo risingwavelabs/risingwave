@@ -152,9 +152,6 @@ where
     pub fn clear(&mut self) {
         self.inner.clear();
     }
-
-    // TODO(MrCroxx): REMOVE ME!!!
-    pub fn update_epoch(&mut self, _: u64) {}
 }
 
 impl<K, V> ManagedLruCache<K, V>

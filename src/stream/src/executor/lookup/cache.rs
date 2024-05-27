@@ -70,11 +70,6 @@ impl LookupCache {
         self.data.len()
     }
 
-    /// Update the current epoch.
-    pub fn update_epoch(&mut self, epoch: u64) {
-        self.data.update_epoch(epoch);
-    }
-
     /// Clear the cache.
     pub fn clear(&mut self) {
         self.data.clear();

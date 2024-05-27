@@ -315,14 +315,8 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     }
 
     pub fn init(&mut self, epoch: EpochPair) {
-        self.update_epoch(epoch.curr);
         self.state.table.init_epoch(epoch);
         self.degree_state.table.init_epoch(epoch);
-    }
-
-    pub fn update_epoch(&mut self, epoch: u64) {
-        // Update the current epoch in `ManagedLruCache`
-        self.inner.update_epoch(epoch)
     }
 
     /// Update the vnode bitmap and manipulate the cache if necessary.

@@ -832,7 +832,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const A: bool>
                             self.right_table.cache.clear();
                         }
                     }
-                    self.right_table.cache.update_epoch(barrier.epoch.curr);
                     self.right_table.update(
                         updates,
                         &self.right_join_keys,

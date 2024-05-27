@@ -348,7 +348,6 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
         let mut input = input.execute();
         let barrier = expect_first_barrier(&mut input).await?;
         this.state_table.init_epoch(barrier.epoch);
-        vars.partitions.update_epoch(barrier.epoch.curr);
 
         yield Message::Barrier(barrier);
 
@@ -377,8 +376,6 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                             vars.partitions.clear();
                         }
                     }
-
-                    vars.partitions.update_epoch(barrier.epoch.curr);
 
                     yield Message::Barrier(barrier);
                 }
