@@ -31,6 +31,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 
 use super::{bail_uncategorized, uncategorized, Access, AccessError, AccessResult};
 use crate::error::ConnectorResult;
+use crate::parser::avro::util::avro_to_jsonb;
 #[derive(Clone)]
 /// Options for parsing an `AvroValue` into Datum, with an optional avro schema.
 pub struct AvroParseOptions<'a> {
@@ -269,6 +270,13 @@ impl<'a> AvroParseOptions<'a> {
             (Some(DataType::Jsonb), Value::String(s)) => {
                 JsonbVal::from_str(s).map_err(|_| create_error())?.into()
             }
+            (Some(DataType::Jsonb), v) => {
+                let mut builder = jsonbb::Builder::default();
+                avro_to_jsonb(v, &mut builder)?;
+                let jsonb = builder.finish();
+                debug_assert!(jsonb.as_ref().is_object());
+                JsonbVal::from(jsonb).into()
+            }
 
             (_expected, _got) => Err(create_error())?,
         };
@@ -310,7 +318,7 @@ where
                 }
                 Value::Map(fields) if fields.contains_key(key) => {
                     value = fields.get(key).unwrap();
-                    options.schema = None;
+                    options.schema = options.extract_inner_schema(None);
                     i += 1;
                     continue;
                 }
@@ -420,7 +428,8 @@ pub fn avro_extract_field_schema<'a>(
         }
         Schema::Array(schema) => Ok(schema),
         Schema::Union(_) => avro_schema_skip_union(schema),
-        _ => bail!("avro schema is not a record or array"),
+        Schema::Map(schema) => Ok(schema),
+        _ => bail!("avro schema does not have inner item, schema: {:?}", schema),
     }
 }
 

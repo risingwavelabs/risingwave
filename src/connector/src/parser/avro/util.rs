@@ -15,6 +15,7 @@
 use std::sync::LazyLock;
 
 use apache_avro::schema::{DecimalSchema, RecordSchema, Schema};
+use apache_avro::types::{Value, ValueKind};
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::log::LogSuppresser;
@@ -22,6 +23,8 @@ use risingwave_common::types::{DataType, Decimal};
 use risingwave_pb::plan_common::{AdditionalColumn, ColumnDesc, ColumnDescVersion};
 
 use crate::error::ConnectorResult;
+use crate::parser::unified::bail_uncategorized;
+use crate::parser::AccessError;
 
 pub fn avro_schema_to_column_descs(schema: &Schema) -> ConnectorResult<Vec<ColumnDesc>> {
     if let Schema::Record(RecordSchema { fields, .. }) = schema {
@@ -152,10 +155,142 @@ fn avro_type_mapping(schema: &Schema) -> ConnectorResult<DataType> {
                 bail!("unsupported Avro type: {:?}", schema);
             }
         }
-        Schema::Map(_) | Schema::Null | Schema::Fixed(_) | Schema::Uuid => {
+        Schema::Map(value_schema) => {
+            // TODO: support native map type
+            // TODO: make the target type configurable
+            if supported_avro_to_json_type(value_schema) {
+                DataType::Jsonb
+            } else {
+                bail!(
+                    "unsupported Avro type, cannot convert map to jsonb: {:?}",
+                    schema
+                )
+            }
+        }
+        Schema::Null | Schema::Fixed(_) | Schema::Uuid => {
             bail!("unsupported Avro type: {:?}", schema)
         }
     };
 
     Ok(data_type)
+}
+
+/// Check for [`avro_to_jsonb`]
+fn supported_avro_to_json_type(schema: &Schema) -> bool {
+    match schema {
+        Schema::Null | Schema::Boolean | Schema::Int | Schema::Long | Schema::String => true,
+
+        Schema::Map(value_schema) | Schema::Array(value_schema) => {
+            supported_avro_to_json_type(value_schema)
+        }
+        Schema::Union(union_schema) => union_schema
+            .variants()
+            .iter()
+            .all(|s| supported_avro_to_json_type(s)),
+        Schema::Record(RecordSchema { fields, .. }) => fields
+            .iter()
+            .all(|f| supported_avro_to_json_type(&f.schema)),
+        Schema::Float
+        | Schema::Double
+        | Schema::Bytes
+        | Schema::Enum(_)
+        | Schema::Fixed(_)
+        | Schema::Decimal(_)
+        | Schema::Uuid
+        | Schema::Date
+        | Schema::TimeMillis
+        | Schema::TimeMicros
+        | Schema::TimestampMillis
+        | Schema::TimestampMicros
+        | Schema::LocalTimestampMillis
+        | Schema::LocalTimestampMicros
+        | Schema::Duration
+        | Schema::Ref { name: _ } => false,
+    }
+}
+
+pub(crate) fn avro_to_jsonb(
+    avro: &Value,
+    builder: &mut jsonbb::Builder,
+) -> crate::parser::AccessResult<()> {
+    match avro {
+        Value::Null => builder.add_null(),
+        Value::Boolean(b) => builder.add_bool(*b),
+        Value::Int(i) => builder.add_i64(*i as i64),
+        Value::Long(l) => builder.add_i64(*l),
+        Value::String(s) => builder.add_string(&s),
+        Value::Map(m) => {
+            builder.begin_object();
+            for (k, v) in m {
+                builder.add_string(&k);
+                avro_to_jsonb(v, builder)?;
+            }
+            builder.end_object()
+        }
+        // same representation as map
+        Value::Record(r) => {
+            builder.begin_object();
+            for (k, v) in r {
+                builder.add_string(&k);
+                avro_to_jsonb(v, builder)?;
+            }
+            builder.end_object()
+        }
+        Value::Array(a) => {
+            builder.begin_array();
+            for v in a {
+                avro_to_jsonb(v, builder)?;
+            }
+            builder.end_array()
+        }
+        Value::Union(_, v) => avro_to_jsonb(&v, builder)?,
+
+        // TODO: figure out where the following encoding is reasonable before enabling them.
+        // Value::Float(f) => {
+        //     if f.is_nan() || f.is_infinite() {
+        //         // XXX: pad null or return err here?
+        //         builder.add_null()
+        //     } else {
+        //         builder.add_f64(*f as f64)
+        //     }
+        // }
+        // Value::Double(f) => {
+        //     if f.is_nan() || f.is_infinite() {
+        //         // XXX: pad null or return err here?
+        //         builder.add_null()
+        //     } else {
+        //         builder.add_f64(*f)
+        //     }
+        // }
+        // // XXX: What encoding to use?
+        // // ToText is \x plus hex string.
+        // Value::Bytes(b) => builder.add_string(&ToText::to_text(&b.as_slice())),
+        // Value::Enum(_, symbol) => {
+        //     builder.add_string(&symbol);
+        // }
+        // Value::Uuid(id) => builder.add_string(&id.as_hyphenated().to_string()),
+
+        // XXX: pad null or return err here?
+        v @ (Value::Float(_)
+        | Value::Double(_)
+        | Value::Bytes(_)
+        | Value::Enum(_, _)
+        | Value::Fixed(_, _)
+        | Value::Date(_)
+        | Value::Decimal(_)
+        | Value::TimeMillis(_)
+        | Value::TimeMicros(_)
+        | Value::TimestampMillis(_)
+        | Value::TimestampMicros(_)
+        | Value::LocalTimestampMillis(_)
+        | Value::LocalTimestampMicros(_)
+        | Value::Duration(_)
+        | Value::Uuid(_)) => {
+            bail_uncategorized!(
+                "unimplemented conversion from avro to jsonb: {:?}",
+                ValueKind::from(v)
+            )
+        }
+    }
+    Ok(())
 }
