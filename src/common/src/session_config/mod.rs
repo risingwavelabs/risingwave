@@ -153,7 +153,7 @@ pub struct SessionConfig {
     streaming_enable_bushy_join: bool,
 
     /// Enable arrangement backfill for streaming queries. Defaults to false.
-    #[parameter(default = true)]
+    #[parameter(default = false)]
     streaming_use_arrangement_backfill: bool,
 
     /// Allow `jsonb` in stream key
