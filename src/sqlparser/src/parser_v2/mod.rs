@@ -25,7 +25,6 @@ mod impl_;
 mod number;
 
 pub(crate) use data_type::*;
-pub(crate) use impl_::TokenStreamWrapper;
 pub(crate) use number::*;
 
 /// Bundle trait requirements from winnow, so that we don't need to write them everywhere.

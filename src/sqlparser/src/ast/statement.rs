@@ -32,7 +32,7 @@ use crate::tokenizer::Token;
 
 /// Consumes token from the parser into an AST node.
 pub trait ParseTo: Sized {
-    fn parse_to(parser: &mut Parser) -> Result<Self, ParserError>;
+    fn parse_to(parser: &mut Parser<'_>) -> Result<Self, ParserError>;
 }
 
 #[macro_export]
@@ -217,7 +217,7 @@ pub struct ConnectorSchema {
     pub key_encode: Option<Encode>,
 }
 
-impl Parser {
+impl Parser<'_> {
     /// Peek the next tokens to see if it is `FORMAT` or `ROW FORMAT` (for compatibility).
     fn peek_source_schema_format(&mut self) -> bool {
         (self.peek_nth_any_of_keywords(0, &[Keyword::ROW])
@@ -389,7 +389,7 @@ impl fmt::Display for ConnectorSchema {
 }
 
 impl ParseTo for CreateSourceStatement {
-    fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
+    fn parse_to(p: &mut Parser<'_>) -> Result<Self, ParserError> {
         impl_parse_to!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], p);
         impl_parse_to!(source_name: ObjectName, p);
 
@@ -524,7 +524,7 @@ pub struct CreateSinkStatement {
 }
 
 impl ParseTo for CreateSinkStatement {
-    fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
+    fn parse_to(p: &mut Parser<'_>) -> Result<Self, ParserError> {
         impl_parse_to!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], p);
         impl_parse_to!(sink_name: ObjectName, p);
 
@@ -616,7 +616,7 @@ pub struct CreateSubscriptionStatement {
 }
 
 impl ParseTo for CreateSubscriptionStatement {
-    fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
+    fn parse_to(p: &mut Parser<'_>) -> Result<Self, ParserError> {
         impl_parse_to!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], p);
         impl_parse_to!(subscription_name: ObjectName, p);
 
@@ -703,7 +703,7 @@ pub struct DeclareCursorStatement {
 }
 
 impl ParseTo for DeclareCursorStatement {
-    fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
+    fn parse_to(p: &mut Parser<'_>) -> Result<Self, ParserError> {
         impl_parse_to!(cursor_name: ObjectName, p);
 
         let declare_cursor = if !p.parse_keyword(Keyword::SUBSCRIPTION) {
@@ -746,7 +746,7 @@ pub struct FetchCursorStatement {
 }
 
 impl ParseTo for FetchCursorStatement {
-    fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
+    fn parse_to(p: &mut Parser<'_>) -> Result<Self, ParserError> {
         let count = if p.parse_keyword(Keyword::NEXT) {
             1
         } else {
@@ -786,7 +786,7 @@ pub struct CloseCursorStatement {
 }
 
 impl ParseTo for CloseCursorStatement {
-    fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
+    fn parse_to(p: &mut Parser<'_>) -> Result<Self, ParserError> {
         let cursor_name = if p.parse_keyword(Keyword::ALL) {
             None
         } else {
@@ -823,7 +823,7 @@ pub struct CreateConnectionStatement {
 }
 
 impl ParseTo for CreateConnectionStatement {
-    fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
+    fn parse_to(p: &mut Parser<'_>) -> Result<Self, ParserError> {
         impl_parse_to!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], p);
         impl_parse_to!(connection_name: ObjectName, p);
         impl_parse_to!(with_properties: WithProperties, p);
@@ -907,7 +907,7 @@ impl<T: fmt::Display> fmt::Display for AstVec<T> {
 pub struct WithProperties(pub Vec<SqlOption>);
 
 impl ParseTo for WithProperties {
-    fn parse_to(parser: &mut Parser) -> Result<Self, ParserError> {
+    fn parse_to(parser: &mut Parser<'_>) -> Result<Self, ParserError> {
         Ok(Self(
             parser.parse_options_with_preceding_keyword(Keyword::WITH)?,
         ))
@@ -950,7 +950,7 @@ pub struct RowSchemaLocation {
 }
 
 impl ParseTo for RowSchemaLocation {
-    fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
+    fn parse_to(p: &mut Parser<'_>) -> Result<Self, ParserError> {
         impl_parse_to!([Keyword::ROW, Keyword::SCHEMA, Keyword::LOCATION], p);
         impl_parse_to!(value: AstString, p);
         Ok(Self { value })
@@ -973,7 +973,7 @@ impl fmt::Display for RowSchemaLocation {
 pub struct AstString(pub String);
 
 impl ParseTo for AstString {
-    fn parse_to(parser: &mut Parser) -> Result<Self, ParserError> {
+    fn parse_to(parser: &mut Parser<'_>) -> Result<Self, ParserError> {
         Ok(Self(parser.parse_literal_string()?))
     }
 }
@@ -996,7 +996,7 @@ pub enum AstOption<T> {
 }
 
 impl<T: ParseTo> ParseTo for AstOption<T> {
-    fn parse_to(parser: &mut Parser) -> Result<Self, ParserError> {
+    fn parse_to(parser: &mut Parser<'_>) -> Result<Self, ParserError> {
         match T::parse_to(parser) {
             Ok(t) => Ok(AstOption::Some(t)),
             Err(_) => Ok(AstOption::None),
@@ -1116,7 +1116,7 @@ impl UserOptionsBuilder {
 }
 
 impl ParseTo for UserOptions {
-    fn parse_to(parser: &mut Parser) -> Result<Self, ParserError> {
+    fn parse_to(parser: &mut Parser<'_>) -> Result<Self, ParserError> {
         let mut builder = UserOptionsBuilder::default();
         let add_option = |item: &mut Option<UserOption>, user_option| {
             let old_value = item.replace(user_option);
@@ -1200,7 +1200,7 @@ impl fmt::Display for UserOptions {
 }
 
 impl ParseTo for CreateUserStatement {
-    fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
+    fn parse_to(p: &mut Parser<'_>) -> Result<Self, ParserError> {
         impl_parse_to!(user_name: ObjectName, p);
         impl_parse_to!(with_options: UserOptions, p);
 
@@ -1243,7 +1243,7 @@ impl fmt::Display for AlterUserStatement {
 }
 
 impl ParseTo for AlterUserStatement {
-    fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
+    fn parse_to(p: &mut Parser<'_>) -> Result<Self, ParserError> {
         impl_parse_to!(user_name: ObjectName, p);
         impl_parse_to!(mode: AlterUserMode, p);
 
@@ -1252,7 +1252,7 @@ impl ParseTo for AlterUserStatement {
 }
 
 impl ParseTo for AlterUserMode {
-    fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
+    fn parse_to(p: &mut Parser<'_>) -> Result<Self, ParserError> {
         if p.parse_keyword(Keyword::RENAME) {
             p.expect_keyword(Keyword::TO)?;
             impl_parse_to!(new_name: ObjectName, p);
@@ -1285,7 +1285,7 @@ pub struct DropStatement {
 //     drop_mode: AstOption<DropMode>,
 // });
 impl ParseTo for DropStatement {
-    fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
+    fn parse_to(p: &mut Parser<'_>) -> Result<Self, ParserError> {
         impl_parse_to!(object_type: ObjectType, p);
         impl_parse_to!(if_exists => [Keyword::IF, Keyword::EXISTS], p);
         let object_name = p.parse_object_name()?;
@@ -1318,7 +1318,7 @@ pub enum DropMode {
 }
 
 impl ParseTo for DropMode {
-    fn parse_to(parser: &mut Parser) -> Result<Self, ParserError> {
+    fn parse_to(parser: &mut Parser<'_>) -> Result<Self, ParserError> {
         let drop_mode = if parser.parse_keyword(Keyword::CASCADE) {
             DropMode::Cascade
         } else if parser.parse_keyword(Keyword::RESTRICT) {

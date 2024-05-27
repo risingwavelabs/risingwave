@@ -191,7 +191,7 @@ impl From<&str> for Ident {
 }
 
 impl ParseTo for Ident {
-    fn parse_to(parser: &mut Parser) -> Result<Self, ParserError> {
+    fn parse_to(parser: &mut Parser<'_>) -> Result<Self, ParserError> {
         parser.parse_identifier()
     }
 }
@@ -235,7 +235,7 @@ impl fmt::Display for ObjectName {
 }
 
 impl ParseTo for ObjectName {
-    fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
+    fn parse_to(p: &mut Parser<'_>) -> Result<Self, ParserError> {
         p.parse_object_name()
     }
 }
@@ -2560,7 +2560,7 @@ impl fmt::Display for ObjectType {
 }
 
 impl ParseTo for ObjectType {
-    fn parse_to(parser: &mut Parser) -> Result<Self, ParserError> {
+    fn parse_to(parser: &mut Parser<'_>) -> Result<Self, ParserError> {
         let object_type = if parser.parse_keyword(Keyword::TABLE) {
             ObjectType::Table
         } else if parser.parse_keyword(Keyword::VIEW) {

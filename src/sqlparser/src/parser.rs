@@ -169,34 +169,20 @@ pub enum Precedence {
     DoubleColon, // 50 in upstream
 }
 
-pub struct Parser {
-    tokens: Vec<TokenWithLocation>,
-    /// The index of the first unprocessed token in `self.tokens`
-    index: usize,
-}
+#[derive(Clone, Copy, Default)]
+pub struct Parser<'a>(pub(crate) &'a [TokenWithLocation]);
 
-impl Parser {
-    /// Parse the specified tokens
-    pub fn new(tokens: Vec<TokenWithLocation>) -> Self {
-        Parser { tokens, index: 0 }
-    }
-
+impl Parser<'_> {
     /// Adaptor for [`parser_v2`].
     ///
     /// You can call a v2 parser from original parser by using this method.
-    pub(crate) fn parse_v2<'a, O>(
-        &'a mut self,
-        mut parse_next: impl winnow::Parser<
-            winnow::Located<parser_v2::TokenStreamWrapper<'a>>,
-            O,
-            winnow::error::ContextError,
-        >,
+    pub(crate) fn parse_v2<O>(
+        &mut self,
+        mut parse_next: impl winnow::Parser<winnow::Located<Self>, O, winnow::error::ContextError>,
     ) -> Result<O, ParserError> {
         use winnow::stream::Location;
 
-        let mut token_stream = winnow::Located::new(parser_v2::TokenStreamWrapper {
-            tokens: &self.tokens[self.index..],
-        });
+        let mut token_stream = winnow::Located::new(*self);
         let output = parse_next.parse_next(&mut token_stream).map_err(|e| {
             let msg = if let Some(e) = e.into_inner()
                 && let Some(cause) = e.cause()
@@ -207,16 +193,16 @@ impl Parser {
             };
             ParserError::ParserError(format!(
                 "Unexpected {}{}",
-                if self.index + token_stream.location() >= self.tokens.len() {
+                if token_stream.location() >= self.0.len() {
                     &"EOF" as &dyn std::fmt::Display
                 } else {
-                    &self.tokens[self.index + token_stream.location()] as &dyn std::fmt::Display
+                    &self.0[token_stream.location()] as &dyn std::fmt::Display
                 },
                 msg
             ))
         });
         let offset = token_stream.location();
-        self.index += offset;
+        self.0 = &self.0[offset..];
         output
     }
 
@@ -225,7 +211,7 @@ impl Parser {
     pub fn parse_sql(sql: &str) -> Result<Vec<Statement>, ParserError> {
         let mut tokenizer = Tokenizer::new(sql);
         let tokens = tokenizer.tokenize_with_location()?;
-        let mut parser = Parser::new(tokens);
+        let mut parser = Parser(&tokens);
         let ast = parser.parse_statements().map_err(|e| {
             // append SQL context to the error message, e.g.:
             // LINE 1: SELECT 1::int(2);
@@ -284,13 +270,14 @@ impl Parser {
     /// Parse a single top-level statement (such as SELECT, INSERT, CREATE, etc.),
     /// stopping before the statement separator, if any.
     pub fn parse_statement(&mut self) -> Result<Statement, ParserError> {
+        let checkpoint = *self;
         let token = self.next_token();
         match token.token {
             Token::Word(w) => match w.keyword {
                 Keyword::EXPLAIN => Ok(self.parse_explain()?),
                 Keyword::ANALYZE => Ok(self.parse_analyze()?),
                 Keyword::SELECT | Keyword::WITH | Keyword::VALUES => {
-                    self.prev_token();
+                    *self = checkpoint;
                     Ok(Statement::Query(Box::new(self.parse_query()?)))
                 }
                 Keyword::DECLARE => Ok(self.parse_declare()?),
@@ -343,7 +330,7 @@ impl Parser {
                 ),
             },
             Token::LParen => {
-                self.prev_token();
+                *self = checkpoint;
                 Ok(Statement::Query(Box::new(self.parse_query()?)))
             }
             unexpected => {
@@ -373,13 +360,13 @@ impl Parser {
     /// - Selecting all columns from a table. In this case, it is a
     ///   [`WildcardOrExpr::QualifiedWildcard`] or a [`WildcardOrExpr::Wildcard`].
     pub fn parse_wildcard_or_expr(&mut self) -> Result<WildcardOrExpr, ParserError> {
-        let index = self.index;
+        let checkpoint = *self;
 
         match self.next_token().token {
             Token::Word(w) if self.peek_token() == Token::Period => {
                 // Since there's no parenthesis, `w` must be a column or a table
                 // So what follows must be dot-delimited identifiers, e.g. `a.b.c.*`
-                let wildcard_expr = self.parse_simple_wildcard_expr(index)?;
+                let wildcard_expr = self.parse_simple_wildcard_expr(checkpoint)?;
                 return self.word_concat_wildcard_expr(w.to_ident()?, wildcard_expr);
             }
             Token::Mul => {
@@ -396,14 +383,14 @@ impl Parser {
                     }
                     // Now that we have an expr, what follows must be
                     // dot-delimited identifiers, e.g. `b.c.*` in `(a).b.c.*`
-                    let wildcard_expr = self.parse_simple_wildcard_expr(index)?;
+                    let wildcard_expr = self.parse_simple_wildcard_expr(checkpoint)?;
                     return self.expr_concat_wildcard_expr(expr, wildcard_expr);
                 }
             }
             _ => (),
         };
 
-        self.index = index;
+        *self = checkpoint;
         self.parse_expr().map(WildcardOrExpr::Expr)
     }
 
@@ -501,7 +488,7 @@ impl Parser {
     /// If wildcard is not found, go back to `index` and parse an expression.
     pub fn parse_simple_wildcard_expr(
         &mut self,
-        index: usize,
+        checkpoint: Self,
     ) -> Result<WildcardOrExpr, ParserError> {
         let mut id_parts = vec![];
         while self.consume_token(&Token::Period) {
@@ -526,7 +513,7 @@ impl Parser {
                 }
             }
         }
-        self.index = index;
+        *self = checkpoint;
         self.parse_expr().map(WildcardOrExpr::Expr)
     }
 
@@ -607,11 +594,12 @@ impl Parser {
             }
         }));
 
+        let checkpoint = *self;
         let token = self.next_token();
         let expr = match token.token.clone() {
             Token::Word(w) => match w.keyword {
                 Keyword::TRUE | Keyword::FALSE | Keyword::NULL => {
-                    self.prev_token();
+                    *self = checkpoint;
                     Ok(Expr::Value(self.parse_value()?))
                 }
                 Keyword::CASE => self.parse_case_expr(),
@@ -688,8 +676,7 @@ impl Parser {
                             }
                         }
 
-                        if self.consume_token(&Token::LParen) {
-                            self.prev_token();
+                        if self.peek_token().token == Token::LParen {
                             self.parse_function(ObjectName(id_parts))
                         } else {
                             Ok(Expr::CompoundIdentifier(id_parts))
@@ -743,7 +730,7 @@ impl Parser {
             | Token::NationalStringLiteral(_)
             | Token::HexStringLiteral(_)
             | Token::CstyleEscapesString(_) => {
-                self.prev_token();
+                *self = checkpoint;
                 Ok(Expr::Value(self.parse_value()?))
             }
             Token::Parameter(number) => self.parse_param(number),
@@ -757,18 +744,17 @@ impl Parser {
                 })
             }
             Token::LParen => {
-                let expr =
-                    if self.parse_keyword(Keyword::SELECT) || self.parse_keyword(Keyword::WITH) {
-                        self.prev_token();
-                        Expr::Subquery(Box::new(self.parse_query()?))
+                let expr = if matches!(self.peek_token().token, Token::Word(w) if w.keyword == Keyword::SELECT || w.keyword == Keyword::WITH)
+                {
+                    Expr::Subquery(Box::new(self.parse_query()?))
+                } else {
+                    let mut exprs = self.parse_comma_separated(Parser::parse_expr)?;
+                    if exprs.len() == 1 {
+                        Expr::Nested(Box::new(exprs.pop().unwrap()))
                     } else {
-                        let mut exprs = self.parse_comma_separated(Parser::parse_expr)?;
-                        if exprs.len() == 1 {
-                            Expr::Nested(Box::new(exprs.pop().unwrap()))
-                        } else {
-                            Expr::Row(exprs)
-                        }
-                    };
+                        Expr::Row(exprs)
+                    }
+                };
                 self.expect_token(&Token::RParen)?;
                 if self.peek_token() == Token::Period && matches!(expr, Expr::Nested(_)) {
                     self.parse_struct_selection(expr)
@@ -831,13 +817,14 @@ impl Parser {
     pub fn parse_qualified_operator(&mut self) -> Result<QualifiedOperator, ParserError> {
         self.expect_token(&Token::LParen)?;
 
+        let checkpoint = *self;
         let schema = match self.parse_identifier_non_reserved() {
             Ok(ident) => {
                 self.expect_token(&Token::Period)?;
                 Some(ident)
             }
             Err(_) => {
-                self.prev_token();
+                *self = checkpoint;
                 None
             }
         };
@@ -853,10 +840,11 @@ impl Parser {
             //
             // To support custom operators and be fully compatible with PostgreSQL later, the
             // tokenizer should also be updated.
+            let checkpoint = *self;
             let token = self.next_token();
             let name = token.token.to_string();
             if !name.trim_matches(OP_CHARS).is_empty() {
-                self.prev_token();
+                *self = checkpoint;
                 return self.expected(&format!("one of {}", OP_CHARS.iter().join(" ")), token);
             }
             name
@@ -1439,6 +1427,7 @@ impl Parser {
 
     /// Parse an operator following an expression
     pub fn parse_infix(&mut self, expr: Expr, precedence: Precedence) -> Result<Expr, ParserError> {
+        let checkpoint = *self;
         let tok = self.next_token();
         debug!("parsing infix {:?}", tok.token);
         let regular_binary_operator = match &tok.token {
@@ -1611,7 +1600,7 @@ impl Parser {
                 | Keyword::LIKE
                 | Keyword::ILIKE
                 | Keyword::SIMILAR => {
-                    self.prev_token();
+                    *self = checkpoint;
                     let negated = self.parse_keyword(Keyword::NOT);
                     if self.parse_keyword(Keyword::IN) {
                         self.parse_in(expr, negated)
@@ -1783,8 +1772,8 @@ impl Parser {
     /// Parses the parens following the `[ NOT ] IN` operator
     pub fn parse_in(&mut self, expr: Expr, negated: bool) -> Result<Expr, ParserError> {
         self.expect_token(&Token::LParen)?;
-        let in_op = if self.parse_keyword(Keyword::SELECT) || self.parse_keyword(Keyword::WITH) {
-            self.prev_token();
+        let in_op = if matches!(self.peek_token().token, Token::Word(w) if w.keyword == Keyword::SELECT || w.keyword == Keyword::WITH)
+        {
             Expr::InSubquery {
                 expr: Box::new(expr),
                 subquery: Box::new(self.parse_query()?),
@@ -1930,10 +1919,10 @@ impl Parser {
 
     /// Return nth non-whitespace token that has not yet been processed
     pub fn peek_nth_token(&self, mut n: usize) -> TokenWithLocation {
-        let mut index = self.index;
+        let mut index = 0;
         loop {
+            let token = self.0.get(index);
             index += 1;
-            let token = self.tokens.get(index - 1);
             match token.map(|x| &x.token) {
                 Some(Token::Whitespace(_)) => continue,
                 _ => {
@@ -1953,38 +1942,25 @@ impl Parser {
     /// repeatedly after reaching EOF.
     pub fn next_token(&mut self) -> TokenWithLocation {
         loop {
-            self.index += 1;
-            let token = self.tokens.get(self.index - 1);
-            match token.map(|x| &x.token) {
-                Some(Token::Whitespace(_)) => continue,
-                _ => {
-                    return token
-                        .cloned()
-                        .unwrap_or(TokenWithLocation::wrap(Token::EOF));
-                }
+            let Some(token) = self.0.first() else {
+                return TokenWithLocation::wrap(Token::EOF);
+            };
+            self.0 = &self.0[1..];
+            match token.token {
+                Token::Whitespace(_) => continue,
+                _ => return token.clone(),
             }
         }
     }
 
     /// Return the first unprocessed token, possibly whitespace.
     pub fn next_token_no_skip(&mut self) -> Option<&TokenWithLocation> {
-        self.index += 1;
-        self.tokens.get(self.index - 1)
-    }
-
-    /// Push back the last one non-whitespace token. Must be called after
-    /// `next_token()`, otherwise might panic. OK to call after
-    /// `next_token()` indicates an EOF.
-    pub fn prev_token(&mut self) {
-        loop {
-            assert!(self.index > 0);
-            self.index -= 1;
-            if let Some(token) = self.tokens.get(self.index)
-                && let Token::Whitespace(_) = token.token
-            {
-                continue;
-            }
-            return;
+        if self.0.is_empty() {
+            None
+        } else {
+            let (first, rest) = self.0.split_at(1);
+            self.0 = rest;
+            Some(&first[0])
         }
     }
 
@@ -2008,12 +1984,12 @@ impl Parser {
     /// Look for an expected sequence of keywords and consume them if they exist
     #[must_use]
     pub fn parse_keywords(&mut self, keywords: &[Keyword]) -> bool {
-        let index = self.index;
+        let checkpoint = *self;
         for &keyword in keywords {
             if !self.parse_keyword(keyword) {
                 // println!("parse_keywords aborting .. did not find {:?}", keyword);
                 // reset index and return immediately
-                self.index = index;
+                *self = checkpoint;
                 return false;
             }
         }
@@ -2098,7 +2074,7 @@ impl Parser {
     /// Parse a comma-separated list of 1+ items accepted by `F`
     pub fn parse_comma_separated<T, F>(&mut self, mut f: F) -> Result<Vec<T>, ParserError>
     where
-        F: FnMut(&mut Parser) -> Result<T, ParserError>,
+        F: FnMut(&mut Self) -> Result<T, ParserError>,
     {
         let mut values = vec![];
         loop {
@@ -2115,13 +2091,13 @@ impl Parser {
     #[must_use]
     fn maybe_parse<T, F>(&mut self, mut f: F) -> Option<T>
     where
-        F: FnMut(&mut Parser) -> Result<T, ParserError>,
+        F: FnMut(&mut Self) -> Result<T, ParserError>,
     {
-        let index = self.index;
+        let checkpoint = *self;
         if let Ok(t) = f(self) {
             Some(t)
         } else {
-            self.index = index;
+            *self = checkpoint;
             None
         }
     }
@@ -2322,8 +2298,7 @@ impl Parser {
     ) -> Result<Statement, ParserError> {
         let name = self.parse_object_name()?;
         self.expect_token(&Token::LParen)?;
-        let args = if self.consume_token(&Token::RParen) {
-            self.prev_token();
+        let args = if self.peek_token().token == Token::RParen {
             None
         } else {
             Some(self.parse_comma_separated(Parser::parse_function_arg)?)
@@ -2991,6 +2966,7 @@ impl Parser {
         } else {
             None
         };
+        let checkpoint = *self;
         let token = self.next_token();
         match token.token {
             Token::Word(w) if w.keyword == Keyword::PRIMARY || w.keyword == Keyword::UNIQUE => {
@@ -3046,7 +3022,7 @@ impl Parser {
                         unexpected.with_location(token.location),
                     )
                 } else {
-                    self.prev_token();
+                    *self = checkpoint;
                     Ok(None)
                 }
             }
@@ -3807,10 +3783,11 @@ impl Parser {
     }
 
     pub fn parse_number_value(&mut self) -> Result<String, ParserError> {
+        let checkpoint = *self;
         match self.parse_value()? {
             Value::Number(v) => Ok(v),
             _ => {
-                self.prev_token();
+                *self = checkpoint;
                 self.expected("literal number", self.peek_token())
             }
         }
@@ -3891,6 +3868,7 @@ impl Parser {
         reserved_kwds: &[Keyword],
     ) -> Result<Option<Ident>, ParserError> {
         let after_as = self.parse_keyword(Keyword::AS);
+        let checkpoint = *self;
         let token = self.next_token();
         match token.token {
             // Accept any identifier after `AS` (though many dialects have restrictions on
@@ -3908,7 +3886,7 @@ impl Parser {
                         not_an_ident.with_location(token.location),
                     );
                 }
-                self.prev_token();
+                *self = checkpoint;
                 Ok(None) // no alias found
             }
         }
@@ -4190,7 +4168,7 @@ impl Parser {
             Keyword::DISTSQL,
         ];
 
-        let parse_explain_option = |parser: &mut Parser| -> Result<(), ParserError> {
+        let parse_explain_option = |parser: &mut Parser<'_>| -> Result<(), ParserError> {
             let keyword = parser.expect_one_of_keywords(&explain_key_words)?;
             match keyword {
                 Keyword::VERBOSE => options.verbose = parser.parse_optional_boolean(true),
@@ -4531,7 +4509,7 @@ impl Parser {
     /// return `Statement::ShowCommand` or `Statement::ShowColumn`,
     /// otherwise, return `Statement::ShowVariable`.
     pub fn parse_show(&mut self) -> Result<Statement, ParserError> {
-        let index = self.index;
+        let checkpoint = *self;
         if let Token::Word(w) = self.next_token().token {
             match w.keyword {
                 Keyword::TABLES => {
@@ -4680,7 +4658,7 @@ impl Parser {
                 _ => {}
             }
         }
-        self.index = index;
+        *self = checkpoint;
         Ok(Statement::ShowVariable {
             variable: self.parse_identifiers()?,
         })
@@ -5502,27 +5480,6 @@ impl Word {
 mod tests {
     use super::*;
     use crate::test_utils::run_parser_method;
-
-    #[test]
-    fn test_prev_index() {
-        let sql = "SELECT version";
-        run_parser_method(sql, |parser| {
-            assert_eq!(parser.peek_token(), Token::make_keyword("SELECT"));
-            assert_eq!(parser.next_token(), Token::make_keyword("SELECT"));
-            parser.prev_token();
-            assert_eq!(parser.next_token(), Token::make_keyword("SELECT"));
-            assert_eq!(parser.next_token(), Token::make_word("version", None));
-            parser.prev_token();
-            assert_eq!(parser.peek_token(), Token::make_word("version", None));
-            assert_eq!(parser.next_token(), Token::make_word("version", None));
-            assert_eq!(parser.peek_token(), Token::EOF);
-            parser.prev_token();
-            assert_eq!(parser.next_token(), Token::make_word("version", None));
-            assert_eq!(parser.next_token(), Token::EOF);
-            assert_eq!(parser.next_token(), Token::EOF);
-            parser.prev_token();
-        });
-    }
 
     #[test]
     fn test_parse_integer_min() {
