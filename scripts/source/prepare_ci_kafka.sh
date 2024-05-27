@@ -37,10 +37,10 @@ for filename in $kafka_data_files; do
 
     # always ok
     echo "Drop topic $topic"
-    risedev kafka-topics --topic "$topic" --delete || true
+    risedev rpk topic delete "$topic" || true
 
     echo "Recreate topic $topic with partition $partition"
-    risedev kafka-topics --topic "$topic" --create --partitions "$partition") &
+    risedev rpk topic create "$topic" --partitions "$partition") &
 done
 wait
 

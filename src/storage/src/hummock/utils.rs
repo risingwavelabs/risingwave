@@ -389,7 +389,18 @@ pub fn check_subset_preserve_order<T: Eq>(
     true
 }
 
-pub(crate) const ENABLE_SANITY_CHECK: bool = cfg!(debug_assertions);
+static SANITY_CHECK_ENABLED: AtomicBool = AtomicBool::new(cfg!(debug_assertions));
+
+/// This function is intended to be called during compute node initialization if the storage
+/// sanity check is not desired. This controls a global flag so only need to be called once
+/// if need to disable the sanity check.
+pub fn disable_sanity_check() {
+    SANITY_CHECK_ENABLED.store(false, AtomicOrdering::Release);
+}
+
+pub(crate) fn sanity_check_enabled() -> bool {
+    SANITY_CHECK_ENABLED.load(AtomicOrdering::Acquire)
+}
 
 /// Make sure the key to insert should not exist in storage.
 pub(crate) async fn do_insert_sanity_check(

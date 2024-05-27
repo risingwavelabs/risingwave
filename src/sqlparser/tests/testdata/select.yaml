@@ -120,9 +120,9 @@
 - input: SELECT 0x
   error_msg: 'sql parser error: incomplete integer literal at Line: 1, Column 8'
 - input: SELECT 1::float(0)
-  error_msg: 'sql parser error: precision for type float must be at least 1 bit'
+  error_msg: 'sql parser error: Unexpected 0 at line:1, column:17: Precision must be in range 1..54'
 - input: SELECT 1::float(54)
-  error_msg: 'sql parser error: precision for type float must be less than 54 bits'
+  error_msg: 'sql parser error: Unexpected 54 at line:1, column:18: Precision must be in range 1..54'
 - input: SELECT 1::int(2)
   error_msg: |-
     sql parser error: Expected end of statement, found: ( at line:1, column:14

@@ -19,7 +19,8 @@
 //! See expr/impl/src/udf for the implementations.
 
 use anyhow::{bail, Context, Result};
-use arrow_array::RecordBatch;
+use arrow_array::{ArrayRef, BooleanArray, RecordBatch};
+use enum_as_inner::EnumAsInner;
 use futures::stream::BoxStream;
 use risingwave_common::types::DataType;
 
@@ -77,11 +78,11 @@ pub struct UdfImplDescriptor {
 /// These information are parsed from `CREATE FUNCTION` statement.
 /// Implementations should verify the options and return a `CreateFunctionOutput` in `create_fn`.
 pub struct CreateFunctionOptions<'a> {
+    pub kind: UdfKind,
     pub name: &'a str,
     pub arg_names: &'a [String],
     pub arg_types: &'a [DataType],
     pub return_type: &'a DataType,
-    pub is_table_function: bool,
     pub as_: Option<&'a str>,
     pub using_link: Option<&'a str>,
     pub using_base64_decoded: Option<&'a [u8]>,
@@ -96,7 +97,7 @@ pub struct CreateFunctionOutput {
 
 /// Options for building a UDF runtime.
 pub struct UdfOptions<'a> {
-    pub table_function: bool,
+    pub kind: UdfKind,
     pub body: Option<&'a str>,
     pub compressed_binary: Option<&'a [u8]>,
     pub link: Option<&'a str>,
@@ -105,6 +106,13 @@ pub struct UdfOptions<'a> {
     pub return_type: &'a DataType,
     pub always_retry_on_network_error: bool,
     pub function_type: Option<&'a str>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumAsInner)]
+pub enum UdfKind {
+    Scalar,
+    Table,
+    Aggregate,
 }
 
 /// UDF implementation.
@@ -118,6 +126,26 @@ pub trait UdfImpl: std::fmt::Debug + Send + Sync {
         &'a self,
         input: &'a RecordBatch,
     ) -> Result<BoxStream<'a, Result<RecordBatch>>>;
+
+    /// For aggregate function, create the initial state.
+    fn call_agg_create_state(&self) -> Result<ArrayRef> {
+        bail!("aggregate function is not supported");
+    }
+
+    /// For aggregate function, accumulate or retract the state.
+    fn call_agg_accumulate_or_retract(
+        &self,
+        _state: &ArrayRef,
+        _ops: &BooleanArray,
+        _input: &RecordBatch,
+    ) -> Result<ArrayRef> {
+        bail!("aggregate function is not supported");
+    }
+
+    /// For aggregate function, get aggregate result from the state.
+    fn call_agg_finish(&self, _state: &ArrayRef) -> Result<ArrayRef> {
+        bail!("aggregate function is not supported");
+    }
 
     /// Whether the UDF talks in legacy mode.
     ///

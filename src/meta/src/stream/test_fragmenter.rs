@@ -74,6 +74,7 @@ fn make_sum_aggcall(idx: u32) -> AggCall {
         order_by: vec![],
         filter: None,
         direct_args: vec![],
+        udf: None,
     }
 }
 
