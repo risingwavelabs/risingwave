@@ -19,7 +19,7 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::catalog::{TableOption, DEFAULT_SCHEMA_NAME, SYSTEM_SCHEMAS};
-use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
+use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont_mut;
 use risingwave_common::{bail, current_cluster_version};
 use risingwave_connector::source::UPSTREAM_SOURCE_KEY;
 use risingwave_meta_model_v2::object::ObjectType;
@@ -876,7 +876,7 @@ impl CatalogController {
 
                     let mut pb_stream_node = stream_node.to_protobuf();
 
-                    visit_stream_node_cont(&mut pb_stream_node, |node| {
+                    visit_stream_node_cont_mut(&mut pb_stream_node, |node| {
                         if let Some(NodeBody::Union(_)) = node.node_body {
                             node.input.retain_mut(|input| {
                                 if let Some(NodeBody::Merge(merge_node)) = &mut input.node_body
