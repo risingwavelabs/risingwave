@@ -289,16 +289,13 @@ impl<S: StateStore> DistinctDeduplicater<S> {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
     use risingwave_common::test_prelude::StreamChunkTestExt;
-    use risingwave_common::types::DataType;
     use risingwave_common::util::epoch::{test_epoch, EpochPair};
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
 
     use super::*;
-    use crate::executor::ActorContext;
 
     async fn infer_dedup_tables<S: StateStore>(
         agg_calls: &[AggCall],
