@@ -643,7 +643,6 @@ const MAX_ROWS_FOR_TRANSACTION: usize = 4096;
 #[try_stream(ok = StreamChunk, error = crate::error::ConnectorError)]
 async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream: BoxSourceStream) {
     let columns = parser.columns().to_vec();
-    tracing::info!("parser columns: {:?}", columns);
 
     let mut heartbeat_builder = SourceStreamChunkBuilder::with_capacity(columns.clone(), 0);
     let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 0);

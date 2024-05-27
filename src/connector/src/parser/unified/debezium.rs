@@ -198,13 +198,6 @@ where
                     |additional_column_type| {
                         match additional_column_type {
                             &ColumnType::Timestamp(_) => {
-                                tracing::info!(
-                                    "access timestamp field: `{}, type: {:?}, column_type: {:?}`",
-                                    desc.name,
-                                    desc.data_type,
-                                    desc.additional_column.column_type
-                                );
-
                                 // access payload.source.ts_ms
                                 let ts_ms = self
                                     .value_accessor

@@ -743,6 +743,22 @@ pub(crate) fn gen_create_table_plan_for_cdc_source(
     with_version_column: Option<String>,
     include_column_options: IncludeOption,
 ) -> Result<(PlanRef, PbTable)> {
+    if constraints.iter().any(|c| {
+        matches!(
+            c,
+            TableConstraint::Unique {
+                is_primary: true,
+                ..
+            }
+        )
+    }) {
+        return Err(ErrorCode::NotSupported(
+            "CDC table without primary key constraint is not supported".to_owned(),
+            "Please define a primary key".to_owned(),
+        )
+        .into());
+    }
+
     let session = context.session_ctx().clone();
     let db_name = session.database();
     let (schema_name, name) = Binder::resolve_schema_qualified_name(db_name, table_name)?;
@@ -776,11 +792,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_source(
     }
 
     let pk_names = bind_sql_pk_names(&column_defs, &constraints)?;
-    let (columns, pk_column_ids, row_id_index) = bind_pk_on_relation(columns, pk_names, true)?;
-    assert_eq!(
-        None, row_id_index,
-        "cdc table should not have row_id column"
-    );
+    let (columns, pk_column_ids, _row_id_index) = bind_pk_on_relation(columns, pk_names, true)?;
 
     let definition = context.normalized_sql().to_owned();
 
