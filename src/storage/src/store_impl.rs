@@ -571,9 +571,11 @@ impl StateStoreImpl {
     ) -> StorageResult<Self> {
         const MB: usize = 1 << 20;
 
-        metrics_prometheus::Recorder::builder()
-            .with_registry(GLOBAL_METRICS_REGISTRY.deref().clone())
-            .build_and_install();
+        if cfg!(not(madsim)) {
+            metrics_prometheus::Recorder::builder()
+                .with_registry(GLOBAL_METRICS_REGISTRY.deref().clone())
+                .build_and_install();
+        }
 
         let meta_cache_v2 = {
             let mut builder = HybridCacheBuilder::new()
