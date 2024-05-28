@@ -1217,6 +1217,7 @@ mod tests {
             false,
             Arc::new(StreamingMetrics::unused()),
             1024,
+            2048,
         );
         (tx_l, tx_r, executor.boxed().execute())
     }
@@ -1309,6 +1310,7 @@ mod tests {
             true,
             Arc::new(StreamingMetrics::unused()),
             1024,
+            2048,
         );
         (tx_l, tx_r, executor.boxed().execute())
     }
