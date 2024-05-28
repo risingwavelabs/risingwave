@@ -688,10 +688,6 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::min_sst_size_for_streaming_upload")]
     pub min_sst_size_for_streaming_upload: u64,
 
-    /// Max sub compaction task numbers
-    #[serde(default = "default::storage::max_sub_compaction")]
-    pub max_sub_compaction: u32,
-
     #[serde(default = "default::storage::max_concurrent_compaction_task_number")]
     pub max_concurrent_compaction_task_number: u64,
 
@@ -1389,10 +1385,6 @@ pub mod default {
         pub fn min_sst_size_for_streaming_upload() -> u64 {
             // 32MB
             32 * 1024 * 1024
-        }
-
-        pub fn max_sub_compaction() -> u32 {
-            4
         }
 
         pub fn max_concurrent_compaction_task_number() -> u64 {
