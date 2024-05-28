@@ -20,7 +20,7 @@ use either::Either;
 use futures::TryStreamExt;
 use itertools::Itertools;
 use risingwave_common::array::ArrayRef;
-use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
+use risingwave_common::metrics::{LabelGuardedIntCounter, GLOBAL_ERROR_METRICS};
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::epoch::{Epoch, EpochPair};
@@ -180,11 +180,9 @@ impl<S: StateStore> SourceExecutor<S> {
         stream: &mut StreamReaderWithPause<BIASED, StreamChunk>,
         split_assignment: &HashMap<ActorId, Vec<SplitImpl>>,
         should_trim_state: bool,
+        source_split_change_count_metrics: &LabelGuardedIntCounter<4>,
     ) -> StreamExecutorResult<()> {
-        self.metrics
-            .source_split_change_count
-            .with_guarded_label_values(&self.get_metric_labels().each_ref().map(AsRef::as_ref))
-            .inc();
+        source_split_change_count_metrics.inc();
         if let Some(target_splits) = split_assignment.get(&self.actor_ctx.id).cloned() {
             if self
                 .update_state_if_changed(target_splits, should_trim_state)
@@ -492,15 +490,12 @@ impl<S: StateStore> SourceExecutor<S> {
         let source_output_row_count = self
             .metrics
             .source_output_row_count
-            .with_guarded_label_values(
-                &self
-                    .get_metric_labels()
-                    .iter()
-                    .map(AsRef::as_ref)
-                    .collect::<Vec<&str>>()
-                    .try_into()
-                    .unwrap(),
-            );
+            .with_guarded_label_values(&self.get_metric_labels().each_ref().map(AsRef::as_ref));
+
+        let source_split_change_count = self
+            .metrics
+            .source_split_change_count
+            .with_guarded_label_values(&self.get_metric_labels().each_ref().map(AsRef::as_ref));
 
         while let Some(msg) = stream.next().await {
             let Ok(msg) = msg else {
@@ -547,6 +542,7 @@ impl<S: StateStore> SourceExecutor<S> {
                                     &mut stream,
                                     actor_splits,
                                     true,
+                                    &source_split_change_count,
                                 )
                                 .await?;
                             }
@@ -557,6 +553,7 @@ impl<S: StateStore> SourceExecutor<S> {
                                     &mut stream,
                                     actor_splits,
                                     false,
+                                    &source_split_change_count,
                                 )
                                 .await?;
                             }
