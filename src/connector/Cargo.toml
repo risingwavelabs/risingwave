@@ -61,10 +61,10 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 gcp-bigquery-client = "0.18.0"
 glob = "0.3"
-google-cloud-bigquery = { version = "0.8.0", features = ["auth"] }
+google-cloud-bigquery = { version = "0.9.0", features = ["auth"] }
 google-cloud-gax = "0.17.0"
-google-cloud-googleapis = { version = "0.13", features = ["pubsub"] }
-google-cloud-pubsub = "0.24"
+google-cloud-googleapis = { version = "0.13", features = ["pubsub", "bigquery"] }
+google-cloud-pubsub = "0.25"
 http = "0.2"
 icelake = { workspace = true }
 indexmap = { version = "1.9.3", features = ["serde"] }
