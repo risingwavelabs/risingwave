@@ -10541,6 +10541,7 @@ dependencies = [
  "indexmap 1.9.3",
  "itertools 0.12.1",
  "jni",
+ "jsonbb",
  "jsonschema-transpiler",
  "jsonwebtoken",
  "madsim-rdkafka",

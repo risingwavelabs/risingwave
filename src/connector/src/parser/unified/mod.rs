@@ -95,7 +95,7 @@ where
 pub enum AccessError {
     #[error("Undefined field `{name}` at `{path}`")]
     Undefined { name: String, path: String },
-    #[error("Expected type `{expected}` but got `{got}` for `{value}`")]
+    #[error("Cannot parse value `{value}` with type `{got}` into expected type `{expected}`")]
     TypeError {
         expected: String,
         got: String,
