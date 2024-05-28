@@ -36,5 +36,5 @@ echo "--- e2e, $mode, slow-udf-tests"
 python3 -m pip install --break-system-packages arrow-udf==0.2.1
 RUST_LOG="info" \
 risedev ci-start "$mode"
-sqllogictest -p 4566 -d dev './e2e_test/udf/always_retry_python.slt'
-sqllogictest -p 4566 -d dev './e2e_test/backfill/rate_limit/slow-udf.slt'
+sqllogictest -p 4566 -d dev './e2e_test_slow/udf/always_retry_python.slt'
+sqllogictest -p 4566 -d dev './e2e_test_slow/backfill/rate_limit/slow-udf.slt'
