@@ -43,6 +43,9 @@ create table rw.products_test ( id INT,
  PRIMARY KEY (id)
 ) include timestamp as commit_ts from mysql_mytest table 'mytest.products';
 
+# sleep to ensure (default,'Milk','Milk is a white liquid food') is consumed from Debezium message instead of backfill.
+sleep 10s
+
 system ok
 mysql --protocol=tcp -u root mytest -e "INSERT INTO products VALUES (default,'Milk','Milk is a white liquid food');
        INSERT INTO orders VALUES (default, '2023-11-28 15:08:22', 'Bob', 10.52, 100, false);"
