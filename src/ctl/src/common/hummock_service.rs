@@ -35,7 +35,7 @@ pub struct HummockServiceOpts {
     pub hummock_url: String,
     pub data_dir: Option<String>,
 
-    devide_object_prefix: bool,
+    use_new_object_prefix_strategy: bool,
 
     heartbeat_handle: Option<JoinHandle<()>>,
     heartbeat_shutdown_sender: Option<Sender<()>>,
@@ -81,9 +81,9 @@ impl HummockServiceOpts {
                 bail!(MESSAGE);
             }
         };
-        let devide_object_prefix = match env::var("RW_OBJECT_STORE_DEVIDE_OBJECT_PREFIX") {
-            Ok(devide_object_prefix) => devide_object_prefix == "true",
-            _ => true,
+        let use_new_object_prefix_strategy = match env::var("RW_USE_NEW_OBJECT_PREFIX_STRATEGY") {
+            Ok(use_new_object_prefix_strategy) => use_new_object_prefix_strategy == "true",
+            _ => false,
         };
 
         Ok(Self {
@@ -91,7 +91,7 @@ impl HummockServiceOpts {
             data_dir,
             heartbeat_handle: None,
             heartbeat_shutdown_sender: None,
-            devide_object_prefix,
+            use_new_object_prefix_strategy,
         })
     }
 
@@ -149,7 +149,7 @@ impl HummockServiceOpts {
             metrics.storage_metrics.clone(),
             metrics.compactor_metrics.clone(),
             None,
-            self.devide_object_prefix,
+            self.use_new_object_prefix_strategy,
         )
         .await?;
 
@@ -167,7 +167,7 @@ impl HummockServiceOpts {
 
     pub async fn create_sstable_store(
         &self,
-        devide_object_prefix: bool,
+        use_new_object_prefix_strategy: bool,
     ) -> Result<Arc<SstableStore>> {
         let object_store = build_remote_object_store(
             self.hummock_url.strip_prefix("hummock+").unwrap(),
@@ -196,7 +196,7 @@ impl HummockServiceOpts {
             state_store_metrics: Arc::new(global_hummock_state_store_metrics(
                 MetricLevel::Disabled,
             )),
-            devide_object_prefix,
+            use_new_object_prefix_strategy,
         })))
     }
 }

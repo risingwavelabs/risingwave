@@ -28,11 +28,11 @@ pub(crate) mod opendal_engine {
     /// The number of Azblob bucket prefixes
     pub(crate) const NUM_BUCKET_PREFIXES_AZBLOB: u32 = 256;
 
-    pub(crate) fn get_object_prefix(obj_id: u64, devide_object_prefix: bool) -> String {
+    pub(crate) fn get_object_prefix(obj_id: u64, use_new_object_prefix_strategy: bool) -> String {
         // For OpenDAL object storage, whether objects are divided by prefixes depends on whether it is a new cluster:
-        // If it is a new cluster, objects will be divided into NUM_BUCKET_PREFIXES_AZBLOB prefixes.
+        // If it is a new cluster, objects will be divided into `NUM_BUCKET_PREFIXES_AZBLOB` prefixes.
         // If it is an old cluster, prefixes are not used due to the need to read and write old data.
-        match devide_object_prefix {
+        match use_new_object_prefix_strategy {
             true => {
                 let prefix = crc32fast::hash(&obj_id.to_be_bytes()) % NUM_BUCKET_PREFIXES_AZBLOB;
                 let mut obj_prefix = prefix.to_string();

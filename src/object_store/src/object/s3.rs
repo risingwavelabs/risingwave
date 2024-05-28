@@ -314,7 +314,7 @@ pub struct S3ObjectStore {
 
 #[async_trait::async_trait]
 impl ObjectStore for S3ObjectStore {
-    fn get_object_prefix(&self, obj_id: u64, _devide_object_prefix: bool) -> String {
+    fn get_object_prefix(&self, obj_id: u64, _use_new_object_prefix_strategy: bool) -> String {
         // Delegate to static method to avoid creating an `S3ObjectStore` in unit test.
         // Using aws s3 sdk as object storage, the object prefix will be devised by default.
         prefix::s3::get_object_prefix(obj_id)

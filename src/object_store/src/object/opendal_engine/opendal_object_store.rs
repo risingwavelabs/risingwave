@@ -63,7 +63,7 @@ impl OpendalObjectStore {
 
 #[async_trait::async_trait]
 impl ObjectStore for OpendalObjectStore {
-    fn get_object_prefix(&self, obj_id: u64, devide_object_prefix: bool) -> String {
+    fn get_object_prefix(&self, obj_id: u64, use_new_object_prefix_strategy: bool) -> String {
         match self.engine_type {
             EngineType::S3 => prefix::s3::get_object_prefix(obj_id),
             EngineType::Minio => prefix::s3::get_object_prefix(obj_id),
@@ -75,7 +75,7 @@ impl ObjectStore for OpendalObjectStore {
             | EngineType::Webhdfs
             | EngineType::Azblob
             | EngineType::Fs => {
-                prefix::opendal_engine::get_object_prefix(obj_id, devide_object_prefix)
+                prefix::opendal_engine::get_object_prefix(obj_id, use_new_object_prefix_strategy)
             }
         }
     }
