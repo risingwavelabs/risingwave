@@ -48,7 +48,7 @@ mod tests {
         let string_agg = build_append_only(&AggCall::from_pretty(
             "(string_agg:varchar $0:varchar $1:varchar)",
         ))?;
-        let mut state = string_agg.create_state();
+        let mut state = string_agg.create_state()?;
         string_agg.update(&mut state, &chunk).await?;
         assert_eq!(
             string_agg.get_result(&state).await?,
@@ -69,7 +69,7 @@ mod tests {
         let string_agg = build_append_only(&AggCall::from_pretty(
             "(string_agg:varchar $0:varchar $1:varchar)",
         ))?;
-        let mut state = string_agg.create_state();
+        let mut state = string_agg.create_state()?;
         string_agg.update(&mut state, &chunk).await?;
         assert_eq!(
             string_agg.get_result(&state).await?,

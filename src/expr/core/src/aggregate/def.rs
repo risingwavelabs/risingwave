@@ -24,7 +24,7 @@ use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::util::value_encoding::DatumFromProtoExt;
 use risingwave_pb::expr::agg_call::PbType;
-use risingwave_pb::expr::{PbAggCall, PbInputRef};
+use risingwave_pb::expr::{PbAggCall, PbInputRef, PbUserDefinedFunctionMetadata};
 
 use crate::expr::{
     build_from_prost, BoxedExpression, ExpectExt, Expression, LiteralExpression, Token,
@@ -32,6 +32,10 @@ use crate::expr::{
 use crate::Result;
 
 /// Represents an aggregation function.
+// TODO(runji):
+//  remove this struct from the expression module.
+//  this module only cares about aggregate functions themselves.
+//  advanced features like order by, filter, distinct, etc. should be handled by the upper layer.
 #[derive(Debug, Clone)]
 pub struct AggCall {
     /// Aggregation kind for constructing agg state.
@@ -52,6 +56,9 @@ pub struct AggCall {
 
     /// Constant arguments.
     pub direct_args: Vec<LiteralExpression>,
+
+    /// Additional metadata for user defined functions.
+    pub user_defined: Option<PbUserDefinedFunctionMetadata>,
 }
 
 impl AggCall {
@@ -90,6 +97,7 @@ impl AggCall {
             filter,
             distinct: agg_call.distinct,
             direct_args,
+            user_defined: agg_call.udf.clone(),
         })
     }
 
@@ -148,17 +156,16 @@ impl<Iter: Iterator<Item = Token>> Parser<Iter> {
 
         AggCall {
             kind: AggKind::from_protobuf(func).unwrap(),
-            args: match children.as_slice() {
-                [] => AggArgs::None,
-                [(i, t)] => AggArgs::Unary(t.clone(), *i),
-                [(i0, t0), (i1, t1)] => AggArgs::Binary([t0.clone(), t1.clone()], [*i0, *i1]),
-                _ => panic!("too many arguments for agg call"),
+            args: AggArgs {
+                data_types: children.iter().map(|(_, ty)| ty.clone()).collect(),
+                val_indices: children.iter().map(|(idx, _)| *idx).collect(),
             },
             return_type: ty,
             column_orders,
             filter: None,
             distinct,
             direct_args: Vec::new(),
+            user_defined: None,
         }
     }
 
@@ -236,6 +243,7 @@ pub enum AggKind {
 
     /// Return last seen one of the input values.
     InternalLastSeenValue,
+    UserDefined,
 }
 
 impl AggKind {
@@ -268,6 +276,7 @@ impl AggKind {
             PbType::Mode => Ok(AggKind::Mode),
             PbType::Grouping => Ok(AggKind::Grouping),
             PbType::InternalLastSeenValue => Ok(AggKind::InternalLastSeenValue),
+            PbType::UserDefined => Ok(AggKind::UserDefined),
             PbType::Unspecified => bail!("Unrecognized agg."),
         }
     }
@@ -301,6 +310,7 @@ impl AggKind {
             Self::Mode => PbType::Mode,
             Self::Grouping => PbType::Grouping,
             Self::InternalLastSeenValue => PbType::InternalLastSeenValue,
+            Self::UserDefined => PbType::UserDefined,
         }
     }
 }
@@ -409,6 +419,7 @@ pub mod agg_kinds {
                 | AggKind::BoolOr
                 | AggKind::BitAnd
                 | AggKind::BitOr
+                | AggKind::UserDefined
         };
     }
     pub use simply_cannot_two_phase;
@@ -428,6 +439,7 @@ pub mod agg_kinds {
                 | AggKind::BoolOr
                 | AggKind::ApproxCountDistinct
                 | AggKind::InternalLastSeenValue
+                | AggKind::UserDefined
         };
     }
     pub use single_value_state;
@@ -469,52 +481,40 @@ impl AggKind {
 }
 
 /// An aggregation function may accept 0, 1 or 2 arguments.
-#[derive(Clone, Debug)]
-pub enum AggArgs {
-    /// `None` is used for function calls that accept 0 argument, e.g. `count(*)`.
-    None,
-    /// `Unary` is used for function calls that accept 1 argument, e.g. `sum(x)`.
-    Unary(DataType, usize),
-    /// `Binary` is used for function calls that accept 2 arguments, e.g. `string_agg(x, delim)`.
-    Binary([DataType; 2], [usize; 2]),
+#[derive(Clone, Debug, Default)]
+pub struct AggArgs {
+    data_types: Box<[DataType]>,
+    val_indices: Box<[usize]>,
 }
 
 impl AggArgs {
     pub fn from_protobuf(args: &[PbInputRef]) -> Result<Self> {
-        let args = match args {
-            [] => Self::None,
-            [arg] => Self::Unary(DataType::from(arg.get_type()?), arg.get_index() as usize),
-            [arg1, arg2] => Self::Binary(
-                [
-                    DataType::from(arg1.get_type()?),
-                    DataType::from(arg2.get_type()?),
-                ],
-                [arg1.get_index() as usize, arg2.get_index() as usize],
-            ),
-            _ => bail!("too many arguments for agg call"),
-        };
-        Ok(args)
+        Ok(AggArgs {
+            data_types: args
+                .iter()
+                .map(|arg| DataType::from(arg.get_type().unwrap()))
+                .collect(),
+            val_indices: args.iter().map(|arg| arg.get_index() as usize).collect(),
+        })
     }
-}
 
-impl AggArgs {
     /// return the types of arguments.
     pub fn arg_types(&self) -> &[DataType] {
-        use AggArgs::*;
-        match self {
-            None => &[],
-            Unary(typ, _) => std::slice::from_ref(typ),
-            Binary(typs, _) => typs,
-        }
+        &self.data_types
     }
 
     /// return the indices of the arguments in [`risingwave_common::array::StreamChunk`].
     pub fn val_indices(&self) -> &[usize] {
-        use AggArgs::*;
-        match self {
-            None => &[],
-            Unary(_, val_idx) => std::slice::from_ref(val_idx),
-            Binary(_, val_indices) => val_indices,
+        &self.val_indices
+    }
+}
+
+impl FromIterator<(DataType, usize)> for AggArgs {
+    fn from_iter<T: IntoIterator<Item = (DataType, usize)>>(iter: T) -> Self {
+        let (data_types, val_indices): (Vec<_>, Vec<_>) = iter.into_iter().unzip();
+        AggArgs {
+            data_types: data_types.into(),
+            val_indices: val_indices.into(),
         }
     }
 }

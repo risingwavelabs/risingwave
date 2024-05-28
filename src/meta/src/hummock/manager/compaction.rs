@@ -12,6 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Copyright 2024 RisingWave Labs
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Arc, LazyLock};
 use std::time::{Instant, SystemTime};
@@ -30,7 +44,7 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockLevels
 use risingwave_hummock_sdk::table_stats::{
     add_prost_table_stats_map, purge_prost_table_stats, PbTableStatsMap,
 };
-use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
+use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{
     compact_task_to_string, statistics_compact_task, CompactionGroupId, HummockCompactionTaskId,
     HummockVersionId,
@@ -66,15 +80,17 @@ use crate::hummock::compaction::selector::{
 };
 use crate::hummock::compaction::{CompactStatus, CompactionDeveloperConfig, CompactionSelector};
 use crate::hummock::error::{Error, Result};
+use crate::hummock::manager::transaction::{
+    HummockVersionStatsTransaction, HummockVersionTransaction,
+};
 use crate::hummock::manager::versioning::Versioning;
 use crate::hummock::metrics_utils::{
-    build_compact_task_level_type_metrics_label, trigger_delta_log_stats, trigger_local_table_stat,
-    trigger_sst_stat, trigger_version_stat,
+    build_compact_task_level_type_metrics_label, trigger_local_table_stat, trigger_sst_stat,
 };
 use crate::hummock::sequence::next_compaction_task_id;
 use crate::hummock::{commit_multi_var, start_measure_real_process_timer, HummockManager};
 use crate::manager::{MetadataManager, META_NODE_ID};
-use crate::model::{BTreeMapTransaction, VarTransaction};
+use crate::model::BTreeMapTransaction;
 
 const MAX_SKIP_TIMES: usize = 8;
 const MAX_REPORT_COUNT: usize = 16;
@@ -117,73 +133,60 @@ fn init_selectors() -> HashMap<compact_task::TaskType, Box<dyn CompactionSelecto
     compaction_selectors
 }
 
-fn gen_version_delta(
-    txn: &mut BTreeMapTransaction<'_, HummockVersionId, HummockVersionDelta>,
-    old_version: &HummockVersion,
-    compact_task: &CompactTask,
-    deterministic_mode: bool,
-) -> HummockVersionDelta {
-    let trivial_move = CompactStatus::is_trivial_move_task(compact_task);
+impl<'a> HummockVersionTransaction<'a> {
+    fn apply_compact_task(&mut self, compact_task: &CompactTask) {
+        let mut version_delta = self.new_delta();
+        let trivial_move = CompactStatus::is_trivial_move_task(compact_task);
+        version_delta.trivial_move = trivial_move;
 
-    let mut version_delta = HummockVersionDelta {
-        id: old_version.id + 1,
-        prev_id: old_version.id,
-        max_committed_epoch: old_version.max_committed_epoch,
-        trivial_move,
-        ..Default::default()
-    };
-    let group_deltas = &mut version_delta
-        .group_deltas
-        .entry(compact_task.compaction_group_id)
-        .or_default()
-        .group_deltas;
-    let mut removed_table_ids_map: BTreeMap<u32, Vec<u64>> = BTreeMap::default();
-
-    for level in &compact_task.input_ssts {
-        let level_idx = level.level_idx;
-        let mut removed_table_ids = level
-            .table_infos
-            .iter()
-            .map(|sst| sst.get_sst_id())
-            .collect_vec();
-
-        removed_table_ids_map
-            .entry(level_idx)
+        let group_deltas = &mut version_delta
+            .group_deltas
+            .entry(compact_task.compaction_group_id)
             .or_default()
-            .append(&mut removed_table_ids);
-    }
+            .group_deltas;
+        let mut removed_table_ids_map: BTreeMap<u32, Vec<u64>> = BTreeMap::default();
 
-    for (level_idx, removed_table_ids) in removed_table_ids_map {
+        for level in &compact_task.input_ssts {
+            let level_idx = level.level_idx;
+            let mut removed_table_ids = level
+                .table_infos
+                .iter()
+                .map(|sst| sst.get_sst_id())
+                .collect_vec();
+
+            removed_table_ids_map
+                .entry(level_idx)
+                .or_default()
+                .append(&mut removed_table_ids);
+        }
+
+        for (level_idx, removed_table_ids) in removed_table_ids_map {
+            let group_delta = GroupDelta {
+                delta_type: Some(DeltaType::IntraLevel(IntraLevelDelta {
+                    level_idx,
+                    removed_table_ids,
+                    ..Default::default()
+                })),
+            };
+            group_deltas.push(group_delta);
+        }
+
         let group_delta = GroupDelta {
             delta_type: Some(DeltaType::IntraLevel(IntraLevelDelta {
-                level_idx,
-                removed_table_ids,
+                level_idx: compact_task.target_level,
+                inserted_table_infos: compact_task.sorted_output_ssts.clone(),
+                l0_sub_level_id: compact_task.target_sub_level_id,
+                vnode_partition_count: compact_task.split_weight_by_vnode,
                 ..Default::default()
             })),
         };
         group_deltas.push(group_delta);
+        version_delta.safe_epoch = std::cmp::max(
+            version_delta.latest_version().safe_epoch,
+            compact_task.watermark,
+        );
+        version_delta.pre_apply();
     }
-
-    let group_delta = GroupDelta {
-        delta_type: Some(DeltaType::IntraLevel(IntraLevelDelta {
-            level_idx: compact_task.target_level,
-            inserted_table_infos: compact_task.sorted_output_ssts.clone(),
-            l0_sub_level_id: compact_task.target_sub_level_id,
-            vnode_partition_count: compact_task.split_weight_by_vnode,
-            ..Default::default()
-        })),
-    };
-    group_deltas.push(group_delta);
-    version_delta.safe_epoch = std::cmp::max(old_version.safe_epoch, compact_task.watermark);
-
-    // Don't persist version delta generated by compaction to meta store in deterministic mode.
-    // Because it will override existing version delta that has same ID generated in the data
-    // ingestion phase.
-    if !deterministic_mode {
-        txn.insert(version_delta.id, version_delta.clone());
-    }
-
-    version_delta
 }
 
 #[derive(Default)]
@@ -606,7 +609,7 @@ impl HummockManager {
 }
 
 impl HummockManager {
-    pub(super) async fn get_compact_tasks_impl(
+    pub async fn get_compact_tasks_impl(
         &self,
         compaction_groups: Vec<CompactionGroupId>,
         max_select_count: usize,
@@ -625,13 +628,12 @@ impl HummockManager {
         let mut compaction_guard = self.compaction.write().await;
         let compaction: &mut Compaction = &mut compaction_guard;
         let mut versioning_guard = self.versioning.write().await;
-        let versioning = &mut versioning_guard;
+        let versioning: &mut Versioning = &mut versioning_guard;
 
         let _timer = start_measure_real_process_timer!(self, "get_compact_tasks_impl");
 
-        let mut current_version = versioning.current_version.clone();
         let start_time = Instant::now();
-        let max_committed_epoch = current_version.max_committed_epoch;
+        let max_committed_epoch = versioning.current_version.max_committed_epoch;
         let watermark = self
             .context_info
             .read()
@@ -640,15 +642,22 @@ impl HummockManager {
             .values()
             .map(|v| v.minimal_pinned_snapshot)
             .fold(max_committed_epoch, std::cmp::min);
-        let last_apply_version_id = current_version.id;
 
         let mut compaction_statuses = BTreeMapTransaction::new(&mut compaction.compaction_statuses);
 
         let mut compact_task_assignment =
             BTreeMapTransaction::new(&mut compaction.compact_task_assignment);
 
-        let mut hummock_version_deltas =
-            BTreeMapTransaction::new(&mut versioning.hummock_version_deltas);
+        let mut version = HummockVersionTransaction::new(
+            &mut versioning.current_version,
+            &mut versioning.hummock_version_deltas,
+            self.env.notification_manager(),
+            &self.metrics,
+        );
+
+        if deterministic_mode {
+            version.disable_apply_to_txn();
+        }
 
         let mut unschedule_groups = vec![];
         let mut trivial_tasks = vec![];
@@ -661,7 +670,11 @@ impl HummockManager {
                 break;
             }
 
-            if !current_version.levels.contains_key(&compaction_group_id) {
+            if !version
+                .latest_version()
+                .levels
+                .contains_key(&compaction_group_id)
+            {
                 continue;
             }
 
@@ -696,7 +709,8 @@ impl HummockManager {
                 || matches!(selector.task_type(), TaskType::Emergency);
 
             let mut stats = LocalSelectorStatistic::default();
-            let member_table_ids = current_version
+            let member_table_ids = version
+                .latest_version()
                 .get_compaction_group_levels(compaction_group_id)
                 .member_table_ids
                 .clone();
@@ -709,17 +723,10 @@ impl HummockManager {
                 }
             }
 
-            let table_to_vnode_partition = match self
-                .group_to_table_vnode_partition
-                .read()
-                .get(&compaction_group_id)
-            {
-                Some(table_to_vnode_partition) => table_to_vnode_partition.clone(),
-                None => BTreeMap::default(),
-            };
-
             while let Some(compact_task) = compact_status.get_compact_task(
-                current_version.get_compaction_group_levels(compaction_group_id),
+                version
+                    .latest_version()
+                    .get_compaction_group_levels(compaction_group_id),
                 task_id as HummockCompactionTaskId,
                 &group_config,
                 &mut stats,
@@ -746,7 +753,8 @@ impl HummockManager {
                     target_level: target_level_id,
                     // only gc delete keys in last level because there may be older version in more bottom
                     // level.
-                    gc_delete_keys: current_version
+                    gc_delete_keys: version
+                        .latest_version()
                         .get_compaction_group_levels(compaction_group_id)
                         .is_last_level(target_level_id),
                     base_level: compact_task.base_level as u32,
@@ -806,31 +814,20 @@ impl HummockManager {
                             "SUCCESS",
                         ])
                         .inc();
-                    let version_delta = gen_version_delta(
-                        &mut hummock_version_deltas,
-                        &current_version,
-                        &compact_task,
-                        deterministic_mode,
-                    );
-                    current_version.apply_version_delta(&version_delta);
+
+                    version.apply_compact_task(&compact_task);
                     trivial_tasks.push(compact_task);
                     if trivial_tasks.len() >= self.env.opts.max_trivial_move_task_count_per_loop {
                         break 'outside;
                     }
                 } else {
-                    if group_config.compaction_config.split_weight_by_vnode > 0 {
-                        for table_id in &compact_task.existing_table_ids {
-                            compact_task
-                                .table_vnode_partition
-                                .insert(*table_id, vnode_partition_count);
-                        }
-                    } else {
-                        compact_task.table_vnode_partition = table_to_vnode_partition.clone();
-                    }
-                    compact_task
-                        .table_vnode_partition
-                        .retain(|table_id, _| compact_task.existing_table_ids.contains(table_id));
-                    compact_task.table_watermarks = current_version
+                    self.calculate_vnode_partition(
+                        &mut compact_task,
+                        group_config.compaction_config.as_ref(),
+                    )
+                    .await;
+                    compact_task.table_watermarks = version
+                        .latest_version()
                         .safe_epoch_table_watermarks(&compact_task.existing_table_ids);
 
                     // do not split sst by vnode partition when target_level > base_level
@@ -881,7 +878,6 @@ impl HummockManager {
             {
                 unschedule_groups.push(compaction_group_id);
             }
-
             stats.report_to_metrics(compaction_group_id, self.metrics.as_ref());
         }
 
@@ -890,14 +886,8 @@ impl HummockManager {
                 self.meta_store_ref(),
                 compaction_statuses,
                 compact_task_assignment,
-                hummock_version_deltas
+                version
             )?;
-
-            trigger_version_stat(&self.metrics, &current_version);
-            versioning.current_version = current_version;
-            trigger_delta_log_stats(&self.metrics, versioning.hummock_version_deltas.len());
-            self.notify_stats(&versioning.version_stats);
-            self.notify_version_deltas(versioning, last_apply_version_id);
             self.metrics
                 .compact_task_batch_count
                 .with_label_values(&["batch_trivial_move"])
@@ -1087,7 +1077,7 @@ impl HummockManager {
             .await
     }
 
-    fn is_compact_task_expired(
+    pub(super) fn is_compact_task_expired(
         compact_task: &CompactTask,
         hummock_version: &HummockVersion,
     ) -> bool {
@@ -1148,6 +1138,7 @@ impl HummockManager {
     ///
     /// Return Ok(false) indicates either the task is not found,
     /// or the task is not owned by `context_id` when `context_id` is not None.
+
     pub async fn report_compact_tasks(&self, report_tasks: Vec<ReportTask>) -> Result<Vec<bool>> {
         let mut guard = self.compaction.write().await;
         let deterministic_mode = self.env.opts.compaction_deterministic_test;
@@ -1163,21 +1154,30 @@ impl HummockManager {
         let versioning: &mut Versioning = &mut versioning_guard;
         let _timer = start_measure_real_process_timer!(self, "report_compact_tasks");
 
-        let mut current_version = versioning.current_version.clone();
         // purge stale compact_status
         for group_id in original_keys {
-            if !current_version.levels.contains_key(&group_id) {
+            if !versioning.current_version.levels.contains_key(&group_id) {
                 compact_statuses.remove(group_id);
             }
         }
         let mut tasks = vec![];
 
-        let mut hummock_version_deltas =
-            BTreeMapTransaction::new(&mut versioning.hummock_version_deltas);
+        let mut version = HummockVersionTransaction::new(
+            &mut versioning.current_version,
+            &mut versioning.hummock_version_deltas,
+            self.env.notification_manager(),
+            &self.metrics,
+        );
 
-        let mut version_stats = VarTransaction::new(&mut versioning.version_stats);
+        if deterministic_mode {
+            version.disable_apply_to_txn();
+        }
+
+        let mut version_stats = HummockVersionStatsTransaction::new(
+            &mut versioning.version_stats,
+            self.env.notification_manager(),
+        );
         let mut success_count = 0;
-        let last_version_id = current_version.id;
         for (idx, task) in report_tasks.into_iter().enumerate() {
             rets[idx] = true;
             let mut compact_task = match compact_task_assignment.remove(task.task_id) {
@@ -1216,12 +1216,14 @@ impl HummockManager {
                 .collect();
             let is_success = if let TaskStatus::Success = compact_task.task_status() {
                 // if member_table_ids changes, the data of sstable may stale.
-                let is_expired = Self::is_compact_task_expired(&compact_task, &current_version);
+                let is_expired =
+                    Self::is_compact_task_expired(&compact_task, version.latest_version());
                 if is_expired {
                     compact_task.set_task_status(TaskStatus::InputOutdatedCanceled);
                     false
                 } else {
-                    let group = current_version
+                    let group = version
+                        .latest_version()
                         .levels
                         .get(&compact_task.compaction_group_id)
                         .unwrap();
@@ -1241,16 +1243,9 @@ impl HummockManager {
             };
             if is_success {
                 success_count += 1;
-                let version_delta = gen_version_delta(
-                    &mut hummock_version_deltas,
-                    &current_version,
-                    &compact_task,
-                    deterministic_mode,
-                );
-                // apply version delta before we persist this change. If it causes panic we can
-                // recover to a correct state after restarting meta-node.
-                current_version.apply_version_delta(&version_delta);
-                if purge_prost_table_stats(&mut version_stats.table_stats, &current_version) {
+                version.apply_compact_task(&compact_task);
+                if purge_prost_table_stats(&mut version_stats.table_stats, version.latest_version())
+                {
                     self.metrics.version_stats.reset();
                     versioning.local_metrics.clear();
                 }
@@ -1269,18 +1264,9 @@ impl HummockManager {
                 self.meta_store_ref(),
                 compact_statuses,
                 compact_task_assignment,
-                hummock_version_deltas,
+                version,
                 version_stats
             )?;
-
-            trigger_version_stat(&self.metrics, &current_version);
-            trigger_delta_log_stats(&self.metrics, versioning.hummock_version_deltas.len());
-            self.notify_stats(&versioning.version_stats);
-            versioning.current_version = current_version;
-
-            if !deterministic_mode {
-                self.notify_version_deltas(versioning, last_version_id);
-            }
 
             self.metrics
                 .compact_task_batch_count
@@ -1460,6 +1446,88 @@ impl HummockManager {
                 );
                 false
             }
+        }
+    }
+
+    pub(crate) async fn calculate_vnode_partition(
+        &self,
+        compact_task: &mut CompactTask,
+        compaction_config: &CompactionConfig,
+    ) {
+        if compact_task.target_level > compact_task.base_level {
+            return;
+        }
+        if compaction_config.split_weight_by_vnode > 0 {
+            for table_id in &compact_task.existing_table_ids {
+                compact_task
+                    .table_vnode_partition
+                    .insert(*table_id, compact_task.split_weight_by_vnode);
+            }
+        } else {
+            let mut table_size_info: HashMap<u32, u64> = HashMap::default();
+            let mut existing_table_ids: HashSet<u32> = HashSet::default();
+            for input_ssts in &compact_task.input_ssts {
+                for sst in &input_ssts.table_infos {
+                    existing_table_ids.extend(sst.table_ids.iter());
+                    for table_id in &sst.table_ids {
+                        *table_size_info.entry(*table_id).or_default() +=
+                            sst.file_size / (sst.table_ids.len() as u64);
+                    }
+                }
+            }
+            compact_task
+                .existing_table_ids
+                .retain(|table_id| existing_table_ids.contains(table_id));
+
+            let hybrid_vnode_count = self.env.opts.hybrid_partition_node_count;
+            let default_partition_count = self.env.opts.partition_vnode_count;
+            // We must ensure the partition threshold large enough to avoid too many small files.
+            let compact_task_table_size_partition_threshold_low = self
+                .env
+                .opts
+                .compact_task_table_size_partition_threshold_low;
+            let compact_task_table_size_partition_threshold_high = self
+                .env
+                .opts
+                .compact_task_table_size_partition_threshold_high;
+            use risingwave_common::system_param::reader::SystemParamsRead;
+            let params = self.env.system_params_reader().await;
+            let barrier_interval_ms = params.barrier_interval_ms() as u64;
+            let checkpoint_secs = std::cmp::max(
+                1,
+                params.checkpoint_frequency() * barrier_interval_ms / 1000,
+            );
+            // check latest write throughput
+            let history_table_throughput = self.history_table_throughput.read();
+            for (table_id, compact_table_size) in table_size_info {
+                let write_throughput = history_table_throughput
+                    .get(&table_id)
+                    .map(|que| que.back().cloned().unwrap_or(0))
+                    .unwrap_or(0)
+                    / checkpoint_secs;
+                if compact_table_size > compact_task_table_size_partition_threshold_high
+                    && default_partition_count > 0
+                {
+                    compact_task
+                        .table_vnode_partition
+                        .insert(table_id, default_partition_count);
+                } else if (compact_table_size > compact_task_table_size_partition_threshold_low
+                    || (write_throughput > self.env.opts.table_write_throughput_threshold
+                        && compact_table_size > compaction_config.target_file_size_base))
+                    && hybrid_vnode_count > 0
+                {
+                    // partition for large write throughput table. But we also need to make sure that it can not be too small.
+                    compact_task
+                        .table_vnode_partition
+                        .insert(table_id, hybrid_vnode_count);
+                } else if compact_table_size > compaction_config.target_file_size_base {
+                    // partition for small table
+                    compact_task.table_vnode_partition.insert(table_id, 1);
+                }
+            }
+            compact_task
+                .table_vnode_partition
+                .retain(|table_id, _| compact_task.existing_table_ids.contains(table_id));
         }
     }
 }

@@ -36,7 +36,7 @@ use risingwave_pb::hummock::{
     CompactTaskAssignment, HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot,
     HummockVersionStats, PbCompactionGroupInfo, SubscribeCompactionEventRequest,
 };
-use risingwave_pb::meta::subscribe_response::{Info, Operation};
+use risingwave_pb::meta::subscribe_response::Operation;
 use tokio::sync::mpsc::UnboundedSender;
 use tonic::Streaming;
 
@@ -53,7 +53,6 @@ use crate::rpc::metrics::MetaMetrics;
 mod compaction_group_manager;
 mod context;
 mod gc;
-#[cfg(test)]
 mod tests;
 mod versioning;
 pub use context::HummockVersionSafePoint;
@@ -63,6 +62,7 @@ mod commit_epoch;
 mod compaction;
 pub mod sequence;
 mod timer_task;
+mod transaction;
 mod utils;
 mod worker;
 
@@ -114,19 +114,6 @@ pub struct HummockManager {
     // `compaction_state` will record the types of compact tasks that can be triggered in `hummock`
     // and suggest types with a certain priority.
     pub compaction_state: CompactionState,
-
-    // Record the partition corresponding to the table in each group (accepting delays)
-    // The compactor will refer to this structure to determine how to cut the boundaries of sst.
-    // Currently, we update it in a couple of scenarios
-    // 1. throughput and size are checked periodically and calculated according to the rules
-    // 2. A new group is created (split)
-    // 3. split_weight_by_vnode is modified for an existing group. (not supported yet)
-    // Tips:
-    // 1. When table_id does not exist in the current structure, compactor will not cut the boundary
-    // 2. When partition count <=1, compactor will still use table_id as the cutting boundary of sst
-    // 3. Modify the special configuration item hybrid_vnode_count = 0 to remove the table_id in hybrid cg and no longer perform alignment cutting.
-    group_to_table_vnode_partition:
-        parking_lot::RwLock<HashMap<CompactionGroupId, BTreeMap<StateTableId, u32>>>,
 }
 
 pub type HummockManagerRef = Arc<HummockManager>;
@@ -300,7 +287,6 @@ impl HummockManager {
             history_table_throughput: parking_lot::RwLock::new(HashMap::default()),
             compactor_streams_change_tx,
             compaction_state: CompactionState::new(),
-            group_to_table_vnode_partition: parking_lot::RwLock::new(HashMap::default()),
         };
         let instance = Arc::new(instance);
         instance.start_worker(rx).await;
@@ -553,8 +539,8 @@ impl HummockManager {
     ) -> Result<(HummockVersion, Vec<CompactionGroupId>)> {
         let mut versioning_guard = self.versioning.write().await;
         // ensure the version id is ascending after replay
-        version_delta.id = versioning_guard.current_version.id + 1;
-        version_delta.prev_id = version_delta.id - 1;
+        version_delta.id = versioning_guard.current_version.next_version_id();
+        version_delta.prev_id = versioning_guard.current_version.id;
         versioning_guard
             .current_version
             .apply_version_delta(&version_delta);
@@ -572,45 +558,6 @@ impl HummockManager {
 
     pub fn metadata_manager(&self) -> &MetadataManager {
         &self.metadata_manager
-    }
-
-    fn notify_last_version_delta(&self, versioning: &Versioning) {
-        self.env
-            .notification_manager()
-            .notify_hummock_without_version(
-                Operation::Add,
-                Info::HummockVersionDeltas(risingwave_pb::hummock::HummockVersionDeltas {
-                    version_deltas: vec![versioning
-                        .hummock_version_deltas
-                        .last_key_value()
-                        .unwrap()
-                        .1
-                        .to_protobuf()],
-                }),
-            );
-    }
-
-    fn notify_version_deltas(&self, versioning: &Versioning, last_version_id: u64) {
-        let start_version_id = last_version_id + 1;
-        let version_deltas = versioning
-            .hummock_version_deltas
-            .range(start_version_id..)
-            .map(|(_, delta)| delta.to_protobuf())
-            .collect_vec();
-        self.env
-            .notification_manager()
-            .notify_hummock_without_version(
-                Operation::Add,
-                Info::HummockVersionDeltas(risingwave_pb::hummock::HummockVersionDeltas {
-                    version_deltas,
-                }),
-            );
-    }
-
-    fn notify_stats(&self, stats: &HummockVersionStats) {
-        self.env
-            .notification_manager()
-            .notify_frontend_without_version(Operation::Update, Info::HummockStats(stats.clone()));
     }
 }
 

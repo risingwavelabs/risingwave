@@ -252,6 +252,10 @@ impl<'a, T> VarTransaction<'a, T> {
             orig_value_ref: val_ref,
         }
     }
+
+    pub fn has_new_value(&self) -> bool {
+        self.new_value.is_some()
+    }
 }
 
 impl<'a, T> Deref for VarTransaction<'a, T> {
@@ -452,10 +456,6 @@ impl<'a, K: Ord + Debug, V: Clone> BTreeMapTransaction<'a, K, V> {
     }
 
     pub fn tree_ref(&self) -> &BTreeMap<K, V> {
-        self.tree_ref
-    }
-
-    pub fn tree_mut(&mut self) -> &mut BTreeMap<K, V> {
         self.tree_ref
     }
 

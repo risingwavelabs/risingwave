@@ -41,7 +41,7 @@ create table rw.products_test ( id INT,
  name STRING,
  description STRING,
  PRIMARY KEY (id)
-) from mysql_mytest table 'mytest.products';
+) include timestamp as commit_ts from mysql_mytest table 'mytest.products';
 
 system ok
 mysql --protocol=tcp -u root mytest -e "INSERT INTO products VALUES (default,'Milk','Milk is a white liquid food');
@@ -145,11 +145,24 @@ SELECT * from orders_test_cnt
 4
 
 query ITT
-SELECT * FROM rw.products_test order by id limit 3
+SELECT id,name,description FROM rw.products_test order by id limit 3
 ----
 101 scooter Small 2-wheel scooter
 102 car battery 12V car battery
 103 12-pack drill bits 12-pack of drill bits with sizes ranging from #40 to #3
+
+# commit_ts of historical records should be '1970-01-01 00:00:00+00:00'
+query I
+SELECT count(*) as cnt from rw.products_test where commit_ts = '1970-01-01 00:00:00+00:00'
+----
+9
+
+# commit_ts of new records should greater than '1970-01-01 00:00:00+00:00'
+query TTT
+SELECT name,description FROM rw.products_test where commit_ts > '1970-01-01 00:00:00+00:00' order by id
+----
+Milk Milk is a white liquid food
+Juice 100ml Juice
 
 query ITTT
 SELECT order_id,order_date,customer_name,product_id FROM orders_test order by order_id limit 3
@@ -230,7 +243,7 @@ CREATE TABLE person_new (
     credit_card varchar,
     city varchar,
     PRIMARY KEY (id)
-) FROM pg_source TABLE 'public.person';
+) INCLUDE TIMESTAMP AS commit_ts FROM pg_source TABLE 'public.person';
 
 statement ok
 CREATE MATERIALIZED VIEW person_new_cnt AS SELECT COUNT(*) AS cnt FROM person_new;
@@ -260,11 +273,27 @@ SELECT * from person_new_cnt
 6
 
 query ITTTT
-SELECT * from person_new order by id;
+SELECT id,name,email_address,credit_card,city from person_new order by id;
 ----
 1000 vicky noris yplkvgz@qbxfg.com 7878 5821 1864 2539 cheyenne
 1001 peter white myckhsp@xpmpe.com 1781 2313 8157 6974 boise
 1002 sarah spencer wipvdbm@dkaap.com 3453 4987 9481 6270 los angeles
+1100 noris ypl@qbxfg.com 1864 2539 enne
+1101 white myc@xpmpe.com 8157 6974 se
+1102 spencer wip@dkaap.com 9481 6270 angeles
+
+# historical data
+query ITTTT
+SELECT id,name,email_address,credit_card,city from person_new where commit_ts = '1970-01-01 00:00:00+00:00' order by id;
+----
+1000 vicky noris yplkvgz@qbxfg.com 7878 5821 1864 2539 cheyenne
+1001 peter white myckhsp@xpmpe.com 1781 2313 8157 6974 boise
+1002 sarah spencer wipvdbm@dkaap.com 3453 4987 9481 6270 los angeles
+
+# incremental data
+query ITTTT
+SELECT id,name,email_address,credit_card,city from person_new where commit_ts > '1970-01-01 00:00:00+00:00' order by id;
+----
 1100 noris ypl@qbxfg.com 1864 2539 enne
 1101 white myc@xpmpe.com 8157 6974 se
 1102 spencer wip@dkaap.com 9481 6270 angeles
