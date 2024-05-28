@@ -33,7 +33,7 @@ CREATE MATERIALIZED VIEW mv_no_retry AS SELECT sleep_no_retry(v1) as s1 from t;
 statement ok
 CREATE MATERIALIZED VIEW mv_always_retry AS SELECT sleep_always_retry(v1) as s1 from t;
 
-# Immediately kill the server, sleep for 1minute.
+# Immediately kill the server, sleep
 system ok
 pkill -9 -i python && sleep 60
 
