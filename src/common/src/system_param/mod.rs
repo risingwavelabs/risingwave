@@ -442,6 +442,7 @@ mod tests {
             (MAX_CONCURRENT_CREATING_STREAMING_JOBS_KEY, "1"),
             (PAUSE_ON_NEXT_BOOTSTRAP_KEY, "false"),
             (ENABLE_TRACING_KEY, "true"),
+            (USE_NEW_OBJECT_PREFIX_STRATEGY_KEY, "true"),
             ("a_deprecated_param", "foo"),
         ];
 

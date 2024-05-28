@@ -239,3 +239,4 @@ bloom_false_positive = 0.001
 max_concurrent_creating_streaming_jobs = 1
 pause_on_next_bootstrap = false
 enable_tracing = false
+use_new_object_prefix_strategy = false
