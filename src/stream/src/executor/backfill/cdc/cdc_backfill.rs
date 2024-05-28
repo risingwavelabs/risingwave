@@ -20,12 +20,12 @@ use futures::stream::select_with_strategy;
 use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::bail;
-use risingwave_common::catalog::{ColumnDesc, ColumnId};
+use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::row::RowExt;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector::parser::{
-    DebeziumParser, DebeziumProps, EncodingProperties, JsonProperties, ProtocolProperties,
-    SourceStreamChunkBuilder, SpecificParserConfig,
+    ByteStreamSourceParser, DebeziumParser, DebeziumProps, EncodingProperties, JsonProperties,
+    ProtocolProperties, SourceStreamChunkBuilder, SpecificParserConfig,
 };
 use risingwave_connector::source::cdc::external::CdcOffset;
 use risingwave_connector::source::{SourceColumnDesc, SourceContext};
@@ -56,8 +56,10 @@ pub struct CdcBackfillExecutor<S: StateStore> {
     upstream: Executor,
 
     /// The column indices need to be forwarded to the downstream from the upstream and table scan.
-    /// User may select a subset of columns from the upstream table.
     output_indices: Vec<usize>,
+
+    /// The schema of output chunk, including additional columns if any
+    output_columns: Vec<ColumnDesc>,
 
     /// State table of the `CdcBackfill` executor
     state_impl: CdcBackfillState<S>,
@@ -81,18 +83,19 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         external_table: ExternalStorageTable,
         upstream: Executor,
         output_indices: Vec<usize>,
+        output_columns: Vec<ColumnDesc>,
         progress: Option<CreateMviewProgress>,
         metrics: Arc<StreamingMetrics>,
         state_table: StateTable<S>,
         rate_limit_rps: Option<u32>,
         options: CdcScanOptions,
     ) -> Self {
-        let pk_in_output_indices = external_table.pk_in_output_indices().clone().unwrap();
+        let pk_indices = external_table.pk_indices();
         let upstream_table_id = external_table.table_id().table_id;
         let state_impl = CdcBackfillState::new(
             upstream_table_id,
             state_table,
-            pk_in_output_indices.len() + METADATA_STATE_LEN,
+            pk_indices.len() + METADATA_STATE_LEN,
         );
 
         Self {
@@ -100,6 +103,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             external_table,
             upstream,
             output_indices,
+            output_columns,
             state_impl,
             progress,
             metrics,
@@ -134,14 +138,20 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
-        // The primary key columns, in the output columns of the upstream_table scan.
-        let pk_in_output_indices = self.external_table.pk_in_output_indices().unwrap();
+        // The indices to primary key columns
+        let pk_indices = self.external_table.pk_indices().to_vec();
         let pk_order = self.external_table.pk_order_types().to_vec();
 
         let upstream_table_id = self.external_table.table_id().table_id;
         let upstream_table_name = self.external_table.qualified_table_name();
-        let upstream_table_schema = self.external_table.schema().clone();
         let upstream_table_reader = UpstreamTableReader::new(self.external_table);
+
+        let additional_columns = self
+            .output_columns
+            .iter()
+            .filter(|col| col.additional_column.column_type.is_some())
+            .cloned()
+            .collect_vec();
 
         let mut upstream = self.upstream.execute();
 
@@ -158,7 +168,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         // if not, we should bypass the backfill directly.
         let mut state_impl = self.state_impl;
 
-        let mut upstream = transform_upstream(upstream, &upstream_table_schema)
+        let mut upstream = transform_upstream(upstream, &self.output_columns)
             .boxed()
             .peekable();
 
@@ -259,7 +269,8 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                 let read_args = SnapshotReadArgs::new(
                     current_pk_pos.clone(),
                     self.rate_limit_rps,
-                    pk_in_output_indices.clone(),
+                    pk_indices.clone(),
+                    additional_columns.clone(),
                 );
 
                 let right_snapshot = pin!(upstream_table_reader
@@ -423,8 +434,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                     // Raise the current position.
                                     // As snapshot read streams are ordered by pk, so we can
                                     // just use the last row to update `current_pos`.
-                                    current_pk_pos =
-                                        Some(get_new_pos(&chunk, &pk_in_output_indices));
+                                    current_pk_pos = Some(get_new_pos(&chunk, &pk_indices));
 
                                     tracing::trace!(
                                         "got a snapshot chunk: len {}, current_pk_pos {:?}",
@@ -488,7 +498,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                         }
                         Some(chunk) => {
                             // Raise the current pk position.
-                            current_pk_pos = Some(get_new_pos(&chunk, &pk_in_output_indices));
+                            current_pk_pos = Some(get_new_pos(&chunk, &pk_indices));
 
                             let row_count = chunk.cardinality() as u64;
                             cur_barrier_snapshot_processed_rows += row_count;
@@ -522,7 +532,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                 &offset_parse_func,
                                 chunk,
                                 current_pos,
-                                &pk_in_output_indices,
+                                &pk_indices,
                                 &pk_order,
                                 last_binlog_offset.clone(),
                             )?,
@@ -636,7 +646,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
 }
 
 #[try_stream(ok = Message, error = StreamExecutorError)]
-pub async fn transform_upstream(upstream: BoxedMessageStream, schema: &Schema) {
+pub async fn transform_upstream(upstream: BoxedMessageStream, output_columns: &[ColumnDesc]) {
     let props = SpecificParserConfig {
         key_encoding_config: None,
         encoding_config: EncodingProperties::Json(JsonProperties {
@@ -646,9 +656,16 @@ pub async fn transform_upstream(upstream: BoxedMessageStream, schema: &Schema) {
         // the cdc message is generated internally so the key must exist.
         protocol_config: ProtocolProperties::Debezium(DebeziumProps::default()),
     };
+
+    // convert to source column desc to feed into parser
+    let columns_with_meta = output_columns
+        .iter()
+        .map(SourceColumnDesc::from)
+        .collect_vec();
+
     let mut parser = DebeziumParser::new(
         props,
-        get_rw_columns(schema),
+        columns_with_meta.clone(),
         Arc::new(SourceContext::dummy()),
     )
     .await
@@ -659,7 +676,7 @@ pub async fn transform_upstream(upstream: BoxedMessageStream, schema: &Schema) {
     for msg in upstream {
         let mut msg = msg?;
         if let Message::Chunk(chunk) = &mut msg {
-            let parsed_chunk = parse_debezium_chunk(&mut parser, chunk, schema).await?;
+            let parsed_chunk = parse_debezium_chunk(&mut parser, chunk).await?;
             let _ = std::mem::replace(chunk, parsed_chunk);
         }
         yield msg;
@@ -669,14 +686,13 @@ pub async fn transform_upstream(upstream: BoxedMessageStream, schema: &Schema) {
 async fn parse_debezium_chunk(
     parser: &mut DebeziumParser,
     chunk: &StreamChunk,
-    schema: &Schema,
 ) -> StreamExecutorResult<StreamChunk> {
     // here we transform the input chunk in (payload varchar, _rw_offset varchar, _rw_table_name varchar) schema
     // to chunk with downstream table schema `info.schema` of MergeNode contains the schema of the
     // table job with `_rw_offset` in the end
     // see `gen_create_table_plan_for_cdc_source` for details
-    let column_descs = get_rw_columns(schema);
-    let mut builder = SourceStreamChunkBuilder::with_capacity(column_descs, chunk.capacity());
+    let mut builder =
+        SourceStreamChunkBuilder::with_capacity(parser.columns().to_vec(), chunk.capacity());
 
     // The schema of input chunk (payload varchar, _rw_offset varchar, _rw_table_name varchar, _row_id)
     // We should use the debezium parser to parse the first column,
@@ -715,10 +731,10 @@ async fn parse_debezium_chunk(
         new_rows.push(combined);
     }
 
-    let data_types = schema
-        .fields
+    let data_types = parser
+        .columns()
         .iter()
-        .map(|field| field.data_type.clone())
+        .map(|col| col.data_type.clone())
         .chain(std::iter::once(DataType::Varchar)) // _rw_offset column
         .collect_vec();
 
@@ -726,21 +742,6 @@ async fn parse_debezium_chunk(
         ops,
         DataChunk::from_rows(new_rows.as_slice(), data_types.as_slice()),
     ))
-}
-
-fn get_rw_columns(schema: &Schema) -> Vec<SourceColumnDesc> {
-    schema
-        .fields
-        .iter()
-        .map(|field| {
-            let column_desc = ColumnDesc::named(
-                field.name.clone(),
-                ColumnId::placeholder(),
-                field.data_type.clone(),
-            );
-            SourceColumnDesc::from(&column_desc)
-        })
-        .collect_vec()
 }
 
 impl<S: StateStore> Execute for CdcBackfillExecutor<S> {
@@ -755,7 +756,7 @@ mod tests {
 
     use futures::{pin_mut, StreamExt};
     use risingwave_common::array::{DataChunk, Op, StreamChunk};
-    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
     use risingwave_common::types::{DataType, Datum, JsonbVal};
     use risingwave_common::util::iter_util::ZipEqFast;
 
@@ -798,16 +799,17 @@ mod tests {
         tx.push_chunk(chunk);
         let upstream = Box::new(source).execute();
 
-        // schema of the CDC table
-        let rw_schema = Schema::new(vec![
-            Field::with_name(DataType::Int64, "O_ORDERKEY"), // orderkey
-            Field::with_name(DataType::Int64, "O_CUSTKEY"),  // custkey
-            Field::with_name(DataType::Varchar, "O_ORDERSTATUS"), // orderstatus
-            Field::with_name(DataType::Decimal, "O_TOTALPRICE"), // totalprice
-            Field::with_name(DataType::Date, "O_ORDERDATE"), // orderdate
-        ]);
+        // schema to the debezium parser
+        let columns = vec![
+            ColumnDesc::named("O_ORDERKEY", ColumnId::new(1), DataType::Int64),
+            ColumnDesc::named("O_CUSTKEY", ColumnId::new(2), DataType::Int64),
+            ColumnDesc::named("O_ORDERSTATUS", ColumnId::new(3), DataType::Varchar),
+            ColumnDesc::named("O_TOTALPRICE", ColumnId::new(4), DataType::Decimal),
+            ColumnDesc::named("O_ORDERDATE", ColumnId::new(5), DataType::Date),
+            ColumnDesc::named("commit_ts", ColumnId::new(6), DataType::Timestamptz),
+        ];
 
-        let parsed_stream = transform_upstream(upstream, &rw_schema);
+        let parsed_stream = transform_upstream(upstream, &columns);
         pin_mut!(parsed_stream);
         // the output chunk must contain the offset column
         if let Some(message) = parsed_stream.next().await {

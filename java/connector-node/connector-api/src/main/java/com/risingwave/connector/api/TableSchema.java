@@ -20,12 +20,18 @@ import com.risingwave.proto.Data;
 import com.risingwave.proto.Data.DataType.TypeName;
 import com.risingwave.proto.PlanCommon;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class TableSchema {
+
+    static final Logger LOG = LoggerFactory.getLogger(TableSchema.class);
+
     private final List<String> columnNames;
     private final Map<String, TypeName> columns;
     private final Map<String, Integer> columnIndices;
@@ -80,16 +86,20 @@ public class TableSchema {
     }
 
     public static TableSchema fromProto(ConnectorServiceProto.TableSchema tableSchema) {
-        return new TableSchema(
-                tableSchema.getColumnsList().stream()
-                        .map(PlanCommon.ColumnDesc::getName)
-                        .collect(Collectors.toList()),
-                tableSchema.getColumnsList().stream()
-                        .map(PlanCommon.ColumnDesc::getColumnType)
-                        .collect(Collectors.toList()),
-                tableSchema.getPkIndicesList().stream()
-                        .map(i -> tableSchema.getColumns(i).getName())
-                        .collect(Collectors.toList()));
+        // filter out additional columns
+        var instance =
+                new TableSchema(
+                        tableSchema.getColumnsList().stream()
+                                .map(PlanCommon.ColumnDesc::getName)
+                                .collect(Collectors.toList()),
+                        tableSchema.getColumnsList().stream()
+                                .map(PlanCommon.ColumnDesc::getColumnType)
+                                .collect(Collectors.toList()),
+                        tableSchema.getPkIndicesList().stream()
+                                .map(i -> tableSchema.getColumns(i).getName())
+                                .collect(Collectors.toList()));
+        LOG.info("table column names: {}", Arrays.toString(instance.getColumnNames()));
+        return instance;
     }
 
     public List<String> getPrimaryKeys() {
