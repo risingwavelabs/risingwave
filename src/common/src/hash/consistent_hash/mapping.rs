@@ -361,7 +361,6 @@ impl ActorMapping {
     }
 }
 
-
 impl WorkerSlotMapping {
     /// Create a uniform worker mapping from the given worker ids
     pub fn build_from_ids(worker_slot_ids: &[WorkerSlotId]) -> Self {
