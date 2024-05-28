@@ -21,7 +21,7 @@
     Near "CREATE SOURCE src"
 - input: CREATE SOURCE src-a FORMAT PLAIN ENCODE JSON
   error_msg: |-
-    sql parser error: Expected description of the format, found: - at line:1, column:19
+    sql parser error: Expected description of the format, found: - at line:1, column:18
     Near "CREATE SOURCE src"
 - input: CREATE SOURCE src FORMAT PLAIN ENCODE JSON
   formatted_sql: CREATE SOURCE src FORMAT PLAIN ENCODE JSON
@@ -49,7 +49,7 @@
 - input: CREATE TABLE T (a STRUCT<v1 INT>)
   formatted_sql: CREATE TABLE T (a STRUCT<v1 INT>)
 - input: CREATE TABLE T (FULL INT)
-  error_msg: 'sql parser error: syntax error at or near FULL at line:1, column:21'
+  error_msg: 'sql parser error: syntax error at or near FULL at line:1, column:17'
 - input: CREATE TABLE T ("FULL" INT)
   formatted_sql: CREATE TABLE T ("FULL" INT)
 - input: CREATE TABLE T ("FULL" INT) ON CONFLICT OVERWRITE WITH VERSION COLUMN("FULL")
@@ -61,10 +61,10 @@
     sql parser error: Expected (, found: EOF at the end
     Near " CONFLICT OVERWRITE WITH VERSION COLUMN"
 - input: CREATE TABLE T ("FULL" INT) ON CONFLICT OVERWRITE WITH VERSION COLUMN(FULL
-  error_msg: 'sql parser error: syntax error at or near FULL at line:1, column:75'
+  error_msg: 'sql parser error: syntax error at or near FULL at line:1, column:71'
 - input: CREATE TABLE T ("FULL" INT) ON CONFLICT OVERWRITE WITH VERSION COLUMNFULL)
   error_msg: |-
-    sql parser error: Expected (, found: VERSION at line:1, column:63
+    sql parser error: Expected (, found: VERSION at line:1, column:56
     Near "INT) ON CONFLICT OVERWRITE WITH"
 - input: CREATE TABLE T ("FULL" INT) ON CONFLICT DO UPDATE IF NOT NULL
   formatted_sql: CREATE TABLE T ("FULL" INT) ON CONFLICT DO UPDATE IF NOT NULL
@@ -90,19 +90,19 @@
   formatted_sql: CREATE SINK snk INTO t AS SELECT * FROM t
 - input: CREATE SINK snk FROM mv WITH (connector = 'kafka', properties.bootstrap.server = '127.0.0.1:9092', topic = 'test_topic') format;
   error_msg: |-
-    sql parser error: Expected identifier, found: ; at line:1, column:123
+    sql parser error: Expected identifier, found: ; at line:1, column:128
     Near " topic = 'test_topic') format;"
 - input: create sink sk1 from tt where v1 % 10 = 0 with (connector='blackhole')
   error_msg: |-
-    sql parser error: Expected WITH, found: where at line:1, column:30
+    sql parser error: Expected WITH, found: where at line:1, column:25
     Near "create sink sk1 from tt"
 - input: CREATE SINK snk FROM mv WITH (connector = 'kafka', properties.bootstrap.server = '127.0.0.1:9092', topic = 'test_topic') format debezium;
   error_msg: |-
-    sql parser error: Expected ENCODE, found: ; at line:1, column:132
+    sql parser error: Expected ENCODE, found: ; at line:1, column:137
     Near "topic = 'test_topic') format debezium"
 - input: CREATE SINK snk FROM mv WITH (connector = 'kafka', properties.bootstrap.server = '127.0.0.1:9092', topic = 'test_topic') format debezium encode;
   error_msg: |-
-    sql parser error: Expected identifier, found: ; at line:1, column:139
+    sql parser error: Expected identifier, found: ; at line:1, column:144
     Near " 'test_topic') format debezium encode;"
 - input: create user tmp createdb nocreatedb
   error_msg: 'sql parser error: conflicting or redundant options'
@@ -114,5 +114,5 @@
   error_msg: 'sql parser error: conflicting or redundant options'
 - input: create user tmp with encrypted password null
   error_msg: |-
-    sql parser error: Expected literal string, found: null at line:1, column:45
+    sql parser error: Expected literal string, found: null at line:1, column:41
     Near " tmp with encrypted password null"
