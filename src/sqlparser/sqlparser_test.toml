@@ -4,5 +4,5 @@ private = true
 script = '''
 #!/usr/bin/env bash
 set -e
-UPDATE_EXPECT=1 cargo test --test parser_test
+UPDATE_PARSER_TEST=1 cargo test --test parser_test
 '''
