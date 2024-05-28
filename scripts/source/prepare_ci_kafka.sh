@@ -58,7 +58,7 @@ for filename in $kafka_data_files; do
     elif [[ "$topic" = *avro_json ]]; then
         python3 source/schema_registry_producer.py "message_queue:29092" "http://message_queue:8081" "$filename" "topic" "avro"
     elif [[ "$topic" = *json_schema ]]; then
-        python3 source/schema_registry_producer.py "kafka:9093" "http://schemaregistry:8082" "$filename" "topic" "json"
+        python3 source/schema_registry_producer.py "message_queue:29092" "http://schemaregistry:8082" "$filename" "topic" "json"
     else
         cat "$filename" | kcat -P -K ^  -b message_queue:29092 -t "$topic"
     fi

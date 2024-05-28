@@ -178,6 +178,7 @@ steps:
           run: source-test-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
+          upload-container-logs: always
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 18
     retry: *auto-retry

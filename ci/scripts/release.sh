@@ -20,7 +20,7 @@ dnf install -y lld
 ld.lld --version
 
 echo "--- Install dependencies"
-dnf install -y perl-core wget python3 python3-devel cyrus-sasl-devel rsync
+dnf install -y perl-core wget python3 python3-devel cyrus-sasl-devel rsync openssl-devel
 
 echo "--- Install java and maven"
 dnf install -y java-11-openjdk java-11-openjdk-devel
