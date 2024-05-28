@@ -60,33 +60,30 @@ impl<K, V> UpsertChangeEvent<K, V> {
     }
 }
 
-impl<K, V> Access for UpsertChangeEvent<K, V>
+impl<K, V> UpsertChangeEvent<K, V>
 where
     K: Access,
     V: Access,
 {
-    fn access(&self, path: &[&str], type_expected: Option<&DataType>) -> super::AccessResult {
-        let create_error = |name: String| AccessError::Undefined {
-            name,
-            path: String::new(),
-        };
-        match path.first() {
-            Some(&"key") => {
-                if let Some(ka) = &self.key_accessor {
-                    ka.access(&path[1..], type_expected)
-                } else {
-                    Err(create_error("key".to_string()))
-                }
-            }
-            Some(&"value") => {
-                if let Some(va) = &self.value_accessor {
-                    va.access(&path[1..], type_expected)
-                } else {
-                    Err(create_error("value".to_string()))
-                }
-            }
-            None => Ok(None),
-            Some(other) => Err(create_error(other.to_string())),
+    fn access_key(&self, path: &[&str], type_expected: Option<&DataType>) -> super::AccessResult {
+        if let Some(ka) = &self.key_accessor {
+            ka.access(path, type_expected)
+        } else {
+            Err(AccessError::Undefined {
+                name: "key".to_string(),
+                path: String::new(),
+            })
+        }
+    }
+
+    fn access_value(&self, path: &[&str], type_expected: Option<&DataType>) -> super::AccessResult {
+        if let Some(va) = &self.value_accessor {
+            va.access(path, type_expected)
+        } else {
+            Err(AccessError::Undefined {
+                name: "value".to_string(),
+                path: String::new(),
+            })
         }
     }
 }
@@ -97,7 +94,7 @@ where
     V: Access,
 {
     fn op(&self) -> std::result::Result<ChangeEventOperation, AccessError> {
-        if let Ok(Some(_)) = self.access(&["value"], None) {
+        if let Ok(Some(_)) = self.access_value(&[], None) {
             Ok(ChangeEventOperation::Upsert)
         } else {
             Ok(ChangeEventOperation::Delete)
@@ -110,12 +107,12 @@ where
                 if let Some(key_as_column_name) = &self.key_column_name
                     && &desc.name == key_as_column_name
                 {
-                    self.access(&["key"], Some(&desc.data_type))
+                    self.access_key(&[], Some(&desc.data_type))
                 } else {
-                    self.access(&["key", &desc.name], Some(&desc.data_type))
+                    self.access_key(&[&desc.name], Some(&desc.data_type))
                 }
             }
-            None => self.access(&["value", &desc.name], Some(&desc.data_type)),
+            None => self.access_value(&[&desc.name], Some(&desc.data_type)),
             _ => unreachable!(),
         }
     }
