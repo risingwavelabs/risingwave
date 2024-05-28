@@ -23,7 +23,7 @@ use bytes::Bytes;
 use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, Validation};
 use parking_lot::Mutex;
 use risingwave_common::types::DataType;
-use risingwave_sqlparser::ast::Statement;
+use risingwave_sqlparser::ast::{RedactSqlOptionKeywordsRef, Statement};
 use serde::Deserialize;
 use thiserror_ext::AsReport;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -251,6 +251,7 @@ pub async fn pg_serve(
     addr: &str,
     session_mgr: Arc<impl SessionManager>,
     tls_config: Option<TlsConfig>,
+    redact_sql_option_keywords: Option<RedactSqlOptionKeywordsRef>,
 ) -> io::Result<()> {
     let listener = Listener::bind(addr).await?;
     tracing::info!(addr, "server started");
@@ -281,6 +282,7 @@ pub async fn pg_serve(
                         session_mgr.clone(),
                         tls_config.clone(),
                         Arc::new(peer_addr),
+                        redact_sql_option_keywords.clone(),
                     ));
                 }
 
@@ -299,11 +301,18 @@ pub async fn handle_connection<S, SM>(
     session_mgr: Arc<SM>,
     tls_config: Option<TlsConfig>,
     peer_addr: AddressRef,
+    redact_sql_option_keywords: Option<RedactSqlOptionKeywordsRef>,
 ) where
     S: AsyncWrite + AsyncRead + Unpin,
     SM: SessionManager,
 {
-    let mut pg_proto = PgProtocol::new(stream, session_mgr, tls_config, peer_addr);
+    let mut pg_proto = PgProtocol::new(
+        stream,
+        session_mgr,
+        tls_config,
+        peer_addr,
+        redact_sql_option_keywords,
+    );
     loop {
         let msg = match pg_proto.read_message().await {
             Ok(msg) => msg,
@@ -486,7 +495,7 @@ mod tests {
         let pg_config = pg_config.into();
 
         let session_mgr = Arc::new(MockSessionManager {});
-        tokio::spawn(async move { pg_serve(&bind_addr, session_mgr, None).await });
+        tokio::spawn(async move { pg_serve(&bind_addr, session_mgr, None, None).await });
         // wait for server to start
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
