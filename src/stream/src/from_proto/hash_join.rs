@@ -155,6 +155,11 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
             join_type_proto: node.get_join_type()?,
             join_key_data_types,
             chunk_size: params.env.config().developer.chunk_size,
+            high_join_amplification_threshold: params
+                .env
+                .config()
+                .developer
+                .high_join_amplification_threshold,
         };
 
         let exec = args.dispatch()?;
@@ -183,6 +188,7 @@ struct HashJoinExecutorDispatcherArgs<S: StateStore> {
     join_type_proto: JoinTypeProto,
     join_key_data_types: Vec<DataType>,
     chunk_size: usize,
+    high_join_amplification_threshold: usize,
 }
 
 impl<S: StateStore> HashKeyDispatcher for HashJoinExecutorDispatcherArgs<S> {
@@ -211,6 +217,7 @@ impl<S: StateStore> HashKeyDispatcher for HashJoinExecutorDispatcherArgs<S> {
                     self.is_append_only,
                     self.metrics,
                     self.chunk_size,
+                    self.high_join_amplification_threshold,
                 )
                 .boxed())
             };
