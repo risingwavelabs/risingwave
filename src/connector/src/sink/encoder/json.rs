@@ -438,13 +438,13 @@ fn type_as_json_schema(rw_type: &DataType) -> Map<String, Value> {
 
 #[cfg(test)]
 mod tests {
-
     use risingwave_common::types::{
         Date, Decimal, Interval, Scalar, ScalarImpl, StructRef, StructType, StructValue, Time,
         Timestamp,
     };
 
     use super::*;
+
     #[test]
     fn test_to_json_basic_type() {
         let mock_field = Field {
@@ -517,7 +517,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             serde_json::to_string(&serial_value).unwrap(),
-            i64::MAX.to_string()
+            format!("\"{}\"", i64::MAX)
         );
 
         // https://github.com/debezium/debezium/blob/main/debezium-core/src/main/java/io/debezium/time/ZonedTimestamp.java
