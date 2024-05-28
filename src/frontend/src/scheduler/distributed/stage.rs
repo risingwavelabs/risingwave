@@ -32,7 +32,7 @@ use risingwave_batch::executor::ExecutorBuilder;
 use risingwave_batch::task::{ShutdownMsg, ShutdownSender, ShutdownToken, TaskId as TaskIdBatch};
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
 use risingwave_common::array::DataChunk;
-use risingwave_common::hash::ParallelUnitMapping;
+use risingwave_common::hash::WorkerSlotMapping;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector::source::SplitMetaData;
@@ -172,7 +172,7 @@ impl StageExecution {
         ctx: ExecutionContextRef,
     ) -> Self {
         let tasks = (0..stage.parallelism.unwrap())
-            .map(|task_id| (task_id, TaskStatusHolder::new(task_id)))
+            .map(|task_id| (task_id as u64, TaskStatusHolder::new(task_id as u64)))
             .collect();
 
         Self {
@@ -289,7 +289,7 @@ impl StageExecution {
     ///
     /// When this method is called, all tasks should have been scheduled, and their `worker_node`
     /// should have been set.
-    pub fn all_exchange_sources_for(&self, output_id: u32) -> Vec<ExchangeSource> {
+    pub fn all_exchange_sources_for(&self, output_id: u64) -> Vec<ExchangeSource> {
         self.tasks
             .iter()
             .map(|(task_id, status_holder)| {
@@ -353,12 +353,13 @@ impl StageRunner {
             // We let each task read one partition by setting the `vnode_ranges` of the scan node in
             // the task.
             // We schedule the task to the worker node that owns the data partition.
-            let parallel_unit_ids = vnode_bitmaps.keys().cloned().collect_vec();
+            let worker_slot_ids = vnode_bitmaps.keys().cloned().collect_vec();
             let workers = self
                 .worker_node_manager
                 .manager
-                .get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;
-            for (i, (parallel_unit_id, worker)) in parallel_unit_ids
+                .get_workers_by_worker_slot_ids(&worker_slot_ids)?;
+
+            for (i, (worker_slot_id, worker)) in worker_slot_ids
                 .into_iter()
                 .zip_eq_fast(workers.into_iter())
                 .enumerate()
@@ -366,11 +367,11 @@ impl StageRunner {
                 let task_id = TaskIdPb {
                     query_id: self.stage.query_id.id.clone(),
                     stage_id: self.stage.id,
-                    task_id: i as u32,
+                    task_id: i as u64,
                 };
-                let vnode_ranges = vnode_bitmaps[&parallel_unit_id].clone();
+                let vnode_ranges = vnode_bitmaps[&worker_slot_id].clone();
                 let plan_fragment =
-                    self.create_plan_fragment(i as u32, Some(PartitionInfo::Table(vnode_ranges)));
+                    self.create_plan_fragment(i as u64, Some(PartitionInfo::Table(vnode_ranges)));
                 futures.push(self.schedule_task(
                     task_id,
                     plan_fragment,
@@ -391,10 +392,10 @@ impl StageRunner {
                 let task_id = TaskIdPb {
                     query_id: self.stage.query_id.id.clone(),
                     stage_id: self.stage.id,
-                    task_id: id as u32,
+                    task_id: id as u64,
                 };
                 let plan_fragment = self
-                    .create_plan_fragment(id as u32, Some(PartitionInfo::Source(split.to_vec())));
+                    .create_plan_fragment(id as u64, Some(PartitionInfo::Source(split.to_vec())));
                 let worker =
                     self.choose_worker(&plan_fragment, id as u32, self.stage.dml_table_id)?;
                 futures.push(self.schedule_task(
@@ -409,9 +410,9 @@ impl StageRunner {
                 let task_id = TaskIdPb {
                     query_id: self.stage.query_id.id.clone(),
                     stage_id: self.stage.id,
-                    task_id: id,
+                    task_id: id as u64,
                 };
-                let plan_fragment = self.create_plan_fragment(id, None);
+                let plan_fragment = self.create_plan_fragment(id as u64, None);
                 let worker = self.choose_worker(&plan_fragment, id, self.stage.dml_table_id)?;
                 futures.push(self.schedule_task(
                     task_id,
@@ -682,7 +683,7 @@ impl StageRunner {
     fn get_table_dml_vnode_mapping(
         &self,
         table_id: &TableId,
-    ) -> SchedulerResult<ParallelUnitMapping> {
+    ) -> SchedulerResult<WorkerSlotMapping> {
         let guard = self.catalog_reader.read_guard();
 
         let table = guard
@@ -711,11 +712,11 @@ impl StageRunner {
 
         if let Some(table_id) = dml_table_id {
             let vnode_mapping = self.get_table_dml_vnode_mapping(&table_id)?;
-            let parallel_unit_ids = vnode_mapping.iter_unique().collect_vec();
+            let worker_ids = vnode_mapping.iter_unique().collect_vec();
             let candidates = self
                 .worker_node_manager
                 .manager
-                .get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;
+                .get_workers_by_worker_slot_ids(&worker_ids)?;
             if candidates.is_empty() {
                 return Err(BatchError::EmptyWorkerNodes.into());
             }
@@ -741,17 +742,17 @@ impl StageRunner {
                     .table_id
                     .into(),
             )?;
-            let id2pu_vec = self
+            let id_to_worker_slots = self
                 .worker_node_manager
                 .fragment_mapping(fragment_id)?
                 .iter_unique()
                 .collect_vec();
 
-            let pu = id2pu_vec[task_id as usize];
+            let worker_slot_id = id_to_worker_slots[task_id as usize];
             let candidates = self
                 .worker_node_manager
                 .manager
-                .get_workers_by_parallel_unit_ids(&[pu])?;
+                .get_workers_by_worker_slot_ids(&[worker_slot_id])?;
             if candidates.is_empty() {
                 return Err(BatchError::EmptyWorkerNodes.into());
             }
