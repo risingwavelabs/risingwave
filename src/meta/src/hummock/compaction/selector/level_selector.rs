@@ -164,8 +164,8 @@ impl DynamicLevelSelectorCore {
             return ctx;
         }
 
-        let base_bytes_min = self.config.max_bytes_for_level_base;
-        let base_bytes_max = base_bytes_min * self.config.max_bytes_for_level_multiplier;
+        let base_bytes_max = self.config.max_bytes_for_level_base;
+        let base_bytes_min = base_bytes_max / self.config.max_bytes_for_level_multiplier;
 
         let mut cur_level_size = max_level_size;
         for _ in first_non_empty_level..self.config.max_level as usize {

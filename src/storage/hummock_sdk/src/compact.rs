@@ -14,6 +14,7 @@
 
 use std::collections::HashSet;
 
+use itertools::Itertools;
 use risingwave_pb::hummock::{CompactTask, LevelType, SstableInfo};
 
 pub fn compact_task_output_to_string(compact_task: &CompactTask) -> String {
@@ -99,14 +100,12 @@ pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
         writeln!(s, "Level {:?} {:?} ", level_entry.level_idx, tables).unwrap();
     }
     if !compact_task.table_vnode_partition.is_empty() {
-        writeln!(s, "Table vnode partition info:").unwrap();
-        compact_task
+        let partitions = compact_task
             .table_vnode_partition
             .iter()
             .filter(|t| input_sst_table_ids.contains(t.0))
-            .for_each(|(tid, partition)| {
-                writeln!(s, " [{:?}, {:?}]", tid, partition).unwrap();
-            });
+            .collect_vec();
+        writeln!(s, "Table vnode partition info: {:?}", partitions).unwrap();
     }
 
     if !dropped_table_ids.is_empty() {
