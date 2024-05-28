@@ -87,9 +87,14 @@ impl PostgresExternalTable {
         }
     }
 
-    pub async fn connect(&self) -> ConnectorResult<()> {
-        todo!("connect to postgres");
-        // connect to external db and read the schema
+    pub async fn connect(config: ExternalTableConfig) -> ConnectorResult<Self> {
+        // TODO: connect to external db and read the schema
+        tracing::debug!("connect to postgres");
+
+        Ok(Self {
+            columns: vec![],
+            pk_indices: vec![],
+        })
     }
 
     pub fn column_descs(&self) -> Vec<ColumnDesc> {

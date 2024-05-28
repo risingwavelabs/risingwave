@@ -942,52 +942,15 @@ pub(super) async fn handle_create_table_plan(
             }
 
             (None, Some(cdc_table)) => {
-                if append_only {
-                    return Err(ErrorCode::NotSupported(
-                        "append only modifier on the table created from a CDC source".into(),
-                        "Remove the APPEND ONLY clause".into(),
-                    )
-                    .into());
-                }
+                sanity_check_for_cdc_table(
+                    append_only,
+                    &column_defs,
+                    &wildcard_idx,
+                    &constraints,
+                    &source_watermarks,
+                )?;
 
-                if !source_watermarks.is_empty() {
-                    return Err(ErrorCode::NotSupported(
-                        "watermark defined on the table created from a CDC source".into(),
-                        "Remove the Watermark definitions".into(),
-                    )
-                    .into());
-                }
-                for c in &column_defs {
-                    for op in &c.options {
-                        if let ColumnOption::GeneratedColumns(_) = op.option {
-                            return Err(ErrorCode::NotSupported(
-                                "generated column defined on the table created from a CDC source"
-                                    .into(),
-                                "Remove the generated column in the column list".into(),
-                            )
-                            .into());
-                        }
-                    }
-                }
-                if !wildcard_idx.is_some()
-                    && !constraints.iter().any(|c| {
-                        matches!(
-                            c,
-                            TableConstraint::Unique {
-                                is_primary: true,
-                                ..
-                            }
-                        )
-                    })
-                {
-                    return Err(ErrorCode::NotSupported(
-                        "CDC table without primary key constraint is not supported".to_owned(),
-                        "Please define a primary key".to_owned(),
-                    )
-                    .into());
-                }
-
-                let session = handler_args.session.clone();
+                let session = &handler_args.session;
                 let db_name = session.database();
                 let (schema_name, resolved_table_name) =
                     Binder::resolve_schema_qualified_name(db_name, table_name)?;
@@ -995,7 +958,6 @@ pub(super) async fn handle_create_table_plan(
                     session.get_database_and_schema_id_for_create(schema_name.clone())?;
 
                 // cdc table cannot be append-only
-                let need_auto_schema_map = wildcard_idx.is_some();
                 let (source_schema, source_name) =
                     Binder::resolve_schema_qualified_name(db_name, cdc_table.source_name.clone())?;
 
@@ -1011,45 +973,24 @@ pub(super) async fn handle_create_table_plan(
                     )?;
                     source.clone()
                 };
-
                 let source_with_properties = source.with_properties.clone().into_iter().collect();
-
                 let connect_properties = derive_connect_properties(
                     &source_with_properties,
                     cdc_table.external_table_name.clone(),
                 )?;
 
-                // read cdc table schema from external db or parsing the schema from SQL definitions
-                let (columns, pk_names) = if need_auto_schema_map {
-                    let _connector = connect_properties.get(UPSTREAM_SOURCE_KEY).unwrap();
-                    let _config =
-                        ExternalTableConfig::try_from_hashmap(connect_properties.clone(), false)
-                            .context("failed to extract external table config")?;
-                    // TODO: create external table according to connector
-                    let pg_table = PostgresExternalTable::new();
-                    pg_table.connect().await?;
-                    (
-                        pg_table
-                            .column_descs()
-                            .into_iter()
-                            .map(|column_desc| ColumnCatalog {
-                                column_desc,
-                                is_hidden: false,
-                            })
-                            .collect(),
-                        pg_table.pk_names(),
-                    )
-                } else {
-                    (
-                        bind_sql_columns(&column_defs)?,
-                        bind_sql_pk_names(&column_defs, &constraints)?,
-                    )
-                };
+                let (columns, pk_names) = derive_schema_for_cdc_table(
+                    &column_defs,
+                    &constraints,
+                    connect_properties.clone(),
+                    wildcard_idx.is_some(),
+                )
+                .await?;
 
                 let (plan, table) = gen_create_table_plan_for_cdc_source(
                     handler_args,
                     explain_options,
-                    source.clone(),
+                    source,
                     cdc_table.external_table_name.clone(),
                     columns,
                     pk_names,
@@ -1074,6 +1015,92 @@ pub(super) async fn handle_create_table_plan(
             .into()),
         };
     Ok((plan, source, table, job_type))
+}
+
+fn sanity_check_for_cdc_table(
+    append_only: bool,
+    column_defs: &Vec<ColumnDef>,
+    wildcard_idx: &Option<usize>,
+    constraints: &Vec<TableConstraint>,
+    source_watermarks: &Vec<SourceWatermark>,
+) -> Result<()> {
+    if append_only {
+        return Err(ErrorCode::NotSupported(
+            "append only modifier on the table created from a CDC source".into(),
+            "Remove the APPEND ONLY clause".into(),
+        )
+        .into());
+    }
+
+    if !source_watermarks.is_empty() {
+        return Err(ErrorCode::NotSupported(
+            "watermark defined on the table created from a CDC source".into(),
+            "Remove the Watermark definitions".into(),
+        )
+        .into());
+    }
+    for c in column_defs {
+        for op in &c.options {
+            if let ColumnOption::GeneratedColumns(_) = op.option {
+                return Err(ErrorCode::NotSupported(
+                    "generated column defined on the table created from a CDC source".into(),
+                    "Remove the generated column in the column list".into(),
+                )
+                .into());
+            }
+        }
+    }
+    if !wildcard_idx.is_some()
+        && !constraints.iter().any(|c| {
+            matches!(
+                c,
+                TableConstraint::Unique {
+                    is_primary: true,
+                    ..
+                }
+            )
+        })
+    {
+        return Err(ErrorCode::NotSupported(
+            "CDC table without primary key constraint is not supported".to_owned(),
+            "Please define a primary key".to_owned(),
+        )
+        .into());
+    }
+
+    Ok(())
+}
+
+async fn derive_schema_for_cdc_table(
+    column_defs: &Vec<ColumnDef>,
+    constraints: &Vec<TableConstraint>,
+    connect_properties: HashMap<String, String>,
+    need_auto_schema_map: bool,
+) -> Result<(Vec<ColumnCatalog>, Vec<String>)> {
+    // read cdc table schema from external db or parsing the schema from SQL definitions
+    if need_auto_schema_map {
+        let _connector = connect_properties.get(UPSTREAM_SOURCE_KEY).unwrap();
+        let config = ExternalTableConfig::try_from_hashmap(connect_properties.clone(), false)
+            .context("failed to extract external table config")?;
+        // TODO: create external table according to connector
+        let pg_table = PostgresExternalTable::connect(config).await?;
+        Ok((
+            pg_table
+                .column_descs()
+                .into_iter()
+                .map(|column_desc| ColumnCatalog {
+                    column_desc,
+                    is_hidden: false,
+                })
+                .collect(),
+            pg_table.pk_names(),
+        ))
+    } else {
+        Ok((
+            bind_sql_columns(column_defs)?,
+            bind_sql_pk_names(column_defs, constraints)?,
+        ))
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
