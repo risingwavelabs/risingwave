@@ -654,7 +654,8 @@ impl DdlController {
             bincode::serialize(&SecretEncryption { nonce, ciphertext }).map_err(|e| {
                 MetaError::from(MetaErrorInner::InvalidParameter(format!(
                     "failed to serialize secret {}: {:?}",
-                    secret.name, e
+                    secret.name,
+                    e.as_report()
                 )))
             })?
         };
