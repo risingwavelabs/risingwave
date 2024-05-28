@@ -17,7 +17,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use governor::Quota;
 
-type RateLimiter = governor::RateLimiter<
+pub type RateLimiter = governor::RateLimiter<
     governor::state::NotKeyed,
     governor::state::InMemoryState,
     governor::clock::MonotonicClock,

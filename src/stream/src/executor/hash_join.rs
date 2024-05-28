@@ -13,16 +13,19 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashSet};
-use std::sync::Arc;
+use std::num::NonZeroU32;
+use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
 use await_tree::InstrumentAwait;
 use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
+use governor::Quota;
 use itertools::Itertools;
 use multimap::MultiMap;
 use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::hash::{HashKey, NullBitmap};
+use risingwave_common::log::{LogSuppresser, RateLimiter};
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, DefaultOrd, ToOwnedDatum};
 use risingwave_common::util::epoch::EpochPair;
@@ -842,21 +845,18 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
 
             if let Some(rows) = &matched_rows {
                 join_matched_join_keys.observe(rows.len() as _);
-                if rows.len() > 2000 {
-                    let join_key_data_types = side_update.ht.join_key_data_types();
-                    let key = key.deserialize(join_key_data_types)?;
-                    if rows.len() < 10000 {
-                        tracing::debug!(target: "hash_join_amplification",
-                            matched_rows_len = rows.len(),
-                            update_table_id = side_update.ht.table_id(),
-                            match_table_id = side_match.ht.table_id(),
-                            join_key = ?key,
-                            actor_id = ctx.id,
-                            fragment_id = ctx.fragment_id,
-                            "large rows matched for join key"
-                        );
-                    } else {
-                        tracing::error!(target: "hash_join_amplification",
+                if rows.len() > 2048 {
+                    static LOG_SUPPRESSOR: LazyLock<LogSuppresser> = LazyLock::new(|| {
+                        LogSuppresser::new(RateLimiter::direct(Quota::per_minute(
+                            NonZeroU32::new(1).unwrap(),
+                        )))
+                    });
+
+                    if let Ok(suppressed_count) = LOG_SUPPRESSOR.check() {
+                        let join_key_data_types = side_update.ht.join_key_data_types();
+                        let key = key.deserialize(join_key_data_types)?;
+                        tracing::warn!(target: "hash_join_amplification",
+                            suppressed_count,
                             matched_rows_len = rows.len(),
                             update_table_id = side_update.ht.table_id(),
                             match_table_id = side_match.ht.table_id(),
