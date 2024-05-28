@@ -24,7 +24,7 @@ use risingwave_pb::hummock::WriteLimits;
 use risingwave_pb::meta::meta_snapshot::SnapshotVersion;
 use risingwave_pb::meta::notification_service_server::NotificationService;
 use risingwave_pb::meta::{
-    FragmentParallelUnitMapping, GetSessionParamsResponse, MetaSnapshot, SubscribeRequest,
+    FragmentWorkerSlotMapping, GetSessionParamsResponse, MetaSnapshot, SubscribeRequest,
     SubscribeType,
 };
 use risingwave_pb::user::UserInfo;
@@ -138,9 +138,9 @@ impl NotificationServiceImpl {
         }
     }
 
-    async fn get_parallel_unit_mapping_snapshot(
+    async fn get_worker_slot_mapping_snapshot(
         &self,
-    ) -> MetaResult<(Vec<FragmentParallelUnitMapping>, NotificationVersion)> {
+    ) -> MetaResult<(Vec<FragmentWorkerSlotMapping>, NotificationVersion)> {
         match &self.metadata_manager {
             MetadataManager::V1(mgr) => {
                 let fragment_guard = mgr.fragment_manager.get_fragment_read_guard().await;
@@ -161,11 +161,11 @@ impl NotificationServiceImpl {
         }
     }
 
-    fn get_serving_vnode_mappings(&self) -> Vec<FragmentParallelUnitMapping> {
+    fn get_serving_vnode_mappings(&self) -> Vec<FragmentWorkerSlotMapping> {
         self.serving_vnode_mapping
             .all()
             .iter()
-            .map(|(fragment_id, mapping)| FragmentParallelUnitMapping {
+            .map(|(fragment_id, mapping)| FragmentWorkerSlotMapping {
                 fragment_id: *fragment_id,
                 mapping: Some(mapping.to_protobuf()),
             })
@@ -241,9 +241,11 @@ impl NotificationServiceImpl {
             users,
             catalog_version,
         ) = self.get_catalog_snapshot().await?;
-        let (parallel_unit_mappings, parallel_unit_mapping_version) =
-            self.get_parallel_unit_mapping_snapshot().await?;
-        let serving_parallel_unit_mappings = self.get_serving_vnode_mappings();
+
+        let (streaming_worker_slot_mappings, streaming_worker_slot_mapping_version) =
+            self.get_worker_slot_mapping_snapshot().await?;
+        let serving_worker_slot_mappings = self.get_serving_vnode_mappings();
+
         let (nodes, worker_node_version) = self.get_worker_node_snapshot().await?;
 
         let hummock_snapshot = Some(self.hummock_manager.latest_snapshot());
@@ -270,15 +272,15 @@ impl NotificationServiceImpl {
             functions,
             connections,
             users,
-            parallel_unit_mappings,
             nodes,
             hummock_snapshot,
-            serving_parallel_unit_mappings,
             version: Some(SnapshotVersion {
                 catalog_version,
-                parallel_unit_mapping_version,
                 worker_node_version,
+                streaming_worker_slot_mapping_version,
             }),
+            serving_worker_slot_mappings,
+            streaming_worker_slot_mappings,
             session_params,
             ..Default::default()
         })

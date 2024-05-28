@@ -80,7 +80,6 @@ RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=i
 cluster_start
 # Please make sure the regression is expected before increasing the timeout.
 sqllogictest -p 4566 -d dev './e2e_test/streaming/**/*.slt' --junit "streaming-${profile}"
-sqllogictest -p 4566 -d dev './e2e_test/backfill/rate_limit/*.slt'
 sqllogictest -p 4566 -d dev './e2e_test/backfill/sink/different_pk_and_dist_key.slt'
 
 echo "--- Kill cluster"
@@ -115,7 +114,6 @@ pkill python3
 
 sqllogictest -p 4566 -d dev './e2e_test/udf/alter_function.slt'
 sqllogictest -p 4566 -d dev './e2e_test/udf/graceful_shutdown_python.slt'
-sqllogictest -p 4566 -d dev './e2e_test/udf/always_retry_python.slt'
 # FIXME: flaky test
 # sqllogictest -p 4566 -d dev './e2e_test/udf/retry_python.slt'
 

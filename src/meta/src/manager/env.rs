@@ -247,12 +247,12 @@ pub struct MetaOpts {
 
     /// hybird compaction group config
     ///
-    /// `hybird_partition_vnode_count` determines the granularity of vnodes in the hybrid compaction group for SST alignment.
-    /// When `hybird_partition_vnode_count` > 0, in hybrid compaction group
+    /// `hybrid_partition_vnode_count` determines the granularity of vnodes in the hybrid compaction group for SST alignment.
+    /// When `hybrid_partition_vnode_count` > 0, in hybrid compaction group
     /// - Tables with high write throughput will be split at vnode granularity
     /// - Tables with high size tables will be split by table granularity
-    /// When `hybird_partition_vnode_count` = 0,no longer be special alignment operations for the hybird compaction group
-    pub hybird_partition_vnode_count: u32,
+    /// When `hybrid_partition_vnode_count` = 0,no longer be special alignment operations for the hybird compaction group
+    pub hybrid_partition_node_count: u32,
 
     pub event_log_enabled: bool,
     pub event_log_channel_max_size: u32,
@@ -277,6 +277,9 @@ pub struct MetaOpts {
 
     /// The maximum number of times to probe for `PullTaskEvent`
     pub max_get_task_probe_times: usize,
+
+    pub compact_task_table_size_partition_threshold_low: u64,
+    pub compact_task_table_size_partition_threshold_high: u64,
 }
 
 impl MetaOpts {
@@ -315,6 +318,8 @@ impl MetaOpts {
             periodic_split_compact_group_interval_sec: 60,
             split_group_size_limit: 5 * 1024 * 1024 * 1024,
             min_table_split_size: 2 * 1024 * 1024 * 1024,
+            compact_task_table_size_partition_threshold_low: 128 * 1024 * 1024,
+            compact_task_table_size_partition_threshold_high: 512 * 1024 * 1024,
             table_write_throughput_threshold: 128 * 1024 * 1024,
             min_table_split_write_throughput: 64 * 1024 * 1024,
             do_not_config_object_storage_lifecycle: true,
@@ -323,7 +328,7 @@ impl MetaOpts {
             compaction_task_max_progress_interval_secs: 1,
             compaction_config: None,
             cut_table_size_limit: 1024 * 1024 * 1024,
-            hybird_partition_vnode_count: 4,
+            hybrid_partition_node_count: 4,
             event_log_enabled: false,
             event_log_channel_max_size: 1,
             advertise_addr: "".to_string(),
