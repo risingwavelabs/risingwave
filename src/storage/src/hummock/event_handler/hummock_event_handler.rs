@@ -92,7 +92,7 @@ impl BufferTracker {
         )
     }
 
-    pub fn new(
+    fn new(
         capacity: usize,
         flush_threshold: usize,
         global_upload_task_size: GenericGauge<AtomicU64>,
@@ -134,6 +134,11 @@ impl BufferTracker {
 
     pub fn need_more_flush(&self, curr_batch_flush_size: usize) -> bool {
         curr_batch_flush_size < self.min_batch_flush_size || self.need_flush()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn flush_threshold(&self) -> usize {
+        self.flush_threshold
     }
 }
 

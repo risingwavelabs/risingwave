@@ -813,7 +813,7 @@ impl HummockUploader {
         }
     }
 
-    pub(crate) fn may_flush(&mut self) {
+    pub(crate) fn may_flush(&mut self) -> bool {
         if self.context.buffer_tracker.need_flush() {
             let mut curr_batch_flush_size = 0;
             if self.context.buffer_tracker.need_flush() {
@@ -837,6 +837,9 @@ impl HummockUploader {
                     }
                 }
             }
+            curr_batch_flush_size > 0
+        } else {
+            false
         }
     }
 
@@ -1380,14 +1383,16 @@ mod tests {
         assert_eq!(epoch6, uploader.max_sealed_epoch);
     }
 
-    fn prepare_uploader_order_test() -> (
+    fn prepare_uploader_order_test(
+        config: &StorageOpts,
+        skip_schedule: bool,
+    ) -> (
         BufferTracker,
         HummockUploader,
         impl Fn(HashMap<LocalInstanceId, Vec<ImmId>>) -> (BoxFuture<'static, ()>, oneshot::Sender<()>),
     ) {
-        // flush threshold is 0. Flush anyway
-        let buffer_tracker =
-            BufferTracker::new(usize::MAX, 0, GenericGauge::new("test", "test").unwrap(), 0);
+        let gauge = GenericGauge::new("test", "test").unwrap();
+        let buffer_tracker = BufferTracker::from_storage_opts(config, gauge);
         // (the started task send the imm ids of payload, the started task wait for finish notify)
         #[allow(clippy::type_complexity)]
         let task_notifier_holder: Arc<
@@ -1418,14 +1423,17 @@ mod tests {
             Arc::new({
                 move |_, task_info: UploadTaskInfo| {
                     let task_notifier_holder = task_notifier_holder.clone();
-                    let (start_tx, finish_rx) = task_notifier_holder.lock().pop_back().unwrap();
+                    let task_item = task_notifier_holder.lock().pop_back();
                     let start_epoch = *task_info.epochs.last().unwrap();
                     let end_epoch = *task_info.epochs.first().unwrap();
                     assert!(end_epoch >= start_epoch);
                     spawn(async move {
                         let ssts = gen_sstable_info(start_epoch, end_epoch);
-                        start_tx.send(task_info).unwrap();
-                        finish_rx.await.unwrap();
+                        if !skip_schedule {
+                            let (start_tx, finish_rx) = task_item.unwrap();
+                            start_tx.send(task_info).unwrap();
+                            finish_rx.await.unwrap();
+                        }
                         Ok(UploadTaskOutput {
                             new_value_ssts: ssts,
                             old_value_ssts: vec![],
@@ -1453,7 +1461,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_uploader_finish_in_order() {
-        let (buffer_tracker, mut uploader, new_task_notifier) = prepare_uploader_order_test();
+        let config = StorageOpts {
+            shared_buffer_capacity_mb: 1024 * 1024,
+            shared_buffer_flush_ratio: 0.0,
+            ..Default::default()
+        };
+        let (buffer_tracker, mut uploader, new_task_notifier) =
+            prepare_uploader_order_test(&config, false);
 
         let epoch1 = INITIAL_EPOCH.next_epoch();
         let epoch2 = epoch1.next_epoch();
@@ -1665,5 +1679,43 @@ mod tests {
         // synced: epoch1: sst([imm1_4]), sst([imm1_3]), sst([imm1_2, imm1_1])
         //         epoch2: sst([imm2])
         //         epoch4: sst([imm4, imm3_3]), sst([imm3_2]), sst([imm3_1])
+    }
+
+    #[tokio::test]
+    async fn test_uploader_frequently_flush() {
+        let config = StorageOpts {
+            shared_buffer_capacity_mb: 10,
+            shared_buffer_flush_ratio: 0.8,
+            // This test will fail when we set it to 0
+            shared_buffer_min_batch_flush_size_mb: 1,
+            ..Default::default()
+        };
+        let (buffer_tracker, mut uploader, _new_task_notifier) =
+            prepare_uploader_order_test(&config, true);
+
+        let epoch1 = INITIAL_EPOCH.next_epoch();
+        let epoch2 = epoch1.next_epoch();
+        let flush_threshold = buffer_tracker.flush_threshold();
+        let memory_limiter = buffer_tracker.get_memory_limiter().clone();
+
+        // imm2 contains data in newer epoch, but added first
+        let mut total_memory = 0;
+        while total_memory < flush_threshold {
+            let imm = gen_imm_with_limiter(epoch2, Some(memory_limiter.as_ref())).await;
+            total_memory += imm.size();
+            if total_memory > flush_threshold {
+                break;
+            }
+            uploader.add_imm(imm);
+        }
+        let imm = gen_imm_with_limiter(epoch1, Some(memory_limiter.as_ref())).await;
+        uploader.add_imm(imm);
+        assert!(uploader.may_flush());
+
+        for _ in 0..10 {
+            let imm = gen_imm_with_limiter(epoch1, Some(memory_limiter.as_ref())).await;
+            uploader.add_imm(imm);
+            assert!(!uploader.may_flush());
+        }
     }
 }
