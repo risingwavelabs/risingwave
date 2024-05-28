@@ -211,7 +211,7 @@ fn datum_to_json_object(
         }
         (DataType::Serial, ScalarRefImpl::Serial(v)) => {
             // The serial type needs to be handled as a string to prevent primary key conflicts caused by the precision issues of JSON numbers.
-            json!(v.into_inner().to_string())
+            json!(format!("{:#018x}", v.into_inner()))
         }
         (DataType::Float32, ScalarRefImpl::Float32(v)) => {
             json!(f32::from(v))
@@ -517,7 +517,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             serde_json::to_string(&serial_value).unwrap(),
-            format!("\"{}\"", i64::MAX)
+            format!("\"{:#018x}\"", i64::MAX)
         );
 
         // https://github.com/debezium/debezium/blob/main/debezium-core/src/main/java/io/debezium/time/ZonedTimestamp.java
