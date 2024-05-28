@@ -22,8 +22,9 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use openssl::ssl::{SslConnector, SslMethod, SslVerifyMode};
 use postgres_openssl::MakeTlsConnector;
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId, Schema};
 use risingwave_common::row::{OwnedRow, Row};
+use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
 use serde_derive::{Deserialize, Serialize};
 use thiserror_ext::AsReport;
@@ -70,6 +71,42 @@ impl PostgresOffset {
                 .lsn
                 .context("invalid postgres lsn")?,
         })
+    }
+}
+
+pub struct PostgresExternalTable {
+    columns: Vec<ColumnDesc>,
+    pk_indices: Vec<usize>,
+}
+
+impl PostgresExternalTable {
+    pub fn new() -> Self {
+        Self {
+            columns: vec![],
+            pk_indices: vec![],
+        }
+    }
+
+    pub async fn connect(&self) -> ConnectorResult<()> {
+        todo!("connect to postgres");
+        // connect to external db and read the schema
+    }
+
+    pub fn column_descs(&self) -> Vec<ColumnDesc> {
+        vec![
+            ColumnDesc::named("v1", ColumnId::new(1), DataType::Int32),
+            ColumnDesc::named("v2", ColumnId::new(2), DataType::Varchar),
+            ColumnDesc::named("v3", ColumnId::new(3), DataType::Decimal),
+            ColumnDesc::named("v4", ColumnId::new(4), DataType::Date),
+        ]
+    }
+
+    pub fn pk_names(&self) -> Vec<String> {
+        vec!["v1".to_string(), "v2".to_string()]
+    }
+
+    pub fn pk_indices(&self) -> Vec<usize> {
+        vec![0, 1]
     }
 }
 

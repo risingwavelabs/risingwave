@@ -26,12 +26,15 @@ use risingwave_common::hash::{ParallelUnitMapping, VirtualNode};
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::epoch::Epoch;
+use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::util::stream_graph_visitor::{
     visit_fragment, visit_stream_node, visit_stream_node_cont,
 };
 use risingwave_common::{bail, current_cluster_version};
 use risingwave_connector::dispatch_source_prop;
 use risingwave_connector::error::ConnectorError;
+use risingwave_connector::source::cdc::external::postgres::PostgresExternalTable;
+use risingwave_connector::source::cdc::external::ExternalTableConfig;
 use risingwave_connector::source::cdc::CdcSourceType;
 use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, SourceProperties, SplitEnumerator,
@@ -53,6 +56,7 @@ use risingwave_pb::ddl_service::{
 };
 use risingwave_pb::meta::table_fragments::PbFragment;
 use risingwave_pb::meta::PbTableParallelism;
+use risingwave_pb::plan_common::ColumnCatalog;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
     Dispatcher, DispatcherType, FragmentTypeFlag, MergeNode, PbStreamFragmentGraph,
@@ -770,6 +774,51 @@ impl DdlController {
                     src.id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
                 }
                 fill_table_stream_graph_info(src, table, *job_type, &mut fragment_graph);
+
+                // // TODO: read the table schema from upstream
+                // if matches!(job_type, TableJobType::SharedCdcSource) {
+                //     let mut table_desc = None;
+                //
+                //     for fragment in fragment_graph.fragments.values_mut() {
+                //         visit_fragment(fragment, |node_body| {
+                //             if let NodeBody::StreamCdcScan(cdc_scan_node) = node_body
+                //                 && let Some(external_table_desc) =
+                //                     cdc_scan_node.cdc_table_desc.as_mut()
+                //             {
+                //                 table_desc = Some(external_table_desc.clone());
+                //             }
+                //         });
+                //     }
+                //
+                //     if let Some(table_desc) = table_desc {
+                //         let properties: HashMap<String, String> =
+                //             table_desc.connect_properties.clone().into_iter().collect();
+                //         let _connector = properties.get(UPSTREAM_SOURCE_KEY).unwrap();
+                //         let _config = serde_json::from_value::<ExternalTableConfig>(
+                //             serde_json::to_value(properties).unwrap(),
+                //         )
+                //         .context("failed to extract external table config")?;
+                //
+                //         // connect
+                //         let pg_table = PostgresExternalTable::new();
+                //         pg_table.connect().await?;
+                //         table.columns = pg_table
+                //             .column_descs()
+                //             .into_iter()
+                //             .map(|col| ColumnCatalog {
+                //                 column_desc: Some(col.to_protobuf()),
+                //                 is_hidden: false,
+                //             })
+                //             .collect();
+                //         table.pk = pg_table
+                //             .pk_indices()
+                //             .into_iter()
+                //             .map(|index| {
+                //                 ColumnOrder::new(index, OrderType::ascending()).to_protobuf()
+                //             })
+                //             .collect();
+                //     }
+                // }
             }
             StreamingJob::Source(_) => {
                 // set the inner source id of source node.
