@@ -11,11 +11,12 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
+use core::num::NonZeroU32;
 use std::collections::{BTreeMap, HashSet};
 use std::sync::LazyLock;
 use std::time::Duration;
 
+use governor::{Quota, RateLimiter};
 use itertools::Itertools;
 use multimap::MultiMap;
 use risingwave_common::array::Op;
@@ -828,9 +829,12 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
 
             if let Some(rows) = &matched_rows {
                 join_matched_join_keys.observe(rows.len() as _);
-                if rows.len() >= 10000 {
-                    static LOG_SUPPERSSER: LazyLock<LogSuppresser> =
-                        LazyLock::new(LogSuppresser::default);
+                if rows.len() > 2048 {
+                    static LOG_SUPPERSSER: LazyLock<LogSuppresser> = LazyLock::new(|| {
+                        LogSuppresser::new(RateLimiter::direct(Quota::per_minute(
+                            NonZeroU32::new(1).unwrap(),
+                        )))
+                    });
                     if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
                         let join_key_data_types = side_update.ht.join_key_data_types();
                         let key = key.deserialize(join_key_data_types)?;
