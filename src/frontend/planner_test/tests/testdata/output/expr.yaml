@@ -88,7 +88,7 @@
     create table t (v1 int);
     SELECT 1 in (3, 0.5*2, min(v1)) from t;
   batch_plan: |-
-    BatchProject { exprs: [true:Boolean] }
+    BatchProject { exprs: [(true:Boolean OR (1:Int32 = min(min(t.v1)))) as $expr1] }
     └─BatchSimpleAgg { aggs: [min(min(t.v1))] }
       └─BatchExchange { order: [], dist: Single }
         └─BatchSimpleAgg { aggs: [min(t.v1)] }
@@ -648,7 +648,7 @@
   stream_error: |-
     Not supported: streaming nested-loop join
     HINT: The non-equal join in the query requires a nested-loop join executor, which could be very expensive to run. Consider rewriting the query to use dynamic filter as a substitute if possible.
-    See also: https://github.com/risingwavelabs/rfcs/blob/main/rfcs/0033-dynamic-filter.md
+    See also: https://docs.risingwave.com/docs/current/sql-pattern-dynamic-filters/
 - name: without variadic keyword
   sql: |
     create table t(a varchar, b varchar);

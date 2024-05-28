@@ -14,7 +14,7 @@ ignored = ["workspace-hack"]
 normal = ["workspace-hack"]
 
 [dependencies]
-ahash = "0.8"
+ahash = "0.8.7"
 anyhow = "1"
 arc-swap = "1"
 async-trait = "0.1"
@@ -52,6 +52,8 @@ risingwave_object_store = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
 scopeguard = "1"
+serde = { version = "1", features = ["derive"] }
+serde_bytes = "0.11"
 sled = "0.34.7"
 spin = "0.9"
 sync-point = { path = "../utils/sync-point" }
@@ -78,7 +80,7 @@ zstd = { version = "0.13", default-features = false }
 [target.'cfg(target_os = "linux")'.dependencies]
 procfs = { version = "0.16", default-features = false }
 libc = "0.2"
-nix = { version = "0.28", features = ["fs", "mman"] }
+nix = { version = "0.29", features = ["fs", "mman"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 darwin-libproc = { git = "https://github.com/risingwavelabs/darwin-libproc.git", rev = "a502be24bd0971463f5bcbfe035a248d8ba503b7" }
@@ -89,6 +91,7 @@ mach2 = "0.4"
 workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
+bincode = "1"
 criterion = { workspace = true, features = ["async_futures", "async_tokio"] }
 expect-test = "1"
 moka = { version = "0.12", features = ["future"] }

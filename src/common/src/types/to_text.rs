@@ -47,15 +47,18 @@ pub trait ToText {
     /// - `ScalarRefImpl::Float32` -> `DataType::Float32`
     /// - `ScalarRefImpl::Float64` -> `DataType::Float64`
     /// - `ScalarRefImpl::Decimal` -> `DataType::Decimal`
-    /// - `ScalarRefImpl::Boolean` -> `DataType::Boolean`
+    /// - `ScalarRefImpl::Bool` -> `DataType::Boolean`
     /// - `ScalarRefImpl::Utf8` -> `DataType::Varchar`
     /// - `ScalarRefImpl::Bytea` -> `DataType::Bytea`
     /// - `ScalarRefImpl::Date` -> `DataType::Date`
     /// - `ScalarRefImpl::Time` -> `DataType::Time`
     /// - `ScalarRefImpl::Timestamp` -> `DataType::Timestamp`
+    /// - `ScalarRefImpl::Timestamptz` -> `DataType::Timestamptz`
     /// - `ScalarRefImpl::Interval` -> `DataType::Interval`
+    /// - `ScalarRefImpl::Jsonb` -> `DataType::Jsonb`
     /// - `ScalarRefImpl::List` -> `DataType::List`
     /// - `ScalarRefImpl::Struct` -> `DataType::Struct`
+    /// - `ScalarRefImpl::Serial` -> `DataType::Serial`
     fn to_text(&self) -> String {
         let mut s = String::new();
         self.write(&mut s).unwrap();

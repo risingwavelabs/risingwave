@@ -16,7 +16,7 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use bytes::{BufMut, Bytes};
-use foyer::memory::CacheContext;
+use foyer::CacheContext;
 use futures::TryStreamExt;
 use itertools::Itertools;
 use risingwave_common::buffer::BitmapBuilder;
@@ -37,7 +37,6 @@ use risingwave_storage::hummock::store::version::read_filter_for_version;
 use risingwave_storage::hummock::{CachePolicy, HummockStorage, LocalHummockStorage};
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::*;
-use risingwave_storage::StateStore;
 
 use crate::local_state_store_test_utils::LocalStateStoreTestExt;
 use crate::test_utils::{gen_key_from_str, prepare_hummock_test_env, TestIngestBatch};
@@ -636,12 +635,36 @@ async fn test_state_store_sync() {
             .into_stream(to_owned_item);
         futures::pin_mut!(iter);
 
+        let rev_iter = test_env
+            .storage
+            .rev_iter(
+                (
+                    Unbounded,
+                    Included(gen_key_from_str(VirtualNode::ZERO, "eeee")),
+                ),
+                epoch1,
+                ReadOptions {
+                    table_id: TEST_TABLE_ID,
+                    cache_policy: CachePolicy::Fill(CacheContext::Default),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap()
+            .into_stream(to_owned_item);
+        futures::pin_mut!(rev_iter);
+        let mut rev_results = vec![];
+        while let Some(result) = rev_iter.try_next().await.unwrap() {
+            rev_results.push(result);
+        }
         let kv_map_batch_1 = [
             (gen_key_from_str(VirtualNode::ZERO, "aaaa"), "1111", epoch1),
             (gen_key_from_str(VirtualNode::ZERO, "bbbb"), "2222", epoch1),
         ];
         for (k, v, e) in kv_map_batch_1 {
             let result = iter.try_next().await.unwrap();
+            let rev_result = rev_results.pop();
+            assert_eq!(result, rev_result);
             assert_eq!(
                 result,
                 Some((
@@ -658,6 +681,8 @@ async fn test_state_store_sync() {
 
         for (k, v, e) in kv_map_batch_2 {
             let result = iter.try_next().await.unwrap();
+            let rev_result = rev_results.pop();
+            assert_eq!(result, rev_result);
             assert_eq!(
                 result,
                 Some((
@@ -691,12 +716,37 @@ async fn test_state_store_sync() {
 
         futures::pin_mut!(iter);
 
+        let rev_iter = test_env
+            .storage
+            .rev_iter(
+                (
+                    Unbounded,
+                    Included(gen_key_from_str(VirtualNode::ZERO, "eeee")),
+                ),
+                epoch2,
+                ReadOptions {
+                    table_id: TEST_TABLE_ID,
+                    cache_policy: CachePolicy::Fill(CacheContext::Default),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap()
+            .into_stream(to_owned_item);
+        futures::pin_mut!(rev_iter);
+        let mut rev_results = vec![];
+        while let Some(result) = rev_iter.try_next().await.unwrap() {
+            rev_results.push(result);
+        }
+
         let kv_map_batch_1 = [("aaaa", "1111", epoch1), ("bbbb", "2222", epoch1)];
 
         let kv_map_batch_2 = [("cccc", "3333", epoch1), ("dddd", "4444", epoch1)];
         let kv_map_batch_3 = [("eeee", "6666", epoch2)];
         for (k, v, e) in kv_map_batch_1 {
             let result = iter.try_next().await.unwrap();
+            let rev_result = rev_results.pop();
+            assert_eq!(result, rev_result);
             assert_eq!(
                 result,
                 Some((
@@ -708,6 +758,8 @@ async fn test_state_store_sync() {
 
         for (k, v, e) in kv_map_batch_2 {
             let result = iter.try_next().await.unwrap();
+            let rev_result = rev_results.pop();
+            assert_eq!(result, rev_result);
             assert_eq!(
                 result,
                 Some((

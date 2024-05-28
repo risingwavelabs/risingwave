@@ -15,30 +15,21 @@
 use std::sync::Arc;
 
 use anyhow::Context;
-use arrow_array::RecordBatch;
-use arrow_schema::{Field, Fields, Schema, SchemaRef};
-use arrow_udf_js::{CallMode as JsCallMode, Runtime as JsRuntime};
-#[cfg(feature = "embedded-deno-udf")]
-use arrow_udf_js_deno::{CallMode as DenoCallMode, Runtime as DenoRuntime};
-#[cfg(feature = "embedded-python-udf")]
-use arrow_udf_python::{CallMode as PythonCallMode, Runtime as PythonRuntime};
-use cfg_or_panic::cfg_or_panic;
-use futures_util::stream;
-use risingwave_common::array::{ArrayError, DataChunk, I32Array};
+use arrow_schema::{Fields, Schema, SchemaRef};
+use risingwave_common::array::arrow::{FromArrow, ToArrow, UdfArrowConvert};
+use risingwave_common::array::I32Array;
 use risingwave_common::bail;
-use thiserror_ext::AsReport;
 
 use super::*;
-use crate::expr::expr_udf::UdfImpl;
+use crate::sig::{UdfImpl, UdfKind, UdfOptions};
 
 #[derive(Debug)]
 pub struct UserDefinedTableFunction {
     children: Vec<BoxedExpression>,
-    #[allow(dead_code)]
     arg_schema: SchemaRef,
     return_type: DataType,
-    client: UdfImpl,
-    identifier: String,
+    runtime: Box<dyn UdfImpl>,
+    arrow_convert: UdfArrowConvert,
     #[allow(dead_code)]
     chunk_size: usize,
 }
@@ -49,54 +40,11 @@ impl TableFunction for UserDefinedTableFunction {
         self.return_type.clone()
     }
 
-    #[cfg_or_panic(not(madsim))]
     async fn eval<'a>(&'a self, input: &'a DataChunk) -> BoxStream<'a, Result<DataChunk>> {
         self.eval_inner(input)
     }
 }
 
-#[cfg(not(madsim))]
-impl UdfImpl {
-    #[try_stream(ok = RecordBatch, error = ExprError)]
-    async fn call_table_function<'a>(&'a self, identifier: &'a str, input: RecordBatch) {
-        match self {
-            UdfImpl::External(client) => {
-                #[for_await]
-                for res in client
-                    .call_stream(identifier, stream::once(async { input }))
-                    .await?
-                {
-                    yield res?;
-                }
-            }
-            UdfImpl::JavaScript(runtime) => {
-                for res in runtime.call_table_function(identifier, &input, 1024)? {
-                    yield res?;
-                }
-            }
-            #[cfg(feature = "embedded-python-udf")]
-            UdfImpl::Python(runtime) => {
-                for res in runtime.call_table_function(identifier, &input, 1024)? {
-                    yield res?;
-                }
-            }
-            #[cfg(feature = "embedded-deno-udf")]
-            UdfImpl::Deno(runtime) => {
-                let mut iter = runtime.call_table_function(identifier, input, 1024).await?;
-                while let Some(res) = iter.next().await {
-                    yield res?;
-                }
-            }
-            UdfImpl::Wasm(runtime) => {
-                for res in runtime.call_table_function(identifier, &input)? {
-                    yield res?;
-                }
-            }
-        }
-    }
-}
-
-#[cfg(not(madsim))]
 impl UserDefinedTableFunction {
     #[try_stream(boxed, ok = DataChunk, error = ExprError)]
     async fn eval_inner<'a>(&'a self, input: &'a DataChunk) {
@@ -109,17 +57,16 @@ impl UserDefinedTableFunction {
         let direct_input = DataChunk::new(columns, input.visibility().clone());
 
         // compact the input chunk and record the row mapping
-        let visible_rows = direct_input.visibility().iter_ones().collect_vec();
-        let compacted_input = direct_input.compact_cow();
-        let arrow_input = RecordBatch::try_from(compacted_input.as_ref())?;
+        let visible_rows = direct_input.visibility().iter_ones().collect::<Vec<_>>();
+        // this will drop invisible rows
+        let arrow_input = self
+            .arrow_convert
+            .to_record_batch(self.arg_schema.clone(), &direct_input)?;
 
         // call UDTF
         #[for_await]
-        for res in self
-            .client
-            .call_table_function(&self.identifier, arrow_input)
-        {
-            let output = DataChunk::try_from(&res?)?;
+        for res in self.runtime.call_table_function(&arrow_input).await? {
+            let output = self.arrow_convert.from_record_batch(&res?)?;
             self.check_output(&output)?;
 
             // we send the compacted input to UDF, so we need to map the row indices back to the
@@ -173,126 +120,46 @@ impl UserDefinedTableFunction {
     }
 }
 
-#[cfg_or_panic(not(madsim))]
 pub fn new_user_defined(prost: &PbTableFunction, chunk_size: usize) -> Result<BoxedTableFunction> {
-    let Some(udtf) = &prost.udtf else {
-        bail!("expect UDTF");
-    };
+    let udf = prost.get_udf()?;
 
-    let arg_schema = Arc::new(Schema::new(
-        udtf.arg_types
-            .iter()
-            .map::<Result<_>, _>(|t| {
-                Ok(Field::new(
-                    "",
-                    DataType::from(t).try_into().map_err(|e: ArrayError| {
-                        risingwave_udf::Error::unsupported(e.to_report_string())
-                    })?,
-                    true,
-                ))
-            })
-            .try_collect::<_, Fields, _>()?,
-    ));
-
-    let identifier = udtf.get_identifier()?;
+    let identifier = udf.get_identifier()?;
     let return_type = DataType::from(prost.get_return_type()?);
 
-    #[cfg(not(feature = "embedded-deno-udf"))]
-    let runtime = "quickjs";
+    let language = udf.language.as_str();
+    let runtime = udf.runtime.as_deref();
+    let link = udf.link.as_deref();
 
-    #[cfg(feature = "embedded-deno-udf")]
-    let runtime = match udtf.runtime.as_deref() {
-        Some("deno") => "deno",
-        _ => "quickjs",
+    let build_fn = crate::sig::find_udf_impl(language, runtime, link)?.build_fn;
+    let runtime = build_fn(UdfOptions {
+        kind: UdfKind::Table,
+        body: udf.body.as_deref(),
+        compressed_binary: udf.compressed_binary.as_deref(),
+        link: udf.link.as_deref(),
+        identifier,
+        arg_names: &udf.arg_names,
+        return_type: &return_type,
+        always_retry_on_network_error: false,
+        function_type: udf.function_type.as_deref(),
+    })
+    .context("failed to build UDF runtime")?;
+
+    let arrow_convert = UdfArrowConvert {
+        legacy: runtime.is_legacy(),
     };
-
-    let client = match udtf.language.as_str() {
-        "wasm" | "rust" => {
-            let compressed_wasm_binary = udtf.get_compressed_binary()?;
-            let wasm_binary = zstd::stream::decode_all(compressed_wasm_binary.as_slice())
-                .context("failed to decompress wasm binary")?;
-            let runtime = crate::expr::expr_udf::get_or_create_wasm_runtime(&wasm_binary)?;
-            UdfImpl::Wasm(runtime)
-        }
-        "javascript" if runtime != "deno" => {
-            let mut rt = JsRuntime::new()?;
-            let body = format!(
-                "export function* {}({}) {{ {} }}",
-                identifier,
-                udtf.arg_names.join(","),
-                udtf.get_body()?
-            );
-            rt.add_function(
-                identifier,
-                arrow_schema::DataType::try_from(&return_type)?,
-                JsCallMode::CalledOnNullInput,
-                &body,
-            )?;
-            UdfImpl::JavaScript(rt)
-        }
-        #[cfg(feature = "embedded-deno-udf")]
-        "javascript" if runtime == "deno" => {
-            let rt = DenoRuntime::new();
-            let body = match udtf.get_body() {
-                Ok(body) => body.clone(),
-                Err(_) => match udtf.get_compressed_binary() {
-                    Ok(compressed_binary) => {
-                        let binary = zstd::stream::decode_all(compressed_binary.as_slice())
-                            .context("failed to decompress binary")?;
-                        String::from_utf8(binary).context("failed to decode binary")?
-                    }
-                    Err(_) => {
-                        bail!("UDF body or compressed binary is required for deno UDF");
-                    }
-                },
-            };
-
-            let body = format!(
-                "export {} {}({}) {{ {} }}",
-                match udtf.function_type.as_deref() {
-                    Some("async") => "async function",
-                    Some("async_generator") => "async function*",
-                    Some("sync") => "function",
-                    _ => "function*",
-                },
-                identifier,
-                udtf.arg_names.join(","),
-                body
-            );
-
-            futures::executor::block_on(rt.add_function(
-                identifier,
-                arrow_schema::DataType::try_from(&return_type)?,
-                DenoCallMode::CalledOnNullInput,
-                &body,
-            ))?;
-            UdfImpl::Deno(rt)
-        }
-        #[cfg(feature = "embedded-python-udf")]
-        "python" if udtf.body.is_some() => {
-            let mut rt = PythonRuntime::builder().sandboxed(true).build()?;
-            let body = udtf.get_body()?;
-            rt.add_function(
-                identifier,
-                arrow_schema::DataType::try_from(&return_type)?,
-                PythonCallMode::CalledOnNullInput,
-                body,
-            )?;
-            UdfImpl::Python(rt)
-        }
-        // connect to UDF service
-        _ => {
-            let link = udtf.get_link()?;
-            UdfImpl::External(crate::expr::expr_udf::get_or_create_flight_client(link)?)
-        }
-    };
+    let arg_schema = Arc::new(Schema::new(
+        udf.arg_types
+            .iter()
+            .map(|t| arrow_convert.to_arrow_field("", &DataType::from(t)))
+            .try_collect::<Fields>()?,
+    ));
 
     Ok(UserDefinedTableFunction {
         children: prost.args.iter().map(expr_build_from_prost).try_collect()?,
         return_type,
         arg_schema,
-        client,
-        identifier: identifier.clone(),
+        runtime,
+        arrow_convert,
         chunk_size,
     }
     .boxed())

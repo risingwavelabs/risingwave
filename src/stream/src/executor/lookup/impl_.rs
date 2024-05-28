@@ -328,7 +328,6 @@ impl<S: StateStore> LookupExecutor<S> {
         }
 
         // Use the new stream barrier epoch as new cache epoch
-        self.lookup_cache.update_epoch(barrier.epoch.curr);
         self.last_barrier = Some(barrier.clone());
     }
 

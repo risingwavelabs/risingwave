@@ -27,7 +27,6 @@
 #![feature(iterator_try_collect)]
 #![feature(exclusive_range_pattern)]
 #![feature(lazy_cell)]
-#![feature(round_ties_even)]
 #![feature(coroutines)]
 #![feature(test)]
 #![feature(iter_array_chunks)]
@@ -37,6 +36,7 @@
 mod aggregate;
 mod scalar;
 mod table_function;
+mod udf;
 
 /// Enable functions in this crate.
 #[macro_export]

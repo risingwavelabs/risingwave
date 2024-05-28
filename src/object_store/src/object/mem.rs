@@ -28,8 +28,7 @@ use thiserror::Error;
 use tokio::sync::Mutex;
 
 use super::{
-    BoxedStreamingUploader, ObjectError, ObjectMetadata, ObjectRangeBounds, ObjectResult,
-    ObjectStore, StreamingUploader,
+    ObjectError, ObjectMetadata, ObjectRangeBounds, ObjectResult, ObjectStore, StreamingUploader,
 };
 use crate::object::{ObjectDataStream, ObjectMetadataIter};
 
@@ -64,7 +63,6 @@ pub struct InMemStreamingUploader {
     objects: Arc<Mutex<HashMap<String, (ObjectMetadata, Bytes)>>>,
 }
 
-#[async_trait::async_trait]
 impl StreamingUploader for InMemStreamingUploader {
     async fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()> {
         fail_point!("mem_write_bytes_err", |_| Err(ObjectError::internal(
@@ -74,7 +72,7 @@ impl StreamingUploader for InMemStreamingUploader {
         Ok(())
     }
 
-    async fn finish(self: Box<Self>) -> ObjectResult<()> {
+    async fn finish(self) -> ObjectResult<()> {
         fail_point!("mem_finish_streaming_upload_err", |_| Err(
             ObjectError::internal("mem finish streaming upload error")
         ));
@@ -101,6 +99,8 @@ pub struct InMemObjectStore {
 
 #[async_trait::async_trait]
 impl ObjectStore for InMemObjectStore {
+    type StreamingUploader = InMemStreamingUploader;
+
     fn get_object_prefix(&self, _obj_id: u64) -> String {
         String::default()
     }
@@ -121,12 +121,12 @@ impl ObjectStore for InMemObjectStore {
         }
     }
 
-    async fn streaming_upload(&self, path: &str) -> ObjectResult<BoxedStreamingUploader> {
-        Ok(Box::new(InMemStreamingUploader {
+    async fn streaming_upload(&self, path: &str) -> ObjectResult<Self::StreamingUploader> {
+        Ok(InMemStreamingUploader {
             path: path.to_string(),
             buf: BytesMut::new(),
             objects: self.objects.clone(),
-        }))
+        })
     }
 
     async fn read(&self, path: &str, range: impl ObjectRangeBounds) -> ObjectResult<Bytes> {
@@ -307,7 +307,6 @@ impl Stream for InMemObjectIter {
 
 #[cfg(test)]
 mod tests {
-    use bytes::Bytes;
     use futures::TryStreamExt;
     use itertools::enumerate;
 

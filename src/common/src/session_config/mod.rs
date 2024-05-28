@@ -152,7 +152,11 @@ pub struct SessionConfig {
     #[parameter(default = true, rename = "rw_streaming_enable_bushy_join")]
     streaming_enable_bushy_join: bool,
 
-    /// Enable arrangement backfill for streaming queries. Defaults to false.
+    /// Enable arrangement backfill for streaming queries. Defaults to true.
+    /// When set to true, the parallelism of the upstream fragment will be
+    /// decoupled from the parallelism of the downstream scan fragment.
+    /// Or more generally, the parallelism of the upstream table / index / mv
+    /// will be decoupled from the parallelism of the downstream table / index / mv / sink.
     #[parameter(default = true)]
     streaming_use_arrangement_backfill: bool,
 
@@ -235,6 +239,10 @@ pub struct SessionConfig {
     /// Unused in RisingWave, support for compatibility.
     #[parameter(default = 0)]
     lock_timeout: i32,
+
+    /// For limiting the startup time of a shareable CDC streaming source when the source is being created. Unit: seconds.
+    #[parameter(default = 30)]
+    cdc_source_wait_streaming_start_timeout: i32,
 
     /// see <https://www.postgresql.org/docs/current/runtime-config-client.html#GUC-ROW-SECURITY>.
     /// Unused in RisingWave, support for compatibility.

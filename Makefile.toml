@@ -4,12 +4,11 @@ extend = [
   { path = "src/risedevtool/minio.toml" },
   { path = "src/risedevtool/etcd.toml" },
   { path = "src/risedevtool/tempo.toml" },
-  { path = "src/risedevtool/kafka.toml" },
   { path = "src/risedevtool/gcloud-pubsub.toml" },
   { path = "src/risedevtool/redis.toml" },
   { path = "src/risedevtool/connector.toml" },
   { path = "src/risedevtool/risedev-components.toml" },
-  { path = "src/sqlparser/test_runner/sqlparser_test.toml" },
+  { path = "src/sqlparser/sqlparser_test.toml" },
   { path = "src/frontend/planner_test/planner_test.toml" },
   { path = "src/tests/compaction_test/Makefile.toml" },
   { path = "src/storage/backup/integration_tests/Makefile.toml" },
@@ -35,15 +34,18 @@ is_release = get_env ENABLE_RELEASE_PROFILE
 is_not_release = not ${is_release}
 is_dynamic_linking = get_env ENABLE_DYNAMIC_LINKING
 is_hummock_trace = get_env ENABLE_HUMMOCK_TRACE
+is_external_udf_enabled = get_env ENABLE_EXTERNAL_UDF
+is_wasm_udf_enabled = get_env ENABLE_WASM_UDF
+is_js_udf_enabled = get_env ENABLE_JS_UDF
 is_deno_udf_enabled = get_env ENABLE_DENO_UDF
 is_python_udf_enabled = get_env ENABLE_PYTHON_UDF
 
 if ${is_sanitizer_enabled}
-  set_env RISEDEV_CARGO_BUILD_EXTRA_ARGS "-Zbuild-std --target ${CARGO_MAKE_RUST_TARGET_TRIPLE}"
+  set_env RISEDEV_CARGO_BUILD_EXTRA_ARGS "--timings -Zbuild-std --target ${CARGO_MAKE_RUST_TARGET_TRIPLE}"
   set_env RISEDEV_BUILD_TARGET_DIR "${CARGO_MAKE_RUST_TARGET_TRIPLE}/"
   set_env RISEDEV_RUSTFLAGS "-Ctarget-cpu=native --cfg tokio_unstable -Zsanitizer=thread"
 else
-  set_env RISEDEV_CARGO_BUILD_EXTRA_ARGS ""
+  set_env RISEDEV_CARGO_BUILD_EXTRA_ARGS "--timings"
   set_env RISEDEV_BUILD_TARGET_DIR ""
 end
 
@@ -59,14 +61,29 @@ else
   set_env RISINGWAVE_FEATURE_FLAGS "--features rw-static-link"
 end
 
+if ${is_external_udf_enabled}
+  flags = get_env RISINGWAVE_FEATURE_FLAGS
+  set_env RISINGWAVE_FEATURE_FLAGS "${flags} --features external-udf"
+end
+
+if ${is_wasm_udf_enabled}
+  flags = get_env RISINGWAVE_FEATURE_FLAGS
+  set_env RISINGWAVE_FEATURE_FLAGS "${flags} --features wasm-udf"
+end
+
+if ${is_js_udf_enabled}
+  flags = get_env RISINGWAVE_FEATURE_FLAGS
+  set_env RISINGWAVE_FEATURE_FLAGS "${flags} --features js-udf"
+end
+
 if ${is_deno_udf_enabled}
   flags = get_env RISINGWAVE_FEATURE_FLAGS
-  set_env RISINGWAVE_FEATURE_FLAGS "${flags} --features embedded-deno-udf"
+  set_env RISINGWAVE_FEATURE_FLAGS "${flags} --features deno-udf"
 end
 
 if ${is_python_udf_enabled}
   flags = get_env RISINGWAVE_FEATURE_FLAGS
-  set_env RISINGWAVE_FEATURE_FLAGS "${flags} --features embedded-python-udf"
+  set_env RISINGWAVE_FEATURE_FLAGS "${flags} --features python-udf"
 end
 
 if ${is_hummock_trace}
@@ -480,7 +497,6 @@ dependencies = [
   "download-etcd",
   "download-grafana",
   "download-tempo",
-  "download-kafka",
   "download-mcli",
   "download-minio",
   "download-prometheus",
@@ -538,7 +554,6 @@ dependencies = [
   "download-grafana",
   "download-prometheus",
   "download-tempo",
-  "download-kafka",
   "download-redis",
 ]
 
@@ -689,54 +704,21 @@ script = '''
 
 set -euo pipefail
 
-wait_kafka_exit() {
-  # Follow kafka-server-stop.sh
-  while [[ -n "$(ps ax | grep ' kafka\.Kafka ' | grep java | grep -v grep | awk '{print $1}')" ]]; do
-    echo "Waiting for kafka to exit"
-    sleep 1
-  done
-}
-
-wait_zookeeper_exit() {
-  # Follow zookeeper-server-stop.sh
-  while [[ -n "$(ps ax | grep java | grep -i QuorumPeerMain | grep -v grep | awk '{print $1}')" ]]; do
-    echo "Waiting for zookeeper to exit"
-    sleep 1
-  done
-}
-
-kill_kafka() {
-  ${PREFIX_BIN}/kafka/bin/kafka-server-stop.sh
-  wait_kafka_exit
-}
-
-kill_zookeeper() {
-  ${PREFIX_BIN}/kafka/bin/zookeeper-server-stop.sh
-  wait_zookeeper_exit
-}
-
 if ! ${TMUX} ls &>/dev/null ; then
   echo "No risedev cluster to kill. Exiting..."
   exit 0
 fi
 
-# Kill other components
+# Kill other components with Ctrl+C/Ctrl+D
 ${TMUX} list-windows -F "#{window_name} #{pane_id}" \
-| grep -v 'kafka' \
-| grep -v 'zookeeper' \
 | awk '{ print $2 }' \
 | xargs -I {} ${TMUX} send-keys -t {} C-c C-d
 
-if [[ -n $(${TMUX} list-windows | grep kafka) ]];
-then
-  echo "kill kafka"
-  kill_kafka || true
-
-  echo "kill zookeeper"
-  kill_zookeeper || true
-
-  # Kill their ${TMUX} sessions
-  ${TMUX} list-windows -t risedev -F "#{pane_id}" | xargs -I {} ${TMUX} send-keys -t {} C-c C-d
+# Stop docker components
+containers=$(docker ps -a -q -f name=risedev- 2>/dev/null) || true
+if [[ -n ${containers} ]]; then
+  echo "Stopping docker components..."
+  docker stop ${containers}
 fi
 
 ${TMUX} kill-server

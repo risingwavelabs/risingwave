@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
-use std::default::Default;
 use std::sync::Arc;
 
 use futures::future::try_join_all;
@@ -21,6 +20,8 @@ use itertools::Itertools;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::ActorMapping;
+use risingwave_common::types::Timestamptz;
+use risingwave_common::util::epoch::Epoch;
 use risingwave_connector::source::SplitImpl;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::catalog::CreateType;
@@ -32,12 +33,13 @@ use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::throttle_mutation::RateLimit;
 use risingwave_pb::stream_plan::update_mutation::*;
 use risingwave_pb::stream_plan::{
-    AddMutation, BarrierMutation, CombinedMutation, Dispatcher, Dispatchers, PauseMutation,
-    ResumeMutation, SourceChangeSplitMutation, StopMutation, StreamActor, ThrottleMutation,
-    UpdateMutation,
+    AddMutation, BarrierMutation, CombinedMutation, CreateSubscriptionMutation, Dispatcher,
+    Dispatchers, DropSubscriptionMutation, PauseMutation, ResumeMutation,
+    SourceChangeSplitMutation, StopMutation, StreamActor, ThrottleMutation, UpdateMutation,
 };
 use risingwave_pb::stream_service::WaitEpochCommitRequest;
 use thiserror_ext::AsReport;
+use tracing::warn;
 
 use super::info::{ActorDesc, CommandActorChanges, InflightActorInfo};
 use super::trace::TracedEpoch;
@@ -93,7 +95,7 @@ pub struct ReplaceTablePlan {
     /// We need to reassign splits for it.
     ///
     /// Note that there's no `SourceBackfillExecutor` involved for table with connector, so we don't need to worry about
-    /// backfill_splits.
+    /// `backfill_splits`.
     pub init_split_assignment: SplitAssignment,
 }
 
@@ -209,6 +211,22 @@ pub enum Command {
     /// `Throttle` command generates a `Throttle` barrier with the given throttle config to change
     /// the `rate_limit` of `FlowControl` Executor after `StreamScan` or Source.
     Throttle(ThrottleConfig),
+
+    /// `CreateSubscription` command generates a `CreateSubscriptionMutation` to notify
+    /// materialize executor to start storing old value for subscription.
+    CreateSubscription {
+        subscription_id: u32,
+        upstream_mv_table_id: TableId,
+        retention_second: u64,
+    },
+
+    /// `DropSubscription` command generates a `DropSubscriptionMutation` to notify
+    /// materialize executor to stop storing old value when there is no
+    /// subscription depending on it.
+    DropSubscription {
+        subscription_id: u32,
+        upstream_mv_table_id: TableId,
+    },
 }
 
 impl Command {
@@ -293,6 +311,8 @@ impl Command {
             Command::ReplaceTable(plan) => Some(plan.actor_changes()),
             Command::SourceSplitAssignment(_) => None,
             Command::Throttle(_) => None,
+            Command::CreateSubscription { .. } => None,
+            Command::DropSubscription { .. } => None,
         }
     }
 
@@ -368,7 +388,7 @@ pub struct CommandContext {
     /// Differs from [`TracedEpoch`], this span focuses on the lifetime of the corresponding
     /// barrier, including the process of waiting for the barrier to be sent, flowing through the
     /// stream graph on compute nodes, and finishing its `post_collect` stuffs.
-    pub span: tracing::Span,
+    pub _span: tracing::Span,
 }
 
 impl CommandContext {
@@ -391,7 +411,7 @@ impl CommandContext {
             command,
             kind,
             barrier_manager_context,
-            span,
+            _span: span,
         }
     }
 
@@ -671,6 +691,22 @@ impl CommandContext {
                     tracing::debug!("update mutation: {mutation:?}");
                     Some(mutation)
                 }
+
+                Command::CreateSubscription {
+                    upstream_mv_table_id,
+                    subscription_id,
+                    ..
+                } => Some(Mutation::CreateSubscription(CreateSubscriptionMutation {
+                    upstream_mv_table_id: upstream_mv_table_id.table_id,
+                    subscription_id: *subscription_id,
+                })),
+                Command::DropSubscription {
+                    upstream_mv_table_id,
+                    subscription_id,
+                } => Some(Mutation::DropSubscription(DropSubscriptionMutation {
+                    upstream_mv_table_id: upstream_mv_table_id.table_id,
+                    subscription_id: *subscription_id,
+                })),
             };
 
         mutation
@@ -1079,8 +1115,34 @@ impl CommandContext {
                     )
                     .await;
             }
+
+            Command::CreateSubscription {
+                subscription_id, ..
+            } => match &self.barrier_manager_context.metadata_manager {
+                MetadataManager::V1(mgr) => {
+                    mgr.catalog_manager
+                        .finish_create_subscription_procedure(*subscription_id)
+                        .await?;
+                }
+                MetadataManager::V2(mgr) => {
+                    mgr.catalog_controller
+                        .finish_create_subscription_catalog(*subscription_id)
+                        .await?;
+                }
+            },
+            Command::DropSubscription { .. } => {}
         }
 
         Ok(())
+    }
+
+    pub fn get_truncate_epoch(&self, retention_second: u64) -> Epoch {
+        let Some(truncate_timestamptz) = Timestamptz::from_secs(
+            self.prev_epoch.value().as_timestamptz().timestamp() - retention_second as i64,
+        ) else {
+            warn!(retention_second, prev_epoch = ?self.prev_epoch.value(), "invalid retention second value");
+            return self.prev_epoch.value();
+        };
+        Epoch::from_unix_millis(truncate_timestamptz.timestamp_millis() as u64)
     }
 }

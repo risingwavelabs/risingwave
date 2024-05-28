@@ -19,8 +19,7 @@ use risingwave_common::catalog::FieldDisplay;
 use risingwave_pb::stream_plan::StreamScanType;
 
 use super::*;
-use crate::optimizer::property::{Order, RequiredDist};
-use crate::utils::ColIndexMapping;
+use crate::optimizer::property::RequiredDist;
 use crate::{for_batch_plan_nodes, for_logical_plan_nodes, for_stream_plan_nodes};
 
 /// `ToStream` converts a logical plan node to streaming physical node

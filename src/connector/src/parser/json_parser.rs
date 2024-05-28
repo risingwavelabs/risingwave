@@ -174,7 +174,8 @@ pub async fn schema_to_columns(
     let context = Context::default();
     let avro_schema = convert_avro(&json_schema, context).to_string();
     let schema = Schema::parse_str(&avro_schema).context("failed to parse avro schema")?;
-    avro_schema_to_column_descs(&schema)
+    // TODO: do we need to support map type here?
+    avro_schema_to_column_descs(&schema, None)
 }
 
 impl ByteStreamSourceParser for JsonParser {

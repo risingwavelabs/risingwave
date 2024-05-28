@@ -12,22 +12,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use risingwave_common::types::DataType;
 use risingwave_expr::aggregate::AggKind;
 
 use super::{infer_type, Expr, ExprImpl, Literal, OrderBy};
+use crate::catalog::function_catalog::{FunctionCatalog, FunctionKind};
 use crate::error::Result;
 use crate::utils::Condition;
 
 #[derive(Clone, Eq, PartialEq, Hash)]
 pub struct AggCall {
-    agg_kind: AggKind,
-    return_type: DataType,
-    args: Vec<ExprImpl>,
-    distinct: bool,
-    order_by: OrderBy,
-    filter: Condition,
-    direct_args: Vec<Literal>,
+    pub agg_kind: AggKind,
+    pub return_type: DataType,
+    pub args: Vec<ExprImpl>,
+    pub distinct: bool,
+    pub order_by: OrderBy,
+    pub filter: Condition,
+    pub direct_args: Vec<Literal>,
+    /// Catalog of user defined aggregate function.
+    pub user_defined: Option<Arc<FunctionCatalog>>,
 }
 
 impl std::fmt::Debug for AggCall {
@@ -69,6 +74,7 @@ impl AggCall {
             order_by,
             filter,
             direct_args,
+            user_defined: None,
         })
     }
 
@@ -86,27 +92,32 @@ impl AggCall {
             order_by: OrderBy::any(),
             filter: Condition::true_cond(),
             direct_args: vec![],
+            user_defined: None,
         })
     }
 
-    pub fn decompose(
-        self,
-    ) -> (
-        AggKind,
-        Vec<ExprImpl>,
-        bool,
-        OrderBy,
-        Condition,
-        Vec<Literal>,
-    ) {
-        (
-            self.agg_kind,
-            self.args,
-            self.distinct,
-            self.order_by,
-            self.filter,
-            self.direct_args,
-        )
+    /// Create a user-defined `AggCall`.
+    pub fn new_user_defined(
+        args: Vec<ExprImpl>,
+        distinct: bool,
+        order_by: OrderBy,
+        filter: Condition,
+        direct_args: Vec<Literal>,
+        user_defined: Arc<FunctionCatalog>,
+    ) -> Result<Self> {
+        let FunctionKind::Aggregate = &user_defined.kind else {
+            panic!("not an aggregate function");
+        };
+        Ok(AggCall {
+            agg_kind: AggKind::UserDefined,
+            return_type: user_defined.return_type.clone(),
+            args,
+            distinct,
+            order_by,
+            filter,
+            direct_args,
+            user_defined: Some(user_defined),
+        })
     }
 
     pub fn agg_kind(&self) -> AggKind {

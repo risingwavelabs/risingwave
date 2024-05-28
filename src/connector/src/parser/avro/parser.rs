@@ -27,7 +27,7 @@ use crate::error::ConnectorResult;
 use crate::parser::unified::avro::{AvroAccess, AvroParseOptions};
 use crate::parser::unified::AccessImpl;
 use crate::parser::util::bytes_from_url;
-use crate::parser::{AccessBuilder, EncodingProperties, EncodingType};
+use crate::parser::{AccessBuilder, AvroProperties, EncodingProperties, EncodingType, MapHandling};
 use crate::schema::schema_registry::{
     extract_schema_id, get_subject_by_strategy, handle_sr_list, Client,
 };
@@ -101,35 +101,46 @@ pub struct AvroParserConfig {
     pub schema: Arc<Schema>,
     pub key_schema: Option<Arc<Schema>>,
     pub schema_resolver: Option<Arc<ConfluentSchemaResolver>>,
+
+    pub map_handling: Option<MapHandling>,
 }
 
 impl AvroParserConfig {
     pub async fn new(encoding_properties: EncodingProperties) -> ConnectorResult<Self> {
-        let avro_config = try_match_expand!(encoding_properties, EncodingProperties::Avro)?;
-        let schema_location = &avro_config.row_schema_location;
-        let enable_upsert = avro_config.enable_upsert;
+        let AvroProperties {
+            use_schema_registry,
+            row_schema_location: schema_location,
+            client_config,
+            aws_auth_props,
+            topic,
+            enable_upsert,
+            record_name,
+            key_record_name,
+            name_strategy,
+            map_handling,
+        } = try_match_expand!(encoding_properties, EncodingProperties::Avro)?;
         let url = handle_sr_list(schema_location.as_str())?;
-        if avro_config.use_schema_registry {
-            let client = Client::new(url, &avro_config.client_config)?;
+        if use_schema_registry {
+            let client = Client::new(url, &client_config)?;
             let resolver = ConfluentSchemaResolver::new(client);
 
             let subject_key = if enable_upsert {
                 Some(get_subject_by_strategy(
-                    &avro_config.name_strategy,
-                    avro_config.topic.as_str(),
-                    avro_config.key_record_name.as_deref(),
+                    &name_strategy,
+                    topic.as_str(),
+                    key_record_name.as_deref(),
                     true,
                 )?)
             } else {
-                if let Some(name) = &avro_config.key_record_name {
+                if let Some(name) = &key_record_name {
                     bail!("key.message = {name} not used");
                 }
                 None
             };
             let subject_value = get_subject_by_strategy(
-                &avro_config.name_strategy,
-                avro_config.topic.as_str(),
-                avro_config.record_name.as_deref(),
+                &name_strategy,
+                topic.as_str(),
+                record_name.as_deref(),
                 false,
             )?;
             tracing::debug!("infer key subject {subject_key:?}, value subject {subject_value}");
@@ -142,33 +153,27 @@ impl AvroParserConfig {
                     None
                 },
                 schema_resolver: Some(Arc::new(resolver)),
+                map_handling,
             })
         } else {
             if enable_upsert {
                 bail!("avro upsert without schema registry is not supported");
             }
             let url = url.first().unwrap();
-            let schema_content = bytes_from_url(url, avro_config.aws_auth_props.as_ref()).await?;
+            let schema_content = bytes_from_url(url, aws_auth_props.as_ref()).await?;
             let schema = Schema::parse_reader(&mut schema_content.as_slice())
                 .context("failed to parse avro schema")?;
             Ok(Self {
                 schema: Arc::new(schema),
                 key_schema: None,
                 schema_resolver: None,
+                map_handling,
             })
         }
     }
 
-    pub fn extract_pks(&self) -> ConnectorResult<Vec<ColumnDesc>> {
-        avro_schema_to_column_descs(
-            self.key_schema
-                .as_deref()
-                .ok_or_else(|| anyhow::format_err!("key schema is required"))?,
-        )
-    }
-
     pub fn map_to_columns(&self) -> ConnectorResult<Vec<ColumnDesc>> {
-        avro_schema_to_column_descs(self.schema.as_ref())
+        avro_schema_to_column_descs(self.schema.as_ref(), self.map_handling)
     }
 }
 
@@ -182,8 +187,8 @@ mod test {
     use std::path::PathBuf;
 
     use apache_avro::schema::RecordSchema;
-    use apache_avro::types::{Record, Value};
-    use apache_avro::{Codec, Days, Duration, Millis, Months, Reader, Schema, Writer};
+    use apache_avro::types::Record;
+    use apache_avro::{Codec, Days, Duration, Millis, Months, Writer};
     use itertools::Itertools;
     use risingwave_common::array::Op;
     use risingwave_common::catalog::ColumnId;
@@ -195,12 +200,9 @@ mod test {
 
     use super::*;
     use crate::connector_common::AwsAuthProps;
-    use crate::error::ConnectorResult;
     use crate::parser::plain_parser::PlainParser;
     use crate::parser::unified::avro::unix_epoch_days;
-    use crate::parser::{
-        AccessBuilderImpl, EncodingType, SourceStreamChunkBuilder, SpecificParserConfig,
-    };
+    use crate::parser::{AccessBuilderImpl, SourceStreamChunkBuilder, SpecificParserConfig};
     use crate::source::{SourceColumnDesc, SourceContext};
 
     fn test_data_path(file_name: &str) -> String {

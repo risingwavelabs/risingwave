@@ -147,6 +147,7 @@ enum EncodeType {
   ENCODE_TYPE_BYTES = 6;
   ENCODE_TYPE_TEMPLATE = 7;
   ENCODE_TYPE_NONE = 8;
+  ENCODE_TYPE_TEXT = 9;
 }
 
 enum RowFormatType {

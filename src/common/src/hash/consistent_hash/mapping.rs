@@ -12,15 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
-use std::fmt::Debug;
+use std::collections::{BTreeSet, HashMap};
+use std::fmt::{Debug, Display, Formatter};
 use std::hash::Hash;
 use std::ops::Index;
 
 use educe::Educe;
 use itertools::Itertools;
 use risingwave_pb::common::{
-    ParallelUnit, ParallelUnitMapping as ParallelUnitMappingProto, PbWorkerMapping,
+    ParallelUnit, ParallelUnitMapping as ParallelUnitMappingProto, PbWorkerSlotMapping,
 };
 use risingwave_pb::stream_plan::ActorMapping as ActorMappingProto;
 
@@ -32,7 +32,41 @@ use crate::util::iter_util::ZipEqDebug;
 
 // TODO: find a better place for this.
 pub type ActorId = u32;
-pub type WorkerId = u32;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
+pub struct WorkerSlotId(u64);
+
+impl WorkerSlotId {
+    pub fn worker_id(&self) -> u32 {
+        (self.0 >> 32) as u32
+    }
+
+    pub fn slot_idx(&self) -> u32 {
+        self.0 as u32
+    }
+
+    pub fn new(worker_id: u32, slot_idx: usize) -> Self {
+        Self((worker_id as u64) << 32 | slot_idx as u64)
+    }
+}
+
+impl From<WorkerSlotId> for u64 {
+    fn from(id: WorkerSlotId) -> Self {
+        id.0
+    }
+}
+
+impl From<u64> for WorkerSlotId {
+    fn from(id: u64) -> Self {
+        Self(id)
+    }
+}
+
+impl Display for WorkerSlotId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!("[{}:{}]", self.worker_id(), self.slot_idx()))
+    }
+}
 
 /// Trait for items that can be used as keys in [`VnodeMapping`].
 pub trait VnodeMappingItem {
@@ -258,10 +292,10 @@ pub mod marker {
         type Item = ParallelUnitId;
     }
 
-    /// A marker type for items of [`WorkerId`].
-    pub struct Worker;
-    impl VnodeMappingItem for Worker {
-        type Item = WorkerId;
+    /// A marker type for items of [`WorkerSlotId`].
+    pub struct WorkerSlot;
+    impl VnodeMappingItem for WorkerSlot {
+        type Item = WorkerSlotId;
     }
 }
 
@@ -275,10 +309,10 @@ pub type ParallelUnitMapping = VnodeMapping<marker::ParallelUnit>;
 /// An expanded mapping from [`VirtualNode`] to [`ParallelUnitId`].
 pub type ExpandedParallelUnitMapping = ExpandedMapping<marker::ParallelUnit>;
 
-/// A mapping from [`VirtualNode`] to [`WorkerId`].
-pub type WorkerMapping = VnodeMapping<marker::Worker>;
-/// An expanded mapping from [`VirtualNode`] to [`WorkerId`].
-pub type ExpandedWorkerMapping = ExpandedMapping<marker::Worker>;
+/// A mapping from [`VirtualNode`] to [`WorkerSlotId`].
+pub type WorkerSlotMapping = VnodeMapping<marker::WorkerSlot>;
+/// An expanded mapping from [`VirtualNode`] to [`WorkerSlotId`].
+pub type ExpandedWorkerSlotMapping = ExpandedMapping<marker::WorkerSlot>;
 
 impl ActorMapping {
     /// Transform this actor mapping to a parallel unit mapping, essentially `transform`.
@@ -307,26 +341,26 @@ impl ActorMapping {
     }
 }
 
-impl WorkerMapping {
+impl WorkerSlotMapping {
     /// Create a uniform worker mapping from the given worker ids
-    pub fn build_from_ids(worker_ids: &[WorkerId]) -> Self {
-        Self::new_uniform(worker_ids.iter().cloned())
+    pub fn build_from_ids(worker_slot_ids: &[WorkerSlotId]) -> Self {
+        Self::new_uniform(worker_slot_ids.iter().cloned())
     }
 
     /// Create a worker mapping from the protobuf representation.
-    pub fn from_protobuf(proto: &PbWorkerMapping) -> Self {
+    pub fn from_protobuf(proto: &PbWorkerSlotMapping) -> Self {
         assert_eq!(proto.original_indices.len(), proto.data.len());
         Self {
             original_indices: proto.original_indices.clone(),
-            data: proto.data.clone(),
+            data: proto.data.iter().map(|&id| WorkerSlotId(id)).collect(),
         }
     }
 
     /// Convert this worker mapping to the protobuf representation.
-    pub fn to_protobuf(&self) -> PbWorkerMapping {
-        PbWorkerMapping {
+    pub fn to_protobuf(&self) -> PbWorkerSlotMapping {
+        PbWorkerSlotMapping {
             original_indices: self.original_indices.clone(),
-            data: self.data.clone(),
+            data: self.data.iter().map(|id| id.0).collect(),
         }
     }
 }
@@ -349,8 +383,25 @@ impl ParallelUnitMapping {
     }
 
     /// Transform this parallel unit mapping to an worker mapping, essentially `transform`.
-    pub fn to_worker(&self, to_map: &HashMap<ParallelUnitId, WorkerId>) -> WorkerMapping {
-        self.transform(to_map)
+    pub fn to_worker_slot(&self, to_map: &HashMap<ParallelUnitId, u32>) -> WorkerSlotMapping {
+        let mut worker_to_parallel_units = HashMap::<_, BTreeSet<_>>::new();
+        for (parallel_unit_id, worker_id) in to_map {
+            worker_to_parallel_units
+                .entry(*worker_id)
+                .or_default()
+                .insert(*parallel_unit_id);
+        }
+
+        let mut parallel_unit_to_worker_slot = HashMap::with_capacity(to_map.len());
+
+        for (worker_id, parallel_unit_ids) in worker_to_parallel_units {
+            for (index, &parallel_unit_id) in parallel_unit_ids.iter().enumerate() {
+                parallel_unit_to_worker_slot
+                    .insert(parallel_unit_id, WorkerSlotId::new(worker_id, index));
+            }
+        }
+
+        self.transform(&parallel_unit_to_worker_slot)
     }
 
     /// Create a parallel unit mapping from the protobuf representation.
@@ -378,7 +429,6 @@ mod tests {
     use rand::Rng;
 
     use super::*;
-    use crate::util::iter_util::ZipEqDebug;
 
     struct Test;
     impl VnodeMappingItem for Test {

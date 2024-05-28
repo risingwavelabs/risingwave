@@ -85,11 +85,31 @@ pub fn generate_risedev_env(services: &Vec<ServiceConfig>) -> String {
                 // These envs are used by `mysql` cli.
                 writeln!(env, r#"MYSQL_HOST="{host}""#,).unwrap();
                 writeln!(env, r#"MYSQL_TCP_PORT="{port}""#,).unwrap();
-                writeln!(env, r#"MYSQL_USER="{user}""#,).unwrap();
+                // Note: There's no env var for the username read by `mysql` cli. Here we set
+                // `RISEDEV_MYSQL_USER`, which will be read by `e2e_test/commands/mysql` when
+                // running `risedev slt`, as a wrapper of `mysql` cli.
+                writeln!(env, r#"RISEDEV_MYSQL_USER="{user}""#,).unwrap();
                 writeln!(env, r#"MYSQL_PWD="{password}""#,).unwrap();
                 // Note: user and password are not included in the common WITH options.
                 // It's expected to create another dedicated user for the source.
                 writeln!(env, r#"RISEDEV_MYSQL_WITH_OPTIONS_COMMON="connector='mysql-cdc',hostname='{host}',port='{port}'""#,).unwrap();
+            }
+            ServiceConfig::Pubsub(c) => {
+                let address = &c.address;
+                let port = &c.port;
+                writeln!(env, r#"PUBSUB_EMULATOR_HOST="{address}:{port}""#,).unwrap();
+                writeln!(env, r#"RISEDEV_PUBSUB_WITH_OPTIONS_COMMON="connector='google_pubsub',pubsub.emulator_host='{address}:{port}'""#,).unwrap();
+            }
+            ServiceConfig::Postgres(c) => {
+                let host = &c.address;
+                let port = &c.port;
+                let user = &c.user;
+                let password = &c.password;
+                // These envs are used by `postgres` cli.
+                writeln!(env, r#"PGHOST="{host}""#,).unwrap();
+                writeln!(env, r#"PGPORT="{port}""#,).unwrap();
+                writeln!(env, r#"PGUSER="{user}""#,).unwrap();
+                writeln!(env, r#"PGPASSWORD="{password}""#,).unwrap();
             }
             _ => {}
         }

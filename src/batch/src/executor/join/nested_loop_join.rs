@@ -98,7 +98,9 @@ impl NestedLoopJoinExecutor {
             for chunk in self.left_child.execute() {
                 let c = chunk?;
                 trace!("Estimated chunk size is {:?}", c.estimated_heap_size());
-                self.mem_context.add(c.estimated_heap_size() as i64);
+                if !self.mem_context.add(c.estimated_heap_size() as i64) {
+                    Err(BatchError::OutOfMemory(self.mem_context.mem_limit()))?;
+                }
                 ret.push(c);
             }
             ret

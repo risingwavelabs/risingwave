@@ -100,7 +100,6 @@ message DropSinkResponse {
 
 message CreateSubscriptionRequest {
   catalog.Subscription subscription = 1;
-  stream_plan.StreamFragmentGraph fragment_graph = 2;
 }
 
 message CreateSubscriptionResponse {

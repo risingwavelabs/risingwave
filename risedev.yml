@@ -43,9 +43,6 @@ profile:
       # - use: compactor
 
       # If you want to create source from Kafka, uncomment the following lines
-      # Note that kafka depends on zookeeper, so zookeeper must be started beforehand.
-      # - use: zookeeper
-      #   persist-data: true
       # - use: kafka
       #   persist-data: true
 
@@ -108,13 +105,12 @@ profile:
       - use: minio
       - use: etcd
       - use: meta-node
+        meta-backend: etcd
       - use: compute-node
       - use: frontend
       - use: compactor
       - use: prometheus
       - use: grafana
-      - use: zookeeper
-        persist-data: true
       - use: kafka
         persist-data: true
 
@@ -124,6 +120,7 @@ profile:
       - use: etcd
       - use: meta-node
         user-managed: true
+        meta-backend: etcd
       - use: compute-node
         user-managed: true
       - use: frontend
@@ -132,8 +129,6 @@ profile:
         user-managed: true
       - use: prometheus
       - use: grafana
-      - use: zookeeper
-        persist-data: true
       - use: kafka
         persist-data: true
 
@@ -143,6 +138,7 @@ profile:
       - use: etcd
       - use: meta-node
         user-managed: true
+        meta-backend: etcd
       - use: compute-node
         user-managed: true
       - use: frontend
@@ -156,6 +152,7 @@ profile:
       - use: etcd
       - use: meta-node
         user-managed: true
+        meta-backend: etcd
       - use: compute-node
         user-managed: true
       - use: frontend
@@ -260,6 +257,7 @@ profile:
       - use: minio
       - use: etcd
       - use: meta-node
+        meta-backend: etcd
       - use: compute-node
       - use: frontend
       - use: compactor
@@ -268,8 +266,6 @@ profile:
         remote-write-region: "ap-southeast-1"
         remote-write-url: "https://aps-workspaces.ap-southeast-1.amazonaws.com/workspaces/ws-f3841dad-6a5c-420f-8f62-8f66487f512a/api/v1/remote_write"
       - use: grafana
-      - use: zookeeper
-        persist-data: true
       - use: kafka
         persist-data: true
 
@@ -295,6 +291,7 @@ profile:
         port: 5690
         dashboard-port: 5691
         exporter-port: 1250
+        meta-backend: etcd
       - use: meta-node
         port: 15690
         dashboard-port: 15691
@@ -342,6 +339,7 @@ profile:
         port: 5690
         dashboard-port: 5691
         exporter-port: 1250
+        meta-backend: etcd
       - use: meta-node
         port: 15690
         dashboard-port: 15691
@@ -362,6 +360,7 @@ profile:
         port: 5690
         dashboard-port: 5691
         exporter-port: 1250
+        meta-backend: sqlite
       - use: compactor
       - use: compute-node
       - use: frontend
@@ -375,6 +374,40 @@ profile:
         port: 5690
         dashboard-port: 5691
         exporter-port: 1250
+        meta-backend: sqlite
+      - use: compactor
+      - use: compute-node
+      - use: frontend
+
+  meta-1cn-1fe-pg-backend:
+    steps:
+      - use: minio
+      - use: postgres
+        port: 8432
+        user: postgres
+        database: metadata
+      - use: meta-node
+        port: 5690
+        dashboard-port: 5691
+        exporter-port: 1250
+        meta-backend: postgres
+      - use: compactor
+      - use: compute-node
+      - use: frontend
+
+  meta-1cn-1fe-pg-backend-with-recovery:
+    config-path: src/config/ci-recovery.toml
+    steps:
+      - use: minio
+      - use: postgres
+        port: 8432
+        user: postgres
+        database: metadata
+      - use: meta-node
+        port: 5690
+        dashboard-port: 5691
+        exporter-port: 1250
+        meta-backend: postgres
       - use: compactor
       - use: compute-node
       - use: frontend
@@ -401,16 +434,15 @@ profile:
       - use: minio
       - use: etcd
       - use: meta-node
+        meta-backend: etcd
       - use: compute-node
         parallelism: 8
       - use: frontend
       - use: compactor
       - use: prometheus
       - use: grafana
-      # Do not use kafka and zookeeper here, we will spawn it separately,
+      # Do not use kafka here, we will spawn it separately,
       # so we don't have to re-generate data each time.
-      # - use: zookeeper
-      #   persist-data: true
       # RW will still be ale to talk to it.
       # - use: kafka
       #   port: 9092
@@ -561,6 +593,7 @@ profile:
       - use: etcd
         unsafe-no-fsync: true
       - use: meta-node
+        meta-backend: etcd
       - use: compute-node
         enable-tiered-cache: true
       - use: frontend
@@ -573,6 +606,7 @@ profile:
       - use: etcd
         unsafe-no-fsync: true
       - use: meta-node
+        meta-backend: etcd
       - use: compute-node
         port: 5687
         exporter-port: 1222
@@ -595,6 +629,7 @@ profile:
       - use: etcd
         unsafe-no-fsync: true
       - use: meta-node
+        meta-backend: etcd
       - use: compute-node
         port: 5687
         exporter-port: 1222
@@ -621,6 +656,7 @@ profile:
       - use: etcd
         unsafe-no-fsync: true
       - use: meta-node
+        meta-backend: etcd
       - use: compute-node
         port: 5687
         exporter-port: 1222
@@ -645,6 +681,7 @@ profile:
       - use: etcd
         unsafe-no-fsync: true
       - use: meta-node
+        meta-backend: etcd
       - use: compute-node
         port: 5687
         exporter-port: 1222
@@ -669,6 +706,7 @@ profile:
       - use: etcd
         unsafe-no-fsync: true
       - use: meta-node
+        meta-backend: etcd
       - use: compute-node
         port: 5687
         exporter-port: 1222
@@ -728,6 +766,7 @@ profile:
       - use: etcd
         unsafe-no-fsync: true
       - use: meta-node
+        meta-backend: etcd
       - use: opendal
         engine: fs
         bucket: "/tmp/rw_ci"
@@ -761,6 +800,7 @@ profile:
       - use: etcd
         unsafe-no-fsync: true
       - use: meta-node
+        meta-backend: etcd
       - use: compute-node
         port: 5687
         exporter-port: 1222
@@ -805,31 +845,31 @@ profile:
         health-check-port: 6788
       - use: compactor
 
-  ci-pubsub-kafka:
+  ci-kafka:
     config-path: src/config/ci.toml
     steps:
       - use: minio
       - use: etcd
         unsafe-no-fsync: true
       - use: meta-node
+        meta-backend: etcd
       - use: compute-node
         enable-tiered-cache: true
       - use: frontend
       - use: compactor
-      - use: pubsub
-        persist-data: true
       - use: kafka
         user-managed: true
         address: message_queue
         port: 29092
 
   ci-inline-source-test:
-    config-path: src/config/ci.toml
+    config-path: src/config/ci-recovery.toml
     steps:
       - use: minio
       - use: etcd
         unsafe-no-fsync: true
       - use: meta-node
+        meta-backend: etcd
       - use: compute-node
         enable-tiered-cache: true
       - use: frontend
@@ -854,6 +894,7 @@ profile:
       - use: etcd
         unsafe-no-fsync: true
       - use: meta-node
+        meta-backend: etcd
       - use: compute-node
         enable-tiered-cache: true
       - use: frontend
@@ -867,6 +908,7 @@ profile:
       - use: etcd
         unsafe-no-fsync: true
       - use: meta-node
+        meta-backend: etcd
       - use: compute-node
         enable-tiered-cache: true
         total-memory-bytes: 17179869184
@@ -879,6 +921,7 @@ profile:
       - use: minio
       - use: etcd
       - use: meta-node
+        meta-backend: etcd
       - use: compute-node
         enable-tiered-cache: true
       - use: frontend
@@ -891,6 +934,7 @@ profile:
       - use: etcd
         unsafe-no-fsync: true
       - use: meta-node
+        meta-backend: etcd
       - use: compute-node
         port: 5687
         exporter-port: 1222
@@ -912,12 +956,11 @@ profile:
       - use: minio
       - use: etcd
       - use: meta-node
+        meta-backend: etcd
       - use: compute-node
         enable-tiered-cache: true
       - use: frontend
       - use: compactor
-      - use: zookeeper
-        persist-data: true
       - use: kafka
         persist-data: true
 
@@ -927,6 +970,7 @@ profile:
       - use: etcd
       - use: minio
       - use: meta-node
+        meta-backend: etcd
       - use: compute-node
       - use: frontend
       - use: compactor
@@ -943,6 +987,7 @@ profile:
       - use: sqlite
       - use: minio
       - use: meta-node
+        meta-backend: sqlite
       - use: compute-node
       - use: frontend
       - use: compactor
@@ -993,6 +1038,7 @@ profile:
       - use: minio
       - use: etcd
       - use: meta-node
+        meta-backend: etcd
       - use: compute-node
       - use: frontend
       - use: compactor
@@ -1004,6 +1050,7 @@ profile:
         bucket: renjie-iceberg-bench
       - use: etcd
       - use: meta-node
+        meta-backend: etcd
       - use: compute-node
       - use: frontend
       - use: compactor
@@ -1016,6 +1063,7 @@ profile:
       - use: minio
       - use: etcd
       - use: meta-node
+        meta-backend: etcd
       - use: compute-node
       - use: frontend
       - use: compactor
@@ -1176,11 +1224,17 @@ template:
     # If `user-managed` is true, this service will be started by user with the above config
     user-managed: false
 
+    # meta backend type, requires extra config for provided backend
+    meta-backend: "memory"
+
     # Etcd backend config
     provide-etcd-backend: "etcd*"
 
     # Sqlite backend config
     provide-sqlite-backend: "sqlite*"
+
+    # Postgres backend config
+    provide-postgres-backend: "postgres*"
 
     # Prometheus nodes used by dashboard service
     provide-prometheus: "prometheus*"
@@ -1364,7 +1418,7 @@ template:
 
     # access key, secret key and region should be set in aws config (either by env var or .aws/config)
 
-  # Apache Kafka service
+  # Apache Kafka service backed by docker.
   kafka:
     # Id to be picked-up by services
     id: kafka-${port}
@@ -1375,17 +1429,20 @@ template:
     # Listen port of Kafka
     port: 29092
 
+    # Listen port of KRaft controller
+    controller-port: 29093
+
     # Listen address
     listen-address: ${address}
 
-    # ZooKeeper used by this Kafka instance
-    provide-zookeeper: "zookeeper*"
+    # The docker image. Can be overridden to use a different version.
+    image: "confluentinc/cp-kafka:7.6.1"
 
     # If set to true, data will be persisted at data/{id}.
     persist-data: true
 
-    # Kafka broker id. If there are multiple instances of Kafka, we will need to set.
-    broker-id: 0
+    # Kafka node id. If there are multiple instances of Kafka, we will need to set.
+    node-id: 0
 
     user-managed: false
 
@@ -1397,23 +1454,6 @@ template:
 
     port: 5980
 
-    persist-data: true
-
-  # Apache ZooKeeper service
-  zookeeper:
-    # Id to be picked-up by services
-    id: zookeeper-${port}
-
-    # Advertise address of ZooKeeper
-    address: "127.0.0.1"
-
-    # Listen address
-    listen-address: ${address}
-
-    # Listen port of ZooKeeper
-    port: 2181
-
-    # If set to true, data will be persisted at data/{id}.
     persist-data: true
 
   # Only supported in RiseDev compose
@@ -1447,20 +1487,64 @@ template:
     # address of redis
     address: "127.0.0.1"
 
-  # MySQL service. Currently user-managed only
+  # MySQL service backed by docker.
   mysql:
     # Id to be picked-up by services
-    id: mysql
+    id: mysql-${port}
 
-    # listen port of mysql
-    port: 8306
     # address of mysql
     address: "127.0.0.1"
 
-    # Note: these configs are not validated by risedev. They are passed as-is to risedev-env
-    # default user for mysql operations.
-    # This is not used in RISEDEV_MYSQL_WITH_OPTIONS_COMMON.
+    # listen port of mysql
+    port: 8306
+
+    # Note:
+    # - This will be used to initialize the MySQL instance.
+    #   * If the user is "root", the password will be used as the root password.
+    #   * Otherwise, a regular user will be created with the given password. The root password will be empty.
+    #   Note that this only applies to fresh instances, i.e., the data directory is empty.
+    # - In user-managed mode, these configs are not validated by risedev.
+    #   They are passed as-is to risedev-env default user for MySQL operations.
+    # - This is not used in RISEDEV_MYSQL_WITH_OPTIONS_COMMON.
     user: root
     password: ""
+    database: "risedev"
 
-    user-managed: true
+    # The docker image. Can be overridden to use a different version.
+    image: "mysql:8.0"
+
+    # If set to true, data will be persisted at data/{id}.
+    persist-data: true
+
+    # If `user-managed` is true, user is responsible for starting the service
+    # to serve at the above address and port in any way they see fit.
+    user-managed: false
+
+  # PostgreSQL service backed by docker.
+  postgres:
+    # Id to be picked-up by services
+    id: postgres-${port}
+
+    # address of pg
+    address: "127.0.0.1"
+
+    # listen port of pg
+    port: 8432
+
+    # Note:
+    # - This will be used to initialize the PostgreSQL instance if it's fresh.
+    # - In user-managed mode, these configs are not validated by risedev.
+    #   They are passed as-is to risedev-env default user for PostgreSQL operations.
+    user: postgres
+    password: ""
+    database: "postgres"
+
+    # The docker image. Can be overridden to use a different version.
+    image: "postgres:15-alpine"
+
+    # If set to true, data will be persisted at data/{id}.
+    persist-data: true
+
+    # If `user-managed` is true, user is responsible for starting the service
+    # to serve at the above address and port in any way they see fit.
+    user-managed: false

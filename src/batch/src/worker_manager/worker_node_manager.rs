@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use rand::seq::SliceRandom;
 use risingwave_common::bail;
-use risingwave_common::hash::{WorkerId, WorkerMapping};
+use risingwave_common::hash::{WorkerSlotId, WorkerSlotMapping};
 use risingwave_common::vnode_mapping::vnode_placement::place_vnode;
 use risingwave_pb::common::{WorkerNode, WorkerType};
 
@@ -36,9 +36,9 @@ pub struct WorkerNodeManager {
 struct WorkerNodeManagerInner {
     worker_nodes: Vec<WorkerNode>,
     /// fragment vnode mapping info for streaming
-    streaming_fragment_vnode_mapping: HashMap<FragmentId, WorkerMapping>,
+    streaming_fragment_vnode_mapping: HashMap<FragmentId, WorkerSlotMapping>,
     /// fragment vnode mapping info for serving
-    serving_fragment_vnode_mapping: HashMap<FragmentId, WorkerMapping>,
+    serving_fragment_vnode_mapping: HashMap<FragmentId, WorkerSlotMapping>,
 }
 
 pub type WorkerNodeManagerRef = Arc<WorkerNodeManager>;
@@ -125,8 +125,8 @@ impl WorkerNodeManager {
     pub fn refresh(
         &self,
         nodes: Vec<WorkerNode>,
-        streaming_mapping: HashMap<FragmentId, WorkerMapping>,
-        serving_mapping: HashMap<FragmentId, WorkerMapping>,
+        streaming_mapping: HashMap<FragmentId, WorkerSlotMapping>,
+        serving_mapping: HashMap<FragmentId, WorkerSlotMapping>,
     ) {
         let mut write_guard = self.inner.write().unwrap();
         tracing::debug!("Refresh worker nodes {:?}.", nodes);
@@ -143,29 +143,37 @@ impl WorkerNodeManager {
         write_guard.serving_fragment_vnode_mapping = serving_mapping;
     }
 
-    /// If worker ids is empty, the scheduler may fail to schedule any task and stuck at
+    /// If worker slot ids is empty, the scheduler may fail to schedule any task and stuck at
     /// schedule next stage. If we do not return error in this case, needs more complex control
     /// logic above. Report in this function makes the schedule root fail reason more clear.
-    pub fn get_workers_by_worker_ids(&self, worker_ids: &[WorkerId]) -> Result<Vec<WorkerNode>> {
-        if worker_ids.is_empty() {
+    pub fn get_workers_by_worker_slot_ids(
+        &self,
+        worker_slot_ids: &[WorkerSlotId],
+    ) -> Result<Vec<WorkerNode>> {
+        if worker_slot_ids.is_empty() {
             return Err(BatchError::EmptyWorkerNodes);
         }
 
         let guard = self.inner.read().unwrap();
 
-        // TODO: Does the return order of this function need to match the order of the parameters?
-        let worker_index: HashMap<_, _> = guard
+        let worker_slot_index: HashMap<_, _> = guard
             .worker_nodes
             .iter()
-            .map(|worker| (worker.id, worker.clone()))
+            .flat_map(|worker| {
+                (0..worker.parallel_units.len())
+                    .map(move |i| (WorkerSlotId::new(worker.id, i), worker))
+            })
             .collect();
 
-        let mut workers = Vec::with_capacity(worker_ids.len());
+        let mut workers = Vec::with_capacity(worker_slot_ids.len());
 
-        for worker_id in worker_ids {
-            match worker_index.get(worker_id) {
-                Some(worker) => workers.push(worker.clone()),
-                None => bail!("No worker node found for worker id: {}", worker_id),
+        for worker_slot_id in worker_slot_ids {
+            match worker_slot_index.get(worker_slot_id) {
+                Some(worker) => workers.push((*worker).clone()),
+                None => bail!(
+                    "No worker node found for worker slot id: {}",
+                    worker_slot_id
+                ),
             }
         }
 
@@ -175,7 +183,7 @@ impl WorkerNodeManager {
     pub fn get_streaming_fragment_mapping(
         &self,
         fragment_id: &FragmentId,
-    ) -> Result<WorkerMapping> {
+    ) -> Result<WorkerSlotMapping> {
         self.inner
             .read()
             .unwrap()
@@ -188,7 +196,7 @@ impl WorkerNodeManager {
     pub fn insert_streaming_fragment_mapping(
         &self,
         fragment_id: FragmentId,
-        vnode_mapping: WorkerMapping,
+        vnode_mapping: WorkerSlotMapping,
     ) {
         self.inner
             .write()
@@ -201,7 +209,7 @@ impl WorkerNodeManager {
     pub fn update_streaming_fragment_mapping(
         &self,
         fragment_id: FragmentId,
-        vnode_mapping: WorkerMapping,
+        vnode_mapping: WorkerSlotMapping,
     ) {
         let mut guard = self.inner.write().unwrap();
         guard
@@ -219,7 +227,7 @@ impl WorkerNodeManager {
     }
 
     /// Returns fragment's vnode mapping for serving.
-    fn serving_fragment_mapping(&self, fragment_id: FragmentId) -> Result<WorkerMapping> {
+    fn serving_fragment_mapping(&self, fragment_id: FragmentId) -> Result<WorkerSlotMapping> {
         self.inner
             .read()
             .unwrap()
@@ -227,7 +235,7 @@ impl WorkerNodeManager {
             .ok_or_else(|| BatchError::ServingVnodeMappingNotFound(fragment_id))
     }
 
-    pub fn set_serving_fragment_mapping(&self, mappings: HashMap<FragmentId, WorkerMapping>) {
+    pub fn set_serving_fragment_mapping(&self, mappings: HashMap<FragmentId, WorkerSlotMapping>) {
         let mut guard = self.inner.write().unwrap();
         tracing::debug!(
             "Set serving vnode mapping for fragments {:?}",
@@ -236,7 +244,10 @@ impl WorkerNodeManager {
         guard.serving_fragment_vnode_mapping = mappings;
     }
 
-    pub fn upsert_serving_fragment_mapping(&self, mappings: HashMap<FragmentId, WorkerMapping>) {
+    pub fn upsert_serving_fragment_mapping(
+        &self,
+        mappings: HashMap<FragmentId, WorkerSlotMapping>,
+    ) {
         let mut guard = self.inner.write().unwrap();
         tracing::debug!(
             "Upsert serving vnode mapping for fragments {:?}",
@@ -287,7 +298,7 @@ impl WorkerNodeManager {
 }
 
 impl WorkerNodeManagerInner {
-    fn get_serving_fragment_mapping(&self, fragment_id: FragmentId) -> Option<WorkerMapping> {
+    fn get_serving_fragment_mapping(&self, fragment_id: FragmentId) -> Option<WorkerSlotMapping> {
         self.serving_fragment_vnode_mapping
             .get(&fragment_id)
             .cloned()
@@ -330,7 +341,7 @@ impl WorkerNodeSelector {
             .sum()
     }
 
-    pub fn fragment_mapping(&self, fragment_id: FragmentId) -> Result<WorkerMapping> {
+    pub fn fragment_mapping(&self, fragment_id: FragmentId) -> Result<WorkerSlotMapping> {
         if self.enable_barrier_read {
             self.manager.get_streaming_fragment_mapping(&fragment_id)
         } else {

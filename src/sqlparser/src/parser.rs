@@ -25,13 +25,9 @@ use core::fmt;
 use itertools::Itertools;
 use tracing::{debug, instrument};
 
-use self::ddl::AlterSubscriptionOperation;
-use crate::ast::ddl::{
-    AlterConnectionOperation, AlterDatabaseOperation, AlterFunctionOperation, AlterIndexOperation,
-    AlterSchemaOperation, AlterSinkOperation, AlterViewOperation, SourceWatermark,
-};
-use crate::ast::{ParseTo, *};
+use crate::ast::*;
 use crate::keywords::{self, Keyword};
+use crate::parser_v2;
 use crate::tokenizer::*;
 
 pub(crate) const UPSTREAM_SOURCE_KEY: &str = "connector";
@@ -177,27 +173,51 @@ pub struct Parser {
     tokens: Vec<TokenWithLocation>,
     /// The index of the first unprocessed token in `self.tokens`
     index: usize,
-    /// Since we cannot distinguish `>>` and double `>`, so use `angle_brackets_num` to store the
-    /// number of `<` to match `>` in sql like `struct<v1 struct<v2 int>>`.
-    angle_brackets_num: i32,
-    /// It's important that already in named Array or not. so use this field check in or not.
-    /// Consider 0 is you're not in named Array. if more than 0 is you're in named Array
-    array_depth: usize,
-    /// We cannot know current array should be keep named or not, so by using this field store
-    /// every depth of array that should be keep named or not.
-    array_named_stack: Vec<bool>,
 }
 
 impl Parser {
     /// Parse the specified tokens
     pub fn new(tokens: Vec<TokenWithLocation>) -> Self {
-        Parser {
-            tokens,
-            index: 0,
-            angle_brackets_num: 0,
-            array_depth: 0,
-            array_named_stack: Vec::new(),
-        }
+        Parser { tokens, index: 0 }
+    }
+
+    /// Adaptor for [`parser_v2`].
+    ///
+    /// You can call a v2 parser from original parser by using this method.
+    pub(crate) fn parse_v2<'a, O>(
+        &'a mut self,
+        mut parse_next: impl winnow::Parser<
+            winnow::Located<parser_v2::TokenStreamWrapper<'a>>,
+            O,
+            winnow::error::ContextError,
+        >,
+    ) -> Result<O, ParserError> {
+        use winnow::stream::Location;
+
+        let mut token_stream = winnow::Located::new(parser_v2::TokenStreamWrapper {
+            tokens: &self.tokens[self.index..],
+        });
+        let output = parse_next.parse_next(&mut token_stream).map_err(|e| {
+            let msg = if let Some(e) = e.into_inner()
+                && let Some(cause) = e.cause()
+            {
+                format!(": {}", cause)
+            } else {
+                "".to_string()
+            };
+            ParserError::ParserError(format!(
+                "Unexpected {}{}",
+                if self.index + token_stream.location() >= self.tokens.len() {
+                    &"EOF" as &dyn std::fmt::Display
+                } else {
+                    &self.tokens[self.index + token_stream.location()] as &dyn std::fmt::Display
+                },
+                msg
+            ))
+        });
+        let offset = token_stream.location();
+        self.index += offset;
+        output
     }
 
     /// Parse a SQL statement and produce an Abstract Syntax Tree (AST)
@@ -310,25 +330,6 @@ impl Parser {
         let table_name = self.parse_object_name()?;
 
         Ok(Statement::Analyze { table_name })
-    }
-
-    /// Check is enter array expression.
-    pub fn peek_array_depth(&self) -> usize {
-        self.array_depth
-    }
-
-    /// When enter specify ARRAY prefix expression.
-    pub fn increase_array_depth(&mut self, num: usize) {
-        self.array_depth += num;
-    }
-
-    /// When exit specify ARRAY prefix expression.
-    pub fn decrease_array_depth(&mut self, num: usize) {
-        self.array_depth -= num;
-    }
-
-    pub fn is_in_array(&self) -> bool {
-        self.peek_array_depth() > 0
     }
 
     /// Tries to parse a wildcard expression. If it is not a wildcard, parses an expression.
@@ -483,7 +484,7 @@ impl Parser {
                             ObjectName(id_parts),
                             self.parse_except()?,
                         ))
-                    }
+                    };
                 }
                 unexpected => {
                     return self.expected(
@@ -596,10 +597,6 @@ impl Parser {
                     expr: Box::new(self.parse_subexpr(Precedence::UnaryNot)?),
                 }),
                 Keyword::ROW => self.parse_row_expr(),
-                Keyword::ARRAY if self.peek_token() == Token::LBracket => {
-                    self.expect_token(&Token::LBracket)?;
-                    self.parse_array_expr(true)
-                }
                 Keyword::ARRAY if self.peek_token() == Token::LParen => {
                     // similar to `exists(subquery)`
                     self.expect_token(&Token::LParen)?;
@@ -607,6 +604,7 @@ impl Parser {
                     self.expect_token(&Token::RParen)?;
                     Ok(exists_node)
                 }
+                Keyword::ARRAY if self.peek_token() == Token::LBracket => self.parse_array_expr(),
                 // `LEFT` and `RIGHT` are reserved as identifier but okay as function
                 Keyword::LEFT | Keyword::RIGHT => {
                     self.parse_function(ObjectName(vec![w.to_ident()?]))
@@ -668,8 +666,6 @@ impl Parser {
                     _ => Ok(Expr::Identifier(w.to_ident()?)),
                 },
             }, // End of Token::Word
-
-            Token::LBracket if self.is_in_array() => self.parse_array_expr(false),
 
             tok @ Token::Minus | tok @ Token::Plus => {
                 let op = if tok == Token::Plus {
@@ -1242,46 +1238,50 @@ impl Parser {
     }
 
     /// Parses an array expression `[ex1, ex2, ..]`
-    /// if `named` is `true`, came from an expression like  `ARRAY[ex1, ex2]`
-    pub fn parse_array_expr(&mut self, named: bool) -> Result<Expr, ParserError> {
-        self.increase_array_depth(1);
-        if self.array_named_stack.len() < self.peek_array_depth() {
-            self.array_named_stack.push(named);
-        } else if let Err(parse_err) = self.check_same_named_array(named) {
-            Err(parse_err)?
-        }
-
-        if self.peek_token() == Token::RBracket {
-            let _ = self.next_token(); // consume ]
-            self.decrease_array_depth(1);
-            Ok(Expr::Array(Array {
-                elem: vec![],
-                named,
-            }))
-        } else {
-            let exprs = self.parse_comma_separated(Parser::parse_expr)?;
-            self.expect_token(&Token::RBracket)?;
-            if self.array_named_stack.len() > self.peek_array_depth() {
-                self.array_named_stack.pop();
-            }
-            self.decrease_array_depth(1);
-            Ok(Expr::Array(Array { elem: exprs, named }))
-        }
+    pub fn parse_array_expr(&mut self) -> Result<Expr, ParserError> {
+        let mut expected_depth = None;
+        let exprs = self.parse_array_inner(0, &mut expected_depth)?;
+        Ok(Expr::Array(Array {
+            elem: exprs,
+            // Top-level array is named.
+            named: true,
+        }))
     }
 
-    fn check_same_named_array(&mut self, current_named: bool) -> Result<(), ParserError> {
-        let previous_named = self.array_named_stack.last().unwrap();
-        if current_named != *previous_named {
-            // for '['
-            self.prev_token();
-            if current_named {
-                // for keyword 'array'
-                self.prev_token();
-            }
-            parser_err!(format!("syntax error at or near {}", self.peek_token()))?
-        } else {
-            Ok(())
+    fn parse_array_inner(
+        &mut self,
+        depth: usize,
+        expected_depth: &mut Option<usize>,
+    ) -> Result<Vec<Expr>, ParserError> {
+        self.expect_token(&Token::LBracket)?;
+        if let Some(expected_depth) = *expected_depth
+            && depth > expected_depth
+        {
+            return self.expected("]", self.peek_token());
         }
+        let exprs = if self.peek_token() == Token::LBracket {
+            self.parse_comma_separated(|parser| {
+                let exprs = parser.parse_array_inner(depth + 1, expected_depth)?;
+                Ok(Expr::Array(Array {
+                    elem: exprs,
+                    named: false,
+                }))
+            })?
+        } else {
+            if let Some(expected_depth) = *expected_depth {
+                if depth < expected_depth {
+                    return self.expected("[", self.peek_token());
+                }
+            } else {
+                *expected_depth = Some(depth);
+            }
+            if self.consume_token(&Token::RBracket) {
+                return Ok(vec![]);
+            }
+            self.parse_comma_separated(Self::parse_expr)?
+        };
+        self.expect_token(&Token::RBracket)?;
+        Ok(exprs)
     }
 
     // This function parses date/time fields for interval qualifiers.
@@ -1928,7 +1928,7 @@ impl Parser {
                 _ => {
                     return token
                         .cloned()
-                        .unwrap_or(TokenWithLocation::wrap(Token::EOF))
+                        .unwrap_or(TokenWithLocation::wrap(Token::EOF));
                 }
             }
         }
@@ -2185,10 +2185,22 @@ impl Parser {
 
     pub fn parse_create_schema(&mut self) -> Result<Statement, ParserError> {
         let if_not_exists = self.parse_keywords(&[Keyword::IF, Keyword::NOT, Keyword::EXISTS]);
-        let schema_name = self.parse_object_name()?;
+        let (schema_name, user_specified) = if self.parse_keyword(Keyword::AUTHORIZATION) {
+            let user_specified = self.parse_object_name()?;
+            (user_specified.clone(), Some(user_specified))
+        } else {
+            let schema_name = self.parse_object_name()?;
+            let user_specified = if self.parse_keyword(Keyword::AUTHORIZATION) {
+                Some(self.parse_object_name()?)
+            } else {
+                None
+            };
+            (schema_name, user_specified)
+        };
         Ok(Statement::CreateSchema {
             schema_name,
             if_not_exists,
+            user_specified,
         })
     }
 
@@ -2344,11 +2356,8 @@ impl Parser {
         let args = self.parse_comma_separated(Parser::parse_function_arg)?;
         self.expect_token(&Token::RParen)?;
 
-        let return_type = if self.parse_keyword(Keyword::RETURNS) {
-            Some(self.parse_data_type()?)
-        } else {
-            None
-        };
+        self.expect_keyword(Keyword::RETURNS)?;
+        let returns = self.parse_data_type()?;
 
         let append_only = self.parse_keywords(&[Keyword::APPEND, Keyword::ONLY]);
         let params = self.parse_create_function_body()?;
@@ -2357,7 +2366,7 @@ impl Parser {
             or_replace,
             name,
             args,
-            returns: return_type,
+            returns,
             append_only,
             params,
         })
@@ -2443,7 +2452,7 @@ impl Parser {
                 body.language = Some(self.parse_identifier()?);
             } else if self.parse_keyword(Keyword::RUNTIME) {
                 ensure_not_set(&body.runtime, "RUNTIME")?;
-                body.runtime = Some(self.parse_function_runtime()?);
+                body.runtime = Some(self.parse_identifier()?);
             } else if self.parse_keyword(Keyword::IMMUTABLE) {
                 ensure_not_set(&body.behavior, "IMMUTABLE | STABLE | VOLATILE")?;
                 body.behavior = Some(FunctionBehavior::Immutable);
@@ -2487,17 +2496,6 @@ impl Parser {
                 Ok(CreateFunctionUsing::Base64(base64))
             }
             _ => unreachable!("{}", keyword),
-        }
-    }
-
-    fn parse_function_runtime(&mut self) -> Result<FunctionRuntime, ParserError> {
-        let ident = self.parse_identifier()?;
-        match ident.value.to_lowercase().as_str() {
-            "deno" => Ok(FunctionRuntime::Deno),
-            "quickjs" => Ok(FunctionRuntime::QuickJs),
-            r => Err(ParserError::ParserError(format!(
-                "Unsupported runtime: {r}"
-            ))),
         }
     }
 
@@ -2546,6 +2544,8 @@ impl Parser {
     pub fn parse_drop(&mut self) -> Result<Statement, ParserError> {
         if self.parse_keyword(Keyword::FUNCTION) {
             return self.parse_drop_function();
+        } else if self.parse_keyword(Keyword::AGGREGATE) {
+            return self.parse_drop_aggregate();
         }
         Ok(Statement::Drop(DropStatement::parse_to(self)?))
     }
@@ -2563,6 +2563,25 @@ impl Parser {
             _ => None,
         };
         Ok(Statement::DropFunction {
+            if_exists,
+            func_desc,
+            option,
+        })
+    }
+
+    /// ```sql
+    /// DROP AGGREGATE [ IF EXISTS ] name [ ( [ [ argmode ] [ argname ] argtype [, ...] ] ) ] [, ...]
+    /// [ CASCADE | RESTRICT ]
+    /// ```
+    fn parse_drop_aggregate(&mut self) -> Result<Statement, ParserError> {
+        let if_exists = self.parse_keywords(&[Keyword::IF, Keyword::EXISTS]);
+        let func_desc = self.parse_comma_separated(Parser::parse_function_desc)?;
+        let option = match self.parse_one_of_keywords(&[Keyword::CASCADE, Keyword::RESTRICT]) {
+            Some(Keyword::CASCADE) => Some(ReferentialAction::Cascade),
+            Some(Keyword::RESTRICT) => Some(ReferentialAction::Restrict),
+            _ => None,
+        };
+        Ok(Statement::DropAggregate {
             if_exists,
             func_desc,
             option,
@@ -3260,8 +3279,13 @@ impl Parser {
                     parallelism: value,
                     deferred,
                 }
+            } else if let Some(rate_limit) = self.parse_alter_streaming_rate_limit()? {
+                AlterTableOperation::SetStreamingRateLimit { rate_limit }
             } else {
-                return self.expected("SCHEMA/PARALLELISM after SET", self.peek_token());
+                return self.expected(
+                    "SCHEMA/PARALLELISM/STREAMING_RATE_LIMIT after SET",
+                    self.peek_token(),
+                );
             }
         } else if self.parse_keyword(Keyword::DROP) {
             let _ = self.parse_keyword(Keyword::COLUMN);
@@ -3316,6 +3340,31 @@ impl Parser {
             name: table_name,
             operation,
         })
+    }
+
+    /// STREAMING_RATE_LIMIT = default | NUMBER
+    /// STREAMING_RATE_LIMIT TO default | NUMBER
+    pub fn parse_alter_streaming_rate_limit(&mut self) -> Result<Option<i32>, ParserError> {
+        if !self.parse_keyword(Keyword::STREAMING_RATE_LIMIT) {
+            return Ok(None);
+        }
+        if self.expect_keyword(Keyword::TO).is_err() && self.expect_token(&Token::Eq).is_err() {
+            return self.expected(
+                "TO or = after ALTER TABLE SET STREAMING_RATE_LIMIT",
+                self.peek_token(),
+            );
+        }
+        let rate_limit = if self.parse_keyword(Keyword::DEFAULT) {
+            -1
+        } else {
+            let s = self.parse_number_value()?;
+            if let Ok(n) = s.parse::<i32>() {
+                n
+            } else {
+                return self.expected("number or DEFAULT", self.peek_token());
+            }
+        };
+        Ok(Some(rate_limit))
     }
 
     pub fn parse_alter_index(&mut self) -> Result<Statement, ParserError> {
@@ -3397,8 +3446,15 @@ impl Parser {
                     parallelism: value,
                     deferred,
                 }
+            } else if materialized
+                && let Some(rate_limit) = self.parse_alter_streaming_rate_limit()?
+            {
+                AlterViewOperation::SetStreamingRateLimit { rate_limit }
             } else {
-                return self.expected("SCHEMA/PARALLELISM after SET", self.peek_token());
+                return self.expected(
+                    "SCHEMA/PARALLELISM/STREAMING_RATE_LIMIT after SET",
+                    self.peek_token(),
+                );
             }
         } else {
             return self.expected(
@@ -3490,24 +3546,8 @@ impl Parser {
                 AlterSubscriptionOperation::SetSchema {
                     new_schema_name: schema_name,
                 }
-            } else if self.parse_keyword(Keyword::PARALLELISM) {
-                if self.expect_keyword(Keyword::TO).is_err()
-                    && self.expect_token(&Token::Eq).is_err()
-                {
-                    return self.expected(
-                        "TO or = after ALTER TABLE SET PARALLELISM",
-                        self.peek_token(),
-                    );
-                }
-                let value = self.parse_set_variable()?;
-                let deferred = self.parse_keyword(Keyword::DEFERRED);
-
-                AlterSubscriptionOperation::SetParallelism {
-                    parallelism: value,
-                    deferred,
-                }
             } else {
-                return self.expected("SCHEMA/PARALLELISM after SET", self.peek_token());
+                return self.expected("SCHEMA after SET", self.peek_token());
             }
         } else {
             return self.expected(
@@ -3547,17 +3587,24 @@ impl Parser {
                 AlterSourceOperation::SetSchema {
                     new_schema_name: schema_name,
                 }
+            } else if let Some(rate_limit) = self.parse_alter_streaming_rate_limit()? {
+                AlterSourceOperation::SetStreamingRateLimit { rate_limit }
             } else {
                 return self.expected("SCHEMA after SET", self.peek_token());
             }
         } else if self.peek_nth_any_of_keywords(0, &[Keyword::FORMAT]) {
             let connector_schema = self.parse_schema()?.unwrap();
+            if connector_schema.key_encode.is_some() {
+                return Err(ParserError::ParserError(
+                    "key encode clause is not supported in source schema".to_string(),
+                ));
+            }
             AlterSourceOperation::FormatEncode { connector_schema }
         } else if self.parse_keywords(&[Keyword::REFRESH, Keyword::SCHEMA]) {
             AlterSourceOperation::RefreshSchema
         } else {
             return self.expected(
-                "RENAME, ADD COLUMN or OWNER TO or SET after ALTER SOURCE",
+                "RENAME, ADD COLUMN, OWNER TO, SET or STREAMING_RATE_LIMIT after ALTER SOURCE",
                 self.peek_token(),
             );
         };
@@ -3810,136 +3857,7 @@ impl Parser {
     /// Parse a SQL datatype (in the context of a CREATE TABLE statement for example) and convert
     /// into an array of that datatype if needed
     pub fn parse_data_type(&mut self) -> Result<DataType, ParserError> {
-        let mut data_type = self.parse_data_type_inner()?;
-        while self.consume_token(&Token::LBracket) {
-            self.expect_token(&Token::RBracket)?;
-            data_type = DataType::Array(Box::new(data_type));
-        }
-        Ok(data_type)
-    }
-
-    /// Parse struct `data_type` e.g.`<v1 int, v2 int, v3 struct<...>>`.
-    pub fn parse_struct_data_type(&mut self) -> Result<Vec<StructField>, ParserError> {
-        let mut columns = vec![];
-        if !self.consume_token(&Token::Lt) {
-            return self.expected("'<' after struct", self.peek_token());
-        }
-        self.angle_brackets_num += 1;
-
-        loop {
-            if let Token::Word(_) = self.peek_token().token {
-                let name = self.parse_identifier_non_reserved()?;
-                let data_type = self.parse_data_type()?;
-                columns.push(StructField { name, data_type })
-            } else {
-                return self.expected("struct field name", self.peek_token());
-            }
-            if self.angle_brackets_num == 0 {
-                break;
-            } else if self.consume_token(&Token::Gt) {
-                self.angle_brackets_num -= 1;
-                break;
-            } else if self.consume_token(&Token::ShiftRight) {
-                if self.angle_brackets_num >= 1 {
-                    self.angle_brackets_num -= 2;
-                    break;
-                } else {
-                    return parser_err!("too much '>'");
-                }
-            } else if !self.consume_token(&Token::Comma) {
-                return self.expected("',' or '>' after column definition", self.peek_token());
-            }
-        }
-
-        Ok(columns)
-    }
-
-    /// Parse a SQL datatype
-    pub fn parse_data_type_inner(&mut self) -> Result<DataType, ParserError> {
-        let token = self.next_token();
-        match token.token {
-            Token::Word(w) => match w.keyword {
-                Keyword::BOOLEAN | Keyword::BOOL => Ok(DataType::Boolean),
-                Keyword::FLOAT => {
-                    let precision = self.parse_optional_precision()?;
-                    match precision {
-                        Some(0) => Err(ParserError::ParserError(
-                            "precision for type float must be at least 1 bit".to_string(),
-                        )),
-                        Some(54..) => Err(ParserError::ParserError(
-                            "precision for type float must be less than 54 bits".to_string(),
-                        )),
-                        _ => Ok(DataType::Float(precision)),
-                    }
-                }
-                Keyword::REAL => Ok(DataType::Real),
-                Keyword::DOUBLE => {
-                    let _ = self.parse_keyword(Keyword::PRECISION);
-                    Ok(DataType::Double)
-                }
-                Keyword::SMALLINT => Ok(DataType::SmallInt),
-                Keyword::INT | Keyword::INTEGER => Ok(DataType::Int),
-                Keyword::BIGINT => Ok(DataType::BigInt),
-                Keyword::STRING | Keyword::VARCHAR => Ok(DataType::Varchar),
-                Keyword::CHAR | Keyword::CHARACTER => {
-                    if self.parse_keyword(Keyword::VARYING) {
-                        Ok(DataType::Varchar)
-                    } else {
-                        Ok(DataType::Char(self.parse_optional_precision()?))
-                    }
-                }
-                Keyword::UUID => Ok(DataType::Uuid),
-                Keyword::DATE => Ok(DataType::Date),
-                Keyword::TIMESTAMP => {
-                    let with_time_zone = self.parse_keyword(Keyword::WITH);
-                    if with_time_zone || self.parse_keyword(Keyword::WITHOUT) {
-                        self.expect_keywords(&[Keyword::TIME, Keyword::ZONE])?;
-                    }
-                    Ok(DataType::Timestamp(with_time_zone))
-                }
-                Keyword::TIME => {
-                    let with_time_zone = self.parse_keyword(Keyword::WITH);
-                    if with_time_zone || self.parse_keyword(Keyword::WITHOUT) {
-                        self.expect_keywords(&[Keyword::TIME, Keyword::ZONE])?;
-                    }
-                    Ok(DataType::Time(with_time_zone))
-                }
-                // Interval types can be followed by a complicated interval
-                // qualifier that we don't currently support. See
-                // parse_interval_literal for a taste.
-                Keyword::INTERVAL => Ok(DataType::Interval),
-                Keyword::REGCLASS => Ok(DataType::Regclass),
-                Keyword::REGPROC => Ok(DataType::Regproc),
-                Keyword::TEXT => {
-                    if self.consume_token(&Token::LBracket) {
-                        // Note: this is postgresql-specific
-                        self.expect_token(&Token::RBracket)?;
-                        Ok(DataType::Array(Box::new(DataType::Text)))
-                    } else {
-                        Ok(DataType::Text)
-                    }
-                }
-                Keyword::STRUCT => Ok(DataType::Struct(self.parse_struct_data_type()?)),
-                Keyword::BYTEA => Ok(DataType::Bytea),
-                Keyword::NUMERIC | Keyword::DECIMAL | Keyword::DEC => {
-                    let (precision, scale) = self.parse_optional_precision_scale()?;
-                    Ok(DataType::Decimal(precision, scale))
-                }
-                _ => {
-                    self.prev_token();
-                    let type_name = self.parse_object_name()?;
-                    // JSONB is not a keyword
-                    if type_name.to_string().eq_ignore_ascii_case("jsonb") {
-                        Ok(DataType::Jsonb)
-                    } else {
-                        Ok(DataType::Custom(type_name))
-                    }
-                }
-            },
-            unexpected => {
-                self.expected("a data type name", unexpected.with_location(token.location))
-            }
-        }
+        self.parse_v2(parser_v2::data_type)
     }
 
     /// Parse `AS identifier` (or simply `identifier` if it's not a reserved keyword)

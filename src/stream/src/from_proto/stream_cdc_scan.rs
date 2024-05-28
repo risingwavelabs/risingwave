@@ -23,7 +23,7 @@ use risingwave_pb::stream_plan::StreamCdcScanNode;
 
 use super::*;
 use crate::common::table::state_table::StateTable;
-use crate::executor::{CdcBackfillExecutor, CdcScanOptions, Executor, ExternalStorageTable};
+use crate::executor::{CdcBackfillExecutor, CdcScanOptions, ExternalStorageTable};
 
 pub struct StreamCdcScanExecutorBuilder;
 
@@ -45,19 +45,15 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
 
         let table_desc: &ExternalTableDesc = node.get_cdc_table_desc()?;
 
-        let table_schema: Schema = table_desc.columns.iter().map(Into::into).collect();
-        assert_eq!(output_indices, (0..table_schema.len()).collect_vec());
-        assert_eq!(table_schema.data_types(), params.info.schema.data_types());
+        let output_schema: Schema = table_desc.columns.iter().map(Into::into).collect();
+        assert_eq!(output_indices, (0..output_schema.len()).collect_vec());
+        assert_eq!(output_schema.data_types(), params.info.schema.data_types());
 
         let properties: HashMap<String, String> = table_desc
             .connect_properties
             .iter()
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
-        let table_type = CdcTableType::from_properties(&properties);
-        let table_reader = table_type
-            .create_table_reader(properties.clone(), table_schema.clone())
-            .await?;
 
         let table_pk_order_types = table_desc
             .pk
@@ -70,6 +66,37 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
             .map(|k| k.column_index as usize)
             .collect_vec();
 
+        let scan_options = node
+            .options
+            .as_ref()
+            .map(CdcScanOptions::from_proto)
+            .unwrap_or(CdcScanOptions {
+                disable_backfill: node.disable_backfill,
+                ..Default::default()
+            });
+        let table_type = CdcTableType::from_properties(&properties);
+
+        // Filter out additional columns to construct the external table schema
+        let table_schema: Schema = table_desc
+            .columns
+            .iter()
+            .filter(|col| {
+                !col.additional_column
+                    .as_ref()
+                    .is_some_and(|a_col| a_col.column_type.is_some())
+            })
+            .map(Into::into)
+            .collect();
+
+        let table_reader = table_type
+            .create_table_reader(
+                properties.clone(),
+                table_schema.clone(),
+                table_pk_indices.clone(),
+                scan_options.snapshot_batch_size,
+            )
+            .await?;
+
         let schema_table_name = SchemaTableName::from_properties(&properties);
         let external_table = ExternalStorageTable::new(
             TableId::new(table_desc.table_id),
@@ -78,7 +105,6 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
             table_schema,
             table_pk_order_types,
             table_pk_indices,
-            output_indices.clone(),
         );
 
         let vnodes = params.vnode_bitmap.map(Arc::new);
@@ -87,17 +113,17 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
         let state_table =
             StateTable::from_table_catalog(node.get_state_table()?, state_store, vnodes).await;
 
-        let scan_options = node.options.clone().map(CdcScanOptions::from_proto);
+        let output_columns = table_desc.columns.iter().map(Into::into).collect_vec();
         let exec = CdcBackfillExecutor::new(
             params.actor_context.clone(),
             external_table,
             upstream,
             output_indices,
+            output_columns,
             None,
             params.executor_stats,
             state_table,
             node.rate_limit,
-            node.disable_backfill,
             scan_options,
         );
         Ok((params.info, exec).into())

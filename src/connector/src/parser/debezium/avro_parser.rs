@@ -123,14 +123,22 @@ impl DebeziumAvroParserConfig {
     }
 
     pub fn extract_pks(&self) -> ConnectorResult<Vec<ColumnDesc>> {
-        avro_schema_to_column_descs(&self.key_schema)
+        avro_schema_to_column_descs(
+            &self.key_schema,
+            // TODO: do we need to support map type here?
+            None,
+        )
     }
 
     pub fn map_to_columns(&self) -> ConnectorResult<Vec<ColumnDesc>> {
-        avro_schema_to_column_descs(avro_schema_skip_union(avro_extract_field_schema(
-            &self.outer_schema,
-            Some("before"),
-        )?)?)
+        avro_schema_to_column_descs(
+            avro_schema_skip_union(avro_extract_field_schema(
+                &self.outer_schema,
+                Some("before"),
+            )?)?,
+            // TODO: do we need to support map type here?
+            None,
+        )
     }
 }
 
@@ -139,7 +147,6 @@ mod tests {
     use std::io::Read;
     use std::path::PathBuf;
 
-    use apache_avro::Schema;
     use itertools::Itertools;
     use maplit::{convert_args, hashmap};
     use risingwave_common::array::Op;
@@ -151,9 +158,7 @@ mod tests {
     use risingwave_pb::plan_common::{PbEncodeType, PbFormatType};
 
     use super::*;
-    use crate::parser::{
-        DebeziumAvroParserConfig, DebeziumParser, SourceStreamChunkBuilder, SpecificParserConfig,
-    };
+    use crate::parser::{DebeziumParser, SourceStreamChunkBuilder, SpecificParserConfig};
     use crate::source::{SourceColumnDesc, SourceContext};
 
     const DEBEZIUM_AVRO_DATA: &[u8] = b"\x00\x00\x00\x00\x06\x00\x02\xd2\x0f\x0a\x53\x61\x6c\x6c\x79\x0c\x54\x68\x6f\x6d\x61\x73\x2a\x73\x61\x6c\x6c\x79\x2e\x74\x68\x6f\x6d\x61\x73\x40\x61\x63\x6d\x65\x2e\x63\x6f\x6d\x16\x32\x2e\x31\x2e\x32\x2e\x46\x69\x6e\x61\x6c\x0a\x6d\x79\x73\x71\x6c\x12\x64\x62\x73\x65\x72\x76\x65\x72\x31\xc0\xb4\xe8\xb7\xc9\x61\x00\x30\x66\x69\x72\x73\x74\x5f\x69\x6e\x5f\x64\x61\x74\x61\x5f\x63\x6f\x6c\x6c\x65\x63\x74\x69\x6f\x6e\x12\x69\x6e\x76\x65\x6e\x74\x6f\x72\x79\x00\x02\x12\x63\x75\x73\x74\x6f\x6d\x65\x72\x73\x00\x00\x20\x6d\x79\x73\x71\x6c\x2d\x62\x69\x6e\x2e\x30\x30\x30\x30\x30\x33\x8c\x06\x00\x00\x00\x02\x72\x02\x92\xc3\xe8\xb7\xc9\x61\x00";
@@ -245,7 +250,7 @@ mod tests {
 }
 "#;
         let key_schema = Schema::parse_str(key_schema_str).unwrap();
-        let names: Vec<String> = avro_schema_to_column_descs(&key_schema)
+        let names: Vec<String> = avro_schema_to_column_descs(&key_schema, None)
             .unwrap()
             .drain(..)
             .map(|d| d.name)
@@ -301,7 +306,7 @@ mod tests {
 }
 "#;
         let schema = Schema::parse_str(test_schema_str).unwrap();
-        let columns = avro_schema_to_column_descs(&schema).unwrap();
+        let columns = avro_schema_to_column_descs(&schema, None).unwrap();
         for col in &columns {
             let dtype = col.column_type.as_ref().unwrap();
             println!("name = {}, type = {:?}", col.name, dtype.type_name);
@@ -319,6 +324,7 @@ mod tests {
                 avro_extract_field_schema(&outer_schema, Some("before")).unwrap(),
             )
             .unwrap(),
+            None,
         )
         .unwrap()
         .into_iter()

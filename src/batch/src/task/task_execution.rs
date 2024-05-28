@@ -79,7 +79,7 @@ impl StateReporter {
 
 #[derive(PartialEq, Eq, Hash, Clone, Debug, Default)]
 pub struct TaskId {
-    pub task_id: u32,
+    pub task_id: u64,
     pub stage_id: u32,
     pub query_id: String,
 }
@@ -87,7 +87,7 @@ pub struct TaskId {
 #[derive(PartialEq, Eq, Hash, Clone, Default)]
 pub struct TaskOutputId {
     pub task_id: TaskId,
-    pub output_id: u32,
+    pub output_id: u64,
 }
 
 /// More compact formatter compared to derived `fmt::Debug`.
@@ -689,10 +689,6 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             TaskStatus::Finished => bail!("task {:?} has been finished", self.get_task_id()),
             _ => Ok(false),
         }
-    }
-
-    pub fn mem_usage(&self) -> usize {
-        self.context.mem_usage()
     }
 
     /// Check the task status: whether has ended.

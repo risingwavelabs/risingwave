@@ -23,9 +23,9 @@ use std::marker::PhantomData;
 
 pub use enumerator::*;
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_pb::catalog::PbSource;
 use risingwave_pb::connector_service::{PbSourceType, PbTableSchema, SourceType, TableSchema};
+use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::ExternalTableDesc;
 use simd_json::prelude::ArrayTrait;
 pub use source::*;
@@ -44,6 +44,7 @@ pub const CDC_BACKFILL_SNAPSHOT_INTERVAL_KEY: &str = "snapshot.interval";
 pub const CDC_BACKFILL_SNAPSHOT_BATCH_SIZE_KEY: &str = "snapshot.batch_size";
 // We enable transaction for shared cdc source by default
 pub const CDC_TRANSACTIONAL_KEY: &str = "transactional";
+pub const CDC_WAIT_FOR_STREAMING_START_TIMEOUT: &str = "cdc.source.wait.streaming.start.timeout";
 
 pub const MYSQL_CDC_CONNECTOR: &str = Mysql::CDC_CONNECTOR_NAME;
 pub const POSTGRES_CDC_CONNECTOR: &str = Postgres::CDC_CONNECTOR_NAME;
@@ -98,6 +99,22 @@ pub struct CdcProperties<T: CdcSourceTypeTrait> {
     pub _phantom: PhantomData<T>,
 }
 
+pub fn table_schema_exclude_additional_columns(table_schema: &TableSchema) -> TableSchema {
+    TableSchema {
+        columns: table_schema
+            .columns
+            .iter()
+            .filter(|col| {
+                col.additional_column
+                    .as_ref()
+                    .is_some_and(|val| val.column_type.is_none())
+            })
+            .cloned()
+            .collect(),
+        pk_indices: table_schema.pk_indices.clone(),
+    }
+}
+
 impl<T: CdcSourceTypeTrait> TryFromHashmap for CdcProperties<T> {
     fn try_from_hashmap(
         properties: HashMap<String, String>,
@@ -146,6 +163,12 @@ where
                 .columns
                 .iter()
                 .flat_map(|col| &col.column_desc)
+                .filter(|col| {
+                    !matches!(
+                        col.generated_or_default_column,
+                        Some(GeneratedOrDefaultColumn::GeneratedColumn(_))
+                    )
+                })
                 .cloned()
                 .collect(),
             pk_indices,
@@ -161,7 +184,17 @@ where
             table_desc.connect_properties.clone().into_iter().collect();
 
         let table_schema = TableSchema {
-            columns: table_desc.columns.clone(),
+            columns: table_desc
+                .columns
+                .iter()
+                .filter(|col| {
+                    !matches!(
+                        col.generated_or_default_column,
+                        Some(GeneratedOrDefaultColumn::GeneratedColumn(_))
+                    )
+                })
+                .cloned()
+                .collect(),
             pk_indices: table_desc.stream_key.clone(),
         };
 
@@ -182,17 +215,5 @@ impl<T: CdcSourceTypeTrait> crate::source::UnknownFields for CdcProperties<T> {
 impl<T: CdcSourceTypeTrait> CdcProperties<T> {
     pub fn get_source_type_pb(&self) -> SourceType {
         SourceType::from(T::source_type())
-    }
-
-    pub fn schema(&self) -> Schema {
-        Schema {
-            fields: self
-                .table_schema
-                .columns
-                .iter()
-                .map(ColumnDesc::from)
-                .map(Field::from)
-                .collect(),
-        }
     }
 }
