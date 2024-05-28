@@ -131,7 +131,7 @@ impl DynamicLevelSelectorCore {
                 Box::new(MinOverlappingPicker::new(
                     picker_info.select_level,
                     picker_info.target_level,
-                    self.config.max_bytes_for_level_base / 2,
+                    self.config.sub_level_max_compaction_bytes,
                     self.config.split_weight_by_vnode,
                     overlap_strategy,
                 ))
@@ -164,8 +164,8 @@ impl DynamicLevelSelectorCore {
             return ctx;
         }
 
-        let base_bytes_max = self.config.max_bytes_for_level_base;
-        let base_bytes_min = base_bytes_max / self.config.max_bytes_for_level_multiplier;
+        let base_bytes_min = self.config.max_bytes_for_level_base;
+        let base_bytes_max = base_bytes_min * self.config.max_bytes_for_level_multiplier;
 
         let mut cur_level_size = max_level_size;
         for _ in first_non_empty_level..self.config.max_level as usize {
@@ -194,7 +194,8 @@ impl DynamicLevelSelectorCore {
             // assume an hourglass shape where L1+ sizes are smaller than L0. This
             // causes compaction scoring, which depends on level sizes, to favor L1+
             // at the expense of L0, which may fill up and stall.
-            ctx.level_max_bytes[i] = std::cmp::max(level_size, base_bytes_max);
+            ctx.level_max_bytes[i] =
+                std::cmp::max(level_size, self.config.max_bytes_for_level_base);
             level_size = (level_size as f64 * level_multiplier) as u64;
         }
         ctx

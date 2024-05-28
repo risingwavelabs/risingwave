@@ -228,6 +228,8 @@ pub struct MetaOpts {
     /// The size limit to move a state-table to other group.
     pub min_table_split_size: u64,
 
+    pub max_group_size: u64,
+
     /// Whether config object storage bucket lifecycle to purge stale data.
     pub do_not_config_object_storage_lifecycle: bool,
 
@@ -317,6 +319,7 @@ impl MetaOpts {
             periodic_tombstone_reclaim_compaction_interval_sec: 60,
             periodic_split_compact_group_interval_sec: 60,
             split_group_size_limit: 5 * 1024 * 1024 * 1024,
+            max_group_size: 20 * 1024 * 1024 * 1024,
             min_table_split_size: 2 * 1024 * 1024 * 1024,
             compact_task_table_size_partition_threshold_low: 128 * 1024 * 1024,
             compact_task_table_size_partition_threshold_high: 512 * 1024 * 1024,

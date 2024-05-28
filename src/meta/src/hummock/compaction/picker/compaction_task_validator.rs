@@ -179,18 +179,12 @@ impl CompactionTaskValidationRule for BaseCompactionTaskValidationRule {
     fn validate(&self, input: &CompactionInput, stats: &mut LocalPickerStatistic) -> bool {
         if input.total_file_count >= self.config.level0_max_compact_file_number
             || input.input_levels.len() >= MAX_COMPACT_LEVEL_COUNT
+            || input.select_input_size + input.target_input_size >= self.config.max_compaction_bytes
         {
             return true;
         }
 
-        // The size of target level may be too large, we shall skip this compact task and wait
-        //  the data in base level compact to lower level.
-        if input.target_input_size > self.config.max_compaction_bytes {
-            stats.skip_by_count_limit += 1;
-            return false;
-        }
-
-        if input.select_input_size < input.target_input_size {
+        if input.select_input_size < 2 * input.target_input_size {
             stats.skip_by_write_amp_limit += 1;
             return false;
         }

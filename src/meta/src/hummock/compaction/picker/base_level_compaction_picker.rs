@@ -159,7 +159,7 @@ impl LevelCompactionPicker {
             // half quota.
             std::cmp::max(
                 self.config.max_bytes_for_level_base,
-                self.config.max_compaction_bytes / 2,
+                self.config.max_compaction_bytes,
             ),
             1,
             // The maximum number of sub_level compact level per task

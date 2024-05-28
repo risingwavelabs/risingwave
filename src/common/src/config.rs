@@ -299,6 +299,9 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::split_group_size_limit")]
     pub split_group_size_limit: u64,
 
+    #[serde(default = "default::meta::max_group_size")]
+    pub max_group_size: u64,
+
     #[serde(default = "default::meta::cut_table_size_limit")]
     pub cut_table_size_limit: u64,
 
@@ -1255,11 +1258,15 @@ pub mod default {
         }
 
         pub fn move_table_size_limit() -> u64 {
-            10 * 1024 * 1024 * 1024 // 10GB
+            192 * 1024 * 1024 * 1024 // 192GB
         }
 
         pub fn split_group_size_limit() -> u64 {
-            64 * 1024 * 1024 * 1024 // 64GB
+            256 * 1024 * 1024 * 1024 // 256GB
+        }
+
+        pub fn max_group_size() -> u64 {
+            1024 * 1024 * 1024 * 1024 // 1TB
         }
 
         pub fn partition_vnode_count() -> u32 {

@@ -853,6 +853,32 @@ impl Levels {
         }
         delete_sst_ids_set.is_empty()
     }
+
+    pub fn check_reclaim_sst_exist(&self) -> bool {
+        let existed_table_ids: HashSet<u32> =
+            HashSet::from_iter(self.member_table_ids.clone().into_iter());
+        for level in &self.l0.as_ref().unwrap().sub_levels {
+            for table in &level.table_infos {
+                for table_id in &table.table_ids {
+                    if !existed_table_ids.contains(table_id) {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        for level in &self.levels {
+            for table in &level.table_infos {
+                for table_id in &table.table_ids {
+                    if !existed_table_ids.contains(table_id) {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        false
+    }
 }
 
 pub fn build_initial_compaction_group_levels(
