@@ -402,17 +402,6 @@ pub(crate) async fn bind_columns_from_source(
             stream_source_info.name_strategy =
                 name_strategy.unwrap_or(PbSchemaRegistryNameStrategy::Unspecified as i32);
 
-            // Parse the value but throw it away.
-            // It would be too late to report error in `SpecificParserConfig::new`,
-            // which leads to recovery loop.
-            // XXX: Really?
-            MapHandling::from_options(&format_encode_options_to_consume)
-                .map_err(|err| InvalidInputSyntax(err.message))?;
-            try_consume_string_from_options(
-                &mut format_encode_options_to_consume,
-                MapHandling::OPTION_KEY,
-            );
-
             Some(
                 extract_avro_table_schema(
                     &stream_source_info,
@@ -457,7 +446,8 @@ pub(crate) async fn bind_columns_from_source(
                 // Parse the value but throw it away.
                 // It would be too late to report error in `SpecificParserConfig::new`,
                 // which leads to recovery loop.
-                // XXX: Really?
+                // FIXME: We should make parser to return error and remove the check here.
+                // For Avro map.handling.mode, it can already report error, so there must be something wrong for JSON.
                 TimestamptzHandling::from_options(&format_encode_options_to_consume)
                     .map_err(|err| InvalidInputSyntax(err.message))?;
                 try_consume_string_from_options(
