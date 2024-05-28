@@ -29,7 +29,7 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::types::DataType;
 use risingwave_connector::parser::additional_columns::{
-    build_additional_column_catalog, COMPATIBLE_ADDITIONAL_COLUMNS,
+    build_additional_column_catalog, get_supported_additional_columns,
 };
 use risingwave_connector::parser::{
     schema_to_columns, AvroParserConfig, DebeziumAvroParserConfig, ProtobufParserConfig,
@@ -551,12 +551,11 @@ pub fn handle_addition_columns(
     with_properties: &HashMap<String, String>,
     mut additional_columns: IncludeOption,
     columns: &mut Vec<ColumnCatalog>,
+    is_cdc_backfill_table: bool,
 ) -> Result<()> {
     let connector_name = with_properties.get_connector().unwrap(); // there must be a connector in source
 
-    if COMPATIBLE_ADDITIONAL_COLUMNS
-        .get(connector_name.as_str())
-        .is_none()
+    if get_supported_additional_columns(connector_name.as_str(), is_cdc_backfill_table).is_none()
         && !additional_columns.is_empty()
     {
         return Err(RwError::from(ProtocolError(format!(
@@ -595,6 +594,7 @@ pub fn handle_addition_columns(
             item.inner_field.as_deref(),
             data_type_name.as_deref(),
             true,
+            is_cdc_backfill_table,
         )?);
     }
 
@@ -838,12 +838,6 @@ pub(crate) async fn bind_source_pk(
             }
         }
         (Format::DebeziumMongo, Encode::Json) => {
-            if !additional_column_names.is_empty() {
-                return Err(RwError::from(ProtocolError(format!(
-                    "FORMAT DEBEZIUMMONGO forbids additional columns, but got {:?}",
-                    additional_column_names
-                ))));
-            }
             if sql_defined_pk {
                 sql_defined_pk_names
             } else {
@@ -917,6 +911,7 @@ fn check_and_add_timestamp_column(
             None,
             None,
             true,
+            false,
         )
         .unwrap();
         catalog.is_hidden = true;
@@ -1361,7 +1356,12 @@ pub async fn bind_create_source(
     )?;
 
     // add additional columns before bind pk, because `format upsert` requires the key column
-    handle_addition_columns(&with_properties, include_column_options, &mut columns)?;
+    handle_addition_columns(
+        &with_properties,
+        include_column_options,
+        &mut columns,
+        false,
+    )?;
     // compatible with the behavior that add a hidden column `_rw_kafka_timestamp` to each message from Kafka source
     if is_create_source {
         // must behind `handle_addition_columns`
