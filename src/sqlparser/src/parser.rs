@@ -61,7 +61,7 @@ macro_rules! parser_err {
         return Err(winnow::error::ErrMode::Cut(<winnow::error::ContextError as winnow::error::FromExternalError<_, _>>::from_external_error(
             &Parser::default(),
             winnow::error::ErrorKind::Fail,
-            crate::parser::StrError(format!($($arg)*)),
+            $crate::parser::StrError(format!($($arg)*)),
         )))
     };
 }
