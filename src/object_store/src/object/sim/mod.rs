@@ -115,7 +115,7 @@ pub struct SimObjectStore {
 
 #[async_trait::async_trait]
 impl ObjectStore for SimObjectStore {
-    fn get_object_prefix(&self, _obj_id: u64) -> String {
+    fn get_object_prefix(&self, _obj_id: u64, _use_new_object_prefix_strategy: bool) -> String {
         String::default()
     }
 
