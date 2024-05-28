@@ -5,8 +5,8 @@ db error: ERROR: Failed to prepare the statement
 
 Caused by:
   sql parser error: expected an SQL statement, found: selet at line 1, column 1
-  LINE 1: selet 1;
-               ^
+LINE 1: selet 1;
+             ^
 
 
 query error

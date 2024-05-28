@@ -5,8 +5,9 @@ db error: ERROR: Failed to run the query
 
 Caused by:
   sql parser error: expected an SQL statement, found: selet at line 1, column 1
-  LINE 1: selet 1;
-               ^
+LINE 1: selet 1;
+             ^
+
 
 statement error
 create function int_42() returns int as int_42 using link '555.0.0.1:8815';
