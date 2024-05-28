@@ -290,7 +290,7 @@ struct UnsealedEpochData {
 }
 
 impl UnsealedEpochData {
-    fn flush(&mut self, context: &UploaderContext) {
+    fn flush(&mut self, context: &UploaderContext) -> usize {
         let imms: HashMap<_, _> = take(&mut self.imms)
             .into_iter()
             .map(|(id, imms)| (id, imms.into_iter().collect_vec()))
@@ -303,7 +303,11 @@ impl UnsealedEpochData {
                 .spill_task_size_from_unsealed
                 .inc_by(task.task_info.task_size as u64);
             info!("Spill unsealed data. Task: {}", task.get_task_info());
+            let size = task.task_info.task_size;
             self.spilled_data.add_task(task);
+            size
+        } else {
+            0
         }
     }
 
@@ -446,14 +450,15 @@ impl SealedData {
     }
 
     // Flush can be triggered by either a sync_epoch or a spill (`may_flush`) request.
-    fn flush(&mut self, context: &UploaderContext, is_spilled: bool) {
-        let payload: HashMap<_, _> = take(&mut self.imms_by_table_shard)
+    fn flush(&mut self, context: &UploaderContext, is_spilled: bool) -> usize {
+        let payload: HashMap<_, Vec<_>> = take(&mut self.imms_by_table_shard)
             .into_iter()
             .map(|(id, imms)| (id, imms.into_iter().collect()))
             .collect();
 
         if !payload.is_empty() {
             let task = UploadingTask::new(payload, context);
+            let size = task.task_info.task_size;
             if is_spilled {
                 context.stats.spill_task_counts_from_sealed.inc();
                 context
@@ -463,6 +468,9 @@ impl SealedData {
                 info!("Spill sealed data. Task: {}", task.get_task_info());
             }
             self.spilled_data.add_task(task);
+            size
+        } else {
+            0
         }
     }
 
@@ -806,16 +814,27 @@ impl HummockUploader {
     }
 
     pub(crate) fn may_flush(&mut self) {
-        if self.context.buffer_tracker.need_more_flush() {
-            self.sealed_data.flush(&self.context, true);
-        }
+        if self.context.buffer_tracker.need_flush() {
+            let mut curr_batch_flush_size = 0;
+            if self.context.buffer_tracker.need_flush() {
+                curr_batch_flush_size += self.sealed_data.flush(&self.context, true);
+            }
 
-        if self.context.buffer_tracker.need_more_flush() {
-            // iterate from older epoch to newer epoch
-            for unsealed_data in self.unsealed_data.values_mut() {
-                unsealed_data.flush(&self.context);
-                if !self.context.buffer_tracker.need_more_flush() {
-                    break;
+            if self
+                .context
+                .buffer_tracker
+                .need_more_flush(curr_batch_flush_size)
+            {
+                // iterate from older epoch to newer epoch
+                for unsealed_data in self.unsealed_data.values_mut() {
+                    curr_batch_flush_size += unsealed_data.flush(&self.context);
+                    if !self
+                        .context
+                        .buffer_tracker
+                        .need_more_flush(curr_batch_flush_size)
+                    {
+                        break;
+                    }
                 }
             }
         }
@@ -1368,7 +1387,7 @@ mod tests {
     ) {
         // flush threshold is 0. Flush anyway
         let buffer_tracker =
-            BufferTracker::new(usize::MAX, 0, GenericGauge::new("test", "test").unwrap());
+            BufferTracker::new(usize::MAX, 0, GenericGauge::new("test", "test").unwrap(), 0);
         // (the started task send the imm ids of payload, the started task wait for finish notify)
         #[allow(clippy::type_complexity)]
         let task_notifier_holder: Arc<

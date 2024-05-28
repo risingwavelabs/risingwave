@@ -618,6 +618,11 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::shared_buffer_flush_ratio")]
     pub shared_buffer_flush_ratio: f32,
 
+    /// The minimum total flush size of shared buffer spill. When a shared buffer spilled is trigger,
+    /// the total flush size across multiple epochs should be at least higher than this size.
+    #[serde(default = "default::storage::shared_buffer_min_batch_flush_size_mb")]
+    pub shared_buffer_min_batch_flush_size_mb: usize,
+
     /// The threshold for the number of immutable memtables to merge to a new imm.
     #[serde(default = "default::storage::imm_merge_threshold")]
     #[deprecated]
@@ -1307,11 +1312,15 @@ pub mod default {
         }
 
         pub fn shared_buffer_capacity_mb() -> usize {
-            1024
+            4096
         }
 
         pub fn shared_buffer_flush_ratio() -> f32 {
             0.8
+        }
+
+        pub fn shared_buffer_min_batch_flush_size_mb() -> usize {
+            800
         }
 
         pub fn imm_merge_threshold() -> usize {
