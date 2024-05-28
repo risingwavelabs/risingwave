@@ -147,10 +147,16 @@ fn data_type_stateful<S>(input: &mut StatefulStream<S>) -> PResult<DataType>
 where
     S: TokenStream,
 {
-    repeat(0.., (Token::LBracket, cut_err(Token::RBracket)))
-        .fold1(data_type_stateful_inner, |mut acc, _| {
-            acc = DataType::Array(Box::new(acc));
-            acc
+    (
+        data_type_stateful_inner,
+        repeat(0.., (Token::LBracket, cut_err(Token::RBracket))),
+    )
+        .map(|(mut dt, depth)| {
+            let depth: usize = depth;
+            for _ in 0..depth {
+                dt = DataType::Array(Box::new(dt));
+            }
+            dt
         })
         .parse_next(input)
 }
