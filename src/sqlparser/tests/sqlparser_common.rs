@@ -130,12 +130,12 @@ fn parse_update() {
 
     let sql = "UPDATE t WHERE 1";
     let res = parse_sql_statements(sql);
-    assert!(format!("{}", res.unwrap_err()).contains("Expected SET, found: WHERE"));
+    assert!(format!("{}", res.unwrap_err()).contains("expected SET, found: WHERE"));
 
     let sql = "UPDATE t SET a = 1 extrabadstuff";
     let res = parse_sql_statements(sql);
     assert!(
-        format!("{}", res.unwrap_err()).contains("Expected end of statement, found: extrabadstuff")
+        format!("{}", res.unwrap_err()).contains("expected end of statement, found: extrabadstuff")
     );
 }
 
@@ -286,7 +286,7 @@ fn parse_select_wildcard() {
 
     let sql = "SELECT * + * FROM foo;";
     let result = parse_sql_statements(sql);
-    assert!(format!("{}", result.unwrap_err()).contains("Expected end of statement, found: +"));
+    assert!(format!("{}", result.unwrap_err()).contains("expected end of statement, found: +"));
 }
 
 #[test]
@@ -323,7 +323,7 @@ fn parse_column_aliases() {
         assert_eq!(&Expr::Value(number("1")), right.as_ref());
         assert_eq!(&Ident::new_unchecked("newname"), alias);
     } else {
-        panic!("Expected ExprWithAlias")
+        panic!("expected ExprWithAlias")
     }
 
     // alias without AS is parsed correctly:
@@ -333,10 +333,10 @@ fn parse_column_aliases() {
 #[test]
 fn test_eof_after_as() {
     let res = parse_sql_statements("SELECT foo AS");
-    assert!(format!("{}", res.unwrap_err()).contains("Expected an identifier after AS, found: EOF"));
+    assert!(format!("{}", res.unwrap_err()).contains("expected an identifier after AS, found: EOF"));
 
     let res = parse_sql_statements("SELECT 1 FROM foo AS");
-    assert!(format!("{}", res.unwrap_err()).contains("Expected an identifier after AS, found: EOF"));
+    assert!(format!("{}", res.unwrap_err()).contains("expected an identifier after AS, found: EOF"));
 }
 
 #[test]
@@ -392,7 +392,7 @@ fn parse_select_count_distinct() {
 #[test]
 fn parse_invalid_infix_not() {
     let res = parse_sql_statements("SELECT c FROM t WHERE c NOT (");
-    assert!(format!("{}", res.unwrap_err(),).contains("Expected end of statement, found: NOT"));
+    assert!(format!("{}", res.unwrap_err(),).contains("expected end of statement, found: NOT"));
 }
 
 #[test]
@@ -1270,7 +1270,7 @@ fn parse_extract() {
     verified_stmt("SELECT EXTRACT(SECOND FROM d)");
 
     let res = parse_sql_statements("SELECT EXTRACT(0 FROM d)");
-    assert!(format!("{}", res.unwrap_err()).contains("Expected date/time field, found: 0"));
+    assert!(format!("{}", res.unwrap_err()).contains("expected date/time field, found: 0"));
 }
 
 #[test]
@@ -1436,13 +1436,13 @@ fn parse_create_table() {
     assert!(res
         .unwrap_err()
         .to_string()
-        .contains("Expected \',\' or \')\' after column definition, found: GARBAGE"));
+        .contains("expected \',\' or \')\' after column definition, found: GARBAGE"));
 
     let res = parse_sql_statements("CREATE TABLE t (a int NOT NULL CONSTRAINT foo)");
     assert!(res
         .unwrap_err()
         .to_string()
-        .contains("Expected constraint details after CONSTRAINT <name>"));
+        .contains("expected constraint details after CONSTRAINT <name>"));
 }
 
 #[test]
@@ -1783,12 +1783,12 @@ fn parse_alter_table_alter_column_type() {
 #[test]
 fn parse_bad_constraint() {
     let res = parse_sql_statements("ALTER TABLE tab ADD");
-    assert!(format!("{}", res.unwrap_err()).contains("Expected identifier, found: EOF"));
+    assert!(format!("{}", res.unwrap_err()).contains("expected identifier, found: EOF"));
 
     let res = parse_sql_statements("CREATE TABLE tab (foo int,");
 
     assert!(format!("{}", res.unwrap_err())
-        .contains("Expected column name or constraint definition, found: EOF"));
+        .contains("expected column name or constraint definition, found: EOF"));
 }
 
 fn run_explain_analyze(query: &str, expected_analyze: bool, expected_options: ExplainOptions) {
@@ -1887,7 +1887,7 @@ fn parse_explain_with_invalid_options() {
     assert!(res.is_err());
 
     let res = parse_sql_statements("EXPLAIN (VERBOSE TRACE) SELECT sqrt(id) FROM foo");
-    assert!(format!("{}", res.unwrap_err()).contains("Expected ), found: TRACE"));
+    assert!(format!("{}", res.unwrap_err()).contains("expected ), found: TRACE"));
 
     let res = parse_sql_statements("EXPLAIN () SELECT sqrt(id) FROM foo");
     assert!(res.is_err());
@@ -1895,7 +1895,7 @@ fn parse_explain_with_invalid_options() {
     let res = parse_sql_statements("EXPLAIN (VERBOSE, ) SELECT sqrt(id) FROM foo");
 
     let err_msg =
-        "Expected one of VERBOSE or TRACE or TYPE or LOGICAL or PHYSICAL or DISTSQL, found: )";
+        "expected one of VERBOSE or TRACE or TYPE or LOGICAL or PHYSICAL or DISTSQL, found: )";
     assert!(format!("{}", res.unwrap_err()).contains(err_msg));
 }
 
@@ -2209,10 +2209,10 @@ fn parse_literal_interval() {
     );
 
     let result = parse_sql_statements("SELECT INTERVAL '1' SECOND TO SECOND");
-    assert!(format!("{}", result.unwrap_err()).contains("Expected end of statement, found: SECOND"));
+    assert!(format!("{}", result.unwrap_err()).contains("expected end of statement, found: SECOND"));
 
     let result = parse_sql_statements("SELECT INTERVAL '10' HOUR (1) TO HOUR (2)");
-    assert!(format!("{}", result.unwrap_err()).contains("Expected end of statement, found: ("));
+    assert!(format!("{}", result.unwrap_err()).contains("expected end of statement, found: ("));
 
     verified_only_select("SELECT INTERVAL '1' YEAR");
     verified_only_select("SELECT INTERVAL '1' MONTH");
@@ -2295,7 +2295,7 @@ fn parse_delimited_identifiers() {
             );
             assert_eq!(&Ident::with_quote_unchecked('"', "column alias"), alias);
         }
-        _ => panic!("Expected ExprWithAlias"),
+        _ => panic!("expected ExprWithAlias"),
     }
 
     verified_stmt(r#"CREATE TABLE "foo" ("bar" "int")"#);
@@ -2614,7 +2614,7 @@ fn parse_natural_join() {
 
     let sql = "SELECT * FROM t1 natural";
     assert!(format!("{}", parse_sql_statements(sql).unwrap_err(),)
-        .contains("Expected a join type after NATURAL, found: EOF"));
+        .contains("expected a join type after NATURAL, found: EOF"));
 }
 
 #[test]
@@ -2678,7 +2678,7 @@ fn parse_join_syntax_variants() {
     );
 
     let res = parse_sql_statements("SELECT * FROM a OUTER JOIN b ON 1");
-    assert!(format!("{}", res.unwrap_err()).contains("Expected LEFT, RIGHT, or FULL, found: OUTER"));
+    assert!(format!("{}", res.unwrap_err()).contains("expected LEFT, RIGHT, or FULL, found: OUTER"));
 }
 
 #[test]
@@ -2714,7 +2714,7 @@ fn parse_ctes() {
         Expr::Subquery(ref subquery) => {
             assert_ctes_in_select(&cte_sqls, subquery.as_ref());
         }
-        _ => panic!("Expected subquery"),
+        _ => panic!("expected subquery"),
     }
     // CTE in a derived table
     let sql = &format!("SELECT * FROM ({})", with);
@@ -2723,13 +2723,13 @@ fn parse_ctes() {
         TableFactor::Derived { subquery, .. } => {
             assert_ctes_in_select(&cte_sqls, subquery.as_ref())
         }
-        _ => panic!("Expected derived table"),
+        _ => panic!("expected derived table"),
     }
     // CTE in a view
     let sql = &format!("CREATE VIEW v AS {}", with);
     match verified_stmt(sql) {
         Statement::CreateView { query, .. } => assert_ctes_in_select(&cte_sqls, &query),
-        _ => panic!("Expected CREATE VIEW"),
+        _ => panic!("expected CREATE VIEW"),
     }
     // CTE in a CTE...
     let sql = &format!("WITH outer_cte AS ({}) SELECT * FROM outer_cte", with);
@@ -2868,7 +2868,7 @@ fn parse_multiple_statements() {
         one_statement_parses_to(&(sql1.to_owned() + ";"), sql1);
         // Check that forgetting the semicolon results in an error:
         let res = parse_sql_statements(&(sql1.to_owned() + " " + sql2_kw + sql2_rest));
-        let err_msg = "Expected end of statement, found: ";
+        let err_msg = "expected end of statement, found: ";
         assert!(format!("{}", res.unwrap_err()).contains(err_msg));
     }
     test_with("SELECT foo", "SELECT", " bar");
@@ -2932,18 +2932,18 @@ fn parse_overlay() {
     );
 
     for (sql, err_msg) in [
-        ("SELECT OVERLAY('abc', 'xyz')", "Expected PLACING, found: ,"),
+        ("SELECT OVERLAY('abc', 'xyz')", "expected PLACING, found: ,"),
         (
             "SELECT OVERLAY('abc' PLACING 'xyz')",
-            "Expected FROM, found: )",
+            "expected FROM, found: )",
         ),
         (
             "SELECT OVERLAY('abc' PLACING 'xyz' FOR 2)",
-            "Expected FROM, found: FOR",
+            "expected FROM, found: FOR",
         ),
         (
             "SELECT OVERLAY('abc' PLACING 'xyz' FOR 2 FROM 1)",
-            "Expected FROM, found: FOR",
+            "expected FROM, found: FOR",
         ),
     ] {
         let res = parse_sql_statements(sql);
@@ -2972,7 +2972,7 @@ fn parse_trim() {
 
     let res = parse_sql_statements("SELECT TRIM(FOO 'xyz' FROM 'xyzfooxyz')");
 
-    let err_msg = "Expected ), found: 'xyz'";
+    let err_msg = "expected ), found: 'xyz'";
     assert!(format!("{}", res.unwrap_err()).contains(err_msg));
 }
 
@@ -3000,12 +3000,12 @@ fn parse_exists_subquery() {
     verified_stmt("SELECT EXISTS (SELECT 1)");
 
     let res = parse_sql_statements("SELECT EXISTS (");
-    let err_msg = "Expected SELECT, VALUES, or a subquery in the query body, found: EOF";
+    let err_msg = "expected SELECT, VALUES, or a subquery in the query body, found: EOF";
     assert!(format!("{}", res.unwrap_err()).contains(err_msg));
 
     let res = parse_sql_statements("SELECT EXISTS (NULL)");
 
-    let err_msg = "Expected SELECT, VALUES, or a subquery in the query body, found: NULL";
+    let err_msg = "expected SELECT, VALUES, or a subquery in the query body, found: NULL";
     assert!(format!("{}", res.unwrap_err()).contains(err_msg));
 }
 
@@ -3339,11 +3339,11 @@ fn parse_drop_table() {
 
     let sql = "DROP TABLE";
     assert!(format!("{}", parse_sql_statements(sql).unwrap_err(),)
-        .contains("Expected identifier, found: EOF"));
+        .contains("expected identifier, found: EOF"));
 
     let sql = "DROP TABLE IF EXISTS foo CASCADE RESTRICT";
     assert!(format!("{}", parse_sql_statements(sql).unwrap_err(),)
-        .contains("Expected end of statement, found: RESTRICT"));
+        .contains("expected end of statement, found: RESTRICT"));
 }
 
 #[test]
@@ -3404,7 +3404,7 @@ fn parse_create_user() {
 #[test]
 fn parse_invalid_subquery_without_parens() {
     let res = parse_sql_statements("SELECT SELECT 1 FROM bar WHERE 1=1 FROM baz");
-    assert!(format!("{}", res.unwrap_err()).contains("Expected end of statement, found: 1"));
+    assert!(format!("{}", res.unwrap_err()).contains("expected end of statement, found: 1"));
 }
 
 #[test]
@@ -3566,12 +3566,12 @@ fn lateral_derived() {
     let sql = "SELECT * FROM customer LEFT JOIN LATERAL generate_series(1, customer.id)";
     let res = parse_sql_statements(sql);
     assert!(format!("{}", res.unwrap_err())
-        .contains("Expected subquery after LATERAL, found: generate_series"));
+        .contains("expected subquery after LATERAL, found: generate_series"));
 
     let sql = "SELECT * FROM a LEFT JOIN LATERAL (b CROSS JOIN c)";
     let res = parse_sql_statements(sql);
     assert!(format!("{}", res.unwrap_err())
-        .contains("Expected SELECT, VALUES, or a subquery in the query body, found: b"));
+        .contains("expected SELECT, VALUES, or a subquery in the query body, found: b"));
 }
 
 #[test]
@@ -3624,13 +3624,13 @@ fn parse_start_transaction() {
     );
 
     let res = parse_sql_statements("START TRANSACTION ISOLATION LEVEL BAD");
-    assert!(format!("{}", res.unwrap_err()).contains("Expected isolation level, found: BAD"));
+    assert!(format!("{}", res.unwrap_err()).contains("expected isolation level, found: BAD"));
 
     let res = parse_sql_statements("START TRANSACTION BAD");
-    assert!(format!("{}", res.unwrap_err()).contains("Expected end of statement, found: BAD"));
+    assert!(format!("{}", res.unwrap_err()).contains("expected end of statement, found: BAD"));
 
     let res = parse_sql_statements("START TRANSACTION READ ONLY,");
-    assert!(format!("{}", res.unwrap_err()).contains("Expected transaction mode, found: EOF"));
+    assert!(format!("{}", res.unwrap_err()).contains("expected transaction mode, found: EOF"));
 }
 
 #[test]
