@@ -43,6 +43,9 @@ create table rw.products_test ( id INT,
  PRIMARY KEY (id)
 ) include timestamp as commit_ts from mysql_mytest table 'mytest.products';
 
+# sleep to ensure (default,'Milk','Milk is a white liquid food') is consumed from Debezium message instead of backfill.
+sleep 10s
+
 system ok
 mysql --protocol=tcp -u root mytest -e "INSERT INTO products VALUES (default,'Milk','Milk is a white liquid food');
        INSERT INTO orders VALUES (default, '2023-11-28 15:08:22', 'Bob', 10.52, 100, false);"
@@ -206,6 +209,8 @@ CREATE TABLE IF NOT EXISTS postgres_all_types(
  c_timestamptz timestamptz,
  c_interval interval,
  c_jsonb jsonb,
+ c_uuid varchar,
+ c_enum varchar,
  c_boolean_array boolean[],
  c_smallint_array smallint[],
  c_integer_array integer[],
@@ -221,7 +226,8 @@ CREATE TABLE IF NOT EXISTS postgres_all_types(
  c_timestamptz_array timestamptz[],
  c_interval_array interval[],
  c_jsonb_array jsonb[],
- c_uuid varchar,
+ c_uuid_array varchar[],
+ c_enum_array varchar[],
  PRIMARY KEY (c_boolean,c_bigint,c_date)
 ) from pg_source table 'public.postgres_all_types';
 
@@ -253,7 +259,7 @@ sleep 3s
 query TTTTTTT
 SELECT c_boolean,c_date,c_time,c_timestamp,c_jsonb,c_smallint_array,c_timestamp_array,c_uuid FROM postgres_all_types where c_bigint=-9223372036854775807
 ----
-f 0001-01-01 00:00:00 0001-01-01 00:00:00 {} {-32767} {"0001-01-01 00:00:00"} bb488f9b-330d-4012-b849-12adeb49e57e
+f 0001-01-01 00:00:00 2001-01-01 00:00:00 {} {-32767} {"2001-01-01 00:00:00"} bb488f9b-330d-4012-b849-12adeb49e57e
 
 
 # postgres streaming test
