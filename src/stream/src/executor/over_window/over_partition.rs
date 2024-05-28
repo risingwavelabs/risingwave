@@ -15,7 +15,7 @@
 //! Types and functions that store or manipulate state/cache inside one single over window
 //! partition.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::BTreeMap;
 use std::marker::PhantomData;
 use std::ops::{Bound, RangeInclusive};
 
@@ -817,9 +817,9 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
                 .await?;
         }
 
-        // TODO(rc): Uncomment the following to enable prefetching rows before the start of the
-        // range once we have STATE TABLE REVERSE ITERATOR.
-        // self.extend_cache_leftward_by_n(table, range.start()).await?;
+        // prefetch rows before the start of the range
+        self.extend_cache_leftward_by_n(table, range.start())
+            .await?;
 
         // prefetch rows after the end of the range
         self.extend_cache_rightward_by_n(table, range.end()).await
@@ -898,7 +898,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         table: &StateTable<S>,
         range_to_exclusive: &StateKey,
     ) -> StreamExecutorResult<()> {
-        let mut to_extend: VecDeque<OwnedRow> = VecDeque::with_capacity(MAGIC_BATCH_SIZE);
+        let mut n_extended = 0usize;
         {
             let sub_range = (
                 Bound::<OwnedRow>::Unbounded,
@@ -907,8 +907,8 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
                         .state_key_to_table_sub_pk(range_to_exclusive)?,
                 ),
             );
-            let stream = table
-                .iter_with_prefix(
+            let rev_stream = table
+                .rev_iter_with_prefix(
                     self.this_partition_key,
                     &sub_range,
                     PrefetchOptions::default(),
@@ -916,24 +916,19 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
                 .await?;
 
             #[for_await]
-            for row in stream {
+            for row in rev_stream {
                 let row: OwnedRow = row?.into_owned_row();
 
-                // For leftward extension, we now must iterate the table in order from the beginning
-                // of this partition and fill only the last n rows to the cache.
-                // TODO(rc): WE NEED STATE TABLE REVERSE ITERATOR!!
-                if to_extend.len() == MAGIC_BATCH_SIZE {
-                    to_extend.pop_front();
+                let key = self.row_conv.row_to_state_key(&row)?;
+                self.range_cache.insert(CacheKey::from(key), row);
+
+                n_extended += 1;
+                if n_extended == MAGIC_BATCH_SIZE {
+                    break;
                 }
-                to_extend.push_back(row);
             }
         }
 
-        let n_extended = to_extend.len();
-        for row in to_extend {
-            let key = self.row_conv.row_to_state_key(&row)?;
-            self.range_cache.insert(CacheKey::from(key), row);
-        }
         if n_extended < MAGIC_BATCH_SIZE && self.cache_real_len() > 0 {
             // we reached the beginning of this partition in the table
             self.range_cache.remove(&CacheKey::Smallest);

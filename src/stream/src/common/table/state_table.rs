@@ -1359,6 +1359,16 @@ where
     }
 }
 
+pub trait KeyedRowStream<'a>: Stream<Item = StreamExecutorResult<KeyedRow<Bytes>>> + 'a {}
+impl<'a, T> KeyedRowStream<'a> for T where
+    T: Stream<Item = StreamExecutorResult<KeyedRow<Bytes>>> + 'a
+{
+}
+
+type IterDirection = i32;
+const ITER_FORWARD: IterDirection = 1;
+const ITER_REVERSE: IterDirection = -1;
+
 // Iterator functions
 impl<
         S,
@@ -1382,7 +1392,7 @@ where
         vnode: VirtualNode,
         pk_range: &(Bound<impl Row>, Bound<impl Row>),
         prefetch_options: PrefetchOptions,
-    ) -> StreamExecutorResult<KeyedRowStream<'_, S, SD>> {
+    ) -> StreamExecutorResult<impl KeyedRowStream<'_>> {
         Ok(deserialize_keyed_row_stream(
             self.iter_kv_with_pk_range(pk_range, vnode, prefetch_options)
                 .await?,
@@ -1427,6 +1437,27 @@ where
         Ok(self.local_store.iter(table_key_range, read_options).await?)
     }
 
+    async fn rev_iter_kv(
+        &self,
+        table_key_range: TableKeyRange,
+        prefix_hint: Option<Bytes>,
+        prefetch_options: PrefetchOptions,
+    ) -> StreamExecutorResult<<S::Local as LocalStateStore>::RevIter<'_>> {
+        let read_options = ReadOptions {
+            prefix_hint,
+            retention_seconds: self.table_option.retention_seconds,
+            table_id: self.table_id,
+            prefetch_options,
+            cache_policy: CachePolicy::Fill(CacheContext::Default),
+            ..Default::default()
+        };
+
+        Ok(self
+            .local_store
+            .rev_iter(table_key_range, read_options)
+            .await?)
+    }
+
     /// This function scans rows from the relational table with specific `prefix` and `sub_range` under the same
     /// `vnode`. If `sub_range` is (Unbounded, Unbounded), it scans rows from the relational table with specific `pk_prefix`.
     /// `pk_prefix` is used to identify the exact vnode the scan should perform on.
@@ -1435,7 +1466,28 @@ where
         pk_prefix: impl Row,
         sub_range: &(Bound<impl Row>, Bound<impl Row>),
         prefetch_options: PrefetchOptions,
-    ) -> StreamExecutorResult<KeyedRowStream<'_, S, SD>> {
+    ) -> StreamExecutorResult<impl KeyedRowStream<'_>> {
+        self.iter_with_prefix_inner::<ITER_FORWARD>(pk_prefix, sub_range, prefetch_options)
+            .await
+    }
+
+    /// This function scans the table just like `iter_with_prefix`, but in reverse order.
+    pub async fn rev_iter_with_prefix(
+        &self,
+        pk_prefix: impl Row,
+        sub_range: &(Bound<impl Row>, Bound<impl Row>),
+        prefetch_options: PrefetchOptions,
+    ) -> StreamExecutorResult<impl KeyedRowStream<'_>> {
+        self.iter_with_prefix_inner::<ITER_REVERSE>(pk_prefix, sub_range, prefetch_options)
+            .await
+    }
+
+    async fn iter_with_prefix_inner<const DIRECTION: IterDirection>(
+        &self,
+        pk_prefix: impl Row,
+        sub_range: &(Bound<impl Row>, Bound<impl Row>),
+        prefetch_options: PrefetchOptions,
+    ) -> StreamExecutorResult<impl KeyedRowStream<'_>> {
         let prefix_serializer = self.pk_serde.prefix(pk_prefix.len());
         let encoded_prefix = serialize_pk(&pk_prefix, &prefix_serializer);
 
@@ -1466,7 +1518,12 @@ where
         trace!(
             table_id = %self.table_id(),
             ?prefix_hint, ?pk_prefix,
-             ?pk_prefix_indices,
+            ?pk_prefix_indices,
+            iter_direction = match DIRECTION {
+                ITER_FORWARD => "forward",
+                ITER_REVERSE => "reverse",
+                _ => unreachable!(),
+            },
             "storage_iter_with_prefix"
         );
 
@@ -1475,15 +1532,27 @@ where
 
         let memcomparable_range_with_vnode = prefixed_range_with_vnode(memcomparable_range, vnode);
 
-        Ok(deserialize_keyed_row_stream(
-            self.iter_kv(
-                memcomparable_range_with_vnode,
-                prefix_hint,
-                prefetch_options,
-            )
-            .await?,
-            &self.row_serde,
-        ))
+        Ok(match DIRECTION {
+            ITER_FORWARD => futures::future::Either::Left(deserialize_keyed_row_stream(
+                self.iter_kv(
+                    memcomparable_range_with_vnode,
+                    prefix_hint,
+                    prefetch_options,
+                )
+                .await?,
+                &self.row_serde,
+            )),
+            ITER_REVERSE => futures::future::Either::Right(deserialize_keyed_row_stream(
+                self.rev_iter_kv(
+                    memcomparable_range_with_vnode,
+                    prefix_hint,
+                    prefetch_options,
+                )
+                .await?,
+                &self.row_serde,
+            )),
+            _ => unreachable!(),
+        })
     }
 
     /// This function scans raw key-values from the relational table with specific `pk_range` under
@@ -1592,13 +1661,10 @@ where
     }
 }
 
-pub type KeyedRowStream<'a, S: StateStore, SD: ValueRowSerde + 'a> =
-    impl Stream<Item = StreamExecutorResult<KeyedRow<Bytes>>> + 'a;
-
 fn deserialize_keyed_row_stream<'a>(
     iter: impl StateStoreIter + 'a,
     deserializer: &'a impl ValueRowSerde,
-) -> impl Stream<Item = StreamExecutorResult<KeyedRow<Bytes>>> + 'a {
+) -> impl KeyedRowStream<'a> {
     iter.into_stream(move |(key, value)| {
         Ok(KeyedRow::new(
             // TODO: may avoid clone the key when key is not needed
