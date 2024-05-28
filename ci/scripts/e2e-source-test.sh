@@ -32,6 +32,7 @@ mkdir ./connector-node
 tar xf ./risingwave-connector.tar.gz -C ./connector-node
 
 echo "--- e2e, inline test"
+RUST_LOG="debug,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 risedev ci-start ci-inline-source-test
 risedev slt './e2e_test/source_inline/**/*.slt'
 echo "--- Kill cluster"
@@ -55,7 +56,7 @@ createdb
 psql < ./e2e_test/source/cdc/postgres_cdc.sql
 
 echo "--- starting risingwave cluster"
-RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
+RUST_LOG="debug,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 risedev ci-start ci-1cn-1fe-with-recovery
 
 echo "--- mongodb cdc test"

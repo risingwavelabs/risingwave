@@ -459,10 +459,6 @@ impl<'a, K: Ord + Debug, V: Clone> BTreeMapTransaction<'a, K, V> {
         self.tree_ref
     }
 
-    pub fn tree_mut(&mut self) -> &mut BTreeMap<K, V> {
-        self.tree_ref
-    }
-
     /// Get the value of the provided key by merging the staging value and the original value
     pub fn get(&self, key: &K) -> Option<&V> {
         self.staging

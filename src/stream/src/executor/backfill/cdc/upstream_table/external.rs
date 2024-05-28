@@ -38,8 +38,6 @@ pub struct ExternalStorageTable {
     /// Indices of primary key.
     /// Note that the index is based on the all columns of the table.
     pk_indices: Vec<usize>,
-
-    output_indices: Vec<usize>,
 }
 
 impl ExternalStorageTable {
@@ -53,7 +51,6 @@ impl ExternalStorageTable {
         schema: Schema,
         pk_order_types: Vec<OrderType>,
         pk_indices: Vec<usize>,
-        output_indices: Vec<usize>,
     ) -> Self {
         Self {
             table_id,
@@ -63,7 +60,6 @@ impl ExternalStorageTable {
             schema,
             pk_order_types,
             pk_indices,
-            output_indices,
         }
     }
 
@@ -81,16 +77,6 @@ impl ExternalStorageTable {
 
     pub fn pk_indices(&self) -> &[usize] {
         &self.pk_indices
-    }
-
-    /// Get the indices of the primary key columns in the output columns.
-    ///
-    /// Returns `None` if any of the primary key columns is not in the output columns.
-    pub fn pk_in_output_indices(&self) -> Option<Vec<usize>> {
-        self.pk_indices
-            .iter()
-            .map(|&i| self.output_indices.iter().position(|&j| i == j))
-            .collect()
     }
 
     pub fn schema_table_name(&self) -> SchemaTableName {

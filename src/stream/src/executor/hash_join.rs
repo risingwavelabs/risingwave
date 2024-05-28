@@ -587,10 +587,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         self.side_r.ht.update_vnode_bitmap(vnode_bitmap);
                     }
 
-                    // Update epoch for managed cache.
-                    self.side_l.ht.update_epoch(barrier.epoch.curr);
-                    self.side_r.ht.update_epoch(barrier.epoch.curr);
-
                     // Report metrics of cached join rows/entries
                     for (join_cached_entry_count, ht) in [
                         (&left_join_cached_entry_count, &self.side_l.ht),

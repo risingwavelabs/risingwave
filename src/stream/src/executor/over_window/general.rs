@@ -35,7 +35,7 @@ use super::over_partition::{
     new_empty_partition_cache, shrink_partition_cache, CacheKey, OverPartition, PartitionCache,
     PartitionDelta,
 };
-use crate::cache::{new_unbounded, ManagedLruCache};
+use crate::cache::ManagedLruCache;
 use crate::common::metrics::MetricsInfo;
 use crate::executor::monitor::OverWindowMetrics;
 use crate::executor::over_window::over_partition::AffectedRange;
@@ -65,7 +65,7 @@ struct ExecutorInner<S: StateStore> {
     state_key_to_table_sub_pk_proj: Vec<usize>,
 
     state_table: StateTable<S>,
-    watermark_epoch: AtomicU64Ref,
+    watermark_sequence: AtomicU64Ref,
 
     /// The maximum size of the chunk produced by executor at a time.
     chunk_size: usize,
@@ -182,7 +182,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
                 input_schema_len: input_schema.len(),
                 state_key_to_table_sub_pk_proj,
                 state_table: args.state_table,
-                watermark_epoch: args.watermark_epoch,
+                watermark_sequence: args.watermark_epoch,
                 chunk_size: args.chunk_size,
                 cache_policy,
             },
@@ -594,7 +594,10 @@ impl<S: StateStore> OverWindowExecutor<S> {
         );
 
         let mut vars = ExecutionVars {
-            cached_partitions: new_unbounded(this.watermark_epoch.clone(), metrics_info),
+            cached_partitions: ManagedLruCache::unbounded(
+                this.watermark_sequence.clone(),
+                metrics_info,
+            ),
             recently_accessed_ranges: Default::default(),
             stats: Default::default(),
             _phantom: PhantomData::<S>,
@@ -603,7 +606,6 @@ impl<S: StateStore> OverWindowExecutor<S> {
         let mut input = input.execute();
         let barrier = expect_first_barrier(&mut input).await?;
         this.state_table.init_epoch(barrier.epoch);
-        vars.cached_partitions.update_epoch(barrier.epoch.curr);
 
         yield Message::Barrier(barrier);
 
@@ -662,8 +664,6 @@ impl<S: StateStore> OverWindowExecutor<S> {
                             }
                         }
                     }
-
-                    vars.cached_partitions.update_epoch(barrier.epoch.curr);
 
                     yield Message::Barrier(barrier);
                 }

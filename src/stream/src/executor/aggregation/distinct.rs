@@ -23,7 +23,7 @@ use risingwave_common::row::{self, CompactedRow, RowExt};
 use risingwave_common::util::iter_util::ZipEqFast;
 
 use super::{AggCall, GroupKey};
-use crate::cache::{new_unbounded, ManagedLruCache};
+use crate::cache::ManagedLruCache;
 use crate::common::metrics::MetricsInfo;
 use crate::executor::monitor::AggDistinctDedupMetrics;
 use crate::executor::prelude::*;
@@ -41,7 +41,7 @@ impl<S: StateStore> ColumnDeduplicater<S> {
     fn new(
         distinct_col: usize,
         dedup_table: &StateTable<S>,
-        watermark_epoch: Arc<AtomicU64>,
+        watermark_sequence: Arc<AtomicU64>,
         actor_ctx: &ActorContext,
     ) -> Self {
         let metrics_info = MetricsInfo::new(
@@ -57,7 +57,7 @@ impl<S: StateStore> ColumnDeduplicater<S> {
         );
 
         Self {
-            cache: new_unbounded(watermark_epoch, metrics_info),
+            cache: ManagedLruCache::unbounded(watermark_sequence, metrics_info),
             metrics,
             _phantom: PhantomData,
         }

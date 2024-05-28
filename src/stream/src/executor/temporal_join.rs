@@ -36,7 +36,7 @@ use risingwave_storage::table::TableIter;
 
 use super::join::{JoinType, JoinTypePrimitive};
 use super::monitor::TemporalJoinMetrics;
-use crate::cache::{cache_may_stale, new_with_hasher_in, ManagedLruCache};
+use crate::cache::{cache_may_stale, ManagedLruCache};
 use crate::common::metrics::MetricsInfo;
 use crate::executor::join::builder::JoinStreamChunkBuilder;
 use crate::executor::prelude::*;
@@ -588,7 +588,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const A: bool>
         output_indices: Vec<usize>,
         table_output_indices: Vec<usize>,
         table_stream_key_indices: Vec<usize>,
-        watermark_epoch: AtomicU64Ref,
+        watermark_sequence: AtomicU64Ref,
         metrics: Arc<StreamingMetrics>,
         chunk_size: usize,
         join_key_data_types: Vec<DataType>,
@@ -603,8 +603,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const A: bool>
             "temporal join",
         );
 
-        let cache = new_with_hasher_in(
-            watermark_epoch,
+        let cache = ManagedLruCache::unbounded_with_hasher_in(
+            watermark_sequence,
             metrics_info,
             DefaultHasher::default(),
             alloc,
@@ -824,7 +824,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const A: bool>
                             self.right_table.cache.clear();
                         }
                     }
-                    self.right_table.cache.update_epoch(barrier.epoch.curr);
                     self.right_table.update(
                         updates,
                         &self.right_join_keys,
