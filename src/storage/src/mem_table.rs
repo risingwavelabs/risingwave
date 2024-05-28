@@ -35,10 +35,10 @@ use thiserror_ext::AsReport;
 use tracing::error;
 
 use crate::error::{StorageError, StorageResult};
-use crate::hummock::iterator::{FromRustIterator, RustIteratorBuilder};
+use crate::hummock::iterator::{Backward, Forward, FromRustIterator, RustIteratorBuilder};
 use crate::hummock::shared_buffer::shared_buffer_batch::{SharedBufferBatch, SharedBufferBatchId};
 use crate::hummock::utils::{
-    do_delete_sanity_check, do_insert_sanity_check, do_update_sanity_check, ENABLE_SANITY_CHECK,
+    do_delete_sanity_check, do_insert_sanity_check, do_update_sanity_check, sanity_check_enabled,
 };
 use crate::hummock::value::HummockValue;
 use crate::row_serde::value_serde::ValueRowSerde;
@@ -78,6 +78,7 @@ type Result<T> = std::result::Result<T, Box<MemTableError>>;
 
 pub type MemTableStore = BTreeMap<TableKey<Bytes>, KeyOp>;
 pub struct MemTableIteratorBuilder;
+pub struct MemTableRevIteratorBuilder;
 
 fn map_to_hummock_value<'a>(
     (key, op): (&'a TableKey<Bytes>, &'a KeyOp),
@@ -91,7 +92,29 @@ fn map_to_hummock_value<'a>(
     )
 }
 
+impl RustIteratorBuilder for MemTableRevIteratorBuilder {
+    type Direction = Backward;
+    type Iterable = MemTableStore;
+
+    type RewindIter<'a> =
+        impl Iterator<Item = (TableKey<&'a [u8]>, HummockValue<&'a [u8]>)> + Send + 'a;
+    type SeekIter<'a> =
+        impl Iterator<Item = (TableKey<&'a [u8]>, HummockValue<&'a [u8]>)> + Send + 'a;
+
+    fn seek<'a>(iterable: &'a Self::Iterable, seek_key: TableKey<&[u8]>) -> Self::SeekIter<'a> {
+        iterable
+            .range::<[u8], _>((Unbounded, Included(seek_key.0)))
+            .rev()
+            .map(map_to_hummock_value)
+    }
+
+    fn rewind(iterable: &Self::Iterable) -> Self::RewindIter<'_> {
+        iterable.iter().rev().map(map_to_hummock_value)
+    }
+}
+
 impl RustIteratorBuilder for MemTableIteratorBuilder {
+    type Direction = Forward;
     type Iterable = MemTableStore;
 
     type RewindIter<'a> =
@@ -111,6 +134,7 @@ impl RustIteratorBuilder for MemTableIteratorBuilder {
 }
 
 pub type MemTableHummockIterator<'a> = FromRustIterator<'a, MemTableIteratorBuilder>;
+pub type MemTableHummockRevIterator<'a> = FromRustIterator<'a, MemTableRevIteratorBuilder>;
 
 impl MemTable {
     pub fn new(op_consistency_level: OpConsistencyLevel) -> Self {
@@ -134,39 +158,50 @@ impl MemTable {
     pub fn insert(&mut self, pk: TableKey<Bytes>, value: Bytes) -> Result<()> {
         if let OpConsistencyLevel::Inconsistent = &self.op_consistency_level {
             let key_len = std::mem::size_of::<Bytes>() + pk.len();
-            let insert_value = KeyOp::Insert(value);
-            self.kv_size.add(&pk, &insert_value);
-            let origin_value = self.buffer.insert(pk, insert_value);
-            self.sub_origin_size(origin_value, key_len);
-
+            let op = KeyOp::Insert(value);
+            self.kv_size.add(&pk, &op);
+            let old_op = self.buffer.insert(pk, op);
+            self.sub_old_op_size(old_op, key_len);
             return Ok(());
         };
         let entry = self.buffer.entry(pk);
         match entry {
             Entry::Vacant(e) => {
-                let insert_value = KeyOp::Insert(value);
-                self.kv_size.add(e.key(), &insert_value);
-                e.insert(insert_value);
+                let op = KeyOp::Insert(value);
+                self.kv_size.add(e.key(), &op);
+                e.insert(op);
                 Ok(())
             }
             Entry::Occupied(mut e) => {
-                let origin_value = e.get_mut();
-                self.kv_size.sub_val(origin_value);
-                match origin_value {
-                    KeyOp::Delete(ref mut old_value) => {
-                        let old_val = std::mem::take(old_value);
-                        let update_value = KeyOp::Update((old_val, value));
-                        self.kv_size.add_val(&update_value);
-                        e.insert(update_value);
+                let old_op = e.get_mut();
+                self.kv_size.sub_val(old_op);
+
+                match old_op {
+                    KeyOp::Delete(ref mut old_op_old_value) => {
+                        let new_op = KeyOp::Update((std::mem::take(old_op_old_value), value));
+                        self.kv_size.add_val(&new_op);
+                        e.insert(new_op);
                         Ok(())
                     }
                     KeyOp::Insert(_) | KeyOp::Update(_) => {
-                        Err(MemTableError::InconsistentOperation {
+                        let new_op = KeyOp::Insert(value);
+                        let err = MemTableError::InconsistentOperation {
                             key: e.key().clone(),
                             prev: e.get().clone(),
-                            new: KeyOp::Insert(value),
+                            new: new_op.clone(),
+                        };
+
+                        if sanity_check_enabled() {
+                            Err(err.into())
+                        } else {
+                            tracing::error!(
+                                error = %err.as_report(),
+                                "double insert / insert on updated, ignoring because sanity check is disabled"
+                            );
+                            self.kv_size.add_val(&new_op);
+                            e.insert(new_op);
+                            Ok(())
                         }
-                        .into())
                     }
                 }
             }
@@ -180,26 +215,27 @@ impl MemTable {
             ..
         } = &self.op_consistency_level
         else {
-            let delete_value = KeyOp::Delete(old_value);
-            self.kv_size.add(&pk, &delete_value);
-            let origin_value = self.buffer.insert(pk, delete_value);
-            self.sub_origin_size(origin_value, key_len);
+            let op = KeyOp::Delete(old_value);
+            self.kv_size.add(&pk, &op);
+            let old_op = self.buffer.insert(pk, op);
+            self.sub_old_op_size(old_op, key_len);
             return Ok(());
         };
         let entry = self.buffer.entry(pk);
         match entry {
             Entry::Vacant(e) => {
-                let delete_value = KeyOp::Delete(old_value);
-                self.kv_size.add(e.key(), &delete_value);
-                e.insert(delete_value);
+                let op = KeyOp::Delete(old_value);
+                self.kv_size.add(e.key(), &op);
+                e.insert(op);
                 Ok(())
             }
             Entry::Occupied(mut e) => {
-                let origin_value = e.get_mut();
-                self.kv_size.sub_val(origin_value);
-                match origin_value {
-                    KeyOp::Insert(original_value) => {
-                        if ENABLE_SANITY_CHECK && !value_checker(original_value, &old_value) {
+                let old_op = e.get_mut();
+                self.kv_size.sub_val(old_op);
+
+                match old_op {
+                    KeyOp::Insert(old_op_new_value) => {
+                        if sanity_check_enabled() && !value_checker(old_op_new_value, &old_value) {
                             return Err(Box::new(MemTableError::InconsistentOperation {
                                 key: e.key().clone(),
                                 prev: e.get().clone(),
@@ -209,27 +245,40 @@ impl MemTable {
 
                         self.kv_size.sub_size(key_len);
                         e.remove();
-
                         Ok(())
                     }
-                    KeyOp::Delete(_) => Err(MemTableError::InconsistentOperation {
-                        key: e.key().clone(),
-                        prev: e.get().clone(),
-                        new: KeyOp::Delete(old_value),
+                    KeyOp::Delete(_) => {
+                        let new_op = KeyOp::Delete(old_value);
+                        let err = MemTableError::InconsistentOperation {
+                            key: e.key().clone(),
+                            prev: e.get().clone(),
+                            new: new_op.clone(),
+                        };
+
+                        if sanity_check_enabled() {
+                            Err(err.into())
+                        } else {
+                            tracing::error!(
+                                error = %err.as_report(),
+                                "double delete, ignoring because sanity check is disabled"
+                            );
+                            self.kv_size.add_val(&new_op);
+                            e.insert(new_op);
+                            Ok(())
+                        }
                     }
-                    .into()),
-                    KeyOp::Update(value) => {
-                        let (original_old_value, original_new_value) = std::mem::take(value);
-                        if ENABLE_SANITY_CHECK && original_new_value != old_value {
+                    KeyOp::Update((old_op_old_value, old_op_new_value)) => {
+                        if sanity_check_enabled() && !value_checker(old_op_new_value, &old_value) {
                             return Err(Box::new(MemTableError::InconsistentOperation {
                                 key: e.key().clone(),
                                 prev: e.get().clone(),
                                 new: KeyOp::Delete(old_value),
                             }));
                         }
-                        let delete_value = KeyOp::Delete(original_old_value);
-                        self.kv_size.add_val(&delete_value);
-                        e.insert(delete_value);
+
+                        let new_op = KeyOp::Delete(std::mem::take(old_op_old_value));
+                        self.kv_size.add_val(&new_op);
+                        e.insert(new_op);
                         Ok(())
                     }
                 }
@@ -249,58 +298,73 @@ impl MemTable {
         } = &self.op_consistency_level
         else {
             let key_len = std::mem::size_of::<Bytes>() + pk.len();
-
-            let update_value = KeyOp::Update((old_value, new_value));
-            self.kv_size.add(&pk, &update_value);
-            let origin_value = self.buffer.insert(pk, update_value);
-            self.sub_origin_size(origin_value, key_len);
+            let op = KeyOp::Update((old_value, new_value));
+            self.kv_size.add(&pk, &op);
+            let old_op = self.buffer.insert(pk, op);
+            self.sub_old_op_size(old_op, key_len);
             return Ok(());
         };
         let entry = self.buffer.entry(pk);
         match entry {
             Entry::Vacant(e) => {
-                let update_value = KeyOp::Update((old_value, new_value));
-                self.kv_size.add(e.key(), &update_value);
-                e.insert(update_value);
+                let op = KeyOp::Update((old_value, new_value));
+                self.kv_size.add(e.key(), &op);
+                e.insert(op);
                 Ok(())
             }
             Entry::Occupied(mut e) => {
-                let origin_value = e.get_mut();
-                self.kv_size.sub_val(origin_value);
-                match origin_value {
-                    KeyOp::Insert(original_new_value) => {
-                        if ENABLE_SANITY_CHECK && !value_checker(original_new_value, &old_value) {
+                let old_op = e.get_mut();
+                self.kv_size.sub_val(old_op);
+
+                match old_op {
+                    KeyOp::Insert(old_op_new_value) => {
+                        if sanity_check_enabled() && !value_checker(old_op_new_value, &old_value) {
                             return Err(Box::new(MemTableError::InconsistentOperation {
                                 key: e.key().clone(),
                                 prev: e.get().clone(),
                                 new: KeyOp::Update((old_value, new_value)),
                             }));
                         }
-                        let new_key_op = KeyOp::Insert(new_value);
-                        self.kv_size.add_val(&new_key_op);
-                        e.insert(new_key_op);
+
+                        let new_op = KeyOp::Insert(new_value);
+                        self.kv_size.add_val(&new_op);
+                        e.insert(new_op);
                         Ok(())
                     }
-                    KeyOp::Update((origin_old_value, original_new_value)) => {
-                        if ENABLE_SANITY_CHECK && !value_checker(original_new_value, &old_value) {
+                    KeyOp::Update((old_op_old_value, old_op_new_value)) => {
+                        if sanity_check_enabled() && !value_checker(old_op_new_value, &old_value) {
                             return Err(Box::new(MemTableError::InconsistentOperation {
                                 key: e.key().clone(),
                                 prev: e.get().clone(),
                                 new: KeyOp::Update((old_value, new_value)),
                             }));
                         }
-                        let old_value = std::mem::take(origin_old_value);
-                        let new_key_op = KeyOp::Update((old_value, new_value));
-                        self.kv_size.add_val(&new_key_op);
-                        e.insert(new_key_op);
+
+                        let new_op = KeyOp::Update((std::mem::take(old_op_old_value), new_value));
+                        self.kv_size.add_val(&new_op);
+                        e.insert(new_op);
                         Ok(())
                     }
-                    KeyOp::Delete(_) => Err(MemTableError::InconsistentOperation {
-                        key: e.key().clone(),
-                        prev: e.get().clone(),
-                        new: KeyOp::Update((old_value, new_value)),
+                    KeyOp::Delete(_) => {
+                        let new_op = KeyOp::Update((old_value, new_value));
+                        let err = MemTableError::InconsistentOperation {
+                            key: e.key().clone(),
+                            prev: e.get().clone(),
+                            new: new_op.clone(),
+                        };
+
+                        if sanity_check_enabled() {
+                            Err(err.into())
+                        } else {
+                            tracing::error!(
+                                error = %err.as_report(),
+                                "update on deleted, ignoring because sanity check is disabled"
+                            );
+                            self.kv_size.add_val(&new_op);
+                            e.insert(new_op);
+                            Ok(())
+                        }
                     }
-                    .into()),
                 }
             }
         }
@@ -320,9 +384,19 @@ impl MemTable {
         self.buffer.range(key_range)
     }
 
-    fn sub_origin_size(&mut self, origin_value: Option<KeyOp>, key_len: usize) {
-        if let Some(origin_value) = origin_value {
-            self.kv_size.sub_val(&origin_value);
+    pub fn rev_iter<'a, R>(
+        &'a self,
+        key_range: R,
+    ) -> impl Iterator<Item = (&'a TableKey<Bytes>, &'a KeyOp)>
+    where
+        R: RangeBounds<TableKey<Bytes>> + 'a,
+    {
+        self.buffer.range(key_range).rev()
+    }
+
+    fn sub_old_op_size(&mut self, old_op: Option<KeyOp>, key_len: usize) {
+        if let Some(op) = old_op {
+            self.kv_size.sub_val(&op);
             self.kv_size.sub_size(key_len);
         }
     }
@@ -465,6 +539,7 @@ impl<S: StateStoreWrite + StateStoreRead> MemtableLocalStateStore<S> {
 
 impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalStateStore<S> {
     type Iter<'a> = impl StateStoreIter + 'a;
+    type RevIter<'a> = impl StateStoreIter + 'a;
 
     #[allow(clippy::unused_async)]
     async fn may_exist(
@@ -509,6 +584,26 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
         }
     }
 
+    #[allow(clippy::manual_async_fn)]
+    fn rev_iter(
+        &self,
+        key_range: TableKeyRange,
+        read_options: ReadOptions,
+    ) -> impl Future<Output = StorageResult<Self::RevIter<'_>>> + Send + '_ {
+        async move {
+            let iter = self
+                .inner
+                .rev_iter(key_range.clone(), self.epoch(), read_options)
+                .await?;
+            Ok(FromStreamStateStoreIter::new(Box::pin(merge_stream(
+                self.mem_table.rev_iter(key_range),
+                iter.into_stream(to_owned_item),
+                self.table_id,
+                self.epoch(),
+            ))))
+        }
+    }
+
     fn insert(
         &mut self,
         key: TableKey<Bytes>,
@@ -535,7 +630,7 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
                 // a workaround you may call disable the check by initializing the
                 // state store with `op_consistency_level=Inconsistent`.
                 KeyOp::Insert(value) => {
-                    if ENABLE_SANITY_CHECK {
+                    if sanity_check_enabled() {
                         do_insert_sanity_check(
                             &key,
                             &value,
@@ -550,7 +645,7 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
                     kv_pairs.push((key, StorageValue::new_put(value)));
                 }
                 KeyOp::Delete(old_value) => {
-                    if ENABLE_SANITY_CHECK {
+                    if sanity_check_enabled() {
                         do_delete_sanity_check(
                             &key,
                             &old_value,
@@ -565,7 +660,7 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
                     kv_pairs.push((key, StorageValue::new_delete()));
                 }
                 KeyOp::Update((old_value, new_value)) => {
-                    if ENABLE_SANITY_CHECK {
+                    if sanity_check_enabled() {
                         do_update_sanity_check(
                             &key,
                             &old_value,
@@ -684,7 +779,7 @@ mod tests {
 
     use crate::hummock::iterator::HummockIterator;
     use crate::hummock::value::HummockValue;
-    use crate::mem_table::{KeyOp, MemTable, MemTableHummockIterator};
+    use crate::mem_table::{KeyOp, MemTable, MemTableHummockIterator, MemTableHummockRevIterator};
     use crate::store::{OpConsistencyLevel, CHECK_BYTES_EQUAL};
 
     #[tokio::test]
@@ -870,7 +965,7 @@ mod tests {
             TableKey(bytes.freeze())
         }
 
-        let ordered_test_data = (0..10000)
+        let mut ordered_test_data = (0..10000)
             .map(|i| {
                 let key_op = match rng.gen::<usize>() % 3 {
                     0 => KeyOp::Insert(Bytes::from("insert")),
@@ -904,8 +999,8 @@ mod tests {
         const TEST_TABLE_ID: TableId = TableId::new(233);
         const TEST_EPOCH: u64 = test_epoch(10);
 
-        async fn check_data(
-            iter: &mut MemTableHummockIterator<'_>,
+        async fn check_data<I: HummockIterator>(
+            iter: &mut I,
             test_data: &[(TableKey<Bytes>, KeyOp)],
         ) {
             let mut idx = 0;
@@ -916,7 +1011,14 @@ mod tests {
                 let (expected_key, expected_value) = test_data[idx].clone();
                 assert_eq!(key.epoch_with_gap, EpochWithGap::new_from_epoch(TEST_EPOCH));
                 assert_eq!(key.user_key.table_id, TEST_TABLE_ID);
-                assert_eq!(key.user_key.table_key.0, expected_key.0.as_ref());
+                assert_eq!(
+                    key.user_key.table_key.0,
+                    expected_key.0.as_ref(),
+                    "failed at {}, {:?} != {:?}",
+                    idx,
+                    String::from_utf8(key.user_key.table_key.key_part().to_vec()).unwrap(),
+                    String::from_utf8(expected_key.key_part().to_vec()).unwrap(),
+                );
                 match expected_value {
                     KeyOp::Insert(expected_value) | KeyOp::Update((_, expected_value)) => {
                         assert_eq!(value, HummockValue::Put(expected_value.as_ref()));
@@ -1007,5 +1109,109 @@ mod tests {
         .await
         .unwrap();
         check_data(&mut iter, &[]).await;
+
+        // check reverse iterator
+        ordered_test_data.reverse();
+        drop(iter);
+        let mut iter = MemTableHummockRevIterator::new(
+            &mem_table.buffer,
+            EpochWithGap::new_from_epoch(TEST_EPOCH),
+            TEST_TABLE_ID,
+        );
+
+        // Test rewind
+        iter.rewind().await.unwrap();
+        check_data(&mut iter, &ordered_test_data).await;
+
+        // Test seek with a smaller table id
+        let smaller_table_id = TableId::new(TEST_TABLE_ID.table_id() - 1);
+        iter.seek(FullKey {
+            user_key: UserKey {
+                table_id: smaller_table_id,
+                table_key: TableKey(&get_key(ordered_test_data.len() + 10)),
+            },
+            epoch_with_gap: EpochWithGap::new_from_epoch(TEST_EPOCH),
+        })
+        .await
+        .unwrap();
+        check_data(&mut iter, &[]).await;
+
+        // Test seek with a greater table id
+        let greater_table_id = TableId::new(TEST_TABLE_ID.table_id() + 1);
+        iter.seek(FullKey {
+            user_key: UserKey {
+                table_id: greater_table_id,
+                table_key: TableKey(&get_key(0)),
+            },
+            epoch_with_gap: EpochWithGap::new_from_epoch(TEST_EPOCH),
+        })
+        .await
+        .unwrap();
+        check_data(&mut iter, &ordered_test_data).await;
+
+        // Test seek with a later epoch, the first key is skipped
+        let later_epoch = EpochWithGap::new_from_epoch(TEST_EPOCH.next_epoch());
+        let seek_idx = 500;
+        iter.seek(FullKey {
+            user_key: UserKey {
+                table_id: TEST_TABLE_ID,
+                table_key: TableKey(&get_key(seek_idx)),
+            },
+            epoch_with_gap: later_epoch,
+        })
+        .await
+        .unwrap();
+        let rev_seek_idx = ordered_test_data.len() - seek_idx - 1;
+        check_data(&mut iter, &ordered_test_data[rev_seek_idx + 1..]).await;
+
+        // Test seek with a earlier epoch, the first key is not skipped
+        let early_epoch = EpochWithGap::new_from_epoch(TEST_EPOCH.prev_epoch());
+        let seek_idx = 500;
+        iter.seek(FullKey {
+            user_key: UserKey {
+                table_id: TEST_TABLE_ID,
+                table_key: TableKey(&get_key(seek_idx)),
+            },
+            epoch_with_gap: early_epoch,
+        })
+        .await
+        .unwrap();
+        let rev_seek_idx = ordered_test_data.len() - seek_idx - 1;
+        check_data(&mut iter, &ordered_test_data[rev_seek_idx..]).await;
+
+        drop(iter);
+        mem_table.insert(get_key(10001), "value1".into()).unwrap();
+
+        let mut iter = MemTableHummockRevIterator::new(
+            &mem_table.buffer,
+            EpochWithGap::new_from_epoch(TEST_EPOCH),
+            TEST_TABLE_ID,
+        );
+        iter.seek(FullKey {
+            user_key: UserKey {
+                table_id: TEST_TABLE_ID,
+                table_key: TableKey(&get_key(10000)),
+            },
+            epoch_with_gap: early_epoch,
+        })
+        .await
+        .unwrap();
+        assert_eq!(iter.key().user_key.table_key, get_key(9999).to_ref());
+
+        let mut iter = MemTableHummockIterator::new(
+            &mem_table.buffer,
+            EpochWithGap::new_from_epoch(TEST_EPOCH),
+            TEST_TABLE_ID,
+        );
+        iter.seek(FullKey {
+            user_key: UserKey {
+                table_id: TEST_TABLE_ID,
+                table_key: TableKey(&get_key(10000)),
+            },
+            epoch_with_gap: later_epoch,
+        })
+        .await
+        .unwrap();
+        assert_eq!(iter.key().user_key.table_key, get_key(10001).to_ref());
     }
 }

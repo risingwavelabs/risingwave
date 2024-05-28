@@ -44,7 +44,7 @@ use crate::storage_value::StorageValue;
 pub trait StaticSendSync = Send + Sync + 'static;
 
 pub trait IterItem: Send + 'static {
-    type ItemRef<'a>: Send + 'a;
+    type ItemRef<'a>: Send + Copy + 'a;
 }
 
 impl IterItem for StateStoreIterItem {
@@ -66,7 +66,8 @@ pub fn to_owned_item((key, value): StateStoreIterItemRef<'_>) -> StorageResult<S
 }
 
 pub trait StateStoreIterExt<T: IterItem = StateStoreIterItem>: StateStoreIter<T> + Sized {
-    type ItemStream<O: Send, F: Send>: Stream<Item = StorageResult<O>> + Send;
+    type ItemStream<O: Send, F: Send + for<'a> Fn(T::ItemRef<'a>) -> StorageResult<O>>: Stream<Item = StorageResult<O>>
+        + Send;
 
     fn into_stream<O: Send, F: for<'a> Fn(T::ItemRef<'a>) -> StorageResult<O> + Send>(
         self,
@@ -151,7 +152,8 @@ impl<T: IterItem, I: StateStoreIter<T>> FusedStateStoreIter<I, T> {
 }
 
 impl<T: IterItem, I: StateStoreIter<T>> StateStoreIterExt<T> for I {
-    type ItemStream<O: Send, F: Send> = impl Stream<Item = StorageResult<O>> + Send;
+    type ItemStream<O: Send, F: Send + for<'a> Fn(T::ItemRef<'a>) -> StorageResult<O>> =
+        impl Stream<Item = StorageResult<O>> + Send;
 
     fn into_stream<O: Send, F: for<'a> Fn(T::ItemRef<'a>) -> StorageResult<O> + Send>(
         self,
@@ -215,6 +217,7 @@ pub trait StateStoreReadChangeLogIter = StateStoreIter<StateStoreReadLogItem> + 
 
 pub trait StateStoreRead: StaticSendSync {
     type Iter: StateStoreReadIter;
+    type RevIter: StateStoreReadIter;
     type ChangeLogIter: StateStoreReadChangeLogIter;
 
     /// Point gets a value from the state store.
@@ -237,6 +240,13 @@ pub trait StateStoreRead: StaticSendSync {
         epoch: u64,
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<Self::Iter>> + Send + '_;
+
+    fn rev_iter(
+        &self,
+        key_range: TableKeyRange,
+        epoch: u64,
+        read_options: ReadOptions,
+    ) -> impl Future<Output = StorageResult<Self::RevIter>> + Send + '_;
 
     fn iter_log(
         &self,
@@ -343,6 +353,7 @@ pub trait StateStore: StateStoreRead + StaticSendSync + Clone {
 /// table.
 pub trait LocalStateStore: StaticSendSync {
     type Iter<'a>: StateStoreIter + 'a;
+    type RevIter<'a>: StateStoreIter + 'a;
 
     /// Point gets a value from the state store.
     /// The result is based on the latest written snapshot.
@@ -362,6 +373,12 @@ pub trait LocalStateStore: StaticSendSync {
         key_range: TableKeyRange,
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<Self::Iter<'_>>> + Send + '_;
+
+    fn rev_iter(
+        &self,
+        key_range: TableKeyRange,
+        read_options: ReadOptions,
+    ) -> impl Future<Output = StorageResult<Self::RevIter<'_>>> + Send + '_;
 
     /// Inserts a key-value entry associated with a given `epoch` into the state store.
     fn insert(

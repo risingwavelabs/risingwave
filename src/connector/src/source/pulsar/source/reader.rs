@@ -27,7 +27,8 @@ use itertools::Itertools;
 use pulsar::consumer::InitialPosition;
 use pulsar::message::proto::MessageIdData;
 use pulsar::{Consumer, ConsumerBuilder, ConsumerOptions, Pulsar, SubType, TokioExecutor};
-use risingwave_common::array::{DataChunk, StreamChunk};
+use risingwave_common::array::arrow::{FromArrow, IcebergArrowConvert};
+use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::ROWID_PREFIX;
 use risingwave_common::{bail, ensure};
 use thiserror_ext::AsReport;
@@ -37,8 +38,8 @@ use crate::parser::ParserConfig;
 use crate::source::pulsar::split::PulsarSplit;
 use crate::source::pulsar::{PulsarEnumeratorOffset, PulsarProperties};
 use crate::source::{
-    into_chunk_stream, BoxChunkSourceStream, Column, CommonSplitReader, SourceContextRef,
-    SourceMessage, SplitId, SplitMetaData, SplitReader,
+    into_chunk_stream, BoxChunkSourceStream, Column, SourceContextRef, SourceMessage, SplitId,
+    SplitMetaData, SplitReader,
 };
 
 pub enum PulsarSplitReader {
@@ -88,7 +89,11 @@ impl SplitReader for PulsarSplitReader {
             Self::Broker(reader) => {
                 let (parser_config, source_context) =
                     (reader.parser_config.clone(), reader.source_ctx.clone());
-                Box::pin(into_chunk_stream(reader, parser_config, source_context))
+                Box::pin(into_chunk_stream(
+                    reader.into_data_stream(),
+                    parser_config,
+                    source_context,
+                ))
             }
             Self::Iceberg(reader) => Box::pin(reader.into_stream()),
         }
@@ -226,11 +231,11 @@ impl SplitReader for PulsarBrokerReader {
     fn into_stream(self) -> BoxChunkSourceStream {
         let parser_config = self.parser_config.clone();
         let source_context = self.source_ctx.clone();
-        into_chunk_stream(self, parser_config, source_context)
+        into_chunk_stream(self.into_data_stream(), parser_config, source_context)
     }
 }
 
-impl CommonSplitReader for PulsarBrokerReader {
+impl PulsarBrokerReader {
     #[try_stream(ok = Vec<SourceMessage>, error = crate::error::ConnectorError)]
     async fn into_data_stream(self) {
         let max_chunk_size = self.source_ctx.source_ctrl_opts.chunk_size;
@@ -508,7 +513,8 @@ impl PulsarIcebergReader {
             offsets.push(offset);
         }
 
-        let data_chunk = DataChunk::try_from(&record_batch.project(&field_indices)?)
+        let data_chunk = IcebergArrowConvert
+            .from_record_batch(&record_batch.project(&field_indices)?)
             .context("failed to convert arrow record batch to data chunk")?;
 
         let stream_chunk = StreamChunk::from(data_chunk);

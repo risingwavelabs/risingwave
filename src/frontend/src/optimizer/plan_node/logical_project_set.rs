@@ -104,7 +104,7 @@ impl LogicalProjectSet {
                         args,
                         return_type,
                         function_type,
-                        udtf_catalog,
+                        user_defined,
                     } = table_func;
                     let args = args
                         .into_iter()
@@ -116,7 +116,7 @@ impl LogicalProjectSet {
                         args,
                         return_type,
                         function_type,
-                        udtf_catalog,
+                        user_defined,
                     }
                     .into()
                 } else {
@@ -412,10 +412,8 @@ mod test {
     use std::collections::HashSet;
 
     use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::types::DataType;
 
     use super::*;
-    use crate::expr::{ExprImpl, InputRef, TableFunction};
     use crate::optimizer::optimizer_context::OptimizerContext;
     use crate::optimizer::plan_node::LogicalValues;
     use crate::optimizer::property::FunctionalDependency;

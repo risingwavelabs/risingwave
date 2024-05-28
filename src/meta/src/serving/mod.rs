@@ -16,11 +16,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use parking_lot::RwLock;
-use risingwave_common::hash::WorkerMapping;
+use risingwave_common::hash::WorkerSlotMapping;
 use risingwave_common::vnode_mapping::vnode_placement::place_vnode;
 use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
-use risingwave_pb::meta::{FragmentWorkerMapping, FragmentWorkerMappings};
+use risingwave_pb::meta::{FragmentWorkerSlotMapping, FragmentWorkerSlotMappings};
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
@@ -31,11 +31,11 @@ pub type ServingVnodeMappingRef = Arc<ServingVnodeMapping>;
 
 #[derive(Default)]
 pub struct ServingVnodeMapping {
-    serving_vnode_mappings: RwLock<HashMap<FragmentId, WorkerMapping>>,
+    serving_vnode_mappings: RwLock<HashMap<FragmentId, WorkerSlotMapping>>,
 }
 
 impl ServingVnodeMapping {
-    pub fn all(&self) -> HashMap<FragmentId, WorkerMapping> {
+    pub fn all(&self) -> HashMap<FragmentId, WorkerSlotMapping> {
         self.serving_vnode_mappings.read().clone()
     }
 
@@ -45,9 +45,9 @@ impl ServingVnodeMapping {
         &self,
         streaming_parallelisms: HashMap<FragmentId, usize>,
         workers: &[WorkerNode],
-    ) -> (HashMap<FragmentId, WorkerMapping>, Vec<FragmentId>) {
+    ) -> (HashMap<FragmentId, WorkerSlotMapping>, Vec<FragmentId>) {
         let mut serving_vnode_mappings = self.serving_vnode_mappings.write();
-        let mut upserted: HashMap<FragmentId, WorkerMapping> = HashMap::default();
+        let mut upserted: HashMap<FragmentId, WorkerSlotMapping> = HashMap::default();
         let mut failed: Vec<FragmentId> = vec![];
         for (fragment_id, streaming_parallelism) in streaming_parallelisms {
             let new_mapping = {
@@ -81,24 +81,24 @@ impl ServingVnodeMapping {
     }
 }
 
-pub(crate) fn to_fragment_worker_mapping(
-    mappings: &HashMap<FragmentId, WorkerMapping>,
-) -> Vec<FragmentWorkerMapping> {
+pub(crate) fn to_fragment_worker_slot_mapping(
+    mappings: &HashMap<FragmentId, WorkerSlotMapping>,
+) -> Vec<FragmentWorkerSlotMapping> {
     mappings
         .iter()
-        .map(|(fragment_id, mapping)| FragmentWorkerMapping {
+        .map(|(fragment_id, mapping)| FragmentWorkerSlotMapping {
             fragment_id: *fragment_id,
             mapping: Some(mapping.to_protobuf()),
         })
         .collect()
 }
 
-pub(crate) fn to_deleted_fragment_worker_mapping(
+pub(crate) fn to_deleted_fragment_worker_slot_mapping(
     fragment_ids: &[FragmentId],
-) -> Vec<FragmentWorkerMapping> {
+) -> Vec<FragmentWorkerSlotMapping> {
     fragment_ids
         .iter()
-        .map(|fragment_id| FragmentWorkerMapping {
+        .map(|fragment_id| FragmentWorkerSlotMapping {
             fragment_id: *fragment_id,
             mapping: None,
         })
@@ -120,8 +120,8 @@ pub async fn on_meta_start(
     );
     notification_manager.notify_frontend_without_version(
         Operation::Snapshot,
-        Info::ServingWorkerMappings(FragmentWorkerMappings {
-            mappings: to_fragment_worker_mapping(&mappings),
+        Info::ServingWorkerSlotMappings(FragmentWorkerSlotMappings {
+            mappings: to_fragment_worker_slot_mapping(&mappings),
         }),
     );
 }
@@ -185,7 +185,7 @@ pub async fn start_serving_vnode_mapping_worker(
                                     let (workers, streaming_parallelisms) = fetch_serving_infos(&metadata_manager).await;
                                     let (mappings, _) = serving_vnode_mapping.upsert(streaming_parallelisms, &workers);
                                     tracing::debug!("Update serving vnode mapping snapshot for fragments {:?}.", mappings.keys());
-                                    notification_manager.notify_frontend_without_version(Operation::Snapshot, Info::ServingWorkerMappings(FragmentWorkerMappings{ mappings: to_fragment_worker_mapping(&mappings) }));
+                                    notification_manager.notify_frontend_without_version(Operation::Snapshot, Info::ServingWorkerSlotMappings(FragmentWorkerSlotMappings{ mappings: to_fragment_worker_slot_mapping(&mappings) }));
                                 }
                                 LocalNotification::FragmentMappingsUpsert(fragment_ids) => {
                                     if fragment_ids.is_empty() {
@@ -195,11 +195,11 @@ pub async fn start_serving_vnode_mapping_worker(
                                     let (upserted, failed) = serving_vnode_mapping.upsert(streaming_parallelisms, &workers);
                                     if !upserted.is_empty() {
                                         tracing::debug!("Update serving vnode mapping for fragments {:?}.", upserted.keys());
-                                        notification_manager.notify_frontend_without_version(Operation::Update, Info::ServingWorkerMappings(FragmentWorkerMappings{ mappings: to_fragment_worker_mapping(&upserted) }));
+                                        notification_manager.notify_frontend_without_version(Operation::Update, Info::ServingWorkerSlotMappings(FragmentWorkerSlotMappings{ mappings: to_fragment_worker_slot_mapping(&upserted) }));
                                     }
                                     if !failed.is_empty() {
                                         tracing::debug!("Fail to update serving vnode mapping for fragments {:?}.", failed);
-                                        notification_manager.notify_frontend_without_version(Operation::Delete, Info::ServingWorkerMappings(FragmentWorkerMappings{ mappings: to_deleted_fragment_worker_mapping(&failed)}));
+                                        notification_manager.notify_frontend_without_version(Operation::Delete, Info::ServingWorkerSlotMappings(FragmentWorkerSlotMappings{ mappings: to_deleted_fragment_worker_slot_mapping(&failed)}));
                                     }
                                 }
                                 LocalNotification::FragmentMappingsDelete(fragment_ids) => {
@@ -208,7 +208,7 @@ pub async fn start_serving_vnode_mapping_worker(
                                     }
                                     tracing::debug!("Delete serving vnode mapping for fragments {:?}.", fragment_ids);
                                     serving_vnode_mapping.remove(&fragment_ids);
-                                    notification_manager.notify_frontend_without_version(Operation::Delete, Info::ServingWorkerMappings(FragmentWorkerMappings{ mappings: to_deleted_fragment_worker_mapping(&fragment_ids) }));
+                                    notification_manager.notify_frontend_without_version(Operation::Delete, Info::ServingWorkerSlotMappings(FragmentWorkerSlotMappings{ mappings: to_deleted_fragment_worker_slot_mapping(&fragment_ids) }));
                                 }
                                 _ => {}
                             }

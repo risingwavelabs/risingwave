@@ -75,7 +75,9 @@ mod maxwell;
 mod mysql;
 pub mod plain_parser;
 mod postgres;
+
 mod protobuf;
+pub mod scalar_adapter;
 mod unified;
 mod upsert_parser;
 mod util;
@@ -89,6 +91,7 @@ pub struct SourceStreamChunkBuilder {
     descs: Vec<SourceColumnDesc>,
     builders: Vec<ArrayBuilderImpl>,
     op_builder: Vec<Op>,
+    vis_builder: BitmapBuilder,
 }
 
 impl SourceStreamChunkBuilder {
@@ -102,6 +105,7 @@ impl SourceStreamChunkBuilder {
             descs,
             builders,
             op_builder: Vec::with_capacity(cap),
+            vis_builder: BitmapBuilder::with_capacity(cap),
         }
     }
 
@@ -110,18 +114,21 @@ impl SourceStreamChunkBuilder {
             descs: &self.descs,
             builders: &mut self.builders,
             op_builder: &mut self.op_builder,
+            vis_builder: &mut self.vis_builder,
+            visible: true, // write visible rows by default
             row_meta: None,
         }
     }
 
     /// Consumes the builder and returns a [`StreamChunk`].
     pub fn finish(self) -> StreamChunk {
-        StreamChunk::new(
+        StreamChunk::with_visibility(
             self.op_builder,
             self.builders
                 .into_iter()
                 .map(|builder| builder.finish().into())
                 .collect(),
+            self.vis_builder.finish(),
         )
     }
 
@@ -129,74 +136,17 @@ impl SourceStreamChunkBuilder {
     /// the builders of the next [`StreamChunk`].
     #[must_use]
     pub fn take(&mut self, next_cap: usize) -> StreamChunk {
-        let descs = std::mem::take(&mut self.descs);
+        let descs = std::mem::take(&mut self.descs); // we don't use `descs` in `finish`
         let builder = std::mem::replace(self, Self::with_capacity(descs, next_cap));
         builder.finish()
     }
 
-    pub fn op_num(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.op_builder.len()
     }
 
     pub fn is_empty(&self) -> bool {
         self.op_builder.is_empty()
-    }
-}
-
-/// A builder for building a [`StreamChunk`] that contains only heartbeat rows.
-/// Some connectors may emit heartbeat messages to the downstream, and the cdc source
-/// rely on the heartbeat messages to keep the source offset up-to-date with upstream.
-pub struct HeartbeatChunkBuilder {
-    builder: SourceStreamChunkBuilder,
-}
-
-impl HeartbeatChunkBuilder {
-    fn with_capacity(descs: Vec<SourceColumnDesc>, cap: usize) -> Self {
-        let builders = descs
-            .iter()
-            .map(|desc| desc.data_type.create_array_builder(cap))
-            .collect();
-
-        Self {
-            builder: SourceStreamChunkBuilder {
-                descs,
-                builders,
-                op_builder: Vec::with_capacity(cap),
-            },
-        }
-    }
-
-    fn row_writer(&mut self) -> SourceStreamChunkRowWriter<'_> {
-        self.builder.row_writer()
-    }
-
-    /// Consumes the builder and returns a [`StreamChunk`] with all rows marked as invisible
-    fn finish(self) -> StreamChunk {
-        // heartbeat chunk should be invisible
-        let builder = self.builder;
-        let visibility = BitmapBuilder::zeroed(builder.op_builder.len());
-        StreamChunk::with_visibility(
-            builder.op_builder,
-            builder
-                .builders
-                .into_iter()
-                .map(|builder| builder.finish().into())
-                .collect(),
-            visibility.finish(),
-        )
-    }
-
-    /// Resets the builder and returns a [`StreamChunk`], while reserving `next_cap` capacity for
-    /// the builders of the next [`StreamChunk`].
-    #[must_use]
-    fn take(&mut self, next_cap: usize) -> StreamChunk {
-        let descs = std::mem::take(&mut self.builder.descs);
-        let builder = std::mem::replace(self, Self::with_capacity(descs, next_cap));
-        builder.finish()
-    }
-
-    fn is_empty(&self) -> bool {
-        self.builder.is_empty()
     }
 }
 
@@ -213,11 +163,31 @@ pub struct SourceStreamChunkRowWriter<'a> {
     descs: &'a [SourceColumnDesc],
     builders: &'a mut [ArrayBuilderImpl],
     op_builder: &'a mut Vec<Op>,
+    vis_builder: &'a mut BitmapBuilder,
+
+    /// Whether the rows written by this writer should be visible in output `StreamChunk`.
+    visible: bool,
 
     /// An optional meta data of the original message.
     ///
     /// When this is set by `with_meta`, it'll be used to fill the columns of types other than [`SourceColumnType::Normal`].
     row_meta: Option<MessageMeta<'a>>,
+}
+
+impl<'a> SourceStreamChunkRowWriter<'a> {
+    /// Set the meta data of the original message for this row writer.
+    ///
+    /// This should always be called except for tests.
+    fn with_meta(mut self, row_meta: MessageMeta<'a>) -> Self {
+        self.row_meta = Some(row_meta);
+        self
+    }
+
+    /// Convert the row writer to invisible row writer.
+    fn invisible(mut self) -> Self {
+        self.visible = false;
+        self
+    }
 }
 
 /// The meta data of the original message for a row writer.
@@ -306,7 +276,7 @@ impl OpAction for OpActionInsert {
 
     #[inline(always)]
     fn finish(writer: &mut SourceStreamChunkRowWriter<'_>) {
-        writer.op_builder.push(Op::Insert);
+        writer.append_op(Op::Insert);
     }
 }
 
@@ -332,7 +302,7 @@ impl OpAction for OpActionDelete {
 
     #[inline(always)]
     fn finish(writer: &mut SourceStreamChunkRowWriter<'_>) {
-        writer.op_builder.push(Op::Delete);
+        writer.append_op(Op::Delete);
     }
 }
 
@@ -360,28 +330,50 @@ impl OpAction for OpActionUpdate {
 
     #[inline(always)]
     fn finish(writer: &mut SourceStreamChunkRowWriter<'_>) {
-        writer.op_builder.push(Op::UpdateDelete);
-        writer.op_builder.push(Op::UpdateInsert);
-    }
-}
-
-impl<'a> SourceStreamChunkRowWriter<'a> {
-    /// Set the meta data of the original message for this row writer.
-    ///
-    /// This should always be called except for tests.
-    fn with_meta(self, row_meta: MessageMeta<'a>) -> Self {
-        Self {
-            row_meta: Some(row_meta),
-            ..self
-        }
+        writer.append_op(Op::UpdateDelete);
+        writer.append_op(Op::UpdateInsert);
     }
 }
 
 impl SourceStreamChunkRowWriter<'_> {
+    fn append_op(&mut self, op: Op) {
+        self.op_builder.push(op);
+        self.vis_builder.append(self.visible);
+    }
+
     fn do_action<A: OpAction>(
         &mut self,
         mut f: impl FnMut(&SourceColumnDesc) -> AccessResult<A::Output>,
     ) -> AccessResult<()> {
+        let mut parse_field = |desc: &SourceColumnDesc| {
+            match f(desc) {
+                Ok(output) => Ok(output),
+
+                // Throw error for failed access to primary key columns.
+                Err(e) if desc.is_pk => Err(e),
+                // Ignore error for other columns and fill in `NULL` instead.
+                Err(error) => {
+                    // TODO: figure out a way to fill in not-null default value if user specifies one
+                    // TODO: decide whether the error should not be ignored (e.g., even not a valid Debezium message)
+                    // TODO: not using tracing span to provide `split_id` and `offset` due to performance concern,
+                    //       see #13105
+                    static LOG_SUPPERSSER: LazyLock<LogSuppresser> =
+                        LazyLock::new(LogSuppresser::default);
+                    if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                        tracing::warn!(
+                            error = %error.as_report(),
+                            split_id = self.row_meta.as_ref().map(|m| m.split_id),
+                            offset = self.row_meta.as_ref().map(|m| m.offset),
+                            column = desc.name,
+                            suppressed_count,
+                            "failed to parse non-pk column, padding with `NULL`"
+                        );
+                    }
+                    Ok(A::output_for(Datum::None))
+                }
+            }
+        };
+
         let mut wrapped_f = |desc: &SourceColumnDesc| {
             match (&desc.column_type, &desc.additional_column.column_type) {
                 (&SourceColumnType::Offset | &SourceColumnType::RowId, _) => {
@@ -407,14 +399,12 @@ impl SourceStreamChunkRowWriter<'_> {
                             .unwrap(), // handled all match cases in internal match, unwrap is safe
                     ));
                 }
-                (_, &Some(AdditionalColumnType::Timestamp(_))) => {
-                    return Ok(A::output_for(
-                        self.row_meta
-                            .as_ref()
-                            .and_then(|ele| extreact_timestamp_from_meta(ele.meta))
-                            .unwrap_or(None),
-                    ))
-                }
+                (_, &Some(AdditionalColumnType::Timestamp(_))) => match self.row_meta {
+                    Some(row_meta) => Ok(A::output_for(
+                        extreact_timestamp_from_meta(row_meta.meta).unwrap_or(None),
+                    )),
+                    None => parse_field(desc), // parse from payload
+                },
                 (_, &Some(AdditionalColumnType::Partition(_))) => {
                     // the meta info does not involve spec connector
                     return Ok(A::output_for(
@@ -463,32 +453,7 @@ impl SourceStreamChunkRowWriter<'_> {
                 }
                 (_, _) => {
                     // For normal columns, call the user provided closure.
-                    match f(desc) {
-                        Ok(output) => Ok(output),
-
-                        // Throw error for failed access to primary key columns.
-                        Err(e) if desc.is_pk => Err(e),
-                        // Ignore error for other columns and fill in `NULL` instead.
-                        Err(error) => {
-                            // TODO: figure out a way to fill in not-null default value if user specifies one
-                            // TODO: decide whether the error should not be ignored (e.g., even not a valid Debezium message)
-                            // TODO: not using tracing span to provide `split_id` and `offset` due to performance concern,
-                            //       see #13105
-                            static LOG_SUPPERSSER: LazyLock<LogSuppresser> =
-                                LazyLock::new(LogSuppresser::default);
-                            if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
-                                tracing::warn!(
-                                    error = %error.as_report(),
-                                    split_id = self.row_meta.as_ref().map(|m| m.split_id),
-                                    offset = self.row_meta.as_ref().map(|m| m.offset),
-                                    column = desc.name,
-                                    suppressed_count,
-                                    "failed to parse non-pk column, padding with `NULL`"
-                                );
-                            }
-                            Ok(A::output_for(Datum::None))
-                        }
-                    }
+                    parse_field(desc)
                 }
             }
         };
@@ -581,8 +546,10 @@ pub enum ParserFormat {
     Plain,
 }
 
-/// `ByteStreamSourceParser` is a new message parser, the parser should consume
-/// the input data stream and return a stream of parsed msgs.
+/// `ByteStreamSourceParser` is the entrypoint abstraction for parsing messages.
+/// It consumes bytes of one individual message and produces parsed records.
+///
+/// It's used by [`ByteStreamSourceParserImpl::into_stream`]. `pub` is for benchmark only.
 pub trait ByteStreamSourceParser: Send + Debug + Sized + 'static {
     /// The column descriptors of the output chunk.
     fn columns(&self) -> &[SourceColumnDesc];
@@ -664,7 +631,7 @@ impl<P: ByteStreamSourceParser> P {
 
         // The parser stream will be long-lived. We use `instrument_with` here to create
         // a new span for the polling of each chunk.
-        into_chunk_stream(self, data_stream)
+        into_chunk_stream_inner(self, data_stream)
             .instrument_with(move || tracing::info_span!("source_parse_chunk", actor_id, source_id))
     }
 }
@@ -676,10 +643,13 @@ const MAX_ROWS_FOR_TRANSACTION: usize = 4096;
 // TODO: when upsert is disabled, how to filter those empty payload
 // Currently, an err is returned for non upsert with empty payload
 #[try_stream(ok = StreamChunk, error = crate::error::ConnectorError)]
-async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream: BoxSourceStream) {
+async fn into_chunk_stream_inner<P: ByteStreamSourceParser>(
+    mut parser: P,
+    data_stream: BoxSourceStream,
+) {
     let columns = parser.columns().to_vec();
 
-    let mut heartbeat_builder = HeartbeatChunkBuilder::with_capacity(columns.clone(), 0);
+    let mut heartbeat_builder = SourceStreamChunkBuilder::with_capacity(columns.clone(), 0);
     let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 0);
 
     struct Transaction {
@@ -687,13 +657,13 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
         len: usize,
     }
     let mut current_transaction = None;
-    let mut yield_asap = false; // whether we should yield the chunk as soon as possible (txn commits)
 
     #[for_await]
     for batch in data_stream {
         let batch = batch?;
         let batch_len = batch.len();
 
+        let mut last_batch_not_yielded = false;
         if let Some(Transaction { len, id }) = &mut current_transaction {
             // Dirty state. The last batch is not yielded due to uncommitted transaction.
             if *len > MAX_ROWS_FOR_TRANSACTION {
@@ -704,17 +674,13 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                     "transaction is larger than {MAX_ROWS_FOR_TRANSACTION} rows, force commit"
                 );
                 *len = 0; // reset `len` while keeping `id`
-                yield_asap = false;
                 yield builder.take(batch_len);
             } else {
-                // Normal transaction. After the transaction is committed, we should yield the last
-                // batch immediately, so set `yield_asap` to true.
-                yield_asap = true;
+                last_batch_not_yielded = true
             }
         } else {
             // Clean state. Reserve capacity for the builder.
             assert!(builder.is_empty());
-            assert!(!yield_asap);
             let _ = builder.take(batch_len);
         }
 
@@ -725,11 +691,14 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                     offset = msg.offset,
                     "got a empty message, could be a heartbeat"
                 );
-                parser.emit_empty_row(heartbeat_builder.row_writer().with_meta(MessageMeta {
-                    meta: &msg.meta,
-                    split_id: &msg.split_id,
-                    offset: &msg.offset,
-                }));
+                // Emit an empty invisible row for the heartbeat message.
+                parser.emit_empty_row(heartbeat_builder.row_writer().invisible().with_meta(
+                    MessageMeta {
+                        meta: &msg.meta,
+                        split_id: &msg.split_id,
+                        offset: &msg.offset,
+                    },
+                ));
                 continue;
             }
 
@@ -743,7 +712,7 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                     .observe(lag_ms as f64);
             }
 
-            let old_op_num = builder.op_num();
+            let old_len = builder.len();
             match parser
                 .parse_one_with_txn(
                     msg.key,
@@ -759,12 +728,10 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                 // It's possible that parsing multiple rows in a single message PARTIALLY failed.
                 // We still have to maintain the row number in this case.
                 res @ (Ok(ParseResult::Rows) | Err(_)) => {
-                    // The number of rows added to the builder.
-                    let num = builder.op_num() - old_op_num;
-
-                    // Aggregate the number of rows in the current transaction.
+                    // Aggregate the number of new rows into the current transaction.
                     if let Some(Transaction { len, .. }) = &mut current_transaction {
-                        *len += num;
+                        let n_new_rows = builder.len() - old_len;
+                        *len += n_new_rows;
                     }
 
                     if let Err(error) = res {
@@ -793,32 +760,28 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                     }
                 }
 
-                Ok(ParseResult::TransactionControl(txn_ctl)) => {
-                    match txn_ctl {
-                        TransactionControl::Begin { id } => {
-                            if let Some(Transaction { id: current_id, .. }) = &current_transaction {
-                                tracing::warn!(current_id, id, "already in transaction");
-                            }
-                            tracing::debug!("begin upstream transaction: id={}", id);
-                            current_transaction = Some(Transaction { id, len: 0 });
+                Ok(ParseResult::TransactionControl(txn_ctl)) => match txn_ctl {
+                    TransactionControl::Begin { id } => {
+                        if let Some(Transaction { id: current_id, .. }) = &current_transaction {
+                            tracing::warn!(current_id, id, "already in transaction");
                         }
-                        TransactionControl::Commit { id } => {
-                            let current_id = current_transaction.as_ref().map(|t| &t.id);
-                            if current_id != Some(&id) {
-                                tracing::warn!(?current_id, id, "transaction id mismatch");
-                            }
-                            tracing::debug!("commit upstream transaction: id={}", id);
-                            current_transaction = None;
-                        }
+                        tracing::debug!(id, "begin upstream transaction");
+                        current_transaction = Some(Transaction { id, len: 0 });
                     }
+                    TransactionControl::Commit { id } => {
+                        let current_id = current_transaction.as_ref().map(|t| &t.id);
+                        if current_id != Some(&id) {
+                            tracing::warn!(?current_id, id, "transaction id mismatch");
+                        }
+                        tracing::debug!(id, "commit upstream transaction");
+                        current_transaction = None;
 
-                    // Not in a transaction anymore and `yield_asap` is set, so we should yield the
-                    // chunk now.
-                    if current_transaction.is_none() && yield_asap {
-                        yield_asap = false;
-                        yield builder.take(batch_len - (i + 1));
+                        if last_batch_not_yielded {
+                            yield builder.take(batch_len - (i + 1));
+                            last_batch_not_yielded = false;
+                        }
                     }
-                }
+                },
             }
         }
 
@@ -831,8 +794,6 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
 
         // If we are not in a transaction, we should yield the chunk now.
         if current_transaction.is_none() {
-            yield_asap = false;
-
             yield builder.take(0);
         }
     }
@@ -901,8 +862,10 @@ impl AccessBuilderImpl {
     }
 }
 
+/// The entrypoint of parsing. It parses [`SourceMessage`] stream (byte stream) into [`StreamChunk`] stream.
+/// Used by [`crate::source::into_chunk_stream`].
 #[derive(Debug)]
-pub enum ByteStreamSourceParserImpl {
+pub(crate) enum ByteStreamSourceParserImpl {
     Csv(CsvParser),
     Json(JsonParser),
     Debezium(DebeziumParser),
@@ -913,11 +876,9 @@ pub enum ByteStreamSourceParserImpl {
     CanalJson(CanalJsonParser),
 }
 
-pub type ParsedStreamImpl = impl ChunkSourceStream + Unpin;
-
 impl ByteStreamSourceParserImpl {
-    /// Converts this `SourceMessage` stream into a stream of [`StreamChunk`].
-    pub fn into_stream(self, msg_stream: BoxSourceStream) -> ParsedStreamImpl {
+    /// Converts [`SourceMessage`] stream into [`StreamChunk`] stream.
+    pub fn into_stream(self, msg_stream: BoxSourceStream) -> impl ChunkSourceStream + Unpin {
         #[auto_enum(futures03::Stream)]
         let stream = match self {
             Self::Csv(parser) => parser.into_stream(msg_stream),
@@ -1062,7 +1023,7 @@ pub enum EncodingProperties {
     Protobuf(ProtobufProperties),
     Csv(CsvProperties),
     Json(JsonProperties),
-    MongoJson(JsonProperties),
+    MongoJson,
     Bytes(BytesProperties),
     Native,
     /// Encoding can't be specified because the source will determines it. Now only used in Iceberg.

@@ -127,7 +127,7 @@ pub struct SstDeltaInfo {
     pub delete_sst_object_ids: Vec<HummockSstableObjectId>,
 }
 
-pub type BranchedSstInfo = HashMap<CompactionGroupId, /* SST Id */ HummockSstableId>;
+pub type BranchedSstInfo = HashMap<CompactionGroupId, Vec<HummockSstableId>>;
 
 impl HummockVersion {
     pub fn get_compaction_group_levels(&self, compaction_group_id: CompactionGroupId) -> &Levels {
@@ -300,13 +300,12 @@ impl HummockVersion {
         member_table_ids: HashSet<StateTableId>,
         new_sst_start_id: u64,
         allow_trivial_split: bool,
-    ) -> Vec<SstSplitInfo> {
+    ) {
         let mut new_sst_id = new_sst_start_id;
-        let mut split_id_vers = vec![];
         if parent_group_id == StaticCompactionGroupId::NewCompactionGroup as CompactionGroupId
             || !self.levels.contains_key(&parent_group_id)
         {
-            return split_id_vers;
+            return;
         }
         let [parent_levels, cur_levels] = self
             .levels
@@ -338,7 +337,6 @@ impl HummockVersion {
                     &member_table_ids,
                     allow_trivial_split,
                     sub_level,
-                    &mut split_id_vers,
                     &mut new_sst_id,
                 );
                 sub_level
@@ -374,7 +372,6 @@ impl HummockVersion {
                 &member_table_ids,
                 allow_trivial_split,
                 level,
-                &mut split_id_vers,
                 &mut new_sst_id,
             );
             cur_levels.levels[idx].total_file_size += insert_table_infos
@@ -402,7 +399,6 @@ impl HummockVersion {
                     level.uncompressed_file_size -= sst_info.uncompressed_file_size;
                 });
         }
-        split_id_vers
     }
 
     pub fn build_sst_delta_infos(&self, version_delta: &HummockVersionDelta) -> Vec<SstDeltaInfo> {
@@ -486,11 +482,8 @@ impl HummockVersion {
         infos
     }
 
-    pub fn apply_version_delta(
-        &mut self,
-        version_delta: &HummockVersionDelta,
-    ) -> Vec<SstSplitInfo> {
-        let mut sst_split_info = vec![];
+    pub fn apply_version_delta(&mut self, version_delta: &HummockVersionDelta) {
+        let new_committed_epoch = version_delta.max_committed_epoch > self.max_committed_epoch;
         for (compaction_group_id, group_deltas) in &version_delta.group_deltas {
             let summary = summarize_group_deltas(group_deltas);
             if let Some(group_construct) = &summary.group_construct {
@@ -504,21 +497,21 @@ impl HummockVersion {
                     .member_table_ids
                     .clone_from(&group_construct.table_ids);
                 self.levels.insert(*compaction_group_id, new_levels);
-                sst_split_info.extend(self.init_with_parent_group(
+                self.init_with_parent_group(
                     parent_group_id,
                     *compaction_group_id,
                     HashSet::from_iter(group_construct.table_ids.clone()),
                     group_construct.get_new_sst_start_id(),
                     group_construct.version() == CompatibilityVersion::VersionUnspecified,
-                ));
+                );
             } else if let Some(group_change) = &summary.group_table_change {
-                sst_split_info.extend(self.init_with_parent_group(
+                self.init_with_parent_group(
                     group_change.origin_group_id,
                     group_change.target_group_id,
                     HashSet::from_iter(group_change.table_ids.clone()),
                     group_change.new_sst_start_id,
                     group_change.version() == CompatibilityVersion::VersionUnspecified,
-                ));
+                );
 
                 let levels = self
                     .levels
@@ -649,16 +642,25 @@ impl HummockVersion {
 
         // If a table has no new change log entry (even an empty one), it means we have stopped maintained
         // the change log for the table
-        self.table_change_log
-            .retain(|table_id, _| version_delta.change_log_delta.contains_key(table_id));
+        if new_committed_epoch {
+            self.table_change_log.retain(|table_id, _| {
+                let contains = version_delta.change_log_delta.contains_key(table_id);
+                if !contains {
+                    warn!(
+                        ?table_id,
+                        max_committed_epoch = version_delta.max_committed_epoch,
+                        "table change log dropped due to no further change log at newly committed epoch",
+                    );
+                }
+                contains
+            });
+        }
 
         for (table_id, change_log_delta) in &version_delta.change_log_delta {
             if let Some(change_log) = self.table_change_log.get_mut(table_id) {
                 change_log.truncate(change_log_delta.truncate_epoch);
             }
         }
-
-        sst_split_info
     }
 
     pub fn build_compaction_group_info(&self) -> HashMap<TableId, CompactionGroupId> {
@@ -684,10 +686,10 @@ impl HummockVersion {
                     }
                     let object_id = table_info.get_object_id();
                     let entry: &mut BranchedSstInfo = ret.entry(object_id).or_default();
-                    if let Some(exist_sst_id) = entry.get(compaction_group_id) {
-                        panic!("we do not allow more than one sst with the same object id in one grou. object-id: {}, duplicated sst id: {:?} and {}", object_id, exist_sst_id, table_info.sst_id);
-                    }
-                    entry.insert(*compaction_group_id, table_info.sst_id);
+                    entry
+                        .entry(*compaction_group_id)
+                        .or_default()
+                        .push(table_info.sst_id)
                 }
             }
         }
@@ -886,7 +888,6 @@ fn split_sst_info_for_level(
     member_table_ids: &HashSet<u32>,
     allow_trivial_split: bool,
     level: &mut Level,
-    split_id_vers: &mut Vec<SstSplitInfo>,
     new_sst_id: &mut u64,
 ) -> Vec<SstableInfo> {
     // Remove SST from sub level may result in empty sub level. It will be purged
@@ -905,7 +906,6 @@ fn split_sst_info_for_level(
             let mut branch_table_info = sst_info.clone();
             branch_table_info.sst_id = *new_sst_id;
             *new_sst_id += 1;
-            let parent_old_sst_id = sst_info.get_sst_id();
             if is_trivial {
                 // This is a compatibility design. we only clear the table-ids for files which would
                 // be removed in later code. In the version-delta generated by new
@@ -916,12 +916,6 @@ fn split_sst_info_for_level(
                 sst_info.sst_id = *new_sst_id;
                 *new_sst_id += 1;
             }
-            split_id_vers.push((
-                branch_table_info.object_id,
-                branch_table_info.sst_id,
-                parent_old_sst_id,
-                sst_info.sst_id,
-            ));
             insert_table_infos.push(branch_table_info);
         }
     }
@@ -1101,7 +1095,7 @@ pub fn insert_new_sub_level(
 
 pub fn build_version_delta_after_version(version: &HummockVersion) -> HummockVersionDelta {
     HummockVersionDelta {
-        id: version.id + 1,
+        id: version.next_version_id(),
         prev_id: version.id,
         safe_epoch: version.safe_epoch,
         trivial_move: false,
@@ -1265,13 +1259,7 @@ pub fn validate_version(version: &HummockVersion) -> Vec<String> {
             let mut prev_table_info: Option<&SstableInfo> = None;
             for table_info in &level.table_infos {
                 // Ensure table_ids are sorted and unique
-                if !table_info.table_ids.is_sorted_by(|a, b| {
-                    if a < b {
-                        Some(Ordering::Less)
-                    } else {
-                        Some(Ordering::Greater)
-                    }
-                }) {
+                if !table_info.table_ids.is_sorted_by(|a, b| a < b) {
                     res.push(format!(
                         "{} SST {}: table_ids not sorted",
                         level_identifier, table_info.object_id

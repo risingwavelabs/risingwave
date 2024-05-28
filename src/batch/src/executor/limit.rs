@@ -150,8 +150,8 @@ mod tests {
     use std::vec;
 
     use futures_async_stream::for_await;
-    use risingwave_common::array::{Array, ArrayRef, BoolArray, DataChunk, PrimitiveArray};
-    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::array::{Array, ArrayRef, BoolArray, PrimitiveArray};
+    use risingwave_common::catalog::Field;
     use risingwave_common::types::DataType;
     use risingwave_common::util::iter_util::ZipEqDebug;
 

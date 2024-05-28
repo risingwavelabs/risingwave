@@ -18,7 +18,6 @@ use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_common::{bail_not_implemented, not_implemented};
 use risingwave_expr::aggregate::{agg_kinds, AggKind};
-use risingwave_expr::sig::FUNCTION_REGISTRY;
 
 use super::generic::{self, Agg, GenericPlanRef, PlanAggCall, ProjectBuilder};
 use super::utils::impl_distill_by_unit;
@@ -27,7 +26,7 @@ use super::{
     PlanTreeNodeUnary, PredicatePushdown, StreamHashAgg, StreamProject, StreamSimpleAgg,
     StreamStatelessSimpleAgg, ToBatch, ToStream,
 };
-use crate::error::{ErrorCode, Result};
+use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{
     AggCall, Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef, Literal,
     OrderBy, WindowFunction,
@@ -262,7 +261,7 @@ pub struct LogicalAggBuilder {
     /// the agg calls
     agg_calls: Vec<PlanAggCall>,
     /// the error during the expression rewriting
-    error: Option<ErrorCode>,
+    error: Option<RwError>,
     /// If `is_in_filter_clause` is true, it means that
     /// we are processing filter clause.
     /// This field is needed because input refs in these clauses
@@ -354,7 +353,7 @@ impl LogicalAggBuilder {
     fn rewrite_with_error(&mut self, expr: ExprImpl) -> Result<ExprImpl> {
         let rewritten_expr = self.rewrite_expr(expr);
         if let Some(error) = self.error.take() {
-            return Err(error.into());
+            return Err(error);
         }
         Ok(rewritten_expr)
     }
@@ -377,51 +376,159 @@ impl LogicalAggBuilder {
         self.group_key.len()
     }
 
-    /// Push a new planned agg call into the builder.
-    /// Return an `InputRef` to that agg call.
-    /// For existing agg calls, return an `InputRef` to the existing one.
-    fn push_agg_call(&mut self, agg_call: PlanAggCall) -> InputRef {
-        if let Some((pos, existing)) = self.agg_calls.iter().find_position(|&c| c == &agg_call) {
-            return InputRef::new(
-                self.schema_agg_start_offset() + pos,
-                existing.return_type.clone(),
-            );
+    /// Rewrite [`AggCall`] if needed, and push it into the builder using `push_agg_call`.
+    /// This is shared by [`LogicalAggBuilder`] and `LogicalOverWindowBuilder`.
+    pub(crate) fn general_rewrite_agg_call(
+        agg_call: AggCall,
+        mut push_agg_call: impl FnMut(AggCall) -> Result<InputRef>,
+    ) -> Result<ExprImpl> {
+        match agg_call.agg_kind {
+            // Rewrite avg to cast(sum as avg_return_type) / count.
+            AggKind::Avg => {
+                assert_eq!(agg_call.args.len(), 1);
+
+                let sum = ExprImpl::from(push_agg_call(AggCall::new(
+                    AggKind::Sum,
+                    agg_call.args.clone(),
+                    agg_call.distinct,
+                    agg_call.order_by.clone(),
+                    agg_call.filter.clone(),
+                    agg_call.direct_args.clone(),
+                )?)?)
+                .cast_explicit(agg_call.return_type())?;
+
+                let count = ExprImpl::from(push_agg_call(AggCall::new(
+                    AggKind::Count,
+                    agg_call.args.clone(),
+                    agg_call.distinct,
+                    agg_call.order_by.clone(),
+                    agg_call.filter.clone(),
+                    agg_call.direct_args.clone(),
+                )?)?);
+
+                Ok(FunctionCall::new(ExprType::Divide, Vec::from([sum, count]))?.into())
+            }
+            // We compute `var_samp` as
+            // (sum(sq) - sum * sum / count) / (count - 1)
+            // and `var_pop` as
+            // (sum(sq) - sum * sum / count) / count
+            // Since we don't have the square function, we use the plain Multiply for squaring,
+            // which is in a sense more general than the pow function, especially when calculating
+            // covariances in the future. Also we don't have the sqrt function for rooting, so we
+            // use pow(x, 0.5) to simulate
+            kind @ (AggKind::StddevPop
+            | AggKind::StddevSamp
+            | AggKind::VarPop
+            | AggKind::VarSamp) => {
+                let arg = agg_call.args().iter().exactly_one().unwrap();
+                let squared_arg = ExprImpl::from(FunctionCall::new(
+                    ExprType::Multiply,
+                    vec![arg.clone(), arg.clone()],
+                )?);
+
+                let sum_of_sq = ExprImpl::from(push_agg_call(AggCall::new(
+                    AggKind::Sum,
+                    vec![squared_arg],
+                    agg_call.distinct,
+                    agg_call.order_by.clone(),
+                    agg_call.filter.clone(),
+                    agg_call.direct_args.clone(),
+                )?)?)
+                .cast_explicit(agg_call.return_type())?;
+
+                let sum = ExprImpl::from(push_agg_call(AggCall::new(
+                    AggKind::Sum,
+                    agg_call.args.clone(),
+                    agg_call.distinct,
+                    agg_call.order_by.clone(),
+                    agg_call.filter.clone(),
+                    agg_call.direct_args.clone(),
+                )?)?)
+                .cast_explicit(agg_call.return_type())?;
+
+                let count = ExprImpl::from(push_agg_call(AggCall::new(
+                    AggKind::Count,
+                    agg_call.args.clone(),
+                    agg_call.distinct,
+                    agg_call.order_by.clone(),
+                    agg_call.filter.clone(),
+                    agg_call.direct_args.clone(),
+                )?)?);
+
+                let one = ExprImpl::from(Literal::new(
+                    Datum::from(ScalarImpl::Int64(1)),
+                    DataType::Int64,
+                ));
+
+                let squared_sum = ExprImpl::from(FunctionCall::new(
+                    ExprType::Multiply,
+                    vec![sum.clone(), sum],
+                )?);
+
+                let numerator = ExprImpl::from(FunctionCall::new(
+                    ExprType::Subtract,
+                    vec![
+                        sum_of_sq,
+                        ExprImpl::from(FunctionCall::new(
+                            ExprType::Divide,
+                            vec![squared_sum, count.clone()],
+                        )?),
+                    ],
+                )?);
+
+                let denominator = match kind {
+                    AggKind::VarPop | AggKind::StddevPop => count.clone(),
+                    AggKind::VarSamp | AggKind::StddevSamp => ExprImpl::from(FunctionCall::new(
+                        ExprType::Subtract,
+                        vec![count.clone(), one.clone()],
+                    )?),
+                    _ => unreachable!(),
+                };
+
+                let mut target = ExprImpl::from(FunctionCall::new(
+                    ExprType::Divide,
+                    vec![numerator, denominator],
+                )?);
+
+                if matches!(kind, AggKind::StddevPop | AggKind::StddevSamp) {
+                    target = ExprImpl::from(FunctionCall::new(ExprType::Sqrt, vec![target])?);
+                }
+
+                match kind {
+                    AggKind::VarPop | AggKind::StddevPop => Ok(target),
+                    AggKind::StddevSamp | AggKind::VarSamp => {
+                        let case_cond = ExprImpl::from(FunctionCall::new(
+                            ExprType::LessThanOrEqual,
+                            vec![count, one],
+                        )?);
+                        let null = ExprImpl::from(Literal::new(None, agg_call.return_type()));
+
+                        Ok(ExprImpl::from(FunctionCall::new(
+                            ExprType::Case,
+                            vec![case_cond, null, target],
+                        )?))
+                    }
+                    _ => unreachable!(),
+                }
+            }
+            _ => Ok(push_agg_call(agg_call)?.into()),
         }
-        let index = self.schema_agg_start_offset() + self.agg_calls.len();
-        let data_type = agg_call.return_type.clone();
-        self.agg_calls.push(agg_call);
-        InputRef::new(index, data_type)
     }
 
-    /// When there is an agg call, there are 3 things to do:
-    /// 1. eval its inputs via project;
-    /// 2. add a `PlanAggCall` to agg;
-    /// 3. rewrite it as an `InputRef` to the agg result in select list.
-    ///
-    /// Note that the rewriter does not traverse into inputs of agg calls.
-    fn try_rewrite_agg_call(
-        &mut self,
-        agg_call: AggCall,
-    ) -> std::result::Result<ExprImpl, ErrorCode> {
-        let return_type = agg_call.return_type();
-        let (agg_kind, inputs, mut distinct, mut order_by, filter, direct_args) =
-            agg_call.decompose();
-
-        if matches!(agg_kind, agg_kinds::must_have_order_by!()) && order_by.sort_exprs.is_empty() {
-            return Err(ErrorCode::InvalidInputSyntax(format!(
-                "Aggregation function {} requires ORDER BY clause",
-                agg_kind
-            )));
-        }
-
-        // try ignore ORDER BY if it doesn't affect the result
-        if matches!(agg_kind, agg_kinds::result_unaffected_by_order_by!()) {
-            order_by = OrderBy::any();
-        }
-        // try ignore DISTINCT if it doesn't affect the result
-        if matches!(agg_kind, agg_kinds::result_unaffected_by_distinct!()) {
-            distinct = false;
-        }
+    /// Push a new agg call into the builder.
+    /// Return an `InputRef` to that agg call.
+    /// For existing agg calls, return an `InputRef` to the existing one.
+    fn push_agg_call(&mut self, agg_call: AggCall) -> Result<InputRef> {
+        let AggCall {
+            agg_kind,
+            return_type,
+            args,
+            distinct,
+            order_by,
+            filter,
+            direct_args,
+            user_defined,
+        } = agg_call;
 
         self.is_in_filter_clause = true;
         // filter expr is not added to `input_proj_builder` as a whole. Special exprs incl
@@ -429,27 +536,7 @@ impl LogicalAggBuilder {
         let filter = filter.rewrite_expr(self);
         self.is_in_filter_clause = false;
 
-        if matches!(agg_kind, AggKind::Grouping) {
-            if self.grouping_sets.is_empty() {
-                return Err(ErrorCode::NotSupported(
-                    "GROUPING must be used in a query with grouping sets".into(),
-                    "try to use grouping sets instead".into(),
-                ));
-            }
-            if inputs.len() >= 32 {
-                return Err(ErrorCode::InvalidInputSyntax(
-                    "GROUPING must have fewer than 32 arguments".into(),
-                ));
-            }
-            if inputs.iter().any(|x| self.try_as_group_expr(x).is_none()) {
-                return Err(ErrorCode::InvalidInputSyntax(
-                    "arguments to GROUPING must be grouping expressions of the associated query level"
-                        .into(),
-                ));
-            }
-        }
-
-        let inputs: Vec<_> = inputs
+        let args: Vec<_> = args
             .iter()
             .map(|expr| {
                 let index = self.input_proj_builder.add_expr(expr)?;
@@ -470,220 +557,91 @@ impl LogicalAggBuilder {
                 not_implemented!("{err} inside aggregation calls order by")
             })?;
 
-        match agg_kind {
-            // Rewrite avg to cast(sum as avg_return_type) / count.
-            AggKind::Avg => {
-                assert_eq!(inputs.len(), 1);
+        let plan_agg_call = PlanAggCall {
+            agg_kind,
+            return_type: return_type.clone(),
+            inputs: args,
+            distinct,
+            order_by,
+            filter,
+            direct_args,
+            user_defined,
+        };
 
-                let left_return_type = FUNCTION_REGISTRY
-                    .get_return_type(AggKind::Sum, &[inputs[0].return_type()])
-                    .unwrap();
-                let left_ref = self.push_agg_call(PlanAggCall {
-                    agg_kind: AggKind::Sum,
-                    return_type: left_return_type,
-                    inputs: inputs.clone(),
-                    distinct,
-                    order_by: order_by.clone(),
-                    filter: filter.clone(),
-                    direct_args: direct_args.clone(),
-                });
-                let left = ExprImpl::from(left_ref).cast_explicit(return_type).unwrap();
-
-                let right_return_type = FUNCTION_REGISTRY
-                    .get_return_type(AggKind::Count, &[inputs[0].return_type()])
-                    .unwrap();
-                let right_ref = self.push_agg_call(PlanAggCall {
-                    agg_kind: AggKind::Count,
-                    return_type: right_return_type,
-                    inputs,
-                    distinct,
-                    order_by,
-                    filter,
-                    direct_args,
-                });
-
-                Ok(ExprImpl::from(
-                    FunctionCall::new(ExprType::Divide, vec![left, right_ref.into()]).unwrap(),
-                ))
-            }
-
-            // We compute `var_samp` as
-            // (sum(sq) - sum * sum / count) / (count - 1)
-            // and `var_pop` as
-            // (sum(sq) - sum * sum / count) / count
-            // Since we don't have the square function, we use the plain Multiply for squaring,
-            // which is in a sense more general than the pow function, especially when calculating
-            // covariances in the future. Also we don't have the sqrt function for rooting, so we
-            // use pow(x, 0.5) to simulate
-            AggKind::StddevPop | AggKind::StddevSamp | AggKind::VarPop | AggKind::VarSamp => {
-                let input = inputs.iter().exactly_one().unwrap();
-                let pre_proj_input = self.input_proj_builder.get_expr(input.index).unwrap();
-
-                // first, we compute sum of squared as sum_sq
-                let squared_input_expr = ExprImpl::from(
-                    FunctionCall::new(
-                        ExprType::Multiply,
-                        vec![pre_proj_input.clone(), pre_proj_input.clone()],
-                    )
-                    .unwrap(),
-                );
-
-                let squared_input_proj_index = self
-                    .input_proj_builder
-                    .add_expr(&squared_input_expr)
-                    .unwrap();
-
-                let sum_of_squares_return_type = FUNCTION_REGISTRY
-                    .get_return_type(AggKind::Sum, &[squared_input_expr.return_type()])
-                    .unwrap();
-
-                let sum_of_squares_expr = ExprImpl::from(self.push_agg_call(PlanAggCall {
-                    agg_kind: AggKind::Sum,
-                    return_type: sum_of_squares_return_type,
-                    inputs: vec![InputRef::new(
-                        squared_input_proj_index,
-                        squared_input_expr.return_type(),
-                    )],
-                    distinct,
-                    order_by: order_by.clone(),
-                    filter: filter.clone(),
-                    direct_args: direct_args.clone(),
-                }))
-                .cast_explicit(return_type.clone())
-                .unwrap();
-
-                // after that, we compute sum
-                let sum_return_type = FUNCTION_REGISTRY
-                    .get_return_type(AggKind::Sum, &[input.return_type()])
-                    .unwrap();
-
-                let sum_expr = ExprImpl::from(self.push_agg_call(PlanAggCall {
-                    agg_kind: AggKind::Sum,
-                    return_type: sum_return_type,
-                    inputs: inputs.clone(),
-                    distinct,
-                    order_by: order_by.clone(),
-                    filter: filter.clone(),
-                    direct_args: direct_args.clone(),
-                }))
-                .cast_explicit(return_type.clone())
-                .unwrap();
-
-                // then, we compute count
-                let count_return_type = FUNCTION_REGISTRY
-                    .get_return_type(AggKind::Count, &[input.return_type()])
-                    .unwrap();
-
-                let count_expr = ExprImpl::from(self.push_agg_call(PlanAggCall {
-                    agg_kind: AggKind::Count,
-                    return_type: count_return_type,
-                    inputs,
-                    distinct,
-                    order_by,
-                    filter,
-                    direct_args,
-                }));
-
-                // we start with variance
-
-                // sum * sum
-                let square_of_sum_expr = ExprImpl::from(
-                    FunctionCall::new(ExprType::Multiply, vec![sum_expr.clone(), sum_expr])
-                        .unwrap(),
-                );
-
-                // sum_sq - sum * sum / count
-                let numerator_expr = ExprImpl::from(
-                    FunctionCall::new(
-                        ExprType::Subtract,
-                        vec![
-                            sum_of_squares_expr,
-                            ExprImpl::from(
-                                FunctionCall::new(
-                                    ExprType::Divide,
-                                    vec![square_of_sum_expr, count_expr.clone()],
-                                )
-                                .unwrap(),
-                            ),
-                        ],
-                    )
-                    .unwrap(),
-                );
-
-                // count or count - 1
-                let denominator_expr = match agg_kind {
-                    AggKind::StddevPop | AggKind::VarPop => count_expr.clone(),
-                    AggKind::StddevSamp | AggKind::VarSamp => ExprImpl::from(
-                        FunctionCall::new(
-                            ExprType::Subtract,
-                            vec![
-                                count_expr.clone(),
-                                ExprImpl::from(Literal::new(
-                                    Datum::from(ScalarImpl::Int64(1)),
-                                    DataType::Int64,
-                                )),
-                            ],
-                        )
-                        .unwrap(),
-                    ),
-                    _ => unreachable!(),
-                };
-
-                let mut target_expr = ExprImpl::from(
-                    FunctionCall::new(ExprType::Divide, vec![numerator_expr, denominator_expr])
-                        .unwrap(),
-                );
-
-                // stddev = sqrt(variance)
-                if matches!(agg_kind, AggKind::StddevPop | AggKind::StddevSamp) {
-                    target_expr = ExprImpl::from(
-                        FunctionCall::new(ExprType::Sqrt, vec![target_expr]).unwrap(),
-                    );
-                }
-
-                match agg_kind {
-                    AggKind::VarPop | AggKind::StddevPop => Ok(target_expr),
-                    AggKind::StddevSamp | AggKind::VarSamp => {
-                        let less_than_expr = ExprImpl::from(
-                            FunctionCall::new(
-                                ExprType::LessThanOrEqual,
-                                vec![
-                                    count_expr,
-                                    ExprImpl::from(Literal::new(
-                                        Datum::from(ScalarImpl::Int64(1)),
-                                        DataType::Int64,
-                                    )),
-                                ],
-                            )
-                            .unwrap(),
-                        );
-                        let null_expr = ExprImpl::from(Literal::new(None, return_type));
-
-                        let case_expr = ExprImpl::from(
-                            FunctionCall::new(
-                                ExprType::Case,
-                                vec![less_than_expr, null_expr, target_expr],
-                            )
-                            .unwrap(),
-                        );
-
-                        Ok(case_expr)
-                    }
-                    _ => unreachable!(),
-                }
-            }
-            _ => Ok(self
-                .push_agg_call(PlanAggCall {
-                    agg_kind,
-                    return_type,
-                    inputs,
-                    distinct,
-                    order_by,
-                    filter,
-                    direct_args,
-                })
-                .into()),
+        if let Some((pos, existing)) = self
+            .agg_calls
+            .iter()
+            .find_position(|&c| c == &plan_agg_call)
+        {
+            return Ok(InputRef::new(
+                self.schema_agg_start_offset() + pos,
+                existing.return_type.clone(),
+            ));
         }
+        let index = self.schema_agg_start_offset() + self.agg_calls.len();
+        self.agg_calls.push(plan_agg_call);
+        Ok(InputRef::new(index, return_type))
+    }
+
+    /// When there is an agg call, there are 3 things to do:
+    /// 1. Rewrite `avg`, `var_samp`, etc. into a combination of `sum`, `count`, etc.;
+    /// 2. Add exprs in arguments to input `Project`;
+    /// 2. Add the agg call to current `Agg`, and return an `InputRef` to it.
+    ///
+    /// Note that the rewriter does not traverse into inputs of agg calls.
+    fn try_rewrite_agg_call(&mut self, mut agg_call: AggCall) -> Result<ExprImpl> {
+        if matches!(agg_call.agg_kind, agg_kinds::must_have_order_by!())
+            && agg_call.order_by.sort_exprs.is_empty()
+        {
+            return Err(ErrorCode::InvalidInputSyntax(format!(
+                "Aggregation function {} requires ORDER BY clause",
+                agg_call.agg_kind
+            ))
+            .into());
+        }
+
+        // try ignore ORDER BY if it doesn't affect the result
+        if matches!(
+            agg_call.agg_kind,
+            agg_kinds::result_unaffected_by_order_by!()
+        ) {
+            agg_call.order_by = OrderBy::any();
+        }
+        // try ignore DISTINCT if it doesn't affect the result
+        if matches!(
+            agg_call.agg_kind,
+            agg_kinds::result_unaffected_by_distinct!()
+        ) {
+            agg_call.distinct = false;
+        }
+
+        if matches!(agg_call.agg_kind, AggKind::Grouping) {
+            if self.grouping_sets.is_empty() {
+                return Err(ErrorCode::NotSupported(
+                    "GROUPING must be used in a query with grouping sets".into(),
+                    "try to use grouping sets instead".into(),
+                )
+                .into());
+            }
+            if agg_call.args.len() >= 32 {
+                return Err(ErrorCode::InvalidInputSyntax(
+                    "GROUPING must have fewer than 32 arguments".into(),
+                )
+                .into());
+            }
+            if agg_call
+                .args
+                .iter()
+                .any(|x| self.try_as_group_expr(x).is_none())
+            {
+                return Err(ErrorCode::InvalidInputSyntax(
+                    "arguments to GROUPING must be grouping expressions of the associated query level"
+                        .into(),
+                ).into());
+            }
+        }
+
+        Self::general_rewrite_agg_call(agg_call, |agg_call| self.push_agg_call(agg_call))
     }
 }
 
@@ -754,10 +712,13 @@ impl ExprRewriter for LogicalAggBuilder {
             )
             .into()
         } else {
-            self.error = Some(ErrorCode::InvalidInputSyntax(
-                "column must appear in the GROUP BY clause or be used in an aggregate function"
-                    .into(),
-            ));
+            self.error = Some(
+                ErrorCode::InvalidInputSyntax(
+                    "column must appear in the GROUP BY clause or be used in an aggregate function"
+                        .into(),
+                )
+                .into(),
+            );
             expr
         }
     }
@@ -1202,12 +1163,9 @@ impl ToStream for LogicalAgg {
 #[cfg(test)]
 mod tests {
     use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::types::DataType;
 
     use super::*;
-    use crate::expr::{
-        assert_eq_input_ref, input_ref_to_column_indices, AggCall, ExprType, FunctionCall, OrderBy,
-    };
+    use crate::expr::{assert_eq_input_ref, input_ref_to_column_indices};
     use crate::optimizer::optimizer_context::OptimizerContext;
     use crate::optimizer::plan_node::LogicalValues;
 
@@ -1378,6 +1336,7 @@ mod tests {
             order_by: vec![],
             filter: Condition::true_cond(),
             direct_args: vec![],
+            user_defined: None,
         };
         Agg::new(vec![agg_call], vec![1].into(), values.into()).into()
     }
@@ -1498,6 +1457,7 @@ mod tests {
             order_by: vec![],
             filter: Condition::true_cond(),
             direct_args: vec![],
+            user_defined: None,
         };
         let agg: PlanRef = Agg::new(vec![agg_call], vec![1].into(), values.into()).into();
 
@@ -1562,6 +1522,7 @@ mod tests {
                 order_by: vec![],
                 filter: Condition::true_cond(),
                 direct_args: vec![],
+                user_defined: None,
             },
             PlanAggCall {
                 agg_kind: AggKind::Max,
@@ -1571,6 +1532,7 @@ mod tests {
                 order_by: vec![],
                 filter: Condition::true_cond(),
                 direct_args: vec![],
+                user_defined: None,
             },
         ];
         let agg: PlanRef = Agg::new(agg_calls, vec![1, 2].into(), values.into()).into();

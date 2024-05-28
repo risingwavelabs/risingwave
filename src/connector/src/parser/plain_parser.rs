@@ -30,6 +30,7 @@ use crate::parser::upsert_parser::get_key_column_name;
 use crate::parser::{BytesProperties, ParseResult, ParserFormat};
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef, SourceMeta};
 
+/// Parser for `FORMAT PLAIN`, i.e., append-only source.
 #[derive(Debug)]
 pub struct PlainParser {
     pub key_builder: Option<AccessBuilderImpl>,
@@ -210,7 +211,7 @@ mod tests {
         let mut transactional = false;
         // for untransactional source, we expect emit a chunk for each message batch
         let message_stream = source_message_stream(transactional);
-        let chunk_stream = crate::parser::into_chunk_stream(parser, message_stream.boxed());
+        let chunk_stream = crate::parser::into_chunk_stream_inner(parser, message_stream.boxed());
         let output: std::result::Result<Vec<_>, _> = block_on(chunk_stream.collect::<Vec<_>>())
             .into_iter()
             .collect();
@@ -247,7 +248,7 @@ mod tests {
         // for transactional source, we expect emit a single chunk for the transaction
         transactional = true;
         let message_stream = source_message_stream(transactional);
-        let chunk_stream = crate::parser::into_chunk_stream(parser, message_stream.boxed());
+        let chunk_stream = crate::parser::into_chunk_stream_inner(parser, message_stream.boxed());
         let output: std::result::Result<Vec<_>, _> = block_on(chunk_stream.collect::<Vec<_>>())
             .into_iter()
             .collect();

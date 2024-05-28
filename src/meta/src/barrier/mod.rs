@@ -16,7 +16,6 @@ use std::assert_matches::assert_matches;
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::future::pending;
-use std::iter::empty;
 use std::mem::{replace, take};
 use std::sync::Arc;
 use std::time::Duration;
@@ -427,6 +426,7 @@ enum CompletingCommand {
         // that has finished but not checkpointed. If there is any, we will force checkpoint on the next barrier
         join_handle: JoinHandle<MetaResult<BarrierCompleteOutput>>,
     },
+    #[expect(dead_code)]
     Err(MetaError),
 }
 
@@ -1084,16 +1084,20 @@ impl GlobalBarrierManagerContext {
         &self,
         active_nodes: &ActiveStreamingWorkerNodes,
     ) -> MetaResult<InflightActorInfo> {
+        let subscriptions = self
+            .metadata_manager
+            .get_mv_depended_subscriptions()
+            .await?;
         let info = match &self.metadata_manager {
             MetadataManager::V1(mgr) => {
                 let all_actor_infos = mgr.fragment_manager.load_all_actors().await;
 
-                InflightActorInfo::resolve(active_nodes, all_actor_infos)
+                InflightActorInfo::resolve(active_nodes, all_actor_infos, subscriptions)
             }
             MetadataManager::V2(mgr) => {
                 let all_actor_infos = mgr.catalog_controller.load_all_actors().await?;
 
-                InflightActorInfo::resolve(active_nodes, all_actor_infos)
+                InflightActorInfo::resolve(active_nodes, all_actor_infos, subscriptions)
             }
         };
 
@@ -1187,8 +1191,18 @@ fn collect_commit_epoch_info(
         old_value_ssts.into_iter(),
         synced_ssts.iter().map(|sst| &sst.sst_info),
         epochs,
-        // TODO: pass log store table id and the corresponding truncate_epoch
-        empty(),
+        command_ctx
+            .info
+            .mv_depended_subscriptions
+            .iter()
+            .filter_map(|(mv_table_id, subscriptions)| {
+                subscriptions.values().max().map(|max_retention| {
+                    (
+                        mv_table_id.table_id,
+                        command_ctx.get_truncate_epoch(*max_retention).0,
+                    )
+                })
+            }),
     );
 
     CommitEpochInfo::new(

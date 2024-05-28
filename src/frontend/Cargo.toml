@@ -18,7 +18,6 @@ normal = ["workspace-hack"]
 anyhow = "1"
 arc-swap = "1"
 arrow-schema = { workspace = true }
-arrow-udf-wasm = { workspace = true }
 async-recursion = "1.1.0"
 async-trait = "0.1"
 auto_enums = { workspace = true }
@@ -40,7 +39,7 @@ futures-async-stream = { workspace = true }
 iana-time-zone = "0.1"
 icelake = { workspace = true }
 itertools = { workspace = true }
-jsonbb = "0.1.2"
+jsonbb = { workspace = true }
 linkme = { version = "0.3", features = ["used_linker"] }
 maplit = "1"
 md5 = "0.7.0"
@@ -72,7 +71,6 @@ risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
 risingwave_sqlparser = { workspace = true }
 risingwave_storage = { workspace = true }
-risingwave_udf = { workspace = true }
 risingwave_variables = { workspace = true }
 rw_futures_util = { workspace = true }
 serde = { version = "1", features = ["derive"] }

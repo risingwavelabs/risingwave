@@ -218,7 +218,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
         );
         let stream = source_desc
             .source
-            .to_stream(Some(splits), column_ids, Arc::new(source_ctx))
+            .build_stream(Some(splits), column_ids, Arc::new(source_ctx))
             .await
             .map_err(StreamExecutorError::connector_error)?;
         Ok(apply_rate_limit(stream, self.rate_limit_rps).boxed())
@@ -733,11 +733,11 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
         if split_changed {
             stage
                 .unfinished_splits
-                .retain(|split| target_state.get(split.id().as_ref()).is_some());
+                .retain(|split| target_state.contains_key(split.id().as_ref()));
 
             let dropped_splits = stage
                 .states
-                .extract_if(|split_id, _| target_state.get(split_id).is_none())
+                .extract_if(|split_id, _| !target_state.contains_key(split_id))
                 .map(|(split_id, _)| split_id);
 
             if should_trim_state {
@@ -826,7 +826,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             );
 
             let dropped_splits =
-                current_splits.extract_if(|split_id| target_splits.get(split_id).is_none());
+                current_splits.extract_if(|split_id| !target_splits.contains(split_id));
 
             if should_trim_state {
                 // trim dropped splits' state

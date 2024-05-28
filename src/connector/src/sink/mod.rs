@@ -17,12 +17,14 @@ pub mod boxed;
 pub mod catalog;
 pub mod clickhouse;
 pub mod coordinate;
+pub mod decouple_checkpoint_log_sink;
 pub mod deltalake;
 pub mod doris;
 pub mod doris_starrocks_connector;
 pub mod elasticsearch;
 pub mod encoder;
 pub mod formatter;
+pub mod google_pubsub;
 pub mod iceberg;
 pub mod kafka;
 pub mod kinesis;
@@ -70,7 +72,6 @@ use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::catalog::{SinkCatalog, SinkId};
 use crate::sink::log_store::{LogReader, LogStoreReadItem, LogStoreResult, TruncateOffset};
 use crate::sink::writer::SinkWriter;
-use crate::ConnectorParams;
 
 const BOUNDED_CHANNEL_SIZE: usize = 16;
 #[macro_export]
@@ -86,6 +87,7 @@ macro_rules! for_all_sinks {
                 { ClickHouse, $crate::sink::clickhouse::ClickHouseSink },
                 { Iceberg, $crate::sink::iceberg::IcebergSink },
                 { Mqtt, $crate::sink::mqtt::MqttSink },
+                { GooglePubSub, $crate::sink::google_pubsub::GooglePubSubSink },
                 { Nats, $crate::sink::nats::NatsSink },
                 { Jdbc, $crate::sink::remote::JdbcSink },
                 { ElasticSearch, $crate::sink::remote::ElasticSearchSink },
@@ -254,6 +256,8 @@ pub struct SinkMetrics {
     pub log_store_latest_read_epoch: LabelGuardedIntGauge<3>,
     pub log_store_read_rows: LabelGuardedIntCounter<3>,
 
+    pub log_store_reader_wait_new_future_duration_ns: LabelGuardedIntCounter<3>,
+
     pub iceberg_write_qps: LabelGuardedIntCounter<2>,
     pub iceberg_write_latency: LabelGuardedHistogram<2>,
     pub iceberg_rolling_unflushed_data_file: LabelGuardedIntGauge<2>,
@@ -271,6 +275,8 @@ impl SinkMetrics {
             log_store_latest_read_epoch: LabelGuardedIntGauge::test_int_gauge(),
             log_store_write_rows: LabelGuardedIntCounter::test_int_counter(),
             log_store_read_rows: LabelGuardedIntCounter::test_int_counter(),
+            log_store_reader_wait_new_future_duration_ns: LabelGuardedIntCounter::test_int_counter(
+            ),
             iceberg_write_qps: LabelGuardedIntCounter::test_int_counter(),
             iceberg_write_latency: LabelGuardedHistogram::test_histogram(),
             iceberg_rolling_unflushed_data_file: LabelGuardedIntGauge::test_int_gauge(),
@@ -282,7 +288,6 @@ impl SinkMetrics {
 
 #[derive(Clone)]
 pub struct SinkWriterParam {
-    pub connector_params: ConnectorParams,
     pub executor_id: u64,
     pub vnode_bitmap: Option<Bitmap>,
     pub meta_client: Option<SinkMetaClient>,
@@ -320,7 +325,6 @@ impl SinkMetaClient {
 impl SinkWriterParam {
     pub fn for_test() -> Self {
         SinkWriterParam {
-            connector_params: Default::default(),
             executor_id: Default::default(),
             vnode_bitmap: Default::default(),
             meta_client: Default::default(),
@@ -361,10 +365,7 @@ pub trait SinkLogReader: Send + Sized + 'static {
 
     /// Mark that all items emitted so far have been consumed and it is safe to truncate the log
     /// from the current offset.
-    fn truncate(
-        &mut self,
-        offset: TruncateOffset,
-    ) -> impl Future<Output = LogStoreResult<()>> + Send + '_;
+    fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()>;
 }
 
 impl<R: LogReader> SinkLogReader for R {
@@ -374,10 +375,7 @@ impl<R: LogReader> SinkLogReader for R {
         <Self as LogReader>::next_item(self)
     }
 
-    fn truncate(
-        &mut self,
-        offset: TruncateOffset,
-    ) -> impl Future<Output = LogStoreResult<()>> + Send + '_ {
+    fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()> {
         <Self as LogReader>::truncate(self, offset)
     }
 }
@@ -525,6 +523,12 @@ pub enum SinkError {
         #[backtrace]
         anyhow::Error,
     ),
+    #[error("Google Pub/Sub error: {0}")]
+    GooglePubSub(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
     #[error("Doris/Starrocks connect error: {0}")]
     DorisStarrocksConnect(
         #[source]
@@ -542,7 +546,11 @@ pub enum SinkError {
     #[error("Starrocks error: {0}")]
     Starrocks(String),
     #[error("Snowflake error: {0}")]
-    Snowflake(String),
+    Snowflake(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
     #[error("Pulsar error: {0}")]
     Pulsar(
         #[source]

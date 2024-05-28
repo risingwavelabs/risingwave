@@ -12,85 +12,61 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::env;
-use std::path::{Path, PathBuf};
-use std::process::Command;
+use super::docker_service::{DockerService, DockerServiceConfig};
+use crate::KafkaConfig;
 
-use anyhow::{anyhow, Result};
-
-use super::{ExecuteContext, Task};
-use crate::{KafkaConfig, KafkaGen};
-
-pub struct KafkaService {
-    config: KafkaConfig,
-}
-
-impl KafkaService {
-    pub fn new(config: KafkaConfig) -> Result<Self> {
-        Ok(Self { config })
-    }
-
-    fn kafka_path(&self) -> Result<PathBuf> {
-        let prefix_bin = env::var("PREFIX_BIN")?;
-        Ok(Path::new(&prefix_bin)
-            .join("kafka")
-            .join("bin")
-            .join("kafka-server-start.sh"))
-    }
-
-    fn kafka(&self) -> Result<Command> {
-        Ok(Command::new(self.kafka_path()?))
-    }
-}
-
-impl Task for KafkaService {
-    fn execute(&mut self, ctx: &mut ExecuteContext<impl std::io::Write>) -> anyhow::Result<()> {
-        ctx.service(self);
-        ctx.pb.set_message("starting...");
-
-        let path = self.kafka_path()?;
-        if !path.exists() {
-            return Err(anyhow!("Kafka binary not found in {:?}\nDid you enable kafka feature in `./risedev configure`?", path));
-        }
-
-        let prefix_config = env::var("PREFIX_CONFIG")?;
-
-        let path = if self.config.persist_data {
-            Path::new(&env::var("PREFIX_DATA")?).join(self.id())
-        } else {
-            let path = Path::new("/tmp/risedev").join(self.id());
-            fs_err::remove_dir_all(&path).ok();
-            path
-        };
-        fs_err::create_dir_all(&path)?;
-
-        let config_path = Path::new(&prefix_config).join(format!("{}.properties", self.id()));
-        fs_err::write(
-            &config_path,
-            KafkaGen.gen_server_properties(&self.config, &path.to_string_lossy()),
-        )?;
-
-        let mut cmd = self.kafka()?;
-
-        cmd.arg(config_path);
-
-        if !self.config.user_managed {
-            ctx.run_command(ctx.tmux_run(cmd)?)?;
-        } else {
-            ctx.pb.set_message("user managed");
-            writeln!(
-                &mut ctx.log,
-                "Please start your Kafka at {}:{}\n\n",
-                self.config.listen_address, self.config.port
-            )?;
-        }
-
-        ctx.pb.set_message("started");
-
-        Ok(())
-    }
-
+impl DockerServiceConfig for KafkaConfig {
     fn id(&self) -> String {
-        self.config.id.clone()
+        self.id.clone()
+    }
+
+    fn is_user_managed(&self) -> bool {
+        self.user_managed
+    }
+
+    fn image(&self) -> String {
+        self.image.clone()
+    }
+
+    fn envs(&self) -> Vec<(String, String)> {
+        vec![
+            ("KAFKA_NODE_ID".to_owned(), self.node_id.to_string()),
+            (
+                "KAFKA_PROCESS_ROLES".to_owned(),
+                "controller,broker".to_owned(),
+            ),
+            (
+                "KAFKA_LISTENERS".to_owned(),
+                "PLAINTEXT://:9092,CONTROLLER://:9093".to_owned(),
+            ),
+            (
+                "KAFKA_ADVERTISED_LISTENERS".to_owned(),
+                format!("PLAINTEXT://{}:{}", self.address, self.port),
+            ),
+            (
+                "KAFKA_LISTENER_SECURITY_PROTOCOL_MAP".to_owned(),
+                "PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT".to_owned(),
+            ),
+            (
+                "KAFKA_CONTROLLER_QUORUM_VOTERS".to_owned(),
+                format!("{}@localhost:9093", self.node_id),
+            ),
+            (
+                "KAFKA_CONTROLLER_LISTENER_NAMES".to_owned(),
+                "CONTROLLER".to_owned(),
+            ),
+            ("CLUSTER_ID".to_owned(), "RiseDevRiseDevRiseDev1".to_owned()),
+        ]
+    }
+
+    fn ports(&self) -> Vec<(String, String)> {
+        vec![(self.port.to_string(), "9092".to_owned())]
+    }
+
+    fn data_path(&self) -> Option<String> {
+        self.persist_data.then(|| "/var/lib/kafka/data".to_owned())
     }
 }
+
+/// Docker-backed Kafka service.
+pub type KafkaService = DockerService<KafkaConfig>;

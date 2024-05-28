@@ -25,7 +25,7 @@ use risingwave_common::util::sort_util::ColumnOrder;
 use super::top_n_cache::TopNCacheTrait;
 use super::utils::*;
 use super::{ManagedTopNState, TopNCache};
-use crate::cache::{new_unbounded, ManagedLruCache};
+use crate::cache::ManagedLruCache;
 use crate::common::metrics::MetricsInfo;
 use crate::executor::prelude::*;
 
@@ -129,8 +129,8 @@ pub struct GroupTopNCache<K: HashKey, const WITH_TIES: bool> {
 }
 
 impl<K: HashKey, const WITH_TIES: bool> GroupTopNCache<K, WITH_TIES> {
-    pub fn new(watermark_epoch: AtomicU64Ref, metrics_info: MetricsInfo) -> Self {
-        let cache = new_unbounded(watermark_epoch, metrics_info);
+    pub fn new(watermark_sequence: AtomicU64Ref, metrics_info: MetricsInfo) -> Self {
+        let cache = ManagedLruCache::unbounded(watermark_sequence, metrics_info);
         Self { data: cache }
     }
 }
@@ -231,10 +231,6 @@ where
         self.managed_state.try_flush().await
     }
 
-    fn update_epoch(&mut self, epoch: u64) {
-        self.caches.update_epoch(epoch);
-    }
-
     fn update_vnode_bitmap(&mut self, vnode_bitmap: Arc<Bitmap>) {
         let cache_may_stale = self.managed_state.update_vnode_bitmap(vnode_bitmap);
         if cache_may_stale {
@@ -267,11 +263,9 @@ mod tests {
     use std::sync::atomic::AtomicU64;
 
     use assert_matches::assert_matches;
-    use futures::StreamExt;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
-    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::catalog::Field;
     use risingwave_common::hash::SerializedKey;
-    use risingwave_common::types::DataType;
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
@@ -279,7 +273,6 @@ mod tests {
     use super::*;
     use crate::executor::test_utils::top_n_executor::create_in_memory_state_table;
     use crate::executor::test_utils::MockSource;
-    use crate::executor::{ActorContext, Barrier, Execute, Message};
 
     fn create_schema() -> Schema {
         Schema {

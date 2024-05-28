@@ -20,6 +20,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_hummock_sdk::key::FullKey;
+use risingwave_hummock_sdk::table_stats::{add_table_stats_map, TableStats, TableStatsMap};
 use risingwave_hummock_sdk::table_watermark::{ReadTableWatermark, WatermarkDirection};
 use risingwave_pb::hummock::PbTableWatermarks;
 
@@ -31,6 +32,12 @@ use crate::monitor::StoreLocalStatistic;
 pub struct SkipWatermarkIterator<I> {
     inner: I,
     state: SkipWatermarkState,
+    /// The stats of skipped key-value pairs for each table.
+    skipped_entry_table_stats: TableStatsMap,
+    /// The id of table currently undergoing processing.
+    last_table_id: Option<u32>,
+    /// The stats of table currently undergoing processing.
+    last_table_stats: TableStats,
 }
 
 impl<I: HummockIterator<Direction = Forward>> SkipWatermarkIterator<I> {
@@ -38,6 +45,9 @@ impl<I: HummockIterator<Direction = Forward>> SkipWatermarkIterator<I> {
         Self {
             inner,
             state: SkipWatermarkState::new(watermarks),
+            skipped_entry_table_stats: TableStatsMap::default(),
+            last_table_id: None,
+            last_table_stats: TableStats::default(),
         }
     }
 
@@ -48,11 +58,20 @@ impl<I: HummockIterator<Direction = Forward>> SkipWatermarkIterator<I> {
         Self {
             inner,
             state: SkipWatermarkState::from_safe_epoch_watermarks(safe_epoch_watermarks),
+            skipped_entry_table_stats: TableStatsMap::default(),
+            last_table_id: None,
+            last_table_stats: TableStats::default(),
         }
     }
 
     fn reset_watermark(&mut self) {
         self.state.reset_watermark();
+    }
+
+    fn reset_skipped_entry_table_stats(&mut self) {
+        self.skipped_entry_table_stats = TableStatsMap::default();
+        self.last_table_id = None;
+        self.last_table_stats = TableStats::default();
     }
 
     /// Advance the key until iterator invalid or the current key will not be filtered by the latest watermark.
@@ -66,9 +85,35 @@ impl<I: HummockIterator<Direction = Forward>> SkipWatermarkIterator<I> {
             if !self.state.should_delete(&self.inner.key()) {
                 break;
             }
+
+            if self.last_table_id.map_or(true, |last_table_id| {
+                last_table_id != self.inner.key().user_key.table_id.table_id
+            }) {
+                self.add_last_table_stats();
+                self.last_table_id = Some(self.inner.key().user_key.table_id.table_id);
+            }
+            self.last_table_stats.total_key_count -= 1;
+            self.last_table_stats.total_key_size -= self.inner.key().encoded_len() as i64;
+            self.last_table_stats.total_value_size -= self.inner.value().encoded_len() as i64;
+
             self.inner.next().await?;
         }
+        self.add_last_table_stats();
         Ok(())
+    }
+
+    fn add_last_table_stats(&mut self) {
+        let Some(last_table_id) = self.last_table_id.take() else {
+            return;
+        };
+        let delta = std::mem::take(&mut self.last_table_stats);
+        let e = self
+            .skipped_entry_table_stats
+            .entry(last_table_id)
+            .or_default();
+        e.total_key_count += delta.total_key_count;
+        e.total_key_size += delta.total_key_size;
+        e.total_value_size += delta.total_value_size;
     }
 }
 
@@ -100,6 +145,7 @@ impl<I: HummockIterator<Direction = Forward>> HummockIterator for SkipWatermarkI
 
     async fn rewind(&mut self) -> HummockResult<()> {
         self.reset_watermark();
+        self.reset_skipped_entry_table_stats();
         self.inner.rewind().await?;
         self.advance_key_and_watermark().await?;
         Ok(())
@@ -107,12 +153,17 @@ impl<I: HummockIterator<Direction = Forward>> HummockIterator for SkipWatermarkI
 
     async fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> HummockResult<()> {
         self.reset_watermark();
+        self.reset_skipped_entry_table_stats();
         self.inner.seek(key).await?;
         self.advance_key_and_watermark().await?;
         Ok(())
     }
 
     fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
+        add_table_stats_map(
+            &mut stats.skipped_by_watermark_table_stats,
+            &self.skipped_entry_table_stats,
+        );
         self.inner.collect_local_statistic(stats)
     }
 

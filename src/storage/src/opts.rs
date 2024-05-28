@@ -24,6 +24,8 @@ pub struct StorageOpts {
     pub parallel_compact_size_mb: u32,
     /// Target size of the Sstable.
     pub sstable_size_mb: u32,
+    /// Minimal target size of the Sstable to store data of different state-table in independent files as soon as possible.
+    pub min_sstable_size_mb: u32,
     /// Size of each block in bytes in SST.
     pub block_size_kb: u32,
     /// False positive probability of bloom filter.
@@ -39,8 +41,6 @@ pub struct StorageOpts {
     /// The shared buffer will start flushing data to object when the ratio of memory usage to the
     /// shared buffer capacity exceed such ratio.
     pub shared_buffer_flush_ratio: f32,
-    /// The threshold for the number of immutable memtables to merge to a new imm.
-    pub imm_merge_threshold: usize,
     /// Remote directory for storing data and metadata objects.
     pub data_directory: String,
     /// Whether to enable write conflict detection
@@ -122,14 +122,6 @@ pub struct StorageOpts {
     pub backup_storage_directory: String,
     /// max time which wait for preload. 0 represent do not do any preload.
     pub max_preload_wait_time_mill: u64,
-    /// object store streaming read timeout.
-    pub object_store_streaming_read_timeout_ms: u64,
-    /// object store streaming upload timeout.
-    pub object_store_streaming_upload_timeout_ms: u64,
-    /// object store upload timeout.
-    pub object_store_upload_timeout_ms: u64,
-    /// object store read timeout.
-    pub object_store_read_timeout_ms: u64,
 
     pub compactor_max_sst_key_count: u64,
     pub compactor_max_task_multiplier: f32,
@@ -160,6 +152,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
         Self {
             parallel_compact_size_mb: p.parallel_compact_size_mb(),
             sstable_size_mb: p.sstable_size_mb(),
+            min_sstable_size_mb: c.storage.min_sstable_size_mb,
             block_size_kb: p.block_size_kb(),
             bloom_false_positive: p.bloom_false_positive(),
             share_buffers_sync_parallelism: c.storage.share_buffers_sync_parallelism,
@@ -168,7 +161,6 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
                 .share_buffer_compaction_worker_threads_number,
             shared_buffer_capacity_mb: s.shared_buffer_capacity_mb,
             shared_buffer_flush_ratio: c.storage.shared_buffer_flush_ratio,
-            imm_merge_threshold: c.storage.imm_merge_threshold,
             data_directory: p.data_directory().to_string(),
             write_conflict_detection_enabled: c.storage.write_conflict_detection_enabled,
             block_cache_capacity_mb: s.block_cache_capacity_mb,
@@ -236,17 +228,8 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             cache_refill_unit: c.storage.cache_refill.unit,
             cache_refill_threshold: c.storage.cache_refill.threshold,
             max_preload_wait_time_mill: c.storage.max_preload_wait_time_mill,
-            object_store_streaming_read_timeout_ms: c
-                .storage
-                .object_store
-                .object_store_streaming_read_timeout_ms,
             compact_iter_recreate_timeout_ms: c.storage.compact_iter_recreate_timeout_ms,
-            object_store_streaming_upload_timeout_ms: c
-                .storage
-                .object_store
-                .object_store_streaming_upload_timeout_ms,
-            object_store_read_timeout_ms: c.storage.object_store.object_store_read_timeout_ms,
-            object_store_upload_timeout_ms: c.storage.object_store.object_store_upload_timeout_ms,
+
             max_preload_io_retry_times: c.storage.max_preload_io_retry_times,
             backup_storage_url: p.backup_storage_url().to_string(),
             backup_storage_directory: p.backup_storage_directory().to_string(),

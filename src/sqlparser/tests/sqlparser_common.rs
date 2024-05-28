@@ -25,7 +25,6 @@ use risingwave_sqlparser::ast::*;
 use risingwave_sqlparser::keywords::ALL_KEYWORDS;
 use risingwave_sqlparser::parser::ParserError;
 use risingwave_sqlparser::test_utils::*;
-use test_utils::{expr_from_projection, join, number, only, table, table_alias};
 
 #[test]
 fn parse_insert_values() {

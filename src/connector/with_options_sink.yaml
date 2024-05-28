@@ -21,32 +21,49 @@ BigQueryConfig:
     field_type: usize
     required: false
     default: '1024'
-  - name: region
+  - name: aws.region
     field_type: String
     required: false
-  - name: endpoint
+    alias:
+    - region
+  - name: aws.endpoint_url
     field_type: String
     required: false
-    alias: endpoint_url
-  - name: access_key
+    alias:
+    - endpoint_url
+    - endpoint
+  - name: aws.credentials.access_key_id
     field_type: String
     required: false
-  - name: secret_key
+    alias:
+    - access_key
+  - name: aws.credentials.secret_access_key
     field_type: String
     required: false
-  - name: session_token
+    alias:
+    - secret_key
+  - name: aws.credentials.session_token
     field_type: String
     required: false
-  - name: arn
+    alias:
+    - session_token
+  - name: aws.credentials.role.arn
+    field_type: String
+    comments: IAM role
+    required: false
+    alias:
+    - arn
+  - name: aws.credentials.role.external_id
+    field_type: String
+    comments: external ID in IAM role trust policy
+    required: false
+    alias:
+    - external_id
+  - name: aws.profile
     field_type: String
     required: false
-  - name: external_id
-    field_type: String
-    comments: This field was added for kinesis. Not sure if it's useful for other connectors.  Please ignore it in the documentation for now.
-    required: false
-  - name: profile
-    field_type: String
-    required: false
+    alias:
+    - profile
   - name: r#type
     field_type: String
     required: true
@@ -90,6 +107,10 @@ DeltaLakeConfig:
   - name: gcs.service.account
     field_type: String
     required: false
+  - name: commit_checkpoint_interval
+    field_type: u64
+    required: false
+    default: Default::default
   - name: r#type
     field_type: String
     required: true
@@ -113,6 +134,28 @@ DorisConfig:
   - name: r#type
     field_type: String
     required: true
+GooglePubSubConfig:
+  fields:
+  - name: pubsub.project_id
+    field_type: String
+    comments: The Google Pub/Sub Project ID
+    required: true
+  - name: pubsub.topic
+    field_type: String
+    comments: Specifies the Pub/Sub topic to publish messages
+    required: true
+  - name: pubsub.endpoint
+    field_type: String
+    comments: The Google Pub/Sub endpoint URL
+    required: true
+  - name: pubsub.emulator_host
+    field_type: String
+    comments: use the connector with a pubsub emulator  <https://cloud.google.com/pubsub/docs/emulator>
+    required: false
+  - name: pubsub.credentials
+    field_type: String
+    comments: A JSON string containing the service account credentials for authorization,  see the [service-account](https://developers.google.com/workspace/guides/create-credentials#create_credentials_for_a_service_account) credentials guide.  The provided account credential must have the  `pubsub.publisher` [role](https://cloud.google.com/pubsub/docs/access-control#roles)
+    required: false
 IcebergConfig:
   fields:
   - name: connector
@@ -171,11 +214,13 @@ KafkaConfig:
   - name: properties.bootstrap.server
     field_type: String
     required: true
-    alias: kafka.brokers
+    alias:
+    - kafka.brokers
   - name: topic
     field_type: String
     required: true
-    alias: kafka.topic
+    alias:
+    - kafka.topic
   - name: properties.sync.call.timeout
     field_type: Duration
     required: false
@@ -205,7 +250,7 @@ KafkaConfig:
     required: false
   - name: properties.sasl.mechanism
     field_type: String
-    comments: SASL mechanism if SASL is enabled. Currently support PLAIN, SCRAM and GSSAPI.
+    comments: SASL mechanism if SASL is enabled. Currently support PLAIN, SCRAM, GSSAPI, and AWS_MSK_IAM.
     required: false
   - name: properties.sasl.username
     field_type: String
@@ -326,40 +371,91 @@ KafkaConfig:
     field_type: HashMap<String,String>
     comments: This is generated from `private_link_targets` and `private_link_endpoint` in frontend, instead of given by users.
     required: false
+  - name: aws.region
+    field_type: String
+    required: false
+    alias:
+    - region
+  - name: aws.endpoint_url
+    field_type: String
+    required: false
+    alias:
+    - endpoint_url
+    - endpoint
+  - name: aws.credentials.access_key_id
+    field_type: String
+    required: false
+    alias:
+    - access_key
+  - name: aws.credentials.secret_access_key
+    field_type: String
+    required: false
+    alias:
+    - secret_key
+  - name: aws.credentials.session_token
+    field_type: String
+    required: false
+    alias:
+    - session_token
+  - name: aws.credentials.role.arn
+    field_type: String
+    comments: IAM role
+    required: false
+    alias:
+    - arn
+  - name: aws.credentials.role.external_id
+    field_type: String
+    comments: external ID in IAM role trust policy
+    required: false
+    alias:
+    - external_id
+  - name: aws.profile
+    field_type: String
+    required: false
+    alias:
+    - profile
 KinesisSinkConfig:
   fields:
   - name: stream
     field_type: String
     required: true
-    alias: kinesis.stream.name
+    alias:
+    - kinesis.stream.name
   - name: aws.region
     field_type: String
     required: true
-    alias: kinesis.stream.region
+    alias:
+    - kinesis.stream.region
   - name: endpoint
     field_type: String
     required: false
-    alias: kinesis.endpoint
+    alias:
+    - kinesis.endpoint
   - name: aws.credentials.access_key_id
     field_type: String
     required: false
-    alias: kinesis.credentials.access
+    alias:
+    - kinesis.credentials.access
   - name: aws.credentials.secret_access_key
     field_type: String
     required: false
-    alias: kinesis.credentials.secret
+    alias:
+    - kinesis.credentials.secret
   - name: aws.credentials.session_token
     field_type: String
     required: false
-    alias: kinesis.credentials.session_token
+    alias:
+    - kinesis.credentials.session_token
   - name: aws.credentials.role.arn
     field_type: String
     required: false
-    alias: kinesis.assumerole.arn
+    alias:
+    - kinesis.assumerole.arn
   - name: aws.credentials.role.external_id
     field_type: String
     required: false
-    alias: kinesis.assumerole.external_id
+    alias:
+    - kinesis.assumerole.external_id
 MqttConfig:
   fields:
   - name: url
@@ -472,11 +568,13 @@ PulsarConfig:
   - name: topic
     field_type: String
     required: true
-    alias: pulsar.topic
+    alias:
+    - pulsar.topic
   - name: service.url
     field_type: String
     required: true
-    alias: pulsar.service.url
+    alias:
+    - pulsar.service.url
   - name: auth.token
     field_type: String
     required: false
@@ -492,32 +590,49 @@ PulsarConfig:
   - name: oauth.scope
     field_type: String
     required: false
-  - name: region
+  - name: aws.region
     field_type: String
     required: false
-  - name: endpoint
+    alias:
+    - region
+  - name: aws.endpoint_url
     field_type: String
     required: false
-    alias: endpoint_url
-  - name: access_key
+    alias:
+    - endpoint_url
+    - endpoint
+  - name: aws.credentials.access_key_id
     field_type: String
     required: false
-  - name: secret_key
+    alias:
+    - access_key
+  - name: aws.credentials.secret_access_key
     field_type: String
     required: false
-  - name: session_token
+    alias:
+    - secret_key
+  - name: aws.credentials.session_token
     field_type: String
     required: false
-  - name: arn
+    alias:
+    - session_token
+  - name: aws.credentials.role.arn
+    field_type: String
+    comments: IAM role
+    required: false
+    alias:
+    - arn
+  - name: aws.credentials.role.external_id
+    field_type: String
+    comments: external ID in IAM role trust policy
+    required: false
+    alias:
+    - external_id
+  - name: aws.profile
     field_type: String
     required: false
-  - name: external_id
-    field_type: String
-    comments: This field was added for kinesis. Not sure if it's useful for other connectors.  Please ignore it in the documentation for now.
-    required: false
-  - name: profile
-    field_type: String
-    required: false
+    alias:
+    - profile
   - name: properties.batch.size
     field_type: u32
     required: false
@@ -591,12 +706,14 @@ StarrocksConfig:
     field_type: String
     comments: The port to the MySQL server of `StarRocks` FE.
     required: true
-    alias: starrocks.query_port
+    alias:
+    - starrocks.query_port
   - name: starrocks.httpport
     field_type: String
     comments: The port to the HTTP server of `StarRocks` FE.
     required: true
-    alias: starrocks.http_port
+    alias:
+    - starrocks.http_port
   - name: starrocks.user
     field_type: String
     comments: The user name used to access the `StarRocks` database.

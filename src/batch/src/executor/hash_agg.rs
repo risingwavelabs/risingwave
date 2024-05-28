@@ -15,6 +15,7 @@
 use std::marker::PhantomData;
 
 use futures_async_stream::try_stream;
+use hashbrown::hash_map::Entry;
 use itertools::Itertools;
 use risingwave_common::array::{DataChunk, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
@@ -235,10 +236,18 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
                     continue;
                 }
                 let mut new_group = false;
-                let states = groups.entry(key).or_insert_with(|| {
-                    new_group = true;
-                    self.aggs.iter().map(|agg| agg.create_state()).collect()
-                });
+                let states = match groups.entry(key) {
+                    Entry::Occupied(entry) => entry.into_mut(),
+                    Entry::Vacant(entry) => {
+                        new_group = true;
+                        let states = self
+                            .aggs
+                            .iter()
+                            .map(|agg| agg.create_state())
+                            .try_collect()?;
+                        entry.insert(states)
+                    }
+                };
 
                 // TODO: currently not a vectorized implementation
                 for (agg, state) in self.aggs.iter().zip_eq_fast(states) {
@@ -250,7 +259,9 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
                 }
             }
             // update memory usage
-            self.mem_context.add(memory_usage_diff);
+            if !self.mem_context.add(memory_usage_diff) {
+                Err(BatchError::OutOfMemory(self.mem_context.mem_limit()))?;
+            }
         }
 
         // Don't use `into_iter` here, it may cause memory leak.
@@ -308,7 +319,6 @@ mod tests {
     use std::sync::Arc;
 
     use futures_async_stream::for_await;
-    use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::metrics::LabelGuardedIntGauge;
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_pb::data::data_type::TypeName;
@@ -323,7 +333,7 @@ mod tests {
 
     #[tokio::test]
     async fn execute_int32_grouped() {
-        let parent_mem = MemoryContext::root(LabelGuardedIntGauge::<4>::test_int_gauge());
+        let parent_mem = MemoryContext::root(LabelGuardedIntGauge::<4>::test_int_gauge(), u64::MAX);
         {
             let src_exec = Box::new(MockExecutor::with_chunk(
                 DataChunk::from_pretty(
@@ -361,6 +371,7 @@ mod tests {
                 order_by: vec![],
                 filter: None,
                 direct_args: vec![],
+                udf: None,
             };
 
             let agg_prost = HashAggNode {
@@ -436,6 +447,7 @@ mod tests {
             order_by: vec![],
             filter: None,
             direct_args: vec![],
+            udf: None,
         };
 
         let agg_prost = HashAggNode {
@@ -549,6 +561,7 @@ mod tests {
             order_by: vec![],
             filter: None,
             direct_args: vec![],
+            udf: None,
         };
 
         let agg_prost = HashAggNode {

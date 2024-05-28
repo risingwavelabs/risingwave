@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
-use std::ops::DerefMut;
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::pin::pin;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::{Arc, LazyLock};
+use std::time::Duration;
 
 use arc_swap::ArcSwap;
 use await_tree::InstrumentAwait;
@@ -43,8 +43,8 @@ use crate::hummock::compactor::{await_tree_key, compact, CompactorContext};
 use crate::hummock::conflict_detector::ConflictDetector;
 use crate::hummock::event_handler::refiller::{CacheRefillerEvent, SpawnRefillTask};
 use crate::hummock::event_handler::uploader::{
-    default_spawn_merging_task, HummockUploader, SpawnMergingTask, SpawnUploadTask, SyncedData,
-    UploadTaskInfo, UploadTaskOutput, UploadTaskPayload, UploaderEvent,
+    HummockUploader, SpawnUploadTask, SyncedData, UploadTaskInfo, UploadTaskOutput,
+    UploadTaskPayload, UploaderEvent,
 };
 use crate::hummock::event_handler::{
     HummockEvent, HummockReadVersionRef, HummockVersionUpdate, ReadOnlyReadVersionMapping,
@@ -258,7 +258,10 @@ impl HummockEventHandler {
                     let future = async move {
                         let _timer = upload_task_latency.start_timer();
                         let mut output = flush_imms(
-                            payload,
+                            payload
+                                .values()
+                                .flat_map(|imms| imms.iter().cloned())
+                                .collect(),
                             task_info,
                             upload_compactor_context.clone(),
                             filter_key_extractor_manager.clone(),
@@ -281,10 +284,6 @@ impl HummockEventHandler {
                     }
                 })
             }),
-            default_spawn_merging_task(
-                compactor_context.compaction_executor.clone(),
-                compactor_context.await_tree_reg.clone(),
-            ),
             CacheRefiller::default_spawn_refill_task(),
         )
     }
@@ -297,7 +296,6 @@ impl HummockEventHandler {
         state_store_metrics: Arc<HummockStateStoreMetrics>,
         storage_opts: &StorageOpts,
         spawn_upload_task: SpawnUploadTask,
-        spawn_merging_task: SpawnMergingTask,
         spawn_refill_task: SpawnRefillTask,
     ) -> Self {
         let (hummock_event_tx, hummock_event_rx) =
@@ -331,7 +329,6 @@ impl HummockEventHandler {
             state_store_metrics,
             pinned_version.clone(),
             spawn_upload_task,
-            spawn_merging_task,
             buffer_tracker,
             storage_opts,
         );
@@ -388,20 +385,29 @@ impl HummockEventHandler {
         newly_uploaded_sstables: Vec<StagingSstableInfo>,
     ) {
         debug!("epoch has been synced: {}.", epoch);
+        let newly_uploaded_sstables = newly_uploaded_sstables
+            .into_iter()
+            .map(Arc::new)
+            .collect_vec();
         if !newly_uploaded_sstables.is_empty() {
-            newly_uploaded_sstables
-                .into_iter()
-                // Take rev because newer data come first in `newly_uploaded_sstables` but we apply
-                // older data first
-                .rev()
-                .for_each(|staging_sstable_info| {
-                    let staging_sstable_info_ref = Arc::new(staging_sstable_info);
-                    self.for_each_read_version(|read_version| {
-                        read_version.update(VersionUpdate::Staging(StagingData::Sst(
-                            staging_sstable_info_ref.clone(),
-                        )))
+            let related_instance_ids: HashSet<_> = newly_uploaded_sstables
+                .iter()
+                .flat_map(|sst| sst.imm_ids().keys().cloned())
+                .collect();
+            self.for_each_read_version(related_instance_ids, |instance_id, read_version| {
+                newly_uploaded_sstables
+                    .iter()
+                    // Take rev because newer data come first in `newly_uploaded_sstables` but we apply
+                    // older data first
+                    .rev()
+                    .for_each(|staging_sstable_info| {
+                        if staging_sstable_info.imm_ids().contains_key(&instance_id) {
+                            read_version.update(VersionUpdate::Staging(StagingData::Sst(
+                                staging_sstable_info.clone(),
+                            )));
+                        }
                     });
-                });
+            });
         }
         let result = self
             .uploader
@@ -434,21 +440,74 @@ impl HummockEventHandler {
 
     /// This function will be performed under the protection of the `read_version_mapping` read
     /// lock, and add write lock on each `read_version` operation
-    fn for_each_read_version(&self, mut f: impl FnMut(&mut HummockReadVersion)) {
-        self.local_read_version_mapping
-            .values()
-            .for_each(|read_version: &HummockReadVersionRef| f(read_version.write().deref_mut()));
+    fn for_each_read_version(
+        &self,
+        instances: impl IntoIterator<Item = LocalInstanceId>,
+        mut f: impl FnMut(LocalInstanceId, &mut HummockReadVersion),
+    ) {
+        let instances = {
+            #[cfg(debug_assertion)]
+            {
+                // check duplication on debug_mode
+                use std::collections::HashSet;
+                let mut id_set = HashSet::new();
+                for instance in instances {
+                    assert!(id_set.insert(instance));
+                }
+                id_set
+            }
+            #[cfg(not(debug_assertion))]
+            {
+                instances
+            }
+        };
+        let mut pending = VecDeque::new();
+        let mut total_count = 0;
+        for instance_id in instances {
+            let Some(read_version) = self.local_read_version_mapping.get(&instance_id) else {
+                continue;
+            };
+            total_count += 1;
+            if let Some(mut write_guard) = read_version.try_write() {
+                f(instance_id, &mut write_guard);
+            } else {
+                pending.push_back(instance_id);
+            }
+        }
+        if !pending.is_empty() {
+            warn!(
+                pending_count = pending.len(),
+                total_count, "cannot acquire lock for all read version"
+            );
+        }
+
+        const TRY_LOCK_TIMEOUT: Duration = Duration::from_millis(1);
+
+        while let Some(instance_id) = pending.pop_front() {
+            let read_version = self
+                .local_read_version_mapping
+                .get(&instance_id)
+                .expect("have checked exist before");
+            if let Some(mut write_guard) = read_version.try_write_for(TRY_LOCK_TIMEOUT) {
+                f(instance_id, &mut write_guard);
+            } else {
+                warn!(instance_id, "failed to get lock again for instance");
+                pending.push_back(instance_id);
+            }
+        }
     }
 
     fn handle_data_spilled(&mut self, staging_sstable_info: StagingSstableInfo) {
-        // todo: do some prune for version update
         let staging_sstable_info = Arc::new(staging_sstable_info);
-        self.for_each_read_version(|read_version| {
-            trace!("data_spilled. SST size {}", staging_sstable_info.imm_size());
-            read_version.update(VersionUpdate::Staging(StagingData::Sst(
-                staging_sstable_info.clone(),
-            )))
-        })
+        trace!("data_spilled. SST size {}", staging_sstable_info.imm_size());
+        self.for_each_read_version(
+            staging_sstable_info.imm_ids().keys().cloned(),
+            |_, read_version| {
+                read_version.update(VersionUpdate::Staging(StagingData::Sst(
+                    staging_sstable_info.clone(),
+                )))
+            },
+        )
     }
 
     fn handle_await_sync_epoch(
@@ -679,9 +738,13 @@ impl HummockEventHandler {
             .store(Arc::new(new_pinned_version.clone()));
 
         {
-            self.for_each_read_version(|read_version| {
-                read_version.update(VersionUpdate::CommittedSnapshot(new_pinned_version.clone()))
-            });
+            self.for_each_read_version(
+                self.local_read_version_mapping.keys().cloned(),
+                |_, read_version| {
+                    read_version
+                        .update(VersionUpdate::CommittedSnapshot(new_pinned_version.clone()))
+                },
+            );
         }
 
         let prev_max_committed_epoch = pinned_version.max_committed_epoch();
@@ -769,26 +832,6 @@ impl HummockEventHandler {
                 let _timer = self.metrics.event_handler_on_spilled_latency.start_timer();
                 self.handle_data_spilled(staging_sstable_info);
             }
-
-            UploaderEvent::ImmMerged(merge_output) => {
-                // update read version for corresponding table shards
-                if let Some(read_version) = self
-                    .local_read_version_mapping
-                    .get(&merge_output.instance_id)
-                {
-                    read_version
-                        .write()
-                        .update(VersionUpdate::Staging(StagingData::MergedImmMem(
-                            merge_output.merged_imm,
-                            merge_output.imm_ids,
-                        )));
-                } else {
-                    warn!(
-                        "handle ImmMerged: table instance not found. table {:?}, instance {}",
-                        &merge_output.table_id, &merge_output.instance_id
-                    )
-                }
-            }
         }
     }
 
@@ -830,9 +873,6 @@ impl HummockEventHandler {
 
                 if is_checkpoint {
                     self.uploader.start_sync_epoch(epoch);
-                } else {
-                    // start merging task on non-checkpoint epochs sealed
-                    self.uploader.start_merge_imms(epoch);
                 }
             }
 
@@ -868,16 +908,16 @@ impl HummockEventHandler {
                 vnodes,
             } => {
                 let pinned_version = self.pinned_version.load();
+                let instance_id = self.generate_instance_id();
                 let basic_read_version = Arc::new(RwLock::new(
                     HummockReadVersion::new_with_replication_option(
                         table_id,
+                        instance_id,
                         (**pinned_version).clone(),
                         is_replicated,
                         vnodes,
                     ),
                 ));
-
-                let instance_id = self.generate_instance_id();
 
                 debug!(
                     "new read version registered: table_id: {}, instance_id: {}",
@@ -1011,208 +1051,21 @@ fn to_sync_result(result: &HummockResult<SyncedData>) -> HummockResult<SyncResul
 #[cfg(test)]
 mod tests {
     use std::future::{poll_fn, Future};
-    use std::iter::once;
     use std::sync::Arc;
     use std::task::Poll;
 
-    use bytes::Bytes;
     use futures::FutureExt;
-    use itertools::Itertools;
-    use risingwave_common::buffer::Bitmap;
-    use risingwave_common::catalog::TableId;
-    use risingwave_common::hash::VirtualNode;
-    use risingwave_common::util::epoch::{test_epoch, EpochExt};
-    use risingwave_common::util::iter_util::ZipEqDebug;
-    use risingwave_hummock_sdk::key::TableKey;
     use risingwave_hummock_sdk::version::HummockVersion;
     use risingwave_pb::hummock::PbHummockVersion;
     use tokio::spawn;
     use tokio::sync::mpsc::unbounded_channel;
     use tokio::sync::oneshot;
-    use tokio::task::yield_now;
 
-    use crate::hummock::event_handler::refiller::CacheRefiller;
     use crate::hummock::event_handler::{HummockEvent, HummockEventHandler, HummockVersionUpdate};
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::local_version::pinned_version::PinnedVersion;
-    use crate::hummock::shared_buffer::shared_buffer_batch::{
-        SharedBufferBatch, SharedBufferValue,
-    };
-    use crate::hummock::store::version::{StagingData, VersionUpdate};
     use crate::hummock::test_utils::default_opts_for_test;
-    use crate::hummock::HummockError;
     use crate::monitor::HummockStateStoreMetrics;
-
-    #[tokio::test]
-    async fn test_event_handler_merging_task() {
-        let table_id = TableId::new(123);
-        let epoch0 = test_epoch(233);
-        let pinned_version = PinnedVersion::new(
-            HummockVersion::from_rpc_protobuf(&PbHummockVersion {
-                id: 1,
-                max_committed_epoch: epoch0,
-                ..Default::default()
-            }),
-            unbounded_channel().0,
-        );
-
-        let mut storage_opts = default_opts_for_test();
-        storage_opts.imm_merge_threshold = 5;
-
-        let (_version_update_tx, version_update_rx) = unbounded_channel();
-
-        let (spawn_upload_task_tx, mut spawn_upload_task_rx) = unbounded_channel();
-        let (spawn_merging_task_tx, mut spawn_merging_task_rx) = unbounded_channel();
-        let event_handler = HummockEventHandler::new_inner(
-            version_update_rx,
-            pinned_version,
-            None,
-            mock_sstable_store(),
-            Arc::new(HummockStateStoreMetrics::unused()),
-            &storage_opts,
-            Arc::new(move |_, _| {
-                let (tx, rx) = oneshot::channel::<()>();
-                spawn_upload_task_tx.send(tx).unwrap();
-                spawn(async move {
-                    // wait for main thread to notify returning error
-                    rx.await.unwrap();
-                    Err(HummockError::other("".to_string()))
-                })
-            }),
-            Arc::new(move |_, _, imms, _| {
-                let (tx, rx) = oneshot::channel::<()>();
-                let (finish_tx, finish_rx) = oneshot::channel::<()>();
-                spawn_merging_task_tx.send((tx, finish_rx)).unwrap();
-                spawn(async move {
-                    rx.await.unwrap();
-                    finish_tx.send(()).unwrap();
-                    imms[0].clone()
-                })
-            }),
-            CacheRefiller::default_spawn_refill_task(),
-        );
-
-        let tx = event_handler.event_sender();
-
-        let _join_handle = spawn(event_handler.start_hummock_event_handler_worker());
-
-        let (read_version_tx, read_version_rx) = oneshot::channel();
-
-        tx.send(HummockEvent::RegisterReadVersion {
-            table_id,
-            new_read_version_sender: read_version_tx,
-            is_replicated: false,
-            vnodes: Arc::new(Bitmap::ones(VirtualNode::COUNT)),
-        })
-        .unwrap();
-        let (read_version, guard) = read_version_rx.await.unwrap();
-        let instance_id = guard.instance_id;
-
-        let build_batch = |epoch, spill_offset| {
-            SharedBufferBatch::build_shared_buffer_batch(
-                epoch,
-                spill_offset,
-                vec![(TableKey(Bytes::from("key")), SharedBufferValue::Delete)],
-                None,
-                10,
-                table_id,
-                instance_id,
-                None,
-            )
-        };
-
-        let epoch1 = epoch0.next_epoch();
-        let imm1 = build_batch(epoch1, 0);
-        read_version
-            .write()
-            .update(VersionUpdate::Staging(StagingData::ImmMem(imm1.clone())));
-        tx.send(HummockEvent::ImmToUploader(imm1.clone())).unwrap();
-        tx.send(HummockEvent::SealEpoch {
-            epoch: epoch1,
-            is_checkpoint: true,
-        })
-        .unwrap();
-        let (sync_tx, mut sync_rx) = oneshot::channel();
-        tx.send(HummockEvent::AwaitSyncEpoch {
-            new_sync_epoch: epoch1,
-            sync_result_sender: sync_tx,
-        })
-        .unwrap();
-
-        let upload_finish_tx = spawn_upload_task_rx.recv().await.unwrap();
-        assert!(poll_fn(|cx| Poll::Ready(sync_rx.poll_unpin(cx)))
-            .await
-            .is_pending());
-
-        let epoch2 = epoch1.next_epoch();
-        let mut imm_ids = Vec::new();
-        for i in 0..10 {
-            let imm = build_batch(epoch2, i);
-            imm_ids.push(imm.batch_id());
-            read_version
-                .write()
-                .update(VersionUpdate::Staging(StagingData::ImmMem(imm.clone())));
-            tx.send(HummockEvent::ImmToUploader(imm)).unwrap();
-        }
-
-        for (staging_imm, imm_id) in read_version
-            .read()
-            .staging()
-            .imm
-            .iter()
-            .zip_eq_debug(imm_ids.iter().copied().rev().chain(once(imm1.batch_id())))
-        {
-            assert_eq!(staging_imm.batch_id(), imm_id);
-        }
-
-        // should start merging task
-        tx.send(HummockEvent::SealEpoch {
-            epoch: epoch2,
-            is_checkpoint: false,
-        })
-        .unwrap();
-
-        println!("before wait spawn merging task");
-
-        let (merging_start_tx, merging_finish_rx) = spawn_merging_task_rx.recv().await.unwrap();
-        merging_start_tx.send(()).unwrap();
-
-        println!("after wait spawn merging task");
-
-        // yield to possibly poll the merging task, though it shouldn't poll it because there is unfinished syncing task
-        yield_now().await;
-
-        for (staging_imm, imm_id) in read_version
-            .read()
-            .staging()
-            .imm
-            .iter()
-            .zip_eq_debug(imm_ids.iter().copied().rev().chain(once(imm1.batch_id())))
-        {
-            assert_eq!(staging_imm.batch_id(), imm_id);
-        }
-
-        upload_finish_tx.send(()).unwrap();
-        assert!(sync_rx.await.unwrap().is_err());
-
-        merging_finish_rx.await.unwrap();
-
-        // yield to poll the merging task, and then it should have finished.
-        for _ in 0..10 {
-            yield_now().await;
-        }
-
-        assert_eq!(
-            read_version
-                .read()
-                .staging()
-                .imm
-                .iter()
-                .map(|imm| imm.batch_id())
-                .collect_vec(),
-            vec![*imm_ids.last().unwrap(), imm1.batch_id()]
-        );
-    }
 
     #[tokio::test]
     async fn test_clear_shared_buffer() {
@@ -1239,11 +1092,10 @@ mod tests {
             version_update_rx,
             initial_version.clone(),
             None,
-            mock_sstable_store(),
+            mock_sstable_store().await,
             Arc::new(HummockStateStoreMetrics::unused()),
             &default_opts_for_test(),
             Arc::new(|_, _| unreachable!("should not spawn upload task")),
-            Arc::new(|_, _, _, _| unreachable!("should not spawn merging task")),
             Arc::new(move |_, _, old_version, new_version| {
                 let (tx, rx) = oneshot::channel();
                 refill_task_tx_clone

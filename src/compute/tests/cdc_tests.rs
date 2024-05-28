@@ -183,7 +183,6 @@ async fn test_cdc_backfill() -> StreamResult<()> {
         table_schema.clone(),
         table_pk_order_types,
         table_pk_indices.clone(),
-        vec![0, 1],
     );
 
     let actor_id = 0x1a;
@@ -214,6 +213,11 @@ async fn test_cdc_backfill() -> StreamResult<()> {
     )
     .await;
 
+    let output_columns = vec![
+        ColumnDesc::named("id", ColumnId::new(1), DataType::Int64), // primary key
+        ColumnDesc::named("price", ColumnId::new(2), DataType::Float64),
+    ];
+
     let cdc_backfill = StreamExecutor::new(
         ExecutorInfo {
             schema: table_schema.clone(),
@@ -225,16 +229,16 @@ async fn test_cdc_backfill() -> StreamResult<()> {
             external_table,
             mock_offset_executor,
             vec![0, 1],
+            output_columns,
             None,
             Arc::new(StreamingMetrics::unused()),
             state_table,
             Some(4), // limit a snapshot chunk to have <= 4 rows by rate limit
-            false,
-            Some(CdcScanOptions {
+            CdcScanOptions {
                 disable_backfill: false,
                 snapshot_interval: 1,
                 snapshot_batch_size: 4,
-            }),
+            },
         )
         .boxed(),
     );

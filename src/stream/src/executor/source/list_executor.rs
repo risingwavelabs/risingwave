@@ -92,7 +92,7 @@ impl<S: StateStore> FsListExecutor<S> {
                         ]),
                     )),
                     Err(e) => {
-                        tracing::error!("Connector fail to list item: {e}");
+                        tracing::error!(error = %e.as_report(), "Connector fail to list item");
                         Err(e)
                     }
                 })

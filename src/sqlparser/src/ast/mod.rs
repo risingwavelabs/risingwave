@@ -27,6 +27,8 @@ use alloc::{
 };
 use core::fmt;
 use core::fmt::Display;
+use std::collections::HashSet;
+use std::sync::Arc;
 
 use itertools::Itertools;
 #[cfg(feature = "serde")]
@@ -58,6 +60,12 @@ pub use crate::ast::ddl::{
 };
 use crate::keywords::Keyword;
 use crate::parser::{IncludeOption, IncludeOptionItem, Parser, ParserError};
+
+pub type RedactSqlOptionKeywordsRef = Arc<HashSet<String>>;
+
+tokio::task_local! {
+    pub static REDACT_SQL_OPTION_KEYWORDS: RedactSqlOptionKeywordsRef;
+}
 
 pub struct DisplaySeparated<'a, T>
 where
@@ -1283,8 +1291,8 @@ pub enum Statement {
         or_replace: bool,
         name: ObjectName,
         args: Vec<OperateFunctionArg>,
+        returns: DataType,
         /// Optional parameters.
-        returns: Option<DataType>,
         append_only: bool,
         params: CreateFunctionBody,
     },
@@ -1387,8 +1395,16 @@ pub enum Statement {
     Kill(i32),
     /// DROP
     Drop(DropStatement),
-    /// DROP Function
+    /// DROP FUNCTION
     DropFunction {
+        if_exists: bool,
+        /// One or more function to drop
+        func_desc: Vec<FunctionDesc>,
+        /// `CASCADE` or `RESTRICT`
+        option: Option<ReferentialAction>,
+    },
+    /// DROP AGGREGATE
+    DropAggregate {
         if_exists: bool,
         /// One or more function to drop
         func_desc: Vec<FunctionDesc>,
@@ -1452,6 +1468,7 @@ pub enum Statement {
     CreateSchema {
         schema_name: ObjectName,
         if_not_exists: bool,
+        user_specified: Option<ObjectName>,
     },
     /// CREATE DATABASE
     CreateDatabase {
@@ -1697,9 +1714,7 @@ impl fmt::Display for Statement {
                     or_replace = if *or_replace { "OR REPLACE " } else { "" },
                 )?;
                 write!(f, "({})", display_comma_separated(args))?;
-                if let Some(return_type) = returns {
-                    write!(f, " RETURNS {}", return_type)?;
-                }
+                write!(f, " RETURNS {}", returns)?;
                 if *append_only {
                     write!(f, " APPEND ONLY")?;
                 }
@@ -1912,6 +1927,22 @@ impl fmt::Display for Statement {
                 }
                 Ok(())
             }
+            Statement::DropAggregate {
+                if_exists,
+                func_desc,
+                option,
+            } => {
+                write!(
+                    f,
+                    "DROP AGGREGATE{} {}",
+                    if *if_exists { " IF EXISTS" } else { "" },
+                    display_comma_separated(func_desc),
+                )?;
+                if let Some(op) = option {
+                    write!(f, " {}", op)?;
+                }
+                Ok(())
+            }
             Statement::SetVariable {
                 local,
                 variable,
@@ -1980,12 +2011,19 @@ impl fmt::Display for Statement {
             Statement::CreateSchema {
                 schema_name,
                 if_not_exists,
-            } => write!(
-                f,
-                "CREATE SCHEMA {if_not_exists}{name}",
-                if_not_exists = if *if_not_exists { "IF NOT EXISTS " } else { "" },
-                name = schema_name
-            ),
+                user_specified,
+            } => {
+                write!(
+                    f,
+                    "CREATE SCHEMA {if_not_exists}{name}",
+                    if_not_exists = if *if_not_exists { "IF NOT EXISTS " } else { "" },
+                    name = schema_name
+                )?;
+                if let Some(user) = user_specified {
+                    write!(f, " AUTHORIZATION {}", user)?;
+                }
+                Ok(())
+            },
             Statement::Grant {
                 privileges,
                 objects,
@@ -2554,7 +2592,17 @@ pub struct SqlOption {
 
 impl fmt::Display for SqlOption {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} = {}", self.name, self.value)
+        let should_redact = REDACT_SQL_OPTION_KEYWORDS
+            .try_with(|keywords| {
+                let sql_option_name = self.name.real_value().to_lowercase();
+                keywords.iter().any(|k| sql_option_name.contains(k))
+            })
+            .unwrap_or(false);
+        if should_redact {
+            write!(f, "{} = [REDACTED]", self.name)
+        } else {
+            write!(f, "{} = {}", self.name, self.value)
+        }
     }
 }
 
@@ -2887,8 +2935,8 @@ impl fmt::Display for TableColumnDef {
 pub struct CreateFunctionBody {
     /// LANGUAGE lang_name
     pub language: Option<Ident>,
-
-    pub runtime: Option<FunctionRuntime>,
+    /// RUNTIME runtime_name
+    pub runtime: Option<Ident>,
 
     /// IMMUTABLE | STABLE | VOLATILE
     pub behavior: Option<FunctionBehavior>,
@@ -2909,11 +2957,9 @@ impl fmt::Display for CreateFunctionBody {
         if let Some(language) = &self.language {
             write!(f, " LANGUAGE {language}")?;
         }
-
         if let Some(runtime) = &self.runtime {
             write!(f, " RUNTIME {runtime}")?;
         }
-
         if let Some(behavior) = &self.behavior {
             write!(f, " {behavior}")?;
         }
@@ -2999,22 +3045,6 @@ impl fmt::Display for CreateFunctionUsing {
             CreateFunctionUsing::Base64(s) => {
                 write!(f, "BASE64 '{s}'")
             }
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub enum FunctionRuntime {
-    QuickJs,
-    Deno,
-}
-
-impl fmt::Display for FunctionRuntime {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            FunctionRuntime::QuickJs => write!(f, "quickjs"),
-            FunctionRuntime::Deno => write!(f, "deno"),
         }
     }
 }
@@ -3127,6 +3157,12 @@ impl fmt::Display for DiscardType {
         match self {
             All => write!(f, "ALL"),
         }
+    }
+}
+
+impl Statement {
+    pub fn to_redacted_string(&self, keywords: RedactSqlOptionKeywordsRef) -> String {
+        REDACT_SQL_OPTION_KEYWORDS.sync_scope(keywords, || self.to_string())
     }
 }
 
@@ -3320,7 +3356,7 @@ mod tests {
                 as_: Some(FunctionDefinition::SingleQuotedDef("SELECT 1".to_string())),
                 return_: None,
                 using: None,
-                runtime: Some(FunctionRuntime::Deno),
+                runtime: Some(Ident::new_unchecked("deno")),
                 function_type: Some(CreateFunctionType::AsyncGenerator),
             },
             with_options: CreateFunctionWithOptions {

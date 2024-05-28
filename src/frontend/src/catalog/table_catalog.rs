@@ -450,6 +450,20 @@ impl TableCatalog {
             .map(|(i, _)| i)
     }
 
+    pub fn default_column_expr(&self, col_idx: usize) -> ExprImpl {
+        if let Some(GeneratedOrDefaultColumn::DefaultColumn(DefaultColumnDesc { expr, .. })) = self
+            .columns[col_idx]
+            .column_desc
+            .generated_or_default_column
+            .as_ref()
+        {
+            ExprImpl::from_expr_proto(expr.as_ref().unwrap())
+                .expect("expr in default columns corrupted")
+        } else {
+            ExprImpl::literal_null(self.columns[col_idx].data_type().clone())
+        }
+    }
+
     pub fn default_columns(&self) -> impl Iterator<Item = (usize, ExprImpl)> + '_ {
         self.columns.iter().enumerate().filter_map(|(i, c)| {
             if let Some(GeneratedOrDefaultColumn::DefaultColumn(DefaultColumnDesc {
@@ -581,19 +595,15 @@ impl OwnedByUserCatalog for TableCatalog {
 #[cfg(test)]
 mod tests {
 
-    use risingwave_common::catalog::{
-        row_id_column_desc, ColumnCatalog, ColumnDesc, ColumnId, TableId,
-    };
+    use risingwave_common::catalog::{row_id_column_desc, ColumnDesc, ColumnId};
     use risingwave_common::test_prelude::*;
     use risingwave_common::types::*;
     use risingwave_common::util::sort_util::OrderType;
-    use risingwave_pb::catalog::{PbStreamJobStatus, PbTable};
     use risingwave_pb::plan_common::{
         AdditionalColumn, ColumnDescVersion, PbColumnCatalog, PbColumnDesc,
     };
 
     use super::*;
-    use crate::catalog::table_catalog::{TableCatalog, TableType};
 
     #[test]
     fn test_into_table_catalog() {

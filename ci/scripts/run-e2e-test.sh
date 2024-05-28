@@ -70,7 +70,7 @@ download-and-decompress-artifact e2e_test_generated ./
 download-and-decompress-artifact risingwave_e2e_extended_mode_test-"$profile" target/debug/
 mkdir -p e2e_test/udf/wasm/target/wasm32-wasi/release/
 buildkite-agent artifact download udf.wasm e2e_test/udf/wasm/target/wasm32-wasi/release/
-buildkite-agent artifact download risingwave-udf-example.jar ./
+buildkite-agent artifact download udf.jar ./
 mv target/debug/risingwave_e2e_extended_mode_test-"$profile" target/debug/risingwave_e2e_extended_mode_test
 
 chmod +x ./target/debug/risingwave_e2e_extended_mode_test
@@ -80,6 +80,8 @@ RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=i
 cluster_start
 # Please make sure the regression is expected before increasing the timeout.
 sqllogictest -p 4566 -d dev './e2e_test/streaming/**/*.slt' --junit "streaming-${profile}"
+sqllogictest -p 4566 -d dev './e2e_test/backfill/rate_limit/*.slt'
+sqllogictest -p 4566 -d dev './e2e_test/backfill/sink/different_pk_and_dist_key.slt'
 
 echo "--- Kill cluster"
 cluster_stop
@@ -105,6 +107,7 @@ echo "--- e2e, $mode, Apache Superset"
 sqllogictest -p 4566 -d dev './e2e_test/superset/*.slt' --junit "batch-${profile}"
 
 echo "--- e2e, $mode, external python udf"
+python3 -m pip install --break-system-packages arrow-udf==0.2.1
 python3 e2e_test/udf/test.py &
 sleep 1
 sqllogictest -p 4566 -d dev './e2e_test/udf/external_udf.slt'
@@ -117,7 +120,7 @@ sqllogictest -p 4566 -d dev './e2e_test/udf/always_retry_python.slt'
 # sqllogictest -p 4566 -d dev './e2e_test/udf/retry_python.slt'
 
 echo "--- e2e, $mode, external java udf"
-java -jar risingwave-udf-example.jar &
+java -jar udf.jar &
 sleep 1
 sqllogictest -p 4566 -d dev './e2e_test/udf/external_udf.slt'
 pkill java

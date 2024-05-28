@@ -48,7 +48,9 @@ table_write_throughput_threshold = 16777216
 min_table_split_write_throughput = 4194304
 compaction_task_max_heartbeat_interval_secs = 30
 compaction_task_max_progress_interval_secs = 600
-hybird_partition_vnode_count = 4
+hybrid_partition_vnode_count = 4
+compact_task_table_size_partition_threshold_low = 134217728
+compact_task_table_size_partition_threshold_high = 536870912
 event_log_enabled = true
 event_log_channel_max_size = 10
 enable_dropped_column_reclaim = false
@@ -64,7 +66,7 @@ compaction_filter_mask = 6
 max_sub_compaction = 4
 level0_stop_write_threshold_sub_level_number = 300
 level0_sub_level_compact_level_count = 3
-level0_overlapping_sub_level_compact_level_count = 6
+level0_overlapping_sub_level_compact_level_count = 12
 max_space_reclaim_bytes = 536870912
 level0_max_compact_file_number = 100
 tombstone_reclaim_ratio = 40
@@ -75,12 +77,15 @@ meta_cached_traces_num = 256
 meta_cached_traces_memory_limit_bytes = 134217728
 meta_enable_trivial_move = true
 meta_enable_check_task_level_overlap = false
+meta_max_trivial_move_task_count_per_loop = 256
+meta_max_get_task_probe_times = 5
 
 [batch]
 enable_barrier_read = false
 statement_timeout_in_sec = 3600
 frontend_compute_runtime_worker_threads = 4
 mask_worker_temporary_secs = 30
+redact_sql_option_keywords = ["credential", "key", "password", "private", "secret", "token"]
 
 [batch.developer]
 batch_connector_message_buffer_size = 16
@@ -107,6 +112,11 @@ stream_hash_agg_max_dirty_groups_heap_size = 67108864
 stream_memory_controller_threshold_aggressive = 0.9
 stream_memory_controller_threshold_graceful = 0.8
 stream_memory_controller_threshold_stable = 0.7
+stream_memory_controller_eviction_factor_aggressive = 2.0
+stream_memory_controller_eviction_factor_graceful = 1.5
+stream_memory_controller_eviction_factor_stable = 1.0
+stream_memory_controller_sequence_tls_step = 128
+stream_memory_controller_sequence_tls_lag = 32
 stream_enable_arrangement_backfill = true
 
 [storage]
@@ -118,9 +128,10 @@ write_conflict_detection_enabled = true
 max_prefetch_block_number = 16
 disable_remote_compactor = false
 share_buffer_upload_concurrency = 8
-compactor_max_task_multiplier = 3.5
+compactor_max_task_multiplier = 3.0
 compactor_memory_available_proportion = 0.8
 sstable_id_remote_fetch_number = 10
+min_sstable_size_mb = 32
 min_sst_size_for_streaming_upload = 33554432
 max_sub_compaction = 4
 max_concurrent_compaction_task_number = 16
@@ -183,19 +194,33 @@ recent_filter_layers = 6
 recent_filter_rotate_interval_ms = 10000
 
 [storage.object_store]
-object_store_streaming_read_timeout_ms = 480000
-object_store_streaming_upload_timeout_ms = 480000
-object_store_upload_timeout_ms = 480000
-object_store_read_timeout_ms = 480000
 object_store_set_atomic_write_dir = false
+
+[storage.object_store.retry]
+req_backoff_interval_ms = 1000
+req_backoff_max_delay_ms = 10000
+req_backoff_factor = 2
+upload_attempt_timeout_ms = 8000
+upload_retry_attempts = 3
+streaming_upload_attempt_timeout_ms = 5000
+streaming_upload_retry_attempts = 3
+read_attempt_timeout_ms = 8000
+read_retry_attempts = 3
+streaming_read_attempt_timeout_ms = 3000
+streaming_read_retry_attempts = 3
+metadata_attempt_timeout_ms = 60000
+metadata_retry_attempts = 3
+delete_attempt_timeout_ms = 5000
+delete_retry_attempts = 3
+delete_objects_attempt_timeout_ms = 5000
+delete_objects_retry_attempts = 3
+list_attempt_timeout_ms = 600000
+list_retry_attempts = 3
 
 [storage.object_store.s3]
 object_store_keepalive_ms = 600000
 object_store_recv_buffer_size = 2097152
 object_store_nodelay = true
-object_store_req_retry_interval_ms = 20
-object_store_req_retry_max_delay_ms = 10000
-object_store_req_retry_max_attempts = 8
 retry_unknown_service_error = false
 identity_resolution_timeout_s = 5
 

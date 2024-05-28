@@ -95,13 +95,6 @@ pub enum ExprError {
         anyhow::Error,
     ),
 
-    #[error("UDF error: {0}")]
-    Udf(
-        #[from]
-        #[backtrace]
-        risingwave_udf::Error,
-    ),
-
     #[error("not a constant")]
     NotConstant,
 
@@ -117,22 +110,13 @@ pub enum ExprError {
     #[error("invalid state: {0}")]
     InvalidState(String),
 
-    #[error("error in cryptography: {0}")]
-    Cryptography(Box<CryptographyError>),
-}
+    /// Function error message returned by UDF.
+    #[error("{0}")]
+    Custom(String),
 
-#[derive(Debug)]
-pub enum CryptographyStage {
-    Encrypt,
-    Decrypt,
-}
-
-#[derive(Debug, Error)]
-#[error("{stage:?} stage, reason: {reason}")]
-pub struct CryptographyError {
-    pub stage: CryptographyStage,
-    #[source]
-    pub reason: openssl::error::ErrorStack,
+    /// Error from a function call.
+    #[error("{0}")]
+    Function(#[source] Box<dyn std::error::Error + Send + Sync>),
 }
 
 static_assertions::const_assert_eq!(std::mem::size_of::<ExprError>(), 40);
@@ -175,6 +159,12 @@ impl Display for MultiExprError {
 impl From<Vec<ExprError>> for MultiExprError {
     fn from(v: Vec<ExprError>) -> Self {
         Self(v.into_boxed_slice())
+    }
+}
+
+impl FromIterator<ExprError> for MultiExprError {
+    fn from_iter<T: IntoIterator<Item = ExprError>>(iter: T) -> Self {
+        Self(iter.into_iter().collect())
     }
 }
 

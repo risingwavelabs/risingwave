@@ -111,14 +111,14 @@ message FragmentParallelUnitMappings {
   repeated FragmentParallelUnitMapping mappings = 1;
 }
 
-/// Worker mapping with fragment id, used for notification.
-message FragmentWorkerMapping {
+/// Worker slot mapping with fragment id, used for notification.
+message FragmentWorkerSlotMapping {
   uint32 fragment_id = 1;
-  common.WorkerMapping mapping = 2;
+  common.WorkerSlotMapping mapping = 2;
 }
 
-message FragmentWorkerMappings {
-  repeated FragmentWorkerMapping mappings = 1;
+message FragmentWorkerSlotMappings {
+  repeated FragmentWorkerSlotMapping mappings = 1;
 }
 
 // TODO: remove this when dashboard refactored.
@@ -264,6 +264,7 @@ enum ThrottleTarget {
   THROTTLE_TARGET_UNSPECIFIED = 0;
   SOURCE = 1;
   MV = 2;
+  TABLE_WITH_SOURCE = 3;
 }
 
 message ApplyThrottleRequest {
@@ -390,7 +391,7 @@ message MetaSnapshot {
     reserved 2;
     reserved "parallel_unit_mapping_version";
     uint64 worker_node_version = 3;
-    uint64 streaming_worker_mapping_version = 4;
+    uint64 streaming_worker_slot_mapping_version = 4;
   }
   repeated catalog.Database databases = 1;
   repeated catalog.Schema schemas = 2;
@@ -415,8 +416,8 @@ message MetaSnapshot {
   reserved "serving_parallel_unit_mappings";
 
   // for streaming
-  repeated FragmentWorkerMapping streaming_worker_mappings = 21;
-  repeated FragmentWorkerMapping serving_worker_mappings = 22;
+  repeated FragmentWorkerSlotMapping streaming_worker_slot_mappings = 21;
+  repeated FragmentWorkerSlotMapping serving_worker_slot_mappings = 22;
 
   SnapshotVersion version = 13;
 }
@@ -466,8 +467,8 @@ message SubscribeResponse {
     catalog.Connection connection = 22;
     hummock.HummockVersionStats hummock_stats = 24;
     Recovery recovery = 25;
-    FragmentWorkerMapping streaming_worker_mapping = 27;
-    FragmentWorkerMappings serving_worker_mappings = 28;
+    FragmentWorkerSlotMapping streaming_worker_slot_mapping = 27;
+    FragmentWorkerSlotMappings serving_worker_slot_mappings = 28;
   }
   reserved 12;
   reserved "parallel_unit_mapping";
@@ -651,7 +652,7 @@ message GetServingVnodeMappingsResponse {
   reserved 1;
   reserved "mappings";
   map<uint32, uint32> fragment_to_table = 2;
-  repeated FragmentWorkerMapping worker_mappings = 3;
+  repeated FragmentWorkerSlotMapping worker_slot_mappings = 3;
 }
 
 service ServingService {
