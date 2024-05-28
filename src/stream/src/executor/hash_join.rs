@@ -11,11 +11,12 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
 use std::collections::{BTreeMap, HashSet};
+use std::num::NonZeroU32;
 use std::sync::LazyLock;
 use std::time::Duration;
 
+use governor::{Quota, RateLimiter};
 use itertools::Itertools;
 use multimap::MultiMap;
 use risingwave_common::array::{Op, RowRef};
@@ -159,6 +160,8 @@ pub struct HashJoinExecutor<K: HashKey, S: StateStore, const T: JoinTypePrimitiv
 
     /// watermark column index -> `BufferedWatermarks`
     watermark_buffers: BTreeMap<usize, BufferedWatermarks<SideTypePrimitive>>,
+
+    high_join_amplification_threshold: usize,
 }
 
 impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> std::fmt::Debug
@@ -195,6 +198,7 @@ struct EqJoinArgs<'a, K: HashKey, S: StateStore> {
     append_only_optimize: bool,
     chunk_size: usize,
     cnt_rows_received: &'a mut u32,
+    high_join_amplification_threshold: usize,
 }
 
 impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, S, T> {
@@ -218,6 +222,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         is_append_only: bool,
         metrics: Arc<StreamingMetrics>,
         chunk_size: usize,
+        high_join_amplification_threshold: usize,
     ) -> Self {
         let side_l_column_n = input_l.schema().len();
 
@@ -446,6 +451,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             chunk_size,
             cnt_rows_received: 0,
             watermark_buffers,
+            high_join_amplification_threshold,
         }
     }
 
@@ -539,6 +545,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         append_only_optimize: self.append_only_optimize,
                         chunk_size: self.chunk_size,
                         cnt_rows_received: &mut self.cnt_rows_received,
+                        high_join_amplification_threshold: self.high_join_amplification_threshold,
                     }) {
                         left_time += left_start_time.elapsed();
                         yield Message::Chunk(chunk?);
@@ -563,6 +570,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         append_only_optimize: self.append_only_optimize,
                         chunk_size: self.chunk_size,
                         cnt_rows_received: &mut self.cnt_rows_received,
+                        high_join_amplification_threshold: self.high_join_amplification_threshold,
                     }) {
                         right_time += right_start_time.elapsed();
                         yield Message::Chunk(chunk?);
@@ -777,6 +785,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             append_only_optimize,
             chunk_size,
             cnt_rows_received,
+            high_join_amplification_threshold,
             ..
         } = args;
 
@@ -832,13 +841,16 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
 
             if let Some(rows) = &matched_rows {
                 join_matched_join_keys.observe(rows.len() as _);
-                if rows.len() >= 10000 {
-                    static LOG_SUPPERSSER: LazyLock<LogSuppresser> =
-                        LazyLock::new(LogSuppresser::default);
+                if rows.len() > high_join_amplification_threshold {
+                    static LOG_SUPPERSSER: LazyLock<LogSuppresser> = LazyLock::new(|| {
+                        LogSuppresser::new(RateLimiter::direct(Quota::per_minute(
+                            NonZeroU32::new(1).unwrap(),
+                        )))
+                    });
                     if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
                         let join_key_data_types = side_update.ht.join_key_data_types();
                         let key = key.deserialize(join_key_data_types)?;
-                        tracing::warn!(target: "hash_join_amplification",
+                        tracing::warn!(target: "high_join_amplification",
                             suppressed_count,
                             matched_rows_len = rows.len(),
                             update_table_id = side_update.ht.table_id(),
@@ -1213,6 +1225,7 @@ mod tests {
             false,
             Arc::new(StreamingMetrics::unused()),
             1024,
+            2048,
         );
         (tx_l, tx_r, executor.boxed().execute())
     }
@@ -1305,6 +1318,7 @@ mod tests {
             true,
             Arc::new(StreamingMetrics::unused()),
             1024,
+            2048,
         );
         (tx_l, tx_r, executor.boxed().execute())
     }
