@@ -25,6 +25,7 @@ normal = ["workspace-hack"]
 itertools = { workspace = true }
 serde = { version = "1.0", features = ["derive"], optional = true }
 thiserror = "1.0.61"
+tokio = { version = "0.2", package = "madsim-tokio" }
 tracing = "0.1"
 tracing-subscriber = "0.3"
 winnow = { version = "0.6.8", git = "https://github.com/TennyZhuang/winnow.git", rev = "a6b1f04" }
@@ -33,7 +34,14 @@ winnow = { version = "0.6.8", git = "https://github.com/TennyZhuang/winnow.git",
 workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
+anyhow = "1"
+console = "0.15"
+libtest-mimic = "0.7"
 matches = "0.1"
+serde = { version = "1", features = ["derive"] }
+serde_with = "3"
+serde_yaml = "0.9"
+walkdir = "2"
 
 [package.metadata.release]
 # Instruct `cargo release` to not run `cargo publish` locally:
@@ -44,6 +52,10 @@ disable-publish = true
 [[bin]]
 name = "sqlparser"
 path = "src/bin/sqlparser.rs"
+
+[[test]]
+name = "parser_test"
+harness = false
 
 [lints]
 workspace = true

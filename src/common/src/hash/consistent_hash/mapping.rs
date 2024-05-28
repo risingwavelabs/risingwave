@@ -361,7 +361,30 @@ impl ActorMapping {
     }
 }
 
-impl WorkerSlotMapping {}
+
+impl WorkerSlotMapping {
+    /// Create a uniform worker mapping from the given worker ids
+    pub fn build_from_ids(worker_slot_ids: &[WorkerSlotId]) -> Self {
+        Self::new_uniform(worker_slot_ids.iter().cloned())
+    }
+
+    /// Create a worker mapping from the protobuf representation.
+    pub fn from_protobuf(proto: &PbWorkerSlotMapping) -> Self {
+        assert_eq!(proto.original_indices.len(), proto.data.len());
+        Self {
+            original_indices: proto.original_indices.clone(),
+            data: proto.data.iter().map(|&id| WorkerSlotId(id)).collect(),
+        }
+    }
+
+    /// Convert this worker mapping to the protobuf representation.
+    pub fn to_protobuf(&self) -> PbWorkerSlotMapping {
+        PbWorkerSlotMapping {
+            original_indices: self.original_indices.clone(),
+            data: self.data.iter().map(|id| id.0).collect(),
+        }
+    }
+}
 
 impl ParallelUnitMapping {
     /// Create a uniform parallel unit mapping from the given parallel units, essentially
