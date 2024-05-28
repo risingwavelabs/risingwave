@@ -18,9 +18,12 @@ use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Duration;
 
+use aes_siv::aead::generic_array::GenericArray;
+use aes_siv::aead::Aead;
+use aes_siv::{Aes128SivAead, KeyInit};
 use anyhow::Context;
 use itertools::Itertools;
-use rand::Rng;
+use rand::{Rng, RngCore};
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::{ParallelUnitMapping, VirtualNode};
 use risingwave_common::system_param::reader::SystemParamsRead;
@@ -58,6 +61,7 @@ use risingwave_pb::stream_plan::{
     Dispatcher, DispatcherType, FragmentTypeFlag, MergeNode, PbStreamFragmentGraph,
     StreamFragmentGraph as StreamFragmentGraphProto,
 };
+use serde::{Deserialize, Serialize};
 use thiserror_ext::AsReport;
 use tokio::sync::Semaphore;
 use tokio::time::sleep;
@@ -154,6 +158,12 @@ pub enum DdlCommand {
     CommentOn(Comment),
     CreateSubscription(Subscription),
     DropSubscription(SubscriptionId, DropMode),
+}
+
+#[derive(Deserialize, Serialize)]
+struct SecretEncryption {
+    nonce: [u8; 16],
+    ciphertext: Vec<u8>,
 }
 
 impl DdlCommand {
@@ -620,16 +630,34 @@ impl DdlController {
         // The 'secret' part of the request we receive from the frontend is in plaintext;
         // here, we need to encrypt it before storing it in the catalog.
 
-        let encrypted_payload = simplestcrypt::encrypt_and_serialize(
-            self.env.opts.secret_store_private_key.as_slice(),
-            secret.get_value().as_slice(),
-        )
-        .map_err(|e| {
-            MetaError::from(MetaErrorInner::InvalidParameter(format!(
-                "failed to encrypt secret {}: {:?}",
-                secret.name, e
-            )))
-        })?;
+        let encrypted_payload = {
+            let data = secret.get_value().as_slice();
+            let key = self.env.opts.secret_store_private_key.as_slice();
+            let encrypt_key = {
+                let mut k = key[..(std::cmp::min(key.len(), 32))].to_vec();
+                k.resize_with(32, || 0);
+                k
+            };
+
+            let mut rng = rand::thread_rng();
+            let mut nonce: [u8; 16] = [0; 16];
+            rng.fill_bytes(&mut nonce);
+            let nonce_array = GenericArray::from_slice(&nonce);
+            let cipher = Aes128SivAead::new(encrypt_key.as_slice().into());
+
+            let ciphertext = cipher.encrypt(nonce_array, data).map_err(|e| {
+                MetaError::from(MetaErrorInner::InvalidParameter(format!(
+                    "failed to encrypt secret {}: {:?}",
+                    secret.name, e
+                )))
+            })?;
+            bincode::serialize(&SecretEncryption { nonce, ciphertext }).map_err(|e| {
+                MetaError::from(MetaErrorInner::InvalidParameter(format!(
+                    "failed to serialize secret {}: {:?}",
+                    secret.name, e
+                )))
+            })?
+        };
         secret.value = encrypted_payload;
 
         match &self.metadata_manager {
