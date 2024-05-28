@@ -123,14 +123,22 @@ impl DebeziumAvroParserConfig {
     }
 
     pub fn extract_pks(&self) -> ConnectorResult<Vec<ColumnDesc>> {
-        avro_schema_to_column_descs(&self.key_schema)
+        avro_schema_to_column_descs(
+            &self.key_schema,
+            // TODO: do we need to support map type here?
+            None,
+        )
     }
 
     pub fn map_to_columns(&self) -> ConnectorResult<Vec<ColumnDesc>> {
-        avro_schema_to_column_descs(avro_schema_skip_union(avro_extract_field_schema(
-            &self.outer_schema,
-            Some("before"),
-        )?)?)
+        avro_schema_to_column_descs(
+            avro_schema_skip_union(avro_extract_field_schema(
+                &self.outer_schema,
+                Some("before"),
+            )?)?,
+            // TODO: do we need to support map type here?
+            None,
+        )
     }
 }
 
@@ -245,7 +253,7 @@ mod tests {
 }
 "#;
         let key_schema = Schema::parse_str(key_schema_str).unwrap();
-        let names: Vec<String> = avro_schema_to_column_descs(&key_schema)
+        let names: Vec<String> = avro_schema_to_column_descs(&key_schema, None)
             .unwrap()
             .drain(..)
             .map(|d| d.name)
@@ -301,7 +309,7 @@ mod tests {
 }
 "#;
         let schema = Schema::parse_str(test_schema_str).unwrap();
-        let columns = avro_schema_to_column_descs(&schema).unwrap();
+        let columns = avro_schema_to_column_descs(&schema, None).unwrap();
         for col in &columns {
             let dtype = col.column_type.as_ref().unwrap();
             println!("name = {}, type = {:?}", col.name, dtype.type_name);
@@ -319,6 +327,7 @@ mod tests {
                 avro_extract_field_schema(&outer_schema, Some("before")).unwrap(),
             )
             .unwrap(),
+            None,
         )
         .unwrap()
         .into_iter()
