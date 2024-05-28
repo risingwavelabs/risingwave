@@ -198,10 +198,6 @@ fn supported_avro_to_json_type(schema: &Schema) -> bool {
         Schema::Map(value_schema) | Schema::Array(value_schema) => {
             supported_avro_to_json_type(value_schema)
         }
-        Schema::Union(union_schema) => union_schema
-            .variants()
-            .iter()
-            .all(supported_avro_to_json_type),
         Schema::Record(RecordSchema { fields, .. }) => fields
             .iter()
             .all(|f| supported_avro_to_json_type(&f.schema)),
@@ -221,7 +217,8 @@ fn supported_avro_to_json_type(schema: &Schema) -> bool {
         | Schema::LocalTimestampMillis
         | Schema::LocalTimestampMicros
         | Schema::Duration
-        | Schema::Ref { name: _ } => false,
+        | Schema::Ref { name: _ }
+        | Schema::Union(_) => false,
     }
 }
 
@@ -258,9 +255,10 @@ pub(crate) fn avro_to_jsonb(
             }
             builder.end_array()
         }
-        Value::Union(_, v) => avro_to_jsonb(v, builder)?,
 
         // TODO: figure out where the following encoding is reasonable before enabling them.
+        // See discussions: https://github.com/risingwavelabs/risingwave/pull/16948
+
         // jsonbb supports int64, but JSON spec does not allow it. How should we handle it?
         // BTW, protobuf canonical JSON converts int64 to string.
         // Value::Long(l) => builder.add_i64(*l),
@@ -287,7 +285,9 @@ pub(crate) fn avro_to_jsonb(
         //     builder.add_string(&symbol);
         // }
         // Value::Uuid(id) => builder.add_string(&id.as_hyphenated().to_string()),
-
+        // // For Union, one concern is that the avro union is tagged (like rust enum) but json union is untagged (like c union).
+        // // When the union consists of multiple records, it is possible to distinguish which variant is active in avro, but in json they will all become jsonb objects and indistinguishable.
+        // Value::Union(_, v) => avro_to_jsonb(v, builder)?
         // XXX: pad null or return err here?
         v @ (Value::Long(_)
         | Value::Float(_)
@@ -304,7 +304,8 @@ pub(crate) fn avro_to_jsonb(
         | Value::LocalTimestampMillis(_)
         | Value::LocalTimestampMicros(_)
         | Value::Duration(_)
-        | Value::Uuid(_)) => {
+        | Value::Uuid(_)
+        | Value::Union(_, _)) => {
             bail_uncategorized!(
                 "unimplemented conversion from avro to jsonb: {:?}",
                 ValueKind::from(v)

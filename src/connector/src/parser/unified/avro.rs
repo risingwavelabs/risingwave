@@ -270,7 +270,7 @@ impl<'a> AvroParseOptions<'a> {
             (Some(DataType::Jsonb), Value::String(s)) => {
                 JsonbVal::from_str(s).map_err(|_| create_error())?.into()
             }
-            (Some(DataType::Jsonb), v) => {
+            (Some(DataType::Jsonb), v @ Value::Map(_)) => {
                 let mut builder = jsonbb::Builder::default();
                 avro_to_jsonb(v, &mut builder)?;
                 let jsonb = builder.finish();
