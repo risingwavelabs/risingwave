@@ -7,11 +7,11 @@
   formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(Identifier(Ident { value: "a1", quote_style: None }))], from: [TableWithJoins { relation: Table { name: ObjectName([Ident { value: "a", quote_style: None }]), alias: None, as_of: None }, joins: [] }], lateral_views: [], selection: Some(InSubquery { expr: Identifier(Ident { value: "a1", quote_style: None }), subquery: Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(Identifier(Ident { value: "b1", quote_style: None }))], from: [TableWithJoins { relation: Table { name: ObjectName([Ident { value: "b", quote_style: None }]), alias: None, as_of: None }, joins: [] }], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None }, negated: true }), group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })'
 - input: select a1 from a where a1 < ALL (select b1 from b);
   error_msg: |-
-    sql parser error: Expected ), found: b1 at line:1, column:41
+    sql parser error: Expected ), found: b1 at line 1, column 41
     Near "where a1 < ALL (select"
 - input: select a1 from a where a1 <> SOME (select b1 from b);
   error_msg: |-
-    sql parser error: Expected ), found: b1 at line:1, column:43
+    sql parser error: Expected ), found: b1 at line 1, column 43
     Near "where a1 <> SOME (select"
 - input: select 1 + (select 2);
   formatted_sql: SELECT 1 + (SELECT 2)

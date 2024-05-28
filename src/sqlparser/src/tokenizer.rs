@@ -392,7 +392,7 @@ impl fmt::Display for TokenWithLocation {
         } else {
             write!(
                 f,
-                "{} at line:{}, column:{}",
+                "{} at line {}, column {}",
                 self.token, self.location.line, self.location.column
             )
         }
@@ -1222,7 +1222,7 @@ mod tests {
             use std::error::Error;
             assert!(err.source().is_none());
         }
-        assert_eq!(err.to_string(), "test at Line: 1, Column 1");
+        assert_eq!(err.to_string(), "test at line 1, column 1");
     }
 
     #[test]
