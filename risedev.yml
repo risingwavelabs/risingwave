@@ -977,6 +977,8 @@ profile:
       - use: compactor
       - use: kafka
         user-managed: true
+        address: message_queue
+        port: 29092
 
   ci-meta-backup-test-etcd:
     config-path: src/config/ci-meta-backup-test.toml
