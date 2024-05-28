@@ -225,7 +225,7 @@ impl ExternalFunction {
         for i in 0..5 {
             match self.client.call(&self.identifier, input).await {
                 Err(err) if is_connection_error(&err) && i != 4 => {
-                    tracing::error!(backoff, error = %err.as_report(), "UDF connection error. retry...");
+                    tracing::error!(?backoff, error = %err.as_report(), "UDF connection error. retry...");
                 }
                 ret => return ret,
             }
@@ -244,7 +244,7 @@ impl ExternalFunction {
         loop {
             match self.client.call(&self.identifier, input).await {
                 Err(err) if is_tonic_error(&err) => {
-                    tracing::error!(backoff, error = %err.as_report(), "UDF tonic error. retry...");
+                    tracing::error!(?backoff, error = %err.as_report(), "UDF tonic error. retry...");
                 }
                 ret => {
                     if ret.is_err() {
