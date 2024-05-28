@@ -825,29 +825,6 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         self.extend_cache_rightward_by_n(table, range.end()).await
     }
 
-    async fn extend_cache_by_range_inner(
-        &mut self,
-        table: &StateTable<S>,
-        table_sub_range: (Bound<impl Row>, Bound<impl Row>),
-    ) -> StreamExecutorResult<()> {
-        let stream = table
-            .iter_with_prefix(
-                self.this_partition_key,
-                &table_sub_range,
-                PrefetchOptions::default(),
-            )
-            .await?;
-
-        #[for_await]
-        for row in stream {
-            let row: OwnedRow = row?.into_owned_row();
-            let key = self.row_conv.row_to_state_key(&row)?;
-            self.range_cache.insert(CacheKey::from(key), row);
-        }
-
-        Ok(())
-    }
-
     async fn extend_cache_leftward_by_n(
         &mut self,
         table: &StateTable<S>,
@@ -893,50 +870,6 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         Ok(())
     }
 
-    async fn extend_cache_leftward_by_n_inner(
-        &mut self,
-        table: &StateTable<S>,
-        range_to_exclusive: &StateKey,
-    ) -> StreamExecutorResult<()> {
-        let mut n_extended = 0usize;
-        {
-            let sub_range = (
-                Bound::<OwnedRow>::Unbounded,
-                Bound::Excluded(
-                    self.row_conv
-                        .state_key_to_table_sub_pk(range_to_exclusive)?,
-                ),
-            );
-            let rev_stream = table
-                .rev_iter_with_prefix(
-                    self.this_partition_key,
-                    &sub_range,
-                    PrefetchOptions::default(),
-                )
-                .await?;
-
-            #[for_await]
-            for row in rev_stream {
-                let row: OwnedRow = row?.into_owned_row();
-
-                let key = self.row_conv.row_to_state_key(&row)?;
-                self.range_cache.insert(CacheKey::from(key), row);
-
-                n_extended += 1;
-                if n_extended == MAGIC_BATCH_SIZE {
-                    break;
-                }
-            }
-        }
-
-        if n_extended < MAGIC_BATCH_SIZE && self.cache_real_len() > 0 {
-            // we reached the beginning of this partition in the table
-            self.range_cache.remove(&CacheKey::Smallest);
-        }
-
-        Ok(())
-    }
-
     async fn extend_cache_rightward_by_n(
         &mut self,
         table: &StateTable<S>,
@@ -977,6 +910,73 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
                 self.range_cache.remove(&CacheKey::Smallest);
                 self.range_cache.remove(&CacheKey::Largest);
             }
+        }
+
+        Ok(())
+    }
+
+    async fn extend_cache_by_range_inner(
+        &mut self,
+        table: &StateTable<S>,
+        table_sub_range: (Bound<impl Row>, Bound<impl Row>),
+    ) -> StreamExecutorResult<()> {
+        let stream = table
+            .iter_with_prefix(
+                self.this_partition_key,
+                &table_sub_range,
+                PrefetchOptions::default(),
+            )
+            .await?;
+
+        #[for_await]
+        for row in stream {
+            let row: OwnedRow = row?.into_owned_row();
+            let key = self.row_conv.row_to_state_key(&row)?;
+            self.range_cache.insert(CacheKey::from(key), row);
+        }
+
+        Ok(())
+    }
+
+    async fn extend_cache_leftward_by_n_inner(
+        &mut self,
+        table: &StateTable<S>,
+        range_to_exclusive: &StateKey,
+    ) -> StreamExecutorResult<()> {
+        let mut n_extended = 0usize;
+        {
+            let sub_range = (
+                Bound::<OwnedRow>::Unbounded,
+                Bound::Excluded(
+                    self.row_conv
+                        .state_key_to_table_sub_pk(range_to_exclusive)?,
+                ),
+            );
+            let rev_stream = table
+                .rev_iter_with_prefix(
+                    self.this_partition_key,
+                    &sub_range,
+                    PrefetchOptions::default(),
+                )
+                .await?;
+
+            #[for_await]
+            for row in rev_stream {
+                let row: OwnedRow = row?.into_owned_row();
+
+                let key = self.row_conv.row_to_state_key(&row)?;
+                self.range_cache.insert(CacheKey::from(key), row);
+
+                n_extended += 1;
+                if n_extended == MAGIC_BATCH_SIZE {
+                    break;
+                }
+            }
+        }
+
+        if n_extended < MAGIC_BATCH_SIZE && self.cache_real_len() > 0 {
+            // we reached the beginning of this partition in the table
+            self.range_cache.remove(&CacheKey::Smallest);
         }
 
         Ok(())
