@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::iter::once;
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
@@ -28,9 +27,11 @@ use risingwave_hummock_sdk::{
 use risingwave_pb::hummock::compact_task::{self};
 use risingwave_pb::hummock::group_delta::DeltaType;
 use risingwave_pb::hummock::hummock_version_delta::ChangeLogDelta;
-use risingwave_pb::hummock::{GroupDelta, HummockSnapshot, IntraLevelDelta};
+use risingwave_pb::hummock::{
+    GroupDelta, GroupMetaChange, HummockSnapshot, IntraLevelDelta, StateTableInfoDelta,
+};
 
-use crate::hummock::error::Result;
+use crate::hummock::error::{Error, Result};
 use crate::hummock::manager::transaction::{
     HummockVersionStatsTransaction, HummockVersionTransaction,
 };
@@ -141,48 +142,80 @@ impl HummockManager {
             .latest_version()
             .build_compaction_group_info();
 
+        let mut new_table_ids = None;
+
         // Add new table
         if let Some(new_fragment_table_info) = new_table_fragment_info {
-            let mut cg_table_ids = HashMap::new();
+            let new_table_ids = new_table_ids.insert(HashSet::new());
             if !new_fragment_table_info.internal_table_ids.is_empty() {
-                cg_table_ids.insert(
-                    StaticCompactionGroupId::StateDefault as u64,
-                    new_fragment_table_info
-                        .internal_table_ids
-                        .iter()
-                        .map(|table_id| table_id.table_id)
-                        .collect(),
-                );
+                if let Some(levels) = new_version_delta
+                    .latest_version()
+                    .levels
+                    .get(&(StaticCompactionGroupId::StateDefault as u64))
+                {
+                    for table_id in &new_fragment_table_info.internal_table_ids {
+                        if levels.member_table_ids.contains(&table_id.table_id) {
+                            return Err(Error::CompactionGroup(format!(
+                                "table {} already in group {}",
+                                table_id,
+                                StaticCompactionGroupId::StateDefault as u64
+                            )));
+                        }
+                    }
+                }
+
+                let group_deltas = &mut new_version_delta
+                    .group_deltas
+                    .entry(StaticCompactionGroupId::StateDefault as u64)
+                    .or_default()
+                    .group_deltas;
+                group_deltas.push(GroupDelta {
+                    delta_type: Some(DeltaType::GroupMetaChange(GroupMetaChange {
+                        table_ids_add: new_fragment_table_info
+                            .internal_table_ids
+                            .iter()
+                            .map(|table_id| table_id.table_id)
+                            .collect(),
+                        ..Default::default()
+                    })),
+                });
 
                 for table_id in &new_fragment_table_info.internal_table_ids {
                     table_compaction_group_mapping
                         .insert(*table_id, StaticCompactionGroupId::StateDefault as u64);
+                    new_table_ids.insert(*table_id);
                 }
             }
 
             if let Some(table_id) = new_fragment_table_info.mv_table_id {
-                cg_table_ids.insert(
-                    StaticCompactionGroupId::MaterializedView as u64,
-                    HashSet::from_iter(once(table_id.table_id)),
-                );
-                table_compaction_group_mapping
+                if let Some(levels) = new_version_delta
+                    .latest_version()
+                    .levels
+                    .get(&(StaticCompactionGroupId::MaterializedView as u64))
+                {
+                    if levels.member_table_ids.contains(&table_id.table_id) {
+                        return Err(Error::CompactionGroup(format!(
+                            "table {} already in group {}",
+                            table_id,
+                            StaticCompactionGroupId::MaterializedView as u64
+                        )));
+                    }
+                }
+                let group_deltas = &mut new_version_delta
+                    .group_deltas
+                    .entry(StaticCompactionGroupId::MaterializedView as u64)
+                    .or_default()
+                    .group_deltas;
+                group_deltas.push(GroupDelta {
+                    delta_type: Some(DeltaType::GroupMetaChange(GroupMetaChange {
+                        table_ids_add: vec![table_id.table_id],
+                        ..Default::default()
+                    })),
+                });
+                let _ = table_compaction_group_mapping
                     .insert(table_id, StaticCompactionGroupId::MaterializedView as u64);
+                new_table_ids.insert(table_id);
             }
-
-            let table_fragments_id = new_fragment_table_info.table_id;
-
-            let (snapshot_group_delta, compaction_group_deltas) = self
-                .gen_register_table_fragments_delta(
-                    table_fragments_id,
-                    cg_table_ids,
-                    new_version_delta.latest_version(),
-                )
-                .await?;
-
-            new_version_delta
-                .snapshot_group_delta
-                .insert(table_fragments_id, snapshot_group_delta);
-            new_version_delta.group_deltas = compaction_group_deltas;
         }
 
         let mut incorrect_ssts = vec![];
@@ -302,6 +335,28 @@ impl HummockManager {
             };
             group_deltas.push(group_delta);
         }
+
+        // update state table info
+        new_version_delta.with_latest_version(|version, delta| {
+            for table_id in new_table_ids
+                .into_iter()
+                .flat_map(|ids| ids.into_iter().map(|table_id| table_id.table_id))
+                .chain(
+                    version
+                        .levels
+                        .values()
+                        .flat_map(|group| group.member_table_ids.iter().cloned()),
+                )
+            {
+                delta.state_table_info_delta.insert(
+                    TableId::new(table_id),
+                    StateTableInfoDelta {
+                        committed_epoch: epoch,
+                        safe_epoch: version.safe_epoch,
+                    },
+                );
+            }
+        });
 
         new_version_delta.pre_apply();
 

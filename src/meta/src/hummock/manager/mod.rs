@@ -69,7 +69,6 @@ mod worker;
 pub(crate) use commit_epoch::*;
 use compaction::*;
 pub use compaction::{check_cg_write_limit, WriteLimitType};
-use risingwave_common::catalog::TableId;
 pub(crate) use utils::*;
 
 type Snapshot = ArcSwap<HummockSnapshot>;
@@ -511,12 +510,10 @@ impl HummockManager {
         }
 
         for group in &compaction_groups {
-            for table_id in &group.member_table_ids {
-                self.register_single_table_fragments(TableId::new(*table_id), group.id)
-                    .await
-                    .unwrap();
+            let mut pairs = vec![];
+            for table_id in group.member_table_ids.clone() {
+                pairs.push((table_id as StateTableId, group.id));
             }
-            tracing::info!("Registered table ids {:?}", group.member_table_ids);
             let group_config = group.compaction_config.clone().unwrap();
             self.compaction_group_manager
                 .write()
@@ -524,6 +521,8 @@ impl HummockManager {
                 .init_compaction_config_for_replay(group.id, group_config)
                 .await
                 .unwrap();
+            self.register_table_ids_for_test(&pairs).await?;
+            tracing::info!("Registered table ids {:?}", pairs);
         }
 
         // Notify that tables have created

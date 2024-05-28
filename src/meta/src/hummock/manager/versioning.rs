@@ -36,7 +36,6 @@ use risingwave_pb::hummock::{
     HummockVersionStats, SstableInfo, TableStats,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
-use tracing::warn;
 
 use super::check_cg_write_limit;
 use crate::hummock::error::Result;
@@ -44,10 +43,11 @@ use crate::hummock::manager::checkpoint::HummockVersionCheckpoint;
 use crate::hummock::manager::commit_multi_var;
 use crate::hummock::manager::context::ContextInfo;
 use crate::hummock::manager::gc::DeleteObjectTracker;
+use crate::hummock::manager::transaction::HummockVersionTransaction;
 use crate::hummock::metrics_utils::{trigger_write_stop_stats, LocalTableMetrics};
 use crate::hummock::model::CompactionGroup;
 use crate::hummock::HummockManager;
-use crate::model::{BTreeMapEntryTransaction, VarTransaction};
+use crate::model::VarTransaction;
 use crate::MetaResult;
 
 #[derive(Default)]
@@ -249,30 +249,25 @@ impl HummockManager {
         Ok(())
     }
 
-    pub async fn may_fill_backward_snapshot_group(
-        &self,
-        existing_table_fragment_state_tables: &HashMap<u32, HashSet<u32>>,
-    ) -> Result<()> {
+    pub async fn may_fill_backward_state_table_info(&self) -> Result<()> {
         let mut versioning = self.versioning.write().await;
-        if let Some(new_version_delta) = versioning
+        if versioning
             .current_version
-            .gen_fill_backward_compatibility_snapshot_group_delta(
-                existing_table_fragment_state_tables,
-            )
+            .need_fill_backward_compatible_state_table_info_delta()
         {
-            warn!(
-                ?new_version_delta,
-                "fill snapshot group for backward compatibility"
-            );
-            let mut new_version: HummockVersion = versioning.current_version.clone();
-            let new_version_delta = BTreeMapEntryTransaction::new_insert(
+            let versioning: &mut Versioning = &mut versioning;
+            let mut version = HummockVersionTransaction::new(
+                &mut versioning.current_version,
                 &mut versioning.hummock_version_deltas,
-                new_version_delta.id,
-                new_version_delta,
+                self.env.notification_manager(),
+                &self.metrics,
             );
-            new_version.apply_version_delta(&new_version_delta);
-            commit_multi_var!(self.meta_store_ref(), new_version_delta)?;
-            versioning.current_version = new_version;
+            let mut new_version_delta = version.new_delta();
+            new_version_delta.with_latest_version(|version, delta| {
+                version.may_fill_backward_compatible_state_table_info_delta(delta)
+            });
+            new_version_delta.pre_apply();
+            commit_multi_var!(self.meta_store_ref(), version)?;
         }
         Ok(())
     }
@@ -360,7 +355,7 @@ pub(super) fn create_init_version(default_compaction_config: CompactionConfig) -
         safe_epoch: INVALID_EPOCH,
         table_watermarks: HashMap::new(),
         table_change_log: HashMap::new(),
-        snapshot_groups: HashMap::new(),
+        state_table_info: HashMap::new(),
     };
     for group_id in [
         StaticCompactionGroupId::StateDefault as CompactionGroupId,

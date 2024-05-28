@@ -22,50 +22,13 @@ use risingwave_pb::hummock::group_delta::DeltaType;
 use risingwave_pb::hummock::hummock_version::Levels as PbLevels;
 use risingwave_pb::hummock::hummock_version_delta::{ChangeLogDelta, GroupDeltas as PbGroupDeltas};
 use risingwave_pb::hummock::{
-    snapshot_group_delta, HummockVersion as PbHummockVersion,
-    HummockVersionDelta as PbHummockVersionDelta, SnapshotGroup as PbSnapshotGroup,
-    SnapshotGroupDelta as PbSnapshotGroupDelta, SstableInfo,
+    HummockVersion as PbHummockVersion, HummockVersionDelta as PbHummockVersionDelta, SstableInfo,
+    StateTableInfo as PbStateTableInfo, StateTableInfoDelta,
 };
 
 use crate::change_log::TableChangeLog;
 use crate::table_watermark::TableWatermarks;
 use crate::{CompactionGroupId, HummockSstableObjectId, HummockVersionId};
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct SnapshotGroup {
-    pub table_fragments_id: TableId,
-    pub committed_epoch: u64,
-    pub safe_epoch: u64,
-    pub member_table_ids: HashSet<TableId>,
-}
-
-impl SnapshotGroup {
-    pub fn to_protobuf(&self) -> PbSnapshotGroup {
-        PbSnapshotGroup {
-            table_fragments_id: self.table_fragments_id.into(),
-            committed_epoch: self.committed_epoch,
-            safe_epoch: self.safe_epoch,
-            member_table_ids: self
-                .member_table_ids
-                .iter()
-                .map(|table_id| table_id.table_id)
-                .collect(),
-        }
-    }
-
-    pub fn from_protobuf(group: &PbSnapshotGroup) -> Self {
-        SnapshotGroup {
-            table_fragments_id: TableId::new(group.table_fragments_id),
-            committed_epoch: group.committed_epoch,
-            safe_epoch: group.safe_epoch,
-            member_table_ids: group
-                .member_table_ids
-                .iter()
-                .map(|table_id| TableId::new(*table_id))
-                .collect(),
-        }
-    }
-}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct HummockVersion {
@@ -75,7 +38,7 @@ pub struct HummockVersion {
     pub safe_epoch: u64,
     pub table_watermarks: HashMap<TableId, Arc<TableWatermarks>>,
     pub table_change_log: HashMap<TableId, TableChangeLog>,
-    pub snapshot_groups: HashMap<TableId, SnapshotGroup>,
+    pub state_table_info: HashMap<TableId, PbStateTableInfo>,
 }
 
 impl Default for HummockVersion {
@@ -127,15 +90,10 @@ impl HummockVersion {
                     )
                 })
                 .collect(),
-            snapshot_groups: pb_version
-                .snapshot_groups
+            state_table_info: pb_version
+                .state_table_info
                 .iter()
-                .map(|(table_fragments_id, group)| {
-                    (
-                        TableId::new(*table_fragments_id),
-                        SnapshotGroup::from_protobuf(group),
-                    )
-                })
+                .map(|(table_id, info)| (TableId::new(*table_id), info.clone()))
                 .collect(),
         }
     }
@@ -160,10 +118,10 @@ impl HummockVersion {
                 .iter()
                 .map(|(table_id, change_log)| (table_id.table_id, change_log.to_protobuf()))
                 .collect(),
-            snapshot_groups: self
-                .snapshot_groups
+            state_table_info: self
+                .state_table_info
                 .iter()
-                .map(|(group_id, group)| ((*group_id).into(), group.to_protobuf()))
+                .map(|(table_id, info)| (table_id.table_id(), info.clone()))
                 .collect(),
         }
     }
@@ -187,107 +145,37 @@ impl HummockVersion {
         self.id + 1
     }
 
-    fn need_fill_backward_compatibility_snapshot_group(&self) -> bool {
-        let has_prev_table = self
-            .levels
-            .values()
-            .any(|group| !group.member_table_ids.is_empty());
-        has_prev_table && self.snapshot_groups.is_empty()
+    pub fn need_fill_backward_compatible_state_table_info_delta(&self) -> bool {
+        // state_table_info is not previously filled, but there previously exists some tables
+        self.state_table_info.is_empty()
+            && self
+                .levels
+                .values()
+                .any(|group| !group.member_table_ids.is_empty())
     }
 
-    pub fn gen_fill_backward_compatibility_snapshot_group_delta(
+    pub fn may_fill_backward_compatible_state_table_info_delta(
         &self,
-        existing_table_fragment_state_tables: &HashMap<u32, HashSet<u32>>,
-    ) -> Option<HummockVersionDelta> {
-        if existing_table_fragment_state_tables.is_empty()
-            || !self.need_fill_backward_compatibility_snapshot_group()
-        {
-            return None;
-        }
-        let snapshot_group_delta = existing_table_fragment_state_tables
-            .iter()
-            .map(|(table_fragments_id, state_table_ids)| {
-                (
-                    TableId::new(*table_fragments_id),
-                    SnapshotGroupDelta::NewSnapshotGroup {
-                        member_table_ids: state_table_ids
-                            .iter()
-                            .map(|table_id| TableId::new(*table_id))
-                            .collect(),
-                        committed_epoch: self.max_committed_epoch,
-                        safe_epoch: self.safe_epoch,
-                    },
-                )
-            })
-            .collect();
-        let delta = HummockVersionDelta {
-            id: self.id + 1,
-            prev_id: self.id,
-            max_committed_epoch: self.max_committed_epoch,
-            safe_epoch: self.safe_epoch,
-            snapshot_group_delta,
-            ..Default::default()
-        };
-        Some(delta)
-    }
-}
-
-#[derive(Debug, PartialEq, Clone)]
-pub enum SnapshotGroupDelta {
-    NewSnapshotGroup {
-        member_table_ids: HashSet<TableId>,
-        committed_epoch: u64,
-        safe_epoch: u64,
-    },
-    NewCommittedEpoch(u64),
-    NewSafeEpoch(u64),
-    Destroy,
-}
-
-impl SnapshotGroupDelta {
-    pub fn to_protobuf(&self) -> PbSnapshotGroupDelta {
-        let delta = match self {
-            SnapshotGroupDelta::NewSnapshotGroup {
-                member_table_ids,
-                committed_epoch,
-                safe_epoch,
-            } => snapshot_group_delta::Delta::NewSnapshotGroup(
-                snapshot_group_delta::NewSnapshotGroup {
-                    member_table_ids: member_table_ids
-                        .iter()
-                        .map(|table_id| table_id.table_id)
-                        .collect(),
-                    committed_epoch: *committed_epoch,
-                    safe_epoch: *safe_epoch,
-                },
-            ),
-            SnapshotGroupDelta::NewCommittedEpoch(epoch) => {
-                snapshot_group_delta::Delta::NewCommittedEpoch(*epoch)
+        delta: &mut HummockVersionDelta,
+    ) {
+        for (cg_id, group) in &self.levels {
+            for table_id in &group.member_table_ids {
+                assert!(
+                    delta
+                        .state_table_info_delta
+                        .insert(
+                            TableId::new(*table_id),
+                            StateTableInfoDelta {
+                                committed_epoch: self.max_committed_epoch,
+                                safe_epoch: self.safe_epoch,
+                            }
+                        )
+                        .is_none(),
+                    "duplicate table id {} in cg {}",
+                    table_id,
+                    cg_id
+                );
             }
-            SnapshotGroupDelta::NewSafeEpoch(epoch) => {
-                snapshot_group_delta::Delta::NewSafeEpoch(*epoch)
-            }
-            SnapshotGroupDelta::Destroy => {
-                snapshot_group_delta::Delta::Destroy(snapshot_group_delta::DestroySnapshotGroup {})
-            }
-        };
-        PbSnapshotGroupDelta { delta: Some(delta) }
-    }
-
-    pub fn from_protobuf(delta: &PbSnapshotGroupDelta) -> Self {
-        match delta.delta.as_ref().unwrap() {
-            snapshot_group_delta::Delta::NewSnapshotGroup(group) => Self::NewSnapshotGroup {
-                member_table_ids: HashSet::from_iter(
-                    group.member_table_ids.iter().cloned().map(TableId::new),
-                ),
-                committed_epoch: group.committed_epoch,
-                safe_epoch: group.safe_epoch,
-            },
-            snapshot_group_delta::Delta::NewCommittedEpoch(epoch) => {
-                Self::NewCommittedEpoch(*epoch)
-            }
-            snapshot_group_delta::Delta::NewSafeEpoch(epoch) => Self::NewSafeEpoch(*epoch),
-            snapshot_group_delta::Delta::Destroy(_) => Self::Destroy,
         }
     }
 }
@@ -301,9 +189,9 @@ pub struct HummockVersionDelta {
     pub safe_epoch: u64,
     pub trivial_move: bool,
     pub new_table_watermarks: HashMap<TableId, TableWatermarks>,
-    pub removed_table_ids: Vec<TableId>,
+    pub removed_table_ids: HashSet<TableId>,
     pub change_log_delta: HashMap<TableId, ChangeLogDelta>,
-    pub snapshot_group_delta: HashMap<TableId, SnapshotGroupDelta>,
+    pub state_table_info_delta: HashMap<TableId, StateTableInfoDelta>,
 }
 
 impl Default for HummockVersionDelta {
@@ -361,15 +249,10 @@ impl HummockVersionDelta {
                     )
                 })
                 .collect(),
-            snapshot_group_delta: delta
-                .snapshot_group_delta
+            state_table_info_delta: delta
+                .state_table_info_delta
                 .iter()
-                .map(|(table_fragments_id, delta)| {
-                    (
-                        TableId::new(*table_fragments_id),
-                        SnapshotGroupDelta::from_protobuf(delta),
-                    )
-                })
+                .map(|(table_id, delta)| (TableId::new(*table_id), delta.clone()))
                 .collect(),
         }
     }
@@ -397,10 +280,10 @@ impl HummockVersionDelta {
                 .iter()
                 .map(|(table_id, log_delta)| (table_id.table_id, log_delta.clone()))
                 .collect(),
-            snapshot_group_delta: self
-                .snapshot_group_delta
+            state_table_info_delta: self
+                .state_table_info_delta
                 .iter()
-                .map(|(group_id, delta)| ((*group_id).into(), delta.to_protobuf()))
+                .map(|(table_id, delta)| (table_id.table_id, delta.clone()))
                 .collect(),
         }
     }

@@ -34,7 +34,6 @@ use risingwave_hummock_sdk::key_range::KeyRangeCommon;
 use risingwave_hummock_sdk::table_watermark::{
     TableWatermarksIndex, VnodeWatermark, WatermarkDirection,
 };
-use risingwave_hummock_sdk::version::HummockVersionDelta;
 use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::{EpochNewChangeLog, LevelType, SstableInfo};
 use sync_point::sync_point;
@@ -136,7 +135,6 @@ pub enum StagingData {
 pub enum VersionUpdate {
     /// a new staging data entry will be added.
     Staging(StagingData),
-    CommittedDelta(Box<HummockVersionDelta>),
     CommittedSnapshot(CommittedVersion),
     NewTableWatermark {
         direction: WatermarkDirection,
@@ -343,10 +341,6 @@ impl HummockReadVersion {
                     self.staging.sst.push_front(staging_sst_ref);
                 }
             },
-
-            VersionUpdate::CommittedDelta(_) => {
-                unimplemented!()
-            }
 
             VersionUpdate::CommittedSnapshot(committed_version) => {
                 let max_committed_epoch = committed_version.max_committed_epoch();

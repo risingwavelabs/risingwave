@@ -16,7 +16,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use itertools::Itertools;
-use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::test_epoch;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::key_with_epoch;
@@ -236,25 +235,23 @@ pub async fn register_table_ids_to_compaction_group(
     table_ids: &[u32],
     compaction_group_id: CompactionGroupId,
 ) {
-    for table_id in table_ids {
-        hummock_manager_ref
-            .register_single_table_fragments(TableId::new(*table_id), compaction_group_id)
-            .await
-            .unwrap();
-    }
+    hummock_manager_ref
+        .register_table_ids_for_test(
+            &table_ids
+                .iter()
+                .map(|table_id| (*table_id, compaction_group_id))
+                .collect_vec(),
+        )
+        .await
+        .unwrap();
 }
 
 pub async fn unregister_table_ids_from_compaction_group(
     hummock_manager_ref: &HummockManager,
-    fragment_tables_ids: &[u32],
+    table_ids: &[u32],
 ) {
     hummock_manager_ref
-        .unregister_table_fragments_ids(
-            fragment_tables_ids
-                .iter()
-                .map(|table_id| TableId::new(*table_id))
-                .collect(),
-        )
+        .unregister_table_ids(table_ids)
         .await
         .unwrap();
 }

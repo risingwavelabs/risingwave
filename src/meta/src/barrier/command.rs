@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
-use std::iter::once;
 use std::sync::Arc;
 
 use futures::future::try_join_all;
@@ -868,15 +867,19 @@ impl CommandContext {
 
             Command::DropStreamingJobs {
                 actors,
-                unregistered_table_fragment_ids,
+                unregistered_state_table_ids,
                 ..
             } => {
                 // Tell compute nodes to drop actors.
                 self.clean_up(actors.clone()).await?;
 
+                let unregistered_state_table_ids = unregistered_state_table_ids
+                    .iter()
+                    .map(|table_id| table_id.table_id)
+                    .collect_vec();
                 self.barrier_manager_context
                     .hummock_manager
-                    .unregister_table_fragments_ids(unregistered_table_fragment_ids.clone())
+                    .unregister_table_ids(&unregistered_state_table_ids)
                     .await?;
             }
 
@@ -894,11 +897,11 @@ impl CommandContext {
                 // since the failure could be recoverable.
                 // As such it needs to be handled here.
                 let table_id = table_fragments.table_id().table_id;
+                let mut table_ids = table_fragments.internal_table_ids();
+                table_ids.push(table_id);
                 self.barrier_manager_context
                     .hummock_manager
-                    .unregister_table_fragments_ids(HashSet::from_iter(once(
-                        table_fragments.table_id(),
-                    )))
+                    .unregister_table_ids(&table_ids)
                     .await?;
 
                 match &self.barrier_manager_context.metadata_manager {

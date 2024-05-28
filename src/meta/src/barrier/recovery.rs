@@ -113,18 +113,23 @@ impl GlobalBarrierManagerContext {
     }
 
     async fn purge_state_table_from_hummock(&self) -> MetaResult<()> {
-        let existing_table_fragment_state_tables = self
-            .metadata_manager
-            .get_table_fragment_state_table_ids()
-            .await?;
-        self.hummock_manager
-            .purge(HashSet::from_iter(
-                existing_table_fragment_state_tables
-                    .keys()
-                    .cloned()
-                    .map(TableId::new),
-            ))
-            .await?;
+        let all_state_table_ids = match &self.metadata_manager {
+            MetadataManager::V1(mgr) => mgr
+                .catalog_manager
+                .list_tables()
+                .await
+                .into_iter()
+                .map(|t| t.id)
+                .collect_vec(),
+            MetadataManager::V2(mgr) => mgr
+                .catalog_controller
+                .list_all_state_table_ids()
+                .await?
+                .into_iter()
+                .map(|id| id as u32)
+                .collect_vec(),
+        };
+        self.hummock_manager.purge(&all_state_table_ids).await?;
         Ok(())
     }
 
@@ -308,23 +313,29 @@ impl GlobalBarrierManagerContext {
         let (dropped_actors, cancelled) = scheduled_barriers.pre_apply_drop_cancel_scheduled();
         let applied = !dropped_actors.is_empty() || !cancelled.is_empty();
         if !cancelled.is_empty() {
-            match &self.metadata_manager {
+            let unregister_table_ids = match &self.metadata_manager {
                 MetadataManager::V1(mgr) => {
                     mgr.fragment_manager
                         .drop_table_fragments_vec(&cancelled)
-                        .await?;
+                        .await?
                 }
                 MetadataManager::V2(mgr) => {
-                    for job_id in &cancelled {
-                        let _ = mgr
+                    let mut unregister_table_ids = Vec::new();
+                    for job_id in cancelled {
+                        let (_, table_ids_to_unregister) = mgr
                             .catalog_controller
                             .try_abort_creating_streaming_job(job_id.table_id as _, true)
                             .await?;
+                        unregister_table_ids.extend(table_ids_to_unregister);
                     }
+                    unregister_table_ids
+                        .into_iter()
+                        .map(|table_id| table_id as u32)
+                        .collect()
                 }
             };
             self.hummock_manager
-                .unregister_table_fragments_ids(HashSet::from_iter(cancelled))
+                .unregister_table_ids(&unregister_table_ids)
                 .await?;
         }
         Ok(applied)

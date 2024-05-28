@@ -30,7 +30,7 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockLevels
 use risingwave_hummock_sdk::table_stats::{
     add_prost_table_stats_map, purge_prost_table_stats, PbTableStatsMap,
 };
-use risingwave_hummock_sdk::version::{HummockVersion, SnapshotGroupDelta};
+use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{
     compact_task_to_string, statistics_compact_task, CompactionGroupId, HummockCompactionTaskId,
     HummockVersionId,
@@ -47,7 +47,7 @@ use risingwave_pb::hummock::subscribe_compaction_event_response::{
 use risingwave_pb::hummock::{
     compact_task, CompactStatus as PbCompactStatus, CompactTask, CompactTaskAssignment,
     CompactionConfig, GroupDelta, InputLevel, IntraLevelDelta, Level, SstableInfo,
-    SubscribeCompactionEventRequest, TableOption, TableSchema,
+    StateTableInfoDelta, SubscribeCompactionEventRequest, TableOption, TableSchema,
 };
 use rw_futures_util::pending_on_none;
 use thiserror_ext::AsReport;
@@ -172,14 +172,17 @@ impl<'a> HummockVersionTransaction<'a> {
             compact_task.watermark,
         );
         if version_delta.latest_version().safe_epoch < version_delta.safe_epoch {
-            version_delta.snapshot_group_delta = version_delta
+            version_delta.state_table_info_delta = version_delta
                 .latest_version()
-                .snapshot_groups
-                .keys()
-                .map(|group_id| {
+                .state_table_info
+                .iter()
+                .map(|(table_id, info)| {
                     (
-                        *group_id,
-                        SnapshotGroupDelta::NewSafeEpoch(version_delta.safe_epoch),
+                        *table_id,
+                        StateTableInfoDelta {
+                            committed_epoch: info.committed_epoch,
+                            safe_epoch: version_delta.safe_epoch,
+                        },
                     )
                 })
                 .collect();

@@ -137,32 +137,6 @@ message TableWatermarks {
   bool is_ascending = 2;
 }
 
-message SnapshotGroup {
-  uint32 table_fragments_id = 1;
-  repeated uint32 member_table_ids = 2;
-  uint64 committed_epoch = 3;
-  // Snapshots with epoch less than the safe epoch have been GCed.
-  // Reads against such an epoch will fail.
-  uint64 safe_epoch = 4;
-}
-
-message SnapshotGroupDelta {
-  message NewSnapshotGroup {
-    repeated uint32 member_table_ids = 1;
-    uint64 committed_epoch = 2;
-    uint64 safe_epoch = 3;
-  }
-
-  message DestroySnapshotGroup {}
-
-  oneof delta {
-    NewSnapshotGroup new_snapshot_group = 1;
-    uint64 new_committed_epoch = 2;
-    uint64 new_safe_epoch = 3;
-    DestroySnapshotGroup destroy = 4;
-  }
-}
-
 message EpochNewChangeLog {
   repeated SstableInfo old_value = 1;
   repeated SstableInfo new_value = 2;
@@ -173,6 +147,16 @@ message EpochNewChangeLog {
 message TableChangeLog {
   // Epochs should be sorted in ascending order, which means earlier epoch at the front.
   repeated EpochNewChangeLog change_logs = 1;
+}
+
+message StateTableInfo {
+  uint64 committed_epoch = 1;
+  uint64 safe_epoch = 2;
+}
+
+message StateTableInfoDelta {
+  uint64 committed_epoch = 1;
+  uint64 safe_epoch = 2;
 }
 
 message HummockVersion {
@@ -192,7 +176,7 @@ message HummockVersion {
   uint64 safe_epoch = 4;
   map<uint32, TableWatermarks> table_watermarks = 5;
   map<uint32, TableChangeLog> table_change_logs = 6;
-  map<uint32, SnapshotGroup> snapshot_groups = 7;
+  map<uint32, StateTableInfo> state_table_info = 7;
 }
 
 message HummockVersionDelta {
@@ -218,7 +202,7 @@ message HummockVersionDelta {
     uint64 truncate_epoch = 2;
   }
   map<uint32, ChangeLogDelta> change_log_delta = 10;
-  map<uint32, SnapshotGroupDelta> snapshot_group_delta = 11;
+  map<uint32, StateTableInfoDelta> state_table_info_delta = 11;
 }
 
 message HummockVersionDeltas {

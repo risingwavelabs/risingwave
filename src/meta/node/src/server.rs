@@ -587,13 +587,8 @@ pub async fn start_service_as_election_leader(
         .unwrap(),
     );
 
-    let existing_table_fragment_state_tables = metadata_manager
-        .get_table_fragment_state_table_ids()
-        .await
-        .unwrap();
-
     hummock_manager
-        .may_fill_backward_snapshot_group(&existing_table_fragment_state_tables)
+        .may_fill_backward_state_table_info()
         .await
         .unwrap();
 

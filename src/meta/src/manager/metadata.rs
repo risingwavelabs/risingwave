@@ -534,44 +534,6 @@ impl MetadataManager {
         }
     }
 
-    pub async fn get_table_fragment_state_table_ids(
-        &self,
-    ) -> MetaResult<HashMap<u32, HashSet<u32>>> {
-        Ok(match &self {
-            MetadataManager::V1(mgr) => mgr
-                .fragment_manager
-                .list_table_fragments()
-                .await
-                .into_iter()
-                .map(|table_fragment| {
-                    (
-                        table_fragment.table_id().table_id,
-                        table_fragment
-                            .fragments()
-                            .flat_map(|fragment| fragment.state_table_ids.iter().cloned())
-                            .collect(),
-                    )
-                })
-                .collect(),
-            MetadataManager::V2(mgr) => mgr
-                .catalog_controller
-                .table_fragments()
-                .await?
-                .into_values()
-                .map(|table_fragments| {
-                    (
-                        table_fragments.table_id,
-                        table_fragments
-                            .fragments
-                            .values()
-                            .flat_map(|fragment| fragment.state_table_ids.iter().cloned())
-                            .collect(),
-                    )
-                })
-                .collect(),
-        })
-    }
-
     pub async fn get_downstream_chain_fragments(
         &self,
         job_id: u32,

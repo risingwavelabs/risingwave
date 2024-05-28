@@ -13,17 +13,16 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::iter::once;
 use std::ops::DerefMut;
 use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
-    get_compaction_group_ids, try_get_compaction_group_id_by_table_id, TableGroupInfo,
+    get_compaction_group_ids, get_member_table_ids, try_get_compaction_group_id_by_table_id,
+    TableGroupInfo,
 };
 use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGroupId};
-use risingwave_hummock_sdk::version::{HummockVersion, SnapshotGroupDelta};
 use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_meta_model_v2::compaction_config;
 use risingwave_pb::hummock::compact_task::TaskStatus;
@@ -34,7 +33,7 @@ use risingwave_pb::hummock::subscribe_compaction_event_request::ReportTask;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
     compact_task, CompactionConfig, CompactionGroupInfo, CompatibilityVersion, GroupConstruct,
-    GroupDelta, GroupDestroy, GroupMetaChange,
+    GroupDelta, GroupDestroy, GroupMetaChange, StateTableInfoDelta,
 };
 use tokio::sync::OnceCell;
 
@@ -99,27 +98,29 @@ impl HummockManager {
     /// Registers `table_fragments` to compaction groups.
     pub async fn register_table_fragments(
         &self,
-        table_fragments: crate::model::TableFragments,
-    ) -> Result<()> {
-        let mut group_table_ids = HashMap::new();
-        if let Some(mv_table) = table_fragments.mv_table_id() {
+        mv_table: Option<u32>,
+        mut internal_tables: Vec<u32>,
+    ) -> Result<Vec<StateTableId>> {
+        let mut pairs = vec![];
+        if let Some(mv_table) = mv_table {
+            if internal_tables.extract_if(|t| *t == mv_table).count() > 0 {
+                tracing::warn!("`mv_table` {} found in `internal_tables`", mv_table);
+            }
             // materialized_view
-            group_table_ids.insert(
-                StaticCompactionGroupId::MaterializedView as u64,
-                HashSet::from_iter(once(mv_table)),
-            );
+            pairs.push((
+                mv_table,
+                CompactionGroupId::from(StaticCompactionGroupId::MaterializedView),
+            ));
         }
         // internal states
-        let internal_tables = table_fragments.internal_table_ids();
-        if !internal_tables.is_empty() {
-            group_table_ids.insert(
-                StaticCompactionGroupId::StateDefault as u64,
-                HashSet::from_iter(internal_tables),
-            );
+        for table_id in internal_tables {
+            pairs.push((
+                table_id,
+                CompactionGroupId::from(StaticCompactionGroupId::StateDefault),
+            ));
         }
-        self.register_table_fragments_tables(table_fragments.table_id(), group_table_ids)
-            .await?;
-        Ok(())
+        self.register_table_ids_for_test(&pairs).await?;
+        Ok(pairs.iter().map(|(table_id, ..)| *table_id).collect_vec())
     }
 
     #[cfg(test)]
@@ -128,9 +129,12 @@ impl HummockManager {
         &self,
         table_fragments: &[crate::model::TableFragments],
     ) {
-        self.unregister_table_fragments_ids(HashSet::from_iter(
-            table_fragments.iter().map(|tf| tf.table_id()),
-        ))
+        self.unregister_table_ids(
+            &table_fragments
+                .iter()
+                .flat_map(|t| t.all_table_ids())
+                .collect_vec(),
+        )
         .await
         .unwrap();
     }
@@ -138,114 +142,59 @@ impl HummockManager {
     /// Unregisters stale members and groups
     /// The caller should ensure `table_fragments_list` remain unchanged during `purge`.
     /// Currently `purge` is only called during meta service start ups.
-    pub async fn purge(&self, existing_table_fragment_ids: HashSet<TableId>) -> Result<()> {
-        let registered_table_fragments_ids: HashSet<TableId> = self
-            .versioning
-            .read()
-            .await
-            .current_version
-            .snapshot_groups
-            .keys()
-            .cloned()
-            .collect();
-        let to_unregister: HashSet<TableId> =
-            &registered_table_fragments_ids - &existing_table_fragment_ids;
+    pub async fn purge(&self, valid_ids: &[u32]) -> Result<()> {
+        let registered_members =
+            get_member_table_ids(&self.versioning.read().await.current_version);
+        let to_unregister = registered_members
+            .into_iter()
+            .filter(|table_id| !valid_ids.contains(table_id))
+            .collect_vec();
         // As we have released versioning lock, the version that `to_unregister` is calculated from
         // may not be the same as the one used in unregister_table_ids. It is OK.
-        self.unregister_table_fragments_ids(to_unregister).await
+        self.unregister_table_ids(&to_unregister).await
     }
 
-    pub async fn register_single_table_fragments(
+    /// The implementation acquires `versioning` lock.
+    ///
+    /// The method name is temporarily added with a `_for_test` prefix to mark
+    /// that it's currently only used in test.
+    pub async fn register_table_ids_for_test(
         &self,
-        table_id: TableId,
-        compaction_group_id: CompactionGroupId,
+        pairs: &[(StateTableId, CompactionGroupId)],
     ) -> Result<()> {
-        self.register_table_fragments_tables(
-            table_id,
-            HashMap::from_iter(once((
-                compaction_group_id,
-                HashSet::from_iter(once(table_id.table_id)),
-            ))),
-        )
-        .await
-    }
-
-    pub async fn register_table_fragments_tables(
-        &self,
-        table_fragments_id: TableId,
-        group_table_ids: HashMap<CompactionGroupId, HashSet<StateTableId>>,
-    ) -> Result<()> {
+        if pairs.is_empty() {
+            return Ok(());
+        }
         let mut versioning_guard = self.versioning.write().await;
-        let versioning: &mut Versioning = &mut versioning_guard;
+        let versioning = versioning_guard.deref_mut();
+        let current_version = &versioning.current_version;
 
-        let (snapshot_group_delta, compaction_group_deltas) = self
-            .gen_register_table_fragments_delta(
-                table_fragments_id,
-                group_table_ids,
-                &versioning.current_version,
-            )
-            .await?;
-
+        for (table_id, _) in pairs {
+            if let Some(old_group) =
+                try_get_compaction_group_id_by_table_id(current_version, *table_id)
+            {
+                return Err(Error::CompactionGroup(format!(
+                    "table {} already in group {}",
+                    *table_id, old_group
+                )));
+            }
+        }
+        // All NewCompactionGroup pairs are mapped to one new compaction group.
+        let new_compaction_group_id: OnceCell<CompactionGroupId> = OnceCell::new();
         let mut version = HummockVersionTransaction::new(
             &mut versioning.current_version,
             &mut versioning.hummock_version_deltas,
             self.env.notification_manager(),
             &self.metrics,
         );
-
         let mut new_version_delta = version.new_delta();
-
-        new_version_delta
-            .snapshot_group_delta
-            .insert(table_fragments_id, snapshot_group_delta);
-        new_version_delta.group_deltas = compaction_group_deltas;
-        new_version_delta.pre_apply();
-
-        commit_multi_var!(self.meta_store_ref(), version)?;
-
-        Ok(())
-    }
-
-    pub(super) async fn gen_register_table_fragments_delta(
-        &self,
-        table_fragments_id: TableId,
-        group_table_ids: HashMap<CompactionGroupId, HashSet<StateTableId>>,
-        current_version: &HummockVersion,
-    ) -> Result<(SnapshotGroupDelta, HashMap<CompactionGroupId, GroupDeltas>)> {
-        if let Some(group) = &current_version.snapshot_groups.get(&table_fragments_id) {
-            return Err(Error::SnapshotGroup(format!(
-                "table fragments {} already exists. {:?}",
-                table_fragments_id.table_id, group
-            )));
-        }
-        for (cg_id, table_ids) in &group_table_ids {
-            if let Some(group) = current_version.levels.get(cg_id) {
-                for table_id in table_ids {
-                    if group.member_table_ids.contains(table_id) {
-                        return Err(Error::CompactionGroup(format!(
-                            "table {} already in group {}",
-                            *table_id, cg_id,
-                        )));
-                    }
-                }
-            }
-        }
-
-        let snapshot_group_delta = SnapshotGroupDelta::NewSnapshotGroup {
-            member_table_ids: group_table_ids
-                .values()
-                .flat_map(|table_ids| table_ids.iter().map(|table_id| TableId::new(*table_id)))
-                .collect(),
-            committed_epoch: current_version.max_committed_epoch,
-            safe_epoch: current_version.safe_epoch,
+        let (committed_epoch, safe_epoch) = {
+            let version = new_version_delta.latest_version();
+            (version.max_committed_epoch, version.safe_epoch)
         };
-        let mut compaction_group_deltas: HashMap<CompactionGroupId, GroupDeltas> = HashMap::new();
 
-        // All NewCompactionGroup pairs are mapped to one new compaction group.
-        let new_compaction_group_id: OnceCell<CompactionGroupId> = OnceCell::new();
-
-        for (raw_group_id, table_ids) in group_table_ids {
-            let mut group_id = raw_group_id;
+        for (table_id, raw_group_id) in pairs {
+            let mut group_id = *raw_group_id;
             if group_id == StaticCompactionGroupId::NewCompactionGroup as u64 {
                 let mut is_group_init = false;
                 group_id = *new_compaction_group_id
@@ -259,8 +208,11 @@ impl HummockManager {
                     })
                     .await?;
                 if is_group_init {
-                    let group_deltas =
-                        &mut (compaction_group_deltas.entry(group_id).or_default()).group_deltas;
+                    let group_deltas = &mut new_version_delta
+                        .group_deltas
+                        .entry(group_id)
+                        .or_default()
+                        .group_deltas;
                     let config = self
                         .compaction_group_manager
                         .write()
@@ -279,26 +231,36 @@ impl HummockManager {
                     });
                 }
             }
-            let group_deltas = &mut compaction_group_deltas
+            let group_deltas = &mut new_version_delta
+                .group_deltas
                 .entry(group_id)
                 .or_default()
                 .group_deltas;
             group_deltas.push(GroupDelta {
                 delta_type: Some(DeltaType::GroupMetaChange(GroupMetaChange {
-                    table_ids_add: table_ids.iter().cloned().collect(),
+                    table_ids_add: vec![*table_id],
                     ..Default::default()
                 })),
             });
+            assert!(new_version_delta
+                .state_table_info_delta
+                .insert(
+                    TableId::new(*table_id),
+                    StateTableInfoDelta {
+                        committed_epoch,
+                        safe_epoch,
+                    }
+                )
+                .is_none());
         }
+        new_version_delta.pre_apply();
+        commit_multi_var!(self.meta_store_ref(), version)?;
 
-        Ok((snapshot_group_delta, compaction_group_deltas))
+        Ok(())
     }
 
-    pub async fn unregister_table_fragments_ids(
-        &self,
-        table_fragments_ids: HashSet<TableId>,
-    ) -> Result<()> {
-        if table_fragments_ids.is_empty() {
+    pub async fn unregister_table_ids(&self, table_ids: &[StateTableId]) -> Result<()> {
+        if table_ids.is_empty() {
             return Ok(());
         }
         let mut versioning_guard = self.versioning.write().await;
@@ -310,24 +272,6 @@ impl HummockManager {
             &self.metrics,
         );
         let mut new_version_delta = version.new_delta();
-        let mut table_ids = HashSet::new();
-        for table_fragments_id in &table_fragments_ids {
-            if let Some(group) = new_version_delta
-                .latest_version()
-                .snapshot_groups
-                .get(table_fragments_id)
-            {
-                table_ids.extend(
-                    group
-                        .member_table_ids
-                        .iter()
-                        .map(|table_id| table_id.table_id),
-                );
-                new_version_delta
-                    .snapshot_group_delta
-                    .insert(*table_fragments_id, SnapshotGroupDelta::Destroy);
-            }
-        }
         let mut modified_groups: HashMap<CompactionGroupId, /* #member table */ u64> =
             HashMap::new();
         // Remove member tables
@@ -363,7 +307,7 @@ impl HummockManager {
                 );
             new_version_delta
                 .removed_table_ids
-                .push(TableId::new(*table_id));
+                .insert(TableId::new(*table_id));
         }
 
         let groups_to_remove = modified_groups
@@ -959,28 +903,16 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{BTreeMap, HashSet};
-    use std::iter::once;
+    use std::collections::BTreeMap;
 
+    use itertools::Itertools;
     use risingwave_common::catalog::TableId;
-    use risingwave_hummock_sdk::CompactionGroupId;
     use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
     use risingwave_pb::meta::table_fragments::Fragment;
 
     use crate::hummock::manager::compaction_group_manager::CompactionGroupManager;
     use crate::hummock::test_utils::setup_compute_env;
-    use crate::hummock::HummockManager;
     use crate::model::TableFragments;
-
-    impl HummockManager {
-        pub(crate) async fn register_table_ids(
-            &self,
-            [(table_id, compaction_group_id)]: &[(u32, CompactionGroupId); 1],
-        ) -> super::Result<()> {
-            self.register_single_table_fragments(TableId::new(*table_id), *compaction_group_id)
-                .await
-        }
-    }
 
     #[tokio::test]
     async fn test_inner() {
@@ -1061,12 +993,18 @@ mod tests {
         assert_eq!(registered_number().await, 0);
 
         compaction_group_manager
-            .register_table_fragments(table_fragment_1.clone())
+            .register_table_fragments(
+                Some(table_fragment_1.table_id().table_id),
+                table_fragment_1.internal_table_ids(),
+            )
             .await
             .unwrap();
         assert_eq!(registered_number().await, 4);
         compaction_group_manager
-            .register_table_fragments(table_fragment_2.clone())
+            .register_table_fragments(
+                Some(table_fragment_2.table_id().table_id),
+                table_fragment_2.internal_table_ids(),
+            )
             .await
             .unwrap();
         assert_eq!(registered_number().await, 8);
@@ -1079,20 +1017,20 @@ mod tests {
 
         // Test purge_stale_members: table fragments
         compaction_group_manager
-            .purge(once(table_fragment_2.table_id()).collect())
+            .purge(&table_fragment_2.all_table_ids().collect_vec())
             .await
             .unwrap();
         assert_eq!(registered_number().await, 4);
-        compaction_group_manager
-            .purge(HashSet::new())
-            .await
-            .unwrap();
+        compaction_group_manager.purge(&[]).await.unwrap();
         assert_eq!(registered_number().await, 0);
 
         assert_eq!(group_number().await, 2);
 
         compaction_group_manager
-            .register_table_fragments(table_fragment_1.clone())
+            .register_table_fragments(
+                Some(table_fragment_1.table_id().table_id),
+                table_fragment_1.internal_table_ids(),
+            )
             .await
             .unwrap();
         assert_eq!(registered_number().await, 4);

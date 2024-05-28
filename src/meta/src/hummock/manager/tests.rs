@@ -512,6 +512,8 @@ async fn test_hummock_manager_basic() {
     );
 
     let mut epoch = test_epoch(1);
+    let mut register_log_count = 0;
+    let mut commit_log_count = 0;
     let commit_one = |epoch: HummockEpoch, hummock_manager: HummockManagerRef| async move {
         let original_tables =
             generate_test_tables(test_epoch(epoch), get_sst_ids(&hummock_manager, 2).await);
@@ -531,13 +533,17 @@ async fn test_hummock_manager_basic() {
     };
 
     commit_one(epoch, hummock_manager.clone()).await;
+    register_log_count += 1;
+    commit_log_count += 1;
     epoch.inc_epoch();
 
     let init_version_id = FIRST_VERSION_ID;
 
-    let version_id1 = hummock_manager.get_current_version().await.id;
     // increased version id
-    assert!(version_id1 > init_version_id);
+    assert_eq!(
+        hummock_manager.get_current_version().await.id,
+        init_version_id + commit_log_count + register_log_count
+    );
 
     // min pinned version id if no clients
     assert_eq!(
@@ -556,25 +562,31 @@ async fn test_hummock_manager_basic() {
 
         // should pin latest because u64::MAX
         let version = hummock_manager.pin_version(context_id_1).await.unwrap();
-        assert_eq!(version.id, version_id1);
+        assert_eq!(
+            version.id,
+            init_version_id + commit_log_count + register_log_count
+        );
         assert_eq!(
             hummock_manager.get_min_pinned_version_id().await,
-            version_id1
+            init_version_id + commit_log_count + register_log_count
         );
     }
 
     commit_one(epoch, hummock_manager.clone()).await;
-
-    let version_id2 = hummock_manager.get_current_version().await.id;
+    commit_log_count += 1;
+    register_log_count += 1;
 
     for _ in 0..2 {
         // should pin latest because deltas cannot contain INVALID_EPOCH
         let version = hummock_manager.pin_version(context_id_2).await.unwrap();
-        assert_eq!(version.id, version_id2);
+        assert_eq!(
+            version.id,
+            init_version_id + commit_log_count + register_log_count
+        );
         // pinned by context_id_1
         assert_eq!(
             hummock_manager.get_min_pinned_version_id().await,
-            version_id1,
+            init_version_id + commit_log_count + register_log_count - 2,
         );
     }
     // objects_to_delete is always empty because no compaction is ever invoked.
@@ -588,7 +600,7 @@ async fn test_hummock_manager_basic() {
     );
     assert_eq!(
         hummock_manager.create_version_checkpoint(1).await.unwrap(),
-        version_id2 - init_version_id
+        commit_log_count + register_log_count
     );
     assert!(hummock_manager.get_objects_to_delete().is_empty());
     assert_eq!(
@@ -596,7 +608,7 @@ async fn test_hummock_manager_basic() {
             .delete_version_deltas(usize::MAX)
             .await
             .unwrap(),
-        ((version_id2 - init_version_id) as usize, 0)
+        ((commit_log_count + register_log_count) as usize, 0)
     );
     hummock_manager
         .unpin_version_before(context_id_1, u64::MAX)
@@ -604,7 +616,7 @@ async fn test_hummock_manager_basic() {
         .unwrap();
     assert_eq!(
         hummock_manager.get_min_pinned_version_id().await,
-        version_id2
+        init_version_id + commit_log_count + register_log_count
     );
     hummock_manager
         .unpin_version_before(context_id_2, u64::MAX)
@@ -1130,7 +1142,7 @@ async fn test_extend_objects_to_delete() {
     // Checkpoint
     assert_eq!(
         hummock_manager.create_version_checkpoint(1).await.unwrap(),
-        8
+        6
     );
     assert_eq!(
         hummock_manager.get_objects_to_delete().len(),
@@ -1327,11 +1339,11 @@ async fn test_split_compaction_group_on_commit() {
     let (_env, hummock_manager, _, worker_node) = setup_compute_env(80).await;
     let context_id = worker_node.id;
     hummock_manager
-        .register_table_ids(&[(100, 2)])
+        .register_table_ids_for_test(&[(100, 2)])
         .await
         .unwrap();
     hummock_manager
-        .register_table_ids(&[(101, 3)])
+        .register_table_ids_for_test(&[(101, 3)])
         .await
         .unwrap();
     let sst_1 = ExtendedSstableInfo {
@@ -1413,11 +1425,11 @@ async fn test_split_compaction_group_on_demand_basic() {
     );
 
     hummock_manager
-        .register_table_ids(&[(100, 2)])
+        .register_table_ids_for_test(&[(100, 2)])
         .await
         .unwrap();
     hummock_manager
-        .register_table_ids(&[(101, 2)])
+        .register_table_ids_for_test(&[(101, 2)])
         .await
         .unwrap();
     let sst_1 = ExtendedSstableInfo {
@@ -1477,7 +1489,7 @@ async fn test_split_compaction_group_on_demand_basic() {
     // Now group 2 has member tables [100,101,102], so split [100, 101] can succeed even though
     // there is no data of 102.
     hummock_manager
-        .register_table_ids(&[(102, 2)])
+        .register_table_ids_for_test(&[(102, 2)])
         .await
         .unwrap();
 
@@ -1529,11 +1541,11 @@ async fn test_split_compaction_group_on_demand_non_trivial() {
         table_stats: Default::default(),
     };
     hummock_manager
-        .register_table_ids(&[(100, 2)])
+        .register_table_ids_for_test(&[(100, 2)])
         .await
         .unwrap();
     hummock_manager
-        .register_table_ids(&[(101, 2)])
+        .register_table_ids_for_test(&[(101, 2)])
         .await
         .unwrap();
     hummock_manager
@@ -1591,11 +1603,11 @@ async fn test_split_compaction_group_trivial_expired() {
     hummock_manager.compactor_manager.add_compactor(context_id);
 
     hummock_manager
-        .register_table_ids(&[(100, 2)])
+        .register_table_ids_for_test(&[(100, 2)])
         .await
         .unwrap();
     hummock_manager
-        .register_table_ids(&[(101, 2)])
+        .register_table_ids_for_test(&[(101, 2)])
         .await
         .unwrap();
     let sst_1 = ExtendedSstableInfo {
@@ -1657,7 +1669,7 @@ async fn test_split_compaction_group_trivial_expired() {
     // Now group 2 has member tables [100,101,102], so split [100, 101] can succeed even though
     // there is no data of 102.
     hummock_manager
-        .register_table_ids(&[(102, 2)])
+        .register_table_ids_for_test(&[(102, 2)])
         .await
         .unwrap();
     let task = hummock_manager
@@ -1753,11 +1765,11 @@ async fn test_split_compaction_group_on_demand_bottom_levels() {
     let context_id = worker_node.id;
 
     hummock_manager
-        .register_table_ids(&[(100, 2)])
+        .register_table_ids_for_test(&[(100, 2)])
         .await
         .unwrap();
     hummock_manager
-        .register_table_ids(&[(101, 2)])
+        .register_table_ids_for_test(&[(101, 2)])
         .await
         .unwrap();
 
@@ -1893,11 +1905,11 @@ async fn test_compaction_task_expiration_due_to_split_group() {
     let context_id = worker_node.id;
 
     hummock_manager
-        .register_table_ids(&[(100, 2)])
+        .register_table_ids_for_test(&[(100, 2)])
         .await
         .unwrap();
     hummock_manager
-        .register_table_ids(&[(101, 2)])
+        .register_table_ids_for_test(&[(101, 2)])
         .await
         .unwrap();
     let sst_1 = ExtendedSstableInfo {
@@ -1984,15 +1996,15 @@ async fn test_move_tables_between_compaction_group() {
     let context_id = worker_node.id;
 
     hummock_manager
-        .register_table_ids(&[(100, 2)])
+        .register_table_ids_for_test(&[(100, 2)])
         .await
         .unwrap();
     hummock_manager
-        .register_table_ids(&[(101, 2)])
+        .register_table_ids_for_test(&[(101, 2)])
         .await
         .unwrap();
     hummock_manager
-        .register_table_ids(&[(102, 2)])
+        .register_table_ids_for_test(&[(102, 2)])
         .await
         .unwrap();
     let sst_1 = gen_extend_sstable_info(10, 2, 1, vec![100, 101, 102]);
@@ -2166,11 +2178,11 @@ async fn test_partition_level() {
     let context_id = worker_node.id;
 
     hummock_manager
-        .register_table_ids(&[(100, 2)])
+        .register_table_ids_for_test(&[(100, 2)])
         .await
         .unwrap();
     hummock_manager
-        .register_table_ids(&[(101, 2)])
+        .register_table_ids_for_test(&[(101, 2)])
         .await
         .unwrap();
     let sst_1 = gen_extend_sstable_info(10, 2, 1, vec![100, 101]);
