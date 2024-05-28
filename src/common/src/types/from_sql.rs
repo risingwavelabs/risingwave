@@ -61,9 +61,6 @@ impl<'a> FromSql<'a> for ScalarImpl {
                 | Type::BYTEA
                 | Type::VARCHAR
                 | Type::TEXT
-                | Type::BPCHAR
-                | Type::NAME
-                | Type::UNKNOWN
         )
     }
 }
