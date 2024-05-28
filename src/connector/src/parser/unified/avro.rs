@@ -267,9 +267,6 @@ impl<'a> AvroParseOptions<'a> {
                 value.clone().into_boxed_slice().into()
             }
             // ---- Jsonb -----
-            (Some(DataType::Jsonb), Value::String(s)) => {
-                JsonbVal::from_str(s).map_err(|_| create_error())?.into()
-            }
             (Some(DataType::Jsonb), v @ Value::Map(_)) => {
                 let mut builder = jsonbb::Builder::default();
                 avro_to_jsonb(v, &mut builder)?;
