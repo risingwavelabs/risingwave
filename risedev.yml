@@ -964,6 +964,20 @@ profile:
       - use: kafka
         persist-data: true
 
+  ci-1cn-1fe-user-kafka-with-recovery:
+    config-path: src/config/ci-recovery.toml
+    steps:
+      - use: minio
+      - use: etcd
+      - use: meta-node
+        meta-backend: etcd
+      - use: compute-node
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+      - use: kafka
+        user-managed: true
+
   ci-meta-backup-test-etcd:
     config-path: src/config/ci-meta-backup-test.toml
     steps:
