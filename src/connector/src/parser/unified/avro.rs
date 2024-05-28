@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::str::FromStr;
 use std::sync::LazyLock;
 
 use apache_avro::schema::{DecimalSchema, RecordSchema};
@@ -313,12 +312,6 @@ where
                     options.schema = options.extract_inner_schema(None);
                     continue;
                 }
-                Value::Map(fields) if fields.contains_key(key) => {
-                    value = fields.get(key).unwrap();
-                    options.schema = options.extract_inner_schema(None);
-                    i += 1;
-                    continue;
-                }
                 Value::Record(fields) => {
                     if let Some((_, v)) = fields.iter().find(|(k, _)| k == key) {
                         value = v;
@@ -436,6 +429,8 @@ pub(crate) fn unix_epoch_days() -> i32 {
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
+
     use apache_avro::Decimal as AvroDecimal;
     use risingwave_common::types::Decimal;
 
