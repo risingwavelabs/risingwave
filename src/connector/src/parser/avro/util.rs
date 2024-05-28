@@ -193,7 +193,7 @@ fn avro_type_mapping(
 /// Check for [`avro_to_jsonb`]
 fn supported_avro_to_json_type(schema: &Schema) -> bool {
     match schema {
-        Schema::Null | Schema::Boolean | Schema::Int | Schema::Long | Schema::String => true,
+        Schema::Null | Schema::Boolean | Schema::Int | Schema::String => true,
 
         Schema::Map(value_schema) | Schema::Array(value_schema) => {
             supported_avro_to_json_type(value_schema)
@@ -205,7 +205,8 @@ fn supported_avro_to_json_type(schema: &Schema) -> bool {
         Schema::Record(RecordSchema { fields, .. }) => fields
             .iter()
             .all(|f| supported_avro_to_json_type(&f.schema)),
-        Schema::Float
+        Schema::Long
+        | Schema::Float
         | Schema::Double
         | Schema::Bytes
         | Schema::Enum(_)
@@ -232,7 +233,6 @@ pub(crate) fn avro_to_jsonb(
         Value::Null => builder.add_null(),
         Value::Boolean(b) => builder.add_bool(*b),
         Value::Int(i) => builder.add_i64(*i as i64),
-        Value::Long(l) => builder.add_i64(*l),
         Value::String(s) => builder.add_string(s),
         Value::Map(m) => {
             builder.begin_object();
@@ -261,6 +261,9 @@ pub(crate) fn avro_to_jsonb(
         Value::Union(_, v) => avro_to_jsonb(v, builder)?,
 
         // TODO: figure out where the following encoding is reasonable before enabling them.
+        // jsonbb supports int64, but JSON spec does not allow it. How should we handle it?
+        // BTW, protobuf canonical JSON converts int64 to string.
+        // Value::Long(l) => builder.add_i64(*l),
         // Value::Float(f) => {
         //     if f.is_nan() || f.is_infinite() {
         //         // XXX: pad null or return err here?
@@ -286,7 +289,8 @@ pub(crate) fn avro_to_jsonb(
         // Value::Uuid(id) => builder.add_string(&id.as_hyphenated().to_string()),
 
         // XXX: pad null or return err here?
-        v @ (Value::Float(_)
+        v @ (Value::Long(_)
+        | Value::Float(_)
         | Value::Double(_)
         | Value::Bytes(_)
         | Value::Enum(_, _)

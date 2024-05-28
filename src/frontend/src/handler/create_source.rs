@@ -32,8 +32,8 @@ use risingwave_connector::parser::additional_columns::{
     build_additional_column_catalog, get_supported_additional_columns,
 };
 use risingwave_connector::parser::{
-    schema_to_columns, AvroParserConfig, DebeziumAvroParserConfig, MapHandling,
-    ProtobufParserConfig, SpecificParserConfig, TimestamptzHandling, DEBEZIUM_IGNORE_KEY,
+    schema_to_columns, AvroParserConfig, DebeziumAvroParserConfig, ProtobufParserConfig,
+    SpecificParserConfig, TimestamptzHandling, DEBEZIUM_IGNORE_KEY,
 };
 use risingwave_connector::schema::schema_registry::{
     name_strategy_from_str, SchemaRegistryAuth, SCHEMA_REGISTRY_PASSWORD, SCHEMA_REGISTRY_USERNAME,
