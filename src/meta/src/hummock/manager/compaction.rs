@@ -830,8 +830,6 @@ impl HummockManager {
                         .latest_version()
                         .safe_epoch_table_watermarks(&compact_task.existing_table_ids);
 
-
-
                     if self.env.opts.enable_dropped_column_reclaim {
                         // TODO: get all table schemas for all tables in once call to avoid acquiring lock and await.
                         compact_task.table_schemas = match self.metadata_manager() {
@@ -1449,10 +1447,10 @@ impl HummockManager {
         compact_task: &mut CompactTask,
         compaction_config: &CompactionConfig,
     ) {
-        // do not split sst by vnode partition when target_level > base_level
+        // do not split sst by vnode partition when target_level > base_level + 1
         // The purpose of data alignment is mainly to improve the parallelism of base level compaction and reduce write amplification.
         // However, at high level, the size of the sst file is often larger and only contains the data of a single table_id, so there is no need to cut it.
-        if compact_task.target_level > compact_task.base_level {
+        if compact_task.target_level > compact_task.base_level + 1 {
             return;
         }
         if compaction_config.split_weight_by_vnode > 0 {
@@ -1510,14 +1508,18 @@ impl HummockManager {
                         .table_vnode_partition
                         .insert(table_id, default_partition_count);
                 } else if compact_table_size > compaction_config.target_file_size_base {
-                    if write_throughput > self.env.opts.table_write_throughput_threshold && compact_table_size > compact_task_table_size_partition_threshold_low
-                        && compact_task.base_level == compact_task.target_level {
+                    if write_throughput > self.env.opts.table_write_throughput_threshold
+                        && compact_table_size > compact_task_table_size_partition_threshold_low
+                        && compact_task.base_level == compact_task.target_level
+                        && default_partition_count > 0
+                    {
                         // Because the task to base level may be small, we shall partition it if the write throughput is high.
                         compact_task
                             .table_vnode_partition
                             .insert(table_id, default_partition_count);
-                    }
-                    else if write_throughput > self.env.opts.table_write_throughput_threshold || compact_table_size > compact_task_table_size_partition_threshold_low {
+                    } else if write_throughput > self.env.opts.table_write_throughput_threshold
+                        || compact_table_size > compact_task_table_size_partition_threshold_low
+                    {
                         // partition for large write throughput table. But we also need to make sure that it can not be too small.
                         compact_task
                             .table_vnode_partition

@@ -45,7 +45,6 @@ pub enum TableAlignRule {
     SplitToDedicatedCg(u32),
 }
 
-
 impl HummockManager {
     pub fn hummock_timer_task(hummock_manager: Arc<Self>) -> (JoinHandle<()>, Sender<()>) {
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
@@ -452,7 +451,7 @@ impl HummockManager {
         let mut group_infos = self.calculate_compaction_group_statistic().await;
         group_infos.sort_by_key(|group| group.group_size);
         group_infos.reverse();
-      
+
         for group in &mut group_infos {
             if group.table_statistic.len() == 1 {
                 // no need to handle the separate compaciton group
@@ -573,7 +572,7 @@ impl HummockManager {
         checkpoint_secs: u64,
         parent_group_id: u64,
         group_size: u64,
-    ) {
+    ) -> TableAlignRule {
         let default_group_id: CompactionGroupId = StaticCompactionGroupId::StateDefault.into();
         let mv_group_id: CompactionGroupId = StaticCompactionGroupId::MaterializedView.into();
         let partition_vnode_count = self.env.opts.partition_vnode_count;
