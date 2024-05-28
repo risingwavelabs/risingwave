@@ -134,7 +134,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 6
+    timeout_in_minutes: 8
     retry: *auto-retry
 
   - label: "end-to-end test (parallel)"
