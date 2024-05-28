@@ -1507,27 +1507,18 @@ impl HummockManager {
                     compact_task
                         .table_vnode_partition
                         .insert(table_id, default_partition_count);
+                } else if (compact_table_size > compact_task_table_size_partition_threshold_low
+                    || (write_throughput > self.env.opts.table_write_throughput_threshold
+                        && compact_table_size > compaction_config.target_file_size_base))
+                    && hybrid_vnode_count > 0
+                {
+                    // partition for large write throughput table. But we also need to make sure that it can not be too small.
+                    compact_task
+                        .table_vnode_partition
+                        .insert(table_id, hybrid_vnode_count);
                 } else if compact_table_size > compaction_config.target_file_size_base {
-                    if write_throughput > self.env.opts.table_write_throughput_threshold
-                        && compact_table_size > compact_task_table_size_partition_threshold_low
-                        && compact_task.base_level == compact_task.target_level
-                        && default_partition_count > 0
-                    {
-                        // Because the task to base level may be small, we shall partition it if the write throughput is high.
-                        compact_task
-                            .table_vnode_partition
-                            .insert(table_id, default_partition_count);
-                    } else if write_throughput > self.env.opts.table_write_throughput_threshold
-                        || compact_table_size > compact_task_table_size_partition_threshold_low
-                    {
-                        // partition for large write throughput table. But we also need to make sure that it can not be too small.
-                        compact_task
-                            .table_vnode_partition
-                            .insert(table_id, hybrid_vnode_count);
-                    } else {
-                        // partition for small table
-                        compact_task.table_vnode_partition.insert(table_id, 1);
-                    }
+                    // partition for small table
+                    compact_task.table_vnode_partition.insert(table_id, 1);
                 }
             }
             compact_task

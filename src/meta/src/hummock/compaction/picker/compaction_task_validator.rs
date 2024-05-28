@@ -162,7 +162,7 @@ impl CompactionTaskValidationRule for IntraCompactionTaskValidationRule {
             max_level_size * self.config.level0_sub_level_compact_level_count as u64 / 2
                 >= input.select_input_size;
 
-        if is_write_amp_large {
+        if is_write_amp_large || max_level_size > self.config.sub_level_max_compaction_bytes {
             stats.skip_by_write_amp_limit += 1;
             return false;
         }
@@ -184,7 +184,7 @@ impl CompactionTaskValidationRule for BaseCompactionTaskValidationRule {
             return true;
         }
 
-        if input.select_input_size < 2 * input.target_input_size {
+        if input.select_input_size < input.target_input_size {
             stats.skip_by_write_amp_limit += 1;
             return false;
         }
