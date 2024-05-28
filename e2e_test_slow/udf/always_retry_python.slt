@@ -35,7 +35,7 @@ CREATE MATERIALIZED VIEW mv_always_retry AS SELECT sleep_always_retry(v1) as s1 
 
 # Immediately kill the server, sleep
 system ok
-pkill -9 -i python && sleep 50
+pkill -9 -i python && sleep 60
 
 # Restart the server
 system ok
