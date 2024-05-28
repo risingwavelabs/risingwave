@@ -53,3 +53,9 @@
 - input: SHOW INDEXES FROM t
   formatted_sql: SHOW INDEXES FROM t
   formatted_ast: 'ShowObjects { object: Indexes { table: ObjectName([Ident { value: "t", quote_style: None }]) }, filter: None }'
+- input: SHOW SECRETS
+  formatted_sql: SHOW SECRETS
+  formatted_ast: 'ShowObjects { object: Secret { schema: None }, filter: None }'
+- input: SHOW SECRETS FROM t
+  formatted_sql: SHOW SECRETS FROM t
+  formatted_ast: 'ShowObjects { object: Secret { schema: Some(Ident { value: "t", quote_style: None }) }, filter: None }'

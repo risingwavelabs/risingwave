@@ -807,6 +807,26 @@ impl SessionImpl {
         }
     }
 
+    pub fn check_secret_name_duplicated(&self, name: ObjectName) -> Result<()> {
+        let db_name = self.database();
+        let catalog_reader = self.env().catalog_reader().read_guard();
+        let (schema_name, secret_name) = {
+            let (schema_name, secret_name) = Binder::resolve_schema_qualified_name(db_name, name)?;
+            let search_path = self.config().search_path();
+            let user_name = &self.auth_context().user_name;
+            let schema_name = match schema_name {
+                Some(schema_name) => schema_name,
+                None => catalog_reader
+                    .first_valid_schema(db_name, &search_path, user_name)?
+                    .name(),
+            };
+            (schema_name, secret_name)
+        };
+        catalog_reader
+            .check_secret_name_duplicated(db_name, &schema_name, &secret_name)
+            .map_err(RwError::from)
+    }
+
     pub fn check_connection_name_duplicated(&self, name: ObjectName) -> Result<()> {
         let db_name = self.database();
         let catalog_reader = self.env().catalog_reader().read_guard();
