@@ -2589,7 +2589,6 @@ impl ParseTo for ObjectType {
         } else {
             return parser.expected(
                 "TABLE, VIEW, INDEX, MATERIALIZED VIEW, SOURCE, SINK, SUBSCRIPTION, SCHEMA, DATABASE, USER, SECRET or CONNECTION after DROP",
-                parser.peek_token(),
             );
         };
         Ok(object_type)

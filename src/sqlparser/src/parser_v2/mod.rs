@@ -61,7 +61,7 @@ where
 /// Consume a keyword.
 ///
 /// If you need to consume a specific keyword, use [`Keyword::?`][Keyword] directly, which already implements [`Parser`].
-fn keyword<S>(input: &mut S) -> PResult<Keyword>
+pub fn keyword<S>(input: &mut S) -> PResult<Keyword>
 where
     S: TokenStream,
 {

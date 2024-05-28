@@ -541,7 +541,7 @@ impl ParseTo for CreateSinkStatement {
             let query = Box::new(p.parse_query()?);
             CreateSink::AsQuery(query)
         } else {
-            p.expected("FROM or AS after CREATE SINK sink_name", p.peek_token())?
+            p.expected("FROM or AS after CREATE SINK sink_name")?
         };
 
         let emit_mode: Option<EmitMode> = p.parse_emit_mode()?;
@@ -549,7 +549,7 @@ impl ParseTo for CreateSinkStatement {
         // This check cannot be put into the `WithProperties::parse_to`, since other
         // statements may not need the with properties.
         if !p.peek_nth_any_of_keywords(0, &[Keyword::WITH]) && into_table_name.is_none() {
-            p.expected("WITH", p.peek_token())?
+            p.expected("WITH")?
         }
         impl_parse_to!(with_properties: WithProperties, p);
 
@@ -619,10 +619,7 @@ impl ParseTo for CreateSubscriptionStatement {
             impl_parse_to!(from_name: ObjectName, p);
             from_name
         } else {
-            p.expected(
-                "FROM after CREATE SUBSCRIPTION subscription_name",
-                p.peek_token(),
-            )?
+            p.expected("FROM after CREATE SUBSCRIPTION subscription_name")?
         };
 
         // let emit_mode = p.parse_emit_mode()?;
@@ -630,7 +627,7 @@ impl ParseTo for CreateSubscriptionStatement {
         // This check cannot be put into the `WithProperties::parse_to`, since other
         // statements may not need the with properties.
         if !p.peek_nth_any_of_keywords(0, &[Keyword::WITH]) {
-            p.expected("WITH", p.peek_token())?
+            p.expected("WITH")?
         }
         impl_parse_to!(with_properties: WithProperties, p);
 
@@ -1121,6 +1118,7 @@ impl ParseTo for UserOptions {
             }
 
             if let Token::Word(ref w) = token.token {
+                let checkpoint = *parser;
                 parser.next_token();
                 let (item_mut_ref, user_option) = match w.keyword {
                     Keyword::SUPERUSER => (&mut builder.super_user, UserOption::SuperUser),
@@ -1153,10 +1151,10 @@ impl ParseTo for UserOptions {
                         (&mut builder.password, UserOption::OAuth(options))
                     }
                     _ => {
-                        parser.expected(
+                        parser.expected_at(
+                            checkpoint,
                             "SUPERUSER | NOSUPERUSER | CREATEDB | NOCREATEDB | LOGIN \
                             | NOLOGIN | CREATEUSER | NOCREATEUSER | [ENCRYPTED] PASSWORD | NULL | OAUTH",
-                            token,
                         )?;
                         unreachable!()
                     }
@@ -1166,7 +1164,6 @@ impl ParseTo for UserOptions {
                 parser.expected(
                     "SUPERUSER | NOSUPERUSER | CREATEDB | NOCREATEDB | LOGIN | NOLOGIN \
                         | CREATEUSER | NOCREATEUSER | [ENCRYPTED] PASSWORD | NULL | OAUTH",
-                    token,
                 )?
             }
         }
@@ -1309,7 +1306,7 @@ impl ParseTo for DropMode {
         } else if parser.parse_keyword(Keyword::RESTRICT) {
             DropMode::Restrict
         } else {
-            return parser.expected("CASCADE | RESTRICT", parser.peek_token());
+            return parser.expected("CASCADE | RESTRICT");
         };
         Ok(drop_mode)
     }

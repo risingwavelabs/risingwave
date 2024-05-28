@@ -116,7 +116,7 @@ pub fn parse_source_schema(p: &mut Parser<'_>) -> PResult<CompatibleSourceSchema
         };
         Ok(CompatibleSourceSchema::RowFormat(schema))
     } else {
-        p.expected("description of the format", p.peek_token())
+        p.expected("description of the format")
     }
 }
 
