@@ -11456,29 +11456,20 @@ dependencies = [
 name = "risingwave_sqlparser"
 version = "1.9.0-alpha"
 dependencies = [
- "itertools 0.12.1",
- "matches",
- "serde",
- "thiserror",
- "tracing",
- "tracing-subscriber",
- "winnow 0.6.8 (git+https://github.com/TennyZhuang/winnow.git?rev=a6b1f04)",
- "workspace-hack",
-]
-
-[[package]]
-name = "risingwave_sqlparser_test_runner"
-version = "0.1.0"
-dependencies = [
  "anyhow",
  "console",
- "futures",
+ "itertools 0.12.1",
+ "libtest-mimic 0.7.0",
  "madsim-tokio",
- "risingwave_sqlparser",
+ "matches",
  "serde",
  "serde_with",
  "serde_yaml",
+ "thiserror",
+ "tracing",
+ "tracing-subscriber",
  "walkdir",
+ "winnow 0.6.8 (git+https://github.com/TennyZhuang/winnow.git?rev=a6b1f04)",
  "workspace-hack",
 ]
 

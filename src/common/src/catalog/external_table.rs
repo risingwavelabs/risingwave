@@ -40,8 +40,6 @@ pub struct CdcTableDesc {
     /// Column indices for primary keys.
     pub stream_key: Vec<usize>,
 
-    pub value_indices: Vec<usize>,
-
     /// properties will be passed into the `StreamScanNode`
     pub connect_properties: BTreeMap<String, String>,
 }

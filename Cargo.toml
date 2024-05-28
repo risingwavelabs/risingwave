@@ -37,7 +37,6 @@ members = [
     "src/risedevtool/config",
     "src/rpc_client",
     "src/sqlparser",
-    "src/sqlparser/test_runner",
     "src/storage",
     "src/storage/backup",
     "src/storage/compactor",
