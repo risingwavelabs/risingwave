@@ -976,6 +976,11 @@ pub struct StreamingDeveloperConfig {
     /// If true, the arrangement backfill will be disabled,
     /// even if session variable set.
     pub enable_arrangement_backfill: bool,
+
+    #[serde(default = "default::developer::stream_high_join_amplification_threshold")]
+    /// If number of hash join matches exceeds this threshold number,
+    /// it will be logged.
+    pub high_join_amplification_threshold: usize,
 }
 
 /// The subsections `[batch.developer]`.
@@ -1732,6 +1737,10 @@ pub mod default {
 
         pub fn stream_enable_arrangement_backfill() -> bool {
             true
+        }
+
+        pub fn stream_high_join_amplification_threshold() -> usize {
+            2048
         }
     }
 
