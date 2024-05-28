@@ -32,7 +32,7 @@ use super::aggregation::{
     OnlyOutputIfHasInput,
 };
 use super::sort_buffer::SortBuffer;
-use crate::cache::{cache_may_stale, new_with_hasher, ManagedLruCache};
+use crate::cache::{cache_may_stale, ManagedLruCache};
 use crate::common::metrics::MetricsInfo;
 use crate::executor::aggregation::AggGroup as GenericAggGroup;
 use crate::executor::prelude::*;
@@ -109,7 +109,7 @@ struct ExecutorInner<K: HashKey, S: StateStore> {
     distinct_dedup_tables: HashMap<usize, StateTable<S>>,
 
     /// Watermark epoch.
-    watermark_epoch: AtomicU64Ref,
+    watermark_sequence: AtomicU64Ref,
 
     /// State cache size for extreme agg.
     extreme_cache_size: usize,
@@ -215,7 +215,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 storages: args.storages,
                 intermediate_state_table: args.intermediate_state_table,
                 distinct_dedup_tables: args.distinct_dedup_tables,
-                watermark_epoch: args.watermark_epoch,
+                watermark_sequence: args.watermark_epoch,
                 extreme_cache_size: args.extreme_cache_size,
                 chunk_size: args.extra.chunk_size,
                 max_dirty_groups_heap_size: args.extra.max_dirty_groups_heap_size,
@@ -573,15 +573,15 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
         let mut vars = ExecutionVars {
             stats: ExecutionStats::new(),
-            agg_group_cache: new_with_hasher(
-                this.watermark_epoch.clone(),
+            agg_group_cache: ManagedLruCache::unbounded_with_hasher(
+                this.watermark_sequence.clone(),
                 agg_group_cache_metrics_info,
                 PrecomputedBuildHasher,
             ),
             dirty_groups: Default::default(),
             distinct_dedup: DistinctDeduplicater::new(
                 &this.agg_calls,
-                this.watermark_epoch.clone(),
+                this.watermark_sequence.clone(),
                 &this.distinct_dedup_tables,
                 this.actor_ctx.clone(),
             ),
@@ -605,10 +605,6 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         let barrier = expect_first_barrier(&mut input).await?;
         this.all_state_tables_mut().for_each(|table| {
             table.init_epoch(barrier.epoch);
-        });
-        vars.agg_group_cache.update_epoch(barrier.epoch.curr);
-        vars.distinct_dedup.dedup_caches_mut().for_each(|cache| {
-            cache.update_epoch(barrier.epoch.curr);
         });
 
         yield Message::Barrier(barrier);
@@ -680,12 +676,6 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                             });
                         }
                     }
-
-                    // Update the current epoch.
-                    vars.agg_group_cache.update_epoch(barrier.epoch.curr);
-                    vars.distinct_dedup.dedup_caches_mut().for_each(|cache| {
-                        cache.update_epoch(barrier.epoch.curr);
-                    });
 
                     yield Message::Barrier(barrier);
                 }

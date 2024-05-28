@@ -10170,6 +10170,7 @@ dependencies = [
 name = "risingwave_common"
 version = "1.9.0-alpha"
 dependencies = [
+ "ahash 0.8.11",
  "anyhow",
  "arc-swap",
  "arrow-array 48.0.1",
@@ -10189,6 +10190,7 @@ dependencies = [
  "chrono",
  "chrono-tz 0.9.0",
  "clap",
+ "coarsetime",
  "comfy-table",
  "crc32fast",
  "criterion",
@@ -10204,6 +10206,7 @@ dependencies = [
  "foyer",
  "futures",
  "governor",
+ "hashbrown 0.14.3",
  "hex",
  "http 0.2.9",
  "http-body 0.4.5",
@@ -11410,6 +11413,7 @@ name = "risingwave_sqlparser"
 version = "1.9.0-alpha"
 dependencies = [
  "itertools 0.12.1",
+ "madsim-tokio",
  "matches",
  "serde",
  "thiserror",

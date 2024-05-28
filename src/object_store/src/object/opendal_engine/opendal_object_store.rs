@@ -248,7 +248,10 @@ impl ObjectStore for OpendalObjectStore {
     }
 
     fn support_streaming_upload(&self) -> bool {
-        self.op.info().native_capability().write_can_multi
+        match self.engine_type {
+            EngineType::Azblob => false,
+            _ => self.op.info().native_capability().write_can_multi,
+        }
     }
 }
 
