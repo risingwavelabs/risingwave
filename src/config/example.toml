@@ -48,7 +48,9 @@ table_write_throughput_threshold = 16777216
 min_table_split_write_throughput = 4194304
 compaction_task_max_heartbeat_interval_secs = 30
 compaction_task_max_progress_interval_secs = 600
-hybird_partition_vnode_count = 4
+hybrid_partition_vnode_count = 4
+compact_task_table_size_partition_threshold_low = 134217728
+compact_task_table_size_partition_threshold_high = 536870912
 event_log_enabled = true
 event_log_channel_max_size = 10
 enable_dropped_column_reclaim = false
@@ -83,6 +85,7 @@ enable_barrier_read = false
 statement_timeout_in_sec = 3600
 frontend_compute_runtime_worker_threads = 4
 mask_worker_temporary_secs = 30
+redact_sql_option_keywords = ["credential", "key", "password", "private", "secret", "token"]
 
 [batch.developer]
 batch_connector_message_buffer_size = 16
@@ -109,6 +112,11 @@ stream_hash_agg_max_dirty_groups_heap_size = 67108864
 stream_memory_controller_threshold_aggressive = 0.9
 stream_memory_controller_threshold_graceful = 0.8
 stream_memory_controller_threshold_stable = 0.7
+stream_memory_controller_eviction_factor_aggressive = 2.0
+stream_memory_controller_eviction_factor_graceful = 1.5
+stream_memory_controller_eviction_factor_stable = 1.0
+stream_memory_controller_sequence_tls_step = 128
+stream_memory_controller_sequence_tls_lag = 32
 stream_enable_arrangement_backfill = true
 
 [storage]
@@ -123,6 +131,7 @@ share_buffer_upload_concurrency = 8
 compactor_max_task_multiplier = 3.0
 compactor_memory_available_proportion = 0.8
 sstable_id_remote_fetch_number = 10
+min_sstable_size_mb = 32
 min_sst_size_for_streaming_upload = 33554432
 max_sub_compaction = 4
 max_concurrent_compaction_task_number = 16

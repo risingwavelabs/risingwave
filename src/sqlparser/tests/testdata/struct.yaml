@@ -3,3 +3,9 @@
   formatted_sql: SELECT CAST(ROW(1 * 2, 1.0) AS foo)
 - input: SELECT ROW(1 * 2, 1.0)::foo;
   formatted_sql: SELECT CAST(ROW(1 * 2, 1.0) AS foo)
+- input: SELECT NULL::STRUCT<v1 INT, v2 INT>
+  formatted_sql: SELECT CAST(NULL AS STRUCT<v1 INT, v2 INT>)
+- input: create table st (v1 int, v2 struct<v1 int, v2 struct<v1 varchar, v2 int>>, v3 struct<v1 varchar, v2 struct<v1 int, v2 varchar>>)
+  formatted_sql: CREATE TABLE st (v1 INT, v2 STRUCT<v1 INT, v2 STRUCT<v1 CHARACTER VARYING, v2 INT>>, v3 STRUCT<v1 CHARACTER VARYING, v2 STRUCT<v1 INT, v2 CHARACTER VARYING>>)
+- input: SELECT NULL::STRUCT<v1 INT, v2 INT>>
+  error_msg: 'sql parser error: Unexpected EOF: Unconsumed `>>`'

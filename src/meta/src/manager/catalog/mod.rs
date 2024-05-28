@@ -49,7 +49,7 @@ use user::*;
 use crate::manager::{
     IdCategory, MetaSrvEnv, NotificationVersion, StreamingJob, IGNORED_NOTIFICATION_VERSION,
 };
-use crate::model::{BTreeMapTransaction, MetadataModel, TableFragments, ValTransaction};
+use crate::model::{BTreeMapTransaction, MetadataModel, TableFragments};
 use crate::storage::Transaction;
 use crate::{MetaError, MetaResult};
 
@@ -83,6 +83,7 @@ macro_rules! commit_meta_with_trx {
         {
             use tracing::Instrument;
             use $crate::storage::meta_store::MetaStore;
+            use $crate::model::{InMemValTransaction, ValTransaction};
             async {
                 // Apply the change in `ValTransaction` to trx
                 $(

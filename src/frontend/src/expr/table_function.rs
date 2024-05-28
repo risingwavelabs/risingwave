@@ -17,9 +17,7 @@ use std::sync::Arc;
 use itertools::Itertools;
 use risingwave_common::types::DataType;
 pub use risingwave_pb::expr::table_function::PbType as TableFunctionType;
-use risingwave_pb::expr::{
-    TableFunction as TableFunctionPb, UserDefinedTableFunction as UserDefinedTableFunctionPb,
-};
+use risingwave_pb::expr::PbTableFunction;
 
 use super::{infer_type, Expr, ExprImpl, ExprRewriter, RwResult};
 use crate::catalog::function_catalog::{FunctionCatalog, FunctionKind};
@@ -35,7 +33,7 @@ pub struct TableFunction {
     pub return_type: DataType,
     pub function_type: TableFunctionType,
     /// Catalog of user defined table function.
-    pub udtf_catalog: Option<Arc<FunctionCatalog>>,
+    pub user_defined: Option<Arc<FunctionCatalog>>,
 }
 
 impl TableFunction {
@@ -47,7 +45,7 @@ impl TableFunction {
             args,
             return_type,
             function_type: func_type,
-            udtf_catalog: None,
+            user_defined: None,
         })
     }
 
@@ -59,37 +57,24 @@ impl TableFunction {
         TableFunction {
             args,
             return_type: catalog.return_type.clone(),
-            function_type: TableFunctionType::Udtf,
-            udtf_catalog: Some(catalog),
+            function_type: TableFunctionType::UserDefined,
+            user_defined: Some(catalog),
         }
     }
 
-    pub fn to_protobuf(&self) -> TableFunctionPb {
-        TableFunctionPb {
+    pub fn to_protobuf(&self) -> PbTableFunction {
+        PbTableFunction {
             function_type: self.function_type as i32,
             args: self.args.iter().map(|c| c.to_expr_proto()).collect_vec(),
             return_type: Some(self.return_type.to_protobuf()),
-            udtf: self
-                .udtf_catalog
-                .as_ref()
-                .map(|c| UserDefinedTableFunctionPb {
-                    arg_names: c.arg_names.clone(),
-                    arg_types: c.arg_types.iter().map(|t| t.to_protobuf()).collect(),
-                    language: c.language.clone(),
-                    link: c.link.clone(),
-                    identifier: c.identifier.clone(),
-                    body: c.body.clone(),
-                    compressed_binary: c.compressed_binary.clone(),
-                    function_type: c.function_type.clone(),
-                    runtime: c.runtime.clone(),
-                }),
+            udf: self.user_defined.as_ref().map(|c| c.as_ref().into()),
         }
     }
 
     /// Get the name of the table function.
     pub fn name(&self) -> String {
         match self.function_type {
-            TableFunctionType::Udtf => self.udtf_catalog.as_ref().unwrap().name.clone(),
+            TableFunctionType::UserDefined => self.user_defined.as_ref().unwrap().name.clone(),
             t => t.as_str_name().to_lowercase(),
         }
     }
