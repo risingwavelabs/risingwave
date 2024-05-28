@@ -244,6 +244,13 @@ impl ObjectStore for OpendalObjectStore {
             EngineType::Fs => "Fs",
         }
     }
+<<<<<<< HEAD
+=======
+
+    fn support_streaming_upload(&self) -> bool {
+        self.op.info().native_capability().write_can_multi
+    }
+>>>>>>> 469c380607 (fix(object store): do not call abort when streaming upload finish error and fix azure workload identity (#16961))
 }
 
 /// Store multiple parts in a map, and concatenate them on finish.
@@ -292,7 +299,10 @@ impl StreamingUploader for OpendalStreamingUploader {
         match self.writer.close().await {
             Ok(_) => (),
             Err(err) => {
-                self.writer.abort().await?;
+                // Due to a bug in OpenDAL, calling `abort()` here may trigger unreachable code and cause panic.
+                // refer to https://github.com/apache/opendal/issues/4651
+                // This will be fixed after the next bump in the opendal version.
+                // self.writer.abort().await?;
                 return Err(err.into());
             }
         };
