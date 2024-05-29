@@ -39,9 +39,10 @@ use risingwave_pb::catalog::{
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
 use thiserror_ext::AsReport;
 
-use self::{avro::AvroAccessBuilder, parquet_parser::ParquetParser};
+use self::avro::AvroAccessBuilder;
 use self::bytes_parser::BytesAccessBuilder;
 pub use self::mysql::mysql_row_to_owned_row;
+use self::parquet_parser::ParquetParser;
 use self::plain_parser::PlainParser;
 pub use self::postgres::postgres_row_to_owned_row;
 use self::simd_json_parser::DebeziumJsonAccessBuilder;
@@ -950,7 +951,7 @@ impl ByteStreamSourceParserImpl {
                 CsvParser::new(rw_columns, *config, source_ctx).map(Self::Csv)
             }
             (ProtocolProperties::Plain, EncodingProperties::Parquet) => {
-                ParquetParser::new().map(Self::Parquet)
+                ParquetParser::new(rw_columns, source_ctx).map(Self::Parquet)
             }
             (ProtocolProperties::DebeziumMongo, EncodingProperties::Json(_)) => {
                 DebeziumMongoJsonParser::new(rw_columns, source_ctx).map(Self::DebeziumMongoJson)
@@ -1063,6 +1064,10 @@ pub struct BytesProperties {
     pub column_name: Option<String>,
 }
 
+#[derive(Debug, Default, Clone, Copy)]
+pub struct ParquetProperties {
+    pub column_name: Option<String>,
+}
 #[derive(Debug, Default, Clone)]
 pub enum EncodingProperties {
     Avro(AvroProperties),
