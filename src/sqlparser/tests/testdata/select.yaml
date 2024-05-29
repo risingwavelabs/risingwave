@@ -95,7 +95,10 @@
   formatted_sql: SELECT TIMESTAMP WITH TIME ZONE '2022-10-01 12:00:00Z' AT TIME ZONE 'US/Pacific'
   formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(AtTimeZone { timestamp: TypedString { data_type: Timestamp(true), value: "2022-10-01 12:00:00Z" }, time_zone: "US/Pacific" })], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })'
 - input: SELECT 0c6
-  error_msg: 'sql parser error: trailing junk after numeric literal at line 1, column 9'
+  error_msg: |-
+    sql parser error: trailing junk after numeric literal at line 1, column 9
+    LINE 1: SELECT 0c6
+                    ^
 - input: SELECT 1e6
   formatted_sql: SELECT 1e6
   formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(Value(Number("1e6")))], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })'
@@ -137,7 +140,10 @@
     LINE 1: SELECT 0o3.5
                       ^
 - input: SELECT 0x
-  error_msg: 'sql parser error: incomplete integer literal at line 1, column 10'
+  error_msg: |-
+    sql parser error: incomplete integer literal at line 1, column 10
+    LINE 1: SELECT 0x
+                     ^
 - input: SELECT 1::float(0)
   error_msg: |-
     sql parser error: Unexpected 0 at line 1, column 17: Precision must be in range 1..54

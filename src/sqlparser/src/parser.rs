@@ -244,12 +244,9 @@ impl Parser {
             };
             let prefix = format!("LINE {}: ", loc.line);
             let sql_line = sql.split('\n').nth(loc.line as usize - 1).unwrap();
-            let cursor = std::iter::repeat(' ')
-                .take(prefix.len() + loc.column as usize - 1)
-                .chain(['^'])
-                .collect::<String>();
+            let cursor = " ".repeat(prefix.len() + loc.column as usize - 1);
             ParserError::ParserError(format!(
-                "{}\n{}{}\n{}",
+                "{}\n{}{}\n{}^",
                 e.inner_msg(),
                 prefix,
                 sql_line,

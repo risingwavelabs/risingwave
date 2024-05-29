@@ -405,14 +405,15 @@ pub struct TokenizerError {
     pub message: String,
     pub line: u64,
     pub col: u64,
+    pub context: String,
 }
 
 impl fmt::Display for TokenizerError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "{} at line {}, column {}",
-            self.message, self.line, self.col
+            "{} at line {}, column {}\n{}",
+            self.message, self.line, self.col, self.context
         )
     }
 }
@@ -422,6 +423,7 @@ impl std::error::Error for TokenizerError {}
 
 /// SQL Tokenizer
 pub struct Tokenizer<'a> {
+    sql: &'a str,
     chars: Peekable<Chars<'a>>,
     line: u64,
     col: u64,
@@ -431,6 +433,7 @@ impl<'a> Tokenizer<'a> {
     /// Create a new SQL tokenizer for the specified SQL statement
     pub fn new(query: &'a str) -> Self {
         Self {
+            sql: query,
             chars: query.chars().peekable(),
             line: 1,
             col: 1,
@@ -906,10 +909,15 @@ impl<'a> Tokenizer<'a> {
     }
 
     fn error<R>(&self, message: impl Into<String>) -> Result<R, TokenizerError> {
+        let prefix = format!("LINE {}: ", self.line);
+        let sql_line = self.sql.split('\n').nth(self.line as usize - 1).unwrap();
+        let cursor = " ".repeat(prefix.len() + self.col as usize - 1);
+        let context = format!("{}{}\n{}^", prefix, sql_line, cursor);
         Err(TokenizerError {
             message: message.into(),
             col: self.col,
             line: self.line,
+            context,
         })
     }
 
@@ -1216,6 +1224,7 @@ mod tests {
             message: "test".into(),
             line: 1,
             col: 1,
+            context: "".to_string(),
         };
         #[cfg(feature = "std")]
         {
@@ -1509,6 +1518,7 @@ mod tests {
                 message: "Unterminated string literal".to_string(),
                 line: 1,
                 col: 12,
+                context: "".to_string(),
             })
         );
     }
@@ -1654,6 +1664,7 @@ mod tests {
                 message: "Expected close delimiter '\"' before EOF.".to_string(),
                 line: 1,
                 col: 5,
+                context: "".to_string(),
             })
         );
     }
