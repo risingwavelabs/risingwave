@@ -90,6 +90,7 @@ services:
       - mysql
       - db
       - message_queue
+      - schemaregistry
       - elasticsearch
       - clickhouse-server
       - redis-server
