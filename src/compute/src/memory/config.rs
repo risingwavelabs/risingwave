@@ -68,7 +68,6 @@ pub fn reserve_memory_bytes(opts: &ComputeNodeOpts) -> (usize, usize) {
         reserved = std::cmp::min(reserved, MAX_SYSTEM_RESERVED_MEMORY_MB << 20);
     }
 
-
     (reserved, opts.total_memory_bytes - reserved)
 }
 
