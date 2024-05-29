@@ -162,7 +162,7 @@ impl ObjectStore for OpendalObjectStore {
             .chunk(self.config.s3.developer.streaming_read_buffer_size)
             .await?;
         let stream = reader.into_bytes_stream(range).await?.map(|item| {
-            item.map_err(|e| {
+            item.map(|b| Bytes::copy_from_slice(b.as_ref())).map_err(|e| {
                 ObjectError::internal(format!("reader into_stream fail {}", e.as_report()))
             })
         });
