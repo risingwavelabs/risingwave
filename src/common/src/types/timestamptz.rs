@@ -19,7 +19,7 @@ use std::str::FromStr;
 use bytes::{Bytes, BytesMut};
 use chrono::{DateTime, Datelike, TimeZone, Utc};
 use chrono_tz::Tz;
-use postgres_types::{accepts, to_sql_checked, IsNull, ToSql, Type};
+use postgres_types::{accepts, to_sql_checked, FromSql, IsNull, ToSql, Type};
 use risingwave_common_estimate_size::ZeroHeapSize;
 use serde::{Deserialize, Serialize};
 
@@ -48,6 +48,20 @@ impl ToSql for Timestamptz {
     {
         let instant = self.to_datetime_utc();
         instant.to_sql(&Type::ANY, out)
+    }
+}
+
+impl<'a> FromSql<'a> for Timestamptz {
+    fn from_sql(
+        ty: &Type,
+        raw: &'a [u8],
+    ) -> Result<Self, Box<dyn std::error::Error + Sync + Send>> {
+        let instant = DateTime::<Utc>::from_sql(ty, raw)?;
+        Ok(Self::from(instant))
+    }
+
+    fn accepts(ty: &Type) -> bool {
+        matches!(*ty, Type::TIMESTAMPTZ)
     }
 }
 

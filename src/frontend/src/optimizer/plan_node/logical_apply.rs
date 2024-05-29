@@ -53,6 +53,10 @@ pub struct LogicalApply {
     /// Whether we require the subquery to produce at most one row. If `true`, we have to report an
     /// error if the subquery produces more than one row.
     max_one_row: bool,
+
+    /// An apply has been translated by `translate_apply()`, so we should not translate it in `translate_apply_rule` again.
+    /// This flag is used to avoid infinite loop in General Unnesting(Translate Apply), since we use a top-down apply order instead of bottom-up to improve the multi-scalar subqueries optimization time.
+    translated: bool,
 }
 
 impl Distill for LogicalApply {
@@ -85,6 +89,7 @@ impl LogicalApply {
         correlated_id: CorrelatedId,
         correlated_indices: Vec<usize>,
         max_one_row: bool,
+        translated: bool,
     ) -> Self {
         let ctx = left.ctx();
         let join_core = generic::Join::with_full_output(left, right, join_type, on);
@@ -105,6 +110,7 @@ impl LogicalApply {
             correlated_id,
             correlated_indices,
             max_one_row,
+            translated,
         }
     }
 
@@ -125,6 +131,7 @@ impl LogicalApply {
             correlated_id,
             correlated_indices,
             max_one_row,
+            false,
         )
         .into()
     }
@@ -162,6 +169,10 @@ impl LogicalApply {
 
     pub fn correlated_indices(&self) -> Vec<usize> {
         self.correlated_indices.to_owned()
+    }
+
+    pub fn translated(&self) -> bool {
+        self.translated
     }
 
     pub fn max_one_row(&self) -> bool {
@@ -202,7 +213,7 @@ impl LogicalApply {
         let apply_left_len = apply_left.schema().len();
         let correlated_indices_len = correlated_indices.len();
 
-        let new_apply = LogicalApply::create(
+        let new_apply = LogicalApply::new(
             domain,
             apply_right,
             JoinType::Inner,
@@ -210,7 +221,9 @@ impl LogicalApply {
             correlated_id,
             correlated_indices,
             max_one_row,
-        );
+            true,
+        )
+        .into();
 
         let on = Self::rewrite_on(on, correlated_indices_len, apply_left_len).and(Condition {
             conjunctions: eq_predicates,
@@ -285,6 +298,7 @@ impl PlanTreeNodeBinary for LogicalApply {
             self.correlated_id,
             self.correlated_indices.clone(),
             self.max_one_row,
+            self.translated,
         )
     }
 }

@@ -2178,6 +2178,8 @@ impl Parser {
             self.parse_create_database()
         } else if self.parse_keyword(Keyword::USER) {
             self.parse_create_user()
+        } else if self.parse_keyword(Keyword::SECRET) {
+            self.parse_create_secret()
         } else {
             self.expected("an object type after CREATE", self.peek_token())
         }
@@ -2527,6 +2529,12 @@ impl Parser {
     //     | [ ENCRYPTED ] PASSWORD 'password' | PASSWORD NULL | OAUTH
     fn parse_create_user(&mut self) -> Result<Statement, ParserError> {
         Ok(Statement::CreateUser(CreateUserStatement::parse_to(self)?))
+    }
+
+    fn parse_create_secret(&mut self) -> Result<Statement, ParserError> {
+        Ok(Statement::CreateSecret {
+            stmt: CreateSecretStatement::parse_to(self)?,
+        })
     }
 
     pub fn parse_with_properties(&mut self) -> Result<Vec<SqlOption>, ParserError> {
@@ -3721,7 +3729,7 @@ impl Parser {
     }
 
     /// Parse a literal value (numbers, strings, date/time, booleans)
-    fn parse_value(&mut self) -> Result<Value, ParserError> {
+    pub fn parse_value(&mut self) -> Result<Value, ParserError> {
         let token = self.next_token();
         match token.token {
             Token::Word(w) => match w.keyword {
@@ -4595,6 +4603,14 @@ impl Parser {
                     } else {
                         return self.expected("from after columns", self.peek_token());
                     }
+                }
+                Keyword::SECRETS => {
+                    return Ok(Statement::ShowObjects {
+                        object: ShowObject::Secret {
+                            schema: self.parse_from_and_identifier()?,
+                        },
+                        filter: self.parse_show_statement_filter()?,
+                    });
                 }
                 Keyword::CONNECTIONS => {
                     return Ok(Statement::ShowObjects {
