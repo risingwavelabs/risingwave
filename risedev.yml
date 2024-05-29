@@ -1431,9 +1431,8 @@ template:
 
     # Listen port of KRaft controller
     controller-port: 29093
-
-    # Listen address
-    listen-address: ${address}
+    # Listen port for other services in docker (schema-registry)
+    docker-port: 29094
 
     # The docker image. Can be overridden to use a different version.
     image: "confluentinc/cp-kafka:7.6.1"
@@ -1445,6 +1444,23 @@ template:
     node-id: 0
 
     user-managed: false
+
+  schema-registry:
+    # Id to be picked-up by services
+    id: schema-registry-${port}
+
+    # Advertise address
+    address: "127.0.0.1"
+
+    # Listen port of Schema Registry
+    port: 8081
+
+    # The docker image. Can be overridden to use a different version.
+    image: "confluentinc/cp-schema-registry:7.6.1"
+
+    user-managed: false
+
+    provide-kafka: "kafka*"
 
   # Google pubsub emulator service
   pubsub:
