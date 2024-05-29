@@ -222,7 +222,7 @@ impl Parser<'_> {
                     let sql_line = sql.split('\n').nth(loc.line as usize - 1).unwrap();
                     let cursor = " ".repeat(prefix.len() + loc.column as usize - 1);
                     ParserError::ParserError(format!(
-                        "{}\n{}{}\n{}",
+                        "{}\n{}{}\n{}^",
                         e.inner().to_string().replace('\n', ": "),
                         prefix,
                         sql_line,
@@ -2415,7 +2415,7 @@ impl Parser<'_> {
         Ok(Statement::CreateUser(CreateUserStatement::parse_to(self)?))
     }
 
-    fn parse_create_secret(&mut self) -> Result<Statement> {
+    fn parse_create_secret(&mut self) -> PResult<Statement> {
         Ok(Statement::CreateSecret {
             stmt: CreateSecretStatement::parse_to(self)?,
         })

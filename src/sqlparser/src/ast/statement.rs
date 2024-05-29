@@ -846,7 +846,7 @@ pub struct CreateSecretStatement {
 }
 
 impl ParseTo for CreateSecretStatement {
-    fn parse_to(parser: &mut Parser) -> Result<Self, ParserError> {
+    fn parse_to(parser: &mut Parser<'_>) -> PResult<Self> {
         impl_parse_to!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], parser);
         impl_parse_to!(secret_name: ObjectName, parser);
         impl_parse_to!(with_properties: WithProperties, parser);
