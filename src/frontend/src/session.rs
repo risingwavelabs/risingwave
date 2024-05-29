@@ -1152,6 +1152,10 @@ impl SessionManagerImpl {
         })
     }
 
+    pub fn env(&self) -> &FrontendEnv {
+        &self.env
+    }
+
     fn insert_session(&self, session: Arc<SessionImpl>) {
         let active_sessions = {
             let mut write_guard = self.env.sessions_map.write();
