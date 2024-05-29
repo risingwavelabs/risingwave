@@ -950,7 +950,7 @@ profile:
       - use: frontend
       - use: compactor
 
-  ci-1cn-1fe-kafka-with-recovery:
+  ci-1cn-1fe-user-kafka-with-recovery:
     config-path: src/config/ci-recovery.toml
     steps:
       - use: minio
@@ -962,7 +962,9 @@ profile:
       - use: frontend
       - use: compactor
       - use: kafka
-        persist-data: true
+        user-managed: true
+        address: message_queue
+        port: 29092
 
   ci-meta-backup-test-etcd:
     config-path: src/config/ci-meta-backup-test.toml
