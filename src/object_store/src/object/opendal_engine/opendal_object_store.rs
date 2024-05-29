@@ -244,10 +244,6 @@ impl ObjectStore for OpendalObjectStore {
             EngineType::Fs => "Fs",
         }
     }
-
-    fn support_streaming_upload(&self) -> bool {
-        self.op.info().native_capability().write_can_multi
-    }
 }
 
 /// Store multiple parts in a map, and concatenate them on finish.
