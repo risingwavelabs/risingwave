@@ -26,6 +26,7 @@ pub const MIN_COMPUTE_MEMORY_MB: usize = 512;
 /// The memory reserved for system usage (stack and code segment of processes, allocation
 /// overhead, network buffer, etc.) in megabytes.
 pub const MIN_SYSTEM_RESERVED_MEMORY_MB: usize = 512;
+pub const MAX_SYSTEM_RESERVED_MEMORY_MB: usize = 8192;
 
 const SYSTEM_RESERVED_MEMORY_PROPORTION: f64 = 0.3;
 
@@ -61,7 +62,12 @@ pub fn reserve_memory_bytes(opts: &ComputeNodeOpts) -> (usize, usize) {
     });
 
     // Should have at least `MIN_SYSTEM_RESERVED_MEMORY_MB` for reserved memory.
-    let reserved = std::cmp::max(reserved, MIN_SYSTEM_RESERVED_MEMORY_MB << 20);
+    let mut reserved = std::cmp::max(reserved, MIN_SYSTEM_RESERVED_MEMORY_MB << 20);
+    // Limit the maximum reserved memory size if it is not explicitly specified.
+    if opts.reserved_memory_bytes.is_none() {
+        reserved = std::cmp::min(reserved, MAX_SYSTEM_RESERVED_MEMORY_MB << 20);
+    }
+
 
     (reserved, opts.total_memory_bytes - reserved)
 }
