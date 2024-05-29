@@ -4386,7 +4386,7 @@ dependencies = [
  "serde",
  "thiserror",
  "time",
- "winnow 0.6.8 (registry+https://github.com/rust-lang/crates.io-index)",
+ "winnow 0.6.9",
 ]
 
 [[package]]
@@ -11483,7 +11483,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "walkdir",
- "winnow 0.6.8 (git+https://github.com/TennyZhuang/winnow.git?rev=a6b1f04)",
+ "winnow 0.6.9",
  "workspace-hack",
 ]
 
@@ -14595,7 +14595,7 @@ dependencies = [
  "serde",
  "serde_spanned",
  "toml_datetime",
- "winnow 0.6.8 (registry+https://github.com/rust-lang/crates.io-index)",
+ "winnow 0.6.9",
 ]
 
 [[package]]
@@ -16275,17 +16275,9 @@ dependencies = [
 
 [[package]]
 name = "winnow"
-version = "0.6.8"
+version = "0.6.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c3c52e9c97a68071b23e836c9380edae937f17b9c4667bd021973efc689f618d"
-dependencies = [
- "memchr",
-]
-
-[[package]]
-name = "winnow"
-version = "0.6.8"
-source = "git+https://github.com/TennyZhuang/winnow.git?rev=a6b1f04#a6b1f04cbe9b39d218da5a121e610144ebf961b0"
+checksum = "86c949fede1d13936a99f14fafd3e76fd642b556dd2ce96287fbe2e0151bfac6"
 dependencies = [
  "memchr",
 ]
