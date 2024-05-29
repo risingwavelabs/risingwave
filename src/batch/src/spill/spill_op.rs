@@ -54,7 +54,6 @@ impl SpillOp {
         Ok(self
             .op
             .writer_with(name)
-            .append(true)
             .buffer(DEFAULT_IO_BUFFER_SIZE)
             .concurrent(DEFAULT_IO_CONCURRENT_TASK)
             .await?)
