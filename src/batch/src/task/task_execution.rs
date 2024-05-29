@@ -559,8 +559,8 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                         }
                     }
                 }
-                date_chunk = data_chunk_stream.next()=> {
-                    match date_chunk {
+                data_chunk = data_chunk_stream.next()=> {
+                    match data_chunk {
                         Some(Ok(data_chunk)) => {
                             if let Err(e) = sender.send(data_chunk).await {
                                 match e {
