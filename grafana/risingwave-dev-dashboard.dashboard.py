@@ -2651,6 +2651,16 @@ def section_hummock_tiered_cache(outer_panels):
                         ),
                     ],
                 ),
+                panels.timeseries_bytes(
+                    "Storage Region Size",
+                    "",
+                    [
+                        panels.target(
+                            f"sum({metric('foyer_storage_region')}) by (name, type, {NODE_LABEL}) * on(name, {NODE_LABEL}) group_left() foyer_storage_region_size_bytes",
+                            "{{name}} - memory - size @ {{%s}}" % NODE_LABEL,
+                        ),
+                    ],
+                ),
                 # disk
                 panels.timeseries_ops(
                     "Disk Ops",
@@ -2679,7 +2689,7 @@ def section_hummock_tiered_cache(outer_panels):
                     ],
                 ),
                 panels.timeseries_bytes_per_sec(
-                    "Data Refill Throughput",
+                    "Disk Op Throughput",
                     "",
                     [
                         panels.target(
