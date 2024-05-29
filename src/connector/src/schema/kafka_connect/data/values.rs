@@ -23,7 +23,9 @@ fn convert_to(
     let Some(value) = value else {
         return match to_schema.base().optional {
             true => Ok(None),
-            false => Err(DataException::new("Unable to convert a null value to a schema that requires a value")),
+            false => Err(DataException::new(
+                "Unable to convert a null value to a schema that requires a value",
+            )),
         };
     };
     match to_schema.base().type_ {

@@ -14,15 +14,15 @@
 
 //! This module is an analogy to Java package `org.apache.kafka.connect.data`.
 //! <https://github.com/apache/kafka/blob/trunk/connect/api/src/main/java/org/apache/kafka/connect/data/ConnectSchema.java>
+//!
+//! Note any `java.lang.Object` is `Clone + Eq + Any + Hash + Display`
 
 use std::sync::LazyLock;
 
-use simd_json::prelude::ValueAsContainer;
-use simd_json::BorrowedValue;
-
-/// Get a value from a json object by key, case insensitive.
+/// `org.apache.kafka.connect.data.ConnectSchema`
 ///
-/// Returns `None` if the given json value is not an object, or the key is not found.
+/// The responsibility of `Schema` and `SchemaBuilder` are also merged into this type,
+/// for simplicity until necessary later.
 #[derive(Debug, Clone)]
 pub enum ConnectSchema {
     Primitive(PrimitiveSchema),
@@ -41,6 +41,9 @@ impl ConnectSchema {
         }
     }
 
+    /// TODO:
+    /// * Forbid updating `type_`
+    /// * Setting `default` checks `self.validate_value(v)`
     pub fn base_mut(&mut self) -> &mut SchemaBase {
         match self {
             ConnectSchema::Primitive(s) => &mut s.base,
@@ -124,6 +127,9 @@ impl StructSchema {
             fields_by_name,
         }
     }
+
+    // add_field
+    // get_fields
 
     pub fn equals(&self, _other: &Self) -> bool {
         todo!()
