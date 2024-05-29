@@ -27,10 +27,9 @@ statement error Should not create MATERIALIZED VIEW or SELECT directly on shared
 create materialized view mv as select * from mysql_mytest;
 
 statement error The upstream table name must contain database name prefix*
-create table products_test ( id INT,
+create table products_test ( id INT PRIMARY KEY,
    name STRING,
-   description STRING,
-   PRIMARY KEY (id)
+   description STRING
 ) from mysql_mytest table 'products';
 
 statement ok
@@ -233,12 +232,11 @@ CREATE TABLE IF NOT EXISTS postgres_all_types(
 
 statement error The upstream table name must contain schema name prefix*
 CREATE TABLE person_new (
-    id int,
+    id int PRIMARY KEY,
     name varchar,
     email_address varchar,
     credit_card varchar,
-    city varchar,
-    PRIMARY KEY (id)
+    city varchar
 ) FROM pg_source TABLE 'person';
 
 statement ok
