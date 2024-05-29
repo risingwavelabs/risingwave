@@ -17,20 +17,30 @@ use either::Either;
 use crate::binder::bind_context::RecursiveUnion;
 use crate::binder::statement::RewriteExprsRecursive;
 use crate::binder::{BoundQuery, ShareId};
+use crate::binder::Relation;
 
 /// Share a relation during binding and planning.
 /// It could be used to share a (recursive) CTE, a source, a view and so on.
+
+#[derive(Debug, Clone)]
+pub enum BoundShareInput {
+    Query(Either<BoundQuery, RecursiveUnion>),
+    ChangeLog(Relation),
+}
 #[derive(Debug, Clone)]
 pub struct BoundShare {
     pub(crate) share_id: ShareId,
-    pub(crate) input: Either<BoundQuery, RecursiveUnion>,
+    pub(crate) input: BoundShareInput,
 }
 
 impl RewriteExprsRecursive for BoundShare {
     fn rewrite_exprs_recursive(&mut self, rewriter: &mut impl crate::expr::ExprRewriter) {
         match &mut self.input {
-            Either::Left(q) => q.rewrite_exprs_recursive(rewriter),
-            Either::Right(r) => r.rewrite_exprs_recursive(rewriter),
+            BoundShareInput::Query(q) => match q {
+                Either::Left(q) => q.rewrite_exprs_recursive(rewriter),
+                Either::Right(r) => r.rewrite_exprs_recursive(rewriter),
+            },
+            BoundShareInput::ChangeLog(r) => r.rewrite_exprs_recursive(rewriter),
         };
     }
 }

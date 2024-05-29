@@ -49,6 +49,7 @@ pub use subquery::BoundSubquery;
 pub use table_or_source::{BoundBaseTable, BoundSource, BoundSystemTable};
 pub use watermark::BoundWatermark;
 pub use window_table_function::{BoundWindowTableFunction, WindowTableFunctionKind};
+use crate::binder::relation::share::BoundShareInput;
 
 use crate::expr::{CorrelatedId, Depth};
 
@@ -395,8 +396,21 @@ impl Binder {
                     // we could always share the cte,
                     // no matter it's recursive or not.
                     let input = query;
-                    Ok(Relation::Share(Box::new(BoundShare { share_id, input })))
+                    Ok(Relation::Share(Box::new(BoundShare { share_id, input: BoundShareInput::Query(input)})))
                 }
+                BindingCteState::ChangeLog { table } => {
+                    let schema = if let Relation::BaseTable(boundBaseTable) = &table{
+                        boundBaseTable.table_catalog.column_schema()
+                    }else{
+                        return Err(ErrorCode::BindError("Change log CTE must be a base table".to_string()).into());
+                    };
+                    self.bind_table_to_context(
+                        schema.fields.iter().map(|f| (false, f.clone())),
+                        table_name.clone(),
+                        Some(original_alias),
+                    )?;
+                    Ok(Relation::Share(Box::new(BoundShare { share_id, input: BoundShareInput::ChangeLog(table) })))
+                },
             }
         } else {
             self.bind_relation_by_name_inner(schema_name.as_deref(), &table_name, alias, as_of)

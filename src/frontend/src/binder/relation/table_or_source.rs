@@ -280,7 +280,7 @@ impl Binder {
         };
         let input = Either::Left(query);
         Ok((
-            Relation::Share(Box::new(BoundShare { share_id, input })),
+            Relation::Share(Box::new(BoundShare { share_id, input: BoundShareInput::Query(input) })),
             columns.iter().map(|c| (false, c.clone())).collect_vec(),
         ))
     }

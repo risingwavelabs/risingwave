@@ -282,15 +282,19 @@ impl fmt::Display for With {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Cte {
     pub alias: TableAlias,
-    pub query: Query,
+    pub query: Option<Query>,
     pub from: Option<Ident>,
 }
 
 impl fmt::Display for Cte {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} AS ({})", self.alias, self.query)?;
-        if let Some(ref fr) = self.from {
-            write!(f, " FROM {}", fr)?;
+        if let Some(query) = &self.query{
+            write!(f, "{} AS ({})", self.alias, query)?;
+            if let Some(ref fr) = self.from {
+                write!(f, " FROM {}", fr)?;
+            }
+        }else {
+            write!(f, "{} AS changelog from {:?}", self.alias, self.from)?;
         }
         Ok(())
     }

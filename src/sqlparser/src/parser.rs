@@ -4276,9 +4276,16 @@ impl Parser {
         let name = self.parse_identifier_non_reserved()?;
 
         let mut cte = if self.parse_keyword(Keyword::AS) {
-            self.expect_token(&Token::LParen)?;
-            let query = self.parse_query()?;
-            self.expect_token(&Token::RParen)?;
+            let query = if let Ok(changelog) = self.parse_identifier_non_reserved(){
+                assert!(changelog.to_string().to_lowercase() == "changelog");
+                self.expect_keyword(Keyword::FROM)?;
+                None
+            }else{
+                self.expect_token(&Token::LParen)?;
+                let query = self.parse_query()?;
+                self.expect_token(&Token::RParen)?;
+                Some(query)
+            };
             let alias = TableAlias {
                 name,
                 columns: vec![],
@@ -4297,7 +4304,7 @@ impl Parser {
             let alias = TableAlias { name, columns };
             Cte {
                 alias,
-                query,
+                query: Some(query),
                 from: None,
             }
         };

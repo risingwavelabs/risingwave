@@ -31,6 +31,7 @@ use crate::binder::bind_context::{BindingCte, RecursiveUnion};
 use crate::binder::{Binder, BoundSetExpr};
 use crate::error::{ErrorCode, Result};
 use crate::expr::{CorrelatedId, Depth, ExprImpl, ExprRewriter};
+use crate::handler::query;
 
 /// A validated sql query, including order and union.
 /// An example of its relationship with `BoundSetExpr` and `BoundSelect` can be found here: <https://bit.ly/3GQwgPz>
@@ -286,10 +287,13 @@ impl Binder {
         for cte_table in with.cte_tables {
             // note that the new `share_id` for the rcte is generated here
             let share_id = self.next_share_id();
-            let Cte { alias, query, .. } = cte_table;
+            let Cte { alias, query, from } = cte_table;
             let table_name = alias.name.real_value();
 
             if with.recursive {
+                let query = query.ok_or_else(|| {
+                    ErrorCode::BindError("RECURSIVE CTE don't support changlog from".to_string())
+                })?;
                 let (
                     SetExpr::SetOperation {
                         op: SetOperator::Union,
@@ -319,7 +323,7 @@ impl Binder {
                     .clone();
 
                 self.bind_rcte(with, entry, *left, *right, all)?;
-            } else {
+            } else if let Some(query) = query{
                 let bound_query = self.bind_query(query)?;
                 self.context.cte_to_relation.insert(
                     table_name,
@@ -328,6 +332,19 @@ impl Binder {
                         state: BindingCteState::Bound {
                             query: either::Either::Left(bound_query),
                         },
+                        alias,
+                    })),
+                );
+            } else{
+                let from_table_name = from.ok_or_else(|| {
+                    ErrorCode::BindError("CTE with changelog from must have a table/mv".to_string())
+                })?;
+                let from_table_relation = self.bind_relation_by_name(from_table_name, None, None)?;
+                self.context.cte_to_relation.insert(
+                    table_name,
+                    Rc::new(RefCell::new(BindingCte {
+                        share_id,
+                        state: BindingCteState::ChangeLog { table: from_table_relation },
                         alias,
                     })),
                 );

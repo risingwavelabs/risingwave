@@ -21,9 +21,10 @@ use either::Either;
 use parse_display::Display;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
-use risingwave_sqlparser::ast::TableAlias;
+use risingwave_sqlparser::ast::{TableAlias};
 
 use crate::error::{ErrorCode, Result};
+use crate::binder::Relation;
 
 type LiteResult<T> = std::result::Result<T, ErrorCode>;
 
@@ -99,6 +100,10 @@ pub enum BindingCteState {
     Bound {
         query: Either<BoundQuery, RecursiveUnion>,
     },
+
+    ChangeLog{
+        table: Relation,
+    }
 }
 
 /// the entire `RecursiveUnion` represents a *bound* recursive cte.
