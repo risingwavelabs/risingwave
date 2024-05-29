@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use core::option::Option::Some;
 use std::ffi::c_void;
 use std::path::PathBuf;
 use std::sync::OnceLock;

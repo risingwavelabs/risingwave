@@ -245,7 +245,9 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::ConvertTo
             | Type::IcebergTransform
             | Type::InetNtoa
-            | Type::InetAton =>
+            | Type::InetAton
+            | Type::QuoteLiteral
+            | Type::QuoteNullable =>
             // expression output is deterministic(same result for the same input)
             {
                 func_call
@@ -267,6 +269,9 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::PgIndexesSize
             | Type::PgRelationSize
             | Type::PgGetSerialSequence
+            | Type::HasTablePrivilege
+            | Type::HasAnyColumnPrivilege
+            | Type::HasSchemaPrivilege
             | Type::MakeTimestamptz => self.impure = true,
         }
     }

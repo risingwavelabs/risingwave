@@ -22,13 +22,13 @@ use risingwave_common::{bail, try_match_expand};
 use risingwave_pb::plan_common::ColumnDesc;
 
 use super::avro::schema_resolver::ConfluentSchemaResolver;
+use super::unified::Access;
 use super::util::{bytes_from_url, get_kafka_topic};
 use super::{EncodingProperties, JsonProperties, SchemaRegistryAuth, SpecificParserConfig};
 use crate::error::ConnectorResult;
 use crate::only_parse_payload;
 use crate::parser::avro::util::avro_schema_to_column_descs;
 use crate::parser::unified::json::{JsonAccess, JsonParseOptions};
-use crate::parser::unified::util::apply_row_accessor_on_stream_chunk_writer;
 use crate::parser::unified::AccessImpl;
 use crate::parser::{
     AccessBuilder, ByteStreamSourceParser, ParserFormat, SourceStreamChunkRowWriter,
@@ -132,7 +132,8 @@ impl JsonParser {
         let mut errors = Vec::new();
         for value in values {
             let accessor = JsonAccess::new(value);
-            match apply_row_accessor_on_stream_chunk_writer(accessor, &mut writer) {
+            match writer.insert(|column| accessor.access(&[&column.name], Some(&column.data_type)))
+            {
                 Ok(_) => {}
                 Err(err) => errors.push(err),
             }
@@ -174,7 +175,8 @@ pub async fn schema_to_columns(
     let context = Context::default();
     let avro_schema = convert_avro(&json_schema, context).to_string();
     let schema = Schema::parse_str(&avro_schema).context("failed to parse avro schema")?;
-    avro_schema_to_column_descs(&schema)
+    // TODO: do we need to support map type here?
+    avro_schema_to_column_descs(&schema, None)
 }
 
 impl ByteStreamSourceParser for JsonParser {

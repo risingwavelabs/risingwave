@@ -33,6 +33,11 @@ pub async fn trace(
     let actor_id_str = actor_ctx.id.to_string();
     let fragment_id_str = actor_ctx.fragment_id.to_string();
 
+    let executor_row_count = actor_ctx
+        .streaming_metrics
+        .executor_row_count
+        .with_guarded_label_values(&[&actor_id_str, &fragment_id_str, &info.identity]);
+
     let new_span = || {
         tracing::info_span!(
             "executor",
@@ -50,11 +55,7 @@ pub async fn trace(
         match &message {
             Message::Chunk(chunk) => {
                 if enable_executor_row_count {
-                    actor_ctx
-                        .streaming_metrics
-                        .executor_row_count
-                        .with_label_values(&[&actor_id_str, &fragment_id_str, &info.identity])
-                        .inc_by(chunk.cardinality() as u64);
+                    executor_row_count.inc_by(chunk.cardinality() as u64);
                 }
                 tracing::debug!(
                     target: "events::stream::message::chunk",

@@ -18,10 +18,9 @@ use risingwave_pb::batch_plan::HashJoinNode;
 use risingwave_pb::plan_common::JoinType;
 
 use super::batch::prelude::*;
-use super::generic::{self, GenericPlanRef};
 use super::utils::{childless_record, Distill};
 use super::{
-    EqJoinPredicate, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary, ToBatchPb,
+    generic, EqJoinPredicate, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary, ToBatchPb,
     ToDistributedBatch,
 };
 use crate::error::Result;

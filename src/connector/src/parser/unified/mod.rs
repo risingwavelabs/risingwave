@@ -95,7 +95,7 @@ where
 pub enum AccessError {
     #[error("Undefined field `{name}` at `{path}`")]
     Undefined { name: String, path: String },
-    #[error("Expected type `{expected}` but got `{got}` for `{value}`")]
+    #[error("Cannot parse value `{value}` with type `{got}` into expected type `{expected}`")]
     TypeError {
         expected: String,
         got: String,
@@ -103,6 +103,9 @@ pub enum AccessError {
     },
     #[error("Unsupported data type `{ty}`")]
     UnsupportedType { ty: String },
+
+    #[error("Unsupported additional column `{name}`")]
+    UnsupportedAdditionalColumn { name: String },
 
     /// Errors that are not categorized into variants above.
     #[error("{message}")]

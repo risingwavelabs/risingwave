@@ -583,7 +583,7 @@ mod test {
     use std::path::PathBuf;
 
     use prost::Message;
-    use risingwave_common::types::{DataType, ListValue, StructType};
+    use risingwave_common::types::StructType;
     use risingwave_pb::catalog::StreamSourceInfo;
     use risingwave_pb::data::data_type::PbTypeName;
     use risingwave_pb::plan_common::{PbEncodeType, PbFormatType};

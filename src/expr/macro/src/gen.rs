@@ -365,13 +365,13 @@ impl FunctionAttr {
             ReturnTypeKind::Result => quote! {
                 match #output {
                     Ok(x) => Some(x),
-                    Err(e) => { errors.push(e); None }
+                    Err(e) => { errors.push(ExprError::Function(Box::new(e))); None }
                 }
             },
             ReturnTypeKind::ResultOption => quote! {
                 match #output {
                     Ok(x) => x,
-                    Err(e) => { errors.push(e); None }
+                    Err(e) => { errors.push(ExprError::Function(Box::new(e))); None }
                 }
             },
         };
@@ -725,15 +725,15 @@ impl FunctionAttr {
         };
         let create_state = if custom_state.is_some() {
             quote! {
-                fn create_state(&self) -> AggregateState {
-                    AggregateState::Any(Box::<#state_type>::default())
+                fn create_state(&self) -> Result<AggregateState> {
+                    Ok(AggregateState::Any(Box::<#state_type>::default()))
                 }
             }
         } else if let Some(state) = &self.init_state {
             let state: TokenStream2 = state.parse().unwrap();
             quote! {
-                fn create_state(&self) -> AggregateState {
-                    AggregateState::Datum(Some(#state.into()))
+                fn create_state(&self) -> Result<AggregateState> {
+                    Ok(AggregateState::Datum(Some(#state.into())))
                 }
             }
         } else {

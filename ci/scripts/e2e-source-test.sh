@@ -32,6 +32,7 @@ mkdir ./connector-node
 tar xf ./risingwave-connector.tar.gz -C ./connector-node
 
 echo "--- e2e, inline test"
+RUST_LOG="debug,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 risedev ci-start ci-inline-source-test
 risedev slt './e2e_test/source_inline/**/*.slt'
 echo "--- Kill cluster"
@@ -55,7 +56,7 @@ createdb
 psql < ./e2e_test/source/cdc/postgres_cdc.sql
 
 echo "--- starting risingwave cluster"
-RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
+RUST_LOG="debug,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 risedev ci-start ci-1cn-1fe-with-recovery
 
 echo "--- mongodb cdc test"
@@ -149,9 +150,8 @@ risedev ci-kill
 
 echo "--- e2e, ci-kafka-plus-pubsub, kafka and pubsub source"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
-risedev ci-start ci-pubsub-kafka
+risedev ci-start ci-kafka
 ./scripts/source/prepare_ci_kafka.sh
-cargo run --bin prepare_ci_pubsub
 risedev slt './e2e_test/source/basic/*.slt'
 risedev slt './e2e_test/source/basic/old_row_format_syntax/*.slt'
 risedev slt './e2e_test/source/basic/alter/kafka.slt'

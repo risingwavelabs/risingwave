@@ -43,7 +43,7 @@ use risingwave_pb::meta::subscribe_response::{
 };
 use risingwave_pb::meta::table_fragments::PbActorStatus;
 use risingwave_pb::meta::{
-    FragmentParallelUnitMapping, PbFragmentParallelUnitMapping, PbRelation, PbRelationGroup,
+    FragmentWorkerSlotMapping, PbFragmentWorkerSlotMapping, PbRelation, PbRelationGroup,
     PbTableFragments, Relation,
 };
 use risingwave_pb::source::{PbConnectorSplit, PbConnectorSplits};
@@ -66,7 +66,7 @@ use crate::controller::catalog::CatalogController;
 use crate::controller::rename::ReplaceTableExprRewriter;
 use crate::controller::utils::{
     check_relation_name_duplicate, check_sink_into_table_cycle, ensure_object_id, ensure_user_id,
-    get_fragment_actor_ids, get_fragment_mappings,
+    get_fragment_actor_ids, get_fragment_mappings, get_parallel_unit_to_worker_map,
 };
 use crate::controller::ObjectModel;
 use crate::manager::{NotificationVersion, SinkId, StreamingJob};
@@ -803,7 +803,7 @@ impl CatalogController {
         dropping_sink_id: Option<SinkId>,
         txn: &DatabaseTransaction,
         streaming_job: StreamingJob,
-    ) -> MetaResult<(Vec<Relation>, Vec<PbFragmentParallelUnitMapping>)> {
+    ) -> MetaResult<(Vec<Relation>, Vec<PbFragmentWorkerSlotMapping>)> {
         // Question: The source catalog should be remain unchanged?
         let StreamingJob::Table(_, table, ..) = streaming_job else {
             unreachable!("unexpected job: {streaming_job:?}")
@@ -1007,8 +1007,7 @@ impl CatalogController {
             }
         }
 
-        let fragment_mapping: Vec<PbFragmentParallelUnitMapping> =
-            get_fragment_mappings(txn, job_id as _).await?;
+        let fragment_mapping: Vec<_> = get_fragment_mappings(txn, job_id as _).await?;
 
         Ok((relations, fragment_mapping))
     }
@@ -1224,6 +1223,8 @@ impl CatalogController {
 
         let txn = inner.db.begin().await?;
 
+        let parallel_unit_to_worker = get_parallel_unit_to_worker_map(&txn).await?;
+
         let mut fragment_mapping_to_notify = vec![];
 
         // for assert only
@@ -1253,10 +1254,6 @@ impl CatalogController {
                 .exec(&txn)
                 .await?;
 
-            // newly created actor
-            let mut new_actors = vec![];
-            let mut new_actor_dispatchers = vec![];
-
             for (
                 PbStreamActor {
                     actor_id,
@@ -1276,6 +1273,7 @@ impl CatalogController {
             ) in newly_created_actors
             {
                 let mut actor_upstreams = BTreeMap::<FragmentId, BTreeSet<ActorId>>::new();
+                let mut new_actor_dispatchers = vec![];
 
                 if let Some(nodes) = &mut nodes {
                     visit_stream_node(nodes, |node| {
@@ -1314,7 +1312,7 @@ impl CatalogController {
                     .get(&actor_id)
                     .map(|splits| splits.iter().map(PbConnectorSplit::from).collect_vec());
 
-                new_actors.push(actor::ActiveModel {
+                Actor::insert(actor::ActiveModel {
                     actor_id: Set(actor_id as _),
                     fragment_id: Set(fragment_id as _),
                     status: Set(ActorStatus::Running),
@@ -1324,7 +1322,9 @@ impl CatalogController {
                     upstream_actor_ids: Set(actor_upstreams),
                     vnode_bitmap: Set(vnode_bitmap.as_ref().map(|bitmap| bitmap.into())),
                     expr_context: Set(expr_context.as_ref().unwrap().into()),
-                });
+                })
+                .exec(&txn)
+                .await?;
 
                 for PbDispatcher {
                     r#type: dispatcher_type,
@@ -1348,16 +1348,11 @@ impl CatalogController {
                         downstream_actor_ids: Set(downstream_actor_id.into()),
                     })
                 }
-            }
-
-            if !new_actors.is_empty() {
-                Actor::insert_many(new_actors).exec(&txn).await?;
-            }
-
-            if !new_actor_dispatchers.is_empty() {
-                ActorDispatcher::insert_many(new_actor_dispatchers)
-                    .exec(&txn)
-                    .await?;
+                if !new_actor_dispatchers.is_empty() {
+                    ActorDispatcher::insert_many(new_actor_dispatchers)
+                        .exec(&txn)
+                        .await?;
+                }
             }
 
             // actor update
@@ -1405,9 +1400,13 @@ impl CatalogController {
             fragment.vnode_mapping = Set((&vnode_mapping).into());
             fragment.update(&txn).await?;
 
-            fragment_mapping_to_notify.push(FragmentParallelUnitMapping {
+            let worker_slot_mapping = ParallelUnitMapping::from_protobuf(&vnode_mapping)
+                .to_worker_slot(&parallel_unit_to_worker)
+                .to_protobuf();
+
+            fragment_mapping_to_notify.push(FragmentWorkerSlotMapping {
                 fragment_id: fragment_id as u32,
-                mapping: Some(vnode_mapping),
+                mapping: Some(worker_slot_mapping),
             });
 
             // for downstream and upstream

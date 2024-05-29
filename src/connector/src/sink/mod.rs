@@ -17,6 +17,7 @@ pub mod boxed;
 pub mod catalog;
 pub mod clickhouse;
 pub mod coordinate;
+pub mod decouple_checkpoint_log_sink;
 pub mod deltalake;
 pub mod doris;
 pub mod doris_starrocks_connector;
@@ -72,7 +73,6 @@ use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::catalog::{SinkCatalog, SinkId};
 use crate::sink::log_store::{LogReader, LogStoreReadItem, LogStoreResult, TruncateOffset};
 use crate::sink::writer::SinkWriter;
-use crate::ConnectorParams;
 
 const BOUNDED_CHANNEL_SIZE: usize = 16;
 #[macro_export]
@@ -290,7 +290,6 @@ impl SinkMetrics {
 
 #[derive(Clone)]
 pub struct SinkWriterParam {
-    pub connector_params: ConnectorParams,
     pub executor_id: u64,
     pub vnode_bitmap: Option<Bitmap>,
     pub meta_client: Option<SinkMetaClient>,
@@ -328,7 +327,6 @@ impl SinkMetaClient {
 impl SinkWriterParam {
     pub fn for_test() -> Self {
         SinkWriterParam {
-            connector_params: Default::default(),
             executor_id: Default::default(),
             vnode_bitmap: Default::default(),
             meta_client: Default::default(),
