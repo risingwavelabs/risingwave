@@ -1224,14 +1224,14 @@ mod tests {
             message: "test".into(),
             line: 1,
             col: 1,
-            context: "".to_string(),
+            context: "LINE 1:".to_string(),
         };
         #[cfg(feature = "std")]
         {
             use std::error::Error;
             assert!(err.source().is_none());
         }
-        assert_eq!(err.to_string(), "test at line 1, column 1");
+        assert_eq!(err.to_string(), "test at line 1, column 1\nLINE 1:");
     }
 
     #[test]
@@ -1518,7 +1518,7 @@ mod tests {
                 message: "Unterminated string literal".to_string(),
                 line: 1,
                 col: 12,
-                context: "".to_string(),
+                context: "LINE 1: select 'foo\n                   ^".to_string(),
             })
         );
     }
@@ -1664,7 +1664,7 @@ mod tests {
                 message: "Expected close delimiter '\"' before EOF.".to_string(),
                 line: 1,
                 col: 5,
-                context: "".to_string(),
+                context: "LINE 1: \"foo\n            ^".to_string(),
             })
         );
     }
