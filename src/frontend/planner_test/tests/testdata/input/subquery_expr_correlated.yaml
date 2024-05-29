@@ -543,7 +543,7 @@
     create table t4(g int, h int);
     create table t5(i int, j int);
     create table t6(k int, l int);
-    select 
+    select
     COALESCE((SELECT sum(d) FROM t2 left join t3 on e = a and f = c left join t4 on g = a and h = c left join t5 on i = a and j = c WHERE t1.a = t2.c and t1.a = t2.c and j in (select k from t6 where b = l) ), 0) col1,
     COALESCE((SELECT sum(d) FROM t2 left join t3 on e = a and f = c left join t4 on g = a and h = c left join t5 on i = a and j = c WHERE t1.a = t2.c and t1.a = t2.c and j in (select k from t6 where b = l) ), 0) col2,
     COALESCE((SELECT sum(d) FROM t2 left join t3 on e = a and f = c left join t4 on g = a and h = c left join t5 on i = a and j = c WHERE t1.a = t2.c and t1.a = t2.c and j in (select k from t6 where b = l) ), 0) col3,
