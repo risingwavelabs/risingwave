@@ -31,9 +31,8 @@ use risingwave_common::util::value_encoding::DatumToProtoExt;
 use risingwave_connector::source;
 use risingwave_connector::source::cdc::external::postgres::PostgresExternalTable;
 use risingwave_connector::source::cdc::external::{
-    ExternalTableConfig, DATABASE_NAME_KEY, SCHEMA_NAME_KEY, TABLE_NAME_KEY,
+    ExternalTableConfig, ExternalTableImpl, DATABASE_NAME_KEY, SCHEMA_NAME_KEY, TABLE_NAME_KEY,
 };
-use risingwave_connector::source::TryFromHashmap;
 use risingwave_pb::catalog::{PbSource, PbTable, Table, WatermarkDesc};
 use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
@@ -733,7 +732,7 @@ fn gen_table_plan_inner(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) async fn gen_create_table_plan_for_cdc_source(
+pub(crate) async fn gen_create_table_plan_for_cdc_table(
     handler_args: HandlerArgs,
     explain_options: ExplainOptions,
     source: Arc<SourceCatalog>,
@@ -987,7 +986,7 @@ pub(super) async fn handle_create_table_plan(
                 )
                 .await?;
 
-                let (plan, table) = gen_create_table_plan_for_cdc_source(
+                let (plan, table) = gen_create_table_plan_for_cdc_table(
                     handler_args,
                     explain_options,
                     source,
@@ -1079,21 +1078,21 @@ async fn derive_schema_for_cdc_table(
 ) -> Result<(Vec<ColumnCatalog>, Vec<String>)> {
     // read cdc table schema from external db or parsing the schema from SQL definitions
     if need_auto_schema_map {
-        let _connector = connect_properties.get(UPSTREAM_SOURCE_KEY).unwrap();
-        let config = ExternalTableConfig::try_from_hashmap(connect_properties.clone(), false)
+        let config = ExternalTableConfig::try_from_hashmap(connect_properties)
             .context("failed to extract external table config")?;
-        // TODO: create external table according to connector
-        let pg_table = PostgresExternalTable::connect(config).await?;
+
+        let table = ExternalTableImpl::connect(config).await?;
         Ok((
-            pg_table
+            table
                 .column_descs()
-                .into_iter()
+                .iter()
+                .cloned()
                 .map(|column_desc| ColumnCatalog {
                     column_desc,
                     is_hidden: false,
                 })
                 .collect(),
-            pg_table.pk_names(),
+            table.pk_names().clone(),
         ))
     } else {
         Ok((

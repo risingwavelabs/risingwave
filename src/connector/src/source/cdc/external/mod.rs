@@ -22,13 +22,14 @@ pub mod mysql;
 use std::collections::HashMap;
 use std::fmt;
 
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use futures::stream::BoxStream;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
+use mysql_async::prelude::AsQuery;
 use risingwave_common::bail;
-use risingwave_common::catalog::{Schema, OFFSET_COLUMN_NAME};
+use risingwave_common::catalog::{ColumnDesc, Schema, OFFSET_COLUMN_NAME};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -43,7 +44,8 @@ use crate::source::cdc::external::mysql::{
 use crate::source::cdc::external::postgres::{
     PostgresExternalTable, PostgresExternalTableReader, PostgresOffset,
 };
-use crate::source::UnknownFields;
+use crate::source::cdc::CdcSourceType;
+use crate::source::{UnknownFields, UPSTREAM_SOURCE_KEY};
 use crate::WithPropertiesExt;
 
 #[derive(Debug)]
@@ -203,6 +205,8 @@ pub enum ExternalTableReaderImpl {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct ExternalTableConfig {
+    pub connector: String,
+
     #[serde(rename = "hostname")]
     pub host: String,
     pub port: String,
@@ -219,14 +223,13 @@ pub struct ExternalTableConfig {
     /// This field is optional.
     #[serde(rename = "ssl.mode", default = "Default::default")]
     pub sslmode: SslMode,
-
-    #[serde(flatten)]
-    pub unknown_fields: HashMap<String, String>,
 }
 
-impl UnknownFields for ExternalTableConfig {
-    fn unknown_fields(&self) -> HashMap<String, String> {
-        self.unknown_fields.clone()
+impl ExternalTableConfig {
+    pub fn try_from_hashmap(connect_properties: HashMap<String, String>) -> ConnectorResult<Self> {
+        let json_value = serde_json::to_value(connect_properties)?;
+        let config = serde_json::from_value::<ExternalTableConfig>(json_value)?;
+        Ok(config)
     }
 }
 
@@ -318,6 +321,35 @@ impl ExternalTableReaderImpl {
 pub enum ExternalTableImpl {
     MySql(MySqlExternalTable),
     Postgres(PostgresExternalTable),
+}
+
+impl ExternalTableImpl {
+    pub async fn connect(config: ExternalTableConfig) -> ConnectorResult<Self> {
+        let cdc_source_type = CdcSourceType::from(config.connector.as_str());
+        match cdc_source_type {
+            CdcSourceType::Mysql => Ok(ExternalTableImpl::MySql(
+                MySqlExternalTable::connect(config).await?,
+            )),
+            CdcSourceType::Postgres => Ok(ExternalTableImpl::Postgres(
+                PostgresExternalTable::connect(config).await?,
+            )),
+            _ => Err(anyhow!("Unsupported cdc connector type: {}", config.connector).into()),
+        }
+    }
+
+    pub fn column_descs(&self) -> &Vec<ColumnDesc> {
+        match self {
+            ExternalTableImpl::MySql(mysql) => mysql.column_descs(),
+            ExternalTableImpl::Postgres(postgres) => postgres.column_descs(),
+        }
+    }
+
+    pub fn pk_names(&self) -> &Vec<String> {
+        match self {
+            ExternalTableImpl::MySql(mysql) => mysql.pk_names(),
+            ExternalTableImpl::Postgres(postgres) => postgres.pk_names(),
+        }
+    }
 }
 
 #[cfg(test)]

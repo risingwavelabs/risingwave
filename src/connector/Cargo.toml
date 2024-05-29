@@ -128,6 +128,8 @@ serde_with = { version = "3", features = ["json"] }
 simd-json = "0.13.3"
 strum = "0.26"
 strum_macros = "0.26"
+sea-schema = {version = "0.14", features = ["default", "sqlx-postgres", "sqlx-mysql"]}
+sqlx = { workspace = true }
 tempfile = "3"
 thiserror = "1"
 thiserror-ext = { workspace = true }

@@ -10566,12 +10566,14 @@ dependencies = [
  "rustls-pemfile 2.1.1",
  "rustls-pki-types",
  "rw_futures_util",
+ "sea-schema",
  "serde",
  "serde_derive",
  "serde_json",
  "serde_with",
  "serde_yaml",
  "simd-json",
+ "sqlx",
  "strum 0.26.1",
  "strum_macros 0.26.1",
  "syn 1.0.109",
@@ -12361,7 +12363,9 @@ checksum = "30d148608012d25222442d1ebbfafd1228dbc5221baf4ec35596494e27a2394e"
 dependencies = [
  "futures",
  "sea-query",
+ "sea-query-binder",
  "sea-schema-derive",
+ "sqlx",
 ]
 
 [[package]]

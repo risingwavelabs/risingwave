@@ -23,7 +23,7 @@ use mysql_async::prelude::*;
 use mysql_common::params::Params;
 use mysql_common::value::Value;
 use risingwave_common::bail;
-use risingwave_common::catalog::{Schema, OFFSET_COLUMN_NAME};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, OFFSET_COLUMN_NAME};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -66,7 +66,28 @@ impl MySqlOffset {
 }
 
 pub struct MySqlExternalTable {
-    config: ExternalTableConfig,
+    columns: Vec<ColumnDesc>,
+    pk_names: Vec<String>,
+}
+
+impl MySqlExternalTable {
+    pub async fn connect(config: ExternalTableConfig) -> ConnectorResult<Self> {
+        // TODO: connect to external db and read the schema
+        tracing::debug!("connect to mysql");
+
+        Ok(Self {
+            columns: vec![],
+            pk_names: vec![],
+        })
+    }
+
+    pub fn column_descs(&self) -> &Vec<ColumnDesc> {
+        &self.columns
+    }
+
+    pub fn pk_names(&self) -> &Vec<String> {
+        &self.pk_names
+    }
 }
 
 pub struct MySqlExternalTableReader {

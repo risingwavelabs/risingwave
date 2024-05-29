@@ -238,6 +238,7 @@ macro_rules! impl_cdc_source_type {
             }
         )*
 
+        #[derive(Clone)]
         pub enum CdcSourceType {
             $(
                 $cdc_source_type,
