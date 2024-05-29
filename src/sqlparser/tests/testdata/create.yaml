@@ -145,3 +145,7 @@
     sql parser error: expected literal string, found: null at line 1, column 41
     LINE 1: create user tmp with encrypted password null
                                                         ^
+- input: CREATE SECRET secret1 WITH (backend = 'meta') AS 'demo-secret'
+  formatted_sql: CREATE SECRET secret1 WITH (backend = 'meta') AS 'demo-secret'
+- input: CREATE SECRET IF NOT EXISTS secret2 WITH (backend = 'meta') AS 'demo-secret
+  error_msg: 'sql parser error: Unterminated string literal at line 1, column 76'

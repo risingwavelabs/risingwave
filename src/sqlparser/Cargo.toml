@@ -25,10 +25,14 @@ normal = ["workspace-hack"]
 itertools = { workspace = true }
 serde = { version = "1.0", features = ["derive"], optional = true }
 thiserror = "1.0.61"
-tokio = { version = "0.2", package = "madsim-tokio", features = ["rt"] }
+tokio = { version = "0.2", package = "madsim-tokio", features = [
+    "rt",
+    "rt-multi-thread",
+    "macros",
+] }
 tracing = "0.1"
 tracing-subscriber = "0.3"
-winnow = { version = "0.6.8", git = "https://github.com/TennyZhuang/winnow.git", rev = "a6b1f04" }
+winnow = "0.6.9"
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
