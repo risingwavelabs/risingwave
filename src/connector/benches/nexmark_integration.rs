@@ -32,8 +32,7 @@ use risingwave_connector::parser::{
     ByteStreamSourceParserImpl, CommonParserConfig, ParserConfig, SpecificParserConfig,
 };
 use risingwave_connector::source::{
-    BoxChunkSourceStream, BoxSourceStream, SourceColumnDesc, SourceContext, SourceMessage,
-    SourceMeta,
+    BoxChunkSourceStream, BoxSourceStream, SourceColumnDesc, SourceMessage, SourceMeta,
 };
 use tracing::Level;
 use tracing_subscriber::prelude::*;
