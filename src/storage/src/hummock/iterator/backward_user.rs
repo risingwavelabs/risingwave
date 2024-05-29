@@ -212,28 +212,33 @@ impl<I: HummockIterator<Direction = Backward>> BackwardUserIterator<I> {
     pub async fn rewind(&mut self) -> HummockResult<()> {
         // Handle range scan
         match &self.key_range.1 {
-            Included(end_key) => {
+            Included(end_key) | Excluded(end_key) => {
                 let full_key = FullKey {
                     user_key: end_key.clone(),
                     epoch_with_gap: EpochWithGap::new_min_epoch(),
                 };
                 self.iterator.seek(full_key.to_ref()).await?;
             }
-            Excluded(_) => unimplemented!("excluded begin key is not supported"),
             Unbounded => self.iterator.rewind().await?,
         };
 
         // Handle multi-version
         self.reset();
         // Handle range scan when key < begin_key
-        self.next().await
+        self.next().await?;
+        if let Excluded(end_key) = &self.key_range.0 {
+            if self.is_valid() && self.last_key.user_key.as_ref() == end_key.as_ref() {
+                self.next().await?;
+            }
+        }
+        Ok(())
     }
 
     /// Resets the iterating position to the first position where the key >= provided key.
     pub async fn seek(&mut self, user_key: UserKey<&[u8]>) -> HummockResult<()> {
         // Handle range scan when key > end_key
-        let user_key = match &self.key_range.1 {
-            Included(end_key) => {
+        let seek_key = match &self.key_range.1 {
+            Included(end_key) | Excluded(end_key) => {
                 let end_key = end_key.as_ref();
                 if end_key < user_key {
                     end_key
@@ -241,11 +246,10 @@ impl<I: HummockIterator<Direction = Backward>> BackwardUserIterator<I> {
                     user_key
                 }
             }
-            Excluded(_) => unimplemented!("excluded begin key is not supported"),
             Unbounded => user_key,
         };
         let full_key = FullKey {
-            user_key,
+            user_key: seek_key.clone(),
             epoch_with_gap: EpochWithGap::new_min_epoch(),
         };
         self.iterator.seek(full_key).await?;
@@ -253,7 +257,15 @@ impl<I: HummockIterator<Direction = Backward>> BackwardUserIterator<I> {
         // Handle multi-version
         self.reset();
         // Handle range scan when key < begin_key
-        self.next().await
+        self.next().await?;
+        if let Excluded(end_key) = &self.key_range.0
+            && end_key.as_ref() >= user_key
+        {
+            if self.is_valid() && self.last_key.user_key.as_ref() == end_key.as_ref() {
+                self.next().await?;
+            }
+        }
+        Ok(())
     }
 
     /// Indicates whether the iterator can be used.

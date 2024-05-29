@@ -124,20 +124,28 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
 
         // Handle range scan
         match &self.key_range.0 {
-            Included(begin_key) => {
+            Included(begin_key) | Excluded(begin_key) => {
                 let full_key = FullKey {
                     user_key: begin_key.clone(),
                     epoch_with_gap: EpochWithGap::new(self.read_epoch, MAX_SPILL_TIMES),
                 };
                 self.iterator.seek(full_key.to_ref()).await?;
             }
-            Excluded(_) => unimplemented!("excluded begin key is not supported"),
             Unbounded => {
                 self.iterator.rewind().await?;
             }
         };
 
-        self.try_advance_to_next_valid().await
+        self.try_advance_to_next_valid().await?;
+        match &self.key_range.0 {
+            Excluded(begin_key) => {
+                if self.key().user_key == begin_key.as_ref() {
+                    self.next().await?;
+                }
+            }
+            _ => {}
+        }
+        Ok(())
     }
 
     /// Resets the iterating position to the first position where the key >= provided key.
@@ -147,8 +155,8 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
         self.full_key_tracker = FullKeyTracker::new(FullKey::default());
 
         // Handle range scan when key < begin_key
-        let user_key = match &self.key_range.0 {
-            Included(begin_key) => {
+        let seek_key = match &self.key_range.0 {
+            Included(begin_key) | Excluded(begin_key) => {
                 let begin_key = begin_key.as_ref();
                 if begin_key > user_key {
                     begin_key
@@ -156,17 +164,23 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
                     user_key
                 }
             }
-            Excluded(_) => unimplemented!("excluded begin key is not supported"),
             Unbounded => user_key,
         };
 
         let full_key = FullKey {
-            user_key,
+            user_key: seek_key.clone(),
             epoch_with_gap: EpochWithGap::new(self.read_epoch, MAX_SPILL_TIMES),
         };
         self.iterator.seek(full_key).await?;
 
-        self.try_advance_to_next_valid().await
+        self.try_advance_to_next_valid().await?;
+        if let Excluded(begin_key) = &self.key_range.0
+            && begin_key.as_ref() >= user_key
+            && self.key().user_key == begin_key.as_ref()
+        {
+            self.next().await?;
+        }
+        Ok(())
     }
 
     /// Indicates whether the iterator can be used.
