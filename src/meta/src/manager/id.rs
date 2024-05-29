@@ -137,6 +137,8 @@ pub mod IdCategory {
     pub const CompactionGroup: IdCategoryType = 15;
     pub const Function: IdCategoryType = 16;
     pub const Connection: IdCategoryType = 17;
+
+    pub const Secret: IdCategoryType = 18;
 }
 
 pub type IdGeneratorManagerRef = Arc<IdGeneratorManager>;
@@ -160,6 +162,7 @@ pub struct IdGeneratorManager {
     parallel_unit: Arc<StoredIdGenerator>,
     compaction_group: Arc<StoredIdGenerator>,
     connection: Arc<StoredIdGenerator>,
+    secret: Arc<StoredIdGenerator>,
 }
 
 impl IdGeneratorManager {
@@ -209,6 +212,7 @@ impl IdGeneratorManager {
             connection: Arc::new(
                 StoredIdGenerator::new(meta_store.clone(), "connection", None).await,
             ),
+            secret: Arc::new(StoredIdGenerator::new(meta_store.clone(), "secret", None).await),
         }
     }
 
@@ -230,6 +234,7 @@ impl IdGeneratorManager {
             IdCategory::HummockCompactionTask => &self.hummock_compaction_task,
             IdCategory::CompactionGroup => &self.compaction_group,
             IdCategory::Connection => &self.connection,
+            IdCategory::Secret => &self.secret,
             _ => unreachable!(),
         }
     }

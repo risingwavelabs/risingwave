@@ -63,7 +63,7 @@ use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, RelationC
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
-use crate::utils::resolve_privatelink_in_with_option;
+use crate::utils::{resolve_privatelink_in_with_option, resolve_secret_in_with_options};
 use crate::{Explain, Planner, TableCatalog, WithOptions};
 
 // used to store result of `gen_sink_plan`
@@ -145,6 +145,7 @@ pub fn gen_sink_plan(
             resolve_privatelink_in_with_option(&mut with_options, &sink_schema_name, session)?;
         conn_id.map(ConnectionId)
     };
+    let secret_ref = resolve_secret_in_with_options(&mut with_options, session)?;
 
     let emit_on_window_close = stmt.emit_mode == Some(EmitMode::OnWindowClose);
     if emit_on_window_close {
@@ -254,6 +255,7 @@ pub fn gen_sink_plan(
         UserId::new(session.user_id()),
         connection_id,
         dependent_relations.into_iter().collect_vec(),
+        secret_ref,
     );
 
     if let Some(table_catalog) = &target_table_catalog {

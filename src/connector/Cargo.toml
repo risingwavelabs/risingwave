@@ -54,7 +54,7 @@ clickhouse = { git = "https://github.com/risingwavelabs/clickhouse.rs", rev = "d
 ] }
 csv = "1.3"
 deltalake = { workspace = true }
-duration-str = "0.7.1"
+duration-str = "0.10.0"
 easy-ext = "1"
 enum-as-inner = "0.6"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
@@ -70,6 +70,7 @@ icelake = { workspace = true }
 indexmap = { version = "1.9.3", features = ["serde"] }
 itertools = { workspace = true }
 jni = { version = "0.21.1", features = ["invocation"] }
+jsonbb = { workspace = true }
 jsonwebtoken = "9.2.0"
 jst = { package = 'jsonschema-transpiler', git = "https://github.com/mozilla/jsonschema-transpiler", rev = "c1a89d720d118843d8bcca51084deb0ed223e4b4" }
 maplit = "1.0.2"

@@ -155,6 +155,9 @@ impl RemoteInput {
         let up_actor_id = up_down_ids.0.to_string();
         let up_fragment_id = up_down_frag.0.to_string();
         let down_fragment_id = up_down_frag.1.to_string();
+        let exchange_frag_recv_size_metrics = metrics
+            .exchange_frag_recv_size
+            .with_guarded_label_values(&[&up_fragment_id, &down_fragment_id]);
 
         let span: await_tree::Span = format!("RemoteInput (actor {up_actor_id})").into();
 
@@ -167,10 +170,7 @@ impl RemoteInput {
                     let msg = message.unwrap();
                     let bytes = Message::get_encoded_len(&msg);
 
-                    metrics
-                        .exchange_frag_recv_size
-                        .with_label_values(&[&up_fragment_id, &down_fragment_id])
-                        .inc_by(bytes as u64);
+                    exchange_frag_recv_size_metrics.inc_by(bytes as u64);
 
                     let msg_res = Message::from_protobuf(&msg);
                     if let Some(add_back_permits) = match permits.unwrap().value {
