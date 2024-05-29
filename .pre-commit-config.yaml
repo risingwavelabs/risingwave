@@ -15,6 +15,6 @@ repos:
         language: system
         types: [rust]
     -   id: typos
-        name: typoos
+        name: typos
         entry: typos
         language: system
