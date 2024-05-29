@@ -864,7 +864,7 @@ profile:
       - use: schema-registry
         user-managed: true
         address: schemaregistry
-        port: 8081
+        port: 8082
 
   ci-inline-source-test:
     config-path: src/config/ci-recovery.toml
