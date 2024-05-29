@@ -179,7 +179,7 @@ prost-build = "0.12"
 protobuf-src = "1"
 
 [[bench]]
-name = "parser"
+name = "debezium_json_parser"
 harness = false
 
 [[bench]]
@@ -187,7 +187,11 @@ name = "nexmark_integration"
 harness = false
 
 [[bench]]
-name = "json_parser"
+name = "json_parser_case_insensitive"
+harness = false
+
+[[bench]]
+name = "json_vs_plain_parser"
 harness = false
 
 [lints]

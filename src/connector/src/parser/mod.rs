@@ -866,7 +866,7 @@ impl AccessBuilderImpl {
 /// The entrypoint of parsing. It parses [`SourceMessage`] stream (byte stream) into [`StreamChunk`] stream.
 /// Used by [`crate::source::into_chunk_stream`].
 #[derive(Debug)]
-pub(crate) enum ByteStreamSourceParserImpl {
+pub enum ByteStreamSourceParserImpl {
     Csv(CsvParser),
     Json(JsonParser),
     Debezium(DebeziumParser),
@@ -936,6 +936,11 @@ impl ByteStreamSourceParserImpl {
             }
             _ => unreachable!(),
         }
+    }
+
+    /// Create a parser for testing purposes.
+    pub fn create_for_test(parser_config: ParserConfig) -> ConnectorResult<Self> {
+        futures::executor::block_on(Self::create(parser_config, SourceContext::dummy().into()))
     }
 }
 

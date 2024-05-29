@@ -543,6 +543,19 @@ pub struct SourceMessage {
     pub meta: SourceMeta,
 }
 
+impl SourceMessage {
+    /// Create a dummy `SourceMessage` for testing purposes.
+    pub fn dummy() -> Self {
+        Self {
+            key: None,
+            payload: None,
+            offset: "".to_string(),
+            split_id: "".into(),
+            meta: SourceMeta::Empty,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum SourceMeta {
     Kafka(KafkaMeta),

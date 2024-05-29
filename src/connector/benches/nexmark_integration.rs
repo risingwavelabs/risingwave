@@ -23,7 +23,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::types::DataType;
 use risingwave_connector::parser::{
-    ByteStreamSourceParser, JsonParser, SourceParserIntoStreamExt, SpecificParserConfig,
+    ByteStreamSourceParserImpl, CommonParserConfig, ParserConfig, SpecificParserConfig,
 };
 use risingwave_connector::source::{
     BoxChunkSourceStream, BoxSourceStream, SourceColumnDesc, SourceContext, SourceMessage,
@@ -71,8 +71,8 @@ fn make_data_stream() -> BoxSourceStream {
         .boxed()
 }
 
-fn make_parser() -> impl ByteStreamSourceParser {
-    let columns = [
+fn make_parser() -> ByteStreamSourceParserImpl {
+    let rw_columns = [
         ("auction", DataType::Int64),
         ("bidder", DataType::Int64),
         ("price", DataType::Int64),
@@ -86,9 +86,15 @@ fn make_parser() -> impl ByteStreamSourceParser {
     .map(|(i, (n, t))| SourceColumnDesc::simple(n, t, ColumnId::new(i as _)))
     .collect_vec();
 
-    let props = SpecificParserConfig::DEFAULT_PLAIN_JSON;
+    let config = ParserConfig {
+        common: CommonParserConfig { rw_columns },
+        specific: SpecificParserConfig::DEFAULT_PLAIN_JSON,
+    };
 
-    JsonParser::new(props, columns, SourceContext::dummy().into()).unwrap()
+    ByteStreamSourceParserImpl::create(config, SourceContext::dummy().into())
+        .now_or_never()
+        .expect("parse should be created without awaiting")
+        .unwrap()
 }
 
 fn make_stream_iter() -> impl Iterator<Item = StreamChunk> {
