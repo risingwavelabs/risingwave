@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Benchmarking JSON parsers for scenarios with exact key matches and case-insensitive key matches.
+
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use futures::StreamExt;
 use maplit::hashmap;

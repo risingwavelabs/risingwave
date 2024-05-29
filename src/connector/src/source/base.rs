@@ -544,7 +544,7 @@ pub struct SourceMessage {
 }
 
 impl SourceMessage {
-    /// Create a dummy `SourceMessage` for testing purposes.
+    /// Create a dummy `SourceMessage` with all fields unset for testing purposes.
     pub fn dummy() -> Self {
         Self {
             key: None,

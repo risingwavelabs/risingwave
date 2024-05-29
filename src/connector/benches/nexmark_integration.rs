@@ -12,6 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Integration benchmark for parsing Nexmark events.
+//!
+//! To cover the code path in real-world scenarios, the parser is created through
+//! `ByteStreamSourceParserImpl::create` based on the given configuration, rather
+//! than depending on a specific internal implementation.
+
 #![feature(lazy_cell)]
 
 use std::sync::LazyLock;
@@ -91,10 +97,7 @@ fn make_parser() -> ByteStreamSourceParserImpl {
         specific: SpecificParserConfig::DEFAULT_PLAIN_JSON,
     };
 
-    ByteStreamSourceParserImpl::create(config, SourceContext::dummy().into())
-        .now_or_never()
-        .expect("parse should be created without awaiting")
-        .unwrap()
+    ByteStreamSourceParserImpl::create_for_test(config).unwrap()
 }
 
 fn make_stream_iter() -> impl Iterator<Item = StreamChunk> {

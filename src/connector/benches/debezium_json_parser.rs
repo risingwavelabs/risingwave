@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Benchmark for Debezium JSON records with `DebeziumParser`.
+
 mod json_common;
 
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion};

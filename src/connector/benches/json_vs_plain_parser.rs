@@ -1,3 +1,20 @@
+// Copyright 2024 RisingWave Labs
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! Benchmark for comparing the performance of parsing JSON records directly
+//! through the `JsonParser` versus indirectly through the `PlainParser`.
+
 mod json_common;
 
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
@@ -58,11 +75,11 @@ fn bench_plain_parser_and_json_parser(c: &mut Criterion) {
                 .unwrap();
                 (parser, records.clone())
             },
-            |(mut parser, records)| async move {
+            |(parser, records)| async move {
                 let mut builder = SourceStreamChunkBuilder::with_capacity(get_descs(), NUM_RECORDS);
                 for record in records {
                     let writer = builder.row_writer();
-                    parser.parse_value(record, writer).await.unwrap();
+                    parser.parse_inner(record, writer).await.unwrap();
                 }
             },
             BatchSize::SmallInput,
