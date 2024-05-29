@@ -950,20 +950,6 @@ profile:
       - use: frontend
       - use: compactor
 
-  ci-1cn-1fe-kafka-with-recovery:
-    config-path: src/config/ci-recovery.toml
-    steps:
-      - use: minio
-      - use: etcd
-      - use: meta-node
-        meta-backend: etcd
-      - use: compute-node
-        enable-tiered-cache: true
-      - use: frontend
-      - use: compactor
-      - use: kafka
-        persist-data: true
-
   ci-1cn-1fe-user-kafka-with-recovery:
     config-path: src/config/ci-recovery.toml
     steps:
