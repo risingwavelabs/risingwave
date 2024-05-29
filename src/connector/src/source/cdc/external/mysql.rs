@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use futures::stream::BoxStream;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
@@ -27,7 +27,11 @@ use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, OFFSET_COLUMN_NAM
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
+use sea_schema::mysql::def::{CharSet, Collation, ColumnKey, ColumnType, StorageEngine, TableInfo};
+use sea_schema::mysql::discovery::SchemaDiscovery;
 use serde_derive::{Deserialize, Serialize};
+use sqlx::mysql::MySqlConnectOptions;
+use sqlx::MySqlPool;
 
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::source::cdc::external::{
@@ -66,28 +70,136 @@ impl MySqlOffset {
 }
 
 pub struct MySqlExternalTable {
-    columns: Vec<ColumnDesc>,
+    column_descs: Vec<ColumnDesc>,
     pk_names: Vec<String>,
 }
 
 impl MySqlExternalTable {
     pub async fn connect(config: ExternalTableConfig) -> ConnectorResult<Self> {
-        // TODO: connect to external db and read the schema
         tracing::debug!("connect to mysql");
+        let options = MySqlConnectOptions::new()
+            .username(&config.username)
+            .password(&config.password)
+            .host(&config.host)
+            .port(config.port.parse::<u16>().unwrap())
+            .database(&config.database)
+            .ssl_mode(match config.sslmode {
+                SslMode::Disabled | SslMode::Preferred => sqlx::mysql::MySqlSslMode::Disabled,
+                SslMode::Required => sqlx::mysql::MySqlSslMode::Required,
+            });
+
+        let connection = MySqlPool::connect_with(options).await?;
+        let schema_discovery = SchemaDiscovery::new(connection, config.database.as_str());
+
+        let table_schema = schema_discovery
+            .discover_table(TableInfo {
+                name: config.table.clone(),
+                engine: StorageEngine::InnoDb,
+                auto_increment: None,
+                char_set: CharSet::Utf8Mb4,
+                collation: Collation::Utf8Mb40900AiCi,
+                comment: "".to_string(),
+            })
+            .await?;
+
+        let mut column_descs = vec![];
+        let mut pk_names = vec![];
+        for col in table_schema.columns.iter() {
+            let data_type = type_to_rw_type(&col.col_type)?;
+            column_descs.push(ColumnDesc::named(
+                col.name.clone(),
+                ColumnId::placeholder(),
+                data_type,
+            ));
+            if matches!(col.key, ColumnKey::Primary) {
+                pk_names.push(col.name.clone());
+            }
+        }
 
         Ok(Self {
-            columns: vec![],
-            pk_names: vec![],
+            column_descs,
+            pk_names,
         })
     }
 
     pub fn column_descs(&self) -> &Vec<ColumnDesc> {
-        &self.columns
+        &self.column_descs
     }
 
     pub fn pk_names(&self) -> &Vec<String> {
         &self.pk_names
     }
+}
+
+fn type_to_rw_type(col_type: &ColumnType) -> ConnectorResult<DataType> {
+    let dtype = match col_type {
+        ColumnType::Serial => DataType::Int32,
+        ColumnType::Bit(attr) => {
+            // return Err(anyhow!("line type not supported").into());
+            tracing::info!("bit attr: {:?}", attr);
+            DataType::Boolean
+        }
+        ColumnType::TinyInt(_) | ColumnType::SmallInt(_) => DataType::Int16,
+        ColumnType::Bool => DataType::Boolean,
+        ColumnType::MediumInt(_) => DataType::Int32,
+        ColumnType::Int(_) => DataType::Int32,
+        ColumnType::BigInt(_) => DataType::Int64,
+        ColumnType::Decimal(_) => DataType::Decimal,
+        ColumnType::Float(_) => DataType::Float32,
+        ColumnType::Double(_) => DataType::Float64,
+        ColumnType::Date => DataType::Date,
+        ColumnType::Time(_) => DataType::Time,
+        ColumnType::DateTime(_) => DataType::Timestamp,
+        ColumnType::Timestamp(_) => DataType::Timestamptz,
+        ColumnType::Year => DataType::Int32,
+        ColumnType::Char(_)
+        | ColumnType::NChar(_)
+        | ColumnType::Varchar(_)
+        | ColumnType::NVarchar(_) => DataType::Varchar,
+        ColumnType::Binary(_) | ColumnType::Varbinary(_) => DataType::Bytea,
+        ColumnType::Text(_)
+        | ColumnType::TinyText(_)
+        | ColumnType::MediumText(_)
+        | ColumnType::LongText(_) => DataType::Varchar,
+        ColumnType::Blob(_)
+        | ColumnType::TinyBlob
+        | ColumnType::MediumBlob
+        | ColumnType::LongBlob => DataType::Bytea,
+        ColumnType::Enum(_) => DataType::Varchar,
+        ColumnType::Json => DataType::Jsonb,
+        ColumnType::Set(_) => {
+            return Err(anyhow!("set type not supported").into());
+        }
+        ColumnType::Geometry(_) => {
+            return Err(anyhow!("geometry type not supported").into());
+        }
+        ColumnType::Point(_) => {
+            return Err(anyhow!("point type not supported").into());
+        }
+        ColumnType::LineString(_) => {
+            return Err(anyhow!("line string type not supported").into());
+        }
+        ColumnType::Polygon(_) => {
+            return Err(anyhow!("polygon type not supported").into());
+        }
+        ColumnType::MultiPoint(_) => {
+            return Err(anyhow!("multi point type not supported").into());
+        }
+        ColumnType::MultiLineString(_) => {
+            return Err(anyhow!("multi line string type not supported").into());
+        }
+        ColumnType::MultiPolygon(_) => {
+            return Err(anyhow!("multi polygon type not supported").into());
+        }
+        ColumnType::GeometryCollection(_) => {
+            return Err(anyhow!("geometry collection type not supported").into());
+        }
+        ColumnType::Unknown(_) => {
+            return Err(anyhow!("unknown column type").into());
+        }
+    };
+
+    Ok(dtype)
 }
 
 pub struct MySqlExternalTableReader {
@@ -324,5 +436,30 @@ impl MySqlExternalTableReader {
 
     fn quote_column(column: &str) -> String {
         format!("`{}`", column)
+    }
+}
+#[cfg(test)]
+mod tests {
+    use crate::source::cdc::external::mysql::MySqlExternalTable;
+    use crate::source::cdc::external::ExternalTableConfig;
+
+    #[ignore]
+    #[tokio::test]
+    async fn test_mysql_schema() {
+        let config = ExternalTableConfig {
+            connector: "mysql-cdc".to_string(),
+            host: "localhost".to_string(),
+            port: "8306".to_string(),
+            username: "root".to_string(),
+            password: "123456".to_string(),
+            database: "mydb".to_string(),
+            schema: "".to_string(),
+            table: "part".to_string(),
+            sslmode: Default::default(),
+        };
+
+        let table = MySqlExternalTable::connect(config).await.unwrap();
+        println!("columns: {:?}", &table.column_descs);
+        println!("primary keys: {:?}", &table.pk_names);
     }
 }
