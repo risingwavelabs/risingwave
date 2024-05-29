@@ -775,51 +775,6 @@ impl DdlController {
                     src.id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
                 }
                 fill_table_stream_graph_info(src, table, *job_type, &mut fragment_graph);
-
-                // // TODO: read the table schema from upstream
-                // if matches!(job_type, TableJobType::SharedCdcSource) {
-                //     let mut table_desc = None;
-                //
-                //     for fragment in fragment_graph.fragments.values_mut() {
-                //         visit_fragment(fragment, |node_body| {
-                //             if let NodeBody::StreamCdcScan(cdc_scan_node) = node_body
-                //                 && let Some(external_table_desc) =
-                //                     cdc_scan_node.cdc_table_desc.as_mut()
-                //             {
-                //                 table_desc = Some(external_table_desc.clone());
-                //             }
-                //         });
-                //     }
-                //
-                //     if let Some(table_desc) = table_desc {
-                //         let properties: HashMap<String, String> =
-                //             table_desc.connect_properties.clone().into_iter().collect();
-                //         let _connector = properties.get(UPSTREAM_SOURCE_KEY).unwrap();
-                //         let _config = serde_json::from_value::<ExternalTableConfig>(
-                //             serde_json::to_value(properties).unwrap(),
-                //         )
-                //         .context("failed to extract external table config")?;
-                //
-                //         // connect
-                //         let pg_table = PostgresExternalTable::new();
-                //         pg_table.connect().await?;
-                //         table.columns = pg_table
-                //             .column_descs()
-                //             .into_iter()
-                //             .map(|col| ColumnCatalog {
-                //                 column_desc: Some(col.to_protobuf()),
-                //                 is_hidden: false,
-                //             })
-                //             .collect();
-                //         table.pk = pg_table
-                //             .pk_indices()
-                //             .into_iter()
-                //             .map(|index| {
-                //                 ColumnOrder::new(index, OrderType::ascending()).to_protobuf()
-                //             })
-                //             .collect();
-                //     }
-                // }
             }
             StreamingJob::Source(_) => {
                 // set the inner source id of source node.
