@@ -71,6 +71,8 @@ Then follow the prompts to start and connect to RisingWave.
 
 To learn about other installation options, such as using a Docker image, see [Quick Start](https://docs.risingwave.com/docs/current/get-started/).
 
+> Please note: RisingWave uses [Scarf](https://scarf.sh/) to collect anonymized installation analytics. These analytics help support us understand and improve the distribution of our package. However, if you'd like to opt out, you can do so by setting scarf.enabled = false in your project's risingwave/src/config/<your-config>.toml. 
+
 ## Production deployments
 
 [**RisingWave Cloud**](https://cloud.risingwave.com) offers the easiest way to run RisingWave in production, with a _forever-free_ developer tier.
