@@ -159,6 +159,7 @@ impl ObjectStore for OpendalObjectStore {
                 self.config.retry.streaming_read_attempt_timeout_ms,
             )))
             .reader_with(path)
+            .chunk(self.config.s3.developer.streaming_read_buffer_size)
             .await?;
         let stream = reader.into_bytes_stream(range).await?.map(|item| {
             item.map_err(|e| {
@@ -285,7 +286,7 @@ impl OpendalStreamingUploader {
                 config.retry.streaming_upload_attempt_timeout_ms,
             )))
             .writer_with(&path)
-            .concurrent(8)
+            .concurrent(config.s3.developer.upload_concurrency)
             .executor(Executor::new())
             .await?;
         Ok(Self {

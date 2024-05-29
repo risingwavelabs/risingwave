@@ -1034,6 +1034,12 @@ pub struct S3ObjectStoreDeveloperConfig {
 
     #[serde(default = "default::object_store_config::s3::developer::use_opendal")]
     pub use_opendal: bool,
+
+    #[serde(default = "default::object_store_config::s3::developer::upload_concurrency")]
+    pub upload_concurrency: usize,
+
+    #[serde(default = "default::object_store_config::s3::developer::streaming_read_buffer_size")]
+    pub streaming_read_buffer_size: usize,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
@@ -1879,6 +1885,14 @@ pub mod default {
                     // 1. Maintain compatibility so that there is no behavior change in cluster with RW_USE_OPENDAL_FOR_S3 set.
                     // 2. Change the default behavior to use opendal for s3 if RW_USE_OPENDAL_FOR_S3 is not set.
                     env_var_is_true_or(RW_USE_OPENDAL_FOR_S3, false)
+                }
+
+                pub fn upload_concurrency() -> usize {
+                    8
+                }
+
+                pub fn streaming_read_buffer_size() -> usize {
+                    8 * (1 << 20)
                 }
             }
         }
