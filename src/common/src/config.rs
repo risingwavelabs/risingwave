@@ -536,6 +536,7 @@ pub struct BatchConfig {
     #[serde(default = "default::batch::redact_sql_option_keywords")]
     pub redact_sql_option_keywords: Vec<String>,
 
+    /// Enable the spill out to disk feature for batch queries.
     #[serde(default = "default::batch::enable_spill")]
     pub enable_spill: bool,
 }
