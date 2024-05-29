@@ -18,10 +18,10 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use fail::fail_point;
-use futures::{stream, StreamExt, TryStreamExt};
+use futures::{stream, StreamExt};
 use opendal::layers::{RetryLayer, TimeoutLayer};
 use opendal::services::Memory;
-use opendal::{Metakey, Operator, Writer};
+use opendal::{Executor, Metakey, Operator, Writer};
 use risingwave_common::config::ObjectStoreConfig;
 use risingwave_common::range::RangeBoundsExt;
 use thiserror_ext::AsReport;
@@ -160,7 +160,7 @@ impl ObjectStore for OpendalObjectStore {
             )))
             .reader_with(path)
             .await?;
-        let stream = reader.into_bytes_stream(range).map(|item| {
+        let stream = reader.into_bytes_stream(range).await?.map(|item| {
             item.map_err(|e| {
                 ObjectError::internal(format!("reader into_stream fail {}", e.as_report()))
             })
@@ -286,6 +286,7 @@ impl OpendalStreamingUploader {
             )))
             .writer_with(&path)
             .concurrent(8)
+            .executor(Executor::new())
             .await?;
         Ok(Self {
             writer,

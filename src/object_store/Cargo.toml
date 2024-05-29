@@ -28,7 +28,9 @@ hyper-rustls = { version = "0.24.2", features = ["webpki-roots"] }
 hyper-tls = "0.5.0"
 itertools = { workspace = true }
 madsim = "0.2.27"
-opendal = { version = "0.46", features = [
+# opendal = { version = "0.46", features = [
+opendal = { git = "https://github.com/apache/opendal", rev = "dd70b3c706f1689c2fe9455405cbd1e773c483ab", features = [
+    "executors-tokio",
     "services-azblob",
     "services-fs",
     "services-gcs",
