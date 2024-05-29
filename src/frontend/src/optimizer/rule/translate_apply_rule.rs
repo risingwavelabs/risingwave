@@ -222,15 +222,7 @@ impl TranslateApplyRule {
                     indices.iter_mut().for_each(|index| *index -= left_len);
                     offset += left_len;
                 }
-                if let Some(join) = plan.as_logical_join() {
-                    Self::rewrite_join(join, indices, offset, index_mapping, data_types, index)
-                } else if let Some(apply) = plan.as_logical_apply() {
-                    Self::rewrite_apply(apply, indices, offset, index_mapping, data_types, index)
-                } else if let Some(scan) = plan.as_logical_scan() {
-                    Self::rewrite_scan(scan, indices, offset, index_mapping, data_types, index)
-                } else {
-                    None
-                }
+                Self::rewrite(&plan, indices, offset, index_mapping, data_types, index)
             };
         match (left_idxs.is_empty(), right_idxs.is_empty()) {
             (true, false) => {
@@ -310,36 +302,7 @@ impl TranslateApplyRule {
             match apply.join_type() {
                 JoinType::Inner | JoinType::LeftSemi | JoinType::LeftAnti | JoinType::LeftOuter => {
                     let plan = apply.left();
-                    if let Some(join) = plan.as_logical_join() {
-                        Self::rewrite_join(
-                            join,
-                            left_idxs,
-                            offset,
-                            index_mapping,
-                            data_types,
-                            index,
-                        )
-                    } else if let Some(apply) = plan.as_logical_apply() {
-                        Self::rewrite_apply(
-                            apply,
-                            left_idxs,
-                            offset,
-                            index_mapping,
-                            data_types,
-                            index,
-                        )
-                    } else if let Some(scan) = plan.as_logical_scan() {
-                        Self::rewrite_scan(
-                            scan,
-                            left_idxs,
-                            offset,
-                            index_mapping,
-                            data_types,
-                            index,
-                        )
-                    } else {
-                        None
-                    }
+                    Self::rewrite(&plan, left_idxs, offset, index_mapping, data_types, index)
                 }
                 JoinType::RightOuter
                 | JoinType::RightAnti
