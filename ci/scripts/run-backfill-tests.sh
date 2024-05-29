@@ -187,7 +187,7 @@ test_sink_backfill_recovery() {
 
   # Restart
   restart_cluster
-  sleep 3
+  sleep 5
 
   # Sink back into rw
   run_sql "CREATE TABLE table_kafka (v1 int primary key)
