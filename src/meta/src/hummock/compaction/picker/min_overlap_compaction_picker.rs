@@ -245,6 +245,11 @@ impl NonOverlapSubLevelPicker {
             sstable_infos: vec![vec![]; levels.len()],
             ..Default::default()
         };
+        let first_table_id = if sst.table_ids.len() == 1 {
+            sst.table_ids[0]
+        } else {
+            0
+        };
 
         let mut pick_levels_range = Vec::default();
         let mut max_select_level_count = 0;
@@ -305,6 +310,12 @@ impl NonOverlapSubLevelPicker {
 
                 for other in &target_tables[overlap_files_range.clone()] {
                     if level_handler.is_pending_compact(&other.sst_id) {
+                        break 'expand_new_level;
+                    }
+                    if first_table_id != 0
+                        && (other.table_ids.len() > 0
+                            || (other.table_ids.len() == 1 && other.table_ids[0] != first_table_id))
+                    {
                         break 'expand_new_level;
                     }
                     basic_overlap_info.update(other);
