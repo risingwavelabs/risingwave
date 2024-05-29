@@ -1724,6 +1724,7 @@ mod tests {
         // The truncate should take effect
         reader
             .truncate(TruncateOffset::Barrier { epoch: epoch1 })
+            .await
             .unwrap();
         let epoch4 = epoch3.next_epoch();
         writer.flush_current_epoch(epoch4, true).await.unwrap();
