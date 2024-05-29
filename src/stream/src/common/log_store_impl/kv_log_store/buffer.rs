@@ -156,6 +156,16 @@ impl LogStoreBufferInner {
         }
     }
 
+    fn add_truncate_offset(&mut self, (epoch, seq_id): ReaderTruncationOffsetType) {
+        if let Some((prev_epoch, ref mut prev_seq_id)) = self.truncation_list.back_mut()
+            && *prev_epoch == epoch
+        {
+            *prev_seq_id = seq_id;
+        } else {
+            self.truncation_list.push_back((epoch, seq_id));
+        }
+    }
+
     fn rewind(&mut self) {
         while let Some((epoch, item)) = self.consumed_queue.pop_front() {
             self.unconsumed_queue.push_back((epoch, item))
@@ -327,7 +337,7 @@ impl LogStoreBufferReceiver {
         }
     }
 
-    pub(crate) fn truncate(&mut self, offset: TruncateOffset) {
+    pub(crate) fn truncate_buffer(&mut self, offset: TruncateOffset) {
         let mut inner = self.buffer.inner();
         let mut latest_offset: Option<ReaderTruncationOffsetType> = None;
         while let Some((epoch, item)) = inner.consumed_queue.back() {
@@ -387,15 +397,14 @@ impl LogStoreBufferReceiver {
                 }
             }
         }
-        if let Some((epoch, seq_id)) = latest_offset {
-            if let Some((prev_epoch, ref mut prev_seq_id)) = inner.truncation_list.back_mut()
-                && *prev_epoch == epoch
-            {
-                *prev_seq_id = seq_id;
-            } else {
-                inner.truncation_list.push_back((epoch, seq_id));
-            }
+        if let Some(offset) = latest_offset {
+            inner.add_truncate_offset(offset);
         }
+    }
+
+    pub(crate) fn truncate_historical(&mut self, epoch: u64) {
+        let mut inner = self.buffer.inner();
+        inner.add_truncate_offset((epoch, None));
     }
 
     pub(crate) fn rewind(&self) {
