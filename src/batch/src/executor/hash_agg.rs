@@ -220,6 +220,7 @@ impl<K> HashAggExecutor<K> {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn new_with_init_agg_state(
         aggs: Arc<Vec<BoxedAggregateFunction>>,
         group_key_columns: Vec<usize>,
