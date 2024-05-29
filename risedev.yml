@@ -861,6 +861,10 @@ profile:
         user-managed: true
         address: message_queue
         port: 29092
+      - use: schema-registry
+        user-managed: true
+        address: schemaregistry
+        port: 8081
 
   ci-inline-source-test:
     config-path: src/config/ci-recovery.toml
