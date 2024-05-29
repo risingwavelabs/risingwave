@@ -30,6 +30,7 @@ use risingwave_common::row::Row as _;
 use risingwave_common::types::{DataType, ScalarRefImpl, ToText};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use serde_derive::Deserialize;
+use serde_with::{serde_as, DisplayFromStr};
 use with_options::WithOptions;
 
 use super::log_store::DeliveryFutureManagerAddFuture;
@@ -42,13 +43,22 @@ use crate::error::ConnectorResult;
 
 pub const DYNAMO_DB_SINK: &str = "dynamodb";
 
+#[serde_as]
 #[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct DynamoDbConfig {
     #[serde(rename = "table", alias = "dynamodb.table")]
     pub table: String,
 
+    #[serde(rename = "dynamodb.max_batch_rows", default = "default_max_batch_rows")]
+    #[serde_as(as = "DisplayFromStr")]
+    pub max_batch_rows: usize,
+
     #[serde(flatten)]
     pub aws_auth_props: AwsAuthProps,
+}
+
+fn default_max_batch_rows() -> usize {
+    1024
 }
 
 impl DynamoDbConfig {
@@ -102,7 +112,6 @@ impl Sink for DynamoDbSink {
                 table_name
             )));
         }
-
         let pk_set: HashSet<String> = self
             .schema
             .fields()
@@ -114,7 +123,7 @@ impl Sink for DynamoDbSink {
         let key_schema = table.key_schema();
 
         for key_element in key_schema.iter().map(|x| x.attribute_name()) {
-            if !pk_set.iter().any(|x| x == key_element) {
+            if !pk_set.contains(key_element) {
                 return Err(SinkError::DynamoDb(anyhow!(
                     "table {} key field {} not found in schema or not primary key",
                     table_name,
@@ -157,7 +166,7 @@ struct DynamoDbRequest {
 }
 
 impl DynamoDbRequest {
-    fn extract_pkey_values(&self) -> Option<Vec<AttributeValue>> {
+    fn extract_pk_values(&self) -> Option<Vec<AttributeValue>> {
         let key = match (&self.inner.put_request(), &self.inner.delete_request()) {
             (Some(put_req), None) => &put_req.item,
             (None, Some(del_req)) => &del_req.key,
@@ -201,10 +210,10 @@ impl DynamoDbPayloadWriter {
             inner: req,
             key_items: self.dynamodb_keys.clone(),
         };
-        if let Some(v) = r_req.extract_pkey_values() {
+        if let Some(v) = r_req.extract_pk_values() {
             self.request_items.retain(|item| {
                 !item
-                    .extract_pkey_values()
+                    .extract_pk_values()
                     .unwrap_or_default()
                     .iter()
                     .all(|x| v.contains(x))
@@ -242,6 +251,7 @@ impl DynamoDbPayloadWriter {
 }
 
 pub struct DynamoDbSinkWriter {
+    max_batch_rows: usize,
     payload_writer: DynamoDbPayloadWriter,
     formatter: DynamoDbFormatter,
 }
@@ -277,6 +287,7 @@ impl DynamoDbSinkWriter {
         };
 
         Ok(Self {
+            max_batch_rows: config.max_batch_rows,
             payload_writer,
             formatter: DynamoDbFormatter { schema },
         })
@@ -295,6 +306,13 @@ impl DynamoDbSinkWriter {
                 Op::UpdateDelete => {}
             }
         }
+        if self.payload_writer.request_items.len() >= self.max_batch_rows {
+            self.payload_writer.write_chunk().await?;
+        }
+        Ok(())
+    }
+
+    async fn flush(&mut self) -> Result<()> {
         self.payload_writer.write_chunk().await
     }
 }
@@ -306,6 +324,13 @@ impl AsyncTruncateSinkWriter for DynamoDbSinkWriter {
         _add_future: DeliveryFutureManagerAddFuture<'a, Self::DeliveryFuture>,
     ) -> Result<()> {
         self.write_chunk_inner(chunk).await
+    }
+
+    async fn barrier(&mut self, is_checkpoint: bool) -> Result<()> {
+        if is_checkpoint {
+            self.flush().await?;
+        }
+        Ok(())
     }
 }
 
