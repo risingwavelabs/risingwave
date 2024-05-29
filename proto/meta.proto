@@ -560,6 +560,7 @@ message GetReschedulePlanResponse {
 }
 
 service ScaleService {
+  rpc SubscribeClusterInfo(GetClusterInfoRequest) returns (stream GetClusterInfoResponse);
   rpc GetClusterInfo(GetClusterInfoRequest) returns (GetClusterInfoResponse);
   rpc Reschedule(RescheduleRequest) returns (RescheduleResponse);
   rpc GetReschedulePlan(GetReschedulePlanRequest) returns (GetReschedulePlanResponse);
