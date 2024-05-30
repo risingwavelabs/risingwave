@@ -1064,7 +1064,7 @@ pub struct BytesProperties {
     pub column_name: Option<String>,
 }
 
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone)]
 pub struct ParquetProperties {
     pub column_name: Option<String>,
 }
