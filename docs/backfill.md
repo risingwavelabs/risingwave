@@ -361,14 +361,18 @@ and arrangement backfill will consume this historical data snapshot:
 #### Initialization
 
 Something to note is that for the first snapshot,
-upstream may not have committed that epoch.
-Additionally, we also have not replicated any upstream records
-during that epoch.
+upstream may not have finished committing data in that epoch to s3.
+
+Additionally, we have not replicated any upstream records
+during that epoch, only in the subsequent ones.
 
 As such, we must wait for that first checkpoint to be committed,
-before reading.
+before reading, or we risk missing the uncommitted data in our backfill.
 
 This is supported internally inside `init_epoch` for replicated state table.
+```shell
+        upstream_table.init_epoch(first_epoch).await?;
+```
 
 ### Recovery
 
