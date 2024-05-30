@@ -17,11 +17,11 @@
   formatted_sql: SET search_path = 'default', 'my_path'
 - input: set search_path to default, 'my_path';
   error_msg: |-
-    sql parser error: expected end of statement, found: , at line 1, column 27
+    sql parser error: expected end of statement, found: ,
     LINE 1: set search_path to default, 'my_path';
                                       ^
 - input: set search_path to 'my_path', default;
   error_msg: |-
-    sql parser error: expected parameter list value, found: default at line 1, column 31
+    sql parser error: expected parameter list value, found: default
     LINE 1: set search_path to 'my_path', default;
-                                                 ^
+                                          ^

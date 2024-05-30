@@ -462,19 +462,34 @@ impl<'a> Tokenizer<'a> {
     }
 
     /// Tokenize the statement and produce a vector of tokens with locations.
+    ///
+    /// Whitespaces are skipped.
     pub fn tokenize_with_location(&mut self) -> Result<Vec<TokenWithLocation>, TokenizerError> {
+        let tokens = self.tokenize()?;
+        Ok(tokens
+            .into_iter()
+            .filter(|token| !matches!(&token.token, Token::Whitespace(_)))
+            .collect())
+    }
+
+    /// Tokenize the statement and produce a vector of tokens.
+    ///
+    /// Whitespaces are included.
+    #[allow(dead_code)]
+    fn tokenize_with_whitespace(&mut self) -> Result<Vec<Token>, TokenizerError> {
+        let tokens = self.tokenize()?;
+        Ok(tokens.into_iter().map(|t| t.token).collect())
+    }
+
+    /// Tokenize the statement and produce a vector of tokens.
+    ///
+    /// Whitespaces are included.
+    fn tokenize(&mut self) -> Result<Vec<TokenWithLocation>, TokenizerError> {
         let mut tokens = Vec::new();
         while let Some(token) = self.next_token_with_location()? {
             tokens.push(token);
         }
         Ok(tokens)
-    }
-
-    /// Tokenize the statement and produce a vector of tokens without locations.
-    #[allow(dead_code)]
-    fn tokenize(&mut self) -> Result<Vec<Token>, TokenizerError> {
-        let tokens = self.tokenize_with_location()?;
-        Ok(tokens.into_iter().map(|t| t.token).collect())
     }
 
     /// Get the next token or return None
@@ -1238,7 +1253,7 @@ mod tests {
     fn tokenize_select_1() {
         let sql = String::from("SELECT 1");
         let mut tokenizer = Tokenizer::new(&sql);
-        let tokens = tokenizer.tokenize().unwrap();
+        let tokens = tokenizer.tokenize_with_whitespace().unwrap();
 
         let expected = vec![
             Token::make_keyword("SELECT"),
@@ -1253,7 +1268,7 @@ mod tests {
     fn tokenize_select_float() {
         let sql = String::from("SELECT .1");
         let mut tokenizer = Tokenizer::new(&sql);
-        let tokens = tokenizer.tokenize().unwrap();
+        let tokens = tokenizer.tokenize_with_whitespace().unwrap();
 
         let expected = vec![
             Token::make_keyword("SELECT"),
@@ -1268,7 +1283,7 @@ mod tests {
     fn tokenize_scalar_function() {
         let sql = String::from("SELECT sqrt(1)");
         let mut tokenizer = Tokenizer::new(&sql);
-        let tokens = tokenizer.tokenize().unwrap();
+        let tokens = tokenizer.tokenize_with_whitespace().unwrap();
 
         let expected = vec![
             Token::make_keyword("SELECT"),
@@ -1286,7 +1301,7 @@ mod tests {
     fn tokenize_string_string_concat() {
         let sql = String::from("SELECT 'a' || 'b'");
         let mut tokenizer = Tokenizer::new(&sql);
-        let tokens = tokenizer.tokenize().unwrap();
+        let tokens = tokenizer.tokenize_with_whitespace().unwrap();
 
         let expected = vec![
             Token::make_keyword("SELECT"),
@@ -1305,7 +1320,7 @@ mod tests {
     fn tokenize_bitwise_op() {
         let sql = String::from("SELECT one | two ^ three");
         let mut tokenizer = Tokenizer::new(&sql);
-        let tokens = tokenizer.tokenize().unwrap();
+        let tokens = tokenizer.tokenize_with_whitespace().unwrap();
 
         let expected = vec![
             Token::make_keyword("SELECT"),
@@ -1328,7 +1343,7 @@ mod tests {
         let sql =
             String::from("SELECT true XOR true, false XOR false, true XOR false, false XOR true");
         let mut tokenizer = Tokenizer::new(&sql);
-        let tokens = tokenizer.tokenize().unwrap();
+        let tokens = tokenizer.tokenize_with_whitespace().unwrap();
 
         let expected = vec![
             Token::make_keyword("SELECT"),
@@ -1367,7 +1382,7 @@ mod tests {
     fn tokenize_simple_select() {
         let sql = String::from("SELECT * FROM customer WHERE id = 1 LIMIT 5");
         let mut tokenizer = Tokenizer::new(&sql);
-        let tokens = tokenizer.tokenize().unwrap();
+        let tokens = tokenizer.tokenize_with_whitespace().unwrap();
 
         let expected = vec![
             Token::make_keyword("SELECT"),
@@ -1398,7 +1413,7 @@ mod tests {
     fn tokenize_explain_select() {
         let sql = String::from("EXPLAIN SELECT * FROM customer WHERE id = 1");
         let mut tokenizer = Tokenizer::new(&sql);
-        let tokens = tokenizer.tokenize().unwrap();
+        let tokens = tokenizer.tokenize_with_whitespace().unwrap();
 
         let expected = vec![
             Token::make_keyword("EXPLAIN"),
@@ -1427,7 +1442,7 @@ mod tests {
     fn tokenize_explain_analyze_select() {
         let sql = String::from("EXPLAIN ANALYZE SELECT * FROM customer WHERE id = 1");
         let mut tokenizer = Tokenizer::new(&sql);
-        let tokens = tokenizer.tokenize().unwrap();
+        let tokens = tokenizer.tokenize_with_whitespace().unwrap();
 
         let expected = vec![
             Token::make_keyword("EXPLAIN"),
@@ -1458,7 +1473,7 @@ mod tests {
     fn tokenize_string_predicate() {
         let sql = String::from("SELECT * FROM customer WHERE salary != 'Not Provided'");
         let mut tokenizer = Tokenizer::new(&sql);
-        let tokens = tokenizer.tokenize().unwrap();
+        let tokens = tokenizer.tokenize_with_whitespace().unwrap();
 
         let expected = vec![
             Token::make_keyword("SELECT"),
@@ -1485,7 +1500,7 @@ mod tests {
     fn tokenize_invalid_string() {
         let sql = String::from("\nمصطفىh");
         let mut tokenizer = Tokenizer::new(&sql);
-        let tokens = tokenizer.tokenize().unwrap();
+        let tokens = tokenizer.tokenize_with_whitespace().unwrap();
         // println!("tokens: {:#?}", tokens);
         let expected = vec![
             Token::Whitespace(Whitespace::Newline),
@@ -1503,7 +1518,7 @@ mod tests {
     fn tokenize_newline_in_string_literal() {
         let sql = String::from("'foo\r\nbar\nbaz'");
         let mut tokenizer = Tokenizer::new(&sql);
-        let tokens = tokenizer.tokenize().unwrap();
+        let tokens = tokenizer.tokenize_with_whitespace().unwrap();
         let expected = vec![Token::SingleQuotedString("foo\r\nbar\nbaz".to_string())];
         compare(expected, tokens);
     }
@@ -1513,7 +1528,7 @@ mod tests {
         let sql = String::from("select 'foo");
         let mut tokenizer = Tokenizer::new(&sql);
         assert_eq!(
-            tokenizer.tokenize(),
+            tokenizer.tokenize_with_whitespace(),
             Err(TokenizerError {
                 message: "Unterminated string literal".to_string(),
                 line: 1,
@@ -1527,7 +1542,7 @@ mod tests {
     fn tokenize_invalid_string_cols() {
         let sql = String::from("\n\nSELECT * FROM table\tمصطفىh");
         let mut tokenizer = Tokenizer::new(&sql);
-        let tokens = tokenizer.tokenize().unwrap();
+        let tokens = tokenizer.tokenize_with_whitespace().unwrap();
         // println!("tokens: {:#?}", tokens);
         let expected = vec![
             Token::Whitespace(Whitespace::Newline),
@@ -1554,7 +1569,7 @@ mod tests {
     fn tokenize_right_arrow() {
         let sql = String::from("FUNCTION(key=>value)");
         let mut tokenizer = Tokenizer::new(&sql);
-        let tokens = tokenizer.tokenize().unwrap();
+        let tokens = tokenizer.tokenize_with_whitespace().unwrap();
         let expected = vec![
             Token::make_word("FUNCTION", None),
             Token::LParen,
@@ -1570,7 +1585,7 @@ mod tests {
     fn tokenize_is_null() {
         let sql = String::from("a IS NULL");
         let mut tokenizer = Tokenizer::new(&sql);
-        let tokens = tokenizer.tokenize().unwrap();
+        let tokens = tokenizer.tokenize_with_whitespace().unwrap();
 
         let expected = vec![
             Token::make_word("a", None),
@@ -1587,7 +1602,7 @@ mod tests {
     fn tokenize_comment() {
         let sql = String::from("0--this is a comment\n1");
         let mut tokenizer = Tokenizer::new(&sql);
-        let tokens = tokenizer.tokenize().unwrap();
+        let tokens = tokenizer.tokenize_with_whitespace().unwrap();
         let expected = vec![
             Token::Number("0".to_string()),
             Token::Whitespace(Whitespace::SingleLineComment {
@@ -1603,7 +1618,7 @@ mod tests {
     fn tokenize_comment_at_eof() {
         let sql = String::from("--this is a comment");
         let mut tokenizer = Tokenizer::new(&sql);
-        let tokens = tokenizer.tokenize().unwrap();
+        let tokens = tokenizer.tokenize_with_whitespace().unwrap();
         let expected = vec![Token::Whitespace(Whitespace::SingleLineComment {
             prefix: "--".to_string(),
             comment: "this is a comment".to_string(),
@@ -1615,7 +1630,7 @@ mod tests {
     fn tokenize_multiline_comment() {
         let sql = String::from("0/*multi-line\n* /comment*/1");
         let mut tokenizer = Tokenizer::new(&sql);
-        let tokens = tokenizer.tokenize().unwrap();
+        let tokens = tokenizer.tokenize_with_whitespace().unwrap();
         let expected = vec![
             Token::Number("0".to_string()),
             Token::Whitespace(Whitespace::MultiLineComment(
@@ -1630,7 +1645,7 @@ mod tests {
     fn tokenize_nested_multiline_comment() {
         let sql = String::from("0/*multi-line\n* \n/* comment \n /*comment*/*/ */ /comment*/1");
         let mut tokenizer = Tokenizer::new(&sql);
-        let tokens = tokenizer.tokenize().unwrap();
+        let tokens = tokenizer.tokenize_with_whitespace().unwrap();
         let expected = vec![
             Token::Number("0".to_string()),
             Token::Whitespace(Whitespace::MultiLineComment(
@@ -1645,7 +1660,7 @@ mod tests {
     fn tokenize_multiline_comment_with_even_asterisks() {
         let sql = String::from("\n/** Comment **/\n");
         let mut tokenizer = Tokenizer::new(&sql);
-        let tokens = tokenizer.tokenize().unwrap();
+        let tokens = tokenizer.tokenize_with_whitespace().unwrap();
         let expected = vec![
             Token::Whitespace(Whitespace::Newline),
             Token::Whitespace(Whitespace::MultiLineComment("* Comment *".to_string())),
@@ -1659,7 +1674,7 @@ mod tests {
         let sql = String::from("\"foo");
         let mut tokenizer = Tokenizer::new(&sql);
         assert_eq!(
-            tokenizer.tokenize(),
+            tokenizer.tokenize_with_whitespace(),
             Err(TokenizerError {
                 message: "Expected close delimiter '\"' before EOF.".to_string(),
                 line: 1,
@@ -1673,7 +1688,7 @@ mod tests {
     fn tokenize_newlines() {
         let sql = String::from("line1\nline2\rline3\r\nline4\r");
         let mut tokenizer = Tokenizer::new(&sql);
-        let tokens = tokenizer.tokenize().unwrap();
+        let tokens = tokenizer.tokenize_with_whitespace().unwrap();
         let expected = vec![
             Token::make_word("line1", None),
             Token::Whitespace(Whitespace::Newline),
@@ -1691,7 +1706,7 @@ mod tests {
     fn tokenize_pg_regex_match() {
         let sql = "SELECT col ~ '^a', col ~* '^a', col !~ '^a', col !~* '^a'";
         let mut tokenizer = Tokenizer::new(sql);
-        let tokens = tokenizer.tokenize().unwrap();
+        let tokens = tokenizer.tokenize_with_whitespace().unwrap();
         let expected = vec![
             Token::make_keyword("SELECT"),
             Token::Whitespace(Whitespace::Space),
@@ -1729,7 +1744,7 @@ mod tests {
     fn tokenize_select_array() {
         let sql = String::from("SELECT '{1, 2, 3}'");
         let mut tokenizer = Tokenizer::new(&sql);
-        let tokens = tokenizer.tokenize().unwrap();
+        let tokens = tokenizer.tokenize_with_whitespace().unwrap();
 
         let expected = vec![
             Token::make_keyword("SELECT"),

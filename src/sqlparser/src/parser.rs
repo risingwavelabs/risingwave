@@ -25,13 +25,12 @@ use core::fmt;
 use itertools::Itertools;
 use tracing::{debug, instrument};
 use winnow::combinator::{alt, cut_err, dispatch, fail, opt, peek, preceded, repeat, separated};
-use winnow::error::{FromExternalError, StrContext, StrContextValue};
 use winnow::{PResult, Parser as _};
 
 use crate::ast::*;
 use crate::keywords::{self, Keyword};
 use crate::parser_v2;
-use crate::parser_v2::{keyword, literal_i64, literal_uint};
+use crate::parser_v2::{keyword, literal_i64, literal_uint, ParserExt as _};
 use crate::tokenizer::*;
 
 pub(crate) const UPSTREAM_SOURCE_KEY: &str = "connector";
@@ -58,7 +57,7 @@ pub struct StrError(pub String);
 #[macro_export]
 macro_rules! parser_err {
     ($($arg:tt)*) => {
-        return Err(winnow::error::ErrMode::Cut(<winnow::error::ContextError as winnow::error::FromExternalError<_, _>>::from_external_error(
+        return Err(winnow::error::ErrMode::Backtrack(<winnow::error::ContextError as winnow::error::FromExternalError<_, _>>::from_external_error(
             &Parser::default(),
             winnow::error::ErrorKind::Fail,
             $crate::parser::StrError(format!($($arg)*)),
@@ -68,7 +67,7 @@ macro_rules! parser_err {
 
 impl From<StrError> for winnow::error::ErrMode<winnow::error::ContextError> {
     fn from(e: StrError) -> Self {
-        winnow::error::ErrMode::Cut(winnow::error::ContextError::from_external_error(
+        winnow::error::ErrMode::Backtrack(<winnow::error::ContextError as winnow::error::FromExternalError<_, _>>::from_external_error(
             &Parser::default(),
             winnow::error::ErrorKind::Fail,
             e,
@@ -202,35 +201,56 @@ impl Parser<'_> {
         let mut tokenizer = Tokenizer::new(sql);
         let tokens = tokenizer.tokenize_with_location()?;
         let parser = Parser(&tokens);
-        let stmts: Vec<Option<Statement>> =
-            separated(.., opt(Parser::parse_statement), Token::SemiColon)
-                .parse(parser)
-                .map_err(|e| {
-                    // append SQL context to the error message, e.g.:
-                    // LINE 1: SELECT 1::int(2);
-                    let loc = match tokens.get(e.offset()) {
-                        Some(token) => token.location.clone(),
-                        None => {
-                            // get location of EOF
-                            Location {
-                                line: sql.lines().count() as u64,
-                                column: sql.lines().last().map_or(0, |l| l.len() as u64) + 1,
-                            }
-                        }
-                    };
-                    let prefix = format!("LINE {}: ", loc.line);
-                    let sql_line = sql.split('\n').nth(loc.line as usize - 1).unwrap();
-                    let cursor = " ".repeat(prefix.len() + loc.column as usize - 1);
-                    ParserError::ParserError(format!(
-                        "{}\n{}{}\n{}^",
-                        e.inner().to_string().replace('\n', ": "),
-                        prefix,
-                        sql_line,
-                        cursor
-                    ))
-                })?;
+        let stmts = Parser::parse_statements.parse(parser).map_err(|e| {
+            // append SQL context to the error message, e.g.:
+            // LINE 1: SELECT 1::int(2);
+            let loc = match tokens.get(e.offset()) {
+                Some(token) => token.location.clone(),
+                None => {
+                    // get location of EOF
+                    Location {
+                        line: sql.lines().count() as u64,
+                        column: sql.lines().last().map_or(0, |l| l.len() as u64) + 1,
+                    }
+                }
+            };
+            let prefix = format!("LINE {}: ", loc.line);
+            let sql_line = sql.split('\n').nth(loc.line as usize - 1).unwrap();
+            let cursor = " ".repeat(prefix.len() + loc.column as usize - 1);
+            ParserError::ParserError(format!(
+                "{}\n{}{}\n{}^",
+                e.inner().to_string().replace('\n', ": "),
+                prefix,
+                sql_line,
+                cursor
+            ))
+        })?;
         debug!("parsed statements:\n{:#?}", stmts);
-        Ok(stmts.into_iter().flatten().collect())
+        Ok(stmts)
+    }
+
+    /// Parse a list of semicolon-separeted statements.
+    fn parse_statements(&mut self) -> PResult<Vec<Statement>> {
+        let mut stmts = Vec::new();
+        let mut expecting_statement_delimiter = false;
+        loop {
+            // ignore empty statements (between successive statement delimiters)
+            while self.consume_token(&Token::SemiColon) {
+                expecting_statement_delimiter = false;
+            }
+
+            if self.peek_token() == Token::EOF {
+                break;
+            }
+            if expecting_statement_delimiter {
+                return self.expected("end of statement");
+            }
+
+            let statement = self.parse_statement()?;
+            stmts.push(statement);
+            expecting_statement_delimiter = true;
+        }
+        Ok(stmts)
     }
 
     /// Parse a single top-level statement (such as SELECT, INSERT, CREATE, etc.),
@@ -290,17 +310,13 @@ impl Parser<'_> {
                 Keyword::FLUSH => Ok(Statement::Flush),
                 Keyword::WAIT => Ok(Statement::Wait),
                 Keyword::RECOVER => Ok(Statement::Recover),
-                _ => fail
-                    .context(StrContext::Label("statement"))
-                    .parse_next(self),
+                _ => fail.expect("statement").parse_next(self),
             },
             Token::LParen => {
                 *self = checkpoint;
                 Ok(Statement::Query(Box::new(self.parse_query()?)))
             }
-            _ => fail
-                .context(StrContext::Label("statement"))
-                .parse_next(self),
+            _ => fail.expect("statement").parse_next(self),
         }
     }
 
@@ -863,9 +879,7 @@ impl Parser<'_> {
             Keyword::GROUPS => keyword.value(WindowFrameUnits::Groups),
             _ => fail,
         }
-        .context(StrContext::Expected(StrContextValue::Description(
-            "ROWS, RANGE, or GROUPS",
-        )))
+        .expect("ROWS, RANGE, or GROUPS")
         .parse_next(self)
     }
 
@@ -1168,9 +1182,7 @@ impl Parser<'_> {
             Keyword::TRAILING => keyword.value(TrimWhereField::Trailing),
             _ => fail
         }
-        .context(StrContext::Expected(StrContextValue::Description(
-            "BOTH, LEADING, or TRAILING",
-        )))
+        .expect("BOTH, LEADING, or TRAILING")
         .parse_next(self)
     }
 
@@ -1232,7 +1244,7 @@ impl Parser<'_> {
             Keyword::SECOND => keyword.value(DateTimeField::Second),
             _ => fail,
         }
-        .context(StrContext::Label("date/time field"))
+        .expect("date/time field")
         .parse_next(self)
     }
 
@@ -1246,11 +1258,15 @@ impl Parser<'_> {
     //   select extract('invaLId' from null::date);
     // ```
     pub fn parse_date_time_field_in_extract(&mut self) -> PResult<String> {
+        let checkpoint = *self;
         let token = self.next_token();
         match token.token {
             Token::Word(w) => Ok(w.value.to_uppercase()),
             Token::SingleQuotedString(s) => Ok(s.to_uppercase()),
-            _ => self.expected("date/time field"),
+            _ => {
+                *self = checkpoint;
+                self.expected("date/time field")
+            }
         }
     }
 
@@ -3571,34 +3587,34 @@ impl Parser<'_> {
     }
 
     fn parse_set_variable(&mut self) -> PResult<SetVariableValue> {
-        let mut values = vec![];
-        loop {
-            let token = self.peek_token();
-            let checkpoint = *self;
-            let value = match (self.parse_value(), token.token) {
-                (Ok(value), _) => SetVariableValueSingle::Literal(value),
-                (Err(_), Token::Word(w)) => {
-                    if w.keyword == Keyword::DEFAULT {
-                        if !values.is_empty() {
-                            self.expected_at(checkpoint, "parameter list value")?
+        alt((
+            Keyword::DEFAULT.value(SetVariableValue::Default),
+            separated(
+                1..,
+                alt((
+                    Self::parse_value.map(SetVariableValueSingle::Literal),
+                    |parser: &mut Self| {
+                        let checkpoint = *parser;
+                        let ident = parser.parse_identifier()?;
+                        if ident.value == "default" {
+                            *parser = checkpoint;
+                            return parser.expected("parameter list value").map_err(|e| e.cut());
                         }
-                        return Ok(SetVariableValue::Default);
-                    } else {
-                        SetVariableValueSingle::Ident(w.to_ident()?)
-                    }
+                        Ok(SetVariableValueSingle::Ident(ident))
+                    },
+                    fail.expect("parameter value"),
+                )),
+                Token::Comma,
+            )
+            .map(|list: Vec<SetVariableValueSingle>| {
+                if list.len() == 1 {
+                    SetVariableValue::Single(list[0].clone())
+                } else {
+                    SetVariableValue::List(list)
                 }
-                (Err(_), _) => self.expected_at(checkpoint, "parameter value")?,
-            };
-            values.push(value);
-            if !self.consume_token(&Token::Comma) {
-                break;
-            }
-        }
-        if values.len() == 1 {
-            Ok(SetVariableValue::Single(values[0].clone()))
-        } else {
-            Ok(SetVariableValue::List(values))
-        }
+            }),
+        ))
+        .parse_next(self)
     }
 
     pub fn parse_number_value(&mut self) -> PResult<String> {
@@ -4209,17 +4225,14 @@ impl Parser<'_> {
     pub fn parse_set(&mut self) -> PResult<Statement> {
         let modifier = self.parse_one_of_keywords(&[Keyword::SESSION, Keyword::LOCAL]);
         if self.parse_keywords(&[Keyword::TIME, Keyword::ZONE]) {
-            let checkpoint = *self;
-            let token = self.peek_token();
-            let value = match (self.parse_value(), token.token) {
-                (Ok(value), _) => SetTimeZoneValue::Literal(value),
-                (Err(_), Token::Word(w)) if w.keyword == Keyword::DEFAULT => {
-                    SetTimeZoneValue::Default
-                }
-                (Err(_), Token::Word(w)) if w.keyword == Keyword::LOCAL => SetTimeZoneValue::Local,
-                (Err(_), Token::Word(w)) => SetTimeZoneValue::Ident(w.to_ident()?),
-                (Err(_), _) => self.expected_at(checkpoint, "variable value")?,
-            };
+            let value = alt((
+                Keyword::DEFAULT.value(SetTimeZoneValue::Default),
+                Keyword::LOCAL.value(SetTimeZoneValue::Local),
+                Self::parse_identifier.map(SetTimeZoneValue::Ident),
+                Self::parse_value.map(SetTimeZoneValue::Literal),
+            ))
+            .expect("variable")
+            .parse_next(self)?;
 
             Ok(Statement::SetTimeZone {
                 local: modifier == Some(Keyword::LOCAL),

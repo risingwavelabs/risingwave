@@ -13,7 +13,7 @@
 use winnow::stream::{Checkpoint, Offset, SliceLen, Stream, StreamIsPartial, UpdateSlice};
 
 use crate::parser::Parser;
-use crate::tokenizer::{Token, TokenWithLocation, Whitespace};
+use crate::tokenizer::TokenWithLocation;
 
 #[derive(Copy, Clone, Debug)]
 pub struct CheckpointWrapper<'a>(Checkpoint<&'a [TokenWithLocation], &'a [TokenWithLocation]>);
@@ -25,15 +25,14 @@ impl<'a> Offset<CheckpointWrapper<'a>> for CheckpointWrapper<'a> {
     }
 }
 
+// Used for diagnostics with `--features winnow/debug`.
 impl<'a> std::fmt::Debug for Parser<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        for tok in self.0 {
-            let tok = &tok.token;
-            if matches!(tok, Token::Whitespace(Whitespace::Newline)) {
-                write!(f, "\\n")?;
-            } else {
-                write!(f, "{}", tok)?;
-            }
+        if let Some(token) = self.0.first() {
+            write!(f, "{}", token.token)?;
+        }
+        for token in self.0.iter().skip(1) {
+            write!(f, " {}", token.token)?;
         }
         Ok(())
     }
