@@ -99,3 +99,28 @@ impl DummyExecutor {
     #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_nothing() {}
 }
+
+pub struct WrapStreamExecutor {
+    schema: Schema,
+    stream: BoxedDataChunkStream,
+}
+
+impl WrapStreamExecutor {
+    pub fn new(schema: Schema, stream: BoxedDataChunkStream) -> Self {
+        Self { schema, stream }
+    }
+}
+
+impl Executor for WrapStreamExecutor {
+    fn schema(&self) -> &Schema {
+        &self.schema
+    }
+
+    fn identity(&self) -> &str {
+        "WrapStreamExecutor"
+    }
+
+    fn execute(self: Box<Self>) -> BoxedDataChunkStream {
+        self.stream
+    }
+}
