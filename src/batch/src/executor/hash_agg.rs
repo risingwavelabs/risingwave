@@ -21,6 +21,7 @@ use anyhow::anyhow;
 use bytes::Bytes;
 use futures_async_stream::try_stream;
 use futures_util::AsyncReadExt;
+use hashbrown::hash_map::Entry;
 use itertools::Itertools;
 use prost::Message;
 use risingwave_common::array::{DataChunk, StreamChunk};
@@ -63,7 +64,6 @@ impl HashKeyDispatcher for HashAggExecutorBuilder {
             self.group_key_types,
             self.schema,
             self.child,
-            None,
             self.identity,
             self.chunk_size,
             self.mem_context,
@@ -196,8 +196,35 @@ pub struct HashAggExecutor<K> {
 }
 
 impl<K> HashAggExecutor<K> {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
+        aggs: Arc<Vec<BoxedAggregateFunction>>,
+        group_key_columns: Vec<usize>,
+        group_key_types: Vec<DataType>,
+        schema: Schema,
+        child: BoxedExecutor,
+        identity: String,
+        chunk_size: usize,
+        mem_context: MemoryContext,
+        enable_spill: bool,
+        shutdown_rx: ShutdownToken,
+    ) -> Self {
+        Self::new_with_init_agg_state(
+            aggs,
+            group_key_columns,
+            group_key_types,
+            schema,
+            child,
+            None,
+            identity,
+            chunk_size,
+            mem_context,
+            enable_spill,
+            shutdown_rx,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn new_with_init_agg_state(
         aggs: Arc<Vec<BoxedAggregateFunction>>,
         group_key_columns: Vec<usize>,
         group_key_types: Vec<DataType>,
@@ -252,7 +279,6 @@ impl BuildHasher for SpillBuildHasher {
     }
 }
 
-const DEFAULT_SPILL_CHUNK_SIZE: usize = 1024;
 const DEFAULT_IO_CHANNEL_SIZE: usize = 8;
 
 /// `AggSpillManager` is used to manage how to write spill data file and read them back.
@@ -287,7 +313,7 @@ pub struct AggSpillManager {
 }
 
 impl AggSpillManager {
-    pub fn new(
+    fn new(
         agg_identity: &String,
         partition_num: usize,
         group_key_types: Vec<DataType>,
@@ -325,7 +351,7 @@ impl AggSpillManager {
         })
     }
 
-    pub async fn init_writers(&mut self) -> Result<()> {
+    async fn init_writers(&mut self) -> Result<()> {
         let writer_task = |mut writer: opendal::Writer, mut rx: Receiver<DataChunk>| async move {
             while let Some(chunk) = rx.recv().await {
                 let chunk_pb: PbDataChunk = chunk.to_protobuf();
@@ -341,7 +367,7 @@ impl AggSpillManager {
         for i in 0..self.partition_num {
             let agg_state_partition_file_name = format!("agg-state-p{}", i);
             let agg_state_writer = self.op.writer_with(&agg_state_partition_file_name).await?;
-            let (tx,rx) = channel(DEFAULT_IO_CHANNEL_SIZE);
+            let (tx, rx) = channel(DEFAULT_IO_CHANNEL_SIZE);
             self.agg_state_writer_txs.push(tx);
             self.agg_state_chunk_builders.push(DataChunkBuilder::new(
                 self.group_key_types
@@ -368,7 +394,7 @@ impl AggSpillManager {
         Ok(())
     }
 
-    pub async fn write_agg_state_row(&mut self, row: impl Row, hash_code: u64) -> Result<()> {
+    async fn write_agg_state_row(&mut self, row: impl Row, hash_code: u64) -> Result<()> {
         let partition = hash_code as usize % self.partition_num;
         if let Some(output_chunk) = self.agg_state_chunk_builders[partition].append_one_row(row) {
             self.agg_state_writer_txs[partition]
@@ -379,11 +405,7 @@ impl AggSpillManager {
         Ok(())
     }
 
-    pub async fn write_input_chunk(
-        &mut self,
-        chunk: DataChunk,
-        hash_codes: Vec<u64>,
-    ) -> Result<()> {
+    async fn write_input_chunk(&mut self, chunk: DataChunk, hash_codes: Vec<u64>) -> Result<()> {
         let (columns, vis) = chunk.into_parts_v2();
         for partition in 0..self.partition_num {
             let new_vis = vis.clone()
@@ -403,7 +425,7 @@ impl AggSpillManager {
         Ok(())
     }
 
-    pub async fn close_writers(&mut self) -> Result<()> {
+    async fn close_writers(&mut self) -> Result<()> {
         for partition in 0..self.partition_num {
             if let Some(output_chunk) = self.agg_state_chunk_builders[partition].consume_all() {
                 self.agg_state_writer_txs[partition]
@@ -533,10 +555,18 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
                     continue;
                 }
                 let mut new_group = false;
-                let states = groups.entry(key).or_insert_with(|| {
-                    new_group = true;
-                    self.aggs.iter().map(|agg| agg.create_state()).collect()
-                });
+                let states = match groups.entry(key) {
+                    Entry::Occupied(entry) => entry.into_mut(),
+                    Entry::Vacant(entry) => {
+                        new_group = true;
+                        let states = self
+                            .aggs
+                            .iter()
+                            .map(|agg| agg.create_state())
+                            .try_collect()?;
+                        entry.insert(states)
+                    }
+                };
 
                 // TODO: currently not a vectorized implementation
                 for (agg, state) in self.aggs.iter().zip_eq_fast(states) {
@@ -572,7 +602,7 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
                 self.group_key_types.clone(),
                 self.aggs.iter().map(|agg| agg.return_type()).collect(),
                 child_schema.data_types(),
-                DEFAULT_SPILL_CHUNK_SIZE,
+                self.chunk_size,
             )?;
             agg_spill_manager.init_writers().await?;
 
@@ -619,7 +649,11 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
 
             agg_spill_manager.close_writers().await?;
 
-            debug!("agg {} spill write time = {}ms", self.identity, start_time.elapsed().as_millis());
+            debug!(
+                "agg {} spill write time = {}ms",
+                self.identity,
+                start_time.elapsed().as_millis()
+            );
 
             // Process each partition one by one.
             for i in 0..agg_spill_manager.partition_num {
@@ -628,22 +662,23 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
 
                 let sub_hash_agg_identity = format!("{}-sub{}", self.identity.clone(), i);
 
-                let sub_hash_agg_executor: HashAggExecutor<K> = HashAggExecutor::new(
-                    self.aggs.clone(),
-                    self.group_key_columns.clone(),
-                    self.group_key_types.clone(),
-                    self.schema.clone(),
-                    Box::new(WrapStreamExecutor::new(child_schema.clone(), input_stream)),
-                    Some(Box::new(WrapStreamExecutor::new(
+                let sub_hash_agg_executor: HashAggExecutor<K> =
+                    HashAggExecutor::new_with_init_agg_state(
+                        self.aggs.clone(),
+                        self.group_key_columns.clone(),
+                        self.group_key_types.clone(),
                         self.schema.clone(),
-                        agg_state_stream,
-                    ))),
-                    sub_hash_agg_identity.clone(),
-                    self.chunk_size,
-                    self.mem_context.clone(),
-                    self.enable_spill,
-                    self.shutdown_rx.clone(),
-                );
+                        Box::new(WrapStreamExecutor::new(child_schema.clone(), input_stream)),
+                        Some(Box::new(WrapStreamExecutor::new(
+                            self.schema.clone(),
+                            agg_state_stream,
+                        ))),
+                        sub_hash_agg_identity.clone(),
+                        self.chunk_size,
+                        self.mem_context.clone(),
+                        self.enable_spill,
+                        self.shutdown_rx.clone(),
+                    );
 
                 debug!(
                     "create sub_hash_agg {} for hash_agg {} to spill",
@@ -660,7 +695,11 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
                     yield chunk;
                 }
 
-                debug!("agg {} spill read time = {}ms", sub_hash_agg_identity, start_time.elapsed().as_millis());
+                debug!(
+                    "agg {} spill read time = {}ms",
+                    sub_hash_agg_identity,
+                    start_time.elapsed().as_millis()
+                );
 
                 // Clear files of the current partition.
                 agg_spill_manager.clear_partition(i).await?;
@@ -773,6 +812,7 @@ mod tests {
                 order_by: vec![],
                 filter: None,
                 direct_args: vec![],
+                udf: None,
             };
 
             let agg_prost = HashAggNode {
@@ -849,6 +889,7 @@ mod tests {
             order_by: vec![],
             filter: None,
             direct_args: vec![],
+            udf: None,
         };
 
         let agg_prost = HashAggNode {
@@ -963,6 +1004,7 @@ mod tests {
             order_by: vec![],
             filter: None,
             direct_args: vec![],
+            udf: None,
         };
 
         let agg_prost = HashAggNode {

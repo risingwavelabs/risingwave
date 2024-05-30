@@ -29,7 +29,7 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::types::DataType;
 use risingwave_connector::parser::additional_columns::{
-    build_additional_column_catalog, COMPATIBLE_ADDITIONAL_COLUMNS,
+    build_additional_column_catalog, get_supported_additional_columns,
 };
 use risingwave_connector::parser::{
     schema_to_columns, AvroParserConfig, DebeziumAvroParserConfig, ProtobufParserConfig,
@@ -81,7 +81,7 @@ use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::generic::SourceNodeKind;
 use crate::optimizer::plan_node::{LogicalSource, ToStream, ToStreamContext};
 use crate::session::SessionImpl;
-use crate::utils::resolve_privatelink_in_with_option;
+use crate::utils::{resolve_privatelink_in_with_option, resolve_secret_in_with_options};
 use crate::{bind_data_type, build_graph, OptimizerContext, WithOptions};
 
 pub(crate) const UPSTREAM_SOURCE_KEY: &str = "connector";
@@ -446,6 +446,7 @@ pub(crate) async fn bind_columns_from_source(
                 // Parse the value but throw it away.
                 // It would be too late to report error in `SpecificParserConfig::new`,
                 // which leads to recovery loop.
+                // TODO: rely on SpecificParserConfig::new to validate, like Avro
                 TimestamptzHandling::from_options(&format_encode_options_to_consume)
                     .map_err(|err| InvalidInputSyntax(err.message))?;
                 try_consume_string_from_options(
@@ -503,7 +504,6 @@ pub(crate) async fn bind_columns_from_source(
 fn bind_columns_from_source_for_cdc(
     session: &SessionImpl,
     source_schema: &ConnectorSchema,
-    _with_properties: &HashMap<String, String>,
 ) -> Result<(Option<Vec<ColumnCatalog>>, StreamSourceInfo)> {
     let format_encode_options = WithOptions::try_from(source_schema.row_options())?.into_inner();
     let mut format_encode_options_to_consume = format_encode_options.clone();
@@ -552,12 +552,11 @@ pub fn handle_addition_columns(
     with_properties: &HashMap<String, String>,
     mut additional_columns: IncludeOption,
     columns: &mut Vec<ColumnCatalog>,
+    is_cdc_backfill_table: bool,
 ) -> Result<()> {
     let connector_name = with_properties.get_connector().unwrap(); // there must be a connector in source
 
-    if COMPATIBLE_ADDITIONAL_COLUMNS
-        .get(connector_name.as_str())
-        .is_none()
+    if get_supported_additional_columns(connector_name.as_str(), is_cdc_backfill_table).is_none()
         && !additional_columns.is_empty()
     {
         return Err(RwError::from(ProtocolError(format!(
@@ -596,6 +595,7 @@ pub fn handle_addition_columns(
             item.inner_field.as_deref(),
             data_type_name.as_deref(),
             true,
+            is_cdc_backfill_table,
         )?);
     }
 
@@ -839,12 +839,6 @@ pub(crate) async fn bind_source_pk(
             }
         }
         (Format::DebeziumMongo, Encode::Json) => {
-            if !additional_column_names.is_empty() {
-                return Err(RwError::from(ProtocolError(format!(
-                    "FORMAT DEBEZIUMMONGO forbids additional columns, but got {:?}",
-                    additional_column_names
-                ))));
-            }
             if sql_defined_pk {
                 sql_defined_pk_names
             } else {
@@ -918,6 +912,7 @@ fn check_and_add_timestamp_column(
             None,
             None,
             true,
+            false,
         )
         .unwrap();
         catalog.is_hidden = true;
@@ -1362,7 +1357,12 @@ pub async fn bind_create_source(
     )?;
 
     // add additional columns before bind pk, because `format upsert` requires the key column
-    handle_addition_columns(&with_properties, include_column_options, &mut columns)?;
+    handle_addition_columns(
+        &with_properties,
+        include_column_options,
+        &mut columns,
+        false,
+    )?;
     // compatible with the behavior that add a hidden column `_rw_kafka_timestamp` to each message from Kafka source
     if is_create_source {
         // must behind `handle_addition_columns`
@@ -1391,7 +1391,18 @@ pub async fn bind_create_source(
     }
     debug_assert!(is_column_ids_dedup(&columns));
 
-    let (mut columns, pk_col_ids, row_id_index) = bind_pk_on_relation(columns, pk_names, true)?;
+    let must_need_pk = if is_create_source {
+        with_properties.connector_need_pk()
+    } else {
+        // For those connectors that do not need generate a `row_id`` column in the source schema such as iceberg.
+        // But in such case, we can not create mv or table on the source because there is not a pk.
+        assert!(with_properties.connector_need_pk());
+
+        true
+    };
+
+    let (mut columns, pk_col_ids, row_id_index) =
+        bind_pk_on_relation(columns, pk_names, must_need_pk)?;
 
     let watermark_descs =
         bind_source_watermark(session, source_name.clone(), source_watermarks, &columns)?;
@@ -1412,6 +1423,7 @@ pub async fn bind_create_source(
     let mut with_properties = WithOptions::new(with_properties);
     let connection_id =
         resolve_privatelink_in_with_option(&mut with_properties, &schema_name, session)?;
+    let _secret_ref = resolve_secret_in_with_options(&mut with_properties, session)?;
 
     let definition: String = handler_args.normalized_sql.clone();
 
@@ -1471,7 +1483,7 @@ pub async fn handle_create_source(
         || (with_properties.is_kafka_connector() && session.config().rw_enable_shared_source());
 
     let (columns_from_resolve_source, mut source_info) = if create_cdc_source_job {
-        bind_columns_from_source_for_cdc(&session, &source_schema, &with_properties)?
+        bind_columns_from_source_for_cdc(&session, &source_schema)?
     } else {
         bind_columns_from_source(&session, &source_schema, &with_properties).await?
     };

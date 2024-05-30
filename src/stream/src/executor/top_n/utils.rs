@@ -49,7 +49,6 @@ pub trait TopNExecutorBase: Send + 'static {
     }
 
     fn evict(&mut self) {}
-    fn update_epoch(&mut self, _epoch: u64) {}
 
     fn init(&mut self, epoch: EpochPair) -> impl Future<Output = StreamExecutorResult<()>> + Send;
 
@@ -114,7 +113,6 @@ where
                         self.inner.update_vnode_bitmap(vnode_bitmap);
                     }
 
-                    self.inner.update_epoch(barrier.epoch.curr);
                     yield Message::Barrier(barrier)
                 }
             };

@@ -26,6 +26,7 @@ use crate::types::Row;
 
 pub type RowSet = Vec<Row>;
 pub type RowSetResult = Result<RowSet, BoxedError>;
+
 pub trait ValuesStream = Stream<Item = RowSetResult> + Unpin + Send;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -53,8 +54,10 @@ pub enum StatementType {
     CREATE_SCHEMA,
     CREATE_USER,
     CREATE_INDEX,
+    CREATE_AGGREGATE,
     CREATE_FUNCTION,
     CREATE_CONNECTION,
+    CREATE_SECRET,
     COMMENT,
     DECLARE_CURSOR,
     DESCRIBE,
@@ -65,6 +68,7 @@ pub enum StatementType {
     DROP_VIEW,
     DROP_INDEX,
     DROP_FUNCTION,
+    DROP_AGGREGATE,
     DROP_SOURCE,
     DROP_SINK,
     DROP_SUBSCRIPTION,
@@ -72,6 +76,7 @@ pub enum StatementType {
     DROP_DATABASE,
     DROP_USER,
     DROP_CONNECTION,
+    DROP_SECRET,
     ALTER_DATABASE,
     ALTER_SCHEMA,
     ALTER_INDEX,
@@ -116,6 +121,7 @@ impl std::fmt::Display for StatementType {
 }
 
 pub trait Callback = Future<Output = Result<(), BoxedError>> + Send;
+
 pub type BoxedCallback = Pin<Box<dyn Callback>>;
 
 pub struct PgResponse<VS> {
@@ -291,6 +297,7 @@ impl StatementType {
                 risingwave_sqlparser::ast::ObjectType::Connection => {
                     Ok(StatementType::DROP_CONNECTION)
                 }
+                risingwave_sqlparser::ast::ObjectType::Secret => Ok(StatementType::DROP_SECRET),
                 risingwave_sqlparser::ast::ObjectType::Subscription => {
                     Ok(StatementType::DROP_SUBSCRIPTION)
                 }

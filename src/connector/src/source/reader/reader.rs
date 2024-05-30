@@ -36,7 +36,7 @@ use crate::source::filesystem::opendal_source::{
 use crate::source::filesystem::{FsPageItem, OpendalFsSplit};
 use crate::source::{
     create_split_reader, BoxChunkSourceStream, BoxTryStream, Column, ConnectorProperties,
-    ConnectorState, SourceColumnDesc, SourceContext, SplitReader,
+    ConnectorState, SourceColumnDesc, SourceContext, SplitReader, WaitCheckpointTask,
 };
 
 #[derive(Clone, Debug)]
@@ -105,13 +105,22 @@ impl SourceReader {
         }
     }
 
-    /// Postgres and Oracle connectors need to commit the offset to upstream.
-    /// And we will spawn a separate tokio task to wait for epoch commit and commit the source offset.
-    pub fn need_commit_offset_to_upstream(&self) -> bool {
-        matches!(&self.config, ConnectorProperties::PostgresCdc(_))
+    /// Refer to `WaitCheckpointWorker` for more details.
+    pub async fn create_wait_checkpoint_task(&self) -> ConnectorResult<Option<WaitCheckpointTask>> {
+        Ok(match &self.config {
+            ConnectorProperties::PostgresCdc(_prop) => {
+                Some(WaitCheckpointTask::CommitCdcOffset(None))
+            }
+            ConnectorProperties::GooglePubsub(prop) => Some(WaitCheckpointTask::AckPubsubMessage(
+                prop.subscription_client().await?,
+                vec![],
+            )),
+            _ => None,
+        })
     }
 
-    pub async fn to_stream(
+    /// Build `SplitReader`s and then `BoxChunkSourceStream` from the given `ConnectorState` (`SplitImpl`s).
+    pub async fn build_stream(
         &self,
         state: ConnectorState,
         column_ids: Vec<ColumnId>,

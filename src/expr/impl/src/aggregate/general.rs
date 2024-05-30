@@ -203,7 +203,7 @@ mod tests {
 
     fn test_agg(pretty: &str, input: StreamChunk, expected: Datum) {
         let agg = build_append_only(&AggCall::from_pretty(pretty)).unwrap();
-        let mut state = agg.create_state();
+        let mut state = agg.create_state().unwrap();
         agg.update(&mut state, &input)
             .now_or_never()
             .unwrap()
@@ -471,7 +471,7 @@ mod tests {
         let chunk = StreamChunk::from_parts(ops, DataChunk::new(vec![Arc::new(data)], vis));
         let pretty = format!("({agg_desc}:int8 $0:int8)");
         let agg = build_append_only(&AggCall::from_pretty(pretty)).unwrap();
-        let mut state = agg.create_state();
+        let mut state = agg.create_state().unwrap();
         b.iter(|| {
             agg.update(&mut state, &chunk)
                 .now_or_never()

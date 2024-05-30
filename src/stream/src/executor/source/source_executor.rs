@@ -13,22 +13,22 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::str::FromStr;
 use std::time::Duration;
 
 use anyhow::anyhow;
 use either::Either;
 use futures::TryStreamExt;
 use itertools::Itertools;
-use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
+use risingwave_common::array::ArrayRef;
+use risingwave_common::metrics::{LabelGuardedIntCounter, GLOBAL_ERROR_METRICS};
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::epoch::{Epoch, EpochPair};
-use risingwave_connector::source::cdc::jni_source;
 use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
+use risingwave_connector::source::reader::reader::SourceReader;
 use risingwave_connector::source::{
     BoxChunkSourceStream, ConnectorState, SourceContext, SourceCtrlOpts, SplitId, SplitImpl,
-    SplitMetaData,
+    SplitMetaData, WaitCheckpointTask,
 };
 use risingwave_hummock_sdk::HummockReadEpoch;
 use thiserror_ext::AsReport;
@@ -92,16 +92,24 @@ impl<S: StateStore> SourceExecutor<S> {
         }
     }
 
-    pub fn spawn_wait_epoch_worker(
+    async fn spawn_wait_checkpoint_worker(
         core: &StreamSourceCore<S>,
-    ) -> UnboundedSender<(Epoch, HashMap<SplitId, String>)> {
-        let (wait_epoch_tx, wait_epoch_rx) = mpsc::unbounded_channel();
-        let wait_epoch_worker = WaitEpochWorker {
-            wait_epoch_rx,
+        source_reader: SourceReader,
+    ) -> StreamExecutorResult<Option<WaitCheckpointTaskBuilder>> {
+        let Some(initial_task) = source_reader.create_wait_checkpoint_task().await? else {
+            return Ok(None);
+        };
+        let (wait_checkpoint_tx, wait_checkpoint_rx) = mpsc::unbounded_channel();
+        let wait_checkpoint_worker = WaitCheckpointWorker {
+            wait_checkpoint_rx,
             state_store: core.split_state_store.state_table.state_store().clone(),
         };
-        tokio::spawn(wait_epoch_worker.run());
-        wait_epoch_tx
+        tokio::spawn(wait_checkpoint_worker.run());
+        Ok(Some(WaitCheckpointTaskBuilder {
+            wait_checkpoint_tx,
+            source_reader,
+            building_task: initial_task,
+        }))
     }
 
     pub async fn build_stream_source_reader(
@@ -132,7 +140,7 @@ impl<S: StateStore> SourceExecutor<S> {
         );
         let stream = source_desc
             .source
-            .to_stream(state, column_ids, Arc::new(source_ctx))
+            .build_stream(state, column_ids, Arc::new(source_ctx))
             .await
             .map_err(StreamExecutorError::connector_error);
 
@@ -172,17 +180,9 @@ impl<S: StateStore> SourceExecutor<S> {
         stream: &mut StreamReaderWithPause<BIASED, StreamChunk>,
         split_assignment: &HashMap<ActorId, Vec<SplitImpl>>,
         should_trim_state: bool,
+        source_split_change_count_metrics: &LabelGuardedIntCounter<4>,
     ) -> StreamExecutorResult<()> {
-        self.metrics
-            .source_split_change_count
-            .with_label_values(
-                &self
-                    .get_metric_labels()
-                    .iter()
-                    .map(AsRef::as_ref)
-                    .collect::<Vec<&str>>(),
-            )
-            .inc();
+        source_split_change_count_metrics.inc();
         if let Some(target_splits) = split_assignment.get(&self.actor_ctx.id).cloned() {
             if self
                 .update_state_if_changed(target_splits, should_trim_state)
@@ -387,11 +387,8 @@ impl<S: StateStore> SourceExecutor<S> {
             .build()
             .map_err(StreamExecutorError::connector_error)?;
 
-        let wait_epoch_tx = if source_desc.source.need_commit_offset_to_upstream() {
-            Some(Self::spawn_wait_epoch_worker(&core))
-        } else {
-            None
-        };
+        let mut wait_checkpoint_task_builder =
+            Self::spawn_wait_checkpoint_worker(&core, source_desc.source.clone()).await?;
 
         let (Some(split_idx), Some(offset_idx)) = get_split_offset_col_idx(&source_desc.columns)
         else {
@@ -490,6 +487,16 @@ impl<S: StateStore> SourceExecutor<S> {
         let mut last_barrier_time = Instant::now();
         let mut self_paused = false;
 
+        let source_output_row_count = self
+            .metrics
+            .source_output_row_count
+            .with_guarded_label_values(&self.get_metric_labels().each_ref().map(AsRef::as_ref));
+
+        let source_split_change_count = self
+            .metrics
+            .source_split_change_count
+            .with_guarded_label_values(&self.get_metric_labels().each_ref().map(AsRef::as_ref));
+
         while let Some(msg) = stream.next().await {
             let Ok(msg) = msg else {
                 tokio::time::sleep(Duration::from_millis(1000)).await;
@@ -535,6 +542,7 @@ impl<S: StateStore> SourceExecutor<S> {
                                     &mut stream,
                                     actor_splits,
                                     true,
+                                    &source_split_change_count,
                                 )
                                 .await?;
                             }
@@ -545,6 +553,7 @@ impl<S: StateStore> SourceExecutor<S> {
                                     &mut stream,
                                     actor_splits,
                                     false,
+                                    &source_split_change_count,
                                 )
                                 .await?;
                             }
@@ -566,19 +575,12 @@ impl<S: StateStore> SourceExecutor<S> {
 
                     // when handle a checkpoint barrier, spawn a task to wait for epoch commit notification
                     if barrier.kind.is_checkpoint()
-                        && !updated_splits.is_empty()
-                        && let Some(ref tx) = wait_epoch_tx
+                        && let Some(task_builder) = &mut wait_checkpoint_task_builder
                     {
-                        let mut updated_offsets = HashMap::new();
-                        for (split_id, split_impl) in updated_splits {
-                            if split_impl.is_cdc_split() {
-                                updated_offsets.insert(split_id, split_impl.get_cdc_split_offset());
-                            }
-                        }
+                        task_builder.update_task_on_checkpoint(updated_splits);
 
                         tracing::debug!("epoch to wait {:?}", epoch);
-                        tx.send((Epoch(epoch.prev), updated_offsets))
-                            .expect("wait_epoch_tx send success");
+                        task_builder.send(Epoch(epoch.prev)).await?
                     }
 
                     yield Message::Barrier(barrier);
@@ -590,6 +592,10 @@ impl<S: StateStore> SourceExecutor<S> {
                 }
 
                 Either::Right(chunk) => {
+                    if let Some(task_builder) = &mut wait_checkpoint_task_builder {
+                        let offset_col = chunk.column_at(offset_idx);
+                        task_builder.update_task_on_chunk(offset_col.clone());
+                    }
                     // TODO: confirm when split_offset_mapping is None
                     let split_offset_mapping =
                         get_split_offset_mapping_from_chunk(&chunk, split_idx, offset_idx);
@@ -639,16 +645,7 @@ impl<S: StateStore> SourceExecutor<S> {
                             .extend(state);
                     }
 
-                    self.metrics
-                        .source_output_row_count
-                        .with_label_values(
-                            &self
-                                .get_metric_labels()
-                                .iter()
-                                .map(AsRef::as_ref)
-                                .collect::<Vec<&str>>(),
-                        )
-                        .inc_by(chunk.cardinality() as u64);
+                    source_output_row_count.inc_by(chunk.cardinality() as u64);
                     let chunk =
                         prune_additional_cols(&chunk, split_idx, offset_idx, &source_desc.columns);
                     yield Message::Chunk(chunk);
@@ -710,18 +707,94 @@ impl<S: StateStore> Debug for SourceExecutor<S> {
     }
 }
 
-struct WaitEpochWorker<S: StateStore> {
-    wait_epoch_rx: UnboundedReceiver<(Epoch, HashMap<SplitId, String>)>,
+struct WaitCheckpointTaskBuilder {
+    wait_checkpoint_tx: UnboundedSender<(Epoch, WaitCheckpointTask)>,
+    source_reader: SourceReader,
+    building_task: WaitCheckpointTask,
+}
+
+impl WaitCheckpointTaskBuilder {
+    fn update_task_on_chunk(&mut self, offset_col: ArrayRef) {
+        #[expect(clippy::single_match)]
+        match &mut self.building_task {
+            WaitCheckpointTask::AckPubsubMessage(_, arrays) => {
+                arrays.push(offset_col);
+            }
+            _ => {}
+        }
+    }
+
+    fn update_task_on_checkpoint(&mut self, updated_splits: HashMap<SplitId, SplitImpl>) {
+        #[expect(clippy::single_match)]
+        match &mut self.building_task {
+            WaitCheckpointTask::CommitCdcOffset(offsets) => {
+                if !updated_splits.is_empty() {
+                    // cdc source only has one split
+                    assert_eq!(1, updated_splits.len());
+                    for (split_id, split_impl) in updated_splits {
+                        if split_impl.is_cdc_split() {
+                            *offsets = Some((split_id, split_impl.get_cdc_split_offset()));
+                        } else {
+                            unreachable!()
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Send and reset the building task to a new one.
+    async fn send(&mut self, epoch: Epoch) -> Result<(), anyhow::Error> {
+        let new_task = self
+            .source_reader
+            .create_wait_checkpoint_task()
+            .await?
+            .expect("wait checkpoint task should be created");
+        self.wait_checkpoint_tx
+            .send((epoch, std::mem::replace(&mut self.building_task, new_task)))
+            .expect("wait_checkpoint_tx send should succeed");
+        Ok(())
+    }
+}
+
+/// A worker used to do some work after each checkpoint epoch is committed.
+///
+/// # Usage Cases
+///
+/// Typically there are 2 issues related with ack on checkpoint:
+///
+/// 1. Correctness (at-least-once), or don't let upstream clean uncommitted data.
+///    For message queueing semantics (delete after ack), we should ack to avoid redelivery,
+///    and only ack after checkpoint to avoid data loss.
+///
+/// 2. Allow upstream to clean data after commit.
+///
+/// See also <https://github.com/risingwavelabs/risingwave/issues/16736#issuecomment-2109379790>
+///
+/// ## CDC
+///
+/// Commit last consumed offset to upstream DB, so that old data can be discarded.
+///
+/// ## Google Pub/Sub
+///
+/// Due to queueing semantics.
+/// Although Pub/Sub supports `retain_acked_messages` and `seek` functionality,
+/// it's quite limited unlike Kafka.
+///
+/// See also <https://cloud.google.com/pubsub/docs/subscribe-best-practices#process-messages>
+struct WaitCheckpointWorker<S: StateStore> {
+    wait_checkpoint_rx: UnboundedReceiver<(Epoch, WaitCheckpointTask)>,
     state_store: S,
 }
 
-impl<S: StateStore> WaitEpochWorker<S> {
+impl<S: StateStore> WaitCheckpointWorker<S> {
     pub async fn run(mut self) {
         tracing::debug!("wait epoch worker start success");
         loop {
             // poll the rx and wait for the epoch commit
-            match self.wait_epoch_rx.recv().await {
-                Some((epoch, updated_offsets)) => {
+            match self.wait_checkpoint_rx.recv().await {
+                Some((epoch, task)) => {
                     tracing::debug!("start to wait epoch {}", epoch.0);
                     let ret = self
                         .state_store
@@ -731,20 +804,7 @@ impl<S: StateStore> WaitEpochWorker<S> {
                     match ret {
                         Ok(()) => {
                             tracing::debug!(epoch = epoch.0, "wait epoch success");
-                            // cdc source only has one split
-                            assert_eq!(1, updated_offsets.len());
-                            let (split_id, offset) = updated_offsets.into_iter().next().unwrap();
-                            let source_id: u64 = u64::from_str(split_id.as_ref()).unwrap();
-                            // notify cdc connector to commit offset
-                            match jni_source::commit_cdc_offset(source_id, offset.clone()) {
-                                Ok(_) => {}
-                                Err(e) => {
-                                    tracing::error!(
-                                        error = %e.as_report(),
-                                        "source#{source_id}: failed to commit cdc offset: {offset}.",
-                                    )
-                                }
-                            }
+                            task.run().await;
                         }
                         Err(e) => {
                             tracing::error!(

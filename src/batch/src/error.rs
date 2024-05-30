@@ -140,7 +140,7 @@ pub enum BatchError {
     #[error("Not enough memory to run this query, batch memory limit is {0} bytes")]
     OutOfMemory(u64),
 
-    #[error(transparent)]
+    #[error("Failed to spill out to disk")]
     Spill(
         #[from]
         #[backtrace]

@@ -863,7 +863,7 @@ profile:
         port: 29092
 
   ci-inline-source-test:
-    config-path: src/config/ci.toml
+    config-path: src/config/ci-recovery.toml
     steps:
       - use: minio
       - use: etcd
@@ -950,7 +950,7 @@ profile:
       - use: frontend
       - use: compactor
 
-  ci-1cn-1fe-kafka-with-recovery:
+  ci-1cn-1fe-user-kafka-with-recovery:
     config-path: src/config/ci-recovery.toml
     steps:
       - use: minio
@@ -962,7 +962,9 @@ profile:
       - use: frontend
       - use: compactor
       - use: kafka
-        persist-data: true
+        user-managed: true
+        address: message_queue
+        port: 29092
 
   ci-meta-backup-test-etcd:
     config-path: src/config/ci-meta-backup-test.toml
@@ -1418,7 +1420,7 @@ template:
 
     # access key, secret key and region should be set in aws config (either by env var or .aws/config)
 
-  # Apache Kafka service
+  # Apache Kafka service backed by docker.
   kafka:
     # Id to be picked-up by services
     id: kafka-${port}
@@ -1434,6 +1436,9 @@ template:
 
     # Listen address
     listen-address: ${address}
+
+    # The docker image. Can be overridden to use a different version.
+    image: "confluentinc/cp-kafka:7.6.1"
 
     # If set to true, data will be persisted at data/{id}.
     persist-data: true
@@ -1496,7 +1501,10 @@ template:
     port: 8306
 
     # Note:
-    # - This will be used to initialize the MySQL instance if it's fresh.
+    # - This will be used to initialize the MySQL instance.
+    #   * If the user is "root", the password will be used as the root password.
+    #   * Otherwise, a regular user will be created with the given password. The root password will be empty.
+    #   Note that this only applies to fresh instances, i.e., the data directory is empty.
     # - In user-managed mode, these configs are not validated by risedev.
     #   They are passed as-is to risedev-env default user for MySQL operations.
     # - This is not used in RISEDEV_MYSQL_WITH_OPTIONS_COMMON.
