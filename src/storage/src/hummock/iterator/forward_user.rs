@@ -14,6 +14,7 @@
 
 use std::ops::Bound::*;
 
+use more_asserts::debug_assert_ge;
 use risingwave_common::must_match;
 use risingwave_common::util::epoch::MAX_SPILL_TIMES;
 use risingwave_hummock_sdk::key::{FullKey, FullKeyTracker, UserKey, UserKeyRange};
@@ -126,10 +127,10 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
         match &self.key_range.0 {
             Included(begin_key) | Excluded(begin_key) => {
                 let full_key = FullKey {
-                    user_key: begin_key.clone(),
+                    user_key: begin_key.as_ref(),
                     epoch_with_gap: EpochWithGap::new(self.read_epoch, MAX_SPILL_TIMES),
                 };
-                self.iterator.seek(full_key.to_ref()).await?;
+                self.iterator.seek(full_key).await?;
             }
             Unbounded => {
                 self.iterator.rewind().await?;
@@ -137,13 +138,11 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
         };
 
         self.try_advance_to_next_valid().await?;
-        match &self.key_range.0 {
-            Excluded(begin_key) => {
-                if self.key().user_key == begin_key.as_ref() {
-                    self.next().await?;
-                }
-            }
-            _ => {}
+        if let Excluded(begin_key) = &self.key_range.0
+            && self.is_valid()
+            && self.key().user_key == begin_key.as_ref()
+        {
+            self.next().await?;
         }
         Ok(())
     }
@@ -168,16 +167,17 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
         };
 
         let full_key = FullKey {
-            user_key: seek_key.clone(),
+            user_key: seek_key,
             epoch_with_gap: EpochWithGap::new(self.read_epoch, MAX_SPILL_TIMES),
         };
         self.iterator.seek(full_key).await?;
 
         self.try_advance_to_next_valid().await?;
         if let Excluded(begin_key) = &self.key_range.0
-            && begin_key.as_ref() >= user_key
+            && self.is_valid()
             && self.key().user_key == begin_key.as_ref()
         {
+            debug_assert_ge!(begin_key.as_ref(), user_key);
             self.next().await?;
         }
         Ok(())
@@ -570,7 +570,11 @@ mod tests {
         let table =
             gen_iterator_test_sstable_from_kv_pair(0, kv_pairs, sstable_store.clone()).await;
         let read_options = Arc::new(SstableIteratorReadOptions::default());
-        let iters = vec![SstableIterator::create(table, sstable_store, read_options)];
+        let iters = vec![SstableIterator::create(
+            table.clone(),
+            sstable_store.clone(),
+            read_options.clone(),
+        )];
         let mi = MergeIterator::new(iters);
 
         let begin_key = Included(iterator_test_bytes_user_key_of(2));
@@ -623,6 +627,35 @@ mod tests {
             .await
             .unwrap();
         assert!(!ui.is_valid());
+
+        let iters = vec![SstableIterator::create(table, sstable_store, read_options)];
+        let mi = MergeIterator::new(iters);
+
+        let begin_key = Excluded(iterator_test_bytes_user_key_of(2));
+        let end_key = Excluded(iterator_test_bytes_user_key_of(7));
+
+        let mut ui = UserIterator::for_test(mi, (begin_key, end_key));
+        // ----- after-end-range iterate -----
+        ui.seek(iterator_test_bytes_user_key_of(1).as_ref())
+            .await
+            .unwrap();
+        assert!(ui.is_valid());
+        assert_eq!(ui.key(), iterator_test_bytes_key_of_epoch(3, 100).to_ref());
+        ui.seek(iterator_test_bytes_user_key_of(2).as_ref())
+            .await
+            .unwrap();
+        assert!(ui.is_valid());
+        assert_eq!(ui.key(), iterator_test_bytes_key_of_epoch(3, 100).to_ref());
+        ui.seek(iterator_test_bytes_user_key_of(3).as_ref())
+            .await
+            .unwrap();
+        assert!(ui.is_valid());
+        assert_eq!(ui.key(), iterator_test_bytes_key_of_epoch(3, 100).to_ref());
+        ui.seek(iterator_test_bytes_user_key_of(4).as_ref())
+            .await
+            .unwrap();
+        assert!(ui.is_valid());
+        assert_eq!(ui.key(), iterator_test_bytes_key_of_epoch(6, 100).to_ref());
     }
 
     // ..=right
