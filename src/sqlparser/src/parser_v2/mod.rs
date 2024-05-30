@@ -21,6 +21,7 @@ use crate::keywords::{self, Keyword};
 use crate::tokenizer::{Token, TokenWithLocation};
 
 mod data_type;
+mod expr;
 mod impl_;
 mod number;
 

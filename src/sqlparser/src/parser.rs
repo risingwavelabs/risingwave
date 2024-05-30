@@ -148,7 +148,7 @@ type ColumnsDefTuple = (
 
 /// Reference:
 /// <https://www.postgresql.org/docs/current/sql-syntax-lexical.html#SQL-PRECEDENCE>
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Precedence {
     Zero = 0,
     LogicalOr, // 5 in upstream
