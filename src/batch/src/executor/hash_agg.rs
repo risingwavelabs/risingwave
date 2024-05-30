@@ -279,7 +279,7 @@ impl BuildHasher for SpillBuildHasher {
     }
 }
 
-const DEFAULT_IO_CHANNEL_SIZE: usize = 8;
+const DEFAULT_IO_CHANNEL_SIZE: usize = 1;
 
 /// `AggSpillManager` is used to manage how to write spill data file and read them back.
 /// The spill data first need to be partitioned. Each partition contains 2 files: `agg_state_file` and `input_chunks_file`.
