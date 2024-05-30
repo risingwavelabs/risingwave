@@ -18,3 +18,9 @@ repos:
         name: typos
         entry: typos -w
         language: system
+    -   id: cargo sort
+        name: cargo sort
+        entry: cargo sort -g -w
+        language: system
+        files: 'Cargo.toml'
+        pass_filenames: false
