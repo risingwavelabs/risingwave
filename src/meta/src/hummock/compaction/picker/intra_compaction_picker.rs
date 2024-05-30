@@ -229,6 +229,8 @@ impl IntraCompactionPicker {
                 continue;
             }
 
+            assert!(l0.sub_levels[idx + 1].sub_level_id != l0.sub_levels[idx].sub_level_id);
+
             let trivial_move_picker = TrivialMovePicker::new(0, 0, overlap_strategy.clone());
 
             let select_sst = trivial_move_picker.pick_trivial_move_sst(
@@ -368,7 +370,6 @@ impl WholeLevelCompactionPicker {
                         stats,
                     )
                 {
-                    tracing::warn!("==========pick_whole_level============");
                     return Some(result);
                 }
             }

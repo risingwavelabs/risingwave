@@ -128,7 +128,10 @@ struct IntraCompactionTaskValidationRule {
 
 impl CompactionTaskValidationRule for IntraCompactionTaskValidationRule {
     fn validate(&self, input: &CompactionInput, stats: &mut LocalPickerStatistic) -> bool {
-        if input.input_levels.len() >= MAX_COMPACT_LEVEL_COUNT {
+        if (input.total_file_count >= self.config.level0_max_compact_file_number
+            && input.input_levels.len() > 1)
+            || input.input_levels.len() >= MAX_COMPACT_LEVEL_COUNT
+        {
             return true;
         }
 

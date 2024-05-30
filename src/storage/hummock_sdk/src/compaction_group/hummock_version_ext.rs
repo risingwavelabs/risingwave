@@ -855,8 +855,7 @@ impl Levels {
     }
 
     pub fn check_reclaim_sst_exist(&self) -> bool {
-        let existed_table_ids: HashSet<u32> =
-            HashSet::from_iter(self.member_table_ids.clone().into_iter());
+        let existed_table_ids: HashSet<u32> = HashSet::from_iter(self.member_table_ids.clone());
         for level in &self.l0.as_ref().unwrap().sub_levels {
             for table in &level.table_infos {
                 for table_id in &table.table_ids {

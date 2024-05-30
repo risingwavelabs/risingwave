@@ -245,11 +245,6 @@ impl NonOverlapSubLevelPicker {
             sstable_infos: vec![vec![]; levels.len()],
             ..Default::default()
         };
-        let first_table_id = if sst.table_ids.len() == 1 {
-            sst.table_ids[0]
-        } else {
-            0
-        };
 
         let mut pick_levels_range = Vec::default();
         let mut max_select_level_count = 0;
@@ -312,12 +307,6 @@ impl NonOverlapSubLevelPicker {
                     if level_handler.is_pending_compact(&other.sst_id) {
                         break 'expand_new_level;
                     }
-                    if first_table_id != 0
-                        && (other.table_ids.len() > 0
-                            || (other.table_ids.len() == 1 && other.table_ids[0] != first_table_id))
-                    {
-                        break 'expand_new_level;
-                    }
                     basic_overlap_info.update(other);
 
                     add_files_size += other.get_file_size();
@@ -373,33 +362,33 @@ impl NonOverlapSubLevelPicker {
 
         ret.sstable_infos.retain(|ssts| !ssts.is_empty());
 
-        // // To check whether the task is expected
-        // if ret.total_file_size > self.max_compaction_bytes
-        //     || ret.total_file_count as u64 > self.max_file_count
-        //     || ret.sstable_infos.len() > self.max_expected_level_count
-        // {
-        //     // rotate the sstables to meet the `max_file_count` and `max_compaction_bytes` and `max_expected_level_count`
-        //     let mut total_file_count = 0;
-        //     let mut total_file_size = 0;
-        //     let mut total_level_count = 0;
-        //     for (index, sstables) in ret.sstable_infos.iter().enumerate() {
-        //         total_file_count += sstables.len();
-        //         total_file_size += sstables.iter().map(|sst| sst.file_size).sum::<u64>();
-        //         total_level_count += 1;
-        //
-        //         // Atleast `min_expected_level_count`` level should be selected
-        //         if total_level_count >= self.min_expected_level_count
-        //             && (total_file_count as u64 >= self.max_file_count
-        //                 || total_file_size >= self.max_compaction_bytes
-        //                 || total_level_count >= self.max_expected_level_count)
-        //         {
-        //             ret.total_file_count = total_file_count;
-        //             ret.total_file_size = total_file_size;
-        //             ret.sstable_infos.truncate(index + 1);
-        //             break;
-        //         }
-        //     }
-        // }
+        // To check whether the task is expected
+        if ret.total_file_size > self.max_compaction_bytes
+            || ret.total_file_count as u64 > self.max_file_count
+            || ret.sstable_infos.len() > self.max_expected_level_count
+        {
+            // rotate the sstables to meet the `max_file_count` and `max_compaction_bytes` and `max_expected_level_count`
+            let mut total_file_count = 0;
+            let mut total_file_size = 0;
+            let mut total_level_count = 0;
+            for (index, sstables) in ret.sstable_infos.iter().enumerate() {
+                total_file_count += sstables.len();
+                total_file_size += sstables.iter().map(|sst| sst.file_size).sum::<u64>();
+                total_level_count += 1;
+
+                // Atleast `min_expected_level_count`` level should be selected
+                if total_level_count >= self.min_expected_level_count
+                    && (total_file_count as u64 >= self.max_file_count
+                        || total_file_size >= self.max_compaction_bytes
+                        || total_level_count >= self.max_expected_level_count)
+                {
+                    ret.total_file_count = total_file_count;
+                    ret.total_file_size = total_file_size;
+                    ret.sstable_infos.truncate(index + 1);
+                    break;
+                }
+            }
+        }
 
         ret
     }

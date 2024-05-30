@@ -655,12 +655,17 @@ pub fn calculate_task_parallelism(compact_task: &CompactTask, context: &Compacto
         .map(|table_info| table_info.file_size)
         .sum::<u64>();
     let parallel_compact_size = (context.storage_opts.parallel_compact_size_mb as u64) << 20;
-    calculate_task_parallelism_impl(
+    let task_parallelism = calculate_task_parallelism_impl(
         context.compaction_executor.worker_num(),
         parallel_compact_size,
         compaction_size,
         context.storage_opts.max_sub_compaction,
-    )
+    );
+    if compact_task.compression_algorithm == 0 {
+        std::cmp::max(1, task_parallelism / 2)
+    } else {
+        task_parallelism
+    }
 }
 
 pub fn calculate_task_parallelism_impl(

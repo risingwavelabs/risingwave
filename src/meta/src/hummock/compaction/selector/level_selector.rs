@@ -33,8 +33,8 @@ use super::{
 };
 use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
 use crate::hummock::compaction::picker::{
-    CompactionPicker, CompactionTaskValidator, IntraCompactionPicker, LocalPickerStatistic,
-    MinOverlappingPicker,
+    CompactionInput, CompactionPicker, CompactionTaskValidator, IntraCompactionPicker,
+    LocalPickerStatistic, MinOverlappingPicker,
 };
 use crate::hummock::compaction::{
     create_overlap_strategy, CompactionDeveloperConfig, CompactionTask, LocalSelectorStatistic,
@@ -134,7 +134,7 @@ impl DynamicLevelSelectorCore {
                 Box::new(MinOverlappingPicker::new(
                     picker_info.select_level,
                     picker_info.target_level,
-                    self.config.sub_level_max_compaction_bytes,
+                    self.config.max_bytes_for_level_base / 2,
                     self.config.split_weight_by_vnode,
                     overlap_strategy,
                 ))
@@ -420,6 +420,74 @@ impl DynamicLevelSelectorCore {
     }
 }
 
+fn remove_table_from_level(
+    origin_level: &Level,
+    virtual_level: &mut HashMap<u32, Level>,
+    table_id: u32,
+) {
+    if let Some(vlevel) = virtual_level.remove(&table_id) {
+        let new_level = virtual_level.entry(0).or_insert_with(|| Level {
+            level_idx: origin_level.level_idx,
+            level_type: origin_level.level_type,
+            table_infos: vec![],
+            total_file_size: 0,
+            sub_level_id: origin_level.sub_level_id,
+            uncompressed_file_size: 0,
+            vnode_partition_count: 0,
+        });
+        new_level.table_infos.extend(vlevel.table_infos);
+        new_level.total_file_size = new_level
+            .table_infos
+            .iter()
+            .map(|sst| sst.file_size)
+            .sum::<u64>();
+        new_level.table_infos.sort_by(|sst1, sst2| {
+            let a = sst1.key_range.as_ref().unwrap();
+            let b = sst2.key_range.as_ref().unwrap();
+            a.compare(b)
+        });
+    }
+}
+
+fn remove_table_from_group(
+    origin_group: &Levels,
+    compaction_group: &CompactionGroup,
+    virtual_group: &mut HashMap<u32, Levels>,
+    table_id: u32,
+) {
+    if let Some(group) = virtual_group.remove(&table_id) {
+        let hybrid_group = virtual_group.entry(0).or_insert_with(|| {
+            build_initial_compaction_group_levels(
+                origin_group.group_id,
+                compaction_group.compaction_config.as_ref(),
+            )
+        });
+        let l0 = hybrid_group.l0.as_mut().unwrap();
+        l0.sub_levels.extend(group.l0.unwrap().sub_levels);
+        l0.sub_levels.sort_by_key(|l| l.sub_level_id);
+        let mut idx = 1;
+        while idx < l0.sub_levels.len() {
+            if l0.sub_levels[idx].sub_level_id == l0.sub_levels[idx - 1].sub_level_id {
+                let x = std::mem::take(&mut l0.sub_levels[idx].table_infos);
+                l0.sub_levels[idx - 1].table_infos.extend(x);
+                l0.sub_levels[idx - 1].table_infos.sort_by(|sst1, sst2| {
+                    let a = sst1.key_range.as_ref().unwrap();
+                    let b = sst2.key_range.as_ref().unwrap();
+                    a.compare(b)
+                });
+                l0.sub_levels[idx - 1].total_file_size = l0.sub_levels[idx - 1]
+                    .table_infos
+                    .iter()
+                    .map(|sst| sst.file_size)
+                    .sum::<u64>();
+                l0.sub_levels.remove(idx);
+            } else {
+                idx += 1;
+            }
+        }
+    }
+}
+
 impl DynamicLevelSelector {
     fn pick_compaction_per_table(
         &mut self,
@@ -432,6 +500,7 @@ impl DynamicLevelSelector {
     ) -> Option<CompactionTask> {
         let mut virtual_group: HashMap<u32, Levels> = HashMap::default();
         let mut hybrid_table_ids: HashSet<u32> = HashSet::default();
+        let mut has_hybrid_level = false;
         for level in &levels.l0.as_ref().unwrap().sub_levels {
             let mut virtual_level: HashMap<u32, Level> = HashMap::default();
             for sst in &level.table_infos {
@@ -441,56 +510,29 @@ impl DynamicLevelSelector {
                 {
                     // 0 represent hybrid sst.
                     if sst.table_ids.len() > 1 && level.level_type() != LevelType::Overlapping {
+                        let small_table_id = sst.table_ids.iter().min().unwrap();
+                        let largest_table_id = sst.table_ids.iter().max().unwrap();
+                        for table_id in virtual_group.keys() {
+                            if table_id > small_table_id
+                                && table_id < largest_table_id
+                                && !sst.table_ids.contains(table_id)
+                            {
+                                // For example: there are three table_ids: [3, 4, 5], if the table [4] has lots of data, and was split to a virtual lsm tree, when we meet a sst exists in higher sub-level which only contains [3, 5],
+                                // we can not compact it with files only contains [3] and [5] in bottom level, because the result may overlap with some pending task contains table [4].
+                                has_hybrid_level = true;
+                                break;
+                            }
+                        }
                         for table_id in &sst.table_ids {
                             if !hybrid_table_ids.contains(table_id) {
                                 hybrid_table_ids.insert(*table_id);
-                                if let Some(vlevel) = virtual_level.remove(table_id) {
-                                    let new_level =
-                                        virtual_level.entry(0).or_insert_with(|| Level {
-                                            level_idx: level.level_idx,
-                                            level_type: level.level_type,
-                                            table_infos: vec![],
-                                            total_file_size: 0,
-                                            sub_level_id: level.sub_level_id,
-                                            uncompressed_file_size: 0,
-                                            vnode_partition_count: 0,
-                                        });
-                                    new_level.table_infos.extend(vlevel.table_infos);
-                                    new_level.total_file_size += vlevel.total_file_size;
-                                }
-                                if let Some(group) = virtual_group.remove(table_id) {
-                                    let hybrid_group =
-                                        virtual_group.entry(0).or_insert_with(|| {
-                                            build_initial_compaction_group_levels(
-                                                levels.group_id,
-                                                compaction_group.compaction_config.as_ref(),
-                                            )
-                                        });
-                                    let l0 = hybrid_group.l0.as_mut().unwrap();
-                                    l0.sub_levels.extend(group.l0.unwrap().sub_levels);
-                                    l0.sub_levels.sort_by_key(|l| l.sub_level_id);
-                                    let mut idx = 1;
-                                    while idx < l0.sub_levels.len() {
-                                        if l0.sub_levels[idx].sub_level_id
-                                            == l0.sub_levels[idx - 1].sub_level_id
-                                        {
-                                            let x = std::mem::take(&mut l0.sub_levels[idx].table_infos);
-                                            l0.sub_levels[idx - 1].table_infos.extend(x);
-                                            l0.sub_levels[idx - 1].total_file_size +=
-                                                l0.sub_levels[idx].total_file_size;
-                                            l0.sub_levels[idx - 1].table_infos.sort_by(
-                                                |sst1, sst2| {
-                                                    let a = sst1.key_range.as_ref().unwrap();
-                                                    let b = sst2.key_range.as_ref().unwrap();
-                                                    a.compare(b)
-                                                },
-                                            );
-                                            l0.sub_levels.remove(idx);
-                                        } else {
-                                            idx += 1;
-                                        }
-                                    }
-                                }
+                                remove_table_from_level(level, &mut virtual_level, *table_id);
+                                remove_table_from_group(
+                                    levels,
+                                    compaction_group,
+                                    &mut virtual_group,
+                                    *table_id,
+                                );
                             }
                         }
                     }
@@ -498,6 +540,9 @@ impl DynamicLevelSelector {
                 } else {
                     sst.table_ids[0]
                 };
+                if has_hybrid_level {
+                    break;
+                }
                 let new_level = virtual_level.entry(table_id).or_insert_with(|| Level {
                     level_idx: level.level_idx,
                     level_type: level.level_type,
@@ -518,6 +563,20 @@ impl DynamicLevelSelector {
                         compaction_group.compaction_config.as_ref(),
                     )
                 });
+                if table_id == 0 {
+                    for sst in &vlevel.table_infos {
+                        group.member_table_ids.extend(sst.table_ids.clone());
+                    }
+                } else {
+                    group.member_table_ids.push(table_id);
+                }
+                assert!(group
+                    .l0
+                    .as_mut()
+                    .unwrap()
+                    .sub_levels
+                    .iter()
+                    .all(|l| l.sub_level_id != vlevel.sub_level_id));
                 group.l0.as_mut().unwrap().sub_levels.push(vlevel);
             }
         }
@@ -525,19 +584,19 @@ impl DynamicLevelSelector {
         for level in &levels.levels {
             let mut virtual_level: HashMap<u32, Level> = HashMap::default();
             for sst in &level.table_infos {
-                let table_id =
-                    if sst.table_ids.len() > 1 || hybrid_table_ids.contains(&sst.table_ids[0]) {
-                        if sst.table_ids.len() > 1 {
-                            for table_id in &sst.table_ids {
-                                if virtual_group.contains_key(table_id) {
-                                    return None;
-                                }
-                            }
+                let table_id = if sst.table_ids.len() > 1 {
+                    for table_id in &sst.table_ids {
+                        if virtual_group.contains_key(table_id) {
+                            return None;
                         }
-                        0
-                    } else {
-                        sst.table_ids[0]
-                    };
+                        hybrid_table_ids.insert(*table_id);
+                    }
+                    0
+                } else if hybrid_table_ids.contains(&sst.table_ids[0]) {
+                    0
+                } else {
+                    sst.table_ids[0]
+                };
                 let new_level = virtual_level.entry(table_id).or_insert_with(|| Level {
                     level_idx: level.level_idx,
                     level_type: level.level_type,
@@ -553,6 +612,13 @@ impl DynamicLevelSelector {
             }
             for (table_id, vlevel) in virtual_level {
                 if let Some(group) = virtual_group.get_mut(&table_id) {
+                    if table_id == 0 {
+                        for sst in &vlevel.table_infos {
+                            group.member_table_ids.extend(sst.table_ids.clone());
+                        }
+                    } else {
+                        group.member_table_ids.push(table_id);
+                    }
                     group.levels[(level.level_idx as usize) - 1] = vlevel;
                 }
             }
@@ -568,7 +634,10 @@ impl DynamicLevelSelector {
             compaction_group.compaction_config.clone(),
         ));
         let mut score_levels = vec![];
-        for (table_id, group) in &virtual_group {
+        for (table_id, group) in &mut virtual_group {
+            group.member_table_ids.sort();
+            group.member_table_ids.dedup();
+            assert!(!group.member_table_ids.is_empty());
             let ctx = dynamic_level_core.get_priority_levels(group, level_handlers);
             for picker_info in ctx.score_levels {
                 score_levels.push((*table_id, picker_info, ctx.base_level));
@@ -591,9 +660,13 @@ impl DynamicLevelSelector {
             );
 
             let mut stats = LocalPickerStatistic::default();
-            if let Some(ret) = picker.pick_compaction(&group, level_handlers, &mut stats) {
+            if let Some(ret) = picker.pick_compaction(group, level_handlers, &mut stats) {
                 ret.add_pending_task(task_id, level_handlers);
-                tracing::warn!("NEW COMPACT task-{} to target level-{}", task_id, picker_info.target_level);
+                selector_stats.record_virtual_group_task(
+                    table_id,
+                    ret.input_levels[0].level_idx as usize,
+                    ret.target_level,
+                );
                 return Some(create_compaction_task(
                     dynamic_level_core.get_config(),
                     ret,
@@ -611,6 +684,12 @@ impl DynamicLevelSelector {
     }
 }
 
+pub fn is_trivial_move_task(task: &CompactionInput) -> bool {
+    task.input_levels.len() == 2
+        && task.input_levels[1].level_idx as usize == task.target_level
+        && task.input_levels[1].table_infos.is_empty()
+}
+
 impl CompactionSelector for DynamicLevelSelector {
     fn pick_compaction(
         &mut self,
@@ -622,19 +701,6 @@ impl CompactionSelector for DynamicLevelSelector {
         _table_id_to_options: HashMap<u32, TableOption>,
         developer_config: Arc<CompactionDeveloperConfig>,
     ) -> Option<CompactionTask> {
-        if levels.member_table_ids.len() > 1 {
-            if let Some(ret) = self.pick_compaction_per_table(
-                task_id,
-                compaction_group,
-                levels,
-                level_handlers,
-                selector_stats,
-                developer_config.clone(),
-            ) {
-                return Some(ret);
-            }
-        }
-
         let dynamic_level_core = DynamicLevelSelectorCore::new(
             compaction_group.compaction_config.clone(),
             developer_config.clone(),
@@ -646,6 +712,39 @@ impl CompactionSelector for DynamicLevelSelector {
         let compaction_task_validator = Arc::new(CompactionTaskValidator::new(
             compaction_group.compaction_config.clone(),
         ));
+        if levels.member_table_ids.len() > 1 && !ctx.score_levels.is_empty() {
+            if ctx.score_levels[0].score > SCORE_BASE {
+                let mut picker = dynamic_level_core.create_compaction_picker(
+                    &ctx.score_levels[0],
+                    overlap_strategy.clone(),
+                    compaction_task_validator.clone(),
+                );
+                let mut stats = LocalPickerStatistic::default();
+                if let Some(ret) = picker.pick_compaction(levels, level_handlers, &mut stats)
+                    && (ctx.score_levels[0].picker_type == PickerType::Tier
+                        || is_trivial_move_task(&ret))
+                {
+                    ret.add_pending_task(task_id, level_handlers);
+                    return Some(create_compaction_task(
+                        dynamic_level_core.get_config(),
+                        ret,
+                        ctx.base_level,
+                        self.task_type(),
+                    ));
+                }
+            }
+
+            if let Some(ret) = self.pick_compaction_per_table(
+                task_id,
+                compaction_group,
+                levels,
+                level_handlers,
+                selector_stats,
+                developer_config.clone(),
+            ) {
+                return Some(ret);
+            }
+        }
         for picker_info in &ctx.score_levels {
             if picker_info.score <= SCORE_BASE {
                 return None;
