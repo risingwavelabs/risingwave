@@ -491,7 +491,7 @@ impl AggSpillManager {
     }
 }
 
-const SPILL_AT_LEAST_MEMORY: u64 = 1 * 1024 * 1024;
+const SPILL_AT_LEAST_MEMORY: u64 = 1024 * 1024;
 
 impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
     #[try_stream(boxed, ok = DataChunk, error = BatchError)]
