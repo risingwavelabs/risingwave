@@ -1,4 +1,7 @@
 statement ok
+set streaming_parallelism = 2;
+
+statement ok
 create table fact(v1 int);
 
 statement ok
@@ -10,7 +13,7 @@ statement ok
 insert into fact select 1 from generate_series(1, 250000);
 
 statement ok
-insert into dim select 1 from generate_series(1, 100);
+insert into dim select 1 from generate_series(1, 2000);
 
 statement ok
 flush;

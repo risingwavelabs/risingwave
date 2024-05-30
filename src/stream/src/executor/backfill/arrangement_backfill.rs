@@ -111,8 +111,7 @@ where
         let upstream_table_id = self.upstream_table.table_id();
         let mut upstream_table = self.upstream_table;
         let vnodes = upstream_table.vnodes().clone();
-        let rate_limit = self.rate_limit;
-        self.chunk_size = 1;
+        let mut rate_limit = self.rate_limit;
 
         // These builders will build data chunks.
         // We must supply them with the full datatypes which correspond to
@@ -147,9 +146,18 @@ where
                 highest_barrier_latency * 2.0
             }
         };
-        tracing::debug!(target: "adaptive_rate_limit", highest_barrier_latency, threshold_barrier_latency, "initial configs");
-        let adaptive_rate_limit = true;
-        let mut rate_limit = Some(INITIAL_ADAPTIVE_RATE_LIMIT);
+        let adaptive_rate_limit = {
+            use std::env;
+            let key = "ADAPTIVE_RATE_LIMIT";
+            match env::var(key) {
+                Ok(val) => true,
+                Err(_) => false,
+            }
+        };
+        tracing::debug!(target: "adaptive_rate_limit", adaptive_rate_limit, highest_barrier_latency, threshold_barrier_latency, "initial configs");
+        if adaptive_rate_limit {
+            rate_limit = Some(INITIAL_ADAPTIVE_RATE_LIMIT);
+        }
 
         // Poll the upstream to get the first barrier.
         let first_barrier = expect_first_barrier(&mut upstream).await?;
@@ -557,7 +565,7 @@ where
 
                 // Adapt Rate Limit
                 if adaptive_rate_limit {
-                    Self::adapt_rate_limit_3(
+                    Self::adapt_rate_limit_2(
                         &self.actor_id,
                         &self.metrics,
                         threshold_barrier_latency,
