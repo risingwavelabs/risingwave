@@ -358,6 +358,18 @@ and arrangement backfill will consume this historical data snapshot:
 | 1                  | 'Jack' | 29 |
 | 2                  | 'Jill' | 30 |
 
+#### Initialization
+
+Something to note is that for the first snapshot,
+upstream may not have committed that epoch.
+Additionally, we also have not replicated any upstream records
+during that epoch.
+
+As such, we must wait for that first checkpoint to be committed,
+before reading.
+
+This is supported internally inside `init_epoch` for replicated state table.
+
 ### Recovery
 
 TODO
