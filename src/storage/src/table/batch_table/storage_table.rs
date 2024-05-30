@@ -1169,15 +1169,15 @@ impl<S: StateStore> ColumnarStoreStorageTableInnerIterInner<S> {
                     iter_output.push(col_val);
                 }
             }
-            let row = OwnedRow::empty();
+            // let row = OwnedRow::empty();
             // let row = self
             //     .mapping
             //     .project(OwnedRow::new(iter_output))
             //     .into_owned_row();
-            yield KeyedRow {
-                vnode_prefixed_key,
-                row,
-            }
+            // yield KeyedRow {
+            //     vnode_prefixed_key,
+            //     row,
+            // }
         }
     }
 }
