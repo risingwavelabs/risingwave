@@ -21,7 +21,7 @@ use apache_avro::{from_avro_datum, Reader, Schema};
 use risingwave_common::{bail, try_match_expand};
 use risingwave_pb::plan_common::ColumnDesc;
 
-use super::schema_resolver::ConfluentSchemaResolver;
+use super::schema_resolver::ConfluentSchemaCache;
 use super::util::avro_schema_to_column_descs;
 use crate::error::ConnectorResult;
 use crate::parser::unified::avro::{AvroAccess, AvroParseOptions};
@@ -36,7 +36,7 @@ use crate::schema::schema_registry::{
 #[derive(Debug)]
 pub struct AvroAccessBuilder {
     schema: Arc<Schema>,
-    pub schema_resolver: Option<Arc<ConfluentSchemaResolver>>,
+    pub schema_resolver: Option<Arc<ConfluentSchemaCache>>,
     value: Option<Value>,
 }
 
@@ -45,7 +45,7 @@ impl AccessBuilder for AvroAccessBuilder {
         self.value = self.parse_avro_value(&payload, Some(&*self.schema)).await?;
         Ok(AccessImpl::Avro(AvroAccess::new(
             self.value.as_ref().unwrap(),
-            AvroParseOptions::default().with_schema(&self.schema),
+            AvroParseOptions::create(&self.schema),
         )))
     }
 }
@@ -100,7 +100,7 @@ impl AvroAccessBuilder {
 pub struct AvroParserConfig {
     pub schema: Arc<Schema>,
     pub key_schema: Option<Arc<Schema>>,
-    pub schema_resolver: Option<Arc<ConfluentSchemaResolver>>,
+    pub schema_resolver: Option<Arc<ConfluentSchemaCache>>,
 
     pub map_handling: Option<MapHandling>,
 }
@@ -122,7 +122,7 @@ impl AvroParserConfig {
         let url = handle_sr_list(schema_location.as_str())?;
         if use_schema_registry {
             let client = Client::new(url, &client_config)?;
-            let resolver = ConfluentSchemaResolver::new(client);
+            let resolver = ConfluentSchemaCache::new(client);
 
             let subject_key = if enable_upsert {
                 Some(get_subject_by_strategy(
