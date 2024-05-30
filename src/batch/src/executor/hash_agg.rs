@@ -650,7 +650,7 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
             agg_spill_manager.close_writers().await?;
 
             debug!(
-                "agg {} spill write time = {}ms",
+                "agg {} spill out to disk time = {}ms",
                 self.identity,
                 start_time.elapsed().as_millis()
             );
@@ -696,7 +696,7 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
                 }
 
                 debug!(
-                    "agg {} spill read time = {}ms",
+                    "agg {} processes spill partition time = {}ms",
                     sub_hash_agg_identity,
                     start_time.elapsed().as_millis()
                 );
