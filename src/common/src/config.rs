@@ -1892,7 +1892,7 @@ pub mod default {
                 }
 
                 pub fn streaming_read_buffer_size() -> usize {
-                    8 * (1 << 20)
+                    512 * (1 << 10)
                 }
             }
         }
