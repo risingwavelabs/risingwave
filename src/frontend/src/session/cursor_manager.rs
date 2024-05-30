@@ -30,6 +30,7 @@ use risingwave_sqlparser::ast::{Ident, ObjectName, Statement};
 
 use super::SessionImpl;
 use crate::catalog::subscription_catalog::SubscriptionCatalog;
+use crate::catalog::TableId;
 use crate::error::{ErrorCode, Result};
 use crate::handler::declare_cursor::create_stream_for_cursor_stmt;
 use crate::handler::query::{create_stream, gen_batch_plan_fragmenter, BatchQueryPlanResult};
@@ -136,7 +137,7 @@ enum State {
 pub struct SubscriptionCursor {
     cursor_name: String,
     subscription: Arc<SubscriptionCatalog>,
-    table: Arc<TableCatalog>,
+    dependent_table_id: TableId,
     cursor_need_drop_time: Instant,
     state: State,
 }
@@ -146,7 +147,7 @@ impl SubscriptionCursor {
         cursor_name: String,
         start_timestamp: Option<u64>,
         subscription: Arc<SubscriptionCatalog>,
-        table: Arc<TableCatalog>,
+        dependent_table_id: TableId,
         handle_args: &HandlerArgs,
     ) -> Result<Self> {
         let state = if let Some(start_timestamp) = start_timestamp {
@@ -160,7 +161,7 @@ impl SubscriptionCursor {
             //
             // TODO: is this the right behavior? Should we delay the query stream initiation till the first fetch?
             let (row_stream, pg_descs) =
-                Self::initiate_query(None, &table, handle_args.clone()).await?;
+                Self::initiate_query(None, &dependent_table_id, handle_args.clone()).await?;
             let pinned_epoch = handle_args
                 .session
                 .get_pinned_snapshot()
@@ -191,15 +192,16 @@ impl SubscriptionCursor {
         Ok(Self {
             cursor_name,
             subscription,
-            table,
+            dependent_table_id,
             cursor_need_drop_time,
             state,
         })
     }
 
-    pub async fn next_row(
+    async fn next_row(
         &mut self,
-        handle_args: HandlerArgs,
+        handle_args: &HandlerArgs,
+        expected_pg_descs: &Vec<PgFieldDescriptor>,
     ) -> Result<(Option<Row>, Vec<PgFieldDescriptor>)> {
         loop {
             match &mut self.state {
@@ -212,7 +214,7 @@ impl SubscriptionCursor {
                     // Initiate a new batch query to continue fetching
                     match Self::get_next_rw_timestamp(
                         *seek_timestamp,
-                        self.table.id.table_id,
+                        self.dependent_table_id.table_id,
                         *expected_timestamp,
                         handle_args.clone(),
                     )
@@ -221,7 +223,7 @@ impl SubscriptionCursor {
                         Ok((Some(rw_timestamp), expected_timestamp)) => {
                             let (mut row_stream, pg_descs) = Self::initiate_query(
                                 Some(rw_timestamp),
-                                &self.table,
+                                &self.dependent_table_id,
                                 handle_args.clone(),
                             )
                             .await?;
@@ -235,10 +237,15 @@ impl SubscriptionCursor {
                                 from_snapshot,
                                 rw_timestamp,
                                 row_stream,
-                                pg_descs,
+                                pg_descs: pg_descs.clone(),
                                 remaining_rows,
                                 expected_timestamp,
                             };
+                            if (!expected_pg_descs.is_empty()) && expected_pg_descs.ne(&pg_descs) {
+                                // If the user alters the table upstream of the sub, there will be different descs here.
+                                // So we should output data for different descs in two separate batches
+                                return Ok((None, vec![]));
+                            }
                         }
                         Ok((None, _)) => return Ok((None, vec![])),
                         Err(e) => {
@@ -313,20 +320,25 @@ impl SubscriptionCursor {
             )
             .into());
         }
-        // `FETCH NEXT` is equivalent to `FETCH 1`.
-        if count != 1 {
-            Err(crate::error::ErrorCode::InternalError(
-                "FETCH count with subscription is not supported".to_string(),
-            )
-            .into())
-        } else {
-            let (row, pg_descs) = self.next_row(handle_args).await?;
-            if let Some(row) = row {
-                Ok((vec![row], pg_descs))
-            } else {
-                Ok((vec![], pg_descs))
+
+        let mut ans = Vec::with_capacity(std::cmp::min(100, count) as usize);
+        let mut cur = 0;
+        let mut pg_descs_ans = vec![];
+        while cur < count {
+            let (row, descs_ans) = self.next_row(&handle_args, &pg_descs_ans).await?;
+            match row {
+                Some(row) => {
+                    pg_descs_ans = descs_ans;
+                    cur += 1;
+                    ans.push(row);
+                }
+                None => {
+                    break;
+                }
             }
         }
+
+        Ok((ans, pg_descs_ans))
     }
 
     async fn get_next_rw_timestamp(
@@ -358,16 +370,17 @@ impl SubscriptionCursor {
 
     async fn initiate_query(
         rw_timestamp: Option<u64>,
-        table_catalog: &TableCatalog,
+        dependent_table_id: &TableId,
         handle_args: HandlerArgs,
     ) -> Result<(PgResponseStream, Vec<PgFieldDescriptor>)> {
+        let session = handle_args.clone().session;
+        let table_catalog = session.get_table_by_id(dependent_table_id)?;
         let (row_stream, pg_descs) = if let Some(rw_timestamp) = rw_timestamp {
-            let context = OptimizerContext::from_handler_args(handle_args.clone());
-            let session = handle_args.session;
+            let context = OptimizerContext::from_handler_args(handle_args);
             let plan_fragmenter_result = gen_batch_plan_fragmenter(
                 &session,
                 Self::create_batch_plan_for_cursor(
-                    table_catalog,
+                    &table_catalog,
                     &session,
                     context.into(),
                     rw_timestamp,
@@ -458,7 +471,11 @@ impl SubscriptionCursor {
             new_epoch,
         );
         let batch_log_seq_scan = BatchLogSeqScan::new(core);
-        let out_fields = FixedBitSet::from_iter(0..batch_log_seq_scan.core().schema().len());
+        let schema = batch_log_seq_scan
+            .core()
+            .schema_without_table_name()
+            .clone();
+        let out_fields = FixedBitSet::from_iter(0..schema.len());
         let out_names = batch_log_seq_scan.core().column_names();
         // Here we just need a plan_root to call the method, only out_fields and out_names will be used
         let plan_root = PlanRoot::new_with_batch_plan(
@@ -468,7 +485,6 @@ impl SubscriptionCursor {
             out_fields,
             out_names,
         );
-        let schema = batch_log_seq_scan.core().schema().clone();
         let (batch_log_seq_scan, query_mode) = match session.config().query_mode() {
             QueryMode::Auto => (plan_root.gen_batch_local_plan()?, QueryMode::Local),
             QueryMode::Local => (plan_root.gen_batch_local_plan()?, QueryMode::Local),
@@ -497,15 +513,15 @@ impl CursorManager {
         &self,
         cursor_name: String,
         start_timestamp: Option<u64>,
+        dependent_table_id: TableId,
         subscription: Arc<SubscriptionCatalog>,
-        table: Arc<TableCatalog>,
         handle_args: &HandlerArgs,
     ) -> Result<()> {
         let cursor = SubscriptionCursor::new(
             cursor_name.clone(),
             start_timestamp,
             subscription,
-            table,
+            dependent_table_id,
             handle_args,
         )
         .await?;
