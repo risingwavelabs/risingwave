@@ -366,7 +366,7 @@ impl Deref for RangeFrameOffset {
 
 #[derive(Debug, Educe)]
 #[educe(Clone, Copy)]
-pub struct RangeFrameOffsetRef<'a> {
+struct RangeFrameOffsetRef<'a> {
     /// Built expression for `$0 + offset`.
     add_expr: &'a dyn Expression,
     /// Built expression for `$0 - offset`.
