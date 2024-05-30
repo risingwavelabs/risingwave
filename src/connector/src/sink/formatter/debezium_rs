@@ -1,0 +1,272 @@
+key: struct
+  name: RisingWave.$db_name.$sink_from_name.Key
+  fields: [
+    pk..
+  ]
+value: struct
+  name: RisingWave.$db_name.$sink_from_name.Envelope
+  fields: [
+    before: struct
+      name: RisingWave.$db_name.$sink_from_name.Value
+      fields: [ .. ]
+    after: struct
+      name: RisingWave.$db_name.$sink_from_name.Value
+      fields: [ .. ]
+    source: struct
+      name: io.debezium.connector.postgresql.Source
+      fields: [
+        db: string
+        table: string
+        ts_ms: int64
+      ]
+    op: string
+    ts_ms: int64
+  ]
+
+Predefined (Struct) Schemas:
+  io.debezium.connector.postgresql.Source
+    https://github.com/debezium/debezium/blob/v2.6.1.Final/debezium-connector-postgres/src/main/java/io/debezium/connector/postgresql/PostgresSourceInfoStructMaker.java
+  .Envelope
+    https://github.com/debezium/debezium/blob/v2.6.1.Final/debezium-core/src/main/java/io/debezium/data/Envelope.java
+    https://github.com/debezium/debezium/blob/v2.6.1.Final/debezium-core/src/main/java/io/debezium/schema/SchemaFactory.java#L337
+    https://github.com/debezium/debezium/blob/v2.6.1.Final/debezium-core/src/main/java/io/debezium/relational/TableSchemaBuilder.java#L182
+  .Value & .Key
+    https://github.com/debezium/debezium/blob/v2.6.1.Final/debezium-core/src/main/java/io/debezium/relational/TableSchemaBuilder.java#L408
+    https://github.com/debezium/debezium/blob/v2.6.1.Final/debezium-connector-postgres/src/main/java/io/debezium/connector/postgresql/PostgresSchema.java#L69
+
+```
+{
+  "schema": {
+    "type": "struct",
+    "fields": [
+      {
+        "type": "struct",
+        "fields": [
+          {
+            "type": "int32",
+            "optional": false,
+            "default": 0,
+            "field": "id"
+          },
+          {
+            "type": "string",
+            "optional": false,
+            "field": "first_name"
+          },
+          {
+            "type": "string",
+            "optional": false,
+            "field": "last_name"
+          },
+          {
+            "type": "string",
+            "optional": false,
+            "field": "email"
+          }
+        ],
+        "optional": true,
+        "name": "dbserver1.inventory.customers.Value",
+        "field": "before"
+      },
+      {
+        "type": "struct",
+        "fields": [
+          {
+            "type": "int32",
+            "optional": false,
+            "default": 0,
+            "field": "id"
+          },
+          {
+            "type": "string",
+            "optional": false,
+            "field": "first_name"
+          },
+          {
+            "type": "string",
+            "optional": false,
+            "field": "last_name"
+          },
+          {
+            "type": "string",
+            "optional": false,
+            "field": "email"
+          }
+        ],
+        "optional": true,
+        "name": "dbserver1.inventory.customers.Value",
+        "field": "after"
+      },
+      {
+        "type": "struct",
+        "fields": [
+          {
+            "type": "string",
+            "optional": false,
+            "field": "version"
+          },
+          {
+            "type": "string",
+            "optional": false,
+            "field": "connector"
+          },
+          {
+            "type": "string",
+            "optional": false,
+            "field": "name"
+          },
+          {
+            "type": "int64",
+            "optional": false,
+            "field": "ts_ms"
+          },
+          {
+            "type": "string",
+            "optional": true,
+            "name": "io.debezium.data.Enum",
+            "version": 1,
+            "parameters": {
+              "allowed": "true,last,false,incremental"
+            },
+            "default": "false",
+            "field": "snapshot"
+          },
+          {
+            "type": "string",
+            "optional": false,
+            "field": "db"
+          },
+          {
+            "type": "string",
+            "optional": true,
+            "field": "sequence"
+          },
+          {
+            "type": "string",
+            "optional": false,
+            "field": "schema"
+          },
+          {
+            "type": "string",
+            "optional": false,
+            "field": "table"
+          },
+          {
+            "type": "int64",
+            "optional": true,
+            "field": "txId"
+          },
+          {
+            "type": "int64",
+            "optional": true,
+            "field": "lsn"
+          },
+          {
+            "type": "int64",
+            "optional": true,
+            "field": "xmin"
+          }
+        ],
+        "optional": false,
+        "name": "io.debezium.connector.postgresql.Source",
+        "field": "source"
+      },
+      {
+        "type": "string",
+        "optional": false,
+        "field": "op"
+      },
+      {
+        "type": "int64",
+        "optional": true,
+        "field": "ts_ms"
+      },
+      {
+        "type": "struct",
+        "fields": [
+          {
+            "type": "string",
+            "optional": false,
+            "field": "id"
+          },
+          {
+            "type": "int64",
+            "optional": false,
+            "field": "total_order"
+          },
+          {
+            "type": "int64",
+            "optional": false,
+            "field": "data_collection_order"
+          }
+        ],
+        "optional": true,
+        "name": "event.block",
+        "version": 1,
+        "field": "transaction"
+      }
+    ],
+    "optional": false,
+    "name": "dbserver1.inventory.customers.Envelope",
+    "version": 1
+  },
+  "payload": {
+    "before": null,
+    "after": {
+      "id": 1004,
+      "first_name": "Anne",
+      "last_name": "Kretchmar",
+      "email": "annek@noanswer.org"
+    },
+    "source": {
+      "version": "2.1.4.Final",
+      "connector": "postgresql",
+      "name": "dbserver1",
+      "ts_ms": 1717061456444,
+      "snapshot": "last_in_data_collection",
+      "db": "postgres",
+      "sequence": "[null,\"34442200\"]",
+      "schema": "inventory",
+      "table": "customers",
+      "txId": 766,
+      "lsn": 34442200,
+      "xmin": null
+    },
+    "op": "r",
+    "ts_ms": 1717061456560,
+    "transaction": null
+  }
+}
+```
+
+EmbeddedEngineChangeEvent [
+  key=null,
+  value=SourceRecord{
+      sourcePartition={server=my-app-connector},
+      sourceOffset={ts_sec=1717142969, file=binlog.000009, pos=236, row=1, server_id=1, event=2}
+    }
+    ConnectRecord{
+      topic='my-app-connector.foo.t',
+      kafkaPartition=null,
+      key=Struct{id=2},
+      keySchema=Schema{my-app-connector.foo.t.Key:STRUCT},
+      value=Struct{before=Struct{v1=1602333296000,v2=2020-10-10T04:34:56Z,id=2},after=Struct{v1=1602333296000,v2=2024-05-31T08:09:29Z,id=2},source=Struct{version=2.6.1.Final,connector=mysql,name=my-app-connector,ts_ms=1717142969000,db=foo,ts_us=1717142969000000,ts_ns=1717142969000000000,table=t,server_id=1,file=binlog.000009,pos=377,row=0,thread=12},op=u,ts_ms=1717142969650,ts_us=1717142969650843,ts_ns=1717142969650843000},
+      valueSchema=Schema{my-app-connector.foo.t.Envelope:STRUCT},
+      timestamp=null,
+      headers=ConnectHeaders(headers=)
+    },
+  sourceRecord=SourceRecord{
+      sourcePartition={server=my-app-connector},
+      sourceOffset={ts_sec=1717142969, file=binlog.000009, pos=236, row=1, server_id=1, event=2}
+    }
+    ConnectRecord{
+      topic='my-app-connector.foo.t',
+      kafkaPartition=null,
+      key=Struct{id=2},
+      keySchema=Schema{my-app-connector.foo.t.Key:STRUCT},
+      value=Struct{before=Struct{v1=1602333296000,v2=2020-10-10T04:34:56Z,id=2},after=Struct{v1=1602333296000,v2=2024-05-31T08:09:29Z,id=2},source=Struct{version=2.6.1.Final,connector=mysql,name=my-app-connector,ts_ms=1717142969000,db=foo,ts_us=1717142969000000,ts_ns=1717142969000000000,table=t,server_id=1,file=binlog.000009,pos=377,row=0,thread=12},op=u,ts_ms=1717142969650,ts_us=1717142969650843,ts_ns=1717142969650843000},
+      valueSchema=Schema{my-app-connector.foo.t.Envelope:STRUCT},
+      timestamp=null,
+      headers=ConnectHeaders(headers=)
+    }
+]
