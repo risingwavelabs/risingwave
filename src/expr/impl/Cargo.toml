@@ -57,8 +57,8 @@ regex = "1"
 risingwave_common = { workspace = true }
 risingwave_common_estimate_size = { workspace = true }
 risingwave_expr = { workspace = true }
-risingwave_sqlparser = { workspace = true }
 risingwave_pb = { workspace = true }
+risingwave_sqlparser = { workspace = true }
 rust_decimal = { version = "1", features = ["db-postgres", "maths"] }
 self_cell = "1.0.1"
 serde = { version = "1", features = ["derive"] }
