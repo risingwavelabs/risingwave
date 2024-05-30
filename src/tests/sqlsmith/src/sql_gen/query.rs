@@ -133,7 +133,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let from = None;
         let cte = Cte {
             alias: alias.clone(),
-            query,
+            query: Some(query),
             from,
         };
 

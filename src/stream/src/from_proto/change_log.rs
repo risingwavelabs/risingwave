@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_pb::stream_plan::ChangeLogNode;
+use risingwave_pb::stream_plan::ChangedLogNode;
 use risingwave_storage::StateStore;
 
 use super::ExecutorBuilder;
@@ -23,16 +23,16 @@ use crate::task::ExecutorParams;
 pub struct ChangeLogExecutorBuilder;
 
 impl ExecutorBuilder for ChangeLogExecutorBuilder {
-    type Node = ChangeLogNode;
+    type Node = ChangedLogNode;
 
     async fn new_boxed_executor(
         params: ExecutorParams,
-        _node: &Self::Node,
+        node: &Self::Node,
         _store: impl StateStore,
     ) -> StreamResult<Executor> {
         let [input]: [_; 1] = params.input.try_into().unwrap();
 
-        let exec = ChangeLogExecutor::new(params.actor_context, input);
+        let exec = ChangeLogExecutor::new(params.actor_context, input, node.need_op);
         Ok((params.info, exec).into())
     }
 }

@@ -15,7 +15,6 @@
 use std::collections::hash_map::Entry;
 use std::ops::Deref;
 
-use either::Either;
 use itertools::{EitherOrBoth, Itertools};
 use risingwave_common::bail;
 use risingwave_common::catalog::{Field, TableId, DEFAULT_SCHEMA_NAME};
@@ -44,12 +43,11 @@ mod window_table_function;
 
 pub use cte_ref::BoundBackCteRef;
 pub use join::BoundJoin;
-pub use share::BoundShare;
+pub use share::{BoundShare, BoundShareInput};
 pub use subquery::BoundSubquery;
 pub use table_or_source::{BoundBaseTable, BoundSource, BoundSystemTable};
 pub use watermark::BoundWatermark;
 pub use window_table_function::{BoundWindowTableFunction, WindowTableFunctionKind};
-use crate::binder::relation::share::BoundShareInput;
 
 use crate::expr::{CorrelatedId, Depth};
 
@@ -384,32 +382,25 @@ impl Binder {
                     Ok(Relation::BackCteRef(Box::new(BoundBackCteRef { share_id, base })))
                 }
                 BindingCteState::Bound { query } => {
-                    let schema = match &query {
-                        Either::Left(normal) => normal.schema(),
-                        Either::Right(recursive) => &recursive.schema,
-                    };
+                    let input = BoundShareInput::Query(query);
                     self.bind_table_to_context(
-                        schema.fields.iter().map(|f| (false, f.clone())),
+                        input.fields()?,
                         table_name.clone(),
                         Some(original_alias),
                     )?;
                     // we could always share the cte,
                     // no matter it's recursive or not.
-                    let input = query;
-                    Ok(Relation::Share(Box::new(BoundShare { share_id, input: BoundShareInput::Query(input)})))
+                    Ok(Relation::Share(Box::new(BoundShare { share_id, input})))
                 }
                 BindingCteState::ChangeLog { table } => {
-                    let schema = if let Relation::BaseTable(boundBaseTable) = &table{
-                        boundBaseTable.table_catalog.column_schema()
-                    }else{
-                        return Err(ErrorCode::BindError("Change log CTE must be a base table".to_string()).into());
-                    };
+                    let input = BoundShareInput::ChangeLog(table);
                     self.bind_table_to_context(
-                        schema.fields.iter().map(|f| (false, f.clone())),
+                        input.fields()?,
                         table_name.clone(),
                         Some(original_alias),
                     )?;
-                    Ok(Relation::Share(Box::new(BoundShare { share_id, input: BoundShareInput::ChangeLog(table) })))
+                    println!("self.context.columns: {:?}", self.context.columns);
+                    Ok(Relation::Share(Box::new(BoundShare { share_id, input })))
                 },
             }
         } else {

@@ -4276,15 +4276,14 @@ impl Parser {
         let name = self.parse_identifier_non_reserved()?;
 
         let mut cte = if self.parse_keyword(Keyword::AS) {
-            let query = if let Ok(changelog) = self.parse_identifier_non_reserved(){
-                assert!(changelog.to_string().to_lowercase() == "changelog");
-                self.expect_keyword(Keyword::FROM)?;
-                None
-            }else{
-                self.expect_token(&Token::LParen)?;
+            let query = if let Ok(()) = self.expect_token(&Token::LParen) {
                 let query = self.parse_query()?;
                 self.expect_token(&Token::RParen)?;
                 Some(query)
+            } else {
+                let changelog = self.parse_identifier_non_reserved()?;
+                assert!(changelog.to_string().to_lowercase() == "changedlog");
+                None
             };
             let alias = TableAlias {
                 name,

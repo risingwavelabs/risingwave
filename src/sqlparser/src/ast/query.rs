@@ -288,12 +288,12 @@ pub struct Cte {
 
 impl fmt::Display for Cte {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if let Some(query) = &self.query{
+        if let Some(query) = &self.query {
             write!(f, "{} AS ({})", self.alias, query)?;
             if let Some(ref fr) = self.from {
                 write!(f, " FROM {}", fr)?;
             }
-        }else {
+        } else {
             write!(f, "{} AS changelog from {:?}", self.alias, self.from)?;
         }
         Ok(())

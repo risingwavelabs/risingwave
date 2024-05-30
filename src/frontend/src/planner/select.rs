@@ -95,6 +95,7 @@ impl Planner {
             None => self.create_dummy_values(),
             Some(t) => self.plan_relation(t)?,
         };
+        println!("root {:?}", root.schema());
         // Plan the WHERE clause.
         if let Some(where_clause) = where_clause {
             root = self.plan_where(root, where_clause)?;
@@ -153,7 +154,8 @@ impl Planner {
 
         let need_restore_select_items = select_items.len() > original_select_items_len;
 
-        root = LogicalProjectSet::create(root, select_items);
+        root = LogicalProjectSet::create(root, select_items.clone());
+        println!("root1 {:?},{:?}", root.schema(), select_items);
 
         if matches!(&distinct, BoundDistinct::DistinctOn(_)) {
             root = if order.is_empty() {

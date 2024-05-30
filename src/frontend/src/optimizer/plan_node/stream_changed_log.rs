@@ -1,0 +1,79 @@
+// Copyright 2024 RisingWave Labs
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+use risingwave_pb::stream_plan::stream_node::PbNodeBody;
+use risingwave_pb::stream_plan::ChangedLogNode;
+
+use super::expr_visitable::ExprVisitable;
+use super::stream::prelude::PhysicalPlanRef;
+use super::stream::StreamPlanRef;
+use super::utils::impl_distill_by_unit;
+use super::{generic, ExprRewritable, PlanBase, PlanTreeNodeUnary, Stream, StreamNode};
+use crate::stream_fragmenter::BuildFragmentGraphState;
+use crate::PlanRef;
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct StreamChangedLog {
+    pub base: PlanBase<Stream>,
+    core: generic::ChangeLog<PlanRef>,
+}
+
+impl StreamChangedLog {
+    pub fn new(core: generic::ChangeLog<PlanRef>) -> Self {
+        let input = core.input.clone();
+        let dist = input.distribution().clone();
+        // Filter executor won't change the append-only behavior of the stream.
+        let mut watermark_columns = input.watermark_columns().clone();
+        if core.need_op {
+            watermark_columns.grow(input.watermark_columns().len() + 2);
+        } else {
+            watermark_columns.grow(input.watermark_columns().len() + 1);
+        }
+        let base = PlanBase::new_stream_with_core(
+            &core,
+            dist,
+            input.append_only(),
+            input.emit_on_window_close(),
+            watermark_columns,
+        );
+        StreamChangedLog { base, core }
+    }
+}
+
+impl PlanTreeNodeUnary for StreamChangedLog {
+    fn input(&self) -> PlanRef {
+        self.core.input.clone()
+    }
+
+    fn clone_with_input(&self, input: PlanRef) -> Self {
+        let mut core = self.core.clone();
+        core.input = input;
+        Self::new(core)
+    }
+}
+
+impl_plan_tree_node_for_unary! { StreamChangedLog }
+impl_distill_by_unit!(StreamChangedLog, core, "StreamChangedLog");
+
+impl StreamNode for StreamChangedLog {
+    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
+        PbNodeBody::ChangedLog(ChangedLogNode {
+            need_op: self.core.need_op,
+        })
+    }
+}
+
+impl ExprRewritable for StreamChangedLog {}
+
+impl ExprVisitable for StreamChangedLog {}

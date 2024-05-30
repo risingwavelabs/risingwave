@@ -124,7 +124,9 @@ pub(crate) fn find_ddl_references_for_query(query: &Query, ddl_references: &mut 
     let Query { with, body, .. } = query;
     if let Some(With { cte_tables, .. }) = with {
         for Cte { query, .. } in cte_tables {
-            find_ddl_references_for_query(query, ddl_references)
+            if let Some(query) = query {
+                find_ddl_references_for_query(query, ddl_references)
+            }
         }
     }
     find_ddl_references_for_query_in_set_expr(body, ddl_references);

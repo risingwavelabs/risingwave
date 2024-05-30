@@ -20,7 +20,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_sqlparser::ast::{
-    Cte, Expr, Fetch, OrderByExpr, Query, SetExpr, SetOperator, Value, With,
+    Cte, Expr, Fetch, ObjectName, OrderByExpr, Query, SetExpr, SetOperator, Value, With,
 };
 use thiserror_ext::AsReport;
 
@@ -31,7 +31,6 @@ use crate::binder::bind_context::{BindingCte, RecursiveUnion};
 use crate::binder::{Binder, BoundSetExpr};
 use crate::error::{ErrorCode, Result};
 use crate::expr::{CorrelatedId, Depth, ExprImpl, ExprRewriter};
-use crate::handler::query;
 
 /// A validated sql query, including order and union.
 /// An example of its relationship with `BoundSetExpr` and `BoundSelect` can be found here: <https://bit.ly/3GQwgPz>
@@ -146,7 +145,7 @@ impl Binder {
     /// After finishing binding, we pop the previous context from the stack.
     pub fn bind_query(&mut self, query: Query) -> Result<BoundQuery> {
         self.push_context();
-        let result = self.bind_query_inner(query);
+        let result = self.bind_query_inner(query.clone());
         self.pop_context()?;
         result
     }
@@ -292,7 +291,7 @@ impl Binder {
 
             if with.recursive {
                 let query = query.ok_or_else(|| {
-                    ErrorCode::BindError("RECURSIVE CTE don't support changlog from".to_string())
+                    ErrorCode::BindError("RECURSIVE CTE don't support changedlog from".to_string())
                 })?;
                 let (
                     SetExpr::SetOperation {
@@ -323,8 +322,9 @@ impl Binder {
                     .clone();
 
                 self.bind_rcte(with, entry, *left, *right, all)?;
-            } else if let Some(query) = query{
+            } else if let Some(query) = query {
                 let bound_query = self.bind_query(query)?;
+                println!("ccc3 {:?}", self.context.columns);
                 self.context.cte_to_relation.insert(
                     table_name,
                     Rc::new(RefCell::new(BindingCte {
@@ -335,16 +335,25 @@ impl Binder {
                         alias,
                     })),
                 );
-            } else{
+            } else {
                 let from_table_name = from.ok_or_else(|| {
                     ErrorCode::BindError("CTE with changelog from must have a table/mv".to_string())
                 })?;
-                let from_table_relation = self.bind_relation_by_name(from_table_name, None, None)?;
+                self.push_context();
+                let from_table_relation = self.bind_relation_by_name(
+                    ObjectName::from(vec![from_table_name]),
+                    None,
+                    None,
+                )?;
+                self.pop_context()?;
+                println!("ddd {:?}", self.context.columns);
                 self.context.cte_to_relation.insert(
                     table_name,
                     Rc::new(RefCell::new(BindingCte {
                         share_id,
-                        state: BindingCteState::ChangeLog { table: from_table_relation },
+                        state: BindingCteState::ChangeLog {
+                            table: from_table_relation,
+                        },
                         alias,
                     })),
                 );

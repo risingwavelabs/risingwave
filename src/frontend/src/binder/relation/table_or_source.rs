@@ -25,6 +25,7 @@ use risingwave_sqlparser::parser::Parser;
 use thiserror_ext::AsReport;
 
 use super::BoundShare;
+use crate::binder::relation::BoundShareInput;
 use crate::binder::{Binder, Relation};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::source_catalog::SourceCatalog;
@@ -280,7 +281,10 @@ impl Binder {
         };
         let input = Either::Left(query);
         Ok((
-            Relation::Share(Box::new(BoundShare { share_id, input: BoundShareInput::Query(input) })),
+            Relation::Share(Box::new(BoundShare {
+                share_id,
+                input: BoundShareInput::Query(input),
+            })),
             columns.iter().map(|c| (false, c.clone())).collect_vec(),
         ))
     }

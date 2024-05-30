@@ -18,6 +18,7 @@ use crate::binder::{BoundStatement, ShareId};
 use crate::error::Result;
 use crate::optimizer::{OptimizerContextRef, PlanRoot};
 
+mod changed_log;
 mod delete;
 mod insert;
 mod query;

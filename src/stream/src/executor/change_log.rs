@@ -18,13 +18,15 @@ use std::sync::Arc;
 
 use futures::prelude::stream::StreamExt;
 use futures_async_stream::try_stream;
-use risingwave_common::array::{ArrayImpl, I16Array, Op, StreamChunk};
+use risingwave_common::array::{ArrayImpl, I16Array, Op, SerialArray, StreamChunk};
+use risingwave_common::types::Serial;
 
 use super::{ActorContextRef, BoxedMessageStream, Execute, Executor, Message, StreamExecutorError};
 
 pub struct ChangeLogExecutor {
     _ctx: ActorContextRef,
     input: Executor,
+    need_op: bool,
 }
 
 impl Debug for ChangeLogExecutor {
@@ -39,8 +41,12 @@ impl Execute for ChangeLogExecutor {
     }
 }
 impl ChangeLogExecutor {
-    pub fn new(ctx: ActorContextRef, input: Executor) -> Self {
-        Self { _ctx: ctx, input }
+    pub fn new(ctx: ActorContextRef, input: Executor, need_op: bool) -> Self {
+        Self {
+            _ctx: ctx,
+            input,
+            need_op,
+        }
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
@@ -53,13 +59,29 @@ impl ChangeLogExecutor {
                 Message::Chunk(chunk) => {
                     let (ops, columns, bitmap) = chunk.into_inner();
                     let new_ops = vec![Op::Insert; ops.len()];
-                    let ops: Vec<Option<i16>> =
-                        ops.into_iter().map(|op| Some(op.to_i16())).collect();
-                    let ops_array = Arc::new(ArrayImpl::Int16(I16Array::from_iter(ops)));
-                    let mut new_columns = Vec::with_capacity(columns.len() + 1);
-                    new_columns.extend_from_slice(&columns);
-                    new_columns.push(ops_array);
-                    let new_chunk = StreamChunk::with_visibility(new_ops, columns, bitmap);
+                    // They are all 0, will be add in row id gen executor.
+                    let changed_log_row_id_array =
+                        Arc::new(ArrayImpl::Serial(SerialArray::from_iter(vec![
+                            Serial::from(
+                                0
+                            );
+                            ops.len()
+                        ])));
+                    let new_chunk = if self.need_op {
+                        let ops: Vec<Option<i16>> =
+                            ops.iter().map(|op| Some(op.to_i16())).collect();
+                        let ops_array = Arc::new(ArrayImpl::Int16(I16Array::from_iter(ops)));
+                        let mut new_columns = Vec::with_capacity(columns.len() + 2);
+                        new_columns.extend_from_slice(&columns);
+                        new_columns.push(ops_array);
+                        new_columns.push(changed_log_row_id_array);
+                        StreamChunk::with_visibility(new_ops, new_columns, bitmap)
+                    } else {
+                        let mut new_columns = Vec::with_capacity(columns.len() + 1);
+                        new_columns.extend_from_slice(&columns);
+                        new_columns.push(changed_log_row_id_array);
+                        StreamChunk::with_visibility(new_ops, new_columns, bitmap)
+                    };
                     yield Message::Chunk(new_chunk);
                 }
                 m => yield m,
