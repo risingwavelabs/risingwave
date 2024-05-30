@@ -21,13 +21,14 @@ use moka::future::Cache;
 use crate::error::ConnectorResult;
 use crate::schema::schema_registry::{Client, ConfluentSchema};
 
+/// TODO: support protobuf
 #[derive(Debug)]
-pub struct ConfluentSchemaResolver {
+pub struct ConfluentSchemaCache {
     writer_schemas: Cache<i32, Arc<Schema>>,
     confluent_client: Client,
 }
 
-impl ConfluentSchemaResolver {
+impl ConfluentSchemaCache {
     async fn parse_and_cache_schema(
         &self,
         raw_schema: ConfluentSchema,
@@ -43,7 +44,7 @@ impl ConfluentSchemaResolver {
 
     /// Create a new `ConfluentSchemaResolver`
     pub fn new(client: Client) -> Self {
-        ConfluentSchemaResolver {
+        ConfluentSchemaCache {
             writer_schemas: Cache::new(u64::MAX),
             confluent_client: client,
         }
