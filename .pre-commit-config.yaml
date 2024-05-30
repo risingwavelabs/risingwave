@@ -11,10 +11,10 @@ repos:
     hooks:
     -   id: rustfmt
         name: rustfmt
-        entry: rustfmt
+        entry: rustfmt --edition 2021
         language: system
         types: [rust]
     -   id: typos
         name: typos
-        entry: typos
+        entry: typos -w
         language: system
