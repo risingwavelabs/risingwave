@@ -31,8 +31,8 @@ impl<'a> BytesAccess<'a> {
 
 impl<'a> Access for BytesAccess<'a> {
     /// path is empty currently, `type_expected` should be `Bytea`
-    fn access(&self, path: &[&str], type_expected: Option<&DataType>) -> AccessResult {
-        if let DataType::Bytea = type_expected.unwrap() {
+    fn access(&self, path: &[&str], type_expected: &DataType) -> AccessResult {
+        if let DataType::Bytea = type_expected {
             if self.column_name.is_none()
                 || (path.len() == 1 && self.column_name.as_ref().unwrap() == path[0])
             {

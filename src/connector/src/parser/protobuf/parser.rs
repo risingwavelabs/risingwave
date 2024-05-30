@@ -896,7 +896,8 @@ mod test {
     }
 
     fn pb_eq(a: &ProtobufAccess, field_name: &str, value: ScalarImpl) {
-        let d = a.access(&[field_name], None).unwrap().unwrap();
+        let dummy_type = DataType::Varchar;
+        let d = a.access(&[field_name], &dummy_type).unwrap().unwrap();
         assert_eq!(d, value, "field: {} value: {:?}", field_name, d);
     }
 

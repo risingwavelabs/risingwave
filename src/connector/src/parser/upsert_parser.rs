@@ -101,13 +101,13 @@ impl UpsertParser {
             UpsertChangeEvent::default();
         let mut change_event_op = ChangeEventOperation::Delete;
         if let Some(data) = key {
-            row_op = row_op.with_key(self.key_builder.generate_accessor(data).await?);
+            row_op.with_key(self.key_builder.generate_accessor(data).await?);
         }
         // Empty payload of kafka is Some(vec![])
         if let Some(data) = payload
             && !data.is_empty()
         {
-            row_op = row_op.with_value(self.payload_builder.generate_accessor(data).await?);
+            row_op.with_value(self.payload_builder.generate_accessor(data).await?);
             change_event_op = ChangeEventOperation::Upsert;
         }
 

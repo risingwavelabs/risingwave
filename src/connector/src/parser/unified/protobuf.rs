@@ -38,7 +38,7 @@ impl ProtobufAccess {
 }
 
 impl Access for ProtobufAccess {
-    fn access(&self, path: &[&str], _type_expected: Option<&DataType>) -> AccessResult {
+    fn access(&self, path: &[&str], _type_expected: &DataType) -> AccessResult {
         debug_assert_eq!(1, path.len());
         let field_desc = self
             .message

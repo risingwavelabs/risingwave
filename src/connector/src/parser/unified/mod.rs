@@ -39,7 +39,12 @@ pub type AccessResult<T = Datum> = std::result::Result<T, AccessError>;
 
 /// Access a certain field in an object according to the path
 pub trait Access {
-    fn access(&self, path: &[&str], type_expected: Option<&DataType>) -> AccessResult;
+    fn access(&self, path: &[&str], type_expected: &DataType) -> AccessResult;
+}
+
+/// Whether the whole message is null. This is used for UPSERT events: `null` means DELETE.
+pub trait NullableAccess: Access {
+    fn is_null(&self) -> bool;
 }
 
 pub enum AccessImpl<'a, 'b> {
@@ -51,13 +56,26 @@ pub enum AccessImpl<'a, 'b> {
 }
 
 impl Access for AccessImpl<'_, '_> {
-    fn access(&self, path: &[&str], type_expected: Option<&DataType>) -> AccessResult {
+    fn access(&self, path: &[&str], type_expected: &DataType) -> AccessResult {
         match self {
             Self::Avro(accessor) => accessor.access(path, type_expected),
             Self::Bytes(accessor) => accessor.access(path, type_expected),
             Self::Protobuf(accessor) => accessor.access(path, type_expected),
             Self::Json(accessor) => accessor.access(path, type_expected),
             Self::MongoJson(accessor) => accessor.access(path, type_expected),
+        }
+    }
+}
+
+impl NullableAccess for AccessImpl<'_, '_> {
+    fn is_null(&self) -> bool {
+        match self {
+            Self::Avro(accessor) => accessor.is_null(),
+            Self::Json(accessor) => accessor.is_null(),
+            Self::Bytes(_) | Self::Protobuf(_) | Self::MongoJson(_) => {
+                // TODO: refactor upsert related code to avoid this branch
+                unreachable!()
+            }
         }
     }
 }
@@ -72,8 +90,8 @@ pub enum ChangeEventOperation {
 #[auto_impl(&)]
 pub trait ChangeEvent {
     /// Access the operation type.
-    fn op(&self) -> std::result::Result<ChangeEventOperation, AccessError>;
-    /// Access the field after the operation.
+    fn op(&self) -> AccessResult<ChangeEventOperation>;
+    /// Access the field.
     fn access_field(&self, desc: &SourceColumnDesc) -> AccessResult;
 }
 
@@ -81,12 +99,12 @@ impl<A> ChangeEvent for (ChangeEventOperation, A)
 where
     A: Access,
 {
-    fn op(&self) -> std::result::Result<ChangeEventOperation, AccessError> {
+    fn op(&self) -> AccessResult<ChangeEventOperation> {
         Ok(self.0)
     }
 
     fn access_field(&self, desc: &SourceColumnDesc) -> AccessResult {
-        self.1.access(&[desc.name.as_str()], Some(&desc.data_type))
+        self.1.access(&[desc.name.as_str()], &desc.data_type)
     }
 }
 

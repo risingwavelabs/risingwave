@@ -31,7 +31,7 @@ use simd_json::prelude::{
 use simd_json::{BorrowedValue, ValueType};
 use thiserror_ext::AsReport;
 
-use super::{Access, AccessError, AccessResult};
+use super::{Access, AccessError, AccessResult, NullableAccess};
 use crate::parser::common::json_object_get_case_insensitive;
 use crate::parser::unified::avro::extract_decimal;
 use crate::schema::{bail_invalid_option_error, InvalidOptionError};
@@ -199,11 +199,7 @@ impl JsonParseOptions {
         }
     }
 
-    pub fn parse(
-        &self,
-        value: &BorrowedValue<'_>,
-        type_expected: Option<&DataType>,
-    ) -> AccessResult {
+    pub fn parse(&self, value: &BorrowedValue<'_>, type_expected: &DataType) -> AccessResult {
         let create_error = || AccessError::TypeError {
             expected: format!("{:?}", type_expected),
             got: value.value_type().to_string(),
@@ -213,10 +209,10 @@ impl JsonParseOptions {
         let v: ScalarImpl = match (type_expected, value.value_type()) {
             (_, ValueType::Null) => return Ok(None),
             // ---- Boolean -----
-            (Some(DataType::Boolean) | None, ValueType::Bool) => value.as_bool().unwrap().into(),
+            (DataType::Boolean , ValueType::Bool) => value.as_bool().unwrap().into(),
 
             (
-                Some(DataType::Boolean),
+                DataType::Boolean,
                 ValueType::I64 | ValueType::I128 | ValueType::U64 | ValueType::U128,
             ) if matches!(self.boolean_handling, BooleanHandling::Relax { .. })
                 && matches!(value.as_i64(), Some(0i64) | Some(1i64)) =>
@@ -224,7 +220,7 @@ impl JsonParseOptions {
                 (value.as_i64() == Some(1i64)).into()
             }
 
-            (Some(DataType::Boolean), ValueType::String)
+            (DataType::Boolean, ValueType::String)
                 if matches!(
                     self.boolean_handling,
                     BooleanHandling::Relax {
@@ -256,11 +252,11 @@ impl JsonParseOptions {
             }
             // ---- Int16 -----
             (
-                Some(DataType::Int16),
+                DataType::Int16,
                 ValueType::I64 | ValueType::I128 | ValueType::U64 | ValueType::U128,
             ) => value.try_as_i16().map_err(|_| create_error())?.into(),
 
-            (Some(DataType::Int16), ValueType::String)
+            (DataType::Int16, ValueType::String)
                 if matches!(
                     self.numeric_handling,
                     NumericHandling::Relax {
@@ -277,11 +273,11 @@ impl JsonParseOptions {
             }
             // ---- Int32 -----
             (
-                Some(DataType::Int32),
+                DataType::Int32,
                 ValueType::I64 | ValueType::I128 | ValueType::U64 | ValueType::U128,
             ) => value.try_as_i32().map_err(|_| create_error())?.into(),
 
-            (Some(DataType::Int32), ValueType::String)
+            (DataType::Int32, ValueType::String)
                 if matches!(
                     self.numeric_handling,
                     NumericHandling::Relax {
@@ -297,15 +293,12 @@ impl JsonParseOptions {
                     .into()
             }
             // ---- Int64 -----
-            (None, ValueType::I64 | ValueType::U64) => {
-                value.try_as_i64().map_err(|_| create_error())?.into()
-            }
             (
-                Some(DataType::Int64),
+                DataType::Int64,
                 ValueType::I64 | ValueType::I128 | ValueType::U64 | ValueType::U128,
             ) => value.try_as_i64().map_err(|_| create_error())?.into(),
 
-            (Some(DataType::Int64), ValueType::String)
+            (DataType::Int64, ValueType::String)
                 if matches!(
                     self.numeric_handling,
                     NumericHandling::Relax {
@@ -322,12 +315,12 @@ impl JsonParseOptions {
             }
             // ---- Float32 -----
             (
-                Some(DataType::Float32),
+                DataType::Float32,
                 ValueType::I64 | ValueType::I128 | ValueType::U64 | ValueType::U128,
             ) if matches!(self.numeric_handling, NumericHandling::Relax { .. }) => {
                 (value.try_as_i64().map_err(|_| create_error())? as f32).into()
             }
-            (Some(DataType::Float32), ValueType::String)
+            (DataType::Float32, ValueType::String)
                 if matches!(
                     self.numeric_handling,
                     NumericHandling::Relax {
@@ -342,17 +335,17 @@ impl JsonParseOptions {
                     .map_err(|_| create_error())?
                     .into()
             }
-            (Some(DataType::Float32), ValueType::F64) => {
+            (DataType::Float32, ValueType::F64) => {
                 value.try_as_f32().map_err(|_| create_error())?.into()
             }
             // ---- Float64 -----
             (
-                Some(DataType::Float64),
+                DataType::Float64,
                 ValueType::I64 | ValueType::I128 | ValueType::U64 | ValueType::U128,
             ) if matches!(self.numeric_handling, NumericHandling::Relax { .. }) => {
                 (value.try_as_i64().map_err(|_| create_error())? as f64).into()
             }
-            (Some(DataType::Float64), ValueType::String)
+            (DataType::Float64, ValueType::String)
                 if matches!(
                     self.numeric_handling,
                     NumericHandling::Relax {
@@ -367,25 +360,25 @@ impl JsonParseOptions {
                     .map_err(|_| create_error())?
                     .into()
             }
-            (Some(DataType::Float64) | None, ValueType::F64) => {
+            (DataType::Float64 , ValueType::F64) => {
                 value.try_as_f64().map_err(|_| create_error())?.into()
             }
             // ---- Decimal -----
-            (Some(DataType::Decimal) | None, ValueType::I128 | ValueType::U128) => {
+            (DataType::Decimal , ValueType::I128 | ValueType::U128) => {
                 Decimal::from_str(&value.try_as_i128().map_err(|_| create_error())?.to_string())
                     .map_err(|_| create_error())?
                     .into()
             }
-            (Some(DataType::Decimal), ValueType::I64 | ValueType::U64) => {
+            (DataType::Decimal, ValueType::I64 | ValueType::U64) => {
                 Decimal::from(value.try_as_i64().map_err(|_| create_error())?).into()
             }
 
-            (Some(DataType::Decimal), ValueType::F64) => {
+            (DataType::Decimal, ValueType::F64) => {
                 Decimal::try_from(value.try_as_f64().map_err(|_| create_error())?)
                     .map_err(|_| create_error())?
                     .into()
             }
-            (Some(DataType::Decimal), ValueType::String) => {
+            (DataType::Decimal, ValueType::String) => {
                 let str = value.as_str().unwrap();
                 // the following values are special string generated by Debezium and should be handled separately
                 match str {
@@ -395,7 +388,7 @@ impl JsonParseOptions {
                     _ => ScalarImpl::Decimal(Decimal::from_str(str).map_err(|_err| create_error())?),
                 }
             }
-            (Some(DataType::Decimal), ValueType::Object) => {
+            (DataType::Decimal, ValueType::Object) => {
                 // ref https://github.com/risingwavelabs/risingwave/issues/10628
                 // handle debezium json (variable scale): {"scale": int, "value": bytes}
                 let scale = value
@@ -418,21 +411,21 @@ impl JsonParseOptions {
             }
             // ---- Date -----
             (
-                Some(DataType::Date),
+                DataType::Date,
                 ValueType::I64 | ValueType::I128 | ValueType::U64 | ValueType::U128,
             ) => Date::with_days_since_unix_epoch(value.try_as_i32().map_err(|_| create_error())?)
                 .map_err(|_| create_error())?
                 .into(),
-            (Some(DataType::Date), ValueType::String) => value
+            (DataType::Date, ValueType::String) => value
                 .as_str()
                 .unwrap()
                 .parse::<Date>()
                 .map_err(|_| create_error())?
                 .into(),
             // ---- Varchar -----
-            (Some(DataType::Varchar) | None, ValueType::String) => value.as_str().unwrap().into(),
+            (DataType::Varchar , ValueType::String) => value.as_str().unwrap().into(),
             (
-                Some(DataType::Varchar),
+                DataType::Varchar,
                 ValueType::Bool
                 | ValueType::I64
                 | ValueType::I128
@@ -443,7 +436,7 @@ impl JsonParseOptions {
                 value.to_string().into()
             }
             (
-                Some(DataType::Varchar),
+                DataType::Varchar,
                 ValueType::Bool
                 | ValueType::I64
                 | ValueType::I128
@@ -456,14 +449,14 @@ impl JsonParseOptions {
                 value.to_string().into()
             }
             // ---- Time -----
-            (Some(DataType::Time), ValueType::String) => value
+            (DataType::Time, ValueType::String) => value
                 .as_str()
                 .unwrap()
                 .parse::<Time>()
                 .map_err(|_| create_error())?
                 .into(),
             (
-                Some(DataType::Time),
+                DataType::Time,
                 ValueType::I64 | ValueType::I128 | ValueType::U64 | ValueType::U128,
             ) => value
                 .as_i64()
@@ -475,20 +468,20 @@ impl JsonParseOptions {
                 .map_err(|_| create_error())?
                 .into(),
             // ---- Timestamp -----
-            (Some(DataType::Timestamp), ValueType::String) => value
+            (DataType::Timestamp, ValueType::String) => value
                 .as_str()
                 .unwrap()
                 .parse::<Timestamp>()
                 .map_err(|_| create_error())?
                 .into(),
             (
-                Some(DataType::Timestamp),
+                DataType::Timestamp,
                 ValueType::I64 | ValueType::I128 | ValueType::U64 | ValueType::U128,
             ) => i64_to_timestamp(value.as_i64().unwrap())
                 .map_err(|_| create_error())?
                 .into(),
             // ---- Timestamptz -----
-            (Some(DataType::Timestamptz), ValueType::String) => match self.timestamptz_handling {
+            (DataType::Timestamptz, ValueType::String) => match self.timestamptz_handling {
                 TimestamptzHandling::UtcWithoutSuffix => value
                     .as_str()
                     .unwrap()
@@ -505,7 +498,7 @@ impl JsonParseOptions {
                     .into(),
             }
             (
-                Some(DataType::Timestamptz),
+                DataType::Timestamptz,
                 ValueType::I64 | ValueType::I128 | ValueType::U64 | ValueType::U128,
             ) => value.as_i64()
                 .and_then(|num| match self.timestamptz_handling {
@@ -518,11 +511,11 @@ impl JsonParseOptions {
                 .ok_or_else(create_error)?
                 .into(),
             // ---- Interval -----
-            (Some(DataType::Interval), ValueType::String) => {
+            (DataType::Interval, ValueType::String) => {
                 value.as_str().unwrap().parse::<Interval>().map_err(|_| create_error())?.into()
             }
             // ---- Struct -----
-            (Some(DataType::Struct(struct_type_info)), ValueType::Object) => StructValue::new(
+            (DataType::Struct(struct_type_info), ValueType::Object) => StructValue::new(
                 struct_type_info
                     .names()
                     .zip_eq_fast(struct_type_info.types())
@@ -540,25 +533,16 @@ impl JsonParseOptions {
                                 }
                                 &BorrowedValue::Static(simd_json::StaticNode::Null)
                             });
-                        self.parse(field_value, Some(field_type))
+                        self.parse(field_value, field_type)
                     })
                     .collect::<Result<_, _>>()?,
             )
             .into(),
 
-            (None, ValueType::Object) => StructValue::new(
-                value
-                    .as_object()
-                    .unwrap()
-                    .iter()
-                    .map(|(_field_name, field_value)| self.parse(field_value, None))
-                    .collect::<Result<_, _>>()?,
-            )
-            .into(),
 
             // String containing json object, e.g. "{\"a\": 1, \"b\": 2}"
             // Try to parse it as json object.
-            (Some(DataType::Struct(_)), ValueType::String)
+            (DataType::Struct(_), ValueType::String)
                 if matches!(self.struct_handling, StructHandling::AllowJsonString) =>
             {
                 // TODO: avoid copy by accepting `&mut BorrowedValue` in `parse` method.
@@ -569,11 +553,11 @@ impl JsonParseOptions {
             }
 
             // ---- List -----
-            (Some(DataType::List(item_type)), ValueType::Array) => ListValue::new({
+            (DataType::List(item_type), ValueType::Array) => ListValue::new({
                 let array = value.as_array().unwrap();
                 let mut builder = item_type.create_array_builder(array.len());
                 for v in array {
-                    let value = self.parse(v, Some(item_type))?;
+                    let value = self.parse(v, item_type)?;
                     builder.append(value);
                 }
                 builder.finish()
@@ -581,7 +565,7 @@ impl JsonParseOptions {
             .into(),
 
             // ---- Bytea -----
-            (Some(DataType::Bytea), ValueType::String) => match self.bytea_handling {
+            (DataType::Bytea, ValueType::String) => match self.bytea_handling {
                 ByteaHandling::Standard => str_to_bytea(value.as_str().unwrap())
                     .map_err(|_| create_error())?
                     .into(),
@@ -592,14 +576,14 @@ impl JsonParseOptions {
                     .into(),
             },
             // ---- Jsonb -----
-            (Some(DataType::Jsonb), ValueType::String)
+            (DataType::Jsonb, ValueType::String)
                 if matches!(self.json_value_handling, JsonValueHandling::AsString) =>
             {
                 JsonbVal::from_str(value.as_str().unwrap())
                     .map_err(|_| create_error())?
                     .into()
             }
-            (Some(DataType::Jsonb), _)
+            (DataType::Jsonb, _)
                 if matches!(self.json_value_handling, JsonValueHandling::AsValue) =>
             {
                 let value: serde_json::Value =
@@ -608,11 +592,11 @@ impl JsonParseOptions {
             }
             // ---- Int256 -----
             (
-                Some(DataType::Int256),
+                DataType::Int256,
                 ValueType::I64 | ValueType::I128 | ValueType::U64 | ValueType::U128,
             ) => Int256::from(value.try_as_i64().map_err(|_| create_error())?).into(),
 
-            (Some(DataType::Int256), ValueType::String) => {
+            (DataType::Int256, ValueType::String) => {
                 Int256::from_str(value.as_str().unwrap())
                     .map_err(|_| create_error())?
                     .into()
@@ -643,7 +627,7 @@ impl<'a, 'b> Access for JsonAccess<'a, 'b>
 where
     'a: 'b,
 {
-    fn access(&self, path: &[&str], type_expected: Option<&DataType>) -> AccessResult {
+    fn access(&self, path: &[&str], type_expected: &DataType) -> AccessResult {
         let mut value = &self.value;
         for (idx, &key) in path.iter().enumerate() {
             if let Some(sub_value) = if self.options.ignoring_keycase {
@@ -661,5 +645,14 @@ where
         }
 
         self.options.parse(value, type_expected)
+    }
+}
+
+impl<'a, 'b> NullableAccess for JsonAccess<'a, 'b>
+where
+    'a: 'b,
+{
+    fn is_null(&self) -> bool {
+        matches!(self.value.value_type(), ValueType::Null)
     }
 }

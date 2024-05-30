@@ -79,8 +79,8 @@ pub fn parse_transaction_meta(
     connector_props: &ConnectorProperties,
 ) -> AccessResult<TransactionControl> {
     if let (Some(ScalarImpl::Utf8(status)), Some(ScalarImpl::Utf8(id))) = (
-        accessor.access(&[TRANSACTION_STATUS], Some(&DataType::Varchar))?,
-        accessor.access(&[TRANSACTION_ID], Some(&DataType::Varchar))?,
+        accessor.access(&[TRANSACTION_STATUS], &DataType::Varchar)?,
+        accessor.access(&[TRANSACTION_ID], &DataType::Varchar)?,
     ) {
         // The id field has different meanings for different databases:
         // PG: txID:LSN
@@ -172,16 +172,16 @@ where
                         .key_accessor
                         .as_ref()
                         .expect("key_accessor must be provided for delete operation")
-                        .access(&[&desc.name], Some(&desc.data_type));
+                        .access(&[&desc.name], &desc.data_type);
                 }
 
                 if let Some(va) = self.value_accessor.as_ref() {
-                    va.access(&[BEFORE, &desc.name], Some(&desc.data_type))
+                    va.access(&[BEFORE, &desc.name], &desc.data_type)
                 } else {
                     self.key_accessor
                         .as_ref()
                         .unwrap()
-                        .access(&[&desc.name], Some(&desc.data_type))
+                        .access(&[&desc.name], &desc.data_type)
                 }
             }
 
@@ -193,7 +193,7 @@ where
                         self.value_accessor
                             .as_ref()
                             .expect("value_accessor must be provided for upsert operation")
-                            .access(&[AFTER, &desc.name], Some(&desc.data_type))
+                            .access(&[AFTER, &desc.name], &desc.data_type)
                     },
                     |additional_column_type| {
                         match additional_column_type {
@@ -203,7 +203,7 @@ where
                                     .value_accessor
                                     .as_ref()
                                     .expect("value_accessor must be provided for upsert operation")
-                                    .access(&[SOURCE, SOURCE_TS_MS], Some(&DataType::Int64))?;
+                                    .access(&[SOURCE, SOURCE_TS_MS], &DataType::Int64)?;
                                 Ok(ts_ms.map(|scalar| {
                                     Timestamptz::from_millis(scalar.into_int64())
                                         .expect("source.ts_ms must in millisecond")
@@ -222,7 +222,7 @@ where
 
     fn op(&self) -> Result<ChangeEventOperation, AccessError> {
         if let Some(accessor) = &self.value_accessor {
-            if let Some(ScalarImpl::Utf8(op)) = accessor.access(&[OP], Some(&DataType::Varchar))? {
+            if let Some(ScalarImpl::Utf8(op)) = accessor.access(&[OP], &DataType::Varchar)? {
                 match op.as_ref() {
                     DEBEZIUM_READ_OP | DEBEZIUM_CREATE_OP | DEBEZIUM_UPDATE_OP => {
                         return Ok(ChangeEventOperation::Upsert)
@@ -309,15 +309,12 @@ impl<A> Access for MongoJsonAccess<A>
 where
     A: Access,
 {
-    fn access(&self, path: &[&str], type_expected: Option<&DataType>) -> super::AccessResult {
+    fn access(&self, path: &[&str], type_expected: &DataType) -> super::AccessResult {
         match path {
             ["after" | "before", "_id"] => {
-                let payload = self.access(&[path[0]], Some(&DataType::Jsonb))?;
+                let payload = self.access(&[path[0]], &DataType::Jsonb)?;
                 if let Some(ScalarImpl::Jsonb(bson_doc)) = payload {
-                    Ok(extract_bson_id(
-                        type_expected.unwrap_or(&DataType::Jsonb),
-                        &bson_doc.take(),
-                    )?)
+                    Ok(extract_bson_id(type_expected, &bson_doc.take())?)
                 } else {
                     // fail to extract the "_id" field from the message payload
                     Err(AccessError::Undefined {
@@ -326,19 +323,16 @@ where
                     })?
                 }
             }
-            ["after" | "before", "payload"] => self.access(&[path[0]], Some(&DataType::Jsonb)),
+            ["after" | "before", "payload"] => self.access(&[path[0]], &DataType::Jsonb),
             // To handle a DELETE message, we need to extract the "_id" field from the message key, because it is not in the payload.
             // In addition, the "_id" field is named as "id" in the key. An example of message key:
             // {"schema":null,"payload":{"id":"{\"$oid\": \"65bc9fb6c485f419a7a877fe\"}"}}
             ["_id"] => {
                 let ret = self.accessor.access(path, type_expected);
                 if matches!(ret, Err(AccessError::Undefined { .. })) {
-                    let id_bson = self.accessor.access(&["id"], Some(&DataType::Jsonb))?;
+                    let id_bson = self.accessor.access(&["id"], &DataType::Jsonb)?;
                     if let Some(ScalarImpl::Jsonb(bson_doc)) = id_bson {
-                        Ok(extract_bson_id(
-                            type_expected.unwrap_or(&DataType::Jsonb),
-                            &bson_doc.take(),
-                        )?)
+                        Ok(extract_bson_id(type_expected, &bson_doc.take())?)
                     } else {
                         // fail to extract the "_id" field from the message key
                         Err(AccessError::Undefined {

@@ -36,7 +36,7 @@ where
 {
     fn op(&self) -> std::result::Result<super::ChangeEventOperation, super::AccessError> {
         const OP: &str = "type";
-        if let Some(ScalarImpl::Utf8(op)) = self.0.access(&[OP], Some(&DataType::Varchar))? {
+        if let Some(ScalarImpl::Utf8(op)) = self.0.access(&[OP], &DataType::Varchar)? {
             match op.as_ref() {
                 MAXWELL_INSERT_OP | MAXWELL_UPDATE_OP => return Ok(ChangeEventOperation::Upsert),
                 MAXWELL_DELETE_OP => return Ok(ChangeEventOperation::Delete),
@@ -51,6 +51,6 @@ where
 
     fn access_field(&self, desc: &SourceColumnDesc) -> super::AccessResult {
         const DATA: &str = "data";
-        self.0.access(&[DATA, &desc.name], Some(&desc.data_type))
+        self.0.access(&[DATA, &desc.name], &desc.data_type)
     }
 }
