@@ -1130,12 +1130,11 @@ impl<S: StateStore> ColumnarStoreStorageTableInnerIterInner<S> {
             buffer.freeze()
         }
         loop {
-            let mut fut_iter = Vec::with_capacity(self.iters.len());
+            let mut kvs = Vec::with_capacity(self.iters.len());
             for iter in &mut self.iters {
-                let fut = iter.try_next();
-                fut_iter.push(fut);
+                let kv = iter.try_next().await?;
+                kvs.push(kv);
             }
-            let kvs = try_join_all(fut_iter).await?;
             if kvs.iter().any(|kv| kv.is_none()) {
                 assert!(kvs.iter().all(|kv| kv.is_none()));
                 break;
