@@ -91,7 +91,7 @@ pub async fn schema_to_columns(
         let topic = get_kafka_topic(props)?;
         let resolver = ConfluentSchemaCache::new(client);
         let content = resolver
-            .get_raw_schema_by_subject_name(&format!("{}-value", topic))
+            .fetch_raw_schema_by_subject_name(&format!("{}-value", topic))
             .await?
             .content;
         serde_json::from_str(&content)?

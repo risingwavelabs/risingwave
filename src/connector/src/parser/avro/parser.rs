@@ -36,13 +36,14 @@ use crate::schema::schema_registry::{
 #[derive(Debug)]
 pub struct AvroAccessBuilder {
     schema: Arc<Schema>,
-    pub schema_resolver: Option<Arc<ConfluentSchemaCache>>,
+    /// Refer to [`AvroParserConfig::writer_schema_cache`].
+    pub writer_schema_cache: Option<Arc<ConfluentSchemaCache>>,
     value: Option<Value>,
 }
 
 impl AccessBuilder for AvroAccessBuilder {
     async fn generate_accessor(&mut self, payload: Vec<u8>) -> ConnectorResult<AccessImpl<'_, '_>> {
-        self.value = self.parse_avro_value(&payload, Some(&*self.schema)).await?;
+        self.value = self.parse_avro_value(&payload).await?;
         Ok(AccessImpl::Avro(AvroAccess::new(
             self.value.as_ref().unwrap(),
             AvroParseOptions::create(&self.schema),
@@ -55,7 +56,7 @@ impl AvroAccessBuilder {
         let AvroParserConfig {
             schema,
             key_schema,
-            schema_resolver,
+            writer_schema_cache,
             ..
         } = config;
         Ok(Self {
@@ -63,35 +64,29 @@ impl AvroAccessBuilder {
                 EncodingType::Key => key_schema.context("Avro with empty key schema")?,
                 EncodingType::Value => schema,
             },
-            schema_resolver,
+            writer_schema_cache,
             value: None,
         })
     }
 
-    async fn parse_avro_value(
-        &self,
-        payload: &[u8],
-        reader_schema: Option<&Schema>,
-    ) -> ConnectorResult<Option<Value>> {
+    async fn parse_avro_value(&self, payload: &[u8]) -> ConnectorResult<Option<Value>> {
         // parse payload to avro value
         // if use confluent schema, get writer schema from confluent schema registry
-        if let Some(resolver) = &self.schema_resolver {
+        if let Some(resolver) = &self.writer_schema_cache {
             let (schema_id, mut raw_payload) = extract_schema_id(payload)?;
             let writer_schema = resolver.get(schema_id).await?;
             Ok(Some(from_avro_datum(
                 writer_schema.as_ref(),
                 &mut raw_payload,
-                reader_schema,
+                Some(self.schema.as_ref()),
             )?))
-        } else if let Some(schema) = reader_schema {
-            let mut reader = Reader::with_schema(schema, payload)?;
+        } else {
+            let mut reader = Reader::with_schema(self.schema.as_ref(), payload)?;
             match reader.next() {
                 Some(Ok(v)) => Ok(Some(v)),
                 Some(Err(e)) => Err(e)?,
                 None => bail!("avro parse unexpected eof"),
             }
-        } else {
-            unreachable!("both schema_resolver and reader_schema not exist");
         }
     }
 }
@@ -100,7 +95,9 @@ impl AvroAccessBuilder {
 pub struct AvroParserConfig {
     pub schema: Arc<Schema>,
     pub key_schema: Option<Arc<Schema>>,
-    pub schema_resolver: Option<Arc<ConfluentSchemaCache>>,
+    /// Writer schema is the schema used to write the data. When parsing Avro data, the exactly same schema
+    /// must be used to decode the message, and then convert it with the reader schema.
+    pub writer_schema_cache: Option<Arc<ConfluentSchemaCache>>,
 
     pub map_handling: Option<MapHandling>,
 }
@@ -146,13 +143,13 @@ impl AvroParserConfig {
             tracing::debug!("infer key subject {subject_key:?}, value subject {subject_value}");
 
             Ok(Self {
-                schema: resolver.get_by_subject_name(&subject_value).await?,
+                schema: resolver.fetch_by_subject_name(&subject_value).await?,
                 key_schema: if let Some(subject_key) = subject_key {
-                    Some(resolver.get_by_subject_name(&subject_key).await?)
+                    Some(resolver.fetch_by_subject_name(&subject_key).await?)
                 } else {
                     None
                 },
-                schema_resolver: Some(Arc::new(resolver)),
+                writer_schema_cache: Some(Arc::new(resolver)),
                 map_handling,
             })
         } else {
@@ -166,7 +163,7 @@ impl AvroParserConfig {
             Ok(Self {
                 schema: Arc::new(schema),
                 key_schema: None,
-                schema_resolver: None,
+                writer_schema_cache: None,
                 map_handling,
             })
         }

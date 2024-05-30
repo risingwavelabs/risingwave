@@ -112,8 +112,8 @@ impl DebeziumAvroParserConfig {
         let name_strategy = &PbSchemaRegistryNameStrategy::Unspecified;
         let key_subject = get_subject_by_strategy(name_strategy, kafka_topic, None, true)?;
         let val_subject = get_subject_by_strategy(name_strategy, kafka_topic, None, false)?;
-        let key_schema = resolver.get_by_subject_name(&key_subject).await?;
-        let outer_schema = resolver.get_by_subject_name(&val_subject).await?;
+        let key_schema = resolver.fetch_by_subject_name(&key_subject).await?;
+        let outer_schema = resolver.fetch_by_subject_name(&val_subject).await?;
 
         Ok(Self {
             key_schema,

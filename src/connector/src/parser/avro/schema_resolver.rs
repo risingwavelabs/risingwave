@@ -21,7 +21,13 @@ use moka::future::Cache;
 use crate::error::ConnectorResult;
 use crate::schema::schema_registry::{Client, ConfluentSchema};
 
-/// TODO: support protobuf
+/// Fetch schemas from confluent schema registry and cache them.
+///
+/// Background: This is mainly used for Avro **writer schema** (during schema evolution): When decoding an Avro message,
+/// we must get the message's schema id, and use the *exactly same schema* to decode the message, and then
+/// convert it with the reader schema. (This is also why Avro has to be used with a schema registry instead of a static schema file.)
+///
+/// TODO: support protobuf (not sure if it's needed)
 #[derive(Debug)]
 pub struct ConfluentSchemaCache {
     writer_schemas: Cache<i32, Arc<Schema>>,
@@ -50,12 +56,14 @@ impl ConfluentSchemaCache {
         }
     }
 
-    pub async fn get_by_subject_name(&self, subject_name: &str) -> ConnectorResult<Arc<Schema>> {
-        let raw_schema = self.get_raw_schema_by_subject_name(subject_name).await?;
+    /// Non-cached
+    pub async fn fetch_by_subject_name(&self, subject_name: &str) -> ConnectorResult<Arc<Schema>> {
+        let raw_schema = self.fetch_raw_schema_by_subject_name(subject_name).await?;
         self.parse_and_cache_schema(raw_schema).await
     }
 
-    pub async fn get_raw_schema_by_subject_name(
+    /// Non-cached
+    pub async fn fetch_raw_schema_by_subject_name(
         &self,
         subject_name: &str,
     ) -> ConnectorResult<ConfluentSchema> {
