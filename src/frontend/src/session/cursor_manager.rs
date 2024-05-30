@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use core::mem;
 use core::time::Duration;
 use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
@@ -141,8 +140,6 @@ pub struct SubscriptionCursor {
     dependent_table_id: TableId,
     cursor_need_drop_time: Instant,
     state: State,
-    cache_seek_row: Option<Row>,
-    cache_seek_descs: Vec<PgFieldDescriptor>,
 }
 
 impl SubscriptionCursor {
@@ -198,39 +195,13 @@ impl SubscriptionCursor {
             dependent_table_id,
             cursor_need_drop_time,
             state,
-            cache_seek_row: None,
-            cache_seek_descs: vec![],
         })
     }
 
-    pub async fn seek_descs(
+    async fn next_row(
         &mut self,
         handle_args: &HandlerArgs,
-    ) -> Result<Vec<PgFieldDescriptor>> {
-        if self.cache_seek_descs.is_empty() {
-            let (row, descs) = self.next_row_inner(handle_args).await?;
-            self.cache_seek_row = row;
-            self.cache_seek_descs = descs;
-        }
-        Ok(self.cache_seek_descs.clone())
-    }
-
-    pub async fn next_row(
-        &mut self,
-        handle_args: &HandlerArgs,
-    ) -> Result<(Option<Row>, Vec<PgFieldDescriptor>)> {
-        if self.cache_seek_descs.is_empty() {
-            self.next_row_inner(handle_args).await
-        } else {
-            let descs = mem::take(&mut self.cache_seek_descs);
-            let row = self.cache_seek_row.take();
-            Ok((row, descs))
-        }
-    }
-
-    async fn next_row_inner(
-        &mut self,
-        handle_args: &HandlerArgs,
+        expected_pg_descs: &Vec<PgFieldDescriptor>,
     ) -> Result<(Option<Row>, Vec<PgFieldDescriptor>)> {
         loop {
             match &mut self.state {
@@ -266,10 +237,14 @@ impl SubscriptionCursor {
                                 from_snapshot,
                                 rw_timestamp,
                                 row_stream,
-                                pg_descs,
+                                pg_descs: pg_descs.clone(),
                                 remaining_rows,
                                 expected_timestamp,
                             };
+                            if (!expected_pg_descs.is_empty()) && expected_pg_descs.ne(&pg_descs) {
+                                println!("expected_pg_descs{:?},{:?}", expected_pg_descs, pg_descs);
+                                return Ok((None, vec![]));
+                            }
                         }
                         Ok((None, _)) => return Ok((None, vec![])),
                         Err(e) => {
@@ -349,15 +324,10 @@ impl SubscriptionCursor {
         let mut cur = 0;
         let mut pg_descs_ans = vec![];
         while cur < count {
-            let pg_descs = self.seek_descs(&handle_args).await?;
-            if pg_descs_ans.is_empty() {
-                pg_descs_ans = pg_descs;
-            } else if !pg_descs_ans.eq(&pg_descs) {
-                break;
-            }
-            let (row, _) = self.next_row(&handle_args).await?;
+            let (row, descs_ans) = self.next_row(&handle_args, &pg_descs_ans).await?;
             match row {
                 Some(row) => {
+                    pg_descs_ans = descs_ans;
                     cur += 1;
                     ans.push(row);
                 }
@@ -500,8 +470,11 @@ impl SubscriptionCursor {
             new_epoch,
         );
         let batch_log_seq_scan = BatchLogSeqScan::new(core);
-        let out_fields =
-            FixedBitSet::from_iter(0..batch_log_seq_scan.core().schema_without_table_name().len());
+        let schema = batch_log_seq_scan
+            .core()
+            .schema_without_table_name()
+            .clone();
+        let out_fields = FixedBitSet::from_iter(0..schema.len());
         let out_names = batch_log_seq_scan.core().column_names();
         // Here we just need a plan_root to call the method, only out_fields and out_names will be used
         let plan_root = PlanRoot::new_with_batch_plan(
@@ -511,10 +484,6 @@ impl SubscriptionCursor {
             out_fields,
             out_names,
         );
-        let schema = batch_log_seq_scan
-            .core()
-            .schema_without_table_name()
-            .clone();
         let (batch_log_seq_scan, query_mode) = match session.config().query_mode() {
             QueryMode::Auto => (plan_root.gen_batch_local_plan()?, QueryMode::Local),
             QueryMode::Local => (plan_root.gen_batch_local_plan()?, QueryMode::Local),
