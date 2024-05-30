@@ -27,7 +27,7 @@ use crate::ast::{
     Value,
 };
 use crate::keywords::Keyword;
-use crate::parser::Parser;
+use crate::parser::{Parser, StrError};
 use crate::{impl_fmt_display, impl_parse_to, parser_err};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -395,14 +395,13 @@ pub struct CsvInfo {
     pub has_header: bool,
 }
 
-pub fn get_delimiter(chars: &str) -> PResult<u8> {
+pub fn get_delimiter(chars: &str) -> Result<u8, StrError> {
     match chars {
         "," => Ok(b','),   // comma
         "\t" => Ok(b'\t'), // tab
-        other => parser_err!(
-            "The delimiter should be one of ',', E'\\t', but got {:?}",
-            other
-        ),
+        other => Err(StrError(format!(
+            "The delimiter should be one of ',', E'\\t', but got {other:?}",
+        ))),
     }
 }
 

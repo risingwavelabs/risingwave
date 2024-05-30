@@ -225,11 +225,20 @@ impl Parser<'_> {
                 cursor
             ))
         })?;
-        debug!("parsed statements:\n{:#?}", stmts);
         Ok(stmts)
     }
 
-    /// Parse a list of semicolon-separeted statements.
+    /// Parse object name from a string.
+    pub fn parse_object_name_str(s: &str) -> Result<ObjectName, ParserError> {
+        let mut tokenizer = Tokenizer::new(s);
+        let tokens = tokenizer.tokenize_with_location()?;
+        let parser = Parser(&tokens);
+        Parser::parse_object_name
+            .parse(parser)
+            .map_err(|e| ParserError::ParserError(e.inner().to_string()))
+    }
+
+    /// Parse a list of semicolon-separated statements.
     fn parse_statements(&mut self) -> PResult<Vec<Statement>> {
         let mut stmts = Vec::new();
         let mut expecting_statement_delimiter = false;
@@ -250,6 +259,7 @@ impl Parser<'_> {
             stmts.push(statement);
             expecting_statement_delimiter = true;
         }
+        debug!("parsed statements:\n{:#?}", stmts);
         Ok(stmts)
     }
 
