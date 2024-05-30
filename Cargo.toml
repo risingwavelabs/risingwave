@@ -76,7 +76,7 @@ repository = "https://github.com/risingwavelabs/risingwave"
 
 [workspace.dependencies]
 # foyer = { version = "0.9", features = ["nightly"] }
-foyer = { git = "https://github.com/mrcroxx/foyer", rev = "372b791", features = ["nightly", "strict_assertions"] }
+foyer = { git = "https://github.com/mrcroxx/foyer", rev = "4cc8037", features = ["nightly", "strict_assertions", "sanity"] }
 auto_enums = { version = "0.8", features = ["futures03", "tokio1"] }
 await-tree = "0.2.1"
 aws-config = { version = "1", default-features = false, features = [
