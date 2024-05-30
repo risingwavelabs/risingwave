@@ -371,13 +371,14 @@ impl MySqlExternalTableReader {
                             DataType::Timestamp => Value::from(value.into_timestamp().0),
                             _ => bail!("unsupported primary key data type: {}", ty),
                         };
-                        ConnectorResult::Ok((pk.clone(), val))
+                        ConnectorResult::Ok((pk.to_lowercase(), val))
                     } else {
                         bail!("primary key {} cannot be null", pk);
                     }
                 })
                 .try_collect::<_, _, ConnectorError>()?;
 
+            tracing::debug!("snapshot read params: {:?}", &params);
             let rs_stream = sql
                 .with(Params::from(params))
                 .stream::<mysql_async::Row, _>(&mut *conn)
@@ -401,29 +402,37 @@ impl MySqlExternalTableReader {
     // mysql cannot leverage the given key to narrow down the range of scan,
     // we need to rewrite the comparison conditions by our own.
     // (a, b) > (x, y) => (`a` > x) OR ((`a` = x) AND (`b` > y))
-    pub(crate) fn filter_expression(columns: &[String]) -> String {
+    fn filter_expression(columns: &[String]) -> String {
         let mut conditions = vec![];
         // push the first condition
         conditions.push(format!(
             "({} > :{})",
             Self::quote_column(&columns[0]),
-            columns[0]
+            columns[0].to_lowercase()
         ));
         for i in 2..=columns.len() {
             // '=' condition
             let mut condition = String::new();
             for (j, col) in columns.iter().enumerate().take(i - 1) {
                 if j == 0 {
-                    condition.push_str(&format!("({} = :{})", Self::quote_column(col), col));
+                    condition.push_str(&format!(
+                        "({} = :{})",
+                        Self::quote_column(col),
+                        col.to_lowercase()
+                    ));
                 } else {
-                    condition.push_str(&format!(" AND ({} = :{})", Self::quote_column(col), col));
+                    condition.push_str(&format!(
+                        " AND ({} = :{})",
+                        Self::quote_column(col),
+                        col.to_lowercase()
+                    ));
                 }
             }
             // '>' condition
             condition.push_str(&format!(
                 " AND ({} > :{})",
                 Self::quote_column(&columns[i - 1]),
-                columns[i - 1]
+                columns[i - 1].to_lowercase()
             ));
             conditions.push(format!("({})", condition));
         }
