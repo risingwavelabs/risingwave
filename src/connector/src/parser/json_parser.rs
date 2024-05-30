@@ -21,7 +21,7 @@ use jst::{convert_avro, Context};
 use risingwave_common::{bail, try_match_expand};
 use risingwave_pb::plan_common::ColumnDesc;
 
-use super::avro::schema_resolver::ConfluentSchemaResolver;
+use super::avro::schema_resolver::ConfluentSchemaCache;
 use super::unified::Access;
 use super::util::{bytes_from_url, get_kafka_topic};
 use super::{EncodingProperties, JsonProperties, SchemaRegistryAuth, SpecificParserConfig};
@@ -161,7 +161,7 @@ pub async fn schema_to_columns(
     let json_schema = if let Some(schema_registry_auth) = schema_registry_auth {
         let client = Client::new(url, &schema_registry_auth)?;
         let topic = get_kafka_topic(props)?;
-        let resolver = ConfluentSchemaResolver::new(client);
+        let resolver = ConfluentSchemaCache::new(client);
         let content = resolver
             .get_raw_schema_by_subject_name(&format!("{}-value", topic))
             .await?
