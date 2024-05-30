@@ -407,7 +407,7 @@ mod test {
         let format_desc = SinkFormatDesc {
             format: SinkFormat::AppendOnly,
             encode: SinkEncode::Json,
-            options: BTreeMap::default(),
+            options: HashMap::default(),
             key_encode: None,
         };
 
@@ -475,16 +475,16 @@ mod test {
             },
         ]);
 
-        let mut btree_map = BTreeMap::default();
-        btree_map.insert(KEY_FORMAT.to_string(), "key-{id}".to_string());
-        btree_map.insert(
+        let mut hash_map = HashMap::default();
+        hash_map.insert(KEY_FORMAT.to_string(), "key-{id}".to_string());
+        hash_map.insert(
             VALUE_FORMAT.to_string(),
             "values:{id:{id},name:{name}}".to_string(),
         );
         let format_desc = SinkFormatDesc {
             format: SinkFormat::AppendOnly,
             encode: SinkEncode::Template,
-            options: btree_map,
+            options: hash_map,
             key_encode: None,
         };
 

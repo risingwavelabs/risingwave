@@ -23,7 +23,7 @@ use risingwave_pb::stream_plan::PbSinkDesc;
 
 use super::{SinkCatalog, SinkFormatDesc, SinkId, SinkType};
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SinkDesc {
     /// Id of the sink. For debug now.
     pub id: SinkId,
@@ -48,7 +48,7 @@ pub struct SinkDesc {
     pub distribution_key: Vec<usize>,
 
     /// The properties of the sink.
-    pub properties: BTreeMap<String, String>,
+    pub properties: HashMap<String, String>,
 
     // The append-only behavior of the physical sink connector. Frontend will determine `sink_type`
     // based on both its own derivation on the append-only attribute and other user-specified

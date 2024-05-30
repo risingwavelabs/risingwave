@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt::Debug;
 use std::sync::LazyLock;
 
@@ -1003,7 +1003,7 @@ impl MapHandling {
     pub const OPTION_KEY: &'static str = "map.handling.mode";
 
     pub fn from_options(
-        options: &std::collections::BTreeMap<String, String>,
+        options: &std::collections::HashMap<String, String>,
     ) -> Result<Option<Self>, InvalidOptionError> {
         let mode = match options.get(Self::OPTION_KEY).map(std::ops::Deref::deref) {
             Some("jsonb") => Self::Jsonb,

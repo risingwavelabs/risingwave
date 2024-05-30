@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use core::str::FromStr;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use risingwave_common::catalog::{TableId, UserId, OBJECT_ID_PLACEHOLDER};
 use risingwave_common::types::Interval;
@@ -24,6 +24,7 @@ use thiserror_ext::AsReport;
 
 use super::OwnedByUserCatalog;
 use crate::error::{ErrorCode, Result};
+use crate::WithOptions;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(test, derive(Default))]
@@ -82,7 +83,7 @@ impl SubscriptionId {
 }
 
 impl SubscriptionCatalog {
-    pub fn set_retention_seconds(&mut self, properties: BTreeMap<String, String>) -> Result<()> {
+    pub fn set_retention_seconds(&mut self, properties: &WithOptions) -> Result<()> {
         let retention_seconds_str = properties.get("retention").ok_or_else(|| {
             ErrorCode::InternalError("Subscription retention time not set.".to_string())
         })?;

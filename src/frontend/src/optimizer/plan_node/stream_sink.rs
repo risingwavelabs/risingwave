@@ -164,7 +164,7 @@ fn find_column_idx_by_name(columns: &[ColumnCatalog], col_name: &str) -> Result<
 }
 
 /// [`StreamSink`] represents a table/connector sink at the very end of the graph.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StreamSink {
     pub base: PlanBase<Stream>,
     input: PlanRef,

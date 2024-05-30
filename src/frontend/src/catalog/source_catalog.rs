@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use risingwave_common::catalog::{ColumnCatalog, SourceVersionId};
 use risingwave_common::util::epoch::Epoch;
@@ -26,7 +26,7 @@ use crate::user::UserId;
 
 /// This struct `SourceCatalog` is used in frontend.
 /// Compared with `PbSource`, it only maintains information used during optimization.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SourceCatalog {
     pub id: SourceId,
     pub name: String,
@@ -36,7 +36,7 @@ pub struct SourceCatalog {
     pub owner: UserId,
     pub info: StreamSourceInfo,
     pub row_id_index: Option<usize>,
-    pub with_properties: BTreeMap<String, String>,
+    pub with_properties: HashMap<String, String>,
     pub watermark_descs: Vec<WatermarkDesc>,
     pub associated_table_id: Option<TableId>,
     pub definition: String,

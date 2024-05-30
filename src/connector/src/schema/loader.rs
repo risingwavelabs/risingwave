@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use risingwave_pb::catalog::PbSchemaRegistryNameStrategy;
 
@@ -38,7 +38,7 @@ pub struct SchemaLoader {
 impl SchemaLoader {
     pub fn from_format_options(
         topic: &str,
-        format_options: &BTreeMap<String, String>,
+        format_options: &HashMap<String, String>,
     ) -> Result<Self, SchemaFetchError> {
         let schema_location = format_options
             .get(SCHEMA_REGISTRY_KEY)

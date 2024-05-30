@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use anyhow::anyhow;
@@ -67,7 +67,7 @@ impl OwnedByUserCatalog for ConnectionCatalog {
 
 pub(crate) fn resolve_private_link_connection(
     connection: &Arc<ConnectionCatalog>,
-    properties: &mut BTreeMap<String, String>,
+    properties: &mut HashMap<String, String>,
 ) -> Result<()> {
     #[allow(irrefutable_let_patterns)]
     if let connection::Info::PrivateLinkService(svc) = &connection.info {

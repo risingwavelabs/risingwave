@@ -70,7 +70,7 @@ impl TimestamptzHandling {
     pub const OPTION_KEY: &'static str = "timestamptz.handling.mode";
 
     pub fn from_options(
-        options: &std::collections::BTreeMap<String, String>,
+        options: &std::collections::HashMap<String, String>,
     ) -> Result<Option<Self>, InvalidOptionError> {
         let mode = match options.get(Self::OPTION_KEY).map(std::ops::Deref::deref) {
             Some("utc_string") => Self::UtcString,

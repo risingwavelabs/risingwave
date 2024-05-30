@@ -3756,6 +3756,10 @@ impl Parser {
                     Some('\'') => Ok(Value::SingleQuotedString(w.value)),
                     _ => self.expected("A value?", Token::Word(w).with_location(token.location))?,
                 },
+                Keyword::REF => {
+                    self.expect_keyword(Keyword::SECRET)?;
+                    Ok(Value::Ref(self.parse_object_name()?))
+                }
                 _ => self.expected(
                     "a concrete value",
                     Token::Word(w).with_location(token.location),

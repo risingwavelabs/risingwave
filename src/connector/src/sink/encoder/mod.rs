@@ -117,7 +117,7 @@ impl TimestamptzHandlingMode {
     pub const FRONTEND_DEFAULT: &'static str = "utc_string";
     pub const OPTION_KEY: &'static str = "timestamptz.handling.mode";
 
-    pub fn from_options(options: &BTreeMap<String, String>) -> Result<Self> {
+    pub fn from_options(options: &HashMap<String, String>) -> Result<Self> {
         match options.get(Self::OPTION_KEY).map(std::ops::Deref::deref) {
             Some(Self::FRONTEND_DEFAULT) => Ok(Self::UtcString),
             Some("utc_without_suffix") => Ok(Self::UtcWithoutSuffix),

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::option;
 use std::rc::Rc;
 use std::sync::{Arc, LazyLock};
 
@@ -782,6 +783,7 @@ fn bind_sink_format_desc(value: ConnectorSchema) -> Result<SinkFormatDesc> {
     options
         .entry(TimestamptzHandlingMode::OPTION_KEY.to_owned())
         .or_insert(TimestamptzHandlingMode::FRONTEND_DEFAULT.to_owned());
+    let options = options.into_iter().collect();
 
     Ok(SinkFormatDesc {
         format,

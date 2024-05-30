@@ -90,7 +90,7 @@ pub(crate) const UPSTREAM_SOURCE_KEY: &str = "connector";
 async fn extract_json_table_schema(
     schema_config: &Option<(AstString, bool)>,
     with_properties: &HashMap<String, String>,
-    format_encode_options: &mut BTreeMap<String, String>,
+    format_encode_options: &mut HashMap<String, String>,
 ) -> Result<Option<Vec<ColumnCatalog>>> {
     match schema_config {
         None => Ok(None),
@@ -140,7 +140,7 @@ fn json_schema_infer_use_schema_registry(schema_config: &Option<(AstString, bool
 async fn extract_avro_table_schema(
     info: &StreamSourceInfo,
     with_properties: &HashMap<String, String>,
-    format_encode_options: &mut BTreeMap<String, String>,
+    format_encode_options: &mut HashMap<String, String>,
     is_debezium: bool,
 ) -> Result<Vec<ColumnCatalog>> {
     let parser_config = SpecificParserConfig::new(info, with_properties)?;
@@ -186,7 +186,7 @@ async fn extract_debezium_avro_table_pk_columns(
 async fn extract_protobuf_table_schema(
     schema: &ProtobufSchema,
     with_properties: &HashMap<String, String>,
-    format_encode_options: &mut BTreeMap<String, String>,
+    format_encode_options: &mut HashMap<String, String>,
 ) -> Result<Vec<ColumnCatalog>> {
     let info = StreamSourceInfo {
         proto_message_name: schema.message_name.0.clone(),
@@ -224,14 +224,14 @@ fn non_generated_sql_columns(columns: &[ColumnDef]) -> Vec<ColumnDef> {
 }
 
 fn try_consume_string_from_options(
-    format_encode_options: &mut BTreeMap<String, String>,
+    format_encode_options: &mut HashMap<String, String>,
     key: &str,
 ) -> Option<AstString> {
     format_encode_options.remove(key).map(AstString)
 }
 
 fn consume_string_from_options(
-    format_encode_options: &mut BTreeMap<String, String>,
+    format_encode_options: &mut HashMap<String, String>,
     key: &str,
 ) -> Result<AstString> {
     try_consume_string_from_options(format_encode_options, key).ok_or(RwError::from(ProtocolError(
@@ -239,12 +239,12 @@ fn consume_string_from_options(
     )))
 }
 
-fn consume_aws_config_from_options(format_encode_options: &mut BTreeMap<String, String>) {
+fn consume_aws_config_from_options(format_encode_options: &mut HashMap<String, String>) {
     format_encode_options.retain(|key, _| !key.starts_with("aws."))
 }
 
 pub fn get_json_schema_location(
-    format_encode_options: &mut BTreeMap<String, String>,
+    format_encode_options: &mut HashMap<String, String>,
 ) -> Result<Option<(AstString, bool)>> {
     let schema_location = try_consume_string_from_options(format_encode_options, "schema.location");
     let schema_registry = try_consume_string_from_options(format_encode_options, "schema.registry");
@@ -259,7 +259,7 @@ pub fn get_json_schema_location(
 }
 
 fn get_schema_location(
-    format_encode_options: &mut BTreeMap<String, String>,
+    format_encode_options: &mut HashMap<String, String>,
 ) -> Result<(AstString, bool)> {
     let schema_location = try_consume_string_from_options(format_encode_options, "schema.location");
     let schema_registry = try_consume_string_from_options(format_encode_options, "schema.registry");
@@ -300,13 +300,13 @@ pub(crate) async fn bind_columns_from_source(
     let format_encode_options = WithOptions::try_from(source_schema.row_options())?.into_inner();
     let mut format_encode_options_to_consume = format_encode_options.clone();
 
-    fn get_key_message_name(options: &mut BTreeMap<String, String>) -> Option<String> {
+    fn get_key_message_name(options: &mut HashMap<String, String>) -> Option<String> {
         consume_string_from_options(options, KEY_MESSAGE_NAME_KEY)
             .map(|ele| Some(ele.0))
             .unwrap_or(None)
     }
     fn get_sr_name_strategy_check(
-        options: &mut BTreeMap<String, String>,
+        options: &mut HashMap<String, String>,
         use_sr: bool,
     ) -> Result<Option<i32>> {
         let name_strategy = get_name_strategy_or_default(try_consume_string_from_options(
@@ -1292,7 +1292,7 @@ pub fn bind_connector_props(
     handler_args: &HandlerArgs,
     source_schema: &ConnectorSchema,
     is_create_source: bool,
-) -> Result<HashMap<String, String>> {
+) -> Result<WithOptions> {
     let mut with_properties = handler_args.with_options.clone().into_connector_props();
     validate_compatibility(source_schema, &mut with_properties)?;
     let create_cdc_source_job = with_properties.is_shareable_cdc_connector();
@@ -1319,7 +1319,7 @@ pub async fn bind_create_source(
     handler_args: HandlerArgs,
     full_name: ObjectName,
     source_schema: ConnectorSchema,
-    with_properties: HashMap<String, String>,
+    with_properties: WithOptions,
     sql_columns_defs: &[ColumnDef],
     constraints: Vec<TableConstraint>,
     wildcard_idx: Option<usize>,
@@ -1420,7 +1420,7 @@ pub async fn bind_create_source(
     check_source_schema(&with_properties, row_id_index, &columns).await?;
 
     // resolve privatelink connection for Kafka
-    let mut with_properties = WithOptions::new(with_properties);
+    let mut with_properties = with_properties;
     let connection_id =
         resolve_privatelink_in_with_option(&mut with_properties, &schema_name, session)?;
     let _secret_ref = resolve_secret_in_with_options(&mut with_properties, session)?;
@@ -1485,7 +1485,7 @@ pub async fn handle_create_source(
     let (columns_from_resolve_source, mut source_info) = if create_cdc_source_job {
         bind_columns_from_source_for_cdc(&session, &source_schema)?
     } else {
-        bind_columns_from_source(&session, &source_schema, &with_properties).await?
+        bind_columns_from_source(&session, &source_schema, with_properties.inner()).await?
     };
     if is_shared {
         // Note: this field should be called is_shared. Check field doc for more details.

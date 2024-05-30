@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use itertools::Itertools as _;
 use prost_reflect::{DescriptorPool, FileDescriptor, MessageDescriptor};
@@ -28,7 +28,7 @@ use crate::parser::{EncodingProperties, ProtobufParserConfig, ProtobufProperties
 
 /// `aws_auth_props` is only required when reading `s3://` URL.
 pub async fn fetch_descriptor(
-    format_options: &BTreeMap<String, String>,
+    format_options: &HashMap<String, String>,
     topic: &str,
     aws_auth_props: Option<&AwsAuthProps>,
 ) -> Result<(MessageDescriptor, Option<i32>), SchemaFetchError> {
@@ -82,7 +82,7 @@ pub async fn fetch_descriptor(
 
 pub async fn fetch_from_registry(
     message_name: &str,
-    format_options: &BTreeMap<String, String>,
+    format_options: &HashMap<String, String>,
     topic: &str,
 ) -> Result<(MessageDescriptor, i32), SchemaFetchError> {
     let loader = SchemaLoader::from_format_options(topic, format_options)?;

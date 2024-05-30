@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use risingwave_common::bail;
 
@@ -49,7 +49,7 @@ pub struct DebeziumProps {
 }
 
 impl DebeziumProps {
-    pub fn from(props: &BTreeMap<String, String>) -> Self {
+    pub fn from(props: &HashMap<String, String>) -> Self {
         let ignore_key = props
             .get(DEBEZIUM_IGNORE_KEY)
             .map(|v| v.eq_ignore_ascii_case("true"))

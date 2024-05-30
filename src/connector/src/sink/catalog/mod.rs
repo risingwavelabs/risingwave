@@ -114,11 +114,11 @@ impl SinkType {
 /// May replace [`SinkType`].
 ///
 /// TODO: consolidate with [`crate::source::SourceStruct`] and [`crate::parser::SpecificParserConfig`].
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SinkFormatDesc {
     pub format: SinkFormat,
     pub encode: SinkEncode,
-    pub options: BTreeMap<String, String>,
+    pub options: HashMap<String, String>,
 
     pub key_encode: Option<SinkEncode>,
 }
