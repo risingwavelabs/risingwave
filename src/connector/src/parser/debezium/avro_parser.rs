@@ -59,7 +59,7 @@ impl AccessBuilder for DebeziumAvroAccessBuilder {
         };
         Ok(AccessImpl::Avro(AvroAccess::new(
             self.value.as_mut().unwrap(),
-            AvroParseOptions::default().with_schema(match self.encoding_type {
+            AvroParseOptions::create(match self.encoding_type {
                 EncodingType::Key => self.key_schema.as_mut().unwrap(),
                 EncodingType::Value => &self.schema,
             }),
