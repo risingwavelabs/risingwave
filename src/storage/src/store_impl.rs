@@ -643,9 +643,6 @@ impl StateStoreImpl {
                             .build(),
                     )
                     .with_indexer_shards(opts.meta_file_cache_indexer_shards)
-                    .with_admission_picker(Arc::new(RateLimitPicker::new(
-                        opts.meta_file_cache_insert_rate_limit_mb * MB,
-                    )))
                     .with_flushers(opts.meta_file_cache_flushers)
                     .with_reclaimers(opts.meta_file_cache_reclaimers)
                     .with_clean_region_threshold(
