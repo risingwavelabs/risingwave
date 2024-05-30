@@ -242,7 +242,8 @@ impl SubscriptionCursor {
                                 expected_timestamp,
                             };
                             if (!expected_pg_descs.is_empty()) && expected_pg_descs.ne(&pg_descs) {
-                                println!("expected_pg_descs{:?},{:?}", expected_pg_descs, pg_descs);
+                                // If the user alters the table upstream of the sub, there will be different descs here.
+                                // So we should output data for different descs in two separate batches
                                 return Ok((None, vec![]));
                             }
                         }
