@@ -230,17 +230,31 @@ async fn iter_with_timeout_rebuild<S: StateStoreRead>(
 ) -> StorageResult<TimeoutAutoRebuildIter<S>> {
     const CHECK_TIMEOUT_PERIOD: usize = 100;
     // use a struct here to avoid accidental copy instead of move on primitive usize
-    struct CheckCount(usize);
-    let mut check_count = CheckCount(0);
+    struct Count(usize);
+    let mut check_count = Count(0);
+    let mut total_count = Count(0);
+    let mut curr_iter_item_count = Count(0);
     let mut start_time = Instant::now();
+    let initial_start_time = start_time;
     AutoRebuildStateStoreReadIter::new(
         state_store,
         move || {
             check_count.0 += 1;
+            curr_iter_item_count.0 += 1;
+            total_count.0 += 1;
             if check_count.0 == CHECK_TIMEOUT_PERIOD {
                 check_count.0 = 0;
                 if start_time.elapsed() > timeout {
+                    let prev_iter_item_count = curr_iter_item_count.0;
+                    curr_iter_item_count.0 = 0;
                     start_time = Instant::now();
+                    info!(
+                        table_id = options.table_id.table_id,
+                        iter_exist_time_secs = initial_start_time.elapsed().as_secs(),
+                        prev_iter_item_count,
+                        total_iter_item_count = total_count.0,
+                        "kv log store iter is rebuilt"
+                    );
                     true
                 } else {
                     false
