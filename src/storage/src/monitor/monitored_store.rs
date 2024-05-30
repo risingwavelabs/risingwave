@@ -355,18 +355,6 @@ pub struct MonitoredStateStoreIter<S> {
 
 impl<S: StateStoreIter> StateStoreIter for MonitoredStateStoreIter<S> {
     async fn try_next(&mut self) -> StorageResult<Option<StateStoreIterItemRef<'_>>> {
-        if let Some((key, value)) = self
-            .inner
-            .try_next()
-            .instrument(tracing::trace_span!("store_iter_try_next"))
-            .await
-            .inspect_err(|e| error!(error = %e.as_report(), "Failed in next"))?
-        {
-            self.stats.total_items += 1;
-            self.stats.total_size += key.encoded_len() + value.len();
-            Ok(Some((key, value)))
-        } else {
-            Ok(None)
-        }
+        self.inner.try_next().await
     }
 }

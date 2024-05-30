@@ -319,25 +319,7 @@ impl MonitoredStateStoreIterStats {
         }
     }
 
-    pub fn report(&self) {
-        LOCAL_METRICS.with_borrow_mut(|local_metrics| {
-            let table_metrics = local_metrics.entry(self.table_id).or_insert_with(|| {
-                let table_label = self.table_id.to_string();
-                self.metrics.local_metrics(&table_label)
-            });
-            let iter_scan_duration = self.iter_scan_time.elapsed();
-            table_metrics
-                .iter_scan_duration
-                .observe(iter_scan_duration.as_secs_f64());
-            table_metrics
-                .iter_init_duration
-                .observe(self.iter_init_duration.as_secs_f64());
-            table_metrics.iter_in_process_counts.inc();
-            table_metrics.iter_item.observe(self.total_items as f64);
-            table_metrics.iter_size.observe(self.total_size as f64);
-            table_metrics.may_flush();
-        });
-    }
+    pub fn report(&self) {}
 }
 
 impl Drop for MonitoredStateStoreIterStats {
