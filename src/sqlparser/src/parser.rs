@@ -320,13 +320,13 @@ impl Parser<'_> {
                 Keyword::FLUSH => Ok(Statement::Flush),
                 Keyword::WAIT => Ok(Statement::Wait),
                 Keyword::RECOVER => Ok(Statement::Recover),
-                _ => fail.expect("statement").parse_next(self),
+                _ => self.expected_at(checkpoint, "statement"),
             },
             Token::LParen => {
                 *self = checkpoint;
                 Ok(Statement::Query(Box::new(self.parse_query()?)))
             }
-            _ => fail.expect("statement").parse_next(self),
+            _ => self.expected_at(checkpoint, "statement"),
         }
     }
 
