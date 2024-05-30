@@ -2,9 +2,9 @@ FROM apache/airflow:2.6.2-python3.10 as airflow
 
 USER root
 
-# Install OpenJDK-11
+# Install OpenJDK-17
 RUN apt-get update && \
-    apt-get install -y openjdk-11-jdk && \
+    apt-get install -y openjdk-17-jdk && \
     apt-get install -y ant && \
     apt-get clean;
 
