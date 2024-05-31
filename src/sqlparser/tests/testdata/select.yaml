@@ -48,24 +48,24 @@
   formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [Wildcard(Some([Identifier(Ident { value: "v1", quote_style: None })])), QualifiedWildcard(ObjectName([Ident { value: "bar", quote_style: None }]), Some([CompoundIdentifier([Ident { value: "foo", quote_style: None }, Ident { value: "v2", quote_style: None }])]))], from: [TableWithJoins { relation: Table { name: ObjectName([Ident { value: "foo", quote_style: None }]), alias: None, as_of: None }, joins: [] }, TableWithJoins { relation: Table { name: ObjectName([Ident { value: "bar", quote_style: None }]), alias: None, as_of: None }, joins: [] }], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })'
 - input: SELECT v3 EXCEPT (v1, v2) FROM foo
   error_msg: |-
-    sql parser error: expected SELECT, VALUES, or a subquery in the query body, found: v1 at line 1, column 19
+    sql parser error: expected SELECT, VALUES, or a subquery in the query body, found: v1
     LINE 1: SELECT v3 EXCEPT (v1, v2) FROM foo
                               ^
 - input: SELECT * EXCEPT (V1, ) FROM foo
   error_msg: |-
-    sql parser error: expected an expression:, found: ) at line 1, column 22
+    sql parser error: expected an expression, found: )
     LINE 1: SELECT * EXCEPT (V1, ) FROM foo
-                                  ^
+                                 ^
 - input: SELECT * EXCEPT (v1 FROM foo
   error_msg: |-
-    sql parser error: expected ( should be followed by ) after column names, found: FROM at line 1, column 21
+    sql parser error: expected ( should be followed by ) after column names, found: FROM
     LINE 1: SELECT * EXCEPT (v1 FROM foo
-                               ^
+                                ^
 - input: SELECT * FROM t LIMIT 1 FETCH FIRST ROWS ONLY
   error_msg: |-
     sql parser error: Cannot specify both LIMIT and FETCH
     LINE 1: SELECT * FROM t LIMIT 1 FETCH FIRST ROWS ONLY
-                                         ^
+                                          ^
 - input: SELECT * FROM t FETCH FIRST ROWS WITH TIES
   error_msg: |-
     sql parser error: WITH TIES cannot be specified without ORDER BY clause
@@ -73,24 +73,24 @@
                                                       ^
 - input: select * from (select 1 from 1);
   error_msg: |-
-    sql parser error: expected identifier, found: 1 at line 1, column 30
+    sql parser error: expected identifier, found: 1
     LINE 1: select * from (select 1 from 1);
-                                          ^
+                                         ^
 - input: select * from (select * from tumble(t, x, interval '10' minutes))
   error_msg: |-
-    sql parser error: expected ), found: minutes at line 1, column 57
+    sql parser error: expected ), found: minutes
     LINE 1: select * from (select * from tumble(t, x, interval '10' minutes))
-                                                                   ^
+                                                                    ^
 - input: SELECT 1, FROM t
   error_msg: |-
     sql parser error: syntax error at or near FROM at line 1, column 11
     LINE 1: SELECT 1, FROM t
-                          ^
+                           ^
 - input: SELECT 1, WHERE true
   error_msg: |-
     sql parser error: syntax error at or near WHERE at line 1, column 11
     LINE 1: SELECT 1, WHERE true
-                           ^
+                            ^
 - input: SELECT timestamp with time zone '2022-10-01 12:00:00Z' AT TIME ZONE 'US/Pacific'
   formatted_sql: SELECT TIMESTAMP WITH TIME ZONE '2022-10-01 12:00:00Z' AT TIME ZONE 'US/Pacific'
   formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(AtTimeZone { timestamp: TypedString { data_type: Timestamp(true), value: "2022-10-01 12:00:00Z" }, time_zone: "US/Pacific" })], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })'
@@ -131,12 +131,12 @@
   formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(Value(Number("-0o755")))], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })'
 - input: SELECT 0o129
   error_msg: |-
-    sql parser error: expected end of statement, found: 9 at line 1, column 12
+    sql parser error: expected end of statement, found: 9
     LINE 1: SELECT 0o129
                        ^
 - input: SELECT 0o3.5
   error_msg: |-
-    sql parser error: expected end of statement, found: .5 at line 1, column 11
+    sql parser error: expected end of statement, found: .5
     LINE 1: SELECT 0o3.5
                       ^
 - input: SELECT 0x
@@ -146,17 +146,17 @@
                      ^
 - input: SELECT 1::float(0)
   error_msg: |-
-    sql parser error: Unexpected 0 at line 1, column 17: Precision must be in range 1..54
+    sql parser error: invalid data_type: precision must be in range 1..54
     LINE 1: SELECT 1::float(0)
                             ^
 - input: SELECT 1::float(54)
   error_msg: |-
-    sql parser error: Unexpected 54 at line 1, column 17: Precision must be in range 1..54
+    sql parser error: invalid data_type: precision must be in range 1..54
     LINE 1: SELECT 1::float(54)
                             ^
 - input: SELECT 1::int(2)
   error_msg: |-
-    sql parser error: expected end of statement, found: ( at line 1, column 14
+    sql parser error: expected end of statement, found: (
     LINE 1: SELECT 1::int(2)
                          ^
 - input: select id1, a1, id2, a2 from stream as S join version FOR SYSTEM_TIME AS OF PROCTIME() AS V on id1= id2
@@ -167,9 +167,9 @@
   formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(Function(Function { name: ObjectName([Ident { value: "percentile_cont", quote_style: None }]), args: [Unnamed(Expr(Value(Number("0.3"))))], variadic: false, over: None, distinct: false, order_by: [], filter: None, within_group: Some(OrderByExpr { expr: Identifier(Ident { value: "x", quote_style: None }), asc: Some(false), nulls_first: None }) }))], from: [TableWithJoins { relation: TableFunction { name: ObjectName([Ident { value: "unnest", quote_style: None }]), alias: Some(TableAlias { name: Ident { value: "x", quote_style: None }, columns: [] }), args: [Unnamed(Expr(Array(Array { elem: [Value(Number("1")), Value(Number("2")), Value(Number("4")), Value(Number("5")), Value(Number("10"))], named: true })))], with_ordinality: false }, joins: [] }], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })'
 - input: select percentile_cont(0.3) within group (order by x, y desc) from t
   error_msg: |-
-    sql parser error: only one arg in order by is expected here
+    sql parser error: expected ), found: ,
     LINE 1: select percentile_cont(0.3) within group (order by x, y desc) from t
-                                                                        ^
+                                                                ^
 - input: select 'apple' ~~ 'app%'
   formatted_sql: SELECT 'apple' ~~ 'app%'
   formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(BinaryOp { left: Value(SingleQuotedString("apple")), op: PGLikeMatch, right: Value(SingleQuotedString("app%")) })], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })'
@@ -206,3 +206,8 @@
 - input: select 'a' not like ANY(array['a', null]);
   formatted_sql: SELECT 'a' NOT LIKE SOME(ARRAY['a', NULL])
   formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(Like { negated: true, expr: Value(SingleQuotedString("a")), pattern: SomeOp(Array(Array { elem: [Value(SingleQuotedString("a")), Value(Null)], named: true })), escape_char: None })], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })'
+- input: selet 1;
+  error_msg: |-
+    sql parser error: expected statement, found: selet
+    LINE 1: selet 1;
+            ^
