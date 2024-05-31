@@ -22,9 +22,10 @@ use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType as PbDataType;
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
 use risingwave_pb::plan_common::{
-    AdditionalColumn, AdditionalColumnFilename, AdditionalColumnHeader, AdditionalColumnHeaders,
-    AdditionalColumnKey, AdditionalColumnOffset, AdditionalColumnPartition,
-    AdditionalColumnTimestamp,
+    AdditionalCollectionName, AdditionalColumn, AdditionalColumnFilename, AdditionalColumnHeader,
+    AdditionalColumnHeaders, AdditionalColumnKey, AdditionalColumnOffset,
+    AdditionalColumnPartition, AdditionalColumnTimestamp, AdditionalDatabaseName,
+    AdditionalTableName,
 };
 
 use crate::error::ConnectorResult;
@@ -66,7 +67,14 @@ pub static COMPATIBLE_ADDITIONAL_COLUMNS: LazyLock<HashMap<&'static str, HashSet
 
 // For CDC backfill table, the additional columns are added to the schema of `StreamCdcScan`
 pub static CDC_BACKFILL_TABLE_ADDITIONAL_COLUMNS: LazyLock<Option<HashSet<&'static str>>> =
-    LazyLock::new(|| Some(HashSet::from(["timestamp"])));
+    LazyLock::new(|| {
+        Some(HashSet::from([
+            "timestamp",
+            "database_name",
+            "table_name",
+            "collection_name",
+        ]))
+    });
 
 pub fn get_supported_additional_columns(
     connector_name: &str,
@@ -201,6 +209,43 @@ pub fn build_additional_column_catalog(
             is_hidden: false,
         },
         "header" => build_header_catalog(column_id, &column_name, inner_field_name, data_type),
+        "database_name" => ColumnCatalog {
+            column_desc: ColumnDesc::named_with_additional_column(
+                column_name,
+                column_id,
+                DataType::Varchar,
+                AdditionalColumn {
+                    column_type: Some(AdditionalColumnType::DatabaseName(
+                        AdditionalDatabaseName {},
+                    )),
+                },
+            ),
+            is_hidden: false,
+        },
+        "table_name" => ColumnCatalog {
+            column_desc: ColumnDesc::named_with_additional_column(
+                column_name,
+                column_id,
+                DataType::Varchar,
+                AdditionalColumn {
+                    column_type: Some(AdditionalColumnType::TableName(AdditionalTableName {})),
+                },
+            ),
+            is_hidden: false,
+        },
+        "collection_name" => ColumnCatalog {
+            column_desc: ColumnDesc::named_with_additional_column(
+                column_name,
+                column_id,
+                DataType::Varchar,
+                AdditionalColumn {
+                    column_type: Some(AdditionalColumnType::CollectionName(
+                        AdditionalCollectionName {},
+                    )),
+                },
+            ),
+            is_hidden: false,
+        },
         _ => unreachable!(),
     };
 

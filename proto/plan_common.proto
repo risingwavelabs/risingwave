@@ -203,6 +203,14 @@ message AdditionalColumnHeader {
   data.DataType data_type = 2;
 }
 
+
+message AdditionalDatabaseName {}
+
+message AdditionalTableName {}
+
+message AdditionalCollectionName {}
+
+
 // this type means we read all headers as a whole
 message AdditionalColumnHeaders {}
 
@@ -215,6 +223,10 @@ message AdditionalColumn {
     AdditionalColumnHeader header_inner = 5;
     AdditionalColumnFilename filename = 6;
     AdditionalColumnHeaders headers = 7;
+    // metadata column for cdc table
+    AdditionalDatabaseName database_name = 8;
+    AdditionalTableName table_name = 9;
+    AdditionalCollectionName collection_name = 10;
   }
 }
 

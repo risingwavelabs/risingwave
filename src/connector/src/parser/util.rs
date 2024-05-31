@@ -11,6 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+use std::assert_matches::assert_matches;
 use std::collections::HashMap;
 
 use anyhow::Context;
@@ -38,6 +39,10 @@ macro_rules! log_error {
     };
 }
 pub(crate) use log_error;
+use risingwave_pb::plan_common::additional_column;
+use risingwave_pb::plan_common::additional_column::ColumnType;
+
+use crate::parser::{AccessError, AccessResult};
 
 /// get kafka topic name
 pub(super) fn get_kafka_topic(props: &HashMap<String, String>) -> ConnectorResult<&String> {
@@ -127,11 +132,25 @@ pub(super) async fn bytes_from_url(
     }
 }
 
-pub fn extreact_timestamp_from_meta(meta: &SourceMeta) -> Option<Datum> {
-    match meta {
-        SourceMeta::Kafka(kafka_meta) => kafka_meta.extract_timestamp(),
-        SourceMeta::DebeziumCdc(debezium_meta) => debezium_meta.extract_timestamp(),
-        _ => None,
+pub fn extract_cdc_meta_column(
+    meta: &SourceMeta,
+    column_type: &additional_column::ColumnType,
+    column_name: &str,
+) -> AccessResult<Option<Datum>> {
+    assert_matches!(meta, &SourceMeta::DebeziumCdc(_));
+
+    let cdc_meta = match meta {
+        SourceMeta::DebeziumCdc(cdc_meta) => cdc_meta,
+        _ => unreachable!(),
+    };
+
+    match column_type {
+        ColumnType::Timestamp(_) => Ok(cdc_meta.extract_timestamp()),
+        ColumnType::DatabaseName(_) => Ok(cdc_meta.extract_database_name()),
+        ColumnType::TableName(_) => Ok(cdc_meta.extract_table_name()),
+        _ => Err(AccessError::UnsupportedAdditionalColumn {
+            name: column_name.to_string(),
+        }),
     }
 }
 

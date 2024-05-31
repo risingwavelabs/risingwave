@@ -60,8 +60,13 @@ pub struct DebeziumChangeEvent<A> {
 
 const BEFORE: &str = "before";
 const AFTER: &str = "after";
+
 const SOURCE: &str = "source";
 const SOURCE_TS_MS: &str = "ts_ms";
+const SOURCE_DB: &str = "db";
+const SOURCE_TABLE: &str = "table";
+const SOURCE_COLLECTION: &str = "collection";
+
 const OP: &str = "op";
 pub const TRANSACTION_STATUS: &str = "status";
 pub const TRANSACTION_ID: &str = "id";
@@ -210,6 +215,21 @@ where
                                         .to_scalar_value()
                                 }))
                             }
+                            &ColumnType::DatabaseName(_) => self
+                                .value_accessor
+                                .as_ref()
+                                .expect("value_accessor must be provided for upsert operation")
+                                .access(&[SOURCE, SOURCE_DB], Some(&desc.data_type)),
+                            &ColumnType::TableName(_) => self
+                                .value_accessor
+                                .as_ref()
+                                .expect("value_accessor must be provided for upsert operation")
+                                .access(&[SOURCE, SOURCE_TABLE], Some(&desc.data_type)),
+                            &ColumnType::CollectionName(_) => self
+                                .value_accessor
+                                .as_ref()
+                                .expect("value_accessor must be provided for upsert operation")
+                                .access(&[SOURCE, SOURCE_COLLECTION], Some(&desc.data_type)),
                             _ => Err(AccessError::UnsupportedAdditionalColumn {
                                 name: desc.name.clone(),
                             }),
