@@ -766,3 +766,12 @@
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [AtTimeZone(i.ts, 'UTC':Varchar) as $expr1] }
       └─BatchScan { table: i, columns: [i.ts], scan_ranges: [i.AT_TIME_ZONE > Timestamptz(Timestamptz(1617235200000000))], distribution: SomeShard }
+- name: funtional index with timezone2
+  sql: |
+    create table t (a int, ts timestamp without time zone);
+    create index idx on t (CAST(ts AS timestamptz));
+    select * from t order by ts;
+  batch_plan: |-
+    BatchExchange { order: [t.ts ASC], dist: Single }
+    └─BatchSort { order: [t.ts ASC] }
+      └─BatchScan { table: t, columns: [t.a, t.ts], distribution: SomeShard }

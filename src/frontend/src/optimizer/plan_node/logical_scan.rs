@@ -163,14 +163,18 @@ impl LogicalScan {
                         .pk()
                         .iter()
                         .map(|idx_item| {
+                            let idx = match s2p_mapping.get(&idx_item.column_index) {
+                                Some(col_idx) =>
+                                    *output_col_map
+                                        .get(
+                                            col_idx
+                                        )
+                                        .unwrap_or(&unmatched_idx),
+                                // After we support index on expressions, we need to handle the case where the column is not in the `s2p_mapping`.
+                                None => unmatched_idx,
+                            };
                             ColumnOrder::new(
-                                *output_col_map
-                                    .get(
-                                        s2p_mapping
-                                            .get(&idx_item.column_index)
-                                            .expect("should be in s2p mapping"),
-                                    )
-                                    .unwrap_or(&unmatched_idx),
+                                idx,
                                 idx_item.order_type,
                             )
                         })
