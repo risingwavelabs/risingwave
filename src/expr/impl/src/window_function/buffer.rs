@@ -19,11 +19,11 @@ use educe::Educe;
 use risingwave_common::array::Op;
 use risingwave_common::types::Sentinelled;
 use risingwave_common::util::memcmp_encoding;
+use risingwave_expr::window_function::{
+    FrameExclusion, RangeFrameBounds, RowsFrameBounds, StateKey,
+};
 
-use super::range_utils::range_except;
-use super::StateKey;
-use crate::window_function::state::range_utils::range_diff;
-use crate::window_function::{FrameExclusion, RangeFrameBounds, RowsFrameBounds};
+use super::range_utils::{range_diff, range_except};
 
 /// A common sliding window buffer.
 pub(super) struct WindowBuffer<W: WindowImpl> {

@@ -18,12 +18,13 @@ use risingwave_common::types::Datum;
 use risingwave_common::util::memcmp_encoding::MemcmpEncoded;
 use risingwave_common_estimate_size::collections::EstimatedVecDeque;
 use risingwave_common_estimate_size::EstimateSize;
+use risingwave_expr::window_function::{
+    StateEvictHint, StateKey, StatePos, WindowFuncCall, WindowState,
+};
+use risingwave_expr::Result;
 use smallvec::SmallVec;
 
 use self::private::RankFuncCount;
-use super::{StateEvictHint, StateKey, StatePos, WindowState};
-use crate::window_function::WindowFuncCall;
-use crate::Result;
 
 mod private {
     use super::*;
@@ -34,7 +35,7 @@ mod private {
 }
 
 #[derive(Default, EstimateSize)]
-pub struct RowNumber {
+pub(super) struct RowNumber {
     prev_rank: i64,
 }
 
@@ -47,7 +48,7 @@ impl RankFuncCount for RowNumber {
 }
 
 #[derive(EstimateSize)]
-pub struct Rank {
+pub(super) struct Rank {
     prev_order_key: Option<MemcmpEncoded>,
     prev_rank: i64,
     prev_pos_in_peer_group: i64,
@@ -83,7 +84,7 @@ impl RankFuncCount for Rank {
 }
 
 #[derive(Default, EstimateSize)]
-pub struct DenseRank {
+pub(super) struct DenseRank {
     prev_order_key: Option<MemcmpEncoded>,
     prev_rank: i64,
 }
@@ -107,7 +108,7 @@ impl RankFuncCount for DenseRank {
 
 /// Generic state for rank window functions including `row_number`, `rank` and `dense_rank`.
 #[derive(EstimateSize)]
-pub struct RankState<RF: RankFuncCount> {
+pub(super) struct RankState<RF: RankFuncCount> {
     /// First state key of the partition.
     first_key: Option<StateKey>,
     /// State keys that are waiting to be outputted.

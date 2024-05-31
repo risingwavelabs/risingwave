@@ -14,20 +14,13 @@
 
 use std::collections::BTreeSet;
 
-use itertools::Itertools;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{Datum, DefaultOrdered};
 use risingwave_common::util::memcmp_encoding::MemcmpEncoded;
 use risingwave_common_estimate_size::EstimateSize;
 use smallvec::SmallVec;
 
-use super::{WindowFuncCall, WindowFuncKind};
-use crate::{ExprError, Result};
-
-mod aggregate;
-mod buffer;
-mod range_utils;
-mod rank;
+use crate::Result;
 
 /// Unique and ordered identifier for a row in internal states.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, EstimateSize)]
@@ -109,23 +102,3 @@ pub trait WindowState: EstimateSize {
 }
 
 pub type BoxedWindowState = Box<dyn WindowState + Send + Sync>;
-
-pub fn create_window_state(call: &WindowFuncCall) -> Result<BoxedWindowState> {
-    assert!(call.frame.bounds.validate().is_ok());
-
-    use WindowFuncKind::*;
-    Ok(match call.kind {
-        RowNumber => Box::new(rank::RankState::<rank::RowNumber>::new(call)),
-        Rank => Box::new(rank::RankState::<rank::Rank>::new(call)),
-        DenseRank => Box::new(rank::RankState::<rank::DenseRank>::new(call)),
-        Aggregate(_) => aggregate::new(call)?,
-        kind => {
-            return Err(ExprError::UnsupportedFunction(format!(
-                "{}({}) -> {}",
-                kind,
-                call.args.arg_types().iter().format(", "),
-                &call.return_type,
-            )));
-        }
-    })
-}
