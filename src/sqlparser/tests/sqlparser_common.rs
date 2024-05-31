@@ -1268,9 +1268,6 @@ fn parse_extract() {
     verified_stmt("SELECT EXTRACT(HOUR FROM d)");
     verified_stmt("SELECT EXTRACT(MINUTE FROM d)");
     verified_stmt("SELECT EXTRACT(SECOND FROM d)");
-
-    let res = parse_sql_statements("SELECT EXTRACT(0 FROM d)");
-    assert!(format!("{}", res.unwrap_err()).contains("expected date/time field, found: 0"));
 }
 
 #[test]

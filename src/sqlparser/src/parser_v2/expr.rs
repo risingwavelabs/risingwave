@@ -9,12 +9,13 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use winnow::combinator::{cut_err, opt, preceded, repeat, trace};
+use winnow::combinator::{alt, cut_err, opt, preceded, repeat, trace};
 use winnow::{PResult, Parser};
 
-use super::TokenStream;
+use super::{data_type, token, ParserExt, TokenStream};
 use crate::ast::Expr;
 use crate::keywords::Keyword;
+use crate::tokenizer::Token;
 
 fn expr<S>(input: &mut S) -> PResult<Expr>
 where
@@ -57,4 +58,92 @@ where
         });
 
     trace("expr_case", parse).parse_next(input)
+}
+
+/// Consome a SQL CAST function e.g. `CAST(expr AS FLOAT)`
+pub fn expr_cast<S>(input: &mut S) -> PResult<Expr>
+where
+    S: TokenStream,
+{
+    let parse = (
+        cut_err(Token::LParen),
+        cut_err(expr).map(Box::new),
+        cut_err(Keyword::AS),
+        cut_err(data_type),
+        cut_err(Token::RParen),
+    )
+        .map(|(_, expr, _, data_type, _)| Expr::Cast { expr, data_type });
+
+    trace("expr_cast", parse).parse_next(input)
+}
+
+/// Consume a SQL TRY_CAST function e.g. `TRY_CAST(expr AS FLOAT)`
+pub fn expr_try_cast<S>(input: &mut S) -> PResult<Expr>
+where
+    S: TokenStream,
+{
+    let parse = (
+        cut_err(Token::LParen),
+        cut_err(expr).map(Box::new), // Parses the expresion within TRY_CAST
+        cut_err(Keyword::AS),
+        cut_err(data_type), // Parses the data type to TRY_CAST to
+        cut_err(Token::RParen),
+    )
+        .map(|(_, expr, _, data_type, _)| Expr::TryCast { expr, data_type });
+
+    trace("expr_try_cast", parse).parse_next(input)
+}
+
+/// Consume a SQL EXTRACT function e.g. `EXTRACT(YEAR FROM expr)`
+pub fn expr_extract<S>(input: &mut S) -> PResult<Expr>
+where
+    S: TokenStream,
+{
+    let date_time_field = token
+        .verify_map(|token| match token.token {
+            Token::Word(w) => Some(w.value.to_uppercase()),
+            Token::SingleQuotedString(s) => Some(s.to_uppercase()),
+            _ => None,
+        })
+        .expect("date/time field");
+
+    let parse = (
+        cut_err(Token::LParen),
+        cut_err(date_time_field),
+        cut_err(Keyword::FROM),
+        cut_err(expr).map(Box::new),
+        cut_err(Token::RParen),
+    )
+        .map(|(_, field, _, expr, _)| Expr::Extract { field, expr });
+
+    trace("expr_extract", parse).parse_next(input)
+}
+
+/// Consume `SUBSTRING (EXPR [FROM 1] [FOR 3])`
+pub fn expr_substring<S>(input: &mut S) -> PResult<Expr>
+where
+    S: TokenStream,
+{
+    let parse = (
+        cut_err(Token::LParen),
+        cut_err(expr).map(Box::new),
+        opt(preceded(
+            alt((Token::Comma.void(), Keyword::FROM.void())),
+            cut_err(expr).map(Box::new),
+        )),
+        opt(preceded(
+            alt((Token::Comma.void(), Keyword::FOR.void())),
+            cut_err(expr).map(Box::new),
+        )),
+        cut_err(Token::RParen),
+    )
+        .map(
+            |(_, expr, substring_from, substring_for, _)| Expr::Substring {
+                expr,
+                substring_from,
+                substring_for,
+            },
+        );
+
+    trace("expr_substring", parse).parse_next(input)
 }

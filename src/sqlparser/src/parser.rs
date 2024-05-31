@@ -1009,28 +1009,12 @@ impl Parser<'_> {
 
     /// Parse a SQL CAST function e.g. `CAST(expr AS FLOAT)`
     pub fn parse_cast_expr(&mut self) -> PResult<Expr> {
-        self.expect_token(&Token::LParen)?;
-        let expr = self.parse_expr()?;
-        self.expect_keyword(Keyword::AS)?;
-        let data_type = self.parse_data_type()?;
-        self.expect_token(&Token::RParen)?;
-        Ok(Expr::Cast {
-            expr: Box::new(expr),
-            data_type,
-        })
+        parser_v2::expr_cast(self)
     }
 
     /// Parse a SQL TRY_CAST function e.g. `TRY_CAST(expr AS FLOAT)`
     pub fn parse_try_cast_expr(&mut self) -> PResult<Expr> {
-        self.expect_token(&Token::LParen)?;
-        let expr = self.parse_expr()?;
-        self.expect_keyword(Keyword::AS)?;
-        let data_type = self.parse_data_type()?;
-        self.expect_token(&Token::RParen)?;
-        Ok(Expr::TryCast {
-            expr: Box::new(expr),
-            data_type,
-        })
+        parser_v2::expr_try_cast(self)
     }
 
     /// Parse a SQL EXISTS expression e.g. `WHERE EXISTS(SELECT ...)`.
@@ -1042,37 +1026,12 @@ impl Parser<'_> {
     }
 
     pub fn parse_extract_expr(&mut self) -> PResult<Expr> {
-        self.expect_token(&Token::LParen)?;
-        let field = self.parse_date_time_field_in_extract()?;
-        self.expect_keyword(Keyword::FROM)?;
-        let expr = self.parse_expr()?;
-        self.expect_token(&Token::RParen)?;
-        Ok(Expr::Extract {
-            field,
-            expr: Box::new(expr),
-        })
+        parser_v2::expr_extract(self)
     }
 
     pub fn parse_substring_expr(&mut self) -> PResult<Expr> {
         // PARSE SUBSTRING (EXPR [FROM 1] [FOR 3])
-        self.expect_token(&Token::LParen)?;
-        let expr = self.parse_expr()?;
-        let mut from_expr = None;
-        if self.parse_keyword(Keyword::FROM) || self.consume_token(&Token::Comma) {
-            from_expr = Some(self.parse_expr()?);
-        }
-
-        let mut to_expr = None;
-        if self.parse_keyword(Keyword::FOR) || self.consume_token(&Token::Comma) {
-            to_expr = Some(self.parse_expr()?);
-        }
-        self.expect_token(&Token::RParen)?;
-
-        Ok(Expr::Substring {
-            expr: Box::new(expr),
-            substring_from: from_expr.map(Box::new),
-            substring_for: to_expr.map(Box::new),
-        })
+        parser_v2::expr_substring(self)
     }
 
     /// `POSITION(<expr> IN <expr>)`
