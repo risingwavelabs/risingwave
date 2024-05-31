@@ -44,6 +44,10 @@ struct Inner {
     /// the selectivity threshold which should be in `[0,1]`. for the chunk with selectivity less
     /// than the threshold, the Project executor will construct a new chunk before expr evaluation,
     materialize_selectivity_threshold: f64,
+
+    /// Whether there are likely no-op updates in the output chunks, so that eliminating them with
+    /// `StreamChunk::eliminate_adjacent_noop_update` could be beneficial.
+    noop_update_hint: bool,
 }
 
 impl ProjectExecutor {
@@ -55,6 +59,7 @@ impl ProjectExecutor {
         watermark_derivations: MultiMap<usize, usize>,
         nondecreasing_expr_indices: Vec<usize>,
         materialize_selectivity_threshold: f64,
+        noop_update_hint: bool,
     ) -> Self {
         let n_nondecreasing_exprs = nondecreasing_expr_indices.len();
         Self {
@@ -66,6 +71,7 @@ impl ProjectExecutor {
                 nondecreasing_expr_indices,
                 last_nondec_expr_values: vec![None; n_nondecreasing_exprs],
                 materialize_selectivity_threshold,
+                noop_update_hint,
             },
         }
     }
@@ -103,7 +109,11 @@ impl Inner {
             projected_columns.push(evaluated_expr);
         }
         let (_, vis) = data_chunk.into_parts();
-        let new_chunk = StreamChunk::with_visibility(ops, projected_columns, vis);
+
+        let mut new_chunk = StreamChunk::with_visibility(ops, projected_columns, vis);
+        if self.noop_update_hint {
+            new_chunk = new_chunk.eliminate_adjacent_noop_update();
+        }
         Ok(Some(new_chunk))
     }
 
@@ -233,6 +243,7 @@ mod tests {
             MultiMap::new(),
             vec![],
             0.0,
+            false,
         );
         let mut project = project.boxed().execute();
 
@@ -315,6 +326,7 @@ mod tests {
             MultiMap::from_iter(vec![(0, 0), (0, 1)].into_iter()),
             vec![2],
             0.0,
+            false,
         );
         let mut project = project.boxed().execute();
 
