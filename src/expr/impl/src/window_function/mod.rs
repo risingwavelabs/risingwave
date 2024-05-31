@@ -13,7 +13,9 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_expr::window_function::{BoxedWindowState, WindowFuncCall, WindowFuncKind};
+use risingwave_expr::window_function::{
+    BoxedWindowState, WindowFuncCall, WindowFuncKind, WINDOW_STATE_BUILDERS,
+};
 use risingwave_expr::{ExprError, Result};
 
 mod aggregate;
@@ -21,7 +23,8 @@ mod buffer;
 mod range_utils;
 mod rank;
 
-pub fn create_window_state(call: &WindowFuncCall) -> Result<BoxedWindowState> {
+#[linkme::distributed_slice(WINDOW_STATE_BUILDERS)]
+fn create_window_state_impl(call: &WindowFuncCall) -> Result<BoxedWindowState> {
     assert!(call.frame.bounds.validate().is_ok());
 
     use WindowFuncKind::*;

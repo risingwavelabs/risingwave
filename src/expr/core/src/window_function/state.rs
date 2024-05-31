@@ -14,13 +14,15 @@
 
 use std::collections::BTreeSet;
 
+use itertools::Itertools;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{Datum, DefaultOrdered};
 use risingwave_common::util::memcmp_encoding::MemcmpEncoded;
 use risingwave_common_estimate_size::EstimateSize;
 use smallvec::SmallVec;
 
-use crate::Result;
+use super::WindowFuncCall;
+use crate::{ExprError, Result};
 
 /// Unique and ordered identifier for a row in internal states.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, EstimateSize)]
@@ -102,3 +104,22 @@ pub trait WindowState: EstimateSize {
 }
 
 pub type BoxedWindowState = Box<dyn WindowState + Send + Sync>;
+
+#[linkme::distributed_slice]
+pub static WINDOW_STATE_BUILDERS: [fn(&WindowFuncCall) -> Result<BoxedWindowState>];
+
+pub fn create_window_state(call: &WindowFuncCall) -> Result<BoxedWindowState> {
+    // we expect only one builder function in `expr_impl/window_function/mod.rs`
+    let builder = WINDOW_STATE_BUILDERS.iter().next();
+    builder.map_or_else(
+        || {
+            Err(ExprError::UnsupportedFunction(format!(
+                "{}({}) -> {}",
+                call.kind,
+                call.args.arg_types().iter().format(", "),
+                &call.return_type,
+            )))
+        },
+        |f| f(call),
+    )
+}
