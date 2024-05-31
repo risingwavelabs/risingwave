@@ -15,6 +15,7 @@
 use std::hash::BuildHasher;
 use std::marker::PhantomData;
 use std::sync::Arc;
+use std::time::Instant;
 
 use anyhow::anyhow;
 use bytes::Bytes;
@@ -37,6 +38,8 @@ use risingwave_expr::aggregate::{AggCall, AggregateState, BoxedAggregateFunction
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::HashAggNode;
 use risingwave_pb::data::DataChunk as PbDataChunk;
+use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::task::JoinHandle;
 use twox_hash::XxHash64;
 
 use crate::error::{BatchError, Result};
@@ -276,6 +279,8 @@ impl BuildHasher for SpillBuildHasher {
     }
 }
 
+const DEFAULT_IO_CHANNEL_SIZE: usize = 1;
+
 /// `AggSpillManager` is used to manage how to write spill data file and read them back.
 /// The spill data first need to be partitioned. Each partition contains 2 files: `agg_state_file` and `input_chunks_file`.
 /// The spill file consume a data chunk and serialize the chunk into a protobuf bytes.
@@ -293,12 +298,13 @@ impl BuildHasher for SpillBuildHasher {
 pub struct AggSpillManager {
     op: SpillOp,
     partition_num: usize,
-    agg_state_writers: Vec<opendal::Writer>,
-    agg_state_readers: Vec<opendal::Reader>,
-    agg_state_chunk_builder: Vec<DataChunkBuilder>,
-    input_writers: Vec<opendal::Writer>,
-    input_readers: Vec<opendal::Reader>,
+    agg_state_chunk_builders: Vec<DataChunkBuilder>,
     input_chunk_builders: Vec<DataChunkBuilder>,
+    agg_state_writer_txs: Vec<Sender<DataChunk>>,
+    input_writer_txs: Vec<Sender<DataChunk>>,
+    join_handles: Vec<JoinHandle<opendal::Result<()>>>,
+    agg_state_readers: Vec<opendal::Reader>,
+    input_readers: Vec<opendal::Reader>,
     spill_build_hasher: SpillBuildHasher,
     group_key_types: Vec<DataType>,
     child_data_types: Vec<DataType>,
@@ -318,23 +324,25 @@ impl AggSpillManager {
         let suffix_uuid = uuid::Uuid::new_v4();
         let dir = format!("/{}-{}/", agg_identity, suffix_uuid);
         let op = SpillOp::create(dir)?;
-        let agg_state_writers = Vec::with_capacity(partition_num);
-        let agg_state_readers = Vec::with_capacity(partition_num);
-        let agg_state_chunk_builder = Vec::with_capacity(partition_num);
-        let input_writers = Vec::with_capacity(partition_num);
-        let input_readers = Vec::with_capacity(partition_num);
+        let agg_state_writer_txs = Vec::with_capacity(partition_num);
+        let agg_state_chunk_builders = Vec::with_capacity(partition_num);
         let input_chunk_builders = Vec::with_capacity(partition_num);
+        let join_handles = Vec::with_capacity(partition_num);
+        let input_writer_txs = Vec::with_capacity(partition_num);
+        let agg_state_readers = Vec::with_capacity(partition_num);
+        let input_readers = Vec::with_capacity(partition_num);
         // Use uuid to generate an unique hasher so that when recursive spilling happens they would use a different hasher to avoid data skew.
         let spill_build_hasher = SpillBuildHasher(suffix_uuid.as_u64_pair().1);
         Ok(Self {
             op,
             partition_num,
-            agg_state_writers,
-            agg_state_readers,
-            agg_state_chunk_builder,
-            input_writers,
-            input_readers,
+            agg_state_chunk_builders,
             input_chunk_builders,
+            agg_state_writer_txs,
+            input_writer_txs,
+            join_handles,
+            agg_state_readers,
+            input_readers,
             spill_build_hasher,
             group_key_types,
             child_data_types,
@@ -344,19 +352,24 @@ impl AggSpillManager {
     }
 
     async fn init_writers(&mut self) -> Result<()> {
+        let writer_task = |mut writer: opendal::Writer, mut rx: Receiver<DataChunk>| async move {
+            while let Some(chunk) = rx.recv().await {
+                let chunk_pb: PbDataChunk = chunk.to_protobuf();
+                let buf = Message::encode_to_vec(&chunk_pb);
+                let len_bytes = Bytes::copy_from_slice(&(buf.len() as u32).to_le_bytes());
+                writer.write(len_bytes).await?;
+                writer.write(buf).await?;
+            }
+            writer.close().await?;
+            Ok(())
+        };
+
         for i in 0..self.partition_num {
             let agg_state_partition_file_name = format!("agg-state-p{}", i);
-            let w = self.op.writer_with(&agg_state_partition_file_name).await?;
-            self.agg_state_writers.push(w);
-
-            let partition_file_name = format!("input-chunks-p{}", i);
-            let w = self.op.writer_with(&partition_file_name).await?;
-            self.input_writers.push(w);
-            self.input_chunk_builders.push(DataChunkBuilder::new(
-                self.child_data_types.clone(),
-                self.spill_chunk_size,
-            ));
-            self.agg_state_chunk_builder.push(DataChunkBuilder::new(
+            let agg_state_writer = self.op.writer_with(&agg_state_partition_file_name).await?;
+            let (tx, rx) = channel(DEFAULT_IO_CHANNEL_SIZE);
+            self.agg_state_writer_txs.push(tx);
+            self.agg_state_chunk_builders.push(DataChunkBuilder::new(
                 self.group_key_types
                     .iter()
                     .cloned()
@@ -364,18 +377,30 @@ impl AggSpillManager {
                     .collect(),
                 self.spill_chunk_size,
             ));
+            let join_handle = tokio::task::spawn(writer_task(agg_state_writer, rx));
+            self.join_handles.push(join_handle);
+
+            let partition_file_name = format!("input-chunks-p{}", i);
+            let input_writer = self.op.writer_with(&partition_file_name).await?;
+            let (tx, rx) = channel(DEFAULT_IO_CHANNEL_SIZE);
+            self.input_writer_txs.push(tx);
+            self.input_chunk_builders.push(DataChunkBuilder::new(
+                self.child_data_types.clone(),
+                self.spill_chunk_size,
+            ));
+            let join_handle = tokio::task::spawn(writer_task(input_writer, rx));
+            self.join_handles.push(join_handle);
         }
         Ok(())
     }
 
     async fn write_agg_state_row(&mut self, row: impl Row, hash_code: u64) -> Result<()> {
         let partition = hash_code as usize % self.partition_num;
-        if let Some(output_chunk) = self.agg_state_chunk_builder[partition].append_one_row(row) {
-            let chunk_pb: PbDataChunk = output_chunk.to_protobuf();
-            let buf = Message::encode_to_vec(&chunk_pb);
-            let len_bytes = Bytes::copy_from_slice(&(buf.len() as u32).to_le_bytes());
-            self.agg_state_writers[partition].write(len_bytes).await?;
-            self.agg_state_writers[partition].write(buf).await?;
+        if let Some(output_chunk) = self.agg_state_chunk_builders[partition].append_one_row(row) {
+            self.agg_state_writer_txs[partition]
+                .send(output_chunk)
+                .await
+                .map_err(|e| anyhow!(e).context("failed to write agg state chunk"))?;
         }
         Ok(())
     }
@@ -391,11 +416,10 @@ impl AggSpillManager {
                 );
             let new_chunk = DataChunk::from_parts(columns.clone(), new_vis);
             for output_chunk in self.input_chunk_builders[partition].append_chunk(new_chunk) {
-                let chunk_pb: PbDataChunk = output_chunk.to_protobuf();
-                let buf = Message::encode_to_vec(&chunk_pb);
-                let len_bytes = Bytes::copy_from_slice(&(buf.len() as u32).to_le_bytes());
-                self.input_writers[partition].write(len_bytes).await?;
-                self.input_writers[partition].write(buf).await?;
+                self.input_writer_txs[partition]
+                    .send(output_chunk)
+                    .await
+                    .map_err(|e| anyhow!(e).context("failed to write input chunk"))?;
             }
         }
         Ok(())
@@ -403,28 +427,29 @@ impl AggSpillManager {
 
     async fn close_writers(&mut self) -> Result<()> {
         for partition in 0..self.partition_num {
-            if let Some(output_chunk) = self.agg_state_chunk_builder[partition].consume_all() {
-                let chunk_pb: PbDataChunk = output_chunk.to_protobuf();
-                let buf = Message::encode_to_vec(&chunk_pb);
-                let len_bytes = Bytes::copy_from_slice(&(buf.len() as u32).to_le_bytes());
-                self.agg_state_writers[partition].write(len_bytes).await?;
-                self.agg_state_writers[partition].write(buf).await?;
+            if let Some(output_chunk) = self.agg_state_chunk_builders[partition].consume_all() {
+                self.agg_state_writer_txs[partition]
+                    .send(output_chunk)
+                    .await
+                    .map_err(|e| anyhow!(e).context("failed to write agg state chunk"))?;
             }
-
             if let Some(output_chunk) = self.input_chunk_builders[partition].consume_all() {
-                let chunk_pb: PbDataChunk = output_chunk.to_protobuf();
-                let buf = Message::encode_to_vec(&chunk_pb);
-                let len_bytes = Bytes::copy_from_slice(&(buf.len() as u32).to_le_bytes());
-                self.input_writers[partition].write(len_bytes).await?;
-                self.input_writers[partition].write(buf).await?;
+                self.input_writer_txs[partition]
+                    .send(output_chunk)
+                    .await
+                    .map_err(|e| anyhow!(e).context("failed to write input chunk"))?;
             }
         }
 
-        for mut w in self.agg_state_writers.drain(..) {
-            w.close().await?;
-        }
-        for mut w in self.input_writers.drain(..) {
-            w.close().await?;
+        // drop txs
+        self.agg_state_writer_txs = vec![];
+        self.input_writer_txs = vec![];
+
+        // wait join handle to close writer
+        for join_handle in self.join_handles.drain(..) {
+            join_handle
+                .await
+                .map_err(|err| anyhow!(err).context("Failed to join shutdown"))??;
         }
         Ok(())
     }
@@ -581,6 +606,8 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
             )?;
             agg_spill_manager.init_writers().await?;
 
+            let start_time = Instant::now();
+
             let mut memory_usage_diff = 0;
             // Spill agg states.
             for (key, states) in groups {
@@ -622,10 +649,18 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
 
             agg_spill_manager.close_writers().await?;
 
+            debug!(
+                "agg {} spill out to disk time = {}ms",
+                self.identity,
+                start_time.elapsed().as_millis()
+            );
+
             // Process each partition one by one.
             for i in 0..agg_spill_manager.partition_num {
                 let agg_state_stream = agg_spill_manager.read_agg_state_partition(i).await?;
                 let input_stream = agg_spill_manager.read_input_partition(i).await?;
+
+                let sub_hash_agg_identity = format!("{}-sub{}", self.identity.clone(), i);
 
                 let sub_hash_agg_executor: HashAggExecutor<K> =
                     HashAggExecutor::new_with_init_agg_state(
@@ -638,7 +673,7 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
                             self.schema.clone(),
                             agg_state_stream,
                         ))),
-                        format!("{}-sub{}", self.identity.clone(), i),
+                        sub_hash_agg_identity.clone(),
                         self.chunk_size,
                         self.mem_context.clone(),
                         self.enable_spill,
@@ -650,6 +685,8 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
                     sub_hash_agg_executor.identity, self.identity
                 );
 
+                let start_time = Instant::now();
+
                 let sub_hash_agg_stream = Box::new(sub_hash_agg_executor).execute();
 
                 #[for_await]
@@ -657,6 +694,12 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
                     let chunk = chunk?;
                     yield chunk;
                 }
+
+                debug!(
+                    "agg {} processes spill partition time = {}ms",
+                    sub_hash_agg_identity,
+                    start_time.elapsed().as_millis()
+                );
 
                 // Clear files of the current partition.
                 agg_spill_manager.clear_partition(i).await?;
