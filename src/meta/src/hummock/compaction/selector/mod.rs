@@ -24,13 +24,13 @@ mod space_reclaim_selector;
 mod tombstone_compaction_selector;
 mod ttl_selector;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 pub use emergency_selector::EmergencySelector;
 pub use level_selector::{DynamicLevelSelector, DynamicLevelSelectorCore};
 pub use manual_selector::{ManualCompactionOption, ManualCompactionSelector};
-use risingwave_common::catalog::TableOption;
+use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_hummock_sdk::HummockCompactionTaskId;
 use risingwave_pb::hummock::compact_task;
 use risingwave_pb::hummock::hummock_version::Levels;
@@ -53,6 +53,7 @@ pub trait CompactionSelector: Sync + Send {
         task_id: HummockCompactionTaskId,
         group: &CompactionGroup,
         levels: &Levels,
+        member_table_ids: &HashSet<TableId>,
         level_handlers: &mut [LevelHandler],
         selector_stats: &mut LocalSelectorStatistic,
         table_id_to_options: HashMap<u32, TableOption>,

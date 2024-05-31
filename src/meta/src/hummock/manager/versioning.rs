@@ -24,7 +24,9 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
 };
 use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGroupId};
 use risingwave_hummock_sdk::table_stats::add_prost_table_stats_map;
-use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
+use risingwave_hummock_sdk::version::{
+    HummockVersion, HummockVersionDelta, HummockVersionStateTableInfo,
+};
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockContextId, HummockEpoch, HummockSstableObjectId, HummockVersionId,
     FIRST_VERSION_ID,
@@ -335,7 +337,12 @@ pub(super) fn calc_new_write_limits(
             new_write_limits.insert(
                 *id,
                 WriteLimit {
-                    table_ids: levels.member_table_ids.clone(),
+                    table_ids: version
+                        .state_table_info
+                        .compaction_group_member_table_ids(*id)
+                        .iter()
+                        .map(|table_id| table_id.table_id)
+                        .collect(),
                     reason: write_limit_type.as_str(),
                 },
             );
@@ -355,7 +362,7 @@ pub(super) fn create_init_version(default_compaction_config: CompactionConfig) -
         safe_epoch: INVALID_EPOCH,
         table_watermarks: HashMap::new(),
         table_change_log: HashMap::new(),
-        state_table_info: HashMap::new(),
+        state_table_info: HummockVersionStateTableInfo::empty(),
     };
     for group_id in [
         StaticCompactionGroupId::StateDefault as CompactionGroupId,

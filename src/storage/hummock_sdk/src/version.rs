@@ -12,10 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
-use std::mem::size_of;
-use std::sync::Arc;
+use std::mem::{replace, size_of};
+use std::ops::Deref;
+use std::sync::{Arc, LazyLock};
 
+use itertools::Itertools;
 use prost::Message;
 use risingwave_common::catalog::TableId;
 use risingwave_pb::hummock::group_delta::DeltaType;
@@ -23,12 +26,145 @@ use risingwave_pb::hummock::hummock_version::Levels as PbLevels;
 use risingwave_pb::hummock::hummock_version_delta::{ChangeLogDelta, GroupDeltas as PbGroupDeltas};
 use risingwave_pb::hummock::{
     HummockVersion as PbHummockVersion, HummockVersionDelta as PbHummockVersionDelta, SstableInfo,
-    StateTableInfo as PbStateTableInfo, StateTableInfoDelta,
+    StateTableInfo as PbStateTableInfo, StateTableInfo, StateTableInfoDelta,
 };
+use tracing::{info, warn};
 
 use crate::change_log::TableChangeLog;
 use crate::table_watermark::TableWatermarks;
 use crate::{CompactionGroupId, HummockSstableObjectId, HummockVersionId};
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct HummockVersionStateTableInfo {
+    state_table_info: HashMap<TableId, PbStateTableInfo>,
+
+    // in memory index
+    compaction_group_member_tables: Arc<HashMap<CompactionGroupId, HashSet<TableId>>>,
+    table_compaction_group_id: Arc<HashMap<TableId, CompactionGroupId>>,
+}
+
+impl HummockVersionStateTableInfo {
+    pub fn empty() -> Self {
+        Self {
+            state_table_info: HashMap::new(),
+            compaction_group_member_tables: Arc::new(HashMap::new()),
+            table_compaction_group_id: Arc::new(HashMap::new()),
+        }
+    }
+
+    fn build_compaction_group_member_tables(
+        state_table_info: &HashMap<TableId, PbStateTableInfo>,
+    ) -> HashMap<CompactionGroupId, HashSet<TableId>> {
+        let mut ret: HashMap<_, HashSet<_>> = HashMap::new();
+        for (table_id, info) in state_table_info {
+            assert!(ret
+                .entry(info.compaction_group_id)
+                .or_default()
+                .insert(*table_id));
+        }
+        ret
+    }
+
+    pub fn build_table_compaction_group_id(
+        state_table_info: &HashMap<TableId, PbStateTableInfo>,
+    ) -> HashMap<TableId, CompactionGroupId> {
+        state_table_info
+            .iter()
+            .map(|(table_id, info)| (*table_id, info.compaction_group_id))
+            .collect()
+    }
+
+    pub fn from_protobuf(state_table_info: &HashMap<u32, PbStateTableInfo>) -> Self {
+        let state_table_info = state_table_info
+            .iter()
+            .map(|(table_id, info)| (TableId::new(*table_id), info.clone()))
+            .collect();
+        let compaction_group_member_tables = Arc::new(Self::build_compaction_group_member_tables(
+            &state_table_info,
+        ));
+        let table_compaction_group_id =
+            Arc::new(Self::build_table_compaction_group_id(&state_table_info));
+        Self {
+            state_table_info,
+            compaction_group_member_tables,
+            table_compaction_group_id,
+        }
+    }
+
+    pub fn to_protobuf(&self) -> HashMap<u32, PbStateTableInfo> {
+        self.state_table_info
+            .iter()
+            .map(|(table_id, info)| (table_id.table_id, info.clone()))
+            .collect()
+    }
+
+    pub fn apply_delta(
+        &mut self,
+        delta: &HashMap<TableId, StateTableInfoDelta>,
+        removed_table_id: &HashSet<TableId>,
+    ) -> HashMap<TableId, Option<StateTableInfo>> {
+        let mut changed_table = HashMap::new();
+        info!(removed_table_id = ?removed_table_id.iter().map(|table_id| table_id.table_id).collect_vec(), "removing table id");
+        for table_id in removed_table_id {
+            if let Some(prev_info) = self.state_table_info.remove(table_id) {
+                assert!(changed_table.insert(*table_id, Some(prev_info)).is_none());
+            } else {
+                warn!(
+                    table_id = table_id.table_id,
+                    "table to remove does not exist"
+                );
+            }
+        }
+        for (table_id, delta) in delta {
+            if removed_table_id.contains(table_id) {
+                continue;
+            }
+            let new_info = StateTableInfo {
+                committed_epoch: delta.committed_epoch,
+                safe_epoch: delta.safe_epoch,
+                compaction_group_id: delta.compaction_group_id,
+            };
+            match self.state_table_info.entry(*table_id) {
+                Entry::Occupied(mut entry) => {
+                    let prev_info = replace(entry.get_mut(), new_info);
+                    changed_table.insert(*table_id, Some(prev_info));
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(new_info);
+                    changed_table.insert(*table_id, None);
+                }
+            }
+        }
+        self.compaction_group_member_tables = Arc::new(Self::build_compaction_group_member_tables(
+            &self.state_table_info,
+        ));
+        changed_table
+    }
+
+    pub fn info(&self) -> &HashMap<TableId, StateTableInfo> {
+        &self.state_table_info
+    }
+
+    pub fn compaction_group_member_table_ids(
+        &self,
+        compaction_group_id: CompactionGroupId,
+    ) -> &HashSet<TableId> {
+        static EMPTY_SET: LazyLock<HashSet<TableId>> = LazyLock::new(HashSet::new);
+        self.compaction_group_member_tables
+            .get(&compaction_group_id)
+            .unwrap_or_else(|| EMPTY_SET.deref())
+    }
+
+    pub fn compaction_group_member_tables(
+        &self,
+    ) -> &Arc<HashMap<CompactionGroupId, HashSet<TableId>>> {
+        &self.compaction_group_member_tables
+    }
+
+    pub fn table_compaction_group_id(&self) -> &Arc<HashMap<TableId, CompactionGroupId>> {
+        &self.table_compaction_group_id
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct HummockVersion {
@@ -38,7 +174,7 @@ pub struct HummockVersion {
     pub safe_epoch: u64,
     pub table_watermarks: HashMap<TableId, Arc<TableWatermarks>>,
     pub table_change_log: HashMap<TableId, TableChangeLog>,
-    pub state_table_info: HashMap<TableId, PbStateTableInfo>,
+    pub state_table_info: HummockVersionStateTableInfo,
 }
 
 impl Default for HummockVersion {
@@ -90,11 +226,9 @@ impl HummockVersion {
                     )
                 })
                 .collect(),
-            state_table_info: pb_version
-                .state_table_info
-                .iter()
-                .map(|(table_id, info)| (TableId::new(*table_id), info.clone()))
-                .collect(),
+            state_table_info: HummockVersionStateTableInfo::from_protobuf(
+                &pb_version.state_table_info,
+            ),
         }
     }
 
@@ -118,11 +252,7 @@ impl HummockVersion {
                 .iter()
                 .map(|(table_id, change_log)| (table_id.table_id, change_log.to_protobuf()))
                 .collect(),
-            state_table_info: self
-                .state_table_info
-                .iter()
-                .map(|(table_id, info)| (table_id.table_id(), info.clone()))
-                .collect(),
+            state_table_info: self.state_table_info.to_protobuf(),
         }
     }
 
@@ -146,18 +276,21 @@ impl HummockVersion {
     }
 
     pub fn need_fill_backward_compatible_state_table_info_delta(&self) -> bool {
-        // state_table_info is not previously filled, but there previously exists some tables
-        self.state_table_info.is_empty()
-            && self
-                .levels
-                .values()
-                .any(|group| !group.member_table_ids.is_empty())
+        // for backward-compatibility of previous hummock version delta
+        self.state_table_info.state_table_info.is_empty()
+            && self.levels.values().any(|group| {
+                // state_table_info is not previously filled, but there previously exists some tables
+                #[expect(deprecated)]
+                !group.member_table_ids.is_empty()
+            })
     }
 
     pub fn may_fill_backward_compatible_state_table_info_delta(
         &self,
         delta: &mut HummockVersionDelta,
     ) {
+        #[expect(deprecated)]
+        // for backward-compatibility of previous hummock version delta
         for (cg_id, group) in &self.levels {
             for table_id in &group.member_table_ids {
                 assert!(
@@ -168,6 +301,7 @@ impl HummockVersion {
                             StateTableInfoDelta {
                                 committed_epoch: self.max_committed_epoch,
                                 safe_epoch: self.safe_epoch,
+                                compaction_group_id: *cg_id,
                             }
                         )
                         .is_none(),

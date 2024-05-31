@@ -37,6 +37,7 @@ impl CompactionSelector for EmergencySelector {
         task_id: HummockCompactionTaskId,
         group: &CompactionGroup,
         levels: &Levels,
+        _member_table_ids: &std::collections::HashSet<risingwave_common::catalog::TableId>,
         level_handlers: &mut [LevelHandler],
         selector_stats: &mut LocalSelectorStatistic,
         _table_id_to_options: HashMap<u32, TableOption>,

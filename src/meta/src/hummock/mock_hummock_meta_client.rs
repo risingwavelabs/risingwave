@@ -172,9 +172,10 @@ impl HummockMetaClient for MockHummockMetaClient {
             sync_result.uncommitted_ssts.iter().map(|sst| &sst.sst_info),
             &vec![epoch],
             version
-                .levels
-                .values()
-                .flat_map(|group| group.member_table_ids.iter().map(|table_id| (*table_id, 0))),
+                .state_table_info
+                .info()
+                .keys()
+                .map(|table_id| (table_id.table_id, 0)),
         );
         self.hummock_manager
             .commit_epoch(

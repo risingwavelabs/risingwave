@@ -295,7 +295,6 @@ pub mod tests {
                 sub_levels: vec![l1, l2],
             }),
             levels: vec![],
-            member_table_ids: vec![1],
             ..Default::default()
         };
         let config = Arc::new(

@@ -175,6 +175,7 @@ impl<'a> HummockVersionTransaction<'a> {
             version_delta.state_table_info_delta = version_delta
                 .latest_version()
                 .state_table_info
+                .info()
                 .iter()
                 .map(|(table_id, info)| {
                     (
@@ -182,6 +183,7 @@ impl<'a> HummockVersionTransaction<'a> {
                         StateTableInfoDelta {
                             committed_epoch: info.committed_epoch,
                             safe_epoch: version_delta.safe_epoch,
+                            compaction_group_id: info.compaction_group_id,
                         },
                     )
                 })
@@ -711,11 +713,15 @@ impl HummockManager {
                 || matches!(selector.task_type(), TaskType::Emergency);
 
             let mut stats = LocalSelectorStatistic::default();
-            let member_table_ids = version
+            let mut member_table_ids: Vec<_> = version
                 .latest_version()
-                .get_compaction_group_levels(compaction_group_id)
-                .member_table_ids
-                .clone();
+                .state_table_info
+                .compaction_group_member_table_ids(compaction_group_id)
+                .iter()
+                .map(|table_id| table_id.table_id)
+                .collect();
+
+            member_table_ids.sort();
 
             let mut table_id_to_option: HashMap<u32, _> = HashMap::default();
 
@@ -738,6 +744,10 @@ impl HummockManager {
                 version
                     .latest_version()
                     .get_compaction_group_levels(compaction_group_id),
+                version
+                    .latest_version()
+                    .state_table_info
+                    .compaction_group_member_table_ids(compaction_group_id),
                 task_id as HummockCompactionTaskId,
                 &group_config,
                 &mut stats,

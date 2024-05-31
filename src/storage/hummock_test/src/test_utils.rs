@@ -81,7 +81,7 @@ pub async fn prepare_first_valid_version(
     };
 
     (
-        PinnedVersion::new(hummock_version, unbounded_channel().0),
+        PinnedVersion::new(*hummock_version, unbounded_channel().0),
         tx,
         rx,
     )

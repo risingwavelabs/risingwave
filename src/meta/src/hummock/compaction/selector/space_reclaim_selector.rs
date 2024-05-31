@@ -17,10 +17,10 @@
 // COPYING file in the root directory) and Apache 2.0 License
 // (found in the LICENSE.Apache file in the root directory).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use risingwave_common::catalog::TableOption;
+use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_hummock_sdk::HummockCompactionTaskId;
 use risingwave_pb::hummock::compact_task;
 use risingwave_pb::hummock::hummock_version::Levels;
@@ -44,6 +44,7 @@ impl CompactionSelector for SpaceReclaimCompactionSelector {
         task_id: HummockCompactionTaskId,
         group: &CompactionGroup,
         levels: &Levels,
+        member_table_ids: &HashSet<TableId>,
         level_handlers: &mut [LevelHandler],
         _selector_stats: &mut LocalSelectorStatistic,
         _table_id_to_options: HashMap<u32, TableOption>,
@@ -53,7 +54,10 @@ impl CompactionSelector for SpaceReclaimCompactionSelector {
             DynamicLevelSelectorCore::new(group.compaction_config.clone(), developer_config);
         let mut picker = SpaceReclaimCompactionPicker::new(
             group.compaction_config.max_space_reclaim_bytes,
-            levels.member_table_ids.iter().cloned().collect(),
+            member_table_ids
+                .iter()
+                .map(|table_id| table_id.table_id)
+                .collect(),
         );
         let ctx = dynamic_level_core.calculate_level_base_size(levels);
         let state = self.state.entry(group.group_id).or_default();

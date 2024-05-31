@@ -427,6 +427,7 @@ impl CompactionSelector for DynamicLevelSelector {
         task_id: HummockCompactionTaskId,
         compaction_group: &CompactionGroup,
         levels: &Levels,
+        _member_table_ids: &std::collections::HashSet<risingwave_common::catalog::TableId>,
         level_handlers: &mut [LevelHandler],
         selector_stats: &mut LocalSelectorStatistic,
         _table_id_to_options: HashMap<u32, TableOption>,
@@ -483,7 +484,7 @@ impl CompactionSelector for DynamicLevelSelector {
 
 #[cfg(test)]
 pub mod tests {
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
     use std::sync::Arc;
 
     use itertools::Itertools;
@@ -605,7 +606,6 @@ pub mod tests {
                 3,
                 10,
             ))),
-            member_table_ids: vec![1],
             ..Default::default()
         };
 
@@ -617,6 +617,7 @@ pub mod tests {
                 1,
                 &group_config,
                 &levels,
+                &HashSet::new(),
                 &mut levels_handlers,
                 &mut local_stats,
                 HashMap::default(),
@@ -644,6 +645,7 @@ pub mod tests {
                 1,
                 &group_config,
                 &levels,
+                &HashSet::new(),
                 &mut levels_handlers,
                 &mut local_stats,
                 HashMap::default(),
@@ -663,6 +665,7 @@ pub mod tests {
                 2,
                 &group_config,
                 &levels,
+                &HashSet::new(),
                 &mut levels_handlers,
                 &mut local_stats,
                 HashMap::default(),
@@ -699,6 +702,7 @@ pub mod tests {
             2,
             &group_config,
             &levels,
+            &HashSet::new(),
             &mut levels_handlers,
             &mut local_stats,
             HashMap::default(),

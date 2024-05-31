@@ -47,7 +47,7 @@ pub struct BufferWriteRequest {
 #[derive(Debug)]
 pub enum HummockVersionUpdate {
     VersionDeltas(Vec<HummockVersionDelta>),
-    PinnedVersion(HummockVersion),
+    PinnedVersion(Box<HummockVersion>),
 }
 
 pub enum HummockEvent {

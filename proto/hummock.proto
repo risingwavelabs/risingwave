@@ -69,25 +69,28 @@ message IntraLevelDelta {
 enum CompatibilityVersion {
   VERSION_UNSPECIFIED = 0;
   NO_TRIVIAL_SPLIT = 1;
+  NO_MEMBER_TABLE_IDS = 2;
 }
 
 message GroupConstruct {
   CompactionConfig group_config = 1;
   // If parent_group_id is not 0, it means parent_group_id splits into parent_group_id and this group, so this group is not empty initially.
   uint64 parent_group_id = 2;
-  repeated uint32 table_ids = 3;
+  repeated uint32 table_ids = 3 [deprecated = true];
   uint64 group_id = 4;
   uint64 new_sst_start_id = 5;
   CompatibilityVersion version = 6;
 }
 
 message GroupMetaChange {
-  repeated uint32 table_ids_add = 1;
-  repeated uint32 table_ids_remove = 2;
+  option deprecated = true;
+  repeated uint32 table_ids_add = 1 [deprecated = true];
+  repeated uint32 table_ids_remove = 2 [deprecated = true];
 }
 
 message GroupTableChange {
-  repeated uint32 table_ids = 1;
+  option deprecated = true;
+  repeated uint32 table_ids = 1 [deprecated = true];
   uint64 target_group_id = 2;
   uint64 origin_group_id = 3;
   uint64 new_sst_start_id = 4;
@@ -152,11 +155,13 @@ message TableChangeLog {
 message StateTableInfo {
   uint64 committed_epoch = 1;
   uint64 safe_epoch = 2;
+  uint64 compaction_group_id = 3;
 }
 
 message StateTableInfoDelta {
   uint64 committed_epoch = 1;
   uint64 safe_epoch = 2;
+  uint64 compaction_group_id = 3;
 }
 
 message HummockVersion {
@@ -165,7 +170,7 @@ message HummockVersion {
     OverlappingLevel l0 = 2;
     uint64 group_id = 3;
     uint64 parent_group_id = 4;
-    repeated uint32 member_table_ids = 5;
+    repeated uint32 member_table_ids = 5 [deprecated = true];
   }
   uint64 id = 1;
   // Levels of each compaction group

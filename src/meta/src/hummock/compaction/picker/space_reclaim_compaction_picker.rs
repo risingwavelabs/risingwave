@@ -172,6 +172,7 @@ mod test {
     use std::sync::Arc;
 
     use itertools::Itertools;
+    use risingwave_common::catalog::TableId;
     use risingwave_pb::hummock::compact_task;
     pub use risingwave_pb::hummock::{Level, LevelType};
 
@@ -234,11 +235,12 @@ mod test {
         }
 
         assert_eq!(levels.len(), 4);
-        let mut levels = Levels {
+        let levels = Levels {
             levels,
             l0: Some(l0),
             ..Default::default()
         };
+        let mut member_table_ids = HashSet::new();
         let mut levels_handler = (0..5).map(LevelHandler::new).collect_vec();
         let mut local_stats = LocalSelectorStatistic::default();
 
@@ -252,6 +254,7 @@ mod test {
                     1,
                     &group_config,
                     &levels,
+                    &member_table_ids,
                     &mut levels_handler,
                     &mut local_stats,
                     HashMap::default(),
@@ -268,6 +271,7 @@ mod test {
                     1,
                     &group_config,
                     &levels,
+                    &member_table_ids,
                     &mut levels_handler,
                     &mut local_stats,
                     HashMap::default(),
@@ -308,6 +312,7 @@ mod test {
                     1,
                     &group_config,
                     &levels,
+                    &member_table_ids,
                     &mut levels_handler,
                     &mut local_stats,
                     HashMap::default(),
@@ -334,6 +339,7 @@ mod test {
                     1,
                     &group_config,
                     &levels,
+                    &member_table_ids,
                     &mut levels_handler,
                     &mut local_stats,
                     HashMap::default(),
@@ -351,12 +357,17 @@ mod test {
                 }
             }
 
-            levels.member_table_ids = vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+            member_table_ids = HashSet::from_iter(
+                [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+                    .into_iter()
+                    .map(TableId::new),
+            );
             // pick space reclaim
             let task = selector.pick_compaction(
                 1,
                 &group_config,
                 &levels,
+                &member_table_ids,
                 &mut levels_handler,
                 &mut local_stats,
                 HashMap::default(),
@@ -372,13 +383,15 @@ mod test {
                 }
             }
 
-            levels.member_table_ids = vec![2, 3, 4, 5, 6, 7, 8, 9];
+            member_table_ids =
+                HashSet::from_iter([2, 3, 4, 5, 6, 7, 8, 9].into_iter().map(TableId::new));
             // pick space reclaim
             let task = selector
                 .pick_compaction(
                     1,
                     &group_config,
                     &levels,
+                    &member_table_ids,
                     &mut levels_handler,
                     &mut local_stats,
                     HashMap::default(),
@@ -407,7 +420,7 @@ mod test {
             // rebuild selector
             selector = SpaceReclaimCompactionSelector::default();
             // cut range [3,4] [6] [8,9,10]
-            levels.member_table_ids = vec![0, 1, 2, 5, 7];
+            member_table_ids = HashSet::from_iter([0, 1, 2, 5, 7].into_iter().map(TableId::new));
             let expect_task_file_count = [2, 1, 4];
             let expect_task_sst_id_range = [vec![3, 4], vec![6], vec![8, 9, 10, 11]];
             for (index, x) in expect_task_file_count.iter().enumerate() {
@@ -417,6 +430,7 @@ mod test {
                         1,
                         &group_config,
                         &levels,
+                        &member_table_ids,
                         &mut levels_handler,
                         &mut local_stats,
                         HashMap::default(),
@@ -458,12 +472,13 @@ mod test {
             // rebuild selector
             selector = SpaceReclaimCompactionSelector::default();
             // cut range [3,4] [6] [8,9,10]
-            levels.member_table_ids = vec![0, 1, 2, 5, 7];
+
+            member_table_ids = HashSet::from_iter([0, 1, 2, 5, 7].into_iter().map(TableId::new));
             let expect_task_file_count = [2, 1, 5];
             let expect_task_sst_id_range = [vec![3, 4], vec![6], vec![7, 8, 9, 10, 11]];
             for (index, x) in expect_task_file_count.iter().enumerate() {
                 if index == expect_task_file_count.len() - 1 {
-                    levels.member_table_ids = vec![2, 5];
+                    member_table_ids = HashSet::from_iter([2, 5].into_iter().map(TableId::new));
                 }
 
                 // // pick space reclaim
@@ -472,6 +487,7 @@ mod test {
                         1,
                         &group_config,
                         &levels,
+                        &member_table_ids,
                         &mut levels_handler,
                         &mut local_stats,
                         HashMap::default(),

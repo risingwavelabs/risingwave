@@ -75,7 +75,6 @@ impl Drop for PinnedVersionGuard {
 #[derive(Clone)]
 pub struct PinnedVersion {
     version: Arc<HummockVersion>,
-    compaction_group_index: Arc<HashMap<TableId, CompactionGroupId>>,
     guard: Arc<PinnedVersionGuard>,
 }
 
@@ -85,11 +84,9 @@ impl PinnedVersion {
         pinned_version_manager_tx: UnboundedSender<PinVersionAction>,
     ) -> Self {
         let version_id = version.id;
-        let compaction_group_index = version.build_compaction_group_info();
 
         PinnedVersion {
             version: Arc::new(version),
-            compaction_group_index: Arc::new(compaction_group_index),
             guard: Arc::new(PinnedVersionGuard::new(
                 version_id,
                 pinned_version_manager_tx,
@@ -98,7 +95,10 @@ impl PinnedVersion {
     }
 
     pub(crate) fn compaction_group_index(&self) -> Arc<HashMap<TableId, CompactionGroupId>> {
-        self.compaction_group_index.clone()
+        self.version
+            .state_table_info
+            .table_compaction_group_id()
+            .clone()
     }
 
     pub fn new_pin_version(&self, version: HummockVersion) -> Self {
@@ -109,11 +109,9 @@ impl PinnedVersion {
             self.version.id
         );
         let version_id = version.id;
-        let compaction_group_index = version.build_compaction_group_info();
 
         PinnedVersion {
             version: Arc::new(version),
-            compaction_group_index: Arc::new(compaction_group_index),
             guard: Arc::new(PinnedVersionGuard::new(
                 version_id,
                 self.guard.pinned_version_manager_tx.clone(),
@@ -135,9 +133,10 @@ impl PinnedVersion {
 
     pub fn levels(&self, table_id: TableId) -> impl Iterator<Item = &PbLevel> {
         #[auto_enum(Iterator)]
-        match self.compaction_group_index.get(&table_id) {
-            Some(compaction_group_id) => {
-                let levels = self.levels_by_compaction_groups_id(*compaction_group_id);
+        match self.version.state_table_info.info().get(&table_id) {
+            Some(info) => {
+                let compaction_group_id = info.compaction_group_id;
+                let levels = self.levels_by_compaction_groups_id(compaction_group_id);
                 levels
                     .l0
                     .as_ref()
