@@ -84,9 +84,9 @@ where
 {
     let parse = (
         cut_err(Token::LParen),
-        cut_err(expr).map(Box::new), // Parses the expresion within TRY_CAST
+        cut_err(expr).map(Box::new),
         cut_err(Keyword::AS),
-        cut_err(data_type), // Parses the data type to TRY_CAST to
+        cut_err(data_type),
         cut_err(Token::RParen),
     )
         .map(|(_, expr, _, data_type, _)| Expr::TryCast { expr, data_type });
