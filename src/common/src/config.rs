@@ -366,6 +366,9 @@ pub struct MetaConfig {
     /// Whether compactor should rewrite row to remove dropped column.
     #[serde(default = "default::meta::enable_dropped_column_reclaim")]
     pub enable_dropped_column_reclaim: bool,
+
+    #[serde(default = "default::meta::secret_store_private_key")]
+    pub secret_store_private_key: Vec<u8>,
 }
 
 #[derive(Copy, Clone, Debug, Default)]
@@ -532,6 +535,10 @@ pub struct BatchConfig {
     /// A SQL option with a name containing any of these keywords will be redacted.
     #[serde(default = "default::batch::redact_sql_option_keywords")]
     pub redact_sql_option_keywords: Vec<String>,
+
+    /// Enable the spill out to disk feature for batch queries.
+    #[serde(default = "default::batch::enable_spill")]
+    pub enable_spill: bool,
 }
 
 /// The section `[streaming]` in `risingwave.toml`.
@@ -713,10 +720,6 @@ pub struct StorageConfig {
     /// Whether to enable streaming upload for sstable.
     #[serde(default = "default::storage::min_sst_size_for_streaming_upload")]
     pub min_sst_size_for_streaming_upload: u64,
-
-    /// Max sub compaction task numbers
-    #[serde(default = "default::storage::max_sub_compaction")]
-    pub max_sub_compaction: u32,
 
     #[serde(default = "default::storage::max_concurrent_compaction_task_number")]
     pub max_concurrent_compaction_task_number: u64,
@@ -1322,8 +1325,13 @@ pub mod default {
         pub fn parallelism_control_trigger_first_delay_sec() -> u64 {
             30
         }
+
         pub fn enable_dropped_column_reclaim() -> bool {
             false
+        }
+
+        pub fn secret_store_private_key() -> Vec<u8> {
+            "demo-secret-private-key".as_bytes().to_vec()
         }
     }
 
@@ -1449,10 +1457,6 @@ pub mod default {
             32 * 1024 * 1024
         }
 
-        pub fn max_sub_compaction() -> u32 {
-            4
-        }
-
         pub fn max_concurrent_compaction_task_number() -> u64 {
             16
         }
@@ -1492,6 +1496,7 @@ pub mod default {
         pub fn max_preload_io_retry_times() -> usize {
             3
         }
+
         pub fn mem_table_spill_threshold() -> usize {
             4 << 20
         }
@@ -1532,7 +1537,6 @@ pub mod default {
     }
 
     pub mod file_cache {
-
         pub fn dir() -> String {
             "".to_string()
         }
@@ -1751,6 +1755,10 @@ pub mod default {
             false
         }
 
+        pub fn enable_spill() -> bool {
+            true
+        }
+
         pub fn statement_timeout_in_sec() -> u32 {
             // 1 hour
             60 * 60
@@ -1786,7 +1794,8 @@ pub mod default {
 
         // decrease this configure when the generation of checkpoint barrier is not frequent.
         const DEFAULT_TIER_COMPACT_TRIGGER_NUMBER: u64 = 12;
-        const DEFAULT_TARGET_FILE_SIZE_BASE: u64 = 32 * 1024 * 1024; // 32MB
+        const DEFAULT_TARGET_FILE_SIZE_BASE: u64 = 32 * 1024 * 1024;
+        // 32MB
         const DEFAULT_MAX_SUB_COMPACTION: u32 = 4;
         const DEFAULT_LEVEL_MULTIPLIER: u64 = 5;
         const DEFAULT_MAX_SPACE_RECLAIM_BYTES: u64 = 512 * 1024 * 1024; // 512MB;
@@ -1802,42 +1811,55 @@ pub mod default {
         pub fn max_bytes_for_level_base() -> u64 {
             DEFAULT_MAX_BYTES_FOR_LEVEL_BASE
         }
+
         pub fn max_bytes_for_level_multiplier() -> u64 {
             DEFAULT_LEVEL_MULTIPLIER
         }
+
         pub fn max_compaction_bytes() -> u64 {
             DEFAULT_MAX_COMPACTION_BYTES
         }
+
         pub fn sub_level_max_compaction_bytes() -> u64 {
             DEFAULT_MIN_COMPACTION_BYTES
         }
+
         pub fn level0_tier_compact_file_number() -> u64 {
             DEFAULT_TIER_COMPACT_TRIGGER_NUMBER
         }
+
         pub fn target_file_size_base() -> u64 {
             DEFAULT_TARGET_FILE_SIZE_BASE
         }
+
         pub fn compaction_filter_mask() -> u32 {
             (CompactionFilterFlag::STATE_CLEAN | CompactionFilterFlag::TTL).into()
         }
+
         pub fn max_sub_compaction() -> u32 {
             DEFAULT_MAX_SUB_COMPACTION
         }
+
         pub fn level0_stop_write_threshold_sub_level_number() -> u64 {
             DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_SUB_LEVEL_NUMBER
         }
+
         pub fn level0_sub_level_compact_level_count() -> u32 {
             DEFAULT_MIN_SUB_LEVEL_COMPACT_LEVEL_COUNT
         }
+
         pub fn level0_overlapping_sub_level_compact_level_count() -> u32 {
             DEFAULT_MIN_OVERLAPPING_SUB_LEVEL_COMPACT_LEVEL_COUNT
         }
+
         pub fn max_space_reclaim_bytes() -> u64 {
             DEFAULT_MAX_SPACE_RECLAIM_BYTES
         }
+
         pub fn level0_max_compact_file_number() -> u64 {
             DEFAULT_MAX_COMPACTION_FILE_COUNT
         }
+
         pub fn tombstone_reclaim_ratio() -> u32 {
             DEFAULT_TOMBSTONE_RATIO_PERCENT
         }
@@ -1962,6 +1984,7 @@ pub mod default {
 
             pub mod developer {
                 use crate::util::env_var::env_var_is_true_or;
+
                 const RW_USE_OPENDAL_FOR_S3: &str = "RW_USE_OPENDAL_FOR_S3";
 
                 pub fn object_store_retry_unknown_service_error() -> bool {

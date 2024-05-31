@@ -32,7 +32,7 @@ use risingwave_rpc_client::ComputeClientPoolRef;
 use tokio::sync::watch::Sender;
 
 use crate::catalog::root_catalog::Catalog;
-use crate::catalog::FragmentId;
+use crate::catalog::{FragmentId, SecretId};
 use crate::scheduler::HummockSnapshotManagerRef;
 use crate::user::user_manager::UserInfoManager;
 use crate::user::UserInfoVersion;
@@ -63,6 +63,7 @@ impl ObserverState for FrontendObserverNode {
             | Info::Schema(_)
             | Info::RelationGroup(_)
             | Info::Function(_)
+            | Info::Secret(_)
             | Info::Connection(_) => {
                 self.handle_catalog_notification(resp);
             }
@@ -142,6 +143,7 @@ impl ObserverState for FrontendObserverNode {
             serving_worker_slot_mappings,
             session_params,
             version,
+            secrets,
         } = snapshot;
 
         for db in databases {
@@ -173,6 +175,9 @@ impl ObserverState for FrontendObserverNode {
         }
         for connection in connections {
             catalog_guard.create_connection(&connection)
+        }
+        for secret in secrets {
+            catalog_guard.create_secret(&secret)
         }
         for user in users {
             user_guard.create_user(user)
@@ -344,6 +349,16 @@ impl FrontendObserverNode {
                     connection.id,
                 ),
                 Operation::Update => catalog_guard.update_connection(connection),
+                _ => panic!("receive an unsupported notify {:?}", resp),
+            },
+            Info::Secret(secret) => match resp.operation() {
+                Operation::Add => catalog_guard.create_secret(secret),
+                Operation::Delete => catalog_guard.drop_secret(
+                    secret.database_id,
+                    secret.schema_id,
+                    SecretId::new(secret.id),
+                ),
+                Operation::Update => catalog_guard.update_secret(secret),
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },
             _ => unreachable!(),
