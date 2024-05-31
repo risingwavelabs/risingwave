@@ -563,9 +563,9 @@ fn check_cycle_for_sink(
                     path.push(table.name.clone());
                     self.visit_table(table.as_ref(), target_table_id, path)?;
                     path.pop();
-                } else if self.source_index.contains_key(&table_id.table_id) {
-                    continue;
-                } else if self.view_index.contains_key(&table_id.table_id) {
+                } else if self.source_index.contains_key(&table_id.table_id)
+                    || self.view_index.contains_key(&table_id.table_id)
+                {
                     continue;
                 } else {
                     bail!("streaming job not found: {:?}", table_id);
