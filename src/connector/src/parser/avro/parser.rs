@@ -74,7 +74,7 @@ impl AvroAccessBuilder {
         // if use confluent schema, get writer schema from confluent schema registry
         if let Some(resolver) = &self.writer_schema_cache {
             let (schema_id, mut raw_payload) = extract_schema_id(payload)?;
-            let writer_schema = resolver.get(schema_id).await?;
+            let writer_schema = resolver.get_by_id(schema_id).await?;
             Ok(Some(from_avro_datum(
                 writer_schema.as_ref(),
                 &mut raw_payload,
@@ -143,9 +143,9 @@ impl AvroParserConfig {
             tracing::debug!("infer key subject {subject_key:?}, value subject {subject_value}");
 
             Ok(Self {
-                schema: resolver.fetch_by_subject_name(&subject_value).await?,
+                schema: resolver.get_by_subject(&subject_value).await?,
                 key_schema: if let Some(subject_key) = subject_key {
-                    Some(resolver.fetch_by_subject_name(&subject_key).await?)
+                    Some(resolver.get_by_subject(&subject_key).await?)
                 } else {
                     None
                 },

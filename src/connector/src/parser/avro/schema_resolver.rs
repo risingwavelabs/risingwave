@@ -56,25 +56,17 @@ impl ConfluentSchemaCache {
         }
     }
 
-    /// Non-cached
-    pub async fn fetch_by_subject_name(&self, subject_name: &str) -> ConnectorResult<Arc<Schema>> {
-        let raw_schema = self.fetch_raw_schema_by_subject_name(subject_name).await?;
+    /// Gets the latest schema by subject name, which is used as *reader schema*.
+    pub async fn get_by_subject(&self, subject_name: &str) -> ConnectorResult<Arc<Schema>> {
+        let raw_schema = self
+            .confluent_client
+            .get_schema_by_subject(subject_name)
+            .await?;
         self.parse_and_cache_schema(raw_schema).await
     }
 
-    /// Non-cached
-    pub async fn fetch_raw_schema_by_subject_name(
-        &self,
-        subject_name: &str,
-    ) -> ConnectorResult<ConfluentSchema> {
-        self.confluent_client
-            .get_schema_by_subject(subject_name)
-            .await
-            .map_err(Into::into)
-    }
-
-    // get the writer schema by id
-    pub async fn get(&self, schema_id: i32) -> ConnectorResult<Arc<Schema>> {
+    /// Gets the a specific schema by id, which is used as *writer schema*.
+    pub async fn get_by_id(&self, schema_id: i32) -> ConnectorResult<Arc<Schema>> {
         // TODO: use `get_with`
         if let Some(schema) = self.writer_schemas.get(&schema_id).await {
             Ok(schema)
