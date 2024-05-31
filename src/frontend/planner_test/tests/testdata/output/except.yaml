@@ -25,7 +25,7 @@
           └─BatchScan { table: t2, columns: [t2.a, t2.b, t2.c], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [a, b, c], stream_key: [a, b, c], pk_columns: [a, b, c], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [t1.a, t1.b, t1.c] }
+    └─StreamProject { exprs: [t1.a, t1.b, t1.c], noop_update_hint: true }
       └─StreamHashAgg { group_key: [t1.a, t1.b, t1.c], aggs: [count] }
         └─StreamHashJoin { type: LeftAnti, predicate: t1.a IS NOT DISTINCT FROM t2.a AND t1.b IS NOT DISTINCT FROM t2.b AND t1.c IS NOT DISTINCT FROM t2.c, output: all }
           ├─StreamExchange { dist: HashShard(t1.a, t1.b, t1.c) }
@@ -35,7 +35,7 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a, b, c], stream_key: [a, b, c], pk_columns: [a, b, c], pk_conflict: NoCheck } { tables: [ Materialize: 4294967294 ] }
-    └── StreamProject { exprs: [t1.a, t1.b, t1.c] }
+    └── StreamProject { exprs: [t1.a, t1.b, t1.c], noop_update_hint: true }
         └── StreamHashAgg { group_key: [t1.a, t1.b, t1.c], aggs: [count] } { tables: [ HashAggState: 0 ] }
             └── StreamHashJoin { type: LeftAnti, predicate: t1.a IS NOT DISTINCT FROM t2.a AND t1.b IS NOT DISTINCT FROM t2.b AND t1.c IS NOT DISTINCT FROM t2.c, output: all }
                 ├── tables: [ HashJoinLeft: 1, HashJoinDegreeLeft: 2, HashJoinRight: 3, HashJoinDegreeRight: 4 ]

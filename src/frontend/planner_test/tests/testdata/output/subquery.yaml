@@ -331,9 +331,9 @@
         │   └─StreamHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: [auction.date_time, window_start, window_end, auction._row_id] }
         │     └─StreamFilter { predicate: IsNotNull(auction.date_time) }
         │       └─StreamTableScan { table: auction, columns: [auction.date_time, auction._row_id], stream_scan_type: ArrangementBackfill, stream_key: [auction._row_id], pk: [_row_id], dist: UpstreamHashShard(auction._row_id) }
-        └─StreamProject { exprs: [auction.date_time] }
+        └─StreamProject { exprs: [auction.date_time], noop_update_hint: true }
           └─StreamHashAgg { group_key: [auction.date_time], aggs: [count] }
-            └─StreamProject { exprs: [auction.date_time] }
+            └─StreamProject { exprs: [auction.date_time], noop_update_hint: true }
               └─StreamHashAgg { group_key: [auction.date_time], aggs: [count] }
                 └─StreamExchange { dist: HashShard(auction.date_time) }
                   └─StreamShare { id: 3 }
@@ -529,13 +529,13 @@
         └─StreamProject { exprs: [t.x, sum(Unnest($0))] }
           └─StreamHashAgg { group_key: [t.x], aggs: [sum(Unnest($0)), count] }
             └─StreamHashJoin { type: LeftOuter, predicate: t.x IS NOT DISTINCT FROM t.x, output: [t.x, Unnest($0), t.x, projected_row_id] }
-              ├─StreamProject { exprs: [t.x] }
+              ├─StreamProject { exprs: [t.x], noop_update_hint: true }
               │ └─StreamHashAgg { group_key: [t.x], aggs: [count] }
               │   └─StreamExchange { dist: HashShard(t.x) }
               │     └─StreamTableScan { table: t, columns: [t.x, t.k], stream_scan_type: ArrangementBackfill, stream_key: [t.k], pk: [k], dist: UpstreamHashShard(t.k) }
               └─StreamProject { exprs: [t.x, Unnest($0), projected_row_id] }
                 └─StreamProjectSet { select_list: [$0, Unnest($0)] }
-                  └─StreamProject { exprs: [t.x] }
+                  └─StreamProject { exprs: [t.x], noop_update_hint: true }
                     └─StreamHashAgg { group_key: [t.x], aggs: [count] }
                       └─StreamExchange { dist: HashShard(t.x) }
                         └─StreamTableScan { table: t, columns: [t.x, t.k], stream_scan_type: ArrangementBackfill, stream_key: [t.k], pk: [k], dist: UpstreamHashShard(t.k) }
@@ -817,7 +817,7 @@
         └─StreamProject { exprs: [integers.correlated_col, (count(distinct rows.k) + count(distinct rows.v)) as $expr1] }
           └─StreamHashAgg { group_key: [integers.correlated_col], aggs: [count(distinct rows.k), count(distinct rows.v), count] }
             └─StreamHashJoin { type: LeftOuter, predicate: integers.correlated_col IS NOT DISTINCT FROM rows.correlated_col, output: [integers.correlated_col, rows.k, rows.v, rows._row_id] }
-              ├─StreamProject { exprs: [integers.correlated_col] }
+              ├─StreamProject { exprs: [integers.correlated_col], noop_update_hint: true }
               │ └─StreamHashAgg { group_key: [integers.correlated_col], aggs: [count] }
               │   └─StreamExchange { dist: HashShard(integers.correlated_col) }
               │     └─StreamTableScan { table: integers, columns: [integers.correlated_col, integers._row_id], stream_scan_type: ArrangementBackfill, stream_key: [integers._row_id], pk: [_row_id], dist: UpstreamHashShard(integers._row_id) }

@@ -77,7 +77,7 @@
     └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3] }
   stream_plan: |-
     StreamMaterialize { columns: [v1, v2, v3], stream_key: [v1, v2, v3], pk_columns: [v1, v2, v3], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [t.v1, t.v2, t.v3] }
+    └─StreamProject { exprs: [t.v1, t.v2, t.v3], noop_update_hint: true }
       └─StreamHashAgg { group_key: [t.v1, t.v2, t.v3], aggs: [count] }
         └─StreamExchange { dist: HashShard(t.v1, t.v2, t.v3) }
           └─StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
