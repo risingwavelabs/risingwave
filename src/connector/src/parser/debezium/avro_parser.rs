@@ -23,7 +23,7 @@ use risingwave_pb::plan_common::ColumnDesc;
 
 use crate::error::ConnectorResult;
 use crate::parser::avro::schema_resolver::ConfluentSchemaCache;
-use crate::parser::avro::util::avro_schema_to_column_descs;
+use crate::parser::avro::util::{avro_schema_to_column_descs, ResolvedAvroSchema};
 use crate::parser::unified::avro::{
     avro_extract_field_schema, avro_schema_skip_union, AvroAccess, AvroParseOptions,
 };
@@ -40,7 +40,7 @@ const PAYLOAD: &str = "payload";
 
 #[derive(Debug)]
 pub struct DebeziumAvroAccessBuilder {
-    schema: Schema,
+    schema: ResolvedAvroSchema,
     schema_resolver: Arc<ConfluentSchemaCache>,
     key_schema: Option<Arc<Schema>>,
     value: Option<Value>,
@@ -59,9 +59,10 @@ impl AccessBuilder for DebeziumAvroAccessBuilder {
         };
         Ok(AccessImpl::Avro(AvroAccess::new(
             self.value.as_mut().unwrap(),
+            // Assumption: Key will not contain reference, so unresolved schema can work here.
             AvroParseOptions::create(match self.encoding_type {
                 EncodingType::Key => self.key_schema.as_mut().unwrap(),
-                EncodingType::Value => &self.schema,
+                EncodingType::Value => &self.schema.0,
             }),
         )))
     }
@@ -78,11 +79,8 @@ impl DebeziumAvroAccessBuilder {
             ..
         } = config;
 
-        let resolver = apache_avro::schema::ResolvedSchema::try_from(&*outer_schema)?;
-        // todo: to_resolved may cause stackoverflow if there's a loop in the schema
-        let schema = resolver.to_resolved(&outer_schema)?;
         Ok(Self {
-            schema,
+            schema: ResolvedAvroSchema::create(&outer_schema)?,
             schema_resolver,
             key_schema: None,
             value: None,
@@ -133,6 +131,9 @@ impl DebeziumAvroParserConfig {
     pub fn map_to_columns(&self) -> ConnectorResult<Vec<ColumnDesc>> {
         avro_schema_to_column_descs(
             avro_schema_skip_union(avro_extract_field_schema(
+                // FIXME: use resolved schema here.
+                // Currently it works because "after" refers to a subtree in "before",
+                // but in theory, inside "before" there could also be a reference.
                 &self.outer_schema,
                 Some("before"),
             )?)?,

@@ -14,8 +14,9 @@
 
 use std::sync::LazyLock;
 
-use apache_avro::schema::{DecimalSchema, RecordSchema, Schema};
+use apache_avro::schema::{DecimalSchema, RecordSchema, ResolvedSchema, Schema};
 use apache_avro::types::{Value, ValueKind};
+use apache_avro::AvroResult;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::log::LogSuppresser;
@@ -26,6 +27,24 @@ use crate::error::ConnectorResult;
 use crate::parser::unified::bail_uncategorized;
 use crate::parser::{AccessError, MapHandling};
 
+/// Avro schema with `Ref` inlined. The newtype is used to indicate whether the schema is resolved.
+///
+/// TODO: Actually most of the place should use resolved schema, but currently they just happen to work (Some edge cases are not met yet).
+///
+/// TODO: refactor avro lib to use the feature there.
+#[derive(Debug)]
+pub struct ResolvedAvroSchema(pub Schema);
+
+impl ResolvedAvroSchema {
+    pub fn create(schema: &Schema) -> AvroResult<Self> {
+        let resolver = ResolvedSchema::try_from(schema)?;
+        // todo: to_resolved may cause stackoverflow if there's a loop in the schema
+        let schema = resolver.to_resolved(schema)?;
+        Ok(Self(schema.clone()))
+    }
+}
+
+/// FIXME: require passing resolved schema here.
 pub fn avro_schema_to_column_descs(
     schema: &Schema,
     map_handling: Option<MapHandling>,

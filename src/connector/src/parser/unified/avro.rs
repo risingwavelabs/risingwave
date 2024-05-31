@@ -34,7 +34,10 @@ use crate::parser::avro::util::avro_to_jsonb;
 #[derive(Clone)]
 /// Options for parsing an `AvroValue` into Datum, with an optional avro schema.
 pub struct AvroParseOptions<'a> {
-    /// Currently, this schema is only used for decimal
+    /// Currently, this schema is only used for decimal.
+    ///
+    /// FIXME: In theory we should use resolved schema.
+    /// e.g., it's possible that a field is a reference to a decimal or a record containing a decimal field.
     pub schema: Option<&'a Schema>,
     /// Strict Mode
     /// If strict mode is disabled, an int64 can be parsed from an `AvroInt` (int32) value.
