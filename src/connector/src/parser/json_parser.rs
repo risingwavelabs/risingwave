@@ -28,7 +28,6 @@ use apache_avro::Schema;
 use jst::{convert_avro, Context};
 use risingwave_pb::plan_common::ColumnDesc;
 
-use super::avro::schema_resolver::ConfluentSchemaCache;
 use super::util::{bytes_from_url, get_kafka_topic};
 use super::{JsonProperties, SchemaRegistryAuth};
 use crate::error::ConnectorResult;
@@ -89,12 +88,10 @@ pub async fn schema_to_columns(
     let json_schema = if let Some(schema_registry_auth) = schema_registry_auth {
         let client = Client::new(url, &schema_registry_auth)?;
         let topic = get_kafka_topic(props)?;
-        let resolver = ConfluentSchemaCache::new(client);
-        let content = resolver
-            .get_raw_schema_by_subject_name(&format!("{}-value", topic))
-            .await?
-            .content;
-        serde_json::from_str(&content)?
+        let schema = client
+            .get_schema_by_subject(&format!("{}-value", topic))
+            .await?;
+        serde_json::from_str(&schema.content)?
     } else {
         let url = url.first().unwrap();
         let bytes = bytes_from_url(url, None).await?;
