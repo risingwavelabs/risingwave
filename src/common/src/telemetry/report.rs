@@ -108,6 +108,14 @@ where
                 Ok(_) => tracing::info!("Telemetry post success, id {}", tracking_id),
                 Err(e) => tracing::error!("Telemetry post error, {}", e),
             }
+
+            // Call report_to_scarf() concurrently with the existing telemetry report
+            tokio::spawn(async move {
+                match report_to_scarf().await {
+                    Ok(_) => tracing::info!("Scarf telemetry post success"),
+                    Err(e) => tracing::error!("Scarf telemetry post error, {}", e),
+                }
+            });
         }
     });
     (join_handle, shutdown_tx)
