@@ -1863,17 +1863,14 @@ def section_frontend(outer_panels):
                     "Query Latency (Distributed Query Mode)",
                     "",
                     [
-                        panels.target(
-                            f"histogram_quantile(0.5, sum(rate({metric('distributed_query_latency_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
-                            "p50 - {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
-                        ),
-                        panels.target(
-                            f"histogram_quantile(0.9, sum(rate({metric('distributed_query_latency_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
-                            "p90 - {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
-                        ),
-                        panels.target(
-                            f"histogram_quantile(0.95, sum(rate({metric('distributed_query_latency_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
-                            "p99 - {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(rate({metric('distributed_query_latency_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
+                                f"p{legend}"
+                                + " - {{%s}} @ {{%s}}" 
+                                % (COMPONENT_LABEL, NODE_LABEL),
+                            ),
+                            [50, 90, 99, "max"],
                         ),
                     ],
                 ),
@@ -1881,17 +1878,14 @@ def section_frontend(outer_panels):
                     "Query Latency (Local Query Mode)",
                     "",
                     [
-                        panels.target(
-                            f"histogram_quantile(0.5, sum(rate({metric('frontend_latency_local_execution_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
-                            "p50 - {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
-                        ),
-                        panels.target(
-                            f"histogram_quantile(0.9, sum(rate({metric('frontend_latency_local_execution_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
-                            "p90 - {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
-                        ),
-                        panels.target(
-                            f"histogram_quantile(0.95, sum(rate({metric('frontend_latency_local_execution_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
-                            "p99 - {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(rate({metric('frontend_latency_local_execution_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
+                                f"p{legend}"
+                                + " - {{%s}} @ {{%s}}" 
+                                % (COMPONENT_LABEL, NODE_LABEL),
+                            ),
+                            [50, 90, 99, "max"],
                         ),
                     ],
                 ),
