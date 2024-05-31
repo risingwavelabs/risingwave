@@ -1004,33 +1004,7 @@ impl Parser<'_> {
     }
 
     pub fn parse_case_expr(&mut self) -> PResult<Expr> {
-        let mut operand = None;
-        if !self.parse_keyword(Keyword::WHEN) {
-            operand = Some(Box::new(self.parse_expr()?));
-            self.expect_keyword(Keyword::WHEN)?;
-        }
-        let mut conditions = vec![];
-        let mut results = vec![];
-        loop {
-            conditions.push(self.parse_expr()?);
-            self.expect_keyword(Keyword::THEN)?;
-            results.push(self.parse_expr()?);
-            if !self.parse_keyword(Keyword::WHEN) {
-                break;
-            }
-        }
-        let else_result = if self.parse_keyword(Keyword::ELSE) {
-            Some(Box::new(self.parse_expr()?))
-        } else {
-            None
-        };
-        self.expect_keyword(Keyword::END)?;
-        Ok(Expr::Case {
-            operand,
-            conditions,
-            results,
-            else_result,
-        })
+        parser_v2::expr_case(self)
     }
 
     /// Parse a SQL CAST function e.g. `CAST(expr AS FLOAT)`
