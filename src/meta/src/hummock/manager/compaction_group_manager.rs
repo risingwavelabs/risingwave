@@ -741,7 +741,7 @@ impl CompactionGroupManager {
 
 impl CompactionGroupManager {
     /// Gets compaction group config for `compaction_group_id`, inserts default one if missing.
-    async fn get_or_insert_compaction_group_config(
+    pub async fn get_or_insert_compaction_group_config(
         &mut self,
         compaction_group_id: CompactionGroupId,
     ) -> Result<CompactionGroup> {

@@ -26,8 +26,11 @@ use risingwave_hummock_sdk::{
 };
 use risingwave_pb::hummock::compact_task::{self};
 use risingwave_pb::hummock::group_delta::DeltaType;
-use risingwave_pb::hummock::hummock_version_delta::ChangeLogDelta;
-use risingwave_pb::hummock::{GroupDelta, GroupMetaChange, HummockSnapshot, IntraLevelDelta};
+use risingwave_pb::hummock::hummock_version_delta::{ChangeLogDelta, GroupDeltas};
+use risingwave_pb::hummock::{
+    CompatibilityVersion, GroupConstruct, GroupDelta, GroupMetaChange, HummockSnapshot,
+    IntraLevelDelta,
+};
 
 use crate::hummock::error::{Error, Result};
 use crate::hummock::manager::transaction::{
@@ -38,7 +41,7 @@ use crate::hummock::manager::HISTORY_TABLE_INFO_STATISTIC_TIME;
 use crate::hummock::metrics_utils::{
     get_or_create_local_table_stat, trigger_local_table_stat, trigger_sst_stat,
 };
-use crate::hummock::sequence::next_sstable_object_id;
+use crate::hummock::sequence::{next_compaction_group_id, next_sstable_object_id};
 use crate::hummock::{commit_multi_var, start_measure_real_process_timer, HummockManager};
 
 #[derive(Debug, Clone)]
@@ -143,71 +146,61 @@ impl HummockManager {
         // Add new table
         if let Some(new_fragment_table_info) = new_table_fragment_info {
             if !new_fragment_table_info.internal_table_ids.is_empty() {
-                if let Some(levels) = new_version_delta
-                    .latest_version()
-                    .levels
-                    .get(&(StaticCompactionGroupId::StateDefault as u64))
-                {
-                    for table_id in &new_fragment_table_info.internal_table_ids {
-                        if levels.member_table_ids.contains(&table_id.table_id) {
-                            return Err(Error::CompactionGroup(format!(
-                                "table {} already in group {}",
-                                table_id,
-                                StaticCompactionGroupId::StateDefault as u64
-                            )));
-                        }
-                    }
-                }
-
-                let group_deltas = &mut new_version_delta
-                    .group_deltas
-                    .entry(StaticCompactionGroupId::StateDefault as u64)
-                    .or_default()
-                    .group_deltas;
-                group_deltas.push(GroupDelta {
-                    delta_type: Some(DeltaType::GroupMetaChange(GroupMetaChange {
-                        table_ids_add: new_fragment_table_info
-                            .internal_table_ids
-                            .iter()
-                            .map(|table_id| table_id.table_id)
-                            .collect(),
-                        ..Default::default()
-                    })),
-                });
-
                 for table_id in &new_fragment_table_info.internal_table_ids {
-                    table_compaction_group_mapping
-                        .insert(*table_id, StaticCompactionGroupId::StateDefault as u64);
+                    let new_compaction_group_id = next_compaction_group_id(&self.env).await?;
+
+                    let config = self
+                        .compaction_group_manager
+                        .write()
+                        .await
+                        .get_or_insert_compaction_group_config(new_compaction_group_id)
+                        .await?;
+
+                    new_version_delta.group_deltas.insert(
+                        new_compaction_group_id,
+                        GroupDeltas {
+                            group_deltas: vec![GroupDelta {
+                                delta_type: Some(DeltaType::GroupConstruct(GroupConstruct {
+                                    group_config: Some(config.compaction_config.as_ref().clone()),
+                                    group_id: new_compaction_group_id,
+                                    table_ids: vec![table_id.table_id],
+                                    version: CompatibilityVersion::NoTrivialSplit as i32,
+                                    ..Default::default()
+                                })),
+                            }],
+                        },
+                    );
+
+                    table_compaction_group_mapping.insert(*table_id, new_compaction_group_id);
                 }
             }
 
             if let Some(table_id) = new_fragment_table_info.mv_table_id {
-                if let Some(levels) = new_version_delta
-                    .latest_version()
-                    .levels
-                    .get(&(StaticCompactionGroupId::MaterializedView as u64))
-                {
-                    if levels.member_table_ids.contains(&table_id.table_id) {
-                        return Err(Error::CompactionGroup(format!(
-                            "table {} already in group {}",
-                            table_id,
-                            StaticCompactionGroupId::MaterializedView as u64
-                        )));
-                    }
-                }
-                let group_deltas = &mut new_version_delta
-                    .group_deltas
-                    .entry(StaticCompactionGroupId::MaterializedView as u64)
-                    .or_default()
-                    .group_deltas;
-                group_deltas.push(GroupDelta {
-                    delta_type: Some(DeltaType::GroupMetaChange(GroupMetaChange {
-                        table_ids_add: vec![table_id.table_id],
-                        ..Default::default()
-                    })),
-                });
-                let _ = table_compaction_group_mapping
-                    .insert(table_id, StaticCompactionGroupId::MaterializedView as u64);
+                let new_compaction_group_id = next_compaction_group_id(&self.env).await?;
+
+                let config = self
+                    .compaction_group_manager
+                    .write()
+                    .await
+                    .get_or_insert_compaction_group_config(new_compaction_group_id)
+                    .await?;
+
+                new_version_delta.group_deltas.insert(
+                    new_compaction_group_id,
+                    GroupDeltas {
+                        group_deltas: vec![GroupDelta {
+                            delta_type: Some(DeltaType::GroupConstruct(GroupConstruct {
+                                group_config: Some(config.compaction_config.as_ref().clone()),
+                                group_id: new_compaction_group_id,
+                                table_ids: vec![table_id.table_id],
+                                version: CompatibilityVersion::NoTrivialSplit as i32,
+                                ..Default::default()
+                            })),
+                        }],
+                    },
+                );
+
+                table_compaction_group_mapping.insert(table_id, new_compaction_group_id);
             }
         }
 
