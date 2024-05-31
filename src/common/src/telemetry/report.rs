@@ -21,8 +21,7 @@ use uuid::Uuid;
 
 use super::{Result, TELEMETRY_REPORT_INTERVAL, TELEMETRY_REPORT_URL};
 use crate::telemetry::pb_compatible::TelemetryToProtobuf;
-use crate::telemetry::post_telemetry_report_pb;
-use crate::telemetry::report_to_scarf;
+use crate::telemetry::{post_telemetry_report_pb, report_to_scarf};
 
 #[async_trait::async_trait]
 pub trait TelemetryInfoFetcher {
