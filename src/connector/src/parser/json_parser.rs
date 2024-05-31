@@ -29,7 +29,6 @@ use jst::{convert_avro, Context};
 use risingwave_pb::plan_common::ColumnDesc;
 
 use super::avro::schema_resolver::ConfluentSchemaCache;
-use super::unified::Access;
 use super::util::{bytes_from_url, get_kafka_topic};
 use super::{JsonProperties, SchemaRegistryAuth};
 use crate::error::ConnectorResult;
