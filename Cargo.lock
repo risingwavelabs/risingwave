@@ -5065,8 +5065,9 @@ dependencies = [
 
 [[package]]
 name = "foyer"
-version = "0.9.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=c75b882#c75b882d0756d8639319776784b1e1259fec0f05"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "81ab8e6a1bb279ba241bbae9b48b5f2945dc31a7a0a06b3ee8c85a00efbcd3f3"
 dependencies = [
  "ahash 0.8.11",
  "anyhow",
@@ -5079,8 +5080,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-common"
-version = "0.7.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=c75b882#c75b882d0756d8639319776784b1e1259fec0f05"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "291f8aedeef1bfd12745a77c3d78369a017ee017b6564e746597a4693b4e7bd2"
 dependencies = [
  "bytes",
  "cfg-if",
@@ -5097,8 +5099,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-intrusive"
-version = "0.6.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=c75b882#c75b882d0756d8639319776784b1e1259fec0f05"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eb45e7a2b0d040a15587b07d1680788d5edf1086c9d6565c37546b9d58688dbe"
 dependencies = [
  "foyer-common",
  "itertools 0.13.0",
@@ -5106,8 +5109,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-memory"
-version = "0.4.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=c75b882#c75b882d0756d8639319776784b1e1259fec0f05"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9555ad68b65a7f8b8081c78010c500742fe3fc7b98ac833a385e5c8a07834598"
 dependencies = [
  "ahash 0.8.11",
  "bitflags 2.5.0",
@@ -5126,8 +5130,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-storage"
-version = "0.8.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=c75b882#c75b882d0756d8639319776784b1e1259fec0f05"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ef35399969ada7554733d160b88e5b264fd6c2288820d3609cb382b4dfb1d275"
 dependencies = [
  "ahash 0.8.11",
  "allocator-api2",
@@ -7307,9 +7312,9 @@ dependencies = [
 
 [[package]]
 name = "metrics"
-version = "0.22.3"
+version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2be3cbd384d4e955b231c895ce10685e3d8260c5ccffae898c96c723b0772835"
+checksum = "884adb57038347dfbaf2d5065887b6cf4312330dc8e94bc30a1a839bd79d3261"
 dependencies = [
  "ahash 0.8.11",
  "portable-atomic",
@@ -7317,9 +7322,9 @@ dependencies = [
 
 [[package]]
 name = "metrics-prometheus"
-version = "0.6.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b3e1316f9ef05b91f4d0e0a0da5b620ba919d336280b83b36be096b86c030fdd"
+checksum = "51557a875fdbd5b953b698ecd6cd06efef47618e02d95ad912e2392e5b5617ff"
 dependencies = [
  "arc-swap",
  "metrics",
@@ -7333,9 +7338,9 @@ dependencies = [
 
 [[package]]
 name = "metrics-util"
-version = "0.16.3"
+version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8b07a5eb561b8cbc16be2d216faf7757f9baf3bfb94dbb0fae3df8387a5bb47f"
+checksum = "4259040465c955f9f2f1a4a8a16dc46726169bca0f88e8fb2dbeced487c3e828"
 dependencies = [
  "crossbeam-epoch",
  "crossbeam-utils",
@@ -9441,7 +9446,7 @@ dependencies = [
  "indoc",
  "libc",
  "memoffset",
- "parking_lot 0.12.1",
+ "parking_lot 0.11.2",
  "portable-atomic",
  "pyo3-build-config",
  "pyo3-ffi",
