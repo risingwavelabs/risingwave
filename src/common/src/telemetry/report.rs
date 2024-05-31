@@ -22,6 +22,7 @@ use uuid::Uuid;
 use super::{Result, TELEMETRY_REPORT_INTERVAL, TELEMETRY_REPORT_URL};
 use crate::telemetry::pb_compatible::TelemetryToProtobuf;
 use crate::telemetry::post_telemetry_report_pb;
+use crate::telemetry::report_to_scarf;
 
 #[async_trait::async_trait]
 pub trait TelemetryInfoFetcher {
@@ -109,7 +110,6 @@ where
                 Err(e) => tracing::error!("Telemetry post error, {}", e),
             }
 
-            // Call report_to_scarf() concurrently with the existing telemetry report
             tokio::spawn(async move {
                 match report_to_scarf().await {
                     Ok(_) => tracing::info!("Scarf telemetry post success"),

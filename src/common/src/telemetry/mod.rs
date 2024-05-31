@@ -161,7 +161,7 @@ pub fn current_timestamp() -> u64 {
 }
 
 // impl logic to report to Scarf service, containing RW version and deployment platform
-async fn report_to_scarf() {
+pub async fn report_to_scarf() {
     let request_url = format!(
         "https://risingwave.gateway.scarf.sh/telemetry/{}/{}",
         RW_VERSION,
