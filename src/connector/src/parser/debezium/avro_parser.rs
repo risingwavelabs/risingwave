@@ -22,7 +22,7 @@ use risingwave_pb::catalog::PbSchemaRegistryNameStrategy;
 use risingwave_pb::plan_common::ColumnDesc;
 
 use crate::error::ConnectorResult;
-use crate::parser::avro::schema_resolver::ConfluentSchemaResolver;
+use crate::parser::avro::schema_resolver::ConfluentSchemaCache;
 use crate::parser::avro::util::avro_schema_to_column_descs;
 use crate::parser::unified::avro::{
     avro_extract_field_schema, avro_schema_skip_union, AvroAccess, AvroParseOptions,
@@ -41,7 +41,7 @@ const PAYLOAD: &str = "payload";
 #[derive(Debug)]
 pub struct DebeziumAvroAccessBuilder {
     schema: Schema,
-    schema_resolver: Arc<ConfluentSchemaResolver>,
+    schema_resolver: Arc<ConfluentSchemaCache>,
     key_schema: Option<Arc<Schema>>,
     value: Option<Value>,
     encoding_type: EncodingType,
@@ -59,7 +59,7 @@ impl AccessBuilder for DebeziumAvroAccessBuilder {
         };
         Ok(AccessImpl::Avro(AvroAccess::new(
             self.value.as_mut().unwrap(),
-            AvroParseOptions::default().with_schema(match self.encoding_type {
+            AvroParseOptions::create(match self.encoding_type {
                 EncodingType::Key => self.key_schema.as_mut().unwrap(),
                 EncodingType::Value => &self.schema,
             }),
@@ -96,7 +96,7 @@ impl DebeziumAvroAccessBuilder {
 pub struct DebeziumAvroParserConfig {
     pub key_schema: Arc<Schema>,
     pub outer_schema: Arc<Schema>,
-    pub schema_resolver: Arc<ConfluentSchemaResolver>,
+    pub schema_resolver: Arc<ConfluentSchemaCache>,
 }
 
 impl DebeziumAvroParserConfig {
@@ -107,7 +107,7 @@ impl DebeziumAvroParserConfig {
         let kafka_topic = &avro_config.topic;
         let url = handle_sr_list(schema_location)?;
         let client = Client::new(url, client_config)?;
-        let resolver = ConfluentSchemaResolver::new(client);
+        let resolver = ConfluentSchemaCache::new(client);
 
         let name_strategy = &PbSchemaRegistryNameStrategy::Unspecified;
         let key_subject = get_subject_by_strategy(name_strategy, kafka_topic, None, true)?;

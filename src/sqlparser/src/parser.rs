@@ -226,22 +226,54 @@ impl Parser {
         let mut tokenizer = Tokenizer::new(sql);
         let tokens = tokenizer.tokenize_with_location()?;
         let mut parser = Parser::new(tokens);
+        let ast = parser.parse_statements().map_err(|e| {
+            // append SQL context to the error message, e.g.:
+            // LINE 1: SELECT 1::int(2);
+            //                      ^
+            // XXX: the cursor location is not accurate
+            //      it may be offset one token forward because the error token has been consumed
+            let loc = match parser.tokens.get(parser.index) {
+                Some(token) => token.location.clone(),
+                None => {
+                    // get location of EOF
+                    Location {
+                        line: sql.lines().count() as u64,
+                        column: sql.lines().last().map_or(0, |l| l.len() as u64) + 1,
+                    }
+                }
+            };
+            let prefix = format!("LINE {}: ", loc.line);
+            let sql_line = sql.split('\n').nth(loc.line as usize - 1).unwrap();
+            let cursor = " ".repeat(prefix.len() + loc.column as usize - 1);
+            ParserError::ParserError(format!(
+                "{}\n{}{}\n{}^",
+                e.inner_msg(),
+                prefix,
+                sql_line,
+                cursor
+            ))
+        })?;
+        Ok(ast)
+    }
+
+    /// Parse a list of semicolon-separated SQL statements.
+    pub fn parse_statements(&mut self) -> Result<Vec<Statement>, ParserError> {
         let mut stmts = Vec::new();
         let mut expecting_statement_delimiter = false;
         loop {
             // ignore empty statements (between successive statement delimiters)
-            while parser.consume_token(&Token::SemiColon) {
+            while self.consume_token(&Token::SemiColon) {
                 expecting_statement_delimiter = false;
             }
 
-            if parser.peek_token() == Token::EOF {
+            if self.peek_token() == Token::EOF {
                 break;
             }
             if expecting_statement_delimiter {
-                return parser.expected("end of statement", parser.peek_token());
+                return self.expected("end of statement", self.peek_token());
             }
 
-            let statement = parser.parse_statement()?;
+            let statement = self.parse_statement()?;
             stmts.push(statement);
             expecting_statement_delimiter = true;
         }
@@ -1958,24 +1990,7 @@ impl Parser {
 
     /// Report unexpected token
     pub fn expected<T>(&self, expected: &str, found: TokenWithLocation) -> Result<T, ParserError> {
-        let start_off = self.index.saturating_sub(10);
-        let end_off = self.index.min(self.tokens.len());
-        let near_tokens = &self.tokens[start_off..end_off];
-        struct TokensDisplay<'a>(&'a [TokenWithLocation]);
-        impl<'a> fmt::Display for TokensDisplay<'a> {
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                for token in self.0 {
-                    write!(f, "{}", token.token)?;
-                }
-                Ok(())
-            }
-        }
-        parser_err!(format!(
-            "Expected {}, found: {}\nNear \"{}\"",
-            expected,
-            found,
-            TokensDisplay(near_tokens),
-        ))
+        parser_err!(format!("expected {}, found: {}", expected, found))
     }
 
     /// Look for an expected keyword and consume it if it exists
@@ -2178,6 +2193,8 @@ impl Parser {
             self.parse_create_database()
         } else if self.parse_keyword(Keyword::USER) {
             self.parse_create_user()
+        } else if self.parse_keyword(Keyword::SECRET) {
+            self.parse_create_secret()
         } else {
             self.expected("an object type after CREATE", self.peek_token())
         }
@@ -2527,6 +2544,12 @@ impl Parser {
     //     | [ ENCRYPTED ] PASSWORD 'password' | PASSWORD NULL | OAUTH
     fn parse_create_user(&mut self) -> Result<Statement, ParserError> {
         Ok(Statement::CreateUser(CreateUserStatement::parse_to(self)?))
+    }
+
+    fn parse_create_secret(&mut self) -> Result<Statement, ParserError> {
+        Ok(Statement::CreateSecret {
+            stmt: CreateSecretStatement::parse_to(self)?,
+        })
     }
 
     pub fn parse_with_properties(&mut self) -> Result<Vec<SqlOption>, ParserError> {
@@ -3721,7 +3744,7 @@ impl Parser {
     }
 
     /// Parse a literal value (numbers, strings, date/time, booleans)
-    fn parse_value(&mut self) -> Result<Value, ParserError> {
+    pub fn parse_value(&mut self) -> Result<Value, ParserError> {
         let token = self.next_token();
         match token.token {
             Token::Word(w) => match w.keyword {
@@ -4595,6 +4618,14 @@ impl Parser {
                     } else {
                         return self.expected("from after columns", self.peek_token());
                     }
+                }
+                Keyword::SECRETS => {
+                    return Ok(Statement::ShowObjects {
+                        object: ShowObject::Secret {
+                            schema: self.parse_from_and_identifier()?,
+                        },
+                        filter: self.parse_show_statement_filter()?,
+                    });
                 }
                 Keyword::CONNECTIONS => {
                     return Ok(Statement::ShowObjects {

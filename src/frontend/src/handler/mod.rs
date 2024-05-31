@@ -60,6 +60,7 @@ pub mod create_function;
 pub mod create_index;
 pub mod create_mv;
 pub mod create_schema;
+pub mod create_secret;
 pub mod create_sink;
 pub mod create_source;
 pub mod create_sql_function;
@@ -77,6 +78,7 @@ pub mod drop_function;
 mod drop_index;
 pub mod drop_mv;
 mod drop_schema;
+pub mod drop_secret;
 pub mod drop_sink;
 pub mod drop_source;
 pub mod drop_subscription;
@@ -256,6 +258,9 @@ pub async fn handle(
         }
         Statement::CreateConnection { stmt } => {
             create_connection::handle_create_connection(handler_args, stmt).await
+        }
+        Statement::CreateSecret { stmt } => {
+            create_secret::handle_create_secret(handler_args, stmt).await
         }
         Statement::CreateFunction {
             or_replace,
@@ -441,7 +446,8 @@ pub async fn handle(
                     ObjectType::Schema
                     | ObjectType::Database
                     | ObjectType::User
-                    | ObjectType::Connection => {
+                    | ObjectType::Connection
+                    | ObjectType::Secret => {
                         bail_not_implemented!("DROP CASCADE");
                     }
                 };
@@ -507,6 +513,9 @@ pub async fn handle(
                 ObjectType::Connection => {
                     drop_connection::handle_drop_connection(handler_args, object_name, if_exists)
                         .await
+                }
+                ObjectType::Secret => {
+                    drop_secret::handle_drop_secret(handler_args, object_name, if_exists).await
                 }
             }
         }

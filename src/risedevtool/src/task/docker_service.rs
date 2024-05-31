@@ -100,7 +100,9 @@ where
         cmd.arg("run")
             .arg("--rm")
             .arg("--name")
-            .arg(format!("risedev-{}", self.id()));
+            .arg(format!("risedev-{}", self.id()))
+            .arg("--add-host")
+            .arg("host.docker.internal:host-gateway");
 
         for (k, v) in self.config.envs() {
             cmd.arg("-e").arg(format!("{k}={v}"));

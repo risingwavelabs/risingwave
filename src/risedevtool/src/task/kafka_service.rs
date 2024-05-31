@@ -37,15 +37,18 @@ impl DockerServiceConfig for KafkaConfig {
             ),
             (
                 "KAFKA_LISTENERS".to_owned(),
-                "PLAINTEXT://:9092,CONTROLLER://:9093".to_owned(),
+                "HOST://:9092,CONTROLLER://:9093,DOCKER://:9094".to_owned(),
             ),
             (
                 "KAFKA_ADVERTISED_LISTENERS".to_owned(),
-                format!("PLAINTEXT://{}:{}", self.address, self.port),
+                format!(
+                    "HOST://{}:{},DOCKER://host.docker.internal:{}",
+                    self.address, self.port, self.docker_port
+                ),
             ),
             (
                 "KAFKA_LISTENER_SECURITY_PROTOCOL_MAP".to_owned(),
-                "PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT".to_owned(),
+                "HOST:PLAINTEXT,CONTROLLER:PLAINTEXT,DOCKER:PLAINTEXT".to_owned(),
             ),
             (
                 "KAFKA_CONTROLLER_QUORUM_VOTERS".to_owned(),
@@ -55,12 +58,19 @@ impl DockerServiceConfig for KafkaConfig {
                 "KAFKA_CONTROLLER_LISTENER_NAMES".to_owned(),
                 "CONTROLLER".to_owned(),
             ),
+            (
+                "KAFKA_INTER_BROKER_LISTENER_NAME".to_owned(),
+                "HOST".to_owned(),
+            ),
             ("CLUSTER_ID".to_owned(), "RiseDevRiseDevRiseDev1".to_owned()),
         ]
     }
 
     fn ports(&self) -> Vec<(String, String)> {
-        vec![(self.port.to_string(), "9092".to_owned())]
+        vec![
+            (self.port.to_string(), "9092".to_owned()),
+            (self.docker_port.to_string(), "9094".to_owned()),
+        ]
     }
 
     fn data_path(&self) -> Option<String> {

@@ -774,6 +774,7 @@ impl HummockManager {
                     target_sub_level_id: compact_task.input.target_sub_level_id,
                     task_type: compact_task.compaction_task_type as i32,
                     split_weight_by_vnode: vnode_partition_count,
+                    max_sub_compaction: group_config.compaction_config.max_sub_compaction,
                     ..Default::default()
                 };
 
