@@ -368,7 +368,8 @@ pub(crate) fn extract_decimal(bytes: Vec<u8>) -> AccessResult<(u32, u32, u32)> {
     }
 }
 
-pub fn avro_schema_skip_union(schema: &Schema) -> ConnectorResult<&Schema> {
+/// Convert unions like `[null, T]` to `T`.
+pub fn avro_schema_skip_nullable_union(schema: &Schema) -> ConnectorResult<&Schema> {
     match schema {
         Schema::Union(union_schema) => {
             let inner_schema = union_schema
@@ -401,7 +402,7 @@ pub fn avro_extract_field_schema<'a>(
             Ok(&field.schema)
         }
         Schema::Array(schema) => Ok(schema),
-        Schema::Union(_) => avro_schema_skip_union(schema),
+        Schema::Union(_) => avro_schema_skip_nullable_union(schema),
         Schema::Map(schema) => Ok(schema),
         _ => bail!("avro schema does not have inner item, schema: {:?}", schema),
     }

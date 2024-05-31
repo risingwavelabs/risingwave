@@ -99,6 +99,7 @@ pub async fn schema_to_columns(
         serde_json::from_slice(&bytes)?
     };
     let context = Context::default();
+    // XXX: Is it reasonable to rely on avro for JSON Schema?
     let avro_schema = convert_avro(&json_schema, context).to_string();
     let schema = Schema::parse_str(&avro_schema).context("failed to parse avro schema")?;
     // TODO: do we need to support map type here?

@@ -25,7 +25,7 @@ use crate::error::ConnectorResult;
 use crate::parser::avro::schema_resolver::ConfluentSchemaCache;
 use crate::parser::avro::util::{avro_schema_to_column_descs, ResolvedAvroSchema};
 use crate::parser::unified::avro::{
-    avro_extract_field_schema, avro_schema_skip_union, AvroAccess, AvroParseOptions,
+    avro_extract_field_schema, avro_schema_skip_nullable_union, AvroAccess, AvroParseOptions,
 };
 use crate::parser::unified::AccessImpl;
 use crate::parser::{AccessBuilder, EncodingProperties, EncodingType};
@@ -128,12 +128,37 @@ impl DebeziumAvroParserConfig {
         )
     }
 
+    /// Performs type mapping from avro schema to RisingWave schema
     pub fn map_to_columns(&self) -> ConnectorResult<Vec<ColumnDesc>> {
+        // Refer to debezium_avro_msg_schema.avsc for how the schema looks like:
+
+        // "fields": [
+        // {
+        //     "name": "before",
+        //     "type": [
+        //         "null",
+        //         {
+        //             "type": "record",
+        //             "name": "Value",
+        //             "fields": [...],
+        //         }
+        //     ],
+        //     "default": null
+        // },
+        // {
+        //     "name": "after",
+        //     "type": [
+        //         "null",
+        //         "Value"
+        //     ],
+        //     "default": null
+        // },
+        // ...]
         avro_schema_to_column_descs(
-            avro_schema_skip_union(avro_extract_field_schema(
-                // FIXME: use resolved schema here.
-                // Currently it works because "after" refers to a subtree in "before",
-                // but in theory, inside "before" there could also be a reference.
+            // FIXME: use resolved schema here.
+            // Currently it works because "after" refers to a subtree in "before",
+            // but in theory, inside "before" there could also be a reference.
+            avro_schema_skip_nullable_union(avro_extract_field_schema(
                 &self.outer_schema,
                 Some("before"),
             )?)?,
@@ -230,7 +255,7 @@ mod tests {
 
         let outer_schema = get_outer_schema();
         let expected_inner_schema = Schema::parse_str(inner_shema_str).unwrap();
-        let extracted_inner_schema = avro_schema_skip_union(
+        let extracted_inner_schema = avro_schema_skip_nullable_union(
             avro_extract_field_schema(&outer_schema, Some("before")).unwrap(),
         )
         .unwrap();
@@ -321,7 +346,7 @@ mod tests {
     fn test_map_to_columns() {
         let outer_schema = get_outer_schema();
         let columns = avro_schema_to_column_descs(
-            avro_schema_skip_union(
+            avro_schema_skip_nullable_union(
                 avro_extract_field_schema(&outer_schema, Some("before")).unwrap(),
             )
             .unwrap(),
