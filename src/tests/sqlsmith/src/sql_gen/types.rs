@@ -35,7 +35,7 @@ pub(super) fn data_type_to_ast_data_type(data_type: &DataType) -> AstDataType {
         DataType::Decimal => AstDataType::Decimal(None, None),
         DataType::Float32 => AstDataType::Real,
         DataType::Float64 => AstDataType::Double,
-        DataType::Varchar => AstDataType::Varchar,
+        DataType::Varchar => AstDataType::Varchar(None),
         DataType::Bytea => AstDataType::Bytea,
         DataType::Date => AstDataType::Date,
         DataType::Timestamp => AstDataType::Timestamp(false),
