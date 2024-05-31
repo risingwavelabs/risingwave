@@ -679,7 +679,7 @@ fn derive_alias(expr: &Expr) -> Option<String> {
 fn data_type_to_alias(data_type: &AstDataType) -> Option<String> {
     let alias = match data_type {
         AstDataType::Char(_) => "bpchar".to_string(),
-        AstDataType::Varchar => "varchar".to_string(),
+        AstDataType::Varchar(_) => "varchar".to_string(),
         AstDataType::Uuid => "uuid".to_string(),
         AstDataType::Decimal(_, _) => "numeric".to_string(),
         AstDataType::Real | AstDataType::Float(Some(1..=24)) => "float4".to_string(),
