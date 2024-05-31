@@ -130,7 +130,7 @@ impl AvroParserConfig {
                 )?)
             } else {
                 if let Some(name) = &key_record_name {
-                    bail!("key.message = {name} not used");
+                    bail!("unused FORMAT ENCODE option: key.message='{name}'");
                 }
                 None
             };
