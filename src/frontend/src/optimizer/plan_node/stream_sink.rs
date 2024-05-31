@@ -164,7 +164,7 @@ fn find_column_idx_by_name(columns: &[ColumnCatalog], col_name: &str) -> Result<
 }
 
 /// [`StreamSink`] represents a table/connector sink at the very end of the graph.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamSink {
     pub base: PlanBase<Stream>,
     input: PlanRef,
@@ -449,7 +449,7 @@ impl StreamSink {
         let (user_defined_append_only, user_force_append_only, syntax_legacy) = match format_desc {
             Some(f) => (
                 f.format == SinkFormat::AppendOnly,
-                Self::is_user_force_append_only(&WithOptions::from_inner(f.options.clone()))?,
+                Self::is_user_force_append_only(&WithOptions::new(f.options.clone()))?,
                 false,
             ),
             None => (

@@ -14,7 +14,7 @@
 
 pub mod desc;
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 
 use anyhow::anyhow;
 use itertools::Itertools;

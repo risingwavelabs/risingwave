@@ -375,7 +375,6 @@ impl AsyncTruncateSinkWriter for RedisSinkWriter {
 #[cfg(test)]
 mod test {
     use core::panic;
-    use std::collections::BTreeMap;
 
     use rdkafka::message::FromBytes;
     use risingwave_common::array::{Array, I32Array, Op, Utf8Array};

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::num::NonZeroU32;
 
 use risingwave_connector::source::kafka::private_link::{
@@ -20,7 +20,8 @@ use risingwave_connector::source::kafka::private_link::{
 };
 use risingwave_connector::WithPropertiesExt;
 use risingwave_sqlparser::ast::{
-    CreateConnectionStatement, CreateSinkStatement, CreateSourceStatement, CreateSubscriptionStatement, ObjectName, SqlOption, Statement, Value
+    CreateConnectionStatement, CreateSinkStatement, CreateSourceStatement,
+    CreateSubscriptionStatement, ObjectName, SqlOption, Statement, Value,
 };
 
 use super::OverwriteOptions;
@@ -38,7 +39,7 @@ mod options {
 #[derive(Default, Clone, Debug, PartialEq, Eq)]
 pub struct WithOptions {
     inner: HashMap<String, String>,
-    ref_secret: HashMap<String, ObjectName>
+    ref_secret: HashMap<String, ObjectName>,
 }
 
 impl std::ops::Deref for WithOptions {
@@ -65,7 +66,10 @@ impl WithOptions {
     }
 
     pub fn from_inner(inner: HashMap<String, String>) -> Self {
-        Self { inner ,ref_secret: Default::default()}
+        Self {
+            inner,
+            ref_secret: Default::default(),
+        }
     }
 
     /// Get the reference of the inner map.
@@ -84,11 +88,15 @@ impl WithOptions {
 
     /// Convert to connector props, remove the key-value pairs used in the top-level.
     pub fn into_connector_props(self) -> Self {
-        let inner = self.inner
+        let inner = self
+            .inner
             .into_iter()
             .filter(|(key, _)| key != OverwriteOptions::STREAMING_RATE_LIMIT_KEY)
             .collect();
-        Self { inner , ref_secret: self.ref_secret}
+        Self {
+            inner,
+            ref_secret: self.ref_secret,
+        }
     }
 
     /// Parse the retention seconds from the options.
@@ -109,7 +117,10 @@ impl WithOptions {
             })
             .collect();
 
-        Self { inner , ref_secret: Default::default()}
+        Self {
+            inner,
+            ref_secret: Default::default(),
+        }
     }
 
     pub fn value_eq_ignore_case(&self, key: &str, val: &str) -> bool {
@@ -209,7 +220,7 @@ impl TryFrom<&[SqlOption]> for WithOptions {
             }
         }
 
-        Ok(Self { inner , ref_secret})
+        Ok(Self { inner, ref_secret })
     }
 }
 

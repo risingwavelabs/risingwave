@@ -148,10 +148,8 @@ pub async fn refresh_sr_and_get_columns_diff(
     connector_schema: &ConnectorSchema,
     session: &Arc<SessionImpl>,
 ) -> Result<(StreamSourceInfo, Vec<ColumnCatalog>, Vec<ColumnCatalog>)> {
-    let mut with_properties = original_source
-        .with_properties
-        .clone();
-        
+    let mut with_properties = original_source.with_properties.clone();
+
     validate_compatibility(connector_schema, &mut with_properties)?;
 
     if with_properties.is_cdc_connector() {

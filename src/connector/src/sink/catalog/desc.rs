@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 
 use itertools::Itertools;
 use risingwave_common::catalog::{
@@ -134,5 +134,11 @@ impl SinkDesc {
             target_table: self.target_table.map(|table_id| table_id.table_id()),
             extra_partition_col_idx: self.extra_partition_col_idx.map(|idx| idx as u64),
         }
+    }
+}
+
+impl std::hash::Hash for SinkDesc {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.id.hash(state);
     }
 }

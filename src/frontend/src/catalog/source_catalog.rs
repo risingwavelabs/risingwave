@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 
 use risingwave_common::catalog::{ColumnCatalog, SourceVersionId};
 use risingwave_common::util::epoch::Epoch;
@@ -147,5 +147,11 @@ impl From<&PbSource> for SourceCatalog {
 impl OwnedByUserCatalog for SourceCatalog {
     fn owner(&self) -> UserId {
         self.owner
+    }
+}
+
+impl std::hash::Hash for SourceCatalog {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.id.hash(state);
     }
 }

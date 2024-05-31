@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::option;
 use std::rc::Rc;
 use std::sync::{Arc, LazyLock};
 

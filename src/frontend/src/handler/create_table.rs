@@ -481,7 +481,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
     let with_properties = bind_connector_props(&handler_args, &source_schema, false)?;
 
     let (columns_from_resolve_source, source_info) =
-        bind_columns_from_source(session, &source_schema, &with_properties.inner()).await?;
+        bind_columns_from_source(session, &source_schema, with_properties.inner()).await?;
 
     let (source_catalog, database_id, schema_id) = bind_create_source(
         handler_args.clone(),

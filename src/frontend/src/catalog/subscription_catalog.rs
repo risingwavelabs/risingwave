@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use core::str::FromStr;
-use std::collections::{BTreeMap, HashMap};
 
 use risingwave_common::catalog::{TableId, UserId, OBJECT_ID_PLACEHOLDER};
 use risingwave_common::types::Interval;
