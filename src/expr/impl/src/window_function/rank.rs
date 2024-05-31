@@ -177,10 +177,10 @@ mod tests {
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_common::util::memcmp_encoding;
     use risingwave_common::util::sort_util::OrderType;
+    use risingwave_expr::aggregate::AggArgs;
+    use risingwave_expr::window_function::{Frame, FrameBound, WindowFuncKind};
 
     use super::*;
-    use crate::aggregate::AggArgs;
-    use crate::window_function::{Frame, FrameBound, WindowFuncKind};
 
     fn create_state_key(order: i64, pk: i64) -> StateKey {
         StateKey {

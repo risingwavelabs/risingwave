@@ -439,11 +439,11 @@ impl<V: Clone> WindowImpl for RangeWindow<V> {
 #[cfg(test)]
 mod tests {
     use itertools::Itertools;
-
-    use super::*;
-    use crate::window_function::FrameBound::{
+    use risingwave_expr::window_function::FrameBound::{
         CurrentRow, Following, Preceding, UnboundedFollowing, UnboundedPreceding,
     };
+
+    use super::*;
 
     #[test]
     fn test_rows_frame_unbounded_preceding_to_current_row() {
