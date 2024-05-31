@@ -25,6 +25,7 @@ use thiserror_ext::AsReport;
 use crate::util::env_var::env_var_is_true_or;
 use crate::util::resource_util::cpu::total_cpu_available;
 use crate::util::resource_util::memory::{system_memory_available_bytes, total_memory_used_bytes};
+use crate::RW_VERSION;
 
 /// Url of telemetry backend
 pub const TELEMETRY_REPORT_URL: &str = "https://telemetry.risingwave.dev/api/v2/report";
@@ -157,6 +158,25 @@ pub fn current_timestamp() -> u64 {
         .duration_since(SystemTime::UNIX_EPOCH)
         .expect("Clock might go backward")
         .as_secs()
+}
+
+// impl logic to report to Scarf service, containing RW version and deployment platform
+async fn report_to_scarf() {
+    let request_url = format!(
+        "https://risingwave.gateway.scarf.sh/telemetry/{}/{}",
+        RW_VERSION,
+        System::name().unwrap_or_default()
+    );
+    // keep trying every 1h until success
+    loop {
+        let res = reqwest::get(&request_url).await;
+        if let Ok(res) = res {
+            if res.status().is_success() {
+                break;
+            }
+        }
+        tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await;
+    }
 }
 
 #[cfg(test)]
