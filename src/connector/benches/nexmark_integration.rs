@@ -12,6 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Integration benchmark for parsing Nexmark events.
+//!
+//! To cover the code path in real-world scenarios, the parser is created through
+//! `ByteStreamSourceParserImpl::create` based on the given configuration, rather
+//! than depending on a specific internal implementation.
+
 #![feature(lazy_cell)]
 
 use std::sync::LazyLock;
@@ -23,11 +29,10 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::types::DataType;
 use risingwave_connector::parser::{
-    ByteStreamSourceParser, JsonParser, SourceParserIntoStreamExt, SpecificParserConfig,
+    ByteStreamSourceParserImpl, CommonParserConfig, ParserConfig, SpecificParserConfig,
 };
 use risingwave_connector::source::{
-    BoxChunkSourceStream, BoxSourceStream, SourceColumnDesc, SourceContext, SourceMessage,
-    SourceMeta,
+    BoxChunkSourceStream, BoxSourceStream, SourceColumnDesc, SourceMessage, SourceMeta,
 };
 use tracing::Level;
 use tracing_subscriber::prelude::*;
@@ -71,8 +76,8 @@ fn make_data_stream() -> BoxSourceStream {
         .boxed()
 }
 
-fn make_parser() -> impl ByteStreamSourceParser {
-    let columns = [
+fn make_parser() -> ByteStreamSourceParserImpl {
+    let rw_columns = [
         ("auction", DataType::Int64),
         ("bidder", DataType::Int64),
         ("price", DataType::Int64),
@@ -86,9 +91,12 @@ fn make_parser() -> impl ByteStreamSourceParser {
     .map(|(i, (n, t))| SourceColumnDesc::simple(n, t, ColumnId::new(i as _)))
     .collect_vec();
 
-    let props = SpecificParserConfig::DEFAULT_PLAIN_JSON;
+    let config = ParserConfig {
+        common: CommonParserConfig { rw_columns },
+        specific: SpecificParserConfig::DEFAULT_PLAIN_JSON,
+    };
 
-    JsonParser::new(props, columns, SourceContext::dummy().into()).unwrap()
+    ByteStreamSourceParserImpl::create_for_test(config).unwrap()
 }
 
 fn make_stream_iter() -> impl Iterator<Item = StreamChunk> {

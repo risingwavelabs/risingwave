@@ -9,6 +9,6 @@
   formatted_sql: CREATE TABLE st (v1 INT, v2 STRUCT<v1 INT, v2 STRUCT<v1 CHARACTER VARYING, v2 INT>>, v3 STRUCT<v1 CHARACTER VARYING, v2 STRUCT<v1 INT, v2 CHARACTER VARYING>>)
 - input: SELECT NULL::STRUCT<v1 INT, v2 INT>>
   error_msg: |-
-    sql parser error: Unexpected EOF: Unconsumed `>>`
+    sql parser error: invalid data_type: unconsumed `>>`
     LINE 1: SELECT NULL::STRUCT<v1 INT, v2 INT>>
                                                 ^
