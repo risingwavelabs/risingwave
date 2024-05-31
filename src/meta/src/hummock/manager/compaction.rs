@@ -774,6 +774,7 @@ impl HummockManager {
                     target_sub_level_id: compact_task.input.target_sub_level_id,
                     task_type: compact_task.compaction_task_type as i32,
                     split_weight_by_vnode: vnode_partition_count,
+                    max_sub_compaction: group_config.compaction_config.max_sub_compaction,
                     ..Default::default()
                 };
 
@@ -1447,10 +1448,10 @@ impl HummockManager {
         compact_task: &mut CompactTask,
         compaction_config: &CompactionConfig,
     ) {
-        // do not split sst by vnode partition when target_level > base_level + 1
+        // do not split sst by vnode partition when target_level > base_level
         // The purpose of data alignment is mainly to improve the parallelism of base level compaction and reduce write amplification.
         // However, at high level, the size of the sst file is often larger and only contains the data of a single table_id, so there is no need to cut it.
-        if compact_task.target_level > compact_task.base_level + 1 {
+        if compact_task.target_level > compact_task.base_level {
             return;
         }
         if compaction_config.split_weight_by_vnode > 0 {

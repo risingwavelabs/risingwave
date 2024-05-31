@@ -2,8 +2,8 @@
 ```cargo
 [dependencies]
 anyhow = "1"
-google-cloud-googleapis = { version = "0.12", features = ["pubsub"] }
-google-cloud-pubsub = "0.24"
+google-cloud-googleapis = { version = "0.13", features = ["pubsub"] }
+google-cloud-pubsub = "0.25"
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
     "rt-multi-thread",

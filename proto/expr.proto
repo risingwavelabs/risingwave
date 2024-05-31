@@ -330,6 +330,7 @@ message TableFunction {
     GENERATE_SUBSCRIPTS = 5;
     // buf:lint:ignore ENUM_VALUE_UPPER_SNAKE_CASE
     _PG_EXPANDARRAY = 6;
+    PG_GET_KEYWORDS = 18;
     // Jsonb functions
     JSONB_ARRAY_ELEMENTS = 10;
     JSONB_ARRAY_ELEMENTS_TEXT = 11;

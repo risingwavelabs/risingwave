@@ -382,6 +382,8 @@ message CompactTask {
   map<uint32, TableWatermarks> table_watermarks = 24;
   // The table schemas that are at least as new as the one used to create `input_ssts`.
   map<uint32, TableSchema> table_schemas = 25;
+  // Max sub compaction task numbers
+  uint32 max_sub_compaction = 26;
 }
 
 message LevelHandler {

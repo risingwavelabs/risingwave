@@ -15,7 +15,6 @@
 use risingwave_common::session_config::SearchPath;
 use risingwave_expr::{capture_context, function, ExprError};
 use risingwave_sqlparser::parser::{Parser, ParserError};
-use risingwave_sqlparser::tokenizer::{Token, Tokenizer};
 use thiserror::Error;
 use thiserror_ext::AsReport;
 
@@ -63,7 +62,11 @@ fn resolve_regclass_inner(
     db_name: &str,
     class_name: &str,
 ) -> Result<u32, ResolveRegclassError> {
-    let obj = parse_object_name(class_name)?;
+    // We use the full parser here because this function needs to accept every legal way
+    // of identifying an object in PG SQL as a valid value for the varchar
+    // literal.  For example: 'foo', 'public.foo', '"my table"', and
+    // '"my schema".foo' must all work as values passed pg_table_size.
+    let obj = Parser::parse_object_name_str(class_name)?;
 
     if obj.0.len() == 1 {
         let class_name = obj.0[0].real_value();
@@ -79,21 +82,6 @@ fn resolve_regclass_inner(
             .read_guard()
             .get_id_by_class_name(db_name, schema_path, &class_name)?)
     }
-}
-
-fn parse_object_name(name: &str) -> Result<risingwave_sqlparser::ast::ObjectName, ParserError> {
-    // We use the full parser here because this function needs to accept every legal way
-    // of identifying an object in PG SQL as a valid value for the varchar
-    // literal.  For example: 'foo', 'public.foo', '"my table"', and
-    // '"my schema".foo' must all work as values passed pg_table_size.
-    let mut tokenizer = Tokenizer::new(name);
-    let tokens = tokenizer
-        .tokenize_with_location()
-        .map_err(ParserError::from)?;
-    let mut parser = Parser::new(tokens);
-    let object = parser.parse_object_name()?;
-    parser.expect_token(&Token::EOF)?;
-    Ok(object)
 }
 
 #[function("cast_regclass(varchar) -> int4")]

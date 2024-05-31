@@ -55,6 +55,7 @@ compact_task_table_size_partition_threshold_high = 536870912
 event_log_enabled = true
 event_log_channel_max_size = 10
 enable_dropped_column_reclaim = false
+secret_store_private_key = [100, 101, 109, 111, 45, 115, 101, 99, 114, 101, 116, 45, 112, 114, 105, 118, 97, 116, 101, 45, 107, 101, 121]
 
 [meta.compaction_config]
 max_bytes_for_level_base = 536870912
@@ -87,6 +88,7 @@ statement_timeout_in_sec = 3600
 frontend_compute_runtime_worker_threads = 4
 mask_worker_temporary_secs = 30
 redact_sql_option_keywords = ["credential", "key", "password", "private", "secret", "token"]
+enable_spill = true
 
 [batch.developer]
 batch_connector_message_buffer_size = 16
@@ -119,6 +121,7 @@ stream_memory_controller_eviction_factor_stable = 1.0
 stream_memory_controller_sequence_tls_step = 128
 stream_memory_controller_sequence_tls_lag = 32
 stream_enable_arrangement_backfill = true
+stream_high_join_amplification_threshold = 2048
 
 [storage]
 share_buffers_sync_parallelism = 1
@@ -134,7 +137,6 @@ compactor_memory_available_proportion = 0.8
 sstable_id_remote_fetch_number = 10
 min_sstable_size_mb = 32
 min_sst_size_for_streaming_upload = 33554432
-max_sub_compaction = 4
 max_concurrent_compaction_task_number = 16
 max_preload_wait_time_mill = 0
 max_version_pinning_duration_sec = 10800

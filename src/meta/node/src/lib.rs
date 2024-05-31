@@ -380,6 +380,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                     .developer
                     .max_trivial_move_task_count_per_loop,
                 max_get_task_probe_times: config.meta.developer.max_get_task_probe_times,
+                secret_store_private_key: config.meta.secret_store_private_key,
             },
             config.system.into_init_system_params(),
             Default::default(),

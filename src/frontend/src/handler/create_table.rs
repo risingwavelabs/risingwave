@@ -743,6 +743,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_source(
     with_version_column: Option<String>,
     include_column_options: IncludeOption,
 ) -> Result<(PlanRef, PbTable)> {
+    // cdc table must have primary key constraint or primary key column
     if !constraints.iter().any(|c| {
         matches!(
             c,
@@ -751,6 +752,10 @@ pub(crate) fn gen_create_table_plan_for_cdc_source(
                 ..
             }
         )
+    }) && !column_defs.iter().any(|col| {
+        col.options
+            .iter()
+            .any(|opt| matches!(opt.option, ColumnOption::Unique { is_primary: true }))
     }) {
         return Err(ErrorCode::NotSupported(
             "CDC table without primary key constraint is not supported".to_owned(),

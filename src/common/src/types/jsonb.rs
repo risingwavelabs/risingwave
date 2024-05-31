@@ -12,11 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
+use std::fmt::{self, Write};
 use std::hash::Hash;
 
-use bytes::Buf;
+use bytes::{Buf, BufMut, BytesMut};
 use jsonbb::{Value, ValueRef};
+use postgres_types::{accepts, to_sql_checked, FromSql, IsNull, ToSql, Type};
 use risingwave_common_estimate_size::EstimateSize;
 
 use super::{Datum, IntoOrdered, ListValue, ScalarImpl, StructRef, ToOwnedDatum, F64};
@@ -537,5 +538,40 @@ impl<F: std::fmt::Write> std::io::Write for FmtToIoUnchecked<F> {
 
     fn flush(&mut self) -> std::io::Result<()> {
         Ok(())
+    }
+}
+
+impl ToSql for JsonbVal {
+    accepts!(JSONB);
+
+    to_sql_checked!();
+
+    fn to_sql(
+        &self,
+        _ty: &Type,
+        out: &mut BytesMut,
+    ) -> Result<IsNull, Box<dyn std::error::Error + Sync + Send>>
+    where
+        Self: Sized,
+    {
+        out.put_u8(1);
+        write!(out, "{}", self.0).unwrap();
+        Ok(IsNull::No)
+    }
+}
+
+impl<'a> FromSql<'a> for JsonbVal {
+    fn from_sql(
+        _ty: &Type,
+        mut raw: &'a [u8],
+    ) -> Result<Self, Box<dyn std::error::Error + Sync + Send>> {
+        if raw.is_empty() || raw.get_u8() != 1 {
+            return Err("invalid jsonb encoding".into());
+        }
+        Ok(JsonbVal::from(Value::from_text(raw)?))
+    }
+
+    fn accepts(ty: &Type) -> bool {
+        matches!(*ty, Type::JSONB)
     }
 }

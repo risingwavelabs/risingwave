@@ -5,7 +5,7 @@ create source s1 () with (
   topic = 'upsert_avro_json-record',
   properties.bootstrap.server = 'message_queue:29092'
 ) format plain encode avro (
-  schema.registry = 'http://message_queue:8081',
+  schema.registry = 'http://schemaregistry:8082',
   schema.registry.name.strategy = 'no sense',
   message = 'CPLM.OBJ_ATTRIBUTE_VALUE',
 );
@@ -17,7 +17,7 @@ create source s1 () with (
   topic = 'upsert_avro_json-record',
   properties.bootstrap.server = 'message_queue:29092'
 ) format plain encode avro (
-  schema.registry = 'http://message_queue:8081',
+  schema.registry = 'http://schemaregistry:8082',
   schema.registry.name.strategy = 'record_name_strategy',
   message = 'CPLM.OBJ_ATTRIBUTE_VALUE',
   key.message = 'string'
@@ -29,7 +29,7 @@ create source s1 () with (
   topic = 'upsert_avro_json-record',
   properties.bootstrap.server = 'message_queue:29092'
 ) format plain encode avro (
-  schema.registry = 'http://message_queue:8081',
+  schema.registry = 'http://schemaregistry:8082',
   schema.registry.name.strategy = 'record_name_strategy',
   message = 'CPLM.OBJ_ATTRIBUTE_VALUE',
 );
@@ -41,7 +41,7 @@ create table t1 () with (
     topic = 'upsert_avro_json-topic-record',
     properties.bootstrap.server = 'message_queue:29092'
 ) format upsert encode avro (
-    schema.registry = 'http://message_queue:8081',
+    schema.registry = 'http://schemaregistry:8082',
     schema.registry.name.strategy = 'topic_record_name_strategy',
     message = 'CPLM.OBJ_ATTRIBUTE_VALUE'
 );
@@ -54,7 +54,7 @@ with (
     topic = 'upsert_avro_json-topic-record',
     properties.bootstrap.server = 'message_queue:29092'
 ) format upsert encode avro (
-    schema.registry = 'http://message_queue:8081',
+    schema.registry = 'http://schemaregistry:8082',
     schema.registry.name.strategy = 'topic_record_name_strategy',
     message = 'CPLM.OBJ_ATTRIBUTE_VALUE',
     key.message = 'string'
