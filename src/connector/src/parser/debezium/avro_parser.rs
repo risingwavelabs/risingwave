@@ -358,7 +358,7 @@ mod tests {
     async fn test_debezium_avro_parser() -> crate::error::ConnectorResult<()> {
         let props = convert_args!(hashmap!(
             "kafka.topic" => "dbserver1.inventory.customers"
-        ));
+        )).into_iter().collect();
         let info = StreamSourceInfo {
             row_schema_location: "http://127.0.0.1:8081".into(),
             format: PbFormatType::Debezium.into(),

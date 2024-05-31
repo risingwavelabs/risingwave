@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use anyhow::anyhow;
@@ -55,15 +55,15 @@ const SPLIT_TYPE_FIELD: &str = "split_type";
 const SPLIT_INFO_FIELD: &str = "split_info";
 pub const UPSTREAM_SOURCE_KEY: &str = "connector";
 
-pub trait TryFromHashmap: Sized + UnknownFields {
+pub trait TryFromBTreeMap: Sized + UnknownFields {
     /// Used to initialize the source properties from the raw untyped `WITH` options.
-    fn try_from_hashmap(props: HashMap<String, String>, deny_unknown_fields: bool) -> Result<Self>;
+    fn try_from_btreemap(props: BTreeMap<String, String>, deny_unknown_fields: bool) -> Result<Self>;
 }
 
 /// Represents `WITH` options for sources.
 ///
 /// Each instance should add a `#[derive(with_options::WithOptions)]` marker.
-pub trait SourceProperties: TryFromHashmap + Clone + WithOptions {
+pub trait SourceProperties: TryFromBTreeMap + Clone + WithOptions {
     const SOURCE_NAME: &'static str;
     type Split: SplitMetaData
         + TryFrom<SplitImpl, Error = crate::error::ConnectorError>
@@ -83,8 +83,8 @@ pub trait UnknownFields {
     fn unknown_fields(&self) -> HashMap<String, String>;
 }
 
-impl<P: DeserializeOwned + UnknownFields> TryFromHashmap for P {
-    fn try_from_hashmap(props: HashMap<String, String>, deny_unknown_fields: bool) -> Result<Self> {
+impl<P: DeserializeOwned + UnknownFields> TryFromBTreeMap for P {
+    fn try_from_btreemap(props: BTreeMap<String, String>, deny_unknown_fields: bool) -> Result<Self> {
         let json_value = serde_json::to_value(props)?;
         let res = serde_json::from_value::<P>(json_value)?;
 
@@ -364,12 +364,12 @@ impl ConnectorProperties {
 impl ConnectorProperties {
     /// Creates typed source properties from the raw `WITH` properties.
     ///
-    /// It checks the `connector` field, and them dispatches to the corresponding type's `try_from_hashmap` method.
+    /// It checks the `connector` field, and them dispatches to the corresponding type's `try_from_btreemap` method.
     ///
     /// `deny_unknown_fields`: Since `WITH` options are persisted in meta, we do not deny unknown fields when restoring from
     /// existing data to avoid breaking backwards compatibility. We only deny unknown fields when creating new sources.
     pub fn extract(
-        mut with_properties: HashMap<String, String>,
+        mut with_properties: BTreeMap<String, String>,
         deny_unknown_fields: bool,
     ) -> Result<Self> {
         let connector = with_properties
@@ -378,7 +378,7 @@ impl ConnectorProperties {
         match_source_name_str!(
             connector.to_lowercase().as_str(),
             PropType,
-            PropType::try_from_hashmap(with_properties, deny_unknown_fields)
+            PropType::try_from_btreemap(with_properties, deny_unknown_fields)
                 .map(ConnectorProperties::from),
             |other| bail!("connector '{}' is not supported", other)
         )
@@ -653,7 +653,7 @@ mod tests {
 
     #[test]
     fn test_extract_nexmark_config() {
-        let props: HashMap<String, String> = convert_args!(hashmap!(
+        let props = convert_args!(btreemap!(
             "connector" => "nexmark",
             "nexmark.table.type" => "Person",
             "nexmark.split.num" => "1",
@@ -671,7 +671,7 @@ mod tests {
 
     #[test]
     fn test_extract_kafka_config() {
-        let props: HashMap<String, String> = convert_args!(hashmap!(
+        let props = convert_args!(btreemap!(
             "connector" => "kafka",
             "properties.bootstrap.server" => "b1,b2",
             "topic" => "test",
@@ -681,7 +681,7 @@ mod tests {
 
         let props = ConnectorProperties::extract(props, true).unwrap();
         if let ConnectorProperties::Kafka(k) = props {
-            let hashmap: HashMap<String, String> = hashmap! {
+            let hashmap = hashmap! {
                 "b-1:9092".to_string() => "dns-1".to_string(),
                 "b-2:9092".to_string() => "dns-2".to_string(),
             };
@@ -693,7 +693,7 @@ mod tests {
 
     #[test]
     fn test_extract_cdc_properties() {
-        let user_props_mysql: HashMap<String, String> = convert_args!(hashmap!(
+        let user_props_mysql = convert_args!(btreemap!(
             "connector" => "mysql-cdc",
             "database.hostname" => "127.0.0.1",
             "database.port" => "3306",
@@ -703,7 +703,7 @@ mod tests {
             "table.name" => "products",
         ));
 
-        let user_props_postgres: HashMap<String, String> = convert_args!(hashmap!(
+        let user_props_postgres = convert_args!(btreemap!(
             "connector" => "postgres-cdc",
             "database.hostname" => "127.0.0.1",
             "database.port" => "5432",

@@ -267,7 +267,7 @@ mod test {
             row_encode: PbEncodeType::Avro.into(),
             ..Default::default()
         };
-        let parser_config = SpecificParserConfig::new(&info, &HashMap::new())?;
+        let parser_config = SpecificParserConfig::new(&info, &Default::default())?;
         AvroParserConfig::new(parser_config.encoding_config).await
     }
 

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use anyhow::Context as _;
 use apache_avro::Schema;
@@ -155,7 +155,7 @@ impl JsonParser {
 pub async fn schema_to_columns(
     schema_location: &str,
     schema_registry_auth: Option<SchemaRegistryAuth>,
-    props: &HashMap<String, String>,
+    props: &BTreeMap<String, String>,
 ) -> ConnectorResult<Vec<ColumnDesc>> {
     let url = handle_sr_list(schema_location)?;
     let json_schema = if let Some(schema_registry_auth) = schema_registry_auth {

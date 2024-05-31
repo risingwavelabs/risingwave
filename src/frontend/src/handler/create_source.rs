@@ -60,7 +60,7 @@ use risingwave_pb::plan_common::{EncodeType, FormatType};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{
     get_delimiter, AstString, ColumnDef, ConnectorSchema, CreateSourceStatement, Encode, Format,
-    ObjectName, ProtobufSchema, SourceWatermark, TableConstraint,
+    ObjectName, ProtobufSchema, SourceWatermark, TableConstraint, With,
 };
 use risingwave_sqlparser::parser::IncludeOption;
 use thiserror_ext::AsReport;
@@ -175,7 +175,7 @@ async fn extract_avro_table_schema(
 
 async fn extract_debezium_avro_table_pk_columns(
     info: &StreamSourceInfo,
-    with_properties: &HashMap<String, String>,
+    with_properties: &WithOptions,
 ) -> Result<Vec<String>> {
     let parser_config = SpecificParserConfig::new(info, with_properties)?;
     let conf = DebeziumAvroParserConfig::new(parser_config.encoding_config).await?;
@@ -185,7 +185,7 @@ async fn extract_debezium_avro_table_pk_columns(
 /// Map a protobuf schema to a relational schema.
 async fn extract_protobuf_table_schema(
     schema: &ProtobufSchema,
-    with_properties: &HashMap<String, String>,
+    with_properties: &WithOptions,
     format_encode_options: &mut BTreeMap<String, String>,
 ) -> Result<Vec<ColumnCatalog>> {
     let info = StreamSourceInfo {
@@ -549,7 +549,7 @@ fn bind_columns_from_source_for_cdc(
 
 /// add connector-spec columns to the end of column catalog
 pub fn handle_addition_columns(
-    with_properties: &HashMap<String, String>,
+    with_properties: &WithOptions,
     mut additional_columns: IncludeOption,
     columns: &mut Vec<ColumnCatalog>,
     is_cdc_backfill_table: bool,
@@ -728,7 +728,7 @@ pub(crate) async fn bind_source_pk(
     source_info: &StreamSourceInfo,
     columns: &mut [ColumnCatalog],
     sql_defined_pk_names: Vec<String>,
-    with_properties: &HashMap<String, String>,
+    with_properties: &WithOptions,
 ) -> Result<Vec<String>> {
     let sql_defined_pk = !sql_defined_pk_names.is_empty();
     let key_column_name: Option<String> = {
@@ -889,7 +889,7 @@ pub(crate) async fn bind_source_pk(
 
 // Add a hidden column `_rw_kafka_timestamp` to each message from Kafka source.
 fn check_and_add_timestamp_column(
-    with_properties: &HashMap<String, String>,
+    with_properties: &WithOptions,
     columns: &mut Vec<ColumnCatalog>,
 ) {
     if with_properties.is_kafka_connector() {
@@ -1124,7 +1124,7 @@ pub fn validate_compatibility(
 /// One should only call this function after all properties of all columns are resolved, like
 /// generated column descriptors.
 pub(super) async fn check_source_schema(
-    props: &HashMap<String, String>,
+    props: &WithOptions,
     row_id_index: Option<usize>,
     columns: &[ColumnCatalog],
 ) -> Result<()> {
@@ -1319,7 +1319,7 @@ pub async fn bind_create_source(
     handler_args: HandlerArgs,
     full_name: ObjectName,
     source_schema: ConnectorSchema,
-    with_properties: HashMap<String, String>,
+    with_properties: WithOptions,
     sql_columns_defs: &[ColumnDef],
     constraints: Vec<TableConstraint>,
     wildcard_idx: Option<usize>,
@@ -1420,7 +1420,7 @@ pub async fn bind_create_source(
     check_source_schema(&with_properties, row_id_index, &columns).await?;
 
     // resolve privatelink connection for Kafka
-    let mut with_properties = WithOptions::new(with_properties);
+    let mut with_properties = with_properties;
     let connection_id =
         resolve_privatelink_in_with_option(&mut with_properties, &schema_name, session)?;
     let _secret_ref = resolve_secret_in_with_options(&mut with_properties, session)?;

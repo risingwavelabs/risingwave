@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap};
 use std::sync::Arc;
 
 use itertools::Itertools;
@@ -56,7 +56,7 @@ pub struct SourceDescBuilder {
     columns: Vec<PbColumnCatalog>,
     metrics: Arc<SourceMetrics>,
     row_id_index: Option<usize>,
-    with_properties: HashMap<String, String>,
+    with_properties: BTreeMap<String, String>,
     source_info: PbStreamSourceInfo,
     connector_message_buffer_size: usize,
     pk_indices: Vec<usize>,
@@ -68,7 +68,7 @@ impl SourceDescBuilder {
         columns: Vec<PbColumnCatalog>,
         metrics: Arc<SourceMetrics>,
         row_id_index: Option<usize>,
-        with_properties: HashMap<String, String>,
+        with_properties: BTreeMap<String, String>,
         source_info: PbStreamSourceInfo,
         connector_message_buffer_size: usize,
         pk_indices: Vec<usize>,
@@ -182,7 +182,7 @@ impl SourceDescBuilder {
 }
 
 pub mod test_utils {
-    use std::collections::HashMap;
+    use std::collections::BTreeMap;
 
     use risingwave_common::catalog::{ColumnDesc, Schema};
     use risingwave_pb::catalog::StreamSourceInfo;
@@ -194,7 +194,7 @@ pub mod test_utils {
         schema: &Schema,
         row_id_index: Option<usize>,
         source_info: StreamSourceInfo,
-        with_properties: HashMap<String, String>,
+        with_properties: BTreeMap<String, String>,
         pk_indices: Vec<usize>,
     ) -> SourceDescBuilder {
         let columns = schema

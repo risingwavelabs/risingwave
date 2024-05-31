@@ -63,7 +63,7 @@ pub fn generate_with_options_yaml_sink() -> String {
 /// the generated `yaml` might be inconsistent with the actual parsing logic.
 /// TODO: improve the test to check whether serde is used.
 ///
-/// - For sources, the parsing logic is in `TryFromHashMap`.
+/// - For sources, the parsing logic is in `TryFromBTreeMap`.
 /// - For sinks, the parsing logic is in `TryFrom<SinkParam>`.
 fn generate_with_options_yaml_inner(path: &Path) -> String {
     let mut structs = vec![];

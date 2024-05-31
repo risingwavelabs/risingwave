@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt::Debug;
 use std::sync::LazyLock;
 
@@ -1082,7 +1082,7 @@ impl SpecificParserConfig {
     // The validity of (format, encode) is ensured by `extract_format_encode`
     pub fn new(
         info: &StreamSourceInfo,
-        with_properties: &HashMap<String, String>,
+        with_properties: &BTreeMap<String, String>,
     ) -> ConnectorResult<Self> {
         let source_struct = extract_source_struct(info)?;
         let format = source_struct.format;

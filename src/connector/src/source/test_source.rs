@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, OnceLock};
 
 use async_trait::async_trait;
@@ -26,7 +26,7 @@ use crate::error::ConnectorResult;
 use crate::parser::ParserConfig;
 use crate::source::{
     BoxChunkSourceStream, Column, SourceContextRef, SourceEnumeratorContextRef, SourceProperties,
-    SplitEnumerator, SplitId, SplitMetaData, SplitReader, TryFromHashmap,
+    SplitEnumerator, SplitId, SplitMetaData, SplitReader, TryFromBTreeMap,
 };
 
 pub type BoxListSplits = Box<
@@ -118,12 +118,12 @@ pub const TEST_CONNECTOR: &str = "test";
 
 #[derive(Clone, Debug, Default, WithOptions)]
 pub struct TestSourceProperties {
-    properties: HashMap<String, String>,
+    properties: BTreeMap<String, String>,
 }
 
-impl TryFromHashmap for TestSourceProperties {
-    fn try_from_hashmap(
-        props: HashMap<String, String>,
+impl TryFromBTreeMap for TestSourceProperties {
+    fn try_from_btreemap(
+        props: BTreeMap<String, String>,
         _deny_unknown_fields: bool,
     ) -> ConnectorResult<Self> {
         if cfg!(any(madsim, test)) {

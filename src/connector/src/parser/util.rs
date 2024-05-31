@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use anyhow::Context;
 use bytes::Bytes;
@@ -40,7 +40,7 @@ macro_rules! log_error {
 pub(crate) use log_error;
 
 /// get kafka topic name
-pub(super) fn get_kafka_topic(props: &HashMap<String, String>) -> ConnectorResult<&String> {
+pub(super) fn get_kafka_topic(props: &BTreeMap<String, String>) -> ConnectorResult<&String> {
     const KAFKA_TOPIC_KEY1: &str = "kafka.topic";
     const KAFKA_TOPIC_KEY2: &str = "topic";
 

@@ -48,6 +48,7 @@ impl<T: crate::source::cdc::CdcSourceTypeTrait> WithOptions
 impl<T: WithOptions> WithOptions for Option<T> {}
 impl WithOptions for Vec<String> {}
 impl WithOptions for HashMap<String, String> {}
+impl WithOptions for BTreeMap<String, String> {}
 
 impl WithOptions for String {}
 impl WithOptions for bool {}

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use anyhow::Context;
@@ -49,7 +49,7 @@ pub struct SourceReader {
 
 impl SourceReader {
     pub fn new(
-        properties: HashMap<String, String>,
+        properties: BTreeMap<String, String>,
         columns: Vec<SourceColumnDesc>,
         connector_message_buffer_size: usize,
         parser_config: SpecificParserConfig,
