@@ -789,7 +789,7 @@ def section_batch(outer_panels):
                             lambda quantile, legend: panels.target(
                                 f"histogram_quantile({quantile}, sum(rate({metric('distributed_query_latency_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
                                 f"p{legend}"
-                                + " - {{%s}} @ {{%s}}" 
+                                + " - {{%s}} @ {{%s}}"
                                 % (COMPONENT_LABEL, NODE_LABEL),
                             ),
                             [50, 90, 99, "max"],
@@ -804,7 +804,7 @@ def section_batch(outer_panels):
                             lambda quantile, legend: panels.target(
                                 f"histogram_quantile({quantile}, sum(rate({metric('frontend_latency_local_execution_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
                                 f"p{legend}"
-                                + " - {{%s}} @ {{%s}}" 
+                                + " - {{%s}} @ {{%s}}"
                                 % (COMPONENT_LABEL, NODE_LABEL),
                             ),
                             [50, 90, 99, "max"],
