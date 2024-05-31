@@ -1,3 +1,5 @@
+#![allow(rw::format_error)]
+
 use std::io;
 
 use risingwave_sqlparser::parser::Parser;
