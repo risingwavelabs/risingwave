@@ -451,6 +451,12 @@
     LogicalAgg { group_key: [t.v1], aggs: [] }
     └─LogicalProject { exprs: [t.v1] }
       └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+  stream_plan: |-
+    StreamMaterialize { columns: [v1], stream_key: [v1], pk_columns: [v1], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [t.v1], noop_update_hint: true }
+      └─StreamHashAgg { group_key: [t.v1], aggs: [count] }
+        └─StreamExchange { dist: HashShard(t.v1) }
+          └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: distinct with agg
   sql: |
     create table t (v1 int, v2 int);
@@ -461,6 +467,15 @@
       └─LogicalAgg { group_key: [t.v2], aggs: [sum(t.v1)] }
         └─LogicalProject { exprs: [t.v2, t.v1] }
           └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+  stream_plan: |-
+    StreamMaterialize { columns: [sum], stream_key: [sum], pk_columns: [sum], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [sum(t.v1)], noop_update_hint: true }
+      └─StreamHashAgg { group_key: [sum(t.v1)], aggs: [count] }
+        └─StreamExchange { dist: HashShard(sum(t.v1)) }
+          └─StreamProject { exprs: [t.v2, sum(t.v1)] }
+            └─StreamHashAgg { group_key: [t.v2], aggs: [sum(t.v1), count] }
+              └─StreamExchange { dist: HashShard(t.v2) }
+                └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: distinct on
   sql: |
     create table t (v1 int, v2 int, v3 int);
