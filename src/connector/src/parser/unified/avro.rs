@@ -28,7 +28,7 @@ use risingwave_common::types::{
 };
 use risingwave_common::util::iter_util::ZipEqFast;
 
-use super::{bail_uncategorized, uncategorized, Access, AccessError, AccessResult, NullableAccess};
+use super::{bail_uncategorized, uncategorized, Access, AccessError, AccessResult};
 use crate::error::ConnectorResult;
 use crate::parser::avro::util::avro_to_jsonb;
 #[derive(Clone)]
@@ -304,15 +304,6 @@ where
         }
 
         options.convert_to_datum(value, type_expected)
-    }
-}
-
-impl<'a, 'b> NullableAccess for AvroAccess<'a, 'b>
-where
-    'a: 'b,
-{
-    fn is_null(&self) -> bool {
-        matches!(self.value, Value::Null)
     }
 }
 

@@ -112,7 +112,7 @@ impl CsvParser {
                 // The header row does not output a row, so we return early.
                 return Ok(());
             }
-            writer.insert(|desc| {
+            writer.do_insert(|desc| {
                 if let Some(i) = headers.iter().position(|name| name == &desc.name) {
                     let value = fields.get_mut(i).map(std::mem::take).unwrap_or_default();
                     if value.is_empty() {
@@ -125,7 +125,7 @@ impl CsvParser {
             })?;
         } else {
             fields.reverse();
-            writer.insert(|desc| {
+            writer.do_insert(|desc| {
                 if let Some(value) = fields.pop() {
                     if value.is_empty() {
                         return Ok(None);

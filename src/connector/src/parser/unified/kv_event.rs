@@ -12,12 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::{Deref, DerefMut};
-
 use risingwave_common::types::DataType;
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
 
-use super::{Access, ChangeEvent, ChangeEventOperation, NullableAccess};
+use super::Access;
 use crate::parser::unified::AccessError;
 use crate::source::SourceColumnDesc;
 
@@ -78,7 +76,7 @@ where
         }
     }
 
-    pub fn access_field_impl(&self, desc: &SourceColumnDesc) -> super::AccessResult {
+    pub fn access_field(&self, desc: &SourceColumnDesc) -> super::AccessResult {
         match desc.additional_column.column_type {
             Some(AdditionalColumnType::Key(_)) => self.access_key(&[&desc.name], &desc.data_type),
             None => self.access_value(&[&desc.name], &desc.data_type),
@@ -86,53 +84,3 @@ where
         }
     }
 }
-
-/// Wraps a key-value message into an upsert event, which uses `null` value to represent `DELETE`s.
-pub struct UpsertChangeEvent<K, V>(KvEvent<K, V>);
-
-impl<K, V> Default for UpsertChangeEvent<K, V> {
-    fn default() -> Self {
-        Self(KvEvent::default())
-    }
-}
-
-impl<K, V> Deref for UpsertChangeEvent<K, V> {
-    type Target = KvEvent<K, V>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl<K, V> DerefMut for UpsertChangeEvent<K, V> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
-
-impl<K, V> ChangeEvent for UpsertChangeEvent<K, V>
-where
-    K: Access,
-    V: NullableAccess,
-{
-    fn op(&self) -> std::result::Result<ChangeEventOperation, AccessError> {
-        if let Some(va) = &self.0.value_accessor {
-            if va.is_null() {
-                Ok(ChangeEventOperation::Delete)
-            } else {
-                Ok(ChangeEventOperation::Upsert)
-            }
-        } else {
-            Err(AccessError::Undefined {
-                name: "value".to_string(),
-                path: String::new(),
-            })
-        }
-    }
-
-    fn access_field(&self, desc: &SourceColumnDesc) -> super::AccessResult {
-        self.0.access_field_impl(desc)
-    }
-}
-
-pub type PlainEvent<K, V> = KvEvent<K, V>;

@@ -15,7 +15,7 @@
 use risingwave_common::bail;
 
 use super::unified::json::TimestamptzHandling;
-use super::unified::upsert::PlainEvent;
+use super::unified::kv_event::KvEvent;
 use super::{
     AccessBuilderImpl, ByteStreamSourceParser, EncodingProperties, EncodingType,
     SourceStreamChunkRowWriter, SpecificParserConfig,
@@ -102,7 +102,7 @@ impl PlainParser {
             };
         }
 
-        let mut row_op: PlainEvent<AccessImpl<'_, '_>, AccessImpl<'_, '_>> = PlainEvent::default();
+        let mut row_op: KvEvent<AccessImpl<'_, '_>, AccessImpl<'_, '_>> = KvEvent::default();
 
         if let Some(data) = key
             && let Some(key_builder) = self.key_builder.as_mut()
@@ -115,7 +115,7 @@ impl PlainParser {
             row_op.with_value(self.payload_builder.generate_accessor(data).await?);
         }
 
-        writer.insert(|column: &SourceColumnDesc| row_op.access_field_impl(column))?;
+        writer.do_insert(|column: &SourceColumnDesc| row_op.access_field(column))?;
 
         Ok(ParseResult::Rows)
     }

@@ -47,6 +47,7 @@ pub struct JsonAccessBuilder {
 impl AccessBuilder for JsonAccessBuilder {
     #[allow(clippy::unused_async)]
     async fn generate_accessor(&mut self, payload: Vec<u8>) -> ConnectorResult<AccessImpl<'_, '_>> {
+        // XXX: When will we enter this branch?
         if payload.is_empty() {
             self.value = Some("{}".into());
         } else {

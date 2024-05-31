@@ -83,8 +83,7 @@ mod old_json_parser {
             let mut errors = Vec::new();
             for value in values {
                 let accessor = JsonAccess::new(value);
-                match writer
-                    .insert(|column| accessor.access(&[&column.name], Some(&column.data_type)))
+                match writer.do_insert(|column| accessor.access(&[&column.name], &column.data_type))
                 {
                     Ok(_) => {}
                     Err(err) => errors.push(err),

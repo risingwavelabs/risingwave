@@ -30,9 +30,9 @@ pub mod avro;
 pub mod bytes;
 pub mod debezium;
 pub mod json;
+pub mod kv_event;
 pub mod maxwell;
 pub mod protobuf;
-pub mod upsert;
 pub mod util;
 
 pub type AccessResult<T = Datum> = std::result::Result<T, AccessError>;
@@ -40,11 +40,6 @@ pub type AccessResult<T = Datum> = std::result::Result<T, AccessError>;
 /// Access a certain field in an object according to the path
 pub trait Access {
     fn access(&self, path: &[&str], type_expected: &DataType) -> AccessResult;
-}
-
-/// Whether the whole message is null. This is used for UPSERT events: `null` means DELETE.
-pub trait NullableAccess: Access {
-    fn is_null(&self) -> bool;
 }
 
 pub enum AccessImpl<'a, 'b> {
@@ -63,19 +58,6 @@ impl Access for AccessImpl<'_, '_> {
             Self::Protobuf(accessor) => accessor.access(path, type_expected),
             Self::Json(accessor) => accessor.access(path, type_expected),
             Self::MongoJson(accessor) => accessor.access(path, type_expected),
-        }
-    }
-}
-
-impl NullableAccess for AccessImpl<'_, '_> {
-    fn is_null(&self) -> bool {
-        match self {
-            Self::Avro(accessor) => accessor.is_null(),
-            Self::Json(accessor) => accessor.is_null(),
-            Self::Bytes(_) | Self::Protobuf(_) | Self::MongoJson(_) => {
-                // TODO: refactor upsert related code to avoid this branch
-                unreachable!()
-            }
         }
     }
 }

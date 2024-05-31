@@ -16,14 +16,13 @@ use risingwave_common::bail;
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
 
 use super::bytes_parser::BytesAccessBuilder;
-use super::unified::upsert::UpsertChangeEvent;
-use super::unified::util::apply_row_operation_on_stream_chunk_writer_with_op;
 use super::unified::{AccessImpl, ChangeEventOperation};
 use super::{
     AccessBuilderImpl, ByteStreamSourceParser, BytesProperties, EncodingProperties, EncodingType,
     SourceStreamChunkRowWriter, SpecificParserConfig,
 };
 use crate::error::ConnectorResult;
+use crate::parser::unified::kv_event::KvEvent;
 use crate::parser::ParserFormat;
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
@@ -97,22 +96,26 @@ impl UpsertParser {
         payload: Option<Vec<u8>>,
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> ConnectorResult<()> {
-        let mut row_op: UpsertChangeEvent<AccessImpl<'_, '_>, AccessImpl<'_, '_>> =
-            UpsertChangeEvent::default();
-        let mut change_event_op = ChangeEventOperation::Delete;
+        let mut row_op: KvEvent<AccessImpl<'_, '_>, AccessImpl<'_, '_>> = KvEvent::default();
         if let Some(data) = key {
             row_op.with_key(self.key_builder.generate_accessor(data).await?);
         }
         // Empty payload of kafka is Some(vec![])
+        let change_event_op;
         if let Some(data) = payload
             && !data.is_empty()
         {
             row_op.with_value(self.payload_builder.generate_accessor(data).await?);
             change_event_op = ChangeEventOperation::Upsert;
+        } else {
+            change_event_op = ChangeEventOperation::Delete;
         }
-
-        apply_row_operation_on_stream_chunk_writer_with_op(row_op, &mut writer, change_event_op)
-            .map_err(Into::into)
+        let f = |column: &SourceColumnDesc| row_op.access_field(column);
+        match change_event_op {
+            ChangeEventOperation::Upsert => writer.do_insert(f)?,
+            ChangeEventOperation::Delete => writer.do_delete(f)?,
+        }
+        Ok(())
     }
 }
 

@@ -31,7 +31,7 @@ use simd_json::prelude::{
 use simd_json::{BorrowedValue, ValueType};
 use thiserror_ext::AsReport;
 
-use super::{Access, AccessError, AccessResult, NullableAccess};
+use super::{Access, AccessError, AccessResult};
 use crate::parser::common::json_object_get_case_insensitive;
 use crate::parser::unified::avro::extract_decimal;
 use crate::schema::{bail_invalid_option_error, InvalidOptionError};
@@ -645,14 +645,5 @@ where
         }
 
         self.options.parse(value, type_expected)
-    }
-}
-
-impl<'a, 'b> NullableAccess for JsonAccess<'a, 'b>
-where
-    'a: 'b,
-{
-    fn is_null(&self) -> bool {
-        matches!(self.value.value_type(), ValueType::Null)
     }
 }
