@@ -1130,16 +1130,16 @@ impl<S: StateStore> ColumnarStoreStorageTableInnerIterInner<S> {
             buffer.freeze()
         }
         loop {
-            let mut kvs = Vec::with_capacity(self.iters.len());
-            for iter in &mut self.iters {
-                let kv = iter.try_next().await?;
-                kvs.push(kv);
+            let mut kvs = vec![None; self.iters.len()];
+            for (i, iter) in self.iters.iter_mut().enumerate() {
+                kvs[i] = iter.try_next().await?;
             }
             if kvs.iter().any(|kv| kv.is_none()) {
                 assert!(kvs.iter().all(|kv| kv.is_none()));
                 break;
             }
-            let mut iter_output = Vec::with_capacity(self.output_indices.len());
+            let mut iter_output = vec![None; self.output_indices.len()];
+            let mut iter_output_i = 0;
             let table_key_with_vnode_and_column_id = kvs[0].as_ref().unwrap().0.user_key.table_key;
             let vnode_prefixed_key =
                 TableKey(vnode_prefixed_key(&table_key_with_vnode_and_column_id));
@@ -1152,7 +1152,8 @@ impl<S: StateStore> ColumnarStoreStorageTableInnerIterInner<S> {
                     .project(&self.output_pk_position_in_pk_indices)
                     .into_owned_row()
                 {
-                    iter_output.push(datum);
+                    iter_output[iter_output_i] = datum;
+                    iter_output_i += 1;
                 }
             }
             if !self.non_pk_position_in_output_indices.is_empty() {
@@ -1164,8 +1165,8 @@ impl<S: StateStore> ColumnarStoreStorageTableInnerIterInner<S> {
                 {
                     // TODO(columnar_store): use a deserializer
                     let data_type = &self.data_types[*pos];
-                    let col_val = deserialize_datum(value, data_type)?;
-                    iter_output.push(col_val);
+                    iter_output[iter_output_i] = deserialize_datum(value, data_type)?;
+                    iter_output_i += 1;
                 }
             }
             // let row = OwnedRow::empty();
