@@ -16,6 +16,7 @@ pub mod manager;
 pub mod pb_compatible;
 pub mod report;
 
+use std::env;
 use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
@@ -26,6 +27,10 @@ use crate::util::env_var::env_var_is_true_or;
 use crate::util::resource_util::cpu::total_cpu_available;
 use crate::util::resource_util::memory::{system_memory_available_bytes, total_memory_used_bytes};
 use crate::RW_VERSION;
+
+pub const TELEMETRY_CLUSTER_TYPE: &str = "RW_TELEMETRY_TYPE";
+const TELEMETRY_CLUSTER_TYPE_HOSTED: &str = "hosted"; // hosted on RisingWave Cloud
+const TELEMETRY_CLUSTER_TYPE_TEST: &str = "test"; // test environment, eg. CI & Risedev
 
 /// Url of telemetry backend
 pub const TELEMETRY_REPORT_URL: &str = "https://telemetry.risingwave.dev/api/v2/report";
@@ -158,6 +163,15 @@ pub fn current_timestamp() -> u64 {
         .duration_since(SystemTime::UNIX_EPOCH)
         .expect("Clock might go backward")
         .as_secs()
+}
+
+pub fn report_scarf_enabled() -> bool {
+    env::var(TELEMETRY_CLUSTER_TYPE)
+        .map(|deploy_type| {
+            !(deploy_type.eq_ignore_ascii_case(TELEMETRY_CLUSTER_TYPE_HOSTED)
+                || deploy_type.eq_ignore_ascii_case(TELEMETRY_CLUSTER_TYPE_TEST))
+        })
+        .unwrap_or(true)
 }
 
 // impl logic to report to Scarf service, containing RW version and deployment platform

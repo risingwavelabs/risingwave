@@ -1,120 +1,121 @@
 extend = [
-  { path = "src/risedevtool/grafana.toml" },
-  { path = "src/risedevtool/prometheus.toml" },
-  { path = "src/risedevtool/minio.toml" },
-  { path = "src/risedevtool/etcd.toml" },
-  { path = "src/risedevtool/tempo.toml" },
-  { path = "src/risedevtool/gcloud-pubsub.toml" },
-  { path = "src/risedevtool/redis.toml" },
-  { path = "src/risedevtool/connector.toml" },
-  { path = "src/risedevtool/risedev-components.toml" },
-  { path = "src/sqlparser/sqlparser_test.toml" },
-  { path = "src/frontend/planner_test/planner_test.toml" },
-  { path = "src/tests/compaction_test/Makefile.toml" },
-  { path = "src/storage/backup/integration_tests/Makefile.toml" },
-  { path = "src/java_binding/make-java-binding.toml" },
-  { path = "src/stream/tests/integration_tests/integration_test.toml" },
-  { path = "e2e_test/source_inline/commands.toml" },
+    { path = "src/risedevtool/grafana.toml" },
+    { path = "src/risedevtool/prometheus.toml" },
+    { path = "src/risedevtool/minio.toml" },
+    { path = "src/risedevtool/etcd.toml" },
+    { path = "src/risedevtool/tempo.toml" },
+    { path = "src/risedevtool/gcloud-pubsub.toml" },
+    { path = "src/risedevtool/redis.toml" },
+    { path = "src/risedevtool/connector.toml" },
+    { path = "src/risedevtool/risedev-components.toml" },
+    { path = "src/sqlparser/sqlparser_test.toml" },
+    { path = "src/frontend/planner_test/planner_test.toml" },
+    { path = "src/tests/compaction_test/Makefile.toml" },
+    { path = "src/storage/backup/integration_tests/Makefile.toml" },
+    { path = "src/java_binding/make-java-binding.toml" },
+    { path = "src/stream/tests/integration_tests/integration_test.toml" },
+    { path = "e2e_test/source_inline/commands.toml" },
 ]
 
 env_files = ["./risedev-components.user.env"]
 
 env_scripts = [
-  '''
-#!@duckscript
+    '''
+  #!@duckscript
 
-# only duckscript can modify env variables in cargo-make
-# duckscript doc: https://github.com/sagiegurari/duckscript/blob/master/docs/sdk.md
+  # only duckscript can modify env variables in cargo-make
+  # duckscript doc: https://github.com/sagiegurari/duckscript/blob/master/docs/sdk.md
 
-set_env ENABLE_TELEMETRY "false"
+  set_env ENABLE_TELEMETRY "false"
+  set_env RW_TELEMETRY_TYPE "test"
 
-is_sanitizer_enabled = get_env ENABLE_SANITIZER
-is_hdfs_backend = get_env ENABLE_HDFS
-is_release = get_env ENABLE_RELEASE_PROFILE
-is_not_release = not ${is_release}
-is_dynamic_linking = get_env ENABLE_DYNAMIC_LINKING
-is_hummock_trace = get_env ENABLE_HUMMOCK_TRACE
-is_external_udf_enabled = get_env ENABLE_EXTERNAL_UDF
-is_wasm_udf_enabled = get_env ENABLE_WASM_UDF
-is_js_udf_enabled = get_env ENABLE_JS_UDF
-is_deno_udf_enabled = get_env ENABLE_DENO_UDF
-is_python_udf_enabled = get_env ENABLE_PYTHON_UDF
+  is_sanitizer_enabled = get_env ENABLE_SANITIZER
+  is_hdfs_backend = get_env ENABLE_HDFS
+  is_release = get_env ENABLE_RELEASE_PROFILE
+  is_not_release = not ${is_release}
+  is_dynamic_linking = get_env ENABLE_DYNAMIC_LINKING
+  is_hummock_trace = get_env ENABLE_HUMMOCK_TRACE
+  is_external_udf_enabled = get_env ENABLE_EXTERNAL_UDF
+  is_wasm_udf_enabled = get_env ENABLE_WASM_UDF
+  is_js_udf_enabled = get_env ENABLE_JS_UDF
+  is_deno_udf_enabled = get_env ENABLE_DENO_UDF
+  is_python_udf_enabled = get_env ENABLE_PYTHON_UDF
 
-if ${is_sanitizer_enabled}
-  set_env RISEDEV_CARGO_BUILD_EXTRA_ARGS "--timings -Zbuild-std --target ${CARGO_MAKE_RUST_TARGET_TRIPLE}"
-  set_env RISEDEV_BUILD_TARGET_DIR "${CARGO_MAKE_RUST_TARGET_TRIPLE}/"
-  set_env RISEDEV_RUSTFLAGS "-Ctarget-cpu=native --cfg tokio_unstable -Zsanitizer=thread"
-else
-  set_env RISEDEV_CARGO_BUILD_EXTRA_ARGS "--timings"
-  set_env RISEDEV_BUILD_TARGET_DIR ""
-end
-
-if ${is_hdfs_backend}
-  set_env BUILD_HDFS_BACKEND_CMD "-p risingwave_object_store --features hdfs-backend"
-else
-  set_env BUILD_HDFS_BACKEND_CMD ""
-end
-
-if ${is_not_release} and ${is_dynamic_linking}
-  set_env RISINGWAVE_FEATURE_FLAGS "--features rw-dynamic-link --no-default-features"
-else
-  set_env RISINGWAVE_FEATURE_FLAGS "--features rw-static-link"
-end
-
-if ${is_external_udf_enabled}
-  flags = get_env RISINGWAVE_FEATURE_FLAGS
-  set_env RISINGWAVE_FEATURE_FLAGS "${flags} --features external-udf"
-end
-
-if ${is_wasm_udf_enabled}
-  flags = get_env RISINGWAVE_FEATURE_FLAGS
-  set_env RISINGWAVE_FEATURE_FLAGS "${flags} --features wasm-udf"
-end
-
-if ${is_js_udf_enabled}
-  flags = get_env RISINGWAVE_FEATURE_FLAGS
-  set_env RISINGWAVE_FEATURE_FLAGS "${flags} --features js-udf"
-end
-
-if ${is_deno_udf_enabled}
-  flags = get_env RISINGWAVE_FEATURE_FLAGS
-  set_env RISINGWAVE_FEATURE_FLAGS "${flags} --features deno-udf"
-end
-
-if ${is_python_udf_enabled}
-  flags = get_env RISINGWAVE_FEATURE_FLAGS
-  set_env RISINGWAVE_FEATURE_FLAGS "${flags} --features python-udf"
-end
-
-if ${is_hummock_trace}
-  set_env BUILD_HUMMOCK_TRACE_CMD "-p risingwave_storage --features hm-trace"
-else
-  set_env BUILD_HUMMOCK_TRACE_CMD ""
-end
-
-is_ci = get_env RISINGWAVE_CI
-is_not_ci = not ${is_ci}
-
-if ${is_not_ci}
-  query_log_path = get_env RW_QUERY_LOG_PATH
-  no_query_log_path = not ${query_log_path}
-
-  if ${no_query_log_path}
-    set_env RW_QUERY_LOG_PATH "${PREFIX_LOG}"
-  fi
-
-  rust_log = get_env RUST_LOG
-  no_rust_log = not ${rust_log}
-
-  if ${no_rust_log}
-    set_env RUST_LOG "pgwire_query_log=info"
+  if ${is_sanitizer_enabled}
+    set_env RISEDEV_CARGO_BUILD_EXTRA_ARGS "--timings -Zbuild-std --target ${CARGO_MAKE_RUST_TARGET_TRIPLE}"
+    set_env RISEDEV_BUILD_TARGET_DIR "${CARGO_MAKE_RUST_TARGET_TRIPLE}/"
+    set_env RISEDEV_RUSTFLAGS "-Ctarget-cpu=native --cfg tokio_unstable -Zsanitizer=thread"
   else
-    set_env RUST_LOG "pgwire_query_log=info,${rust_log}"
+    set_env RISEDEV_CARGO_BUILD_EXTRA_ARGS "--timings"
+    set_env RISEDEV_BUILD_TARGET_DIR ""
   end
-end
 
-set_env TMUX "tmux -L risedev"
-''',
+  if ${is_hdfs_backend}
+    set_env BUILD_HDFS_BACKEND_CMD "-p risingwave_object_store --features hdfs-backend"
+  else
+    set_env BUILD_HDFS_BACKEND_CMD ""
+  end
+
+  if ${is_not_release} and ${is_dynamic_linking}
+    set_env RISINGWAVE_FEATURE_FLAGS "--features rw-dynamic-link --no-default-features"
+  else
+    set_env RISINGWAVE_FEATURE_FLAGS "--features rw-static-link"
+  end
+
+  if ${is_external_udf_enabled}
+    flags = get_env RISINGWAVE_FEATURE_FLAGS
+    set_env RISINGWAVE_FEATURE_FLAGS "${flags} --features external-udf"
+  end
+
+  if ${is_wasm_udf_enabled}
+    flags = get_env RISINGWAVE_FEATURE_FLAGS
+    set_env RISINGWAVE_FEATURE_FLAGS "${flags} --features wasm-udf"
+  end
+
+  if ${is_js_udf_enabled}
+    flags = get_env RISINGWAVE_FEATURE_FLAGS
+    set_env RISINGWAVE_FEATURE_FLAGS "${flags} --features js-udf"
+  end
+
+  if ${is_deno_udf_enabled}
+    flags = get_env RISINGWAVE_FEATURE_FLAGS
+    set_env RISINGWAVE_FEATURE_FLAGS "${flags} --features deno-udf"
+  end
+
+  if ${is_python_udf_enabled}
+    flags = get_env RISINGWAVE_FEATURE_FLAGS
+    set_env RISINGWAVE_FEATURE_FLAGS "${flags} --features python-udf"
+  end
+
+  if ${is_hummock_trace}
+    set_env BUILD_HUMMOCK_TRACE_CMD "-p risingwave_storage --features hm-trace"
+  else
+    set_env BUILD_HUMMOCK_TRACE_CMD ""
+  end
+
+  is_ci = get_env RISINGWAVE_CI
+  is_not_ci = not ${is_ci}
+
+  if ${is_not_ci}
+    query_log_path = get_env RW_QUERY_LOG_PATH
+    no_query_log_path = not ${query_log_path}
+
+    if ${no_query_log_path}
+      set_env RW_QUERY_LOG_PATH "${PREFIX_LOG}"
+    fi
+
+    rust_log = get_env RUST_LOG
+    no_rust_log = not ${rust_log}
+
+    if ${no_rust_log}
+      set_env RUST_LOG "pgwire_query_log=info"
+    else
+      set_env RUST_LOG "pgwire_query_log=info,${rust_log}"
+    end
+  end
+
+  set_env TMUX "tmux -L risedev"
+  ''',
 ]
 
 
@@ -322,7 +323,7 @@ description = "Codesign playground binary to support coredump"
 # codesign the binary before running.
 # https://developer.apple.com/forums/thread/694233?answerId=695943022#695943022
 condition = { env_set = [
-  "ENABLE_COREDUMP",
+    "ENABLE_COREDUMP",
 ], env = { "SYSTEM" = "darwin-arm64" } }
 script = '''
 #!/usr/bin/env bash
@@ -339,7 +340,7 @@ description = "Codesign all binaries to support coredump"
 # codesign the binary before running.
 # https://developer.apple.com/forums/thread/694233?answerId=695943022#695943022
 condition = { env_set = [
-  "ENABLE_COREDUMP",
+    "ENABLE_COREDUMP",
 ], env = { "SYSTEM" = "darwin-arm64" } }
 script = '''
 #!/usr/bin/env bash
@@ -374,9 +375,9 @@ category = "RiseDev - Build"
 description = "Copy RisngWave binaries to bin"
 condition = { env_set = ["ENABLE_BUILD_RUST"] }
 dependencies = [
-  "link-all-in-one-binaries",
-  "link-user-bin",
-  "codesign-binaries",
+    "link-all-in-one-binaries",
+    "link-user-bin",
+    "codesign-binaries",
 ]
 
 [tasks.b]
@@ -493,15 +494,15 @@ private = true
 category = "Misc"
 description = "Download all available components at once"
 dependencies = [
-  "download-maven",
-  "download-etcd",
-  "download-grafana",
-  "download-tempo",
-  "download-mcli",
-  "download-minio",
-  "download-prometheus",
-  "download-pubsub",
-  "download-redis",
+    "download-maven",
+    "download-etcd",
+    "download-grafana",
+    "download-tempo",
+    "download-mcli",
+    "download-minio",
+    "download-prometheus",
+    "download-pubsub",
+    "download-redis",
 ]
 
 [tasks.create-user-profiles-file]
@@ -509,7 +510,7 @@ private = true
 category = "RiseDev - Prepare"
 description = "Create user profiles file if not exists"
 condition = { files_not_exist = [
-  "${CARGO_MAKE_WORKSPACE_WORKING_DIRECTORY}/risedev-profiles.user.yml",
+    "${CARGO_MAKE_WORKSPACE_WORKING_DIRECTORY}/risedev-profiles.user.yml",
 ] }
 script = '''
 #!/usr/bin/env bash
@@ -536,34 +537,34 @@ EOF
 category = "RiseDev - Prepare"
 description = "Prepare dev cluster by downloading necessary tools and build required components"
 dependencies = [
-  "create-user-profiles-file",
-  "download-all",
-  "build-risingwave",
-  "build-connector-node",
-  "post-build-risingwave",
-  "prepare-config",
+    "create-user-profiles-file",
+    "download-all",
+    "build-risingwave",
+    "build-connector-node",
+    "post-build-risingwave",
+    "prepare-config",
 ]
 
 [tasks.pre-start-benchmark]
 category = "RiseDev - Prepare"
 description = "Download necessary tools to deploy a benchmark env"
 dependencies = [
-  "download-minio",
-  "download-mcli",
-  "download-etcd",
-  "download-grafana",
-  "download-prometheus",
-  "download-tempo",
-  "download-redis",
+    "download-minio",
+    "download-mcli",
+    "download-etcd",
+    "download-grafana",
+    "download-prometheus",
+    "download-tempo",
+    "download-redis",
 ]
 
 [tasks.pre-start-playground]
 category = "RiseDev - Prepare"
 description = "Preparation steps for playground"
 dependencies = [
-  "build-risingwave-playground",
-  "codesign-playground",
-  "build-connector-node",
+    "build-risingwave-playground",
+    "codesign-playground",
+    "build-connector-node",
 ]
 
 [tasks.check-risedev-env-file]
@@ -740,16 +741,16 @@ dependencies = ["k", "clean-data"]
 private = true
 category = "RiseDev - Check"
 install_crate = { min_version = "0.9.51", crate_name = "cargo-nextest", binary = "cargo", test_arg = [
-  "nextest",
-  "--help",
+    "nextest",
+    "--help",
 ], install_command = "binstall" }
 
 [tasks.install-llvm-cov]
 private = true
 category = "RiseDev - Check"
 install_crate = { min_version = "0.5.17", crate_name = "cargo-llvm-cov", binary = "cargo", test_arg = [
-  "llvm-cov",
-  "--help",
+    "llvm-cov",
+    "--help",
 ], install_command = "binstall" }
 
 [tasks.install-tools]
@@ -830,11 +831,11 @@ description = "🌟 Run unit tests"
 category = "RiseDev - Build"
 dependencies = ["prepare"]
 condition = { env_set = [
-  "ENABLE_BUILD_RW_CONNECTOR",
+    "ENABLE_BUILD_RW_CONNECTOR",
 ], files_modified = { input = [
-  "./java/connector-node/**/*",
+    "./java/connector-node/**/*",
 ], output = [
-  "./java/connector-node/assembly/target/**/*",
+    "./java/connector-node/assembly/target/**/*",
 ] } }
 description = "Build RisingWave Connector from source"
 script = '''
@@ -1054,8 +1055,8 @@ private = true
 category = "RiseDev - Check"
 description = "Run cargo hakari check and attempt to fix"
 install_crate = { min_version = "0.9.24", crate_name = "cargo-hakari", binary = "cargo", test_arg = [
-  "hakari",
-  "--help",
+    "hakari",
+    "--help",
 ], install_command = "binstall" }
 script = """
 #!/usr/bin/env bash
@@ -1072,8 +1073,8 @@ private = true
 category = "RiseDev - Check"
 description = "Run cargo sort check and attempt to fix"
 install_crate = { min_version = "1.0.9", crate_name = "cargo-sort", binary = "cargo", test_arg = [
-  "sort",
-  "--help",
+    "sort",
+    "--help",
 ], install_command = "binstall" }
 script = """
 #!/usr/bin/env bash
@@ -1135,7 +1136,7 @@ private = true
 category = "RiseDev - Check"
 description = "Run cargo typos-cli check"
 install_crate = { min_version = "1.20.4", crate_name = "typos-cli", binary = "typos", test_arg = [
-  "--help",
+    "--help",
 ], install_command = "binstall" }
 script = """
 #!/usr/bin/env bash
@@ -1151,8 +1152,8 @@ category = "RiseDev - Check"
 description = "Check unused dependencies"
 env = { RUSTFLAGS = "--cfg tokio_unstable" }
 install_crate = { min_version = "0.1.35", crate_name = "cargo-udeps", binary = "cargo", test_arg = [
-  "udeps",
-  "--help",
+    "udeps",
+    "--help",
 ], install_command = "binstall" }
 script = """
 #!/usr/bin/env bash
@@ -1179,13 +1180,13 @@ scripts/check/check-trailing-spaces.sh --fix
 [tasks.check-fast]
 category = "RiseDev - Check"
 dependencies = [
-  "warn-on-missing-tools",
-  # Disable hakari until we make sure it's useful
-  # "check-hakari",
-  "check-dep-sort",
-  "check-fmt",
-  "check-trailing-spaces",
-  "check-typos",
+    "warn-on-missing-tools",
+    # Disable hakari until we make sure it's useful
+    # "check-hakari",
+    "check-dep-sort",
+    "check-fmt",
+    "check-trailing-spaces",
+    "check-typos",
 ]
 description = "Perform part of the pre-CI checks that are fast to run"
 
@@ -1206,10 +1207,10 @@ alias = "check"
 [tasks.check-fix]
 category = "RiseDev - Check"
 dependencies = [
-  "warn-on-missing-tools",
-  "check-fast",
-  "check-clippy-fix",
-  "check-java-fix",
+    "warn-on-missing-tools",
+    "check-fast",
+    "check-clippy-fix",
+    "check-java-fix",
 ]
 script = """
 #!/usr/bin/env bash
@@ -1294,7 +1295,7 @@ echo "All processes has exited."
 [tasks.slt]
 category = "RiseDev - Test - SQLLogicTest"
 install_crate = { version = "0.20.1", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
-  "--help",
+    "--help",
 ], install_command = "binstall" }
 dependencies = ["check-and-load-risedev-env-file"]
 command = "sqllogictest"
