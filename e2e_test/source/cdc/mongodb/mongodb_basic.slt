@@ -2,7 +2,11 @@
 control substitution on
 
 statement ok
-CREATE TABLE users (_id JSONB PRIMARY KEY, payload JSONB) INCLUDE TIMESTAMP as commit_ts WITH (
+CREATE TABLE users (_id JSONB PRIMARY KEY, payload JSONB)
+INCLUDE TIMESTAMP as commit_ts
+INCLUDE DATABASE_NAME as database_name
+INCLUDE COLLECTION_NAME as collection_name
+WITH (
   connector = 'mongodb-cdc',
   mongodb.url = 'mongodb://mongodb:27017/?replicaSet=rs0',
   collection.name = 'random_data.*'
@@ -29,6 +33,13 @@ query I
 select count(*) from users where commit_ts = '1970-01-01 00:00:00+00:00';
 ----
 55
+
+query TT
+select database_name, collection_name FROM users LIMIT 2;
+----
+random_data users
+random_data users
+
 
 statement ok
 DROP TABLE users cascade

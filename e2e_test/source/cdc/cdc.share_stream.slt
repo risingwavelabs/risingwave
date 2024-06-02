@@ -40,7 +40,10 @@ create table rw.products_test ( id INT,
  name STRING,
  description STRING,
  PRIMARY KEY (id)
-) include timestamp as commit_ts from mysql_mytest table 'mytest.products';
+) include timestamp as commit_ts
+include database_name as database_name
+include table_name as table_name
+from mysql_mytest table 'mytest.products';
 
 # sleep to ensure (default,'Milk','Milk is a white liquid food') is consumed from Debezium message instead of backfill.
 sleep 10s
@@ -153,6 +156,14 @@ SELECT id,name,description FROM rw.products_test order by id limit 3
 102 car battery 12V car battery
 103 12-pack drill bits 12-pack of drill bits with sizes ranging from #40 to #3
 
+query TT
+select database_name, tabl_name from rw.products_test limit 3;
+----
+mytest products
+mytest products
+mytest products
+
+
 # commit_ts of historical records should be '1970-01-01 00:00:00+00:00'
 query I
 SELECT count(*) as cnt from rw.products_test where commit_ts = '1970-01-01 00:00:00+00:00'
@@ -247,7 +258,11 @@ CREATE TABLE person_new (
     credit_card varchar,
     city varchar,
     PRIMARY KEY (id)
-) INCLUDE TIMESTAMP AS commit_ts FROM pg_source TABLE 'public.person';
+) INCLUDE TIMESTAMP AS commit_ts
+INCLUDE DATABASE_NAME as database_name
+INCLUDE SCHEMA_NAME as schema_name
+INCLUDE TABLE_NAME as table_name
+FROM pg_source TABLE 'public.person';
 
 statement ok
 CREATE MATERIALIZED VIEW person_new_cnt AS SELECT COUNT(*) AS cnt FROM person_new;
