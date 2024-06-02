@@ -1312,7 +1312,7 @@ pub mod default {
         }
 
         pub fn shared_buffer_capacity_mb() -> usize {
-            4096
+            1024
         }
 
         pub fn shared_buffer_flush_ratio() -> f32 {
