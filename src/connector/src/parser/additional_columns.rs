@@ -25,7 +25,7 @@ use risingwave_pb::plan_common::{
     AdditionalCollectionName, AdditionalColumn, AdditionalColumnFilename, AdditionalColumnHeader,
     AdditionalColumnHeaders, AdditionalColumnKey, AdditionalColumnOffset,
     AdditionalColumnPartition, AdditionalColumnTimestamp, AdditionalDatabaseName,
-    AdditionalTableName,
+    AdditionalSchemaName, AdditionalTableName,
 };
 
 use crate::error::ConnectorResult;
@@ -71,6 +71,7 @@ pub static CDC_BACKFILL_TABLE_ADDITIONAL_COLUMNS: LazyLock<Option<HashSet<&'stat
         Some(HashSet::from([
             "timestamp",
             "database_name",
+            "schema_name",
             "table_name",
             "collection_name",
         ]))
@@ -222,6 +223,18 @@ pub fn build_additional_column_catalog(
             ),
             is_hidden: false,
         },
+        "schema_name" => ColumnCatalog {
+            column_desc: ColumnDesc::named_with_additional_column(
+                column_name,
+                column_id,
+                DataType::Varchar,
+                AdditionalColumn {
+                    column_type: Some(AdditionalColumnType::SchemaName(AdditionalSchemaName {})),
+                },
+            ),
+            is_hidden: false,
+        },
+
         "table_name" => ColumnCatalog {
             column_desc: ColumnDesc::named_with_additional_column(
                 column_name,

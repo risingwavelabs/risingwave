@@ -23,9 +23,11 @@ use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{Scalar, Timestamptz};
+use risingwave_common::types::{Scalar, ScalarImpl, Timestamptz};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
-use risingwave_connector::source::cdc::external::{CdcOffset, ExternalTableReader};
+use risingwave_connector::source::cdc::external::{
+    CdcOffset, ExternalTableReader, SchemaTableName,
+};
 use risingwave_pb::plan_common::additional_column::ColumnType;
 
 use super::external::ExternalStorageTable;
@@ -45,12 +47,14 @@ pub trait UpstreamTableRead {
     ) -> impl Future<Output = StreamExecutorResult<Option<CdcOffset>>> + Send + '_;
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct SnapshotReadArgs {
     pub current_pos: Option<OwnedRow>,
     pub rate_limit_rps: Option<u32>,
     pub pk_indices: Vec<usize>,
     pub additional_columns: Vec<ColumnDesc>,
+    pub schema_table_name: SchemaTableName,
+    pub database_name: String,
 }
 
 impl SnapshotReadArgs {
@@ -59,12 +63,16 @@ impl SnapshotReadArgs {
         rate_limit_rps: Option<u32>,
         pk_indices: Vec<usize>,
         additional_columns: Vec<ColumnDesc>,
+        schema_table_name: SchemaTableName,
+        database_name: String,
     ) -> Self {
         Self {
             current_pos,
             rate_limit_rps,
             pk_indices,
             additional_columns,
+            schema_table_name,
+            database_name,
         }
     }
 }
@@ -90,6 +98,8 @@ impl<T> UpstreamTableReader<T> {
 fn with_additional_columns(
     snapshot_chunk: StreamChunk,
     additional_columns: &[ColumnDesc],
+    schema_table_name: SchemaTableName,
+    database_name: String,
 ) -> StreamChunk {
     let (ops, mut columns, visibility) = snapshot_chunk.into_inner();
     for desc in additional_columns {
@@ -100,6 +110,24 @@ fn with_additional_columns(
                 visibility.len(),
                 Some(Timestamptz::default().to_scalar_value()),
             ),
+            &ColumnType::DatabaseName(_) => {
+                builder.append_n(
+                    visibility.len(),
+                    Some(ScalarImpl::from(database_name.clone())),
+                );
+            }
+            &ColumnType::SchemaName(_) => {
+                builder.append_n(
+                    visibility.len(),
+                    Some(ScalarImpl::from(schema_table_name.schema_name.clone())),
+                );
+            }
+            &ColumnType::TableName(_) => {
+                builder.append_n(
+                    visibility.len(),
+                    Some(ScalarImpl::from(schema_table_name.table_name.clone())),
+                );
+            }
             // set null for other additional columns
             _ => {
                 builder.append_n_null(visibility.len());
@@ -140,6 +168,8 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
         });
 
         let mut read_args = args;
+        let schema_table_name = read_args.schema_table_name.clone();
+        let database_name = read_args.database_name.clone();
         // loop to read all data from the table
         loop {
             tracing::debug!(
@@ -176,6 +206,8 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
                     yield Some(with_additional_columns(
                         chunk,
                         &read_args.additional_columns,
+                        schema_table_name.clone(),
+                        database_name.clone(),
                     ));
                     continue;
                 } else {
@@ -196,6 +228,8 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
                     yield Some(with_additional_columns(
                         chunk,
                         &read_args.additional_columns,
+                        schema_table_name.clone(),
+                        database_name.clone(),
                     ));
                 }
             }

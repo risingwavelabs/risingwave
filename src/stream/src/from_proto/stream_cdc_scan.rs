@@ -15,9 +15,12 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use anyhow::anyhow;
 use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_connector::source::cdc::external::{CdcTableType, SchemaTableName};
+use risingwave_connector::source::cdc::external::{
+    CdcTableType, ExternalTableConfig, SchemaTableName,
+};
 use risingwave_pb::plan_common::ExternalTableDesc;
 use risingwave_pb::stream_plan::StreamCdcScanNode;
 
@@ -88,19 +91,26 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
             .map(Into::into)
             .collect();
 
+        let table_config = serde_json::from_value::<ExternalTableConfig>(
+            serde_json::to_value(properties).unwrap(),
+        )
+        .map_err(|e| anyhow!("failed to parse external table config").context(e))?;
+        let schema_table_name =
+            SchemaTableName::new(table_config.schema.clone(), table_config.table.clone());
+        let database_name = table_config.database.clone();
         let table_reader = table_type
             .create_table_reader(
-                properties.clone(),
+                table_config,
                 table_schema.clone(),
                 table_pk_indices.clone(),
                 scan_options.snapshot_batch_size,
             )
             .await?;
 
-        let schema_table_name = SchemaTableName::from_properties(&properties);
         let external_table = ExternalStorageTable::new(
             TableId::new(table_desc.table_id),
             schema_table_name,
+            database_name,
             table_reader,
             table_schema,
             table_pk_order_types,

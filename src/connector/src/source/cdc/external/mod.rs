@@ -67,18 +67,17 @@ impl CdcTableType {
 
     pub async fn create_table_reader(
         &self,
-        with_properties: HashMap<String, String>,
+        config: ExternalTableConfig,
         schema: Schema,
         pk_indices: Vec<usize>,
         scan_limit: u32,
     ) -> ConnectorResult<ExternalTableReaderImpl> {
         match self {
             Self::MySql => Ok(ExternalTableReaderImpl::MySql(
-                MySqlExternalTableReader::new(with_properties, schema).await?,
+                MySqlExternalTableReader::new(config, schema).await?,
             )),
             Self::Postgres => Ok(ExternalTableReaderImpl::Postgres(
-                PostgresExternalTableReader::new(with_properties, schema, pk_indices, scan_limit)
-                    .await?,
+                PostgresExternalTableReader::new(config, schema, pk_indices, scan_limit).await?,
             )),
             _ => bail!("invalid external table type: {:?}", *self),
         }
@@ -309,15 +308,7 @@ impl ExternalTableReader for MySqlExternalTableReader {
 }
 
 impl MySqlExternalTableReader {
-    pub async fn new(
-        with_properties: HashMap<String, String>,
-        rw_schema: Schema,
-    ) -> ConnectorResult<Self> {
-        let config = serde_json::from_value::<ExternalTableConfig>(
-            serde_json::to_value(with_properties).unwrap(),
-        )
-        .context("failed to extract mysql connector properties")?;
-
+    pub async fn new(config: ExternalTableConfig, rw_schema: Schema) -> ConnectorResult<Self> {
         let mut opts_builder = mysql_async::OptsBuilder::default()
             .user(Some(config.username))
             .pass(Some(config.password))

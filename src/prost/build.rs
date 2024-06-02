@@ -140,6 +140,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute("plan_common.AdditionalColumnHeaders", "#[derive(Eq, Hash)]")
         .type_attribute("plan_common.AdditionalColumnOffset", "#[derive(Eq, Hash)]")
         .type_attribute("plan_common.AdditionalDatabaseName", "#[derive(Eq, Hash)]")
+        .type_attribute("plan_common.AdditionalSchemaName", "#[derive(Eq, Hash)]")
         .type_attribute("plan_common.AdditionalTableName", "#[derive(Eq, Hash)]")
         .type_attribute(
             "plan_common.AdditionalCollectionName",

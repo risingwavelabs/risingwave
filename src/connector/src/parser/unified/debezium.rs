@@ -64,6 +64,7 @@ const AFTER: &str = "after";
 const SOURCE: &str = "source";
 const SOURCE_TS_MS: &str = "ts_ms";
 const SOURCE_DB: &str = "db";
+const SOURCE_SCHEMA: &str = "schema";
 const SOURCE_TABLE: &str = "table";
 const SOURCE_COLLECTION: &str = "collection";
 
@@ -220,6 +221,11 @@ where
                                 .as_ref()
                                 .expect("value_accessor must be provided for upsert operation")
                                 .access(&[SOURCE, SOURCE_DB], Some(&desc.data_type)),
+                            &ColumnType::SchemaName(_) => self
+                                .value_accessor
+                                .as_ref()
+                                .expect("value_accessor must be provided for upsert operation")
+                                .access(&[SOURCE, SOURCE_SCHEMA], Some(&desc.data_type)),
                             &ColumnType::TableName(_) => self
                                 .value_accessor
                                 .as_ref()

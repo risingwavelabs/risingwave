@@ -26,6 +26,8 @@ pub struct ExternalStorageTable {
 
     schema_name: String,
 
+    database_name: String,
+
     table_reader: ExternalTableReaderImpl,
 
     /// The schema of the output columns, i.e., this table VIEWED BY some executor like
@@ -47,6 +49,7 @@ impl ExternalStorageTable {
             table_name,
             schema_name,
         }: SchemaTableName,
+        database_name: String,
         table_reader: ExternalTableReaderImpl,
         schema: Schema,
         pk_order_types: Vec<OrderType>,
@@ -56,6 +59,7 @@ impl ExternalStorageTable {
             table_id,
             table_name,
             schema_name,
+            database_name,
             table_reader,
             schema,
             pk_order_types,
@@ -92,5 +96,9 @@ impl ExternalStorageTable {
 
     pub fn qualified_table_name(&self) -> String {
         format!("{}.{}", self.schema_name, self.table_name)
+    }
+
+    pub fn database_name(&self) -> &str {
+        self.database_name.as_str()
     }
 }

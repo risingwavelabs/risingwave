@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
-use std::collections::HashMap;
 
 use anyhow::Context;
 use futures::stream::BoxStream;
@@ -115,7 +114,7 @@ impl ExternalTableReader for PostgresExternalTableReader {
 
 impl PostgresExternalTableReader {
     pub async fn new(
-        properties: HashMap<String, String>,
+        config: ExternalTableConfig,
         rw_schema: Schema,
         pk_indices: Vec<usize>,
         scan_limit: u32,
@@ -125,11 +124,6 @@ impl PostgresExternalTableReader {
             ?pk_indices,
             "create postgres external table reader"
         );
-
-        let config = serde_json::from_value::<ExternalTableConfig>(
-            serde_json::to_value(properties.clone()).unwrap(),
-        )
-        .context("failed to extract postgres connector properties")?;
 
         let mut pg_config = tokio_postgres::Config::new();
         pg_config
@@ -191,7 +185,7 @@ impl PostgresExternalTableReader {
                 .map(|i| rw_schema.fields[*i].name.clone())
                 .collect_vec();
 
-            let table_name = SchemaTableName::from_properties(&properties);
+            let table_name = SchemaTableName::new(config.schema.clone(), config.table.clone());
             let order_key = primary_keys.iter().join(",");
             let scan_sql = format!(
                 "SELECT {} FROM {} WHERE {} ORDER BY {} LIMIT {scan_limit}",
