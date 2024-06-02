@@ -91,12 +91,11 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
             .map(Into::into)
             .collect();
 
+        let schema_table_name = SchemaTableName::from_properties(&properties);
         let table_config = serde_json::from_value::<ExternalTableConfig>(
             serde_json::to_value(properties).unwrap(),
         )
         .map_err(|e| anyhow!("failed to parse external table config").context(e))?;
-        let schema_table_name =
-            SchemaTableName::new(table_config.schema.clone(), table_config.table.clone());
         let database_name = table_config.database.clone();
         let table_reader = table_type
             .create_table_reader(

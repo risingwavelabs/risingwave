@@ -185,7 +185,10 @@ impl PostgresExternalTableReader {
                 .map(|i| rw_schema.fields[*i].name.clone())
                 .collect_vec();
 
-            let table_name = SchemaTableName::new(config.schema.clone(), config.table.clone());
+            let table_name = SchemaTableName {
+                schema_name: config.schema.clone(),
+                table_name: config.table.clone(),
+            };
             let order_key = primary_keys.iter().join(",");
             let scan_sql = format!(
                 "SELECT {} FROM {} WHERE {} ORDER BY {} LIMIT {scan_limit}",

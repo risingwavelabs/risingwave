@@ -157,7 +157,7 @@ SELECT id,name,description FROM rw.products_test order by id limit 3
 103 12-pack drill bits 12-pack of drill bits with sizes ranging from #40 to #3
 
 query TT
-select database_name, tabl_name from rw.products_test limit 3;
+select database_name, table_name from rw.products_test limit 3;
 ----
 mytest products
 mytest products
@@ -290,6 +290,14 @@ query I
 SELECT * from person_new_cnt
 ----
 6
+
+query TTT
+SELECT database_name,schema_name,table_name from person_new limit 3;
+----
+cdc_test public person
+cdc_test public person
+cdc_test public person
+
 
 query ITTTT
 SELECT id,name,email_address,credit_card,city from person_new order by id;
