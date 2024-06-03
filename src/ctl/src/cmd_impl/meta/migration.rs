@@ -548,7 +548,7 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
                 if let Some(id) = s.connection_id.as_mut() {
                     *id = *connection_rewrite.get(id).unwrap();
                 }
-                for (_, secret_id) in &mut s.secret_ref {
+                for secret_id in s.secret_ref.values_mut() {
                     *secret_id = *secret_rewrite.get(secret_id).unwrap();
                 }
                 object_dependencies.extend(s.secret_ref.values().map(|id| {
