@@ -295,7 +295,7 @@ mod test {
             .await
             .unwrap();
         let builder = try_match_expand!(&parser.payload_builder, AccessBuilderImpl::Avro).unwrap();
-        let schema = builder.schema.clone();
+        let schema = builder.schema.original_schema.clone();
         let record = build_avro_data(&schema);
         assert_eq!(record.fields.len(), 11);
         let mut writer = Writer::with_codec(&schema, Vec::new(), Codec::Snappy);
@@ -488,7 +488,7 @@ mod test {
             .await
             .unwrap();
         let builder = try_match_expand!(&parser.payload_builder, AccessBuilderImpl::Avro).unwrap();
-        let schema = &builder.schema;
+        let schema = &builder.schema.original_schema;
         let mut null_record = Record::new(schema).unwrap();
         null_record.put("id", Value::Int(5));
         null_record.put("age", Value::Union(0, Box::new(Value::Null)));
@@ -560,8 +560,8 @@ mod test {
         let conf = new_avro_conf_from_local("simple-schema.avsc")
             .await
             .unwrap();
-        let mut writer = Writer::new(&conf.schema, Vec::new());
-        let record = build_avro_data(&conf.schema);
+        let mut writer = Writer::new(conf.schema.original_schema.as_ref(), Vec::new());
+        let record = build_avro_data(conf.schema.original_schema.as_ref());
         writer.append(record).unwrap();
         let encoded = writer.into_inner().unwrap();
         println!("path = {:?}", e2e_file_path("avro_simple_schema_bin.1"));
