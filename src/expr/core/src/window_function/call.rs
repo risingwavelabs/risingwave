@@ -22,7 +22,9 @@ use risingwave_pb::expr::window_frame::{PbBounds, PbExclusion};
 use risingwave_pb::expr::{PbWindowFrame, PbWindowFunction};
 use FrameBound::{CurrentRow, Following, Preceding, UnboundedFollowing, UnboundedPreceding};
 
-use super::{RangeFrameBounds, RowsFrameBound, RowsFrameBounds, WindowFuncKind};
+use super::{
+    RangeFrameBounds, RowsFrameBound, RowsFrameBounds, SessionFrameBounds, WindowFuncKind,
+};
 use crate::aggregate::AggArgs;
 use crate::Result;
 
@@ -125,6 +127,10 @@ impl Frame {
                 exclusion,
                 bounds: Some(PbBounds::Range(bounds.to_protobuf())),
             },
+            FrameBounds::Session(_) => {
+                // TODO()
+                todo!()
+            }
         }
     }
 }
@@ -135,6 +141,7 @@ pub enum FrameBounds {
     Rows(RowsFrameBounds),
     // Groups(GroupsFrameBounds),
     Range(RangeFrameBounds),
+    Session(SessionFrameBounds),
 }
 
 impl FrameBounds {
@@ -142,6 +149,7 @@ impl FrameBounds {
         match self {
             Self::Rows(bounds) => bounds.validate(),
             Self::Range(bounds) => bounds.validate(),
+            Self::Session(bounds) => bounds.validate(),
         }
     }
 
@@ -149,6 +157,7 @@ impl FrameBounds {
         match self {
             Self::Rows(RowsFrameBounds { start, .. }) => start.is_unbounded_preceding(),
             Self::Range(RangeFrameBounds { start, .. }) => start.is_unbounded_preceding(),
+            Self::Session(_) => false,
         }
     }
 
@@ -156,6 +165,7 @@ impl FrameBounds {
         match self {
             Self::Rows(RowsFrameBounds { end, .. }) => end.is_unbounded_following(),
             Self::Range(RangeFrameBounds { end, .. }) => end.is_unbounded_following(),
+            Self::Session(_) => false,
         }
     }
 
