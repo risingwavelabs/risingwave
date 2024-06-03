@@ -60,7 +60,7 @@ pub static COMPATIBLE_ADDITIONAL_COLUMNS: LazyLock<HashMap<&'static str, HashSet
             // mongodb-cdc doesn't support cdc backfill table
             (
                 MONGODB_CDC_CONNECTOR,
-                HashSet::from(["timestamp", "partition", "offset"]),
+                HashSet::from(["timestamp", "partition", "offset", "collection_name"]),
             ),
         ])
     });
@@ -73,7 +73,6 @@ pub static CDC_BACKFILL_TABLE_ADDITIONAL_COLUMNS: LazyLock<Option<HashSet<&'stat
             "database_name",
             "schema_name",
             "table_name",
-            "collection_name",
         ]))
     });
 
