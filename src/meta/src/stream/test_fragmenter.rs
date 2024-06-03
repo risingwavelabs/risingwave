@@ -345,9 +345,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
                 make_inputref(0),
                 make_inputref(1),
             ],
-            watermark_input_cols: vec![],
-            watermark_output_cols: vec![],
-            nondecreasing_exprs: vec![],
+            ..Default::default()
         })),
         fields: vec![], // TODO: fill this later
         input: vec![simple_agg_node_1],
