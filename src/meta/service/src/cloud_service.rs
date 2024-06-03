@@ -75,7 +75,7 @@ impl CloudService for CloudServiceImpl {
                 "unexpected source type, only kafka source is supported",
             ));
         }
-        let mut source_cfg: HashMap<String, String> = req.source_config.into_iter().collect();
+        let mut source_cfg = req.source_config.clone();
         // if connection_id provided, check whether endpoint service is available and resolve
         // broker rewrite map currently only support aws privatelink connection
         if let Some(connection_id_str) = source_cfg.get("connection.id") {
