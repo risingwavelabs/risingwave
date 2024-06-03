@@ -551,6 +551,13 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
                 for (_, secret_id) in &mut s.secret_ref {
                     *secret_id = *secret_rewrite.get(secret_id).unwrap();
                 }
+                object_dependencies.extend(s.secret_ref.values().map(|id| {
+                    object_dependency::ActiveModel {
+                        id: NotSet,
+                        oid: Set(*id as _),
+                        used_by: Set(s.id as _),
+                    }
+                }));
                 s.into()
             })
             .collect();
