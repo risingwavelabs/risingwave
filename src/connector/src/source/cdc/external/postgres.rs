@@ -241,7 +241,7 @@ impl PostgresExternalTableReader {
 
         let stream = match start_pk_row {
             Some(ref pk_row) => {
-                let params: Vec<Option<ScalarAdapter<'_>>> = pk_row
+                let params: Vec<Option<ScalarAdapter>> = pk_row
                     .iter()
                     .zip_eq_fast(self.prepared_scan_stmt.params())
                     .map(|(datum, ty)| {
@@ -260,7 +260,7 @@ impl PostgresExternalTableReader {
                     Self::get_normalized_table_name(&table_name),
                     order_key,
                 );
-                let params: Vec<Option<ScalarAdapter<'_>>> = vec![];
+                let params: Vec<Option<ScalarAdapter>> = vec![];
                 client.query_raw(&sql, &params).await?
             }
         };

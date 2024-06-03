@@ -20,6 +20,7 @@ use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockContextId};
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
+use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::CompressionAlgorithm;
 
 use crate::CtlContext;
 
@@ -63,6 +64,7 @@ pub fn build_compaction_config_vec(
     level0_overlapping_sub_level_compact_level_count: Option<u32>,
     enable_emergency_picker: Option<bool>,
     tombstone_reclaim_ratio: Option<u32>,
+    compress_algorithm: Option<CompressionAlgorithm>,
 ) -> Vec<MutableConfig> {
     let mut configs = vec![];
     if let Some(c) = max_bytes_for_level_base {
@@ -109,6 +111,9 @@ pub fn build_compaction_config_vec(
     }
     if let Some(c) = tombstone_reclaim_ratio {
         configs.push(MutableConfig::TombstoneReclaimRatio(c))
+    }
+    if let Some(c) = compress_algorithm {
+        configs.push(MutableConfig::CompressionAlgorithm(c))
     }
 
     configs

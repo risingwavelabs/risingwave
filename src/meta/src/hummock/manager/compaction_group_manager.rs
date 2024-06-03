@@ -407,9 +407,6 @@ impl HummockManager {
                 self.env.opts.partition_vnode_count,
             )
             .await?;
-        self.group_to_table_vnode_partition
-            .write()
-            .insert(result.0, result.1);
 
         Ok(result.0)
     }
@@ -676,14 +673,6 @@ impl HummockManager {
             compaction_group_manager.write_limit
         );
 
-        {
-            // 2. Restore the memory data structure according to the memory of the compaction group config.
-            let mut group_to_table_vnode_partition = self.group_to_table_vnode_partition.write();
-            for (cg_id, table_vnode_partition) in restore_cg_to_partition_vnode {
-                group_to_table_vnode_partition.insert(cg_id, table_vnode_partition);
-            }
-        }
-
         Ok(())
     }
 }
@@ -888,6 +877,11 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
             }
             MutableConfig::TombstoneReclaimRatio(c) => {
                 target.tombstone_reclaim_ratio = *c;
+            }
+
+            MutableConfig::CompressionAlgorithm(c) => {
+                target.compression_algorithm[c.get_level() as usize]
+                    .clone_from(&c.compression_algorithm);
             }
         }
     }

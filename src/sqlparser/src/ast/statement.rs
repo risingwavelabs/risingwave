@@ -13,25 +13,29 @@
 // limitations under the License.
 
 use core::fmt;
+use core::fmt::Formatter;
 use std::fmt::Write;
 
 use itertools::Itertools;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
+use winnow::PResult;
 
 use super::ddl::SourceWatermark;
 use super::legacy_source::{parse_source_schema, CompatibleSourceSchema};
-use super::{EmitMode, Ident, ObjectType, Query};
+use super::{EmitMode, Ident, ObjectType, Query, Value};
 use crate::ast::{
     display_comma_separated, display_separated, ColumnDef, ObjectName, SqlOption, TableConstraint,
 };
 use crate::keywords::Keyword;
-use crate::parser::{IncludeOption, IsOptional, Parser, ParserError, UPSTREAM_SOURCE_KEY};
+use crate::parser::{IncludeOption, IsOptional, Parser, UPSTREAM_SOURCE_KEY};
+use crate::parser_err;
+use crate::parser_v2::literal_u32;
 use crate::tokenizer::Token;
 
 /// Consumes token from the parser into an AST node.
 pub trait ParseTo: Sized {
-    fn parse_to(parser: &mut Parser) -> Result<Self, ParserError>;
+    fn parse_to(parser: &mut Parser<'_>) -> PResult<Self>;
 }
 
 #[macro_export]
@@ -131,7 +135,7 @@ impl fmt::Display for Format {
 }
 
 impl Format {
-    pub fn from_keyword(s: &str) -> Result<Self, ParserError> {
+    pub fn from_keyword(s: &str) -> PResult<Self> {
         Ok(match s {
             "DEBEZIUM" => Format::Debezium,
             "DEBEZIUM_MONGO" => Format::DebeziumMongo,
@@ -141,12 +145,9 @@ impl Format {
             "UPSERT" => Format::Upsert,
             "NATIVE" => Format::Native, // used internally for schema change
             "NONE" => Format::None,     // used by iceberg
-            _ => {
-                return Err(ParserError::ParserError(
-                    "expected CANAL | PROTOBUF | DEBEZIUM | MAXWELL | PLAIN | NATIVE | NONE after FORMAT"
-                        .to_string(),
-                ));
-            }
+            _ => parser_err!(
+                "expected CANAL | PROTOBUF | DEBEZIUM | MAXWELL | PLAIN | NATIVE | NONE after FORMAT"
+            ),
         })
     }
 }
@@ -187,7 +188,7 @@ impl fmt::Display for Encode {
 }
 
 impl Encode {
-    pub fn from_keyword(s: &str) -> Result<Self, ParserError> {
+    pub fn from_keyword(s: &str) -> PResult<Self> {
         Ok(match s {
             "AVRO" => Encode::Avro,
             "TEXT" => Encode::Text,
@@ -198,10 +199,9 @@ impl Encode {
             "TEMPLATE" => Encode::Template,
             "NATIVE" => Encode::Native, // used internally for schema change
             "NONE" => Encode::None, // used by iceberg
-            _ => return Err(ParserError::ParserError(
+            _ => parser_err!(
                 "expected AVRO | BYTES | CSV | PROTOBUF | JSON | NATIVE | TEMPLATE | NONE after Encode"
-                    .to_string(),
-            )),
+            ),
         })
     }
 }
@@ -216,7 +216,7 @@ pub struct ConnectorSchema {
     pub key_encode: Option<Encode>,
 }
 
-impl Parser {
+impl Parser<'_> {
     /// Peek the next tokens to see if it is `FORMAT` or `ROW FORMAT` (for compatibility).
     fn peek_source_schema_format(&mut self) -> bool {
         (self.peek_nth_any_of_keywords(0, &[Keyword::ROW])
@@ -229,7 +229,7 @@ impl Parser {
         &mut self,
         connector: &str,
         cdc_source_job: bool,
-    ) -> Result<CompatibleSourceSchema, ParserError> {
+    ) -> PResult<CompatibleSourceSchema> {
         // row format for cdc source must be debezium json
         // row format for nexmark source must be native
         // default row format for datagen source is native
@@ -246,10 +246,10 @@ impl Parser {
             if self.peek_source_schema_format() {
                 let schema = parse_source_schema(self)?.into_v2();
                 if schema != expected {
-                    return Err(ParserError::ParserError(format!(
+                    parser_err!(
                         "Row format for CDC connectors should be \
                          either omitted or set to `{expected}`",
-                    )));
+                    );
                 }
             }
             Ok(expected.into())
@@ -258,10 +258,10 @@ impl Parser {
             if self.peek_source_schema_format() {
                 let schema = parse_source_schema(self)?.into_v2();
                 if schema != expected {
-                    return Err(ParserError::ParserError(format!(
+                    parser_err!(
                         "Row format for nexmark connectors should be \
                          either omitted or set to `{expected}`",
-                    )));
+                    );
                 }
             }
             Ok(expected.into())
@@ -276,10 +276,10 @@ impl Parser {
             if self.peek_source_schema_format() {
                 let schema = parse_source_schema(self)?.into_v2();
                 if schema != expected {
-                    return Err(ParserError::ParserError(format!(
+                    parser_err!(
                         "Row format for iceberg connectors should be \
                          either omitted or set to `{expected}`",
-                    )));
+                    );
                 }
             }
             Ok(expected.into())
@@ -289,7 +289,7 @@ impl Parser {
     }
 
     /// Parse `FORMAT ... ENCODE ... (...)`.
-    pub fn parse_schema(&mut self) -> Result<Option<ConnectorSchema>, ParserError> {
+    pub fn parse_schema(&mut self) -> PResult<Option<ConnectorSchema>> {
         if !self.parse_keyword(Keyword::FORMAT) {
             return Ok(None);
         }
@@ -388,7 +388,7 @@ impl fmt::Display for ConnectorSchema {
 }
 
 impl ParseTo for CreateSourceStatement {
-    fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
+    fn parse_to(p: &mut Parser<'_>) -> PResult<Self> {
         impl_parse_to!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], p);
         impl_parse_to!(source_name: ObjectName, p);
 
@@ -404,9 +404,7 @@ impl ParseTo for CreateSourceStatement {
         let connector: String = option.map(|opt| opt.value.to_string()).unwrap_or_default();
         let cdc_source_job = connector.contains("-cdc");
         if cdc_source_job && (!columns.is_empty() || !constraints.is_empty()) {
-            return Err(ParserError::ParserError(
-                "CDC source cannot define columns and constraints".to_string(),
-            ));
+            parser_err!("CDC source cannot define columns and constraints");
         }
 
         // row format for nexmark source must be native
@@ -523,7 +521,7 @@ pub struct CreateSinkStatement {
 }
 
 impl ParseTo for CreateSinkStatement {
-    fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
+    fn parse_to(p: &mut Parser<'_>) -> PResult<Self> {
         impl_parse_to!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], p);
         impl_parse_to!(sink_name: ObjectName, p);
 
@@ -543,7 +541,7 @@ impl ParseTo for CreateSinkStatement {
             let query = Box::new(p.parse_query()?);
             CreateSink::AsQuery(query)
         } else {
-            p.expected("FROM or AS after CREATE SINK sink_name", p.peek_token())?
+            p.expected("FROM or AS after CREATE SINK sink_name")?
         };
 
         let emit_mode: Option<EmitMode> = p.parse_emit_mode()?;
@@ -551,14 +549,12 @@ impl ParseTo for CreateSinkStatement {
         // This check cannot be put into the `WithProperties::parse_to`, since other
         // statements may not need the with properties.
         if !p.peek_nth_any_of_keywords(0, &[Keyword::WITH]) && into_table_name.is_none() {
-            p.expected("WITH", p.peek_token())?
+            p.expected("WITH")?
         }
         impl_parse_to!(with_properties: WithProperties, p);
 
         if with_properties.0.is_empty() && into_table_name.is_none() {
-            return Err(ParserError::ParserError(
-                "sink properties not provided".to_string(),
-            ));
+            parser_err!("sink properties not provided");
         }
 
         let sink_schema = p.parse_schema()?;
@@ -615,7 +611,7 @@ pub struct CreateSubscriptionStatement {
 }
 
 impl ParseTo for CreateSubscriptionStatement {
-    fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
+    fn parse_to(p: &mut Parser<'_>) -> PResult<Self> {
         impl_parse_to!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], p);
         impl_parse_to!(subscription_name: ObjectName, p);
 
@@ -623,10 +619,7 @@ impl ParseTo for CreateSubscriptionStatement {
             impl_parse_to!(from_name: ObjectName, p);
             from_name
         } else {
-            p.expected(
-                "FROM after CREATE SUBSCRIPTION subscription_name",
-                p.peek_token(),
-            )?
+            p.expected("FROM after CREATE SUBSCRIPTION subscription_name")?
         };
 
         // let emit_mode = p.parse_emit_mode()?;
@@ -634,14 +627,12 @@ impl ParseTo for CreateSubscriptionStatement {
         // This check cannot be put into the `WithProperties::parse_to`, since other
         // statements may not need the with properties.
         if !p.peek_nth_any_of_keywords(0, &[Keyword::WITH]) {
-            p.expected("WITH", p.peek_token())?
+            p.expected("WITH")?
         }
         impl_parse_to!(with_properties: WithProperties, p);
 
         if with_properties.0.is_empty() {
-            return Err(ParserError::ParserError(
-                "subscription properties not provided".to_string(),
-            ));
+            parser_err!("subscription properties not provided");
         }
 
         Ok(Self {
@@ -702,7 +693,7 @@ pub struct DeclareCursorStatement {
 }
 
 impl ParseTo for DeclareCursorStatement {
-    fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
+    fn parse_to(p: &mut Parser<'_>) -> PResult<Self> {
         impl_parse_to!(cursor_name: ObjectName, p);
 
         let declare_cursor = if !p.parse_keyword(Keyword::SUBSCRIPTION) {
@@ -745,14 +736,11 @@ pub struct FetchCursorStatement {
 }
 
 impl ParseTo for FetchCursorStatement {
-    fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
+    fn parse_to(p: &mut Parser<'_>) -> PResult<Self> {
         let count = if p.parse_keyword(Keyword::NEXT) {
             1
         } else {
-            let count_str = p.parse_number_value()?;
-            count_str.parse::<u32>().map_err(|e| {
-                ParserError::ParserError(format!("Could not parse '{}' as i32: {}", count_str, e))
-            })?
+            literal_u32(p)?
         };
         p.expect_keyword(Keyword::FROM)?;
         impl_parse_to!(cursor_name: ObjectName, p);
@@ -785,7 +773,7 @@ pub struct CloseCursorStatement {
 }
 
 impl ParseTo for CloseCursorStatement {
-    fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
+    fn parse_to(p: &mut Parser<'_>) -> PResult<Self> {
         let cursor_name = if p.parse_keyword(Keyword::ALL) {
             None
         } else {
@@ -822,14 +810,12 @@ pub struct CreateConnectionStatement {
 }
 
 impl ParseTo for CreateConnectionStatement {
-    fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
+    fn parse_to(p: &mut Parser<'_>) -> PResult<Self> {
         impl_parse_to!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], p);
         impl_parse_to!(connection_name: ObjectName, p);
         impl_parse_to!(with_properties: WithProperties, p);
         if with_properties.0.is_empty() {
-            return Err(ParserError::ParserError(
-                "connection properties not provided".to_string(),
-            ));
+            parser_err!("connection properties not provided");
         }
 
         Ok(Self {
@@ -852,6 +838,47 @@ impl fmt::Display for CreateConnectionStatement {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct CreateSecretStatement {
+    pub if_not_exists: bool,
+    pub secret_name: ObjectName,
+    pub credential: Value,
+    pub with_properties: WithProperties,
+}
+
+impl ParseTo for CreateSecretStatement {
+    fn parse_to(parser: &mut Parser<'_>) -> PResult<Self> {
+        impl_parse_to!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], parser);
+        impl_parse_to!(secret_name: ObjectName, parser);
+        impl_parse_to!(with_properties: WithProperties, parser);
+        let mut credential = Value::Null;
+        if parser.parse_keyword(Keyword::AS) {
+            credential = parser.parse_value()?;
+        }
+        Ok(Self {
+            if_not_exists,
+            secret_name,
+            credential,
+            with_properties,
+        })
+    }
+}
+
+impl fmt::Display for CreateSecretStatement {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        let mut v: Vec<String> = vec![];
+        impl_fmt_display!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], v, self);
+        impl_fmt_display!(secret_name, v, self);
+        impl_fmt_display!(with_properties, v, self);
+        if self.credential != Value::Null {
+            v.push("AS".to_string());
+            impl_fmt_display!(credential, v, self);
+        }
+        v.iter().join(" ").fmt(f)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct AstVec<T>(pub Vec<T>);
 
 impl<T: fmt::Display> fmt::Display for AstVec<T> {
@@ -865,7 +892,7 @@ impl<T: fmt::Display> fmt::Display for AstVec<T> {
 pub struct WithProperties(pub Vec<SqlOption>);
 
 impl ParseTo for WithProperties {
-    fn parse_to(parser: &mut Parser) -> Result<Self, ParserError> {
+    fn parse_to(parser: &mut Parser<'_>) -> PResult<Self> {
         Ok(Self(
             parser.parse_options_with_preceding_keyword(Keyword::WITH)?,
         ))
@@ -908,7 +935,7 @@ pub struct RowSchemaLocation {
 }
 
 impl ParseTo for RowSchemaLocation {
-    fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
+    fn parse_to(p: &mut Parser<'_>) -> PResult<Self> {
         impl_parse_to!([Keyword::ROW, Keyword::SCHEMA, Keyword::LOCATION], p);
         impl_parse_to!(value: AstString, p);
         Ok(Self { value })
@@ -931,7 +958,7 @@ impl fmt::Display for RowSchemaLocation {
 pub struct AstString(pub String);
 
 impl ParseTo for AstString {
-    fn parse_to(parser: &mut Parser) -> Result<Self, ParserError> {
+    fn parse_to(parser: &mut Parser<'_>) -> PResult<Self> {
         Ok(Self(parser.parse_literal_string()?))
     }
 }
@@ -954,7 +981,7 @@ pub enum AstOption<T> {
 }
 
 impl<T: ParseTo> ParseTo for AstOption<T> {
-    fn parse_to(parser: &mut Parser) -> Result<Self, ParserError> {
+    fn parse_to(parser: &mut Parser<'_>) -> PResult<Self> {
         match T::parse_to(parser) {
             Ok(t) => Ok(AstOption::Some(t)),
             Err(_) => Ok(AstOption::None),
@@ -1074,17 +1101,14 @@ impl UserOptionsBuilder {
 }
 
 impl ParseTo for UserOptions {
-    fn parse_to(parser: &mut Parser) -> Result<Self, ParserError> {
+    fn parse_to(parser: &mut Parser<'_>) -> PResult<Self> {
         let mut builder = UserOptionsBuilder::default();
         let add_option = |item: &mut Option<UserOption>, user_option| {
             let old_value = item.replace(user_option);
             if old_value.is_some() {
-                Err(ParserError::ParserError(
-                    "conflicting or redundant options".to_string(),
-                ))
-            } else {
-                Ok(())
+                parser_err!("conflicting or redundant options");
             }
+            Ok(())
         };
         let _ = parser.parse_keyword(Keyword::WITH);
         loop {
@@ -1094,6 +1118,7 @@ impl ParseTo for UserOptions {
             }
 
             if let Token::Word(ref w) = token.token {
+                let checkpoint = *parser;
                 parser.next_token();
                 let (item_mut_ref, user_option) = match w.keyword {
                     Keyword::SUPERUSER => (&mut builder.super_user, UserOption::SuperUser),
@@ -1126,10 +1151,10 @@ impl ParseTo for UserOptions {
                         (&mut builder.password, UserOption::OAuth(options))
                     }
                     _ => {
-                        parser.expected(
+                        parser.expected_at(
+                            checkpoint,
                             "SUPERUSER | NOSUPERUSER | CREATEDB | NOCREATEDB | LOGIN \
                             | NOLOGIN | CREATEUSER | NOCREATEUSER | [ENCRYPTED] PASSWORD | NULL | OAUTH",
-                            token,
                         )?;
                         unreachable!()
                     }
@@ -1139,7 +1164,6 @@ impl ParseTo for UserOptions {
                 parser.expected(
                     "SUPERUSER | NOSUPERUSER | CREATEDB | NOCREATEDB | LOGIN | NOLOGIN \
                         | CREATEUSER | NOCREATEUSER | [ENCRYPTED] PASSWORD | NULL | OAUTH",
-                    token,
                 )?
             }
         }
@@ -1158,7 +1182,7 @@ impl fmt::Display for UserOptions {
 }
 
 impl ParseTo for CreateUserStatement {
-    fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
+    fn parse_to(p: &mut Parser<'_>) -> PResult<Self> {
         impl_parse_to!(user_name: ObjectName, p);
         impl_parse_to!(with_options: UserOptions, p);
 
@@ -1201,7 +1225,7 @@ impl fmt::Display for AlterUserStatement {
 }
 
 impl ParseTo for AlterUserStatement {
-    fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
+    fn parse_to(p: &mut Parser<'_>) -> PResult<Self> {
         impl_parse_to!(user_name: ObjectName, p);
         impl_parse_to!(mode: AlterUserMode, p);
 
@@ -1210,7 +1234,7 @@ impl ParseTo for AlterUserStatement {
 }
 
 impl ParseTo for AlterUserMode {
-    fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
+    fn parse_to(p: &mut Parser<'_>) -> PResult<Self> {
         if p.parse_keyword(Keyword::RENAME) {
             p.expect_keyword(Keyword::TO)?;
             impl_parse_to!(new_name: ObjectName, p);
@@ -1243,7 +1267,7 @@ pub struct DropStatement {
 //     drop_mode: AstOption<DropMode>,
 // });
 impl ParseTo for DropStatement {
-    fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
+    fn parse_to(p: &mut Parser<'_>) -> PResult<Self> {
         impl_parse_to!(object_type: ObjectType, p);
         impl_parse_to!(if_exists => [Keyword::IF, Keyword::EXISTS], p);
         let object_name = p.parse_object_name()?;
@@ -1276,13 +1300,13 @@ pub enum DropMode {
 }
 
 impl ParseTo for DropMode {
-    fn parse_to(parser: &mut Parser) -> Result<Self, ParserError> {
+    fn parse_to(parser: &mut Parser<'_>) -> PResult<Self> {
         let drop_mode = if parser.parse_keyword(Keyword::CASCADE) {
             DropMode::Cascade
         } else if parser.parse_keyword(Keyword::RESTRICT) {
             DropMode::Restrict
         } else {
-            return parser.expected("CASCADE | RESTRICT", parser.peek_token());
+            return parser.expected("CASCADE | RESTRICT");
         };
         Ok(drop_mode)
     }

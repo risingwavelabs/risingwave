@@ -309,9 +309,12 @@ pub struct MetaConfig {
     #[serde(default)]
     pub do_not_config_object_storage_lifecycle: bool,
 
+    /// Count of partition in split group. Meta will assign this value to every new group when it splits from default-group by automatically.
+    /// Each partition contains aligned data of `VirtualNode::COUNT / partition_vnode_count` consecutive virtual-nodes of one state table.
     #[serde(default = "default::meta::partition_vnode_count")]
     pub partition_vnode_count: u32,
 
+    /// The threshold of write throughput to trigger a group split. Increase this configuration value to avoid split too many groups with few data write.
     #[serde(default = "default::meta::table_write_throughput_threshold")]
     pub table_write_throughput_threshold: u64,
 
@@ -334,8 +337,23 @@ pub struct MetaConfig {
     #[config_doc(nested)]
     pub compaction_config: CompactionConfig,
 
-    #[serde(default = "default::meta::hybird_partition_vnode_count")]
-    pub hybird_partition_vnode_count: u32,
+    /// Count of partitions of tables in default group and materialized view group.
+    /// The meta node will decide according to some strategy whether to cut the boundaries of the file according to the vnode alignment.
+    /// Each partition contains aligned data of `VirtualNode::COUNT / hybrid_partition_vnode_count` consecutive virtual-nodes of one state table.
+    /// Set it zero to disable this feature.
+    #[serde(default = "default::meta::hybrid_partition_vnode_count")]
+    pub hybrid_partition_vnode_count: u32,
+
+    /// The threshold of table size in one compact task to decide whether to partition one table into `hybrid_partition_vnode_count` parts, which belongs to default group and materialized view group.
+    /// Set it max value of 64-bit number to disable this feature.
+    #[serde(default = "default::meta::compact_task_table_size_partition_threshold_low")]
+    pub compact_task_table_size_partition_threshold_low: u64,
+
+    /// The threshold of table size in one compact task to decide whether to partition one table into `partition_vnode_count` parts, which belongs to default group and materialized view group.
+    /// Set it max value of 64-bit number to disable this feature.
+    #[serde(default = "default::meta::compact_task_table_size_partition_threshold_high")]
+    pub compact_task_table_size_partition_threshold_high: u64,
+
     #[serde(default = "default::meta::event_log_enabled")]
     pub event_log_enabled: bool,
     /// Keeps the latest N events per channel.
@@ -348,6 +366,9 @@ pub struct MetaConfig {
     /// Whether compactor should rewrite row to remove dropped column.
     #[serde(default = "default::meta::enable_dropped_column_reclaim")]
     pub enable_dropped_column_reclaim: bool,
+
+    #[serde(default = "default::meta::secret_store_private_key")]
+    pub secret_store_private_key: Vec<u8>,
 }
 
 #[derive(Copy, Clone, Debug, Default)]
@@ -509,6 +530,15 @@ pub struct BatchConfig {
     /// This is the secs used to mask a worker unavailable temporarily.
     #[serde(default = "default::batch::mask_worker_temporary_secs")]
     pub mask_worker_temporary_secs: usize,
+
+    /// Keywords on which SQL option redaction is based in the query log.
+    /// A SQL option with a name containing any of these keywords will be redacted.
+    #[serde(default = "default::batch::redact_sql_option_keywords")]
+    pub redact_sql_option_keywords: Vec<String>,
+
+    /// Enable the spill out to disk feature for batch queries.
+    #[serde(default = "default::batch::enable_spill")]
+    pub enable_spill: bool,
 }
 
 /// The section `[streaming]` in `risingwave.toml`.
@@ -675,6 +705,9 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::sstable_id_remote_fetch_number")]
     pub sstable_id_remote_fetch_number: u32,
 
+    #[serde(default = "default::storage::min_sstable_size_mb")]
+    pub min_sstable_size_mb: u32,
+
     #[serde(default)]
     pub data_file_cache: FileCacheConfig,
 
@@ -687,10 +720,6 @@ pub struct StorageConfig {
     /// Whether to enable streaming upload for sstable.
     #[serde(default = "default::storage::min_sst_size_for_streaming_upload")]
     pub min_sst_size_for_streaming_upload: u64,
-
-    /// Max sub compaction task numbers
-    #[serde(default = "default::storage::max_sub_compaction")]
-    pub max_sub_compaction: u32,
 
     #[serde(default = "default::storage::max_concurrent_compaction_task_number")]
     pub max_concurrent_compaction_task_number: u64,
@@ -784,12 +813,6 @@ pub struct FileCacheConfig {
     #[serde(default = "default::file_cache::file_capacity_mb")]
     pub file_capacity_mb: usize,
 
-    #[serde(default = "default::file_cache::device_align")]
-    pub device_align: usize,
-
-    #[serde(default = "default::file_cache::device_io_size")]
-    pub device_io_size: usize,
-
     #[serde(default = "default::file_cache::flushers")]
     pub flushers: usize,
 
@@ -808,8 +831,8 @@ pub struct FileCacheConfig {
     #[serde(default = "default::file_cache::insert_rate_limit_mb")]
     pub insert_rate_limit_mb: usize,
 
-    #[serde(default = "default::file_cache::catalog_bits")]
-    pub catalog_bits: usize,
+    #[serde(default = "default::file_cache::indexer_shards")]
+    pub indexer_shards: usize,
 
     #[serde(default = "default::file_cache::compression")]
     pub compression: String,
@@ -930,11 +953,31 @@ pub struct StreamingDeveloperConfig {
     #[serde(default = "default::developer::memory_controller_threshold_stable")]
     pub memory_controller_threshold_stable: f64,
 
+    #[serde(default = "default::developer::memory_controller_eviction_factor_aggressive")]
+    pub memory_controller_eviction_factor_aggressive: f64,
+
+    #[serde(default = "default::developer::memory_controller_eviction_factor_graceful")]
+    pub memory_controller_eviction_factor_graceful: f64,
+
+    #[serde(default = "default::developer::memory_controller_eviction_factor_stable")]
+    pub memory_controller_eviction_factor_stable: f64,
+
+    #[serde(default = "default::developer::memory_controller_sequence_tls_step")]
+    pub memory_controller_sequence_tls_step: u64,
+
+    #[serde(default = "default::developer::memory_controller_sequence_tls_lag")]
+    pub memory_controller_sequence_tls_lag: u64,
+
     #[serde(default = "default::developer::stream_enable_arrangement_backfill")]
     /// Enable arrangement backfill
     /// If true, the arrangement backfill will be disabled,
     /// even if session variable set.
     pub enable_arrangement_backfill: bool,
+
+    #[serde(default = "default::developer::stream_high_join_amplification_threshold")]
+    /// If number of hash join matches exceeds this threshold number,
+    /// it will be logged.
+    pub high_join_amplification_threshold: usize,
 }
 
 /// The subsections `[batch.developer]`.
@@ -1245,8 +1288,16 @@ pub mod default {
             1024 * 1024 * 1024 // 1GB
         }
 
-        pub fn hybird_partition_vnode_count() -> u32 {
+        pub fn hybrid_partition_vnode_count() -> u32 {
             4
+        }
+
+        pub fn compact_task_table_size_partition_threshold_low() -> u64 {
+            128 * 1024 * 1024 // 128MB
+        }
+
+        pub fn compact_task_table_size_partition_threshold_high() -> u64 {
+            512 * 1024 * 1024 // 512MB
         }
 
         pub fn event_log_enabled() -> bool {
@@ -1268,8 +1319,13 @@ pub mod default {
         pub fn parallelism_control_trigger_first_delay_sec() -> u64 {
             30
         }
+
         pub fn enable_dropped_column_reclaim() -> bool {
             false
+        }
+
+        pub fn secret_store_private_key() -> Vec<u8> {
+            "demo-secret-private-key".as_bytes().to_vec()
         }
     }
 
@@ -1386,13 +1442,13 @@ pub mod default {
             10
         }
 
+        pub fn min_sstable_size_mb() -> u32 {
+            32
+        }
+
         pub fn min_sst_size_for_streaming_upload() -> u64 {
             // 32MB
             32 * 1024 * 1024
-        }
-
-        pub fn max_sub_compaction() -> u32 {
-            4
         }
 
         pub fn max_concurrent_compaction_task_number() -> u64 {
@@ -1434,6 +1490,7 @@ pub mod default {
         pub fn max_preload_io_retry_times() -> usize {
             3
         }
+
         pub fn mem_table_spill_threshold() -> usize {
             4 << 20
         }
@@ -1474,7 +1531,6 @@ pub mod default {
     }
 
     pub mod file_cache {
-
         pub fn dir() -> String {
             "".to_string()
         }
@@ -1485,14 +1541,6 @@ pub mod default {
 
         pub fn file_capacity_mb() -> usize {
             64
-        }
-
-        pub fn device_align() -> usize {
-            4096
-        }
-
-        pub fn device_io_size() -> usize {
-            16 * 1024
         }
 
         pub fn flushers() -> usize {
@@ -1519,8 +1567,8 @@ pub mod default {
             0
         }
 
-        pub fn catalog_bits() -> usize {
-            6
+        pub fn indexer_shards() -> usize {
+            64
         }
 
         pub fn compression() -> String {
@@ -1648,14 +1696,41 @@ pub mod default {
         pub fn memory_controller_threshold_aggressive() -> f64 {
             0.9
         }
+
         pub fn memory_controller_threshold_graceful() -> f64 {
             0.8
         }
+
         pub fn memory_controller_threshold_stable() -> f64 {
             0.7
         }
+
+        pub fn memory_controller_eviction_factor_aggressive() -> f64 {
+            2.0
+        }
+
+        pub fn memory_controller_eviction_factor_graceful() -> f64 {
+            1.5
+        }
+
+        pub fn memory_controller_eviction_factor_stable() -> f64 {
+            1.0
+        }
+
+        pub fn memory_controller_sequence_tls_step() -> u64 {
+            128
+        }
+
+        pub fn memory_controller_sequence_tls_lag() -> u64 {
+            32
+        }
+
         pub fn stream_enable_arrangement_backfill() -> bool {
             true
+        }
+
+        pub fn stream_high_join_amplification_threshold() -> usize {
+            2048
         }
     }
 
@@ -1664,6 +1739,10 @@ pub mod default {
     pub mod batch {
         pub fn enable_barrier_read() -> bool {
             false
+        }
+
+        pub fn enable_spill() -> bool {
+            true
         }
 
         pub fn statement_timeout_in_sec() -> u32 {
@@ -1678,6 +1757,20 @@ pub mod default {
         pub fn mask_worker_temporary_secs() -> usize {
             30
         }
+
+        pub fn redact_sql_option_keywords() -> Vec<String> {
+            [
+                "credential",
+                "key",
+                "password",
+                "private",
+                "secret",
+                "token",
+            ]
+            .into_iter()
+            .map(str::to_string)
+            .collect()
+        }
     }
 
     pub mod compaction_config {
@@ -1687,7 +1780,8 @@ pub mod default {
 
         // decrease this configure when the generation of checkpoint barrier is not frequent.
         const DEFAULT_TIER_COMPACT_TRIGGER_NUMBER: u64 = 12;
-        const DEFAULT_TARGET_FILE_SIZE_BASE: u64 = 32 * 1024 * 1024; // 32MB
+        const DEFAULT_TARGET_FILE_SIZE_BASE: u64 = 32 * 1024 * 1024;
+        // 32MB
         const DEFAULT_MAX_SUB_COMPACTION: u32 = 4;
         const DEFAULT_LEVEL_MULTIPLIER: u64 = 5;
         const DEFAULT_MAX_SPACE_RECLAIM_BYTES: u64 = 512 * 1024 * 1024; // 512MB;
@@ -1703,42 +1797,55 @@ pub mod default {
         pub fn max_bytes_for_level_base() -> u64 {
             DEFAULT_MAX_BYTES_FOR_LEVEL_BASE
         }
+
         pub fn max_bytes_for_level_multiplier() -> u64 {
             DEFAULT_LEVEL_MULTIPLIER
         }
+
         pub fn max_compaction_bytes() -> u64 {
             DEFAULT_MAX_COMPACTION_BYTES
         }
+
         pub fn sub_level_max_compaction_bytes() -> u64 {
             DEFAULT_MIN_COMPACTION_BYTES
         }
+
         pub fn level0_tier_compact_file_number() -> u64 {
             DEFAULT_TIER_COMPACT_TRIGGER_NUMBER
         }
+
         pub fn target_file_size_base() -> u64 {
             DEFAULT_TARGET_FILE_SIZE_BASE
         }
+
         pub fn compaction_filter_mask() -> u32 {
             (CompactionFilterFlag::STATE_CLEAN | CompactionFilterFlag::TTL).into()
         }
+
         pub fn max_sub_compaction() -> u32 {
             DEFAULT_MAX_SUB_COMPACTION
         }
+
         pub fn level0_stop_write_threshold_sub_level_number() -> u64 {
             DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_SUB_LEVEL_NUMBER
         }
+
         pub fn level0_sub_level_compact_level_count() -> u32 {
             DEFAULT_MIN_SUB_LEVEL_COMPACT_LEVEL_COUNT
         }
+
         pub fn level0_overlapping_sub_level_compact_level_count() -> u32 {
             DEFAULT_MIN_OVERLAPPING_SUB_LEVEL_COMPACT_LEVEL_COUNT
         }
+
         pub fn max_space_reclaim_bytes() -> u64 {
             DEFAULT_MAX_SPACE_RECLAIM_BYTES
         }
+
         pub fn level0_max_compact_file_number() -> u64 {
             DEFAULT_MAX_COMPACTION_FILE_COUNT
         }
+
         pub fn tombstone_reclaim_ratio() -> u32 {
             DEFAULT_TOMBSTONE_RATIO_PERCENT
         }
@@ -1863,6 +1970,7 @@ pub mod default {
 
             pub mod developer {
                 use crate::util::env_var::env_var_is_true_or;
+
                 const RW_USE_OPENDAL_FOR_S3: &str = "RW_USE_OPENDAL_FOR_S3";
 
                 pub fn object_store_retry_unknown_service_error() -> bool {

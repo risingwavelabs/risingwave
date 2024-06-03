@@ -13,6 +13,8 @@
 // limitations under the License.
 pub mod utils;
 
+use std::sync::Arc;
+
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use itertools::Itertools;
 use risingwave_batch::executor::aggregation::build as build_agg;
@@ -96,7 +98,7 @@ fn create_hash_agg_executor(
     let schema = Schema { fields };
 
     Box::new(HashAggExecutor::<hash::Key64>::new(
-        agg_init_states,
+        Arc::new(agg_init_states),
         group_key_columns,
         group_key_types,
         schema,
@@ -104,6 +106,7 @@ fn create_hash_agg_executor(
         "HashAggExecutor".to_string(),
         CHUNK_SIZE,
         MemoryContext::none(),
+        false,
         ShutdownToken::empty(),
     ))
 }

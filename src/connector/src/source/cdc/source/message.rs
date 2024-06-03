@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::types::{Datum, Scalar, Timestamptz};
 use risingwave_pb::connector_service::CdcMessage;
 
 use crate::source::base::SourceMessage;
@@ -24,6 +25,17 @@ pub struct DebeziumCdcMeta {
     pub source_ts_ms: i64,
     // Whether the message is a transaction metadata
     pub is_transaction_meta: bool,
+}
+
+impl DebeziumCdcMeta {
+    pub fn extract_timestamp(&self) -> Option<Datum> {
+        Some(
+            Timestamptz::from_millis(self.source_ts_ms)
+                .unwrap()
+                .to_scalar_value(),
+        )
+        .into()
+    }
 }
 
 impl From<CdcMessage> for SourceMessage {

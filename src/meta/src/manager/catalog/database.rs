@@ -21,15 +21,15 @@ use risingwave_common::catalog::TableOption;
 use risingwave_pb::catalog::subscription::PbSubscriptionState;
 use risingwave_pb::catalog::table::TableType;
 use risingwave_pb::catalog::{
-    Connection, CreateType, Database, Function, Index, PbStreamJobStatus, Schema, Sink, Source,
-    StreamJobStatus, Subscription, Table, View,
+    Connection, CreateType, Database, Function, Index, PbStreamJobStatus, Schema, Secret, Sink,
+    Source, StreamJobStatus, Subscription, Table, View,
 };
 use risingwave_pb::data::DataType;
 use risingwave_pb::user::grant_privilege::PbObject;
 
 use super::{
-    ConnectionId, DatabaseId, FunctionId, RelationId, SchemaId, SinkId, SourceId, SubscriptionId,
-    ViewId,
+    ConnectionId, DatabaseId, FunctionId, RelationId, SchemaId, SecretId, SinkId, SourceId,
+    SubscriptionId, ViewId,
 };
 use crate::manager::{IndexId, MetaSrvEnv, TableId, UserId};
 use crate::model::MetadataModel;
@@ -46,6 +46,7 @@ pub type Catalog = (
     Vec<View>,
     Vec<Function>,
     Vec<Connection>,
+    Vec<Secret>,
 );
 
 type DatabaseKey = String;
@@ -76,9 +77,14 @@ pub struct DatabaseManager {
     pub(super) functions: BTreeMap<FunctionId, Function>,
     /// Cached connection information.
     pub(super) connections: BTreeMap<ConnectionId, Connection>,
+    /// Cached secret information.
+    pub(super) secrets: BTreeMap<SecretId, Secret>,
 
     /// Relation reference count mapping.
     pub(super) relation_ref_count: HashMap<RelationId, usize>,
+
+    /// Secret reference count mapping
+    pub(super) secret_ref_count: HashMap<SecretId, usize>,
     /// Connection reference count mapping.
     pub(super) connection_ref_count: HashMap<ConnectionId, usize>,
     // In-progress creation tracker.
@@ -102,9 +108,11 @@ impl DatabaseManager {
         let functions = Function::list(env.meta_store().as_kv()).await?;
         let connections = Connection::list(env.meta_store().as_kv()).await?;
         let subscriptions = Subscription::list(env.meta_store().as_kv()).await?;
+        let secrets = Secret::list(env.meta_store().as_kv()).await?;
 
         let mut relation_ref_count = HashMap::new();
         let mut connection_ref_count = HashMap::new();
+        let mut _secret_ref_count = HashMap::new();
 
         let databases = BTreeMap::from_iter(
             databases
@@ -133,6 +141,7 @@ impl DatabaseManager {
                 .or_default() += 1;
             (subscription.id, subscription)
         }));
+        let secrets = BTreeMap::from_iter(secrets.into_iter().map(|secret| (secret.id, secret)));
         let indexes = BTreeMap::from_iter(indexes.into_iter().map(|index| (index.id, index)));
         let tables = BTreeMap::from_iter(tables.into_iter().map(|table| {
             for depend_relation_id in &table.dependent_relations {
@@ -149,6 +158,8 @@ impl DatabaseManager {
         let functions = BTreeMap::from_iter(functions.into_iter().map(|f| (f.id, f)));
         let connections = BTreeMap::from_iter(connections.into_iter().map(|c| (c.id, c)));
 
+        // todo: scan over stream source info and sink to update secret ref count `_secret_ref_count`
+
         Ok(Self {
             databases,
             schemas,
@@ -162,6 +173,8 @@ impl DatabaseManager {
             connections,
             relation_ref_count,
             connection_ref_count,
+            secrets,
+            secret_ref_count: _secret_ref_count,
             in_progress_creation_tracker: HashSet::default(),
             in_progress_creation_streaming_job: HashMap::default(),
             in_progress_creating_tables: HashMap::default(),
@@ -205,6 +218,7 @@ impl DatabaseManager {
             self.views.values().cloned().collect_vec(),
             self.functions.values().cloned().collect_vec(),
             self.connections.values().cloned().collect_vec(),
+            self.secrets.values().cloned().collect_vec(),
         )
     }
 
@@ -292,6 +306,16 @@ impl DatabaseManager {
                 && conn.name.eq(&relation_key.2)
         }) {
             Err(MetaError::catalog_duplicated("connection", &relation_key.2))
+        } else {
+            Ok(())
+        }
+    }
+
+    pub fn check_secret_name_duplicated(&self, secret_key: &RelationKey) -> MetaResult<()> {
+        if self.secrets.values().any(|x| {
+            x.database_id == secret_key.0 && x.schema_id == secret_key.1 && x.name.eq(&secret_key.2)
+        }) {
+            Err(MetaError::catalog_duplicated("secret", &secret_key.2))
         } else {
             Ok(())
         }
@@ -462,6 +486,22 @@ impl DatabaseManager {
 
     pub fn decrease_relation_ref_count(&mut self, relation_id: RelationId) {
         match self.relation_ref_count.entry(relation_id) {
+            Entry::Occupied(mut o) => {
+                *o.get_mut() -= 1;
+                if *o.get() == 0 {
+                    o.remove_entry();
+                }
+            }
+            Entry::Vacant(_) => unreachable!(),
+        }
+    }
+
+    pub fn increase_secret_ref_count(&mut self, secret_id: SecretId) {
+        *self.secret_ref_count.entry(secret_id).or_insert(0) += 1;
+    }
+
+    pub fn decrease_secret_ref_count(&mut self, secret_id: SecretId) {
+        match self.secret_ref_count.entry(secret_id) {
             Entry::Occupied(mut o) => {
                 *o.get_mut() -= 1;
                 if *o.get() == 0 {

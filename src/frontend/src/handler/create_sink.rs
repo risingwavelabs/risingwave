@@ -48,6 +48,7 @@ use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::catalog_service::CatalogReadGuard;
 use crate::catalog::source_catalog::SourceCatalog;
+use crate::catalog::view_catalog::ViewCatalog;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{ExprImpl, InputRef};
 use crate::handler::alter_table_column::fetch_table_catalog_for_alter;
@@ -63,7 +64,7 @@ use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, RelationC
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
-use crate::utils::resolve_privatelink_in_with_option;
+use crate::utils::{resolve_privatelink_in_with_option, resolve_secret_in_with_options};
 use crate::{Explain, Planner, TableCatalog, WithOptions};
 
 // used to store result of `gen_sink_plan`
@@ -145,6 +146,7 @@ pub fn gen_sink_plan(
             resolve_privatelink_in_with_option(&mut with_options, &sink_schema_name, session)?;
         conn_id.map(ConnectionId)
     };
+    let secret_ref = resolve_secret_in_with_options(&mut with_options, session)?;
 
     let emit_on_window_close = stmt.emit_mode == Some(EmitMode::OnWindowClose);
     if emit_on_window_close {
@@ -254,6 +256,7 @@ pub fn gen_sink_plan(
         UserId::new(session.user_id()),
         connection_id,
         dependent_relations.into_iter().collect_vec(),
+        secret_ref,
     );
 
     if let Some(table_catalog) = &target_table_catalog {
@@ -494,6 +497,7 @@ fn check_cycle_for_sink(
 
     let mut sinks = HashMap::new();
     let mut sources = HashMap::new();
+    let mut views = HashMap::new();
     let db_name = session.database();
     for schema in reader.iter_schemas(db_name)? {
         for sink in schema.iter_sink() {
@@ -503,12 +507,17 @@ fn check_cycle_for_sink(
         for source in schema.iter_source() {
             sources.insert(source.id, source.as_ref());
         }
+
+        for view in schema.iter_view() {
+            views.insert(view.id, view.as_ref());
+        }
     }
 
     struct Context<'a> {
         reader: &'a CatalogReadGuard,
         sink_index: &'a HashMap<u32, &'a SinkCatalog>,
         source_index: &'a HashMap<u32, &'a SourceCatalog>,
+        view_index: &'a HashMap<u32, &'a ViewCatalog>,
     }
 
     impl Context<'_> {
@@ -556,7 +565,9 @@ fn check_cycle_for_sink(
                     path.push(table.name.clone());
                     self.visit_table(table.as_ref(), target_table_id, path)?;
                     path.pop();
-                } else if self.source_index.contains_key(&table_id.table_id) {
+                } else if self.source_index.contains_key(&table_id.table_id)
+                    || self.view_index.contains_key(&table_id.table_id)
+                {
                     continue;
                 } else {
                     bail!("streaming job not found: {:?}", table_id);
@@ -575,6 +586,7 @@ fn check_cycle_for_sink(
         reader: &reader,
         sink_index: &sinks,
         source_index: &sources,
+        view_index: &views,
     };
 
     ctx.visit_dependent_jobs(&sink_catalog.dependent_relations, table_id, &mut path)?;

@@ -207,21 +207,9 @@ where
 
             let mut rate_limiter = rate_limit.and_then(create_limiter);
 
-            let backfill_snapshot_read_row_count_metric = self
+            let metrics = self
                 .metrics
-                .backfill_snapshot_read_row_count
-                .with_guarded_label_values(&[
-                    upstream_table_id.to_string().as_str(),
-                    self.actor_id.to_string().as_str(),
-                ]);
-
-            let backfill_upstream_output_row_count_metric = self
-                .metrics
-                .backfill_upstream_output_row_count
-                .with_guarded_label_values(&[
-                    upstream_table_id.to_string().as_str(),
-                    self.actor_id.to_string().as_str(),
-                ]);
+                .new_backfill_metrics(upstream_table_id, self.actor_id);
 
             'backfill_loop: loop {
                 let mut cur_barrier_snapshot_processed_rows: u64 = 0;
@@ -313,9 +301,11 @@ where
                                                 &self.output_indices,
                                             ));
                                         }
-                                        backfill_snapshot_read_row_count_metric
+                                        metrics
+                                            .backfill_snapshot_read_row_count
                                             .inc_by(cur_barrier_snapshot_processed_rows);
-                                        backfill_upstream_output_row_count_metric
+                                        metrics
+                                            .backfill_upstream_output_row_count
                                             .inc_by(cur_barrier_upstream_processed_rows);
                                         break 'backfill_loop;
                                     }
@@ -458,8 +448,11 @@ where
 
                 upstream_table.commit(barrier.epoch).await?;
 
-                backfill_snapshot_read_row_count_metric.inc_by(cur_barrier_snapshot_processed_rows);
-                backfill_upstream_output_row_count_metric
+                metrics
+                    .backfill_snapshot_read_row_count
+                    .inc_by(cur_barrier_snapshot_processed_rows);
+                metrics
+                    .backfill_upstream_output_row_count
                     .inc_by(cur_barrier_upstream_processed_rows);
 
                 // Update snapshot read epoch.

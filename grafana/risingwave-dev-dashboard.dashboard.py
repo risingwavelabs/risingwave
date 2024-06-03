@@ -532,8 +532,8 @@ def section_object_storage(outer_panels):
     operation_duration_blacklist = "type!~'streaming_upload_write_bytes|streaming_read'"
     write_op_filter = "type=~'upload|delete'"
     read_op_filter = "type=~'read|readv|list|metadata'"
-    request_cost_op1 = "type=~'read|streaming_read_start|delete'"
-    request_cost_op2 = "type=~'upload|streaming_upload_start|s3_upload_part|streaming_upload_finish|delete_objects|list'"
+    s3_request_cost_op1 = "type=~'read|streaming_read_start|streaming_read_init'"
+    s3_request_cost_op2 = "type=~'upload|streaming_upload|streaming_upload_start|s3_upload_part|streaming_upload_finish|list'"
     return [
         outer_panels.row_collapsed(
             "Object Storage",
@@ -641,11 +641,11 @@ def section_object_storage(outer_panels):
                             True,
                         ),
                         panels.target(
-                            f"sum({metric('object_store_operation_latency_count', request_cost_op1)}) * 0.0004 / 1000",
+                            f"sum({metric('object_store_operation_latency_count', s3_request_cost_op1)}) * 0.0004 / 1000",
                             "GET, SELECT, and all other Requests Cost",
                         ),
                         panels.target(
-                            f"sum({metric('object_store_operation_latency_count', request_cost_op2)}) * 0.005 / 1000",
+                            f"sum({metric('object_store_operation_latency_count', s3_request_cost_op2)}) * 0.005 / 1000",
                             "PUT, COPY, POST, LIST Requests Cost",
                         ),
                     ],
@@ -1863,17 +1863,14 @@ def section_frontend(outer_panels):
                     "Query Latency (Distributed Query Mode)",
                     "",
                     [
-                        panels.target(
-                            f"histogram_quantile(0.5, sum(rate({metric('distributed_query_latency_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
-                            "p50 - {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
-                        ),
-                        panels.target(
-                            f"histogram_quantile(0.9, sum(rate({metric('distributed_query_latency_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
-                            "p90 - {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
-                        ),
-                        panels.target(
-                            f"histogram_quantile(0.95, sum(rate({metric('distributed_query_latency_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
-                            "p99 - {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(rate({metric('distributed_query_latency_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
+                                f"p{legend}"
+                                + " - {{%s}} @ {{%s}}"
+                                % (COMPONENT_LABEL, NODE_LABEL),
+                            ),
+                            [50, 90, 99, "max"],
                         ),
                     ],
                 ),
@@ -1881,17 +1878,14 @@ def section_frontend(outer_panels):
                     "Query Latency (Local Query Mode)",
                     "",
                     [
-                        panels.target(
-                            f"histogram_quantile(0.5, sum(rate({metric('frontend_latency_local_execution_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
-                            "p50 - {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
-                        ),
-                        panels.target(
-                            f"histogram_quantile(0.9, sum(rate({metric('frontend_latency_local_execution_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
-                            "p90 - {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
-                        ),
-                        panels.target(
-                            f"histogram_quantile(0.95, sum(rate({metric('frontend_latency_local_execution_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
-                            "p99 - {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(rate({metric('frontend_latency_local_execution_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
+                                f"p{legend}"
+                                + " - {{%s}} @ {{%s}}"
+                                % (COMPONENT_LABEL, NODE_LABEL),
+                            ),
+                            [50, 90, 99, "max"],
                         ),
                     ],
                 ),
@@ -2513,30 +2507,175 @@ def section_hummock_tiered_cache(outer_panels):
     block_refill_filter = 'type="block"'
     block_refill_success_filter = 'type="block",op="success"'
     block_refill_unfiltered_filter = 'type="block",op="unfiltered"'
+    cache_hit_filter = 'op="hit"'
+    cache_miss_filter = 'op="miss"'
     return [
         outer_panels.row_collapsed(
             "Hummock Tiered Cache",
             [
+                # hybrid
                 panels.timeseries_ops(
-                    "Ops",
+                    "Hybrid Cache Ops",
                     "",
                     [
                         panels.target(
-                            f"sum(rate({metric('foyer_storage_op_duration_count')}[$__rate_interval])) by (foyer, op, extra, {NODE_LABEL})",
-                            "{{foyer}} file cache {{op}} {{extra}} @ {{%s}}"
+                            f"sum(rate({metric('foyer_hybrid_op_total')}[$__rate_interval])) by (name, op, {NODE_LABEL})",
+                            "{{name}} - hybrid - {{op}} @ {{%s}}"
                             % NODE_LABEL,
                         ),
                     ],
                 ),
                 panels.timeseries_latency(
-                    "Duration",
+                    "Hybrid Cache Op Duration",
                     "",
                     [
                         *quantile(
                             lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate({metric('foyer_storage_op_duration_bucket')}[$__rate_interval])) by (le, foyer, op, extra, {NODE_LABEL}))",
+                                f"histogram_quantile({quantile}, sum(rate({metric('foyer_hybrid_op_duration_bucket')}[$__rate_interval])) by (le, name, op, {NODE_LABEL}))",
                                 f"p{legend}"
-                                + " - {{foyer}} file cache - {{op}} {{extra}} @ {{%s}}"
+                                + " - {{name}} - hybrid - {{op}} @ {{%s}}"
+                                % NODE_LABEL,
+                            ),
+                            [50, 90, 99, "max"],
+                        ),
+                    ],
+                ),
+                panels.timeseries_percentage(
+                    "Hybrid Cache Hit Ratio",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('foyer_hybrid_op_total', cache_hit_filter)}[$__rate_interval])) by (name, {NODE_LABEL}) / (sum(rate({metric('foyer_hybrid_op_total', cache_hit_filter)}[$__rate_interval])) by (name, {NODE_LABEL}) + sum(rate({metric('foyer_hybrid_op_total', cache_miss_filter)}[$__rate_interval])) by (name, {NODE_LABEL}))",
+                            "{{name}} - hybrid - hit ratio @ {{%s}}" % NODE_LABEL,
+                        ),
+                    ],
+                ),
+                # memory
+                panels.timeseries_ops(
+                    "Memory Cache Ops",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('foyer_memory_op_total')}[$__rate_interval])) by (name, op, {NODE_LABEL})",
+                            "{{name}} - memory - {{op}} @ {{%s}}"
+                            % NODE_LABEL,
+                        ),
+                    ],
+                ),
+                panels.timeseries_bytes(
+                    "Memory Cache Size",
+                    "",
+                    [
+                        panels.target(
+                            f"sum({metric('foyer_memory_usage')}) by (name, {NODE_LABEL})",
+                            "{{name}} - memory - size @ {{%s}}" % NODE_LABEL,
+                        ),
+                    ],
+                ),
+                panels.timeseries_percentage(
+                    "Memory Cache Hit Ratio",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('foyer_memory_op_total', cache_hit_filter)}[$__rate_interval])) by (name, {NODE_LABEL}) / (sum(rate({metric('foyer_memory_op_total', cache_hit_filter)}[$__rate_interval])) by (name, {NODE_LABEL}) + sum(rate({metric('foyer_memory_op_total', cache_miss_filter)}[$__rate_interval])) by (name, {NODE_LABEL}))",
+                            "{{name}} - memory - hit ratio @ {{%s}}" % NODE_LABEL,
+                        ),
+                    ],
+                ),
+                # storage
+                panels.timeseries_ops(
+                    "Storage Cache Ops",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('foyer_storage_op_total')}[$__rate_interval])) by (name, op, {NODE_LABEL})",
+                            "{{name}} - storage - {{op}} @ {{%s}}"
+                            % NODE_LABEL,
+                        ),
+                    ],
+                ),
+                panels.timeseries_ops(
+                    "Storage Cache Inner Ops",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('foyer_storage_inner_op_total')}[$__rate_interval])) by (name, op, {NODE_LABEL})",
+                            "{{name}} - storage - {{op}} @ {{%s}}"
+                            % NODE_LABEL,
+                        ),
+                    ],
+                ),
+                panels.timeseries_latency(
+                    "Storage Cache Op Duration",
+                    "",
+                    [
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(rate({metric('foyer_storage_op_duration_bucket')}[$__rate_interval])) by (le, name, op, {NODE_LABEL}))",
+                                f"p{legend}"
+                                + " - {{name}} - storage - {{op}} @ {{%s}}"
+                                % NODE_LABEL,
+                            ),
+                            [50, 90, 99, "max"],
+                        ),
+                    ],
+                ),
+                panels.timeseries_latency(
+                    "Storage Cache Inner Op Duration",
+                    "",
+                    [
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(rate({metric('foyer_storage_inner_op_duration_bucket')}[$__rate_interval])) by (le, name, op, {NODE_LABEL}))",
+                                f"p{legend}"
+                                + " - {{name}} - storage - {{op}} @ {{%s}}"
+                                % NODE_LABEL,
+                            ),
+                            [50, 90, 99, "max"],
+                        ),
+                    ],
+                ),
+                panels.timeseries_percentage(
+                    "Storage Cache Hit Ratio",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('foyer_storage_op_total', cache_hit_filter)}[$__rate_interval])) by (name, {NODE_LABEL}) / (sum(rate({metric('foyer_storage_op_total', cache_hit_filter)}[$__rate_interval])) by (name, {NODE_LABEL}) + sum(rate({metric('foyer_storage_op_total', cache_miss_filter)}[$__rate_interval])) by (name, {NODE_LABEL}))",
+                            "{{name}} - storage - hit ratio @ {{%s}}" % NODE_LABEL,
+                        ),
+                    ],
+                ),
+                panels.timeseries_bytes(
+                    "Storage Region Size",
+                    "",
+                    [
+                        panels.target(
+                            f"sum({metric('foyer_storage_region')}) by (name, type, {NODE_LABEL}) * on(name, {NODE_LABEL}) group_left() foyer_storage_region_size_bytes",
+                            "{{name}} - memory - size @ {{%s}}" % NODE_LABEL,
+                        ),
+                    ],
+                ),
+                # disk
+                panels.timeseries_ops(
+                    "Disk Ops",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('foyer_storage_disk_io_total')}[$__rate_interval])) by (name, op, {NODE_LABEL})",
+                            "{{name}} - disk - {{op}} @ {{%s}}"
+                            % NODE_LABEL,
+                        ),
+                    ],
+                ),
+                panels.timeseries_latency(
+                    "Disk Op Duration",
+                    "",
+                    [
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(rate({metric('foyer_storage_disk_io_duration_bucket')}[$__rate_interval])) by (le, name, op, {NODE_LABEL}))",
+                                f"p{legend}"
+                                + " - {{name}} - disk - {{op}} @ {{%s}}"
                                 % NODE_LABEL,
                             ),
                             [50, 90, 99, "max"],
@@ -2544,26 +2683,17 @@ def section_hummock_tiered_cache(outer_panels):
                     ],
                 ),
                 panels.timeseries_bytes_per_sec(
-                    "Throughput",
+                    "Disk Op Throughput",
                     "",
                     [
                         panels.target(
-                            f"sum(rate({metric('foyer_storage_op_bytes')}[$__rate_interval])) by (foyer, op, extra, {NODE_LABEL})",
-                            "{{foyer}} file cache - {{op}} {{extra}} @ {{%s}}"
+                            f"sum(rate({metric('foyer_storage_disk_io_bytes')}[$__rate_interval])) by (name, op, {NODE_LABEL})",
+                            "{{name}} - disk - {{op}} @ {{%s}}"
                             % NODE_LABEL,
                         ),
                     ],
                 ),
-                panels.timeseries_percentage(
-                    "Hit Ratio",
-                    "",
-                    [
-                        panels.target(
-                            f"sum(rate({metric('foyer_storage_op_duration_count', file_cache_hit_filter)}[$__rate_interval])) by (foyer, {NODE_LABEL}) / (sum(rate({metric('foyer_storage_op_duration_count', file_cache_hit_filter)}[$__rate_interval])) by (foyer, {NODE_LABEL}) + sum(rate({metric('foyer_storage_op_duration_count', file_cache_miss_filter)}[$__rate_interval])) by (foyer, {NODE_LABEL})) >= 0",
-                            "{{foyer}} file cache hit ratio @ {{%s}}" % NODE_LABEL,
-                        ),
-                    ],
-                ),
+                # refill
                 panels.timeseries_ops(
                     "Refill Ops",
                     "",
@@ -2611,57 +2741,6 @@ def section_hummock_tiered_cache(outer_panels):
                         panels.target(
                             f"sum(refill_queue_total) by ({NODE_LABEL})",
                             "refill queue length @ {{%s}}" % NODE_LABEL,
-                        ),
-                    ],
-                ),
-                panels.timeseries_bytes(
-                    "Size",
-                    "",
-                    [
-                        panels.target(
-                            f"sum({metric('foyer_storage_total_bytes')}) by (foyer, {NODE_LABEL})",
-                            "{{foyer}} size @ {{%s}}" % NODE_LABEL,
-                        ),
-                    ],
-                ),
-                panels.timeseries_latency(
-                    "Inner Op Duration",
-                    "",
-                    [
-                        *quantile(
-                            lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate({metric('foyer_storage_inner_op_duration_bucket')}[$__rate_interval])) by (le, foyer, op, extra, {NODE_LABEL}))",
-                                f"p{legend}"
-                                + " - {{foyer}} file cache - {{op}} {{extra}} @ {{%s}}"
-                                % NODE_LABEL,
-                            ),
-                            [50, 90, 99, "max"],
-                        ),
-                    ],
-                ),
-                panels.timeseries_ops(
-                    "Slow Ops",
-                    "",
-                    [
-                        panels.target(
-                            f"sum(rate({metric('foyer_storage_slow_op_duration_count')}[$__rate_interval])) by (foyer, op, extra, {NODE_LABEL})",
-                            "{{foyer}} file cache {{op}} {{extra}} @ {{%s}}"
-                            % NODE_LABEL,
-                        ),
-                    ],
-                ),
-                panels.timeseries_latency(
-                    "Slow Op Duration",
-                    "",
-                    [
-                        *quantile(
-                            lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate({metric('foyer_storage_slow_op_duration_bucket')}[$__rate_interval])) by (le, foyer, op, extra, {NODE_LABEL}))",
-                                f"p{legend}"
-                                + " - {{foyer}} file cache - {{op}} {{extra}} @ {{%s}}"
-                                % NODE_LABEL,
-                            ),
-                            [50, 90, 99, "max"],
                         ),
                     ],
                 ),
@@ -3697,22 +3776,26 @@ def section_memory_manager(outer_panels):
                         ),
                     ],
                 ),
-                panels.timeseries_count(
-                    "LRU manager watermark steps",
+                panels.timeseries(
+                    "LRU manager eviction policy",
                     "",
                     [
                         panels.target(
-                            f"{metric('lru_watermark_step')}",
+                            f"{metric('lru_eviction_policy')}",
                             "",
                         ),
                     ],
                 ),
-                panels.timeseries_ms(
-                    "LRU manager diff between watermark_time and now (ms)",
-                    "watermark_time is the current lower watermark of cached data. physical_now is the current time of the machine. The diff (physical_now - watermark_time) shows how much data is cached.",
+                panels.timeseries(
+                    "LRU manager sequence",
+                    "",
                     [
                         panels.target(
-                            f"{metric('lru_physical_now_ms')} - {metric('lru_current_watermark_time_ms')}",
+                            f"{metric('lru_latest_sequence')}",
+                            "",
+                        ),
+                        panels.target(
+                            f"{metric('lru_watermark_sequence')}",
                             "",
                         ),
                     ],

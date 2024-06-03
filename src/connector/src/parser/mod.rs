@@ -45,7 +45,8 @@ pub use self::mysql::mysql_row_to_owned_row;
 use self::plain_parser::PlainParser;
 pub use self::postgres::postgres_row_to_owned_row;
 use self::simd_json_parser::DebeziumJsonAccessBuilder;
-pub use self::unified::json::TimestamptzHandling;
+pub use self::unified::json::{JsonAccess, TimestamptzHandling};
+pub use self::unified::Access;
 use self::unified::AccessImpl;
 use self::upsert_parser::UpsertParser;
 use self::util::get_kafka_topic;
@@ -57,6 +58,7 @@ use crate::parser::util::{
     extract_header_inner_from_meta, extract_headers_from_meta, extreact_timestamp_from_meta,
 };
 use crate::schema::schema_registry::SchemaRegistryAuth;
+use crate::schema::InvalidOptionError;
 use crate::source::monitor::GLOBAL_SOURCE_METRICS;
 use crate::source::{
     extract_source_struct, BoxSourceStream, ChunkSourceStream, SourceColumnDesc, SourceColumnType,
@@ -345,6 +347,35 @@ impl SourceStreamChunkRowWriter<'_> {
         &mut self,
         mut f: impl FnMut(&SourceColumnDesc) -> AccessResult<A::Output>,
     ) -> AccessResult<()> {
+        let mut parse_field = |desc: &SourceColumnDesc| {
+            match f(desc) {
+                Ok(output) => Ok(output),
+
+                // Throw error for failed access to primary key columns.
+                Err(e) if desc.is_pk => Err(e),
+                // Ignore error for other columns and fill in `NULL` instead.
+                Err(error) => {
+                    // TODO: figure out a way to fill in not-null default value if user specifies one
+                    // TODO: decide whether the error should not be ignored (e.g., even not a valid Debezium message)
+                    // TODO: not using tracing span to provide `split_id` and `offset` due to performance concern,
+                    //       see #13105
+                    static LOG_SUPPERSSER: LazyLock<LogSuppresser> =
+                        LazyLock::new(LogSuppresser::default);
+                    if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                        tracing::warn!(
+                            error = %error.as_report(),
+                            split_id = self.row_meta.as_ref().map(|m| m.split_id),
+                            offset = self.row_meta.as_ref().map(|m| m.offset),
+                            column = desc.name,
+                            suppressed_count,
+                            "failed to parse non-pk column, padding with `NULL`"
+                        );
+                    }
+                    Ok(A::output_for(Datum::None))
+                }
+            }
+        };
+
         let mut wrapped_f = |desc: &SourceColumnDesc| {
             match (&desc.column_type, &desc.additional_column.column_type) {
                 (&SourceColumnType::Offset | &SourceColumnType::RowId, _) => {
@@ -370,14 +401,12 @@ impl SourceStreamChunkRowWriter<'_> {
                             .unwrap(), // handled all match cases in internal match, unwrap is safe
                     ));
                 }
-                (_, &Some(AdditionalColumnType::Timestamp(_))) => {
-                    return Ok(A::output_for(
-                        self.row_meta
-                            .as_ref()
-                            .and_then(|ele| extreact_timestamp_from_meta(ele.meta))
-                            .unwrap_or(None),
-                    ))
-                }
+                (_, &Some(AdditionalColumnType::Timestamp(_))) => match self.row_meta {
+                    Some(row_meta) => Ok(A::output_for(
+                        extreact_timestamp_from_meta(row_meta.meta).unwrap_or(None),
+                    )),
+                    None => parse_field(desc), // parse from payload
+                },
                 (_, &Some(AdditionalColumnType::Partition(_))) => {
                     // the meta info does not involve spec connector
                     return Ok(A::output_for(
@@ -426,32 +455,7 @@ impl SourceStreamChunkRowWriter<'_> {
                 }
                 (_, _) => {
                     // For normal columns, call the user provided closure.
-                    match f(desc) {
-                        Ok(output) => Ok(output),
-
-                        // Throw error for failed access to primary key columns.
-                        Err(e) if desc.is_pk => Err(e),
-                        // Ignore error for other columns and fill in `NULL` instead.
-                        Err(error) => {
-                            // TODO: figure out a way to fill in not-null default value if user specifies one
-                            // TODO: decide whether the error should not be ignored (e.g., even not a valid Debezium message)
-                            // TODO: not using tracing span to provide `split_id` and `offset` due to performance concern,
-                            //       see #13105
-                            static LOG_SUPPERSSER: LazyLock<LogSuppresser> =
-                                LazyLock::new(LogSuppresser::default);
-                            if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
-                                tracing::warn!(
-                                    error = %error.as_report(),
-                                    split_id = self.row_meta.as_ref().map(|m| m.split_id),
-                                    offset = self.row_meta.as_ref().map(|m| m.offset),
-                                    column = desc.name,
-                                    suppressed_count,
-                                    "failed to parse non-pk column, padding with `NULL`"
-                                );
-                            }
-                            Ok(A::output_for(Datum::None))
-                        }
-                    }
+                    parse_field(desc)
                 }
             }
         };
@@ -863,9 +867,8 @@ impl AccessBuilderImpl {
 /// The entrypoint of parsing. It parses [`SourceMessage`] stream (byte stream) into [`StreamChunk`] stream.
 /// Used by [`crate::source::into_chunk_stream`].
 #[derive(Debug)]
-pub(crate) enum ByteStreamSourceParserImpl {
+pub enum ByteStreamSourceParserImpl {
     Csv(CsvParser),
-    Json(JsonParser),
     Debezium(DebeziumParser),
     Plain(PlainParser),
     Upsert(UpsertParser),
@@ -880,7 +883,6 @@ impl ByteStreamSourceParserImpl {
         #[auto_enum(futures03::Stream)]
         let stream = match self {
             Self::Csv(parser) => parser.into_stream(msg_stream),
-            Self::Json(parser) => parser.into_stream(msg_stream),
             Self::Debezium(parser) => parser.into_stream(msg_stream),
             Self::DebeziumMongoJson(parser) => parser.into_stream(msg_stream),
             Self::Maxwell(parser) => parser.into_stream(msg_stream),
@@ -934,6 +936,58 @@ impl ByteStreamSourceParserImpl {
             _ => unreachable!(),
         }
     }
+
+    /// Create a parser for testing purposes.
+    pub fn create_for_test(parser_config: ParserConfig) -> ConnectorResult<Self> {
+        futures::executor::block_on(Self::create(parser_config, SourceContext::dummy().into()))
+    }
+}
+
+/// Test utilities for [`ByteStreamSourceParserImpl`].
+#[cfg(test)]
+pub mod test_utils {
+    use futures::StreamExt as _;
+    use itertools::Itertools as _;
+
+    use super::*;
+
+    #[easy_ext::ext(ByteStreamSourceParserImplTestExt)]
+    pub(crate) impl ByteStreamSourceParserImpl {
+        /// Parse the given payloads into a [`StreamChunk`].
+        async fn parse(self, payloads: Vec<Vec<u8>>) -> StreamChunk {
+            let source_messages = payloads
+                .into_iter()
+                .map(|p| SourceMessage {
+                    payload: (!p.is_empty()).then_some(p),
+                    ..SourceMessage::dummy()
+                })
+                .collect_vec();
+
+            self.into_stream(futures::stream::once(async { Ok(source_messages) }).boxed())
+                .next()
+                .await
+                .unwrap()
+                .unwrap()
+        }
+
+        /// Parse the given key-value pairs into a [`StreamChunk`].
+        async fn parse_upsert(self, kvs: Vec<(Vec<u8>, Vec<u8>)>) -> StreamChunk {
+            let source_messages = kvs
+                .into_iter()
+                .map(|(k, v)| SourceMessage {
+                    key: (!k.is_empty()).then_some(k),
+                    payload: (!v.is_empty()).then_some(v),
+                    ..SourceMessage::dummy()
+                })
+                .collect_vec();
+
+            self.into_stream(futures::stream::once(async { Ok(source_messages) }).boxed())
+                .next()
+                .await
+                .unwrap()
+                .unwrap()
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -983,6 +1037,36 @@ pub struct AvroProperties {
     pub record_name: Option<String>,
     pub key_record_name: Option<String>,
     pub name_strategy: PbSchemaRegistryNameStrategy,
+    pub map_handling: Option<MapHandling>,
+}
+
+/// How to convert the map type from the input encoding to RisingWave's datatype.
+///
+/// XXX: Should this be `avro.map.handling.mode`? Can it be shared between Avro and Protobuf?
+#[derive(Debug, Copy, Clone)]
+pub enum MapHandling {
+    Jsonb,
+    // TODO: <https://github.com/risingwavelabs/risingwave/issues/13387>
+    // Map
+}
+
+impl MapHandling {
+    pub const OPTION_KEY: &'static str = "map.handling.mode";
+
+    pub fn from_options(
+        options: &std::collections::BTreeMap<String, String>,
+    ) -> Result<Option<Self>, InvalidOptionError> {
+        let mode = match options.get(Self::OPTION_KEY).map(std::ops::Deref::deref) {
+            Some("jsonb") => Self::Jsonb,
+            Some(v) => {
+                return Err(InvalidOptionError {
+                    message: format!("unrecognized {} value {}", Self::OPTION_KEY, v),
+                })
+            }
+            None => return Ok(None),
+        };
+        Ok(Some(mode))
+    }
 }
 
 #[derive(Debug, Default, Clone)]
@@ -1021,7 +1105,7 @@ pub enum EncodingProperties {
     Protobuf(ProtobufProperties),
     Csv(CsvProperties),
     Json(JsonProperties),
-    MongoJson(JsonProperties),
+    MongoJson,
     Bytes(BytesProperties),
     Native,
     /// Encoding can't be specified because the source will determines it. Now only used in Iceberg.
@@ -1089,6 +1173,7 @@ impl SpecificParserConfig {
                         .unwrap(),
                     use_schema_registry: info.use_schema_registry,
                     row_schema_location: info.row_schema_location.clone(),
+                    map_handling: MapHandling::from_options(&info.format_encode_options)?,
                     ..Default::default()
                 };
                 if format == SourceFormat::Upsert {

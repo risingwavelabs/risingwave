@@ -45,14 +45,6 @@ impl CompactionPicker for IntraCompactionPicker {
             return None;
         }
 
-        let is_l0_pending_compact =
-            level_handlers[0].is_level_all_pending_compact(&l0.sub_levels[0]);
-
-        if is_l0_pending_compact {
-            stats.skip_by_pending_files += 1;
-            return None;
-        }
-
         if let Some(ret) = self.pick_l0_trivial_move_file(l0, level_handlers, stats) {
             return Some(ret);
         }

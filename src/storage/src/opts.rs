@@ -24,6 +24,8 @@ pub struct StorageOpts {
     pub parallel_compact_size_mb: u32,
     /// Target size of the Sstable.
     pub sstable_size_mb: u32,
+    /// Minimal target size of the Sstable to store data of different state-table in independent files as soon as possible.
+    pub min_sstable_size_mb: u32,
     /// Size of each block in bytes in SST.
     pub block_size_kb: u32,
     /// False positive probability of bloom filter.
@@ -72,8 +74,6 @@ pub struct StorageOpts {
     pub sstable_id_remote_fetch_number: u32,
     /// Whether to enable streaming upload for sstable.
     pub min_sst_size_for_streaming_upload: u64,
-    /// Max sub compaction task numbers
-    pub max_sub_compaction: u32,
     pub max_concurrent_compaction_task_number: u64,
     pub max_version_pinning_duration_sec: u64,
     pub compactor_iter_max_io_retry_times: usize,
@@ -81,15 +81,13 @@ pub struct StorageOpts {
     pub data_file_cache_dir: String,
     pub data_file_cache_capacity_mb: usize,
     pub data_file_cache_file_capacity_mb: usize,
-    pub data_file_cache_device_align: usize,
-    pub data_file_cache_device_io_size: usize,
     pub data_file_cache_flushers: usize,
     pub data_file_cache_reclaimers: usize,
     pub data_file_cache_recover_concurrency: usize,
     pub data_file_cache_lfu_window_to_cache_size_ratio: usize,
     pub data_file_cache_lfu_tiny_lru_capacity_ratio: f64,
     pub data_file_cache_insert_rate_limit_mb: usize,
-    pub data_file_cache_catalog_bits: usize,
+    pub data_file_cache_indexer_shards: usize,
     pub data_file_cache_compression: String,
 
     pub cache_refill_data_refill_levels: Vec<u32>,
@@ -103,15 +101,13 @@ pub struct StorageOpts {
     pub meta_file_cache_dir: String,
     pub meta_file_cache_capacity_mb: usize,
     pub meta_file_cache_file_capacity_mb: usize,
-    pub meta_file_cache_device_align: usize,
-    pub meta_file_cache_device_io_size: usize,
     pub meta_file_cache_flushers: usize,
     pub meta_file_cache_reclaimers: usize,
     pub meta_file_cache_recover_concurrency: usize,
     pub meta_file_cache_lfu_window_to_cache_size_ratio: usize,
     pub meta_file_cache_lfu_tiny_lru_capacity_ratio: f64,
     pub meta_file_cache_insert_rate_limit_mb: usize,
-    pub meta_file_cache_catalog_bits: usize,
+    pub meta_file_cache_indexer_shards: usize,
     pub meta_file_cache_compression: String,
 
     /// The storage url for storing backups.
@@ -150,6 +146,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
         Self {
             parallel_compact_size_mb: p.parallel_compact_size_mb(),
             sstable_size_mb: p.sstable_size_mb(),
+            min_sstable_size_mb: c.storage.min_sstable_size_mb,
             block_size_kb: p.block_size_kb(),
             bloom_false_positive: p.bloom_false_positive(),
             share_buffers_sync_parallelism: c.storage.share_buffers_sync_parallelism,
@@ -173,14 +170,11 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             compactor_memory_limit_mb: s.compactor_memory_limit_mb,
             sstable_id_remote_fetch_number: c.storage.sstable_id_remote_fetch_number,
             min_sst_size_for_streaming_upload: c.storage.min_sst_size_for_streaming_upload,
-            max_sub_compaction: c.storage.max_sub_compaction,
             max_concurrent_compaction_task_number: c.storage.max_concurrent_compaction_task_number,
             max_version_pinning_duration_sec: c.storage.max_version_pinning_duration_sec,
             data_file_cache_dir: c.storage.data_file_cache.dir.clone(),
             data_file_cache_capacity_mb: c.storage.data_file_cache.capacity_mb,
             data_file_cache_file_capacity_mb: c.storage.data_file_cache.file_capacity_mb,
-            data_file_cache_device_align: c.storage.data_file_cache.device_align,
-            data_file_cache_device_io_size: c.storage.data_file_cache.device_io_size,
             data_file_cache_flushers: c.storage.data_file_cache.flushers,
             data_file_cache_reclaimers: c.storage.data_file_cache.reclaimers,
             data_file_cache_recover_concurrency: c.storage.data_file_cache.recover_concurrency,
@@ -193,13 +187,11 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
                 .data_file_cache
                 .lfu_tiny_lru_capacity_ratio,
             data_file_cache_insert_rate_limit_mb: c.storage.data_file_cache.insert_rate_limit_mb,
-            data_file_cache_catalog_bits: c.storage.data_file_cache.catalog_bits,
+            data_file_cache_indexer_shards: c.storage.data_file_cache.indexer_shards,
             data_file_cache_compression: c.storage.data_file_cache.compression.clone(),
             meta_file_cache_dir: c.storage.meta_file_cache.dir.clone(),
             meta_file_cache_capacity_mb: c.storage.meta_file_cache.capacity_mb,
             meta_file_cache_file_capacity_mb: c.storage.meta_file_cache.file_capacity_mb,
-            meta_file_cache_device_align: c.storage.meta_file_cache.device_align,
-            meta_file_cache_device_io_size: c.storage.meta_file_cache.device_io_size,
             meta_file_cache_flushers: c.storage.meta_file_cache.flushers,
             meta_file_cache_reclaimers: c.storage.meta_file_cache.reclaimers,
             meta_file_cache_recover_concurrency: c.storage.meta_file_cache.recover_concurrency,
@@ -212,7 +204,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
                 .meta_file_cache
                 .lfu_tiny_lru_capacity_ratio,
             meta_file_cache_insert_rate_limit_mb: c.storage.meta_file_cache.insert_rate_limit_mb,
-            meta_file_cache_catalog_bits: c.storage.meta_file_cache.catalog_bits,
+            meta_file_cache_indexer_shards: c.storage.meta_file_cache.indexer_shards,
             meta_file_cache_compression: c.storage.meta_file_cache.compression.clone(),
             cache_refill_data_refill_levels: c.storage.cache_refill.data_refill_levels.clone(),
             cache_refill_timeout_ms: c.storage.cache_refill.timeout_ms,
