@@ -46,7 +46,7 @@ impl AccessBuilder for AvroAccessBuilder {
         self.value = self.parse_avro_value(&payload).await?;
         Ok(AccessImpl::Avro(AvroAccess::new(
             self.value.as_ref().unwrap(),
-            AvroParseOptions::create(&self.schema.0),
+            AvroParseOptions::create(&self.schema.resolved_schema),
         )))
     }
 }
@@ -69,6 +69,8 @@ impl AvroAccessBuilder {
         })
     }
 
+    /// Note: we should use unresolved schema to parsing bytes into avro value.
+    /// Otherwise it's an invalid schema and parsing will fail. (Avro error: Two named schema defined for same fullname)
     async fn parse_avro_value(&self, payload: &[u8]) -> ConnectorResult<Option<Value>> {
         // parse payload to avro value
         // if use confluent schema, get writer schema from confluent schema registry
@@ -78,10 +80,10 @@ impl AvroAccessBuilder {
             Ok(Some(from_avro_datum(
                 writer_schema.as_ref(),
                 &mut raw_payload,
-                Some(&self.schema.0),
+                Some(&self.schema.original_schema),
             )?))
         } else {
-            let mut reader = Reader::with_schema(&self.schema.0, payload)?;
+            let mut reader = Reader::with_schema(&self.schema.original_schema, payload)?;
             match reader.next() {
                 Some(Ok(v)) => Ok(Some(v)),
                 Some(Err(e)) => Err(e)?,
@@ -144,11 +146,11 @@ impl AvroParserConfig {
 
             Ok(Self {
                 schema: Arc::new(ResolvedAvroSchema::create(
-                    resolver.get_by_subject(&subject_value).await?.as_ref(),
+                    resolver.get_by_subject(&subject_value).await?,
                 )?),
                 key_schema: if let Some(subject_key) = subject_key {
                     Some(Arc::new(ResolvedAvroSchema::create(
-                        resolver.get_by_subject(&subject_key).await?.as_ref(),
+                        resolver.get_by_subject(&subject_key).await?,
                     )?))
                 } else {
                     None
@@ -165,7 +167,7 @@ impl AvroParserConfig {
             let schema = Schema::parse_reader(&mut schema_content.as_slice())
                 .context("failed to parse avro schema")?;
             Ok(Self {
-                schema: Arc::new(ResolvedAvroSchema::create(&schema)?),
+                schema: Arc::new(ResolvedAvroSchema::create(Arc::new(schema))?),
                 key_schema: None,
                 writer_schema_cache: None,
                 map_handling,
@@ -174,7 +176,7 @@ impl AvroParserConfig {
     }
 
     pub fn map_to_columns(&self) -> ConnectorResult<Vec<ColumnDesc>> {
-        avro_schema_to_column_descs(&self.schema.0, self.map_handling)
+        avro_schema_to_column_descs(&self.schema.resolved_schema, self.map_handling)
     }
 }
 
