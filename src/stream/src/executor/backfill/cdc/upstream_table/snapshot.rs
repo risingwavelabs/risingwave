@@ -255,6 +255,7 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
 
     use futures::pin_mut;
     use futures_async_stream::for_await;
@@ -264,7 +265,7 @@ mod tests {
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
     use risingwave_connector::source::cdc::external::{
-        ExternalTableReader, MySqlExternalTableReader, SchemaTableName,
+        ExternalTableConfig, ExternalTableReader, MySqlExternalTableReader, SchemaTableName,
     };
 
     use crate::executor::backfill::utils::{get_new_pos, iter_chunks};
@@ -280,7 +281,7 @@ mod tests {
         let rw_schema = Schema {
             fields: columns.iter().map(Field::from).collect(),
         };
-        let props = convert_args!(hashmap!(
+        let props: HashMap<String, String> = convert_args!(hashmap!(
                 "hostname" => "localhost",
                 "port" => "8306",
                 "username" => "root",
@@ -288,7 +289,10 @@ mod tests {
                 "database.name" => "mydb",
                 "table.name" => "orders_rw"));
 
-        let reader = MySqlExternalTableReader::new(props, rw_schema.clone())
+        let config =
+            serde_json::from_value::<ExternalTableConfig>(serde_json::to_value(props).unwrap())
+                .unwrap();
+        let reader = MySqlExternalTableReader::new(config, rw_schema.clone())
             .await
             .unwrap();
 

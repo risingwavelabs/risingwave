@@ -556,6 +556,7 @@ impl ExternalTableReaderImpl {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
 
     use futures::pin_mut;
     use futures_async_stream::for_await;
@@ -564,7 +565,8 @@ mod tests {
     use risingwave_common::types::DataType;
 
     use crate::source::cdc::external::{
-        CdcOffset, ExternalTableReader, MySqlExternalTableReader, MySqlOffset, SchemaTableName,
+        CdcOffset, ExternalTableConfig, ExternalTableReader, MySqlExternalTableReader, MySqlOffset,
+        SchemaTableName,
     };
 
     #[test]
@@ -614,7 +616,7 @@ mod tests {
         let rw_schema = Schema {
             fields: columns.iter().map(Field::from).collect(),
         };
-        let props = convert_args!(hashmap!(
+        let props: HashMap<String, String> = convert_args!(hashmap!(
                 "hostname" => "localhost",
                 "port" => "8306",
                 "username" => "root",
@@ -622,7 +624,10 @@ mod tests {
                 "database.name" => "mytest",
                 "table.name" => "t1"));
 
-        let reader = MySqlExternalTableReader::new(props, rw_schema)
+        let config =
+            serde_json::from_value::<ExternalTableConfig>(serde_json::to_value(props).unwrap())
+                .unwrap();
+        let reader = MySqlExternalTableReader::new(config, rw_schema)
             .await
             .unwrap();
         let offset = reader.current_cdc_offset().await.unwrap();

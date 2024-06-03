@@ -54,6 +54,7 @@ impl DebeziumCdcMeta {
     }
 
     pub fn new(full_table_name: String, source_ts_ms: i64, is_transaction_meta: bool) -> Self {
+        // full_table_name is in the format of `database_name.table_name`
         let db_name_prefix_len = full_table_name.as_str().find('.').unwrap_or(0);
         Self {
             db_name_prefix_len,

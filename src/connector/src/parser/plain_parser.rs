@@ -281,11 +281,11 @@ mod tests {
             if i == 0 {
                 // put begin message at first
                 source_msg_batch.push(SourceMessage {
-                    meta: SourceMeta::DebeziumCdc(DebeziumCdcMeta {
-                        full_table_name: "orders".to_string(),
-                        source_ts_ms: 0,
-                        is_transaction_meta: transactional,
-                    }),
+                    meta: SourceMeta::DebeziumCdc(DebeziumCdcMeta::new(
+                        "orders".to_string(),
+                        0,
+                        transactional,
+                    )),
                     split_id: SplitId::from("1001"),
                     offset: "0".into(),
                     key: None,
@@ -295,11 +295,11 @@ mod tests {
             // put data messages
             for data_msg in batch {
                 source_msg_batch.push(SourceMessage {
-                    meta: SourceMeta::DebeziumCdc(DebeziumCdcMeta {
-                        full_table_name: "orders".to_string(),
-                        source_ts_ms: 0,
-                        is_transaction_meta: false,
-                    }),
+                    meta: SourceMeta::DebeziumCdc(DebeziumCdcMeta::new(
+                        "orders".to_string(),
+                        0,
+                        false,
+                    )),
                     split_id: SplitId::from("1001"),
                     offset: "0".into(),
                     key: None,
@@ -309,11 +309,11 @@ mod tests {
             if i == data_batches.len() - 1 {
                 // put commit message at last
                 source_msg_batch.push(SourceMessage {
-                    meta: SourceMeta::DebeziumCdc(DebeziumCdcMeta {
-                        full_table_name: "orders".to_string(),
-                        source_ts_ms: 0,
-                        is_transaction_meta: transactional,
-                    }),
+                    meta: SourceMeta::DebeziumCdc(DebeziumCdcMeta::new(
+                        "orders".to_string(),
+                        0,
+                        transactional,
+                    )),
                     split_id: SplitId::from("1001"),
                     offset: "0".into(),
                     key: None,
@@ -358,11 +358,7 @@ mod tests {
         let begin_msg = r#"{"schema":null,"payload":{"status":"BEGIN","id":"3E11FA47-71CA-11E1-9E33-C80AA9429562:23","event_count":null,"data_collections":null,"ts_ms":1704269323180}}"#;
         let commit_msg = r#"{"schema":null,"payload":{"status":"END","id":"3E11FA47-71CA-11E1-9E33-C80AA9429562:23","event_count":11,"data_collections":[{"data_collection":"public.orders_tx","event_count":5},{"data_collection":"public.person","event_count":6}],"ts_ms":1704269323180}}"#;
 
-        let cdc_meta = SourceMeta::DebeziumCdc(DebeziumCdcMeta {
-            full_table_name: "orders".to_string(),
-            source_ts_ms: 0,
-            is_transaction_meta: true,
-        });
+        let cdc_meta = SourceMeta::DebeziumCdc(DebeziumCdcMeta::new("orders".to_string(), 0, true));
         let msg_meta = MessageMeta {
             meta: &cdc_meta,
             split_id: "1001",
