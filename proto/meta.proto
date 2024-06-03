@@ -69,6 +69,8 @@ message TableFragments {
     common.ParallelUnit parallel_unit = 1;
     // Current state
     ActorState state = 2;
+
+    uint64 worker_slot_id = 3;
   }
   message Fragment {
     enum FragmentDistributionType {
@@ -84,6 +86,8 @@ message TableFragments {
     // Vnode mapping (which should be set in upstream dispatcher) of the fragment.
     // This field is always set to `Some`. For singleton, the parallel unit for all vnodes will be the same.
     common.ParallelUnitMapping vnode_mapping = 5;
+
+    common.WorkerSlotMapping vnode_mapping_v2 = 8;
     repeated uint32 state_table_ids = 6;
     // Note that this can be derived backwards from the upstream actors of the Actor held by the Fragment,
     // but in some scenarios (e.g. Scaling) it will lead to a lot of duplicate code,

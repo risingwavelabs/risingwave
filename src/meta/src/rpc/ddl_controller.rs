@@ -25,7 +25,7 @@ use anyhow::Context;
 use itertools::Itertools;
 use rand::{Rng, RngCore};
 use risingwave_common::config::DefaultParallelism;
-use risingwave_common::hash::{ParallelUnitMapping, VirtualNode};
+use risingwave_common::hash::{ParallelUnitMapping, VirtualNode, WorkerSlotMapping};
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::epoch::Epoch;
@@ -1194,20 +1194,25 @@ impl DdlController {
             .collect_vec();
 
         let dist_key_indices = table.distribution_key.iter().map(|i| *i as _).collect_vec();
-
-        let mapping = downstream_actor_ids
-            .iter()
-            .map(|id| {
-                let actor_status = table_fragments.actor_status.get(id).unwrap();
-                let parallel_unit_id = actor_status.parallel_unit.as_ref().unwrap().id;
-
-                (parallel_unit_id, *id)
-            })
-            .collect();
-
-        let actor_mapping =
-            ParallelUnitMapping::from_protobuf(union_fragment.vnode_mapping.as_ref().unwrap())
-                .to_actor(&mapping);
+        //
+        // let mapping = downstream_actor_ids
+        //     .iter()
+        //     .map(|id| {
+        //         let actor_status = table_fragments.actor_status.get(id).unwrap();
+        //         let worker_id = actor_status.parallel_unit.as_ref().unwrap().worker_node_id;
+        //
+        //         (parallel_unit_id, *id)
+        //     })
+        //     .collect();
+        //
+        // assert!(union_fragment.vnode_mapping.is_none());
+        // let worker_slot_mapping = WorkerSlotMapping::from_protobuf(union_fragment.vnode_mapping_v2.as_ref().unwrap());
+        //
+        // let actor_mapping = worker_slot_mapping.to_actor()
+        //
+        // let actor_mapping =
+        //     ParallelUnitMapping::from_protobuf(union_fragment.vnode_mapping.as_ref().unwrap())
+        //         .to_actor(&mapping);
 
         let upstream_actors = sink_fragment.get_actors();
 

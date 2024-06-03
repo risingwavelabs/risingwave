@@ -1209,8 +1209,6 @@ mod tests {
 
         let worker_slot_mapping = WorkerSlotMapping::new_uniform(worker_slots.into_iter());
 
-        let parallel_unit_mapping = worker_slot_mapping.to_fake_mapping();
-
         let mut fragments = BTreeMap::default();
 
         fragments.insert(
@@ -1221,7 +1219,8 @@ mod tests {
                 distribution_type: FragmentDistributionType::Hash as i32,
                 actors: actors.clone(),
                 state_table_ids: vec![0],
-                vnode_mapping: Some(parallel_unit_mapping.to_protobuf()),
+                vnode_mapping: None,
+                vnode_mapping_v2: Some(worker_slot_mapping.to_protobuf()),
                 ..Default::default()
             },
         );

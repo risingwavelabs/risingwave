@@ -19,9 +19,9 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::{ParallelUnitId, WorkerSlotId};
 use risingwave_connector::source::SplitImpl;
-use risingwave_pb::common::{ParallelUnit, ParallelUnitMapping};
+use risingwave_pb::common::ParallelUnit;
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
-use risingwave_pb::meta::table_fragments::{ActorStatus, Fragment, State};
+use risingwave_pb::meta::table_fragments::{ActorStatus, Fragment, PbFragment, State};
 use risingwave_pb::meta::table_parallelism::{
     FixedParallelism, Parallelism, PbAdaptiveParallelism, PbCustomParallelism, PbFixedParallelism,
     PbParallelism,
@@ -174,10 +174,62 @@ impl MetadataModel for TableFragments {
             parallelism: Some(Parallelism::Custom(PbCustomParallelism {})),
         };
 
+        let state = prost.state();
+
+        let parallel_unit_to_worker = prost
+            .actor_status
+            .values()
+            .map(|actor_status| {
+                let parallel_unit = actor_status.get_parallel_unit().unwrap();
+                (parallel_unit.id, parallel_unit.worker_node_id)
+            })
+            .collect();
+
+        // rewrite fragments
+        let fragments = prost
+            .fragments
+            .into_values()
+            .map(
+                |Fragment {
+                     fragment_id,
+                     fragment_type_mask,
+                     distribution_type,
+                     actors,
+                     vnode_mapping,
+                     vnode_mapping_v2,
+                     state_table_ids,
+                     upstream_fragment_ids,
+                 }| {
+                    let vnode_mapping_v2 = vnode_mapping_v2.or_else(|| {
+                        vnode_mapping.map(|vnode_mapping| {
+                            risingwave_common::hash::ParallelUnitMapping::from_protobuf(
+                                &vnode_mapping,
+                            )
+                            .to_worker_slot(&parallel_unit_to_worker)
+                            .to_protobuf()
+                        })
+                    });
+                    (
+                        fragment_id,
+                        PbFragment {
+                            fragment_id,
+                            fragment_type_mask,
+                            distribution_type,
+                            actors,
+                            vnode_mapping: None,
+                            vnode_mapping_v2,
+                            state_table_ids,
+                            upstream_fragment_ids,
+                        },
+                    )
+                },
+            )
+            .collect();
+
         Self {
             table_id: TableId::new(prost.table_id),
-            state: prost.state(),
-            fragments: prost.fragments.into_iter().collect(),
+            state,
+            fragments,
             actor_status: prost.actor_status.into_iter().collect(),
             actor_splits: build_actor_split_impls(&prost.actor_splits),
             ctx,
@@ -287,20 +339,20 @@ impl TableFragments {
     /// Returns mview fragment vnode mapping.
     /// Note that: the sink fragment is also stored as `TableFragments`, it's possible that
     /// there's no fragment with `FragmentTypeFlag::Mview` exists.
-    pub fn mview_vnode_mapping(&self) -> Option<(FragmentId, ParallelUnitMapping)> {
-        self.fragments
-            .values()
-            .find(|fragment| {
-                (fragment.get_fragment_type_mask() & FragmentTypeFlag::Mview as u32) != 0
-            })
-            .map(|fragment| {
-                (
-                    fragment.fragment_id,
-                    // vnode mapping is always `Some`, even for singletons.
-                    fragment.vnode_mapping.clone().unwrap(),
-                )
-            })
-    }
+    // pub fn mview_vnode_mapping(&self) -> Option<(FragmentId, ParallelUnitMapping)> {
+    //     self.fragments
+    //         .values()
+    //         .find(|fragment| {
+    //             (fragment.get_fragment_type_mask() & FragmentTypeFlag::Mview as u32) != 0
+    //         })
+    //         .map(|fragment| {
+    //             (
+    //                 fragment.fragment_id,
+    //                 // vnode mapping is always `Some`, even for singletons.
+    //                 fragment.vnode_mapping.clone().unwrap(),
+    //             )
+    //         })
+    // }
 
     /// Update state of all actors
     pub fn update_actors_state(&mut self, state: ActorState) {

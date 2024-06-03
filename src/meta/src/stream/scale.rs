@@ -119,7 +119,6 @@ pub struct CustomFragmentInfo {
     pub fragment_id: u32,
     pub fragment_type_mask: u32,
     pub distribution_type: PbFragmentDistributionType,
-    pub vnode_mapping: Option<ParallelUnitMapping>,
     pub state_table_ids: Vec<u32>,
     pub upstream_fragment_ids: Vec<u32>,
     pub actor_template: PbStreamActor,
@@ -162,7 +161,6 @@ impl From<&PbFragment> for CustomFragmentInfo {
             fragment_id: fragment.fragment_id,
             fragment_type_mask: fragment.fragment_type_mask,
             distribution_type: fragment.distribution_type(),
-            vnode_mapping: fragment.vnode_mapping.clone(),
             state_table_ids: fragment.state_table_ids.clone(),
             upstream_fragment_ids: fragment.upstream_fragment_ids.clone(),
             actor_template: fragment

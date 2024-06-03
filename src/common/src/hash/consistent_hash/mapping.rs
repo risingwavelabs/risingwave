@@ -325,10 +325,11 @@ impl ActorMapping {
         self.transform(to_map)
     }
 
-    pub fn to_worker_slot(&self, to_map: &HashMap<ActorId, u32>) -> WorkerSlotMapping {
+    /// Transform the actor mapping to the worker slot mapping. Note that the parameter is a mapping from actor to worker.
+    pub fn to_worker_slot(&self, actor_to_worker: &HashMap<ActorId, u32>) -> WorkerSlotMapping {
         let actor_location: HashMap<_, _> = self
             .iter()
-            .map(|actor_id| (to_map.get(&actor_id).cloned().unwrap(), actor_id))
+            .map(|actor_id| (actor_to_worker.get(&actor_id).cloned().unwrap(), actor_id))
             .into_group_map()
             .into_iter()
             .flat_map(|(worker_id, mut actors)| {

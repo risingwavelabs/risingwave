@@ -20,7 +20,9 @@ use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::TableId;
-use risingwave_common::hash::{ActorMapping, ParallelUnitId, ParallelUnitMapping};
+use risingwave_common::hash::{
+    ActorMapping, ParallelUnitId, ParallelUnitMapping, WorkerSlotId, WorkerSlotMapping,
+};
 use risingwave_common::util::stream_graph_visitor::{
     visit_stream_node, visit_stream_node_cont, visit_stream_node_cont_mut,
 };
@@ -69,10 +71,7 @@ impl FragmentManagerCore {
                     .values()
                     .map(move |fragment| FragmentWorkerSlotMapping {
                         fragment_id: fragment.fragment_id,
-                        mapping: Some(FragmentManager::convert_mapping(
-                            &table_fragments.actor_status,
-                            fragment.vnode_mapping.as_ref().unwrap(),
-                        )),
+                        mapping: fragment.vnode_mapping_v2.clone(),
                     })
             })
     }
@@ -91,7 +90,7 @@ impl FragmentManagerCore {
                     {
                         return None;
                     }
-                    let parallelism = match fragment.vnode_mapping.as_ref() {
+                    let parallelism = match fragment.vnode_mapping_v2.as_ref() {
                         None => {
                             tracing::warn!(
                                 "vnode mapping for fragment {} not found",
@@ -99,7 +98,7 @@ impl FragmentManagerCore {
                             );
                             1
                         }
-                        Some(m) => ParallelUnitMapping::from_protobuf(m).iter_unique().count(),
+                        Some(m) => WorkerSlotMapping::from_protobuf(m).iter_unique().count(),
                     };
                     Some((fragment.fragment_id, parallelism))
                 })
@@ -200,13 +199,7 @@ impl FragmentManager {
         for fragment in table_fragment.fragments.values() {
             let fragment_mapping = FragmentWorkerSlotMapping {
                 fragment_id: fragment.fragment_id,
-                mapping: Some(Self::convert_mapping(
-                    &table_fragment.actor_status,
-                    fragment
-                        .vnode_mapping
-                        .as_ref()
-                        .expect("no data distribution found"),
-                )),
+                mapping: fragment.vnode_mapping_v2.clone(),
             };
 
             self.env
@@ -1243,12 +1236,13 @@ impl FragmentManager {
                 }
 
                 // update fragment's vnode mapping
-                let mut actor_to_parallel_unit = HashMap::with_capacity(fragment.actors.len());
+                let mut actor_to_worker = HashMap::with_capacity(fragment.actors.len());
                 let mut actor_to_vnode_bitmap = HashMap::with_capacity(fragment.actors.len());
                 for actor in &fragment.actors {
                     let actor_status = &actor_status[&actor.actor_id];
-                    let parallel_unit_id = actor_status.parallel_unit.as_ref().unwrap().id;
-                    actor_to_parallel_unit.insert(actor.actor_id, parallel_unit_id);
+                    // let parallel_unit_id = actor_status.parallel_unit.as_ref().unwrap().id;
+                    let worker_id = actor_status.parallel_unit.as_ref().unwrap().worker_node_id;
+                    actor_to_worker.insert(actor.actor_id, worker_id);
 
                     if let Some(vnode_bitmap) = &actor.vnode_bitmap {
                         let bitmap = Bitmap::from(vnode_bitmap);
@@ -1261,24 +1255,24 @@ impl FragmentManager {
                     // We directly use the single parallel unit to construct the mapping.
                     // TODO: also fill `vnode_bitmap` for the actor of singleton fragment so that we
                     // don't need this branch.
-                    let parallel_unit = *actor_to_parallel_unit.values().exactly_one().unwrap();
-                    ParallelUnitMapping::new_single(parallel_unit)
+
+                    let worker_id = *actor_to_worker.values().exactly_one().unwrap();
+                    WorkerSlotMapping::new_single(WorkerSlotId::new(worker_id, 0))
                 } else {
                     // Generate the parallel unit mapping from the fragment's actor bitmaps.
-                    assert_eq!(actor_to_vnode_bitmap.len(), actor_to_parallel_unit.len());
+                    assert_eq!(actor_to_vnode_bitmap.len(), actor_to_worker.len());
                     ActorMapping::from_bitmaps(&actor_to_vnode_bitmap)
-                        .to_parallel_unit(&actor_to_parallel_unit)
+                        .to_worker_slot(&actor_to_worker)
                 }
                 .to_protobuf();
 
-                *fragment.vnode_mapping.as_mut().unwrap() = vnode_mapping.clone();
-
-                let worker_slot_mapping = Self::convert_mapping(&actor_status, &vnode_mapping);
+                assert!(fragment.vnode_mapping.is_none());
+                *fragment.vnode_mapping_v2.as_mut().unwrap() = vnode_mapping.clone();
 
                 // Notify fragment mapping to frontend nodes.
                 let fragment_mapping = FragmentWorkerSlotMapping {
                     fragment_id: *fragment_id as FragmentId,
-                    mapping: Some(worker_slot_mapping),
+                    mapping: Some(vnode_mapping),
                 };
 
                 fragment_mapping_to_notify.push(fragment_mapping);

@@ -192,6 +192,7 @@ impl CatalogController {
             vnode_mapping: pb_vnode_mapping,
             state_table_ids: pb_state_table_ids,
             upstream_fragment_ids: pb_upstream_fragment_ids,
+            ..
         } = pb_fragment;
 
         let state_table_ids = pb_state_table_ids.into();
@@ -484,6 +485,7 @@ impl CatalogController {
             distribution_type: pb_distribution_type,
             actors: pb_actors,
             vnode_mapping: Some(pb_vnode_mapping),
+            vnode_mapping_v2: None,
             state_table_ids: pb_state_table_ids,
             upstream_fragment_ids: pb_upstream_fragment_ids,
         };
