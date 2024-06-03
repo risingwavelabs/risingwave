@@ -430,6 +430,7 @@ mod test {
                     .find_or_first(|s| !matches!(s, &&Schema::Null))
                     .unwrap();
 
+                // XXX: This is strange. Why do we only build null when build_field failed?
                 match build_field(inner_schema) {
                     None => {
                         let index_of_union = union_schema
@@ -466,6 +467,19 @@ mod test {
         record
     }
 
+    fn columns_to_pretty_string(columns: &[ColumnDesc]) -> String {
+        format!(
+            "[\n{}\n]",
+            columns
+                .iter()
+                .format_with(",\n", |column, f| f(&format_args!(
+                    "    {}: {:?}",
+                    column.name,
+                    column.column_type.as_ref().unwrap().type_name()
+                )))
+        )
+    }
+
     #[tokio::test]
     async fn test_map_to_columns() {
         let conf = new_avro_conf_from_local("simple-schema.avsc")
@@ -473,7 +487,21 @@ mod test {
             .unwrap();
         let columns = conf.map_to_columns().unwrap();
         assert_eq!(columns.len(), 11);
-        println!("{:?}", columns);
+        expect_test::expect![[r#"
+            [
+                id: Int32,
+                sequence_id: Int64,
+                name: Varchar,
+                score: Float,
+                avg_score: Double,
+                is_lasted: Boolean,
+                entrance_date: Date,
+                birthday: Timestamptz,
+                anniversary: Timestamptz,
+                passed: Interval,
+                bytes: Bytea
+            ]"#]]
+        .assert_eq(&columns_to_pretty_string(&columns));
     }
 
     #[tokio::test]
@@ -555,7 +583,6 @@ mod test {
 
     // run this script when updating `simple-schema.avsc`, the script will generate new value in
     // `avro_simple_schema_bin.1`
-    #[ignore]
     #[tokio::test]
     async fn update_avro_payload() {
         let conf = new_avro_conf_from_local("simple-schema.avsc")
@@ -565,7 +592,9 @@ mod test {
         let record = build_avro_data(conf.schema.original_schema.as_ref());
         writer.append(record).unwrap();
         let encoded = writer.into_inner().unwrap();
-        println!("path = {:?}", e2e_file_path("avro_simple_schema_bin.1"));
+        expect_test::expect![[r#"
+            b"Obj\x01\x04\x14avro.codec\x08null\x16avro.schema\xc4\x0b{\"type\":\"record\",\"name\":\"test_student\",\"fields\":[{\"name\":\"id\",\"type\":\"int\",\"default\":0},{\"name\":\"sequence_id\",\"type\":\"long\",\"default\":0},{\"name\":\"name\",\"type\":[\"null\",\"string\"]},{\"name\":\"score\",\"type\":\"float\",\"default\":0.0},{\"name\":\"avg_score\",\"type\":\"double\",\"default\":0.0},{\"name\":\"is_lasted\",\"type\":\"boolean\",\"default\":false},{\"name\":\"entrance_date\",\"type\":{\"type\":\"int\",\"logicalType\":\"date\"},\"default\":0},{\"name\":\"birthday\",\"type\":{\"type\":\"long\",\"logicalType\":\"timestamp-millis\"},\"default\":0},{\"name\":\"anniversary\",\"type\":{\"type\":\"long\",\"logicalType\":\"timestamp-micros\"},\"default\":0},{\"name\":\"passed\",\"type\":{\"type\":{\"type\":\"fixed\",\"name\":\"duration\",\"size\":12},\"logicalType\":\"duration\"}},{\"name\":\"bytes\",\"type\":\"bytes\",\"default\":\"\"}]}\0\x06d\xd1\xbfz\x99\xbc\x8af7\x17b\xac\x98\xa3\x8f\x02`@\x80\x01\x02\x12str_value\0\0\0B\0\0\0\0\0\0P@\x01\0\0\0\x01\0\0\0\x01\0\0\0\xe8\x03\0\0\n\x01\x02\x03\x04\x05\x06d\xd1\xbfz\x99\xbc\x8af7\x17b\xac\x98\xa3\x8f"
+        "#]].assert_debug_eq(&bytes::Bytes::copy_from_slice(encoded.as_slice()));
         let mut file = OpenOptions::new()
             .read(true)
             .write(true)
@@ -574,9 +603,5 @@ mod test {
             .open(e2e_file_path("avro_simple_schema_bin.1"))
             .unwrap();
         file.write_all(encoded.as_slice()).unwrap();
-        println!(
-            "encoded = {:?}",
-            String::from_utf8_lossy(encoded.as_slice())
-        );
     }
 }
