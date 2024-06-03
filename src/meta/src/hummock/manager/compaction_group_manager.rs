@@ -818,7 +818,6 @@ impl CompactionGroupManager {
             let mut new_group = group.clone();
             new_group.compaction_config = Arc::new(config);
             compaction_groups.insert(*compaction_group_id, new_group.clone());
-            // result.push(new_group);
         }
 
         Ok(compaction_groups)
