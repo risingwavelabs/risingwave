@@ -254,6 +254,9 @@ impl<'a> AvroParseOptions<'a> {
                 debug_assert!(jsonb.as_ref().is_object());
                 JsonbVal::from(jsonb).into()
             }
+            (DataType::Varchar, Value::Uuid(uuid)) => {
+                uuid.as_hyphenated().to_string().into_boxed_str().into()
+            }
 
             (_expected, _got) => Err(create_error())?,
         };
