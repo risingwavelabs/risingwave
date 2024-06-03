@@ -5,28 +5,31 @@
 # See `rustc --print=cfg --target=<triple>` for details.
 
 [target.x86_64-unknown-linux-gnu]
-rustflags = ["-Ctarget-feature=+avx2"]
+rustflags = ["-Ctarget-feature=+avx2", "-Cforce-frame-pointers=yes"]
 
 [target.aarch64-unknown-linux-gnu]
-rustflags = ["-Ctarget-feature=+neon"]
+rustflags = ["-Ctarget-feature=+neon", "-Cforce-frame-pointers=yes"]
 
 # Extra flags for Linux targets.
 [target.'cfg(target_os = "linux")']
 rustflags = [
     "-Clink-arg=-fuse-ld=lld",       #2781
     "-Clink-arg=-Wl,--no-rosegment", #4574
+    "-Cforce-frame-pointers=yes",
 ]
 
 [target.x86_64-apple-darwin]
 rustflags = [
     "-Ctarget-feature=+sse4.2",                             # use a generally available feature, since it's not for production
     "-Clink-arg=-fuse-ld=/usr/local/opt/llvm/bin/ld64.lld",
+    "-Cforce-frame-pointers=yes",
 ]
 
 [target.aarch64-apple-darwin]
 rustflags = [
     # neon is enabled by default
     "-Clink-arg=-fuse-ld=/opt/homebrew/opt/llvm/bin/ld64.lld",
+    "-Cforce-frame-pointers=yes",
 ]
 
 # Flags for all targets.
@@ -34,6 +37,7 @@ rustflags = [
 rustflags = [
     "--cfg",
     "tokio_unstable",
+    "-Cforce-frame-pointers=yes",
     # Uncomment the following two lines to enable `TaskLocalAlloc`.
     # "--cfg",
     # "enable_task_local_alloc",
