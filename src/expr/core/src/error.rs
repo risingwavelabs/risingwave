@@ -115,8 +115,13 @@ pub enum ExprError {
     Custom(String),
 
     /// Error from a function call.
-    #[error("{0}")]
-    Function(#[source] Box<dyn std::error::Error + Send + Sync>),
+    #[error("error while evaluating expression `{expression}`")]
+    Function {
+        expression: Box<str>,
+        #[backtrace]
+        // We don't use `anyhow::Error` because we don't want to always capture the backtrace.
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
 }
 
 static_assertions::const_assert_eq!(std::mem::size_of::<ExprError>(), 40);

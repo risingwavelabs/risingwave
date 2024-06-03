@@ -346,6 +346,46 @@ impl FunctionAttr {
         let context = user_fn.context.then(|| quote! { &self.context, });
         let writer = user_fn.write.then(|| quote! { &mut writer, });
         let await_ = user_fn.async_.then(|| quote! { .await });
+
+        let to_texts = inputs
+            .iter()
+            .zip(user_fn.args_option.iter())
+            .map(|(input, opt)| {
+                if *opt {
+                    quote! { if let Some(#input) = #input {
+                        #input.to_text()
+                    } else {
+                        "NULL".to_owned()
+                    } }
+                } else {
+                    quote! { #input.to_text() }
+                }
+            });
+        let writes = to_texts.enumerate().map(|(i, to_text)| {
+            let sep = (i > 0).then(|| quote! { write!(s, ", ").unwrap(); });
+            quote! {
+                #sep
+                write!(s, "{}", #to_text).unwrap();
+            }
+        });
+
+        let error_context = quote! {
+            let context = {
+                use risingwave_common::types::ToText;
+                use std::fmt::Write;
+                let mut s = String::new();
+                write!(s, stringify!(#fn_name)).unwrap();
+                write!(s, "(").unwrap();
+                #(#writes)*
+                write!(s, ")").unwrap();
+                s
+            };
+            errors.push(ExprError::Function {
+                expression: context.into(),
+                source: Box::new(e),
+            });
+        };
+
         // call the user defined function
         // inputs: [ Option<impl ScalarRef> ]
         let mut output = quote! { #fn_name #generic(
@@ -365,13 +405,19 @@ impl FunctionAttr {
             ReturnTypeKind::Result => quote! {
                 match #output {
                     Ok(x) => Some(x),
-                    Err(e) => { errors.push(ExprError::Function(Box::new(e))); None }
+                    Err(e) => {
+                        #error_context
+                        None
+                    }
                 }
             },
             ReturnTypeKind::ResultOption => quote! {
                 match #output {
                     Ok(x) => x,
-                    Err(e) => { errors.push(ExprError::Function(Box::new(e))); None }
+                    Err(e) => {
+                        #error_context
+                        None
+                    }
                 }
             },
         };
