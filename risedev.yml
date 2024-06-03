@@ -861,6 +861,10 @@ profile:
         user-managed: true
         address: message_queue
         port: 29092
+      - use: schema-registry
+        user-managed: true
+        address: schemaregistry
+        port: 8082
 
   ci-inline-source-test:
     config-path: src/config/ci-recovery.toml
@@ -880,6 +884,10 @@ profile:
         user-managed: true
         address: message_queue
         port: 29092
+      - use: schema-registry
+        user-managed: true
+        address: schemaregistry
+        port: 8082
       - use: mysql
         port: 3306
         address: mysql
@@ -950,7 +958,7 @@ profile:
       - use: frontend
       - use: compactor
 
-  ci-1cn-1fe-kafka-with-recovery:
+  ci-1cn-1fe-user-kafka-with-recovery:
     config-path: src/config/ci-recovery.toml
     steps:
       - use: minio
@@ -962,7 +970,9 @@ profile:
       - use: frontend
       - use: compactor
       - use: kafka
-        persist-data: true
+        user-managed: true
+        address: message_queue
+        port: 29092
 
   ci-meta-backup-test-etcd:
     config-path: src/config/ci-meta-backup-test.toml
@@ -1431,9 +1441,8 @@ template:
 
     # Listen port of KRaft controller
     controller-port: 29093
-
-    # Listen address
-    listen-address: ${address}
+    # Listen port for other services in docker (schema-registry)
+    docker-port: 29094
 
     # The docker image. Can be overridden to use a different version.
     image: "confluentinc/cp-kafka:7.6.1"
@@ -1445,6 +1454,23 @@ template:
     node-id: 0
 
     user-managed: false
+
+  schema-registry:
+    # Id to be picked-up by services
+    id: schema-registry-${port}
+
+    # Advertise address
+    address: "127.0.0.1"
+
+    # Listen port of Schema Registry
+    port: 8081
+
+    # The docker image. Can be overridden to use a different version.
+    image: "confluentinc/cp-schema-registry:7.6.1"
+
+    user-managed: false
+
+    provide-kafka: "kafka*"
 
   # Google pubsub emulator service
   pubsub:

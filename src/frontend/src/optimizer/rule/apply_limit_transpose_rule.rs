@@ -63,7 +63,7 @@ impl Rule for ApplyLimitTransposeRule {
             return None;
         }
 
-        let new_apply = LogicalApply::new(
+        let new_apply = LogicalApply::create(
             left,
             limit_input,
             JoinType::Inner,
@@ -71,8 +71,7 @@ impl Rule for ApplyLimitTransposeRule {
             correlated_id,
             correlated_indices,
             false,
-        )
-        .into();
+        );
 
         let new_topn = {
             // use the first column as an order to provide determinism for streaming queries.

@@ -1023,6 +1023,26 @@ fn sanity_check_for_cdc_table(
     constraints: &Vec<TableConstraint>,
     source_watermarks: &Vec<SourceWatermark>,
 ) -> Result<()> {
+    // cdc table must have primary key constraint or primary key column
+    if !constraints.iter().any(|c| {
+        matches!(
+            c,
+            TableConstraint::Unique {
+                is_primary: true,
+                ..
+            }
+        )
+    }) && !column_defs.iter().any(|col| {
+        col.options
+            .iter()
+            .any(|opt| matches!(opt.option, ColumnOption::Unique { is_primary: true }))
+    }) {
+        return Err(ErrorCode::NotSupported(
+            "CDC table without primary key constraint is not supported".to_owned(),
+            "Please define a primary key".to_owned(),
+        )
+        .into());
+    }
     if append_only {
         return Err(ErrorCode::NotSupported(
             "append only modifier on the table created from a CDC source".into(),

@@ -28,8 +28,7 @@ use risingwave_hummock_sdk::table_stats::TableStatsMap;
 use risingwave_hummock_sdk::{can_concat, EpochWithGap, KeyComparator};
 use risingwave_pb::hummock::compact_task::TaskType;
 use risingwave_pb::hummock::{
-    compact_task, BloomFilterType, CompactTask, KeyRange as KeyRange_vec, LevelType, SstableInfo,
-    TableSchema,
+    compact_task, BloomFilterType, CompactTask, LevelType, PbKeyRange, SstableInfo, TableSchema,
 };
 use tokio::time::Instant;
 
@@ -178,7 +177,8 @@ fn generate_splits_fast(
     sstable_infos: &Vec<SstableInfo>,
     compaction_size: u64,
     context: &CompactorContext,
-) -> Vec<KeyRange_vec> {
+    max_sub_compaction: u32,
+) -> Vec<PbKeyRange> {
     let worker_num = context.compaction_executor.worker_num();
     let parallel_compact_size = (context.storage_opts.parallel_compact_size_mb as u64) << 20;
 
@@ -186,7 +186,7 @@ fn generate_splits_fast(
         worker_num,
         parallel_compact_size,
         compaction_size,
-        context.storage_opts.max_sub_compaction,
+        max_sub_compaction,
     );
     let mut indexes = vec![];
     for sst in sstable_infos {
@@ -213,13 +213,13 @@ fn generate_splits_fast(
     }
 
     let mut splits = vec![];
-    splits.push(KeyRange_vec::new(vec![], vec![]));
+    splits.push(PbKeyRange::new(vec![], vec![]));
     let parallel_key_count = indexes.len() / parallelism;
     let mut last_split_key_count = 0;
     for key in indexes {
         if last_split_key_count >= parallel_key_count {
             splits.last_mut().unwrap().right.clone_from(&key);
-            splits.push(KeyRange_vec::new(key.clone(), vec![]));
+            splits.push(PbKeyRange::new(key.clone(), vec![]));
             last_split_key_count = 0;
         }
         last_split_key_count += 1;
@@ -232,7 +232,8 @@ pub async fn generate_splits(
     sstable_infos: &Vec<SstableInfo>,
     compaction_size: u64,
     context: &CompactorContext,
-) -> HummockResult<Vec<KeyRange_vec>> {
+    max_sub_compaction: u32,
+) -> HummockResult<Vec<PbKeyRange>> {
     const MAX_FILE_COUNT: usize = 32;
     let parallel_compact_size = (context.storage_opts.parallel_compact_size_mb as u64) << 20;
     if compaction_size > parallel_compact_size {
@@ -241,6 +242,7 @@ pub async fn generate_splits(
                 sstable_infos,
                 compaction_size,
                 context,
+                max_sub_compaction,
             ));
         }
         let mut indexes = vec![];
@@ -269,13 +271,13 @@ pub async fn generate_splits(
         // sort by key, as for every data block has the same size;
         indexes.sort_by(|a, b| KeyComparator::compare_encoded_full_key(a.1.as_ref(), b.1.as_ref()));
         let mut splits = vec![];
-        splits.push(KeyRange_vec::new(vec![], vec![]));
+        splits.push(PbKeyRange::new(vec![], vec![]));
 
         let parallelism = calculate_task_parallelism_impl(
             context.compaction_executor.worker_num(),
             parallel_compact_size,
             compaction_size,
-            context.storage_opts.max_sub_compaction,
+            max_sub_compaction,
         );
 
         let sub_compaction_data_size =
@@ -291,7 +293,7 @@ pub async fn generate_splits(
                     && remaining_size > parallel_compact_size
                 {
                     splits.last_mut().unwrap().right.clone_from(&key);
-                    splits.push(KeyRange_vec::new(key.clone(), vec![]));
+                    splits.push(PbKeyRange::new(key.clone(), vec![]));
                     last_buffer_size = data_size;
                 } else {
                     last_buffer_size += data_size;
@@ -577,7 +579,13 @@ pub async fn generate_splits_for_task(
         .sum::<u64>();
 
     if !optimize_by_copy_block {
-        let splits = generate_splits(&sstable_infos, compaction_size, context).await?;
+        let splits = generate_splits(
+            &sstable_infos,
+            compaction_size,
+            context,
+            compact_task.get_max_sub_compaction(),
+        )
+        .await?;
         if !splits.is_empty() {
             compact_task.splits = splits;
         }
@@ -659,7 +667,7 @@ pub fn calculate_task_parallelism(compact_task: &CompactTask, context: &Compacto
         context.compaction_executor.worker_num(),
         parallel_compact_size,
         compaction_size,
-        context.storage_opts.max_sub_compaction,
+        compact_task.get_max_sub_compaction(),
     )
 }
 

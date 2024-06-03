@@ -18,9 +18,12 @@ use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Duration;
 
+use aes_siv::aead::generic_array::GenericArray;
+use aes_siv::aead::Aead;
+use aes_siv::{Aes128SivAead, KeyInit};
 use anyhow::Context;
 use itertools::Itertools;
-use rand::Rng;
+use rand::{Rng, RngCore};
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::{ParallelUnitMapping, VirtualNode};
 use risingwave_common::system_param::reader::SystemParamsRead;
@@ -48,7 +51,7 @@ use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{
     connection, Comment, Connection, CreateType, Database, Function, PbSource, PbTable, Schema,
-    Sink, Source, Subscription, Table, View,
+    Secret, Sink, Source, Subscription, Table, View,
 };
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::{
@@ -62,6 +65,7 @@ use risingwave_pb::stream_plan::{
     Dispatcher, DispatcherType, FragmentTypeFlag, MergeNode, PbStreamFragmentGraph,
     StreamFragmentGraph as StreamFragmentGraphProto,
 };
+use serde::{Deserialize, Serialize};
 use thiserror_ext::AsReport;
 use tokio::sync::Semaphore;
 use tokio::time::sleep;
@@ -69,12 +73,13 @@ use tracing::log::warn;
 use tracing::Instrument;
 
 use crate::barrier::BarrierManagerRef;
+use crate::error::MetaErrorInner;
 use crate::manager::{
     CatalogManagerRef, ConnectionId, DatabaseId, FragmentManagerRef, FunctionId, IdCategory,
     IdCategoryType, IndexId, LocalNotification, MetaSrvEnv, MetadataManager, MetadataManagerV1,
-    NotificationVersion, RelationIdEnum, SchemaId, SinkId, SourceId, StreamingClusterInfo,
-    StreamingJob, StreamingJobDiscriminants, SubscriptionId, TableId, UserId, ViewId,
-    IGNORED_NOTIFICATION_VERSION,
+    NotificationVersion, RelationIdEnum, SchemaId, SecretId, SinkId, SourceId,
+    StreamingClusterInfo, StreamingJob, StreamingJobDiscriminants, SubscriptionId, TableId, UserId,
+    ViewId, IGNORED_NOTIFICATION_VERSION,
 };
 use crate::model::{FragmentId, StreamContext, TableFragments, TableParallelism};
 use crate::rpc::cloud_provider::AwsEc2Client;
@@ -152,9 +157,17 @@ pub enum DdlCommand {
     AlterSetSchema(alter_set_schema_request::Object, SchemaId),
     CreateConnection(Connection),
     DropConnection(ConnectionId),
+    CreateSecret(Secret),
+    DropSecret(SecretId),
     CommentOn(Comment),
     CreateSubscription(Subscription),
     DropSubscription(SubscriptionId, DropMode),
+}
+
+#[derive(Deserialize, Serialize)]
+struct SecretEncryption {
+    nonce: [u8; 16],
+    ciphertext: Vec<u8>,
 }
 
 impl DdlCommand {
@@ -166,7 +179,9 @@ impl DdlCommand {
             | DdlCommand::DropFunction(_)
             | DdlCommand::DropView(_, _)
             | DdlCommand::DropStreamingJob(_, _, _)
-            | DdlCommand::DropConnection(_) => true,
+            | DdlCommand::DropConnection(_)
+            | DdlCommand::DropSecret(_) => true,
+
             // Simply ban all other commands in recovery.
             _ => false,
         }
@@ -335,6 +350,8 @@ impl DdlController {
                 DdlCommand::DropConnection(connection_id) => {
                     ctrl.drop_connection(connection_id).await
                 }
+                DdlCommand::CreateSecret(secret) => ctrl.create_secret(secret).await,
+                DdlCommand::DropSecret(secret_id) => ctrl.drop_secret(secret_id).await,
                 DdlCommand::AlterSourceColumn(source) => ctrl.alter_source_column(source).await,
                 DdlCommand::CommentOn(comment) => ctrl.comment_on(comment).await,
                 DdlCommand::CreateSubscription(subscription) => {
@@ -610,6 +627,57 @@ impl DdlController {
                 )
                 .await
             }
+        }
+    }
+
+    async fn create_secret(&self, mut secret: Secret) -> MetaResult<NotificationVersion> {
+        // The 'secret' part of the request we receive from the frontend is in plaintext;
+        // here, we need to encrypt it before storing it in the catalog.
+
+        let encrypted_payload = {
+            let data = secret.get_value().as_slice();
+            let key = self.env.opts.secret_store_private_key.as_slice();
+            let encrypt_key = {
+                let mut k = key[..(std::cmp::min(key.len(), 32))].to_vec();
+                k.resize_with(32, || 0);
+                k
+            };
+
+            let mut rng = rand::thread_rng();
+            let mut nonce: [u8; 16] = [0; 16];
+            rng.fill_bytes(&mut nonce);
+            let nonce_array = GenericArray::from_slice(&nonce);
+            let cipher = Aes128SivAead::new(encrypt_key.as_slice().into());
+
+            let ciphertext = cipher.encrypt(nonce_array, data).map_err(|e| {
+                MetaError::from(MetaErrorInner::InvalidParameter(format!(
+                    "failed to encrypt secret {}: {:?}",
+                    secret.name, e
+                )))
+            })?;
+            bincode::serialize(&SecretEncryption { nonce, ciphertext }).map_err(|e| {
+                MetaError::from(MetaErrorInner::InvalidParameter(format!(
+                    "failed to serialize secret {}: {:?}",
+                    secret.name,
+                    e.as_report()
+                )))
+            })?
+        };
+        secret.value = encrypted_payload;
+
+        match &self.metadata_manager {
+            MetadataManager::V1(mgr) => {
+                secret.id = self.gen_unique_id::<{ IdCategory::Secret }>().await?;
+                mgr.catalog_manager.create_secret(secret).await
+            }
+            MetadataManager::V2(mgr) => mgr.catalog_controller.create_secret(secret).await,
+        }
+    }
+
+    async fn drop_secret(&self, secret_id: SecretId) -> MetaResult<NotificationVersion> {
+        match &self.metadata_manager {
+            MetadataManager::V1(mgr) => mgr.catalog_manager.drop_secret(secret_id).await,
+            MetadataManager::V2(mgr) => mgr.catalog_controller.drop_secret(secret_id as _).await,
         }
     }
 
@@ -912,7 +980,7 @@ impl DdlController {
                     ctx,
                     internal_tables,
                 )
-                .await
+                    .await
             }
             (CreateType::Background, &StreamingJob::MaterializedView(_)) => {
                 let ctrl = self.clone();
@@ -1935,20 +2003,20 @@ impl DdlController {
 
         // Map the column indices in the dispatchers with the given mapping.
         let downstream_fragments = self.metadata_manager.get_downstream_chain_fragments(id).await?
-                .into_iter()
-                .map(|(d, f)|
-                    if let Some(mapping) = &table_col_index_mapping {
-                        Some((mapping.rewrite_dispatch_strategy(&d)?, f))
-                    } else {
-                        Some((d, f))
-                    })
-                .collect::<Option<_>>()
-                .ok_or_else(|| {
-                    // The `rewrite` only fails if some column is dropped.
-                    MetaError::invalid_parameter(
-                        "unable to drop the column due to being referenced by downstream materialized views or sinks",
-                    )
-                })?;
+            .into_iter()
+            .map(|(d, f)|
+                if let Some(mapping) = &table_col_index_mapping {
+                    Some((mapping.rewrite_dispatch_strategy(&d)?, f))
+                } else {
+                    Some((d, f))
+                })
+            .collect::<Option<_>>()
+            .ok_or_else(|| {
+                // The `rewrite` only fails if some column is dropped.
+                MetaError::invalid_parameter(
+                    "unable to drop the column due to being referenced by downstream materialized views or sinks",
+                )
+            })?;
 
         let complete_graph = CompleteStreamFragmentGraph::with_downstreams(
             fragment_graph,

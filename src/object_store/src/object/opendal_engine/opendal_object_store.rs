@@ -248,10 +248,7 @@ impl ObjectStore for OpendalObjectStore {
     }
 
     fn support_streaming_upload(&self) -> bool {
-        match self.engine_type {
-            EngineType::Azblob => false,
-            _ => self.op.info().native_capability().write_can_multi,
-        }
+        self.op.info().native_capability().write_can_multi
     }
 }
 
@@ -300,7 +297,10 @@ impl StreamingUploader for OpendalStreamingUploader {
         match self.writer.close().await {
             Ok(_) => (),
             Err(err) => {
-                self.writer.abort().await?;
+                // Due to a bug in OpenDAL, calling `abort()` here may trigger unreachable code and cause panic.
+                // refer to https://github.com/apache/opendal/issues/4651
+                // This will be fixed after the next bump in the opendal version.
+                // self.writer.abort().await?;
                 return Err(err.into());
             }
         };

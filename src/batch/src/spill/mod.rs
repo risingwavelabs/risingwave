@@ -12,8 +12,4 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Traverses the 'testdata/' directory and runs all files.
-#[test]
-fn run_all_test_files() {
-    risingwave_sqlparser_test_runner::run_all_test_files();
-}
+pub mod spill_op;

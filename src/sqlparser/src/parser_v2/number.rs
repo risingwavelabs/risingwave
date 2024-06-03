@@ -13,7 +13,7 @@
 use core::ops::RangeBounds;
 
 use winnow::combinator::{cut_err, delimited};
-use winnow::error::ContextError;
+use winnow::error::{ContextError, StrContext};
 use winnow::{PResult, Parser};
 
 use super::{token, TokenStream};
@@ -32,6 +32,7 @@ where
                 None
             }
         })
+        .context(StrContext::Label("number"))
         .parse_next(input)
 }
 
@@ -40,7 +41,32 @@ pub fn literal_uint<S>(input: &mut S) -> PResult<u64>
 where
     S: TokenStream,
 {
-    token_number.try_map(|s| s.parse::<u64>()).parse_next(input)
+    token_number
+        .try_map(|s| s.parse::<u64>())
+        .context(StrContext::Label("u64"))
+        .parse_next(input)
+}
+
+/// Consume an unsigned literal integer
+pub fn literal_u32<S>(input: &mut S) -> PResult<u32>
+where
+    S: TokenStream,
+{
+    token_number
+        .try_map(|s| s.parse::<u32>())
+        .context(StrContext::Label("u32"))
+        .parse_next(input)
+}
+
+/// Consume an literal integer
+pub fn literal_i64<S>(input: &mut S) -> PResult<i64>
+where
+    S: TokenStream,
+{
+    token_number
+        .try_map(|s| s.parse::<i64>())
+        .context(StrContext::Label("i64"))
+        .parse_next(input)
 }
 
 /// Consume a precision definition in some types, e.g. `FLOAT(32)`.
@@ -53,7 +79,7 @@ where
     S: TokenStream,
 {
     #[derive(Debug, thiserror::Error)]
-    #[error("Precision must be in range {0}")]
+    #[error("precision must be in range {0}")]
     struct OutOfRange(String);
 
     delimited(

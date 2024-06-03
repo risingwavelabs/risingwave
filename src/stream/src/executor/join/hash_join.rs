@@ -105,9 +105,9 @@ pub struct JoinHashMapMetrics {
     insert_cache_miss_count: usize,
 
     // Metrics
-    join_lookup_total_count_metric: LabelGuardedIntCounter<5>,
-    join_lookup_miss_count_metric: LabelGuardedIntCounter<5>,
-    join_insert_cache_miss_count_metrics: LabelGuardedIntCounter<5>,
+    join_lookup_total_count_metric: LabelGuardedIntCounter<4>,
+    join_lookup_miss_count_metric: LabelGuardedIntCounter<4>,
+    join_insert_cache_miss_count_metrics: LabelGuardedIntCounter<4>,
 }
 
 impl JoinHashMapMetrics {
@@ -117,37 +117,19 @@ impl JoinHashMapMetrics {
         fragment_id: FragmentId,
         side: &'static str,
         join_table_id: u32,
-        degree_table_id: u32,
     ) -> Self {
         let actor_id = actor_id.to_string();
         let fragment_id = fragment_id.to_string();
         let join_table_id = join_table_id.to_string();
-        let degree_table_id = degree_table_id.to_string();
-        let join_lookup_total_count_metric =
-            metrics.join_lookup_total_count.with_guarded_label_values(&[
-                (side),
-                &join_table_id,
-                &degree_table_id,
-                &actor_id,
-                &fragment_id,
-            ]);
-        let join_lookup_miss_count_metric =
-            metrics.join_lookup_miss_count.with_guarded_label_values(&[
-                (side),
-                &join_table_id,
-                &degree_table_id,
-                &actor_id,
-                &fragment_id,
-            ]);
+        let join_lookup_total_count_metric = metrics
+            .join_lookup_total_count
+            .with_guarded_label_values(&[(side), &join_table_id, &actor_id, &fragment_id]);
+        let join_lookup_miss_count_metric = metrics
+            .join_lookup_miss_count
+            .with_guarded_label_values(&[(side), &join_table_id, &actor_id, &fragment_id]);
         let join_insert_cache_miss_count_metrics = metrics
             .join_insert_cache_miss_count
-            .with_guarded_label_values(&[
-                (side),
-                &join_table_id,
-                &degree_table_id,
-                &actor_id,
-                &fragment_id,
-            ]);
+            .with_guarded_label_values(&[(side), &join_table_id, &actor_id, &fragment_id]);
 
         Self {
             lookup_miss_count: 0,
@@ -265,7 +247,6 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         );
 
         let join_table_id = state_table.table_id();
-        let degree_table_id = degree_table.table_id();
         let state = TableInner {
             pk_indices: state_pk_indices,
             join_key_indices: state_join_key_indices,
@@ -286,7 +267,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             metrics.clone(),
             join_table_id,
             actor_id,
-            &format!("hash join {}", side),
+            format!("hash join {}", side),
         );
 
         let cache = ManagedLruCache::unbounded_with_hasher_in(
@@ -305,14 +286,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             degree_state,
             need_degree_table,
             pk_contained_in_jk,
-            metrics: JoinHashMapMetrics::new(
-                &metrics,
-                actor_id,
-                fragment_id,
-                side,
-                join_table_id,
-                degree_table_id,
-            ),
+            metrics: JoinHashMapMetrics::new(&metrics, actor_id, fragment_id, side, join_table_id),
         }
     }
 

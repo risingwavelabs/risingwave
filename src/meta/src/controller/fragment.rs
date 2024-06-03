@@ -18,6 +18,7 @@ use std::mem::swap;
 use anyhow::Context;
 use itertools::Itertools;
 use risingwave_common::bail;
+use risingwave_common::hash::ParallelUnitMapping;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node;
 use risingwave_meta_model_v2::actor::ActorStatus;
 use risingwave_meta_model_v2::prelude::{Actor, ActorDispatcher, Fragment, Sink, StreamingJob};
@@ -34,7 +35,7 @@ use risingwave_pb::meta::table_fragments::actor_status::PbActorState;
 use risingwave_pb::meta::table_fragments::fragment::PbFragmentDistributionType;
 use risingwave_pb::meta::table_fragments::{PbActorStatus, PbFragment, PbState};
 use risingwave_pb::meta::{
-    FragmentParallelUnitMapping, PbFragmentParallelUnitMapping, PbTableFragments,
+    FragmentWorkerSlotMapping, PbFragmentWorkerSlotMapping, PbTableFragments,
 };
 use risingwave_pb::source::PbConnectorSplits;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -50,7 +51,8 @@ use sea_orm::{
 
 use crate::controller::catalog::{CatalogController, CatalogControllerInner};
 use crate::controller::utils::{
-    get_actor_dispatchers, FragmentDesc, PartialActorLocation, PartialFragmentStateTables,
+    get_actor_dispatchers, get_parallel_unit_to_worker_map, FragmentDesc, PartialActorLocation,
+    PartialFragmentStateTables,
 };
 use crate::manager::{ActorInfos, LocalNotification};
 use crate::model::TableParallelism;
@@ -61,7 +63,9 @@ impl CatalogControllerInner {
     /// List all fragment vnode mapping info for all CREATED streaming jobs.
     pub async fn all_running_fragment_mappings(
         &self,
-    ) -> MetaResult<impl Iterator<Item = FragmentParallelUnitMapping> + '_> {
+    ) -> MetaResult<impl Iterator<Item = FragmentWorkerSlotMapping> + '_> {
+        let txn = self.db.begin().await?;
+
         let fragment_mappings: Vec<(FragmentId, FragmentVnodeMapping)> = Fragment::find()
             .join(JoinType::InnerJoin, fragment::Relation::Object.def())
             .join(JoinType::InnerJoin, object::Relation::StreamingJob.def())
@@ -69,14 +73,24 @@ impl CatalogControllerInner {
             .columns([fragment::Column::FragmentId, fragment::Column::VnodeMapping])
             .filter(streaming_job::Column::JobStatus.eq(JobStatus::Created))
             .into_tuple()
-            .all(&self.db)
+            .all(&txn)
             .await?;
-        Ok(fragment_mappings.into_iter().map(|(fragment_id, mapping)| {
-            FragmentParallelUnitMapping {
-                fragment_id: fragment_id as _,
-                mapping: Some(mapping.to_protobuf()),
-            }
-        }))
+
+        let parallel_unit_to_worker = get_parallel_unit_to_worker_map(&txn).await?;
+
+        Ok(fragment_mappings
+            .into_iter()
+            .map(move |(fragment_id, mapping)| {
+                let worker_slot_mapping =
+                    ParallelUnitMapping::from_protobuf(&mapping.to_protobuf())
+                        .to_worker_slot(&parallel_unit_to_worker)
+                        .to_protobuf();
+
+                FragmentWorkerSlotMapping {
+                    fragment_id: fragment_id as _,
+                    mapping: Some(worker_slot_mapping),
+                }
+            }))
     }
 }
 
@@ -84,7 +98,7 @@ impl CatalogController {
     pub(crate) async fn notify_fragment_mapping(
         &self,
         operation: NotificationOperation,
-        fragment_mappings: Vec<PbFragmentParallelUnitMapping>,
+        fragment_mappings: Vec<PbFragmentWorkerSlotMapping>,
     ) {
         let fragment_ids = fragment_mappings
             .iter()
@@ -96,7 +110,7 @@ impl CatalogController {
                 .notification_manager()
                 .notify_frontend(
                     operation,
-                    NotificationInfo::ParallelUnitMapping(fragment_mapping),
+                    NotificationInfo::StreamingWorkerSlotMapping(fragment_mapping),
                 )
                 .await;
         }
@@ -936,15 +950,21 @@ impl CatalogController {
             .await?;
         }
 
+        let parallel_unit_to_worker = get_parallel_unit_to_worker_map(&txn).await?;
+
         txn.commit().await?;
 
         self.notify_fragment_mapping(
             NotificationOperation::Update,
             fragment_mapping
                 .into_iter()
-                .map(|(fragment_id, mapping)| PbFragmentParallelUnitMapping {
+                .map(|(fragment_id, mapping)| PbFragmentWorkerSlotMapping {
                     fragment_id: fragment_id as _,
-                    mapping: Some(mapping.to_protobuf()),
+                    mapping: Some(
+                        ParallelUnitMapping::from_protobuf(&mapping.to_protobuf())
+                            .to_worker_slot(&parallel_unit_to_worker)
+                            .to_protobuf(),
+                    ),
                 })
                 .collect(),
         )

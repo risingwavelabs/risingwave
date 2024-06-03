@@ -4,8 +4,9 @@ selet 1;
 db error: ERROR: Failed to run the query
 
 Caused by:
-  sql parser error: Expected an SQL statement, found: selet at line:1, column:6
-Near "selet"
+  sql parser error: expected statement, found: selet
+LINE 1: selet 1;
+        ^
 
 
 statement error

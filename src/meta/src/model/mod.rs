@@ -177,6 +177,7 @@ macro_rules! for_all_metadata_models {
             { risingwave_pb::user::UserInfo },
             { risingwave_pb::catalog::Function },
             { risingwave_pb::catalog::Connection },
+            { risingwave_pb::catalog::Secret },
             // These items need not be included in a meta snapshot.
             { crate::model::cluster::Worker },
             { risingwave_pb::hummock::CompactTaskAssignment },
