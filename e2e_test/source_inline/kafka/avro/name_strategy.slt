@@ -38,9 +38,9 @@ FORMAT UPSERT ENCODE AVRO (schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}');
 
 statement ok
 CREATE TABLE upsert_avro_json (
-  PRIMARY KEY("ID")
+  PRIMARY KEY("ID_KEY")
 )
-INCLUDE KEY AS "ID"
+INCLUDE KEY AS "ID_KEY"
 WITH (
   connector = 'kafka',
   properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
