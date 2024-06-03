@@ -203,7 +203,6 @@ message AdditionalColumnHeader {
   data.DataType data_type = 2;
 }
 
-
 // metadata column for cdc table
 message AdditionalDatabaseName {}
 
@@ -212,7 +211,6 @@ message AdditionalSchemaName {}
 message AdditionalTableName {}
 
 message AdditionalCollectionName {}
-
 
 // this type means we read all headers as a whole
 message AdditionalColumnHeaders {}
