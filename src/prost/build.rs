@@ -65,7 +65,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ".monitor_service.StackTraceResponse",
         ".plan_common.ExternalTableDesc",
         ".hummock.CompactTask",
-        ".catalog.StreamSourceInfo",
+        // ".catalog.StreamSourceInfo",
     ];
 
     // Build protobuf structs.
@@ -99,7 +99,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Eq + Hash are for plan nodes to do common sub-plan detection.
         // The requirement is from Source node -> SourceCatalog -> WatermarkDesc -> expr
         .type_attribute("catalog.WatermarkDesc", "#[derive(Eq, Hash)]")
-        .type_attribute("catalog.StreamSourceInfo", "#[derive(Eq, Hash)]")
+        .type_attribute("catalog.StreamSourceInfo", "#[derive(Eq)]")
         .type_attribute("expr.ExprNode", "#[derive(Eq, Hash)]")
         .type_attribute("data.DataType", "#[derive(Eq, Hash)]")
         .type_attribute("expr.ExprNode.rex_node", "#[derive(Eq, Hash)]")

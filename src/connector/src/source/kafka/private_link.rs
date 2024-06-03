@@ -91,7 +91,7 @@ impl BrokerAddrRewriter {
 }
 
 #[inline(always)]
-fn kafka_props_broker_key(with_properties: &BTreeMap<String, String>) -> &str {
+fn kafka_props_broker_key(with_properties: &HashMap<String, String>) -> &str {
     if with_properties.contains_key(KAFKA_PROPS_BROKER_KEY) {
         KAFKA_PROPS_BROKER_KEY
     } else {
@@ -101,7 +101,7 @@ fn kafka_props_broker_key(with_properties: &BTreeMap<String, String>) -> &str {
 
 #[inline(always)]
 fn get_property_required(
-    with_properties: &BTreeMap<String, String>,
+    with_properties: &HashMap<String, String>,
     property: &str,
 ) -> ConnectorResult<String> {
     with_properties
@@ -112,7 +112,7 @@ fn get_property_required(
 }
 
 pub fn insert_privatelink_broker_rewrite_map(
-    with_options: &mut BTreeMap<String, String>,
+    with_options: &mut HashMap<String, String>,
     svc: Option<&PrivateLinkService>,
     privatelink_endpoint: Option<String>,
 ) -> ConnectorResult<()> {
