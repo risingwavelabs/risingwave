@@ -218,7 +218,8 @@ fn avro_type_mapping(
                 }
             }
         }
-        Schema::Null | Schema::Fixed(_) | Schema::Uuid => {
+        Schema::Uuid => DataType::Varchar,
+        Schema::Null | Schema::Fixed(_) => {
             bail!("unsupported Avro type: {:?}", schema)
         }
     };
