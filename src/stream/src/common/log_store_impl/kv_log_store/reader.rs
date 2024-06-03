@@ -352,7 +352,7 @@ impl<S: StateStore> KvLogStoreReader<S> {
                     ReadOptions {
                         // This stream lives too long, the connection of prefetch object may break. So use a short connection prefetch.
                         prefetch_options: PrefetchOptions::prefetch_for_small_range_scan(),
-                        cache_policy: CachePolicy::Fill(CacheContext::LruPriorityLow),
+                        cache_policy: CachePolicy::Fill(CacheContext::LowPriority),
                         table_id,
                         ..Default::default()
                     },
@@ -504,7 +504,7 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
                                             ReadOptions {
                                                 prefetch_options:
                                                     PrefetchOptions::prefetch_for_large_range_scan(),
-                                                cache_policy: CachePolicy::Fill(CacheContext::LruPriorityLow),
+                                                cache_policy: CachePolicy::Fill(CacheContext::LowPriority),
                                                 table_id,
                                                 ..Default::default()
                                             },
