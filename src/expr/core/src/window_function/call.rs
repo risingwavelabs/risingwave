@@ -102,6 +102,10 @@ impl Frame {
                 let bounds = must_match!(frame.get_bounds()?, PbBounds::Range(bounds) => bounds);
                 FrameBounds::Range(RangeFrameBounds::from_protobuf(bounds)?)
             }
+            PbType::Session => {
+                let bounds = must_match!(frame.get_bounds()?, PbBounds::Session(bounds) => bounds);
+                FrameBounds::Session(SessionFrameBounds::from_protobuf(bounds)?)
+            }
         };
         let exclusion = FrameExclusion::from_protobuf(frame.get_exclusion()?)?;
         Ok(Self { bounds, exclusion })
@@ -110,8 +114,8 @@ impl Frame {
     pub fn to_protobuf(&self) -> PbWindowFrame {
         use risingwave_pb::expr::window_frame::PbType;
         let exclusion = self.exclusion.to_protobuf() as _;
+        #[expect(deprecated)] // because of `start` and `end` fields
         match &self.bounds {
-            #[expect(deprecated)]
             FrameBounds::Rows(bounds) => PbWindowFrame {
                 r#type: PbType::Rows as _,
                 start: None, // deprecated
@@ -119,7 +123,6 @@ impl Frame {
                 exclusion,
                 bounds: Some(PbBounds::Rows(bounds.to_protobuf())),
             },
-            #[expect(deprecated)]
             FrameBounds::Range(bounds) => PbWindowFrame {
                 r#type: PbType::Range as _,
                 start: None, // deprecated
@@ -127,10 +130,13 @@ impl Frame {
                 exclusion,
                 bounds: Some(PbBounds::Range(bounds.to_protobuf())),
             },
-            FrameBounds::Session(_) => {
-                // TODO()
-                todo!()
-            }
+            FrameBounds::Session(bounds) => PbWindowFrame {
+                r#type: PbType::Session as _,
+                start: None, // deprecated
+                end: None,   // deprecated
+                exclusion,
+                bounds: Some(PbBounds::Session(bounds.to_protobuf())),
+            },
         }
     }
 }

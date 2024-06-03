@@ -16,6 +16,7 @@ use std::fmt::Display;
 use std::ops::Deref;
 use std::sync::Arc;
 
+use anyhow::Context;
 use educe::Educe;
 use futures::FutureExt;
 use risingwave_common::bail;
@@ -24,6 +25,8 @@ use risingwave_common::types::{
     DataType, Datum, IsNegative, ScalarImpl, ScalarRefImpl, ToOwnedDatum, ToText,
 };
 use risingwave_common::util::sort_util::OrderType;
+use risingwave_common::util::value_encoding::{DatumFromProtoExt, DatumToProtoExt};
+use risingwave_pb::expr::window_frame::PbSessionFrameBounds;
 
 use super::FrameBoundsImpl;
 use crate::expr::{
@@ -43,21 +46,40 @@ pub struct SessionFrameBounds {
 }
 
 impl SessionFrameBounds {
-    fn from_protobuf() -> Result<Self> {
-        // TODO()
-        todo!()
+    pub(super) fn from_protobuf(bounds: &PbSessionFrameBounds) -> Result<Self> {
+        let order_data_type = DataType::from(bounds.get_order_data_type()?);
+        let order_type = OrderType::from_protobuf(bounds.get_order_type()?);
+        let gap_data_type = DataType::from(bounds.get_gap_data_type()?);
+        let gap_value = Datum::from_protobuf(bounds.get_gap()?, &gap_data_type)
+            .context("gap `Datum` is not decodable")?
+            .context("gap of session frame must be non-NULL")?;
+        let mut gap = SessionFrameGap::new(gap_value);
+        gap.prepare(&order_data_type, &gap_data_type)?;
+        Ok(Self {
+            order_data_type,
+            order_type,
+            gap_data_type,
+            gap,
+        })
     }
 
-    fn to_protobuf(&self) -> () {
-        // TODO()
-        todo!()
+    pub(super) fn to_protobuf(&self) -> PbSessionFrameBounds {
+        PbSessionFrameBounds {
+            gap: Some(Some(self.gap.as_scalar_ref_impl()).to_protobuf()),
+            order_data_type: Some(self.order_data_type.to_protobuf()),
+            order_type: Some(self.order_type.to_protobuf()),
+            gap_data_type: Some(self.gap_data_type.to_protobuf()),
+        }
     }
 }
 
 impl Display for SessionFrameBounds {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // TODO()
-        write!(f, "SESSION {}", self.gap.as_scalar_ref_impl().to_text())
+        write!(
+            f,
+            "SESSION GAPPED BY {}",
+            self.gap.as_scalar_ref_impl().to_text()
+        )
     }
 }
 
