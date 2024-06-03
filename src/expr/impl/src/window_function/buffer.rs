@@ -244,7 +244,7 @@ pub(super) trait WindowImpl {
     /// Recalculate the left and right indices of the current window, according to the latest
     /// `curr_idx` and the hint.
     fn recalculate_left_right(
-        &self,
+        &mut self,
         window: BufferRefMut<'_, Self::Key, Self::Value>,
         hint: RecalculateHint,
     );
@@ -319,7 +319,7 @@ impl<K: Ord, V: Clone> WindowImpl for RowsWindow<K, V> {
     }
 
     fn recalculate_left_right(
-        &self,
+        &mut self,
         window: BufferRefMut<'_, Self::Key, Self::Value>,
         _hint: RecalculateHint,
     ) {
@@ -401,7 +401,7 @@ impl<V: Clone> WindowImpl for RangeWindow<V> {
     }
 
     fn recalculate_left_right(
-        &self,
+        &mut self,
         window: BufferRefMut<'_, Self::Key, Self::Value>,
         _hint: RecalculateHint,
     ) {
