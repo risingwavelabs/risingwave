@@ -16,10 +16,8 @@ use std::hash::BuildHasher;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use anyhow::anyhow;
 use bytes::Bytes;
 use futures_async_stream::try_stream;
-use futures_util::AsyncReadExt;
 use hashbrown::hash_map::Entry;
 use itertools::Itertools;
 use prost::Message;
@@ -44,7 +42,9 @@ use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
     WrapStreamExecutor,
 };
-use crate::spill::spill_op::{DEFAULT_SPILL_PARTITION_NUM, SpillBuildHasher, SpillOp};
+use crate::spill::spill_op::{
+    SpillBuildHasher, SpillOp, DEFAULT_SPILL_PARTITION_NUM, SPILL_AT_LEAST_MEMORY,
+};
 use crate::task::{BatchTaskContext, ShutdownToken, TaskId};
 
 type AggHashMap<K, A> = hashbrown::HashMap<K, Vec<AggregateState>, PrecomputedBuildHasher, A>;
@@ -422,36 +422,16 @@ impl AggSpillManager {
         Ok(())
     }
 
-    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
-    async fn read_stream(mut reader: opendal::Reader) {
-        let mut buf = [0u8; 4];
-        loop {
-            if let Err(err) = reader.read_exact(&mut buf).await {
-                if err.kind() == std::io::ErrorKind::UnexpectedEof {
-                    break;
-                } else {
-                    return Err(anyhow!(err).into());
-                }
-            }
-            let len = u32::from_le_bytes(buf) as usize;
-            let mut buf = vec![0u8; len];
-            reader.read_exact(&mut buf).await.map_err(|e| anyhow!(e))?;
-            let chunk_pb: PbDataChunk = Message::decode(buf.as_slice()).map_err(|e| anyhow!(e))?;
-            let chunk = DataChunk::from_protobuf(&chunk_pb)?;
-            yield chunk;
-        }
-    }
-
     async fn read_agg_state_partition(&mut self, partition: usize) -> Result<BoxedDataChunkStream> {
         let agg_state_partition_file_name = format!("agg-state-p{}", partition);
         let r = self.op.reader_with(&agg_state_partition_file_name).await?;
-        Ok(Self::read_stream(r))
+        Ok(SpillOp::read_stream(r))
     }
 
     async fn read_input_partition(&mut self, partition: usize) -> Result<BoxedDataChunkStream> {
         let input_partition_file_name = format!("input-chunks-p{}", partition);
         let r = self.op.reader_with(&input_partition_file_name).await?;
-        Ok(Self::read_stream(r))
+        Ok(SpillOp::read_stream(r))
     }
 
     async fn estimate_partition_size(&self, partition: usize) -> Result<u64> {
@@ -478,8 +458,6 @@ impl AggSpillManager {
         Ok(())
     }
 }
-
-const SPILL_AT_LEAST_MEMORY: u64 = 1024 * 1024;
 
 impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
     #[try_stream(boxed, ok = DataChunk, error = BatchError)]
@@ -730,7 +708,7 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
 
 #[cfg(test)]
 mod tests {
-    use std::alloc::{Allocator, AllocError, Global, Layout};
+    use std::alloc::{AllocError, Allocator, Global, Layout};
     use std::ptr::NonNull;
     use std::sync::atomic::{AtomicBool, Ordering};
 

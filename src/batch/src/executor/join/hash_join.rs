@@ -17,10 +17,8 @@ use std::iter::empty;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use anyhow::anyhow;
 use bytes::Bytes;
 use futures_async_stream::try_stream;
-use futures_util::AsyncReadExt;
 use itertools::Itertools;
 use prost::Message;
 use risingwave_common::array::{Array, DataChunk, RowRef};
@@ -39,9 +37,12 @@ use risingwave_pb::data::DataChunk as PbDataChunk;
 
 use super::{ChunkedData, JoinType, RowId};
 use crate::error::{BatchError, Result};
-use crate::executor::{BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder, WrapStreamExecutor};
+use crate::executor::{
+    BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
+    WrapStreamExecutor,
+};
 use crate::risingwave_common::hash::NullBitmap;
-use crate::spill::spill_op::{SpillBuildHasher, SpillOp, DEFAULT_SPILL_PARTITION_NUM};
+use crate::spill::spill_op::{SpillBuildHasher, SpillOp, DEFAULT_SPILL_PARTITION_NUM, SPILL_AT_LEAST_MEMORY};
 use crate::task::{BatchTaskContext, ShutdownToken};
 
 /// Hash Join Executor
@@ -77,6 +78,9 @@ pub struct HashJoinExecutor<K> {
     null_matched: Vec<bool>,
     identity: String,
     chunk_size: usize,
+
+    /// The upper bound of memory usage for this executor.
+    memory_upper_bound: Option<u64>,
 
     shutdown_rx: ShutdownToken,
 
@@ -378,26 +382,6 @@ impl JoinSpillManager {
         Ok(())
     }
 
-    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
-    async fn read_stream(mut reader: opendal::Reader) {
-        let mut buf = [0u8; 4];
-        loop {
-            if let Err(err) = reader.read_exact(&mut buf).await {
-                if err.kind() == std::io::ErrorKind::UnexpectedEof {
-                    break;
-                } else {
-                    return Err(anyhow!(err).into());
-                }
-            }
-            let len = u32::from_le_bytes(buf) as usize;
-            let mut buf = vec![0u8; len];
-            reader.read_exact(&mut buf).await.map_err(|e| anyhow!(e))?;
-            let chunk_pb: PbDataChunk = Message::decode(buf.as_slice()).map_err(|e| anyhow!(e))?;
-            let chunk = DataChunk::from_protobuf(&chunk_pb)?;
-            yield chunk;
-        }
-    }
-
     async fn read_probe_side_partition(
         &mut self,
         partition: usize,
@@ -407,7 +391,7 @@ impl JoinSpillManager {
             .op
             .reader_with(&join_probe_side_partition_file_name)
             .await?;
-        Ok(Self::read_stream(r))
+        Ok(SpillOp::read_stream(r))
     }
 
     async fn read_build_side_partition(
@@ -419,7 +403,23 @@ impl JoinSpillManager {
             .op
             .reader_with(&join_build_side_partition_file_name)
             .await?;
-        Ok(Self::read_stream(r))
+        Ok(SpillOp::read_stream(r))
+    }
+
+    pub async fn estimate_partition_size(&self, partition: usize) -> Result<u64> {
+        let join_probe_side_partition_file_name = format!("join-probe-side-p{}", partition);
+        let probe_size = self
+            .op
+            .stat(&join_probe_side_partition_file_name)
+            .await?
+            .content_length();
+        let join_build_side_partition_file_name = format!("join-build-side-p{}", partition);
+        let build_size = self
+            .op
+            .stat(&join_build_side_partition_file_name)
+            .await?
+            .content_length();
+        Ok(probe_size + build_size)
     }
 
     async fn clear_partition(&mut self, partition: usize) -> Result<()> {
@@ -436,6 +436,11 @@ impl<K: HashKey> HashJoinExecutor<K> {
     async fn do_execute(self: Box<Self>) {
         let enable_spill = true;
         let mut need_to_spill = false;
+        // If the memory upper bound is less than 1MB, we don't need to check memory usage.
+        let check_memory = match self.memory_upper_bound {
+            Some(upper_bound) => upper_bound > SPILL_AT_LEAST_MEMORY,
+            None => true,
+        };
 
         let probe_schema = self.probe_side_source.schema().clone();
         let build_schema = self.build_side_source.schema().clone();
@@ -454,7 +459,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
                 let chunk_estimated_heap_size = build_chunk.estimated_heap_size();
                 // push build_chunk to build_side before checking memory limit, otherwise we will lose that chunk when spilling.
                 build_side.push(build_chunk);
-                if !self.mem_ctx.add(chunk_estimated_heap_size as i64) {
+                if !self.mem_ctx.add(chunk_estimated_heap_size as i64) && check_memory {
                     if enable_spill {
                         need_to_spill = true;
                         break;
@@ -494,7 +499,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
                         let row_id = RowId::new(build_chunk_id, build_row_id);
                         let build_key_size = build_key.estimated_heap_size() as i64;
                         mem_added_by_hash_table += build_key_size;
-                        if !self.mem_ctx.add(build_key_size) {
+                        if !self.mem_ctx.add(build_key_size) && check_memory {
                             if enable_spill {
                                 need_to_spill = true;
                                 break;
@@ -584,10 +589,11 @@ impl<K: HashKey> HashJoinExecutor<K> {
 
             // Process each partition one by one.
             for i in 0..join_spill_manager.partition_num {
+                let partition_size = join_spill_manager.estimate_partition_size(i).await?;
                 let probe_side_stream = join_spill_manager.read_probe_side_partition(i).await?;
                 let build_side_stream = join_spill_manager.read_build_side_partition(i).await?;
 
-                let sub_hash_join_executor: HashJoinExecutor<K> = HashJoinExecutor::new(
+                let sub_hash_join_executor: HashJoinExecutor<K> = HashJoinExecutor::new_inner(
                     self.join_type,
                     self.output_indices.clone(),
                     Box::new(WrapStreamExecutor::new(
@@ -604,6 +610,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
                     self.cond.clone(),
                     format!("{}-sub{}", self.identity.clone(), i),
                     self.chunk_size,
+                    Some(partition_size),
                     self.shutdown_rx.clone(),
                     self.mem_ctx.clone(),
                 );
@@ -2256,6 +2263,39 @@ impl<K> HashJoinExecutor<K> {
         shutdown_rx: ShutdownToken,
         mem_ctx: MemoryContext,
     ) -> Self {
+        Self::new_inner(
+            join_type,
+            output_indices,
+            probe_side_source,
+            build_side_source,
+            probe_key_idxs,
+            build_key_idxs,
+            null_matched,
+            cond,
+            identity,
+            chunk_size,
+            None,
+            shutdown_rx,
+            mem_ctx,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn new_inner(
+        join_type: JoinType,
+        output_indices: Vec<usize>,
+        probe_side_source: BoxedExecutor,
+        build_side_source: BoxedExecutor,
+        probe_key_idxs: Vec<usize>,
+        build_key_idxs: Vec<usize>,
+        null_matched: Vec<bool>,
+        cond: Option<Arc<BoxedExpression>>,
+        identity: String,
+        chunk_size: usize,
+        memory_upper_bound: Option<u64>,
+        shutdown_rx: ShutdownToken,
+        mem_ctx: MemoryContext,
+    ) -> Self {
         assert_eq!(probe_key_idxs.len(), build_key_idxs.len());
         assert_eq!(probe_key_idxs.len(), null_matched.len());
         let original_schema = match join_type {
@@ -2289,6 +2329,7 @@ impl<K> HashJoinExecutor<K> {
             identity,
             chunk_size,
             shutdown_rx,
+            memory_upper_bound,
             mem_ctx,
             _phantom: PhantomData,
         }
