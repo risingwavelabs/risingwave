@@ -255,7 +255,8 @@ lto = 'off'
 [profile.release]
 debug = "full"
 split-debuginfo = "packed"
-lto = "thin"
+lto = "off"
+opt-level = 0
 
 # The profile used for CI in main branch.
 # This profile inherits from the release profile, but turns on some checks and assertions for us to
@@ -264,6 +265,7 @@ lto = "thin"
 inherits = "release"
 incremental = false
 lto = "off"
+opt-level = 0
 debug = "line-tables-only"
 split-debuginfo = "off"
 debug-assertions = true
