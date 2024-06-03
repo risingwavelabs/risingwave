@@ -337,12 +337,19 @@ impl HummockManager {
             .filter_map(|(group_id, member_count)| {
                 if member_count == 0 && group_id > StaticCompactionGroupId::End as CompactionGroupId
                 {
-                    return Some(group_id);
+                    return Some((
+                        group_id,
+                        new_version_delta
+                            .latest_version()
+                            .get_compaction_group_levels(group_id)
+                            .get_levels()
+                            .len(),
+                    ));
                 }
                 None
             })
             .collect_vec();
-        for group_id in &groups_to_remove {
+        for (group_id, _) in &groups_to_remove {
             let group_deltas = &mut new_version_delta
                 .group_deltas
                 .entry(*group_id)
@@ -353,13 +360,8 @@ impl HummockManager {
             });
         }
 
-        for group_id in &groups_to_remove {
-            let max_level = new_version_delta
-                .latest_version()
-                .get_compaction_group_levels(*group_id)
-                .get_levels()
-                .len();
-            remove_compaction_group_in_sst_stat(&self.metrics, *group_id, max_level);
+        for (group_id, max_level) in groups_to_remove {
+            remove_compaction_group_in_sst_stat(&self.metrics, group_id, max_level);
         }
 
         new_version_delta.pre_apply();
