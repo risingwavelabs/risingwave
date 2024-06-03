@@ -202,8 +202,8 @@ where
                             .access(&[AFTER, &desc.name], Some(&desc.data_type))
                     },
                     |additional_column_type| {
-                        match additional_column_type {
-                            &ColumnType::Timestamp(_) => {
+                        match *additional_column_type {
+                            ColumnType::Timestamp(_) => {
                                 // access payload.source.ts_ms
                                 let ts_ms = self
                                     .value_accessor
@@ -216,22 +216,22 @@ where
                                         .to_scalar_value()
                                 }))
                             }
-                            &ColumnType::DatabaseName(_) => self
+                            ColumnType::DatabaseName(_) => self
                                 .value_accessor
                                 .as_ref()
                                 .expect("value_accessor must be provided for upsert operation")
                                 .access(&[SOURCE, SOURCE_DB], Some(&desc.data_type)),
-                            &ColumnType::SchemaName(_) => self
+                            ColumnType::SchemaName(_) => self
                                 .value_accessor
                                 .as_ref()
                                 .expect("value_accessor must be provided for upsert operation")
                                 .access(&[SOURCE, SOURCE_SCHEMA], Some(&desc.data_type)),
-                            &ColumnType::TableName(_) => self
+                            ColumnType::TableName(_) => self
                                 .value_accessor
                                 .as_ref()
                                 .expect("value_accessor must be provided for upsert operation")
                                 .access(&[SOURCE, SOURCE_TABLE], Some(&desc.data_type)),
-                            &ColumnType::CollectionName(_) => self
+                            ColumnType::CollectionName(_) => self
                                 .value_accessor
                                 .as_ref()
                                 .expect("value_accessor must be provided for upsert operation")

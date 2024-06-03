@@ -104,25 +104,25 @@ fn with_additional_columns(
     let (ops, mut columns, visibility) = snapshot_chunk.into_inner();
     for desc in additional_columns {
         let mut builder = desc.data_type.create_array_builder(visibility.len());
-        match desc.additional_column.column_type.as_ref().unwrap() {
+        match *desc.additional_column.column_type.as_ref().unwrap() {
             // set default value for timestamp
-            &ColumnType::Timestamp(_) => builder.append_n(
+            ColumnType::Timestamp(_) => builder.append_n(
                 visibility.len(),
                 Some(Timestamptz::default().to_scalar_value()),
             ),
-            &ColumnType::DatabaseName(_) => {
+            ColumnType::DatabaseName(_) => {
                 builder.append_n(
                     visibility.len(),
                     Some(ScalarImpl::from(database_name.clone())),
                 );
             }
-            &ColumnType::SchemaName(_) => {
+            ColumnType::SchemaName(_) => {
                 builder.append_n(
                     visibility.len(),
                     Some(ScalarImpl::from(schema_table_name.schema_name.clone())),
                 );
             }
-            &ColumnType::TableName(_) => {
+            ColumnType::TableName(_) => {
                 builder.append_n(
                     visibility.len(),
                     Some(ScalarImpl::from(schema_table_name.table_name.clone())),
