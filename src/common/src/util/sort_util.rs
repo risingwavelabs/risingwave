@@ -343,12 +343,12 @@ impl HeapElem {
         }
     }
 
-    #[inline(always)]
+
     pub fn chunk_idx(&self) -> usize {
         self.chunk_idx
     }
 
-    #[inline(always)]
+
     pub fn elem_idx(&self) -> usize {
         self.elem_idx
     }

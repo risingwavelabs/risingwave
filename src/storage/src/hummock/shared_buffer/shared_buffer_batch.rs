@@ -358,17 +358,17 @@ impl SharedBufferBatch {
         self.into_directed_iter()
     }
 
-    #[inline(always)]
+
     pub fn start_table_key(&self) -> TableKey<&[u8]> {
         TableKey(self.inner.entries.first().expect("non-empty").key.as_ref())
     }
 
-    #[inline(always)]
+
     pub fn end_table_key(&self) -> TableKey<&[u8]> {
         TableKey(self.inner.entries.last().expect("non-empty").key.as_ref())
     }
 
-    #[inline(always)]
+
     pub fn raw_largest_key(&self) -> &TableKey<Bytes> {
         &self.inner.entries.last().expect("non-empty").key
     }

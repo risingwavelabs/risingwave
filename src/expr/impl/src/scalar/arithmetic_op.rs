@@ -201,7 +201,7 @@ pub fn pow_decimal(l: Decimal, r: Decimal) -> Result<Decimal> {
     })
 }
 
-#[inline(always)]
+
 fn general_atm<T1, T2, T3, F>(l: T1, r: T2, atm: F) -> Result<T3>
 where
     T1: Into<T3> + Debug,

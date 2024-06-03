@@ -3984,7 +3984,7 @@ impl CatalogManager {
     // Defines privilege grant for a user.
 
     // Merge new granted privilege.
-    #[inline(always)]
+
     fn merge_privilege(origin_privilege: &mut GrantPrivilege, new_privilege: &GrantPrivilege) {
         assert_eq!(origin_privilege.object, new_privilege.object);
 
@@ -4015,7 +4015,7 @@ impl CatalogManager {
 
     // Check whether new_privilege is a subset of origin_privilege, and check grand_option if
     // `need_grand_option` is set.
-    #[inline(always)]
+
     fn check_privilege(
         origin_privilege: &GrantPrivilege,
         new_privilege: &GrantPrivilege,
@@ -4042,7 +4042,7 @@ impl CatalogManager {
     }
 
     /// Check whether the user is the owner of the object.
-    #[inline(always)]
+
     fn check_owner(
         database_manager: &DatabaseManager,
         object: &Object,
@@ -4141,7 +4141,7 @@ impl CatalogManager {
     }
 
     // Revoke privilege from object.
-    #[inline(always)]
+
     fn revoke_privilege_inner(
         origin_privilege: &mut GrantPrivilege,
         revoke_grant_privilege: &GrantPrivilege,
@@ -4310,7 +4310,7 @@ impl CatalogManager {
 
     /// `update_user_privileges` removes the privileges with given object from given users, it will
     /// be called when a database/schema/table/source/sink is dropped.
-    #[inline(always)]
+
     fn update_user_privileges(
         users: &mut BTreeMapTransaction<'_, UserId, UserInfo>,
         objects: &[Object],

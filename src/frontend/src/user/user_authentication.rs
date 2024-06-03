@@ -33,7 +33,7 @@ pub const OAUTH_JWKS_URL_KEY: &str = "jwks_url";
 pub const OAUTH_ISSUER_KEY: &str = "issuer";
 
 /// Build `AuthInfo` for `OAuth`.
-#[inline(always)]
+
 pub fn build_oauth_info(options: &Vec<SqlOption>) -> Option<AuthInfo> {
     let metadata: HashMap<String, String> = WithOptions::try_from(options.as_slice())
         .ok()?
@@ -68,7 +68,7 @@ pub fn build_oauth_info(options: &Vec<SqlOption>) -> Option<AuthInfo> {
 /// Risingwave.
 ///
 /// A password that does not follow either of those formats is assumed to be unencrypted.
-#[inline(always)]
+
 pub fn encrypted_password(name: &str, password: &str) -> Option<AuthInfo> {
     // Specifying an empty string will also set the auth info to null.
     if password.is_empty() {
@@ -93,7 +93,7 @@ pub fn encrypted_password(name: &str, password: &str) -> Option<AuthInfo> {
 }
 
 /// Encrypt the password with MD5 as default.
-#[inline(always)]
+
 fn encrypt_default(name: &str, password: &str) -> AuthInfo {
     AuthInfo {
         encryption_type: EncryptionType::Md5 as i32,
@@ -116,7 +116,7 @@ pub fn encrypted_raw_password(info: &AuthInfo) -> String {
 }
 
 /// Encrypt the stored password with given salt, used for user authentication.
-#[inline(always)]
+
 pub fn md5_hash_with_salt(encrypted_value: &[u8], salt: &[u8; 4]) -> Vec<u8> {
     let mut ctx = md5::Context::new();
     ctx.consume(encrypted_value);
@@ -124,19 +124,19 @@ pub fn md5_hash_with_salt(encrypted_value: &[u8], salt: &[u8; 4]) -> Vec<u8> {
     format!("md5{:x}", ctx.compute()).into_bytes()
 }
 
-#[inline(always)]
+
 fn valid_sha256_password(password: &str) -> bool {
     password.starts_with(SHA256_ENCRYPTED_PREFIX) && password.len() == VALID_SHA256_ENCRYPTED_LEN
 }
 
-#[inline(always)]
+
 fn valid_md5_password(password: &str) -> bool {
     password.starts_with(MD5_ENCRYPTED_PREFIX) && password.len() == VALID_MD5_ENCRYPTED_LEN
 }
 
 /// Encrypt "`password`+`name`" with SHA-256.
 #[cfg_attr(not(test), expect(dead_code))]
-#[inline(always)]
+
 pub fn sha256_hash(name: &str, password: &str) -> Vec<u8> {
     let mut hasher = Sha256::new();
     hasher.update(password.as_bytes());
@@ -145,7 +145,7 @@ pub fn sha256_hash(name: &str, password: &str) -> Vec<u8> {
 }
 
 /// Encrypt "`password`+`name`" with MD5.
-#[inline(always)]
+
 pub fn md5_hash(name: &str, password: &str) -> Vec<u8> {
     let mut ctx = md5::Context::new();
     ctx.consume(password.as_bytes());

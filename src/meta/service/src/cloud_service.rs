@@ -49,7 +49,7 @@ impl CloudServiceImpl {
     }
 }
 
-#[inline(always)]
+
 fn new_rwc_validate_fail_response(
     error_type: ErrorType,
     error_message: String,

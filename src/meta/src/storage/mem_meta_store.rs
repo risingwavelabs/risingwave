@@ -38,12 +38,12 @@ pub struct MemStore {
 struct MemStoreInner(HashMap<ColumnFamily, BTreeMap<Key, Value>>);
 
 impl MemStoreInner {
-    #[inline(always)]
+
     fn cf_ref(&self, cf: &str) -> Option<&BTreeMap<Key, Value>> {
         self.0.get(cf)
     }
 
-    #[inline(always)]
+
     fn cf_mut(&mut self, cf: &str) -> &mut BTreeMap<Key, Value> {
         self.0.entry(cf.to_string()).or_default()
     }
@@ -51,7 +51,7 @@ impl MemStoreInner {
 
 #[async_trait]
 impl Snapshot for MemSnapshot {
-    #[inline(always)]
+
     async fn list_cf(&self, cf: &str) -> MetaStoreResult<Vec<(Key, Value)>> {
         Ok(match self.0.cf_ref(cf) {
             Some(cf) => cf.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
@@ -59,7 +59,7 @@ impl Snapshot for MemSnapshot {
         })
     }
 
-    #[inline(always)]
+
     async fn get_cf(&self, cf: &str, key: &[u8]) -> MetaStoreResult<Value> {
         self.0
             .cf_ref(cf)

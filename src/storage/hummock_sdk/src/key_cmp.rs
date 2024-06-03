@@ -44,7 +44,7 @@ impl KeyComparator {
         UserKey::decode(encoded.as_ref()).cmp(&unencoded.as_ref())
     }
 
-    #[inline(always)]
+
     /// Used to compare [`UserKey`] and its encoded format.
     pub fn encoded_less_than_unencoded(
         encoded: impl AsRef<[u8]>,
@@ -53,7 +53,7 @@ impl KeyComparator {
         Self::compare_user_key_cross_format(encoded, unencoded) == Ordering::Less
     }
 
-    #[inline(always)]
+
     /// Used to compare [`UserKey`] and its encoded format.
     pub fn encoded_less_equal_unencoded(
         encoded: impl AsRef<[u8]>,
@@ -62,7 +62,7 @@ impl KeyComparator {
         Self::compare_user_key_cross_format(encoded, unencoded) != Ordering::Greater
     }
 
-    #[inline(always)]
+
     /// Used to compare [`UserKey`] and its encoded format.
     pub fn encoded_greater_than_unencoded(
         encoded: impl AsRef<[u8]>,

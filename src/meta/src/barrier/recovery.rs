@@ -58,7 +58,7 @@ impl GlobalBarrierManager {
     // Retry max interval.
     const RECOVERY_RETRY_MAX_INTERVAL: Duration = Duration::from_secs(5);
 
-    #[inline(always)]
+
     /// Initialize a retry strategy for operation in recovery.
     fn get_retry_strategy() -> impl Iterator<Item = Duration> {
         ExponentialBackoff::from_millis(Self::RECOVERY_RETRY_BASE_INTERVAL)

@@ -93,7 +93,7 @@ pub fn implement(field: &Field) -> Result<TokenStream2> {
 
     if let Some(enum_type) = extract_enum_type_from_field(field) {
         return Ok(quote! {
-            #[inline(always)]
+
             pub fn #getter_fn_name(&self) -> std::result::Result<#enum_type, crate::PbFieldNotFound> {
                 if self.#field_name.eq(&0) {
                     return Err(crate::PbFieldNotFound(stringify!(#field_name)));
@@ -110,7 +110,7 @@ pub fn implement(field: &Field) -> Result<TokenStream2> {
             // ::core::option::Option<Foo>
             let ty = extract_type_from_option(data_type);
             return Ok(quote! {
-                #[inline(always)]
+
                 pub fn #getter_fn_name(&self) -> std::result::Result<&#ty, crate::PbFieldNotFound> {
                     self.#field_name.as_ref().ok_or_else(|| crate::PbFieldNotFound(stringify!(#field_name)))
                 }
@@ -120,7 +120,7 @@ pub fn implement(field: &Field) -> Result<TokenStream2> {
         {
             // Primitive types. Return value instead of reference.
             return Ok(quote! {
-                #[inline(always)]
+
                 pub fn #getter_fn_name(&self) -> #ty {
                     self.#field_name
                 }
@@ -129,7 +129,7 @@ pub fn implement(field: &Field) -> Result<TokenStream2> {
     }
 
     Ok(quote! {
-        #[inline(always)]
+
         pub fn #getter_fn_name(&self) -> &#ty {
             &self.#field_name
         }

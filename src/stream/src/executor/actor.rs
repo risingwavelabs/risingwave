@@ -154,7 +154,7 @@ where
         }
     }
 
-    #[inline(always)]
+
     pub async fn run(mut self) -> StreamResult<()> {
         FRAGMENT_ID::scope(
             self.actor_context.fragment_id,

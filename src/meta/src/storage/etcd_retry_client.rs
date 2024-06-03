@@ -38,7 +38,7 @@ impl EtcdRetryClient {
         Self { client }
     }
 
-    #[inline(always)]
+
     fn get_retry_strategy() -> impl Iterator<Item = Duration> {
         ExponentialBackoff::from_millis(DEFAULT_RETRY_INTERVAL)
             .max_delay(DEFAULT_RETRY_MAX_DELAY)
@@ -46,7 +46,7 @@ impl EtcdRetryClient {
             .map(jitter)
     }
 
-    #[inline(always)]
+
     fn should_retry(err: &Error) -> bool {
         match err {
             Error::GRpcStatus(status) => {

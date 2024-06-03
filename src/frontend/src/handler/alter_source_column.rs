@@ -127,7 +127,7 @@ pub async fn handle_alter_source_column(
 }
 
 /// `alter_definition_add_column` adds a new column to the definition of the relation.
-#[inline(always)]
+
 pub fn alter_definition_add_column(definition: &str, column: ColumnDef) -> Result<String> {
     let ast = Parser::parse_sql(definition).expect("failed to parse relation definition");
     let mut stmt = ast

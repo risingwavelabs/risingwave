@@ -309,7 +309,7 @@ impl TestCase {
         Ok(result)
     }
 
-    #[inline(always)]
+
     fn create_connector_sql(
         is_table: bool,
         connector_name: String,

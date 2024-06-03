@@ -30,7 +30,7 @@ impl Transaction {
     /// Check whether the key exists.
     ///
     /// The check call will never failed, instead, it will only fail on commit.
-    #[inline(always)]
+
     pub fn check_exists(&mut self, cf: ColumnFamily, key: Key) {
         self.add_precondition(Precondition::KeyExists { cf, key })
     }
@@ -38,41 +38,41 @@ impl Transaction {
     /// Check whether the key exists.
     ///
     /// The check call will never failed, instead, it will only fail on commit.
-    #[inline(always)]
+
     pub fn check_equal(&mut self, cf: ColumnFamily, key: Key, value: Value) {
         self.add_precondition(Precondition::KeyEqual { cf, key, value })
     }
 
     /// Put the key/value pair if the preconditions satisfied.
-    #[inline(always)]
+
     pub fn put(&mut self, cf: ColumnFamily, key: Key, value: Value) {
         self.add_operation(Operation::Put { cf, key, value })
     }
 
     /// Delete the key if the preconditions satisfied.
-    #[inline(always)]
+
     pub fn delete(&mut self, cf: ColumnFamily, key: Key) {
         self.add_operation(Operation::Delete { cf, key })
     }
 
-    #[inline(always)]
+
     fn add_precondition(&mut self, precondition: Precondition) {
         self.preconditions.push(precondition)
     }
 
-    #[inline(always)]
+
     fn add_operation(&mut self, operation: Operation) {
         self.operations.push(operation)
     }
 
     /// Add a batch of preconditions.
-    #[inline(always)]
+
     pub fn add_preconditions(&mut self, mut preconditions: impl AsMut<Vec<Precondition>>) {
         self.preconditions.append(preconditions.as_mut());
     }
 
     /// Add a batch of operations.
-    #[inline(always)]
+
     pub fn add_operations(&mut self, mut operations: impl AsMut<Vec<Operation>>) {
         self.operations.append(operations.as_mut());
     }

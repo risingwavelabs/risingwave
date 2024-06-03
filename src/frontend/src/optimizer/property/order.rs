@@ -112,12 +112,12 @@ impl Order {
         true
     }
 
-    #[inline(always)]
+
     pub const fn any() -> Self {
         ANY_ORDER
     }
 
-    #[inline(always)]
+
     pub fn is_any(&self) -> bool {
         self.column_orders.is_empty()
     }

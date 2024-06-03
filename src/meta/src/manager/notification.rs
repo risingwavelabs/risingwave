@@ -123,7 +123,7 @@ impl NotificationManager {
         guard.exiting = true;
     }
 
-    #[inline(always)]
+
     fn notify(
         &self,
         target: Target,
@@ -155,7 +155,7 @@ impl NotificationManager {
     }
 
     /// Add a notification to the waiting queue and return immediately
-    #[inline(always)]
+
     fn notify_without_version(&self, target: Target, operation: Operation, info: Info) {
         self.notify(target, operation, info, None);
     }

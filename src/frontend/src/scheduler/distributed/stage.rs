@@ -667,7 +667,7 @@ impl StageRunner {
         Ok(())
     }
 
-    #[inline(always)]
+
     fn get_fragment_id(&self, table_id: &TableId) -> SchedulerResult<FragmentId> {
         self.catalog_reader
             .read_guard()
@@ -676,7 +676,7 @@ impl StageRunner {
             .map_err(|e| SchedulerError::Internal(anyhow!(e)))
     }
 
-    #[inline(always)]
+
     fn get_table_dml_vnode_mapping(
         &self,
         table_id: &TableId,

@@ -821,7 +821,7 @@ impl S3ObjectStore {
         is_expiration_configured
     }
 
-    #[inline(always)]
+
     fn get_retry_strategy(&self) -> impl Iterator<Item = Duration> {
         ExponentialBackoff::from_millis(self.config.s3.object_store_req_retry_interval_ms)
             .max_delay(Duration::from_millis(

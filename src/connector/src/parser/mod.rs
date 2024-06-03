@@ -230,22 +230,22 @@ struct OpActionInsert;
 impl OpAction for OpActionInsert {
     type Output = Datum;
 
-    #[inline(always)]
+
     fn output_for(datum: Datum) -> Self::Output {
         datum
     }
 
-    #[inline(always)]
+
     fn apply(builder: &mut ArrayBuilderImpl, output: Datum) {
         builder.append(&output)
     }
 
-    #[inline(always)]
+
     fn rollback(builder: &mut ArrayBuilderImpl) {
         builder.pop().unwrap()
     }
 
-    #[inline(always)]
+
     fn finish(writer: &mut SourceStreamChunkRowWriter<'_>) {
         writer.op_builder.push(Op::Insert);
     }
@@ -256,22 +256,22 @@ struct OpActionDelete;
 impl OpAction for OpActionDelete {
     type Output = Datum;
 
-    #[inline(always)]
+
     fn output_for(datum: Datum) -> Self::Output {
         datum
     }
 
-    #[inline(always)]
+
     fn apply(builder: &mut ArrayBuilderImpl, output: Datum) {
         builder.append(&output)
     }
 
-    #[inline(always)]
+
     fn rollback(builder: &mut ArrayBuilderImpl) {
         builder.pop().unwrap()
     }
 
-    #[inline(always)]
+
     fn finish(writer: &mut SourceStreamChunkRowWriter<'_>) {
         writer.op_builder.push(Op::Delete);
     }
@@ -282,24 +282,24 @@ struct OpActionUpdate;
 impl OpAction for OpActionUpdate {
     type Output = (Datum, Datum);
 
-    #[inline(always)]
+
     fn output_for(datum: Datum) -> Self::Output {
         (datum.clone(), datum)
     }
 
-    #[inline(always)]
+
     fn apply(builder: &mut ArrayBuilderImpl, output: (Datum, Datum)) {
         builder.append(&output.0);
         builder.append(&output.1);
     }
 
-    #[inline(always)]
+
     fn rollback(builder: &mut ArrayBuilderImpl) {
         builder.pop().unwrap();
         builder.pop().unwrap();
     }
 
-    #[inline(always)]
+
     fn finish(writer: &mut SourceStreamChunkRowWriter<'_>) {
         writer.op_builder.push(Op::UpdateDelete);
         writer.op_builder.push(Op::UpdateInsert);

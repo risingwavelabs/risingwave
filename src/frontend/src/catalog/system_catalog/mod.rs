@@ -211,7 +211,7 @@ pub(super) type SystemCatalogColumnsDef<'a> = (&'a str, DataType);
 /// returns no rows. For example, with columns `a` and `b`, it returns `SELECT NULL::integer AS a,
 /// NULL::varchar AS b WHERE 1 != 1`.
 // FIXME(noel): Tracked by <https://github.com/risingwavelabs/risingwave/issues/3431#issuecomment-1164160988>
-#[inline(always)]
+
 pub fn infer_dummy_view_sql(columns: &[SystemCatalogColumnsDef<'_>]) -> String {
     format!(
         "SELECT {} WHERE 1 != 1",

@@ -572,7 +572,7 @@ impl<F: TableBuilderFactory> CompactTaskExecutor<F> {
         self.last_key_is_delete = false;
     }
 
-    #[inline(always)]
+
     fn may_report_process_key(&mut self, key_count: u32) {
         const PROGRESS_KEY_INTERVAL: u32 = 100;
         self.progress_key_num += key_count;

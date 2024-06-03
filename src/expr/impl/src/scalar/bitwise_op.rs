@@ -56,7 +56,7 @@ where
     })
 }
 
-#[inline(always)]
+
 fn general_shift<T1, T2, F>(l: T1, r: T2, atm: F) -> Result<T1>
 where
     T1: Debug,

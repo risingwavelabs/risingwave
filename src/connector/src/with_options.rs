@@ -28,7 +28,7 @@ use crate::source::{
 /// things for sinks.
 pub trait WithOptions {
     #[doc(hidden)]
-    #[inline(always)]
+
     fn assert_receiver_is_with_options(&self) {}
 }
 
@@ -81,12 +81,12 @@ impl Get for BTreeMap<String, String> {
 
 /// Utility methods for `WITH` properties (`HashMap` and `BTreeMap`).
 pub trait WithPropertiesExt: Get + Sized {
-    #[inline(always)]
+
     fn get_connector(&self) -> Option<String> {
         self.get(UPSTREAM_SOURCE_KEY).map(|s| s.to_lowercase())
     }
 
-    #[inline(always)]
+
     fn is_kafka_connector(&self) -> bool {
         let Some(connector) = self.get_connector() else {
             return false;
@@ -94,7 +94,7 @@ pub trait WithPropertiesExt: Get + Sized {
         connector == KAFKA_CONNECTOR
     }
 
-    #[inline(always)]
+
     fn is_cdc_connector(&self) -> bool {
         let Some(connector) = self.get_connector() else {
             return false;
@@ -106,7 +106,7 @@ pub trait WithPropertiesExt: Get + Sized {
         self.is_cdc_connector() && CdcTableType::from_properties(self).can_backfill()
     }
 
-    #[inline(always)]
+
     fn is_iceberg_connector(&self) -> bool {
         let Some(connector) = self.get_connector() else {
             return false;

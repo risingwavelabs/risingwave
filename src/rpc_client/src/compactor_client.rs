@@ -175,7 +175,7 @@ impl GrpcCompactorProxyClient {
         .await
     }
 
-    #[inline(always)]
+
     fn get_retry_strategy() -> impl Iterator<Item = Duration> {
         ExponentialBackoff::from_millis(DEFAULT_RETRY_INTERVAL)
             .max_delay(DEFAULT_RETRY_MAX_DELAY)
@@ -183,7 +183,7 @@ impl GrpcCompactorProxyClient {
             .map(jitter)
     }
 
-    #[inline(always)]
+
     fn should_retry(status: &tonic::Status) -> bool {
         if status.code() == tonic::Code::Unavailable
             || status.code() == tonic::Code::Unknown

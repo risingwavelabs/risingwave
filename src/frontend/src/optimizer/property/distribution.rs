@@ -200,7 +200,7 @@ impl Distribution {
         }
     }
 
-    #[inline(always)]
+
     fn get_fragment_id(catalog_reader: &CatalogReader, table_id: &TableId) -> Result<FragmentId> {
         catalog_reader
             .read_guard()

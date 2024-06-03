@@ -61,17 +61,17 @@ impl RowId {
         }
     }
 
-    #[inline(always)]
+
     pub(super) fn chunk_id(&self) -> usize {
         self.chunk_id as usize
     }
 
-    #[inline(always)]
+
     pub(super) fn row_id(&self) -> usize {
         self.row_id as usize
     }
 
-    #[inline(always)]
+
     pub(super) fn next_row(self, cur_chunk_row_count: usize) -> RowId {
         if (self.row_id + 1) >= (cur_chunk_row_count as u32) {
             RowId {

@@ -51,7 +51,7 @@ impl TaskLocalBytesAllocated {
     }
 
     /// Adds to the current counter.
-    #[inline(always)]
+
     pub fn add(&self, val: usize) {
         if let Some(bytes) = self.0 {
             let bytes_ref = unsafe { bytes.as_ref() };
@@ -63,7 +63,7 @@ impl TaskLocalBytesAllocated {
     ///
     /// # Safety
     /// The caller must ensure that `self` is valid.
-    #[inline(always)]
+
     unsafe fn add_unchecked(&self, val: usize) {
         let bytes = self.0.unwrap_unchecked();
         let bytes_ref = unsafe { bytes.as_ref() };
@@ -71,7 +71,7 @@ impl TaskLocalBytesAllocated {
     }
 
     /// Subtracts from the counter value, and `drop` the counter while the count reaches zero.
-    #[inline(always)]
+
     pub fn sub(&self, val: usize) -> bool {
         if let Some(bytes) = self.0 {
             // Use `Relaxed` order as we don't need to sync read/write with other memory addresses.
@@ -91,7 +91,7 @@ impl TaskLocalBytesAllocated {
         false
     }
 
-    #[inline(always)]
+
     pub fn val(&self) -> usize {
         let bytes_ref = self.0.as_ref().expect("bytes is invalid");
         let bytes_ref = unsafe { bytes_ref.as_ref() };
@@ -131,7 +131,7 @@ where
         .await
 }
 
-#[inline(always)]
+
 fn wrap_layout(layout: Layout) -> (Layout, usize) {
     debug_assert_ne!(layout.size(), 0, "the size of layout must be non-zero");
 

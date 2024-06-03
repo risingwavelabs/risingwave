@@ -270,7 +270,7 @@ pub trait Array:
     fn set_bitmap(&mut self, bitmap: Bitmap);
 
     /// Feed the value at `idx` into the given [`Hasher`].
-    #[inline(always)]
+
     fn hash_at<H: Hasher>(&self, idx: usize, state: &mut H) {
         // We use a default implementation for all arrays for now, as retrieving the reference
         // should be lightweight.

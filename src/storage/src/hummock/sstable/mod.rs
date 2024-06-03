@@ -237,7 +237,7 @@ impl Sstable {
         }
     }
 
-    #[inline(always)]
+
     pub fn has_bloom_filter(&self) -> bool {
         !self.filter_reader.is_empty()
     }
@@ -250,31 +250,31 @@ impl Sstable {
         (range, uncompressed_capacity)
     }
 
-    #[inline(always)]
+
     pub fn hash_for_bloom_filter_u32(dist_key: &[u8], table_id: u32) -> u32 {
         let dist_key_hash = xxh32::xxh32(dist_key, 0);
         // congyi adds this because he aims to dedup keys in different tables
         table_id.bitxor(dist_key_hash)
     }
 
-    #[inline(always)]
+
     pub fn hash_for_bloom_filter(dist_key: &[u8], table_id: u32) -> u64 {
         let dist_key_hash = xxh64::xxh64(dist_key, 0);
         // congyi adds this because he aims to dedup keys in different tables
         (table_id as u64).bitxor(dist_key_hash)
     }
 
-    #[inline(always)]
+
     pub fn may_match_hash(&self, user_key_range: &UserKeyRangeRef<'_>, hash: u64) -> bool {
         self.filter_reader.may_match(user_key_range, hash)
     }
 
-    #[inline(always)]
+
     pub fn block_count(&self) -> usize {
         self.meta.block_metas.len()
     }
 
-    #[inline(always)]
+
     pub fn estimate_size(&self) -> usize {
         8 /* id */ + self.filter_reader.estimate_size() + self.meta.encoded_size()
     }

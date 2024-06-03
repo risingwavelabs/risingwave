@@ -23,7 +23,7 @@ use risingwave_expr::{function, ExprError, Result};
 use thiserror_ext::AsReport;
 
 /// Just a wrapper to reuse the `map_err` logic.
-#[inline(always)]
+
 pub fn time_zone_err(inner_err: String) -> ExprError {
     ExprError::InvalidParam {
         name: "time_zone",
@@ -175,7 +175,7 @@ pub fn interval_timestamptz_add_legacy(l: Interval, r: Timestamptz) -> Result<Ti
     timestamptz_interval_add_legacy(r, l)
 }
 
-#[inline(always)]
+
 fn timestamptz_interval_quantitative(
     l: Timestamptz,
     r: Interval,

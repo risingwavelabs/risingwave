@@ -603,21 +603,21 @@ pub trait ToOwnedDatum {
 }
 
 impl ToOwnedDatum for &Datum {
-    #[inline(always)]
+
     fn to_owned_datum(self) -> Datum {
         self.clone()
     }
 }
 
 impl<T: Into<ScalarImpl>> ToOwnedDatum for T {
-    #[inline(always)]
+
     fn to_owned_datum(self) -> Datum {
         Some(self.into())
     }
 }
 
 impl<T: Into<ScalarImpl>> ToOwnedDatum for Option<T> {
-    #[inline(always)]
+
     fn to_owned_datum(self) -> Datum {
         self.map(Into::into)
     }
@@ -630,19 +630,19 @@ pub trait ToDatumRef: PartialEq + Eq + Debug {
 }
 
 impl ToDatumRef for Datum {
-    #[inline(always)]
+
     fn to_datum_ref(&self) -> DatumRef<'_> {
         self.as_ref().map(|d| d.as_scalar_ref_impl())
     }
 }
 impl ToDatumRef for Option<&ScalarImpl> {
-    #[inline(always)]
+
     fn to_datum_ref(&self) -> DatumRef<'_> {
         self.map(|d| d.as_scalar_ref_impl())
     }
 }
 impl ToDatumRef for DatumRef<'_> {
-    #[inline(always)]
+
     fn to_datum_ref(&self) -> DatumRef<'_> {
         *self
     }
@@ -955,7 +955,7 @@ impl Hash for ScalarRefImpl<'_> {
 /// **FIXME**: the result of this function might be different from [`std::hash::Hash`] due to the
 /// type alias of `DatumRef = Option<_>`, we should manually implement [`std::hash::Hash`] for
 /// [`DatumRef`] in the future when it becomes a newtype. (#477)
-#[inline(always)]
+
 pub fn hash_datum(datum: impl ToDatumRef, state: &mut impl std::hash::Hasher) {
     match datum.to_datum_ref() {
         Some(scalar_ref) => scalar_ref.hash(state),

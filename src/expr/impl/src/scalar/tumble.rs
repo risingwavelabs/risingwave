@@ -16,7 +16,7 @@ use num_traits::Zero;
 use risingwave_common::types::{Date, Interval, Timestamp, Timestamptz};
 use risingwave_expr::{function, ExprError, Result};
 
-#[inline(always)]
+
 fn interval_to_micro_second(t: Interval) -> Result<i64> {
     let checked_interval_to_micro_second = || {
         (t.months() as i64)
@@ -52,7 +52,7 @@ pub fn tumble_start_timestamptz(tz: Timestamptz, window_size: Interval) -> Resul
 }
 
 /// The common part of PostgreSQL function `timestamp_bin` and `timestamptz_bin`.
-#[inline(always)]
+
 fn get_window_start(timestamp_micro_second: i64, window_size: Interval) -> Result<i64> {
     get_window_start_with_offset(timestamp_micro_second, window_size, Interval::zero())
 }
@@ -82,7 +82,7 @@ pub fn tumble_start_offset_date_time(
     ))
 }
 
-#[inline(always)]
+
 fn get_window_start_with_offset(
     timestamp_micro_second: i64,
     window_size: Interval,

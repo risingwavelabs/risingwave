@@ -483,7 +483,7 @@ pub trait HummockIteratorDirection: Sync + Send + 'static {
 
 pub struct Forward;
 impl HummockIteratorDirection for Forward {
-    #[inline(always)]
+
     fn direction() -> DirectionEnum {
         DirectionEnum::Forward
     }
@@ -491,7 +491,7 @@ impl HummockIteratorDirection for Forward {
 
 pub struct Backward;
 impl HummockIteratorDirection for Backward {
-    #[inline(always)]
+
     fn direction() -> DirectionEnum {
         DirectionEnum::Backward
     }

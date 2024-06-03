@@ -183,7 +183,7 @@ impl ProducerContext for PrivateLinkProducerContext {
     fn delivery(&self, _: &DeliveryResult<'_>, _: Self::DeliveryOpaque) {}
 }
 
-#[inline(always)]
+
 fn kafka_props_broker_key(with_properties: &BTreeMap<String, String>) -> &str {
     if with_properties.contains_key(KAFKA_PROPS_BROKER_KEY) {
         KAFKA_PROPS_BROKER_KEY
@@ -192,7 +192,7 @@ fn kafka_props_broker_key(with_properties: &BTreeMap<String, String>) -> &str {
     }
 }
 
-#[inline(always)]
+
 fn get_property_required(
     with_properties: &BTreeMap<String, String>,
     property: &str,

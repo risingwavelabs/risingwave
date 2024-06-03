@@ -68,7 +68,7 @@ pub fn available_privilege_actions(objects: &GrantObjects) -> Result<Vec<PbActio
     Ok(acl_sets.iter().map(Into::into).collect_vec())
 }
 
-#[inline(always)]
+
 pub fn get_prost_action(action: &Action) -> PbAction {
     match action {
         Action::Select { .. } => PbAction::Select,

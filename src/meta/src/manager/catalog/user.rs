@@ -104,7 +104,7 @@ impl UserManager {
         }
     }
 
-    #[inline(always)]
+
     pub fn increase_ref(&mut self, user_id: UserId) {
         self.increase_ref_count(user_id, 1)
     }
@@ -116,7 +116,7 @@ impl UserManager {
             .or_insert(count);
     }
 
-    #[inline(always)]
+
     pub fn decrease_ref(&mut self, user_id: UserId) {
         self.decrease_ref_count(user_id, 1)
     }

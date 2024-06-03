@@ -47,7 +47,7 @@ unsafe impl<T> Allocator for StatsAlloc<T>
 where
     T: Allocator,
 {
-    #[inline(always)]
+
     fn allocate(
         &self,
         layout: std::alloc::Layout,
@@ -57,14 +57,14 @@ where
         self.inner.allocate(layout)
     }
 
-    #[inline(always)]
+
     unsafe fn deallocate(&self, ptr: std::ptr::NonNull<u8>, layout: std::alloc::Layout) {
         self.bytes_in_use
             .fetch_sub(layout.size(), atomic::Ordering::Relaxed);
         self.inner.deallocate(ptr, layout)
     }
 
-    #[inline(always)]
+
     fn allocate_zeroed(
         &self,
         layout: std::alloc::Layout,
@@ -74,7 +74,7 @@ where
         self.inner.allocate_zeroed(layout)
     }
 
-    #[inline(always)]
+
     unsafe fn grow(
         &self,
         ptr: std::ptr::NonNull<u8>,
@@ -88,7 +88,7 @@ where
         self.inner.grow(ptr, old_layout, new_layout)
     }
 
-    #[inline(always)]
+
     unsafe fn grow_zeroed(
         &self,
         ptr: std::ptr::NonNull<u8>,
@@ -102,7 +102,7 @@ where
         self.inner.grow_zeroed(ptr, old_layout, new_layout)
     }
 
-    #[inline(always)]
+
     unsafe fn shrink(
         &self,
         ptr: std::ptr::NonNull<u8>,

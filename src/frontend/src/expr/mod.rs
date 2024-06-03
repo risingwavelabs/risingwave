@@ -131,49 +131,49 @@ impl_expr_impl!(
 
 impl ExprImpl {
     /// A literal int value.
-    #[inline(always)]
+
     pub fn literal_int(v: i32) -> Self {
         Literal::new(Some(v.to_scalar_value()), DataType::Int32).into()
     }
 
     /// A literal bigint value
-    #[inline(always)]
+
     pub fn literal_bigint(v: i64) -> Self {
         Literal::new(Some(v.to_scalar_value()), DataType::Int64).into()
     }
 
     /// A literal float64 value.
-    #[inline(always)]
+
     pub fn literal_f64(v: f64) -> Self {
         Literal::new(Some(v.into()), DataType::Float64).into()
     }
 
     /// A literal boolean value.
-    #[inline(always)]
+
     pub fn literal_bool(v: bool) -> Self {
         Literal::new(Some(v.to_scalar_value()), DataType::Boolean).into()
     }
 
     /// A literal varchar value.
-    #[inline(always)]
+
     pub fn literal_varchar(v: String) -> Self {
         Literal::new(Some(v.into()), DataType::Varchar).into()
     }
 
     /// A literal null value.
-    #[inline(always)]
+
     pub fn literal_null(element_type: DataType) -> Self {
         Literal::new(None, element_type).into()
     }
 
     /// A literal jsonb value.
-    #[inline(always)]
+
     pub fn literal_jsonb(v: JsonbVal) -> Self {
         Literal::new(Some(v.into()), DataType::Jsonb).into()
     }
 
     /// A literal list value.
-    #[inline(always)]
+
     pub fn literal_list(v: ListValue, element_type: DataType) -> Self {
         Literal::new(
             Some(v.to_scalar_value()),
@@ -188,7 +188,7 @@ impl ExprImpl {
     }
 
     /// A `count(*)` aggregate function.
-    #[inline(always)]
+
     pub fn count_star() -> Self {
         AggCall::new(
             AggKind::Count,

@@ -26,7 +26,7 @@ use crate::scalar::arithmetic_op::timestamp_interval_add;
 
 type Pattern<'a> = Vec<chrono::format::Item<'a>>;
 
-#[inline(always)]
+
 fn invalid_pattern_err() -> ExprError {
     ExprError::InvalidParam {
         name: "pattern",

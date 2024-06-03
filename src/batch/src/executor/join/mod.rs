@@ -52,7 +52,7 @@ pub enum JoinType {
 }
 
 impl JoinType {
-    #[inline(always)]
+
     pub(super) fn need_join_remaining(self) -> bool {
         matches!(
             self,

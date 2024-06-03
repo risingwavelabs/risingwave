@@ -34,7 +34,7 @@ pub(crate) const CONNECTION_TAGS_PROP: &str = "tags";
 pub(crate) const CLOUD_PROVIDER_MOCK: &str = "mock"; // fake privatelink provider for testing
 pub(crate) const CLOUD_PROVIDER_AWS: &str = "aws";
 
-#[inline(always)]
+
 fn get_connection_property_required(
     with_properties: &HashMap<String, String>,
     property: &str,

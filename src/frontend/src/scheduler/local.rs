@@ -549,7 +549,7 @@ impl LocalQueryExecution {
         }
     }
 
-    #[inline(always)]
+
     fn get_fragment_id(&self, table_id: &TableId) -> SchedulerResult<FragmentId> {
         let reader = self.front_env.catalog_reader().read_guard();
         reader
@@ -558,7 +558,7 @@ impl LocalQueryExecution {
             .map_err(|e| SchedulerError::Internal(anyhow!(e)))
     }
 
-    #[inline(always)]
+
     fn get_table_dml_vnode_mapping(
         &self,
         table_id: &TableId,

@@ -124,7 +124,7 @@ pub fn table_key(user_key: &[u8]) -> &[u8] {
     &user_key[TABLE_PREFIX_LEN..]
 }
 
-#[inline(always)]
+
 /// Extract encoded [`UserKey`] from encoded [`FullKey`] but allow empty slice
 pub fn get_user_key(full_key: &[u8]) -> Vec<u8> {
     if full_key.is_empty() {
@@ -135,7 +135,7 @@ pub fn get_user_key(full_key: &[u8]) -> Vec<u8> {
 }
 
 /// Extract table id from encoded [`FullKey`]
-#[inline(always)]
+
 pub fn get_table_id(full_key: &[u8]) -> u32 {
     let mut buf = full_key;
     buf.get_u32()

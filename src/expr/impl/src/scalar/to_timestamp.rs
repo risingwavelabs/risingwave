@@ -20,7 +20,7 @@ use super::timestamptz::{timestamp_at_time_zone, timestamptz_at_time_zone};
 use super::to_char::ChronoPattern;
 
 /// Parse the input string with the given chrono pattern.
-#[inline(always)]
+
 fn parse(s: &str, tmpl: &ChronoPattern) -> Result<Parsed> {
     let mut parsed = Parsed::new();
     chrono::format::parse(&mut parsed, s, tmpl.borrow_dependent().iter())?;

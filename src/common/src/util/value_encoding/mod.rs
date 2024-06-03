@@ -189,7 +189,7 @@ pub fn deserialize_datum(mut data: impl Buf, ty: &DataType) -> Result<Datum> {
 }
 
 // prevent recursive use of &mut
-#[inline(always)]
+
 fn inner_deserialize_datum(data: &mut impl Buf, ty: &DataType) -> Result<Datum> {
     let null_tag = data.get_u8();
     match null_tag {

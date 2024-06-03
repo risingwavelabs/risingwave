@@ -177,7 +177,7 @@ impl SkipWatermarkState {
         Self::new(watermarks)
     }
 
-    #[inline(always)]
+
     pub fn has_watermark(&self) -> bool {
         !self.remain_watermarks.is_empty()
     }
