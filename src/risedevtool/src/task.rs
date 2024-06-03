@@ -25,15 +25,18 @@ mod kafka_service;
 mod meta_node_service;
 mod minio_service;
 mod mysql_service;
+mod postgres_service;
 mod prometheus_service;
 mod pubsub_service;
 mod redis_service;
-mod task_configure_grpc_node;
+mod schema_registry_service;
 mod task_configure_minio;
 mod task_etcd_ready_check;
 mod task_kafka_ready_check;
+mod task_log_ready_check;
 mod task_pubsub_emu_ready_check;
 mod task_redis_ready_check;
+mod task_tcp_ready_check;
 mod tempo_service;
 mod utils;
 
@@ -62,15 +65,18 @@ pub use self::kafka_service::*;
 pub use self::meta_node_service::*;
 pub use self::minio_service::*;
 pub use self::mysql_service::*;
+pub use self::postgres_service::*;
 pub use self::prometheus_service::*;
 pub use self::pubsub_service::*;
 pub use self::redis_service::*;
-pub use self::task_configure_grpc_node::*;
+pub use self::schema_registry_service::SchemaRegistryService;
 pub use self::task_configure_minio::*;
 pub use self::task_etcd_ready_check::*;
 pub use self::task_kafka_ready_check::*;
+pub use self::task_log_ready_check::*;
 pub use self::task_pubsub_emu_ready_check::*;
 pub use self::task_redis_ready_check::*;
+pub use self::task_tcp_ready_check::*;
 pub use self::tempo_service::*;
 use crate::util::{complete_spin, get_program_args, get_program_name};
 use crate::wait::{wait, wait_tcp_available};
@@ -107,6 +113,9 @@ where
 
     /// The status file corresponding to the current context.
     pub status_file: Option<PathBuf>,
+
+    /// The log file corresponding to the current context. (e.g. frontend-4566.log)
+    pub log_file: Option<PathBuf>,
 }
 
 impl<W> ExecuteContext<W>
@@ -119,6 +128,7 @@ where
             pb,
             status_dir,
             status_file: None,
+            log_file: None,
             id: None,
         }
     }
@@ -127,8 +137,18 @@ where
         let id = task.id();
         if !id.is_empty() {
             self.pb.set_prefix(id.clone());
-            self.status_file = Some(self.status_dir.path().join(format!("{}.status", id)));
-            self.id = Some(id);
+            self.id = Some(id.clone());
+
+            // Remove the old status file if exists to avoid confusion.
+            let status_file = self.status_dir.path().join(format!("{}.status", id));
+            fs_err::remove_file(&status_file).ok();
+            self.status_file = Some(status_file);
+
+            // Remove the old log file if exists to avoid confusion.
+            let log_file = Path::new(&env::var("PREFIX_LOG").unwrap())
+                .join(format!("{}.log", self.id.as_ref().unwrap()));
+            fs_err::remove_file(&log_file).ok();
+            self.log_file = Some(log_file);
         }
     }
 
@@ -166,13 +186,16 @@ where
         self.status_file.clone().unwrap()
     }
 
-    pub fn log_path(&self) -> anyhow::Result<PathBuf> {
-        let prefix_log = env::var("PREFIX_LOG")?;
-        Ok(Path::new(&prefix_log).join(format!("{}.log", self.id.as_ref().unwrap())))
+    pub fn log_path(&self) -> &Path {
+        self.log_file.as_ref().unwrap().as_path()
     }
 
     pub fn wait_tcp(&mut self, server: impl AsRef<str>) -> anyhow::Result<()> {
-        let addr = server.as_ref().parse()?;
+        let addr = server
+            .as_ref()
+            .to_socket_addrs()?
+            .next()
+            .with_context(|| format!("failed to resolve {}", server.as_ref()))?;
         wait(
             || {
                 TcpStream::connect_timeout(&addr, Duration::from_secs(1)).with_context(|| {
@@ -301,7 +324,7 @@ where
             }
         }
         cmd.arg(Path::new(&prefix_path).join("run_command.sh"));
-        cmd.arg(self.log_path()?);
+        cmd.arg(self.log_path());
         cmd.arg(self.status_path());
         cmd.arg(user_cmd.get_program());
         for arg in user_cmd.get_args() {

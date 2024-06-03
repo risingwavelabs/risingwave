@@ -145,8 +145,7 @@ impl SortExecutor {
 mod tests {
     use futures::StreamExt;
     use risingwave_common::array::*;
-    use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::test_prelude::DataChunkTestExt;
+    use risingwave_common::catalog::Field;
     use risingwave_common::types::{
         DataType, Date, Interval, Scalar, StructType, Time, Timestamp, F32,
     };

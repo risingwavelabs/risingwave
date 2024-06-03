@@ -326,10 +326,10 @@ impl CompactionPicker for ManualCompactionPicker {
 
 #[cfg(test)]
 pub mod tests {
-    use std::collections::{HashMap, HashSet};
+    use std::collections::HashMap;
 
     use risingwave_pb::hummock::compact_task;
-    pub use risingwave_pb::hummock::{KeyRange, Level, LevelType};
+    pub use risingwave_pb::hummock::KeyRange;
 
     use super::*;
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;

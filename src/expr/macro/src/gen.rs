@@ -365,13 +365,13 @@ impl FunctionAttr {
             ReturnTypeKind::Result => quote! {
                 match #output {
                     Ok(x) => Some(x),
-                    Err(e) => { errors.push(e); None }
+                    Err(e) => { errors.push(ExprError::Function(Box::new(e))); None }
                 }
             },
             ReturnTypeKind::ResultOption => quote! {
                 match #output {
                     Ok(x) => x,
-                    Err(e) => { errors.push(e); None }
+                    Err(e) => { errors.push(ExprError::Function(Box::new(e))); None }
                 }
             },
         };
@@ -484,10 +484,6 @@ impl FunctionAttr {
             }
         } else {
             // no optimization
-            let array_zip = match children_indices.len() {
-                0 => quote! { std::iter::repeat(()).take(input.capacity()) },
-                _ => quote! { multizip((#(#arrays.iter(),)*)) },
-            };
             let let_variadic = variadic.then(|| {
                 quote! {
                     let variadic_row = variadic_input.row_at_unchecked_vis(i);
@@ -497,18 +493,18 @@ impl FunctionAttr {
                 let mut builder = #builder_type::with_type(input.capacity(), self.context.return_type.clone());
 
                 if input.is_compacted() {
-                    for (i, (#(#inputs,)*)) in #array_zip.enumerate() {
+                    for i in 0..input.capacity() {
+                        #(let #inputs = unsafe { #arrays.value_at_unchecked(i) };)*
                         #let_variadic
                         #append_output
                     }
                 } else {
-                    // allow using `zip` for performance
-                    #[allow(clippy::disallowed_methods)]
-                    for (i, ((#(#inputs,)*), visible)) in #array_zip.zip(input.visibility().iter()).enumerate() {
-                        if !visible {
+                    for i in 0..input.capacity() {
+                        if unsafe { !input.visibility().is_set_unchecked(i) } {
                             builder.append_null();
                             continue;
                         }
+                        #(let #inputs = unsafe { #arrays.value_at_unchecked(i) };)*
                         #let_variadic
                         #append_output
                     }
@@ -725,15 +721,15 @@ impl FunctionAttr {
         };
         let create_state = if custom_state.is_some() {
             quote! {
-                fn create_state(&self) -> AggregateState {
-                    AggregateState::Any(Box::<#state_type>::default())
+                fn create_state(&self) -> Result<AggregateState> {
+                    Ok(AggregateState::Any(Box::<#state_type>::default()))
                 }
             }
         } else if let Some(state) = &self.init_state {
             let state: TokenStream2 = state.parse().unwrap();
             quote! {
-                fn create_state(&self) -> AggregateState {
-                    AggregateState::Datum(Some(#state.into()))
+                fn create_state(&self) -> Result<AggregateState> {
+                    Ok(AggregateState::Datum(Some(#state.into())))
                 }
             }
         } else {
@@ -1179,10 +1175,11 @@ impl FunctionAttr {
                         let mut index_builder = I32ArrayBuilder::new(self.chunk_size);
                         #(let mut #builders = #builder_types::with_type(self.chunk_size, #return_types);)*
 
-                        for (i, ((#(#inputs,)*), visible)) in multizip((#(#arrays.iter(),)*)).zip_eq_fast(input.visibility().iter()).enumerate() {
-                            if !visible {
+                        for i in 0..input.capacity() {
+                            if unsafe { !input.visibility().is_set_unchecked(i) } {
                                 continue;
                             }
+                            #(let #inputs = unsafe { #arrays.value_at_unchecked(i) };)*
                             for output in #iter {
                                 index_builder.append(Some(i as i32));
                                 match #output {

@@ -109,7 +109,11 @@ impl SortAggExecutor {
     #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_execute(mut self: Box<Self>) {
         let mut left_capacity = self.output_size_limit;
-        let mut agg_states = self.aggs.iter().map(|agg| agg.create_state()).collect_vec();
+        let mut agg_states: Vec<_> = self
+            .aggs
+            .iter()
+            .map(|agg| agg.create_state())
+            .try_collect()?;
         let (mut group_builders, mut agg_builders) =
             Self::create_builders(&self.group_key, &self.aggs);
         let mut curr_group = if self.group_key.is_empty() {
@@ -225,7 +229,7 @@ impl SortAggExecutor {
         {
             let result = agg.get_result(state).await?;
             builder.append(result);
-            *state = agg.create_state();
+            *state = agg.create_state()?;
         }
         Ok(())
     }
@@ -360,14 +364,12 @@ mod tests {
     use futures::StreamExt;
     use futures_async_stream::for_await;
     use risingwave_common::array::{Array as _, I64Array};
-    use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::types::DataType;
     use risingwave_expr::expr::build_from_pretty;
 
     use super::*;
     use crate::executor::test_utils::MockExecutor;
-    use crate::task::ShutdownToken;
 
     #[tokio::test]
     async fn execute_count_star_int32() -> Result<()> {

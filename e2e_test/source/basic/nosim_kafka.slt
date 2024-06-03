@@ -1,3 +1,6 @@
+control substitution on
+
+# FIXME: does this really work??
 # Start with nosim to avoid running in deterministic test
 
 
@@ -7,18 +10,18 @@ CREATE TABLE upsert_avro_json_default_key ( primary key (rw_key) )
 INCLUDE KEY AS rw_key
 WITH (
 	connector = 'kafka',
-  properties.bootstrap.server = 'message_queue:29092',
+  properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
 	topic = 'upsert_avro_json')
-FORMAT UPSERT ENCODE AVRO (schema.registry = 'http://message_queue:8081');
+FORMAT UPSERT ENCODE AVRO (schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}');
 
 statement ok
 CREATE TABLE upsert_student_avro_json ( primary key (rw_key) )
 INCLUDE KEY AS rw_key
 WITH (
 	connector = 'kafka',
-  properties.bootstrap.server = 'message_queue:29092',
+  properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
 	topic = 'upsert_student_avro_json')
-FORMAT UPSERT ENCODE AVRO (schema.registry = 'http://message_queue:8081');
+FORMAT UPSERT ENCODE AVRO (schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}');
 
 
 # TODO: Uncomment this when we add test data kafka key with format `"ID":id`
@@ -28,35 +31,35 @@ FORMAT UPSERT ENCODE AVRO (schema.registry = 'http://message_queue:8081');
 # )
 # WITH (
 # connector = 'kafka',
-#  properties.bootstrap.server = 'message_queue:29092',
+#  properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
 # topic = 'upsert_avro_json')
-# FORMAT UPSERT ENCODE AVRO (schema.registry = 'http://message_queue:8081');
+# FORMAT UPSERT ENCODE AVRO (schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}');
 
 
 statement ok
 CREATE TABLE debezium_non_compact (PRIMARY KEY(order_id)) with (
     connector = 'kafka',
     kafka.topic = 'debezium_non_compact_avro_json',
-    kafka.brokers = 'message_queue:29092',
+    kafka.brokers = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
     kafka.scan.startup.mode = 'earliest'
-) FORMAT DEBEZIUM ENCODE AVRO (schema.registry = 'http://message_queue:8081');
+) FORMAT DEBEZIUM ENCODE AVRO (schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}');
 
 
 statement ok
 CREATE TABLE debezium_compact (PRIMARY KEY(order_id)) with (
     connector = 'kafka',
     kafka.topic = 'debezium_compact_avro_json',
-    kafka.brokers = 'message_queue:29092',
+    kafka.brokers = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
     kafka.scan.startup.mode = 'earliest'
-) FORMAT DEBEZIUM ENCODE AVRO (schema.registry = 'http://message_queue:8081');
+) FORMAT DEBEZIUM ENCODE AVRO (schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}');
 
 statement ok
 CREATE TABLE kafka_json_schema_plain with (
     connector = 'kafka',
     kafka.topic = 'kafka_json_schema',
-    kafka.brokers = 'kafka:9093',
+    kafka.brokers = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
     kafka.scan.startup.mode = 'earliest'
-) FORMAT PLAIN ENCODE JSON (schema.registry = 'http://schemaregistry:8082');
+) FORMAT PLAIN ENCODE JSON (schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}');
 
 statement ok
 CREATE TABLE kafka_json_schema_upsert (PRIMARY KEY(rw_key))
@@ -64,9 +67,9 @@ INCLUDE KEY AS rw_key
 with (
     connector = 'kafka',
     kafka.topic = 'kafka_upsert_json_schema',
-    kafka.brokers = 'kafka:9093',
+    kafka.brokers = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
     kafka.scan.startup.mode = 'earliest'
-) FORMAT UPSERT ENCODE JSON (schema.registry = 'http://schemaregistry:8082');
+) FORMAT UPSERT ENCODE JSON (schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}');
 
 statement ok
 flush;

@@ -37,10 +37,10 @@ for filename in $kafka_data_files; do
 
     # always ok
     echo "Drop topic $topic"
-    risedev kafka-topics --topic "$topic" --delete || true
+    risedev rpk topic delete "$topic" || true
 
     echo "Recreate topic $topic with partition $partition"
-    risedev kafka-topics --topic "$topic" --create --partitions "$partition") &
+    risedev rpk topic create "$topic" --partitions "$partition") &
 done
 wait
 
@@ -56,9 +56,9 @@ for filename in $kafka_data_files; do
     if [[ "$topic" = *bin ]]; then
         kcat -P -b message_queue:29092 -t "$topic" "$filename"
     elif [[ "$topic" = *avro_json ]]; then
-        python3 source/schema_registry_producer.py "message_queue:29092" "http://message_queue:8081" "$filename" "topic" "avro"
+        python3 source/schema_registry_producer.py "message_queue:29092" "http://schemaregistry:8082" "$filename" "topic" "avro"
     elif [[ "$topic" = *json_schema ]]; then
-        python3 source/schema_registry_producer.py "kafka:9093" "http://schemaregistry:8082" "$filename" "topic" "json"
+        python3 source/schema_registry_producer.py "message_queue:29092" "http://schemaregistry:8082" "$filename" "topic" "json"
     else
         cat "$filename" | kcat -P -K ^  -b message_queue:29092 -t "$topic"
     fi
@@ -72,9 +72,9 @@ for i in {0..100}; do echo "key$i:{\"a\": $i}" | kcat -P -b message_queue:29092 
 # write schema with name strategy
 
 ## topic: upsert_avro_json-record, key subject: string, value subject: CPLM.OBJ_ATTRIBUTE_VALUE
-(python3 source/schema_registry_producer.py  "message_queue:29092" "http://message_queue:8081" source/test_data/upsert_avro_json.1 "record" "avro") &
+(python3 source/schema_registry_producer.py  "message_queue:29092" "http://schemaregistry:8082" source/test_data/upsert_avro_json.1 "record" "avro") &
 ## topic: upsert_avro_json-topic-record,
 ## key subject: upsert_avro_json-topic-record-string
 ## value subject: upsert_avro_json-topic-record-CPLM.OBJ_ATTRIBUTE_VALUE
-(python3 source/schema_registry_producer.py  "message_queue:29092" "http://message_queue:8081" source/test_data/upsert_avro_json.1 "topic-record" "avro") &
+(python3 source/schema_registry_producer.py  "message_queue:29092" "http://schemaregistry:8082" source/test_data/upsert_avro_json.1 "topic-record" "avro") &
 wait

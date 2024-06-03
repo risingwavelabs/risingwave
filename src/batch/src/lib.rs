@@ -25,13 +25,11 @@
 #![feature(is_sorted)]
 #![recursion_limit = "256"]
 #![feature(let_chains)]
-#![feature(bound_map)]
 #![feature(int_roundings)]
 #![feature(allocator_api)]
 #![feature(impl_trait_in_assoc_type)]
 #![feature(assert_matches)]
 #![feature(lazy_cell)]
-#![feature(array_methods)]
 #![feature(error_generic_member_access)]
 #![feature(map_try_insert)]
 

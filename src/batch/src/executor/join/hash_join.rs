@@ -39,10 +39,7 @@ use risingwave_pb::data::DataChunk as PbDataChunk;
 
 use super::{ChunkedData, JoinType, RowId};
 use crate::error::{BatchError, Result};
-use crate::executor::{
-    BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
-    WrapStreamExecutor,
-};
+use crate::executor::{BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder, WrapStreamExecutor};
 use crate::risingwave_common::hash::NullBitmap;
 use crate::spill::spill_op::{SpillBuildHasher, SpillOp, DEFAULT_SPILL_PARTITION_NUM};
 use crate::task::{BatchTaskContext, ShutdownToken};
@@ -226,8 +223,6 @@ struct RightNonEquiJoinState {
     /// Whether a build row has been matched.
     build_row_matched: ChunkedData<bool>,
 }
-
-const DEFAULT_SPILL_CHUNK_SIZE: usize = 1024;
 
 pub struct JoinSpillManager {
     op: SpillOp,
@@ -519,7 +514,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
                 DEFAULT_SPILL_PARTITION_NUM,
                 probe_data_types.clone(),
                 build_data_types.clone(),
-                DEFAULT_SPILL_CHUNK_SIZE,
+                self.chunk_size,
             )?;
             join_spill_manager.init_writers().await?;
 
@@ -945,7 +940,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
                 }
                 shutdown_rx.check()?;
                 if !ANTI_JOIN {
-                    if hash_map.get(probe_key).is_some() {
+                    if hash_map.contains_key(probe_key) {
                         if let Some(spilled) = Self::append_one_probe_row(
                             &mut chunk_builder,
                             &probe_chunk,

@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap};
-use std::convert::TryFrom;
 use std::num::NonZeroU32;
 
 use risingwave_connector::source::kafka::private_link::{
@@ -119,6 +118,15 @@ impl WithOptions {
         }
         false
     }
+}
+
+pub(crate) fn resolve_secret_in_with_options(
+    _with_options: &mut WithOptions,
+    _session: &SessionImpl,
+) -> RwResult<HashMap<String, u32>> {
+    // todo: implement the function and take `resolve_privatelink_in_with_option` as reference
+
+    Ok(HashMap::new())
 }
 
 pub(crate) fn resolve_privatelink_in_with_option(

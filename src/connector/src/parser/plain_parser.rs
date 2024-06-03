@@ -15,6 +15,7 @@
 use risingwave_common::bail;
 
 use super::unified::json::TimestamptzHandling;
+use super::unified::ChangeEvent;
 use super::{
     AccessBuilderImpl, ByteStreamSourceParser, EncodingProperties, EncodingType,
     SourceStreamChunkRowWriter, SpecificParserConfig,
@@ -24,12 +25,12 @@ use crate::parser::bytes_parser::BytesAccessBuilder;
 use crate::parser::simd_json_parser::DebeziumJsonAccessBuilder;
 use crate::parser::unified::debezium::parse_transaction_meta;
 use crate::parser::unified::upsert::UpsertChangeEvent;
-use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer_with_op;
-use crate::parser::unified::{AccessImpl, ChangeEventOperation};
+use crate::parser::unified::AccessImpl;
 use crate::parser::upsert_parser::get_key_column_name;
 use crate::parser::{BytesProperties, ParseResult, ParserFormat};
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef, SourceMeta};
 
+/// Parser for `FORMAT PLAIN`, i.e., append-only source.
 #[derive(Debug)]
 pub struct PlainParser {
     pub key_builder: Option<AccessBuilderImpl>,
@@ -105,7 +106,6 @@ impl PlainParser {
         // reuse upsert component but always insert
         let mut row_op: UpsertChangeEvent<AccessImpl<'_, '_>, AccessImpl<'_, '_>> =
             UpsertChangeEvent::default();
-        let change_event_op = ChangeEventOperation::Upsert;
 
         if let Some(data) = key
             && let Some(key_builder) = self.key_builder.as_mut()
@@ -118,14 +118,9 @@ impl PlainParser {
             row_op = row_op.with_value(self.payload_builder.generate_accessor(data).await?);
         }
 
-        Ok(
-            apply_row_operation_on_stream_chunk_writer_with_op(
-                row_op,
-                &mut writer,
-                change_event_op,
-            )
-            .map(|_| ParseResult::Rows)?,
-        )
+        writer.insert(|column: &SourceColumnDesc| row_op.access_field(column))?;
+
+        Ok(ParseResult::Rows)
     }
 }
 
@@ -210,7 +205,7 @@ mod tests {
         let mut transactional = false;
         // for untransactional source, we expect emit a chunk for each message batch
         let message_stream = source_message_stream(transactional);
-        let chunk_stream = crate::parser::into_chunk_stream(parser, message_stream.boxed());
+        let chunk_stream = crate::parser::into_chunk_stream_inner(parser, message_stream.boxed());
         let output: std::result::Result<Vec<_>, _> = block_on(chunk_stream.collect::<Vec<_>>())
             .into_iter()
             .collect();
@@ -247,7 +242,7 @@ mod tests {
         // for transactional source, we expect emit a single chunk for the transaction
         transactional = true;
         let message_stream = source_message_stream(transactional);
-        let chunk_stream = crate::parser::into_chunk_stream(parser, message_stream.boxed());
+        let chunk_stream = crate::parser::into_chunk_stream_inner(parser, message_stream.boxed());
         let output: std::result::Result<Vec<_>, _> = block_on(chunk_stream.collect::<Vec<_>>())
             .into_iter()
             .collect();

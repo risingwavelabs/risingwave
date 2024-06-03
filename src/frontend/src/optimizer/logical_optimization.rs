@@ -172,7 +172,7 @@ static GENERAL_UNNESTING_TRANS_APPLY_WITH_SHARE: LazyLock<OptimizationStage> =
                 // can't handle a join with `output_indices`.
                 ProjectJoinSeparateRule::create(),
             ],
-            ApplyOrder::BottomUp,
+            ApplyOrder::TopDown,
         )
     });
 
@@ -186,7 +186,7 @@ static GENERAL_UNNESTING_TRANS_APPLY_WITHOUT_SHARE: LazyLock<OptimizationStage> 
                 // can't handle a join with `output_indices`.
                 ProjectJoinSeparateRule::create(),
             ],
-            ApplyOrder::BottomUp,
+            ApplyOrder::TopDown,
         )
     });
 
@@ -732,8 +732,8 @@ impl LogicalOptimizer {
         // Do a final column pruning and predicate pushing down to clean up the plan.
         plan = Self::column_pruning(plan, explain_trace, &ctx);
         if last_total_rule_applied_before_predicate_pushdown != ctx.total_rule_applied() {
-            #[allow(unused_assignments)]
-            last_total_rule_applied_before_predicate_pushdown = ctx.total_rule_applied();
+            (#[allow(unused_assignments)]
+            last_total_rule_applied_before_predicate_pushdown) = ctx.total_rule_applied();
             plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
         }
 

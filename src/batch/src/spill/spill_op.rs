@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::hash::BuildHasher;
 use std::ops::{Deref, DerefMut};
-use std::result::Result::{Err, Ok};
 
 use opendal::layers::RetryLayer;
 use opendal::services::Fs;
 use opendal::Operator;
+use thiserror_ext::AsReport;
+use std::hash::BuildHasher;
 use twox_hash::XxHash64;
 
 use crate::error::Result;
@@ -28,7 +28,9 @@ pub const DEFAULT_SPILL_PARTITION_NUM: usize = 20;
 const DEFAULT_SPILL_DIR: &str = "/tmp/";
 const RW_MANAGED_SPILL_DIR: &str = "/rw_batch_spill/";
 const DEFAULT_IO_BUFFER_SIZE: usize = 256 * 1024;
+const DEFAULT_IO_CONCURRENT_TASK: usize = 8;
 
+/// `SpillOp` is used to manage the spill directory of the spilling executor and it will drop the directory with a RAII style.
 pub struct SpillOp {
     pub op: Operator,
 }
@@ -54,8 +56,8 @@ impl SpillOp {
         Ok(self
             .op
             .writer_with(name)
-            .append(true)
             .buffer(DEFAULT_IO_BUFFER_SIZE)
+            .concurrent(DEFAULT_IO_CONCURRENT_TASK)
             .await?)
     }
 
@@ -73,8 +75,11 @@ impl Drop for SpillOp {
         let op = self.op.clone();
         tokio::task::spawn(async move {
             let result = op.remove_all("/").await;
-            if let Err(e) = result {
-                error!("Failed to remove spill directory: {}", e);
+            if let Err(error) = result {
+                error!(
+                    error = %error.as_report(),
+                    "Failed to remove spill directory"
+                );
             }
         });
     }

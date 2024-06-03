@@ -578,10 +578,11 @@ impl SharedBufferBatch {
     ) -> Self {
         let inner =
             SharedBufferBatchInner::new(epoch, spill_offset, sorted_items, None, size, None);
+        use crate::hummock::event_handler::TEST_LOCAL_INSTANCE_ID;
         SharedBufferBatch {
             inner: Arc::new(inner),
             table_id,
-            instance_id: LocalInstanceId::default(),
+            instance_id: TEST_LOCAL_INSTANCE_ID,
         }
     }
 }
@@ -968,7 +969,7 @@ impl DeleteRangeIterator for SharedBufferDeleteRangeIterator {
 
 #[cfg(test)]
 mod tests {
-    use std::ops::Bound::{Excluded, Included};
+    use std::ops::Bound::Excluded;
 
     use itertools::{zip_eq, Itertools};
     use risingwave_common::util::epoch::{test_epoch, EpochExt};

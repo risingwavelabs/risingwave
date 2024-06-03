@@ -24,6 +24,8 @@ pub struct StorageOpts {
     pub parallel_compact_size_mb: u32,
     /// Target size of the Sstable.
     pub sstable_size_mb: u32,
+    /// Minimal target size of the Sstable to store data of different state-table in independent files as soon as possible.
+    pub min_sstable_size_mb: u32,
     /// Size of each block in bytes in SST.
     pub block_size_kb: u32,
     /// False positive probability of bloom filter.
@@ -39,8 +41,6 @@ pub struct StorageOpts {
     /// The shared buffer will start flushing data to object when the ratio of memory usage to the
     /// shared buffer capacity exceed such ratio.
     pub shared_buffer_flush_ratio: f32,
-    /// The threshold for the number of immutable memtables to merge to a new imm.
-    pub imm_merge_threshold: usize,
     /// Remote directory for storing data and metadata objects.
     pub data_directory: String,
     /// Whether to enable write conflict detection
@@ -74,8 +74,6 @@ pub struct StorageOpts {
     pub sstable_id_remote_fetch_number: u32,
     /// Whether to enable streaming upload for sstable.
     pub min_sst_size_for_streaming_upload: u64,
-    /// Max sub compaction task numbers
-    pub max_sub_compaction: u32,
     pub max_concurrent_compaction_task_number: u64,
     pub max_version_pinning_duration_sec: u64,
     pub compactor_iter_max_io_retry_times: usize,
@@ -152,6 +150,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
         Self {
             parallel_compact_size_mb: p.parallel_compact_size_mb(),
             sstable_size_mb: p.sstable_size_mb(),
+            min_sstable_size_mb: c.storage.min_sstable_size_mb,
             block_size_kb: p.block_size_kb(),
             bloom_false_positive: p.bloom_false_positive(),
             share_buffers_sync_parallelism: c.storage.share_buffers_sync_parallelism,
@@ -160,7 +159,6 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
                 .share_buffer_compaction_worker_threads_number,
             shared_buffer_capacity_mb: s.shared_buffer_capacity_mb,
             shared_buffer_flush_ratio: c.storage.shared_buffer_flush_ratio,
-            imm_merge_threshold: c.storage.imm_merge_threshold,
             data_directory: p.data_directory().to_string(),
             write_conflict_detection_enabled: c.storage.write_conflict_detection_enabled,
             block_cache_capacity_mb: s.block_cache_capacity_mb,
@@ -176,7 +174,6 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             compactor_memory_limit_mb: s.compactor_memory_limit_mb,
             sstable_id_remote_fetch_number: c.storage.sstable_id_remote_fetch_number,
             min_sst_size_for_streaming_upload: c.storage.min_sst_size_for_streaming_upload,
-            max_sub_compaction: c.storage.max_sub_compaction,
             max_concurrent_compaction_task_number: c.storage.max_concurrent_compaction_task_number,
             max_version_pinning_duration_sec: c.storage.max_version_pinning_duration_sec,
             data_file_cache_dir: c.storage.data_file_cache.dir.clone(),

@@ -21,6 +21,7 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::pg_server::Session;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, DEFAULT_SCHEMA_NAME};
+use risingwave_common::session_config::{SearchPath, USER_NAME_WILD_CARD};
 use risingwave_common::types::{DataType, Fields, Timestamptz};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_connector::source::kafka::PRIVATELINK_CONNECTION;
@@ -29,7 +30,6 @@ use risingwave_pb::catalog::connection;
 use risingwave_sqlparser::ast::{
     display_comma_separated, Ident, ObjectName, ShowCreateType, ShowObject, ShowStatementFilter,
 };
-use serde_json;
 
 use super::{fields_to_descriptors, RwPgResponse, RwPgResponseBuilderExt};
 use crate::binder::{Binder, Relation};
@@ -104,6 +104,28 @@ fn schema_or_default(schema: &Option<Ident>) -> String {
     schema
         .as_ref()
         .map_or_else(|| DEFAULT_SCHEMA_NAME.to_string(), |s| s.real_value())
+}
+
+fn schema_or_search_path(
+    session: &Arc<SessionImpl>,
+    schema: &Option<Ident>,
+    search_path: &SearchPath,
+) -> Vec<String> {
+    if let Some(s) = schema {
+        vec![s.real_value()]
+    } else {
+        search_path
+            .real_path()
+            .iter()
+            .map(|s| {
+                if s.eq(USER_NAME_WILD_CARD) {
+                    session.auth_context().user_name.clone()
+                } else {
+                    s.to_string()
+                }
+            })
+            .collect()
+    }
 }
 
 #[derive(Fields)]
@@ -254,12 +276,22 @@ pub async fn handle_show_object(
 
     let names = match command {
         // If not include schema name, use default schema name
-        ShowObject::Table { schema } => catalog_reader
-            .read_guard()
-            .get_schema_by_name(session.database(), &schema_or_default(&schema))?
-            .iter_table()
-            .map(|t| t.name.clone())
-            .collect(),
+        ShowObject::Table { schema } => {
+            let search_path = session.config().search_path();
+            let mut table_names_in_schema = vec![];
+            for schema in schema_or_search_path(&session, &schema, &search_path) {
+                // If the schema is not found, skip it
+                if let Ok(schema_catalog) = catalog_reader
+                    .read_guard()
+                    .get_schema_by_name(session.database(), schema.as_ref())
+                {
+                    table_names_in_schema
+                        .extend(schema_catalog.iter_table().map(|t| t.name.clone()));
+                }
+            }
+
+            table_names_in_schema
+        }
         ShowObject::InternalTable { schema } => catalog_reader
             .read_guard()
             .get_schema_by_name(session.database(), &schema_or_default(&schema))?
@@ -299,6 +331,12 @@ pub async fn handle_show_object(
             .read_guard()
             .get_schema_by_name(session.database(), &schema_or_default(&schema))?
             .iter_subscription()
+            .map(|t| t.name.clone())
+            .collect(),
+        ShowObject::Secret { schema } => catalog_reader
+            .read_guard()
+            .get_schema_by_name(session.database(), &schema_or_default(&schema))?
+            .iter_secret()
             .map(|t| t.name.clone())
             .collect(),
         ShowObject::Columns { table } => {

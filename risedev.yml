@@ -105,6 +105,7 @@ profile:
       - use: minio
       - use: etcd
       - use: meta-node
+        meta-backend: etcd
       - use: compute-node
       - use: frontend
       - use: compactor
@@ -119,6 +120,7 @@ profile:
       - use: etcd
       - use: meta-node
         user-managed: true
+        meta-backend: etcd
       - use: compute-node
         user-managed: true
       - use: frontend
@@ -136,6 +138,7 @@ profile:
       - use: etcd
       - use: meta-node
         user-managed: true
+        meta-backend: etcd
       - use: compute-node
         user-managed: true
       - use: frontend
@@ -149,6 +152,7 @@ profile:
       - use: etcd
       - use: meta-node
         user-managed: true
+        meta-backend: etcd
       - use: compute-node
         user-managed: true
       - use: frontend
@@ -253,6 +257,7 @@ profile:
       - use: minio
       - use: etcd
       - use: meta-node
+        meta-backend: etcd
       - use: compute-node
       - use: frontend
       - use: compactor
@@ -286,6 +291,7 @@ profile:
         port: 5690
         dashboard-port: 5691
         exporter-port: 1250
+        meta-backend: etcd
       - use: meta-node
         port: 15690
         dashboard-port: 15691
@@ -333,6 +339,7 @@ profile:
         port: 5690
         dashboard-port: 5691
         exporter-port: 1250
+        meta-backend: etcd
       - use: meta-node
         port: 15690
         dashboard-port: 15691
@@ -353,6 +360,7 @@ profile:
         port: 5690
         dashboard-port: 5691
         exporter-port: 1250
+        meta-backend: sqlite
       - use: compactor
       - use: compute-node
       - use: frontend
@@ -366,6 +374,40 @@ profile:
         port: 5690
         dashboard-port: 5691
         exporter-port: 1250
+        meta-backend: sqlite
+      - use: compactor
+      - use: compute-node
+      - use: frontend
+
+  meta-1cn-1fe-pg-backend:
+    steps:
+      - use: minio
+      - use: postgres
+        port: 8432
+        user: postgres
+        database: metadata
+      - use: meta-node
+        port: 5690
+        dashboard-port: 5691
+        exporter-port: 1250
+        meta-backend: postgres
+      - use: compactor
+      - use: compute-node
+      - use: frontend
+
+  meta-1cn-1fe-pg-backend-with-recovery:
+    config-path: src/config/ci-recovery.toml
+    steps:
+      - use: minio
+      - use: postgres
+        port: 8432
+        user: postgres
+        database: metadata
+      - use: meta-node
+        port: 5690
+        dashboard-port: 5691
+        exporter-port: 1250
+        meta-backend: postgres
       - use: compactor
       - use: compute-node
       - use: frontend
@@ -392,6 +434,7 @@ profile:
       - use: minio
       - use: etcd
       - use: meta-node
+        meta-backend: etcd
       - use: compute-node
         parallelism: 8
       - use: frontend
@@ -550,6 +593,7 @@ profile:
       - use: etcd
         unsafe-no-fsync: true
       - use: meta-node
+        meta-backend: etcd
       - use: compute-node
         enable-tiered-cache: true
       - use: frontend
@@ -562,6 +606,7 @@ profile:
       - use: etcd
         unsafe-no-fsync: true
       - use: meta-node
+        meta-backend: etcd
       - use: compute-node
         port: 5687
         exporter-port: 1222
@@ -584,6 +629,7 @@ profile:
       - use: etcd
         unsafe-no-fsync: true
       - use: meta-node
+        meta-backend: etcd
       - use: compute-node
         port: 5687
         exporter-port: 1222
@@ -610,6 +656,7 @@ profile:
       - use: etcd
         unsafe-no-fsync: true
       - use: meta-node
+        meta-backend: etcd
       - use: compute-node
         port: 5687
         exporter-port: 1222
@@ -634,6 +681,7 @@ profile:
       - use: etcd
         unsafe-no-fsync: true
       - use: meta-node
+        meta-backend: etcd
       - use: compute-node
         port: 5687
         exporter-port: 1222
@@ -658,6 +706,7 @@ profile:
       - use: etcd
         unsafe-no-fsync: true
       - use: meta-node
+        meta-backend: etcd
       - use: compute-node
         port: 5687
         exporter-port: 1222
@@ -717,6 +766,7 @@ profile:
       - use: etcd
         unsafe-no-fsync: true
       - use: meta-node
+        meta-backend: etcd
       - use: opendal
         engine: fs
         bucket: "/tmp/rw_ci"
@@ -750,6 +800,7 @@ profile:
       - use: etcd
         unsafe-no-fsync: true
       - use: meta-node
+        meta-backend: etcd
       - use: compute-node
         port: 5687
         exporter-port: 1222
@@ -801,6 +852,7 @@ profile:
       - use: etcd
         unsafe-no-fsync: true
       - use: meta-node
+        meta-backend: etcd
       - use: compute-node
         enable-tiered-cache: true
       - use: frontend
@@ -809,14 +861,19 @@ profile:
         user-managed: true
         address: message_queue
         port: 29092
+      - use: schema-registry
+        user-managed: true
+        address: schemaregistry
+        port: 8082
 
   ci-inline-source-test:
-    config-path: src/config/ci.toml
+    config-path: src/config/ci-recovery.toml
     steps:
       - use: minio
       - use: etcd
         unsafe-no-fsync: true
       - use: meta-node
+        meta-backend: etcd
       - use: compute-node
         enable-tiered-cache: true
       - use: frontend
@@ -841,6 +898,7 @@ profile:
       - use: etcd
         unsafe-no-fsync: true
       - use: meta-node
+        meta-backend: etcd
       - use: compute-node
         enable-tiered-cache: true
       - use: frontend
@@ -854,6 +912,7 @@ profile:
       - use: etcd
         unsafe-no-fsync: true
       - use: meta-node
+        meta-backend: etcd
       - use: compute-node
         enable-tiered-cache: true
         total-memory-bytes: 17179869184
@@ -866,6 +925,7 @@ profile:
       - use: minio
       - use: etcd
       - use: meta-node
+        meta-backend: etcd
       - use: compute-node
         enable-tiered-cache: true
       - use: frontend
@@ -878,6 +938,7 @@ profile:
       - use: etcd
         unsafe-no-fsync: true
       - use: meta-node
+        meta-backend: etcd
       - use: compute-node
         port: 5687
         exporter-port: 1222
@@ -893,18 +954,21 @@ profile:
       - use: frontend
       - use: compactor
 
-  ci-1cn-1fe-kafka-with-recovery:
+  ci-1cn-1fe-user-kafka-with-recovery:
     config-path: src/config/ci-recovery.toml
     steps:
       - use: minio
       - use: etcd
       - use: meta-node
+        meta-backend: etcd
       - use: compute-node
         enable-tiered-cache: true
       - use: frontend
       - use: compactor
       - use: kafka
-        persist-data: true
+        user-managed: true
+        address: message_queue
+        port: 29092
 
   ci-meta-backup-test-etcd:
     config-path: src/config/ci-meta-backup-test.toml
@@ -912,6 +976,7 @@ profile:
       - use: etcd
       - use: minio
       - use: meta-node
+        meta-backend: etcd
       - use: compute-node
       - use: frontend
       - use: compactor
@@ -928,6 +993,7 @@ profile:
       - use: sqlite
       - use: minio
       - use: meta-node
+        meta-backend: sqlite
       - use: compute-node
       - use: frontend
       - use: compactor
@@ -978,6 +1044,7 @@ profile:
       - use: minio
       - use: etcd
       - use: meta-node
+        meta-backend: etcd
       - use: compute-node
       - use: frontend
       - use: compactor
@@ -989,6 +1056,7 @@ profile:
         bucket: renjie-iceberg-bench
       - use: etcd
       - use: meta-node
+        meta-backend: etcd
       - use: compute-node
       - use: frontend
       - use: compactor
@@ -1001,6 +1069,7 @@ profile:
       - use: minio
       - use: etcd
       - use: meta-node
+        meta-backend: etcd
       - use: compute-node
       - use: frontend
       - use: compactor
@@ -1161,11 +1230,17 @@ template:
     # If `user-managed` is true, this service will be started by user with the above config
     user-managed: false
 
+    # meta backend type, requires extra config for provided backend
+    meta-backend: "memory"
+
     # Etcd backend config
     provide-etcd-backend: "etcd*"
 
     # Sqlite backend config
     provide-sqlite-backend: "sqlite*"
+
+    # Postgres backend config
+    provide-postgres-backend: "postgres*"
 
     # Prometheus nodes used by dashboard service
     provide-prometheus: "prometheus*"
@@ -1349,7 +1424,7 @@ template:
 
     # access key, secret key and region should be set in aws config (either by env var or .aws/config)
 
-  # Apache Kafka service
+  # Apache Kafka service backed by docker.
   kafka:
     # Id to be picked-up by services
     id: kafka-${port}
@@ -1362,9 +1437,11 @@ template:
 
     # Listen port of KRaft controller
     controller-port: 29093
+    # Listen port for other services in docker (schema-registry)
+    docker-port: 29094
 
-    # Listen address
-    listen-address: ${address}
+    # The docker image. Can be overridden to use a different version.
+    image: "confluentinc/cp-kafka:7.6.1"
 
     # If set to true, data will be persisted at data/{id}.
     persist-data: true
@@ -1373,6 +1450,23 @@ template:
     node-id: 0
 
     user-managed: false
+
+  schema-registry:
+    # Id to be picked-up by services
+    id: schema-registry-${port}
+
+    # Advertise address
+    address: "127.0.0.1"
+
+    # Listen port of Schema Registry
+    port: 8081
+
+    # The docker image. Can be overridden to use a different version.
+    image: "confluentinc/cp-schema-registry:7.6.1"
+
+    user-managed: false
+
+    provide-kafka: "kafka*"
 
   # Google pubsub emulator service
   pubsub:
@@ -1427,7 +1521,10 @@ template:
     port: 8306
 
     # Note:
-    # - This will be used to initialize the MySQL instance if it's fresh.
+    # - This will be used to initialize the MySQL instance.
+    #   * If the user is "root", the password will be used as the root password.
+    #   * Otherwise, a regular user will be created with the given password. The root password will be empty.
+    #   Note that this only applies to fresh instances, i.e., the data directory is empty.
     # - In user-managed mode, these configs are not validated by risedev.
     #   They are passed as-is to risedev-env default user for MySQL operations.
     # - This is not used in RISEDEV_MYSQL_WITH_OPTIONS_COMMON.
@@ -1436,7 +1533,36 @@ template:
     database: "risedev"
 
     # The docker image. Can be overridden to use a different version.
-    image: "mysql:8"
+    image: "mysql:8.0"
+
+    # If set to true, data will be persisted at data/{id}.
+    persist-data: true
+
+    # If `user-managed` is true, user is responsible for starting the service
+    # to serve at the above address and port in any way they see fit.
+    user-managed: false
+
+  # PostgreSQL service backed by docker.
+  postgres:
+    # Id to be picked-up by services
+    id: postgres-${port}
+
+    # address of pg
+    address: "127.0.0.1"
+
+    # listen port of pg
+    port: 8432
+
+    # Note:
+    # - This will be used to initialize the PostgreSQL instance if it's fresh.
+    # - In user-managed mode, these configs are not validated by risedev.
+    #   They are passed as-is to risedev-env default user for PostgreSQL operations.
+    user: postgres
+    password: ""
+    database: "postgres"
+
+    # The docker image. Can be overridden to use a different version.
+    image: "postgres:15-alpine"
 
     # If set to true, data will be persisted at data/{id}.
     persist-data: true

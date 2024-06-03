@@ -19,7 +19,6 @@ mod utils;
 
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::iter;
-use std::option::Option::Some;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
@@ -37,7 +36,7 @@ use risingwave_pb::catalog::subscription::PbSubscriptionState;
 use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, TableType};
 use risingwave_pb::catalog::{
     Comment, Connection, CreateType, Database, Function, Index, PbSource, PbStreamJobStatus,
-    Schema, Sink, Source, StreamJobStatus, Subscription, Table, View,
+    Schema, Secret, Sink, Source, StreamJobStatus, Subscription, Table, View,
 };
 use risingwave_pb::ddl_service::{alter_owner_request, alter_set_schema_request};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
@@ -50,7 +49,7 @@ use user::*;
 use crate::manager::{
     IdCategory, MetaSrvEnv, NotificationVersion, StreamingJob, IGNORED_NOTIFICATION_VERSION,
 };
-use crate::model::{BTreeMapTransaction, MetadataModel, TableFragments, ValTransaction};
+use crate::model::{BTreeMapTransaction, MetadataModel, TableFragments};
 use crate::storage::Transaction;
 use crate::{MetaError, MetaResult};
 
@@ -64,6 +63,7 @@ pub type RelationId = u32;
 pub type IndexId = u32;
 pub type ViewId = u32;
 pub type FunctionId = u32;
+pub type SecretId = u32;
 
 pub type UserId = u32;
 pub type ConnectionId = u32;
@@ -84,6 +84,7 @@ macro_rules! commit_meta_with_trx {
         {
             use tracing::Instrument;
             use $crate::storage::meta_store::MetaStore;
+            use $crate::model::{InMemValTransaction, ValTransaction};
             async {
                 // Apply the change in `ValTransaction` to trx
                 $(
@@ -328,6 +329,7 @@ impl CatalogManager {
         let mut users = BTreeMapTransaction::new(&mut user_core.user_info);
         let mut functions = BTreeMapTransaction::new(&mut database_core.functions);
         let mut connections = BTreeMapTransaction::new(&mut database_core.connections);
+        let mut secrets = BTreeMapTransaction::new(&mut database_core.secrets);
 
         /// `drop_by_database_id` provides a wrapper for dropping relations by database id, it will
         /// return the relation ids that dropped.
@@ -360,6 +362,7 @@ impl CatalogManager {
             let views_to_drop = drop_by_database_id!(views, database_id);
             let functions_to_drop = drop_by_database_id!(functions, database_id);
             let connections_to_drop = drop_by_database_id!(connections, database_id);
+            let secrets_to_drop = drop_by_database_id!(secrets, database_id);
             connections_dropped = connections_to_drop.clone();
 
             let objects = std::iter::once(Object::DatabaseId(database_id))
@@ -421,6 +424,7 @@ impl CatalogManager {
                         .iter()
                         .map(|connection| connection.owner),
                 )
+                .chain(secrets_to_drop.iter().map(|secret| secret.owner))
                 .for_each(|owner_id| user_core.decrease_ref(owner_id));
 
             // Update relation ref count.
@@ -476,6 +480,57 @@ impl CatalogManager {
         } else {
             Err(MetaError::catalog_id_not_found("database", database_id))
         }
+    }
+
+    pub async fn create_secret(&self, secret: Secret) -> MetaResult<NotificationVersion> {
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        let user_core = &mut core.user;
+        database_core.ensure_database_id(secret.database_id)?;
+        database_core.ensure_schema_id(secret.schema_id)?;
+        #[cfg(not(test))]
+        user_core.ensure_user_id(secret.owner)?;
+        let key = (
+            secret.database_id as DatabaseId,
+            secret.schema_id as SchemaId,
+            secret.name.clone(),
+        );
+        database_core.check_secret_name_duplicated(&key)?;
+
+        let secret_id = secret.id;
+        let mut secret_entry = BTreeMapTransaction::new(&mut database_core.secrets);
+        secret_entry.insert(secret_id, secret.to_owned());
+        commit_meta!(self, secret_entry)?;
+
+        user_core.increase_ref(secret.owner);
+
+        let version = self
+            .notify_frontend(Operation::Add, Info::Secret(secret))
+            .await;
+        Ok(version)
+    }
+
+    pub async fn drop_secret(&self, secret_id: SecretId) -> MetaResult<NotificationVersion> {
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        let user_core = &mut core.user;
+        let mut secrets = BTreeMapTransaction::new(&mut database_core.secrets);
+
+        // todo: impl a ref count check for secret
+        // if secret is used by other relations, not found in the catalog or do not have the privilege to drop, return error
+        // else: commit the change and notify frontend
+
+        let secret = secrets
+            .remove(secret_id)
+            .ok_or_else(|| anyhow!("secret not found"))?;
+
+        commit_meta!(self, secrets)?;
+        user_core.decrease_ref(secret.owner);
+
+        let version = self
+            .notify_frontend(Operation::Delete, Info::Secret(secret))
+            .await;
+        Ok(version)
     }
 
     pub async fn create_connection(
@@ -3702,6 +3757,13 @@ impl CatalogManager {
             }
         }
 
+        for subscription in core.subscriptions.values() {
+            dependencies.push(PbObjectDependencies {
+                object_id: subscription.id,
+                referenced_object_id: subscription.dependent_table_id,
+            });
+        }
+
         dependencies
     }
 
@@ -3962,7 +4024,7 @@ impl CatalogManager {
                 id
             )));
         }
-        if user_core.catalog_create_ref_count.get(&id).is_some() {
+        if user_core.catalog_create_ref_count.contains_key(&id) {
             return Err(MetaError::permission_denied(format!(
                 "User {} cannot be dropped because some objects depend on it",
                 user.name

@@ -24,7 +24,6 @@ use aws_sdk_kinesis::Client as KinesisClient;
 use futures_async_stream::try_stream;
 use risingwave_common::bail;
 use thiserror_ext::AsReport;
-use tokio_retry;
 
 use crate::error::ConnectorResult as Result;
 use crate::parser::ParserConfig;
@@ -32,8 +31,8 @@ use crate::source::kinesis::source::message::from_kinesis_record;
 use crate::source::kinesis::split::{KinesisOffset, KinesisSplit};
 use crate::source::kinesis::KinesisProperties;
 use crate::source::{
-    into_chunk_stream, BoxChunkSourceStream, Column, CommonSplitReader, SourceContextRef,
-    SourceMessage, SplitId, SplitMetaData, SplitReader,
+    into_chunk_stream, BoxChunkSourceStream, Column, SourceContextRef, SourceMessage, SplitId,
+    SplitMetaData, SplitReader,
 };
 
 #[derive(Debug, Clone)]
@@ -115,11 +114,11 @@ impl SplitReader for KinesisSplitReader {
     fn into_stream(self) -> BoxChunkSourceStream {
         let parser_config = self.parser_config.clone();
         let source_context = self.source_ctx.clone();
-        into_chunk_stream(self, parser_config, source_context)
+        into_chunk_stream(self.into_data_stream(), parser_config, source_context)
     }
 }
 
-impl CommonSplitReader for KinesisSplitReader {
+impl KinesisSplitReader {
     #[try_stream(ok = Vec < SourceMessage >, error = crate::error::ConnectorError)]
     async fn into_data_stream(mut self) {
         self.new_shard_iter().await?;
@@ -306,7 +305,6 @@ mod tests {
 
     use super::*;
     use crate::connector_common::KinesisCommon;
-    use crate::source::kinesis::split::KinesisSplit;
     use crate::source::SourceContext;
 
     #[tokio::test]

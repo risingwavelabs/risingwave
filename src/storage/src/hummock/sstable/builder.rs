@@ -626,9 +626,7 @@ pub(super) mod tests {
         default_builder_opt_for_test, gen_test_sstable_impl, mock_sst_writer, test_key_of,
         test_value_of, TEST_KEYS_COUNT,
     };
-    use crate::hummock::{
-        CachePolicy, Sstable, SstableWriterOptions, Xor16FilterBuilder, Xor8FilterBuilder,
-    };
+    use crate::hummock::{CachePolicy, Sstable, SstableWriterOptions, Xor8FilterBuilder};
     use crate::monitor::StoreLocalStatistic;
 
     #[tokio::test]

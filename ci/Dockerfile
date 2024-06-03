@@ -12,7 +12,7 @@ ENV LANG en_US.utf8
 RUN sed -i 's|http://archive.ubuntu.com/ubuntu|http://us-east-2.ec2.archive.ubuntu.com/ubuntu/|g' /etc/apt/sources.list
 RUN apt-get update -yy && \
     DEBIAN_FRONTEND=noninteractive apt-get -y install sudo make build-essential cmake protobuf-compiler curl parallel python3 python3-pip python3-venv software-properties-common \
-    openssl libssl-dev libsasl2-dev libcurl4-openssl-dev pkg-config bash openjdk-11-jdk wget unzip git tmux lld postgresql-client kcat netcat-openbsd mysql-client \
+    openssl libssl-dev libsasl2-dev libcurl4-openssl-dev pkg-config bash openjdk-17-jdk wget unzip git tmux lld postgresql-client kcat netcat-openbsd mysql-client \
     maven zstd libzstd-dev locales \
     python3.12 python3.12-dev \
     && rm -rf /var/lib/{apt,dpkg,cache,log}/
@@ -76,7 +76,7 @@ RUN cargo binstall -y --no-symlinks cargo-llvm-cov cargo-nextest cargo-hakari ca
     && rm -rf "/root/.cargo/registry/index" \
     && rm -rf "/root/.cargo/registry/cache" \
     && rm -rf "/root/.cargo/git/db"
-RUN cargo install cargo-dylint@2.6.0 dylint-link@2.6.0
+RUN cargo install cargo-dylint@3.1.0 dylint-link@3.1.0
 RUN cargo uninstall cargo-binstall cargo-cache
 
 # install risedev

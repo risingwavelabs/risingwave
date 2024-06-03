@@ -451,6 +451,41 @@ impl From<ConnectionId> for u32 {
     }
 }
 
+#[derive(Clone, Copy, Debug, Display, Default, Hash, PartialOrd, PartialEq, Eq, Ord)]
+pub struct SecretId(pub u32);
+
+impl SecretId {
+    pub const fn new(id: u32) -> Self {
+        SecretId(id)
+    }
+
+    pub const fn placeholder() -> Self {
+        SecretId(OBJECT_ID_PLACEHOLDER)
+    }
+
+    pub fn secret_id(&self) -> u32 {
+        self.0
+    }
+}
+
+impl From<u32> for SecretId {
+    fn from(id: u32) -> Self {
+        Self::new(id)
+    }
+}
+
+impl From<&u32> for SecretId {
+    fn from(id: &u32) -> Self {
+        Self::new(*id)
+    }
+}
+
+impl From<SecretId> for u32 {
+    fn from(id: SecretId) -> Self {
+        id.0
+    }
+}
+
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ConflictBehavior {
     #[default]

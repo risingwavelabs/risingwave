@@ -15,7 +15,6 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::io;
-use std::result::Result;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Instant;
@@ -24,7 +23,7 @@ use bytes::Bytes;
 use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, Validation};
 use parking_lot::Mutex;
 use risingwave_common::types::DataType;
-use risingwave_sqlparser::ast::Statement;
+use risingwave_sqlparser::ast::{RedactSqlOptionKeywordsRef, Statement};
 use serde::Deserialize;
 use thiserror_ext::AsReport;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -252,28 +251,49 @@ pub async fn pg_serve(
     addr: &str,
     session_mgr: Arc<impl SessionManager>,
     tls_config: Option<TlsConfig>,
+    redact_sql_option_keywords: Option<RedactSqlOptionKeywordsRef>,
 ) -> io::Result<()> {
     let listener = Listener::bind(addr).await?;
     tracing::info!(addr, "server started");
 
-    loop {
-        let conn_ret = listener.accept().await;
-        match conn_ret {
-            Ok((stream, peer_addr)) => {
-                tracing::info!(%peer_addr, "accept connection");
-                tokio::spawn(handle_connection(
-                    stream,
-                    session_mgr.clone(),
-                    tls_config.clone(),
-                    Arc::new(peer_addr),
-                ));
-            }
+    let acceptor_runtime = {
+        let mut builder = tokio::runtime::Builder::new_multi_thread();
+        builder.worker_threads(1);
+        builder
+            .thread_name("rw-acceptor")
+            .enable_all()
+            .build()
+            .unwrap()
+    };
 
-            Err(e) => {
-                tracing::error!(error = %e.as_report(), "failed to accept connection",);
+    #[cfg(not(madsim))]
+    let worker_runtime = tokio::runtime::Handle::current();
+    #[cfg(madsim)]
+    let worker_runtime = tokio::runtime::Builder::new_multi_thread().build().unwrap();
+
+    let f = async move {
+        loop {
+            let conn_ret = listener.accept().await;
+            match conn_ret {
+                Ok((stream, peer_addr)) => {
+                    tracing::info!(%peer_addr, "accept connection");
+                    worker_runtime.spawn(handle_connection(
+                        stream,
+                        session_mgr.clone(),
+                        tls_config.clone(),
+                        Arc::new(peer_addr),
+                        redact_sql_option_keywords.clone(),
+                    ));
+                }
+
+                Err(e) => {
+                    tracing::error!(error = %e.as_report(), "failed to accept connection",);
+                }
             }
         }
-    }
+    };
+    acceptor_runtime.spawn(f).await?;
+    Ok(())
 }
 
 pub async fn handle_connection<S, SM>(
@@ -281,11 +301,18 @@ pub async fn handle_connection<S, SM>(
     session_mgr: Arc<SM>,
     tls_config: Option<TlsConfig>,
     peer_addr: AddressRef,
+    redact_sql_option_keywords: Option<RedactSqlOptionKeywordsRef>,
 ) where
     S: AsyncWrite + AsyncRead + Unpin,
     SM: SessionManager,
 {
-    let mut pg_proto = PgProtocol::new(stream, session_mgr, tls_config, peer_addr);
+    let mut pg_proto = PgProtocol::new(
+        stream,
+        session_mgr,
+        tls_config,
+        peer_addr,
+        redact_sql_option_keywords,
+    );
     loop {
         let msg = match pg_proto.read_message().await {
             Ok(msg) => msg,
@@ -468,7 +495,7 @@ mod tests {
         let pg_config = pg_config.into();
 
         let session_mgr = Arc::new(MockSessionManager {});
-        tokio::spawn(async move { pg_serve(&bind_addr, session_mgr, None).await });
+        tokio::spawn(async move { pg_serve(&bind_addr, session_mgr, None, None).await });
         // wait for server to start
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 

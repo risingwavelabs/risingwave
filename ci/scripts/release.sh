@@ -20,10 +20,10 @@ dnf install -y lld
 ld.lld --version
 
 echo "--- Install dependencies"
-dnf install -y perl-core wget python3 python3-devel cyrus-sasl-devel rsync
+dnf install -y perl-core wget python3 python3-devel cyrus-sasl-devel rsync openssl-devel
 
 echo "--- Install java and maven"
-dnf install -y java-11-openjdk java-11-openjdk-devel
+dnf install -y java-17-openjdk java-17-openjdk-devel
 pip3 install toml-cli
 wget https://rw-ci-deps-dist.s3.amazonaws.com/apache-maven-3.9.3-bin.tar.gz && tar -zxvf apache-maven-3.9.3-bin.tar.gz
 export PATH="${REPO_ROOT}/apache-maven-3.9.3/bin:$PATH"
@@ -71,8 +71,8 @@ if [ "${ARCH}" == "aarch64" ]; then
   # see https://github.com/tikv/jemallocator/blob/802969384ae0c581255f3375ee2ba774c8d2a754/jemalloc-sys/build.rs#L218
   export JEMALLOC_SYS_WITH_LG_PAGE=16
 fi
-cargo build -p risingwave_cmd_all --features "rw-static-link" --profile release
-cargo build -p risingwave_cmd --bin risectl --features "rw-static-link" --profile release
+OPENSSL_STATIC=1 cargo build -p risingwave_cmd_all --features "rw-static-link" --features external-udf --features wasm-udf --features js-udf --profile release
+OPENSSL_STATIC=1 cargo build -p risingwave_cmd --bin risectl --features "rw-static-link" --profile release
 cd target/release && chmod +x risingwave risectl
 
 echo "--- Upload nightly binary to s3"

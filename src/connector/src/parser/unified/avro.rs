@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::str::FromStr;
 use std::sync::LazyLock;
 
 use apache_avro::schema::{DecimalSchema, RecordSchema};
@@ -31,30 +30,27 @@ use risingwave_common::util::iter_util::ZipEqFast;
 
 use super::{bail_uncategorized, uncategorized, Access, AccessError, AccessResult};
 use crate::error::ConnectorResult;
+use crate::parser::avro::util::avro_to_jsonb;
 #[derive(Clone)]
 /// Options for parsing an `AvroValue` into Datum, with an optional avro schema.
 pub struct AvroParseOptions<'a> {
+    /// Currently, this schema is only used for decimal
     pub schema: Option<&'a Schema>,
     /// Strict Mode
     /// If strict mode is disabled, an int64 can be parsed from an `AvroInt` (int32) value.
     pub relax_numeric: bool,
 }
 
-impl<'a> Default for AvroParseOptions<'a> {
-    fn default() -> Self {
+impl<'a> AvroParseOptions<'a> {
+    pub fn create(schema: &'a Schema) -> Self {
         Self {
-            schema: None,
+            schema: Some(schema),
             relax_numeric: true,
         }
     }
 }
 
 impl<'a> AvroParseOptions<'a> {
-    pub fn with_schema(mut self, schema: &'a Schema) -> Self {
-        self.schema = Some(schema);
-        self
-    }
-
     fn extract_inner_schema(&self, key: Option<&'a str>) -> Option<&'a Schema> {
         self.schema
             .map(|schema| avro_extract_field_schema(schema, key))
@@ -71,15 +67,23 @@ impl<'a> AvroParseOptions<'a> {
     }
 
     /// Parse an avro value into expected type.
-    /// 3 kinds of type info are used to parsing things.
-    ///     - `type_expected`. The type that we expect the value is.
-    ///     - value type. The type info together with the value argument.
-    ///     - schema. The `AvroSchema` provided in option.
-    /// If both `type_expected` and schema are provided, it will check both strictly.
-    /// If only `type_expected` is provided, it will try to match the value type and the
-    /// `type_expected`, converting the value if possible. If only value is provided (without
-    /// schema and `type_expected`), the `DateType` will be inferred.
-    pub fn parse<'b>(&self, value: &'b Value, type_expected: Option<&'b DataType>) -> AccessResult
+    ///
+    /// 3 kinds of type info are used to parsing:
+    /// - `type_expected`. The type that we expect the value is.
+    /// - value type. The type info together with the value argument.
+    /// - schema. The `AvroSchema` provided in option.
+    ///
+    /// Cases: (FIXME: Is this precise?)
+    /// - If both `type_expected` and schema are provided, it will check both strictly.
+    /// - If only `type_expected` is provided, it will try to match the value type and the
+    ///    `type_expected`, converting the value if possible.
+    /// - If only value is provided (without schema and `type_expected`),
+    ///     the `DataType` will be inferred.
+    pub fn convert_to_datum<'b>(
+        &self,
+        value: &'b Value,
+        type_expected: Option<&'b DataType>,
+    ) -> AccessResult
     where
         'b: 'a,
     {
@@ -97,7 +101,7 @@ impl<'a> AvroParseOptions<'a> {
                     schema,
                     relax_numeric: self.relax_numeric,
                 }
-                .parse(v, type_expected);
+                .convert_to_datum(v, type_expected);
             }
             // ---- Boolean -----
             (Some(DataType::Boolean) | None, Value::Boolean(b)) => (*b).into(),
@@ -224,7 +228,7 @@ impl<'a> AvroParseOptions<'a> {
                                 schema,
                                 relax_numeric: self.relax_numeric,
                             }
-                            .parse(value, Some(field_type))?)
+                            .convert_to_datum(value, Some(field_type))?)
                         } else {
                             Ok(None)
                         }
@@ -241,7 +245,7 @@ impl<'a> AvroParseOptions<'a> {
                             schema,
                             relax_numeric: self.relax_numeric,
                         }
-                        .parse(field_value, None)
+                        .convert_to_datum(field_value, None)
                     })
                     .collect::<Result<Vec<Datum>, AccessError>>()?;
                 ScalarImpl::Struct(StructValue::new(rw_values))
@@ -255,7 +259,7 @@ impl<'a> AvroParseOptions<'a> {
                         schema,
                         relax_numeric: self.relax_numeric,
                     }
-                    .parse(v, Some(item_type))?;
+                    .convert_to_datum(v, Some(item_type))?;
                     builder.append(value);
                 }
                 builder.finish()
@@ -266,8 +270,12 @@ impl<'a> AvroParseOptions<'a> {
                 value.clone().into_boxed_slice().into()
             }
             // ---- Jsonb -----
-            (Some(DataType::Jsonb), Value::String(s)) => {
-                JsonbVal::from_str(s).map_err(|_| create_error())?.into()
+            (Some(DataType::Jsonb), v @ Value::Map(_)) => {
+                let mut builder = jsonbb::Builder::default();
+                avro_to_jsonb(v, &mut builder)?;
+                let jsonb = builder.finish();
+                debug_assert!(jsonb.as_ref().is_object());
+                JsonbVal::from(jsonb).into()
             }
 
             (_expected, _got) => Err(create_error())?,
@@ -308,12 +316,6 @@ where
                     options.schema = options.extract_inner_schema(None);
                     continue;
                 }
-                Value::Map(fields) if fields.contains_key(key) => {
-                    value = fields.get(key).unwrap();
-                    options.schema = None;
-                    i += 1;
-                    continue;
-                }
                 Value::Record(fields) => {
                     if let Some((_, v)) = fields.iter().find(|(k, _)| k == key) {
                         value = v;
@@ -327,7 +329,7 @@ where
             Err(create_error())?;
         }
 
-        options.parse(value, type_expected)
+        options.convert_to_datum(value, type_expected)
     }
 }
 
@@ -420,7 +422,8 @@ pub fn avro_extract_field_schema<'a>(
         }
         Schema::Array(schema) => Ok(schema),
         Schema::Union(_) => avro_schema_skip_union(schema),
-        _ => bail!("avro schema is not a record or array"),
+        Schema::Map(schema) => Ok(schema),
+        _ => bail!("avro schema does not have inner item, schema: {:?}", schema),
     }
 }
 
@@ -430,8 +433,10 @@ pub(crate) fn unix_epoch_days() -> i32 {
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
+
     use apache_avro::Decimal as AvroDecimal;
-    use risingwave_common::types::{Decimal, Timestamptz};
+    use risingwave_common::types::Decimal;
 
     use super::*;
 
@@ -478,18 +483,14 @@ mod tests {
     ///  - string: String
     ///  - Date (the number of days from the unix epoch, 1970-1-1 UTC)
     ///  - Timestamp (the number of milliseconds from the unix epoch,  1970-1-1 00:00:00.000 UTC)
-
-    pub(crate) fn from_avro_value(
+    fn from_avro_value(
         value: Value,
         value_schema: &Schema,
         shape: &DataType,
     ) -> crate::error::ConnectorResult<Datum> {
-        AvroParseOptions {
-            schema: Some(value_schema),
-            relax_numeric: true,
-        }
-        .parse(&value, Some(shape))
-        .map_err(Into::into)
+        AvroParseOptions::create(value_schema)
+            .convert_to_datum(&value, Some(shape))
+            .map_err(Into::into)
     }
 
     #[test]
@@ -529,8 +530,10 @@ mod tests {
         .unwrap();
         let bytes = vec![0x3f, 0x3f, 0x3f, 0x3f, 0x3f, 0x3f, 0x3f];
         let value = Value::Decimal(AvroDecimal::from(bytes));
-        let options = AvroParseOptions::default().with_schema(&schema);
-        let resp = options.parse(&value, Some(&DataType::Decimal)).unwrap();
+        let options = AvroParseOptions::create(&schema);
+        let resp = options
+            .convert_to_datum(&value, Some(&DataType::Decimal))
+            .unwrap();
         assert_eq!(
             resp,
             Some(ScalarImpl::Decimal(Decimal::Normalized(
@@ -566,8 +569,10 @@ mod tests {
             ("value".to_string(), Value::Bytes(vec![0x01, 0x02, 0x03])),
         ]);
 
-        let options = AvroParseOptions::default().with_schema(&schema);
-        let resp = options.parse(&value, Some(&DataType::Decimal)).unwrap();
+        let options = AvroParseOptions::create(&schema);
+        let resp = options
+            .convert_to_datum(&value, Some(&DataType::Decimal))
+            .unwrap();
         assert_eq!(resp, Some(ScalarImpl::Decimal(Decimal::from(66051))));
     }
 }
