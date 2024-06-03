@@ -1024,19 +1024,22 @@ fn sanity_check_for_cdc_table(
     source_watermarks: &Vec<SourceWatermark>,
 ) -> Result<()> {
     // cdc table must have primary key constraint or primary key column
-    if !constraints.iter().any(|c| {
-        matches!(
-            c,
-            TableConstraint::Unique {
-                is_primary: true,
-                ..
-            }
-        )
-    }) && !column_defs.iter().any(|col| {
-        col.options
-            .iter()
-            .any(|opt| matches!(opt.option, ColumnOption::Unique { is_primary: true }))
-    }) {
+    if !wildcard_idx.is_some()
+        && !constraints.iter().any(|c| {
+            matches!(
+                c,
+                TableConstraint::Unique {
+                    is_primary: true,
+                    ..
+                }
+            )
+        })
+        && !column_defs.iter().any(|col| {
+            col.options
+                .iter()
+                .any(|opt| matches!(opt.option, ColumnOption::Unique { is_primary: true }))
+        })
+    {
         return Err(ErrorCode::NotSupported(
             "CDC table without primary key constraint is not supported".to_owned(),
             "Please define a primary key".to_owned(),
@@ -1068,23 +1071,6 @@ fn sanity_check_for_cdc_table(
                 .into());
             }
         }
-    }
-    if !wildcard_idx.is_some()
-        && !constraints.iter().any(|c| {
-            matches!(
-                c,
-                TableConstraint::Unique {
-                    is_primary: true,
-                    ..
-                }
-            )
-        })
-    {
-        return Err(ErrorCode::NotSupported(
-            "CDC table without primary key constraint is not supported".to_owned(),
-            "Please define a primary key".to_owned(),
-        )
-        .into());
     }
 
     Ok(())

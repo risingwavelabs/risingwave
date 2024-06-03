@@ -135,9 +135,13 @@ fn type_to_rw_type(col_type: &ColumnType) -> ConnectorResult<DataType> {
     let dtype = match col_type {
         ColumnType::Serial => DataType::Int32,
         ColumnType::Bit(attr) => {
-            // return Err(anyhow!("line type not supported").into());
-            tracing::info!("bit attr: {:?}", attr);
-            DataType::Boolean
+            if let Some(1) = attr.maximum {
+                DataType::Boolean
+            } else {
+                return Err(
+                    anyhow!("BIT({}) type not supported", attr.maximum.unwrap_or(0)).into(),
+                );
+            }
         }
         ColumnType::TinyInt(_) | ColumnType::SmallInt(_) => DataType::Int16,
         ColumnType::Bool => DataType::Boolean,
@@ -168,34 +172,34 @@ fn type_to_rw_type(col_type: &ColumnType) -> ConnectorResult<DataType> {
         ColumnType::Enum(_) => DataType::Varchar,
         ColumnType::Json => DataType::Jsonb,
         ColumnType::Set(_) => {
-            return Err(anyhow!("set type not supported").into());
+            return Err(anyhow!("SET type not supported").into());
         }
         ColumnType::Geometry(_) => {
-            return Err(anyhow!("geometry type not supported").into());
+            return Err(anyhow!("GEOMETRY type not supported").into());
         }
         ColumnType::Point(_) => {
-            return Err(anyhow!("point type not supported").into());
+            return Err(anyhow!("POINT type not supported").into());
         }
         ColumnType::LineString(_) => {
-            return Err(anyhow!("line string type not supported").into());
+            return Err(anyhow!("LINE string type not supported").into());
         }
         ColumnType::Polygon(_) => {
-            return Err(anyhow!("polygon type not supported").into());
+            return Err(anyhow!("POLYGON type not supported").into());
         }
         ColumnType::MultiPoint(_) => {
-            return Err(anyhow!("multi point type not supported").into());
+            return Err(anyhow!("MULTI POINT type not supported").into());
         }
         ColumnType::MultiLineString(_) => {
-            return Err(anyhow!("multi line string type not supported").into());
+            return Err(anyhow!("MULTI LINE STRING type not supported").into());
         }
         ColumnType::MultiPolygon(_) => {
-            return Err(anyhow!("multi polygon type not supported").into());
+            return Err(anyhow!("MULTI POLYGON type not supported").into());
         }
         ColumnType::GeometryCollection(_) => {
-            return Err(anyhow!("geometry collection type not supported").into());
+            return Err(anyhow!("GEOMETRY COLLECTION type not supported").into());
         }
         ColumnType::Unknown(_) => {
-            return Err(anyhow!("unknown column type").into());
+            return Err(anyhow!("Unknown MySQL data type").into());
         }
     };
 

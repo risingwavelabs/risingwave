@@ -174,7 +174,7 @@ fn type_to_rw_type(col_type: &ColumnType) -> ConnectorResult<DataType> {
             let item_type = match def.col_type.as_ref() {
                 Some(ty) => type_to_rw_type(ty.as_ref())?,
                 None => {
-                    return Err(anyhow!("array type missing element type").into());
+                    return Err(anyhow!("ARRAY type missing element type").into());
                 }
             };
 
@@ -194,34 +194,35 @@ fn type_to_rw_type(col_type: &ColumnType) -> ConnectorResult<DataType> {
         | ColumnType::Enum(_) => DataType::Varchar,
 
         ColumnType::Line => {
-            return Err(anyhow!("line type not supported").into());
+            return Err(anyhow!("LINE type not supported").into());
         }
         ColumnType::Lseg => {
-            return Err(anyhow!("lseg type not supported").into());
+            return Err(anyhow!("LSEG type not supported").into());
         }
         ColumnType::Box => {
-            return Err(anyhow!("box type not supported").into());
+            return Err(anyhow!("BOX type not supported").into());
         }
         ColumnType::Path => {
-            return Err(anyhow!("path type not supported").into());
+            return Err(anyhow!("PATH type not supported").into());
         }
         ColumnType::Polygon => {
-            return Err(anyhow!("polygon type not supported").into());
+            return Err(anyhow!("POLYGON type not supported").into());
         }
         ColumnType::Circle => {
-            return Err(anyhow!("circle type not supported").into());
+            return Err(anyhow!("CIRCLE type not supported").into());
         }
         ColumnType::Bit(_) => {
-            return Err(anyhow!("bit type not supported").into());
+            return Err(anyhow!("BIT type not supported").into());
         }
         ColumnType::TsVector => {
-            return Err(anyhow!("tsvector type not supported").into());
+            return Err(anyhow!("TSVECTOR type not supported").into());
         }
         ColumnType::TsQuery => {
-            return Err(anyhow!("tsquery type not supported").into());
+            return Err(anyhow!("TSQUERY type not supported").into());
         }
-        ColumnType::Unknown(_) => {
-            return Err(anyhow!("unknown column type").into());
+        ColumnType::Unknown(name) => {
+            tracing::warn!("Unknown Postgres data type: {name}, map to varchar");
+            DataType::Varchar
         }
     };
 
