@@ -33,6 +33,7 @@ use std::sync::Arc;
 use itertools::Itertools;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
+use winnow::PResult;
 
 pub use self::data_type::{DataType, StructField};
 pub use self::ddl::{
@@ -59,7 +60,7 @@ pub use crate::ast::ddl::{
     AlterViewOperation,
 };
 use crate::keywords::Keyword;
-use crate::parser::{IncludeOption, IncludeOptionItem, Parser, ParserError};
+use crate::parser::{IncludeOption, IncludeOptionItem, Parser, ParserError, StrError};
 
 pub type RedactSqlOptionKeywordsRef = Arc<HashSet<String>>;
 
@@ -191,7 +192,7 @@ impl From<&str> for Ident {
 }
 
 impl ParseTo for Ident {
-    fn parse_to(parser: &mut Parser) -> Result<Self, ParserError> {
+    fn parse_to(parser: &mut Parser<'_>) -> PResult<Self> {
         parser.parse_identifier()
     }
 }
@@ -235,7 +236,7 @@ impl fmt::Display for ObjectName {
 }
 
 impl ParseTo for ObjectName {
-    fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
+    fn parse_to(p: &mut Parser<'_>) -> PResult<Self> {
         p.parse_object_name()
     }
 }
@@ -2560,7 +2561,7 @@ impl fmt::Display for ObjectType {
 }
 
 impl ParseTo for ObjectType {
-    fn parse_to(parser: &mut Parser) -> Result<Self, ParserError> {
+    fn parse_to(parser: &mut Parser<'_>) -> PResult<Self> {
         let object_type = if parser.parse_keyword(Keyword::TABLE) {
             ObjectType::Table
         } else if parser.parse_keyword(Keyword::VIEW) {
@@ -2588,7 +2589,6 @@ impl ParseTo for ObjectType {
         } else {
             return parser.expected(
                 "TABLE, VIEW, INDEX, MATERIALIZED VIEW, SOURCE, SINK, SUBSCRIPTION, SCHEMA, DATABASE, USER, SECRET or CONNECTION after DROP",
-                parser.peek_token(),
             );
         };
         Ok(object_type)
@@ -3007,7 +3007,7 @@ impl CreateFunctionWithOptions {
 
 /// TODO(kwannoel): Generate from the struct definition instead.
 impl TryFrom<Vec<SqlOption>> for CreateFunctionWithOptions {
-    type Error = ParserError;
+    type Error = StrError;
 
     fn try_from(with_options: Vec<SqlOption>) -> Result<Self, Self::Error> {
         let mut always_retry_on_network_error = None;
@@ -3015,10 +3015,7 @@ impl TryFrom<Vec<SqlOption>> for CreateFunctionWithOptions {
             if option.name.to_string().to_lowercase() == "always_retry_on_network_error" {
                 always_retry_on_network_error = Some(option.value == Value::Boolean(true));
             } else {
-                return Err(ParserError::ParserError(format!(
-                    "Unsupported option: {}",
-                    option.name
-                )));
+                return Err(StrError(format!("Unsupported option: {}", option.name)));
             }
         }
         Ok(Self {

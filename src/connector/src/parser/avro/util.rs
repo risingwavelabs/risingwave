@@ -147,11 +147,18 @@ fn avro_type_mapping(
             DataType::List(Box::new(item_type))
         }
         Schema::Union(union_schema) => {
-            let nested_schema = union_schema
-                .variants()
+            // We only support using union to represent nullable fields, not general unions.
+            let variants = union_schema.variants();
+            if variants.len() != 2 || !variants.contains(&Schema::Null) {
+                bail!(
+                    "unsupported Avro type, only unions like [null, T] is supported: {:?}",
+                    schema
+                );
+            }
+            let nested_schema = variants
                 .iter()
                 .find_or_first(|s| !matches!(s, Schema::Null))
-                .ok_or_else(|| anyhow::format_err!("unsupported Avro type: {:?}", union_schema))?;
+                .unwrap();
 
             avro_type_mapping(nested_schema, map_handling)?
         }

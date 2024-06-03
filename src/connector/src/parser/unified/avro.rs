@@ -34,27 +34,23 @@ use crate::parser::avro::util::avro_to_jsonb;
 #[derive(Clone)]
 /// Options for parsing an `AvroValue` into Datum, with an optional avro schema.
 pub struct AvroParseOptions<'a> {
+    /// Currently, this schema is only used for decimal
     pub schema: Option<&'a Schema>,
     /// Strict Mode
     /// If strict mode is disabled, an int64 can be parsed from an `AvroInt` (int32) value.
     pub relax_numeric: bool,
 }
 
-impl<'a> Default for AvroParseOptions<'a> {
-    fn default() -> Self {
+impl<'a> AvroParseOptions<'a> {
+    pub fn create(schema: &'a Schema) -> Self {
         Self {
-            schema: None,
+            schema: Some(schema),
             relax_numeric: true,
         }
     }
 }
 
 impl<'a> AvroParseOptions<'a> {
-    pub fn with_schema(mut self, schema: &'a Schema) -> Self {
-        self.schema = Some(schema);
-        self
-    }
-
     fn extract_inner_schema(&self, key: Option<&'a str>) -> Option<&'a Schema> {
         self.schema
             .map(|schema| avro_extract_field_schema(schema, key))
@@ -71,15 +67,23 @@ impl<'a> AvroParseOptions<'a> {
     }
 
     /// Parse an avro value into expected type.
-    /// 3 kinds of type info are used to parsing things.
-    ///     - `type_expected`. The type that we expect the value is.
-    ///     - value type. The type info together with the value argument.
-    ///     - schema. The `AvroSchema` provided in option.
-    /// If both `type_expected` and schema are provided, it will check both strictly.
-    /// If only `type_expected` is provided, it will try to match the value type and the
-    /// `type_expected`, converting the value if possible. If only value is provided (without
-    /// schema and `type_expected`), the `DateType` will be inferred.
-    pub fn parse<'b>(&self, value: &'b Value, type_expected: Option<&'b DataType>) -> AccessResult
+    ///
+    /// 3 kinds of type info are used to parsing:
+    /// - `type_expected`. The type that we expect the value is.
+    /// - value type. The type info together with the value argument.
+    /// - schema. The `AvroSchema` provided in option.
+    ///
+    /// Cases: (FIXME: Is this precise?)
+    /// - If both `type_expected` and schema are provided, it will check both strictly.
+    /// - If only `type_expected` is provided, it will try to match the value type and the
+    ///    `type_expected`, converting the value if possible.
+    /// - If only value is provided (without schema and `type_expected`),
+    ///     the `DataType` will be inferred.
+    pub fn convert_to_datum<'b>(
+        &self,
+        value: &'b Value,
+        type_expected: Option<&'b DataType>,
+    ) -> AccessResult
     where
         'b: 'a,
     {
@@ -97,7 +101,7 @@ impl<'a> AvroParseOptions<'a> {
                     schema,
                     relax_numeric: self.relax_numeric,
                 }
-                .parse(v, type_expected);
+                .convert_to_datum(v, type_expected);
             }
             // ---- Boolean -----
             (Some(DataType::Boolean) | None, Value::Boolean(b)) => (*b).into(),
@@ -224,7 +228,7 @@ impl<'a> AvroParseOptions<'a> {
                                 schema,
                                 relax_numeric: self.relax_numeric,
                             }
-                            .parse(value, Some(field_type))?)
+                            .convert_to_datum(value, Some(field_type))?)
                         } else {
                             Ok(None)
                         }
@@ -241,7 +245,7 @@ impl<'a> AvroParseOptions<'a> {
                             schema,
                             relax_numeric: self.relax_numeric,
                         }
-                        .parse(field_value, None)
+                        .convert_to_datum(field_value, None)
                     })
                     .collect::<Result<Vec<Datum>, AccessError>>()?;
                 ScalarImpl::Struct(StructValue::new(rw_values))
@@ -255,7 +259,7 @@ impl<'a> AvroParseOptions<'a> {
                         schema,
                         relax_numeric: self.relax_numeric,
                     }
-                    .parse(v, Some(item_type))?;
+                    .convert_to_datum(v, Some(item_type))?;
                     builder.append(value);
                 }
                 builder.finish()
@@ -325,7 +329,7 @@ where
             Err(create_error())?;
         }
 
-        options.parse(value, type_expected)
+        options.convert_to_datum(value, type_expected)
     }
 }
 
@@ -484,12 +488,9 @@ mod tests {
         value_schema: &Schema,
         shape: &DataType,
     ) -> crate::error::ConnectorResult<Datum> {
-        AvroParseOptions {
-            schema: Some(value_schema),
-            relax_numeric: true,
-        }
-        .parse(&value, Some(shape))
-        .map_err(Into::into)
+        AvroParseOptions::create(value_schema)
+            .convert_to_datum(&value, Some(shape))
+            .map_err(Into::into)
     }
 
     #[test]
@@ -529,8 +530,10 @@ mod tests {
         .unwrap();
         let bytes = vec![0x3f, 0x3f, 0x3f, 0x3f, 0x3f, 0x3f, 0x3f];
         let value = Value::Decimal(AvroDecimal::from(bytes));
-        let options = AvroParseOptions::default().with_schema(&schema);
-        let resp = options.parse(&value, Some(&DataType::Decimal)).unwrap();
+        let options = AvroParseOptions::create(&schema);
+        let resp = options
+            .convert_to_datum(&value, Some(&DataType::Decimal))
+            .unwrap();
         assert_eq!(
             resp,
             Some(ScalarImpl::Decimal(Decimal::Normalized(
@@ -566,8 +569,10 @@ mod tests {
             ("value".to_string(), Value::Bytes(vec![0x01, 0x02, 0x03])),
         ]);
 
-        let options = AvroParseOptions::default().with_schema(&schema);
-        let resp = options.parse(&value, Some(&DataType::Decimal)).unwrap();
+        let options = AvroParseOptions::create(&schema);
+        let resp = options
+            .convert_to_datum(&value, Some(&DataType::Decimal))
+            .unwrap();
         assert_eq!(resp, Some(ScalarImpl::Decimal(Decimal::from(66051))));
     }
 }

@@ -437,9 +437,8 @@ impl CatalogManager {
             for view in &views_to_drop {
                 database_core.relation_ref_count.remove(&view.id);
             }
-            // TODO(weili): wait for yezizp to refactor ref cnt
             for connection in &connections_to_drop {
-                database_core.relation_ref_count.remove(&connection.id);
+                database_core.connection_ref_count.remove(&connection.id);
             }
             for user in users_need_update {
                 self.notify_frontend(Operation::Update, Info::User(user))
@@ -576,12 +575,11 @@ impl CatalogManager {
         let user_core = &mut core.user;
         let mut connections = BTreeMapTransaction::new(&mut database_core.connections);
 
-        // TODO(weili): wait for yezizp to refactor ref cnt
-        match database_core.relation_ref_count.get(&conn_id) {
+        match database_core.connection_ref_count.get(&conn_id) {
             Some(ref_count) => {
                 let connection_name = connections
                     .get(&conn_id)
-                    .ok_or_else(|| anyhow!("connection not found"))?
+                    .ok_or_else(|| MetaError::catalog_id_not_found("connection", conn_id))?
                     .name
                     .clone();
                 Err(MetaError::permission_denied(format!(
@@ -592,7 +590,7 @@ impl CatalogManager {
             None => {
                 let connection = connections
                     .remove(conn_id)
-                    .ok_or_else(|| anyhow!("connection not found"))?;
+                    .ok_or_else(|| MetaError::catalog_id_not_found("connection", conn_id))?;
 
                 commit_meta!(self, connections)?;
                 user_core.decrease_ref(connection.owner);
@@ -688,7 +686,7 @@ impl CatalogManager {
         user_core.increase_ref(view.owner);
 
         for &dependent_relation_id in &view.dependent_relations {
-            database_core.increase_ref_count(dependent_relation_id);
+            database_core.increase_relation_ref_count(dependent_relation_id);
         }
 
         let version = self
@@ -737,7 +735,7 @@ impl CatalogManager {
 
         let function = functions
             .remove(function_id)
-            .ok_or_else(|| anyhow!("function not found"))?;
+            .ok_or_else(|| MetaError::catalog_id_not_found("function", function_id))?;
 
         let objects = &[Object::FunctionId(function_id)];
         let users_need_update = Self::update_user_privileges(&mut users, objects);
@@ -845,7 +843,6 @@ impl CatalogManager {
         database_core.ensure_database_id(table.database_id)?;
         database_core.ensure_schema_id(table.schema_id)?;
         for dependent_id in &table.dependent_relations {
-            // TODO(zehua): refactor when using SourceId.
             database_core.ensure_table_view_or_source_id(dependent_id)?;
         }
         #[cfg(not(test))]
@@ -866,7 +863,7 @@ impl CatalogManager {
         commit_meta!(self, tables)?;
 
         for &dependent_relation_id in &table.dependent_relations {
-            database_core.increase_ref_count(dependent_relation_id);
+            database_core.increase_relation_ref_count(dependent_relation_id);
         }
         user_core.increase_ref(table.owner);
         Ok(())
@@ -1064,7 +1061,7 @@ impl CatalogManager {
             if table.table_type != TableType::Internal as i32 {
                 // Recovered when init database manager.
                 for relation_id in &table.dependent_relations {
-                    database_core.decrease_ref_count(*relation_id);
+                    database_core.decrease_relation_ref_count(*relation_id);
                 }
                 // Recovered when init user manager.
                 tracing::debug!("decrease ref for {}", table.id);
@@ -1175,7 +1172,7 @@ impl CatalogManager {
             {
                 let database_core = &mut core.database;
                 for &dependent_relation_id in &table.dependent_relations {
-                    database_core.decrease_ref_count(dependent_relation_id);
+                    database_core.decrease_relation_ref_count(dependent_relation_id);
                 }
             }
         }
@@ -1762,28 +1759,25 @@ impl CatalogManager {
         // decrease dependent relations
         for table in &tables_removed {
             for dependent_relation_id in &table.dependent_relations {
-                database_core.decrease_ref_count(*dependent_relation_id);
+                database_core.decrease_relation_ref_count(*dependent_relation_id);
             }
         }
 
         for view in &views_removed {
             for dependent_relation_id in &view.dependent_relations {
-                database_core.decrease_ref_count(*dependent_relation_id);
+                database_core.decrease_relation_ref_count(*dependent_relation_id);
             }
         }
 
         for sink in &sinks_removed {
-            if let Some(connection_id) = sink.connection_id {
-                // TODO(siyuan): wait for yezizp to refactor ref cnt
-                database_core.decrease_ref_count(connection_id);
-            }
+            refcnt_dec_connection(database_core, sink.connection_id);
             for dependent_relation_id in &sink.dependent_relations {
-                database_core.decrease_ref_count(*dependent_relation_id);
+                database_core.decrease_relation_ref_count(*dependent_relation_id);
             }
         }
 
         for subscription in &subscriptions_removed {
-            database_core.decrease_ref_count(subscription.dependent_table_id);
+            database_core.decrease_relation_ref_count(subscription.dependent_table_id);
         }
 
         let version = self
@@ -2798,7 +2792,7 @@ impl CatalogManager {
         database_core
             .get_connection(connection_id)
             .cloned()
-            .ok_or_else(|| anyhow!(format!("could not find connection {}", connection_id)).into())
+            .ok_or_else(|| MetaError::catalog_id_not_found("connection", connection_id))
     }
 
     pub async fn finish_create_source_procedure(
@@ -3009,7 +3003,7 @@ impl CatalogManager {
             database_core.mark_creating(&key);
             database_core.mark_creating_streaming_job(index_table.id, key);
             for &dependent_relation_id in &index_table.dependent_relations {
-                database_core.increase_ref_count(dependent_relation_id);
+                database_core.increase_relation_ref_count(dependent_relation_id);
             }
             // index table and index.
             user_core.increase_ref_count(index.owner, 2);
@@ -3030,7 +3024,7 @@ impl CatalogManager {
         database_core.unmark_creating(&key);
         database_core.unmark_creating_streaming_job(index_table.id);
         for &dependent_relation_id in &index_table.dependent_relations {
-            database_core.decrease_ref_count(dependent_relation_id);
+            database_core.decrease_relation_ref_count(dependent_relation_id);
         }
         // index table and index.
         user_core.decrease_ref_count(index.owner, 2);
@@ -3101,7 +3095,6 @@ impl CatalogManager {
         database_core.ensure_database_id(sink.database_id)?;
         database_core.ensure_schema_id(sink.schema_id)?;
         for dependent_id in &sink.dependent_relations {
-            // TODO(zehua): refactor when using SourceId.
             database_core.ensure_table_view_or_source_id(dependent_id)?;
         }
         let key = (sink.database_id, sink.schema_id, sink.name.clone());
@@ -3115,7 +3108,7 @@ impl CatalogManager {
             database_core.mark_creating(&key);
             database_core.mark_creating_streaming_job(sink.id, key);
             for &dependent_relation_id in &sink.dependent_relations {
-                database_core.increase_ref_count(dependent_relation_id);
+                database_core.increase_relation_ref_count(dependent_relation_id);
             }
             user_core.increase_ref(sink.owner);
             // We have validate the status of connection before starting the procedure.
@@ -3189,7 +3182,7 @@ impl CatalogManager {
         database_core.unmark_creating(&key);
         database_core.unmark_creating_streaming_job(sink.id);
         for &dependent_relation_id in &sink.dependent_relations {
-            database_core.decrease_ref_count(dependent_relation_id);
+            database_core.decrease_relation_ref_count(dependent_relation_id);
         }
         user_core.decrease_ref(sink.owner);
         refcnt_dec_connection(database_core, sink.connection_id);
@@ -3224,7 +3217,7 @@ impl CatalogManager {
         } else {
             database_core.mark_creating(&key);
             database_core.mark_creating_streaming_job(subscription.id, key);
-            database_core.increase_ref_count(subscription.dependent_table_id);
+            database_core.increase_relation_ref_count(subscription.dependent_table_id);
             user_core.increase_ref(subscription.owner);
             let mut subscriptions = BTreeMapTransaction::new(&mut database_core.subscriptions);
             subscriptions.insert(subscription.id, subscription.clone());
@@ -3242,7 +3235,7 @@ impl CatalogManager {
         let mut subscriptions = BTreeMapTransaction::new(&mut database_core.subscriptions);
         let mut subscription = subscriptions
             .get(&subscription_id)
-            .ok_or_else(|| anyhow!("subscription not found"))?
+            .ok_or_else(|| MetaError::catalog_id_not_found("subscription", subscription_id))?
             .clone();
         subscription.created_at_cluster_version = Some(current_cluster_version());
         subscription.created_at_epoch = Some(Epoch::now().0);
@@ -3278,7 +3271,7 @@ impl CatalogManager {
         let subscriptions = BTreeMapTransaction::new(&mut database_core.subscriptions);
         let subscription = subscriptions
             .get(&subscription_id)
-            .ok_or_else(|| anyhow!("subscription not found"))?
+            .ok_or_else(|| MetaError::catalog_id_not_found("subscription", subscription_id))?
             .clone();
         assert_eq!(
             subscription.subscription_state,
@@ -3327,7 +3320,7 @@ impl CatalogManager {
 
             database_core.unmark_creating(&key);
             database_core.unmark_creating_streaming_job(subscription.id);
-            database_core.decrease_ref_count(subscription.dependent_table_id);
+            database_core.decrease_relation_ref_count(subscription.dependent_table_id);
             user_core.decrease_ref(subscription.owner);
         }
         Ok(())
@@ -3816,7 +3809,7 @@ impl CatalogManager {
             .database
             .subscriptions
             .get(&subscription_id)
-            .ok_or_else(|| anyhow!("cant find subscription with id {}", subscription_id))?;
+            .ok_or_else(|| MetaError::catalog_id_not_found("subscription", subscription_id))?;
         Ok(subscription.clone())
     }
 
@@ -4005,7 +3998,7 @@ impl CatalogManager {
         core.user_info
             .get(&id)
             .cloned()
-            .ok_or_else(|| anyhow!("User {} not found", id).into())
+            .ok_or_else(|| MetaError::catalog_id_not_found("user", id))
     }
 
     pub async fn drop_user(&self, id: UserId) -> MetaResult<NotificationVersion> {
@@ -4135,11 +4128,11 @@ impl CatalogManager {
         let grantor_info = users
             .get(&grantor)
             .cloned()
-            .ok_or_else(|| anyhow!("User {} does not exist", &grantor))?;
+            .ok_or_else(|| MetaError::catalog_id_not_found("user", grantor))?;
         for user_id in user_ids {
             let mut user = users
                 .get_mut(*user_id)
-                .ok_or_else(|| anyhow!("User {} does not exist", user_id))?;
+                .ok_or_else(|| MetaError::catalog_id_not_found("user", user_id))?;
 
             if user.is_super {
                 return Err(MetaError::permission_denied(format!(
@@ -4262,7 +4255,7 @@ impl CatalogManager {
         // check revoke permission
         let revoke_by = users
             .get(&revoke_by)
-            .ok_or_else(|| anyhow!("User {} does not exist", &revoke_by))?;
+            .ok_or_else(|| MetaError::catalog_id_not_found("user", revoke_by))?;
         let same_user = granted_by == revoke_by.id;
         if !revoke_by.is_super {
             for privilege in revoke_grant_privileges {
@@ -4297,7 +4290,7 @@ impl CatalogManager {
             let user = users
                 .get(user_id)
                 .cloned()
-                .ok_or_else(|| anyhow!("User {} does not exist", user_id))?;
+                .ok_or_else(|| MetaError::catalog_id_not_found("user", user_id))?;
             if user.is_super {
                 return Err(MetaError::permission_denied(format!(
                     "Cannot revoke privilege from supper user {}",

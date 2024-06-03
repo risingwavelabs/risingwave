@@ -813,12 +813,6 @@ pub struct FileCacheConfig {
     #[serde(default = "default::file_cache::file_capacity_mb")]
     pub file_capacity_mb: usize,
 
-    #[serde(default = "default::file_cache::device_align")]
-    pub device_align: usize,
-
-    #[serde(default = "default::file_cache::device_io_size")]
-    pub device_io_size: usize,
-
     #[serde(default = "default::file_cache::flushers")]
     pub flushers: usize,
 
@@ -837,8 +831,8 @@ pub struct FileCacheConfig {
     #[serde(default = "default::file_cache::insert_rate_limit_mb")]
     pub insert_rate_limit_mb: usize,
 
-    #[serde(default = "default::file_cache::catalog_bits")]
-    pub catalog_bits: usize,
+    #[serde(default = "default::file_cache::indexer_shards")]
+    pub indexer_shards: usize,
 
     #[serde(default = "default::file_cache::compression")]
     pub compression: String,
@@ -1549,14 +1543,6 @@ pub mod default {
             64
         }
 
-        pub fn device_align() -> usize {
-            4096
-        }
-
-        pub fn device_io_size() -> usize {
-            16 * 1024
-        }
-
         pub fn flushers() -> usize {
             4
         }
@@ -1581,8 +1567,8 @@ pub mod default {
             0
         }
 
-        pub fn catalog_bits() -> usize {
-            6
+        pub fn indexer_shards() -> usize {
+            64
         }
 
         pub fn compression() -> String {

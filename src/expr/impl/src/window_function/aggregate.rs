@@ -20,16 +20,18 @@ use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::{bail, must_match};
 use risingwave_common_estimate_size::{EstimateSize, KvSize};
+use risingwave_expr::aggregate::{
+    AggCall, AggregateFunction, AggregateState as AggImplState, BoxedAggregateFunction,
+};
+use risingwave_expr::sig::FUNCTION_REGISTRY;
+use risingwave_expr::window_function::{
+    BoxedWindowState, FrameBounds, StateEvictHint, StateKey, StatePos, WindowFuncCall,
+    WindowFuncKind, WindowState,
+};
+use risingwave_expr::Result;
 use smallvec::SmallVec;
 
 use super::buffer::{RangeWindow, RowsWindow, WindowBuffer, WindowImpl};
-use super::{BoxedWindowState, StateEvictHint, StateKey, StatePos, WindowState};
-use crate::aggregate::{
-    AggCall, AggregateFunction, AggregateState as AggImplState, BoxedAggregateFunction,
-};
-use crate::sig::FUNCTION_REGISTRY;
-use crate::window_function::{FrameBounds, WindowFuncCall, WindowFuncKind};
-use crate::Result;
 
 type StateValue = SmallVec<[Datum; 2]>;
 
