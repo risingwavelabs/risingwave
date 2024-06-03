@@ -55,6 +55,7 @@ use crate::parser::maxwell::MaxwellParser;
 use crate::parser::simd_json_parser::DebeziumMongoJsonAccessBuilder;
 use crate::parser::util::{
     extract_cdc_meta_column, extract_header_inner_from_meta, extract_headers_from_meta,
+    extreact_timestamp_from_meta,
 };
 use crate::schema::schema_registry::SchemaRegistryAuth;
 use crate::schema::InvalidOptionError;
@@ -406,10 +407,18 @@ impl SourceStreamChunkRowWriter<'_> {
                     | &Some(ref col @ AdditionalColumnType::TableName(_))
                     | &Some(ref col @ AdditionalColumnType::Timestamp(_)),
                 ) => match self.row_meta {
-                    Some(row_meta) => Ok(A::output_for(
-                        extract_cdc_meta_column(row_meta.meta, col, desc.name.as_str())?
-                            .unwrap_or(None),
-                    )),
+                    Some(row_meta) => {
+                        if let SourceMeta::DebeziumCdc(cdc_meta) = row_meta.meta {
+                            Ok(A::output_for(
+                                extract_cdc_meta_column(cdc_meta, col, desc.name.as_str())?
+                                    .unwrap_or(None),
+                            ))
+                        } else {
+                            Ok(A::output_for(
+                                extreact_timestamp_from_meta(row_meta.meta).unwrap_or(None),
+                            ))
+                        }
+                    }
                     None => parse_field(desc), // parse from payload
                 },
                 (_, &Some(AdditionalColumnType::CollectionName(_))) => {

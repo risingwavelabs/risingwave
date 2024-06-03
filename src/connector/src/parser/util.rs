@@ -43,6 +43,7 @@ use risingwave_pb::plan_common::additional_column;
 use risingwave_pb::plan_common::additional_column::ColumnType;
 
 use crate::parser::{AccessError, AccessResult};
+use crate::source::cdc::DebeziumCdcMeta;
 
 /// get kafka topic name
 pub(super) fn get_kafka_topic(props: &HashMap<String, String>) -> ConnectorResult<&String> {
@@ -132,18 +133,18 @@ pub(super) async fn bytes_from_url(
     }
 }
 
+pub fn extreact_timestamp_from_meta(meta: &SourceMeta) -> Option<Datum> {
+    match meta {
+        SourceMeta::Kafka(kafka_meta) => kafka_meta.extract_timestamp(),
+        _ => None,
+    }
+}
+
 pub fn extract_cdc_meta_column(
-    meta: &SourceMeta,
+    cdc_meta: &DebeziumCdcMeta,
     column_type: &additional_column::ColumnType,
     column_name: &str,
 ) -> AccessResult<Option<Datum>> {
-    assert_matches!(meta, &SourceMeta::DebeziumCdc(_));
-
-    let cdc_meta = match meta {
-        SourceMeta::DebeziumCdc(cdc_meta) => cdc_meta,
-        _ => unreachable!(),
-    };
-
     match column_type {
         ColumnType::Timestamp(_) => Ok(cdc_meta.extract_timestamp()),
         ColumnType::DatabaseName(_) => Ok(cdc_meta.extract_database_name()),
