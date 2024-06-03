@@ -16,7 +16,7 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use await_tree::InstrumentAwait;
-use foyer::{EntryState, HybridCacheEntry, HybridEntry};
+use foyer::{FetchState, HybridCacheEntry, HybridFetch};
 use risingwave_common::config::EvictionConfig;
 
 use super::{Block, HummockResult, SstableBlockIndex};
@@ -81,7 +81,7 @@ pub struct BlockCacheConfig {
 
 pub enum BlockResponse {
     Block(BlockHolder),
-    Entry(HybridEntry<SstableBlockIndex, Box<Block>>),
+    Entry(HybridFetch<SstableBlockIndex, Box<Block>>),
 }
 
 impl BlockResponse {
@@ -91,16 +91,16 @@ impl BlockResponse {
             BlockResponse::Entry(entry) => entry,
         };
         match entry.state() {
-            EntryState::Hit => entry
+            FetchState::Hit => entry
                 .await
                 .map(BlockHolder::from_hybrid_cache_entry)
                 .map_err(HummockError::foyer_error),
-            EntryState::Wait => entry
+            FetchState::Wait => entry
                 .verbose_instrument_await("wait_pending_fetch_block")
                 .await
                 .map(BlockHolder::from_hybrid_cache_entry)
                 .map_err(HummockError::foyer_error),
-            EntryState::Miss => entry
+            FetchState::Miss => entry
                 .verbose_instrument_await("fetch_block")
                 .await
                 .map(BlockHolder::from_hybrid_cache_entry)

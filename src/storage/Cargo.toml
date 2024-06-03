@@ -35,6 +35,7 @@ itertools = { workspace = true }
 libc = "0.2"
 lz4 = "1.24.0"
 memcomparable = "0.2"
+metrics-prometheus = "0.7"
 more-asserts = "0.3"
 num-integer = "0.1"
 parking_lot = { workspace = true }
