@@ -12,10 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 
-use apache_avro::schema::{DecimalSchema, RecordSchema, Schema};
+use apache_avro::schema::{DecimalSchema, RecordSchema, ResolvedSchema, Schema};
 use apache_avro::types::{Value, ValueKind};
+use apache_avro::AvroResult;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::log::LogSuppresser;
@@ -26,6 +27,33 @@ use crate::error::ConnectorResult;
 use crate::parser::unified::bail_uncategorized;
 use crate::parser::{AccessError, MapHandling};
 
+/// Avro schema with `Ref` inlined. The newtype is used to indicate whether the schema is resolved.
+///
+/// TODO: Actually most of the place should use resolved schema, but currently they just happen to work (Some edge cases are not met yet).
+///
+/// TODO: refactor avro lib to use the feature there.
+#[derive(Debug)]
+pub struct ResolvedAvroSchema {
+    /// Should be used for parsing bytes into Avro value
+    pub original_schema: Arc<Schema>,
+    /// Should be used for type mapping from Avro value to RisingWave datum
+    pub resolved_schema: Schema,
+}
+
+impl ResolvedAvroSchema {
+    pub fn create(schema: Arc<Schema>) -> AvroResult<Self> {
+        let resolver = ResolvedSchema::try_from(schema.as_ref())?;
+        // todo: to_resolved may cause stackoverflow if there's a loop in the schema
+        let resolved_schema = resolver.to_resolved(schema.as_ref())?;
+        Ok(Self {
+            original_schema: schema,
+            resolved_schema,
+        })
+    }
+}
+
+/// This function expects resolved schema (no `Ref`).
+/// FIXME: require passing resolved schema here.
 pub fn avro_schema_to_column_descs(
     schema: &Schema,
     map_handling: Option<MapHandling>,
@@ -92,6 +120,7 @@ fn avro_field_to_column_desc(
     }
 }
 
+/// This function expects resolved schema (no `Ref`).
 fn avro_type_mapping(
     schema: &Schema,
     map_handling: Option<MapHandling>,
