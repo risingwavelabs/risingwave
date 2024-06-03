@@ -16,8 +16,16 @@ use std::collections::HashMap;
 
 use anyhow::Context as _;
 use apache_avro::Schema;
+use arrow_array::RecordBatch;
+use arrow_schema::{ArrowError, Schema as ArrowSchema};
 use itertools::{Either, Itertools};
 use jst::{convert_avro, Context};
+use parquet::arrow::async_reader::AsyncFileReader;
+use parquet::arrow::{arrow_to_parquet_schema, ParquetRecordBatchStreamBuilder, ProjectionMask};
+use parquet::errors::ParquetError;
+use parquet::file::footer::{decode_footer, decode_metadata};
+use parquet::file::metadata::ParquetMetaData;
+use parquet::file::FOOTER_SIZE;
 use risingwave_common::{bail, try_match_expand};
 use risingwave_pb::plan_common::ColumnDesc;
 
