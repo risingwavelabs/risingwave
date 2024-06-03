@@ -20,7 +20,9 @@ use std::sync::Arc;
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use fail::fail_point;
-use foyer::{CacheContext, FetchState, HybridCache, HybridCacheBuilder, HybridCacheEntry};
+use foyer::{
+    CacheContext, EventListener, FetchState, HybridCache, HybridCacheBuilder, HybridCacheEntry,
+};
 use futures::{future, StreamExt};
 use itertools::Itertools;
 use risingwave_common::config::StorageMemoryConfig;
@@ -51,6 +53,31 @@ pub type TableHolder = HybridCacheEntry<HummockSstableObjectId, Box<Sstable>>;
 pub struct SstableBlockIndex {
     pub sst_id: HummockSstableObjectId,
     pub block_idx: u64,
+}
+
+pub struct BlockCacheEventListener {
+    metrics: Arc<HummockStateStoreMetrics>,
+}
+
+impl BlockCacheEventListener {
+    pub fn new(metrics: Arc<HummockStateStoreMetrics>) -> Self {
+        Self { metrics }
+    }
+}
+
+impl EventListener for BlockCacheEventListener {
+    type Key = SstableBlockIndex;
+    type Value = Box<Block>;
+
+    fn on_memory_release(&self, _key: Self::Key, value: Self::Value)
+    where
+        Self::Key: foyer::Key,
+        Self::Value: foyer::Value,
+    {
+        self.metrics
+            .block_efficiency_histogram
+            .observe(value.efficiency());
+    }
 }
 
 // TODO: Define policy based on use cases (read / compaction / ...).

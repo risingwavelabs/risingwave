@@ -84,7 +84,7 @@ pub struct HummockStateStoreMetrics {
     pub old_value_size: IntGauge,
 
     // block statistics
-    pub block_efficiency_histogram: RelabeledHistogramVec,
+    pub block_efficiency_histogram: Histogram,
 
     pub event_handler_pending_event: IntGauge,
     pub event_handler_latency: HistogramVec,
@@ -417,13 +417,7 @@ impl HummockStateStoreMetrics {
             "Access ratio of in-memory block.",
             exponential_buckets(0.001, 2.0, 11).unwrap(),
         );
-        let block_efficiency_histogram =
-            register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
-        let block_efficiency_histogram = RelabeledHistogramVec::with_metric_level(
-            MetricLevel::Info,
-            block_efficiency_histogram,
-            metric_level,
-        );
+        let block_efficiency_histogram = register_histogram_with_registry!(opts, registry).unwrap();
 
         let event_handler_pending_event = register_int_gauge_with_registry!(
             "state_store_event_handler_pending_event",
