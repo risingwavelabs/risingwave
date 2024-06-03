@@ -75,7 +75,7 @@ license = "Apache-2.0"
 repository = "https://github.com/risingwavelabs/risingwave"
 
 [workspace.dependencies]
-foyer = { version = "0.9.1", features = ["nightly"] }
+foyer = { version = "0.9.2", features = ["nightly"] }
 auto_enums = { version = "0.8", features = ["futures03", "tokio1"] }
 await-tree = "0.2.1"
 aws-config = { version = "1", default-features = false, features = [
@@ -136,7 +136,7 @@ arrow-flight = "50"
 arrow-select = "50"
 arrow-ord = "50"
 arrow-row = "50"
-arrow-udf-js = "0.3"
+arrow-udf-js = "0.3.1"
 arrow-udf-js-deno = { git = "https://github.com/risingwavelabs/arrow-udf.git", rev = "fa36365" }
 arrow-udf-wasm = { version = "0.2.2", features = ["build"] }
 arrow-udf-python = "0.2"

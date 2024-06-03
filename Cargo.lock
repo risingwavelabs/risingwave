@@ -760,9 +760,9 @@ dependencies = [
 
 [[package]]
 name = "arrow-udf-js"
-version = "0.3.0"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc1d882f3cbdaf8dd02d9936c3acbf9e1deca401987562f804977ec262bf5e10"
+checksum = "76cb6d108605c5489fff1ef9c520656946ad05ed0de3ea6d26d56bcb34bdb8c5"
 dependencies = [
  "anyhow",
  "arrow-array 50.0.0",
@@ -5065,9 +5065,9 @@ dependencies = [
 
 [[package]]
 name = "foyer"
-version = "0.9.1"
+version = "0.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "81ab8e6a1bb279ba241bbae9b48b5f2945dc31a7a0a06b3ee8c85a00efbcd3f3"
+checksum = "df2b044c2b62671f594be20a80e303578e6cb7747a60e47e581014edea18ae17"
 dependencies = [
  "ahash 0.8.11",
  "anyhow",
@@ -5080,9 +5080,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-common"
-version = "0.7.1"
+version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "291f8aedeef1bfd12745a77c3d78369a017ee017b6564e746597a4693b4e7bd2"
+checksum = "9c251fd5d8832cfbdcaec8950558fd14c9fb44e27351a956297bdc3c219d1d37"
 dependencies = [
  "bytes",
  "cfg-if",
@@ -5099,9 +5099,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-intrusive"
-version = "0.7.0"
+version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eb45e7a2b0d040a15587b07d1680788d5edf1086c9d6565c37546b9d58688dbe"
+checksum = "c92d09d2bafb1dbb1a0b27ee556f39bdf0ad86ee0e61cc2cf26739c7c8437bd1"
 dependencies = [
  "foyer-common",
  "itertools 0.13.0",
@@ -5109,9 +5109,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-memory"
-version = "0.5.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9555ad68b65a7f8b8081c78010c500742fe3fc7b98ac833a385e5c8a07834598"
+checksum = "b8adaec26f9304026212ce6476fb69639c05eab7277982fb3fe7d83b1cf06194"
 dependencies = [
  "ahash 0.8.11",
  "bitflags 2.5.0",
@@ -5130,9 +5130,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-storage"
-version = "0.8.1"
+version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ef35399969ada7554733d160b88e5b264fd6c2288820d3609cb382b4dfb1d275"
+checksum = "fa39f2ef3dae07aa552d859def785036865222de1c8d3867bb8607e0c3bf8192"
 dependencies = [
  "ahash 0.8.11",
  "allocator-api2",
