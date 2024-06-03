@@ -62,6 +62,9 @@ struct Args {
 
     #[arg(short, long)]
     object_storage: String,
+
+    #[arg(short, long)]
+    use_new_object_prefix_strategy: bool,
 }
 
 #[tokio::main(flavor = "multi_thread")]
@@ -132,7 +135,7 @@ async fn create_replay_hummock(r: Record, args: &Args) -> Result<impl GlobalRepl
         max_prefetch_block_number: storage_opts.max_prefetch_block_number,
         recent_filter: None,
         state_store_metrics: state_store_metrics.clone(),
-        use_new_object_prefix_strategy: false,
+        use_new_object_prefix_strategy: args.use_new_object_prefix_strategy,
         meta_cache_v2,
         block_cache_v2,
     }));

@@ -7,6 +7,7 @@ internal data_directory
 internal parallel_compact_size_mb
 internal sstable_size_mb
 internal state_store
+internal use_new_object_prefix_strategy
 postmaster backup_storage_directory
 postmaster backup_storage_url
 postmaster barrier_interval_ms
@@ -14,7 +15,6 @@ postmaster checkpoint_frequency
 postmaster enable_tracing
 postmaster max_concurrent_creating_streaming_jobs
 postmaster pause_on_next_bootstrap
-postmaster use_new_object_prefix_strategy
 user application_name
 user background_ddl
 user batch_enable_distributed_dml

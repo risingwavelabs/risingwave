@@ -87,7 +87,7 @@ macro_rules! for_all_params {
             { max_concurrent_creating_streaming_jobs,   u32,    Some(1_u32),                                true,   "Max number of concurrent creating streaming jobs.", },
             { pause_on_next_bootstrap,                  bool,   Some(false),                                true,   "Whether to pause all data sources on next bootstrap.", },
             { enable_tracing,                           bool,   Some(false),                                true,   "Whether to enable distributed tracing.", },
-            { use_new_object_prefix_strategy,           bool,   Some(false),                                true,   "Whether to split object prefix.", },
+            { use_new_object_prefix_strategy,           bool,   Some(false),                                false,   "Whether to split object prefix.", },
         }
     };
 }
@@ -442,7 +442,7 @@ mod tests {
             (MAX_CONCURRENT_CREATING_STREAMING_JOBS_KEY, "1"),
             (PAUSE_ON_NEXT_BOOTSTRAP_KEY, "false"),
             (ENABLE_TRACING_KEY, "true"),
-            (USE_NEW_OBJECT_PREFIX_STRATEGY_KEY, "true"),
+            (USE_NEW_OBJECT_PREFIX_STRATEGY_KEY, "false"),
             ("a_deprecated_param", "foo"),
         ];
 

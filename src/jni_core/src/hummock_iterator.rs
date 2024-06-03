@@ -105,7 +105,7 @@ impl HummockJavaBindingIterator {
             state_store_metrics: Arc::new(global_hummock_state_store_metrics(
                 MetricLevel::Disabled,
             )),
-            use_new_object_prefix_strategy: false,
+            use_new_object_prefix_strategy: read_plan.use_new_object_prefix_strategy,
             meta_cache_v2,
             block_cache_v2,
         }));
