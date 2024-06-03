@@ -37,7 +37,6 @@ members = [
     "src/risedevtool/config",
     "src/rpc_client",
     "src/sqlparser",
-    "src/sqlparser/test_runner",
     "src/storage",
     "src/storage/backup",
     "src/storage/compactor",
@@ -76,7 +75,7 @@ license = "Apache-2.0"
 repository = "https://github.com/risingwavelabs/risingwave"
 
 [workspace.dependencies]
-foyer = { version = "0.8.6", features = ["nightly"] }
+foyer = { version = "0.9.1", features = ["nightly"] }
 auto_enums = { version = "0.8", features = ["futures03", "tokio1"] }
 await-tree = "0.2.1"
 aws-config = { version = "1", default-features = false, features = [
@@ -318,7 +317,7 @@ futures-timer = { git = "https://github.com/madsim-rs/futures-timer.git", rev = 
 # patch: unlimit 4MB message size for grpc client
 etcd-client = { git = "https://github.com/risingwavelabs/etcd-client.git", rev = "4e84d40" }
 # todo(wcy-fdu): remove this patch fork after opendal release a new version to apply azure workload identity change.
-reqsign = { git = "https://github.com/wcy-fdu/reqsign.git", rev = "002ee2a" }
+reqsign = { git = "https://github.com/wcy-fdu/reqsign.git", rev = "c7dd668" }
 # patch to remove preserve_order from serde_json
 deno_core = { git = "https://github.com/bakjos/deno_core", rev = "9b241c6" }
 # patch to user reqwest 0.12.2

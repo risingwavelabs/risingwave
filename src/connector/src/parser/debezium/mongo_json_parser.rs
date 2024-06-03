@@ -23,7 +23,7 @@ use crate::parser::simd_json_parser::DebeziumMongoJsonAccessBuilder;
 use crate::parser::unified::debezium::DebeziumChangeEvent;
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
 use crate::parser::{
-    AccessBuilderImpl, ByteStreamSourceParser, EncodingProperties, JsonProperties, ParserFormat,
+    AccessBuilderImpl, ByteStreamSourceParser, EncodingProperties, ParserFormat,
     SourceStreamChunkRowWriter,
 };
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
@@ -40,7 +40,7 @@ pub struct DebeziumMongoJsonParser {
 
 fn build_accessor_builder(config: EncodingProperties) -> anyhow::Result<AccessBuilderImpl> {
     match config {
-        EncodingProperties::MongoJson(_) => Ok(AccessBuilderImpl::DebeziumMongoJson(
+        EncodingProperties::MongoJson => Ok(AccessBuilderImpl::DebeziumMongoJson(
             DebeziumMongoJsonAccessBuilder::new()?,
         )),
         _ => bail!("unsupported encoding for DEBEZIUM_MONGO format"),
@@ -72,15 +72,18 @@ impl DebeziumMongoJsonParser {
             .clone();
 
         // _rw_{connector}_file/partition & _rw_{connector}_offset are created automatically.
-        if rw_columns.iter().filter(|desc| desc.is_visible()).count() != 2 {
-            bail!("Debezium Mongo needs no more columns except `_id` and `payload` in table");
+        if rw_columns
+            .iter()
+            .filter(|desc| desc.is_visible() && desc.additional_column.column_type.is_none())
+            .count()
+            != 2
+        {
+            bail!("Debezium Mongo needs no more data columns except `_id` and `payload` in table");
         }
 
         // encodings are fixed to MongoJson
-        let key_builder =
-            build_accessor_builder(EncodingProperties::MongoJson(JsonProperties::default()))?;
-        let payload_builder =
-            build_accessor_builder(EncodingProperties::MongoJson(JsonProperties::default()))?;
+        let key_builder = build_accessor_builder(EncodingProperties::MongoJson)?;
+        let payload_builder = build_accessor_builder(EncodingProperties::MongoJson)?;
 
         Ok(Self {
             rw_columns,

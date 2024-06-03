@@ -13,13 +13,13 @@
 // limitations under the License.
 
 use std::fmt::Debug;
+use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
 
 use enum_as_inner::EnumAsInner;
 use foyer::{
-    set_metrics_registry, FsDeviceConfigBuilder, HybridCacheBuilder, RatedTicketAdmissionPolicy,
-    RuntimeConfigBuilder,
+    DirectFsDeviceOptionsBuilder, HybridCacheBuilder, RateLimitPicker, RuntimeConfigBuilder,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common_service::observer_manager::RpcNotificationClient;
@@ -616,10 +616,15 @@ impl StateStoreImpl {
     ) -> StorageResult<Self> {
         const MB: usize = 1 << 20;
 
-        set_metrics_registry(GLOBAL_METRICS_REGISTRY.clone());
+        if cfg!(not(madsim)) {
+            metrics_prometheus::Recorder::builder()
+                .with_registry(GLOBAL_METRICS_REGISTRY.deref().clone())
+                .build_and_install();
+        }
 
         let meta_cache_v2 = {
             let mut builder = HybridCacheBuilder::new()
+                .with_name("foyer.meta")
                 .memory(opts.meta_cache_capacity_mb * MB)
                 .with_shards(opts.meta_cache_shard_num)
                 .with_eviction_config(opts.meta_cache_eviction_config.clone())
@@ -631,19 +636,13 @@ impl StateStoreImpl {
 
             if !opts.meta_file_cache_dir.is_empty() {
                 builder = builder
-                    .with_name("foyer.meta")
                     .with_device_config(
-                        FsDeviceConfigBuilder::new(&opts.meta_file_cache_dir)
+                        DirectFsDeviceOptionsBuilder::new(&opts.meta_file_cache_dir)
                             .with_capacity(opts.meta_file_cache_capacity_mb * MB)
                             .with_file_size(opts.meta_file_cache_file_capacity_mb * MB)
-                            .with_align(opts.meta_file_cache_device_align)
-                            .with_io_size(opts.meta_file_cache_device_io_size)
                             .build(),
                     )
-                    .with_catalog_shards(64)
-                    .with_admission_policy(Arc::new(RatedTicketAdmissionPolicy::new(
-                        opts.meta_file_cache_insert_rate_limit_mb * MB,
-                    )))
+                    .with_indexer_shards(opts.meta_file_cache_indexer_shards)
                     .with_flushers(opts.meta_file_cache_flushers)
                     .with_reclaimers(opts.meta_file_cache_reclaimers)
                     .with_clean_region_threshold(
@@ -660,8 +659,12 @@ impl StateStoreImpl {
                         RuntimeConfigBuilder::new()
                             .with_thread_name("foyer.meta.runtime")
                             .build(),
-                    )
-                    .with_lazy(true);
+                    );
+                if opts.meta_file_cache_insert_rate_limit_mb > 0 {
+                    builder = builder.with_admission_picker(Arc::new(RateLimitPicker::new(
+                        opts.meta_file_cache_insert_rate_limit_mb * MB,
+                    )));
+                }
             }
 
             builder.build().await.map_err(HummockError::foyer_error)?
@@ -669,6 +672,7 @@ impl StateStoreImpl {
 
         let block_cache_v2 = {
             let mut builder = HybridCacheBuilder::new()
+                .with_name("foyer.data")
                 .memory(opts.block_cache_capacity_mb * MB)
                 .with_shards(opts.block_cache_shard_num)
                 .with_eviction_config(opts.block_cache_eviction_config.clone())
@@ -679,21 +683,15 @@ impl StateStoreImpl {
                 })
                 .storage();
 
-            if !opts.meta_file_cache_dir.is_empty() {
+            if !opts.data_file_cache_dir.is_empty() {
                 builder = builder
-                    .with_name("foyer.block")
                     .with_device_config(
-                        FsDeviceConfigBuilder::new(&opts.data_file_cache_dir)
+                        DirectFsDeviceOptionsBuilder::new(&opts.data_file_cache_dir)
                             .with_capacity(opts.data_file_cache_capacity_mb * MB)
                             .with_file_size(opts.data_file_cache_file_capacity_mb * MB)
-                            .with_align(opts.data_file_cache_device_align)
-                            .with_io_size(opts.data_file_cache_device_io_size)
                             .build(),
                     )
-                    .with_catalog_shards(64)
-                    .with_admission_policy(Arc::new(RatedTicketAdmissionPolicy::new(
-                        opts.data_file_cache_insert_rate_limit_mb * MB,
-                    )))
+                    .with_indexer_shards(opts.data_file_cache_indexer_shards)
                     .with_flushers(opts.data_file_cache_flushers)
                     .with_reclaimers(opts.data_file_cache_reclaimers)
                     .with_clean_region_threshold(
@@ -708,10 +706,14 @@ impl StateStoreImpl {
                     )
                     .with_runtime_config(
                         RuntimeConfigBuilder::new()
-                            .with_thread_name("foyer.block.runtime")
+                            .with_thread_name("foyer.data.runtime")
                             .build(),
-                    )
-                    .with_lazy(true);
+                    );
+                if opts.data_file_cache_insert_rate_limit_mb > 0 {
+                    builder = builder.with_admission_picker(Arc::new(RateLimitPicker::new(
+                        opts.data_file_cache_insert_rate_limit_mb * MB,
+                    )));
+                }
             }
 
             builder.build().await.map_err(HummockError::foyer_error)?

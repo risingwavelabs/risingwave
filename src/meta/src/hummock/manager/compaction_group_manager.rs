@@ -298,12 +298,19 @@ impl HummockManager {
             .filter_map(|(group_id, member_count)| {
                 if member_count == 0 && group_id > StaticCompactionGroupId::End as CompactionGroupId
                 {
-                    return Some(group_id);
+                    return Some((
+                        group_id,
+                        new_version_delta
+                            .latest_version()
+                            .get_compaction_group_levels(group_id)
+                            .get_levels()
+                            .len(),
+                    ));
                 }
                 None
             })
             .collect_vec();
-        for group_id in &groups_to_remove {
+        for (group_id, _) in &groups_to_remove {
             let group_deltas = &mut new_version_delta
                 .group_deltas
                 .entry(*group_id)
@@ -316,13 +323,8 @@ impl HummockManager {
         new_version_delta.pre_apply();
         commit_multi_var!(self.meta_store_ref(), version)?;
 
-        for group_id in &groups_to_remove {
-            let max_level = versioning
-                .current_version
-                .get_compaction_group_levels(*group_id)
-                .get_levels()
-                .len();
-            remove_compaction_group_in_sst_stat(&self.metrics, *group_id, max_level);
+        for (group_id, max_level) in groups_to_remove {
+            remove_compaction_group_in_sst_stat(&self.metrics, group_id, max_level);
         }
 
         // Purge may cause write to meta store. If it hurts performance while holding versioning
@@ -407,9 +409,6 @@ impl HummockManager {
                 self.env.opts.partition_vnode_count,
             )
             .await?;
-        self.group_to_table_vnode_partition
-            .write()
-            .insert(result.0, result.1);
 
         Ok(result.0)
     }
@@ -676,14 +675,6 @@ impl HummockManager {
             compaction_group_manager.write_limit
         );
 
-        {
-            // 2. Restore the memory data structure according to the memory of the compaction group config.
-            let mut group_to_table_vnode_partition = self.group_to_table_vnode_partition.write();
-            for (cg_id, table_vnode_partition) in restore_cg_to_partition_vnode {
-                group_to_table_vnode_partition.insert(cg_id, table_vnode_partition);
-            }
-        }
-
         Ok(())
     }
 }
@@ -888,6 +879,11 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
             }
             MutableConfig::TombstoneReclaimRatio(c) => {
                 target.tombstone_reclaim_ratio = *c;
+            }
+
+            MutableConfig::CompressionAlgorithm(c) => {
+                target.compression_algorithm[c.get_level() as usize]
+                    .clone_from(&c.compression_algorithm);
             }
         }
     }

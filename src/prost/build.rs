@@ -53,6 +53,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "task_service",
         "telemetry",
         "user",
+        "secret",
     ];
     let protos: Vec<String> = proto_files
         .iter()

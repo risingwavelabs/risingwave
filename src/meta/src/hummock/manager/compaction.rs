@@ -12,6 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Copyright 2024 RisingWave Labs
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Arc, LazyLock};
 use std::time::{Instant, SystemTime};
@@ -709,15 +723,6 @@ impl HummockManager {
                 }
             }
 
-            let table_to_vnode_partition = match self
-                .group_to_table_vnode_partition
-                .read()
-                .get(&compaction_group_id)
-            {
-                Some(table_to_vnode_partition) => table_to_vnode_partition.clone(),
-                None => BTreeMap::default(),
-            };
-
             while let Some(compact_task) = compact_status.get_compact_task(
                 version
                     .latest_version()
@@ -769,6 +774,7 @@ impl HummockManager {
                     target_sub_level_id: compact_task.input.target_sub_level_id,
                     task_type: compact_task.compaction_task_type as i32,
                     split_weight_by_vnode: vnode_partition_count,
+                    max_sub_compaction: group_config.compaction_config.max_sub_compaction,
                     ..Default::default()
                 };
 
@@ -809,34 +815,21 @@ impl HummockManager {
                             "SUCCESS",
                         ])
                         .inc();
+
                     version.apply_compact_task(&compact_task);
                     trivial_tasks.push(compact_task);
                     if trivial_tasks.len() >= self.env.opts.max_trivial_move_task_count_per_loop {
                         break 'outside;
                     }
                 } else {
-                    if group_config.compaction_config.split_weight_by_vnode > 0 {
-                        for table_id in &compact_task.existing_table_ids {
-                            compact_task
-                                .table_vnode_partition
-                                .insert(*table_id, vnode_partition_count);
-                        }
-                    } else {
-                        compact_task.table_vnode_partition = table_to_vnode_partition.clone();
-                    }
-                    compact_task
-                        .table_vnode_partition
-                        .retain(|table_id, _| compact_task.existing_table_ids.contains(table_id));
+                    self.calculate_vnode_partition(
+                        &mut compact_task,
+                        group_config.compaction_config.as_ref(),
+                    )
+                    .await;
                     compact_task.table_watermarks = version
                         .latest_version()
                         .safe_epoch_table_watermarks(&compact_task.existing_table_ids);
-
-                    // do not split sst by vnode partition when target_level > base_level
-                    // The purpose of data alignment is mainly to improve the parallelism of base level compaction and reduce write amplification.
-                    // However, at high level, the size of the sst file is often larger and only contains the data of a single table_id, so there is no need to cut it.
-                    if compact_task.target_level > compact_task.base_level {
-                        compact_task.table_vnode_partition.clear();
-                    }
 
                     if self.env.opts.enable_dropped_column_reclaim {
                         // TODO: get all table schemas for all tables in once call to avoid acquiring lock and await.
@@ -879,7 +872,6 @@ impl HummockManager {
             {
                 unschedule_groups.push(compaction_group_id);
             }
-
             stats.report_to_metrics(compaction_group_id, self.metrics.as_ref());
         }
 
@@ -890,7 +882,6 @@ impl HummockManager {
                 compact_task_assignment,
                 version
             )?;
-
             self.metrics
                 .compact_task_batch_count
                 .with_label_values(&["batch_trivial_move"])
@@ -1141,6 +1132,7 @@ impl HummockManager {
     ///
     /// Return Ok(false) indicates either the task is not found,
     /// or the task is not owned by `context_id` when `context_id` is not None.
+
     pub async fn report_compact_tasks(&self, report_tasks: Vec<ReportTask>) -> Result<Vec<bool>> {
         let mut guard = self.compaction.write().await;
         let deterministic_mode = self.env.opts.compaction_deterministic_test;
@@ -1448,6 +1440,91 @@ impl HummockManager {
                 );
                 false
             }
+        }
+    }
+
+    pub(crate) async fn calculate_vnode_partition(
+        &self,
+        compact_task: &mut CompactTask,
+        compaction_config: &CompactionConfig,
+    ) {
+        // do not split sst by vnode partition when target_level > base_level
+        // The purpose of data alignment is mainly to improve the parallelism of base level compaction and reduce write amplification.
+        // However, at high level, the size of the sst file is often larger and only contains the data of a single table_id, so there is no need to cut it.
+        if compact_task.target_level > compact_task.base_level {
+            return;
+        }
+        if compaction_config.split_weight_by_vnode > 0 {
+            for table_id in &compact_task.existing_table_ids {
+                compact_task
+                    .table_vnode_partition
+                    .insert(*table_id, compact_task.split_weight_by_vnode);
+            }
+        } else {
+            let mut table_size_info: HashMap<u32, u64> = HashMap::default();
+            let mut existing_table_ids: HashSet<u32> = HashSet::default();
+            for input_ssts in &compact_task.input_ssts {
+                for sst in &input_ssts.table_infos {
+                    existing_table_ids.extend(sst.table_ids.iter());
+                    for table_id in &sst.table_ids {
+                        *table_size_info.entry(*table_id).or_default() +=
+                            sst.file_size / (sst.table_ids.len() as u64);
+                    }
+                }
+            }
+            compact_task
+                .existing_table_ids
+                .retain(|table_id| existing_table_ids.contains(table_id));
+
+            let hybrid_vnode_count = self.env.opts.hybrid_partition_node_count;
+            let default_partition_count = self.env.opts.partition_vnode_count;
+            // We must ensure the partition threshold large enough to avoid too many small files.
+            let compact_task_table_size_partition_threshold_low = self
+                .env
+                .opts
+                .compact_task_table_size_partition_threshold_low;
+            let compact_task_table_size_partition_threshold_high = self
+                .env
+                .opts
+                .compact_task_table_size_partition_threshold_high;
+            use risingwave_common::system_param::reader::SystemParamsRead;
+            let params = self.env.system_params_reader().await;
+            let barrier_interval_ms = params.barrier_interval_ms() as u64;
+            let checkpoint_secs = std::cmp::max(
+                1,
+                params.checkpoint_frequency() * barrier_interval_ms / 1000,
+            );
+            // check latest write throughput
+            let history_table_throughput = self.history_table_throughput.read();
+            for (table_id, compact_table_size) in table_size_info {
+                let write_throughput = history_table_throughput
+                    .get(&table_id)
+                    .map(|que| que.back().cloned().unwrap_or(0))
+                    .unwrap_or(0)
+                    / checkpoint_secs;
+                if compact_table_size > compact_task_table_size_partition_threshold_high
+                    && default_partition_count > 0
+                {
+                    compact_task
+                        .table_vnode_partition
+                        .insert(table_id, default_partition_count);
+                } else if (compact_table_size > compact_task_table_size_partition_threshold_low
+                    || (write_throughput > self.env.opts.table_write_throughput_threshold
+                        && compact_table_size > compaction_config.target_file_size_base))
+                    && hybrid_vnode_count > 0
+                {
+                    // partition for large write throughput table. But we also need to make sure that it can not be too small.
+                    compact_task
+                        .table_vnode_partition
+                        .insert(table_id, hybrid_vnode_count);
+                } else if compact_table_size > compaction_config.target_file_size_base {
+                    // partition for small table
+                    compact_task.table_vnode_partition.insert(table_id, 1);
+                }
+            }
+            compact_task
+                .table_vnode_partition
+                .retain(|table_id, _| compact_task.existing_table_ids.contains(table_id));
         }
     }
 }
