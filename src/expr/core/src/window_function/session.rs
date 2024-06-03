@@ -36,7 +36,8 @@ use crate::expr::{
 use crate::Result;
 
 /// To implement Session Window in a similar way to Range Frame, we define a similar frame bounds
-/// structure here. It's very like [`RangeFrameBounds`], but with a gap instead of start & end offset.
+/// structure here. It's very like [`RangeFrameBounds`](super::RangeFrameBounds), but with a gap
+/// instead of start & end offset.
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct SessionFrameBounds {
     pub order_data_type: DataType,
