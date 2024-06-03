@@ -56,7 +56,7 @@ impl SystemParamsManager {
         init_params: SystemParams,
         cluster_first_launch: bool,
     ) -> MetaResult<Self> {
-        let params = if cluster_first_launch {
+        let mut params = if cluster_first_launch {
             init_params
         } else if let Some(persisted) = SystemParams::get(&meta_store).await? {
             merge_params(persisted, init_params)
@@ -65,6 +65,10 @@ impl SystemParamsManager {
                 "cluster is not newly created but no system parameters can be found",
             ));
         };
+
+        // For new clusters, the name of the object store needs to be prefixed according to the object id.
+        // For old clusters, the prefix is ​​not divided for the sake of compatibility.
+        params.use_new_object_prefix_strategy = Some(cluster_first_launch);
 
         info!("system parameters: {:?}", params);
         check_missing_params(&params).map_err(|e| anyhow!(e))?;

@@ -46,7 +46,7 @@ use crate::hummock::manager::checkpoint::HummockVersionCheckpoint;
 use crate::hummock::manager::context::ContextInfo;
 use crate::hummock::manager::gc::DeleteObjectTracker;
 use crate::hummock::CompactorManagerRef;
-use crate::manager::{MetaSrvEnv, MetaStoreImpl, MetadataManager, SystemParamsManagerImpl};
+use crate::manager::{MetaSrvEnv, MetaStoreImpl, MetadataManager};
 use crate::model::{ClusterId, MetadataModel, MetadataModelError};
 use crate::rpc::metrics::MetaMetrics;
 
@@ -224,39 +224,13 @@ impl HummockManager {
         // Skip this check in e2e compaction test, which needs to start a secondary cluster with
         // same bucket
         if !deterministic_mode {
-            let use_new_object_prefix_strategy = write_exclusive_cluster_id(
+            write_exclusive_cluster_id(
                 state_store_dir,
                 env.cluster_id().clone(),
                 object_store.clone(),
             )
             .await?;
-            if use_new_object_prefix_strategy {
-                match env.system_params_manager_impl_ref() {
-                    SystemParamsManagerImpl::Kv(mgr) => {
-                        mgr.set_param("use_new_object_prefix_strategy", Some("true".to_owned()))
-                            .await
-                            .unwrap();
-                    }
-                    SystemParamsManagerImpl::Sql(mgr) => {
-                        mgr.set_param("use_new_object_prefix_strategy", Some("true".to_owned()))
-                            .await
-                            .unwrap();
-                    }
-                };
-            } else {
-                match env.system_params_manager_impl_ref() {
-                    SystemParamsManagerImpl::Kv(mgr) => {
-                        mgr.set_param("use_new_object_prefix_strategy", Some("false".to_owned()))
-                            .await
-                            .unwrap();
-                    }
-                    SystemParamsManagerImpl::Sql(mgr) => {
-                        mgr.set_param("use_new_object_prefix_strategy", Some("false".to_owned()))
-                            .await
-                            .unwrap();
-                    }
-                };
-            }
+
             // config bucket lifecycle for new cluster.
             if let risingwave_object_store::object::ObjectStoreImpl::S3(s3) = object_store.as_ref()
                 && !env.opts.do_not_config_object_storage_lifecycle
@@ -587,16 +561,11 @@ impl HummockManager {
     }
 }
 
-/// This function, `write_exclusive_cluster_id`, is used to check if it is a new cluster during meta startup:
-/// For new clusters, the name of the object store needs to be prefixed according to the object id.
-/// For old clusters, the prefix is ​​not divided for the sake of compatibility.
-///
-/// The return value of this function represents whether to adopt the new object prefix strategy.
 async fn write_exclusive_cluster_id(
     state_store_dir: &str,
     cluster_id: ClusterId,
     object_store: ObjectStoreRef,
-) -> Result<bool> {
+) -> Result<()> {
     const CLUSTER_ID_DIR: &str = "cluster_id";
     const CLUSTER_ID_NAME: &str = "0";
     let cluster_id_dir = format!("{}/{}/", state_store_dir, CLUSTER_ID_DIR);
@@ -605,7 +574,7 @@ async fn write_exclusive_cluster_id(
         Ok(stored_cluster_id) => {
             let stored_cluster_id = String::from_utf8(stored_cluster_id.to_vec()).unwrap();
             if cluster_id.deref() == stored_cluster_id {
-                return Ok(false);
+                return Ok(());
             }
 
             Err(ObjectError::internal(format!(
@@ -619,7 +588,7 @@ async fn write_exclusive_cluster_id(
                 object_store
                     .upload(&cluster_id_full_path, Bytes::from(String::from(cluster_id)))
                     .await?;
-                return Ok(true);
+                return Ok(());
             }
             Err(e.into())
         }

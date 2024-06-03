@@ -326,24 +326,9 @@ impl ObjectStoreImpl {
     }
 
     pub fn get_object_prefix(&self, obj_id: u64, use_new_object_prefix_strategy: bool) -> String {
-        // FIXME: ObjectStoreImpl lacks flexibility for adding new interface to ObjectStore
-        // trait. Macro object_store_impl_method_body routes to local or remote only depending on
-        // the path
-        match self {
-            ObjectStoreImpl::InMem(store) => store
-                .inner
-                .get_object_prefix(obj_id, use_new_object_prefix_strategy),
-            ObjectStoreImpl::Opendal(store) => store
-                .inner
-                .get_object_prefix(obj_id, use_new_object_prefix_strategy),
-            ObjectStoreImpl::S3(store) => store
-                .inner
-                .get_object_prefix(obj_id, use_new_object_prefix_strategy),
-            #[cfg(madsim)]
-            ObjectStoreImpl::Sim(store) => store
-                .inner
-                .get_object_prefix(obj_id, use_new_object_prefix_strategy),
-        }
+        dispatch_object_store_enum!(self, |store| store
+            .inner
+            .get_object_prefix(obj_id, use_new_object_prefix_strategy))
     }
 
     pub fn support_streaming_upload(&self) -> bool {
