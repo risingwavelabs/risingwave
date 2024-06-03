@@ -721,6 +721,7 @@ pub type StagingDataIterator = MergeIterator<
 pub type StagingDataRevIterator = MergeIterator<
     HummockIteratorUnion<Backward, SharedBufferBatchIterator<Backward>, BackwardSstableIterator>,
 >;
+
 pub type HummockStorageIteratorPayloadInner<'a> = MergeIterator<
     HummockIteratorUnion<
         Forward,

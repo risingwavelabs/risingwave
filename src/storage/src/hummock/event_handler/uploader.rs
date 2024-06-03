@@ -125,22 +125,19 @@ impl UploadingTask {
 
     fn new(payload: UploadTaskInput, context: &UploaderContext) -> Self {
         assert!(!payload.is_empty());
-        let mut epochs = payload
+        let epochs = payload
             .iter()
             .flat_map(|(_, imms)| imms.iter().flat_map(|imm| imm.epochs().iter().cloned()))
             .sorted()
             .dedup()
             .collect_vec();
 
-        // reverse to make newer epochs comes first
-        epochs.reverse();
         let imm_ids = payload
             .iter()
             .map(|(instance_id, imms)| {
-                (
-                    *instance_id,
-                    imms.iter().map(|imm| imm.batch_id()).collect_vec(),
-                )
+                let mut imm_ids = imms.iter().map(|imm| imm.batch_id()).collect_vec();
+                imm_ids.sort();
+                (*instance_id, imm_ids)
             })
             .collect();
         let task_size = payload
@@ -162,8 +159,8 @@ impl UploadingTask {
         } else {
             debug!("start upload task: {:?}", task_info);
         }
-        let join_handle = (context.spawn_upload_task)(payload.clone(), task_info.clone());
         context.stats.uploader_uploading_task_count.inc();
+        let join_handle = (context.spawn_upload_task)(payload.clone(), task_info.clone());
         Self {
             payload,
             join_handle,
@@ -287,15 +284,21 @@ struct UnsealedEpochData {
     spilled_data: SpilledData,
 
     table_watermarks: HashMap<TableId, (WatermarkDirection, Vec<VnodeWatermark>, BitmapBuilder)>,
+    size: usize,
 }
 
 impl UnsealedEpochData {
+    fn get_imm_data_size(&self) -> usize {
+        self.size
+    }
+
     fn flush(&mut self, context: &UploaderContext) {
         let imms: HashMap<_, _> = take(&mut self.imms)
             .into_iter()
             .map(|(id, imms)| (id, imms.into_iter().collect_vec()))
             .collect();
         if !imms.is_empty() {
+            self.size = 0;
             let task = UploadingTask::new(imms, context);
             context.stats.spill_task_counts_from_unsealed.inc();
             context
@@ -446,7 +449,7 @@ impl SealedData {
     }
 
     // Flush can be triggered by either a sync_epoch or a spill (`may_flush`) request.
-    fn flush(&mut self, context: &UploaderContext, is_spilled: bool) {
+    fn flush(&mut self, context: &UploaderContext, is_spilled: bool) -> bool {
         let payload: HashMap<_, _> = take(&mut self.imms_by_table_shard)
             .into_iter()
             .map(|(id, imms)| (id, imms.into_iter().collect()))
@@ -463,6 +466,9 @@ impl SealedData {
                 info!("Spill sealed data. Task: {}", task.get_task_info());
             }
             self.spilled_data.add_task(task);
+            true
+        } else {
+            false
         }
     }
 
@@ -632,7 +638,9 @@ impl HummockUploader {
             epoch,
             self.max_sealed_epoch
         );
+
         let unsealed_data = self.unsealed_data.entry(epoch).or_default();
+        unsealed_data.size += imm.size();
         unsealed_data
             .imms
             .entry(imm.instance_id)
@@ -805,20 +813,29 @@ impl HummockUploader {
         }
     }
 
-    pub(crate) fn may_flush(&mut self) {
-        if self.context.buffer_tracker.need_more_flush() {
-            self.sealed_data.flush(&self.context, true);
+    pub(crate) fn may_flush(&mut self) -> bool {
+        if !self.context.buffer_tracker.need_more_flush() {
+            return false;
         }
+        let mut flush_unseal = self.sealed_data.flush(&self.context, true);
 
         if self.context.buffer_tracker.need_more_flush() {
-            // iterate from older epoch to newer epoch
-            for unsealed_data in self.unsealed_data.values_mut() {
+            let mut unseal_epochs = vec![];
+            for (epoch, unsealed_data) in &self.unsealed_data {
+                unseal_epochs.push((unsealed_data.get_imm_data_size(), *epoch));
+            }
+            // flush large data at first to avoid generate small files.
+            unseal_epochs.sort_by_key(|item| item.0);
+            for (_, epoch) in unseal_epochs.iter().rev() {
+                let unsealed_data = self.unsealed_data.get_mut(epoch).unwrap();
                 unsealed_data.flush(&self.context);
+                flush_unseal = true;
                 if !self.context.buffer_tracker.need_more_flush() {
                     break;
                 }
             }
         }
+        flush_unseal
     }
 
     pub(crate) fn clear(&mut self) {
@@ -887,17 +904,16 @@ impl HummockUploader {
         self.sealed_data.spilled_data.poll_success_spill(cx)
     }
 
-    /// Poll the success of the oldest spilled task of unsealed data. Return `Poll::Ready(None)` if
-    /// there is no spilling task.
+    /// Poll the success of all spilled task of unsealed data. Return `Poll::Ready(None)` if
+    /// there is no task finished.
     fn poll_unsealed_spill_task(
         &mut self,
         cx: &mut Context<'_>,
     ) -> Poll<Option<StagingSstableInfo>> {
-        // iterator from older epoch to new epoch so that the spill task are finished in epoch order
         for unsealed_data in self.unsealed_data.values_mut() {
-            // if None, there is no spilling task. Search for the unsealed data of the next epoch in
-            // the next iteration.
-            if let Some(sstable_info) = ready!(unsealed_data.spilled_data.poll_success_spill(cx)) {
+            if let Poll::Ready(Some(sstable_info)) =
+                unsealed_data.spilled_data.poll_success_spill(cx)
+            {
                 return Poll::Ready(Some(sstable_info));
             }
         }
@@ -977,6 +993,7 @@ mod tests {
 
     pub trait UploadOutputFuture =
         Future<Output = HummockResult<UploadTaskOutput>> + Send + 'static;
+
     pub trait UploadFn<Fut: UploadOutputFuture> =
         Fn(UploadTaskInput, UploadTaskInfo) -> Fut + Send + Sync + 'static;
 
@@ -1361,14 +1378,17 @@ mod tests {
         assert_eq!(epoch6, uploader.max_sealed_epoch);
     }
 
-    fn prepare_uploader_order_test() -> (
+    fn prepare_uploader_order_test(
+        config: &StorageOpts,
+        skip_schedule: bool,
+    ) -> (
         BufferTracker,
         HummockUploader,
         impl Fn(HashMap<LocalInstanceId, Vec<ImmId>>) -> (BoxFuture<'static, ()>, oneshot::Sender<()>),
     ) {
+        let gauge = GenericGauge::new("test", "test").unwrap();
         // flush threshold is 0. Flush anyway
-        let buffer_tracker =
-            BufferTracker::new(usize::MAX, 0, GenericGauge::new("test", "test").unwrap());
+        let buffer_tracker = BufferTracker::from_storage_opts(config, gauge);
         // (the started task send the imm ids of payload, the started task wait for finish notify)
         #[allow(clippy::type_complexity)]
         let task_notifier_holder: Arc<
@@ -1399,14 +1419,18 @@ mod tests {
             Arc::new({
                 move |_, task_info: UploadTaskInfo| {
                     let task_notifier_holder = task_notifier_holder.clone();
-                    let (start_tx, finish_rx) = task_notifier_holder.lock().pop_back().unwrap();
-                    let start_epoch = *task_info.epochs.last().unwrap();
-                    let end_epoch = *task_info.epochs.first().unwrap();
+                    let task_item = task_notifier_holder.lock().pop_back();
+                    let start_epoch = *task_info.epochs.first().unwrap();
+                    let end_epoch = *task_info.epochs.last().unwrap();
                     assert!(end_epoch >= start_epoch);
                     spawn(async move {
                         let ssts = gen_sstable_info(start_epoch, end_epoch);
-                        start_tx.send(task_info).unwrap();
-                        finish_rx.await.unwrap();
+                        if !skip_schedule {
+                            let (start_tx, finish_rx) = task_item.unwrap();
+                            start_tx.send(task_info).unwrap();
+                            finish_rx.await.unwrap();
+                        }
+
                         Ok(UploadTaskOutput {
                             new_value_ssts: ssts,
                             old_value_ssts: vec![],
@@ -1433,8 +1457,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_uploader_finish_in_order() {
-        let (buffer_tracker, mut uploader, new_task_notifier) = prepare_uploader_order_test();
+    async fn test_uploader_finish_not_in_order() {
+        let config = StorageOpts {
+            shared_buffer_capacity_mb: 1024 * 1024,
+            shared_buffer_flush_ratio: 0.0,
+            ..Default::default()
+        };
+        let (buffer_tracker, mut uploader, new_task_notifier) =
+            prepare_uploader_order_test(&config, false);
 
         let epoch1 = INITIAL_EPOCH.next_epoch();
         let epoch2 = epoch1.next_epoch();
@@ -1450,7 +1480,7 @@ mod tests {
         uploader.add_imm(imm1_2.clone());
 
         // imm1 will be spilled first
-        let (await_start1, finish_tx1) = new_task_notifier(get_imm_ids([&imm1_2, &imm1_1]));
+        let (await_start1, finish_tx1) = new_task_notifier(get_imm_ids([&imm1_1, &imm1_2]));
         let (await_start2, finish_tx2) = new_task_notifier(get_imm_ids([&imm2]));
         uploader.may_flush();
         await_start1.await;
@@ -1459,11 +1489,10 @@ mod tests {
         assert_uploader_pending(&mut uploader).await;
 
         finish_tx2.send(()).unwrap();
-        assert_uploader_pending(&mut uploader).await;
 
         finish_tx1.send(()).unwrap();
         if let UploaderEvent::DataSpilled(sst) = uploader.next_event().await {
-            assert_eq!(&get_imm_ids([&imm1_2, &imm1_1]), sst.imm_ids());
+            assert_eq!(&get_imm_ids([&imm1_1, &imm1_2]), sst.imm_ids());
             assert_eq!(&vec![epoch1], sst.epochs());
         } else {
             unreachable!("")
@@ -1549,7 +1578,7 @@ mod tests {
         assert_eq!(3, synced_data1.len());
         assert_eq!(&get_imm_ids([&imm1_4]), synced_data1[0].imm_ids());
         assert_eq!(&get_imm_ids([&imm1_3]), synced_data1[1].imm_ids());
-        assert_eq!(&get_imm_ids([&imm1_2, &imm1_1]), synced_data1[2].imm_ids());
+        assert_eq!(&get_imm_ids([&imm1_1, &imm1_2]), synced_data1[2].imm_ids());
 
         // current uploader state:
         // unsealed: epoch3: imm: imm3_3, uploading: [imm3_2], [imm3_1]
@@ -1599,7 +1628,7 @@ mod tests {
 
         uploader.seal_epoch(epoch4);
         let (await_start4_with_3_3, finish_tx4_with_3_3) =
-            new_task_notifier(get_imm_ids([&imm4, &imm3_3]));
+            new_task_notifier(get_imm_ids([&imm3_3, &imm4]));
         uploader.start_sync_epoch(epoch4);
         await_start4_with_3_3.await;
 
@@ -1619,7 +1648,7 @@ mod tests {
             assert_eq!(epoch4, epoch);
             assert_eq!(2, newly_upload_sst.len());
             assert_eq!(
-                &get_imm_ids([&imm4, &imm3_3]),
+                &get_imm_ids([&imm3_3, &imm4]),
                 newly_upload_sst[0].imm_ids()
             );
             assert_eq!(&get_imm_ids([&imm3_2]), newly_upload_sst[1].imm_ids());
@@ -1634,8 +1663,8 @@ mod tests {
             .unwrap()
             .staging_ssts;
         assert_eq!(3, synced_data4.len());
-        assert_eq!(&vec![epoch4, epoch3], synced_data4[0].epochs());
-        assert_eq!(&get_imm_ids([&imm4, &imm3_3]), synced_data4[0].imm_ids());
+        assert_eq!(&vec![epoch3, epoch4], synced_data4[0].epochs());
+        assert_eq!(&get_imm_ids([&imm3_3, &imm4]), synced_data4[0].imm_ids());
         assert_eq!(&get_imm_ids([&imm3_2]), synced_data4[1].imm_ids());
         assert_eq!(&get_imm_ids([&imm3_1]), synced_data4[2].imm_ids());
 
@@ -1646,5 +1675,41 @@ mod tests {
         // synced: epoch1: sst([imm1_4]), sst([imm1_3]), sst([imm1_2, imm1_1])
         //         epoch2: sst([imm2])
         //         epoch4: sst([imm4, imm3_3]), sst([imm3_2]), sst([imm3_1])
+    }
+
+    #[tokio::test]
+    async fn test_uploader_frequently_flush() {
+        let config = StorageOpts {
+            shared_buffer_capacity_mb: 1,
+            shared_buffer_flush_ratio: 0.001,
+            ..Default::default()
+        };
+        let (buffer_tracker, mut uploader, _new_task_notifier) =
+            prepare_uploader_order_test(&config, true);
+
+        let epoch1 = INITIAL_EPOCH.next_epoch();
+        let epoch2 = epoch1.next_epoch();
+        let flush_threshold = buffer_tracker.flush_threshold();
+        let memory_limiter = buffer_tracker.get_memory_limiter().clone();
+
+        // imm2 contains data in newer epoch, but added first
+        let mut total_memory = 0;
+        while total_memory < flush_threshold {
+            let imm = gen_imm_with_limiter(epoch2, Some(memory_limiter.as_ref())).await;
+            total_memory += imm.size();
+            if total_memory > flush_threshold {
+                break;
+            }
+            uploader.add_imm(imm);
+        }
+        let imm = gen_imm_with_limiter(epoch1, Some(memory_limiter.as_ref())).await;
+        uploader.add_imm(imm);
+        assert!(uploader.may_flush());
+
+        for _ in 0..10 {
+            let imm = gen_imm_with_limiter(epoch1, Some(memory_limiter.as_ref())).await;
+            uploader.add_imm(imm);
+            assert!(!uploader.may_flush());
+        }
     }
 }

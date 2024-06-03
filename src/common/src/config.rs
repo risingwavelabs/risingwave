@@ -1454,7 +1454,6 @@ pub mod default {
         pub fn max_concurrent_compaction_task_number() -> u64 {
             16
         }
-
         pub fn max_preload_wait_time_mill() -> u64 {
             0
         }

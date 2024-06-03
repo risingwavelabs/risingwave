@@ -121,6 +121,11 @@ impl BufferTracker {
     pub fn need_more_flush(&self) -> bool {
         self.get_buffer_size() > self.flush_threshold + self.global_upload_task_size.get() as usize
     }
+
+    #[cfg(test)]
+    pub(crate) fn flush_threshold(&self) -> usize {
+        self.flush_threshold
+    }
 }
 
 #[derive(Clone)]
