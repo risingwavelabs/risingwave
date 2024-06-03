@@ -41,6 +41,7 @@ use tracing::{debug, error, info};
 use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
 use crate::hummock::event_handler::LocalInstanceId;
 use crate::hummock::local_version::pinned_version::PinnedVersion;
+use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatchId;
 use crate::hummock::store::version::StagingSstableInfo;
 use crate::hummock::{HummockError, HummockResult, ImmutableMemtable};
 use crate::mem_table::ImmId;
@@ -119,6 +120,20 @@ impl Debug for UploadingTask {
     }
 }
 
+fn get_payload_imm_ids(
+    payload: &UploadTaskInput,
+) -> HashMap<LocalInstanceId, Vec<SharedBufferBatchId>> {
+    payload
+        .iter()
+        .map(|(instance_id, imms)| {
+            (
+                *instance_id,
+                imms.iter().map(|imm| imm.batch_id()).collect_vec(),
+            )
+        })
+        .collect()
+}
+
 impl UploadingTask {
     // INFO logs will be enabled for task with size exceeding 50MB.
     const LOG_THRESHOLD_FOR_UPLOAD_TASK_SIZE: usize = 50 * (1 << 20);
@@ -134,15 +149,7 @@ impl UploadingTask {
 
         // reverse to make newer epochs comes first
         epochs.reverse();
-        let imm_ids = payload
-            .iter()
-            .map(|(instance_id, imms)| {
-                (
-                    *instance_id,
-                    imms.iter().map(|imm| imm.batch_id()).collect_vec(),
-                )
-            })
-            .collect();
+        let imm_ids = get_payload_imm_ids(&payload);
         let task_size = payload
             .values()
             .map(|imms| imms.iter().map(|imm| imm.size()).sum::<usize>())
@@ -624,7 +631,7 @@ impl HummockUploader {
         self.synced_data.get(&epoch)
     }
 
-    pub(crate) fn add_imm(&mut self, imm: ImmutableMemtable) {
+    pub(crate) fn add_imm(&mut self, instance_id: LocalInstanceId, imm: ImmutableMemtable) {
         let epoch = imm.min_epoch();
         assert!(
             epoch > self.max_sealed_epoch,
@@ -635,7 +642,7 @@ impl HummockUploader {
         let unsealed_data = self.unsealed_data.entry(epoch).or_default();
         unsealed_data
             .imms
-            .entry(imm.instance_id)
+            .entry(instance_id)
             .or_default()
             .push_front(imm);
     }
@@ -944,6 +951,7 @@ mod tests {
     use bytes::Bytes;
     use futures::future::BoxFuture;
     use futures::FutureExt;
+    use itertools::Itertools;
     use prometheus::core::GenericGauge;
     use risingwave_common::catalog::TableId;
     use risingwave_common::util::epoch::{test_epoch, EpochExt};
@@ -959,8 +967,8 @@ mod tests {
 
     use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
     use crate::hummock::event_handler::uploader::{
-        HummockUploader, UploadTaskInfo, UploadTaskInput, UploadTaskOutput, UploaderContext,
-        UploaderEvent, UploadingTask,
+        get_payload_imm_ids, HummockUploader, UploadTaskInfo, UploadTaskInput, UploadTaskOutput,
+        UploaderContext, UploaderEvent, UploadingTask,
     };
     use crate::hummock::event_handler::{LocalInstanceId, TEST_LOCAL_INSTANCE_ID};
     use crate::hummock::local_version::pinned_version::PinnedVersion;
@@ -1019,7 +1027,6 @@ mod tests {
             None,
             size,
             TEST_TABLE_ID,
-            TEST_LOCAL_INSTANCE_ID,
             tracker,
         )
     }
@@ -1106,10 +1113,7 @@ mod tests {
 
     impl UploadingTask {
         fn from_vec(imms: Vec<ImmutableMemtable>, context: &UploaderContext) -> Self {
-            let mut input: HashMap<_, Vec<_>> = HashMap::new();
-            for imm in imms {
-                input.entry(imm.instance_id).or_default().push(imm);
-            }
+            let input = HashMap::from_iter([(TEST_LOCAL_INSTANCE_ID, imms)]);
             Self::new(input, context)
         }
     }
@@ -1117,11 +1121,10 @@ mod tests {
     fn get_imm_ids<'a>(
         imms: impl IntoIterator<Item = &'a ImmutableMemtable>,
     ) -> HashMap<LocalInstanceId, Vec<SharedBufferBatchId>> {
-        let mut ret: HashMap<_, Vec<_>> = HashMap::new();
-        for imm in imms {
-            ret.entry(imm.instance_id).or_default().push(imm.batch_id())
-        }
-        ret
+        HashMap::from_iter([(
+            TEST_LOCAL_INSTANCE_ID,
+            imms.into_iter().map(|imm| imm.batch_id()).collect_vec(),
+        )])
     }
 
     #[tokio::test]
@@ -1200,7 +1203,8 @@ mod tests {
         let mut uploader = test_uploader(dummy_success_upload_future);
         let epoch1 = INITIAL_EPOCH.next_epoch();
         let imm = gen_imm(epoch1).await;
-        uploader.add_imm(imm.clone());
+
+        uploader.add_imm(TEST_LOCAL_INSTANCE_ID, imm.clone());
         assert_eq!(1, uploader.unsealed_data.len());
         assert_eq!(
             epoch1 as HummockEpoch,
@@ -1273,7 +1277,7 @@ mod tests {
         let epoch2 = epoch1.next_epoch();
         let imm = gen_imm(epoch2).await;
         // epoch1 is empty while epoch2 is not. Going to seal empty epoch1.
-        uploader.add_imm(imm);
+        uploader.add_imm(TEST_LOCAL_INSTANCE_ID, imm);
         uploader.seal_epoch(epoch1);
         assert_eq!(epoch1, uploader.max_sealed_epoch);
 
@@ -1329,7 +1333,7 @@ mod tests {
         assert_eq!(epoch1, uploader.max_syncing_epoch);
         assert_eq!(epoch1, uploader.max_sealed_epoch);
 
-        uploader.add_imm(gen_imm(epoch6).await);
+        uploader.add_imm(TEST_LOCAL_INSTANCE_ID, gen_imm(epoch6).await);
         uploader.update_pinned_version(version2);
         assert_eq!(epoch2, uploader.max_synced_epoch);
         assert_eq!(epoch2, uploader.max_syncing_epoch);
@@ -1441,17 +1445,25 @@ mod tests {
         let memory_limiter = buffer_tracker.get_memory_limiter().clone();
         let memory_limiter = Some(memory_limiter.deref());
 
+        let instance_id1 = 1;
+        let instance_id2 = 2;
+
         // imm2 contains data in newer epoch, but added first
         let imm2 = gen_imm_with_limiter(epoch2, memory_limiter).await;
-        uploader.add_imm(imm2.clone());
+        uploader.add_imm(instance_id2, imm2.clone());
         let imm1_1 = gen_imm_with_limiter(epoch1, memory_limiter).await;
-        uploader.add_imm(imm1_1.clone());
+        uploader.add_imm(instance_id1, imm1_1.clone());
         let imm1_2 = gen_imm_with_limiter(epoch1, memory_limiter).await;
-        uploader.add_imm(imm1_2.clone());
+        uploader.add_imm(instance_id1, imm1_2.clone());
 
         // imm1 will be spilled first
-        let (await_start1, finish_tx1) = new_task_notifier(get_imm_ids([&imm1_2, &imm1_1]));
-        let (await_start2, finish_tx2) = new_task_notifier(get_imm_ids([&imm2]));
+        let epoch1_spill_payload12 =
+            HashMap::from_iter([(instance_id1, vec![imm1_2.clone(), imm1_1.clone()])]);
+        let epoch2_spill_payload = HashMap::from_iter([(instance_id2, vec![imm2.clone()])]);
+        let (await_start1, finish_tx1) =
+            new_task_notifier(get_payload_imm_ids(&epoch1_spill_payload12));
+        let (await_start2, finish_tx2) =
+            new_task_notifier(get_payload_imm_ids(&epoch2_spill_payload));
         uploader.may_flush();
         await_start1.await;
         await_start2.await;
@@ -1463,27 +1475,31 @@ mod tests {
 
         finish_tx1.send(()).unwrap();
         if let UploaderEvent::DataSpilled(sst) = uploader.next_event().await {
-            assert_eq!(&get_imm_ids([&imm1_2, &imm1_1]), sst.imm_ids());
+            assert_eq!(&get_payload_imm_ids(&epoch1_spill_payload12), sst.imm_ids());
             assert_eq!(&vec![epoch1], sst.epochs());
         } else {
             unreachable!("")
         }
 
         if let UploaderEvent::DataSpilled(sst) = uploader.next_event().await {
-            assert_eq!(&get_imm_ids([&imm2]), sst.imm_ids());
+            assert_eq!(&get_payload_imm_ids(&epoch2_spill_payload), sst.imm_ids());
             assert_eq!(&vec![epoch2], sst.epochs());
         } else {
             unreachable!("")
         }
 
         let imm1_3 = gen_imm_with_limiter(epoch1, memory_limiter).await;
-        uploader.add_imm(imm1_3.clone());
-        let (await_start1_3, finish_tx1_3) = new_task_notifier(get_imm_ids([&imm1_3]));
+        uploader.add_imm(instance_id1, imm1_3.clone());
+        let epoch1_spill_payload3 = HashMap::from_iter([(instance_id1, vec![imm1_3.clone()])]);
+        let (await_start1_3, finish_tx1_3) =
+            new_task_notifier(get_payload_imm_ids(&epoch1_spill_payload3));
         uploader.may_flush();
         await_start1_3.await;
         let imm1_4 = gen_imm_with_limiter(epoch1, memory_limiter).await;
-        uploader.add_imm(imm1_4.clone());
-        let (await_start1_4, finish_tx1_4) = new_task_notifier(get_imm_ids([&imm1_4]));
+        uploader.add_imm(instance_id1, imm1_4.clone());
+        let epoch1_sync_payload = HashMap::from_iter([(instance_id1, vec![imm1_4.clone()])]);
+        let (await_start1_4, finish_tx1_4) =
+            new_task_notifier(get_payload_imm_ids(&epoch1_sync_payload));
         uploader.seal_epoch(epoch1);
         uploader.start_sync_epoch(epoch1);
         await_start1_4.await;
@@ -1497,17 +1513,21 @@ mod tests {
 
         let epoch3 = epoch2.next_epoch();
         let imm3_1 = gen_imm_with_limiter(epoch3, memory_limiter).await;
-        uploader.add_imm(imm3_1.clone());
-        let (await_start3_1, finish_tx3_1) = new_task_notifier(get_imm_ids([&imm3_1]));
+        let epoch3_spill_payload1 = HashMap::from_iter([(instance_id1, vec![imm3_1.clone()])]);
+        uploader.add_imm(instance_id1, imm3_1.clone());
+        let (await_start3_1, finish_tx3_1) =
+            new_task_notifier(get_payload_imm_ids(&epoch3_spill_payload1));
         uploader.may_flush();
         await_start3_1.await;
         let imm3_2 = gen_imm_with_limiter(epoch3, memory_limiter).await;
-        uploader.add_imm(imm3_2.clone());
-        let (await_start3_2, finish_tx3_2) = new_task_notifier(get_imm_ids([&imm3_2]));
+        let epoch3_spill_payload2 = HashMap::from_iter([(instance_id2, vec![imm3_2.clone()])]);
+        uploader.add_imm(instance_id2, imm3_2.clone());
+        let (await_start3_2, finish_tx3_2) =
+            new_task_notifier(get_payload_imm_ids(&epoch3_spill_payload2));
         uploader.may_flush();
         await_start3_2.await;
         let imm3_3 = gen_imm_with_limiter(epoch3, memory_limiter).await;
-        uploader.add_imm(imm3_3.clone());
+        uploader.add_imm(instance_id1, imm3_3.clone());
 
         // current uploader state:
         // unsealed: epoch3: imm: imm3_3, uploading: [imm3_2], [imm3_1]
@@ -1516,7 +1536,7 @@ mod tests {
 
         let epoch4 = epoch3.next_epoch();
         let imm4 = gen_imm_with_limiter(epoch4, memory_limiter).await;
-        uploader.add_imm(imm4.clone());
+        uploader.add_imm(instance_id1, imm4.clone());
         assert_uploader_pending(&mut uploader).await;
 
         // current uploader state:
@@ -1534,8 +1554,14 @@ mod tests {
         if let UploaderEvent::SyncFinish(epoch, newly_upload_sst) = uploader.next_event().await {
             assert_eq!(epoch1, epoch);
             assert_eq!(2, newly_upload_sst.len());
-            assert_eq!(&get_imm_ids([&imm1_4]), newly_upload_sst[0].imm_ids());
-            assert_eq!(&get_imm_ids([&imm1_3]), newly_upload_sst[1].imm_ids());
+            assert_eq!(
+                &get_payload_imm_ids(&epoch1_sync_payload),
+                newly_upload_sst[0].imm_ids()
+            );
+            assert_eq!(
+                &get_payload_imm_ids(&epoch1_spill_payload3),
+                newly_upload_sst[1].imm_ids()
+            );
         } else {
             unreachable!("should be sync finish");
         }
@@ -1547,9 +1573,18 @@ mod tests {
             .unwrap()
             .staging_ssts;
         assert_eq!(3, synced_data1.len());
-        assert_eq!(&get_imm_ids([&imm1_4]), synced_data1[0].imm_ids());
-        assert_eq!(&get_imm_ids([&imm1_3]), synced_data1[1].imm_ids());
-        assert_eq!(&get_imm_ids([&imm1_2, &imm1_1]), synced_data1[2].imm_ids());
+        assert_eq!(
+            &get_payload_imm_ids(&epoch1_sync_payload),
+            synced_data1[0].imm_ids()
+        );
+        assert_eq!(
+            &get_payload_imm_ids(&epoch1_spill_payload3),
+            synced_data1[1].imm_ids()
+        );
+        assert_eq!(
+            &get_payload_imm_ids(&epoch1_spill_payload12),
+            synced_data1[2].imm_ids()
+        );
 
         // current uploader state:
         // unsealed: epoch3: imm: imm3_3, uploading: [imm3_2], [imm3_1]
@@ -1573,7 +1608,10 @@ mod tests {
             .unwrap()
             .staging_ssts;
         assert_eq!(1, synced_data2.len());
-        assert_eq!(&get_imm_ids([&imm2]), synced_data2[0].imm_ids());
+        assert_eq!(
+            &get_payload_imm_ids(&epoch2_spill_payload),
+            synced_data2[0].imm_ids()
+        );
 
         // current uploader state:
         // unsealed: epoch3: imm: imm3_3, uploading: [imm3_2], [imm3_1]
@@ -1585,7 +1623,7 @@ mod tests {
 
         uploader.seal_epoch(epoch3);
         if let UploaderEvent::DataSpilled(sst) = uploader.next_event().await {
-            assert_eq!(&get_imm_ids([&imm3_1]), sst.imm_ids());
+            assert_eq!(&get_payload_imm_ids(&epoch3_spill_payload1), sst.imm_ids());
         } else {
             unreachable!("should be data spilled");
         }
@@ -1598,8 +1636,9 @@ mod tests {
         //         epoch2: sst([imm2])
 
         uploader.seal_epoch(epoch4);
+        let epoch4_sync_payload = HashMap::from_iter([(instance_id1, vec![imm4, imm3_3])]);
         let (await_start4_with_3_3, finish_tx4_with_3_3) =
-            new_task_notifier(get_imm_ids([&imm4, &imm3_3]));
+            new_task_notifier(get_payload_imm_ids(&epoch4_sync_payload));
         uploader.start_sync_epoch(epoch4);
         await_start4_with_3_3.await;
 
@@ -1619,10 +1658,13 @@ mod tests {
             assert_eq!(epoch4, epoch);
             assert_eq!(2, newly_upload_sst.len());
             assert_eq!(
-                &get_imm_ids([&imm4, &imm3_3]),
+                &get_payload_imm_ids(&epoch4_sync_payload),
                 newly_upload_sst[0].imm_ids()
             );
-            assert_eq!(&get_imm_ids([&imm3_2]), newly_upload_sst[1].imm_ids());
+            assert_eq!(
+                &get_payload_imm_ids(&epoch3_spill_payload2),
+                newly_upload_sst[1].imm_ids()
+            );
         } else {
             unreachable!("should be sync finish");
         }
@@ -1635,9 +1677,18 @@ mod tests {
             .staging_ssts;
         assert_eq!(3, synced_data4.len());
         assert_eq!(&vec![epoch4, epoch3], synced_data4[0].epochs());
-        assert_eq!(&get_imm_ids([&imm4, &imm3_3]), synced_data4[0].imm_ids());
-        assert_eq!(&get_imm_ids([&imm3_2]), synced_data4[1].imm_ids());
-        assert_eq!(&get_imm_ids([&imm3_1]), synced_data4[2].imm_ids());
+        assert_eq!(
+            &get_payload_imm_ids(&epoch4_sync_payload),
+            synced_data4[0].imm_ids()
+        );
+        assert_eq!(
+            &get_payload_imm_ids(&epoch3_spill_payload2),
+            synced_data4[1].imm_ids()
+        );
+        assert_eq!(
+            &get_payload_imm_ids(&epoch3_spill_payload1),
+            synced_data4[2].imm_ids()
+        );
 
         // current uploader state:
         // unsealed: empty

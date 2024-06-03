@@ -853,15 +853,14 @@ impl HummockEventHandler {
             HummockEvent::Shutdown => {
                 unreachable!("shutdown is handled specially")
             }
-            HummockEvent::ImmToUploader(imm) => {
+            HummockEvent::ImmToUploader { instance_id, imm } => {
                 assert!(
-                    self.local_read_version_mapping
-                        .contains_key(&imm.instance_id),
+                    self.local_read_version_mapping.contains_key(&instance_id),
                     "add imm from non-existing read version instance: instance_id: {}, table_id {}",
-                    imm.instance_id,
+                    instance_id,
                     imm.table_id,
                 );
-                self.uploader.add_imm(imm);
+                self.uploader.add_imm(instance_id, imm);
                 self.uploader.may_flush();
             }
 

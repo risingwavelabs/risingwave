@@ -38,7 +38,6 @@ use crate::hummock::compactor::compaction_filter::DummyCompactionFilter;
 use crate::hummock::compactor::context::{await_tree_key, CompactorContext};
 use crate::hummock::compactor::{check_flush_result, CompactOutput, Compactor};
 use crate::hummock::event_handler::uploader::{UploadTaskOutput, UploadTaskPayload};
-use crate::hummock::event_handler::LocalInstanceId;
 use crate::hummock::iterator::{Forward, HummockIterator, MergeIterator, UserIterator};
 use crate::hummock::shared_buffer::shared_buffer_batch::{
     SharedBufferBatch, SharedBufferBatchInner, SharedBufferBatchOldValues, SharedBufferKeyEntry,
@@ -321,7 +320,6 @@ async fn compact_shared_buffer<const IS_NEW_VALUE: bool>(
 /// Merge multiple batches into a larger one
 pub async fn merge_imms_in_memory(
     table_id: TableId,
-    instance_id: LocalInstanceId,
     imms: Vec<ImmutableMemtable>,
     memory_tracker: Option<MemoryTracker>,
 ) -> ImmutableMemtable {
@@ -456,7 +454,6 @@ pub async fn merge_imms_in_memory(
             memory_tracker,
         )),
         table_id,
-        instance_id,
     }
 }
 
