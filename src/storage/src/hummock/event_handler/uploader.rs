@@ -39,6 +39,7 @@ use tokio::task::JoinHandle;
 use tracing::{debug, error, info};
 
 use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
+use crate::hummock::event_handler::uploader::uploader_imm::UploaderImm;
 use crate::hummock::event_handler::LocalInstanceId;
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatchId;
@@ -48,8 +49,8 @@ use crate::mem_table::ImmId;
 use crate::monitor::HummockStateStoreMetrics;
 use crate::opts::StorageOpts;
 
-pub type UploadTaskInput = HashMap<LocalInstanceId, Vec<ImmutableMemtable>>;
-pub type UploadTaskPayload = Vec<ImmutableMemtable>;
+type UploadTaskInput = HashMap<LocalInstanceId, Vec<UploaderImm>>;
+pub type UploadTaskPayload = HashMap<LocalInstanceId, Vec<ImmutableMemtable>>;
 
 #[derive(Debug)]
 pub struct UploadTaskOutput {
@@ -58,7 +59,7 @@ pub struct UploadTaskOutput {
     pub wait_poll_timer: Option<HistogramTimer>,
 }
 pub type SpawnUploadTask = Arc<
-    dyn Fn(UploadTaskInput, UploadTaskInfo) -> JoinHandle<HummockResult<UploadTaskOutput>>
+    dyn Fn(UploadTaskPayload, UploadTaskInfo) -> JoinHandle<HummockResult<UploadTaskOutput>>
         + Send
         + Sync
         + 'static,
@@ -92,11 +93,66 @@ impl Debug for UploadTaskInfo {
     }
 }
 
+mod uploader_imm {
+    use std::fmt::Formatter;
+    use std::ops::Deref;
+
+    use prometheus::core::{AtomicU64, GenericGauge};
+
+    use crate::hummock::event_handler::uploader::UploaderContext;
+    use crate::mem_table::ImmutableMemtable;
+
+    pub(super) struct UploaderImm {
+        inner: ImmutableMemtable,
+        size_guard: GenericGauge<AtomicU64>,
+    }
+
+    impl UploaderImm {
+        pub(super) fn new(imm: ImmutableMemtable, context: &UploaderContext) -> Self {
+            let size = imm.size();
+            let size_guard = context.stats.uploader_imm_size.clone();
+            size_guard.add(size as _);
+            Self {
+                inner: imm,
+                size_guard,
+            }
+        }
+
+        #[cfg(test)]
+        pub(super) fn for_test(imm: ImmutableMemtable) -> Self {
+            Self {
+                inner: imm,
+                size_guard: GenericGauge::new("test", "test").unwrap(),
+            }
+        }
+    }
+
+    impl std::fmt::Debug for UploaderImm {
+        fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+            self.inner.fmt(f)
+        }
+    }
+
+    impl Deref for UploaderImm {
+        type Target = ImmutableMemtable;
+
+        fn deref(&self) -> &Self::Target {
+            &self.inner
+        }
+    }
+
+    impl Drop for UploaderImm {
+        fn drop(&mut self) {
+            self.size_guard.sub(self.inner.size() as _);
+        }
+    }
+}
+
 /// A wrapper for a uploading task that compacts and uploads the imm payload. Task context are
 /// stored so that when the task fails, it can be re-tried.
 struct UploadingTask {
     // newer data at the front
-    payload: UploadTaskInput,
+    input: UploadTaskInput,
     join_handle: JoinHandle<HummockResult<UploadTaskOutput>>,
     task_info: UploadTaskInfo,
     spawn_upload_task: SpawnUploadTask,
@@ -114,14 +170,14 @@ impl Drop for UploadingTask {
 impl Debug for UploadingTask {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("UploadingTask")
-            .field("payload", &self.payload)
+            .field("input", &self.input)
             .field("task_info", &self.task_info)
             .finish()
     }
 }
 
 fn get_payload_imm_ids(
-    payload: &UploadTaskInput,
+    payload: &UploadTaskPayload,
 ) -> HashMap<LocalInstanceId, Vec<SharedBufferBatchId>> {
     payload
         .iter()
@@ -138,9 +194,21 @@ impl UploadingTask {
     // INFO logs will be enabled for task with size exceeding 50MB.
     const LOG_THRESHOLD_FOR_UPLOAD_TASK_SIZE: usize = 50 * (1 << 20);
 
-    fn new(payload: UploadTaskInput, context: &UploaderContext) -> Self {
-        assert!(!payload.is_empty());
-        let mut epochs = payload
+    fn input_to_payload(input: &UploadTaskInput) -> UploadTaskPayload {
+        input
+            .iter()
+            .map(|(instance_id, imms)| {
+                (
+                    *instance_id,
+                    imms.iter().map(|imm| (**imm).clone()).collect(),
+                )
+            })
+            .collect()
+    }
+
+    fn new(input: UploadTaskInput, context: &UploaderContext) -> Self {
+        assert!(!input.is_empty());
+        let mut epochs = input
             .iter()
             .flat_map(|(_, imms)| imms.iter().flat_map(|imm| imm.epochs().iter().cloned()))
             .sorted()
@@ -149,8 +217,9 @@ impl UploadingTask {
 
         // reverse to make newer epochs comes first
         epochs.reverse();
+        let payload = Self::input_to_payload(&input);
         let imm_ids = get_payload_imm_ids(&payload);
-        let task_size = payload
+        let task_size = input
             .values()
             .map(|imms| imms.iter().map(|imm| imm.size()).sum::<usize>())
             .sum();
@@ -169,10 +238,10 @@ impl UploadingTask {
         } else {
             debug!("start upload task: {:?}", task_info);
         }
-        let join_handle = (context.spawn_upload_task)(payload.clone(), task_info.clone());
+        let join_handle = (context.spawn_upload_task)(payload, task_info.clone());
         context.stats.uploader_uploading_task_count.inc();
         Self {
-            payload,
+            input,
             join_handle,
             task_info,
             spawn_upload_task: context.spawn_upload_task.clone(),
@@ -222,8 +291,10 @@ impl UploadingTask {
                         task_info = ?self.task_info,
                         "a flush task failed, start retry",
                     );
-                    self.join_handle =
-                        (self.spawn_upload_task)(self.payload.clone(), self.task_info.clone());
+                    self.join_handle = (self.spawn_upload_task)(
+                        Self::input_to_payload(&self.input),
+                        self.task_info.clone(),
+                    );
                     // It is important not to return Poll::pending here immediately, because the new
                     // join_handle is not polled yet, and will not awake the current task when
                     // succeed. It will be polled in the next loop iteration.
@@ -290,7 +361,7 @@ impl SpilledData {
 #[derive(Default, Debug)]
 struct UnsealedEpochData {
     // newer data at the front
-    imms: HashMap<LocalInstanceId, VecDeque<ImmutableMemtable>>,
+    imms: HashMap<LocalInstanceId, VecDeque<UploaderImm>>,
     spilled_data: SpilledData,
 
     table_watermarks: HashMap<TableId, (WatermarkDirection, Vec<VnodeWatermark>, BitmapBuilder)>,
@@ -369,7 +440,7 @@ struct SealedData {
 
     // Sealed imms grouped by table shard.
     // newer data (larger imm id) at the front
-    imms_by_table_shard: HashMap<LocalInstanceId, VecDeque<ImmutableMemtable>>,
+    imms_by_table_shard: HashMap<LocalInstanceId, VecDeque<UploaderImm>>,
 
     spilled_data: SpilledData,
 
@@ -652,7 +723,7 @@ impl HummockUploader {
             .imms
             .entry(instance_id)
             .or_default()
-            .push_front(imm);
+            .push_front(UploaderImm::new(imm, &self.context));
     }
 
     pub(crate) fn add_table_watermarks(
@@ -988,8 +1059,9 @@ mod tests {
     use tokio::task::yield_now;
 
     use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
+    use crate::hummock::event_handler::uploader::uploader_imm::UploaderImm;
     use crate::hummock::event_handler::uploader::{
-        get_payload_imm_ids, HummockUploader, UploadTaskInfo, UploadTaskInput, UploadTaskOutput,
+        get_payload_imm_ids, HummockUploader, UploadTaskInfo, UploadTaskOutput, UploadTaskPayload,
         UploaderContext, UploaderEvent, UploadingTask,
     };
     use crate::hummock::event_handler::{LocalInstanceId, TEST_LOCAL_INSTANCE_ID};
@@ -1008,7 +1080,7 @@ mod tests {
     pub trait UploadOutputFuture =
         Future<Output = HummockResult<UploadTaskOutput>> + Send + 'static;
     pub trait UploadFn<Fut: UploadOutputFuture> =
-        Fn(UploadTaskInput, UploadTaskInfo) -> Fut + Send + Sync + 'static;
+        Fn(UploadTaskPayload, UploadTaskInfo) -> Fut + Send + Sync + 'static;
 
     fn test_hummock_version(epoch: HummockEpoch) -> HummockVersion {
         HummockVersion {
@@ -1119,7 +1191,7 @@ mod tests {
 
     #[allow(clippy::unused_async)]
     async fn dummy_success_upload_future(
-        _: UploadTaskInput,
+        _: UploadTaskPayload,
         _: UploadTaskInfo,
     ) -> HummockResult<UploadTaskOutput> {
         Ok(dummy_success_upload_output())
@@ -1127,7 +1199,7 @@ mod tests {
 
     #[allow(clippy::unused_async)]
     async fn dummy_fail_upload_future(
-        _: UploadTaskInput,
+        _: UploadTaskPayload,
         _: UploadTaskInfo,
     ) -> HummockResult<UploadTaskOutput> {
         Err(HummockError::other("failed"))
@@ -1135,7 +1207,10 @@ mod tests {
 
     impl UploadingTask {
         fn from_vec(imms: Vec<ImmutableMemtable>, context: &UploaderContext) -> Self {
-            let input = HashMap::from_iter([(TEST_LOCAL_INSTANCE_ID, imms)]);
+            let input = HashMap::from_iter([(
+                TEST_LOCAL_INSTANCE_ID,
+                imms.into_iter().map(UploaderImm::for_test).collect_vec(),
+            )]);
             Self::new(input, context)
         }
     }
@@ -1757,15 +1832,15 @@ mod tests {
             if total_memory > flush_threshold {
                 break;
             }
-            uploader.add_imm(imm);
+            uploader.add_imm(TEST_LOCAL_INSTANCE_ID, imm);
         }
         let imm = gen_imm_with_limiter(epoch1, Some(memory_limiter.as_ref())).await;
-        uploader.add_imm(imm);
+        uploader.add_imm(TEST_LOCAL_INSTANCE_ID, imm);
         assert!(uploader.may_flush());
 
         for _ in 0..10 {
             let imm = gen_imm_with_limiter(epoch1, Some(memory_limiter.as_ref())).await;
-            uploader.add_imm(imm);
+            uploader.add_imm(TEST_LOCAL_INSTANCE_ID, imm);
             assert!(!uploader.may_flush());
         }
     }
