@@ -446,7 +446,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         ) {
             // To prevent unbounded range scan queries from polluting the block cache, use the
             // low priority fill policy.
-            (Unbounded, _) | (_, Unbounded) => CachePolicy::Fill(CacheContext::LruPriorityLow),
+            (Unbounded, _) | (_, Unbounded) => CachePolicy::Fill(CacheContext::LowPriority),
             _ => CachePolicy::Fill(CacheContext::Default),
         };
 

@@ -160,30 +160,26 @@ algorithm = "Lru"
 dir = ""
 capacity_mb = 1024
 file_capacity_mb = 64
-device_align = 4096
-device_io_size = 16384
 flushers = 4
 reclaimers = 4
 recover_concurrency = 8
 lfu_window_to_cache_size_ratio = 1
 lfu_tiny_lru_capacity_ratio = 0.01
 insert_rate_limit_mb = 0
-catalog_bits = 6
+indexer_shards = 64
 compression = "none"
 
 [storage.meta_file_cache]
 dir = ""
 capacity_mb = 1024
 file_capacity_mb = 64
-device_align = 4096
-device_io_size = 16384
 flushers = 4
 reclaimers = 4
 recover_concurrency = 8
 lfu_window_to_cache_size_ratio = 1
 lfu_tiny_lru_capacity_ratio = 0.01
 insert_rate_limit_mb = 0
-catalog_bits = 6
+indexer_shards = 64
 compression = "none"
 
 [storage.cache_refill]

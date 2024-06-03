@@ -671,6 +671,11 @@ message RiseCtlListCompactionGroupResponse {
 }
 
 message RiseCtlUpdateCompactionConfigRequest {
+  message CompressionAlgorithm {
+    uint32 level = 1;
+    string compression_algorithm = 2;
+  }
+
   message MutableConfig {
     oneof mutable_config {
       uint64 max_bytes_for_level_base = 1;
@@ -688,6 +693,7 @@ message RiseCtlUpdateCompactionConfigRequest {
       uint64 level0_max_compact_file_number = 14;
       bool enable_emergency_picker = 15;
       uint32 tombstone_reclaim_ratio = 16;
+      CompressionAlgorithm compression_algorithm = 17;
     }
   }
   repeated uint64 compaction_group_ids = 1;

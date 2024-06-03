@@ -22,6 +22,7 @@ use cmd_impl::hummock::SstDumpArgs;
 use itertools::Itertools;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_meta::backup_restore::RestoreOpts;
+use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::CompressionAlgorithm;
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
 use thiserror_ext::AsReport;
 
@@ -254,6 +255,10 @@ enum HummockCommands {
         enable_emergency_picker: Option<bool>,
         #[clap(long)]
         tombstone_reclaim_ratio: Option<u32>,
+        #[clap(long)]
+        compression_level: Option<u32>,
+        #[clap(long)]
+        compression_algorithm: Option<String>,
     },
     /// Split given compaction group into two. Moves the given tables to the new group.
     SplitCompactionGroup {
@@ -683,6 +688,8 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             level0_overlapping_sub_level_compact_level_count,
             enable_emergency_picker,
             tombstone_reclaim_ratio,
+            compression_level,
+            compression_algorithm,
         }) => {
             cmd_impl::hummock::update_compaction_config(
                 context,
@@ -703,6 +710,15 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                     level0_overlapping_sub_level_compact_level_count,
                     enable_emergency_picker,
                     tombstone_reclaim_ratio,
+                    if let Some(level) = compression_level {
+                        assert!(compression_algorithm.is_some());
+                        Some(CompressionAlgorithm {
+                            level,
+                            compression_algorithm: compression_algorithm.unwrap(),
+                        })
+                    } else {
+                        None
+                    },
                 ),
             )
             .await?

@@ -64,7 +64,7 @@ impl From<CacheContext> for TracedCachePriority {
     fn from(value: CacheContext) -> Self {
         match value {
             CacheContext::Default => Self::High,
-            CacheContext::LruPriorityLow => Self::Low,
+            CacheContext::LowPriority => Self::Low,
         }
     }
 }
@@ -73,7 +73,7 @@ impl From<TracedCachePriority> for CacheContext {
     fn from(value: TracedCachePriority) -> Self {
         match value {
             TracedCachePriority::High => Self::Default,
-            TracedCachePriority::Low => Self::LruPriorityLow,
+            TracedCachePriority::Low => Self::LowPriority,
         }
     }
 }
