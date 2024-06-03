@@ -20,7 +20,6 @@ use risingwave_common::config::{
 };
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsReader;
-use risingwave_meta_model_migration::{MigrationStatus, Migrator, MigratorTrait};
 use risingwave_meta_model_v2::prelude::Cluster;
 use risingwave_pb::meta::SystemParams;
 use risingwave_rpc_client::{StreamClientPool, StreamClientPoolRef};
@@ -351,6 +350,7 @@ impl MetaSrvEnv {
         init_system_params: SystemParams,
         init_session_config: SessionConfig,
         meta_store_impl: MetaStoreImpl,
+        is_sql_backend_cluster_first_launch: bool,
     ) -> MetaResult<Self> {
         let notification_manager =
             Arc::new(NotificationManager::new(meta_store_impl.clone()).await);
@@ -417,20 +417,12 @@ impl MetaSrvEnv {
                     .await?
                     .map(|c| c.cluster_id.to_string().into())
                     .unwrap();
-                let migrations = Migrator::get_applied_migrations(&sql_meta_store.conn).await?;
-                let mut cluster_first_launch = true;
-                // If `m20230908_072257_init` has been applied, it is the old cluster
-                for migration in migrations {
-                    if migration.name() == "m20230908_072257_init"
-                        && migration.status() == MigrationStatus::Applied
-                    {
-                        cluster_first_launch = false;
-                    }
-                }
+
                 let mut system_params = init_system_params;
                 // For new clusters, the name of the object store needs to be prefixed according to the object id.
                 // For old clusters, the prefix is ​​not divided for the sake of compatibility.
-                system_params.use_new_object_prefix_strategy = Some(cluster_first_launch);
+                system_params.use_new_object_prefix_strategy =
+                    Some(is_sql_backend_cluster_first_launch);
                 let system_param_controller = Arc::new(
                     SystemParamsController::new(
                         sql_meta_store.clone(),
@@ -548,6 +540,7 @@ impl MetaSrvEnv {
             risingwave_common::system_param::system_params_for_test(),
             Default::default(),
             MetaStoreImpl::Sql(SqlMetaStore::for_test().await),
+            true,
         )
         .await
         .unwrap()
@@ -561,6 +554,7 @@ impl MetaSrvEnv {
             risingwave_common::system_param::system_params_for_test(),
             Default::default(),
             MetaStoreImpl::Kv(MemStore::default().into_ref()),
+            true,
         )
         .await
         .unwrap()

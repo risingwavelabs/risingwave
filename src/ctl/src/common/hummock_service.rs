@@ -57,7 +57,10 @@ impl HummockServiceOpts {
     /// Currently, we will read these variables for meta:
     ///
     /// * `RW_HUMMOCK_URL`: hummock store address
-    pub fn from_env(data_dir: Option<String>) -> Result<Self> {
+    pub fn from_env(
+        data_dir: Option<String>,
+        use_new_object_prefix_strategy: bool,
+    ) -> Result<Self> {
         let hummock_url = match env::var("RW_HUMMOCK_URL") {
             Ok(url) => {
                 if !url.starts_with("hummock+") {
@@ -81,10 +84,6 @@ impl HummockServiceOpts {
                 ";
                 bail!(MESSAGE);
             }
-        };
-        let use_new_object_prefix_strategy = match env::var("RW_USE_NEW_OBJECT_PREFIX_STRATEGY") {
-            Ok(use_new_object_prefix_strategy) => use_new_object_prefix_strategy == "true",
-            _ => false,
         };
 
         Ok(Self {
