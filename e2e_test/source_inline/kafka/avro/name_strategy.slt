@@ -40,6 +40,7 @@ statement ok
 CREATE TABLE upsert_avro_json (
   PRIMARY KEY("ID")
 )
+INCLUDE KEY AS "ID"
 WITH (
   connector = 'kafka',
   properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
