@@ -16,7 +16,7 @@
 
 use auto_impl::auto_impl;
 use risingwave_common::types::DataType;
-pub use risingwave_connector_encdec::decoder::{
+pub use risingwave_connector_codec::decoder::{
     bail_uncategorized, uncategorized, Access, AccessError, AccessResult,
 };
 

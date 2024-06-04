@@ -1,5 +1,5 @@
 [package]
-name = "risingwave_connector_encdec"
+name = "risingwave_connector_codec"
 description = "Encoding and decoding between external data formats and RisingWave datum"
 version = { workspace = true }
 edition = { workspace = true }

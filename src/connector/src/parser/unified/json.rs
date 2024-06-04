@@ -25,7 +25,7 @@ use risingwave_common::types::{
     DataType, Date, Decimal, Int256, Interval, JsonbVal, ScalarImpl, Time, Timestamp, Timestamptz,
 };
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_connector_encdec::decoder::utils::extract_decimal;
+use risingwave_connector_codec::decoder::utils::extract_decimal;
 use simd_json::prelude::{
     TypedValue, ValueAsContainer, ValueAsScalar, ValueObjectAccess, ValueTryAsScalar,
 };
