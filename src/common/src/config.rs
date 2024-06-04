@@ -1038,8 +1038,8 @@ pub struct S3ObjectStoreDeveloperConfig {
     #[serde(default = "default::object_store_config::s3::developer::upload_concurrency")]
     pub upload_concurrency: usize,
 
-    #[serde(default = "default::object_store_config::s3::developer::streaming_read_buffer_size")]
-    pub streaming_read_buffer_size: usize,
+    #[serde(default)]
+    pub streaming_read_buffer_size: Option<usize>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
@@ -1889,10 +1889,6 @@ pub mod default {
 
                 pub fn upload_concurrency() -> usize {
                     8
-                }
-
-                pub fn streaming_read_buffer_size() -> usize {
-                    512 * (1 << 10)
                 }
             }
         }

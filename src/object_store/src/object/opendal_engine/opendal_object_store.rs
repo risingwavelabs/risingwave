@@ -140,7 +140,7 @@ impl ObjectStore for OpendalObjectStore {
             ObjectError::internal("opendal streaming read error")
         ));
         let range: Range<u64> = (range.start as u64)..(range.end as u64);
-        let reader = self
+        let reader_fut = self
             .op
             .clone()
             .layer(
@@ -158,9 +158,12 @@ impl ObjectStore for OpendalObjectStore {
             .layer(TimeoutLayer::new().with_io_timeout(Duration::from_millis(
                 self.config.retry.streaming_read_attempt_timeout_ms,
             )))
-            .reader_with(path)
-            .chunk(self.config.s3.developer.streaming_read_buffer_size)
-            .await?;
+            .reader_with(path);
+        let reader = if let Some(streaming_read_buffer_size) = self.config.s3.developer.streaming_read_buffer_size {
+            reader_fut.chunk(streaming_read_buffer_size).await?
+        } else {
+            reader_fut.await?
+        };
         let stream = reader.into_bytes_stream(range).await?.map(|item| {
             item.map(|b| Bytes::copy_from_slice(b.as_ref())).map_err(|e| {
                 ObjectError::internal(format!("reader into_stream fail {}", e.as_report()))
