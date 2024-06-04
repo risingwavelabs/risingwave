@@ -23,7 +23,6 @@ use arc_swap::ArcSwap;
 use await_tree::InstrumentAwait;
 use futures::FutureExt;
 use itertools::Itertools;
-use more_asserts::assert_gt;
 use parking_lot::RwLock;
 use prometheus::core::{AtomicU64, GenericGauge};
 use prometheus::{Histogram, IntGauge};
@@ -56,7 +55,7 @@ use crate::hummock::store::version::{
 };
 use crate::hummock::utils::validate_table_key_range;
 use crate::hummock::{
-    HummockError, HummockResult, MemoryLimiter, SstableObjectIdManager, SstableStoreRef, TrackerId,
+    HummockResult, MemoryLimiter, SstableObjectIdManager, SstableStoreRef, TrackerId,
 };
 use crate::mem_table::ImmutableMemtable;
 use crate::monitor::HummockStateStoreMetrics;
@@ -195,8 +194,6 @@ pub struct HummockEventHandler {
     hummock_event_tx: HummockEventSender,
     hummock_event_rx: HummockEventReceiver,
     version_update_rx: UnboundedReceiver<HummockVersionUpdate>,
-    // newer epoch at the front
-    pending_sync_requests: VecDeque<(HummockEpoch, oneshot::Sender<HummockResult<SyncResult>>)>,
     read_version_mapping: Arc<RwLock<ReadVersionMappingType>>,
     /// A copy of `read_version_mapping` but owned by event handler
     local_read_version_mapping: HashMap<LocalInstanceId, HummockReadVersionRef>,
@@ -363,7 +360,6 @@ impl HummockEventHandler {
             hummock_event_tx,
             hummock_event_rx,
             version_update_rx,
-            pending_sync_requests: Default::default(),
             version_update_notifier_tx,
             pinned_version: Arc::new(ArcSwap::from_pointee(pinned_version)),
             write_conflict_detector,
@@ -400,19 +396,16 @@ impl HummockEventHandler {
 
 // Handler for different events
 impl HummockEventHandler {
-    fn handle_epoch_synced(&mut self, epoch: HummockEpoch, result: HummockResult<SyncedData>) {
+    fn handle_epoch_synced(&mut self, epoch: HummockEpoch, data: SyncedData) {
         debug!("epoch has been synced: {}.", epoch);
-        let (prev_epoch, result_sender) =
-            self.pending_sync_requests.pop_back().expect("should exist");
-        assert_eq!(prev_epoch, epoch);
-        if let Ok(SyncedData {
+        let SyncedData {
             newly_upload_ssts: newly_uploaded_sstables,
             ..
-        }) = &result
+        } = data;
         {
             let newly_uploaded_sstables = newly_uploaded_sstables
-                .iter()
-                .map(|ssts| Arc::new(ssts.clone()))
+                .into_iter()
+                .map(Arc::new)
                 .collect_vec();
             if !newly_uploaded_sstables.is_empty() {
                 let related_instance_ids: HashSet<_> = newly_uploaded_sstables
@@ -435,8 +428,6 @@ impl HummockEventHandler {
                 });
             }
         };
-
-        send_sync_result(result_sender, to_sync_result(result));
     }
 
     /// This function will be performed under the protection of the `read_version_mapping` read
@@ -521,13 +512,8 @@ impl HummockEventHandler {
             new_sync_epoch,
             self.uploader.max_synced_epoch()
         );
-
-        self.uploader.start_sync_epoch(new_sync_epoch);
-        if let Some((prev_sync_epoch, _)) = self.pending_sync_requests.front() {
-            assert_gt!(new_sync_epoch, *prev_sync_epoch);
-        }
-        self.pending_sync_requests
-            .push_front((new_sync_epoch, sync_result_sender));
+        self.uploader
+            .start_sync_epoch(new_sync_epoch, sync_result_sender);
     }
 
     async fn handle_clear(&mut self, notifier: oneshot::Sender<()>, prev_epoch: u64) {
@@ -595,16 +581,6 @@ impl HummockEventHandler {
             warn!(
                 mce = self.uploader.max_committed_epoch(),
                 prev_epoch, "mce higher than clear prev_epoch"
-            );
-        }
-
-        for (epoch, result_sender) in self.pending_sync_requests.drain(..) {
-            send_sync_result(
-                result_sender,
-                Err(HummockError::other(format!(
-                    "the sync epoch {} has been cleared",
-                    epoch
-                ))),
             );
         }
 
@@ -776,12 +752,12 @@ impl HummockEventHandler {
 
     fn handle_uploader_event(&mut self, event: UploaderEvent) {
         match event {
-            UploaderEvent::SyncFinish(epoch, result) => {
+            UploaderEvent::SyncFinish(epoch, data) => {
                 let _timer = self
                     .metrics
                     .event_handler_on_sync_finish_latency
                     .start_timer();
-                self.handle_epoch_synced(epoch, result);
+                self.handle_epoch_synced(epoch, data);
             }
 
             UploaderEvent::DataSpilled(staging_sstable_info) => {
@@ -958,48 +934,38 @@ impl HummockEventHandler {
     }
 }
 
-fn send_sync_result(
+pub(super) fn send_sync_result(
     sender: oneshot::Sender<HummockResult<SyncResult>>,
-    result: HummockResult<SyncResult>,
+    result: HummockResult<&SyncedData>,
 ) {
-    let _ = sender.send(result).inspect_err(|e| {
-        error!("unable to send sync result. Err: {:?}", e);
-    });
-}
-
-fn to_sync_result(result: HummockResult<SyncedData>) -> HummockResult<SyncResult> {
-    match result {
-        Ok(SyncedData {
-            newly_upload_ssts,
-            uploaded_ssts,
-            table_watermarks,
-        }) => {
+    let result = result.map(
+        |SyncedData {
+             newly_upload_ssts,
+             uploaded_ssts,
+             table_watermarks,
+         }| {
             let mut sync_size = 0;
             let mut uncommitted_ssts = Vec::new();
             let mut old_value_ssts = Vec::new();
             // The newly uploaded `sstable_infos` contains newer data. Therefore,
             // `newly_upload_ssts` at the front
-            for sst in newly_upload_ssts
-                .into_iter()
-                .chain(uploaded_ssts.into_iter())
-            {
+            for sst in newly_upload_ssts.iter().chain(uploaded_ssts.iter()) {
                 sync_size += sst.imm_size();
-                let (new_values, old_values) = sst.into_ssts();
-                uncommitted_ssts.extend(new_values);
-                old_value_ssts.extend(old_values);
+                uncommitted_ssts.extend(sst.sstable_infos().iter().cloned());
+                old_value_ssts.extend(sst.old_value_sstable_infos().iter().cloned());
             }
-            Ok(SyncResult {
+            SyncResult {
                 sync_size,
                 uncommitted_ssts,
-                table_watermarks,
+                table_watermarks: table_watermarks.clone(),
                 old_value_ssts,
-            })
-        }
-        Err(e) => Err(HummockError::other(format!(
-            "sync task failed: {}",
-            e.as_report()
-        ))),
-    }
+            }
+        },
+    );
+
+    let _ = sender.send(result).inspect_err(|e| {
+        error!("unable to send sync result. Err: {:?}", e);
+    });
 }
 
 #[cfg(test)]
