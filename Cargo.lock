@@ -3678,7 +3678,7 @@ dependencies = [
 name = "delta_btree_map"
 version = "1.9.0-alpha"
 dependencies = [
- "educe 0.5.7",
+ "educe 0.5.11",
  "enum-as-inner 0.6.0",
 ]
 
@@ -4410,7 +4410,7 @@ dependencies = [
  "serde",
  "thiserror",
  "time",
- "winnow 0.6.9",
+ "winnow 0.6.11",
 ]
 
 [[package]]
@@ -4490,9 +4490,9 @@ dependencies = [
 
 [[package]]
 name = "educe"
-version = "0.5.7"
+version = "0.5.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "597b6c9e278fefec3b25dfbb86195aeafe270dc6f13e27a3a20a95ba449f1bfb"
+checksum = "e4bd92664bf78c4d3dba9b7cdafce6fa15b13ed3ed16175218196942e99168a8"
 dependencies = [
  "enum-ordinalize 4.3.0",
  "proc-macro2",
@@ -9535,7 +9535,7 @@ dependencies = [
  "indoc",
  "libc",
  "memoffset",
- "parking_lot 0.11.2",
+ "parking_lot 0.12.1",
  "portable-atomic",
  "pyo3-build-config",
  "pyo3-ffi",
@@ -10382,7 +10382,7 @@ dependencies = [
  "criterion",
  "darwin-libproc",
  "easy-ext",
- "educe 0.5.7",
+ "educe 0.5.11",
  "either",
  "enum-as-inner 0.6.0",
  "enumflags2",
@@ -10470,7 +10470,7 @@ name = "risingwave_common_estimate_size"
 version = "1.9.0-alpha"
 dependencies = [
  "bytes",
- "educe 0.5.7",
+ "educe 0.5.11",
  "ethnum",
  "fixedbitset 0.5.0",
  "jsonbb",
@@ -10895,7 +10895,7 @@ dependencies = [
  "const-currying",
  "downcast-rs",
  "easy-ext",
- "educe 0.5.7",
+ "educe 0.5.11",
  "either",
  "enum-as-inner 0.6.0",
  "expect-test",
@@ -10940,7 +10940,7 @@ dependencies = [
  "chrono",
  "chrono-tz 0.9.0",
  "criterion",
- "educe 0.5.7",
+ "educe 0.5.11",
  "expect-test",
  "fancy-regex",
  "futures-async-stream",
@@ -11007,7 +11007,7 @@ dependencies = [
  "downcast-rs",
  "dyn-clone",
  "easy-ext",
- "educe 0.5.7",
+ "educe 0.5.11",
  "either",
  "enum-as-inner 0.6.0",
  "expect-test",
@@ -11617,7 +11617,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "walkdir",
- "winnow 0.6.9",
+ "winnow 0.6.11",
  "workspace-hack",
 ]
 
@@ -11756,7 +11756,7 @@ dependencies = [
  "cfg-if",
  "criterion",
  "delta_btree_map",
- "educe 0.5.7",
+ "educe 0.5.11",
  "either",
  "enum-as-inner 0.6.0",
  "expect-test",
@@ -14773,7 +14773,7 @@ dependencies = [
  "serde",
  "serde_spanned",
  "toml_datetime",
- "winnow 0.6.9",
+ "winnow 0.6.11",
 ]
 
 [[package]]
@@ -16509,9 +16509,9 @@ dependencies = [
 
 [[package]]
 name = "winnow"
-version = "0.6.9"
+version = "0.6.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "86c949fede1d13936a99f14fafd3e76fd642b556dd2ce96287fbe2e0151bfac6"
+checksum = "56c52728401e1dc672a56e81e593e912aa54c78f40246869f78359a2bf24d29d"
 dependencies = [
  "memchr",
 ]
