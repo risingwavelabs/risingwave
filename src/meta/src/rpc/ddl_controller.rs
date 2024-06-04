@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Duration;
@@ -25,7 +25,7 @@ use anyhow::Context;
 use itertools::Itertools;
 use rand::{Rng, RngCore};
 use risingwave_common::config::DefaultParallelism;
-use risingwave_common::hash::{ParallelUnitMapping, VirtualNode, WorkerSlotMapping};
+use risingwave_common::hash::{ActorId, VirtualNode, WorkerSlotId, WorkerSlotMapping};
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::epoch::Epoch;
@@ -1194,25 +1194,38 @@ impl DdlController {
             .collect_vec();
 
         let dist_key_indices = table.distribution_key.iter().map(|i| *i as _).collect_vec();
-        //
-        // let mapping = downstream_actor_ids
-        //     .iter()
-        //     .map(|id| {
-        //         let actor_status = table_fragments.actor_status.get(id).unwrap();
-        //         let worker_id = actor_status.parallel_unit.as_ref().unwrap().worker_node_id;
-        //
-        //         (parallel_unit_id, *id)
-        //     })
-        //     .collect();
-        //
-        // assert!(union_fragment.vnode_mapping.is_none());
-        // let worker_slot_mapping = WorkerSlotMapping::from_protobuf(union_fragment.vnode_mapping_v2.as_ref().unwrap());
-        //
-        // let actor_mapping = worker_slot_mapping.to_actor()
-        //
-        // let actor_mapping =
-        //     ParallelUnitMapping::from_protobuf(union_fragment.vnode_mapping.as_ref().unwrap())
-        //         .to_actor(&mapping);
+
+        let mapping: HashMap<_, _> = downstream_actor_ids
+            .iter()
+            .map(|id| {
+                let actor_status = table_fragments.actor_status.get(id).unwrap();
+                let worker_id = actor_status.parallel_unit.as_ref().unwrap().worker_node_id;
+                (worker_id, *id)
+            })
+            .fold(
+                HashMap::<u32, BTreeSet<_>>::new(),
+                |mut acc: HashMap<u32, BTreeSet<_>>, (worker_id, actor_id)| {
+                    acc.entry(worker_id).or_default().insert(actor_id);
+                    acc
+                },
+            )
+            .into_iter()
+            .flat_map(|(worker_id, actor_ids)| {
+                actor_ids
+                    .into_iter()
+                    .enumerate()
+                    .map(move |(slot_id, actor_id)| {
+                        (
+                            WorkerSlotId::new(worker_id, slot_id as _),
+                            actor_id as ActorId,
+                        )
+                    })
+            })
+            .collect();
+
+        let worker_slot_mapping =
+            WorkerSlotMapping::from_protobuf(union_fragment.vnode_mapping_v2.as_ref().unwrap());
+        let actor_mapping = worker_slot_mapping.to_actor(&mapping);
 
         let upstream_actors = sink_fragment.get_actors();
 
@@ -2004,7 +2017,11 @@ impl DdlController {
             .expect("mview fragment not found");
 
         // Map the column indices in the dispatchers with the given mapping.
-        let downstream_fragments = self.metadata_manager.get_downstream_chain_fragments(id).await?
+        let (downstream_fragments, downstream_actor_locations) = self
+            .metadata_manager
+            .get_downstream_chain_fragments(id)
+            .await?;
+        let downstream_fragments = downstream_fragments
             .into_iter()
             .map(|(d, f)|
                 if let Some(mapping) = &table_col_index_mapping {
@@ -2024,6 +2041,7 @@ impl DdlController {
             fragment_graph,
             original_table_fragment.fragment_id,
             downstream_fragments,
+            downstream_actor_locations,
             stream_job.into(),
         )?;
 

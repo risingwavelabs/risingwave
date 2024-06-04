@@ -559,6 +559,7 @@ pub struct FragmentGraphUpstreamContext {
 pub struct FragmentGraphDownstreamContext {
     original_table_fragment_id: FragmentId,
     downstream_fragments: Vec<(DispatchStrategy, Fragment)>,
+    downstream_actor_location: HashMap<ActorId, u32>,
 }
 
 impl CompleteStreamFragmentGraph {
@@ -600,6 +601,7 @@ impl CompleteStreamFragmentGraph {
         graph: StreamFragmentGraph,
         original_table_fragment_id: FragmentId,
         downstream_fragments: Vec<(DispatchStrategy, Fragment)>,
+        existing_actor_location: HashMap<ActorId, u32>,
         ddl_type: DdlType,
     ) -> MetaResult<Self> {
         Self::build_helper(
@@ -608,6 +610,7 @@ impl CompleteStreamFragmentGraph {
             Some(FragmentGraphDownstreamContext {
                 original_table_fragment_id,
                 downstream_fragments,
+                downstream_actor_location: existing_actor_location,
             }),
             ddl_type,
         )
@@ -798,6 +801,7 @@ impl CompleteStreamFragmentGraph {
         if let Some(FragmentGraphDownstreamContext {
             original_table_fragment_id,
             downstream_fragments,
+            downstream_actor_location,
         }) = downstream_ctx
         {
             let original_table_fragment_id = GlobalFragmentId::new(original_table_fragment_id);
@@ -833,6 +837,8 @@ impl CompleteStreamFragmentGraph {
                     .into_iter()
                     .map(|(_, f)| (GlobalFragmentId::new(f.fragment_id), f)),
             );
+
+            existing_actor_location.extend(downstream_actor_location);
         }
 
         Ok(Self {

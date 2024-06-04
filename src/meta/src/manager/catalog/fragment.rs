@@ -1507,7 +1507,7 @@ impl FragmentManager {
     pub async fn get_downstream_fragments(
         &self,
         table_id: TableId,
-    ) -> MetaResult<Vec<(DispatchStrategy, Fragment)>> {
+    ) -> MetaResult<(Vec<(DispatchStrategy, Fragment)>, HashMap<ActorId, u32>)> {
         let map = &self.core.read().await.table_fragments;
 
         let table_fragments = map
@@ -1549,7 +1549,21 @@ impl FragmentManager {
 
         assert_eq!(downstream_dispatches.len(), fragments.len());
 
-        Ok(fragments)
+        let mut actor_locations = HashMap::new();
+
+        map.values().for_each(|table_fragments| {
+            table_fragments
+                .actor_status
+                .iter()
+                .for_each(|(actor_id, status)| {
+                    actor_locations.insert(
+                        *actor_id,
+                        status.get_parallel_unit().unwrap().worker_node_id,
+                    );
+                });
+        });
+
+        Ok((fragments, actor_locations))
     }
 
     /// Get the `Materialize` fragment of the specified table.

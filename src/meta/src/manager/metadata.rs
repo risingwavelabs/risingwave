@@ -542,17 +542,18 @@ impl MetadataManager {
     pub async fn get_downstream_chain_fragments(
         &self,
         job_id: u32,
-    ) -> MetaResult<Vec<(PbDispatchStrategy, PbFragment)>> {
+    ) -> MetaResult<(Vec<(PbDispatchStrategy, PbFragment)>, HashMap<ActorId, u32>)> {
         match &self {
             MetadataManager::V1(mgr) => {
                 mgr.fragment_manager
                     .get_downstream_fragments(job_id.into())
                     .await
             }
-            MetadataManager::V2(mgr) => {
-                mgr.catalog_controller
-                    .get_downstream_chain_fragments(job_id as _)
-                    .await
+            MetadataManager::V2(_mgr) => {
+                todo!()
+                // mgr.catalog_controller
+                //     .get_downstream_chain_fragments(job_id as _)
+                //     .await
             }
         }
     }

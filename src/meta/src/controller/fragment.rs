@@ -1504,6 +1504,7 @@ mod tests {
             distribution_type: PbFragmentDistributionType::Hash as _,
             actors: pb_actors.clone(),
             vnode_mapping: Some(parallel_unit_mapping.to_protobuf()),
+            vnode_mapping_v2: None,
             state_table_ids: vec![TEST_STATE_TABLE_ID as _],
             upstream_fragment_ids: upstream_actor_ids
                 .values()
@@ -1771,6 +1772,7 @@ mod tests {
             distribution_type: pb_distribution_type,
             actors: _,
             vnode_mapping: pb_vnode_mapping,
+            vnode_mapping_v2,
             state_table_ids: pb_state_table_ids,
             upstream_fragment_ids: pb_upstream_fragment_ids,
         } = pb_fragment;

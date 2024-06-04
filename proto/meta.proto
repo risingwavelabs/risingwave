@@ -69,8 +69,6 @@ message TableFragments {
     common.ParallelUnit parallel_unit = 1;
     // Current state
     ActorState state = 2;
-
-    uint64 worker_slot_id = 3;
   }
   message Fragment {
     enum FragmentDistributionType {

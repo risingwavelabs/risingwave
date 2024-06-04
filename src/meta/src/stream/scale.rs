@@ -31,9 +31,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::hash::{ActorMapping, ParallelUnitId, VirtualNode};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_meta_model_v2::StreamingParallelism;
-use risingwave_pb::common::{
-    ActorInfo, Buffer, ParallelUnit, ParallelUnitMapping, WorkerNode, WorkerType,
-};
+use risingwave_pb::common::{ActorInfo, Buffer, ParallelUnit, WorkerNode, WorkerType};
 use risingwave_pb::meta::get_reschedule_plan_request::{Policy, StableResizePolicy};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
