@@ -28,11 +28,10 @@ use risingwave_pb::hummock::compact_task::{self};
 use risingwave_pb::hummock::group_delta::DeltaType;
 use risingwave_pb::hummock::hummock_version_delta::{ChangeLogDelta, GroupDeltas};
 use risingwave_pb::hummock::{
-    CompatibilityVersion, GroupConstruct, GroupDelta, GroupMetaChange, HummockSnapshot,
-    IntraLevelDelta,
+    CompatibilityVersion, GroupConstruct, GroupDelta, HummockSnapshot, IntraLevelDelta,
 };
 
-use crate::hummock::error::{Error, Result};
+use crate::hummock::error::Result;
 use crate::hummock::manager::transaction::{
     HummockVersionStatsTransaction, HummockVersionTransaction,
 };

@@ -306,8 +306,12 @@ pub fn start_compactor(
         .ceil() as u32;
     let running_task_parallelism = Arc::new(AtomicU32::new(0));
 
-    const MAX_PULL_TASK_COUNT: u32 = 4;
-    let max_pull_task_count = std::cmp::min(max_task_parallelism, MAX_PULL_TASK_COUNT);
+    let max_pull_task_count = std::cmp::min(
+        max_task_parallelism,
+        compactor_context
+            .storage_opts
+            .compactor_max_pull_task_per_round as u32,
+    );
 
     assert_ge!(
         compactor_context.storage_opts.compactor_max_task_multiplier,

@@ -131,6 +131,8 @@ pub struct StorageOpts {
     pub compactor_fast_max_compact_delete_ratio: u32,
     pub compactor_fast_max_compact_task_size: u64,
 
+    pub compactor_max_pull_task_per_round: usize,
+
     pub mem_table_spill_threshold: usize,
 
     pub object_store_config: ObjectStoreConfig,
@@ -242,6 +244,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
                 .compactor_fast_max_compact_delete_ratio,
             compactor_fast_max_compact_task_size: c.storage.compactor_fast_max_compact_task_size,
             compactor_iter_max_io_retry_times: c.storage.compactor_iter_max_io_retry_times,
+            compactor_max_pull_task_per_round: c.storage.compactor_max_pull_task_per_round,
         }
     }
 }

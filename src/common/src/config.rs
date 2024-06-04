@@ -750,6 +750,9 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::compactor_iter_max_io_retry_times")]
     pub compactor_iter_max_io_retry_times: usize,
 
+    #[serde(default = "default::storage::compactor_max_pull_task_per_round")]
+    pub compactor_max_pull_task_per_round: usize,
+
     #[serde(default, flatten)]
     #[config_doc(omitted)]
     pub unrecognized: Unrecognized<Self>,
@@ -1481,6 +1484,10 @@ pub mod default {
             8
         }
 
+        pub fn compactor_max_pull_task_per_round() -> usize {
+            16
+        }
+
         pub fn compactor_max_sst_size() -> u64 {
             512 * 1024 * 1024 // 512m
         }
@@ -1700,7 +1707,7 @@ pub mod default {
         }
 
         pub fn max_trivial_move_task_count_per_loop() -> usize {
-            256
+            1024
         }
 
         pub fn max_get_task_probe_times() -> usize {

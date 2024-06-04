@@ -78,7 +78,7 @@ meta_cached_traces_num = 256
 meta_cached_traces_memory_limit_bytes = 134217728
 meta_enable_trivial_move = true
 meta_enable_check_task_level_overlap = false
-meta_max_trivial_move_task_count_per_loop = 256
+meta_max_trivial_move_task_count_per_loop = 1024
 meta_max_get_task_probe_times = 5
 
 [batch]
@@ -148,6 +148,7 @@ max_preload_io_retry_times = 3
 compactor_fast_max_compact_delete_ratio = 40
 compactor_fast_max_compact_task_size = 2147483648
 compactor_iter_max_io_retry_times = 8
+compactor_max_pull_task_per_round = 16
 mem_table_spill_threshold = 4194304
 
 [storage.cache.block_cache_eviction]
