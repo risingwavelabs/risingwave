@@ -25,7 +25,7 @@ use risingwave_common::monitor::connection::{RouterExt, TcpConfig};
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::telemetry::manager::TelemetryManager;
-use risingwave_common::telemetry::telemetry_env_enabled;
+use risingwave_common::telemetry::{report_scarf_enabled, report_to_scarf, telemetry_env_enabled};
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_common_service::tracing::TracingExtractLayer;
 use risingwave_meta::barrier::StreamRpcManager;
@@ -754,6 +754,11 @@ pub async fn start_service_as_election_leader(
     } else {
         tracing::info!("Telemetry didn't start due to meta backend or config");
     }
+    if report_scarf_enabled() {
+        tokio::spawn(report_to_scarf());
+    } else {
+        tracing::info!("Scarf reporting is disabled");
+    };
 
     if let Some(pair) = env.event_log_manager_ref().take_join_handle() {
         sub_tasks.push(pair);
