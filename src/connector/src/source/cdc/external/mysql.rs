@@ -104,7 +104,7 @@ impl MySqlExternalTable {
 
         let mut column_descs = vec![];
         let mut pk_names = vec![];
-        for col in table_schema.columns.iter() {
+        for col in &table_schema.columns {
             let data_type = type_to_rw_type(&col.col_type)?;
             column_descs.push(ColumnDesc::named(
                 col.name.clone(),
@@ -451,10 +451,21 @@ impl MySqlExternalTableReader {
         format!("`{}`", column)
     }
 }
+
 #[cfg(test)]
 mod tests {
+
+    use futures::pin_mut;
+    use futures_async_stream::for_await;
+    use maplit::{convert_args, hashmap};
+    use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
+    use risingwave_common::types::DataType;
+
     use crate::source::cdc::external::mysql::MySqlExternalTable;
-    use crate::source::cdc::external::ExternalTableConfig;
+    use crate::source::cdc::external::{
+        CdcOffset, ExternalTableConfig, ExternalTableReader, MySqlExternalTableReader, MySqlOffset,
+        SchemaTableName,
+    };
 
     #[ignore]
     #[tokio::test]
@@ -474,5 +485,82 @@ mod tests {
         let table = MySqlExternalTable::connect(config).await.unwrap();
         println!("columns: {:?}", &table.column_descs);
         println!("primary keys: {:?}", &table.pk_names);
+    }
+
+    #[test]
+    fn test_mysql_filter_expr() {
+        let cols = vec!["id".to_string()];
+        let expr = MySqlExternalTableReader::filter_expression(&cols);
+        assert_eq!(expr, "(`id` > :id)");
+
+        let cols = vec!["aa".to_string(), "bb".to_string(), "cc".to_string()];
+        let expr = MySqlExternalTableReader::filter_expression(&cols);
+        assert_eq!(
+            expr,
+            "(`aa` > :aa) OR ((`aa` = :aa) AND (`bb` > :bb)) OR ((`aa` = :aa) AND (`bb` = :bb) AND (`cc` > :cc))"
+        );
+    }
+
+    #[test]
+    fn test_mysql_binlog_offset() {
+        let off0_str = r#"{ "sourcePartition": { "server": "test" }, "sourceOffset": { "ts_sec": 1670876905, "file": "binlog.000001", "pos": 105622, "snapshot": true }, "isHeartbeat": false }"#;
+        let off1_str = r#"{ "sourcePartition": { "server": "test" }, "sourceOffset": { "ts_sec": 1670876905, "file": "binlog.000007", "pos": 1062363217, "snapshot": true }, "isHeartbeat": false }"#;
+        let off2_str = r#"{ "sourcePartition": { "server": "test" }, "sourceOffset": { "ts_sec": 1670876905, "file": "binlog.000007", "pos": 659687560, "snapshot": true }, "isHeartbeat": false }"#;
+        let off3_str = r#"{ "sourcePartition": { "server": "test" }, "sourceOffset": { "ts_sec": 1670876905, "file": "binlog.000008", "pos": 7665875, "snapshot": true }, "isHeartbeat": false }"#;
+        let off4_str = r#"{ "sourcePartition": { "server": "test" }, "sourceOffset": { "ts_sec": 1670876905, "file": "binlog.000008", "pos": 7665875, "snapshot": true }, "isHeartbeat": false }"#;
+
+        let off0 = CdcOffset::MySql(MySqlOffset::parse_debezium_offset(off0_str).unwrap());
+        let off1 = CdcOffset::MySql(MySqlOffset::parse_debezium_offset(off1_str).unwrap());
+        let off2 = CdcOffset::MySql(MySqlOffset::parse_debezium_offset(off2_str).unwrap());
+        let off3 = CdcOffset::MySql(MySqlOffset::parse_debezium_offset(off3_str).unwrap());
+        let off4 = CdcOffset::MySql(MySqlOffset::parse_debezium_offset(off4_str).unwrap());
+
+        assert!(off0 <= off1);
+        assert!(off1 > off2);
+        assert!(off2 < off3);
+        assert_eq!(off3, off4);
+    }
+
+    // manual test case
+    #[ignore]
+    #[tokio::test]
+    async fn test_mysql_table_reader() {
+        let columns = vec![
+            ColumnDesc::named("v1", ColumnId::new(1), DataType::Int32),
+            ColumnDesc::named("v2", ColumnId::new(2), DataType::Decimal),
+            ColumnDesc::named("v3", ColumnId::new(3), DataType::Varchar),
+            ColumnDesc::named("v4", ColumnId::new(4), DataType::Date),
+        ];
+        let rw_schema = Schema {
+            fields: columns.iter().map(Field::from).collect(),
+        };
+        let props = convert_args!(hashmap!(
+                "hostname" => "localhost",
+                "port" => "8306",
+                "username" => "root",
+                "password" => "123456",
+                "database.name" => "mytest",
+                "table.name" => "t1"));
+
+        let reader = MySqlExternalTableReader::new(props, rw_schema)
+            .await
+            .unwrap();
+        let offset = reader.current_cdc_offset().await.unwrap();
+        println!("BinlogOffset: {:?}", offset);
+
+        let off0_str = r#"{ "sourcePartition": { "server": "test" }, "sourceOffset": { "ts_sec": 1670876905, "file": "binlog.000001", "pos": 105622, "snapshot": true }, "isHeartbeat": false }"#;
+        let parser = MySqlExternalTableReader::get_cdc_offset_parser();
+        println!("parsed offset: {:?}", parser(off0_str).unwrap());
+        let table_name = SchemaTableName {
+            schema_name: "mytest".to_string(),
+            table_name: "t1".to_string(),
+        };
+
+        let stream = reader.snapshot_read(table_name, None, vec!["v1".to_string()], 1000);
+        pin_mut!(stream);
+        #[for_await]
+        for row in stream {
+            println!("OwnedRow: {:?}", row);
+        }
     }
 }

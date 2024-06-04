@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -29,7 +29,6 @@ use risingwave_common::catalog::{
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
 use risingwave_connector::source;
-use risingwave_connector::source::cdc::external::postgres::PostgresExternalTable;
 use risingwave_connector::source::cdc::external::{
     ExternalTableConfig, ExternalTableImpl, DATABASE_NAME_KEY, SCHEMA_NAME_KEY, TABLE_NAME_KEY,
 };
@@ -732,7 +731,7 @@ fn gen_table_plan_inner(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) async fn gen_create_table_plan_for_cdc_table(
+pub(crate) fn gen_create_table_plan_for_cdc_table(
     handler_args: HandlerArgs,
     explain_options: ExplainOptions,
     source: Arc<SourceCatalog>,
@@ -1001,8 +1000,7 @@ pub(super) async fn handle_create_table_plan(
                     resolved_table_name,
                     database_id,
                     schema_id,
-                )
-                .await?;
+                )?;
 
                 ((plan, None, table), TableJobType::SharedCdcSource)
             }

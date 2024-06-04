@@ -14,7 +14,6 @@
 
 use std::cmp::Ordering;
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
 use futures::stream::BoxStream;
@@ -23,11 +22,11 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use openssl::ssl::{SslConnector, SslMethod, SslVerifyMode};
 use postgres_openssl::MakeTlsConnector;
-use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId, Schema};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema};
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, StructType};
 use risingwave_common::util::iter_util::ZipEqFast;
-use sea_schema::postgres::def::{ColumnType, TableInfo, Type};
+use sea_schema::postgres::def::{ColumnType, TableInfo};
 use sea_schema::postgres::discovery::SchemaDiscovery;
 use serde_derive::{Deserialize, Serialize};
 use sqlx::postgres::{PgConnectOptions, PgSslMode};
@@ -114,7 +113,7 @@ impl PostgresExternalTable {
             .await?;
 
         let mut column_descs = vec![];
-        for col in table_schema.columns.iter() {
+        for col in &table_schema.columns {
             let data_type = type_to_rw_type(&col.col_type)?;
             column_descs.push(ColumnDesc::named(
                 col.name.clone(),
@@ -455,7 +454,6 @@ impl PostgresExternalTableReader {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
 
     use futures::pin_mut;
     use futures_async_stream::for_await;
@@ -463,9 +461,6 @@ mod tests {
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
     use risingwave_common::row::OwnedRow;
     use risingwave_common::types::{DataType, ScalarImpl};
-    use sea_schema::postgres::def::TableInfo;
-    use sea_schema::postgres::discovery::SchemaDiscovery;
-    use sqlx::PgPool;
 
     use crate::source::cdc::external::postgres::{
         PostgresExternalTable, PostgresExternalTableReader, PostgresOffset,

@@ -29,15 +29,12 @@ use risingwave_common::hash::{ParallelUnitMapping, VirtualNode};
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::epoch::Epoch;
-use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::util::stream_graph_visitor::{
     visit_fragment, visit_stream_node, visit_stream_node_cont_mut,
 };
 use risingwave_common::{bail, current_cluster_version};
 use risingwave_connector::dispatch_source_prop;
 use risingwave_connector::error::ConnectorError;
-use risingwave_connector::source::cdc::external::postgres::PostgresExternalTable;
-use risingwave_connector::source::cdc::external::ExternalTableConfig;
 use risingwave_connector::source::cdc::CdcSourceType;
 use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, SourceProperties, SplitEnumerator,
@@ -59,7 +56,6 @@ use risingwave_pb::ddl_service::{
 };
 use risingwave_pb::meta::table_fragments::PbFragment;
 use risingwave_pb::meta::PbTableParallelism;
-use risingwave_pb::plan_common::ColumnCatalog;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
     Dispatcher, DispatcherType, FragmentTypeFlag, MergeNode, PbStreamFragmentGraph,
