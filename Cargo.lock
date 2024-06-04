@@ -7895,7 +7895,7 @@ dependencies = [
 [[package]]
 name = "opendal"
 version = "0.46.0"
-source = "git+https://github.com/apache/opendal?rev=e2b5df1c3644a6ec678182d337910624e7baeaa6#e2b5df1c3644a6ec678182d337910624e7baeaa6"
+source = "git+https://github.com/apache/opendal?rev=759ffbafbc2cbd4f22b4bb1fc58d40294cf6bc52#759ffbafbc2cbd4f22b4bb1fc58d40294cf6bc52"
 dependencies = [
  "anyhow",
  "async-trait",
