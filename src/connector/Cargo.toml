@@ -34,7 +34,7 @@ await-tree = { workspace = true }
 aws-config = { workspace = true }
 aws-credential-types = { workspace = true }
 aws-msk-iam-sasl-signer = "1.0.0"
-aws-sdk-dynamodb = "1.23.0"
+aws-sdk-dynamodb = "1"
 aws-sdk-kinesis = { workspace = true }
 aws-sdk-s3 = { workspace = true }
 aws-smithy-http = { workspace = true }
