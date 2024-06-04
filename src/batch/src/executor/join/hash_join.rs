@@ -2568,7 +2568,7 @@ mod tests {
                 .collect();
 
             let cond = if has_non_equi_cond {
-                Some(Self::create_cond())
+                Some(Self::create_cond().into())
             } else {
                 None
             };
@@ -2586,6 +2586,7 @@ mod tests {
                 cond,
                 "HashJoinExecutor".to_string(),
                 chunk_size,
+                false,
                 shutdown_rx,
                 mem_ctx,
             ))
