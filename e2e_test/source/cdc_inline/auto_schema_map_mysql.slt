@@ -14,7 +14,7 @@ mysql --protocol=tcp -u root mytest -e "
         c_smallint smallint,
         c_mediumint mediumint,
         c_integer integer,
-        c_bigint bigint,
+        `c_Bigint` bigint,
         c_decimal decimal,
         c_float float,
         c_double double,
@@ -28,7 +28,7 @@ mysql --protocol=tcp -u root mytest -e "
         c_timestamp timestamp,
         c_enum ENUM('happy','sad','ok'),
         c_json JSON,
-        PRIMARY KEY (c_boolean,c_bigint,c_date)
+        PRIMARY KEY (c_boolean,`c_Bigint`,c_date)
     );
     INSERT INTO mysql_types_test VALUES ( False, 0, null, null, -8388608, -2147483647, 9223372036854775806, -10.0, -9999.999999, -10000.0, 'c', 'd', '', '', '1001-01-01', '-838:59:59.000000', '2000-01-01 00:00:00.000000', null, 'happy', '[1,2]');
     INSERT INTO mysql_types_test VALUES ( True, 1, -128, -32767, -8388608, -2147483647, -9223372036854775807, -10.0, -9999.999999, -10000.0, 'a', 'b', '', '', '1001-01-01', '00:00:00', '1998-01-01 00:00:00.000000', '1970-01-01 00:00:01', 'sad', '[3,4]');
@@ -62,7 +62,7 @@ c_tinyint smallint false NULL
 c_smallint smallint false NULL
 c_mediumint integer false NULL
 c_integer integer false NULL
-c_bigint bigint false NULL
+c_Bigint bigint false NULL
 c_decimal numeric false NULL
 c_float real false NULL
 c_double double precision false NULL
@@ -76,8 +76,8 @@ c_datetime timestamp without time zone false NULL
 c_timestamp timestamp with time zone false NULL
 c_enum character varying false NULL
 c_json jsonb false NULL
-primary key c_boolean, c_bigint, c_date NULL NULL
-distribution key c_boolean, c_bigint, c_date NULL NULL
+primary key c_boolean, c_Bigint, c_date NULL NULL
+distribution key c_boolean, c_Bigint, c_date NULL NULL
 table description rw_mysql_types_test NULL NULL
 
 query TTTTTTTTTTTTT
@@ -88,7 +88,7 @@ SELECT
     c_smallint,
     c_mediumint,
     c_integer,
-    c_bigint,
+    "c_Bigint",
     c_decimal,
     c_float,
     c_double,
