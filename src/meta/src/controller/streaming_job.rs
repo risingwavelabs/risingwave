@@ -541,12 +541,32 @@ impl CatalogController {
             return Err(MetaError::permission_denied("table version is stale"));
         }
 
+        // 2. check concurrent replace.
+        let replacing_cnt = ObjectDependency::find()
+            .join(
+                JoinType::InnerJoin,
+                object_dependency::Relation::Object1.def(),
+            )
+            .join(JoinType::InnerJoin, object::Relation::StreamingJob.def())
+            .filter(
+                object_dependency::Column::Oid
+                    .eq(id as ObjectId)
+                    .and(object::Column::ObjType.eq(ObjectType::Table))
+                    .and(streaming_job::Column::JobStatus.ne(JobStatus::Created)),
+            )
+            .count(&txn)
+            .await?;
+        if replacing_cnt != 0 {
+            assert_eq!(replacing_cnt, 1);
+            return Err(MetaError::permission_denied("table is being altered"));
+        }
+
         let parallelism = match specified_parallelism {
             None => StreamingParallelism::Adaptive,
             Some(n) => StreamingParallelism::Fixed(n.get() as _),
         };
 
-        // 2. create streaming object for new replace table.
+        // 3. create streaming object for new replace table.
         let obj_id = Self::create_streaming_job_obj(
             &txn,
             ObjectType::Table,
@@ -559,7 +579,7 @@ impl CatalogController {
         )
         .await?;
 
-        // 3. record dependency for new replace table.
+        // 4. record dependency for new replace table.
         ObjectDependency::insert(object_dependency::ActiveModel {
             oid: Set(id as _),
             used_by: Set(obj_id as _),
