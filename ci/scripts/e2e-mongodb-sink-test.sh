@@ -42,19 +42,19 @@ echo '> run mongodb sink test..'
 sqllogictest -p 4566 -d dev './e2e_test/sink/mongodb_sink.slt'
 sleep 1
 
-append_only_result=$(mongosh mongodb://mongodb:27017 --eval 'db.getSiblingDB("demo").t1.countDocuments({})' | tail -n 1)
+append_only_result=$(mongo mongodb://mongodb:27017 --eval 'db.getSiblingDB("demo").t1.countDocuments({})' | tail -n 1)
 if [ "$append_only_result" != "1" ]; then
     echo "The append-only output is not as expected."
     exit 1
 fi
 
-upsert_and_dynamic_coll_result1=$(mongosh mongodb://mongodb:27017 --eval 'db.getSiblingDB("demo").t2.countDocuments({})' | tail -n 1)
+upsert_and_dynamic_coll_result1=$(mongo mongodb://mongodb:27017 --eval 'db.getSiblingDB("demo").t2.countDocuments({})' | tail -n 1)
 if [ "$upsert_and_dynamic_coll_result1" != "1" ]; then
     echo "The append-only output is not as expected."
     exit 1
 fi
 
-upsert_and_dynamic_coll_result2=$(mongosh mongodb://mongodb:27017 --eval 'db.getSiblingDB("shard_2024_01").tenant_1.countDocuments({})' | tail -n 1)
+upsert_and_dynamic_coll_result2=$(mongo mongodb://mongodb:27017 --eval 'db.getSiblingDB("shard_2024_01").tenant_1.countDocuments({})' | tail -n 1)
 if [ "$upsert_and_dynamic_coll_result2" != "1" ]; then
     echo "The append-only output is not as expected."
     exit 1
