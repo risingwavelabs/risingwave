@@ -342,48 +342,42 @@ impl FunctionAttr {
             // no prebuilt argument
             (None, _) => quote! {},
         };
-        let variadic_args = variadic.then(|| quote! { variadic_row, });
+        let variadic_args = variadic.then(|| quote! { &variadic_row, });
         let context = user_fn.context.then(|| quote! { &self.context, });
         let writer = user_fn.write.then(|| quote! { &mut writer, });
         let await_ = user_fn.async_.then(|| quote! { .await });
 
-        let to_texts = inputs
-            .iter()
-            .zip(user_fn.args_option.iter())
-            .map(|(input, opt)| {
-                if *opt {
-                    quote! { if let Some(#input) = #input {
-                        #input.to_text()
+        let record_error = {
+            // Uniform arguments into `DatumRef`.
+            let inputs_args = inputs
+                .iter()
+                .zip(user_fn.args_option.iter())
+                .map(|(input, opt)| {
+                    if *opt {
+                        quote! { #input.map(|s| ScalarRefImpl::from(s)) }
                     } else {
-                        "NULL".to_owned()
-                    } }
-                } else {
-                    quote! { #input.to_text() }
+                        quote! { Some(ScalarRefImpl::from(#input)) }
+                    }
+                });
+            let inputs_args = quote! {
+                let args: &[DatumRef<'_>] = &[#(#inputs_args),*];
+                let args = args.iter().copied();
+            };
+            let var_args = variadic.then(|| {
+                quote! {
+                    let args = args.chain(variadic_row.iter());
                 }
             });
-        let writes = to_texts.enumerate().map(|(i, to_text)| {
-            let sep = (i > 0).then(|| quote! { write!(s, ", ").unwrap(); });
-            quote! {
-                #sep
-                write!(s, "{}", #to_text).unwrap();
-            }
-        });
 
-        let error_context = quote! {
-            let context = {
-                use risingwave_common::types::ToText;
-                use std::fmt::Write;
-                let mut s = String::new();
-                write!(s, stringify!(#fn_name)).unwrap();
-                write!(s, "(").unwrap();
-                #(#writes)*
-                write!(s, ")").unwrap();
-                s
-            };
-            errors.push(ExprError::Function {
-                expression: context.into(),
-                source: Box::new(e),
-            });
+            quote! {
+                #inputs_args
+                #var_args
+                errors.push(ExprError::function(
+                    stringify!(#fn_name),
+                    args,
+                    e,
+                ));
+            }
         };
 
         // call the user defined function
@@ -406,7 +400,7 @@ impl FunctionAttr {
                 match #output {
                     Ok(x) => Some(x),
                     Err(e) => {
-                        #error_context
+                        #record_error
                         None
                     }
                 }
@@ -415,7 +409,7 @@ impl FunctionAttr {
                 match #output {
                     Ok(x) => x,
                     Err(e) => {
-                        #error_context
+                        #record_error
                         None
                     }
                 }

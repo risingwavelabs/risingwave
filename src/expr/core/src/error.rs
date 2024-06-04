@@ -15,7 +15,7 @@
 use std::fmt::{Debug, Display};
 
 use risingwave_common::array::{ArrayError, ArrayRef};
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, DatumRef, ToText};
 use risingwave_pb::PbFieldNotFound;
 use thiserror::Error;
 use thiserror_ext::AsReport;
@@ -115,9 +115,11 @@ pub enum ExprError {
     Custom(String),
 
     /// Error from a function call.
-    #[error("error while evaluating expression `{expression}`")]
+    ///
+    /// Use [`ExprError::function`] to create this error.
+    #[error("error while evaluating expression `{display}`")]
     Function {
-        expression: Box<str>,
+        display: Box<str>,
         #[backtrace]
         // We don't use `anyhow::Error` because we don't want to always capture the backtrace.
         source: Box<dyn std::error::Error + Send + Sync>,
@@ -125,6 +127,38 @@ pub enum ExprError {
 }
 
 static_assertions::const_assert_eq!(std::mem::size_of::<ExprError>(), 40);
+
+impl ExprError {
+    pub fn function<'a>(
+        fn_name: &str,
+        args: impl IntoIterator<Item = DatumRef<'a>>,
+        source: impl Into<Box<dyn std::error::Error + Send + Sync>>,
+    ) -> Self {
+        use std::fmt::Write;
+
+        let display = {
+            let mut s = String::new();
+            write!(s, "{}(", fn_name).unwrap();
+            for (i, arg) in args.into_iter().enumerate() {
+                if i > 0 {
+                    write!(s, ", ").unwrap();
+                }
+                if let Some(arg) = arg {
+                    ToText::write(&arg, &mut s).unwrap();
+                } else {
+                    write!(s, "NULL").unwrap();
+                }
+            }
+            write!(s, ")").unwrap();
+            s
+        };
+
+        Self::Function {
+            display: display.into(),
+            source: source.into(),
+        }
+    }
+}
 
 impl From<chrono::ParseError> for ExprError {
     fn from(e: chrono::ParseError) -> Self {
