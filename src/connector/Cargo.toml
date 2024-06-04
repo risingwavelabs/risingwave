@@ -110,7 +110,7 @@ rdkafka = { workspace = true, features = [
 ] }
 redis = { version = "0.25", features = ["aio", "tokio-comp", "async-std-comp","cluster-async"] }
 regex = "1.4"
-reqwest = { version = "0.12.2", features = ["json", "stream"] }
+reqwest = { version = "0.12.4", features = ["json", "stream"] }
 risingwave_common = { workspace = true }
 risingwave_common_estimate_size = { workspace = true }
 risingwave_connector_codec = { workspace = true }
