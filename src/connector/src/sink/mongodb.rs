@@ -30,6 +30,7 @@ use risingwave_common::types::{DataType, JsonbVal, ScalarRefImpl};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use serde_derive::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
+use thiserror_ext::AsReport;
 use tonic::async_trait;
 use with_options::WithOptions;
 
@@ -394,7 +395,7 @@ fn bson_from_scalar_ref<'a>(field: &'a Field, datum: Option<ScalarRefImpl<'a>>) 
                     if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
                         tracing::warn!(
                             suppressed_count,
-                            ?err,
+                            error = %err.as_report(),
                             ?field,
                             "risingwave decimal {} convert to bson decimal128 failed",
                             decimal_str,
@@ -421,7 +422,7 @@ fn bson_from_scalar_ref<'a>(field: &'a Field, datum: Option<ScalarRefImpl<'a>>) 
                     if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
                         tracing::warn!(
                             suppressed_count,
-                            error = %err,
+                            error = %err.as_report(),
                             ?field,
                             "convert jsonb to mongodb bson failed",
                         );
@@ -643,7 +644,7 @@ impl MongodbPayloadWriter {
                         if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
                             tracing::warn!(
                                 suppressed_count,
-                                error = ?err,
+                                error = %err.as_report(),
                                 collection_name = %v,
                                 "parsing collection name failed, fallback to use default collection.name"
                             );
