@@ -19,7 +19,7 @@ use crate::keywords::Keyword;
 use crate::parser::Precedence;
 use crate::tokenizer::Token;
 
-fn expr<S>(input: &mut S) -> PResult<Expr>
+fn expr_parse<S>(input: &mut S) -> PResult<Expr>
 where
     S: TokenStream,
 {
@@ -45,17 +45,17 @@ where
     S: TokenStream,
 {
     let parse = (
-        opt(expr),
+        opt(expr_parse),
         repeat(
             1..,
             (
                 Keyword::WHEN,
-                cut_err(expr),
+                cut_err(expr_parse),
                 cut_err(Keyword::THEN),
-                cut_err(expr),
+                cut_err(expr_parse),
             ),
         ),
-        opt(preceded(Keyword::ELSE, cut_err(expr))),
+        opt(preceded(Keyword::ELSE, cut_err(expr_parse))),
         cut_err(Keyword::END),
     )
         .map(|(operand, branches, else_result, _)| {
@@ -79,7 +79,7 @@ where
 {
     let parse = cut_err(seq! {Expr::Cast {
         _: Token::LParen,
-        expr: expr.map(Box::new),
+        expr: expr_parse.map(Box::new),
         _: Keyword::AS,
         data_type: data_type,
         _: Token::RParen,
@@ -95,7 +95,7 @@ where
 {
     let parse = cut_err(seq! {Expr::TryCast {
         _: Token::LParen,
-        expr: expr.map(Box::new),
+        expr: expr_parse.map(Box::new),
         _: Keyword::AS,
         data_type: data_type,
         _: Token::RParen,
@@ -121,7 +121,7 @@ where
         _: Token::LParen,
         field: date_time_field,
         _: Keyword::FROM,
-        expr: expr.map(Box::new),
+        expr: expr_parse.map(Box::new),
         _: Token::RParen,
     }});
 
@@ -135,15 +135,15 @@ where
 {
     let mut substring_from = opt(preceded(
         alt((Token::Comma.void(), Keyword::FROM.void())),
-        cut_err(expr).map(Box::new),
+        cut_err(expr_parse).map(Box::new),
     ));
     let mut substring_for = opt(preceded(
         alt((Token::Comma.void(), Keyword::FOR.void())),
-        cut_err(expr).map(Box::new),
+        cut_err(expr_parse).map(Box::new),
     ));
     let parse = cut_err(seq! {Expr::Substring {
         _: Token::LParen,
-        expr: expr.map(Box::new),
+        expr: expr_parse.map(Box::new),
         substring_from: substring_from,
         substring_for: substring_for,
         _: Token::RParen,
@@ -169,4 +169,28 @@ where
     }});
 
     trace("expr_position", parse).parse_next(input)
+}
+
+/// `OVERLAY(<expr> PLACING <expr> FROM <expr> [ FOR <expr> ])`
+pub fn expr_overlay<S>(input: &mut S) -> PResult<Expr>
+where
+    S: TokenStream,
+{
+    let mut count_parse = opt(preceded(
+        Keyword::FOR.void(),
+        cut_err(expr_parse).map(Box::new),
+    ));
+
+    let parse = cut_err(seq! {Expr::Overlay {
+        _: Token::LParen,
+        expr: expr_parse.map(Box::new),
+        _: Keyword::PLACING,
+        new_substring: expr_parse.map(Box::new),
+        _: Keyword::FROM,
+        start: expr_parse.map(Box::new),
+        count: count_parse,
+        _: Token::RParen,
+    }});
+
+    trace("expr_overlay", parse).parse_next(input)
 }

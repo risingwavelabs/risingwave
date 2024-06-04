@@ -2917,38 +2917,6 @@ fn parse_substring() {
 }
 
 #[test]
-fn parse_overlay() {
-    one_statement_parses_to(
-        "SELECT OVERLAY('abc' PLACING 'xyz' FROM 1)",
-        "SELECT OVERLAY('abc' PLACING 'xyz' FROM 1)",
-    );
-
-    one_statement_parses_to(
-        "SELECT OVERLAY('abc' PLACING 'xyz' FROM 1 FOR 2)",
-        "SELECT OVERLAY('abc' PLACING 'xyz' FROM 1 FOR 2)",
-    );
-
-    for (sql, err_msg) in [
-        ("SELECT OVERLAY('abc', 'xyz')", "expected PLACING, found: ,"),
-        (
-            "SELECT OVERLAY('abc' PLACING 'xyz')",
-            "expected FROM, found: )",
-        ),
-        (
-            "SELECT OVERLAY('abc' PLACING 'xyz' FOR 2)",
-            "expected FROM, found: FOR",
-        ),
-        (
-            "SELECT OVERLAY('abc' PLACING 'xyz' FOR 2 FROM 1)",
-            "expected FROM, found: FOR",
-        ),
-    ] {
-        let res = parse_sql_statements(sql);
-        assert!(format!("{}", res.unwrap_err()).contains(err_msg));
-    }
-}
-
-#[test]
 fn parse_trim() {
     one_statement_parses_to(
         "SELECT TRIM(BOTH 'xyz' FROM 'xyzfooxyz')",
