@@ -386,7 +386,7 @@ impl AggSpillManager {
             let len_bytes = Bytes::copy_from_slice(&(buf.len() as u32).to_le_bytes());
             self.spill_metrics
                 .batch_spill_write_bytes
-                .inc_by(buf.len() as u64 + 4);
+                .inc_by((buf.len() + len_bytes.len()) as u64);
             self.agg_state_writers[partition].write(len_bytes).await?;
             self.agg_state_writers[partition].write(buf).await?;
         }
@@ -409,7 +409,7 @@ impl AggSpillManager {
                 let len_bytes = Bytes::copy_from_slice(&(buf.len() as u32).to_le_bytes());
                 self.spill_metrics
                     .batch_spill_write_bytes
-                    .inc_by(buf.len() as u64 + 4);
+                    .inc_by((buf.len() + len_bytes.len()) as u64);
                 self.input_writers[partition].write(len_bytes).await?;
                 self.input_writers[partition].write(buf).await?;
             }
@@ -425,7 +425,7 @@ impl AggSpillManager {
                 let len_bytes = Bytes::copy_from_slice(&(buf.len() as u32).to_le_bytes());
                 self.spill_metrics
                     .batch_spill_write_bytes
-                    .inc_by(buf.len() as u64 + 4);
+                    .inc_by((buf.len() + len_bytes.len()) as u64);
                 self.agg_state_writers[partition].write(len_bytes).await?;
                 self.agg_state_writers[partition].write(buf).await?;
             }
@@ -436,7 +436,7 @@ impl AggSpillManager {
                 let len_bytes = Bytes::copy_from_slice(&(buf.len() as u32).to_le_bytes());
                 self.spill_metrics
                     .batch_spill_write_bytes
-                    .inc_by(buf.len() as u64 + 4);
+                    .inc_by((buf.len() + len_bytes.len()) as u64);
                 self.input_writers[partition].write(len_bytes).await?;
                 self.input_writers[partition].write(buf).await?;
             }
