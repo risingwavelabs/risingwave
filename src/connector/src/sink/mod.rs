@@ -29,6 +29,7 @@ pub mod kafka;
 pub mod kinesis;
 pub mod log_store;
 pub mod mock_coordination_client;
+mod mongodb;
 pub mod mqtt;
 pub mod nats;
 pub mod pulsar;
@@ -41,7 +42,6 @@ pub mod test_sink;
 pub mod trivial;
 pub mod utils;
 pub mod writer;
-mod mongodb;
 
 use std::collections::HashMap;
 use std::future::Future;

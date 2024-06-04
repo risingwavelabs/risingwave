@@ -314,6 +314,16 @@ KinesisProperties:
     required: false
     alias:
     - kinesis.assumerole.external_id
+MongodbCommon:
+  fields:
+  - name: mongodb.url
+    field_type: String
+    comments: The URL of MongoDB
+    required: true
+  - name: collection.name
+    field_type: String
+    comments: The collection name where data should be written to or read from. For sinks, the format is  `db_name.collection_name`. Data can also be written to dynamic collections, see `collection.name.field`  for more information.
+    required: true
 MqttProperties:
   fields:
   - name: url

@@ -751,8 +751,8 @@ pub struct MongodbCommon {
     /// The URL of MongoDB
     #[serde(rename = "mongodb.url")]
     pub connect_uri: String,
-    /// The collection name where data should be sunk to or read from. For sinks, the format is
-    /// `db_name.collection_name`. Data can also be sunk to dynamic collections, see `collection.name.field`
+    /// The collection name where data should be written to or read from. For sinks, the format is
+    /// `db_name.collection_name`. Data can also be written to dynamic collections, see `collection.name.field`
     /// for more information.
     #[serde(rename = "collection.name")]
     pub collection_name: String,
