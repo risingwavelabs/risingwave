@@ -10,11 +10,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use winnow::combinator::{alt, cut_err, opt, preceded, repeat, seq, trace};
+use winnow::error::ContextError;
 use winnow::{PResult, Parser};
 
 use super::{data_type, token, ParserExt, TokenStream};
 use crate::ast::Expr;
 use crate::keywords::Keyword;
+use crate::parser::Precedence;
 use crate::tokenizer::Token;
 
 fn expr<S>(input: &mut S) -> PResult<Expr>
@@ -26,6 +28,16 @@ where
         input.parse_v1(|parser| parser.parse_expr())
     })
     .parse_next(input)
+}
+
+fn subexpr<S>(precedence: Precedence) -> impl Parser<S, Expr, ContextError>
+where
+    S: TokenStream,
+{
+    // TODO: implement this function using combinator style.
+    trace("subexpr", move |input: &mut S| {
+        input.parse_v1(|parser| parser.parse_subexpr(precedence))
+    })
 }
 
 pub fn expr_case<S>(input: &mut S) -> PResult<Expr>
@@ -138,4 +150,23 @@ where
     }});
 
     trace("expr_substring", parse).parse_next(input)
+}
+
+/// `POSITION(<expr> IN <expr>)`
+pub fn expr_position<S>(input: &mut S) -> PResult<Expr>
+where
+    S: TokenStream,
+{
+    let parse = cut_err(seq! {Expr::Position {
+        _: Token::LParen,
+        // Logically `parse_expr`, but limited to those with precedence higher than `BETWEEN`/`IN`,
+        // to avoid conflict with general IN operator, for example `position(a IN (b) IN (c))`.
+        // https://github.com/postgres/postgres/blob/REL_15_2/src/backend/parser/gram.y#L16012
+        substring: subexpr(Precedence::Between).map(Box::new),
+        _: Keyword::IN,
+        string: subexpr(Precedence::Between).map(Box::new),
+        _: Token::RParen,
+    }});
+
+    trace("expr_position", parse).parse_next(input)
 }

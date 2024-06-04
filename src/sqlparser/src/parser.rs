@@ -170,7 +170,7 @@ type ColumnsDefTuple = (
 
 /// Reference:
 /// <https://www.postgresql.org/docs/current/sql-syntax-lexical.html#SQL-PRECEDENCE>
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Precedence {
     Zero = 0,
     LogicalOr, // 5 in upstream
@@ -1030,27 +1030,12 @@ impl Parser<'_> {
     }
 
     pub fn parse_substring_expr(&mut self) -> PResult<Expr> {
-        // PARSE SUBSTRING (EXPR [FROM 1] [FOR 3])
         parser_v2::expr_substring(self)
     }
 
     /// `POSITION(<expr> IN <expr>)`
     pub fn parse_position_expr(&mut self) -> PResult<Expr> {
-        self.expect_token(&Token::LParen)?;
-
-        // Logically `parse_expr`, but limited to those with precedence higher than `BETWEEN`/`IN`,
-        // to avoid conflict with general IN operator, for example `position(a IN (b) IN (c))`.
-        // https://github.com/postgres/postgres/blob/REL_15_2/src/backend/parser/gram.y#L16012
-        let substring = self.parse_subexpr(Precedence::Between)?;
-        self.expect_keyword(Keyword::IN)?;
-        let string = self.parse_subexpr(Precedence::Between)?;
-
-        self.expect_token(&Token::RParen)?;
-
-        Ok(Expr::Position {
-            substring: Box::new(substring),
-            string: Box::new(string),
-        })
+        parser_v2::expr_position(self)
     }
 
     /// `OVERLAY(<expr> PLACING <expr> FROM <expr> [ FOR <expr> ])`
