@@ -247,7 +247,7 @@ fn avro_type_mapping(
     Ok(data_type)
 }
 
-/// Check for [`avro_to_jsonb`]
+/// Check for [`super::avro_to_jsonb`]
 fn supported_avro_to_json_type(schema: &Schema) -> bool {
     match schema {
         Schema::Null | Schema::Boolean | Schema::Int | Schema::String => true,
