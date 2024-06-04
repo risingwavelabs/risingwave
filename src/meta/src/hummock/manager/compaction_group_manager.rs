@@ -920,11 +920,13 @@ mod tests {
             cg_ids: &[u64],
             config_to_update: &[MutableConfig],
         ) -> Result<()> {
-            let update_trx = inner
-                .update_compaction_config_trx(cg_ids, config_to_update)
-                .unwrap();
-
-            commit_multi_var!(meta, update_trx)
+            match inner.update_compaction_config_trx(cg_ids, config_to_update) {
+                Ok(update_trx) => {
+                    commit_multi_var!(meta, update_trx)?;
+                    Ok(())
+                }
+                Err(e) => Err(e),
+            }
         }
 
         async fn insert_compaction_group_configs(
@@ -939,7 +941,7 @@ mod tests {
 
         update_compaction_config(env.meta_store_ref(), &mut inner, &[100, 200], &[])
             .await
-            .unwrap();
+            .unwrap_err();
         insert_compaction_group_configs(env.meta_store_ref(), &mut inner, &[100, 200]).await;
         assert_eq!(inner.compaction_groups.len(), 4);
         let mut inner = CompactionGroupManager::new(&env).await.unwrap();
