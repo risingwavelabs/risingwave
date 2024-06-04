@@ -1023,6 +1023,15 @@ fn sanity_check_for_cdc_table(
     constraints: &Vec<TableConstraint>,
     source_watermarks: &Vec<SourceWatermark>,
 ) -> Result<()> {
+    // wildcard cannot be used with column definitions
+    if wildcard_idx.is_some() && !column_defs.is_empty() {
+        return Err(ErrorCode::NotSupported(
+            "wildcard(*) and column definitions cannot be used together".to_owned(),
+            "Remove the wildcard or column definitions".to_owned(),
+        )
+        .into());
+    }
+
     // cdc table must have primary key constraint or primary key column
     if !wildcard_idx.is_some()
         && !constraints.iter().any(|c| {
