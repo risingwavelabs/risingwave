@@ -322,6 +322,8 @@ pub fn start_compactor(
         let shutdown_map = CompactionShutdownMap::default();
         let mut min_interval = tokio::time::interval(stream_retry_interval);
         let mut periodic_event_interval = tokio::time::interval(periodic_event_update_interval);
+        let mut periodic_pull_task_event_interval =
+            tokio::time::interval(Duration::from_millis(100));
 
         // This outer loop is to recreate stream.
         'start_stream: loop {
@@ -393,7 +395,10 @@ pub fn start_compactor(
                             continue 'start_stream;
                         }
 
+                        continue;
+                    }
 
+                    _ = periodic_pull_task_event_interval.tick() => {
                         let mut pending_pull_task_count = 0;
                         if pull_task_ack {
                             // TODO: Compute parallelism on meta side
@@ -429,6 +434,7 @@ pub fn start_compactor(
 
                         continue;
                     }
+
                     event = response_event_stream.next() => {
                         event
                     }

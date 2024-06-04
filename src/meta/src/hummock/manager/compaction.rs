@@ -553,6 +553,13 @@ impl HummockManager {
                 break;
             }
         }
+
+        tracing::info!(
+            "auto_pick_compaction_groups_and_type expect {} pick {}",
+            len,
+            normal_groups.len()
+        );
+
         (normal_groups, TaskType::Dynamic)
     }
 
