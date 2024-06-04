@@ -42,7 +42,9 @@ use crate::executor::{
     WrapStreamExecutor,
 };
 use crate::risingwave_common::hash::NullBitmap;
-use crate::spill::spill_op::{SpillBuildHasher, SpillOp, DEFAULT_SPILL_PARTITION_NUM, SPILL_AT_LEAST_MEMORY};
+use crate::spill::spill_op::{
+    SpillBuildHasher, SpillOp, DEFAULT_SPILL_PARTITION_NUM, SPILL_AT_LEAST_MEMORY,
+};
 use crate::task::{BatchTaskContext, ShutdownToken};
 
 /// Hash Join Executor
@@ -79,6 +81,7 @@ pub struct HashJoinExecutor<K> {
     identity: String,
     chunk_size: usize,
 
+    enable_spill: bool,
     /// The upper bound of memory usage for this executor.
     memory_upper_bound: Option<u64>,
 
@@ -434,7 +437,6 @@ impl JoinSpillManager {
 impl<K: HashKey> HashJoinExecutor<K> {
     #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
-        let enable_spill = true;
         let mut need_to_spill = false;
         // If the memory upper bound is less than 1MB, we don't need to check memory usage.
         let check_memory = match self.memory_upper_bound {
@@ -460,7 +462,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
                 // push build_chunk to build_side before checking memory limit, otherwise we will lose that chunk when spilling.
                 build_side.push(build_chunk);
                 if !self.mem_ctx.add(chunk_estimated_heap_size as i64) && check_memory {
-                    if enable_spill {
+                    if self.enable_spill {
                         need_to_spill = true;
                         break;
                     } else {
@@ -500,7 +502,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
                         let build_key_size = build_key.estimated_heap_size() as i64;
                         mem_added_by_hash_table += build_key_size;
                         if !self.mem_ctx.add(build_key_size) && check_memory {
-                            if enable_spill {
+                            if self.enable_spill {
                                 need_to_spill = true;
                                 break;
                             } else {
@@ -610,6 +612,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
                     self.cond.clone(),
                     format!("{}-sub{}", self.identity.clone(), i),
                     self.chunk_size,
+                    self.enable_spill,
                     Some(partition_size),
                     self.shutdown_rx.clone(),
                     self.mem_ctx.clone(),
@@ -2199,6 +2202,7 @@ impl BoxedExecutorBuilder for HashJoinExecutor<()> {
             identity: identity.clone(),
             right_key_types,
             chunk_size: context.context.get_config().developer.chunk_size,
+            enable_spill: context.context.get_config().enable_spill,
             shutdown_rx: context.shutdown_rx.clone(),
             mem_ctx: context.context.create_executor_mem_context(&identity),
         }
@@ -2218,6 +2222,7 @@ struct HashJoinExecutorArgs {
     identity: String,
     right_key_types: Vec<DataType>,
     chunk_size: usize,
+    enable_spill: bool,
     shutdown_rx: ShutdownToken,
     mem_ctx: MemoryContext,
 }
@@ -2237,6 +2242,7 @@ impl HashKeyDispatcher for HashJoinExecutorArgs {
             self.cond.map(Arc::new),
             self.identity,
             self.chunk_size,
+            self.enable_spill,
             self.shutdown_rx,
             self.mem_ctx,
         ))
@@ -2260,6 +2266,7 @@ impl<K> HashJoinExecutor<K> {
         cond: Option<Arc<BoxedExpression>>,
         identity: String,
         chunk_size: usize,
+        enable_spill: bool,
         shutdown_rx: ShutdownToken,
         mem_ctx: MemoryContext,
     ) -> Self {
@@ -2274,6 +2281,7 @@ impl<K> HashJoinExecutor<K> {
             cond,
             identity,
             chunk_size,
+            enable_spill,
             None,
             shutdown_rx,
             mem_ctx,
@@ -2292,6 +2300,7 @@ impl<K> HashJoinExecutor<K> {
         cond: Option<Arc<BoxedExpression>>,
         identity: String,
         chunk_size: usize,
+        enable_spill: bool,
         memory_upper_bound: Option<u64>,
         shutdown_rx: ShutdownToken,
         mem_ctx: MemoryContext,
@@ -2329,6 +2338,7 @@ impl<K> HashJoinExecutor<K> {
             identity,
             chunk_size,
             shutdown_rx,
+            enable_spill,
             memory_upper_bound,
             mem_ctx,
             _phantom: PhantomData,
