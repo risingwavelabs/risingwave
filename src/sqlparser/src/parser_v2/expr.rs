@@ -9,7 +9,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use winnow::combinator::{alt, cut_err, opt, preceded, repeat, trace};
+use winnow::combinator::{alt, cut_err, opt, preceded, repeat, seq, trace};
 use winnow::{PResult, Parser};
 
 use super::{data_type, token, ParserExt, TokenStream};
@@ -60,19 +60,18 @@ where
     trace("expr_case", parse).parse_next(input)
 }
 
-/// Consome a SQL CAST function e.g. `CAST(expr AS FLOAT)`
+/// Consume a SQL CAST function e.g. `CAST(expr AS FLOAT)`
 pub fn expr_cast<S>(input: &mut S) -> PResult<Expr>
 where
     S: TokenStream,
 {
-    let parse = (
-        cut_err(Token::LParen),
-        cut_err(expr).map(Box::new),
-        cut_err(Keyword::AS),
-        cut_err(data_type),
-        cut_err(Token::RParen),
-    )
-        .map(|(_, expr, _, data_type, _)| Expr::Cast { expr, data_type });
+    let parse = cut_err(seq! {Expr::Cast {
+        _: Token::LParen,
+        expr: expr.map(Box::new),
+        _: Keyword::AS,
+        data_type: data_type,
+        _: Token::RParen,
+    }});
 
     trace("expr_cast", parse).parse_next(input)
 }
@@ -82,14 +81,13 @@ pub fn expr_try_cast<S>(input: &mut S) -> PResult<Expr>
 where
     S: TokenStream,
 {
-    let parse = (
-        cut_err(Token::LParen),
-        cut_err(expr).map(Box::new),
-        cut_err(Keyword::AS),
-        cut_err(data_type),
-        cut_err(Token::RParen),
-    )
-        .map(|(_, expr, _, data_type, _)| Expr::TryCast { expr, data_type });
+    let parse = cut_err(seq! {Expr::TryCast {
+        _: Token::LParen,
+        expr: expr.map(Box::new),
+        _: Keyword::AS,
+        data_type: data_type,
+        _: Token::RParen,
+    }});
 
     trace("expr_try_cast", parse).parse_next(input)
 }
@@ -99,7 +97,7 @@ pub fn expr_extract<S>(input: &mut S) -> PResult<Expr>
 where
     S: TokenStream,
 {
-    let date_time_field = token
+    let mut date_time_field = token
         .verify_map(|token| match token.token {
             Token::Word(w) => Some(w.value.to_uppercase()),
             Token::SingleQuotedString(s) => Some(s.to_uppercase()),
@@ -107,14 +105,13 @@ where
         })
         .expect("date/time field");
 
-    let parse = (
-        cut_err(Token::LParen),
-        cut_err(date_time_field),
-        cut_err(Keyword::FROM),
-        cut_err(expr).map(Box::new),
-        cut_err(Token::RParen),
-    )
-        .map(|(_, field, _, expr, _)| Expr::Extract { field, expr });
+    let parse = cut_err(seq! {Expr::Extract {
+        _: Token::LParen,
+        field: date_time_field,
+        _: Keyword::FROM,
+        expr: expr.map(Box::new),
+        _: Token::RParen,
+    }});
 
     trace("expr_extract", parse).parse_next(input)
 }
@@ -124,26 +121,21 @@ pub fn expr_substring<S>(input: &mut S) -> PResult<Expr>
 where
     S: TokenStream,
 {
-    let parse = (
-        cut_err(Token::LParen),
+    let mut substring_from = opt(preceded(
+        alt((Token::Comma.void(), Keyword::FROM.void())),
         cut_err(expr).map(Box::new),
-        opt(preceded(
-            alt((Token::Comma.void(), Keyword::FROM.void())),
-            cut_err(expr).map(Box::new),
-        )),
-        opt(preceded(
-            alt((Token::Comma.void(), Keyword::FOR.void())),
-            cut_err(expr).map(Box::new),
-        )),
-        cut_err(Token::RParen),
-    )
-        .map(
-            |(_, expr, substring_from, substring_for, _)| Expr::Substring {
-                expr,
-                substring_from,
-                substring_for,
-            },
-        );
+    ));
+    let mut substring_for = opt(preceded(
+        alt((Token::Comma.void(), Keyword::FOR.void())),
+        cut_err(expr).map(Box::new),
+    ));
+    let parse = cut_err(seq! {Expr::Substring {
+        _: Token::LParen,
+        expr: expr.map(Box::new),
+        substring_from: substring_from,
+        substring_for: substring_for,
+        _: Token::RParen,
+    }});
 
     trace("expr_substring", parse).parse_next(input)
 }
