@@ -15,9 +15,9 @@ flush;
 query II rowsort
 select * from mv;
 ----
+1    1
 NULL 0
 NULL 1
-1    1
 
 statement ok
 drop materialized view mv;
