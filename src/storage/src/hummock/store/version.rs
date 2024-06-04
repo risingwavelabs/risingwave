@@ -114,6 +114,10 @@ impl StagingSstableInfo {
         &self.old_value_sstable_infos
     }
 
+    pub fn into_ssts(self) -> (Vec<LocalSstableInfo>, Vec<LocalSstableInfo>) {
+        (self.sstable_infos, self.old_value_sstable_infos)
+    }
+
     pub fn imm_size(&self) -> usize {
         self.imm_size
     }

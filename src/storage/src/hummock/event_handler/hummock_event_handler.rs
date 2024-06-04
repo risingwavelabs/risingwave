@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::pin::pin;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::Relaxed;
@@ -23,6 +23,7 @@ use arc_swap::ArcSwap;
 use await_tree::InstrumentAwait;
 use futures::FutureExt;
 use itertools::Itertools;
+use more_asserts::assert_gt;
 use parking_lot::RwLock;
 use prometheus::core::{AtomicU64, GenericGauge};
 use prometheus::{Histogram, IntGauge};
@@ -194,7 +195,8 @@ pub struct HummockEventHandler {
     hummock_event_tx: HummockEventSender,
     hummock_event_rx: HummockEventReceiver,
     version_update_rx: UnboundedReceiver<HummockVersionUpdate>,
-    pending_sync_requests: BTreeMap<HummockEpoch, oneshot::Sender<HummockResult<SyncResult>>>,
+    // newer epoch at the front
+    pending_sync_requests: VecDeque<(HummockEpoch, oneshot::Sender<HummockResult<SyncResult>>)>,
     read_version_mapping: Arc<RwLock<ReadVersionMappingType>>,
     /// A copy of `read_version_mapping` but owned by event handler
     local_read_version_mapping: HashMap<LocalInstanceId, HummockReadVersionRef>,
@@ -398,63 +400,43 @@ impl HummockEventHandler {
 
 // Handler for different events
 impl HummockEventHandler {
-    fn handle_epoch_synced(
-        &mut self,
-        epoch: HummockEpoch,
-        newly_uploaded_sstables: Vec<StagingSstableInfo>,
-    ) {
+    fn handle_epoch_synced(&mut self, epoch: HummockEpoch, result: HummockResult<SyncedData>) {
         debug!("epoch has been synced: {}.", epoch);
-        let newly_uploaded_sstables = newly_uploaded_sstables
-            .into_iter()
-            .map(Arc::new)
-            .collect_vec();
-        if !newly_uploaded_sstables.is_empty() {
-            let related_instance_ids: HashSet<_> = newly_uploaded_sstables
-                .iter()
-                .flat_map(|sst| sst.imm_ids().keys().cloned())
-                .collect();
-            self.for_each_read_version(related_instance_ids, |instance_id, read_version| {
-                newly_uploaded_sstables
-                    .iter()
-                    // Take rev because newer data come first in `newly_uploaded_sstables` but we apply
-                    // older data first
-                    .rev()
-                    .for_each(|staging_sstable_info| {
-                        if staging_sstable_info.imm_ids().contains_key(&instance_id) {
-                            read_version.update(VersionUpdate::Staging(StagingData::Sst(
-                                staging_sstable_info.clone(),
-                            )));
-                        }
-                    });
-            });
-        }
-        let result = self
-            .uploader
-            .get_synced_data(epoch)
-            .expect("data just synced. must exist");
-        // clear the pending sync epoch that is older than newly synced epoch
-        while let Some((smallest_pending_sync_epoch, _)) =
-            self.pending_sync_requests.first_key_value()
+        let (prev_epoch, result_sender) =
+            self.pending_sync_requests.pop_back().expect("should exist");
+        assert_eq!(prev_epoch, epoch);
+        if let Ok(SyncedData {
+            newly_upload_ssts: newly_uploaded_sstables,
+            ..
+        }) = &result
         {
-            if *smallest_pending_sync_epoch > epoch {
-                // The smallest pending sync epoch has not synced yet. Wait later
-                break;
+            let newly_uploaded_sstables = newly_uploaded_sstables
+                .iter()
+                .map(|ssts| Arc::new(ssts.clone()))
+                .collect_vec();
+            if !newly_uploaded_sstables.is_empty() {
+                let related_instance_ids: HashSet<_> = newly_uploaded_sstables
+                    .iter()
+                    .flat_map(|sst| sst.imm_ids().keys().cloned())
+                    .collect();
+                self.for_each_read_version(related_instance_ids, |instance_id, read_version| {
+                    newly_uploaded_sstables
+                        .iter()
+                        // Take rev because newer data come first in `newly_uploaded_sstables` but we apply
+                        // older data first
+                        .rev()
+                        .for_each(|staging_sstable_info| {
+                            if staging_sstable_info.imm_ids().contains_key(&instance_id) {
+                                read_version.update(VersionUpdate::Staging(StagingData::Sst(
+                                    staging_sstable_info.clone(),
+                                )));
+                            }
+                        });
+                });
             }
-            let (pending_sync_epoch, result_sender) =
-                self.pending_sync_requests.pop_first().expect("must exist");
-            if pending_sync_epoch == epoch {
-                send_sync_result(result_sender, to_sync_result(result));
-                break;
-            } else {
-                send_sync_result(
-                    result_sender,
-                    Err(HummockError::other(format!(
-                        "epoch {} is not a checkpoint epoch",
-                        pending_sync_epoch
-                    ))),
-                );
-            }
-        }
+        };
+
+        send_sync_result(result_sender, to_sync_result(result));
     }
 
     /// This function will be performed under the protection of the `read_version_mapping` read
@@ -529,68 +511,23 @@ impl HummockEventHandler {
         )
     }
 
-    fn handle_await_sync_epoch(
+    fn handle_sync_epoch(
         &mut self,
         new_sync_epoch: HummockEpoch,
         sync_result_sender: oneshot::Sender<HummockResult<SyncResult>>,
     ) {
-        debug!("receive await sync epoch: {}", new_sync_epoch);
-        // The epoch to sync has been committed already.
-        if new_sync_epoch <= self.uploader.max_committed_epoch() {
-            send_sync_result(
-                sync_result_sender,
-                Err(HummockError::other(format!(
-                    "epoch {} has been committed. {}",
-                    new_sync_epoch,
-                    self.uploader.max_committed_epoch()
-                ))),
-            );
-            return;
-        }
-        // The epoch has been synced
-        if new_sync_epoch <= self.uploader.max_synced_epoch() {
-            debug!(
-                "epoch {} has been synced. Current max_sync_epoch {}",
-                new_sync_epoch,
-                self.uploader.max_synced_epoch()
-            );
-            if let Some(result) = self.uploader.get_synced_data(new_sync_epoch) {
-                let result = to_sync_result(result);
-                send_sync_result(sync_result_sender, result);
-            } else {
-                send_sync_result(
-                    sync_result_sender,
-                    Err(HummockError::other(
-                        "the requested sync epoch is not a checkpoint epoch",
-                    )),
-                );
-            }
-            return;
-        }
-
         debug!(
             "awaiting for epoch to be synced: {}, max_synced_epoch: {}",
             new_sync_epoch,
             self.uploader.max_synced_epoch()
         );
 
-        // If the epoch is not synced, we add to the `pending_sync_requests` anyway. If the epoch is
-        // not a checkpoint epoch, it will be clear with the max synced epoch bumps up.
-        if let Some(old_sync_result_sender) = self
-            .pending_sync_requests
-            .insert(new_sync_epoch, sync_result_sender)
-        {
-            let _ = old_sync_result_sender
-                .send(Err(HummockError::other(
-                    "the sync rx is overwritten by an new rx",
-                )))
-                .inspect_err(|e| {
-                    error!(
-                        "unable to send sync result: {}. Err: {:?}",
-                        new_sync_epoch, e
-                    );
-                });
+        self.uploader.start_sync_epoch(new_sync_epoch);
+        if let Some((prev_sync_epoch, _)) = self.pending_sync_requests.front() {
+            assert_gt!(new_sync_epoch, *prev_sync_epoch);
         }
+        self.pending_sync_requests
+            .push_front((new_sync_epoch, sync_result_sender));
     }
 
     async fn handle_clear(&mut self, notifier: oneshot::Sender<()>, prev_epoch: u64) {
@@ -661,7 +598,7 @@ impl HummockEventHandler {
             );
         }
 
-        for (epoch, result_sender) in self.pending_sync_requests.extract_if(|_, _| true) {
+        for (epoch, result_sender) in self.pending_sync_requests.drain(..) {
             send_sync_result(
                 result_sender,
                 Err(HummockError::other(format!(
@@ -839,12 +776,12 @@ impl HummockEventHandler {
 
     fn handle_uploader_event(&mut self, event: UploaderEvent) {
         match event {
-            UploaderEvent::SyncFinish(epoch, newly_uploaded_sstables) => {
+            UploaderEvent::SyncFinish(epoch, result) => {
                 let _timer = self
                     .metrics
                     .event_handler_on_sync_finish_latency
                     .start_timer();
-                self.handle_epoch_synced(epoch, newly_uploaded_sstables);
+                self.handle_epoch_synced(epoch, result);
             }
 
             UploaderEvent::DataSpilled(staging_sstable_info) => {
@@ -860,11 +797,11 @@ impl HummockEventHandler {
             HummockEvent::BufferMayFlush => {
                 self.uploader.may_flush();
             }
-            HummockEvent::AwaitSyncEpoch {
+            HummockEvent::SyncEpoch {
                 new_sync_epoch,
                 sync_result_sender,
             } => {
-                self.handle_await_sync_epoch(new_sync_epoch, sync_result_sender);
+                self.handle_sync_epoch(new_sync_epoch, sync_result_sender);
             }
             HummockEvent::Clear(_, _) => {
                 unreachable!("clear is handled in separated async context")
@@ -885,13 +822,9 @@ impl HummockEventHandler {
 
             HummockEvent::SealEpoch {
                 epoch,
-                is_checkpoint,
+                is_checkpoint: _,
             } => {
                 self.uploader.seal_epoch(epoch);
-
-                if is_checkpoint {
-                    self.uploader.start_sync_epoch(epoch);
-                }
             }
 
             HummockEvent::LocalSealEpoch {
@@ -1034,29 +967,32 @@ fn send_sync_result(
     });
 }
 
-fn to_sync_result(result: &HummockResult<SyncedData>) -> HummockResult<SyncResult> {
+fn to_sync_result(result: HummockResult<SyncedData>) -> HummockResult<SyncResult> {
     match result {
-        Ok(sync_data) => {
-            let sync_size = sync_data
-                .staging_ssts
-                .iter()
-                .map(StagingSstableInfo::imm_size)
-                .sum();
+        Ok(SyncedData {
+            newly_upload_ssts,
+            uploaded_ssts,
+            table_watermarks,
+        }) => {
+            let mut sync_size = 0;
+            let mut uncommitted_ssts = Vec::new();
+            let mut old_value_ssts = Vec::new();
+            // The newly uploaded `sstable_infos` contains newer data. Therefore,
+            // `newly_upload_ssts` at the front
+            for sst in newly_upload_ssts
+                .into_iter()
+                .chain(uploaded_ssts.into_iter())
+            {
+                sync_size += sst.imm_size();
+                let (new_values, old_values) = sst.into_ssts();
+                uncommitted_ssts.extend(new_values);
+                old_value_ssts.extend(old_values);
+            }
             Ok(SyncResult {
                 sync_size,
-                uncommitted_ssts: sync_data
-                    .staging_ssts
-                    .iter()
-                    .flat_map(|staging_sstable_info| staging_sstable_info.sstable_infos().clone())
-                    .collect(),
-                table_watermarks: sync_data.table_watermarks.clone(),
-                old_value_ssts: sync_data
-                    .staging_ssts
-                    .iter()
-                    .flat_map(|staging_sstable_info| {
-                        staging_sstable_info.old_value_sstable_infos().clone()
-                    })
-                    .collect(),
+                uncommitted_ssts,
+                table_watermarks,
+                old_value_ssts,
             })
         }
         Err(e) => Err(HummockError::other(format!(
