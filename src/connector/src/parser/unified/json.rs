@@ -25,6 +25,7 @@ use risingwave_common::types::{
     DataType, Date, Decimal, Int256, Interval, JsonbVal, ScalarImpl, Time, Timestamp, Timestamptz,
 };
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_connector_codec::decoder::utils::extract_decimal;
 use simd_json::prelude::{
     TypedValue, ValueAsContainer, ValueAsScalar, ValueObjectAccess, ValueTryAsScalar,
 };
@@ -33,7 +34,6 @@ use thiserror_ext::AsReport;
 
 use super::{Access, AccessError, AccessResult};
 use crate::parser::common::json_object_get_case_insensitive;
-use crate::parser::unified::avro::extract_decimal;
 use crate::schema::{bail_invalid_option_error, InvalidOptionError};
 
 #[derive(Clone, Debug)]

@@ -10664,6 +10664,7 @@ dependencies = [
  "reqwest 0.12.4",
  "risingwave_common",
  "risingwave_common_estimate_size",
+ "risingwave_connector_codec",
  "risingwave_jni_core",
  "risingwave_object_store",
  "risingwave_pb",
@@ -10701,6 +10702,26 @@ dependencies = [
  "with_options",
  "workspace-hack",
  "yup-oauth2",
+]
+
+[[package]]
+name = "risingwave_connector_codec"
+version = "1.9.0-alpha"
+dependencies = [
+ "anyhow",
+ "apache-avro 0.16.0",
+ "chrono",
+ "itertools 0.12.1",
+ "jsonbb",
+ "num-bigint",
+ "risingwave_common",
+ "risingwave_pb",
+ "rust_decimal",
+ "thiserror",
+ "thiserror-ext",
+ "time",
+ "tracing",
+ "workspace-hack",
 ]
 
 [[package]]

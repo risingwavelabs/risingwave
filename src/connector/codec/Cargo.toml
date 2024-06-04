@@ -1,0 +1,44 @@
+[package]
+name = "risingwave_connector_codec"
+description = "Encoding and decoding between external data formats and RisingWave datum"
+version = { workspace = true }
+edition = { workspace = true }
+homepage = { workspace = true }
+keywords = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+
+[package.metadata.cargo-machete]
+ignored = ["workspace-hack"]
+
+[package.metadata.cargo-udeps.ignore]
+normal = ["workspace-hack"]
+
+[dependencies]
+anyhow = "1"
+apache-avro = { git = "https://github.com/risingwavelabs/avro", rev = "5349b0c7b35940d117397edbd314ca9087cdb892", features = [
+    "snappy",
+    "zstandard",
+    "bzip",
+    "xz",
+] }
+chrono = { version = "0.4", default-features = false, features = [
+    "clock",
+    "std",
+] }
+itertools = { workspace = true }
+jsonbb = { workspace = true }
+num-bigint = "0.4"
+risingwave_common = { workspace = true }
+risingwave_pb = { workspace = true }
+rust_decimal = "1"
+thiserror = "1"
+thiserror-ext = { workspace = true }
+time = "0.3.30"
+tracing = "0.1"
+
+[target.'cfg(not(madsim))'.dependencies]
+workspace-hack = { path = "../../workspace-hack" }
+
+[lints]
+workspace = true
