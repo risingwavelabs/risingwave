@@ -45,6 +45,7 @@ pub struct GenericExchangeExecutor<CS, C> {
     context: C,
 
     schema: Schema,
+    #[expect(dead_code)]
     task_id: TaskId,
     identity: String,
 

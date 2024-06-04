@@ -213,7 +213,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
 
         // Configure levels for external crates.
         filter = filter
-            .with_target("foyer", Level::WARN)
+            .with_target("foyer", Level::INFO)
             .with_target("aws", Level::INFO)
             .with_target("aws_config", Level::WARN)
             .with_target("aws_endpoint", Level::WARN)

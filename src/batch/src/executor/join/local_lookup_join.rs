@@ -62,6 +62,7 @@ struct InnerSideExecutorBuilder<C> {
     epoch: BatchQueryEpoch,
     worker_slot_mapping: HashMap<WorkerSlotId, WorkerNode>,
     worker_slot_to_scan_range_mapping: HashMap<WorkerSlotId, Vec<(ScanRange, VirtualNode)>>,
+    #[expect(dead_code)]
     chunk_size: usize,
     shutdown_rx: ShutdownToken,
     next_stage_id: usize,
@@ -504,10 +505,6 @@ mod tests {
     use crate::task::ShutdownToken;
 
     const CHUNK_SIZE: usize = 1024;
-
-    pub struct MockGatherExecutor {
-        chunks: Vec<DataChunk>,
-    }
 
     fn create_outer_side_input() -> BoxedExecutor {
         let schema = Schema {

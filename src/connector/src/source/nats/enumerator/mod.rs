@@ -25,6 +25,7 @@ use crate::source::{SourceEnumeratorContextRef, SplitEnumerator, SplitId};
 #[derive(Debug, Clone)]
 pub struct NatsSplitEnumerator {
     subject: String,
+    #[expect(dead_code)]
     split_id: SplitId,
     client: async_nats::Client,
 }

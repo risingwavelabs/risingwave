@@ -22,7 +22,7 @@ use anyhow::{anyhow, Context};
 use async_trait::async_trait;
 use await_tree::InstrumentAwait;
 use futures::future::select;
-use futures::{StreamExt, TryStreamExt};
+use futures::TryStreamExt;
 use itertools::Itertools;
 use jni::JavaVM;
 use prost::Message;
@@ -53,7 +53,7 @@ use risingwave_rpc_client::{
 use rw_futures_util::drop_either_future;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc;
-use tokio::sync::mpsc::{unbounded_channel, Receiver, Sender};
+use tokio::sync::mpsc::{unbounded_channel, Receiver};
 use tokio::task::spawn_blocking;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::warn;
@@ -558,6 +558,7 @@ impl<R: RemoteSinkTrait> Sink for CoordinatedRemoteSink<R> {
 }
 
 pub struct CoordinatedRemoteSinkWriter {
+    #[expect(dead_code)]
     properties: HashMap<String, String>,
     epoch: Option<u64>,
     batch_id: u64,
@@ -581,10 +582,13 @@ impl CoordinatedRemoteSinkWriter {
         })
     }
 
+    #[cfg(test)]
     fn for_test(
         response_receiver: Receiver<ConnectorResult<SinkWriterStreamResponse>>,
-        request_sender: Sender<JniSinkWriterStreamRequest>,
+        request_sender: tokio::sync::mpsc::Sender<JniSinkWriterStreamRequest>,
     ) -> CoordinatedRemoteSinkWriter {
+        use futures::StreamExt;
+
         let properties = HashMap::from([("output.path".to_string(), "/tmp/rw".to_string())]);
 
         let stream_handle = SinkWriterStreamHandle::for_test(
@@ -666,11 +670,7 @@ impl RemoteCoordinator {
             .start_sink_coordinator_stream(param.clone())
             .await?;
 
-        tracing::trace!(
-            "{:?} RemoteCoordinator started with properties: {:?}",
-            R::SINK_NAME,
-            &param.properties
-        );
+        tracing::trace!("{:?} RemoteCoordinator started", R::SINK_NAME,);
 
         Ok(RemoteCoordinator { stream_handle })
     }

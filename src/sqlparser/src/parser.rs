@@ -30,7 +30,7 @@ use winnow::{PResult, Parser as _};
 use crate::ast::*;
 use crate::keywords::{self, Keyword};
 use crate::parser_v2;
-use crate::parser_v2::{keyword, literal_i64, literal_uint, ParserExt as _};
+use crate::parser_v2::{keyword, literal_i64, literal_uint, single_quoted_string, ParserExt as _};
 use crate::tokenizer::*;
 
 pub(crate) const UPSTREAM_SOURCE_KEY: &str = "connector";
@@ -170,7 +170,7 @@ type ColumnsDefTuple = (
 
 /// Reference:
 /// <https://www.postgresql.org/docs/current/sql-syntax-lexical.html#SQL-PRECEDENCE>
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Precedence {
     Zero = 0,
     LogicalOr, // 5 in upstream
@@ -1009,28 +1009,12 @@ impl Parser<'_> {
 
     /// Parse a SQL CAST function e.g. `CAST(expr AS FLOAT)`
     pub fn parse_cast_expr(&mut self) -> PResult<Expr> {
-        self.expect_token(&Token::LParen)?;
-        let expr = self.parse_expr()?;
-        self.expect_keyword(Keyword::AS)?;
-        let data_type = self.parse_data_type()?;
-        self.expect_token(&Token::RParen)?;
-        Ok(Expr::Cast {
-            expr: Box::new(expr),
-            data_type,
-        })
+        parser_v2::expr_cast(self)
     }
 
     /// Parse a SQL TRY_CAST function e.g. `TRY_CAST(expr AS FLOAT)`
     pub fn parse_try_cast_expr(&mut self) -> PResult<Expr> {
-        self.expect_token(&Token::LParen)?;
-        let expr = self.parse_expr()?;
-        self.expect_keyword(Keyword::AS)?;
-        let data_type = self.parse_data_type()?;
-        self.expect_token(&Token::RParen)?;
-        Ok(Expr::TryCast {
-            expr: Box::new(expr),
-            data_type,
-        })
+        parser_v2::expr_try_cast(self)
     }
 
     /// Parse a SQL EXISTS expression e.g. `WHERE EXISTS(SELECT ...)`.
@@ -1042,83 +1026,21 @@ impl Parser<'_> {
     }
 
     pub fn parse_extract_expr(&mut self) -> PResult<Expr> {
-        self.expect_token(&Token::LParen)?;
-        let field = self.parse_date_time_field_in_extract()?;
-        self.expect_keyword(Keyword::FROM)?;
-        let expr = self.parse_expr()?;
-        self.expect_token(&Token::RParen)?;
-        Ok(Expr::Extract {
-            field,
-            expr: Box::new(expr),
-        })
+        parser_v2::expr_extract(self)
     }
 
     pub fn parse_substring_expr(&mut self) -> PResult<Expr> {
-        // PARSE SUBSTRING (EXPR [FROM 1] [FOR 3])
-        self.expect_token(&Token::LParen)?;
-        let expr = self.parse_expr()?;
-        let mut from_expr = None;
-        if self.parse_keyword(Keyword::FROM) || self.consume_token(&Token::Comma) {
-            from_expr = Some(self.parse_expr()?);
-        }
-
-        let mut to_expr = None;
-        if self.parse_keyword(Keyword::FOR) || self.consume_token(&Token::Comma) {
-            to_expr = Some(self.parse_expr()?);
-        }
-        self.expect_token(&Token::RParen)?;
-
-        Ok(Expr::Substring {
-            expr: Box::new(expr),
-            substring_from: from_expr.map(Box::new),
-            substring_for: to_expr.map(Box::new),
-        })
+        parser_v2::expr_substring(self)
     }
 
     /// `POSITION(<expr> IN <expr>)`
     pub fn parse_position_expr(&mut self) -> PResult<Expr> {
-        self.expect_token(&Token::LParen)?;
-
-        // Logically `parse_expr`, but limited to those with precedence higher than `BETWEEN`/`IN`,
-        // to avoid conflict with general IN operator, for example `position(a IN (b) IN (c))`.
-        // https://github.com/postgres/postgres/blob/REL_15_2/src/backend/parser/gram.y#L16012
-        let substring = self.parse_subexpr(Precedence::Between)?;
-        self.expect_keyword(Keyword::IN)?;
-        let string = self.parse_subexpr(Precedence::Between)?;
-
-        self.expect_token(&Token::RParen)?;
-
-        Ok(Expr::Position {
-            substring: Box::new(substring),
-            string: Box::new(string),
-        })
+        parser_v2::expr_position(self)
     }
 
     /// `OVERLAY(<expr> PLACING <expr> FROM <expr> [ FOR <expr> ])`
     pub fn parse_overlay_expr(&mut self) -> PResult<Expr> {
-        self.expect_token(&Token::LParen)?;
-
-        let expr = self.parse_expr()?;
-
-        self.expect_keyword(Keyword::PLACING)?;
-        let new_substring = self.parse_expr()?;
-
-        self.expect_keyword(Keyword::FROM)?;
-        let start = self.parse_expr()?;
-
-        let mut count = None;
-        if self.parse_keyword(Keyword::FOR) {
-            count = Some(self.parse_expr()?);
-        }
-
-        self.expect_token(&Token::RParen)?;
-
-        Ok(Expr::Overlay {
-            expr: Box::new(expr),
-            new_substring: Box::new(new_substring),
-            start: Box::new(start),
-            count: count.map(Box::new),
-        })
+        parser_v2::expr_overlay(self)
     }
 
     /// `TRIM ([WHERE] ['text'] FROM 'text')`\
@@ -3558,6 +3480,10 @@ impl Parser<'_> {
                     Some('\'') => Ok(Value::SingleQuotedString(w.value)),
                     _ => self.expected_at(checkpoint, "A value")?,
                 },
+                Keyword::REF => {
+                    self.expect_keyword(Keyword::SECRET)?;
+                    Ok(Value::Ref(self.parse_object_name()?))
+                }
                 _ => self.expected_at(checkpoint, "a concrete value"),
             },
             Token::Number(ref n) => Ok(Value::Number(n.clone())),
@@ -3718,25 +3644,31 @@ impl Parser<'_> {
         alt((
             preceded(
                 (Keyword::SYSTEM_TIME, Keyword::AS, Keyword::OF),
-                alt((
-                    (
-                        Self::parse_identifier.verify(|ident| {
-                            ident.real_value() == "proctime" || ident.real_value() == "now"
-                        }),
-                        Token::LParen,
-                        Token::RParen,
-                    )
-                        .value(AsOf::ProcessTime),
-                    literal_i64.map(AsOf::VersionNum),
-                    Self::parse_literal_string.map(AsOf::TimestampString),
-                )),
+                cut_err(
+                    alt((
+                        (
+                            Self::parse_identifier.verify(|ident| {
+                                ident.real_value() == "proctime" || ident.real_value() == "now"
+                            }),
+                            cut_err(Token::LParen),
+                            cut_err(Token::RParen),
+                        )
+                            .value(AsOf::ProcessTime),
+                        literal_i64.map(AsOf::TimestampNum),
+                        single_quoted_string.map(AsOf::TimestampString),
+                    ))
+                    .expect("proctime(), now(), number or string"),
+                ),
             ),
             preceded(
                 (Keyword::SYSTEM_VERSION, Keyword::AS, Keyword::OF),
-                alt((
-                    literal_i64.map(AsOf::VersionNum),
-                    Self::parse_literal_string.map(AsOf::VersionString),
-                )),
+                cut_err(
+                    alt((
+                        literal_i64.map(AsOf::VersionNum),
+                        single_quoted_string.map(AsOf::VersionString),
+                    ))
+                    .expect("number or string"),
+                ),
             ),
         ))
         .parse_next(self)

@@ -39,7 +39,6 @@ use crate::sink::writer::SinkWriterExt;
 use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkWriter, SinkWriterParam};
 
 pub const SNOWFLAKE_SINK: &str = "snowflake";
-const INITIAL_ROW_CAPACITY: usize = 1024;
 
 #[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct SnowflakeCommon {
@@ -166,9 +165,13 @@ impl TryFrom<SinkParam> for SnowflakeSink {
 }
 
 pub struct SnowflakeSinkWriter {
+    #[expect(dead_code)]
     config: SnowflakeConfig,
+    #[expect(dead_code)]
     schema: Schema,
+    #[expect(dead_code)]
     pk_indices: Vec<usize>,
+    #[expect(dead_code)]
     is_append_only: bool,
     /// the client used to send `insertFiles` post request
     http_client: SnowflakeHttpClient,

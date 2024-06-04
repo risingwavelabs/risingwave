@@ -401,10 +401,13 @@ impl TryFrom<SinkParam> for DeltaLakeSink {
 
 pub struct DeltaLakeSinkWriter {
     pub config: DeltaLakeConfig,
+    #[expect(dead_code)]
     schema: Schema,
+    #[expect(dead_code)]
     pk_indices: Vec<usize>,
     writer: RecordBatchWriter,
     dl_schema: Arc<deltalake::arrow::datatypes::Schema>,
+    #[expect(dead_code)]
     dl_table: DeltaTable,
 }
 

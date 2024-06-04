@@ -15,9 +15,10 @@
 //! Unified parsers for both normal events or CDC events of multiple message formats
 
 use auto_impl::auto_impl;
-use risingwave_common::types::{DataType, Datum};
-use thiserror::Error;
-use thiserror_ext::Macro;
+use risingwave_common::types::DataType;
+pub use risingwave_connector_codec::decoder::{
+    bail_uncategorized, uncategorized, Access, AccessError, AccessResult,
+};
 
 use self::avro::AvroAccess;
 use self::bytes::BytesAccess;
@@ -30,17 +31,10 @@ pub mod avro;
 pub mod bytes;
 pub mod debezium;
 pub mod json;
+pub mod kv_event;
 pub mod maxwell;
 pub mod protobuf;
-pub mod upsert;
 pub mod util;
-
-pub type AccessResult<T = Datum> = std::result::Result<T, AccessError>;
-
-/// Access a certain field in an object according to the path
-pub trait Access {
-    fn access(&self, path: &[&str], type_expected: Option<&DataType>) -> AccessResult;
-}
 
 pub enum AccessImpl<'a, 'b> {
     Avro(AvroAccess<'a, 'b>),
@@ -51,7 +45,7 @@ pub enum AccessImpl<'a, 'b> {
 }
 
 impl Access for AccessImpl<'_, '_> {
-    fn access(&self, path: &[&str], type_expected: Option<&DataType>) -> AccessResult {
+    fn access(&self, path: &[&str], type_expected: &DataType) -> AccessResult {
         match self {
             Self::Avro(accessor) => accessor.access(path, type_expected),
             Self::Bytes(accessor) => accessor.access(path, type_expected),
@@ -72,8 +66,8 @@ pub enum ChangeEventOperation {
 #[auto_impl(&)]
 pub trait ChangeEvent {
     /// Access the operation type.
-    fn op(&self) -> std::result::Result<ChangeEventOperation, AccessError>;
-    /// Access the field after the operation.
+    fn op(&self) -> AccessResult<ChangeEventOperation>;
+    /// Access the field.
     fn access_field(&self, desc: &SourceColumnDesc) -> AccessResult;
 }
 
@@ -81,33 +75,11 @@ impl<A> ChangeEvent for (ChangeEventOperation, A)
 where
     A: Access,
 {
-    fn op(&self) -> std::result::Result<ChangeEventOperation, AccessError> {
+    fn op(&self) -> AccessResult<ChangeEventOperation> {
         Ok(self.0)
     }
 
     fn access_field(&self, desc: &SourceColumnDesc) -> AccessResult {
-        self.1.access(&[desc.name.as_str()], Some(&desc.data_type))
+        self.1.access(&[desc.name.as_str()], &desc.data_type)
     }
-}
-
-#[derive(Error, Debug, Macro)]
-#[thiserror_ext(macro(mangle))]
-pub enum AccessError {
-    #[error("Undefined field `{name}` at `{path}`")]
-    Undefined { name: String, path: String },
-    #[error("Cannot parse value `{value}` with type `{got}` into expected type `{expected}`")]
-    TypeError {
-        expected: String,
-        got: String,
-        value: String,
-    },
-    #[error("Unsupported data type `{ty}`")]
-    UnsupportedType { ty: String },
-
-    #[error("Unsupported additional column `{name}`")]
-    UnsupportedAdditionalColumn { name: String },
-
-    /// Errors that are not categorized into variants above.
-    #[error("{message}")]
-    Uncategorized { message: String },
 }
