@@ -654,7 +654,7 @@ impl MongodbPayloadWriter {
                 _ => {
                     if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
                         tracing::warn!(
-                            suppressed_count, 
+                            suppressed_count,
                             "the value of collection.name.field is null, fallback to use default collection.name"
                         );
                     }
