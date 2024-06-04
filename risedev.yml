@@ -1575,7 +1575,7 @@ template:
     database: "risedev"
 
     # Which application to use. Can be overridden for metastore purpose.
-    application: "cdc"
+    application: "connector"
 
     # The docker image. Can be overridden to use a different version.
     image: "mysql:8.0"
@@ -1606,7 +1606,7 @@ template:
     password: ""
     database: "postgres"
 
-    # Which application to use. Can be overridden for cdc purpose.
+    # Which application to use. Can be overridden for connector purpose.
     application: "metastore"
 
     # The docker image. Can be overridden to use a different version.

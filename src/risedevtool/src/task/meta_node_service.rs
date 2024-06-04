@@ -21,7 +21,10 @@ use itertools::Itertools;
 
 use super::{ExecuteContext, Task};
 use crate::util::{get_program_args, get_program_env_cmd, get_program_name};
-use crate::{add_hummock_backend, add_tempo_endpoint, HummockInMemoryStrategy, MetaNodeConfig};
+use crate::{
+    add_hummock_backend, add_tempo_endpoint, Application, HummockInMemoryStrategy, MetaBackend,
+    MetaNodeConfig,
+};
 
 pub struct MetaNodeService {
     config: MetaNodeConfig,
@@ -77,11 +80,11 @@ impl MetaNodeService {
 
         let mut is_persistent_meta_store = false;
 
-        match config.meta_backend.to_ascii_lowercase().as_str() {
-            "memory" => {
+        match &config.meta_backend {
+            MetaBackend::Memory => {
                 cmd.arg("--backend").arg("mem");
             }
-            "etcd" => {
+            MetaBackend::Etcd => {
                 let etcd_config = config.provide_etcd_backend.as_ref().unwrap();
                 assert!(!etcd_config.is_empty());
                 is_persistent_meta_store = true;
@@ -96,7 +99,7 @@ impl MetaNodeService {
                             .join(","),
                     );
             }
-            "sqlite" => {
+            MetaBackend::Sqlite => {
                 let sqlite_config = config.provide_sqlite_backend.as_ref().unwrap();
                 assert_eq!(sqlite_config.len(), 1);
                 is_persistent_meta_store = true;
@@ -110,11 +113,11 @@ impl MetaNodeService {
                     .arg("--sql-endpoint")
                     .arg(format!("sqlite://{}?mode=rwc", file_path.display()));
             }
-            "postgres" => {
+            MetaBackend::Postgres => {
                 let pg_config = config.provide_postgres_backend.as_ref().unwrap();
                 let pg_store_config = pg_config
                     .iter()
-                    .filter(|c| c.application == "metastore")
+                    .filter(|c| c.application == Application::Metastore)
                     .exactly_one()
                     .expect("more than one or no pg store config found for metastore");
                 is_persistent_meta_store = true;
@@ -131,11 +134,11 @@ impl MetaNodeService {
                         pg_store_config.database
                     ));
             }
-            "mysql" => {
+            MetaBackend::Mysql => {
                 let mysql_config = config.provide_mysql_backend.as_ref().unwrap();
                 let mysql_store_config = mysql_config
                     .iter()
-                    .filter(|c| c.application == "metastore")
+                    .filter(|c| c.application == Application::Metastore)
                     .exactly_one()
                     .expect("more than one or no mysql store config found for metastore");
                 is_persistent_meta_store = true;
@@ -151,9 +154,6 @@ impl MetaNodeService {
                         mysql_store_config.port,
                         mysql_store_config.database
                     ));
-            }
-            backend => {
-                return Err(anyhow!("unsupported meta backend {}", backend));
             }
         }
 
