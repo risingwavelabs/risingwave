@@ -134,6 +134,60 @@ DorisConfig:
   - name: r#type
     field_type: String
     required: true
+DynamoDbConfig:
+  fields:
+  - name: table
+    field_type: String
+    required: true
+    alias:
+    - dynamodb.table
+  - name: dynamodb.max_batch_rows
+    field_type: usize
+    required: false
+    default: '1024'
+  - name: aws.region
+    field_type: String
+    required: false
+    alias:
+    - region
+  - name: aws.endpoint_url
+    field_type: String
+    required: false
+    alias:
+    - endpoint_url
+    - endpoint
+  - name: aws.credentials.access_key_id
+    field_type: String
+    required: false
+    alias:
+    - access_key
+  - name: aws.credentials.secret_access_key
+    field_type: String
+    required: false
+    alias:
+    - secret_key
+  - name: aws.credentials.session_token
+    field_type: String
+    required: false
+    alias:
+    - session_token
+  - name: aws.credentials.role.arn
+    field_type: String
+    comments: IAM role
+    required: false
+    alias:
+    - arn
+  - name: aws.credentials.role.external_id
+    field_type: String
+    comments: external ID in IAM role trust policy
+    required: false
+    alias:
+    - external_id
+  - name: aws.profile
+    field_type: String
+    required: false
+    alias:
+    - profile
 GooglePubSubConfig:
   fields:
   - name: pubsub.project_id
