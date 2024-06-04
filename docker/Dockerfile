@@ -125,7 +125,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install gdb libp
 # Set default Rust toolchain but don't install it to keep the image size small
 # The toolchain will be installed when it is first used
 # Do not use `rustup default stable` because it will install immediately
-RUN sed -i '1s/^/default_toolchain = "stable"\n/' ~/.rustup/settings.toml
+RUN rustup show && sed -i '1s/^/default_toolchain = "stable"\n/' ~/.rustup/settings.toml
 
 RUN mkdir -p /risingwave/bin/connector-node && mkdir -p /risingwave/lib
 
