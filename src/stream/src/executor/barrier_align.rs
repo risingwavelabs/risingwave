@@ -46,15 +46,22 @@ pub async fn barrier_align(
     actor_id: ActorId,
     fragment_id: FragmentId,
     metrics: Arc<StreamingMetrics>,
+    executor_name: &str,
 ) {
     let actor_id = actor_id.to_string();
     let fragment_id = fragment_id.to_string();
-    let left_join_barrier_align_duration = metrics
-        .join_barrier_align_duration
-        .with_label_values(&[&actor_id, &fragment_id, "left"]);
-    let right_join_barrier_align_duration = metrics
-        .join_barrier_align_duration
-        .with_label_values(&[&actor_id, &fragment_id, "right"]);
+    let left_barrier_align_duration = metrics.barrier_align_duration.with_label_values(&[
+        &actor_id,
+        &fragment_id,
+        "left",
+        executor_name,
+    ]);
+    let right_barrier_align_duration = metrics.barrier_align_duration.with_label_values(&[
+        &actor_id,
+        &fragment_id,
+        "right",
+        executor_name,
+    ]);
     loop {
         let prefer_left: bool = rand::random();
         let select_result = if prefer_left {
@@ -113,7 +120,7 @@ pub async fn barrier_align(
                         Message::Chunk(chunk) => yield AlignedMessage::Right(chunk),
                         Message::Barrier(barrier) => {
                             yield AlignedMessage::Barrier(barrier);
-                            right_join_barrier_align_duration
+                            right_barrier_align_duration
                                 .observe(start_time.elapsed().as_secs_f64());
                             break;
                         }
@@ -137,8 +144,7 @@ pub async fn barrier_align(
                         Message::Chunk(chunk) => yield AlignedMessage::Left(chunk),
                         Message::Barrier(barrier) => {
                             yield AlignedMessage::Barrier(barrier);
-                            left_join_barrier_align_duration
-                                .observe(start_time.elapsed().as_secs_f64());
+                            left_barrier_align_duration.observe(start_time.elapsed().as_secs_f64());
                             break;
                         }
                     }
@@ -164,7 +170,14 @@ mod tests {
         left: BoxedMessageStream,
         right: BoxedMessageStream,
     ) -> impl Stream<Item = Result<AlignedMessage, StreamExecutorError>> {
-        barrier_align(left, right, 0, 0, Arc::new(StreamingMetrics::unused()))
+        barrier_align(
+            left,
+            right,
+            0,
+            0,
+            Arc::new(StreamingMetrics::unused()),
+            "dummy_executor",
+        )
     }
 
     #[tokio::test]

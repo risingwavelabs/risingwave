@@ -23,7 +23,7 @@ use super::message::MqttMessage;
 use super::MqttSplit;
 use crate::error::ConnectorResult as Result;
 use crate::parser::ParserConfig;
-use crate::source::common::{into_chunk_stream, CommonSplitReader};
+use crate::source::common::into_chunk_stream;
 use crate::source::mqtt::MqttProperties;
 use crate::source::{BoxChunkSourceStream, Column, SourceContextRef, SourceMessage, SplitReader};
 
@@ -78,11 +78,11 @@ impl SplitReader for MqttSplitReader {
     fn into_stream(self) -> BoxChunkSourceStream {
         let parser_config = self.parser_config.clone();
         let source_context = self.source_ctx.clone();
-        into_chunk_stream(self, parser_config, source_context)
+        into_chunk_stream(self.into_data_stream(), parser_config, source_context)
     }
 }
 
-impl CommonSplitReader for MqttSplitReader {
+impl MqttSplitReader {
     #[try_stream(ok = Vec<SourceMessage>, error = crate::error::ConnectorError)]
     async fn into_data_stream(self) {
         let mut eventloop = self.eventloop;

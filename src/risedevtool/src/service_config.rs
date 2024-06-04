@@ -271,18 +271,45 @@ pub struct KafkaConfig {
     phantom_use: Option<String>,
     pub id: String,
 
+    /// Advertise address
     pub address: String,
     #[serde(with = "string")]
     pub port: u16,
+    /// Port for other services in docker. They need to connect to `host.docker.internal`, while the host
+    /// need to connect to `localhost`.
+    pub docker_port: u16,
+
     #[serde(with = "string")]
     pub controller_port: u16,
-    pub listen_address: String,
 
+    pub image: String,
     pub persist_data: bool,
     pub node_id: u32,
 
     pub user_managed: bool,
 }
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
+pub struct SchemaRegistryConfig {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
+
+    pub id: String,
+
+    pub address: String,
+    #[serde(with = "string")]
+    pub port: u16,
+
+    pub provide_kafka: Option<Vec<KafkaConfig>>,
+
+    pub image: String,
+    /// Redpanda supports schema registry natively. You can configure a `user_managed` schema registry
+    /// to use with redpanda.
+    pub user_managed: bool,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 #[serde(deny_unknown_fields)]
@@ -379,6 +406,7 @@ pub enum ServiceConfig {
     Opendal(OpendalConfig),
     AwsS3(AwsS3Config),
     Kafka(KafkaConfig),
+    SchemaRegistry(SchemaRegistryConfig),
     Pubsub(PubsubConfig),
     Redis(RedisConfig),
     RedPanda(RedPandaConfig),
@@ -406,10 +434,12 @@ impl ServiceConfig {
             Self::RedPanda(c) => &c.id,
             Self::Opendal(c) => &c.id,
             Self::MySql(c) => &c.id,
-            ServiceConfig::Postgres(c) => &c.id,
+            Self::Postgres(c) => &c.id,
+            Self::SchemaRegistry(c) => &c.id,
         }
     }
 
+    /// Used to check whether the port is occupied before running the service.
     pub fn port(&self) -> Option<u16> {
         match self {
             Self::ComputeNode(c) => Some(c.port),
@@ -429,7 +459,8 @@ impl ServiceConfig {
             Self::RedPanda(_c) => None,
             Self::Opendal(_) => None,
             Self::MySql(c) => Some(c.port),
-            ServiceConfig::Postgres(c) => Some(c.port),
+            Self::Postgres(c) => Some(c.port),
+            Self::SchemaRegistry(c) => Some(c.port),
         }
     }
 
@@ -453,6 +484,7 @@ impl ServiceConfig {
             Self::Opendal(_c) => false,
             Self::MySql(c) => c.user_managed,
             Self::Postgres(c) => c.user_managed,
+            Self::SchemaRegistry(c) => c.user_managed,
         }
     }
 }

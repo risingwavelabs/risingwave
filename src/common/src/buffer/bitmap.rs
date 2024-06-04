@@ -37,7 +37,7 @@
 #![allow(clippy::disallowed_methods)]
 
 use std::iter::{self, TrustedLen};
-use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, Not, RangeInclusive};
+use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, Not, Range, RangeInclusive};
 
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::common::buffer::CompressionType;
@@ -415,6 +415,46 @@ impl Bitmap {
             self.count_ones
         )
     }
+
+    /// Creates a new bitmap with all bits in range set to 1.
+    ///
+    /// # Example
+    /// ```
+    /// use risingwave_common::buffer::Bitmap;
+    /// let bitmap = Bitmap::from_range(200, 100..180);
+    /// assert_eq!(bitmap.count_ones(), 80);
+    /// for i in 0..200 {
+    ///     assert_eq!(bitmap.is_set(i), i >= 100 && i < 180);
+    /// }
+    /// ```
+    pub fn from_range(num_bits: usize, range: Range<usize>) -> Self {
+        assert!(range.start <= range.end);
+        assert!(range.end <= num_bits);
+        if range.start == range.end {
+            return Self::zeros(num_bits);
+        } else if range == (0..num_bits) {
+            return Self::ones(num_bits);
+        }
+        let mut bits = vec![0; Self::vec_len(num_bits)];
+        let start = range.start / BITS;
+        let end = range.end / BITS;
+        let start_offset = range.start % BITS;
+        let end_offset = range.end % BITS;
+        if start == end {
+            bits[start] = ((1 << (end_offset - start_offset)) - 1) << start_offset;
+        } else {
+            bits[start] = !0 << start_offset;
+            bits[start + 1..end].fill(!0);
+            if end_offset != 0 {
+                bits[end] = (1 << end_offset) - 1;
+            }
+        }
+        Self {
+            bits: Some(bits.into()),
+            num_bits,
+            count_ones: range.len(),
+        }
+    }
 }
 
 impl From<usize> for Bitmap {
@@ -761,6 +801,16 @@ impl<'a> iter::Iterator for BitmapOnesIter<'a> {
                     *cur_idx * BITS + low_bit_idx as usize
                 })
             }
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        match self {
+            BitmapOnesIter::Range { start, end } => {
+                let remaining = end - start;
+                (remaining, Some(remaining))
+            }
+            BitmapOnesIter::Buffer { bits, .. } => (0, Some(bits.len() * usize::BITS as usize)),
         }
     }
 }

@@ -17,6 +17,7 @@ pub mod boxed;
 pub mod catalog;
 pub mod clickhouse;
 pub mod coordinate;
+pub mod decouple_checkpoint_log_sink;
 pub mod deltalake;
 pub mod doris;
 pub mod doris_starrocks_connector;

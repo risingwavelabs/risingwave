@@ -21,13 +21,16 @@ use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::{ActorMapping, ParallelUnitId, ParallelUnitMapping};
-use risingwave_common::util::stream_graph_visitor::{visit_stream_node, visit_stream_node_cont};
+use risingwave_common::util::stream_graph_visitor::{
+    visit_stream_node, visit_stream_node_cont, visit_stream_node_cont_mut,
+};
 use risingwave_connector::source::SplitImpl;
 use risingwave_meta_model_v2::SourceId;
+use risingwave_pb::common::{PbParallelUnitMapping, PbWorkerSlotMapping};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::{ActorStatus, Fragment, State};
-use risingwave_pb::meta::FragmentParallelUnitMapping;
+use risingwave_pb::meta::FragmentWorkerSlotMapping;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use risingwave_pb::stream_plan::{
@@ -41,7 +44,7 @@ use crate::manager::cluster::WorkerId;
 use crate::manager::{commit_meta, commit_meta_with_trx, LocalNotification, MetaSrvEnv};
 use crate::model::{
     ActorId, BTreeMapTransaction, FragmentId, MetadataModel, MigrationPlan, TableFragments,
-    TableParallelism, ValTransaction,
+    TableParallelism,
 };
 use crate::storage::Transaction;
 use crate::stream::{to_build_actor_info, SplitAssignment, TableRevision};
@@ -56,18 +59,21 @@ impl FragmentManagerCore {
     /// List all fragment vnode mapping info that not in `State::Initial`.
     pub fn all_running_fragment_mappings(
         &self,
-    ) -> impl Iterator<Item = FragmentParallelUnitMapping> + '_ {
+    ) -> impl Iterator<Item = FragmentWorkerSlotMapping> + '_ {
         self.table_fragments
             .values()
             .filter(|tf| tf.state() != State::Initial)
             .flat_map(|table_fragments| {
-                table_fragments.fragments.values().map(|fragment| {
-                    let parallel_unit_mapping = fragment.vnode_mapping.clone().unwrap();
-                    FragmentParallelUnitMapping {
+                table_fragments
+                    .fragments
+                    .values()
+                    .map(move |fragment| FragmentWorkerSlotMapping {
                         fragment_id: fragment.fragment_id,
-                        mapping: Some(parallel_unit_mapping),
-                    }
-                })
+                        mapping: Some(FragmentManager::convert_mapping(
+                            &table_fragments.actor_status,
+                            fragment.vnode_mapping.as_ref().unwrap(),
+                        )),
+                    })
             })
     }
 
@@ -192,18 +198,23 @@ impl FragmentManager {
     async fn notify_fragment_mapping(&self, table_fragment: &TableFragments, operation: Operation) {
         // Notify all fragment mapping to frontend nodes
         for fragment in table_fragment.fragments.values() {
-            let mapping = fragment
-                .vnode_mapping
-                .clone()
-                .expect("no data distribution found");
-            let fragment_mapping = FragmentParallelUnitMapping {
+            let fragment_mapping = FragmentWorkerSlotMapping {
                 fragment_id: fragment.fragment_id,
-                mapping: Some(mapping),
+                mapping: Some(Self::convert_mapping(
+                    &table_fragment.actor_status,
+                    fragment
+                        .vnode_mapping
+                        .as_ref()
+                        .expect("no data distribution found"),
+                )),
             };
 
             self.env
                 .notification_manager()
-                .notify_frontend(operation, Info::ParallelUnitMapping(fragment_mapping))
+                .notify_frontend(
+                    operation,
+                    Info::StreamingWorkerSlotMapping(fragment_mapping),
+                )
                 .await;
         }
 
@@ -645,12 +656,12 @@ impl FragmentManager {
 
         let mut dirty_downstream_table_ids = HashMap::new();
 
-        for (table_id, table_fragment) in table_fragments.tree_mut() {
+        for (table_id, table_fragment) in table_fragments.tree_ref() {
             if to_delete_table_ids.contains(table_id) {
                 continue;
             }
 
-            for fragment in table_fragment.fragments.values_mut() {
+            for fragment in table_fragment.fragments.values() {
                 if fragment
                     .get_upstream_fragment_ids()
                     .iter()
@@ -659,11 +670,11 @@ impl FragmentManager {
                     continue;
                 }
 
-                for actor in &mut fragment.actors {
-                    visit_stream_node_cont(actor.nodes.as_mut().unwrap(), |node| {
+                for actor in &fragment.actors {
+                    visit_stream_node_cont(actor.nodes.as_ref().unwrap(), |node| {
                         if let Some(NodeBody::Union(_)) = node.node_body {
-                            for input in &mut node.input {
-                                if let Some(NodeBody::Merge(merge_node)) = &mut input.node_body
+                            for input in &node.input {
+                                if let Some(NodeBody::Merge(merge_node)) = &input.node_body
                                     && !all_fragment_ids.contains(&merge_node.upstream_fragment_id)
                                 {
                                     dirty_downstream_table_ids
@@ -693,7 +704,7 @@ impl FragmentManager {
                 .retain(|upstream_fragment_id| all_fragment_ids.contains(upstream_fragment_id));
 
             for actor in &mut fragment.actors {
-                visit_stream_node_cont(actor.nodes.as_mut().unwrap(), |node| {
+                visit_stream_node_cont_mut(actor.nodes.as_mut().unwrap(), |node| {
                     if let Some(NodeBody::Union(_)) = node.node_body {
                         node.input.retain_mut(|input| {
                             if let Some(NodeBody::Merge(merge_node)) = &mut input.node_body
@@ -1262,11 +1273,14 @@ impl FragmentManager {
 
                 *fragment.vnode_mapping.as_mut().unwrap() = vnode_mapping.clone();
 
+                let worker_slot_mapping = Self::convert_mapping(&actor_status, &vnode_mapping);
+
                 // Notify fragment mapping to frontend nodes.
-                let fragment_mapping = FragmentParallelUnitMapping {
+                let fragment_mapping = FragmentWorkerSlotMapping {
                     fragment_id: *fragment_id as FragmentId,
-                    mapping: Some(vnode_mapping),
+                    mapping: Some(worker_slot_mapping),
                 };
+
                 fragment_mapping_to_notify.push(fragment_mapping);
             }
 
@@ -1386,11 +1400,28 @@ impl FragmentManager {
         for mapping in fragment_mapping_to_notify {
             self.env
                 .notification_manager()
-                .notify_frontend(Operation::Update, Info::ParallelUnitMapping(mapping))
+                .notify_frontend(Operation::Update, Info::StreamingWorkerSlotMapping(mapping))
                 .await;
         }
 
         Ok(())
+    }
+
+    fn convert_mapping(
+        actor_status: &BTreeMap<ActorId, ActorStatus>,
+        vnode_mapping: &PbParallelUnitMapping,
+    ) -> PbWorkerSlotMapping {
+        let parallel_unit_to_worker = actor_status
+            .values()
+            .map(|actor_status| {
+                let parallel_unit = actor_status.get_parallel_unit().unwrap();
+                (parallel_unit.id, parallel_unit.worker_node_id)
+            })
+            .collect();
+
+        ParallelUnitMapping::from_protobuf(vnode_mapping)
+            .to_worker_slot(&parallel_unit_to_worker)
+            .to_protobuf()
     }
 
     pub async fn table_node_actors(

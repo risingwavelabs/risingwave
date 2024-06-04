@@ -70,9 +70,6 @@ pub struct GooglePubSubConfig {
     /// `pubsub.publisher` [role](https://cloud.google.com/pubsub/docs/access-control#roles)
     #[serde(rename = "pubsub.credentials")]
     pub credentials: Option<String>,
-
-    // accept "append-only"
-    pub r#type: String,
 }
 
 impl GooglePubSubConfig {

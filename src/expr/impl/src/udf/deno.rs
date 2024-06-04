@@ -65,7 +65,7 @@ static DENO: UdfImplDescriptor = UdfImplDescriptor {
                 Some("async") => "async function",
                 Some("generator") => "function*",
                 Some("async_generator") => "async function*",
-                _ if opts.table_function => "function*",
+                _ if opts.kind.is_table() => "function*",
                 _ => "function",
             },
             opts.identifier,

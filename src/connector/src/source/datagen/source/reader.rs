@@ -27,8 +27,8 @@ use crate::source::data_gen_util::spawn_data_generation_stream;
 use crate::source::datagen::source::SEQUENCE_FIELD_KIND;
 use crate::source::datagen::{DatagenProperties, DatagenSplit, FieldDesc};
 use crate::source::{
-    into_chunk_stream, BoxChunkSourceStream, Column, CommonSplitReader, DataType, SourceContextRef,
-    SourceMessage, SplitId, SplitMetaData, SplitReader,
+    into_chunk_stream, BoxChunkSourceStream, Column, DataType, SourceContextRef, SourceMessage,
+    SplitId, SplitMetaData, SplitReader,
 };
 
 pub struct DatagenSplitReader {
@@ -177,13 +177,13 @@ impl SplitReader for DatagenSplitReader {
             _ => {
                 let parser_config = self.parser_config.clone();
                 let source_context = self.source_ctx.clone();
-                into_chunk_stream(self, parser_config, source_context)
+                into_chunk_stream(self.into_data_stream(), parser_config, source_context)
             }
         }
     }
 }
 
-impl CommonSplitReader for DatagenSplitReader {
+impl DatagenSplitReader {
     fn into_data_stream(self) -> impl Stream<Item = ConnectorResult<Vec<SourceMessage>>> {
         // Will buffer at most 4 event chunks.
         const BUFFER_SIZE: usize = 4;

@@ -26,7 +26,7 @@ use risingwave_pb::plan_common::PbColumnCatalog;
 use super::fs_reader::FsSourceReader;
 use super::reader::SourceReader;
 use crate::error::ConnectorResult;
-use crate::parser::additional_columns::add_partition_offset_cols;
+use crate::parser::additional_columns::source_add_partition_offset_cols;
 use crate::parser::{EncodingProperties, ProtocolProperties, SpecificParserConfig};
 use crate::source::monitor::SourceMetrics;
 use crate::source::{SourceColumnDesc, SourceColumnType, UPSTREAM_SOURCE_KEY};
@@ -98,7 +98,7 @@ impl SourceDescBuilder {
             .map(|c| ColumnCatalog::from(c.clone()))
             .collect_vec();
         let (columns_exist, additional_columns) =
-            add_partition_offset_cols(&columns, &connector_name);
+            source_add_partition_offset_cols(&columns, &connector_name);
 
         let mut columns: Vec<_> = self
             .columns

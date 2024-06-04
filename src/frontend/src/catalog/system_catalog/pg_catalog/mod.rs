@@ -52,5 +52,3 @@ mod pg_trigger;
 mod pg_type;
 mod pg_user;
 mod pg_views;
-
-pub use pg_keywords::*;

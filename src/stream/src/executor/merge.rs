@@ -25,7 +25,6 @@ use super::watermark::*;
 use super::*;
 use crate::executor::exchange::input::new_input;
 use crate::executor::prelude::*;
-use crate::executor::utils::ActorInputMetrics;
 use crate::task::SharedContext;
 
 /// `MergeExecutor` merges data from multiple channels. Dataflow from one channel
@@ -94,11 +93,15 @@ impl MergeExecutor {
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self: Box<Self>) {
         // Futures of all active upstreams.
-        let select_all = SelectReceivers::new(self.actor_context.id, self.upstreams);
+        let select_all = SelectReceivers::new(
+            self.actor_context.id,
+            self.actor_context.fragment_id,
+            self.upstreams,
+            self.metrics.clone(),
+        );
         let actor_id = self.actor_context.id;
 
-        let mut metrics = ActorInputMetrics::new(
-            &self.metrics,
+        let mut metrics = self.metrics.new_actor_input_metrics(
             actor_id,
             self.fragment_id,
             self.upstream_fragment_id,
@@ -184,8 +187,12 @@ impl MergeExecutor {
 
                             // Poll the first barrier from the new upstreams. It must be the same as
                             // the one we polled from original upstreams.
-                            let mut select_new =
-                                SelectReceivers::new(self.actor_context.id, new_upstreams);
+                            let mut select_new = SelectReceivers::new(
+                                self.actor_context.id,
+                                self.fragment_id,
+                                new_upstreams,
+                                self.metrics.clone(),
+                            );
                             let new_barrier = expect_first_barrier(&mut select_new).await?;
                             assert_eq!(barrier, &new_barrier);
 
@@ -213,8 +220,7 @@ impl MergeExecutor {
                         }
 
                         self.upstream_fragment_id = new_upstream_fragment_id;
-                        metrics = ActorInputMetrics::new(
-                            &self.metrics,
+                        metrics = self.metrics.new_actor_input_metrics(
                             actor_id,
                             self.fragment_id,
                             self.upstream_fragment_id,
@@ -250,8 +256,12 @@ pub struct SelectReceivers {
 
     /// The actor id of this fragment.
     actor_id: u32,
+    /// The fragment id
+    fragment_id: u32,
     /// watermark column index -> `BufferedWatermarks`
     buffered_watermarks: BTreeMap<usize, BufferedWatermarks<ActorId>>,
+    /// Streaming Metrics
+    metrics: Arc<StreamingMetrics>,
 }
 
 impl Stream for SelectReceivers {
@@ -264,6 +274,11 @@ impl Stream for SelectReceivers {
             return Poll::Ready(None);
         }
 
+        let merge_barrier_align_duration = self
+            .metrics
+            .merge_barrier_align_duration
+            .with_label_values(&[&self.actor_id.to_string(), &self.fragment_id.to_string()]);
+        let mut start = None;
         loop {
             match futures::ready!(self.active.poll_next_unpin(cx)) {
                 // Directly forward the error.
@@ -288,6 +303,9 @@ impl Stream for SelectReceivers {
                         }
                         Message::Barrier(barrier) => {
                             // Block this upstream by pushing it to `blocked`.
+                            if self.blocked.is_empty() {
+                                start = Some(Instant::now());
+                            }
                             self.blocked.push(remaining);
                             if let Some(current_barrier) = self.barrier.as_ref() {
                                 if current_barrier.epoch != barrier.epoch {
@@ -313,7 +331,12 @@ impl Stream for SelectReceivers {
                 // So this branch will never be reached in all cases.
                 Some((None, _)) => unreachable!(),
                 // There's no active upstreams. Process the barrier and resume the blocked ones.
-                None => break,
+                None => {
+                    if let Some(start) = start {
+                        merge_barrier_align_duration.observe(start.elapsed().as_secs_f64())
+                    }
+                    break;
+                }
             }
         }
 
@@ -335,16 +358,23 @@ impl Stream for SelectReceivers {
 }
 
 impl SelectReceivers {
-    fn new(actor_id: u32, upstreams: Vec<BoxedInput>) -> Self {
+    fn new(
+        actor_id: u32,
+        fragment_id: u32,
+        upstreams: Vec<BoxedInput>,
+        metrics: Arc<StreamingMetrics>,
+    ) -> Self {
         assert!(!upstreams.is_empty());
         let upstream_actor_ids = upstreams.iter().map(|input| input.actor_id()).collect();
         let mut this = Self {
             blocked: Vec::with_capacity(upstreams.len()),
             active: Default::default(),
             actor_id,
+            fragment_id,
             barrier: None,
             upstream_actor_ids,
             buffered_watermarks: Default::default(),
+            metrics,
         };
         this.extend_active(upstreams);
         this

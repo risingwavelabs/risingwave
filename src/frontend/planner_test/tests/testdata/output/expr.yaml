@@ -88,7 +88,7 @@
     create table t (v1 int);
     SELECT 1 in (3, 0.5*2, min(v1)) from t;
   batch_plan: |-
-    BatchProject { exprs: [true:Boolean] }
+    BatchProject { exprs: [(true:Boolean OR (1:Int32 = min(min(t.v1)))) as $expr1] }
     └─BatchSimpleAgg { aggs: [min(min(t.v1))] }
       └─BatchExchange { order: [], dist: Single }
         └─BatchSimpleAgg { aggs: [min(t.v1)] }

@@ -13,7 +13,6 @@
 // limitations under the License.
 
 mod jni_catalog;
-mod log_sink;
 mod mock_catalog;
 mod prometheus;
 
@@ -54,11 +53,11 @@ use thiserror_ext::AsReport;
 use url::Url;
 use with_options::WithOptions;
 
-use self::log_sink::IcebergLogSinkerOf;
 use self::mock_catalog::MockCatalog;
 use self::prometheus::monitored_base_file_writer::MonitoredBaseFileWriterBuilder;
 use self::prometheus::monitored_position_delete_writer::MonitoredPositionDeleteWriterBuilder;
 use super::catalog::desc::SinkDesc;
+use super::decouple_checkpoint_log_sink::DecoupleCheckpointLogSinkerOf;
 use super::{
     Sink, SinkError, SinkWriterParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
 };
@@ -516,7 +515,7 @@ impl IcebergSink {
 
 impl Sink for IcebergSink {
     type Coordinator = IcebergSinkCommitter;
-    type LogSinker = IcebergLogSinkerOf<CoordinatedSinkWriter<IcebergWriter>>;
+    type LogSinker = DecoupleCheckpointLogSinkerOf<CoordinatedSinkWriter<IcebergWriter>>;
 
     const SINK_NAME: &'static str = ICEBERG_SINK;
 
@@ -577,7 +576,7 @@ impl Sink for IcebergSink {
                 "commit_checkpoint_interval should be greater than 0, and it should be checked in config validation",
             );
 
-        Ok(IcebergLogSinkerOf::new(
+        Ok(DecoupleCheckpointLogSinkerOf::new(
             writer,
             writer_param.sink_metrics,
             commit_checkpoint_interval,

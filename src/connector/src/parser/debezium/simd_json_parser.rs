@@ -530,7 +530,7 @@ mod tests {
                     // For other overflow, the parsing succeeds but the type conversion fails
                     // The errors are ignored and logged.
                     res.unwrap();
-                    assert!(logs_contain("Expected type"), "{i}");
+                    assert!(logs_contain("expected type"), "{i}");
                 } else {
                     // For f64 overflow, the parsing fails
                     let e = res.unwrap_err();

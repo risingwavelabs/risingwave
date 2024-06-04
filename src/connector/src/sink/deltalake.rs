@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use core::num::NonZeroU64;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -30,6 +31,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
+use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
@@ -39,13 +41,15 @@ use serde_derive::{Deserialize, Serialize};
 use serde_with::serde_as;
 use with_options::WithOptions;
 
+use super::catalog::desc::SinkDesc;
 use super::coordinate::CoordinatedSinkWriter;
-use super::writer::{LogSinkerOf, SinkWriter};
+use super::decouple_checkpoint_log_sink::DecoupleCheckpointLogSinkerOf;
+use super::writer::SinkWriter;
 use super::{
     Result, Sink, SinkCommitCoordinator, SinkError, SinkParam, SinkWriterParam,
     SINK_TYPE_APPEND_ONLY, SINK_USER_FORCE_APPEND_ONLY_OPTION,
 };
-use crate::sink::writer::SinkWriterExt;
+use crate::deserialize_optional_u64_from_string;
 
 pub const DELTALAKE_SINK: &str = "deltalake";
 pub const DEFAULT_REGION: &str = "us-east-1";
@@ -65,6 +69,9 @@ pub struct DeltaLakeCommon {
     pub s3_endpoint: Option<String>,
     #[serde(rename = "gcs.service.account")]
     pub gcs_service_account: Option<String>,
+    // Commit every n(>0) checkpoints, if n is not set, we will commit every checkpoint.
+    #[serde(default, deserialize_with = "deserialize_optional_u64_from_string")]
+    pub commit_checkpoint_interval: Option<u64>,
 }
 impl DeltaLakeCommon {
     pub async fn create_deltalake_client(&self) -> Result<DeltaTable> {
@@ -269,9 +276,33 @@ fn check_field_type(rw_data_type: &DataType, dl_data_type: &DeltaLakeDataType) -
 
 impl Sink for DeltaLakeSink {
     type Coordinator = DeltaLakeSinkCommitter;
-    type LogSinker = LogSinkerOf<CoordinatedSinkWriter<DeltaLakeSinkWriter>>;
+    type LogSinker = DecoupleCheckpointLogSinkerOf<CoordinatedSinkWriter<DeltaLakeSinkWriter>>;
 
     const SINK_NAME: &'static str = DELTALAKE_SINK;
+
+    fn is_sink_decouple(desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
+        let config_decouple = if let Some(interval) =
+            desc.properties.get("commit_checkpoint_interval")
+            && interval.parse::<u64>().unwrap_or(0) > 1
+        {
+            true
+        } else {
+            false
+        };
+
+        match user_specified {
+            SinkDecouple::Default => Ok(config_decouple),
+            SinkDecouple::Disable => {
+                if config_decouple {
+                    return Err(SinkError::Config(anyhow!(
+                        "config conflict: DeltaLake config `commit_checkpoint_interval` bigger than 1 which means that must enable sink decouple, but session config sink decouple is disabled"
+                    )));
+                }
+                Ok(false)
+            }
+            SinkDecouple::Enable => Ok(true),
+        }
+    }
 
     async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
         let inner = DeltaLakeSinkWriter::new(
@@ -280,7 +311,7 @@ impl Sink for DeltaLakeSink {
             self.param.downstream_pk.clone(),
         )
         .await?;
-        Ok(CoordinatedSinkWriter::new(
+        let writer = CoordinatedSinkWriter::new(
             writer_param
                 .meta_client
                 .expect("should have meta client")
@@ -294,8 +325,18 @@ impl Sink for DeltaLakeSink {
             })?,
             inner,
         )
-        .await?
-        .into_log_sinker(writer_param.sink_metrics))
+        .await?;
+
+        let commit_checkpoint_interval =
+            NonZeroU64::new(self.config.common.commit_checkpoint_interval.unwrap_or(1)).expect(
+                "commit_checkpoint_interval should be greater than 0, and it should be checked in config validation",
+            );
+
+        Ok(DecoupleCheckpointLogSinkerOf::new(
+            writer,
+            writer_param.sink_metrics,
+            commit_checkpoint_interval,
+        ))
     }
 
     async fn validate(&self) -> Result<()> {
