@@ -67,7 +67,7 @@ fn parse_create_table_with_defaults() {
                     ),
                     ColumnDef::new(
                         "first_name".into(),
-                        DataType::Varchar,
+                        DataType::Varchar(None),
                         None,
                         vec![ColumnOptionDef {
                             name: None,
@@ -76,14 +76,14 @@ fn parse_create_table_with_defaults() {
                     ),
                     ColumnDef::new(
                         "last_name".into(),
-                        DataType::Varchar,
+                        DataType::Varchar(None),
                         Some(ObjectName(vec![Ident::with_quote_unchecked('"', "es_ES")])),
                         vec![ColumnOptionDef {
                             name: None,
                             option: ColumnOption::NotNull,
                         }],
                     ),
-                    ColumnDef::new("email".into(), DataType::Varchar, None, vec![],),
+                    ColumnDef::new("email".into(), DataType::Varchar(None), None, vec![],),
                     ColumnDef::new(
                         "address_id".into(),
                         DataType::SmallInt,
@@ -980,7 +980,7 @@ fn parse_drop_function() {
                 FunctionDesc {
                     name: ObjectName(vec![Ident::new_unchecked("test_func2")]),
                     args: Some(vec![
-                        OperateFunctionArg::with_name("a", DataType::Varchar),
+                        OperateFunctionArg::with_name("a", DataType::Varchar(None)),
                         OperateFunctionArg {
                             mode: Some(ArgMode::In),
                             name: Some("b".into()),
