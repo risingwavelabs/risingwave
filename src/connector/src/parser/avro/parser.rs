@@ -198,6 +198,7 @@ mod test {
     use risingwave_common::catalog::ColumnId;
     use risingwave_common::row::Row;
     use risingwave_common::types::{DataType, Date};
+    use risingwave_common::util::iter_util::ZipEqFast;
     use risingwave_pb::catalog::StreamSourceInfo;
     use risingwave_pb::plan_common::{PbEncodeType, PbFormatType};
     use url::Url;
@@ -332,7 +333,7 @@ mod test {
             record
                 .fields
                 .iter()
-                .zip_eq(row.iter())
+                .zip_eq_fast(row.iter())
                 .format_with("\n", |(avro, datum), f| {
                     f(&format_args!("{:?} => {:?}", avro, datum))
                 })
