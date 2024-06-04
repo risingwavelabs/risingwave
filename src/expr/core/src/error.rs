@@ -129,6 +129,7 @@ pub enum ExprError {
 static_assertions::const_assert_eq!(std::mem::size_of::<ExprError>(), 40);
 
 impl ExprError {
+    /// Constructs a [`ExprError::Function`] error with the given information for display.
     pub fn function<'a>(
         fn_name: &str,
         args: impl IntoIterator<Item = DatumRef<'a>>,
