@@ -12,10 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 
-use apache_avro::schema::{DecimalSchema, RecordSchema, Schema};
+use apache_avro::schema::{DecimalSchema, RecordSchema, ResolvedSchema, Schema};
 use apache_avro::types::{Value, ValueKind};
+use apache_avro::AvroResult;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::log::LogSuppresser;
@@ -26,6 +27,33 @@ use crate::error::ConnectorResult;
 use crate::parser::unified::bail_uncategorized;
 use crate::parser::{AccessError, MapHandling};
 
+/// Avro schema with `Ref` inlined. The newtype is used to indicate whether the schema is resolved.
+///
+/// TODO: Actually most of the place should use resolved schema, but currently they just happen to work (Some edge cases are not met yet).
+///
+/// TODO: refactor avro lib to use the feature there.
+#[derive(Debug)]
+pub struct ResolvedAvroSchema {
+    /// Should be used for parsing bytes into Avro value
+    pub original_schema: Arc<Schema>,
+    /// Should be used for type mapping from Avro value to RisingWave datum
+    pub resolved_schema: Schema,
+}
+
+impl ResolvedAvroSchema {
+    pub fn create(schema: Arc<Schema>) -> AvroResult<Self> {
+        let resolver = ResolvedSchema::try_from(schema.as_ref())?;
+        // todo: to_resolved may cause stackoverflow if there's a loop in the schema
+        let resolved_schema = resolver.to_resolved(schema.as_ref())?;
+        Ok(Self {
+            original_schema: schema,
+            resolved_schema,
+        })
+    }
+}
+
+/// This function expects resolved schema (no `Ref`).
+/// FIXME: require passing resolved schema here.
 pub fn avro_schema_to_column_descs(
     schema: &Schema,
     map_handling: Option<MapHandling>,
@@ -92,6 +120,7 @@ fn avro_field_to_column_desc(
     }
 }
 
+/// This function expects resolved schema (no `Ref`).
 fn avro_type_mapping(
     schema: &Schema,
     map_handling: Option<MapHandling>,
@@ -147,11 +176,18 @@ fn avro_type_mapping(
             DataType::List(Box::new(item_type))
         }
         Schema::Union(union_schema) => {
-            let nested_schema = union_schema
-                .variants()
+            // We only support using union to represent nullable fields, not general unions.
+            let variants = union_schema.variants();
+            if variants.len() != 2 || !variants.contains(&Schema::Null) {
+                bail!(
+                    "unsupported Avro type, only unions like [null, T] is supported: {:?}",
+                    schema
+                );
+            }
+            let nested_schema = variants
                 .iter()
                 .find_or_first(|s| !matches!(s, Schema::Null))
-                .ok_or_else(|| anyhow::format_err!("unsupported Avro type: {:?}", union_schema))?;
+                .unwrap();
 
             avro_type_mapping(nested_schema, map_handling)?
         }
@@ -182,7 +218,8 @@ fn avro_type_mapping(
                 }
             }
         }
-        Schema::Null | Schema::Fixed(_) | Schema::Uuid => {
+        Schema::Uuid => DataType::Varchar,
+        Schema::Null | Schema::Fixed(_) => {
             bail!("unsupported Avro type: {:?}", schema)
         }
     };

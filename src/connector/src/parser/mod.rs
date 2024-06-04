@@ -45,7 +45,8 @@ pub use self::mysql::mysql_row_to_owned_row;
 use self::plain_parser::PlainParser;
 pub use self::postgres::postgres_row_to_owned_row;
 use self::simd_json_parser::DebeziumJsonAccessBuilder;
-pub use self::unified::json::TimestamptzHandling;
+pub use self::unified::json::{JsonAccess, TimestamptzHandling};
+pub use self::unified::Access;
 use self::unified::AccessImpl;
 use self::upsert_parser::UpsertParser;
 use self::util::get_kafka_topic;
@@ -489,7 +490,7 @@ impl SourceStreamChunkRowWriter<'_> {
     /// produces one [`Datum`] by corresponding [`SourceColumnDesc`].
     ///
     /// See the [struct-level documentation](SourceStreamChunkRowWriter) for more details.
-    pub fn insert(
+    pub fn do_insert(
         &mut self,
         f: impl FnMut(&SourceColumnDesc) -> AccessResult<Datum>,
     ) -> AccessResult<()> {
@@ -500,7 +501,7 @@ impl SourceStreamChunkRowWriter<'_> {
     /// produces one [`Datum`] by corresponding [`SourceColumnDesc`].
     ///
     /// See the [struct-level documentation](SourceStreamChunkRowWriter) for more details.
-    pub fn delete(
+    pub fn do_delete(
         &mut self,
         f: impl FnMut(&SourceColumnDesc) -> AccessResult<Datum>,
     ) -> AccessResult<()> {
@@ -511,7 +512,7 @@ impl SourceStreamChunkRowWriter<'_> {
     /// produces two [`Datum`]s as old and new value by corresponding [`SourceColumnDesc`].
     ///
     /// See the [struct-level documentation](SourceStreamChunkRowWriter) for more details.
-    pub fn update(
+    pub fn do_update(
         &mut self,
         f: impl FnMut(&SourceColumnDesc) -> AccessResult<(Datum, Datum)>,
     ) -> AccessResult<()> {
@@ -589,7 +590,7 @@ pub trait ByteStreamSourceParser: Send + Debug + Sized + 'static {
     }
 
     fn emit_empty_row<'a>(&'a mut self, mut writer: SourceStreamChunkRowWriter<'a>) {
-        _ = writer.insert(|_column| Ok(None));
+        _ = writer.do_insert(|_column| Ok(None));
     }
 }
 
@@ -866,9 +867,8 @@ impl AccessBuilderImpl {
 /// The entrypoint of parsing. It parses [`SourceMessage`] stream (byte stream) into [`StreamChunk`] stream.
 /// Used by [`crate::source::into_chunk_stream`].
 #[derive(Debug)]
-pub(crate) enum ByteStreamSourceParserImpl {
+pub enum ByteStreamSourceParserImpl {
     Csv(CsvParser),
-    Json(JsonParser),
     Debezium(DebeziumParser),
     Plain(PlainParser),
     Upsert(UpsertParser),
@@ -883,7 +883,6 @@ impl ByteStreamSourceParserImpl {
         #[auto_enum(futures03::Stream)]
         let stream = match self {
             Self::Csv(parser) => parser.into_stream(msg_stream),
-            Self::Json(parser) => parser.into_stream(msg_stream),
             Self::Debezium(parser) => parser.into_stream(msg_stream),
             Self::DebeziumMongoJson(parser) => parser.into_stream(msg_stream),
             Self::Maxwell(parser) => parser.into_stream(msg_stream),
@@ -935,6 +934,58 @@ impl ByteStreamSourceParserImpl {
                 Ok(Self::Maxwell(parser))
             }
             _ => unreachable!(),
+        }
+    }
+
+    /// Create a parser for testing purposes.
+    pub fn create_for_test(parser_config: ParserConfig) -> ConnectorResult<Self> {
+        futures::executor::block_on(Self::create(parser_config, SourceContext::dummy().into()))
+    }
+}
+
+/// Test utilities for [`ByteStreamSourceParserImpl`].
+#[cfg(test)]
+pub mod test_utils {
+    use futures::StreamExt as _;
+    use itertools::Itertools as _;
+
+    use super::*;
+
+    #[easy_ext::ext(ByteStreamSourceParserImplTestExt)]
+    pub(crate) impl ByteStreamSourceParserImpl {
+        /// Parse the given payloads into a [`StreamChunk`].
+        async fn parse(self, payloads: Vec<Vec<u8>>) -> StreamChunk {
+            let source_messages = payloads
+                .into_iter()
+                .map(|p| SourceMessage {
+                    payload: (!p.is_empty()).then_some(p),
+                    ..SourceMessage::dummy()
+                })
+                .collect_vec();
+
+            self.into_stream(futures::stream::once(async { Ok(source_messages) }).boxed())
+                .next()
+                .await
+                .unwrap()
+                .unwrap()
+        }
+
+        /// Parse the given key-value pairs into a [`StreamChunk`].
+        async fn parse_upsert(self, kvs: Vec<(Vec<u8>, Vec<u8>)>) -> StreamChunk {
+            let source_messages = kvs
+                .into_iter()
+                .map(|(k, v)| SourceMessage {
+                    key: (!k.is_empty()).then_some(k),
+                    payload: (!v.is_empty()).then_some(v),
+                    ..SourceMessage::dummy()
+                })
+                .collect_vec();
+
+            self.into_stream(futures::stream::once(async { Ok(source_messages) }).boxed())
+                .next()
+                .await
+                .unwrap()
+                .unwrap()
         }
     }
 }
@@ -1003,7 +1054,7 @@ impl MapHandling {
     pub const OPTION_KEY: &'static str = "map.handling.mode";
 
     pub fn from_options(
-        options: &std::collections::BTreeMap<String, String>,
+        options: &std::collections::HashMap<String, String>,
     ) -> Result<Option<Self>, InvalidOptionError> {
         let mode = match options.get(Self::OPTION_KEY).map(std::ops::Deref::deref) {
             Some("jsonb") => Self::Jsonb,

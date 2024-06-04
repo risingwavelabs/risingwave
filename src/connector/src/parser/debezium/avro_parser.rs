@@ -22,8 +22,8 @@ use risingwave_pb::catalog::PbSchemaRegistryNameStrategy;
 use risingwave_pb::plan_common::ColumnDesc;
 
 use crate::error::ConnectorResult;
-use crate::parser::avro::schema_resolver::ConfluentSchemaResolver;
-use crate::parser::avro::util::avro_schema_to_column_descs;
+use crate::parser::avro::schema_resolver::ConfluentSchemaCache;
+use crate::parser::avro::util::{avro_schema_to_column_descs, ResolvedAvroSchema};
 use crate::parser::unified::avro::{
     avro_extract_field_schema, avro_schema_skip_union, AvroAccess, AvroParseOptions,
 };
@@ -40,8 +40,8 @@ const PAYLOAD: &str = "payload";
 
 #[derive(Debug)]
 pub struct DebeziumAvroAccessBuilder {
-    schema: Schema,
-    schema_resolver: Arc<ConfluentSchemaResolver>,
+    schema: ResolvedAvroSchema,
+    schema_resolver: Arc<ConfluentSchemaCache>,
     key_schema: Option<Arc<Schema>>,
     value: Option<Value>,
     encoding_type: EncodingType,
@@ -51,7 +51,7 @@ pub struct DebeziumAvroAccessBuilder {
 impl AccessBuilder for DebeziumAvroAccessBuilder {
     async fn generate_accessor(&mut self, payload: Vec<u8>) -> ConnectorResult<AccessImpl<'_, '_>> {
         let (schema_id, mut raw_payload) = extract_schema_id(&payload)?;
-        let schema = self.schema_resolver.get(schema_id).await?;
+        let schema = self.schema_resolver.get_by_id(schema_id).await?;
         self.value = Some(from_avro_datum(schema.as_ref(), &mut raw_payload, None)?);
         self.key_schema = match self.encoding_type {
             EncodingType::Key => Some(schema),
@@ -59,9 +59,10 @@ impl AccessBuilder for DebeziumAvroAccessBuilder {
         };
         Ok(AccessImpl::Avro(AvroAccess::new(
             self.value.as_mut().unwrap(),
-            AvroParseOptions::default().with_schema(match self.encoding_type {
+            // Assumption: Key will not contain reference, so unresolved schema can work here.
+            AvroParseOptions::create(match self.encoding_type {
                 EncodingType::Key => self.key_schema.as_mut().unwrap(),
-                EncodingType::Value => &self.schema,
+                EncodingType::Value => &self.schema.resolved_schema,
             }),
         )))
     }
@@ -78,11 +79,8 @@ impl DebeziumAvroAccessBuilder {
             ..
         } = config;
 
-        let resolver = apache_avro::schema::ResolvedSchema::try_from(&*outer_schema)?;
-        // todo: to_resolved may cause stackoverflow if there's a loop in the schema
-        let schema = resolver.to_resolved(&outer_schema)?;
         Ok(Self {
-            schema,
+            schema: ResolvedAvroSchema::create(outer_schema)?,
             schema_resolver,
             key_schema: None,
             value: None,
@@ -96,7 +94,7 @@ impl DebeziumAvroAccessBuilder {
 pub struct DebeziumAvroParserConfig {
     pub key_schema: Arc<Schema>,
     pub outer_schema: Arc<Schema>,
-    pub schema_resolver: Arc<ConfluentSchemaResolver>,
+    pub schema_resolver: Arc<ConfluentSchemaCache>,
 }
 
 impl DebeziumAvroParserConfig {
@@ -107,13 +105,13 @@ impl DebeziumAvroParserConfig {
         let kafka_topic = &avro_config.topic;
         let url = handle_sr_list(schema_location)?;
         let client = Client::new(url, client_config)?;
-        let resolver = ConfluentSchemaResolver::new(client);
+        let resolver = ConfluentSchemaCache::new(client);
 
         let name_strategy = &PbSchemaRegistryNameStrategy::Unspecified;
         let key_subject = get_subject_by_strategy(name_strategy, kafka_topic, None, true)?;
         let val_subject = get_subject_by_strategy(name_strategy, kafka_topic, None, false)?;
-        let key_schema = resolver.get_by_subject_name(&key_subject).await?;
-        let outer_schema = resolver.get_by_subject_name(&val_subject).await?;
+        let key_schema = resolver.get_by_subject(&key_subject).await?;
+        let outer_schema = resolver.get_by_subject(&val_subject).await?;
 
         Ok(Self {
             key_schema,
@@ -133,6 +131,9 @@ impl DebeziumAvroParserConfig {
     pub fn map_to_columns(&self) -> ConnectorResult<Vec<ColumnDesc>> {
         avro_schema_to_column_descs(
             avro_schema_skip_union(avro_extract_field_schema(
+                // FIXME: use resolved schema here.
+                // Currently it works because "after" refers to a subtree in "before",
+                // but in theory, inside "before" there could also be a reference.
                 &self.outer_schema,
                 Some("before"),
             )?)?,

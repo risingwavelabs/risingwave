@@ -120,7 +120,7 @@ where
     S: TokenStream,
 {
     #[derive(Debug, thiserror::Error)]
-    #[error("Unconsumed `>>`")]
+    #[error("unconsumed `>>`")]
     struct UnconsumedShiftRight;
 
     with_state::<S, DataTypeParsingState, _, _>(terminated(
