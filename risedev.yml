@@ -884,6 +884,10 @@ profile:
         user-managed: true
         address: message_queue
         port: 29092
+      - use: schema-registry
+        user-managed: true
+        address: schemaregistry
+        port: 8082
       - use: mysql
         port: 3306
         address: mysql

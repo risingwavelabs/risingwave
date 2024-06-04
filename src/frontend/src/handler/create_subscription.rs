@@ -64,7 +64,7 @@ pub fn create_subscription_catalog(
         initialized_at_cluster_version: None,
     };
 
-    subscription_catalog.set_retention_seconds(context.with_options().clone().into_inner())?;
+    subscription_catalog.set_retention_seconds(context.with_options())?;
 
     Ok(subscription_catalog)
 }

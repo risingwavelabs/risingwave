@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 
 use itertools::Itertools;
 use risingwave_common::catalog::{
@@ -23,7 +23,7 @@ use risingwave_pb::stream_plan::PbSinkDesc;
 
 use super::{SinkCatalog, SinkFormatDesc, SinkId, SinkType};
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SinkDesc {
     /// Id of the sink. For debug now.
     pub id: SinkId,
@@ -48,7 +48,7 @@ pub struct SinkDesc {
     pub distribution_key: Vec<usize>,
 
     /// The properties of the sink.
-    pub properties: BTreeMap<String, String>,
+    pub properties: HashMap<String, String>,
 
     // The append-only behavior of the physical sink connector. Frontend will determine `sink_type`
     // based on both its own derivation on the append-only attribute and other user-specified
@@ -134,5 +134,11 @@ impl SinkDesc {
             target_table: self.target_table.map(|table_id| table_id.table_id()),
             extra_partition_col_idx: self.extra_partition_col_idx.map(|idx| idx as u64),
         }
+    }
+}
+
+impl std::hash::Hash for SinkDesc {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.id.hash(state);
     }
 }

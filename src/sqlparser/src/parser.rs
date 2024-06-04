@@ -30,7 +30,7 @@ use winnow::{PResult, Parser as _};
 use crate::ast::*;
 use crate::keywords::{self, Keyword};
 use crate::parser_v2;
-use crate::parser_v2::{keyword, literal_i64, literal_uint, ParserExt as _};
+use crate::parser_v2::{keyword, literal_i64, literal_uint, single_quoted_string, ParserExt as _};
 use crate::tokenizer::*;
 
 pub(crate) const UPSTREAM_SOURCE_KEY: &str = "connector";
@@ -3517,6 +3517,10 @@ impl Parser<'_> {
                     Some('\'') => Ok(Value::SingleQuotedString(w.value)),
                     _ => self.expected_at(checkpoint, "A value")?,
                 },
+                Keyword::REF => {
+                    self.expect_keyword(Keyword::SECRET)?;
+                    Ok(Value::Ref(self.parse_object_name()?))
+                }
                 _ => self.expected_at(checkpoint, "a concrete value"),
             },
             Token::Number(ref n) => Ok(Value::Number(n.clone())),
@@ -3677,25 +3681,31 @@ impl Parser<'_> {
         alt((
             preceded(
                 (Keyword::SYSTEM_TIME, Keyword::AS, Keyword::OF),
-                alt((
-                    (
-                        Self::parse_identifier.verify(|ident| {
-                            ident.real_value() == "proctime" || ident.real_value() == "now"
-                        }),
-                        Token::LParen,
-                        Token::RParen,
-                    )
-                        .value(AsOf::ProcessTime),
-                    literal_i64.map(AsOf::VersionNum),
-                    Self::parse_literal_string.map(AsOf::TimestampString),
-                )),
+                cut_err(
+                    alt((
+                        (
+                            Self::parse_identifier.verify(|ident| {
+                                ident.real_value() == "proctime" || ident.real_value() == "now"
+                            }),
+                            cut_err(Token::LParen),
+                            cut_err(Token::RParen),
+                        )
+                            .value(AsOf::ProcessTime),
+                        literal_i64.map(AsOf::TimestampNum),
+                        single_quoted_string.map(AsOf::TimestampString),
+                    ))
+                    .expect("proctime(), now(), number or string"),
+                ),
             ),
             preceded(
                 (Keyword::SYSTEM_VERSION, Keyword::AS, Keyword::OF),
-                alt((
-                    literal_i64.map(AsOf::VersionNum),
-                    Self::parse_literal_string.map(AsOf::VersionString),
-                )),
+                cut_err(
+                    alt((
+                        literal_i64.map(AsOf::VersionNum),
+                        single_quoted_string.map(AsOf::VersionString),
+                    ))
+                    .expect("number or string"),
+                ),
             ),
         ))
         .parse_next(self)
