@@ -112,7 +112,11 @@ impl MetaNodeService {
             }
             "postgres" => {
                 let pg_config = config.provide_postgres_backend.as_ref().unwrap();
-                assert_eq!(pg_config.len(), 1);
+                let pg_store_config = pg_config
+                    .iter()
+                    .filter(|c| c.application == "metastore")
+                    .exactly_one()
+                    .expect("more than one or no pg store config found for metastore");
                 is_persistent_meta_store = true;
 
                 cmd.arg("--backend")
@@ -120,11 +124,32 @@ impl MetaNodeService {
                     .arg("--sql-endpoint")
                     .arg(format!(
                         "postgres://{}:{}@{}:{}/{}",
-                        pg_config[0].user,
-                        pg_config[0].password,
-                        pg_config[0].address,
-                        pg_config[0].port,
-                        pg_config[0].database
+                        pg_store_config.user,
+                        pg_store_config.password,
+                        pg_store_config.address,
+                        pg_store_config.port,
+                        pg_store_config.database
+                    ));
+            }
+            "mysql" => {
+                let mysql_config = config.provide_mysql_backend.as_ref().unwrap();
+                let mysql_store_config = mysql_config
+                    .iter()
+                    .filter(|c| c.application == "metastore")
+                    .exactly_one()
+                    .expect("more than one or no mysql store config found for metastore");
+                is_persistent_meta_store = true;
+
+                cmd.arg("--backend")
+                    .arg("sql")
+                    .arg("--sql-endpoint")
+                    .arg(format!(
+                        "mysql://{}:{}@{}:{}/{}",
+                        mysql_store_config.user,
+                        mysql_store_config.password,
+                        mysql_store_config.address,
+                        mysql_store_config.port,
+                        mysql_store_config.database
                     ));
             }
             backend => {
