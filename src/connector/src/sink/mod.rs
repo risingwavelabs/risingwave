@@ -30,7 +30,7 @@ pub mod kafka;
 pub mod kinesis;
 pub mod log_store;
 pub mod mock_coordination_client;
-mod mongodb;
+pub mod mongodb;
 pub mod mqtt;
 pub mod nats;
 pub mod pulsar;
@@ -99,6 +99,7 @@ macro_rules! for_all_sinks {
                 { Snowflake, $crate::sink::snowflake::SnowflakeSink },
                 { DeltaLake, $crate::sink::deltalake::DeltaLakeSink },
                 { BigQuery, $crate::sink::big_query::BigQuerySink },
+                { Mongodb, $crate::sink::mongodb::MongodbSink },
                 { Test, $crate::sink::test_sink::TestSink },
                 { Table, $crate::sink::trivial::TableSink }
             }

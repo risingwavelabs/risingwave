@@ -653,7 +653,10 @@ impl MongodbPayloadWriter {
                 },
                 _ => {
                     if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
-                        tracing::warn!(suppressed_count, "the value of collection.name.field is null, fallback to use default collection.name");
+                        tracing::warn!(
+                            suppressed_count, 
+                            "the value of collection.name.field is null, fallback to use default collection.name"
+                        );
                     }
                     None
                 }
@@ -720,6 +723,9 @@ impl MongodbPayloadWriter {
 
     async fn write<'a>(&'a mut self, op: Op, row: RowRef<'a>) -> Result<()> {
         if self.is_append_only {
+            if op != Op::Insert {
+                return Ok(());
+            }
             self.append(row);
         } else {
             self.upsert(op, row);
@@ -764,6 +770,7 @@ impl MongodbPayloadWriter {
 
     async fn send_bulk_write_command(&mut self, database: &str, command: Document) -> Result<()> {
         let db = self.client.database(database);
+
         let result = db.run_command(command, None).await.map_err(|err| {
             SinkError::Mongodb(anyhow!(err).context(format!(
                 "sending bulk write command failed, database: {}",
@@ -771,15 +778,15 @@ impl MongodbPayloadWriter {
             )))
         })?;
 
-        let ok = result.get_i32("ok").map_err(|err| {
+        let n = result.get_i32("n").map_err(|err| {
             SinkError::Mongodb(
-                anyhow!(err).context("can't extract field ok from bulk write response"),
+                anyhow!(err).context("can't extract field n from bulk write response"),
             )
         })?;
-        if ok != 1 {
+        if n < 1 {
             return Err(SinkError::Mongodb(anyhow!(
-                "bulk write respond with an abnormal state: {}",
-                ok
+                "bulk write respond with an abnormal state, n = {}",
+                n
             )));
         }
 
