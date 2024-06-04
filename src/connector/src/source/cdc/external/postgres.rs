@@ -221,6 +221,7 @@ fn type_to_rw_type(col_type: &ColumnType) -> ConnectorResult<DataType> {
             return Err(anyhow!("TSQUERY type not supported").into());
         }
         ColumnType::Unknown(name) => {
+            // NOTES: user-defined enum type is classified as `Unknown`
             tracing::warn!("Unknown Postgres data type: {name}, map to varchar");
             DataType::Varchar
         }
