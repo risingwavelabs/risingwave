@@ -666,11 +666,7 @@ impl RemoteCoordinator {
             .start_sink_coordinator_stream(param.clone())
             .await?;
 
-        tracing::trace!(
-            "{:?} RemoteCoordinator started with properties: {:?}",
-            R::SINK_NAME,
-            &param.properties
-        );
+        tracing::trace!("{:?} RemoteCoordinator started", R::SINK_NAME,);
 
         Ok(RemoteCoordinator { stream_handle })
     }
