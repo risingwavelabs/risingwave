@@ -41,6 +41,7 @@ use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
     WrapStreamExecutor,
 };
+use crate::monitor::BatchSpillMetrics;
 use crate::risingwave_common::hash::NullBitmap;
 use crate::spill::spill_op::{
     SpillBuildHasher, SpillOp, DEFAULT_SPILL_PARTITION_NUM, SPILL_AT_LEAST_MEMORY,
@@ -82,6 +83,7 @@ pub struct HashJoinExecutor<K> {
     chunk_size: usize,
 
     enable_spill: bool,
+    spill_metrics: Arc<BatchSpillMetrics>,
     /// The upper bound of memory usage for this executor.
     memory_upper_bound: Option<u64>,
 
@@ -244,6 +246,7 @@ pub struct JoinSpillManager {
     probe_side_data_types: Vec<DataType>,
     build_side_data_types: Vec<DataType>,
     spill_chunk_size: usize,
+    spill_metrics: Arc<BatchSpillMetrics>,
 }
 
 impl JoinSpillManager {
@@ -253,6 +256,7 @@ impl JoinSpillManager {
         probe_side_data_types: Vec<DataType>,
         build_side_data_types: Vec<DataType>,
         spill_chunk_size: usize,
+        spill_metrics: Arc<BatchSpillMetrics>,
     ) -> Result<Self> {
         let suffix_uuid = uuid::Uuid::new_v4();
         let dir = format!("/{}-{}/", join_identity, suffix_uuid);
@@ -277,6 +281,7 @@ impl JoinSpillManager {
             probe_side_data_types,
             build_side_data_types,
             spill_chunk_size,
+            spill_metrics,
         })
     }
 
@@ -325,6 +330,9 @@ impl JoinSpillManager {
                 let chunk_pb: PbDataChunk = output_chunk.to_protobuf();
                 let buf = Message::encode_to_vec(&chunk_pb);
                 let len_bytes = Bytes::copy_from_slice(&(buf.len() as u32).to_le_bytes());
+                self.spill_metrics
+                    .batch_spill_write_bytes
+                    .inc_by(len_bytes.len() as u64 + 4);
                 self.probe_side_writers[partition].write(len_bytes).await?;
                 self.probe_side_writers[partition].write(buf).await?;
             }
@@ -350,6 +358,9 @@ impl JoinSpillManager {
                 let chunk_pb: PbDataChunk = output_chunk.to_protobuf();
                 let buf = Message::encode_to_vec(&chunk_pb);
                 let len_bytes = Bytes::copy_from_slice(&(buf.len() as u32).to_le_bytes());
+                self.spill_metrics
+                    .batch_spill_write_bytes
+                    .inc_by(len_bytes.len() as u64 + 4);
                 self.build_side_writers[partition].write(len_bytes).await?;
                 self.build_side_writers[partition].write(buf).await?;
             }
@@ -363,6 +374,9 @@ impl JoinSpillManager {
                 let chunk_pb: PbDataChunk = output_chunk.to_protobuf();
                 let buf = Message::encode_to_vec(&chunk_pb);
                 let len_bytes = Bytes::copy_from_slice(&(buf.len() as u32).to_le_bytes());
+                self.spill_metrics
+                    .batch_spill_write_bytes
+                    .inc_by(len_bytes.len() as u64 + 4);
                 self.probe_side_writers[partition].write(len_bytes).await?;
                 self.probe_side_writers[partition].write(buf).await?;
             }
@@ -371,6 +385,9 @@ impl JoinSpillManager {
                 let chunk_pb: PbDataChunk = output_chunk.to_protobuf();
                 let buf = Message::encode_to_vec(&chunk_pb);
                 let len_bytes = Bytes::copy_from_slice(&(buf.len() as u32).to_le_bytes());
+                self.spill_metrics
+                    .batch_spill_write_bytes
+                    .inc_by(len_bytes.len() as u64 + 4);
                 self.build_side_writers[partition].write(len_bytes).await?;
                 self.build_side_writers[partition].write(buf).await?;
             }
@@ -394,7 +411,7 @@ impl JoinSpillManager {
             .op
             .reader_with(&join_probe_side_partition_file_name)
             .await?;
-        Ok(SpillOp::read_stream(r))
+        Ok(SpillOp::read_stream(r, self.spill_metrics.clone()))
     }
 
     async fn read_build_side_partition(
@@ -406,7 +423,7 @@ impl JoinSpillManager {
             .op
             .reader_with(&join_build_side_partition_file_name)
             .await?;
-        Ok(SpillOp::read_stream(r))
+        Ok(SpillOp::read_stream(r, self.spill_metrics.clone()))
     }
 
     pub async fn estimate_partition_size(&self, partition: usize) -> Result<u64> {
@@ -522,6 +539,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
                 probe_data_types.clone(),
                 build_data_types.clone(),
                 self.chunk_size,
+                self.spill_metrics.clone(),
             )?;
             join_spill_manager.init_writers().await?;
 
@@ -613,6 +631,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
                     format!("{}-sub{}", self.identity.clone(), i),
                     self.chunk_size,
                     self.enable_spill,
+                    self.spill_metrics.clone(),
                     Some(partition_size),
                     self.shutdown_rx.clone(),
                     self.mem_ctx.clone(),
@@ -2203,6 +2222,7 @@ impl BoxedExecutorBuilder for HashJoinExecutor<()> {
             right_key_types,
             chunk_size: context.context.get_config().developer.chunk_size,
             enable_spill: context.context.get_config().enable_spill,
+            spill_metrics: context.context.spill_metrics(),
             shutdown_rx: context.shutdown_rx.clone(),
             mem_ctx: context.context.create_executor_mem_context(&identity),
         }
@@ -2223,6 +2243,7 @@ struct HashJoinExecutorArgs {
     right_key_types: Vec<DataType>,
     chunk_size: usize,
     enable_spill: bool,
+    spill_metrics: Arc<BatchSpillMetrics>,
     shutdown_rx: ShutdownToken,
     mem_ctx: MemoryContext,
 }
@@ -2243,6 +2264,7 @@ impl HashKeyDispatcher for HashJoinExecutorArgs {
             self.identity,
             self.chunk_size,
             self.enable_spill,
+            self.spill_metrics,
             self.shutdown_rx,
             self.mem_ctx,
         ))
@@ -2267,6 +2289,7 @@ impl<K> HashJoinExecutor<K> {
         identity: String,
         chunk_size: usize,
         enable_spill: bool,
+        spill_metrics: Arc<BatchSpillMetrics>,
         shutdown_rx: ShutdownToken,
         mem_ctx: MemoryContext,
     ) -> Self {
@@ -2282,6 +2305,7 @@ impl<K> HashJoinExecutor<K> {
             identity,
             chunk_size,
             enable_spill,
+            spill_metrics,
             None,
             shutdown_rx,
             mem_ctx,
@@ -2301,6 +2325,7 @@ impl<K> HashJoinExecutor<K> {
         identity: String,
         chunk_size: usize,
         enable_spill: bool,
+        spill_metrics: Arc<BatchSpillMetrics>,
         memory_upper_bound: Option<u64>,
         shutdown_rx: ShutdownToken,
         mem_ctx: MemoryContext,
@@ -2339,6 +2364,7 @@ impl<K> HashJoinExecutor<K> {
             chunk_size,
             shutdown_rx,
             enable_spill,
+            spill_metrics,
             memory_upper_bound,
             mem_ctx,
             _phantom: PhantomData,
@@ -2366,6 +2392,7 @@ mod tests {
     use crate::error::Result;
     use crate::executor::test_utils::MockExecutor;
     use crate::executor::BoxedExecutor;
+    use crate::monitor::BatchSpillMetrics;
     use crate::task::ShutdownToken;
 
     const CHUNK_SIZE: usize = 1024;
@@ -2587,6 +2614,7 @@ mod tests {
                 "HashJoinExecutor".to_string(),
                 chunk_size,
                 false,
+                BatchSpillMetrics::for_test(),
                 shutdown_rx,
                 mem_ctx,
             ))

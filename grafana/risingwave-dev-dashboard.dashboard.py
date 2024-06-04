@@ -1785,6 +1785,20 @@ def section_batch(outer_panels):
                         ),
                     ],
                 ),
+                panels.timeseries_bytes_per_sec(
+                    "Batch Spill Throughput",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('batch_spill_read_bytes')}[$__rate_interval]))by({COMPONENT_LABEL}, {NODE_LABEL})",
+                            "read - {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
+                            ),
+                        panels.target(
+                            f"sum(rate({metric('batch_spill_write_bytes')}[$__rate_interval]))by({COMPONENT_LABEL}, {NODE_LABEL})",
+                            "write - {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
+                            ),
+                    ],
+                ),
             ],
         ),
     ]
