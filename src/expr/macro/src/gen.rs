@@ -349,6 +349,7 @@ impl FunctionAttr {
 
         let record_error = {
             // Uniform arguments into `DatumRef`.
+            #[allow(clippy::disallowed_methods)] // allow zip
             let inputs_args = inputs
                 .iter()
                 .zip(user_fn.args_option.iter())
