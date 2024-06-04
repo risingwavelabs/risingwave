@@ -20,19 +20,28 @@ use crate::ast::{Ident, ObjectName};
 use crate::keywords::{self, Keyword};
 use crate::tokenizer::{Token, TokenWithLocation};
 
+mod compact;
 mod data_type;
+mod expr;
 mod impl_;
 mod number;
 
 pub(crate) use data_type::*;
+pub(crate) use expr::*;
 pub(crate) use number::*;
 
 /// Bundle trait requirements from winnow, so that we don't need to write them everywhere.
 ///
 /// All combinators should accept a generic `S` that implements `TokenStream`.
-pub trait TokenStream: Stream<Token = TokenWithLocation> + StreamIsPartial + Default {}
+pub trait TokenStream:
+    Stream<Token = TokenWithLocation> + StreamIsPartial + Default + compact::ParseV1
+{
+}
 
-impl<S> TokenStream for S where S: Stream<Token = TokenWithLocation> + StreamIsPartial + Default {}
+impl<S> TokenStream for S where
+    S: Stream<Token = TokenWithLocation> + StreamIsPartial + Default + compact::ParseV1
+{
+}
 
 /// Consume any token.
 ///
@@ -158,30 +167,3 @@ pub trait ParserExt<I, O, E>: Parser<I, O, E> {
 }
 
 impl<I, O, E, T> ParserExt<I, O, E> for T where T: Parser<I, O, E> {}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::tokenizer::Tokenizer;
-
-    #[test]
-    fn test_basic() {
-        let input = "SELECT 1";
-        let tokens = Tokenizer::new(input).tokenize_with_location().unwrap();
-        Token::make_keyword("SELECT")
-            .parse_next(&mut &tokens[..])
-            .unwrap();
-    }
-
-    #[test]
-    fn test_stateful() {
-        let input = "SELECT 1";
-        let tokens = Tokenizer::new(input).tokenize_with_location().unwrap();
-        with_state(|input: &mut Stateful<_, usize>| -> PResult<()> {
-            input.state += 1;
-            Token::make_keyword("SELECT").void().parse_next(input)
-        })
-        .parse_next(&mut &tokens[..])
-        .unwrap();
-    }
-}

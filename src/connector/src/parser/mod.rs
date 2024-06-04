@@ -490,7 +490,7 @@ impl SourceStreamChunkRowWriter<'_> {
     /// produces one [`Datum`] by corresponding [`SourceColumnDesc`].
     ///
     /// See the [struct-level documentation](SourceStreamChunkRowWriter) for more details.
-    pub fn insert(
+    pub fn do_insert(
         &mut self,
         f: impl FnMut(&SourceColumnDesc) -> AccessResult<Datum>,
     ) -> AccessResult<()> {
@@ -501,7 +501,7 @@ impl SourceStreamChunkRowWriter<'_> {
     /// produces one [`Datum`] by corresponding [`SourceColumnDesc`].
     ///
     /// See the [struct-level documentation](SourceStreamChunkRowWriter) for more details.
-    pub fn delete(
+    pub fn do_delete(
         &mut self,
         f: impl FnMut(&SourceColumnDesc) -> AccessResult<Datum>,
     ) -> AccessResult<()> {
@@ -512,7 +512,7 @@ impl SourceStreamChunkRowWriter<'_> {
     /// produces two [`Datum`]s as old and new value by corresponding [`SourceColumnDesc`].
     ///
     /// See the [struct-level documentation](SourceStreamChunkRowWriter) for more details.
-    pub fn update(
+    pub fn do_update(
         &mut self,
         f: impl FnMut(&SourceColumnDesc) -> AccessResult<(Datum, Datum)>,
     ) -> AccessResult<()> {
@@ -590,7 +590,7 @@ pub trait ByteStreamSourceParser: Send + Debug + Sized + 'static {
     }
 
     fn emit_empty_row<'a>(&'a mut self, mut writer: SourceStreamChunkRowWriter<'a>) {
-        _ = writer.insert(|_column| Ok(None));
+        _ = writer.do_insert(|_column| Ok(None));
     }
 }
 
@@ -1054,7 +1054,7 @@ impl MapHandling {
     pub const OPTION_KEY: &'static str = "map.handling.mode";
 
     pub fn from_options(
-        options: &std::collections::BTreeMap<String, String>,
+        options: &std::collections::HashMap<String, String>,
     ) -> Result<Option<Self>, InvalidOptionError> {
         let mode = match options.get(Self::OPTION_KEY).map(std::ops::Deref::deref) {
             Some("jsonb") => Self::Jsonb,
