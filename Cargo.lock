@@ -3657,7 +3657,7 @@ dependencies = [
 name = "delta_btree_map"
 version = "1.9.0-alpha"
 dependencies = [
- "educe 0.5.7",
+ "educe 0.6.0",
  "enum-as-inner 0.6.0",
 ]
 
@@ -4469,9 +4469,9 @@ dependencies = [
 
 [[package]]
 name = "educe"
-version = "0.5.7"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "597b6c9e278fefec3b25dfbb86195aeafe270dc6f13e27a3a20a95ba449f1bfb"
+checksum = "1d7bc049e1bd8cdeb31b68bbd586a9464ecf9f3944af3958a7a9d0f8b9799417"
 dependencies = [
  "enum-ordinalize 4.3.0",
  "proc-macro2",
@@ -9446,7 +9446,7 @@ dependencies = [
  "indoc",
  "libc",
  "memoffset",
- "parking_lot 0.11.2",
+ "parking_lot 0.12.1",
  "portable-atomic",
  "pyo3-build-config",
  "pyo3-ffi",
@@ -10293,7 +10293,7 @@ dependencies = [
  "criterion",
  "darwin-libproc",
  "easy-ext",
- "educe 0.5.7",
+ "educe 0.6.0",
  "either",
  "enum-as-inner 0.6.0",
  "enumflags2",
@@ -10381,7 +10381,7 @@ name = "risingwave_common_estimate_size"
 version = "1.9.0-alpha"
 dependencies = [
  "bytes",
- "educe 0.5.7",
+ "educe 0.6.0",
  "ethnum",
  "fixedbitset 0.5.0",
  "jsonbb",
@@ -10805,7 +10805,7 @@ dependencies = [
  "const-currying",
  "downcast-rs",
  "easy-ext",
- "educe 0.5.7",
+ "educe 0.6.0",
  "either",
  "enum-as-inner 0.6.0",
  "expect-test",
@@ -10850,7 +10850,7 @@ dependencies = [
  "chrono",
  "chrono-tz 0.9.0",
  "criterion",
- "educe 0.5.7",
+ "educe 0.6.0",
  "expect-test",
  "fancy-regex",
  "futures-async-stream",
@@ -10917,7 +10917,7 @@ dependencies = [
  "downcast-rs",
  "dyn-clone",
  "easy-ext",
- "educe 0.5.7",
+ "educe 0.6.0",
  "either",
  "enum-as-inner 0.6.0",
  "expect-test",
@@ -11666,7 +11666,7 @@ dependencies = [
  "cfg-if",
  "criterion",
  "delta_btree_map",
- "educe 0.5.7",
+ "educe 0.6.0",
  "either",
  "enum-as-inner 0.6.0",
  "expect-test",
