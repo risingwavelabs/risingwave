@@ -103,4 +103,8 @@ impl UdfImpl for QuickJsFunction {
     fn call_agg_finish(&self, state: &ArrayRef) -> Result<ArrayRef> {
         self.runtime.finish(&self.identifier, state)
     }
+
+    fn memory_usage(&self) -> usize {
+        self.runtime.memory_usage().malloc_size as usize
+    }
 }

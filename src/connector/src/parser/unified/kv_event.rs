@@ -15,57 +15,46 @@
 use risingwave_common::types::DataType;
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
 
-use super::{Access, ChangeEvent, ChangeEventOperation};
+use super::Access;
 use crate::parser::unified::AccessError;
 use crate::source::SourceColumnDesc;
 
-/// `UpsertAccess` wraps a key-value message format into an upsert source.
-/// A key accessor and a value accessor are required.
-pub struct UpsertChangeEvent<K, V> {
+pub struct KvEvent<K, V> {
     key_accessor: Option<K>,
     value_accessor: Option<V>,
-    key_column_name: Option<String>,
 }
 
-impl<K, V> Default for UpsertChangeEvent<K, V> {
+impl<K, V> Default for KvEvent<K, V> {
     fn default() -> Self {
         Self {
             key_accessor: None,
             value_accessor: None,
-            key_column_name: None,
         }
     }
 }
 
-impl<K, V> UpsertChangeEvent<K, V> {
-    pub fn with_key(mut self, key: K) -> Self
+impl<K, V> KvEvent<K, V> {
+    pub fn with_key(&mut self, key: K)
     where
         K: Access,
     {
         self.key_accessor = Some(key);
-        self
     }
 
-    pub fn with_value(mut self, value: V) -> Self
+    pub fn with_value(&mut self, value: V)
     where
         V: Access,
     {
         self.value_accessor = Some(value);
-        self
-    }
-
-    pub fn with_key_column_name(mut self, name: impl ToString) -> Self {
-        self.key_column_name = Some(name.to_string());
-        self
     }
 }
 
-impl<K, V> UpsertChangeEvent<K, V>
+impl<K, V> KvEvent<K, V>
 where
     K: Access,
     V: Access,
 {
-    fn access_key(&self, path: &[&str], type_expected: Option<&DataType>) -> super::AccessResult {
+    fn access_key(&self, path: &[&str], type_expected: &DataType) -> super::AccessResult {
         if let Some(ka) = &self.key_accessor {
             ka.access(path, type_expected)
         } else {
@@ -76,7 +65,7 @@ where
         }
     }
 
-    fn access_value(&self, path: &[&str], type_expected: Option<&DataType>) -> super::AccessResult {
+    fn access_value(&self, path: &[&str], type_expected: &DataType) -> super::AccessResult {
         if let Some(va) = &self.value_accessor {
             va.access(path, type_expected)
         } else {
@@ -86,33 +75,11 @@ where
             })
         }
     }
-}
 
-impl<K, V> ChangeEvent for UpsertChangeEvent<K, V>
-where
-    K: Access,
-    V: Access,
-{
-    fn op(&self) -> std::result::Result<ChangeEventOperation, AccessError> {
-        if let Ok(Some(_)) = self.access_value(&[], None) {
-            Ok(ChangeEventOperation::Upsert)
-        } else {
-            Ok(ChangeEventOperation::Delete)
-        }
-    }
-
-    fn access_field(&self, desc: &SourceColumnDesc) -> super::AccessResult {
+    pub fn access_field(&self, desc: &SourceColumnDesc) -> super::AccessResult {
         match desc.additional_column.column_type {
-            Some(AdditionalColumnType::Key(_)) => {
-                if let Some(key_as_column_name) = &self.key_column_name
-                    && &desc.name == key_as_column_name
-                {
-                    self.access_key(&[], Some(&desc.data_type))
-                } else {
-                    self.access_key(&[&desc.name], Some(&desc.data_type))
-                }
-            }
-            None => self.access_value(&[&desc.name], Some(&desc.data_type)),
+            Some(AdditionalColumnType::Key(_)) => self.access_key(&[&desc.name], &desc.data_type),
+            None => self.access_value(&[&desc.name], &desc.data_type),
             _ => unreachable!(),
         }
     }
