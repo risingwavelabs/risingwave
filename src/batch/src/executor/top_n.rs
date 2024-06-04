@@ -243,10 +243,6 @@ impl HeapElem {
         }
     }
 
-    pub fn encoded_row(&self) -> &[u8] {
-        &self.encoded_row
-    }
-
     pub fn row(&self) -> impl Row + '_ {
         &self.row
     }
