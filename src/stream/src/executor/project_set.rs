@@ -255,7 +255,10 @@ impl Inner {
 
 /// Either a scalar expression or a set-returning function.
 ///
-/// See also [`PbProjectSetSelectItem`]
+/// See also [`PbProjectSetSelectItem`].
+///
+/// A similar enum is defined in the `batch` module. The difference is that
+/// we use `NonStrictExpression` instead of `BoxedExpression` here.
 #[derive(Debug)]
 pub enum ProjectSetSelectItem {
     Scalar(NonStrictExpression),
