@@ -275,3 +275,18 @@ impl AsyncTruncateSinkWriter for KinesisSinkWriter {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use aws_sdk_kinesis::types::PutRecordsRequestEntry;
+    use aws_smithy_types::Blob;
+
+    #[test]
+    fn test_kinesis_entry_builder_save_unwrap() {
+        PutRecordsRequestEntry::builder()
+            .data(Blob::new(b"data"))
+            .partition_key("partition-key")
+            .build()
+            .unwrap();
+    }
+}
