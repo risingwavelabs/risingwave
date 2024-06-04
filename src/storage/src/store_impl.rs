@@ -30,8 +30,8 @@ use crate::error::StorageResult;
 use crate::filter_key_extractor::{RemoteTableAccessor, RpcFilterKeyExtractorManager};
 use crate::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use crate::hummock::{
-    Block, HummockError, HummockStorage, RecentFilter, Sstable, SstableBlockIndex, SstableStore,
-    SstableStoreConfig,
+    Block, BlockCacheEventListener, HummockError, HummockStorage, RecentFilter, Sstable,
+    SstableBlockIndex, SstableStore, SstableStoreConfig,
 };
 use crate::memory::sled::SledStateStore;
 use crate::memory::MemoryStateStore;
@@ -673,6 +673,9 @@ impl StateStoreImpl {
         let block_cache_v2 = {
             let mut builder = HybridCacheBuilder::new()
                 .with_name("foyer.data")
+                .with_event_listener(Arc::new(BlockCacheEventListener::new(
+                    state_store_metrics.clone(),
+                )))
                 .memory(opts.block_cache_capacity_mb * MB)
                 .with_shards(opts.block_cache_shard_num)
                 .with_eviction_config(opts.block_cache_eviction_config.clone())

@@ -22,7 +22,7 @@ use risingwave_common::{bail, try_match_expand};
 use risingwave_pb::plan_common::ColumnDesc;
 
 use super::schema_resolver::ConfluentSchemaCache;
-use super::util::avro_schema_to_column_descs;
+use super::util::{avro_schema_to_column_descs, ResolvedAvroSchema};
 use crate::error::ConnectorResult;
 use crate::parser::unified::avro::{AvroAccess, AvroParseOptions};
 use crate::parser::unified::AccessImpl;
@@ -35,7 +35,7 @@ use crate::schema::schema_registry::{
 // Default avro access builder
 #[derive(Debug)]
 pub struct AvroAccessBuilder {
-    schema: Arc<Schema>,
+    schema: Arc<ResolvedAvroSchema>,
     /// Refer to [`AvroParserConfig::writer_schema_cache`].
     pub writer_schema_cache: Option<Arc<ConfluentSchemaCache>>,
     value: Option<Value>,
@@ -46,7 +46,7 @@ impl AccessBuilder for AvroAccessBuilder {
         self.value = self.parse_avro_value(&payload).await?;
         Ok(AccessImpl::Avro(AvroAccess::new(
             self.value.as_ref().unwrap(),
-            AvroParseOptions::create(&self.schema),
+            AvroParseOptions::create(&self.schema.resolved_schema),
         )))
     }
 }
@@ -69,6 +69,8 @@ impl AvroAccessBuilder {
         })
     }
 
+    /// Note: we should use unresolved schema to parsing bytes into avro value.
+    /// Otherwise it's an invalid schema and parsing will fail. (Avro error: Two named schema defined for same fullname)
     async fn parse_avro_value(&self, payload: &[u8]) -> ConnectorResult<Option<Value>> {
         // parse payload to avro value
         // if use confluent schema, get writer schema from confluent schema registry
@@ -78,10 +80,10 @@ impl AvroAccessBuilder {
             Ok(Some(from_avro_datum(
                 writer_schema.as_ref(),
                 &mut raw_payload,
-                Some(self.schema.as_ref()),
+                Some(&self.schema.original_schema),
             )?))
         } else {
-            let mut reader = Reader::with_schema(self.schema.as_ref(), payload)?;
+            let mut reader = Reader::with_schema(&self.schema.original_schema, payload)?;
             match reader.next() {
                 Some(Ok(v)) => Ok(Some(v)),
                 Some(Err(e)) => Err(e)?,
@@ -93,8 +95,8 @@ impl AvroAccessBuilder {
 
 #[derive(Debug, Clone)]
 pub struct AvroParserConfig {
-    pub schema: Arc<Schema>,
-    pub key_schema: Option<Arc<Schema>>,
+    pub schema: Arc<ResolvedAvroSchema>,
+    pub key_schema: Option<Arc<ResolvedAvroSchema>>,
     /// Writer schema is the schema used to write the data. When parsing Avro data, the exactly same schema
     /// must be used to decode the message, and then convert it with the reader schema.
     pub writer_schema_cache: Option<Arc<ConfluentSchemaCache>>,
@@ -143,9 +145,13 @@ impl AvroParserConfig {
             tracing::debug!("infer key subject {subject_key:?}, value subject {subject_value}");
 
             Ok(Self {
-                schema: resolver.get_by_subject(&subject_value).await?,
+                schema: Arc::new(ResolvedAvroSchema::create(
+                    resolver.get_by_subject(&subject_value).await?,
+                )?),
                 key_schema: if let Some(subject_key) = subject_key {
-                    Some(resolver.get_by_subject(&subject_key).await?)
+                    Some(Arc::new(ResolvedAvroSchema::create(
+                        resolver.get_by_subject(&subject_key).await?,
+                    )?))
                 } else {
                     None
                 },
@@ -161,7 +167,7 @@ impl AvroParserConfig {
             let schema = Schema::parse_reader(&mut schema_content.as_slice())
                 .context("failed to parse avro schema")?;
             Ok(Self {
-                schema: Arc::new(schema),
+                schema: Arc::new(ResolvedAvroSchema::create(Arc::new(schema))?),
                 key_schema: None,
                 writer_schema_cache: None,
                 map_handling,
@@ -170,7 +176,7 @@ impl AvroParserConfig {
     }
 
     pub fn map_to_columns(&self) -> ConnectorResult<Vec<ColumnDesc>> {
-        avro_schema_to_column_descs(self.schema.as_ref(), self.map_handling)
+        avro_schema_to_column_descs(&self.schema.resolved_schema, self.map_handling)
     }
 }
 
@@ -289,7 +295,7 @@ mod test {
             .await
             .unwrap();
         let builder = try_match_expand!(&parser.payload_builder, AccessBuilderImpl::Avro).unwrap();
-        let schema = builder.schema.clone();
+        let schema = builder.schema.original_schema.clone();
         let record = build_avro_data(&schema);
         assert_eq!(record.fields.len(), 11);
         let mut writer = Writer::with_codec(&schema, Vec::new(), Codec::Snappy);
@@ -482,7 +488,7 @@ mod test {
             .await
             .unwrap();
         let builder = try_match_expand!(&parser.payload_builder, AccessBuilderImpl::Avro).unwrap();
-        let schema = &builder.schema;
+        let schema = &builder.schema.original_schema;
         let mut null_record = Record::new(schema).unwrap();
         null_record.put("id", Value::Int(5));
         null_record.put("age", Value::Union(0, Box::new(Value::Null)));
@@ -554,8 +560,8 @@ mod test {
         let conf = new_avro_conf_from_local("simple-schema.avsc")
             .await
             .unwrap();
-        let mut writer = Writer::new(&conf.schema, Vec::new());
-        let record = build_avro_data(&conf.schema);
+        let mut writer = Writer::new(conf.schema.original_schema.as_ref(), Vec::new());
+        let record = build_avro_data(conf.schema.original_schema.as_ref());
         writer.append(record).unwrap();
         let encoded = writer.into_inner().unwrap();
         println!("path = {:?}", e2e_file_path("avro_simple_schema_bin.1"));
