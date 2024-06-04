@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![cfg_attr(not(test), allow(dead_code))]
+
 use std::collections::VecDeque;
 
 use assert_matches::assert_matches;
