@@ -177,6 +177,7 @@ impl AvroParserConfig {
 
     pub fn map_to_columns(&self) -> ConnectorResult<Vec<ColumnDesc>> {
         avro_schema_to_column_descs(&self.schema.resolved_schema, self.map_handling)
+            .map_err(Into::into)
     }
 }
 

@@ -15,9 +15,10 @@
 //! Unified parsers for both normal events or CDC events of multiple message formats
 
 use auto_impl::auto_impl;
-use risingwave_common::types::{DataType, Datum};
-use thiserror::Error;
-use thiserror_ext::Macro;
+use risingwave_common::types::DataType;
+pub use risingwave_connector_encdec::decoder::{
+    bail_uncategorized, uncategorized, Access, AccessError, AccessResult,
+};
 
 use self::avro::AvroAccess;
 use self::bytes::BytesAccess;
@@ -34,13 +35,6 @@ pub mod kv_event;
 pub mod maxwell;
 pub mod protobuf;
 pub mod util;
-
-pub type AccessResult<T = Datum> = std::result::Result<T, AccessError>;
-
-/// Access a certain field in an object according to the path
-pub trait Access {
-    fn access(&self, path: &[&str], type_expected: &DataType) -> AccessResult;
-}
 
 pub enum AccessImpl<'a, 'b> {
     Avro(AvroAccess<'a, 'b>),
@@ -88,26 +82,4 @@ where
     fn access_field(&self, desc: &SourceColumnDesc) -> AccessResult {
         self.1.access(&[desc.name.as_str()], &desc.data_type)
     }
-}
-
-#[derive(Error, Debug, Macro)]
-#[thiserror_ext(macro(mangle))]
-pub enum AccessError {
-    #[error("Undefined field `{name}` at `{path}`")]
-    Undefined { name: String, path: String },
-    #[error("Cannot parse value `{value}` with type `{got}` into expected type `{expected}`")]
-    TypeError {
-        expected: String,
-        got: String,
-        value: String,
-    },
-    #[error("Unsupported data type `{ty}`")]
-    UnsupportedType { ty: String },
-
-    #[error("Unsupported additional column `{name}`")]
-    UnsupportedAdditionalColumn { name: String },
-
-    /// Errors that are not categorized into variants above.
-    #[error("{message}")]
-    Uncategorized { message: String },
 }

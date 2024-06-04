@@ -126,6 +126,7 @@ impl DebeziumAvroParserConfig {
             // TODO: do we need to support map type here?
             None,
         )
+        .map_err(Into::into)
     }
 
     pub fn map_to_columns(&self) -> ConnectorResult<Vec<ColumnDesc>> {
@@ -140,6 +141,7 @@ impl DebeziumAvroParserConfig {
             // TODO: do we need to support map type here?
             None,
         )
+        .map_err(Into::into)
     }
 }
 
