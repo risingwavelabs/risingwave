@@ -502,8 +502,7 @@ impl HummockManager {
             }
             let group_config = group.compaction_config.clone().unwrap();
             let mut compaction_group_manager = self.compaction_group_manager.write().await;
-            let insert_trx = compaction_group_manager
-                .init_compaction_config_for_replay_trx(group.id, group_config);
+            let insert_trx = compaction_group_manager.insert_config_trx(group.id, group_config);
             commit_multi_var!(self.meta_store_ref(), insert_trx)?;
 
             self.register_table_ids(&pairs).await?;

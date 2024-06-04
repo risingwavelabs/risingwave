@@ -51,9 +51,7 @@ use crate::hummock::metrics_utils::{
 use crate::hummock::model::CompactionGroup;
 use crate::hummock::sequence::{next_compaction_group_id, next_sstable_object_id};
 use crate::manager::{MetaSrvEnv, MetaStoreImpl};
-use crate::model::{
-    BTreeMapEntryTransaction, BTreeMapTransaction, MetadataModel, MetadataModelError,
-};
+use crate::model::{BTreeMapTransaction, MetadataModel, MetadataModelError};
 
 impl CompactionGroupManager {
     pub(super) async fn new(env: &MetaSrvEnv) -> Result<CompactionGroupManager> {
@@ -268,6 +266,7 @@ impl HummockManager {
                 .entry(group_id)
                 .or_default()
                 .group_deltas;
+
             group_deltas.push(GroupDelta {
                 delta_type: Some(DeltaType::GroupMetaChange(GroupMetaChange {
                     table_ids_add: vec![*table_id],
@@ -640,6 +639,13 @@ impl HummockManager {
         // 1. Due to version compatibility, we fix some of the configuration of older versions after hummock starts.
         let current_version = &versioning_guard.current_version;
         let all_group_ids = get_compaction_group_ids(current_version).collect_vec();
+
+        if let Some(insert_trx) =
+            compaction_group_manager.insert_not_exist_configs_trx(&all_group_ids)
+        {
+            commit_multi_var!(self.meta_store_ref(), insert_trx)?;
+        }
+
         let compaction_group =
             compaction_group_manager.try_get_compaction_group_configs(&all_group_ids);
 
@@ -714,23 +720,6 @@ impl CompactionGroupManager {
         if !loaded_compaction_groups.is_empty() {
             self.compaction_groups = loaded_compaction_groups;
         }
-    }
-
-    /// Initializes the config for a group.
-    /// Should only be used by compaction test.
-    pub(super) fn init_compaction_config_for_replay_trx(
-        &mut self,
-        group_id: CompactionGroupId,
-        config: CompactionConfig,
-    ) -> BTreeMapEntryTransaction<'_, u64, CompactionGroup> {
-        BTreeMapEntryTransaction::new_insert(
-            &mut self.compaction_groups,
-            group_id,
-            CompactionGroup {
-                group_id,
-                compaction_config: Arc::new(config),
-            },
-        )
     }
 }
 
