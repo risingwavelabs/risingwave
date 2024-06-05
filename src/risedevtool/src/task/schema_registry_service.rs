@@ -40,24 +40,32 @@ impl DockerServiceConfig for SchemaRegistryConfig {
         }
         let kafka = &kafka[0];
         vec![
-            ("SCHEMA_REGISTRY_HOST_NAME".to_owned(), self.address.clone()),
+            (
+                "SCHEMA_REGISTRY_HOST_NAME".to_owned(),
+                "localhost".to_owned(),
+            ),
             (
                 "SCHEMA_REGISTRY_LISTENERS".to_owned(),
-                format!("http://{}:{}", self.address, self.port),
+                format!("http://0.0.0.0:{}", self.port),
             ),
             (
                 "SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS".to_owned(),
-                format!("host.docker.internal:{}", kafka.docker_port),
+                format!("PLAINTEXT://localhost:{}", kafka.port),
             ),
+            ("SCHEMA_REGISTRY_DEBUG".to_owned(), "true".to_owned()),
         ]
     }
 
     fn ports(&self) -> Vec<(String, String)> {
-        vec![(self.port.to_string(), "8081".to_owned())]
+        vec![]
     }
 
     fn data_path(&self) -> Option<String> {
         None
+    }
+
+    fn use_host_network(&self) -> bool {
+        true
     }
 }
 
