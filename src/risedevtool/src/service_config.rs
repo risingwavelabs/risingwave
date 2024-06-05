@@ -46,6 +46,17 @@ pub struct ComputeNodeConfig {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 #[serde(deny_unknown_fields)]
+pub enum MetaBackend {
+    Memory,
+    Etcd,
+    Sqlite,
+    Postgres,
+    Mysql,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
 pub struct MetaNodeConfig {
     #[serde(rename = "use")]
     phantom_use: Option<String>,
@@ -60,10 +71,11 @@ pub struct MetaNodeConfig {
 
     pub user_managed: bool,
 
-    pub meta_backend: String,
+    pub meta_backend: MetaBackend,
     pub provide_etcd_backend: Option<Vec<EtcdConfig>>,
     pub provide_sqlite_backend: Option<Vec<SqliteConfig>>,
     pub provide_postgres_backend: Option<Vec<PostgresConfig>>,
+    pub provide_mysql_backend: Option<Vec<MySqlConfig>>,
     pub provide_prometheus: Option<Vec<PrometheusConfig>>,
 
     pub provide_compute_node: Option<Vec<ComputeNodeConfig>>,
@@ -353,6 +365,14 @@ pub struct RedisConfig {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 #[serde(deny_unknown_fields)]
+pub enum Application {
+    Metastore,
+    Connector,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
 pub struct MySqlConfig {
     #[serde(rename = "use")]
     phantom_use: Option<String>,
@@ -365,6 +385,7 @@ pub struct MySqlConfig {
     pub password: String,
     pub database: String,
 
+    pub application: Application,
     pub image: String,
     pub user_managed: bool,
     pub persist_data: bool,
@@ -385,6 +406,7 @@ pub struct PostgresConfig {
     pub password: String,
     pub database: String,
 
+    pub application: Application,
     pub image: String,
     pub user_managed: bool,
     pub persist_data: bool,
