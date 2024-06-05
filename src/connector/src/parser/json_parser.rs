@@ -107,7 +107,7 @@ pub async fn fetch_json_schema_and_map_to_columns(
 /// ## Notes on type conversion
 /// Map will be used when an object doesn't have `properties` but has `additionalProperties`.
 /// When an object has `properties` and `additionalProperties`, the latter will be ignored.
-/// https://github.com/mozilla/jsonschema-transpiler/blob/fb715c7147ebd52427e0aea09b2bba2d539850b1/src/jsonschema.rs#L228-L280
+/// <https://github.com/mozilla/jsonschema-transpiler/blob/fb715c7147ebd52427e0aea09b2bba2d539850b1/src/jsonschema.rs#L228-L280>
 ///
 /// TODO: examine other stuff like `oneOf`, `patternProperties`, etc.
 fn json_schema_to_columns(json_schema: &serde_json::Value) -> ConnectorResult<Vec<ColumnDesc>> {
