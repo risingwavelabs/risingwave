@@ -14,6 +14,7 @@
 
 use super::expr_visitable::ExprVisitable;
 use super::generic::GenericPlanRef;
+use crate::error::ErrorCode::BindError;
 use super::utils::impl_distill_by_unit;
 use super::{
     gen_filter_and_pushdown, generic, ColPrunable, ColumnPruningContext, ExprRewritable, Logical,
@@ -28,7 +29,7 @@ use crate::PlanRef;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalChangedLog {
     pub base: PlanBase<Logical>,
-    core: generic::ChangeLog<PlanRef>,
+    core: generic::ChangedLog<PlanRef>,
 }
 
 impl LogicalChangedLog {
@@ -37,11 +38,11 @@ impl LogicalChangedLog {
     }
 
     pub fn new(input: PlanRef, need_op: bool, need_changed_log_row_id: bool) -> Self {
-        let core = generic::ChangeLog::new(input, need_op, need_changed_log_row_id);
+        let core = generic::ChangedLog::new(input, need_op, need_changed_log_row_id);
         Self::with_core(core)
     }
 
-    pub fn with_core(core: generic::ChangeLog<PlanRef>) -> Self {
+    pub fn with_core(core: generic::ChangedLog<PlanRef>) -> Self {
         let base = PlanBase::new_logical_with_core(&core);
         LogicalChangedLog { base, core }
     }
@@ -116,7 +117,7 @@ impl ColPrunable for LogicalChangedLog {
 
 impl ToBatch for LogicalChangedLog {
     fn to_batch(&self) -> Result<PlanRef> {
-        unimplemented!()
+        Err(BindError("With changedlog cte only support with create mv/sink".to_string()).into())
     }
 }
 

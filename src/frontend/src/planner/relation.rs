@@ -244,7 +244,7 @@ impl Planner {
                 *recursive_union.recursive,
                 share.share_id,
             ),
-            BoundShareInput::ChangeLog(relation) => {
+            BoundShareInput::ChangedLog(relation) => {
                 let id = share.share_id;
                 let result = self.plan_changed_log(relation)?;
                 let logical_share = LogicalShare::create(result);

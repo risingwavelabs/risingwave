@@ -26,11 +26,11 @@ use crate::PlanRef;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamChangedLog {
     pub base: PlanBase<Stream>,
-    core: generic::ChangeLog<PlanRef>,
+    core: generic::ChangedLog<PlanRef>,
 }
 
 impl StreamChangedLog {
-    pub fn new(core: generic::ChangeLog<PlanRef>) -> Self {
+    pub fn new(core: generic::ChangedLog<PlanRef>) -> Self {
         let input = core.input.clone();
         let dist = input.distribution().clone();
         // Filter executor won't change the append-only behavior of the stream.

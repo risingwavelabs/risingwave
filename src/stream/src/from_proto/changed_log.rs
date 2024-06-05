@@ -17,12 +17,12 @@ use risingwave_storage::StateStore;
 
 use super::ExecutorBuilder;
 use crate::error::StreamResult;
-use crate::executor::{ChangeLogExecutor, Executor};
+use crate::executor::{ChangedLogExecutor, Executor};
 use crate::task::ExecutorParams;
 
-pub struct ChangeLogExecutorBuilder;
+pub struct ChangedLogExecutorBuilder;
 
-impl ExecutorBuilder for ChangeLogExecutorBuilder {
+impl ExecutorBuilder for ChangedLogExecutorBuilder {
     type Node = ChangedLogNode;
 
     async fn new_boxed_executor(
@@ -32,7 +32,7 @@ impl ExecutorBuilder for ChangeLogExecutorBuilder {
     ) -> StreamResult<Executor> {
         let [input]: [_; 1] = params.input.try_into().unwrap();
 
-        let exec = ChangeLogExecutor::new(params.actor_context, input, node.need_op);
+        let exec = ChangedLogExecutor::new(params.actor_context, input, node.need_op);
         Ok((params.info, exec).into())
     }
 }

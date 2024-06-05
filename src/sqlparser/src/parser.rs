@@ -4281,8 +4281,8 @@ impl Parser {
                 self.expect_token(&Token::RParen)?;
                 Some(query)
             } else {
-                let changelog = self.parse_identifier_non_reserved()?;
-                assert!(changelog.to_string().to_lowercase() == "changedlog");
+                let changed_log = self.parse_identifier_non_reserved()?;
+                assert!(changed_log.to_string().to_lowercase() == "changedlog");
                 None
             };
             let alias = TableAlias {

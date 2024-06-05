@@ -24,19 +24,19 @@ use crate::utils::ColIndexMappingRewriteExt;
 use crate::OptimizerContextRef;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct ChangeLog<PlanRef> {
+pub struct ChangedLog<PlanRef> {
     pub input: PlanRef,
     pub need_op: bool,
     pub need_changed_log_row_id: bool,
 }
-impl<PlanRef: GenericPlanRef> DistillUnit for ChangeLog<PlanRef> {
+impl<PlanRef: GenericPlanRef> DistillUnit for ChangedLog<PlanRef> {
     fn distill_with_name<'a>(&self, name: impl Into<Str<'a>>) -> XmlNode<'a> {
         childless_record(name, vec![])
     }
 }
-impl<PlanRef: GenericPlanRef> ChangeLog<PlanRef> {
+impl<PlanRef: GenericPlanRef> ChangedLog<PlanRef> {
     pub fn new(input: PlanRef, need_op: bool, need_changed_log_row_id: bool) -> Self {
-        ChangeLog {
+        ChangedLog {
             input,
             need_op,
             need_changed_log_row_id,
@@ -49,7 +49,7 @@ impl<PlanRef: GenericPlanRef> ChangeLog<PlanRef> {
         ColIndexMapping::new(map, self.schema().len())
     }
 }
-impl<PlanRef: GenericPlanRef> GenericPlanNode for ChangeLog<PlanRef> {
+impl<PlanRef: GenericPlanRef> GenericPlanNode for ChangedLog<PlanRef> {
     fn schema(&self) -> Schema {
         let mut fields = self.input.schema().fields.clone();
         if self.need_op {

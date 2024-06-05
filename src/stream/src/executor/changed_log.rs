@@ -23,24 +23,24 @@ use risingwave_common::types::Serial;
 
 use super::{ActorContextRef, BoxedMessageStream, Execute, Executor, Message, StreamExecutorError};
 
-pub struct ChangeLogExecutor {
+pub struct ChangedLogExecutor {
     _ctx: ActorContextRef,
     input: Executor,
     need_op: bool,
 }
 
-impl Debug for ChangeLogExecutor {
+impl Debug for ChangedLogExecutor {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ChangeLogExecutor").finish()
+        f.debug_struct("ChangedLogExecutor").finish()
     }
 }
 
-impl Execute for ChangeLogExecutor {
+impl Execute for ChangedLogExecutor {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
     }
 }
-impl ChangeLogExecutor {
+impl ChangedLogExecutor {
     pub fn new(ctx: ActorContextRef, input: Executor, need_op: bool) -> Self {
         Self {
             _ctx: ctx,

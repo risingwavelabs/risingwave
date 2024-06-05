@@ -294,7 +294,7 @@ impl fmt::Display for Cte {
                 write!(f, " FROM {}", fr)?;
             }
         } else {
-            write!(f, "{} AS changelog from {:?}", self.alias, self.from)?;
+            write!(f, "{} AS changedlog from {:?}", self.alias, self.from)?;
         }
         Ok(())
     }

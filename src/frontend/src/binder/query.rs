@@ -336,7 +336,9 @@ impl Binder {
                 );
             } else {
                 let from_table_name = from.ok_or_else(|| {
-                    ErrorCode::BindError("CTE with changelog from must have a table/mv".to_string())
+                    ErrorCode::BindError(
+                        "CTE with changedlog from must have a table/mv".to_string(),
+                    )
                 })?;
                 self.push_context();
                 let from_table_relation = self.bind_relation_by_name(
@@ -349,7 +351,7 @@ impl Binder {
                     table_name,
                     Rc::new(RefCell::new(BindingCte {
                         share_id,
-                        state: BindingCteState::ChangeLog {
+                        state: BindingCteState::ChangedLog {
                             table: from_table_relation,
                         },
                         alias,
