@@ -709,8 +709,8 @@ impl CompactionGroupManager {
 }
 
 impl CompactionGroupManager {
-    pub fn start_compaction_groups_txn(&mut self) -> BTreeMapTransaction<'_, u64, CompactionGroup> {
-        BTreeMapTransaction::new(&mut self.compaction_groups)
+    pub fn start_compaction_groups_txn(&mut self) -> CompactionGroupTransaction<'_> {
+        CompactionGroupTransaction::new(&mut self.compaction_groups)
     }
 
     /// Tries to get compaction group config for `compaction_group_id`.
