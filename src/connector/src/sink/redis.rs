@@ -249,8 +249,11 @@ impl Sink for RedisSink {
 }
 
 pub struct RedisSinkWriter {
+    #[expect(dead_code)]
     epoch: u64,
+    #[expect(dead_code)]
     schema: Schema,
+    #[expect(dead_code)]
     pk_indices: Vec<usize>,
     formatter: SinkFormatterImpl,
     payload_writer: RedisSinkPayloadWriter,

@@ -116,14 +116,6 @@ impl<A> DebeziumChangeEvent<A>
 where
     A: Access,
 {
-    pub fn with_value(value_accessor: A) -> Self {
-        Self::new(None, Some(value_accessor))
-    }
-
-    pub fn with_key(key_accessor: A) -> Self {
-        Self::new(Some(key_accessor), None)
-    }
-
     /// Panic: one of the `key_accessor` or `value_accessor` must be provided.
     pub fn new(key_accessor: Option<A>, value_accessor: Option<A>) -> Self {
         assert!(key_accessor.is_some() || value_accessor.is_some());
