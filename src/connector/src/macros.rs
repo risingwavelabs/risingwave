@@ -94,7 +94,9 @@ macro_rules! dispatch_source_enum_inner {
         match $impl {
             $(
                 $enum_name::$source_variant($inner_name) => {
+                    #[allow(dead_code)]
                     type $prop_type_name = $prop_name;
+                    #[allow(dead_code)]
                     type $split_type_name = $split;
                     {
                         $body

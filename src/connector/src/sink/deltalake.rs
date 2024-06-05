@@ -69,7 +69,7 @@ pub struct DeltaLakeCommon {
     pub s3_endpoint: Option<String>,
     #[serde(rename = "gcs.service.account")]
     pub gcs_service_account: Option<String>,
-    // Commit every n(>0) checkpoints, if n is not set, we will commit every checkpoint.
+    /// Commit every n(>0) checkpoints, if n is not set, we will commit every checkpoint.
     #[serde(default, deserialize_with = "deserialize_optional_u64_from_string")]
     pub commit_checkpoint_interval: Option<u64>,
 }
@@ -295,7 +295,7 @@ impl Sink for DeltaLakeSink {
             SinkDecouple::Disable => {
                 if config_decouple {
                     return Err(SinkError::Config(anyhow!(
-                        "config conflict: DeltaLake config `commit_checkpoint_interval` bigger than 1 which means that must enable sink decouple, but session config sink decouple is disabled"
+                        "config conflict: DeltaLake config `commit_checkpoint_interval` larger than 1 means that sink decouple must be enabled, but session config sink_decouple is disabled"
                     )));
                 }
                 Ok(false)
@@ -401,10 +401,13 @@ impl TryFrom<SinkParam> for DeltaLakeSink {
 
 pub struct DeltaLakeSinkWriter {
     pub config: DeltaLakeConfig,
+    #[expect(dead_code)]
     schema: Schema,
+    #[expect(dead_code)]
     pk_indices: Vec<usize>,
     writer: RecordBatchWriter,
     dl_schema: Arc<deltalake::arrow::datatypes::Schema>,
+    #[expect(dead_code)]
     dl_table: DeltaTable,
 }
 

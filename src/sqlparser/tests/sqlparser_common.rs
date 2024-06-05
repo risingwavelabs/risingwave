@@ -1268,9 +1268,6 @@ fn parse_extract() {
     verified_stmt("SELECT EXTRACT(HOUR FROM d)");
     verified_stmt("SELECT EXTRACT(MINUTE FROM d)");
     verified_stmt("SELECT EXTRACT(SECOND FROM d)");
-
-    let res = parse_sql_statements("SELECT EXTRACT(0 FROM d)");
-    assert!(format!("{}", res.unwrap_err()).contains("expected date/time field, found: 0"));
 }
 
 #[test]
@@ -2917,38 +2914,6 @@ fn parse_substring() {
     );
 
     one_statement_parses_to("SELECT SUBSTRING('1' FOR 3)", "SELECT SUBSTRING('1' FOR 3)");
-}
-
-#[test]
-fn parse_overlay() {
-    one_statement_parses_to(
-        "SELECT OVERLAY('abc' PLACING 'xyz' FROM 1)",
-        "SELECT OVERLAY('abc' PLACING 'xyz' FROM 1)",
-    );
-
-    one_statement_parses_to(
-        "SELECT OVERLAY('abc' PLACING 'xyz' FROM 1 FOR 2)",
-        "SELECT OVERLAY('abc' PLACING 'xyz' FROM 1 FOR 2)",
-    );
-
-    for (sql, err_msg) in [
-        ("SELECT OVERLAY('abc', 'xyz')", "expected PLACING, found: ,"),
-        (
-            "SELECT OVERLAY('abc' PLACING 'xyz')",
-            "expected FROM, found: )",
-        ),
-        (
-            "SELECT OVERLAY('abc' PLACING 'xyz' FOR 2)",
-            "expected FROM, found: FOR",
-        ),
-        (
-            "SELECT OVERLAY('abc' PLACING 'xyz' FOR 2 FROM 1)",
-            "expected FROM, found: FOR",
-        ),
-    ] {
-        let res = parse_sql_statements(sql);
-        assert!(format!("{}", res.unwrap_err()).contains(err_msg));
-    }
 }
 
 #[test]

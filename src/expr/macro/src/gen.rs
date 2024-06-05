@@ -342,10 +342,45 @@ impl FunctionAttr {
             // no prebuilt argument
             (None, _) => quote! {},
         };
-        let variadic_args = variadic.then(|| quote! { variadic_row, });
+        let variadic_args = variadic.then(|| quote! { &variadic_row, });
         let context = user_fn.context.then(|| quote! { &self.context, });
         let writer = user_fn.write.then(|| quote! { &mut writer, });
         let await_ = user_fn.async_.then(|| quote! { .await });
+
+        let record_error = {
+            // Uniform arguments into `DatumRef`.
+            #[allow(clippy::disallowed_methods)] // allow zip
+            let inputs_args = inputs
+                .iter()
+                .zip(user_fn.args_option.iter())
+                .map(|(input, opt)| {
+                    if *opt {
+                        quote! { #input.map(|s| ScalarRefImpl::from(s)) }
+                    } else {
+                        quote! { Some(ScalarRefImpl::from(#input)) }
+                    }
+                });
+            let inputs_args = quote! {
+                let args: &[DatumRef<'_>] = &[#(#inputs_args),*];
+                let args = args.iter().copied();
+            };
+            let var_args = variadic.then(|| {
+                quote! {
+                    let args = args.chain(variadic_row.iter());
+                }
+            });
+
+            quote! {
+                #inputs_args
+                #var_args
+                errors.push(ExprError::function(
+                    stringify!(#fn_name),
+                    args,
+                    e,
+                ));
+            }
+        };
+
         // call the user defined function
         // inputs: [ Option<impl ScalarRef> ]
         let mut output = quote! { #fn_name #generic(
@@ -365,13 +400,19 @@ impl FunctionAttr {
             ReturnTypeKind::Result => quote! {
                 match #output {
                     Ok(x) => Some(x),
-                    Err(e) => { errors.push(ExprError::Function(Box::new(e))); None }
+                    Err(e) => {
+                        #record_error
+                        None
+                    }
                 }
             },
             ReturnTypeKind::ResultOption => quote! {
                 match #output {
                     Ok(x) => x,
-                    Err(e) => { errors.push(ExprError::Function(Box::new(e))); None }
+                    Err(e) => {
+                        #record_error
+                        None
+                    }
                 }
             },
         };
@@ -484,10 +525,6 @@ impl FunctionAttr {
             }
         } else {
             // no optimization
-            let array_zip = match children_indices.len() {
-                0 => quote! { std::iter::repeat(()).take(input.capacity()) },
-                _ => quote! { multizip((#(#arrays.iter(),)*)) },
-            };
             let let_variadic = variadic.then(|| {
                 quote! {
                     let variadic_row = variadic_input.row_at_unchecked_vis(i);
@@ -497,18 +534,18 @@ impl FunctionAttr {
                 let mut builder = #builder_type::with_type(input.capacity(), self.context.return_type.clone());
 
                 if input.is_compacted() {
-                    for (i, (#(#inputs,)*)) in #array_zip.enumerate() {
+                    for i in 0..input.capacity() {
+                        #(let #inputs = unsafe { #arrays.value_at_unchecked(i) };)*
                         #let_variadic
                         #append_output
                     }
                 } else {
-                    // allow using `zip` for performance
-                    #[allow(clippy::disallowed_methods)]
-                    for (i, ((#(#inputs,)*), visible)) in #array_zip.zip(input.visibility().iter()).enumerate() {
-                        if !visible {
+                    for i in 0..input.capacity() {
+                        if unsafe { !input.visibility().is_set_unchecked(i) } {
                             builder.append_null();
                             continue;
                         }
+                        #(let #inputs = unsafe { #arrays.value_at_unchecked(i) };)*
                         #let_variadic
                         #append_output
                     }
@@ -1179,10 +1216,11 @@ impl FunctionAttr {
                         let mut index_builder = I32ArrayBuilder::new(self.chunk_size);
                         #(let mut #builders = #builder_types::with_type(self.chunk_size, #return_types);)*
 
-                        for (i, ((#(#inputs,)*), visible)) in multizip((#(#arrays.iter(),)*)).zip_eq_fast(input.visibility().iter()).enumerate() {
-                            if !visible {
+                        for i in 0..input.capacity() {
+                            if unsafe { !input.visibility().is_set_unchecked(i) } {
                                 continue;
                             }
+                            #(let #inputs = unsafe { #arrays.value_at_unchecked(i) };)*
                             for output in #iter {
                                 index_builder.append(Some(i as i32));
                                 match #output {

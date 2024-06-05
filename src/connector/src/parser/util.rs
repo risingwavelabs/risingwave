@@ -38,6 +38,11 @@ macro_rules! log_error {
     };
 }
 pub(crate) use log_error;
+use risingwave_pb::plan_common::additional_column;
+use risingwave_pb::plan_common::additional_column::ColumnType;
+
+use crate::parser::{AccessError, AccessResult};
+use crate::source::cdc::DebeziumCdcMeta;
 
 /// get kafka topic name
 pub(super) fn get_kafka_topic(props: &BTreeMap<String, String>) -> ConnectorResult<&String> {
@@ -130,8 +135,23 @@ pub(super) async fn bytes_from_url(
 pub fn extreact_timestamp_from_meta(meta: &SourceMeta) -> Option<Datum> {
     match meta {
         SourceMeta::Kafka(kafka_meta) => kafka_meta.extract_timestamp(),
-        SourceMeta::DebeziumCdc(debezium_meta) => debezium_meta.extract_timestamp(),
+        SourceMeta::DebeziumCdc(cdc_meta) => cdc_meta.extract_timestamp(),
         _ => None,
+    }
+}
+
+pub fn extract_cdc_meta_column(
+    cdc_meta: &DebeziumCdcMeta,
+    column_type: &additional_column::ColumnType,
+    column_name: &str,
+) -> AccessResult<Option<Datum>> {
+    match column_type {
+        ColumnType::Timestamp(_) => Ok(cdc_meta.extract_timestamp()),
+        ColumnType::DatabaseName(_) => Ok(cdc_meta.extract_database_name()),
+        ColumnType::TableName(_) => Ok(cdc_meta.extract_table_name()),
+        _ => Err(AccessError::UnsupportedAdditionalColumn {
+            name: column_name.to_string(),
+        }),
     }
 }
 
