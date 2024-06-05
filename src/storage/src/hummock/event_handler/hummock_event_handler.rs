@@ -975,16 +975,25 @@ mod tests {
     use std::task::Poll;
 
     use futures::FutureExt;
+    use parking_lot::Mutex;
+    use risingwave_common::buffer::BitmapBuilder;
+    use risingwave_common::hash::VirtualNode;
+    use risingwave_common::util::epoch::{test_epoch, EpochExt};
     use risingwave_hummock_sdk::version::HummockVersion;
     use risingwave_pb::hummock::PbHummockVersion;
     use tokio::spawn;
     use tokio::sync::mpsc::unbounded_channel;
     use tokio::sync::oneshot;
 
+    use crate::hummock::event_handler::refiller::CacheRefiller;
+    use crate::hummock::event_handler::uploader::tests::{gen_imm, TEST_TABLE_ID};
+    use crate::hummock::event_handler::uploader::UploadTaskOutput;
     use crate::hummock::event_handler::{HummockEvent, HummockEventHandler, HummockVersionUpdate};
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::local_version::pinned_version::PinnedVersion;
+    use crate::hummock::store::version::{StagingData, VersionUpdate};
     use crate::hummock::test_utils::default_opts_for_test;
+    use crate::hummock::HummockError;
     use crate::monitor::HummockStateStoreMetrics;
 
     #[tokio::test]
@@ -1109,5 +1118,119 @@ mod tests {
             rx.await.unwrap();
             assert_eq!(latest_version.load().version(), &version5);
         }
+    }
+
+    #[tokio::test]
+    async fn test_old_epoch_sync_fail() {
+        let epoch0 = test_epoch(233);
+
+        let initial_version = PinnedVersion::new(
+            HummockVersion::from_rpc_protobuf(&PbHummockVersion {
+                id: 1,
+                max_committed_epoch: epoch0,
+                ..Default::default()
+            }),
+            unbounded_channel().0,
+        );
+
+        let (_version_update_tx, version_update_rx) = unbounded_channel();
+
+        let epoch1 = epoch0.next_epoch();
+        let epoch2 = epoch1.next_epoch();
+        let (tx, rx) = oneshot::channel();
+        let rx = Arc::new(Mutex::new(Some(rx)));
+
+        let event_handler = HummockEventHandler::new_inner(
+            version_update_rx,
+            initial_version.clone(),
+            None,
+            mock_sstable_store().await,
+            Arc::new(HummockStateStoreMetrics::unused()),
+            &default_opts_for_test(),
+            Arc::new(move |_, info| {
+                assert_eq!(info.epochs.len(), 1);
+                let epoch = info.epochs[0];
+                match epoch {
+                    epoch if epoch == epoch1 => {
+                        let rx = rx.lock().take().unwrap();
+                        spawn(async move {
+                            rx.await.unwrap();
+                            Err(HummockError::other("fail"))
+                        })
+                    }
+                    epoch if epoch == epoch2 => spawn(async move {
+                        Ok(UploadTaskOutput {
+                            new_value_ssts: vec![],
+                            old_value_ssts: vec![],
+                            wait_poll_timer: None,
+                        })
+                    }),
+                    _ => unreachable!(),
+                }
+            }),
+            CacheRefiller::default_spawn_refill_task(),
+        );
+
+        let event_tx = event_handler.event_sender();
+
+        let send_event = |event| event_tx.send(event).unwrap();
+
+        let _join_handle = spawn(event_handler.start_hummock_event_handler_worker());
+
+        let (read_version, guard) = {
+            let (tx, rx) = oneshot::channel();
+            send_event(HummockEvent::RegisterReadVersion {
+                table_id: TEST_TABLE_ID,
+                new_read_version_sender: tx,
+                is_replicated: false,
+                vnodes: Arc::new(BitmapBuilder::filled(VirtualNode::COUNT).finish()),
+            });
+            rx.await.unwrap()
+        };
+
+        let imm1 = gen_imm(epoch1).await;
+        read_version
+            .write()
+            .update(VersionUpdate::Staging(StagingData::ImmMem(imm1.clone())));
+
+        send_event(HummockEvent::ImmToUploader {
+            instance_id: guard.instance_id,
+            imm: imm1,
+        });
+
+        let imm2 = gen_imm(epoch2).await;
+        read_version
+            .write()
+            .update(VersionUpdate::Staging(StagingData::ImmMem(imm2.clone())));
+
+        send_event(HummockEvent::ImmToUploader {
+            instance_id: guard.instance_id,
+            imm: imm2,
+        });
+
+        send_event(HummockEvent::SealEpoch {
+            epoch: epoch1,
+            is_checkpoint: true,
+        });
+        let (tx1, mut rx1) = oneshot::channel();
+        send_event(HummockEvent::SyncEpoch {
+            new_sync_epoch: epoch1,
+            sync_result_sender: tx1,
+        });
+        assert!(poll_fn(|cx| Poll::Ready(rx1.poll_unpin(cx).is_pending())).await);
+        send_event(HummockEvent::SealEpoch {
+            epoch: epoch2,
+            is_checkpoint: true,
+        });
+        let (tx2, mut rx2) = oneshot::channel();
+        send_event(HummockEvent::SyncEpoch {
+            new_sync_epoch: epoch2,
+            sync_result_sender: tx2,
+        });
+        assert!(poll_fn(|cx| Poll::Ready(rx2.poll_unpin(cx).is_pending())).await);
+
+        tx.send(()).unwrap();
+        rx1.await.unwrap().unwrap_err();
+        rx2.await.unwrap().unwrap_err();
     }
 }

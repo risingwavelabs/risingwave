@@ -1113,7 +1113,7 @@ impl HummockUploader {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::collections::{HashMap, VecDeque};
     use std::future::{poll_fn, Future};
     use std::ops::Deref;
@@ -1158,7 +1158,7 @@ mod tests {
     use crate::opts::StorageOpts;
 
     const INITIAL_EPOCH: HummockEpoch = test_epoch(5);
-    const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+    pub(crate) const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
 
     pub trait UploadOutputFuture =
         Future<Output = HummockResult<UploadTaskOutput>> + Send + 'static;
@@ -1218,7 +1218,7 @@ mod tests {
         )
     }
 
-    async fn gen_imm(epoch: HummockEpoch) -> ImmutableMemtable {
+    pub(crate) async fn gen_imm(epoch: HummockEpoch) -> ImmutableMemtable {
         gen_imm_with_limiter(epoch, None).await
     }
 
