@@ -21,7 +21,7 @@ use risingwave_connector::source::kafka::private_link::{
 use risingwave_connector::WithPropertiesExt;
 use risingwave_sqlparser::ast::{
     CreateConnectionStatement, CreateSinkStatement, CreateSourceStatement,
-    CreateSubscriptionStatement, ObjectName, SqlOption, Statement, Value,
+    CreateSubscriptionStatement, SqlOption, Statement, Value,
 };
 
 use super::OverwriteOptions;
@@ -39,7 +39,6 @@ mod options {
 #[derive(Default, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct WithOptions {
     inner: BTreeMap<String, String>,
-    ref_secret: BTreeMap<String, ObjectName>,
 }
 
 impl std::ops::Deref for WithOptions {
@@ -61,15 +60,11 @@ impl WithOptions {
     pub fn new(inner: BTreeMap<String, String>) -> Self {
         Self {
             inner: inner.into_iter().collect(),
-            ref_secret: Default::default(),
         }
     }
 
     pub fn from_inner(inner: BTreeMap<String, String>) -> Self {
-        Self {
-            inner,
-            ref_secret: Default::default(),
-        }
+        Self { inner }
     }
 
     /// Get the reference of the inner map.
@@ -112,10 +107,7 @@ impl WithOptions {
             })
             .collect();
 
-        Self {
-            inner,
-            ref_secret: Default::default(),
-        }
+        Self { inner }
     }
 
     pub fn value_eq_ignore_case(&self, key: &str, val: &str) -> bool {
@@ -183,18 +175,8 @@ impl TryFrom<&[SqlOption]> for WithOptions {
 
     fn try_from(options: &[SqlOption]) -> Result<Self, Self::Error> {
         let mut inner: BTreeMap<String, String> = BTreeMap::new();
-        let mut ref_secret: BTreeMap<String, ObjectName> = BTreeMap::new();
         for option in options {
             let key = option.name.real_value();
-            if let Value::Ref(r) = &option.value {
-                if ref_secret.insert(key.clone(), r.clone()).is_some() || inner.contains_key(&key) {
-                    return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
-                        "Duplicated option: {}",
-                        key
-                    ))));
-                }
-                continue;
-            }
             let value: String = match option.value.clone() {
                 Value::CstyleEscapedString(s) => s.value,
                 Value::SingleQuotedString(s) => s,
@@ -207,7 +189,7 @@ impl TryFrom<&[SqlOption]> for WithOptions {
                     )))
                 }
             };
-            if inner.insert(key.clone(), value).is_some() || ref_secret.contains_key(&key) {
+            if inner.insert(key.clone(), value).is_some() {
                 return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
                     "Duplicated option: {}",
                     key
@@ -215,7 +197,7 @@ impl TryFrom<&[SqlOption]> for WithOptions {
             }
         }
 
-        Ok(Self { inner, ref_secret })
+        Ok(Self { inner })
     }
 }
 
