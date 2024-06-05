@@ -1365,10 +1365,6 @@ impl<'a, T> KeyedRowStream<'a> for T where
 {
 }
 
-type IterDirection = i32;
-const ITER_FORWARD: IterDirection = 1;
-const ITER_REVERSE: IterDirection = -1;
-
 // Iterator functions
 impl<
         S,
@@ -1467,7 +1463,7 @@ where
         sub_range: &(Bound<impl Row>, Bound<impl Row>),
         prefetch_options: PrefetchOptions,
     ) -> StreamExecutorResult<impl KeyedRowStream<'_>> {
-        self.iter_with_prefix_inner::<ITER_FORWARD>(pk_prefix, sub_range, prefetch_options)
+        self.iter_with_prefix_inner::</* REVERSE */ false>(pk_prefix, sub_range, prefetch_options)
             .await
     }
 
@@ -1478,11 +1474,11 @@ where
         sub_range: &(Bound<impl Row>, Bound<impl Row>),
         prefetch_options: PrefetchOptions,
     ) -> StreamExecutorResult<impl KeyedRowStream<'_>> {
-        self.iter_with_prefix_inner::<ITER_REVERSE>(pk_prefix, sub_range, prefetch_options)
+        self.iter_with_prefix_inner::</* REVERSE */ true>(pk_prefix, sub_range, prefetch_options)
             .await
     }
 
-    async fn iter_with_prefix_inner<const DIRECTION: IterDirection>(
+    async fn iter_with_prefix_inner<const REVERSE: bool>(
         &self,
         pk_prefix: impl Row,
         sub_range: &(Bound<impl Row>, Bound<impl Row>),
@@ -1519,11 +1515,7 @@ where
             table_id = %self.table_id(),
             ?prefix_hint, ?pk_prefix,
             ?pk_prefix_indices,
-            iter_direction = match DIRECTION {
-                ITER_FORWARD => "forward",
-                ITER_REVERSE => "reverse",
-                _ => unreachable!(),
-            },
+            iter_direction = if REVERSE { "reverse" } else { "forward" },
             "storage_iter_with_prefix"
         );
 
@@ -1532,17 +1524,8 @@ where
 
         let memcomparable_range_with_vnode = prefixed_range_with_vnode(memcomparable_range, vnode);
 
-        Ok(match DIRECTION {
-            ITER_FORWARD => futures::future::Either::Left(deserialize_keyed_row_stream(
-                self.iter_kv(
-                    memcomparable_range_with_vnode,
-                    prefix_hint,
-                    prefetch_options,
-                )
-                .await?,
-                &self.row_serde,
-            )),
-            ITER_REVERSE => futures::future::Either::Right(deserialize_keyed_row_stream(
+        Ok(if REVERSE {
+            futures::future::Either::Left(deserialize_keyed_row_stream(
                 self.rev_iter_kv(
                     memcomparable_range_with_vnode,
                     prefix_hint,
@@ -1550,8 +1533,17 @@ where
                 )
                 .await?,
                 &self.row_serde,
-            )),
-            _ => unreachable!(),
+            ))
+        } else {
+            futures::future::Either::Right(deserialize_keyed_row_stream(
+                self.iter_kv(
+                    memcomparable_range_with_vnode,
+                    prefix_hint,
+                    prefetch_options,
+                )
+                .await?,
+                &self.row_serde,
+            ))
         })
     }
 
