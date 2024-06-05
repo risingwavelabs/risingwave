@@ -14,7 +14,7 @@
 
 #![deprecated = "will be replaced by new fs source (list + fetch)"]
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use anyhow::Context;

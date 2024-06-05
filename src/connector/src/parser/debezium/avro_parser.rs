@@ -148,7 +148,7 @@ mod tests {
     use std::path::PathBuf;
 
     use itertools::Itertools;
-    use maplit::{convert_args, hashmap};
+    use maplit::{btreemap, convert_args};
     use risingwave_common::array::Op;
     use risingwave_common::catalog::ColumnDesc as CatColumnDesc;
     use risingwave_common::row::{OwnedRow, Row};
@@ -356,9 +356,9 @@ mod tests {
     #[ignore]
     #[tokio::test]
     async fn test_debezium_avro_parser() -> crate::error::ConnectorResult<()> {
-        let props = convert_args!(hashmap!(
+        let props = convert_args!(btreemap!(
             "kafka.topic" => "dbserver1.inventory.customers"
-        )).into_iter().collect();
+        ));
         let info = StreamSourceInfo {
             row_schema_location: "http://127.0.0.1:8081".into(),
             format: PbFormatType::Debezium.into(),

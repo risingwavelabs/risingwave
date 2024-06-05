@@ -179,7 +179,6 @@ impl AvroParserConfig {
 
 #[cfg(test)]
 mod test {
-    use std::collections::HashMap;
     use std::env;
     use std::fs::OpenOptions;
     use std::io::Write;
