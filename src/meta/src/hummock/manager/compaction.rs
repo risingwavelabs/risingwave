@@ -61,7 +61,7 @@ use risingwave_pb::hummock::subscribe_compaction_event_response::{
 use risingwave_pb::hummock::{
     compact_task, CompactStatus as PbCompactStatus, CompactTask, CompactTaskAssignment,
     CompactionConfig, GroupDelta, InputLevel, IntraLevelDelta, Level, SstableInfo,
-    SubscribeCompactionEventRequest, TableOption, TableSchema,
+    StateTableInfoDelta, SubscribeCompactionEventRequest, TableOption, TableSchema,
 };
 use rw_futures_util::pending_on_none;
 use thiserror_ext::AsReport;
@@ -185,6 +185,23 @@ impl<'a> HummockVersionTransaction<'a> {
             version_delta.latest_version().safe_epoch,
             compact_task.watermark,
         );
+        if version_delta.latest_version().safe_epoch < version_delta.safe_epoch {
+            version_delta.state_table_info_delta = version_delta
+                .latest_version()
+                .state_table_info
+                .info()
+                .iter()
+                .map(|(table_id, info)| {
+                    (
+                        *table_id,
+                        StateTableInfoDelta {
+                            committed_epoch: info.committed_epoch,
+                            safe_epoch: version_delta.safe_epoch,
+                        },
+                    )
+                })
+                .collect();
+        }
         version_delta.pre_apply();
     }
 }
