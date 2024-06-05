@@ -66,7 +66,6 @@ impl HummockVersionStateTableInfo {
         removed_table_id: &HashSet<TableId>,
     ) -> HashMap<TableId, Option<StateTableInfo>> {
         let mut changed_table = HashMap::new();
-        info!(removed_table_id = ?removed_table_id.iter().map(|table_id| table_id.table_id).collect_vec(), "removing table id");
         for table_id in removed_table_id {
             if let Some(prev_info) = self.state_table_info.remove(table_id) {
                 assert!(changed_table.insert(*table_id, Some(prev_info)).is_none());
