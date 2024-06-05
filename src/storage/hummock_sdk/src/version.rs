@@ -65,7 +65,7 @@ impl HummockVersionStateTableInfo {
         ret
     }
 
-    pub fn build_table_compaction_group_id(
+    fn build_table_compaction_group_id(
         state_table_info: &HashMap<TableId, PbStateTableInfo>,
     ) -> HashMap<TableId, CompactionGroupId> {
         state_table_info
@@ -74,21 +74,27 @@ impl HummockVersionStateTableInfo {
             .collect()
     }
 
+    fn rebuild_in_memory_index(&mut self) {
+        self.compaction_group_member_tables = Arc::new(Self::build_compaction_group_member_tables(
+            &self.state_table_info,
+        ));
+        self.table_compaction_group_id = Arc::new(Self::build_table_compaction_group_id(
+            &self.state_table_info,
+        ));
+    }
+
     pub fn from_protobuf(state_table_info: &HashMap<u32, PbStateTableInfo>) -> Self {
         let state_table_info = state_table_info
             .iter()
             .map(|(table_id, info)| (TableId::new(*table_id), info.clone()))
             .collect();
-        let compaction_group_member_tables = Arc::new(Self::build_compaction_group_member_tables(
-            &state_table_info,
-        ));
-        let table_compaction_group_id =
-            Arc::new(Self::build_table_compaction_group_id(&state_table_info));
-        Self {
+        let mut ret = Self {
             state_table_info,
-            compaction_group_member_tables,
-            table_compaction_group_id,
-        }
+            compaction_group_member_tables: Default::default(),
+            table_compaction_group_id: Default::default(),
+        };
+        ret.rebuild_in_memory_index();
+        ret
     }
 
     pub fn to_protobuf(&self) -> HashMap<u32, PbStateTableInfo> {
@@ -135,9 +141,7 @@ impl HummockVersionStateTableInfo {
                 }
             }
         }
-        self.compaction_group_member_tables = Arc::new(Self::build_compaction_group_member_tables(
-            &self.state_table_info,
-        ));
+        self.rebuild_in_memory_index();
         changed_table
     }
 
