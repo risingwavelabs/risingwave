@@ -23,7 +23,7 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use await_tree::InstrumentAwait;
 use futures::stream::FuturesOrdered;
-use futures::{FutureExt, StreamExt, TryFutureExt};
+use futures::{FutureExt, StreamExt};
 use prometheus::HistogramTimer;
 use risingwave_common::must_match;
 use risingwave_hummock_sdk::SyncResult;
@@ -96,48 +96,43 @@ fn sync_epoch(
     kind: BarrierKind,
 ) -> impl Future<Output = StreamResult<Option<SyncResult>>> + 'static {
     let barrier_sync_latency = streaming_metrics.barrier_sync_latency.clone();
+    let state_store = state_store.clone();
 
-    let sync_result_future = match kind {
-        BarrierKind::Unspecified => unreachable!(),
-        BarrierKind::Initial => {
-            if let Some(hummock) = state_store.as_hummock() {
-                let mce = hummock.get_pinned_version().max_committed_epoch();
-                assert_eq!(
-                    mce, prev_epoch,
-                    "first epoch should match with the current version",
-                );
-            }
-            tracing::info!(?prev_epoch, "ignored syncing data for the first barrier");
-            None
-        }
-        BarrierKind::Barrier => None,
-        BarrierKind::Checkpoint => {
-            let timer = barrier_sync_latency.start_timer();
-            let sync_result_future = dispatch_state_store!(state_store, store, {
-                store
-                    .sync(prev_epoch)
-                    .instrument_await(format!("sync_epoch (epoch {})", prev_epoch))
-                    .inspect_ok(move |_| {
-                        timer.observe_duration();
-                    })
-                    .inspect_err(move |e| {
-                        tracing::error!(
-                            prev_epoch,
-                            error = %e.as_report(),
-                            "Failed to sync state store",
-                        );
-                    })
-                    .boxed()
-            });
-            Some(sync_result_future)
-        }
-    };
     async move {
-        if let Some(sync_result_future) = sync_result_future {
-            Ok(Some(sync_result_future.await?))
-        } else {
-            Ok(None)
-        }
+        let sync_result = match kind {
+            BarrierKind::Unspecified => unreachable!(),
+            BarrierKind::Initial => {
+                if let Some(hummock) = state_store.as_hummock() {
+                    let mce = hummock.get_pinned_version().max_committed_epoch();
+                    assert_eq!(
+                        mce, prev_epoch,
+                        "first epoch should match with the current version",
+                    );
+                }
+                tracing::info!(?prev_epoch, "ignored syncing data for the first barrier");
+                None
+            }
+            BarrierKind::Barrier => None,
+            BarrierKind::Checkpoint => {
+                let timer = barrier_sync_latency.start_timer();
+                let sync_result = dispatch_state_store!(state_store, store, {
+                    store
+                        .sync(prev_epoch)
+                        .instrument_await(format!("sync_epoch (epoch {})", prev_epoch))
+                        .await
+                        .inspect_err(|e| {
+                            tracing::error!(
+                                prev_epoch,
+                                error = %e.as_report(),
+                                "Failed to sync state store",
+                            );
+                        })
+                })?;
+                timer.observe_duration();
+                Some(sync_result)
+            }
+        };
+        Ok(sync_result)
     }
 }
 

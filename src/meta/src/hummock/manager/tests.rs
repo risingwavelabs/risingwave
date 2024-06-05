@@ -2389,6 +2389,7 @@ async fn test_unregister_moved_table() {
         get_compaction_group_object_ids(&current_version, 2),
         vec![10, 11]
     );
+
     assert_eq!(
         current_version
             .get_compaction_group_levels(2)

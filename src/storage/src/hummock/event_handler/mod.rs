@@ -57,7 +57,7 @@ pub enum HummockEvent {
     /// An epoch is going to be synced. Once the event is processed, there will be no more flush
     /// task on this epoch. Previous concurrent flush task join handle will be returned by the join
     /// handle sender.
-    SyncEpoch {
+    AwaitSyncEpoch {
         new_sync_epoch: HummockEpoch,
         sync_result_sender: oneshot::Sender<HummockResult<SyncResult>>,
     },
@@ -107,7 +107,7 @@ impl HummockEvent {
         match self {
             HummockEvent::BufferMayFlush => "BufferMayFlush".to_string(),
 
-            HummockEvent::SyncEpoch {
+            HummockEvent::AwaitSyncEpoch {
                 new_sync_epoch,
                 sync_result_sender: _,
             } => format!("AwaitSyncEpoch epoch {} ", new_sync_epoch),

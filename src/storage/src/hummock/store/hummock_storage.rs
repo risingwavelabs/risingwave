@@ -19,7 +19,6 @@ use std::sync::Arc;
 
 use arc_swap::ArcSwap;
 use bytes::Bytes;
-use futures::FutureExt;
 use itertools::Itertools;
 use more_asserts::assert_gt;
 use risingwave_common::catalog::TableId;
@@ -557,15 +556,15 @@ impl StateStore for HummockStorage {
         wait_for_epoch(&self.version_update_notifier_tx, wait_epoch).await
     }
 
-    fn sync(&self, epoch: u64) -> impl SyncFuture {
+    async fn sync(&self, epoch: u64) -> StorageResult<SyncResult> {
         let (tx, rx) = oneshot::channel();
         self.hummock_event_sender
-            .send(HummockEvent::SyncEpoch {
+            .send(HummockEvent::AwaitSyncEpoch {
                 new_sync_epoch: epoch,
                 sync_result_sender: tx,
             })
             .expect("should send success");
-        rx.map(|recv_result| Ok(recv_result.expect("should wait success")?))
+        Ok(rx.await.expect("should wait success")?)
     }
 
     fn seal_epoch(&self, epoch: u64, is_checkpoint: bool) {

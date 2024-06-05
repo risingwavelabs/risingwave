@@ -21,7 +21,7 @@ use futures::{Future, TryFutureExt};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
-use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_hummock_sdk::{HummockReadEpoch, SyncResult};
 use thiserror_ext::AsReport;
 use tokio::time::Instant;
 use tracing::{error, Instrument};
@@ -319,20 +319,23 @@ impl<S: StateStore> StateStore for MonitoredStateStore<S> {
             .inspect_err(|e| error!(error = %e.as_report(), "Failed in wait_epoch"))
     }
 
-    fn sync(&self, epoch: u64) -> impl SyncFuture {
-        let future = self.inner.sync(epoch).instrument_await("store_sync");
+    async fn sync(&self, epoch: u64) -> StorageResult<SyncResult> {
+        // TODO: this metrics may not be accurate if we start syncing after `seal_epoch`. We may
+        // move this metrics to inside uploader
         let timer = self.storage_metrics.sync_duration.start_timer();
-        let sync_size = self.storage_metrics.sync_size.clone();
-        async move {
-            let sync_result = future
-                .await
-                .inspect_err(|e| error!(error = %e.as_report(), "Failed in sync"))?;
-            timer.observe_duration();
-            if sync_result.sync_size != 0 {
-                sync_size.observe(sync_result.sync_size as _);
-            }
-            Ok(sync_result)
+        let sync_result = self
+            .inner
+            .sync(epoch)
+            .instrument_await("store_sync")
+            .await
+            .inspect_err(|e| error!(error = %e.as_report(), "Failed in sync"))?;
+        timer.observe_duration();
+        if sync_result.sync_size != 0 {
+            self.storage_metrics
+                .sync_size
+                .observe(sync_result.sync_size as _);
         }
+        Ok(sync_result)
     }
 
     fn seal_epoch(&self, epoch: u64, is_checkpoint: bool) {

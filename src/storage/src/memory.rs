@@ -745,13 +745,10 @@ impl<R: RangeKv> StateStore for RangeKvStateStore<R> {
     }
 
     #[allow(clippy::unused_async)]
-    fn sync(&self, _epoch: u64) -> impl SyncFuture {
-        let result = self.inner.flush();
+    async fn sync(&self, _epoch: u64) -> StorageResult<SyncResult> {
+        self.inner.flush()?;
         // memory backend doesn't need to push to S3, so this is a no-op
-        async move {
-            result?;
-            Ok(SyncResult::default())
-        }
+        Ok(SyncResult::default())
     }
 
     fn seal_epoch(&self, _epoch: u64, _is_checkpoint: bool) {}
