@@ -73,6 +73,7 @@ impl PostgresOffset {
 }
 
 pub struct PostgresExternalTableReader {
+    #[expect(dead_code)]
     config: ExternalTableConfig,
     rw_schema: Schema,
     field_names: String,

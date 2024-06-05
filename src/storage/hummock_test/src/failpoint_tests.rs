@@ -147,8 +147,8 @@ async fn test_failpoints_state_store_read_upload() {
         .await
         .unwrap();
     // clear block cache
-    sstable_store.clear_block_cache().unwrap();
-    sstable_store.clear_meta_cache().unwrap();
+    sstable_store.clear_block_cache().await.unwrap();
+    sstable_store.clear_meta_cache().await.unwrap();
     fail::cfg(mem_read_err, "return").unwrap();
 
     let anchor_prefix_hint = {

@@ -59,6 +59,7 @@ pub struct NatsSink {
 pub struct NatsSinkWriter {
     pub config: NatsConfig,
     context: Context,
+    #[expect(dead_code)]
     schema: Schema,
     json_encoder: JsonEncoder,
 }

@@ -34,6 +34,7 @@ await-tree = { workspace = true }
 aws-config = { workspace = true }
 aws-credential-types = { workspace = true }
 aws-msk-iam-sasl-signer = "1.0.0"
+aws-sdk-dynamodb = "1"
 aws-sdk-kinesis = { workspace = true }
 aws-sdk-s3 = { workspace = true }
 aws-smithy-http = { workspace = true }
@@ -112,6 +113,7 @@ regex = "1.4"
 reqwest = { version = "0.12.2", features = ["json", "stream"] }
 risingwave_common = { workspace = true }
 risingwave_common_estimate_size = { workspace = true }
+risingwave_connector_codec = { workspace = true }
 risingwave_jni_core = { workspace = true }
 risingwave_object_store = { workspace = true }
 risingwave_pb = { workspace = true }

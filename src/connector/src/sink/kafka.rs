@@ -264,8 +264,6 @@ impl KafkaConfig {
     pub(crate) fn set_client(&self, c: &mut rdkafka::ClientConfig) {
         self.rdkafka_properties_common.set_client(c);
         self.rdkafka_properties_producer.set_client(c);
-
-        tracing::info!("kafka client starts with: {:?}", c);
     }
 }
 

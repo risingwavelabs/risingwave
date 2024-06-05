@@ -4,7 +4,7 @@ create source s;
 db error: ERROR: Failed to run the query
 
 Caused by:
-  sql parser error: expected description of the format, found: ; at line 1, column 16
+  sql parser error: expected description of the format, found: ;
 LINE 1: create source s;
                        ^
 
