@@ -2295,11 +2295,11 @@ async fn test_unregister_moved_table() {
     );
 
     hummock_manager
-        .register_table_ids(&[(100, 2)])
+        .register_table_ids_for_test(&[(100, 2)])
         .await
         .unwrap();
     hummock_manager
-        .register_table_ids(&[(101, 2)])
+        .register_table_ids_for_test(&[(101, 2)])
         .await
         .unwrap();
     let sst_1 = ExtendedSstableInfo {

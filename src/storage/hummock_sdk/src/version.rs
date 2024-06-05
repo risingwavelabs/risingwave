@@ -17,7 +17,6 @@ use std::collections::{HashMap, HashSet};
 use std::mem::{replace, size_of};
 use std::sync::Arc;
 
-use itertools::Itertools;
 use prost::Message;
 use risingwave_common::catalog::TableId;
 use risingwave_pb::hummock::group_delta::DeltaType;
@@ -27,7 +26,7 @@ use risingwave_pb::hummock::{
     HummockVersion as PbHummockVersion, HummockVersionDelta as PbHummockVersionDelta, SstableInfo,
     StateTableInfo as PbStateTableInfo, StateTableInfo, StateTableInfoDelta,
 };
-use tracing::{info, warn};
+use tracing::warn;
 
 use crate::change_log::TableChangeLog;
 use crate::table_watermark::TableWatermarks;
