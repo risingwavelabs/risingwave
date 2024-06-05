@@ -26,7 +26,7 @@ use risingwave_pb::hummock::table_watermarks::PbEpochNewWatermarks;
 use risingwave_pb::hummock::{
     CompactionConfig, CompatibilityVersion, GroupConstruct, GroupDestroy, GroupMetaChange,
     GroupTableChange, Level, LevelType, OverlappingLevel, PbLevelType, PbTableWatermarks,
-    SstableInfo, StateTableInfo,
+    SstableInfo,
 };
 use tracing::warn;
 
@@ -254,17 +254,6 @@ impl HummockVersion {
     }
 }
 
-pub type SstSplitInfo = (
-    // Object id.
-    HummockSstableObjectId,
-    // SST id.
-    HummockSstableId,
-    // Old SST id in parent group.
-    HummockSstableId,
-    // New SST id in parent group.
-    HummockSstableId,
-);
-
 impl HummockVersion {
     pub fn count_new_ssts_in_group_split(
         &self,
@@ -485,6 +474,11 @@ impl HummockVersion {
     pub fn apply_version_delta(&mut self, version_delta: &HummockVersionDelta) {
         assert_eq!(self.id, version_delta.prev_id);
 
+        let changed_table_info = self.state_table_info.apply_delta(
+            &version_delta.state_table_info_delta,
+            &version_delta.removed_table_ids,
+        );
+
         // apply to `levels`, which is different compaction groups
         for (compaction_group_id, group_deltas) in &version_delta.group_deltas {
             let summary = summarize_group_deltas(group_deltas);
@@ -614,7 +608,7 @@ impl HummockVersion {
         }
         for (table_id, table_watermarks) in &self.table_watermarks {
             if let Some(table_delta) = version_delta.state_table_info_delta.get(table_id)
-                && let Some(prev_table) = self.state_table_info.get(table_id)
+                && let Some(Some(prev_table)) = changed_table_info.get(table_id)
                 && table_delta.safe_epoch > prev_table.safe_epoch
             {
                 // safe epoch has progressed, need further clear.
@@ -667,7 +661,7 @@ impl HummockVersion {
                 return false;
             }
             if let Some(table_info_delta) = version_delta.state_table_info_delta.get(table_id)
-                && let Some(prev_table_info) = self.state_table_info.get(table_id) && table_info_delta.committed_epoch > prev_table_info.committed_epoch {
+                && let Some(Some(prev_table_info)) = changed_table_info.get(table_id) && table_info_delta.committed_epoch > prev_table_info.committed_epoch {
                 // the table exists previously, and its committed epoch has progressed.
             } else {
                 // otherwise, the table change log should be kept anyway
@@ -689,17 +683,6 @@ impl HummockVersion {
             if let Some(change_log) = self.table_change_log.get_mut(table_id) {
                 change_log.truncate(change_log_delta.truncate_epoch);
             }
-        }
-
-        // apply the state table info delta
-        for (table_id, delta) in &version_delta.state_table_info_delta {
-            self.state_table_info.insert(
-                *table_id,
-                StateTableInfo {
-                    committed_epoch: delta.committed_epoch,
-                    safe_epoch: delta.safe_epoch,
-                },
-            );
         }
     }
 

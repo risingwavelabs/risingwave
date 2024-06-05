@@ -220,6 +220,7 @@ async fn read_hummock_snapshot_groups(
     let version = reader.meta_client.get_hummock_current_version().await?;
     Ok(version
         .state_table_info
+        .info()
         .iter()
         .map(|(table_id, info)| RwHummockSnapshot {
             table_id: table_id.table_id as _,

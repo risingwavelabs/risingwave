@@ -12,10 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
-use std::mem::size_of;
+use std::mem::{replace, size_of};
 use std::sync::Arc;
 
+use itertools::Itertools;
 use prost::Message;
 use risingwave_common::catalog::TableId;
 use risingwave_pb::hummock::group_delta::DeltaType;
@@ -23,12 +25,84 @@ use risingwave_pb::hummock::hummock_version::Levels as PbLevels;
 use risingwave_pb::hummock::hummock_version_delta::{ChangeLogDelta, GroupDeltas as PbGroupDeltas};
 use risingwave_pb::hummock::{
     HummockVersion as PbHummockVersion, HummockVersionDelta as PbHummockVersionDelta, SstableInfo,
-    StateTableInfo as PbStateTableInfo, StateTableInfoDelta,
+    StateTableInfo as PbStateTableInfo, StateTableInfo, StateTableInfoDelta,
 };
+use tracing::{info, warn};
 
 use crate::change_log::TableChangeLog;
 use crate::table_watermark::TableWatermarks;
 use crate::{CompactionGroupId, HummockSstableObjectId, HummockVersionId};
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct HummockVersionStateTableInfo {
+    state_table_info: HashMap<TableId, PbStateTableInfo>,
+}
+
+impl HummockVersionStateTableInfo {
+    pub fn empty() -> Self {
+        Self {
+            state_table_info: HashMap::new(),
+        }
+    }
+
+    pub fn from_protobuf(state_table_info: &HashMap<u32, PbStateTableInfo>) -> Self {
+        let state_table_info = state_table_info
+            .iter()
+            .map(|(table_id, info)| (TableId::new(*table_id), info.clone()))
+            .collect();
+        Self { state_table_info }
+    }
+
+    pub fn to_protobuf(&self) -> HashMap<u32, PbStateTableInfo> {
+        self.state_table_info
+            .iter()
+            .map(|(table_id, info)| (table_id.table_id, info.clone()))
+            .collect()
+    }
+
+    pub fn apply_delta(
+        &mut self,
+        delta: &HashMap<TableId, StateTableInfoDelta>,
+        removed_table_id: &HashSet<TableId>,
+    ) -> HashMap<TableId, Option<StateTableInfo>> {
+        let mut changed_table = HashMap::new();
+        info!(removed_table_id = ?removed_table_id.iter().map(|table_id| table_id.table_id).collect_vec(), "removing table id");
+        for table_id in removed_table_id {
+            if let Some(prev_info) = self.state_table_info.remove(table_id) {
+                assert!(changed_table.insert(*table_id, Some(prev_info)).is_none());
+            } else {
+                warn!(
+                    table_id = table_id.table_id,
+                    "table to remove does not exist"
+                );
+            }
+        }
+        for (table_id, delta) in delta {
+            if removed_table_id.contains(table_id) {
+                continue;
+            }
+            let new_info = StateTableInfo {
+                committed_epoch: delta.committed_epoch,
+                safe_epoch: delta.safe_epoch,
+            };
+            match self.state_table_info.entry(*table_id) {
+                Entry::Occupied(mut entry) => {
+                    let prev_info = replace(entry.get_mut(), new_info);
+                    changed_table.insert(*table_id, Some(prev_info));
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(new_info);
+                    changed_table.insert(*table_id, None);
+                }
+            }
+        }
+        changed_table
+    }
+
+    pub fn info(&self) -> &HashMap<TableId, StateTableInfo> {
+        &self.state_table_info
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct HummockVersion {
@@ -38,7 +112,7 @@ pub struct HummockVersion {
     pub safe_epoch: u64,
     pub table_watermarks: HashMap<TableId, Arc<TableWatermarks>>,
     pub table_change_log: HashMap<TableId, TableChangeLog>,
-    pub state_table_info: HashMap<TableId, PbStateTableInfo>,
+    pub state_table_info: HummockVersionStateTableInfo,
 }
 
 impl Default for HummockVersion {
@@ -90,11 +164,9 @@ impl HummockVersion {
                     )
                 })
                 .collect(),
-            state_table_info: pb_version
-                .state_table_info
-                .iter()
-                .map(|(table_id, info)| (TableId::new(*table_id), info.clone()))
-                .collect(),
+            state_table_info: HummockVersionStateTableInfo::from_protobuf(
+                &pb_version.state_table_info,
+            ),
         }
     }
 
@@ -118,11 +190,7 @@ impl HummockVersion {
                 .iter()
                 .map(|(table_id, change_log)| (table_id.table_id, change_log.to_protobuf()))
                 .collect(),
-            state_table_info: self
-                .state_table_info
-                .iter()
-                .map(|(table_id, info)| (table_id.table_id(), info.clone()))
-                .collect(),
+            state_table_info: self.state_table_info.to_protobuf(),
         }
     }
 
@@ -147,7 +215,7 @@ impl HummockVersion {
 
     pub fn need_fill_backward_compatible_state_table_info_delta(&self) -> bool {
         // state_table_info is not previously filled, but there previously exists some tables
-        self.state_table_info.is_empty()
+        self.state_table_info.state_table_info.is_empty()
             && self
                 .levels
                 .values()

@@ -175,6 +175,7 @@ impl<'a> HummockVersionTransaction<'a> {
             version_delta.state_table_info_delta = version_delta
                 .latest_version()
                 .state_table_info
+                .info()
                 .iter()
                 .map(|(table_id, info)| {
                     (
