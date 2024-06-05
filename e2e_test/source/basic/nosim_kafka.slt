@@ -39,6 +39,12 @@ CREATE TABLE kafka_json_schema_plain with (
     kafka.scan.startup.mode = 'earliest'
 ) FORMAT PLAIN ENCODE JSON (schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}');
 
+
+query
+describe kafka_json_schema_plain;
+----
+
+
 statement ok
 CREATE TABLE kafka_json_schema_upsert (PRIMARY KEY(rw_key))
 INCLUDE KEY AS rw_key
