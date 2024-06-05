@@ -509,7 +509,7 @@ impl HummockManager {
                 group_config,
             );
 
-            self.register_table_ids(&pairs).await?;
+            self.register_table_ids_for_test(&pairs).await?;
             tracing::info!("Registered table ids {:?}", pairs);
         }
 

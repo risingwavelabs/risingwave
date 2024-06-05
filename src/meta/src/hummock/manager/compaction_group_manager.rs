@@ -33,9 +33,8 @@ use risingwave_pb::hummock::subscribe_compaction_event_request::ReportTask;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
     compact_task, CompactionConfig, CompactionGroupInfo, CompatibilityVersion, GroupConstruct,
-    GroupDelta, GroupDestroy, GroupMetaChange,
+    GroupDelta, GroupDestroy, GroupMetaChange, StateTableInfoDelta,
 };
-use thiserror_ext::AsReport;
 use tokio::sync::OnceCell;
 
 use crate::hummock::compaction::compaction_config::{
@@ -137,7 +136,7 @@ impl HummockManager {
                 CompactionGroupId::from(StaticCompactionGroupId::StateDefault),
             ));
         }
-        self.register_table_ids(&pairs).await?;
+        self.register_table_ids_for_test(&pairs).await?;
         Ok(pairs.iter().map(|(table_id, ..)| *table_id).collect_vec())
     }
 
@@ -147,13 +146,14 @@ impl HummockManager {
         &self,
         table_fragments: &[crate::model::TableFragments],
     ) {
-        self.unregister_table_ids_fail_fast(
+        self.unregister_table_ids(
             &table_fragments
                 .iter()
                 .flat_map(|t| t.all_table_ids())
                 .collect_vec(),
         )
-        .await;
+        .await
+        .unwrap();
     }
 
     /// Unregisters stale members and groups
@@ -172,7 +172,10 @@ impl HummockManager {
     }
 
     /// The implementation acquires `versioning` lock.
-    pub async fn register_table_ids(
+    ///
+    /// The method name is temporarily added with a `_for_test` prefix to mark
+    /// that it's currently only used in test.
+    pub async fn register_table_ids_for_test(
         &self,
         pairs: &[(StateTableId, CompactionGroupId)],
     ) -> Result<()> {
@@ -205,6 +208,10 @@ impl HummockManager {
             &self.metrics,
         );
         let mut new_version_delta = version.new_delta();
+        let (committed_epoch, safe_epoch) = {
+            let version = new_version_delta.latest_version();
+            (version.max_committed_epoch, version.safe_epoch)
+        };
 
         for (table_id, raw_group_id) in pairs {
             let mut group_id = *raw_group_id;
@@ -265,6 +272,16 @@ impl HummockManager {
                     ..Default::default()
                 })),
             });
+            assert!(new_version_delta
+                .state_table_info_delta
+                .insert(
+                    TableId::new(*table_id),
+                    StateTableInfoDelta {
+                        committed_epoch,
+                        safe_epoch,
+                    }
+                )
+                .is_none());
         }
         new_version_delta.pre_apply();
         commit_multi_var!(self.meta_store_ref(), version, compaction_groups_txn)?;
@@ -320,7 +337,7 @@ impl HummockManager {
                 );
             new_version_delta
                 .removed_table_ids
-                .push(TableId::new(*table_id));
+                .insert(TableId::new(*table_id));
         }
 
         let groups_to_remove = modified_groups
@@ -372,15 +389,6 @@ impl HummockManager {
         }
 
         Ok(())
-    }
-
-    /// The implementation acquires `versioning` lock and `compaction_group_manager` lock.
-    pub async fn unregister_table_ids_fail_fast(&self, table_ids: &[StateTableId]) {
-        self.unregister_table_ids(table_ids)
-            .await
-            .unwrap_or_else(|e| {
-                panic!("unregister table ids fail: {table_ids:?} {}", e.as_report())
-            });
     }
 
     pub async fn update_compaction_config(

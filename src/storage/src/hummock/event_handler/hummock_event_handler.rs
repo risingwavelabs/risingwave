@@ -43,8 +43,7 @@ use crate::hummock::compactor::{await_tree_key, compact, CompactorContext};
 use crate::hummock::conflict_detector::ConflictDetector;
 use crate::hummock::event_handler::refiller::{CacheRefillerEvent, SpawnRefillTask};
 use crate::hummock::event_handler::uploader::{
-    HummockUploader, SpawnUploadTask, SyncedData, UploadTaskInfo, UploadTaskOutput,
-    UploadTaskPayload, UploaderEvent,
+    HummockUploader, SpawnUploadTask, SyncedData, UploadTaskInfo, UploadTaskOutput, UploaderEvent,
 };
 use crate::hummock::event_handler::{
     HummockEvent, HummockReadVersionRef, HummockVersionUpdate, ReadOnlyReadVersionMapping,
@@ -58,6 +57,7 @@ use crate::hummock::utils::validate_table_key_range;
 use crate::hummock::{
     HummockError, HummockResult, MemoryLimiter, SstableObjectIdManager, SstableStoreRef, TrackerId,
 };
+use crate::mem_table::ImmutableMemtable;
 use crate::monitor::HummockStateStoreMetrics;
 use crate::opts::StorageOpts;
 
@@ -213,7 +213,7 @@ pub struct HummockEventHandler {
 }
 
 async fn flush_imms(
-    payload: UploadTaskPayload,
+    payload: Vec<ImmutableMemtable>,
     task_info: UploadTaskInfo,
     compactor_context: CompactorContext,
     filter_key_extractor_manager: FilterKeyExtractorManager,
@@ -278,8 +278,8 @@ impl HummockEventHandler {
                         let _timer = upload_task_latency.start_timer();
                         let mut output = flush_imms(
                             payload
-                                .values()
-                                .flat_map(|imms| imms.iter().cloned())
+                                .into_values()
+                                .flat_map(|imms| imms.into_iter())
                                 .collect(),
                             task_info,
                             upload_compactor_context.clone(),
@@ -736,7 +736,7 @@ impl HummockEventHandler {
 
                 version_to_apply
             }
-            HummockVersionUpdate::PinnedVersion(version) => version,
+            HummockVersionUpdate::PinnedVersion(version) => *version,
         };
 
         validate_table_key_range(&newly_pinned_version);
@@ -872,15 +872,14 @@ impl HummockEventHandler {
             HummockEvent::Shutdown => {
                 unreachable!("shutdown is handled specially")
             }
-            HummockEvent::ImmToUploader(imm) => {
+            HummockEvent::ImmToUploader { instance_id, imm } => {
                 assert!(
-                    self.local_read_version_mapping
-                        .contains_key(&imm.instance_id),
+                    self.local_read_version_mapping.contains_key(&instance_id),
                     "add imm from non-existing read version instance: instance_id: {}, table_id {}",
-                    imm.instance_id,
+                    instance_id,
                     imm.table_id,
                 );
-                self.uploader.add_imm(imm);
+                self.uploader.add_imm(instance_id, imm);
                 self.uploader.may_flush();
             }
 
@@ -1146,7 +1145,9 @@ mod tests {
         let version1 = make_new_version(epoch1);
         {
             version_update_tx
-                .send(HummockVersionUpdate::PinnedVersion(version1.clone()))
+                .send(HummockVersionUpdate::PinnedVersion(Box::new(
+                    version1.clone(),
+                )))
                 .unwrap();
             let (old_version, new_version, refill_finish_tx) = refill_task_rx.recv().await.unwrap();
             assert_eq!(old_version.version(), initial_version.version());
@@ -1166,10 +1167,14 @@ mod tests {
         let version3 = make_new_version(epoch3);
         {
             version_update_tx
-                .send(HummockVersionUpdate::PinnedVersion(version2.clone()))
+                .send(HummockVersionUpdate::PinnedVersion(Box::new(
+                    version2.clone(),
+                )))
                 .unwrap();
             version_update_tx
-                .send(HummockVersionUpdate::PinnedVersion(version3.clone()))
+                .send(HummockVersionUpdate::PinnedVersion(Box::new(
+                    version3.clone(),
+                )))
                 .unwrap();
             let (old_version2, new_version2, _refill_finish_tx2) =
                 refill_task_rx.recv().await.unwrap();
@@ -1199,11 +1204,15 @@ mod tests {
             let mut rx = send_clear(epoch5);
             assert_pending(&mut rx).await;
             version_update_tx
-                .send(HummockVersionUpdate::PinnedVersion(version4.clone()))
+                .send(HummockVersionUpdate::PinnedVersion(Box::new(
+                    version4.clone(),
+                )))
                 .unwrap();
             assert_pending(&mut rx).await;
             version_update_tx
-                .send(HummockVersionUpdate::PinnedVersion(version5.clone()))
+                .send(HummockVersionUpdate::PinnedVersion(Box::new(
+                    version5.clone(),
+                )))
                 .unwrap();
             rx.await.unwrap();
             assert_eq!(latest_version.load().version(), &version5);

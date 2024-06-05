@@ -170,7 +170,7 @@ impl HummockStorage {
         observer_manager.start().await;
 
         let hummock_version = match version_update_rx.recv().await {
-            Some(HummockVersionUpdate::PinnedVersion(version)) => version,
+            Some(HummockVersionUpdate::PinnedVersion(version)) => *version,
             _ => unreachable!("the hummock observer manager is the first one to take the event tx. Should be full hummock version")
         };
 
@@ -653,7 +653,7 @@ impl HummockStorage {
         use tokio::task::yield_now;
         let version_id = version.id;
         self._version_update_sender
-            .send(HummockVersionUpdate::PinnedVersion(version))
+            .send(HummockVersionUpdate::PinnedVersion(Box::new(version)))
             .unwrap();
         loop {
             if self.pinned_version.load().id() >= version_id {
