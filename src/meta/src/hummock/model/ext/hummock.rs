@@ -249,10 +249,7 @@ impl Transactional<Transaction> for HummockVersionDelta {
 
 impl From<compaction_config::Model> for CompactionGroup {
     fn from(value: compaction_config::Model) -> Self {
-        Self::new(
-            value.compaction_group_id as _,
-            value.config.to_protobuf().into(),
-        )
+        Self::new(value.compaction_group_id as _, value.config.to_protobuf())
     }
 }
 
