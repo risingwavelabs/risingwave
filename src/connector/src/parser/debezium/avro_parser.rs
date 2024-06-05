@@ -33,11 +33,6 @@ use crate::schema::schema_registry::{
     extract_schema_id, get_subject_by_strategy, handle_sr_list, Client,
 };
 
-const BEFORE: &str = "before";
-const AFTER: &str = "after";
-const OP: &str = "op";
-const PAYLOAD: &str = "payload";
-
 #[derive(Debug)]
 pub struct DebeziumAvroAccessBuilder {
     schema: ResolvedAvroSchema,
@@ -126,6 +121,7 @@ impl DebeziumAvroParserConfig {
             // TODO: do we need to support map type here?
             None,
         )
+        .map_err(Into::into)
     }
 
     pub fn map_to_columns(&self) -> ConnectorResult<Vec<ColumnDesc>> {
@@ -140,6 +136,7 @@ impl DebeziumAvroParserConfig {
             // TODO: do we need to support map type here?
             None,
         )
+        .map_err(Into::into)
     }
 }
 
