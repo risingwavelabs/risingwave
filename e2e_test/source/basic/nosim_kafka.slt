@@ -43,7 +43,17 @@ CREATE TABLE kafka_json_schema_plain with (
 query
 describe kafka_json_schema_plain;
 ----
-
+dimensions (empty) false NULL
+map jsonb false NULL
+notMap (empty) false NULL
+price double precision false NULL
+productId bigint false NULL
+productName character varying false NULL
+tags character varying[] false NULL
+_row_id serial true NULL
+primary key _row_id NULL NULL
+distribution key _row_id NULL NULL
+table description kafka_json_schema_plain NULL NULL
 
 statement ok
 CREATE TABLE kafka_json_schema_upsert (PRIMARY KEY(rw_key))
@@ -89,10 +99,10 @@ select count(*) from debezium_compact;
 
 query TFITT
 select
-  "dimensions", "price", "productId", "productName", "tags"
+  *
 from kafka_json_schema_plain
 ----
-(9.5,7,12) 12.5 1 An ice sculpture {cold,ice}
+(9.5,7,12) {"foo": "bar"} (b) 12.5 1 An ice sculpture {cold,ice}
 
 query TFITT
 select
