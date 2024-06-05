@@ -212,22 +212,22 @@ where
                                 .value_accessor
                                 .as_ref()
                                 .expect("value_accessor must be provided for upsert operation")
-                                .access(&[SOURCE, SOURCE_DB], Some(&desc.data_type)),
+                                .access(&[SOURCE, SOURCE_DB], &desc.data_type),
                             ColumnType::SchemaName(_) => self
                                 .value_accessor
                                 .as_ref()
                                 .expect("value_accessor must be provided for upsert operation")
-                                .access(&[SOURCE, SOURCE_SCHEMA], Some(&desc.data_type)),
+                                .access(&[SOURCE, SOURCE_SCHEMA], &desc.data_type),
                             ColumnType::TableName(_) => self
                                 .value_accessor
                                 .as_ref()
                                 .expect("value_accessor must be provided for upsert operation")
-                                .access(&[SOURCE, SOURCE_TABLE], Some(&desc.data_type)),
+                                .access(&[SOURCE, SOURCE_TABLE], &desc.data_type),
                             ColumnType::CollectionName(_) => self
                                 .value_accessor
                                 .as_ref()
                                 .expect("value_accessor must be provided for upsert operation")
-                                .access(&[SOURCE, SOURCE_COLLECTION], Some(&desc.data_type)),
+                                .access(&[SOURCE, SOURCE_COLLECTION], &desc.data_type),
                             _ => Err(AccessError::UnsupportedAdditionalColumn {
                                 name: desc.name.clone(),
                             }),
