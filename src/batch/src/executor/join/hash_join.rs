@@ -236,9 +236,7 @@ pub struct JoinSpillManager {
     op: SpillOp,
     partition_num: usize,
     probe_side_writers: Vec<opendal::Writer>,
-    probe_side_readers: Vec<opendal::Reader>,
     build_side_writers: Vec<opendal::Writer>,
-    build_side_readers: Vec<opendal::Reader>,
     probe_side_chunk_builders: Vec<DataChunkBuilder>,
     build_side_chunk_builders: Vec<DataChunkBuilder>,
     spill_build_hasher: SpillBuildHasher,
@@ -259,9 +257,7 @@ impl JoinSpillManager {
         let dir = format!("/{}-{}/", join_identity, suffix_uuid);
         let op = SpillOp::create(dir)?;
         let probe_side_writers = Vec::with_capacity(partition_num);
-        let probe_side_readers = Vec::with_capacity(partition_num);
         let build_side_writers = Vec::with_capacity(partition_num);
-        let build_side_readers = Vec::with_capacity(partition_num);
         let probe_side_chunk_builders = Vec::with_capacity(partition_num);
         let build_side_chunk_builders = Vec::with_capacity(partition_num);
         let spill_build_hasher = SpillBuildHasher(suffix_uuid.as_u64_pair().1);
@@ -269,9 +265,7 @@ impl JoinSpillManager {
             op,
             partition_num,
             probe_side_writers,
-            probe_side_readers,
             build_side_writers,
-            build_side_readers,
             probe_side_chunk_builders,
             build_side_chunk_builders,
             spill_build_hasher,

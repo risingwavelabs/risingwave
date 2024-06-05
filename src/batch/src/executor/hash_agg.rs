@@ -288,12 +288,8 @@ pub struct AggSpillManager {
     op: SpillOp,
     partition_num: usize,
     agg_state_writers: Vec<opendal::Writer>,
-    #[expect(dead_code)]
-    agg_state_readers: Vec<opendal::Reader>,
     agg_state_chunk_builder: Vec<DataChunkBuilder>,
     input_writers: Vec<opendal::Writer>,
-    #[expect(dead_code)]
-    input_readers: Vec<opendal::Reader>,
     input_chunk_builders: Vec<DataChunkBuilder>,
     spill_build_hasher: SpillBuildHasher,
     group_key_types: Vec<DataType>,
@@ -315,10 +311,8 @@ impl AggSpillManager {
         let dir = format!("/{}-{}/", agg_identity, suffix_uuid);
         let op = SpillOp::create(dir)?;
         let agg_state_writers = Vec::with_capacity(partition_num);
-        let agg_state_readers = Vec::with_capacity(partition_num);
         let agg_state_chunk_builder = Vec::with_capacity(partition_num);
         let input_writers = Vec::with_capacity(partition_num);
-        let input_readers = Vec::with_capacity(partition_num);
         let input_chunk_builders = Vec::with_capacity(partition_num);
         // Use uuid to generate an unique hasher so that when recursive spilling happens they would use a different hasher to avoid data skew.
         let spill_build_hasher = SpillBuildHasher(suffix_uuid.as_u64_pair().1);
@@ -326,10 +320,8 @@ impl AggSpillManager {
             op,
             partition_num,
             agg_state_writers,
-            agg_state_readers,
             agg_state_chunk_builder,
             input_writers,
-            input_readers,
             input_chunk_builders,
             spill_build_hasher,
             group_key_types,
