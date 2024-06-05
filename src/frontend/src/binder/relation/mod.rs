@@ -399,7 +399,6 @@ impl Binder {
                         table_name.clone(),
                         Some(original_alias),
                     )?;
-                    println!("self.context.columns: {:?}", self.context.columns);
                     Ok(Relation::Share(Box::new(BoundShare { share_id, input })))
                 },
             }

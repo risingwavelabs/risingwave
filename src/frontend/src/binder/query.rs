@@ -324,7 +324,6 @@ impl Binder {
                 self.bind_rcte(with, entry, *left, *right, all)?;
             } else if let Some(query) = query {
                 let bound_query = self.bind_query(query)?;
-                println!("ccc3 {:?}", self.context.columns);
                 self.context.cte_to_relation.insert(
                     table_name,
                     Rc::new(RefCell::new(BindingCte {
@@ -346,7 +345,6 @@ impl Binder {
                     None,
                 )?;
                 self.pop_context()?;
-                println!("ddd {:?}", self.context.columns);
                 self.context.cte_to_relation.insert(
                     table_name,
                     Rc::new(RefCell::new(BindingCte {

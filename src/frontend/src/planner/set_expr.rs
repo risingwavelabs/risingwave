@@ -28,10 +28,7 @@ impl Planner {
         order: &[ColumnOrder],
     ) -> Result<PlanRef> {
         match set_expr {
-            BoundSetExpr::Select(s) => {
-                println!("BoundSetExpr::Select(s) {:?}", s);
-                self.plan_select(*s, extra_order_exprs, order)
-            }
+            BoundSetExpr::Select(s) => self.plan_select(*s, extra_order_exprs, order),
             BoundSetExpr::Values(v) => self.plan_values(*v),
             BoundSetExpr::Query(q) => Ok(self.plan_query(*q)?.into_unordered_subplan()),
             BoundSetExpr::SetOperation {
