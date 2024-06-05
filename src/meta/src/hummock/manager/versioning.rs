@@ -24,7 +24,9 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
 };
 use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGroupId};
 use risingwave_hummock_sdk::table_stats::add_prost_table_stats_map;
-use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta, HummockVersionStateTableInfo};
+use risingwave_hummock_sdk::version::{
+    HummockVersion, HummockVersionDelta, HummockVersionStateTableInfo,
+};
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockContextId, HummockEpoch, HummockSstableObjectId, HummockVersionId,
     FIRST_VERSION_ID,
