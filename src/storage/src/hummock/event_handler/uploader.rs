@@ -634,6 +634,7 @@ impl UploaderData {
         for (_, unsealed_data) in self.unsealed_data {
             unsealed_data.spilled_data.abort();
         }
+        // TODO: call `abort` on the uploading task join handle of syncing_data
         for syncing_data in self.syncing_data {
             send_sync_result(syncing_data.sync_result_sender, Err(err()));
         }
@@ -723,6 +724,9 @@ impl HummockUploader {
     }
 
     pub(super) fn add_imm(&mut self, instance_id: LocalInstanceId, imm: ImmutableMemtable) {
+        let UploaderState::Working(data) = &mut self.state else {
+            return;
+        };
         let epoch = imm.min_epoch();
         assert!(
             epoch > self.max_sealed_epoch,
@@ -730,9 +734,6 @@ impl HummockUploader {
             epoch,
             self.max_sealed_epoch
         );
-        let UploaderState::Working(data) = &mut self.state else {
-            return;
-        };
         let unsealed_data = data.unsealed_data.entry(epoch).or_default();
         unsealed_data
             .imms
@@ -748,15 +749,15 @@ impl HummockUploader {
         table_watermarks: Vec<VnodeWatermark>,
         direction: WatermarkDirection,
     ) {
+        let UploaderState::Working(data) = &mut self.state else {
+            return;
+        };
         assert!(
             epoch > self.max_sealed_epoch,
             "imm epoch {} older than max sealed epoch {}",
             epoch,
             self.max_sealed_epoch
         );
-        let UploaderState::Working(data) = &mut self.state else {
-            return;
-        };
         data.unsealed_data
             .entry(epoch)
             .or_default()
@@ -764,6 +765,9 @@ impl HummockUploader {
     }
 
     pub(super) fn seal_epoch(&mut self, epoch: HummockEpoch) {
+        let UploaderState::Working(data) = &mut self.state else {
+            return;
+        };
         debug!("epoch {} is sealed", epoch);
         assert!(
             epoch > self.max_sealed_epoch,
@@ -772,9 +776,6 @@ impl HummockUploader {
             self.max_sealed_epoch
         );
         self.max_sealed_epoch = epoch;
-        let UploaderState::Working(data) = &mut self.state else {
-            return;
-        };
         let unsealed_data =
             if let Some((&smallest_unsealed_epoch, _)) = data.unsealed_data.first_key_value() {
                 assert!(
@@ -982,8 +983,6 @@ impl HummockUploader {
         }
 
         self.context.stats.uploader_syncing_epoch_count.set(0);
-
-        // TODO: call `abort` on the uploading task join handle
     }
 }
 
