@@ -53,7 +53,7 @@ use risingwave_pb::stream_plan::update_mutation::{MergeUpdate, PbMergeUpdate};
 use risingwave_pb::stream_plan::{
     PbDispatcher, PbDispatcherType, PbFragmentTypeFlag, PbStreamActor,
 };
-use sea_orm::sea_query::{Expr, SimpleExpr};
+use sea_orm::sea_query::{Expr, Query, SimpleExpr};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
     ActiveEnum, ActiveModelTrait, ColumnTrait, DatabaseTransaction, EntityTrait, IntoActiveModel,
@@ -123,6 +123,38 @@ impl CatalogController {
             &txn,
         )
         .await?;
+
+        // check if any dependent relation is in altering status.
+        let dependent_relations = streaming_job.dependent_relations();
+        if !dependent_relations.is_empty() {
+            let altering_cnt = ObjectDependency::find()
+                .join(
+                    JoinType::InnerJoin,
+                    object_dependency::Relation::Object1.def(),
+                )
+                .join(JoinType::InnerJoin, object::Relation::StreamingJob.def())
+                .filter(
+                    object_dependency::Column::Oid
+                        .is_in(dependent_relations.iter().map(|id| *id as ObjectId))
+                        .and(object::Column::ObjType.eq(ObjectType::Table))
+                        .and(streaming_job::Column::JobStatus.ne(JobStatus::Created))
+                        .and(
+                            object::Column::Oid.not_in_subquery(
+                                Query::select()
+                                    .column(table::Column::TableId)
+                                    .from(Table)
+                                    .to_owned(),
+                            ),
+                        ),
+                )
+                .count(&txn)
+                .await?;
+            if altering_cnt != 0 {
+                return Err(MetaError::permission_denied(
+                    "some dependent relations are being altered",
+                ));
+            }
+        }
 
         match streaming_job {
             StreamingJob::MaterializedView(table) => {
@@ -256,7 +288,6 @@ impl CatalogController {
         }
 
         // record object dependency.
-        let dependent_relations = streaming_job.dependent_relations();
         if !dependent_relations.is_empty() {
             ObjectDependency::insert_many(dependent_relations.into_iter().map(|id| {
                 object_dependency::ActiveModel {
@@ -542,7 +573,7 @@ impl CatalogController {
         }
 
         // 2. check concurrent replace.
-        let replacing_cnt = ObjectDependency::find()
+        let referring_cnt = ObjectDependency::find()
             .join(
                 JoinType::InnerJoin,
                 object_dependency::Relation::Object1.def(),
@@ -556,9 +587,10 @@ impl CatalogController {
             )
             .count(&txn)
             .await?;
-        if replacing_cnt != 0 {
-            assert_eq!(replacing_cnt, 1);
-            return Err(MetaError::permission_denied("table is being altered"));
+        if referring_cnt != 0 {
+            return Err(MetaError::permission_denied(
+                "table is being altered or referenced by some creating jobs",
+            ));
         }
 
         let parallelism = match specified_parallelism {
