@@ -37,8 +37,7 @@ use crate::filter_key_extractor::{FilterKeyExtractorImpl, FilterKeyExtractorMana
 use crate::hummock::compactor::compaction_filter::DummyCompactionFilter;
 use crate::hummock::compactor::context::{await_tree_key, CompactorContext};
 use crate::hummock::compactor::{check_flush_result, CompactOutput, Compactor};
-use crate::hummock::event_handler::uploader::{UploadTaskOutput, UploadTaskPayload};
-use crate::hummock::event_handler::LocalInstanceId;
+use crate::hummock::event_handler::uploader::UploadTaskOutput;
 use crate::hummock::iterator::{Forward, HummockIterator, MergeIterator, UserIterator};
 use crate::hummock::shared_buffer::shared_buffer_batch::{
     SharedBufferBatch, SharedBufferBatchInner, SharedBufferBatchOldValues, SharedBufferKeyEntry,
@@ -59,11 +58,11 @@ const GC_WATERMARK_FOR_FLUSH: u64 = 0;
 pub async fn compact(
     context: CompactorContext,
     sstable_object_id_manager: SstableObjectIdManagerRef,
-    payload: UploadTaskPayload,
+    payload: Vec<ImmutableMemtable>,
     compaction_group_index: Arc<HashMap<TableId, CompactionGroupId>>,
     filter_key_extractor_manager: FilterKeyExtractorManager,
 ) -> HummockResult<UploadTaskOutput> {
-    let mut grouped_payload: HashMap<CompactionGroupId, UploadTaskPayload> = HashMap::new();
+    let mut grouped_payload: HashMap<CompactionGroupId, Vec<ImmutableMemtable>> = HashMap::new();
     for imm in &payload {
         let compaction_group_id = match compaction_group_index.get(&imm.table_id) {
             // compaction group id is used only as a hint for grouping different data.
@@ -144,7 +143,7 @@ async fn compact_shared_buffer<const IS_NEW_VALUE: bool>(
     context: CompactorContext,
     sstable_object_id_manager: SstableObjectIdManagerRef,
     filter_key_extractor_manager: FilterKeyExtractorManager,
-    mut payload: UploadTaskPayload,
+    mut payload: Vec<ImmutableMemtable>,
 ) -> HummockResult<Vec<LocalSstableInfo>> {
     if !IS_NEW_VALUE {
         assert!(payload.iter().all(|imm| imm.has_old_value()));
@@ -321,7 +320,6 @@ async fn compact_shared_buffer<const IS_NEW_VALUE: bool>(
 /// Merge multiple batches into a larger one
 pub async fn merge_imms_in_memory(
     table_id: TableId,
-    instance_id: LocalInstanceId,
     imms: Vec<ImmutableMemtable>,
     memory_tracker: Option<MemoryTracker>,
 ) -> ImmutableMemtable {
@@ -456,13 +454,12 @@ pub async fn merge_imms_in_memory(
             memory_tracker,
         )),
         table_id,
-        instance_id,
     }
 }
 
 ///  Based on the incoming payload and opts, calculate the sharding method and sstable size of shared buffer compaction.
 fn generate_splits(
-    payload: &UploadTaskPayload,
+    payload: &Vec<ImmutableMemtable>,
     existing_table_ids: &HashSet<u32>,
     storage_opts: &StorageOpts,
 ) -> (Vec<KeyRange>, u64, BTreeMap<u32, u32>) {
