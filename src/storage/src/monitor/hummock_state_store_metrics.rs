@@ -75,6 +75,7 @@ pub struct HummockStateStoreMetrics {
     // uploading task
     pub uploader_uploading_task_size: GenericGauge<AtomicU64>,
     pub uploader_uploading_task_count: IntGauge,
+    pub uploader_imm_size: GenericGauge<AtomicU64>,
     pub uploader_upload_task_latency: Histogram,
     pub uploader_syncing_epoch_count: IntGauge,
     pub uploader_wait_poll_latency: Histogram,
@@ -324,6 +325,15 @@ impl HummockStateStoreMetrics {
         )
         .unwrap();
 
+        let uploader_imm_size = GenericGauge::new(
+            "state_store_uploader_imm_size",
+            "Total size of imms tracked by uploader",
+        )
+        .unwrap();
+        registry
+            .register(Box::new(uploader_imm_size.clone()))
+            .unwrap();
+
         let opts = histogram_opts!(
             "state_store_uploader_upload_task_latency",
             "Latency of uploader uploading tasks",
@@ -466,6 +476,7 @@ impl HummockStateStoreMetrics {
             spill_task_size_from_unsealed: spill_task_size.with_label_values(&["unsealed"]),
             uploader_uploading_task_size,
             uploader_uploading_task_count,
+            uploader_imm_size,
             uploader_upload_task_latency,
             uploader_syncing_epoch_count,
             uploader_wait_poll_latency,

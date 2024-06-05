@@ -43,8 +43,7 @@ use crate::hummock::compactor::{await_tree_key, compact, CompactorContext};
 use crate::hummock::conflict_detector::ConflictDetector;
 use crate::hummock::event_handler::refiller::{CacheRefillerEvent, SpawnRefillTask};
 use crate::hummock::event_handler::uploader::{
-    HummockUploader, SpawnUploadTask, SyncedData, UploadTaskInfo, UploadTaskOutput,
-    UploadTaskPayload, UploaderEvent,
+    HummockUploader, SpawnUploadTask, SyncedData, UploadTaskInfo, UploadTaskOutput, UploaderEvent,
 };
 use crate::hummock::event_handler::{
     HummockEvent, HummockReadVersionRef, HummockVersionUpdate, ReadOnlyReadVersionMapping,
@@ -58,6 +57,7 @@ use crate::hummock::utils::validate_table_key_range;
 use crate::hummock::{
     HummockError, HummockResult, MemoryLimiter, SstableObjectIdManager, SstableStoreRef, TrackerId,
 };
+use crate::mem_table::ImmutableMemtable;
 use crate::monitor::HummockStateStoreMetrics;
 use crate::opts::StorageOpts;
 
@@ -194,7 +194,7 @@ pub struct HummockEventHandler {
 }
 
 async fn flush_imms(
-    payload: UploadTaskPayload,
+    payload: Vec<ImmutableMemtable>,
     task_info: UploadTaskInfo,
     compactor_context: CompactorContext,
     filter_key_extractor_manager: FilterKeyExtractorManager,
@@ -259,8 +259,8 @@ impl HummockEventHandler {
                         let _timer = upload_task_latency.start_timer();
                         let mut output = flush_imms(
                             payload
-                                .values()
-                                .flat_map(|imms| imms.iter().cloned())
+                                .into_values()
+                                .flat_map(|imms| imms.into_iter())
                                 .collect(),
                             task_info,
                             upload_compactor_context.clone(),
@@ -853,15 +853,14 @@ impl HummockEventHandler {
             HummockEvent::Shutdown => {
                 unreachable!("shutdown is handled specially")
             }
-            HummockEvent::ImmToUploader(imm) => {
+            HummockEvent::ImmToUploader { instance_id, imm } => {
                 assert!(
-                    self.local_read_version_mapping
-                        .contains_key(&imm.instance_id),
+                    self.local_read_version_mapping.contains_key(&instance_id),
                     "add imm from non-existing read version instance: instance_id: {}, table_id {}",
-                    imm.instance_id,
+                    instance_id,
                     imm.table_id,
                 );
-                self.uploader.add_imm(imm);
+                self.uploader.add_imm(instance_id, imm);
                 self.uploader.may_flush();
             }
 
