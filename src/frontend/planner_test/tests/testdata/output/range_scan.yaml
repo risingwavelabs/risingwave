@@ -36,7 +36,7 @@
     Expr error
 
     Caused by these errors (recent errors listed first):
-      1: error while evaluating expression `general_div(1, 0)`
+      1: error while evaluating expression `general_div('1', '0')`
       2: Division by zero
 - before:
   - create_table_and_mv
@@ -46,7 +46,7 @@
     Expr error
 
     Caused by these errors (recent errors listed first):
-      1: error while evaluating expression `general_add(2147483647, 1)`
+      1: error while evaluating expression `general_add('2147483647', '1')`
       2: Numeric out of range
 - before:
   - create_table_and_mv
@@ -56,7 +56,7 @@
     Expr error
 
     Caused by these errors (recent errors listed first):
-      1: error while evaluating expression `str_parse(a)`
+      1: error while evaluating expression `str_parse('a')`
       2: Parse error: bigint invalid digit found in string
 - before:
   - create_table_and_mv
@@ -66,7 +66,7 @@
     Expr error
 
     Caused by these errors (recent errors listed first):
-      1: error while evaluating expression `str_parse(a)`
+      1: error while evaluating expression `str_parse('a')`
       2: Parse error: bigint invalid digit found in string
 - before:
   - create_table_and_mv
@@ -152,7 +152,7 @@
     Expr error
 
     Caused by these errors (recent errors listed first):
-      1: error while evaluating expression `str_parse(43.0)`
+      1: error while evaluating expression `str_parse('43.0')`
       2: Parse error: bigint invalid digit found in string
 - before:
   - create_table_and_mv

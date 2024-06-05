@@ -61,7 +61,7 @@ db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
   1: Expr error
-  2: error while evaluating expression `general_div(1, 0)`
+  2: error while evaluating expression `general_div('1', '0')`
   3: Division by zero
 
 
@@ -72,7 +72,7 @@ db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
   1: Expr error
-  2: error while evaluating expression `general_div(1, 0)`
+  2: error while evaluating expression `general_div('1', '0')`
   3: Division by zero
 
 

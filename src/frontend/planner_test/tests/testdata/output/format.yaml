@@ -22,7 +22,7 @@
     Expr error
 
     Caused by these errors (recent errors listed first):
-      1: error while evaluating expression `format(one, two)`
+      1: error while evaluating expression `format('one', 'two')`
       2: too few arguments for format()
 - sql: |
     SELECT format('Testing %s, %s, %s, %', 'one', 'two', 'three');

@@ -145,7 +145,22 @@ impl ExprError {
                     write!(s, ", ").unwrap();
                 }
                 if let Some(arg) = arg {
-                    ToText::write(&arg, &mut s).unwrap();
+                    // Act like `quote_literal(arg::varchar)`.
+                    // Since this is mainly for debugging, we don't need to be too precise.
+                    let arg = arg.to_text();
+                    if arg.contains('\\') {
+                        // use escape format: E'...'
+                        write!(s, "E").unwrap();
+                    }
+                    write!(s, "'").unwrap();
+                    for c in arg.chars() {
+                        match c {
+                            '\'' => write!(s, "''").unwrap(),
+                            '\\' => write!(s, "\\\\").unwrap(),
+                            _ => write!(s, "{}", c).unwrap(),
+                        }
+                    }
+                    write!(s, "'").unwrap();
                 } else {
                     write!(s, "NULL").unwrap();
                 }

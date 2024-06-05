@@ -6,7 +6,7 @@ db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
   1: Expr error
-  2: error while evaluating expression `pow_f64(114, 514)`
+  2: error while evaluating expression `pow_f64('114', '514')`
   3: Numeric out of range: overflow
 
 
@@ -18,7 +18,7 @@ db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
   1: Expr error
-  2: error while evaluating expression `array_position_start({1,NULL,2,NULL}, NULL, NULL)`
+  2: error while evaluating expression `array_position_start('{1,NULL,2,NULL}', NULL, NULL)`
   3: Invalid parameter start: initial position must not be null
 
 
@@ -30,7 +30,7 @@ db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
   1: Expr error
-  2: error while evaluating expression `general_mul(11111111444, 51444444444444444)`
+  2: error while evaluating expression `general_mul('11111111444', '51444444444444444')`
   3: Numeric out of range
 
 
@@ -42,7 +42,7 @@ db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
   1: Expr error
-  2: error while evaluating expression `str_parse(foo)`
+  2: error while evaluating expression `str_parse('foo')`
   3: Parse error: bigint invalid digit found in string
 
 
@@ -55,7 +55,7 @@ db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
   1: Expr error
-  2: error while evaluating expression `jsonb_path_exists3({"a": [1, 2, 3, 4, 5]}, "foo")`
+  2: error while evaluating expression `jsonb_path_exists3('{"a": [1, 2, 3, 4, 5]}', '"foo"')`
   3: Invalid parameter jsonpath: "vars" argument is not an object
 
 
@@ -67,5 +67,5 @@ db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
   1: Expr error
-  2: error while evaluating expression `format(Hello, World)`
+  2: error while evaluating expression `format('Hello', 'World')`
   3: Unsupported function: unsupported specifier type 'L'
