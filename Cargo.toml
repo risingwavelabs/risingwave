@@ -12,6 +12,7 @@ members = [
     "src/common/metrics",
     "src/compute",
     "src/connector",
+    "src/connector/codec",
     "src/connector/with_options",
     "src/ctl",
     "src/dml",
@@ -192,6 +193,7 @@ risingwave_compactor = { path = "./src/storage/compactor" }
 risingwave_compute = { path = "./src/compute" }
 risingwave_ctl = { path = "./src/ctl" }
 risingwave_connector = { path = "./src/connector" }
+risingwave_connector_codec = { path = "./src/connector/codec" }
 risingwave_dml = { path = "./src/dml" }
 risingwave_error = { path = "./src/error" }
 risingwave_expr = { path = "./src/expr/core" }

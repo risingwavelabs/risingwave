@@ -12,40 +12,33 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Encoding and decoding between external data formats and RisingWave datum (i.e., type mappings).
+
 #![allow(clippy::derive_partial_eq_without_eq)]
-#![feature(trait_alias)]
-#![feature(exact_size_is_empty)]
-#![feature(type_alias_impl_trait)]
-#![cfg_attr(coverage, feature(coverage_attribute))]
+#![feature(array_chunks)]
 #![feature(coroutines)]
-#![feature(proc_macro_hygiene, stmt_expr_attributes)]
-#![feature(iterator_try_collect)]
+#![feature(proc_macro_hygiene)]
+#![feature(stmt_expr_attributes)]
+#![feature(box_patterns)]
+#![feature(trait_alias)]
 #![feature(lint_reasons)]
-#![feature(is_sorted)]
-#![recursion_limit = "256"]
-#![feature(let_chains)]
-#![feature(int_roundings)]
-#![feature(allocator_api)]
-#![feature(impl_trait_in_assoc_type)]
-#![feature(assert_matches)]
 #![feature(lazy_cell)]
+#![feature(let_chains)]
+#![feature(box_into_inner)]
+#![feature(type_alias_impl_trait)]
+#![feature(associated_type_defaults)]
+#![feature(impl_trait_in_assoc_type)]
+#![feature(iter_from_coroutine)]
+#![feature(if_let_guard)]
+#![feature(iterator_try_collect)]
+#![feature(try_blocks)]
 #![feature(error_generic_member_access)]
-#![feature(map_try_insert)]
+#![feature(negative_impls)]
+#![feature(register_tool)]
+#![feature(assert_matches)]
+#![register_tool(rw)]
+#![recursion_limit = "256"]
 
-pub mod error;
-pub mod exchange_source;
-pub mod execution;
-pub mod executor;
-pub mod monitor;
-pub mod rpc;
-mod spill;
-pub mod task;
-pub mod worker_manager;
-
-#[macro_use]
-extern crate tracing;
-#[macro_use]
-extern crate risingwave_common;
-
-#[cfg(test)]
-risingwave_expr_impl::enable!();
+/// Converts JSON/AVRO/Protobuf data to RisingWave datum.
+/// The core API is [`decoder::Access`].
+pub mod decoder;
