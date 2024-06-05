@@ -267,7 +267,9 @@ impl Sink for StarrocksSink {
 
 pub struct StarrocksSinkWriter {
     pub config: StarrocksConfig,
+    #[expect(dead_code)]
     schema: Schema,
+    #[expect(dead_code)]
     pk_indices: Vec<usize>,
     inserter_innet_builder: InserterInnerBuilder,
     is_append_only: bool,

@@ -60,6 +60,7 @@ pub struct HashJoinExecutor<K> {
     /// Join type e.g. inner, left outer, ...
     join_type: JoinType,
     /// Output schema without applying `output_indices`
+    #[expect(dead_code)]
     original_schema: Schema,
     /// Output schema after applying `output_indices`
     schema: Schema,
@@ -2371,7 +2372,6 @@ mod tests {
     const CHUNK_SIZE: usize = 1024;
 
     struct DataChunkMerger {
-        data_types: Vec<DataType>,
         array_builders: Vec<ArrayBuilderImpl>,
         array_len: usize,
     }
@@ -2384,7 +2384,6 @@ mod tests {
                 .collect();
 
             Ok(Self {
-                data_types,
                 array_builders,
                 array_len: 0,
             })
@@ -2525,10 +2524,6 @@ mod tests {
             ));
 
             Box::new(executor)
-        }
-
-        fn full_data_types(&self) -> Vec<DataType> {
-            [self.left_types.clone(), self.right_types.clone()].concat()
         }
 
         fn output_data_types(&self) -> Vec<DataType> {

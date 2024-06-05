@@ -79,6 +79,7 @@ pub struct HashAggExecutorBuilder {
     group_key_types: Vec<DataType>,
     child: BoxedExecutor,
     schema: Schema,
+    #[expect(dead_code)]
     task_id: TaskId,
     identity: String,
     chunk_size: usize,
@@ -287,9 +288,11 @@ pub struct AggSpillManager {
     op: SpillOp,
     partition_num: usize,
     agg_state_writers: Vec<opendal::Writer>,
+    #[expect(dead_code)]
     agg_state_readers: Vec<opendal::Reader>,
     agg_state_chunk_builder: Vec<DataChunkBuilder>,
     input_writers: Vec<opendal::Writer>,
+    #[expect(dead_code)]
     input_readers: Vec<opendal::Reader>,
     input_chunk_builders: Vec<DataChunkBuilder>,
     spill_build_hasher: SpillBuildHasher,
@@ -885,6 +888,7 @@ mod tests {
 
             #[derive(Clone)]
             struct MyAlloc {
+                #[expect(dead_code)]
                 inner: Arc<MyAllocInner>,
             }
 

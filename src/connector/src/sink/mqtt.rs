@@ -120,6 +120,7 @@ pub struct MqttSink {
 pub struct MqttSinkWriter {
     pub config: MqttConfig,
     payload_writer: MqttSinkPayloadWriter,
+    #[expect(dead_code)]
     schema: Schema,
     encoder: RowEncoderWrapper,
     stopped: Arc<AtomicBool>,
