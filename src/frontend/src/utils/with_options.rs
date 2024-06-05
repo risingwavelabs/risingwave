@@ -56,15 +56,11 @@ impl std::ops::DerefMut for WithOptions {
 }
 
 impl WithOptions {
-    /// Create a new [`WithOptions`] from a [`HashMap`].
+    /// Create a new [`WithOptions`] from a [`BTreeMap`].
     pub fn new(inner: BTreeMap<String, String>) -> Self {
         Self {
             inner: inner.into_iter().collect(),
         }
-    }
-
-    pub fn from_inner(inner: BTreeMap<String, String>) -> Self {
-        Self { inner }
     }
 
     /// Get the reference of the inner map.
