@@ -124,8 +124,11 @@ LABEL org.opencontainers.image.source https://github.com/risingwavelabs/risingwa
 RUN apt-get update && apt-get -y install linux-tools-generic \
     && ln -s "$(find /usr/lib/linux-tools/*/perf | head -1)" /usr/local/bin/perf
 
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install gdb libpam-krb5 krb5-user telnet kafkacat rustup \
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install gdb libpam-krb5 krb5-user telnet kafkacat curl \
   && rm -rf /var/lib/{apt,dpkg,cache,log}/
+
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-modify-path --default-toolchain none -y
+ENV PATH /root/.cargo/bin/:$PATH
 
 # Set default Rust toolchain but don't install it to keep the image size small
 # The toolchain will be installed when it is first used
