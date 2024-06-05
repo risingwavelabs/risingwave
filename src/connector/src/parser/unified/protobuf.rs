@@ -21,7 +21,7 @@ use thiserror_ext::AsReport;
 
 use super::{Access, AccessResult};
 use crate::parser::from_protobuf_value;
-use crate::parser::unified::{uncategorized, AccessError};
+use crate::parser::unified::uncategorized;
 
 pub struct ProtobufAccess {
     message: DynamicMessage,

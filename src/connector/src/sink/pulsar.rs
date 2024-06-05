@@ -224,6 +224,7 @@ impl Sink for PulsarSink {
 
 pub struct PulsarSinkWriter {
     formatter: SinkFormatterImpl,
+    #[expect(dead_code)]
     pulsar: Pulsar<TokioExecutor>,
     producer: Producer<TokioExecutor>,
     config: PulsarConfig,

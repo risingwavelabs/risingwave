@@ -35,11 +35,8 @@ pub(crate) const DORIS_SUCCESS_STATUS: [&str; 2] = ["Success", "Publish Timeout"
 pub(crate) const DORIS_DELETE_SIGN: &str = "__DORIS_DELETE_SIGN__";
 pub(crate) const STARROCKS_DELETE_SIGN: &str = "__op";
 
-const SEND_CHUNK_TIMEOUT: Duration = Duration::from_secs(10);
 const WAIT_HANDDLE_TIMEOUT: Duration = Duration::from_secs(10);
 pub(crate) const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
-const DORIS: &str = "doris";
-const STARROCKS: &str = "starrocks";
 const LOCALHOST: &str = "localhost";
 const LOCALHOST_IP: &str = "127.0.0.1";
 pub struct HeaderBuilder {
@@ -159,6 +156,7 @@ impl HeaderBuilder {
 pub struct InserterInnerBuilder {
     url: String,
     header: HashMap<String, String>,
+    #[expect(dead_code)]
     sender: Option<Sender>,
     fe_host: String,
 }

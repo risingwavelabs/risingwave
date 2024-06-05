@@ -311,12 +311,15 @@ impl Sink for BigQuerySink {
 
 pub struct BigQuerySinkWriter {
     pub config: BigQueryConfig,
+    #[expect(dead_code)]
     schema: Schema,
+    #[expect(dead_code)]
     pk_indices: Vec<usize>,
     client: StorageWriterClient,
     is_append_only: bool,
     row_encoder: ProtoEncoder,
     writer_pb_schema: ProtoSchema,
+    #[expect(dead_code)]
     message_descriptor: MessageDescriptor,
     write_stream: String,
     proto_field: Option<FieldDescriptor>,
@@ -520,6 +523,7 @@ impl SinkWriter for BigQuerySinkWriter {
 
 struct StorageWriterClient {
     client: StreamingWriteClient,
+    #[expect(dead_code)]
     environment: Environment,
 }
 impl StorageWriterClient {

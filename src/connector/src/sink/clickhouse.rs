@@ -48,7 +48,6 @@ const QUERY_ENGINE: &str =
 const QUERY_COLUMN: &str =
     "select distinct ?fields from system.columns where database = ? and table = ? order by ?";
 pub const CLICKHOUSE_SINK: &str = "clickhouse";
-const BUFFER_SIZE: usize = 1024;
 
 #[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct ClickHouseCommon {
@@ -78,7 +77,9 @@ enum ClickHouseEngine {
     ReplicatedReplacingMergeTree,
     ReplicatedSummingMergeTree,
     ReplicatedAggregatingMergeTree,
+    #[expect(dead_code)]
     ReplicatedCollapsingMergeTree(String),
+    #[expect(dead_code)]
     ReplicatedVersionedCollapsingMergeTree(String),
     ReplicatedGraphiteMergeTree,
 }
@@ -424,9 +425,12 @@ impl Sink for ClickHouseSink {
 }
 pub struct ClickHouseSinkWriter {
     pub config: ClickHouseConfig,
+    #[expect(dead_code)]
     schema: Schema,
+    #[expect(dead_code)]
     pk_indices: Vec<usize>,
     client: ClickHouseClient,
+    #[expect(dead_code)]
     is_append_only: bool,
     // Save some features of the clickhouse column type
     column_correct_vec: Vec<ClickHouseSchemaFeature>,
@@ -617,6 +621,7 @@ struct SystemColumn {
 
 #[derive(ClickHouseRow, Deserialize)]
 struct ClickhouseQueryEngine {
+    #[expect(dead_code)]
     name: String,
     engine: String,
     create_table_query: String,
