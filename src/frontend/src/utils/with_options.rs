@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::num::NonZeroU32;
 
 use risingwave_connector::source::kafka::private_link::{
@@ -20,7 +20,8 @@ use risingwave_connector::source::kafka::private_link::{
 };
 use risingwave_connector::WithPropertiesExt;
 use risingwave_sqlparser::ast::{
-    CreateConnectionStatement, CreateSinkStatement, CreateSourceStatement, CreateSubscriptionStatement, ObjectName, SqlOption, Statement, Value
+    CreateConnectionStatement, CreateSinkStatement, CreateSourceStatement,
+    CreateSubscriptionStatement, ObjectName, SqlOption, Statement, Value,
 };
 
 use super::OverwriteOptions;
@@ -38,7 +39,7 @@ mod options {
 #[derive(Default, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct WithOptions {
     inner: BTreeMap<String, String>,
-    ref_secret: BTreeMap<String, ObjectName>
+    ref_secret: BTreeMap<String, ObjectName>,
 }
 
 impl std::ops::Deref for WithOptions {
@@ -57,7 +58,7 @@ impl std::ops::DerefMut for WithOptions {
 
 impl WithOptions {
     /// Create a new [`WithOptions`] from a [`HashMap`].
-    pub fn new(inner: HashMap<String, String>) -> Self {
+    pub fn new(inner: BTreeMap<String, String>) -> Self {
         Self {
             inner: inner.into_iter().collect(),
             ref_secret: Default::default(),
@@ -65,9 +66,10 @@ impl WithOptions {
     }
 
     pub fn from_inner(inner: BTreeMap<String, String>) -> Self {
-        Self { inner,
+        Self {
+            inner,
             ref_secret: Default::default(),
-         }
+        }
     }
 
     /// Get the reference of the inner map.
@@ -85,7 +87,7 @@ impl WithOptions {
     }
 
     /// Convert to connector props, remove the key-value pairs used in the top-level.
-    pub fn into_connector_props(self) -> HashMap<String, String> {
+    pub fn into_connector_props(self) -> BTreeMap<String, String> {
         self.inner
             .into_iter()
             .filter(|(key, _)| key != OverwriteOptions::STREAMING_RATE_LIMIT_KEY)
@@ -110,7 +112,10 @@ impl WithOptions {
             })
             .collect();
 
-        Self { inner , ref_secret: Default::default()}
+        Self {
+            inner,
+            ref_secret: Default::default(),
+        }
     }
 
     pub fn value_eq_ignore_case(&self, key: &str, val: &str) -> bool {
@@ -126,10 +131,10 @@ impl WithOptions {
 pub(crate) fn resolve_secret_in_with_options(
     _with_options: &mut WithOptions,
     _session: &SessionImpl,
-) -> RwResult<HashMap<String, u32>> {
+) -> RwResult<BTreeMap<String, u32>> {
     // todo: implement the function and take `resolve_privatelink_in_with_option` as reference
 
-    Ok(HashMap::new())
+    Ok(BTreeMap::new())
 }
 
 pub(crate) fn resolve_privatelink_in_with_option(
@@ -210,7 +215,7 @@ impl TryFrom<&[SqlOption]> for WithOptions {
             }
         }
 
-        Ok(Self { inner , ref_secret})
+        Ok(Self { inner, ref_secret })
     }
 }
 

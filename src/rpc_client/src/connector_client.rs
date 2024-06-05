@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::time::Duration;
 
@@ -202,7 +202,7 @@ impl ConnectorClient {
         source_id: u64,
         source_type: SourceType,
         start_offset: Option<String>,
-        properties: HashMap<String, String>,
+        properties: BTreeMap<String, String>,
         snapshot_done: bool,
         is_source_job: bool,
     ) -> Result<Streaming<GetEventStreamResponse>> {
@@ -234,7 +234,7 @@ impl ConnectorClient {
         &self,
         source_id: u64,
         source_type: SourceType,
-        properties: HashMap<String, String>,
+        properties: BTreeMap<String, String>,
         table_schema: Option<TableSchema>,
         is_source_job: bool,
         is_backfill_table: bool,

@@ -57,7 +57,10 @@ pub const UPSTREAM_SOURCE_KEY: &str = "connector";
 
 pub trait TryFromBTreeMap: Sized + UnknownFields {
     /// Used to initialize the source properties from the raw untyped `WITH` options.
-    fn try_from_btreemap(props: BTreeMap<String, String>, deny_unknown_fields: bool) -> Result<Self>;
+    fn try_from_btreemap(
+        props: BTreeMap<String, String>,
+        deny_unknown_fields: bool,
+    ) -> Result<Self>;
 }
 
 /// Represents `WITH` options for sources.
@@ -84,7 +87,10 @@ pub trait UnknownFields {
 }
 
 impl<P: DeserializeOwned + UnknownFields> TryFromBTreeMap for P {
-    fn try_from_btreemap(props: BTreeMap<String, String>, deny_unknown_fields: bool) -> Result<Self> {
+    fn try_from_btreemap(
+        props: BTreeMap<String, String>,
+        deny_unknown_fields: bool,
+    ) -> Result<Self> {
         let json_value = serde_json::to_value(props)?;
         let res = serde_json::from_value::<P>(json_value)?;
 
@@ -702,11 +708,11 @@ mod tests {
 
         let props = ConnectorProperties::extract(props, true).unwrap();
         if let ConnectorProperties::Kafka(k) = props {
-            let hashmap = hashmap! {
+            let btreemap = btreemap! {
                 "b-1:9092".to_string() => "dns-1".to_string(),
                 "b-2:9092".to_string() => "dns-2".to_string(),
             };
-            assert_eq!(k.privatelink_common.broker_rewrite_map, Some(hashmap));
+            assert_eq!(k.privatelink_common.broker_rewrite_map, Some(btreemap));
         } else {
             panic!("extract kafka config failed");
         }

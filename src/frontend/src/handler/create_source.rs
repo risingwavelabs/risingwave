@@ -60,7 +60,7 @@ use risingwave_pb::plan_common::{EncodeType, FormatType};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{
     get_delimiter, AstString, ColumnDef, ConnectorSchema, CreateSourceStatement, Encode, Format,
-    ObjectName, ProtobufSchema, SourceWatermark, TableConstraint, With,
+    ObjectName, ProtobufSchema, SourceWatermark, TableConstraint,
 };
 use risingwave_sqlparser::parser::IncludeOption;
 use thiserror_ext::AsReport;
@@ -89,7 +89,7 @@ pub(crate) const UPSTREAM_SOURCE_KEY: &str = "connector";
 /// Map a JSON schema to a relational schema
 async fn extract_json_table_schema(
     schema_config: &Option<(AstString, bool)>,
-    with_properties: &HashMap<String, String>,
+    with_properties: &BTreeMap<String, String>,
     format_encode_options: &mut BTreeMap<String, String>,
 ) -> Result<Option<Vec<ColumnCatalog>>> {
     match schema_config {
@@ -139,7 +139,7 @@ fn json_schema_infer_use_schema_registry(schema_config: &Option<(AstString, bool
 /// Map an Avro schema to a relational schema.
 async fn extract_avro_table_schema(
     info: &StreamSourceInfo,
-    with_properties: &HashMap<String, String>,
+    with_properties: &BTreeMap<String, String>,
     format_encode_options: &mut BTreeMap<String, String>,
     is_debezium: bool,
 ) -> Result<Vec<ColumnCatalog>> {
@@ -185,7 +185,7 @@ async fn extract_debezium_avro_table_pk_columns(
 /// Map a protobuf schema to a relational schema.
 async fn extract_protobuf_table_schema(
     schema: &ProtobufSchema,
-    with_properties: &WithOptions,
+    with_properties: &BTreeMap<String, String>,
     format_encode_options: &mut BTreeMap<String, String>,
 ) -> Result<Vec<ColumnCatalog>> {
     let info = StreamSourceInfo {
@@ -290,7 +290,7 @@ fn get_name_strategy_or_default(name_strategy: Option<AstString>) -> Result<Opti
 pub(crate) async fn bind_columns_from_source(
     session: &SessionImpl,
     source_schema: &ConnectorSchema,
-    with_properties: &HashMap<String, String>,
+    with_properties: &BTreeMap<String, String>,
 ) -> Result<(Option<Vec<ColumnCatalog>>, StreamSourceInfo)> {
     const MESSAGE_NAME_KEY: &str = "message";
     const KEY_MESSAGE_NAME_KEY: &str = "key.message";
@@ -549,7 +549,7 @@ fn bind_columns_from_source_for_cdc(
 
 /// add connector-spec columns to the end of column catalog
 pub fn handle_addition_columns(
-    with_properties: &WithOptions,
+    with_properties: &BTreeMap<String, String>,
     mut additional_columns: IncludeOption,
     columns: &mut Vec<ColumnCatalog>,
     is_cdc_backfill_table: bool,
@@ -888,10 +888,7 @@ pub(crate) async fn bind_source_pk(
 }
 
 // Add a hidden column `_rw_kafka_timestamp` to each message from Kafka source.
-fn check_and_add_timestamp_column(
-    with_properties: &WithOptions,
-    columns: &mut Vec<ColumnCatalog>,
-) {
+fn check_and_add_timestamp_column(with_properties: &WithOptions, columns: &mut Vec<ColumnCatalog>) {
     if with_properties.is_kafka_connector() {
         if columns.iter().any(|col| {
             matches!(
@@ -1040,7 +1037,7 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
 
 pub fn validate_compatibility(
     source_schema: &ConnectorSchema,
-    props: &mut HashMap<String, String>,
+    props: &mut BTreeMap<String, String>,
 ) -> Result<()> {
     let connector = props
         .get_connector()
@@ -1133,9 +1130,9 @@ pub(super) async fn check_source_schema(
     };
 
     if connector == NEXMARK_CONNECTOR {
-        check_nexmark_schema(props, row_id_index, columns)
+        check_nexmark_schema(props.inner(), row_id_index, columns)
     } else if connector == ICEBERG_CONNECTOR {
-        Ok(check_iceberg_source(props, columns)
+        Ok(check_iceberg_source(props.inner(), columns)
             .await
             .map_err(|err| ProtocolError(err.to_report_string()))?)
     } else {
@@ -1144,7 +1141,7 @@ pub(super) async fn check_source_schema(
 }
 
 pub(super) fn check_nexmark_schema(
-    props: &HashMap<String, String>,
+    props: &BTreeMap<String, String>,
     row_id_index: Option<usize>,
     columns: &[ColumnCatalog],
 ) -> Result<()> {
@@ -1198,7 +1195,7 @@ pub(super) fn check_nexmark_schema(
 }
 
 pub async fn extract_iceberg_columns(
-    with_properties: &HashMap<String, String>,
+    with_properties: &BTreeMap<String, String>,
 ) -> anyhow::Result<Vec<ColumnCatalog>> {
     let props = ConnectorProperties::extract(with_properties.clone(), true)?;
     if let ConnectorProperties::Iceberg(properties) = props {
@@ -1237,7 +1234,7 @@ pub async fn extract_iceberg_columns(
 }
 
 pub async fn check_iceberg_source(
-    props: &HashMap<String, String>,
+    props: &BTreeMap<String, String>,
     columns: &[ColumnCatalog],
 ) -> anyhow::Result<()> {
     let props = ConnectorProperties::extract(props.clone(), true)?;
@@ -1292,7 +1289,7 @@ pub fn bind_connector_props(
     handler_args: &HandlerArgs,
     source_schema: &ConnectorSchema,
     is_create_source: bool,
-) -> Result<HashMap<String, String>> {
+) -> Result<WithOptions> {
     let mut with_properties = handler_args.with_options.clone().into_connector_props();
     validate_compatibility(source_schema, &mut with_properties)?;
     let create_cdc_source_job = with_properties.is_shareable_cdc_connector();
@@ -1312,7 +1309,7 @@ pub fn bind_connector_props(
                 .to_string(),
         );
     }
-    Ok(with_properties)
+    Ok(WithOptions::new(with_properties))
 }
 #[allow(clippy::too_many_arguments)]
 pub async fn bind_create_source(

@@ -180,8 +180,7 @@ where
     }
 
     fn init_from_pb_cdc_table_desc(&mut self, table_desc: &ExternalTableDesc) {
-        let properties=
-            table_desc.connect_properties.clone();
+        let properties = table_desc.connect_properties.clone();
 
         let table_schema = TableSchema {
             columns: table_desc
