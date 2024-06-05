@@ -27,8 +27,8 @@ use risedev::{
     generate_risedev_env, preflight_check, CompactorService, ComputeNodeService, ConfigExpander,
     ConfigureTmuxTask, DummyService, EnsureStopService, ExecuteContext, FrontendService,
     GrafanaService, KafkaService, MetaNodeService, MinioService, MySqlService, PostgresService,
-    PrometheusService, PubsubService, RedisService, ServiceConfig, SqliteConfig, Task,
-    TempoService, RISEDEV_NAME,
+    PrometheusService, PubsubService, RedisService, SchemaRegistryService, ServiceConfig,
+    SqliteConfig, Task, TempoService, RISEDEV_NAME,
 };
 use tempfile::tempdir;
 use thiserror_ext::AsReport;
@@ -272,13 +272,25 @@ fn task_main(
             ServiceConfig::Kafka(c) => {
                 let mut ctx =
                     ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
-                let mut service = KafkaService::new(c.clone())?;
+                let mut service = KafkaService::new(c.clone());
                 service.execute(&mut ctx)?;
                 let mut task = risedev::KafkaReadyCheckTask::new(c.clone())?;
                 task.execute(&mut ctx)?;
                 ctx.pb
                     .set_message(format!("kafka {}:{}", c.address, c.port));
             }
+            ServiceConfig::SchemaRegistry(c) => {
+                let mut ctx =
+                    ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
+                let mut service = SchemaRegistryService::new(c.clone());
+                service.execute(&mut ctx)?;
+                let mut task =
+                    risedev::TcpReadyCheckTask::new(c.address.clone(), c.port, c.user_managed)?;
+                task.execute(&mut ctx)?;
+                ctx.pb
+                    .set_message(format!("schema registry http://{}:{}", c.address, c.port));
+            }
+
             ServiceConfig::Pubsub(c) => {
                 let mut ctx =
                     ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());

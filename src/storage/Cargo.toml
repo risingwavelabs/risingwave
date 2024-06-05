@@ -35,6 +35,7 @@ itertools = { workspace = true }
 libc = "0.2"
 lz4 = "1.24.0"
 memcomparable = "0.2"
+metrics-prometheus = "0.7"
 more-asserts = "0.3"
 num-integer = "0.1"
 parking_lot = { workspace = true }
@@ -80,7 +81,7 @@ zstd = { version = "0.13", default-features = false }
 [target.'cfg(target_os = "linux")'.dependencies]
 procfs = { version = "0.16", default-features = false }
 libc = "0.2"
-nix = { version = "0.28", features = ["fs", "mman"] }
+nix = { version = "0.29", features = ["fs", "mman"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 darwin-libproc = { git = "https://github.com/risingwavelabs/darwin-libproc.git", rev = "a502be24bd0971463f5bcbfe035a248d8ba503b7" }

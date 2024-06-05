@@ -14,7 +14,7 @@
 
 pub mod desc;
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 
 use anyhow::anyhow;
 use itertools::Itertools;
@@ -114,11 +114,11 @@ impl SinkType {
 /// May replace [`SinkType`].
 ///
 /// TODO: consolidate with [`crate::source::SourceStruct`] and [`crate::parser::SpecificParserConfig`].
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SinkFormatDesc {
     pub format: SinkFormat,
     pub encode: SinkEncode,
-    pub options: BTreeMap<String, String>,
+    pub options: HashMap<String, String>,
 
     pub key_encode: Option<SinkEncode>,
 }
@@ -337,6 +337,9 @@ pub struct SinkCatalog {
     pub created_at_cluster_version: Option<String>,
     pub initialized_at_cluster_version: Option<String>,
     pub create_type: CreateType,
+
+    /// The secret reference for the sink, mapping from property name to secret id.
+    pub secret_ref: HashMap<String, u32>,
 }
 
 impl SinkCatalog {
@@ -378,6 +381,7 @@ impl SinkCatalog {
             created_at_cluster_version: self.created_at_cluster_version.clone(),
             initialized_at_cluster_version: self.initialized_at_cluster_version.clone(),
             create_type: self.create_type.to_proto() as i32,
+            secret_ref: self.secret_ref.clone(),
         }
     }
 
@@ -471,6 +475,7 @@ impl From<PbSink> for SinkCatalog {
             initialized_at_cluster_version: pb.initialized_at_cluster_version,
             created_at_cluster_version: pb.created_at_cluster_version,
             create_type: CreateType::from_proto(create_type),
+            secret_ref: pb.secret_ref,
         }
     }
 }

@@ -41,7 +41,7 @@ use risingwave_pb::meta::table_fragments::fragment::{
     FragmentDistributionType, PbFragmentDistributionType,
 };
 use risingwave_pb::meta::table_fragments::{self, ActorStatus, PbFragment, State};
-use risingwave_pb::meta::FragmentParallelUnitMappings;
+use risingwave_pb::meta::FragmentWorkerSlotMappings;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
     Dispatcher, DispatcherType, FragmentTypeFlag, PbStreamActor, StreamNode,
@@ -61,8 +61,7 @@ use crate::manager::{
 };
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments, TableParallelism};
 use crate::serving::{
-    to_deleted_fragment_parallel_unit_mapping, to_fragment_parallel_unit_mapping,
-    ServingVnodeMapping,
+    to_deleted_fragment_worker_slot_mapping, to_fragment_worker_slot_mapping, ServingVnodeMapping,
 };
 use crate::storage::{MetaStore, MetaStoreError, MetaStoreRef, Transaction, DEFAULT_COLUMN_FAMILY};
 use crate::stream::{GlobalStreamManager, SourceManagerRef};
@@ -1725,8 +1724,8 @@ impl ScaleController {
                     .notification_manager()
                     .notify_frontend_without_version(
                         Operation::Update,
-                        Info::ServingParallelUnitMappings(FragmentParallelUnitMappings {
-                            mappings: to_fragment_parallel_unit_mapping(&upserted),
+                        Info::ServingWorkerSlotMappings(FragmentWorkerSlotMappings {
+                            mappings: to_fragment_worker_slot_mapping(&upserted),
                         }),
                     );
             }
@@ -1739,8 +1738,8 @@ impl ScaleController {
                     .notification_manager()
                     .notify_frontend_without_version(
                         Operation::Delete,
-                        Info::ServingParallelUnitMappings(FragmentParallelUnitMappings {
-                            mappings: to_deleted_fragment_parallel_unit_mapping(&failed),
+                        Info::ServingWorkerSlotMappings(FragmentWorkerSlotMappings {
+                            mappings: to_deleted_fragment_worker_slot_mapping(&failed),
                         }),
                     );
             }
@@ -2526,9 +2525,7 @@ impl ScaleController {
         // We trace the upstreams of each downstream under the hierarchy until we reach the top
         // for every no_shuffle relation.
         while let Some(fragment_id) = queue.pop_front() {
-            if !no_shuffle_target_fragment_ids.contains(&fragment_id)
-                && !no_shuffle_source_fragment_ids.contains(&fragment_id)
-            {
+            if !no_shuffle_target_fragment_ids.contains(&fragment_id) {
                 continue;
             }
 
@@ -2595,9 +2592,7 @@ impl ScaleController {
         // We trace the upstreams of each downstream under the hierarchy until we reach the top
         // for every no_shuffle relation.
         while let Some(fragment_id) = queue.pop_front() {
-            if !no_shuffle_target_fragment_ids.contains(&fragment_id)
-                && !no_shuffle_source_fragment_ids.contains(&fragment_id)
-            {
+            if !no_shuffle_target_fragment_ids.contains(&fragment_id) {
                 continue;
             }
 

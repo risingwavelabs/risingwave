@@ -173,6 +173,12 @@ impl LocalStreamManager {
         await_tree_config: Option<await_tree::Config>,
         watermark_epoch: AtomicU64Ref,
     ) -> Self {
+        if !env.config().unsafe_enable_strict_consistency {
+            // If strict consistency is disabled, should disable storage sanity check.
+            // Since this is a special config, we have to check it here.
+            risingwave_storage::hummock::utils::disable_sanity_check();
+        }
+
         let await_tree_reg = await_tree_config.clone().map(await_tree::Registry::new);
 
         let (actor_op_tx, actor_op_rx) = unbounded_channel();
@@ -652,54 +658,43 @@ impl LocalBarrierWorker {
 
             if self.actor_manager.streaming_metrics.level >= MetricLevel::Debug {
                 tracing::info!("Tokio metrics are enabled because metrics_level >= Debug");
-                let actor_id_str = actor_id.to_string();
-                let metrics = self.actor_manager.streaming_metrics.clone();
+                let streaming_metrics = self.actor_manager.streaming_metrics.clone();
                 let actor_monitor_task = self.actor_manager.runtime.spawn(async move {
+                    let metrics = streaming_metrics.new_actor_metrics(actor_id);
                     loop {
                         let task_metrics = monitor.cumulative();
                         metrics
                             .actor_execution_time
-                            .with_label_values(&[&actor_id_str])
                             .set(task_metrics.total_poll_duration.as_secs_f64());
                         metrics
                             .actor_fast_poll_duration
-                            .with_label_values(&[&actor_id_str])
                             .set(task_metrics.total_fast_poll_duration.as_secs_f64());
                         metrics
                             .actor_fast_poll_cnt
-                            .with_label_values(&[&actor_id_str])
                             .set(task_metrics.total_fast_poll_count as i64);
                         metrics
                             .actor_slow_poll_duration
-                            .with_label_values(&[&actor_id_str])
                             .set(task_metrics.total_slow_poll_duration.as_secs_f64());
                         metrics
                             .actor_slow_poll_cnt
-                            .with_label_values(&[&actor_id_str])
                             .set(task_metrics.total_slow_poll_count as i64);
                         metrics
                             .actor_poll_duration
-                            .with_label_values(&[&actor_id_str])
                             .set(task_metrics.total_poll_duration.as_secs_f64());
                         metrics
                             .actor_poll_cnt
-                            .with_label_values(&[&actor_id_str])
                             .set(task_metrics.total_poll_count as i64);
                         metrics
                             .actor_idle_duration
-                            .with_label_values(&[&actor_id_str])
                             .set(task_metrics.total_idle_duration.as_secs_f64());
                         metrics
                             .actor_idle_cnt
-                            .with_label_values(&[&actor_id_str])
                             .set(task_metrics.total_idled_count as i64);
                         metrics
                             .actor_scheduled_duration
-                            .with_label_values(&[&actor_id_str])
                             .set(task_metrics.total_scheduled_duration.as_secs_f64());
                         metrics
                             .actor_scheduled_cnt
-                            .with_label_values(&[&actor_id_str])
                             .set(task_metrics.total_scheduled_count as i64);
                         tokio::time::sleep(Duration::from_secs(1)).await;
                     }

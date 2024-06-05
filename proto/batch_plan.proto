@@ -225,7 +225,7 @@ message TableFunctionNode {
 message TaskId {
   string query_id = 1;
   uint32 stage_id = 2;
-  uint32 task_id = 3;
+  uint64 task_id = 3;
 }
 
 // Every task will create N buffers (channels) for parent operators to fetch results from,
@@ -233,7 +233,7 @@ message TaskId {
 message TaskOutputId {
   TaskId task_id = 1;
   // The id of output channel to fetch from
-  uint32 output_id = 2;
+  uint64 output_id = 2;
 }
 
 message LocalExecutePlan {
@@ -270,7 +270,7 @@ message LocalLookupJoinNode {
   repeated uint32 inner_side_key = 4;
   uint32 lookup_prefix_len = 5;
   plan_common.StorageTableDesc inner_side_table_desc = 6;
-  repeated uint32 inner_side_vnode_mapping = 7;
+  repeated uint64 inner_side_vnode_mapping = 7;
   repeated int32 inner_side_column_ids = 8;
   repeated uint32 output_indices = 9;
   repeated common.WorkerNode worker_nodes = 10;

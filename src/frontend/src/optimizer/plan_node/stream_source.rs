@@ -18,7 +18,7 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_connector::parser::additional_columns::add_partition_offset_cols;
+use risingwave_connector::parser::additional_columns::source_add_partition_offset_cols;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::{PbStreamSource, SourceNode};
 
@@ -46,8 +46,10 @@ impl StreamSource {
         if let Some(source_catalog) = &core.catalog
             && source_catalog.info.is_shared()
         {
-            let (columns_exist, additional_columns) =
-                add_partition_offset_cols(&core.column_catalog, &source_catalog.connector_name());
+            let (columns_exist, additional_columns) = source_add_partition_offset_cols(
+                &core.column_catalog,
+                &source_catalog.connector_name(),
+            );
             for (existed, mut c) in columns_exist.into_iter().zip_eq_fast(additional_columns) {
                 c.is_hidden = true;
                 if !existed {

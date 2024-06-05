@@ -43,6 +43,7 @@ pub mod index;
 pub mod object;
 pub mod object_dependency;
 pub mod schema;
+pub mod secret;
 pub mod serde_seaql_migration;
 pub mod session_parameter;
 pub mod sink;
@@ -72,6 +73,7 @@ pub type IndexId = ObjectId;
 pub type ViewId = ObjectId;
 pub type FunctionId = ObjectId;
 pub type ConnectionId = ObjectId;
+pub type SecretId = ObjectId;
 pub type UserId = i32;
 pub type PrivilegeId = i32;
 
@@ -283,6 +285,8 @@ impl From<BTreeMap<u32, Vec<u32>>> for ActorUpstreamActors {
         Self(map)
     }
 }
+
+derive_from_json_struct!(SecretRef, HashMap<String, u32>);
 
 derive_from_blob!(StreamNode, PbStreamNode);
 derive_from_blob!(DataType, risingwave_pb::data::PbDataType);
