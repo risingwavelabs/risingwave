@@ -14,6 +14,7 @@
 
 use std::cmp;
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
@@ -43,7 +44,6 @@ use super::check_cg_write_limit;
 use crate::hummock::error::Result;
 use crate::hummock::manager::checkpoint::HummockVersionCheckpoint;
 use crate::hummock::manager::commit_multi_var;
-use crate::hummock::manager::compaction_group_manager::CompactionGroupManager;
 use crate::hummock::manager::context::ContextInfo;
 use crate::hummock::manager::gc::DeleteObjectTracker;
 use crate::hummock::manager::transaction::HummockVersionTransaction;
@@ -200,11 +200,9 @@ impl HummockManager {
         let target_group_configs = target_group_ids
             .iter()
             .filter_map(|id| {
-                CompactionGroupManager::try_get_compaction_group_config(
-                    &cg_manager.compaction_groups,
-                    *id,
-                )
-                .map(|config| (*id, config))
+                cg_manager
+                    .try_get_compaction_group_config(*id)
+                    .map(|config| (*id, config))
             })
             .collect();
         let mut new_write_limits = calc_new_write_limits(
@@ -352,7 +350,9 @@ pub(super) fn calc_new_write_limits(
     new_write_limits
 }
 
-pub(super) fn create_init_version(default_compaction_config: CompactionConfig) -> HummockVersion {
+pub(super) fn create_init_version(
+    default_compaction_config: Arc<CompactionConfig>,
+) -> HummockVersion {
     let mut init_version = HummockVersion {
         id: FIRST_VERSION_ID,
         levels: Default::default(),
@@ -368,7 +368,7 @@ pub(super) fn create_init_version(default_compaction_config: CompactionConfig) -
     ] {
         init_version.levels.insert(
             group_id,
-            build_initial_compaction_group_levels(group_id, &default_compaction_config),
+            build_initial_compaction_group_levels(group_id, default_compaction_config.as_ref()),
         );
     }
     init_version

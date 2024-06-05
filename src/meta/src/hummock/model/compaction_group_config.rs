@@ -27,10 +27,10 @@ pub struct CompactionGroup {
 }
 
 impl CompactionGroup {
-    pub fn new(group_id: CompactionGroupId, compaction_config: CompactionConfig) -> Self {
+    pub fn new(group_id: CompactionGroupId, compaction_config: Arc<CompactionConfig>) -> Self {
         Self {
             group_id,
-            compaction_config: Arc::new(compaction_config),
+            compaction_config,
         }
     }
 

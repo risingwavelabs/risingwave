@@ -72,7 +72,6 @@ use tokio::task::JoinHandle;
 use tonic::Streaming;
 use tracing::warn;
 
-use super::compaction_group_manager::CompactionGroupManager;
 use crate::hummock::compaction::selector::level_selector::PickerInfo;
 use crate::hummock::compaction::selector::{
     DynamicLevelSelector, DynamicLevelSelectorCore, LocalSelectorStatistic, ManualCompactionOption,
@@ -247,10 +246,7 @@ impl HummockManager {
             match (
                 compaction.compaction_statuses.get(&compaction_group_id),
                 versioning.current_version.levels.get(&compaction_group_id),
-                CompactionGroupManager::try_get_compaction_group_config(
-                    &config_manager.compaction_groups,
-                    compaction_group_id,
-                ),
+                config_manager.try_get_compaction_group_config(compaction_group_id),
             ) {
                 (Some(cs), Some(v), Some(cf)) => (cs.to_owned(), v.to_owned(), cf),
                 _ => {
@@ -705,10 +701,7 @@ impl HummockManager {
             let group_config = {
                 let config_manager = self.compaction_group_manager.read().await;
 
-                match CompactionGroupManager::try_get_compaction_group_config(
-                    &config_manager.compaction_groups,
-                    compaction_group_id,
-                ) {
+                match config_manager.try_get_compaction_group_config(compaction_group_id) {
                     Some(config) => config,
                     None => continue,
                 }

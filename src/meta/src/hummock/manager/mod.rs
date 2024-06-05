@@ -503,11 +503,7 @@ impl HummockManager {
                 pairs.push((table_id as StateTableId, group.id));
             }
             let group_config = group.compaction_config.clone().unwrap();
-            CompactionGroupManager::insert_config(
-                &mut compaction_groups_txn,
-                group.id,
-                group_config,
-            );
+            compaction_groups_txn.insert_config(group.id, Arc::new(group_config));
 
             self.register_table_ids_for_test(&pairs).await?;
             tracing::info!("Registered table ids {:?}", pairs);
