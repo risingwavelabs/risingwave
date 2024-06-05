@@ -225,7 +225,9 @@ impl Sink for DorisSink {
 
 pub struct DorisSinkWriter {
     pub config: DorisConfig,
+    #[expect(dead_code)]
     schema: Schema,
+    #[expect(dead_code)]
     pk_indices: Vec<usize>,
     inserter_inner_builder: InserterInnerBuilder,
     is_append_only: bool,

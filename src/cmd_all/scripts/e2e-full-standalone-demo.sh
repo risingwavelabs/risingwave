@@ -20,17 +20,14 @@
 set -euo pipefail
 
 insert_json_kafka() {
-  echo $1 | \
-    $KAFKA_PATH/bin/kafka-console-producer.sh \
-      --topic source_kafka \
-      --bootstrap-server localhost:29092
+  echo $1 |
+    RPK_BROKERS=localhost:29092 \
+      rpk topic produce source_kafka -f "%v"
 }
 
 create_topic_kafka() {
-  "$KAFKA_PATH"/bin/kafka-topics.sh \
-    --create \
-    --topic source_kafka \
-    --bootstrap-server localhost:29092
+  RPK_BROKERS=localhost:29092 \
+    rpk topic create source_kafka
 }
 
 # Make sure we start on clean cluster

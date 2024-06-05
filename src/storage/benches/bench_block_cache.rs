@@ -160,7 +160,7 @@ impl CacheBase for FoyerCache {
     async fn try_get_with(&self, sst_object_id: u64, block_idx: u64) -> HummockResult<Arc<Block>> {
         let entry = self
             .inner
-            .entry((sst_object_id, block_idx), || {
+            .fetch((sst_object_id, block_idx), || {
                 let latency = self.fake_io_latency;
                 async move {
                     get_fake_block(sst_object_id, block_idx, latency)
@@ -224,7 +224,7 @@ impl CacheBase for FoyerHybridCache {
     async fn try_get_with(&self, sst_object_id: u64, block_idx: u64) -> HummockResult<Arc<Block>> {
         let entry = self
             .inner
-            .entry((sst_object_id, block_idx), || {
+            .fetch((sst_object_id, block_idx), || {
                 let latency = self.fake_io_latency;
                 async move {
                     get_fake_block(sst_object_id, block_idx, latency)

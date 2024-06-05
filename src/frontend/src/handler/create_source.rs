@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::LazyLock;
 
@@ -29,7 +29,7 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::types::DataType;
 use risingwave_connector::parser::additional_columns::{
-    build_additional_column_catalog, COMPATIBLE_ADDITIONAL_COLUMNS,
+    build_additional_column_catalog, get_supported_additional_columns,
 };
 use risingwave_connector::parser::{
     schema_to_columns, AvroParserConfig, DebeziumAvroParserConfig, ProtobufParserConfig,
@@ -81,7 +81,7 @@ use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::generic::SourceNodeKind;
 use crate::optimizer::plan_node::{LogicalSource, ToStream, ToStreamContext};
 use crate::session::SessionImpl;
-use crate::utils::resolve_privatelink_in_with_option;
+use crate::utils::{resolve_privatelink_in_with_option, resolve_secret_in_with_options};
 use crate::{bind_data_type, build_graph, OptimizerContext, WithOptions};
 
 pub(crate) const UPSTREAM_SOURCE_KEY: &str = "connector";
@@ -90,7 +90,7 @@ pub(crate) const UPSTREAM_SOURCE_KEY: &str = "connector";
 async fn extract_json_table_schema(
     schema_config: &Option<(AstString, bool)>,
     with_properties: &HashMap<String, String>,
-    format_encode_options: &mut BTreeMap<String, String>,
+    format_encode_options: &mut HashMap<String, String>,
 ) -> Result<Option<Vec<ColumnCatalog>>> {
     match schema_config {
         None => Ok(None),
@@ -140,7 +140,7 @@ fn json_schema_infer_use_schema_registry(schema_config: &Option<(AstString, bool
 async fn extract_avro_table_schema(
     info: &StreamSourceInfo,
     with_properties: &HashMap<String, String>,
-    format_encode_options: &mut BTreeMap<String, String>,
+    format_encode_options: &mut HashMap<String, String>,
     is_debezium: bool,
 ) -> Result<Vec<ColumnCatalog>> {
     let parser_config = SpecificParserConfig::new(info, with_properties)?;
@@ -186,7 +186,7 @@ async fn extract_debezium_avro_table_pk_columns(
 async fn extract_protobuf_table_schema(
     schema: &ProtobufSchema,
     with_properties: &HashMap<String, String>,
-    format_encode_options: &mut BTreeMap<String, String>,
+    format_encode_options: &mut HashMap<String, String>,
 ) -> Result<Vec<ColumnCatalog>> {
     let info = StreamSourceInfo {
         proto_message_name: schema.message_name.0.clone(),
@@ -224,14 +224,14 @@ fn non_generated_sql_columns(columns: &[ColumnDef]) -> Vec<ColumnDef> {
 }
 
 fn try_consume_string_from_options(
-    format_encode_options: &mut BTreeMap<String, String>,
+    format_encode_options: &mut HashMap<String, String>,
     key: &str,
 ) -> Option<AstString> {
     format_encode_options.remove(key).map(AstString)
 }
 
 fn consume_string_from_options(
-    format_encode_options: &mut BTreeMap<String, String>,
+    format_encode_options: &mut HashMap<String, String>,
     key: &str,
 ) -> Result<AstString> {
     try_consume_string_from_options(format_encode_options, key).ok_or(RwError::from(ProtocolError(
@@ -239,12 +239,12 @@ fn consume_string_from_options(
     )))
 }
 
-fn consume_aws_config_from_options(format_encode_options: &mut BTreeMap<String, String>) {
+fn consume_aws_config_from_options(format_encode_options: &mut HashMap<String, String>) {
     format_encode_options.retain(|key, _| !key.starts_with("aws."))
 }
 
 pub fn get_json_schema_location(
-    format_encode_options: &mut BTreeMap<String, String>,
+    format_encode_options: &mut HashMap<String, String>,
 ) -> Result<Option<(AstString, bool)>> {
     let schema_location = try_consume_string_from_options(format_encode_options, "schema.location");
     let schema_registry = try_consume_string_from_options(format_encode_options, "schema.registry");
@@ -259,7 +259,7 @@ pub fn get_json_schema_location(
 }
 
 fn get_schema_location(
-    format_encode_options: &mut BTreeMap<String, String>,
+    format_encode_options: &mut HashMap<String, String>,
 ) -> Result<(AstString, bool)> {
     let schema_location = try_consume_string_from_options(format_encode_options, "schema.location");
     let schema_registry = try_consume_string_from_options(format_encode_options, "schema.registry");
@@ -300,13 +300,13 @@ pub(crate) async fn bind_columns_from_source(
     let format_encode_options = WithOptions::try_from(source_schema.row_options())?.into_inner();
     let mut format_encode_options_to_consume = format_encode_options.clone();
 
-    fn get_key_message_name(options: &mut BTreeMap<String, String>) -> Option<String> {
+    fn get_key_message_name(options: &mut HashMap<String, String>) -> Option<String> {
         consume_string_from_options(options, KEY_MESSAGE_NAME_KEY)
             .map(|ele| Some(ele.0))
             .unwrap_or(None)
     }
     fn get_sr_name_strategy_check(
-        options: &mut BTreeMap<String, String>,
+        options: &mut HashMap<String, String>,
         use_sr: bool,
     ) -> Result<Option<i32>> {
         let name_strategy = get_name_strategy_or_default(try_consume_string_from_options(
@@ -446,6 +446,7 @@ pub(crate) async fn bind_columns_from_source(
                 // Parse the value but throw it away.
                 // It would be too late to report error in `SpecificParserConfig::new`,
                 // which leads to recovery loop.
+                // TODO: rely on SpecificParserConfig::new to validate, like Avro
                 TimestamptzHandling::from_options(&format_encode_options_to_consume)
                     .map_err(|err| InvalidInputSyntax(err.message))?;
                 try_consume_string_from_options(
@@ -551,12 +552,11 @@ pub fn handle_addition_columns(
     with_properties: &HashMap<String, String>,
     mut additional_columns: IncludeOption,
     columns: &mut Vec<ColumnCatalog>,
+    is_cdc_backfill_table: bool,
 ) -> Result<()> {
     let connector_name = with_properties.get_connector().unwrap(); // there must be a connector in source
 
-    if COMPATIBLE_ADDITIONAL_COLUMNS
-        .get(connector_name.as_str())
-        .is_none()
+    if get_supported_additional_columns(connector_name.as_str(), is_cdc_backfill_table).is_none()
         && !additional_columns.is_empty()
     {
         return Err(RwError::from(ProtocolError(format!(
@@ -595,6 +595,7 @@ pub fn handle_addition_columns(
             item.inner_field.as_deref(),
             data_type_name.as_deref(),
             true,
+            is_cdc_backfill_table,
         )?);
     }
 
@@ -838,12 +839,6 @@ pub(crate) async fn bind_source_pk(
             }
         }
         (Format::DebeziumMongo, Encode::Json) => {
-            if !additional_column_names.is_empty() {
-                return Err(RwError::from(ProtocolError(format!(
-                    "FORMAT DEBEZIUMMONGO forbids additional columns, but got {:?}",
-                    additional_column_names
-                ))));
-            }
             if sql_defined_pk {
                 sql_defined_pk_names
             } else {
@@ -917,6 +912,7 @@ fn check_and_add_timestamp_column(
             None,
             None,
             true,
+            false,
         )
         .unwrap();
         catalog.is_hidden = true;
@@ -1296,7 +1292,7 @@ pub fn bind_connector_props(
     handler_args: &HandlerArgs,
     source_schema: &ConnectorSchema,
     is_create_source: bool,
-) -> Result<HashMap<String, String>> {
+) -> Result<WithOptions> {
     let mut with_properties = handler_args.with_options.clone().into_connector_props();
     validate_compatibility(source_schema, &mut with_properties)?;
     let create_cdc_source_job = with_properties.is_shareable_cdc_connector();
@@ -1323,7 +1319,7 @@ pub async fn bind_create_source(
     handler_args: HandlerArgs,
     full_name: ObjectName,
     source_schema: ConnectorSchema,
-    with_properties: HashMap<String, String>,
+    with_properties: WithOptions,
     sql_columns_defs: &[ColumnDef],
     constraints: Vec<TableConstraint>,
     wildcard_idx: Option<usize>,
@@ -1361,7 +1357,12 @@ pub async fn bind_create_source(
     )?;
 
     // add additional columns before bind pk, because `format upsert` requires the key column
-    handle_addition_columns(&with_properties, include_column_options, &mut columns)?;
+    handle_addition_columns(
+        &with_properties,
+        include_column_options,
+        &mut columns,
+        false,
+    )?;
     // compatible with the behavior that add a hidden column `_rw_kafka_timestamp` to each message from Kafka source
     if is_create_source {
         // must behind `handle_addition_columns`
@@ -1419,9 +1420,10 @@ pub async fn bind_create_source(
     check_source_schema(&with_properties, row_id_index, &columns).await?;
 
     // resolve privatelink connection for Kafka
-    let mut with_properties = WithOptions::new(with_properties);
+    let mut with_properties = with_properties;
     let connection_id =
         resolve_privatelink_in_with_option(&mut with_properties, &schema_name, session)?;
+    let _secret_ref = resolve_secret_in_with_options(&mut with_properties, session)?;
 
     let definition: String = handler_args.normalized_sql.clone();
 
@@ -1483,7 +1485,7 @@ pub async fn handle_create_source(
     let (columns_from_resolve_source, mut source_info) = if create_cdc_source_job {
         bind_columns_from_source_for_cdc(&session, &source_schema)?
     } else {
-        bind_columns_from_source(&session, &source_schema, &with_properties).await?
+        bind_columns_from_source(&session, &source_schema, with_properties.inner()).await?
     };
     if is_shared {
         // Note: this field should be called is_shared. Check field doc for more details.

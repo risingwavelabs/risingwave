@@ -18,7 +18,6 @@ use std::mem::{replace, size_of};
 use std::ops::Deref;
 use std::sync::{Arc, LazyLock};
 
-use itertools::Itertools;
 use prost::Message;
 use risingwave_common::catalog::TableId;
 use risingwave_pb::hummock::group_delta::DeltaType;
@@ -28,7 +27,7 @@ use risingwave_pb::hummock::{
     HummockVersion as PbHummockVersion, HummockVersionDelta as PbHummockVersionDelta, SstableInfo,
     StateTableInfo as PbStateTableInfo, StateTableInfo, StateTableInfoDelta,
 };
-use tracing::{info, warn};
+use tracing::warn;
 
 use crate::change_log::TableChangeLog;
 use crate::table_watermark::TableWatermarks;
@@ -110,7 +109,6 @@ impl HummockVersionStateTableInfo {
         removed_table_id: &HashSet<TableId>,
     ) -> HashMap<TableId, Option<StateTableInfo>> {
         let mut changed_table = HashMap::new();
-        info!(removed_table_id = ?removed_table_id.iter().map(|table_id| table_id.table_id).collect_vec(), "removing table id");
         for table_id in removed_table_id {
             if let Some(prev_info) = self.state_table_info.remove(table_id) {
                 assert!(changed_table.insert(*table_id, Some(prev_info)).is_none());

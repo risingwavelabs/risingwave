@@ -22,7 +22,7 @@ use risingwave_hummock_sdk::{HummockEpoch, SyncResult};
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot;
 
-use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
+use crate::hummock::shared_buffer::shared_buffer_batch::{SharedBufferBatch, SharedBufferBatchId};
 use crate::hummock::HummockResult;
 use crate::mem_table::ImmutableMemtable;
 use crate::store::SealCurrentEpochOptions;
@@ -67,7 +67,10 @@ pub enum HummockEvent {
 
     Shutdown,
 
-    ImmToUploader(ImmutableMemtable),
+    ImmToUploader {
+        instance_id: SharedBufferBatchId,
+        imm: ImmutableMemtable,
+    },
 
     SealEpoch {
         epoch: HummockEpoch,
@@ -113,8 +116,8 @@ impl HummockEvent {
 
             HummockEvent::Shutdown => "Shutdown".to_string(),
 
-            HummockEvent::ImmToUploader(imm) => {
-                format!("ImmToUploader {:?}", imm)
+            HummockEvent::ImmToUploader { instance_id, imm } => {
+                format!("ImmToUploader {} {}", instance_id, imm.batch_id())
             }
 
             HummockEvent::SealEpoch {

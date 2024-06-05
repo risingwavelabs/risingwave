@@ -43,8 +43,7 @@ use crate::hummock::compactor::{await_tree_key, compact, CompactorContext};
 use crate::hummock::conflict_detector::ConflictDetector;
 use crate::hummock::event_handler::refiller::{CacheRefillerEvent, SpawnRefillTask};
 use crate::hummock::event_handler::uploader::{
-    HummockUploader, SpawnUploadTask, SyncedData, UploadTaskInfo, UploadTaskOutput,
-    UploadTaskPayload, UploaderEvent,
+    HummockUploader, SpawnUploadTask, SyncedData, UploadTaskInfo, UploadTaskOutput, UploaderEvent,
 };
 use crate::hummock::event_handler::{
     HummockEvent, HummockReadVersionRef, HummockVersionUpdate, ReadOnlyReadVersionMapping,
@@ -58,12 +57,14 @@ use crate::hummock::utils::validate_table_key_range;
 use crate::hummock::{
     HummockError, HummockResult, MemoryLimiter, SstableObjectIdManager, SstableStoreRef, TrackerId,
 };
+use crate::mem_table::ImmutableMemtable;
 use crate::monitor::HummockStateStoreMetrics;
 use crate::opts::StorageOpts;
 
 #[derive(Clone)]
 pub struct BufferTracker {
     flush_threshold: usize,
+    min_batch_flush_size: usize,
     global_buffer: Arc<MemoryLimiter>,
     global_upload_task_size: GenericGauge<AtomicU64>,
 }
@@ -75,25 +76,34 @@ impl BufferTracker {
     ) -> Self {
         let capacity = config.shared_buffer_capacity_mb * (1 << 20);
         let flush_threshold = (capacity as f32 * config.shared_buffer_flush_ratio) as usize;
+        let shared_buffer_min_batch_flush_size =
+            config.shared_buffer_min_batch_flush_size_mb * (1 << 20);
         assert!(
             flush_threshold < capacity,
             "flush_threshold {} should be less or equal to capacity {}",
             flush_threshold,
             capacity
         );
-        Self::new(capacity, flush_threshold, global_upload_task_size)
+        Self::new(
+            capacity,
+            flush_threshold,
+            global_upload_task_size,
+            shared_buffer_min_batch_flush_size,
+        )
     }
 
-    pub fn new(
+    fn new(
         capacity: usize,
         flush_threshold: usize,
         global_upload_task_size: GenericGauge<AtomicU64>,
+        min_batch_flush_size: usize,
     ) -> Self {
         assert!(capacity >= flush_threshold);
         Self {
             flush_threshold,
             global_buffer: Arc::new(MemoryLimiter::new(capacity as u64)),
             global_upload_task_size,
+            min_batch_flush_size,
         }
     }
 
@@ -118,8 +128,17 @@ impl BufferTracker {
 
     /// Return true when the buffer size minus current upload task size is still greater than the
     /// flush threshold.
-    pub fn need_more_flush(&self) -> bool {
+    pub fn need_flush(&self) -> bool {
         self.get_buffer_size() > self.flush_threshold + self.global_upload_task_size.get() as usize
+    }
+
+    pub fn need_more_flush(&self, curr_batch_flush_size: usize) -> bool {
+        curr_batch_flush_size < self.min_batch_flush_size || self.need_flush()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn flush_threshold(&self) -> usize {
+        self.flush_threshold
     }
 }
 
@@ -194,7 +213,7 @@ pub struct HummockEventHandler {
 }
 
 async fn flush_imms(
-    payload: UploadTaskPayload,
+    payload: Vec<ImmutableMemtable>,
     task_info: UploadTaskInfo,
     compactor_context: CompactorContext,
     filter_key_extractor_manager: FilterKeyExtractorManager,
@@ -259,8 +278,8 @@ impl HummockEventHandler {
                         let _timer = upload_task_latency.start_timer();
                         let mut output = flush_imms(
                             payload
-                                .values()
-                                .flat_map(|imms| imms.iter().cloned())
+                                .into_values()
+                                .flat_map(|imms| imms.into_iter())
                                 .collect(),
                             task_info,
                             upload_compactor_context.clone(),
@@ -853,15 +872,14 @@ impl HummockEventHandler {
             HummockEvent::Shutdown => {
                 unreachable!("shutdown is handled specially")
             }
-            HummockEvent::ImmToUploader(imm) => {
+            HummockEvent::ImmToUploader { instance_id, imm } => {
                 assert!(
-                    self.local_read_version_mapping
-                        .contains_key(&imm.instance_id),
+                    self.local_read_version_mapping.contains_key(&instance_id),
                     "add imm from non-existing read version instance: instance_id: {}, table_id {}",
-                    imm.instance_id,
+                    instance_id,
                     imm.table_id,
                 );
-                self.uploader.add_imm(imm);
+                self.uploader.add_imm(instance_id, imm);
                 self.uploader.may_flush();
             }
 

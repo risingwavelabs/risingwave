@@ -18,11 +18,9 @@ use aws_smithy_types_convert::date_time::DateTimeExt;
 use crate::source::{SourceMessage, SourceMeta, SplitId};
 
 #[derive(Clone, Debug)]
-pub struct KinesisMessage {}
-
-#[derive(Clone, Debug)]
 pub struct KinesisMeta {
     // from `approximate_arrival_timestamp` of type `Option<aws_smithy_types::DateTime>`
+    #[expect(dead_code)]
     timestamp: Option<i64>,
 }
 
