@@ -795,7 +795,7 @@ impl<'a> CompactionGroupTransaction<'a> {
             if self.contains_key(id) {
                 continue;
             }
-            let new_entry = CompactionGroup::new(*id, config.clone());
+            let new_entry = CompactionGroup::new(*id, config.as_ref().clone());
             self.insert(*id, new_entry);
 
             trivial = false;

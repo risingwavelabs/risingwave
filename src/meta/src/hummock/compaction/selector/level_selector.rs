@@ -621,7 +621,7 @@ pub mod tests {
         assert_compaction_task(&compaction, &levels_handlers);
 
         let compaction_filter_flag = CompactionFilterFlag::STATE_CLEAN | CompactionFilterFlag::TTL;
-        let config = CompactionConfigBuilder::with_config(config)
+        let config = CompactionConfigBuilder::with_config(config.clone())
             .max_bytes_for_level_base(100)
             .sub_level_max_compaction_bytes(50)
             .target_file_size_base(20)
