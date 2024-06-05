@@ -61,7 +61,7 @@ impl MapHandling {
     pub const OPTION_KEY: &'static str = "map.handling.mode";
 
     pub fn from_options(
-        options: &std::collections::HashMap<String, String>,
+        options: &std::collections::BTreeMap<String, String>,
     ) -> anyhow::Result<Option<Self>> {
         let mode = match options.get(Self::OPTION_KEY).map(std::ops::Deref::deref) {
             Some("jsonb") => Self::Jsonb,
