@@ -1292,12 +1292,25 @@
 - sql: |
     create table t (i int, bi bigint, ts timestamp, watermark for ts as ts - interval '1 minute') append only;
     select
-        first_value(i) over (partition by bi order by ts session with gap '10 minutes') as col1
+        first_value(i) over (partition by bi order by ts session with gap '10 minutes') as window_start,
+        last_value(i) over (partition by bi order by ts session with gap '10 minutes') as window_end
     from t;
+  logical_plan: |-
+    LogicalProject { exprs: [first_value, last_value] }
+    └─LogicalOverWindow { window_functions: [first_value(t.i) OVER(PARTITION BY t.bi ORDER BY t.ts ASC SESSION WITH GAP 00:10:00), last_value(t.i) OVER(PARTITION BY t.bi ORDER BY t.ts ASC SESSION WITH GAP 00:10:00)] }
+      └─LogicalProject { exprs: [t.i, t.bi, t.ts, t._row_id] }
+        └─LogicalScan { table: t, columns: [t.i, t.bi, t.ts, t._row_id] }
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [first_value, last_value] }
+      └─BatchOverWindow { window_functions: [first_value(t.i) OVER(PARTITION BY t.bi ORDER BY t.ts ASC SESSION WITH GAP 00:10:00), last_value(t.i) OVER(PARTITION BY t.bi ORDER BY t.ts ASC SESSION WITH GAP 00:10:00)] }
+        └─BatchExchange { order: [t.bi ASC, t.ts ASC], dist: HashShard(t.bi) }
+          └─BatchSort { order: [t.bi ASC, t.ts ASC] }
+            └─BatchScan { table: t, columns: [t.i, t.bi, t.ts], distribution: SomeShard }
   eowc_stream_plan: |-
-    StreamMaterialize { columns: [col1, t._row_id(hidden), t.bi(hidden)], stream_key: [t._row_id, t.bi], pk_columns: [t._row_id, t.bi], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [first_value, t._row_id, t.bi] }
-      └─StreamEowcOverWindow { window_functions: [first_value(t.i) OVER(PARTITION BY t.bi ORDER BY t.ts ASC SESSION WITH GAP 00:10:00)] }
+    StreamMaterialize { columns: [window_start, window_end, t._row_id(hidden), t.bi(hidden)], stream_key: [t._row_id, t.bi], pk_columns: [t._row_id, t.bi], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [first_value, last_value, t._row_id, t.bi] }
+      └─StreamEowcOverWindow { window_functions: [first_value(t.i) OVER(PARTITION BY t.bi ORDER BY t.ts ASC SESSION WITH GAP 00:10:00), last_value(t.i) OVER(PARTITION BY t.bi ORDER BY t.ts ASC SESSION WITH GAP 00:10:00)] }
         └─StreamEowcSort { sort_column: t.ts }
           └─StreamExchange { dist: HashShard(t.bi) }
             └─StreamTableScan { table: t, columns: [t.i, t.bi, t.ts, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
