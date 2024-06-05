@@ -2396,14 +2396,20 @@ async fn test_unregister_moved_table() {
     );
     assert_eq!(
         current_version
-            .get_compaction_group_levels(2)
-            .member_table_ids,
+            .state_table_info
+            .compaction_group_member_table_ids(2)
+            .iter()
+            .map(|table_id| table_id.table_id)
+            .collect_vec(),
         vec![101]
     );
     assert_eq!(
         current_version
-            .get_compaction_group_levels(new_group_id)
-            .member_table_ids,
+            .state_table_info
+            .compaction_group_member_table_ids(new_group_id)
+            .iter()
+            .map(|table_id| table_id.table_id)
+            .collect_vec(),
         vec![100]
     );
 
@@ -2417,8 +2423,11 @@ async fn test_unregister_moved_table() {
     );
     assert_eq!(
         current_version
-            .get_compaction_group_levels(2)
-            .member_table_ids,
+            .state_table_info
+            .compaction_group_member_table_ids(2)
+            .iter()
+            .map(|table_id| table_id.table_id)
+            .collect_vec(),
         vec![101]
     );
 }
