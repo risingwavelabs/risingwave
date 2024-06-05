@@ -14,7 +14,7 @@
 
 pub mod desc;
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use anyhow::anyhow;
 use itertools::Itertools;
@@ -114,11 +114,11 @@ impl SinkType {
 /// May replace [`SinkType`].
 ///
 /// TODO: consolidate with [`crate::source::SourceStruct`] and [`crate::parser::SpecificParserConfig`].
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SinkFormatDesc {
     pub format: SinkFormat,
     pub encode: SinkEncode,
-    pub options: HashMap<String, String>,
+    pub options: BTreeMap<String, String>,
 
     pub key_encode: Option<SinkEncode>,
 }
