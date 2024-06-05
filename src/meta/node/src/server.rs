@@ -587,6 +587,11 @@ pub async fn start_service_as_election_leader(
         .unwrap(),
     );
 
+    hummock_manager
+        .may_fill_backward_state_table_info()
+        .await
+        .unwrap();
+
     // Initialize services.
     let backup_manager = BackupManager::new(
         env.clone(),

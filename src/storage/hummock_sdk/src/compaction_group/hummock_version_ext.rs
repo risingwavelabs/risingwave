@@ -254,17 +254,6 @@ impl HummockVersion {
     }
 }
 
-pub type SstSplitInfo = (
-    // Object id.
-    HummockSstableObjectId,
-    // SST id.
-    HummockSstableId,
-    // Old SST id in parent group.
-    HummockSstableId,
-    // New SST id in parent group.
-    HummockSstableId,
-);
-
 impl HummockVersion {
     pub fn count_new_ssts_in_group_split(
         &self,
@@ -483,7 +472,14 @@ impl HummockVersion {
     }
 
     pub fn apply_version_delta(&mut self, version_delta: &HummockVersionDelta) {
-        let new_committed_epoch = version_delta.max_committed_epoch > self.max_committed_epoch;
+        assert_eq!(self.id, version_delta.prev_id);
+
+        let changed_table_info = self.state_table_info.apply_delta(
+            &version_delta.state_table_info_delta,
+            &version_delta.removed_table_ids,
+        );
+
+        // apply to `levels`, which is different compaction groups
         for (compaction_group_id, group_deltas) in &version_delta.group_deltas {
             let summary = summarize_group_deltas(group_deltas);
             if let Some(group_construct) = &summary.group_construct {
@@ -588,34 +584,56 @@ impl HummockVersion {
         }
         self.id = version_delta.id;
         self.max_committed_epoch = version_delta.max_committed_epoch;
+        self.safe_epoch = version_delta.safe_epoch;
 
-        let mut modified_table_watermarks: HashMap<TableId, TableWatermarks> = HashMap::new();
+        // apply to table watermark
 
+        // Store the table watermarks that needs to be updated. None means to remove the table watermark of the table id
+        let mut modified_table_watermarks: HashMap<TableId, Option<TableWatermarks>> =
+            HashMap::new();
+
+        // apply to table watermark
         for (table_id, table_watermarks) in &version_delta.new_table_watermarks {
             if let Some(current_table_watermarks) = self.table_watermarks.get(table_id) {
-                let mut current_table_watermarks = (**current_table_watermarks).clone();
-                current_table_watermarks.apply_new_table_watermarks(table_watermarks);
-                modified_table_watermarks.insert(*table_id, current_table_watermarks);
+                if version_delta.removed_table_ids.contains(table_id) {
+                    modified_table_watermarks.insert(*table_id, None);
+                } else {
+                    let mut current_table_watermarks = (**current_table_watermarks).clone();
+                    current_table_watermarks.apply_new_table_watermarks(table_watermarks);
+                    modified_table_watermarks.insert(*table_id, Some(current_table_watermarks));
+                }
             } else {
-                modified_table_watermarks.insert(*table_id, table_watermarks.clone());
+                modified_table_watermarks.insert(*table_id, Some(table_watermarks.clone()));
             }
         }
-        if version_delta.safe_epoch != self.safe_epoch {
-            assert!(version_delta.safe_epoch > self.safe_epoch);
-            for (table_id, table_watermarks) in &self.table_watermarks {
-                let table_watermarks = modified_table_watermarks
-                    .entry(*table_id)
-                    .or_insert_with(|| (**table_watermarks).clone());
+        for (table_id, table_watermarks) in &self.table_watermarks {
+            if let Some(table_delta) = version_delta.state_table_info_delta.get(table_id)
+                && let Some(Some(prev_table)) = changed_table_info.get(table_id)
+                && table_delta.safe_epoch > prev_table.safe_epoch
+            {
+                // safe epoch has progressed, need further clear.
+            } else {
+                // safe epoch not progressed. No need to truncate
+                continue;
+            }
+            let table_watermarks = modified_table_watermarks
+                .entry(*table_id)
+                .or_insert_with(|| Some((**table_watermarks).clone()));
+            if let Some(table_watermarks) = table_watermarks {
                 table_watermarks.clear_stale_epoch_watermark(version_delta.safe_epoch);
             }
-            self.safe_epoch = version_delta.safe_epoch;
         }
-
+        // apply the staging table watermark to hummock version
         for (table_id, table_watermarks) in modified_table_watermarks {
-            self.table_watermarks
-                .insert(table_id, Arc::new(table_watermarks));
+            if let Some(table_watermarks) = table_watermarks {
+                self.table_watermarks
+                    .insert(table_id, Arc::new(table_watermarks));
+            } else {
+                self.table_watermarks.remove(&table_id);
+            }
         }
 
+        // apply to table change log
         for (table_id, change_log_delta) in &version_delta.change_log_delta {
             let new_change_log = change_log_delta.new_log.as_ref().unwrap();
             match self.table_change_log.entry(*table_id) {
@@ -635,27 +653,32 @@ impl HummockVersion {
             };
         }
 
-        for table_id in &version_delta.removed_table_ids {
-            let _ = self.table_watermarks.remove(table_id);
-            let _ = self.table_change_log.remove(table_id);
-        }
-
         // If a table has no new change log entry (even an empty one), it means we have stopped maintained
-        // the change log for the table
-        if new_committed_epoch {
-            self.table_change_log.retain(|table_id, _| {
-                let contains = version_delta.change_log_delta.contains_key(table_id);
-                if !contains {
-                    warn!(
+        // the change log for the table, and then we will remove the table change log.
+        // The table change log will also be removed when the table id is removed.
+        self.table_change_log.retain(|table_id, _| {
+            if version_delta.removed_table_ids.contains(table_id) {
+                return false;
+            }
+            if let Some(table_info_delta) = version_delta.state_table_info_delta.get(table_id)
+                && let Some(Some(prev_table_info)) = changed_table_info.get(table_id) && table_info_delta.committed_epoch > prev_table_info.committed_epoch {
+                // the table exists previously, and its committed epoch has progressed.
+            } else {
+                // otherwise, the table change log should be kept anyway
+                return true;
+            }
+            let contains = version_delta.change_log_delta.contains_key(table_id);
+            if !contains {
+                warn!(
                         ?table_id,
                         max_committed_epoch = version_delta.max_committed_epoch,
                         "table change log dropped due to no further change log at newly committed epoch",
                     );
-                }
-                contains
-            });
-        }
+            }
+            contains
+        });
 
+        // truncate the remaining table change log
         for (table_id, change_log_delta) in &version_delta.change_log_delta {
             if let Some(change_log) = self.table_change_log.get_mut(table_id) {
                 change_log.truncate(change_log_delta.truncate_epoch);
@@ -1102,8 +1125,9 @@ pub fn build_version_delta_after_version(version: &HummockVersion) -> HummockVer
         max_committed_epoch: version.max_committed_epoch,
         group_deltas: Default::default(),
         new_table_watermarks: HashMap::new(),
-        removed_table_ids: vec![],
+        removed_table_ids: HashSet::new(),
         change_log_delta: HashMap::new(),
+        state_table_info_delta: Default::default(),
     }
 }
 
@@ -1343,10 +1367,7 @@ mod tests {
                     ..Default::default()
                 },
             )]),
-            max_committed_epoch: 0,
-            safe_epoch: 0,
-            table_watermarks: HashMap::new(),
-            table_change_log: HashMap::new(),
+            ..Default::default()
         };
         assert_eq!(version.get_object_ids().len(), 0);
 
@@ -1407,10 +1428,7 @@ mod tests {
                     ),
                 ),
             ]),
-            max_committed_epoch: 0,
-            safe_epoch: 0,
-            table_watermarks: HashMap::new(),
-            table_change_log: HashMap::new(),
+            ..Default::default()
         };
         let version_delta = HummockVersionDelta {
             id: 1,
@@ -1491,10 +1509,7 @@ mod tests {
                     ),
                     (1, cg1,),
                 ]),
-                max_committed_epoch: 0,
-                safe_epoch: 0,
-                table_watermarks: HashMap::new(),
-                table_change_log: HashMap::new(),
+                ..Default::default()
             }
         );
     }
