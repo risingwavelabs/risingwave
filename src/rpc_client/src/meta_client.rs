@@ -528,6 +528,7 @@ impl MetaClient {
         table: PbTable,
         graph: StreamFragmentGraph,
         table_col_index_mapping: ColIndexMapping,
+        related_fragment_graphs: Vec<StreamFragmentGraph>,
     ) -> Result<CatalogVersion> {
         let request = ReplaceTablePlanRequest {
             plan: Some(ReplaceTablePlan {
@@ -535,6 +536,7 @@ impl MetaClient {
                 table: Some(table),
                 fragment_graph: Some(graph),
                 table_col_index_mapping: Some(table_col_index_mapping.to_protobuf()),
+                related_fragment_graphs,
             }),
         };
         let resp = self.inner.replace_table_plan(request).await?;

@@ -308,6 +308,7 @@ impl CatalogWriter for MockCatalogWriter {
         table: PbTable,
         _graph: StreamFragmentGraph,
         _mapping: ColIndexMapping,
+        _related_graph: Vec<StreamFragmentGraph>,
     ) -> Result<()> {
         self.catalog.write().update_table(&table);
         Ok(())

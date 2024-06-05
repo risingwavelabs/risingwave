@@ -12,13 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::{BTreeSet, HashMap};
+use std::rc::Rc;
 use std::sync::Arc;
 
 use anyhow::Context;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::bail_not_implemented;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
+use risingwave_common::{bail, bail_not_implemented};
+use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{
     AlterTableOperation, ColumnOption, ConnectorSchema, Encode, ObjectName, Statement,
 };
@@ -31,8 +34,9 @@ use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::table_catalog::TableType;
 use crate::error::{ErrorCode, Result, RwError};
+use crate::handler::create_sink::{gen_sink_plan, insert_merger_to_union, SinkPlanContext};
 use crate::session::SessionImpl;
-use crate::{Binder, TableCatalog, WithOptions};
+use crate::{build_graph, Binder, OptimizerContext, TableCatalog, WithOptions};
 
 pub async fn replace_table_with_definition(
     session: &Arc<SessionImpl>,
@@ -58,12 +62,12 @@ pub async fn replace_table_with_definition(
         panic!("unexpected statement type: {:?}", definition);
     };
 
-    let (graph, table, source) = generate_stream_graph_for_table(
+    let (mut graph, table, source) = generate_stream_graph_for_table(
         session,
         table_name,
         original_catalog,
         source_schema,
-        handler_args,
+        handler_args.clone(),
         col_id_gen,
         columns,
         wildcard_idx,
@@ -92,7 +96,7 @@ pub async fn replace_table_with_definition(
     let catalog_writer = session.catalog_writer()?;
 
     catalog_writer
-        .replace_table(source, table, graph, col_index_mapping)
+        .replace_table(source, table, graph, col_index_mapping, vec![])
         .await?;
     Ok(())
 }
@@ -104,12 +108,8 @@ pub async fn handle_alter_table_column(
     table_name: ObjectName,
     operation: AlterTableOperation,
 ) -> Result<RwPgResponse> {
-    let session = handler_args.session;
+    let session = handler_args.session.clone();
     let original_catalog = fetch_table_catalog_for_alter(session.as_ref(), &table_name)?;
-
-    if !original_catalog.incoming_sinks.is_empty() {
-        bail_not_implemented!("alter table with incoming sinks");
-    }
 
     // TODO(yuhao): alter table with generated columns.
     if original_catalog.has_generated_column() {
@@ -210,6 +210,63 @@ pub async fn handle_alter_table_column(
         }
 
         _ => unreachable!(),
+    }
+
+    let mut sinks = HashMap::new();
+    let incoming_sinks: BTreeSet<_> = original_catalog.incoming_sinks.iter().copied().collect();
+    {
+        let catalog_reader = session.env().catalog_reader().read_guard();
+        for schema in catalog_reader.iter_schemas(session.database())? {
+            for sink in schema.iter_sink() {
+                if incoming_sinks.contains(&sink.id.sink_id) {
+                    sinks.insert(sink.id.sink_id, sink.clone());
+                }
+            }
+        }
+    }
+
+    if incoming_sinks.len() != sinks.len() {
+        bail!("unable to find all incoming sinks");
+    }
+
+    for (sink_id, sink) in sinks {
+        // sink, graph, target_table_catalog
+        let () = {
+            let [definition]: [_; 1] = Parser::parse_sql(&sink.definition)
+                .context("unable to parse original table definition")?
+                .try_into()
+                .unwrap();
+            let Statement::CreateSink { stmt } = definition else {
+                panic!("unexpected statement: {:?}", definition);
+            };
+
+            let context = Rc::new(OptimizerContext::from_handler_args(handler_args.clone()));
+
+            let SinkPlanContext {
+                query,
+                sink_plan: plan,
+                sink_catalog: sink,
+                target_table_catalog,
+            } = gen_sink_plan(&session, context.clone(), stmt, None)?;
+
+            // let mut graph = build_graph(plan)?;
+            //
+            // graph.parallelism =
+            //     session
+            //         .config()
+            //         .streaming_parallelism()
+            //         .map(|parallelism| Parallelism {
+            //             parallelism: parallelism.get(),
+            //         });
+            //
+            // (sink, graph, target_table_catalog)
+        };
+
+        // for fragment in graph.fragments.values_mut() {
+        //     if let Some(node) = &mut fragment.node {
+        //         insert_merger_to_union(node);
+        //     }
+        // }
     }
 
     replace_table_with_definition(

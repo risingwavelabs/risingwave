@@ -92,6 +92,7 @@ pub trait CatalogWriter: Send + Sync {
         table: PbTable,
         graph: StreamFragmentGraph,
         mapping: ColIndexMapping,
+        related_fragment_graphs: Vec<StreamFragmentGraph>,
     ) -> Result<()>;
 
     async fn alter_source_column(&self, source: PbSource) -> Result<()>;
@@ -316,10 +317,11 @@ impl CatalogWriter for CatalogWriterImpl {
         table: PbTable,
         graph: StreamFragmentGraph,
         mapping: ColIndexMapping,
+        related_graph: Vec<StreamFragmentGraph>,
     ) -> Result<()> {
         let version = self
             .meta_client
-            .replace_table(source, table, graph, mapping)
+            .replace_table(source, table, graph, mapping, related_graph)
             .await?;
         self.wait_version(version).await
     }

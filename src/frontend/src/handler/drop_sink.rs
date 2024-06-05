@@ -89,6 +89,7 @@ pub async fn handle_drop_sink(
             table: Some(table),
             fragment_graph: Some(graph),
             table_col_index_mapping: None,
+            related_fragment_graphs: vec![],
         });
     }
 
