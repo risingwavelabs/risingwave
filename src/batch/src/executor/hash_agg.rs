@@ -559,7 +559,7 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
             // partition and spill to disk with the same hash function as the hash table spilling.
             // Finally, we would get e.g. 20 partitions. Each partition should contain a portion of the original hash table and input data.
             // A sub HashAggExecutor would be used to consume each partition one by one.
-            // If memory is still not enough in the sub HashAggExecutor, it will partition its hash table and input recursively.
+            // If memory is still not enough in the sub HashAggExecutor, it will spill its hash table and input recursively.
             let mut agg_spill_manager = AggSpillManager::new(
                 &self.identity,
                 DEFAULT_SPILL_PARTITION_NUM,

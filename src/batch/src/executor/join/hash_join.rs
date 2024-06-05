@@ -245,6 +245,20 @@ pub struct JoinSpillManager {
     spill_chunk_size: usize,
 }
 
+/// `JoinSpillManager` is used to manage how to write spill data file and read them back.
+/// The spill data first need to be partitioned. Each partition contains 2 files: `join_probe_side_file` and `join_build_side_file`.
+/// The spill file consume a data chunk and serialize the chunk into a protobuf bytes.
+/// Finally, spill file content will look like the below.
+/// The file write pattern is append-only and the read pattern is sequential scan.
+/// This can maximize the disk IO performance.
+///
+/// ```text
+/// [proto_len]
+/// [proto_bytes]
+/// ...
+/// [proto_len]
+/// [proto_bytes]
+/// ```
 impl JoinSpillManager {
     pub fn new(
         join_identity: &String,
@@ -511,6 +525,12 @@ impl<K: HashKey> HashJoinExecutor<K> {
         }
 
         if need_to_spill {
+            // A spilling version of hash join based on the RFC: Spill Hash Join https://github.com/risingwavelabs/rfcs/pull/91
+            // When HashJoinExecutor told memory is insufficient, JoinSpillManager will start to partition the hash table and spill to disk.
+            // After spilling the hash table, JoinSpillManager will consume all chunks from its build side input executor and probe side input executor.
+            // Finally, we would get e.g. 20 partitions. Each partition should contain a portion of the original build side input and probr side input data.
+            // A sub HashJoinExecutor would be used to consume each partition one by one.
+            // If memory is still not enough in the sub HashJoinExecutor, it will spill its inputs recursively.
             let mut join_spill_manager = JoinSpillManager::new(
                 &self.identity,
                 DEFAULT_SPILL_PARTITION_NUM,
