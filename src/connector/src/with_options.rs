@@ -52,6 +52,7 @@ impl WithOptions for HashMap<String, String> {}
 impl WithOptions for String {}
 impl WithOptions for bool {}
 impl WithOptions for usize {}
+impl WithOptions for u16 {}
 impl WithOptions for u32 {}
 impl WithOptions for u64 {}
 impl WithOptions for i32 {}
