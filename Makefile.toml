@@ -28,6 +28,7 @@ env_scripts = [
 # duckscript doc: https://github.com/sagiegurari/duckscript/blob/master/docs/sdk.md
 
 set_env ENABLE_TELEMETRY "false"
+set_env RW_TELEMETRY_TYPE "test"
 
 is_sanitizer_enabled = get_env ENABLE_SANITIZER
 is_hdfs_backend = get_env ENABLE_HDFS
@@ -60,8 +61,8 @@ else
 end
 
 if ${is_deno_udf_enabled}
-  flags = get_env RISINGWAVE_FEATURE_FLAGS
-  set_env RISINGWAVE_FEATURE_FLAGS "${flags} --features embedded-deno-udf"
+flags = get_env RISINGWAVE_FEATURE_FLAGS
+set_env RISINGWAVE_FEATURE_FLAGS "${flags} --features embedded-deno-udf"
 end
 
 if ${is_python_udf_enabled}
