@@ -308,7 +308,7 @@ impl OpendalStreamingUploader {
         );
         if let Err(err) = self.writer.write(data).await {
             self.is_valid = false;
-            self.writer.abort().await?;
+            // self.writer.abort().await?;
             return Err(err.into());
         }
         self.not_uploaded_len = 0;
@@ -340,7 +340,7 @@ impl StreamingUploader for OpendalStreamingUploader {
         match self.writer.close().await {
             Ok(_) => (),
             Err(err) => {
-                self.writer.abort().await?;
+                // self.writer.abort().await?;
                 return Err(err.into());
             }
         };
