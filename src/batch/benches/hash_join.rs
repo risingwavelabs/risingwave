@@ -74,6 +74,7 @@ fn create_hash_join_executor(
         cond,
         "HashJoinExecutor".into(),
         CHUNK_SIZE,
+        false,
         ShutdownToken::empty(),
         MemoryContext::none(),
     ))
