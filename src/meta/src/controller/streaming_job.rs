@@ -139,6 +139,7 @@ impl CatalogController {
                         .and(object::Column::ObjType.eq(ObjectType::Table))
                         .and(streaming_job::Column::JobStatus.ne(JobStatus::Created))
                         .and(
+                            // It means the referring table is just dummy one for altering.
                             object::Column::Oid.not_in_subquery(
                                 Query::select()
                                     .column(table::Column::TableId)
