@@ -7184,9 +7184,9 @@ dependencies = [
 
 [[package]]
 name = "madsim-tokio"
-version = "0.2.26"
+version = "0.2.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ff38ff2533165380bb529828f59da98908866e68966d38acfe2f741f43c4431c"
+checksum = "2f42620135423d9064b71aeca4908e7567eae2b9a0f0651fc1ba9d96a81dd619"
 dependencies = [
  "madsim",
  "spin 0.9.8",
