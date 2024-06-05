@@ -495,19 +495,25 @@ impl HummockManager {
             );
         }
 
+        let mut compaction_group_manager = self.compaction_group_manager.write().await;
+        let mut compaction_groups_txn = compaction_group_manager.start_compaction_groups_txn();
         for group in &compaction_groups {
             let mut pairs = vec![];
             for table_id in group.member_table_ids.clone() {
                 pairs.push((table_id as StateTableId, group.id));
             }
             let group_config = group.compaction_config.clone().unwrap();
-            let mut compaction_group_manager = self.compaction_group_manager.write().await;
-            let insert_trx = compaction_group_manager.insert_config_trx(group.id, group_config);
-            commit_multi_var!(self.meta_store_ref(), insert_trx)?;
+            CompactionGroupManager::insert_config(
+                &mut compaction_groups_txn,
+                group.id,
+                group_config,
+            );
 
             self.register_table_ids(&pairs).await?;
             tracing::info!("Registered table ids {:?}", pairs);
         }
+
+        commit_multi_var!(self.meta_store_ref(), compaction_groups_txn)?;
 
         // Notify that tables have created
         for table in table_catalogs {

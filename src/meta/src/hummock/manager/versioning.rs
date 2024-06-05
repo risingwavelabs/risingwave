@@ -41,6 +41,7 @@ use super::check_cg_write_limit;
 use crate::hummock::error::Result;
 use crate::hummock::manager::checkpoint::HummockVersionCheckpoint;
 use crate::hummock::manager::commit_multi_var;
+use crate::hummock::manager::compaction_group_manager::CompactionGroupManager;
 use crate::hummock::manager::context::ContextInfo;
 use crate::hummock::manager::gc::DeleteObjectTracker;
 use crate::hummock::metrics_utils::{trigger_write_stop_stats, LocalTableMetrics};
@@ -196,9 +197,11 @@ impl HummockManager {
         let target_group_configs = target_group_ids
             .iter()
             .filter_map(|id| {
-                cg_manager
-                    .try_get_compaction_group_config(*id)
-                    .map(|config| (*id, config))
+                CompactionGroupManager::try_get_compaction_group_config(
+                    &cg_manager.compaction_groups,
+                    *id,
+                )
+                .map(|config| (*id, config))
             })
             .collect();
         let mut new_write_limits = calc_new_write_limits(
