@@ -357,13 +357,15 @@ impl InserterInner {
     }
 
     async fn wait_handle(&mut self) -> Result<Vec<u8>> {
-        let res =
-            match tokio::time::timeout(WAIT_HANDDLE_TIMEOUT, self.join_handle.as_mut().unwrap())
-                .await
-            {
-                Ok(res) => res.map_err(|err| SinkError::DorisStarrocksConnect(anyhow!(err)))??,
-                Err(err) => return Err(SinkError::DorisStarrocksConnect(anyhow!(err))),
-            };
+        let res = match tokio::time::timeout(
+            self.stream_load_http_timeout,
+            self.join_handle.as_mut().unwrap(),
+        )
+        .await
+        {
+            Ok(res) => res.map_err(|err| SinkError::DorisStarrocksConnect(anyhow!(err)))??,
+            Err(err) => return Err(SinkError::DorisStarrocksConnect(anyhow!(err))),
+        };
         Ok(res)
     }
 
