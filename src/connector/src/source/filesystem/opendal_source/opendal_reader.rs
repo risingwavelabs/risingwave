@@ -33,7 +33,6 @@ use crate::source::{
     SplitMetaData, SplitReader,
 };
 
-const MAX_CHANNEL_BUFFER_SIZE: usize = 2048;
 const STREAM_READER_CAPACITY: usize = 4096;
 #[derive(Debug, Clone)]
 pub struct OpendalReader<Src: OpendalSource> {

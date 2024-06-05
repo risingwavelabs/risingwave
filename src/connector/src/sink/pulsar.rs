@@ -224,6 +224,7 @@ impl Sink for PulsarSink {
 
 pub struct PulsarSinkWriter {
     formatter: SinkFormatterImpl,
+    #[expect(dead_code)]
     pulsar: Pulsar<TokioExecutor>,
     producer: Producer<TokioExecutor>,
     config: PulsarConfig,
@@ -286,7 +287,7 @@ impl<'w> PulsarPayloadWriter<'w> {
             if retry_num > 0 {
                 tracing::warn!("Failed to send message, at retry no. {retry_num}");
             }
-            match self.producer.send(message.clone()).await {
+            match self.producer.send_non_blocking(message.clone()).await {
                 // If the message is sent successfully,
                 // a SendFuture holding the message receipt
                 // or error after sending is returned

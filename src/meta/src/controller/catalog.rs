@@ -19,7 +19,8 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::catalog::{TableOption, DEFAULT_SCHEMA_NAME, SYSTEM_SCHEMAS};
-use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
+use risingwave_common::hash::ParallelUnitMapping;
+use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont_mut;
 use risingwave_common::{bail, current_cluster_version};
 use risingwave_connector::source::UPSTREAM_SOURCE_KEY;
 use risingwave_meta_model_v2::object::ObjectType;
@@ -27,16 +28,16 @@ use risingwave_meta_model_v2::prelude::*;
 use risingwave_meta_model_v2::table::TableType;
 use risingwave_meta_model_v2::{
     actor, connection, database, fragment, function, index, object, object_dependency, schema,
-    sink, source, streaming_job, subscription, table, user_privilege, view, ActorId,
+    secret, sink, source, streaming_job, subscription, table, user_privilege, view, ActorId,
     ActorUpstreamActors, ColumnCatalogArray, ConnectionId, CreateType, DatabaseId, FragmentId,
     FunctionId, I32Array, IndexId, JobStatus, ObjectId, PrivateLinkService, Property, SchemaId,
-    SinkId, SourceId, StreamNode, StreamSourceInfo, StreamingParallelism, SubscriptionId, TableId,
-    UserId, ViewId,
+    SecretId, SinkId, SourceId, StreamNode, StreamSourceInfo, StreamingParallelism, SubscriptionId,
+    TableId, UserId, ViewId,
 };
 use risingwave_pb::catalog::subscription::SubscriptionState;
 use risingwave_pb::catalog::table::PbTableType;
 use risingwave_pb::catalog::{
-    PbComment, PbConnection, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource,
+    PbComment, PbConnection, PbDatabase, PbFunction, PbIndex, PbSchema, PbSecret, PbSink, PbSource,
     PbSubscription, PbTable, PbView,
 };
 use risingwave_pb::meta::cancel_creating_jobs_request::PbCreatingJobInfo;
@@ -45,7 +46,9 @@ use risingwave_pb::meta::relation::PbRelationInfo;
 use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Info, Operation as NotificationOperation, Operation,
 };
-use risingwave_pb::meta::{PbRelation, PbRelationGroup};
+use risingwave_pb::meta::{
+    FragmentParallelUnitMapping, PbFragmentWorkerSlotMapping, PbRelation, PbRelationGroup,
+};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::FragmentTypeFlag;
 use risingwave_pb::user::PbUserInfo;
@@ -63,10 +66,10 @@ use crate::controller::rename::{alter_relation_rename, alter_relation_rename_ref
 use crate::controller::utils::{
     check_connection_name_duplicate, check_database_name_duplicate,
     check_function_signature_duplicate, check_relation_name_duplicate, check_schema_name_duplicate,
-    ensure_object_id, ensure_object_not_refer, ensure_schema_empty, ensure_user_id,
-    get_fragment_mappings_by_jobs, get_referring_objects, get_referring_objects_cascade,
-    get_user_privilege, list_user_info_by_ids, resolve_source_register_info_for_jobs,
-    PartialObject,
+    check_secret_name_duplicate, ensure_object_id, ensure_object_not_refer, ensure_schema_empty,
+    ensure_user_id, get_fragment_mappings_by_jobs, get_parallel_unit_to_worker_map,
+    get_referring_objects, get_referring_objects_cascade, get_user_privilege,
+    list_user_info_by_ids, resolve_source_register_info_for_jobs, PartialObject,
 };
 use crate::controller::ObjectModel;
 use crate::manager::{Catalog, MetaSrvEnv, NotificationVersion, IGNORED_NOTIFICATION_VERSION};
@@ -275,7 +278,29 @@ impl CatalogController {
             .into_tuple()
             .all(&txn)
             .await?;
+
+        let parallel_unit_to_worker = get_parallel_unit_to_worker_map(&txn).await?;
+
         let fragment_mappings = get_fragment_mappings_by_jobs(&txn, streaming_jobs.clone()).await?;
+
+        let fragment_mappings = fragment_mappings
+            .into_iter()
+            .map(
+                |FragmentParallelUnitMapping {
+                     fragment_id,
+                     mapping,
+                 }| {
+                    PbFragmentWorkerSlotMapping {
+                        fragment_id,
+                        mapping: Some(
+                            ParallelUnitMapping::from_protobuf(&mapping.unwrap())
+                                .to_worker_slot(&parallel_unit_to_worker)
+                                .to_protobuf(),
+                        ),
+                    }
+                },
+            )
+            .collect();
 
         // The schema and objects in the database will be delete cascade.
         let res = Object::delete_by_id(database_id).exec(&txn).await?;
@@ -296,6 +321,7 @@ impl CatalogController {
                 }),
             )
             .await;
+
         self.notify_fragment_mapping(NotificationOperation::Delete, fragment_mappings)
             .await;
         Ok((
@@ -876,7 +902,7 @@ impl CatalogController {
 
                     let mut pb_stream_node = stream_node.to_protobuf();
 
-                    visit_stream_node_cont(&mut pb_stream_node, |node| {
+                    visit_stream_node_cont_mut(&mut pb_stream_node, |node| {
                         if let Some(NodeBody::Union(_)) = node.node_body {
                             node.input.retain_mut(|input| {
                                 if let Some(NodeBody::Merge(merge_node)) = &mut input.node_body
@@ -1069,6 +1095,88 @@ impl CatalogController {
                     database_id: function_obj.database_id.unwrap() as _,
                     ..Default::default()
                 }),
+            )
+            .await;
+        Ok(version)
+    }
+
+    pub async fn create_secret(&self, mut pb_secret: PbSecret) -> MetaResult<NotificationVersion> {
+        let inner = self.inner.write().await;
+        let owner_id = pb_secret.owner as _;
+        let txn = inner.db.begin().await?;
+        ensure_user_id(owner_id, &txn).await?;
+        ensure_object_id(ObjectType::Database, pb_secret.database_id as _, &txn).await?;
+        ensure_object_id(ObjectType::Schema, pb_secret.schema_id as _, &txn).await?;
+        check_secret_name_duplicate(&pb_secret, &txn).await?;
+
+        let secret_obj = Self::create_object(
+            &txn,
+            ObjectType::Secret,
+            owner_id,
+            Some(pb_secret.database_id as _),
+            Some(pb_secret.schema_id as _),
+        )
+        .await?;
+        pb_secret.id = secret_obj.oid as _;
+        let secret: secret::ActiveModel = pb_secret.clone().into();
+        Secret::insert(secret).exec(&txn).await?;
+
+        txn.commit().await?;
+
+        let version = self
+            .notify_frontend(
+                NotificationOperation::Add,
+                NotificationInfo::Secret(pb_secret),
+            )
+            .await;
+        Ok(version)
+    }
+
+    pub async fn get_secret_by_id(&self, secret_id: SecretId) -> MetaResult<PbSecret> {
+        let inner = self.inner.read().await;
+        let (secret, obj) = Secret::find_by_id(secret_id)
+            .find_also_related(Object)
+            .one(&inner.db)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("secret", secret_id))?;
+        Ok(ObjectModel(secret, obj.unwrap()).into())
+    }
+
+    pub async fn drop_secret(&self, secret_id: SecretId) -> MetaResult<NotificationVersion> {
+        let inner = self.inner.write().await;
+        let txn = inner.db.begin().await?;
+        let (secret, secret_obj) = Secret::find_by_id(secret_id)
+            .find_also_related(Object)
+            .one(&txn)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("secret", secret_id))?;
+        ensure_object_not_refer(ObjectType::Secret, secret_id, &txn).await?;
+
+        // Find affect users with privileges on the connection.
+        let to_update_user_ids: Vec<UserId> = UserPrivilege::find()
+            .select_only()
+            .distinct()
+            .column(user_privilege::Column::UserId)
+            .filter(user_privilege::Column::Oid.eq(secret_id))
+            .into_tuple()
+            .all(&txn)
+            .await?;
+
+        let res = Object::delete_by_id(secret_id).exec(&txn).await?;
+        if res.rows_affected == 0 {
+            return Err(MetaError::catalog_id_not_found("secret", secret_id));
+        }
+        let user_infos = list_user_info_by_ids(to_update_user_ids, &txn).await?;
+
+        txn.commit().await?;
+
+        let pb_secret: PbSecret = ObjectModel(secret, secret_obj.unwrap()).into();
+
+        self.notify_users_update(user_infos).await;
+        let version = self
+            .notify_frontend(
+                NotificationOperation::Delete,
+                NotificationInfo::Secret(pb_secret),
             )
             .await;
         Ok(version)
@@ -1973,6 +2081,7 @@ impl CatalogController {
 
         let (source_fragments, removed_actors) =
             resolve_source_register_info_for_jobs(&txn, to_drop_streaming_jobs.clone()).await?;
+
         let fragment_mappings =
             get_fragment_mappings_by_jobs(&txn, to_drop_streaming_jobs.clone()).await?;
 
@@ -1998,6 +2107,8 @@ impl CatalogController {
             ));
         }
         let user_infos = list_user_info_by_ids(to_update_user_ids, &txn).await?;
+
+        let parallel_unit_to_worker = get_parallel_unit_to_worker_map(&txn).await?;
 
         txn.commit().await?;
 
@@ -2073,6 +2184,26 @@ impl CatalogController {
                 NotificationInfo::RelationGroup(PbRelationGroup { relations }),
             )
             .await;
+
+        let fragment_mappings = fragment_mappings
+            .into_iter()
+            .map(
+                |FragmentParallelUnitMapping {
+                     fragment_id,
+                     mapping,
+                 }| {
+                    PbFragmentWorkerSlotMapping {
+                        fragment_id,
+                        mapping: Some(
+                            ParallelUnitMapping::from_protobuf(&mapping.unwrap())
+                                .to_worker_slot(&parallel_unit_to_worker)
+                                .to_protobuf(),
+                        ),
+                    }
+                },
+            )
+            .collect();
+
         self.notify_fragment_mapping(NotificationOperation::Delete, fragment_mappings)
             .await;
 
@@ -2709,11 +2840,9 @@ impl CatalogController {
         let inner = self.inner.read().await;
 
         // created table ids.
-        let mut table_ids: Vec<TableId> = Table::find()
+        let mut table_ids: Vec<TableId> = StreamingJob::find()
             .select_only()
-            .column(table::Column::TableId)
-            .join(JoinType::LeftJoin, table::Relation::Object1.def())
-            .join(JoinType::LeftJoin, object::Relation::StreamingJob.def())
+            .column(streaming_job::Column::JobId)
             .filter(streaming_job::Column::JobStatus.eq(JobStatus::Created))
             .into_tuple()
             .all(&inner.db)
@@ -2757,6 +2886,7 @@ impl CatalogControllerInner {
         let views = self.list_views().await?;
         let functions = self.list_functions().await?;
         let connections = self.list_connections().await?;
+        let secrets = self.list_secrets().await?;
 
         let users = self.list_users().await?;
 
@@ -2772,6 +2902,7 @@ impl CatalogControllerInner {
                 views,
                 functions,
                 connections,
+                secrets,
             ),
             users,
         ))
@@ -2987,6 +3118,17 @@ impl CatalogControllerInner {
         Ok(conn_objs
             .into_iter()
             .map(|(conn, obj)| ObjectModel(conn, obj.unwrap()).into())
+            .collect())
+    }
+
+    async fn list_secrets(&self) -> MetaResult<Vec<PbSecret>> {
+        let secret_objs = Secret::find()
+            .find_also_related(Object)
+            .all(&self.db)
+            .await?;
+        Ok(secret_objs
+            .into_iter()
+            .map(|(secret, obj)| ObjectModel(secret, obj.unwrap()).into())
             .collect())
     }
 

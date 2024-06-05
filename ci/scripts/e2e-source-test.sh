@@ -31,7 +31,11 @@ buildkite-agent artifact download risingwave-connector.tar.gz ./
 mkdir ./connector-node
 tar xf ./risingwave-connector.tar.gz -C ./connector-node
 
+echo "--- Install dependencies"
+python3 -m pip install --break-system-packages requests protobuf fastavro confluent_kafka jsonschema
+
 echo "--- e2e, inline test"
+RUST_LOG="debug,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 risedev ci-start ci-inline-source-test
 risedev slt './e2e_test/source_inline/**/*.slt'
 echo "--- Kill cluster"
@@ -55,7 +59,7 @@ createdb
 psql < ./e2e_test/source/cdc/postgres_cdc.sql
 
 echo "--- starting risingwave cluster"
-RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
+RUST_LOG="debug,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 risedev ci-start ci-1cn-1fe-with-recovery
 
 echo "--- mongodb cdc test"
@@ -135,12 +139,11 @@ echo "--- e2e, ci-1cn-1fe, protobuf schema registry"
 export RISINGWAVE_CI=true
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 risedev ci-start ci-1cn-1fe
-python3 -m pip install --break-system-packages requests protobuf confluent-kafka
-python3 e2e_test/schema_registry/pb.py "message_queue:29092" "http://message_queue:8081" "sr_pb_test" 20 user
+python3 e2e_test/schema_registry/pb.py "message_queue:29092" "http://schemaregistry:8082" "sr_pb_test" 20 user
 echo "make sure google/protobuf/source_context.proto is NOT in schema registry"
-curl --silent 'http://message_queue:8081/subjects'; echo
-# curl --silent --head -X GET 'http://message_queue:8081/subjects/google%2Fprotobuf%2Fsource_context.proto/versions' | grep 404
-curl --silent 'http://message_queue:8081/subjects' | grep -v 'google/protobuf/source_context.proto'
+curl --silent 'http://schemaregistry:8082/subjects'; echo
+# curl --silent --head -X GET 'http://schemaregistry:8082/subjects/google%2Fprotobuf%2Fsource_context.proto/versions' | grep 404
+curl --silent 'http://schemaregistry:8082/subjects' | grep -v 'google/protobuf/source_context.proto'
 risedev slt './e2e_test/schema_registry/pb.slt'
 risedev slt './e2e_test/schema_registry/alter_sr.slt'
 

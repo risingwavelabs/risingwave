@@ -21,7 +21,7 @@ use thiserror_ext::AsReport;
 
 use super::{Access, AccessResult};
 use crate::parser::from_protobuf_value;
-use crate::parser::unified::{uncategorized, AccessError};
+use crate::parser::unified::uncategorized;
 
 pub struct ProtobufAccess {
     message: DynamicMessage,
@@ -38,7 +38,7 @@ impl ProtobufAccess {
 }
 
 impl Access for ProtobufAccess {
-    fn access(&self, path: &[&str], _type_expected: Option<&DataType>) -> AccessResult {
+    fn access(&self, path: &[&str], _type_expected: &DataType) -> AccessResult {
         debug_assert_eq!(1, path.len());
         let field_desc = self
             .message

@@ -28,6 +28,7 @@ pub struct TableFunctionExecutor {
     schema: Schema,
     identity: String,
     table_function: BoxedTableFunction,
+    #[expect(dead_code)]
     chunk_size: usize,
 }
 
