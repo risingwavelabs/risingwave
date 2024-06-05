@@ -401,24 +401,32 @@ impl SourceStreamChunkRowWriter<'_> {
                             .unwrap(), // handled all match cases in internal match, unwrap is safe
                     ));
                 }
+
                 (
-                    _,
+                    _, // for cdc tables
                     &Some(ref col @ AdditionalColumnType::DatabaseName(_))
-                    | &Some(ref col @ AdditionalColumnType::TableName(_))
-                    | &Some(ref col @ AdditionalColumnType::Timestamp(_)),
-                ) => match self.row_meta {
-                    Some(row_meta) => {
-                        if let SourceMeta::DebeziumCdc(cdc_meta) = row_meta.meta {
-                            Ok(A::output_for(
-                                extract_cdc_meta_column(cdc_meta, col, desc.name.as_str())?
-                                    .unwrap_or(None),
-                            ))
-                        } else {
-                            Ok(A::output_for(
-                                extreact_timestamp_from_meta(row_meta.meta).unwrap_or(None),
-                            ))
+                    | &Some(ref col @ AdditionalColumnType::TableName(_)),
+                ) => {
+                    match self.row_meta {
+                        Some(row_meta) => {
+                            if let SourceMeta::DebeziumCdc(cdc_meta) = row_meta.meta {
+                                Ok(A::output_for(
+                                    extract_cdc_meta_column(cdc_meta, col, desc.name.as_str())?
+                                        .unwrap_or(None),
+                                ))
+                            } else {
+                                Err(AccessError::Uncategorized {
+                                    message: "CDC metadata not found in the message".to_string(),
+                                })
+                            }
                         }
+                        None => parse_field(desc), // parse from payload
                     }
+                }
+                (_, &Some(AdditionalColumnType::Timestamp(_))) => match self.row_meta {
+                    Some(row_meta) => Ok(A::output_for(
+                        extreact_timestamp_from_meta(row_meta.meta).unwrap_or(None),
+                    )),
                     None => parse_field(desc), // parse from payload
                 },
                 (_, &Some(AdditionalColumnType::CollectionName(_))) => {
