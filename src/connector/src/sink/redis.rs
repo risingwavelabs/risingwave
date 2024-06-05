@@ -378,6 +378,7 @@ impl AsyncTruncateSinkWriter for RedisSinkWriter {
 #[cfg(test)]
 mod test {
     use core::panic;
+    use std::collections::BTreeMap;
 
     use rdkafka::message::FromBytes;
     use risingwave_common::array::{Array, I32Array, Op, Utf8Array};
@@ -409,7 +410,7 @@ mod test {
         let format_desc = SinkFormatDesc {
             format: SinkFormat::AppendOnly,
             encode: SinkEncode::Json,
-            options: HashMap::default(),
+            options: BTreeMap::default(),
             key_encode: None,
         };
 
@@ -477,16 +478,16 @@ mod test {
             },
         ]);
 
-        let mut hash_map = HashMap::default();
-        hash_map.insert(KEY_FORMAT.to_string(), "key-{id}".to_string());
-        hash_map.insert(
+        let mut btree_map = BTreeMap::default();
+        btree_map.insert(KEY_FORMAT.to_string(), "key-{id}".to_string());
+        btree_map.insert(
             VALUE_FORMAT.to_string(),
             "values:{id:{id},name:{name}}".to_string(),
         );
         let format_desc = SinkFormatDesc {
             format: SinkFormat::AppendOnly,
             encode: SinkEncode::Template,
-            options: hash_map,
+            options: btree_map,
             key_encode: None,
         };
 

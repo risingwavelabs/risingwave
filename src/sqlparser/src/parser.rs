@@ -3480,10 +3480,6 @@ impl Parser<'_> {
                     Some('\'') => Ok(Value::SingleQuotedString(w.value)),
                     _ => self.expected_at(checkpoint, "A value")?,
                 },
-                Keyword::REF => {
-                    self.expect_keyword(Keyword::SECRET)?;
-                    Ok(Value::Ref(self.parse_object_name()?))
-                }
                 _ => self.expected_at(checkpoint, "a concrete value"),
             },
             Token::Number(ref n) => Ok(Value::Number(n.clone())),
