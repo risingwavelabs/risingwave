@@ -180,12 +180,16 @@ impl SplitReader for PulsarBrokerReader {
                     )
                 } else {
                     builder.with_options(
-                        ConsumerOptions::default().with_initial_position(InitialPosition::Earliest),
+                        ConsumerOptions::default()
+                            .with_initial_position(InitialPosition::Earliest)
+                            .durable(false),
                     )
                 }
             }
             PulsarEnumeratorOffset::Latest => builder.with_options(
-                ConsumerOptions::default().with_initial_position(InitialPosition::Latest),
+                ConsumerOptions::default()
+                    .with_initial_position(InitialPosition::Latest)
+                    .durable(false),
             ),
             PulsarEnumeratorOffset::MessageId(m) => {
                 if topic.starts_with("non-persistent://") {
