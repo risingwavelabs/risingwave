@@ -446,6 +446,7 @@ pub(crate) async fn bind_columns_from_source(
                 // Parse the value but throw it away.
                 // It would be too late to report error in `SpecificParserConfig::new`,
                 // which leads to recovery loop.
+                // TODO: rely on SpecificParserConfig::new to validate, like Avro
                 TimestamptzHandling::from_options(&format_encode_options_to_consume)
                     .map_err(|err| InvalidInputSyntax(err.message))?;
                 try_consume_string_from_options(
