@@ -103,7 +103,7 @@ pub(super) fn merge_rows_frames(rows_frames: &[&RowsFrameBounds]) -> RowsFrameBo
 ///
 /// More examples can be found in the comment inside [`find_curr_for_rows_frame`].
 pub(super) fn find_first_curr_for_rows_frame<'cache>(
-    frame_bounds: &'_ RowsFrameBounds,
+    frame_bounds: &RowsFrameBounds,
     part_with_delta: DeltaBTreeMap<'cache, CacheKey, OwnedRow>,
     delta_key: &'cache CacheKey,
 ) -> &'cache CacheKey {
@@ -116,7 +116,7 @@ pub(super) fn find_first_curr_for_rows_frame<'cache>(
 ///
 /// This is the symmetric function of [`find_first_curr_for_rows_frame`].
 pub(super) fn find_last_curr_for_rows_frame<'cache>(
-    frame_bounds: &'_ RowsFrameBounds,
+    frame_bounds: &RowsFrameBounds,
     part_with_delta: DeltaBTreeMap<'cache, CacheKey, OwnedRow>,
     delta_key: &'cache CacheKey,
 ) -> &'cache CacheKey {
@@ -127,7 +127,7 @@ pub(super) fn find_last_curr_for_rows_frame<'cache>(
 /// to some CURRENT ROW, find the cache key corresponding to the start row in
 /// that frame.
 pub(super) fn find_frame_start_for_rows_frame<'cache>(
-    frame_bounds: &'_ RowsFrameBounds,
+    frame_bounds: &RowsFrameBounds,
     part_with_delta: DeltaBTreeMap<'cache, CacheKey, OwnedRow>,
     curr_key: &'cache CacheKey,
 ) -> &'cache CacheKey {
@@ -140,7 +140,7 @@ pub(super) fn find_frame_start_for_rows_frame<'cache>(
 ///
 /// This is the symmetric function of [`find_frame_start_for_rows_frame`].
 pub(super) fn find_frame_end_for_rows_frame<'cache>(
-    frame_bounds: &'_ RowsFrameBounds,
+    frame_bounds: &RowsFrameBounds,
     part_with_delta: DeltaBTreeMap<'cache, CacheKey, OwnedRow>,
     curr_key: &'cache CacheKey,
 ) -> &'cache CacheKey {
@@ -217,7 +217,7 @@ pub(super) fn find_right_for_range_frames<'cache>(
 // -------------------------- ↑ PUBLIC INTERFACE ↑ --------------------------
 
 fn find_curr_for_rows_frame<'cache, const LEFT: bool>(
-    frame_bounds: &'_ RowsFrameBounds,
+    frame_bounds: &RowsFrameBounds,
     part_with_delta: DeltaBTreeMap<'cache, CacheKey, OwnedRow>,
     delta_key: &'cache CacheKey,
 ) -> &'cache CacheKey {
@@ -329,7 +329,7 @@ fn find_curr_for_rows_frame<'cache, const LEFT: bool>(
 }
 
 fn find_boundary_for_rows_frame<'cache, const LEFT: bool>(
-    frame_bounds: &'_ RowsFrameBounds,
+    frame_bounds: &RowsFrameBounds,
     part_with_delta: DeltaBTreeMap<'cache, CacheKey, OwnedRow>,
     curr_key: &'cache CacheKey,
 ) -> &'cache CacheKey {

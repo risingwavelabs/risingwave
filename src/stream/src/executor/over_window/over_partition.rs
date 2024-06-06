@@ -255,19 +255,19 @@ pub(super) struct OverPartitionStats {
 ///  included for computing the new state.
 #[derive(Debug, Educe)]
 #[educe(Clone, Copy)]
-pub(super) struct AffectedRange<'cache> {
-    pub first_frame_start: &'cache CacheKey,
-    pub first_curr_key: &'cache CacheKey,
-    pub last_curr_key: &'cache CacheKey,
-    pub last_frame_end: &'cache CacheKey,
+pub(super) struct AffectedRange<'a> {
+    pub first_frame_start: &'a CacheKey,
+    pub first_curr_key: &'a CacheKey,
+    pub last_curr_key: &'a CacheKey,
+    pub last_frame_end: &'a CacheKey,
 }
 
-impl<'cache> AffectedRange<'cache> {
+impl<'a> AffectedRange<'a> {
     fn new(
-        first_frame_start: &'cache CacheKey,
-        first_curr_key: &'cache CacheKey,
-        last_curr_key: &'cache CacheKey,
-        last_frame_end: &'cache CacheKey,
+        first_frame_start: &'a CacheKey,
+        first_curr_key: &'a CacheKey,
+        last_curr_key: &'a CacheKey,
+        last_frame_end: &'a CacheKey,
     ) -> Self {
         Self {
             first_frame_start,
@@ -436,16 +436,16 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
     /// Find all ranges in the partition that are affected by the given delta.
     /// The returned ranges are guaranteed to be sorted and non-overlapping. All keys in the ranges
     /// are guaranteed to be cached, which means they should be [`Sentinelled::Normal`]s.
-    pub async fn find_affected_ranges<'s, 'cache>(
-        &'s mut self,
-        table: &'_ StateTable<S>,
-        delta: &'cache PartitionDelta,
+    pub async fn find_affected_ranges<'delta>(
+        &mut self,
+        table: &StateTable<S>,
+        delta: &'delta PartitionDelta,
     ) -> StreamExecutorResult<(
-        DeltaBTreeMap<'cache, CacheKey, OwnedRow>,
-        Vec<AffectedRange<'cache>>,
+        DeltaBTreeMap<'delta, CacheKey, OwnedRow>,
+        Vec<AffectedRange<'delta>>,
     )>
     where
-        's: 'cache,
+        'a: 'delta,
     {
         let delta_first = delta.first_key_value().unwrap().0.as_normal_expect();
         let delta_last = delta.last_key_value().unwrap().0.as_normal_expect();
@@ -472,7 +472,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
             // `Self::find_affected_ranges_readonly` will return `Ok`.
 
             // SAFETY: Here we shortly borrow the range cache and turn the reference into a
-            // `'cache` one to bypass the borrow checker. This is safe because we only return
+            // `'delta` one to bypass the borrow checker. This is safe because we only return
             // the reference once we don't need to do any further mutation.
             let cache_inner = unsafe { &*(self.range_cache.inner() as *const _) };
             let part_with_delta = DeltaBTreeMap::new(cache_inner, delta);
@@ -510,11 +510,11 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
     /// TODO(rc): Currently at most one range will be in the result vector. Ideally we should
     /// recognize uncontinuous changes in the delta and find multiple ranges, but that will be
     /// too complex for now.
-    fn find_affected_ranges_readonly<'cache>(
-        &'_ self,
-        part_with_delta: DeltaBTreeMap<'cache, CacheKey, OwnedRow>,
+    fn find_affected_ranges_readonly<'delta>(
+        &self,
+        part_with_delta: DeltaBTreeMap<'delta, CacheKey, OwnedRow>,
         range_frame_logical_curr: Option<&(Sentinelled<Datum>, Sentinelled<Datum>)>,
-    ) -> std::result::Result<Vec<AffectedRange<'cache>>, (bool, bool)> {
+    ) -> std::result::Result<Vec<AffectedRange<'delta>>, (bool, bool)> {
         if part_with_delta.first_key().is_none() {
             // nothing is left after applying the delta, meaning all entries are deleted
             return Ok(vec![]);
