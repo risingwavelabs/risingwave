@@ -24,6 +24,7 @@ mod avro;
 mod json;
 mod proto;
 pub mod template;
+pub mod text;
 
 pub use avro::{AvroEncoder, AvroHeader};
 pub use json::JsonEncoder;
@@ -144,8 +145,6 @@ pub enum CustomJsonType {
     Es,
     // starrocks' need jsonb is struct
     StarRocks,
-    // bigquery need null array -> []
-    BigQuery,
     None,
 }
 

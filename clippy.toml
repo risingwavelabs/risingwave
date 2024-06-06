@@ -33,7 +33,8 @@ doc-valid-idents = [
     "PostgreSQL",
     "MySQL",
     "TopN",
-    "VNode"
+    "VNode",
+    "IPv4",
 ]
 avoid-breaking-exported-api = false
 upper-case-acronyms-aggressive = true

@@ -70,7 +70,7 @@ download-and-decompress-artifact e2e_test_generated ./
 download-and-decompress-artifact risingwave_e2e_extended_mode_test-"$profile" target/debug/
 mkdir -p e2e_test/udf/wasm/target/wasm32-wasi/release/
 buildkite-agent artifact download udf.wasm e2e_test/udf/wasm/target/wasm32-wasi/release/
-buildkite-agent artifact download risingwave-udf-example.jar ./
+buildkite-agent artifact download udf.jar ./
 mv target/debug/risingwave_e2e_extended_mode_test-"$profile" target/debug/risingwave_e2e_extended_mode_test
 
 chmod +x ./target/debug/risingwave_e2e_extended_mode_test
@@ -80,6 +80,7 @@ RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=i
 cluster_start
 # Please make sure the regression is expected before increasing the timeout.
 sqllogictest -p 4566 -d dev './e2e_test/streaming/**/*.slt' --junit "streaming-${profile}"
+sqllogictest -p 4566 -d dev './e2e_test/backfill/sink/different_pk_and_dist_key.slt'
 
 echo "--- Kill cluster"
 cluster_stop
@@ -96,10 +97,16 @@ sqllogictest -p 4566 -d dev './e2e_test/ttl/ttl.slt'
 sqllogictest -p 4566 -d dev './e2e_test/database/prepare.slt'
 sqllogictest -p 4566 -d test './e2e_test/database/test.slt'
 
+echo "--- e2e, $mode, subscription"
+python3 -m pip install --break-system-packages psycopg2-binary
+sqllogictest -p 4566 -d dev './e2e_test/subscription/check_sql_statement.slt'
+python3 ./e2e_test/subscription/main.py
+
 echo "--- e2e, $mode, Apache Superset"
 sqllogictest -p 4566 -d dev './e2e_test/superset/*.slt' --junit "batch-${profile}"
 
 echo "--- e2e, $mode, external python udf"
+python3 -m pip install --break-system-packages arrow-udf==0.2.1
 python3 e2e_test/udf/test.py &
 sleep 1
 sqllogictest -p 4566 -d dev './e2e_test/udf/external_udf.slt'
@@ -107,21 +114,22 @@ pkill python3
 
 sqllogictest -p 4566 -d dev './e2e_test/udf/alter_function.slt'
 sqllogictest -p 4566 -d dev './e2e_test/udf/graceful_shutdown_python.slt'
-sqllogictest -p 4566 -d dev './e2e_test/udf/always_retry_python.slt'
 # FIXME: flaky test
 # sqllogictest -p 4566 -d dev './e2e_test/udf/retry_python.slt'
 
 echo "--- e2e, $mode, external java udf"
-java -jar risingwave-udf-example.jar &
+java -jar udf.jar &
 sleep 1
 sqllogictest -p 4566 -d dev './e2e_test/udf/external_udf.slt'
 pkill java
 
 echo "--- e2e, $mode, embedded udf"
+python3 -m pip install --break-system-packages flask waitress
 sqllogictest -p 4566 -d dev './e2e_test/udf/wasm_udf.slt'
 sqllogictest -p 4566 -d dev './e2e_test/udf/rust_udf.slt'
 sqllogictest -p 4566 -d dev './e2e_test/udf/js_udf.slt'
 sqllogictest -p 4566 -d dev './e2e_test/udf/python_udf.slt'
+sqllogictest -p 4566 -d dev './e2e_test/udf/deno_udf.slt'
 
 echo "--- Kill cluster"
 cluster_stop
@@ -134,14 +142,17 @@ sqllogictest -p 4566 -d dev './e2e_test/generated/**/*.slt' --junit "generated-$
 echo "--- Kill cluster"
 cluster_stop
 
-echo "--- e2e, $mode, error ui"
-RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
-cluster_start
-sqllogictest -p 4566 -d dev './e2e_test/error_ui/simple/**/*.slt'
-sqllogictest -p 4566 -d dev -e postgres-extended './e2e_test/error_ui/extended/**/*.slt'
+# only run if mode is not single-node or standalone
+if [[ "$mode" != "single-node" && "$mode" != "standalone" ]]; then
+  echo "--- e2e, ci-3cn-1fe-with-recovery, error ui"
+  RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
+  risedev ci-start ci-3cn-1fe-with-recovery
+  sqllogictest -p 4566 -d dev './e2e_test/error_ui/simple/**/*.slt'
+  sqllogictest -p 4566 -d dev -e postgres-extended './e2e_test/error_ui/extended/**/*.slt'
 
-echo "--- Kill cluster"
-cluster_stop
+  echo "--- Kill cluster"
+  risedev ci-kill
+fi
 
 echo "--- e2e, $mode, extended query"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
@@ -169,7 +180,7 @@ if [[ "$RUN_COMPACTION" -eq "1" ]]; then
 
     # Poll the current version id until we have around 100 version deltas
     delta_log_cnt=0
-    while [ $delta_log_cnt -le 90 ]
+    while [ "$delta_log_cnt" -le 90 ]
     do
         delta_log_cnt="$(./target/debug/risingwave risectl hummock list-version --verbose | grep -w '^ *id:' | grep -o '[0-9]\+' | head -n 1)"
         echo "Current version $delta_log_cnt"

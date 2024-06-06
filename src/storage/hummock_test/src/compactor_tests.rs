@@ -17,11 +17,10 @@ pub(crate) mod tests {
 
     use std::collections::{BTreeMap, BTreeSet, VecDeque};
     use std::ops::Bound;
-    use std::sync::atomic::AtomicU32;
     use std::sync::Arc;
 
     use bytes::{BufMut, Bytes, BytesMut};
-    use foyer::memory::CacheContext;
+    use foyer::CacheContext;
     use itertools::Itertools;
     use rand::{Rng, RngCore, SeedableRng};
     use risingwave_common::buffer::BitmapBuilder;
@@ -104,7 +103,7 @@ pub(crate) mod tests {
             write_conflict_detection_enabled: true,
             ..Default::default()
         });
-        let sstable_store = mock_sstable_store();
+        let sstable_store = mock_sstable_store().await;
 
         let hummock = GlobalHummockStorage::for_test(
             options,
@@ -138,7 +137,7 @@ pub(crate) mod tests {
             write_conflict_detection_enabled: true,
             ..Default::default()
         });
-        let sstable_store = mock_sstable_store();
+        let sstable_store = mock_sstable_store().await;
 
         GlobalHummockStorage::for_test(
             options,
@@ -186,13 +185,9 @@ pub(crate) mod tests {
             } else {
                 local.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
             }
-            let ssts = storage
-                .seal_and_sync_epoch(epoch)
-                .await
-                .unwrap()
-                .uncommitted_ssts;
+            let res = storage.seal_and_sync_epoch(epoch).await.unwrap();
 
-            hummock_meta_client.commit_epoch(epoch, ssts).await.unwrap();
+            hummock_meta_client.commit_epoch(epoch, res).await.unwrap();
         }
     }
 
@@ -204,12 +199,6 @@ pub(crate) mod tests {
         storage_opts: Arc<StorageOpts>,
         sstable_store: SstableStoreRef,
     ) -> CompactorContext {
-        let compaction_executor = Arc::new(CompactionExecutor::new(Some(1)));
-        let max_task_parallelism = Arc::new(AtomicU32::new(
-            (compaction_executor.worker_num() as f32 * storage_opts.compactor_max_task_multiplier)
-                .ceil() as u32,
-        ));
-
         CompactorContext {
             storage_opts,
             sstable_store,
@@ -219,8 +208,6 @@ pub(crate) mod tests {
             memory_limiter: MemoryLimiter::unlimit(),
             task_progress_manager: Default::default(),
             await_tree_reg: None,
-            running_task_parallelism: Arc::new(AtomicU32::new(0)),
-            max_task_parallelism,
         }
     }
 
@@ -537,12 +524,8 @@ pub(crate) mod tests {
         storage: &HummockStorage,
         epoch: u64,
     ) {
-        let ssts = storage
-            .seal_and_sync_epoch(epoch)
-            .await
-            .unwrap()
-            .uncommitted_ssts;
-        hummock_meta_client.commit_epoch(epoch, ssts).await.unwrap();
+        let res = storage.seal_and_sync_epoch(epoch).await.unwrap();
+        hummock_meta_client.commit_epoch(epoch, res).await.unwrap();
     }
 
     async fn prepare_data(
@@ -766,12 +749,8 @@ pub(crate) mod tests {
             storage.seal_current_epoch(next_epoch, SealCurrentEpochOptions::for_test());
             other.seal_current_epoch(next_epoch, SealCurrentEpochOptions::for_test());
 
-            let ssts = global_storage
-                .seal_and_sync_epoch(epoch)
-                .await
-                .unwrap()
-                .uncommitted_ssts;
-            hummock_meta_client.commit_epoch(epoch, ssts).await.unwrap();
+            let res = global_storage.seal_and_sync_epoch(epoch).await.unwrap();
+            hummock_meta_client.commit_epoch(epoch, res).await.unwrap();
         }
 
         // Mimic dropping table
@@ -959,12 +938,8 @@ pub(crate) mod tests {
             local.flush().await.unwrap();
             local.seal_current_epoch(next_epoch, SealCurrentEpochOptions::for_test());
 
-            let ssts = storage
-                .seal_and_sync_epoch(epoch)
-                .await
-                .unwrap()
-                .uncommitted_ssts;
-            hummock_meta_client.commit_epoch(epoch, ssts).await.unwrap();
+            let res = storage.seal_and_sync_epoch(epoch).await.unwrap();
+            hummock_meta_client.commit_epoch(epoch, res).await.unwrap();
         }
 
         let manual_compcation_option = ManualCompactionOption {
@@ -1158,12 +1133,8 @@ pub(crate) mod tests {
                 .unwrap();
             local.flush().await.unwrap();
             local.seal_current_epoch(next_epoch, SealCurrentEpochOptions::for_test());
-            let ssts = storage
-                .seal_and_sync_epoch(epoch)
-                .await
-                .unwrap()
-                .uncommitted_ssts;
-            hummock_meta_client.commit_epoch(epoch, ssts).await.unwrap();
+            let res = storage.seal_and_sync_epoch(epoch).await.unwrap();
+            hummock_meta_client.commit_epoch(epoch, res).await.unwrap();
         }
 
         let manual_compcation_option = ManualCompactionOption {

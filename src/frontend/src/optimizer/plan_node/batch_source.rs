@@ -56,10 +56,6 @@ impl BatchSource {
         self.core.catalog.clone()
     }
 
-    pub fn kafka_timestamp_range_value(&self) -> (Option<i64>, Option<i64>) {
-        self.core.kafka_timestamp_range_value()
-    }
-
     pub fn as_of(&self) -> Option<AsOf> {
         self.core.as_of.clone()
     }
@@ -83,7 +79,6 @@ impl Distill for BatchSource {
         let mut fields = vec![
             ("source", src),
             ("columns", column_names_pretty(self.schema())),
-            ("filter", Pretty::debug(&self.kafka_timestamp_range_value())),
         ];
         if let Some(as_of) = &self.core.as_of {
             fields.push(("as_of", Pretty::debug(as_of)));

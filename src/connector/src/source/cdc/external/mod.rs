@@ -67,15 +67,17 @@ impl CdcTableType {
 
     pub async fn create_table_reader(
         &self,
-        with_properties: HashMap<String, String>,
+        config: ExternalTableConfig,
         schema: Schema,
+        pk_indices: Vec<usize>,
+        scan_limit: u32,
     ) -> ConnectorResult<ExternalTableReaderImpl> {
         match self {
             Self::MySql => Ok(ExternalTableReaderImpl::MySql(
-                MySqlExternalTableReader::new(with_properties, schema).await?,
+                MySqlExternalTableReader::new(config, schema).await?,
             )),
             Self::Postgres => Ok(ExternalTableReaderImpl::Postgres(
-                PostgresExternalTableReader::new(with_properties, schema).await?,
+                PostgresExternalTableReader::new(config, schema, pk_indices, scan_limit).await?,
             )),
             _ => bail!("invalid external table type: {:?}", *self),
         }
@@ -94,13 +96,6 @@ pub const SCHEMA_NAME_KEY: &str = "schema.name";
 pub const DATABASE_NAME_KEY: &str = "database.name";
 
 impl SchemaTableName {
-    pub fn new(schema_name: String, table_name: String) -> Self {
-        Self {
-            schema_name,
-            table_name,
-        }
-    }
-
     pub fn from_properties(properties: &HashMap<String, String>) -> Self {
         let table_type = CdcTableType::from_properties(properties);
         let table_name = properties.get(TABLE_NAME_KEY).cloned().unwrap_or_default();
@@ -207,8 +202,6 @@ impl MySqlOffset {
 pub type CdcOffsetParseFunc = Box<dyn Fn(&str) -> ConnectorResult<CdcOffset> + Send>;
 
 pub trait ExternalTableReader {
-    fn get_normalized_table_name(&self, table_name: &SchemaTableName) -> String;
-
     async fn current_cdc_offset(&self) -> ConnectorResult<CdcOffset>;
 
     fn snapshot_read(
@@ -220,16 +213,13 @@ pub trait ExternalTableReader {
     ) -> BoxStream<'_, ConnectorResult<OwnedRow>>;
 }
 
-#[derive(Debug)]
 pub enum ExternalTableReaderImpl {
     MySql(MySqlExternalTableReader),
     Postgres(PostgresExternalTableReader),
     Mock(MockExternalTableReader),
 }
 
-#[derive(Debug)]
 pub struct MySqlExternalTableReader {
-    config: ExternalTableConfig,
     rw_schema: Schema,
     field_names: String,
     // use mutex to provide shared mutable access to the connection
@@ -250,8 +240,8 @@ pub struct ExternalTableConfig {
     #[serde(rename = "table.name")]
     pub table: String,
     /// `ssl.mode` specifies the SSL/TLS encryption level for secure communication with Postgres.
-    /// Choices include `disable`, `prefer`, and `require`.
-    /// This field is optional. `prefer` is used if not specified.
+    /// Choices include `disabled`, `preferred`, and `required`.
+    /// This field is optional.
     #[serde(rename = "ssl.mode", default = "Default::default")]
     pub sslmode: SslMode,
 }
@@ -259,33 +249,29 @@ pub struct ExternalTableConfig {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SslMode {
-    Disable,
-    Prefer,
-    Require,
+    Disabled,
+    Preferred,
+    Required,
 }
 
 impl Default for SslMode {
     fn default() -> Self {
-        Self::Prefer
+        // default to `disabled` for backward compatibility
+        Self::Disabled
     }
 }
 
 impl fmt::Display for SslMode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
-            SslMode::Disable => "disable",
-            SslMode::Prefer => "prefer",
-            SslMode::Require => "require",
+            SslMode::Disabled => "disabled",
+            SslMode::Preferred => "preferred",
+            SslMode::Required => "required",
         })
     }
 }
 
 impl ExternalTableReader for MySqlExternalTableReader {
-    fn get_normalized_table_name(&self, table_name: &SchemaTableName) -> String {
-        // schema name is the database name in mysql
-        format!("`{}`.`{}`", table_name.schema_name, table_name.table_name)
-    }
-
     async fn current_cdc_offset(&self) -> ConnectorResult<CdcOffset> {
         let mut conn = self.conn.lock().await;
 
@@ -315,23 +301,25 @@ impl ExternalTableReader for MySqlExternalTableReader {
 }
 
 impl MySqlExternalTableReader {
-    pub async fn new(
-        with_properties: HashMap<String, String>,
-        rw_schema: Schema,
-    ) -> ConnectorResult<Self> {
-        tracing::debug!(?rw_schema, "create mysql external table reader");
+    pub async fn new(config: ExternalTableConfig, rw_schema: Schema) -> ConnectorResult<Self> {
+        let mut opts_builder = mysql_async::OptsBuilder::default()
+            .user(Some(config.username))
+            .pass(Some(config.password))
+            .ip_or_hostname(config.host)
+            .tcp_port(config.port.parse::<u16>().unwrap())
+            .db_name(Some(config.database));
 
-        let config = serde_json::from_value::<ExternalTableConfig>(
-            serde_json::to_value(with_properties).unwrap(),
-        )
-        .context("failed to extract mysql connector properties")?;
+        opts_builder = match config.sslmode {
+            SslMode::Disabled | SslMode::Preferred => opts_builder.ssl_opts(None),
+            SslMode::Required => {
+                let ssl_without_verify = mysql_async::SslOpts::default()
+                    .with_danger_accept_invalid_certs(true)
+                    .with_danger_skip_domain_validation(true);
+                opts_builder.ssl_opts(Some(ssl_without_verify))
+            }
+        };
 
-        let database_url = format!(
-            "mysql://{}:{}@{}:{}/{}",
-            config.username, config.password, config.host, config.port, config.database
-        );
-        let opts = mysql_async::Opts::from_url(&database_url).map_err(mysql_async::Error::Url)?;
-        let conn = mysql_async::Conn::new(opts).await?;
+        let conn = mysql_async::Conn::new(mysql_async::Opts::from(opts_builder)).await?;
 
         let field_names = rw_schema
             .fields
@@ -341,11 +329,15 @@ impl MySqlExternalTableReader {
             .join(",");
 
         Ok(Self {
-            config,
             rw_schema,
             field_names,
             conn: tokio::sync::Mutex::new(conn),
         })
+    }
+
+    pub fn get_normalized_table_name(table_name: &SchemaTableName) -> String {
+        // schema name is the database name in mysql
+        format!("`{}`.`{}`", table_name.schema_name, table_name.table_name)
     }
 
     pub fn get_cdc_offset_parser() -> CdcOffsetParseFunc {
@@ -372,7 +364,7 @@ impl MySqlExternalTableReader {
             format!(
                 "SELECT {} FROM {} ORDER BY {} LIMIT {limit}",
                 self.field_names,
-                self.get_normalized_table_name(&table_name),
+                Self::get_normalized_table_name(&table_name),
                 order_key,
             )
         } else {
@@ -380,12 +372,13 @@ impl MySqlExternalTableReader {
             format!(
                 "SELECT {} FROM {} WHERE {} ORDER BY {} LIMIT {limit}",
                 self.field_names,
-                self.get_normalized_table_name(&table_name),
+                Self::get_normalized_table_name(&table_name),
                 filter_expr,
                 order_key,
             )
         };
 
+        tracing::debug!("snapshot sql: {}", sql);
         let mut conn = self.conn.lock().await;
 
         // Set session timezone to UTC
@@ -502,16 +495,6 @@ impl MySqlExternalTableReader {
 }
 
 impl ExternalTableReader for ExternalTableReaderImpl {
-    fn get_normalized_table_name(&self, table_name: &SchemaTableName) -> String {
-        match self {
-            ExternalTableReaderImpl::MySql(mysql) => mysql.get_normalized_table_name(table_name),
-            ExternalTableReaderImpl::Postgres(postgres) => {
-                postgres.get_normalized_table_name(table_name)
-            }
-            ExternalTableReaderImpl::Mock(mock) => mock.get_normalized_table_name(table_name),
-        }
-    }
-
     async fn current_cdc_offset(&self) -> ConnectorResult<CdcOffset> {
         match self {
             ExternalTableReaderImpl::MySql(mysql) => mysql.current_cdc_offset().await,
@@ -573,6 +556,7 @@ impl ExternalTableReaderImpl {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
 
     use futures::pin_mut;
     use futures_async_stream::for_await;
@@ -581,7 +565,8 @@ mod tests {
     use risingwave_common::types::DataType;
 
     use crate::source::cdc::external::{
-        CdcOffset, ExternalTableReader, MySqlExternalTableReader, MySqlOffset, SchemaTableName,
+        CdcOffset, ExternalTableConfig, ExternalTableReader, MySqlExternalTableReader, MySqlOffset,
+        SchemaTableName,
     };
 
     #[test]
@@ -631,7 +616,7 @@ mod tests {
         let rw_schema = Schema {
             fields: columns.iter().map(Field::from).collect(),
         };
-        let props = convert_args!(hashmap!(
+        let props: HashMap<String, String> = convert_args!(hashmap!(
                 "hostname" => "localhost",
                 "port" => "8306",
                 "username" => "root",
@@ -639,7 +624,10 @@ mod tests {
                 "database.name" => "mytest",
                 "table.name" => "t1"));
 
-        let reader = MySqlExternalTableReader::new(props, rw_schema)
+        let config =
+            serde_json::from_value::<ExternalTableConfig>(serde_json::to_value(props).unwrap())
+                .unwrap();
+        let reader = MySqlExternalTableReader::new(config, rw_schema)
             .await
             .unwrap();
         let offset = reader.current_cdc_offset().await.unwrap();
@@ -648,7 +636,6 @@ mod tests {
         let off0_str = r#"{ "sourcePartition": { "server": "test" }, "sourceOffset": { "ts_sec": 1670876905, "file": "binlog.000001", "pos": 105622, "snapshot": true }, "isHeartbeat": false }"#;
         let parser = MySqlExternalTableReader::get_cdc_offset_parser();
         println!("parsed offset: {:?}", parser(off0_str).unwrap());
-
         let table_name = SchemaTableName {
             schema_name: "mytest".to_string(),
             table_name: "t1".to_string(),

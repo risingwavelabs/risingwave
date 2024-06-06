@@ -199,9 +199,7 @@ impl<W: SinkWriter<CommitMetadata = ()>> LogSinker for LogSinkerOf<W> {
                         sink_metrics
                             .sink_commit_duration_metrics
                             .observe(start_time.elapsed().as_millis() as f64);
-                        log_reader
-                            .truncate(TruncateOffset::Barrier { epoch })
-                            .await?;
+                        log_reader.truncate(TruncateOffset::Barrier { epoch })?;
                     } else {
                         sink_writer.barrier(false).await?;
                     }
@@ -270,7 +268,7 @@ impl<W: AsyncTruncateSinkWriter> LogSinker for AsyncTruncateLogSinkerOf<W> {
                 }
                 Either::Right(offset_result) => {
                     let offset = offset_result?;
-                    log_reader.truncate(offset).await?;
+                    log_reader.truncate(offset)?;
                 }
             }
         }

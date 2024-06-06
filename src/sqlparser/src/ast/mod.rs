@@ -27,10 +27,13 @@ use alloc::{
 };
 use core::fmt;
 use core::fmt::Display;
+use std::collections::HashSet;
+use std::sync::Arc;
 
 use itertools::Itertools;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
+use winnow::PResult;
 
 pub use self::data_type::{DataType, StructField};
 pub use self::ddl::{
@@ -57,7 +60,13 @@ pub use crate::ast::ddl::{
     AlterViewOperation,
 };
 use crate::keywords::Keyword;
-use crate::parser::{IncludeOption, IncludeOptionItem, Parser, ParserError};
+use crate::parser::{IncludeOption, IncludeOptionItem, Parser, ParserError, StrError};
+
+pub type RedactSqlOptionKeywordsRef = Arc<HashSet<String>>;
+
+tokio::task_local! {
+    pub static REDACT_SQL_OPTION_KEYWORDS: RedactSqlOptionKeywordsRef;
+}
 
 pub struct DisplaySeparated<'a, T>
 where
@@ -183,7 +192,7 @@ impl From<&str> for Ident {
 }
 
 impl ParseTo for Ident {
-    fn parse_to(parser: &mut Parser) -> Result<Self, ParserError> {
+    fn parse_to(parser: &mut Parser<'_>) -> PResult<Self> {
         parser.parse_identifier()
     }
 }
@@ -227,7 +236,7 @@ impl fmt::Display for ObjectName {
 }
 
 impl ParseTo for ObjectName {
-    fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
+    fn parse_to(p: &mut Parser<'_>) -> PResult<Self> {
         p.parse_object_name()
     }
 }
@@ -977,6 +986,7 @@ pub enum ShowObject {
     Subscription { schema: Option<Ident> },
     Columns { table: ObjectName },
     Connection { schema: Option<Ident> },
+    Secret { schema: Option<Ident> },
     Function { schema: Option<Ident> },
     Indexes { table: ObjectName },
     Cluster,
@@ -1025,6 +1035,7 @@ impl fmt::Display for ShowObject {
             ShowObject::Jobs => write!(f, "JOBS"),
             ShowObject::ProcessList => write!(f, "PROCESSLIST"),
             ShowObject::Subscription { schema } => write!(f, "SUBSCRIPTIONS{}", fmt_schema(schema)),
+            ShowObject::Secret { schema } => write!(f, "SECRETS{}", fmt_schema(schema)),
         }
     }
 }
@@ -1101,6 +1112,7 @@ pub struct ExplainOptions {
     // explain's plan type
     pub explain_type: ExplainType,
 }
+
 impl Default for ExplainOptions {
     fn default() -> Self {
         Self {
@@ -1110,6 +1122,7 @@ impl Default for ExplainOptions {
         }
     }
 }
+
 impl fmt::Display for ExplainOptions {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let default = Self::default();
@@ -1192,6 +1205,8 @@ pub enum Statement {
         /// RETURNING
         returning: Vec<SelectItem>,
     },
+    /// DISCARD
+    Discard(DiscardType),
     /// CREATE VIEW
     CreateView {
         or_replace: bool,
@@ -1261,6 +1276,9 @@ pub enum Statement {
     CreateConnection {
         stmt: CreateConnectionStatement,
     },
+    CreateSecret {
+        stmt: CreateSecretStatement,
+    },
     /// CREATE FUNCTION
     ///
     /// Postgres: <https://www.postgresql.org/docs/15/sql-createfunction.html>
@@ -1281,11 +1299,27 @@ pub enum Statement {
         or_replace: bool,
         name: ObjectName,
         args: Vec<OperateFunctionArg>,
+        returns: DataType,
         /// Optional parameters.
-        returns: Option<DataType>,
         append_only: bool,
         params: CreateFunctionBody,
     },
+
+    /// DECLARE CURSOR
+    DeclareCursor {
+        stmt: DeclareCursorStatement,
+    },
+
+    // FETCH CURSOR
+    FetchCursor {
+        stmt: FetchCursorStatement,
+    },
+
+    // CLOSE CURSOR
+    CloseCursor {
+        stmt: CloseCursorStatement,
+    },
+
     /// ALTER DATABASE
     AlterDatabase {
         name: ObjectName,
@@ -1369,8 +1403,16 @@ pub enum Statement {
     Kill(i32),
     /// DROP
     Drop(DropStatement),
-    /// DROP Function
+    /// DROP FUNCTION
     DropFunction {
+        if_exists: bool,
+        /// One or more function to drop
+        func_desc: Vec<FunctionDesc>,
+        /// `CASCADE` or `RESTRICT`
+        option: Option<ReferentialAction>,
+    },
+    /// DROP AGGREGATE
+    DropAggregate {
         if_exists: bool,
         /// One or more function to drop
         func_desc: Vec<FunctionDesc>,
@@ -1434,6 +1476,7 @@ pub enum Statement {
     CreateSchema {
         schema_name: ObjectName,
         if_not_exists: bool,
+        user_specified: Option<ObjectName>,
     },
     /// CREATE DATABASE
     CreateDatabase {
@@ -1497,21 +1540,6 @@ pub enum Statement {
         param: Ident,
         value: SetVariableValue,
     },
-    /// DECLARE CURSOR
-    DeclareCursor {
-        cursor_name: ObjectName,
-        query: Box<Query>,
-    },
-    /// FETCH FROM CURSOR
-    FetchCursor {
-        cursor_name: ObjectName,
-        /// Number of rows to fetch. `None` means `FETCH ALL`.
-        count: Option<i32>,
-    },
-    /// CLOSE CURSOR
-    CloseCursor {
-        cursor_name: Option<ObjectName>,
-    },
     /// FLUSH the current barrier.
     ///
     /// Note: RisingWave specific statement.
@@ -1519,6 +1547,8 @@ pub enum Statement {
     /// WAIT for ALL running stream jobs to finish.
     /// It will block the current session the condition is met.
     Wait,
+    /// Trigger stream job recover
+    Recover,
 }
 
 impl fmt::Display for Statement {
@@ -1554,14 +1584,14 @@ impl fmt::Display for Statement {
                 write!(f, "DESCRIBE {}", name)?;
                 Ok(())
             }
-            Statement::ShowObjects{ object: show_object, filter} => {
+            Statement::ShowObjects { object: show_object, filter } => {
                 write!(f, "SHOW {}", show_object)?;
                 if let Some(filter) = filter {
                     write!(f, " {}", filter)?;
                 }
                 Ok(())
             }
-            Statement::ShowCreateObject{ create_type: show_type, name } => {
+            Statement::ShowCreateObject { create_type: show_type, name } => {
                 write!(f, "SHOW CREATE {} {}", show_type, name)?;
                 Ok(())
             }
@@ -1575,7 +1605,7 @@ impl fmt::Display for Statement {
                 source,
                 returning,
             } => {
-                write!(f, "INSERT INTO {table_name} ", table_name = table_name,)?;
+                write!(f, "INSERT INTO {table_name} ", table_name = table_name, )?;
                 if !columns.is_empty() {
                     write!(f, "({}) ", display_comma_separated(columns))?;
                 }
@@ -1692,9 +1722,7 @@ impl fmt::Display for Statement {
                     or_replace = if *or_replace { "OR REPLACE " } else { "" },
                 )?;
                 write!(f, "({})", display_comma_separated(args))?;
-                if let Some(return_type) = returns {
-                    write!(f, " RETURNS {}", return_type)?;
-                }
+                write!(f, " RETURNS {}", returns)?;
                 if *append_only {
                     write!(f, " APPEND ONLY")?;
                 }
@@ -1785,18 +1813,18 @@ impl fmt::Display for Statement {
                     write!(f, "{}", display_comma_separated(
                         include_column_options.iter().map(|option_item: &IncludeOptionItem| {
                             format!("INCLUDE {}{}{}",
-                            option_item.column_type,
+                                    option_item.column_type,
                                     if let Some(inner_field) = &option_item.inner_field {
                                         format!(" {}", inner_field)
                                     } else {
                                         "".into()
                                     }
                                     , if let Some(alias) = &option_item.column_alias {
-                                        format!(" AS {}", alias)
-                                    } else {
-                                        "".into()
-                                    }
-                                )
+                                    format!(" AS {}", alias)
+                                } else {
+                                    "".into()
+                                }
+                            )
                         }).collect_vec().as_slice()
                     ))?;
                 }
@@ -1852,6 +1880,10 @@ impl fmt::Display for Statement {
             Statement::CreateSink { stmt } => write!(f, "CREATE SINK {}", stmt,),
             Statement::CreateSubscription { stmt } => write!(f, "CREATE SUBSCRIPTION {}", stmt,),
             Statement::CreateConnection { stmt } => write!(f, "CREATE CONNECTION {}", stmt,),
+            Statement::DeclareCursor { stmt } => write!(f, "DECLARE {}", stmt,),
+            Statement::FetchCursor { stmt } => write!(f, "FETCH {}", stmt),
+            Statement::CloseCursor { stmt } => write!(f, "CLOSE {}", stmt),
+            Statement::CreateSecret { stmt } => write!(f, "CREATE SECRET {}", stmt),
             Statement::AlterDatabase { name, operation } => {
                 write!(f, "ALTER DATABASE {} {}", name, operation)
             }
@@ -1886,6 +1918,7 @@ impl fmt::Display for Statement {
             Statement::AlterConnection { name, operation } => {
                 write!(f, "ALTER CONNECTION {} {}", name, operation)
             }
+            Statement::Discard(t) => write!(f, "DISCARD {}", t),
             Statement::Drop(stmt) => write!(f, "DROP {}", stmt),
             Statement::DropFunction {
                 if_exists,
@@ -1895,6 +1928,22 @@ impl fmt::Display for Statement {
                 write!(
                     f,
                     "DROP FUNCTION{} {}",
+                    if *if_exists { " IF EXISTS" } else { "" },
+                    display_comma_separated(func_desc),
+                )?;
+                if let Some(op) = option {
+                    write!(f, " {}", op)?;
+                }
+                Ok(())
+            }
+            Statement::DropAggregate {
+                if_exists,
+                func_desc,
+                option,
+            } => {
+                write!(
+                    f,
+                    "DROP AGGREGATE{} {}",
                     if *if_exists { " IF EXISTS" } else { "" },
                     display_comma_separated(func_desc),
                 )?;
@@ -1963,20 +2012,27 @@ impl fmt::Display for Statement {
                 Ok(())
             }
             Statement::Commit { chain } => {
-                write!(f, "COMMIT{}", if *chain { " AND CHAIN" } else { "" },)
+                write!(f, "COMMIT{}", if *chain { " AND CHAIN" } else { "" }, )
             }
             Statement::Rollback { chain } => {
-                write!(f, "ROLLBACK{}", if *chain { " AND CHAIN" } else { "" },)
+                write!(f, "ROLLBACK{}", if *chain { " AND CHAIN" } else { "" }, )
             }
             Statement::CreateSchema {
                 schema_name,
                 if_not_exists,
-            } => write!(
-                f,
-                "CREATE SCHEMA {if_not_exists}{name}",
-                if_not_exists = if *if_not_exists { "IF NOT EXISTS " } else { "" },
-                name = schema_name
-            ),
+                user_specified,
+            } => {
+                write!(
+                    f,
+                    "CREATE SCHEMA {if_not_exists}{name}",
+                    if_not_exists = if *if_not_exists { "IF NOT EXISTS " } else { "" },
+                    name = schema_name
+                )?;
+                if let Some(user) = user_specified {
+                    write!(f, " AUTHORIZATION {}", user)?;
+                }
+                Ok(())
+            },
             Statement::Grant {
                 privileges,
                 objects,
@@ -2063,29 +2119,12 @@ impl fmt::Display for Statement {
             Statement::AlterUser(statement) => {
                 write!(f, "ALTER USER {}", statement)
             }
-            Statement::AlterSystem{param, value} => {
+            Statement::AlterSystem { param, value } => {
                 f.write_str("ALTER SYSTEM SET ")?;
                 write!(
                     f,
                     "{param} = {value}",
                 )
-            }
-            Statement::DeclareCursor { cursor_name, query } => {
-                write!(f, "DECLARE {} CURSOR FOR {}", cursor_name, query)
-            },
-            Statement::FetchCursor { cursor_name , count} => {
-                if let Some(count) = count {
-                    write!(f, "FETCH {} FROM {}", count, cursor_name)
-                } else {
-                    write!(f, "FETCH NEXT FROM {}", cursor_name)
-                }
-            },
-            Statement::CloseCursor { cursor_name } => {
-                if let Some(name) = cursor_name {
-                    write!(f, "CLOSE {}", name)
-                } else {
-                    write!(f, "CLOSE ALL")
-                }
             }
             Statement::Flush => {
                 write!(f, "FLUSH")
@@ -2106,6 +2145,10 @@ impl fmt::Display for Statement {
             }
             Statement::Kill(process_id) => {
                 write!(f, "KILL {}", process_id)?;
+                Ok(())
+            }
+            Statement::Recover => {
+                write!(f, "RECOVER")?;
                 Ok(())
             }
         }
@@ -2494,6 +2537,7 @@ pub enum ObjectType {
     Database,
     User,
     Connection,
+    Secret,
     Subscription,
 }
 
@@ -2509,6 +2553,7 @@ impl fmt::Display for ObjectType {
             ObjectType::Sink => "SINK",
             ObjectType::Database => "DATABASE",
             ObjectType::User => "USER",
+            ObjectType::Secret => "SECRET",
             ObjectType::Connection => "CONNECTION",
             ObjectType::Subscription => "SUBSCRIPTION",
         })
@@ -2516,7 +2561,7 @@ impl fmt::Display for ObjectType {
 }
 
 impl ParseTo for ObjectType {
-    fn parse_to(parser: &mut Parser) -> Result<Self, ParserError> {
+    fn parse_to(parser: &mut Parser<'_>) -> PResult<Self> {
         let object_type = if parser.parse_keyword(Keyword::TABLE) {
             ObjectType::Table
         } else if parser.parse_keyword(Keyword::VIEW) {
@@ -2537,12 +2582,13 @@ impl ParseTo for ObjectType {
             ObjectType::User
         } else if parser.parse_keyword(Keyword::CONNECTION) {
             ObjectType::Connection
+        } else if parser.parse_keyword(Keyword::SECRET) {
+            ObjectType::Secret
         } else if parser.parse_keyword(Keyword::SUBSCRIPTION) {
             ObjectType::Subscription
         } else {
             return parser.expected(
-                "TABLE, VIEW, INDEX, MATERIALIZED VIEW, SOURCE, SINK, SUBSCRIPTION, SCHEMA, DATABASE, USER or CONNECTION after DROP",
-                parser.peek_token(),
+                "TABLE, VIEW, INDEX, MATERIALIZED VIEW, SOURCE, SINK, SUBSCRIPTION, SCHEMA, DATABASE, USER, SECRET or CONNECTION after DROP",
             );
         };
         Ok(object_type)
@@ -2558,7 +2604,17 @@ pub struct SqlOption {
 
 impl fmt::Display for SqlOption {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} = {}", self.name, self.value)
+        let should_redact = REDACT_SQL_OPTION_KEYWORDS
+            .try_with(|keywords| {
+                let sql_option_name = self.name.real_value().to_lowercase();
+                keywords.iter().any(|k| sql_option_name.contains(k))
+            })
+            .unwrap_or(false);
+        if should_redact {
+            write!(f, "{} = [REDACTED]", self.name)
+        } else {
+            write!(f, "{} = {}", self.name, self.value)
+        }
     }
 }
 
@@ -2891,6 +2947,9 @@ impl fmt::Display for TableColumnDef {
 pub struct CreateFunctionBody {
     /// LANGUAGE lang_name
     pub language: Option<Ident>,
+    /// RUNTIME runtime_name
+    pub runtime: Option<Ident>,
+
     /// IMMUTABLE | STABLE | VOLATILE
     pub behavior: Option<FunctionBehavior>,
     /// AS 'definition'
@@ -2901,12 +2960,17 @@ pub struct CreateFunctionBody {
     pub return_: Option<Expr>,
     /// USING ...
     pub using: Option<CreateFunctionUsing>,
+
+    pub function_type: Option<CreateFunctionType>,
 }
 
 impl fmt::Display for CreateFunctionBody {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if let Some(language) = &self.language {
             write!(f, " LANGUAGE {language}")?;
+        }
+        if let Some(runtime) = &self.runtime {
+            write!(f, " RUNTIME {runtime}")?;
         }
         if let Some(behavior) = &self.behavior {
             write!(f, " {behavior}")?;
@@ -2920,9 +2984,13 @@ impl fmt::Display for CreateFunctionBody {
         if let Some(using) = &self.using {
             write!(f, " {using}")?;
         }
+        if let Some(function_type) = &self.function_type {
+            write!(f, " {function_type}")?;
+        }
         Ok(())
     }
 }
+
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct CreateFunctionWithOptions {
@@ -2939,7 +3007,7 @@ impl CreateFunctionWithOptions {
 
 /// TODO(kwannoel): Generate from the struct definition instead.
 impl TryFrom<Vec<SqlOption>> for CreateFunctionWithOptions {
-    type Error = ParserError;
+    type Error = StrError;
 
     fn try_from(with_options: Vec<SqlOption>) -> Result<Self, Self::Error> {
         let mut always_retry_on_network_error = None;
@@ -2947,10 +3015,7 @@ impl TryFrom<Vec<SqlOption>> for CreateFunctionWithOptions {
             if option.name.to_string().to_lowercase() == "always_retry_on_network_error" {
                 always_retry_on_network_error = Some(option.value == Value::Boolean(true));
             } else {
-                return Err(ParserError::ParserError(format!(
-                    "Unsupported option: {}",
-                    option.name
-                )));
+                return Err(StrError(format!("Unsupported option: {}", option.name)));
             }
         }
         Ok(Self {
@@ -2990,6 +3055,26 @@ impl fmt::Display for CreateFunctionUsing {
             CreateFunctionUsing::Base64(s) => {
                 write!(f, "BASE64 '{s}'")
             }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum CreateFunctionType {
+    Sync,
+    Async,
+    Generator,
+    AsyncGenerator,
+}
+
+impl fmt::Display for CreateFunctionType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            CreateFunctionType::Sync => write!(f, "SYNC"),
+            CreateFunctionType::Async => write!(f, "ASYNC"),
+            CreateFunctionType::Generator => write!(f, "SYNC GENERATOR"),
+            CreateFunctionType::AsyncGenerator => write!(f, "ASYNC GENERATOR"),
         }
     }
 }
@@ -3067,6 +3152,27 @@ impl fmt::Display for AsOf {
             VersionNum(v) => write!(f, " FOR SYSTEM_VERSION AS OF {}", v),
             VersionString(v) => write!(f, " FOR SYSTEM_VERSION AS OF '{}'", v),
         }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum DiscardType {
+    All,
+}
+
+impl fmt::Display for DiscardType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use DiscardType::*;
+        match self {
+            All => write!(f, "ALL"),
+        }
+    }
+}
+
+impl Statement {
+    pub fn to_redacted_string(&self, keywords: RedactSqlOptionKeywordsRef) -> String {
+        REDACT_SQL_OPTION_KEYWORDS.sync_scope(keywords, || self.to_string())
     }
 }
 
@@ -3213,6 +3319,8 @@ mod tests {
                 as_: Some(FunctionDefinition::SingleQuotedDef("SELECT 1".to_string())),
                 return_: None,
                 using: None,
+                runtime: None,
+                function_type: None,
             },
             with_options: CreateFunctionWithOptions {
                 always_retry_on_network_error: None,
@@ -3234,6 +3342,8 @@ mod tests {
                 as_: Some(FunctionDefinition::SingleQuotedDef("SELECT 1".to_string())),
                 return_: None,
                 using: None,
+                runtime: None,
+                function_type: None,
             },
             with_options: CreateFunctionWithOptions {
                 always_retry_on_network_error: Some(true),
@@ -3241,6 +3351,30 @@ mod tests {
         };
         assert_eq!(
             "CREATE FUNCTION foo(INT) RETURNS INT LANGUAGE python IMMUTABLE AS 'SELECT 1' WITH ( ALWAYS_RETRY_NETWORK_ERRORS = true )",
+            format!("{}", create_function)
+        );
+
+        let create_function = Statement::CreateFunction {
+            temporary: false,
+            or_replace: false,
+            name: ObjectName(vec![Ident::new_unchecked("foo")]),
+            args: Some(vec![OperateFunctionArg::unnamed(DataType::Int)]),
+            returns: Some(CreateFunctionReturns::Value(DataType::Int)),
+            params: CreateFunctionBody {
+                language: Some(Ident::new_unchecked("javascript")),
+                behavior: None,
+                as_: Some(FunctionDefinition::SingleQuotedDef("SELECT 1".to_string())),
+                return_: None,
+                using: None,
+                runtime: Some(Ident::new_unchecked("deno")),
+                function_type: Some(CreateFunctionType::AsyncGenerator),
+            },
+            with_options: CreateFunctionWithOptions {
+                always_retry_on_network_error: None,
+            },
+        };
+        assert_eq!(
+            "CREATE FUNCTION foo(INT) RETURNS INT LANGUAGE javascript RUNTIME deno AS 'SELECT 1' ASYNC GENERATOR",
             format!("{}", create_function)
         );
     }

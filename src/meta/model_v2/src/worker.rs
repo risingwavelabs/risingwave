@@ -16,10 +16,11 @@ use risingwave_pb::common::worker_node::PbState;
 use risingwave_pb::common::{PbWorkerNode, PbWorkerType};
 use sea_orm::entity::prelude::*;
 use sea_orm::ActiveValue::Set;
+use serde::{Deserialize, Serialize};
 
 use crate::{TransactionId, WorkerId};
 
-#[derive(Clone, Debug, Hash, PartialEq, Eq, EnumIter, DeriveActiveEnum)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
 #[sea_orm(rs_type = "String", db_type = "String(None)")]
 pub enum WorkerType {
     #[sea_orm(string_value = "FRONTEND")]
@@ -59,7 +60,7 @@ impl From<WorkerType> for PbWorkerType {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum)]
+#[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
 #[sea_orm(rs_type = "String", db_type = "String(None)")]
 pub enum WorkerStatus {
     #[sea_orm(string_value = "STARTING")]
@@ -101,7 +102,7 @@ impl From<&PbWorkerNode> for ActiveModel {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize)]
 #[sea_orm(table_name = "worker")]
 pub struct Model {
     #[sea_orm(primary_key)]

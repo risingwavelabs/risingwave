@@ -26,6 +26,7 @@
 #![feature(impl_trait_in_assoc_type)]
 #![feature(error_generic_member_access)]
 #![feature(panic_update_hook)]
+#![feature(negative_impls)]
 
 use std::any::type_name;
 use std::fmt::{Debug, Formatter};
@@ -145,7 +146,7 @@ pub trait ExtraInfoSource: Send + Sync {
 pub type ExtraInfoSourceRef = Arc<dyn ExtraInfoSource>;
 
 #[macro_export]
-macro_rules! rpc_client_method_impl {
+macro_rules! stream_rpc_client_method_impl {
     ($( { $client:tt, $fn_name:ident, $req:ty, $resp:ty }),*) => {
         $(
             pub async fn $fn_name(&self, request: $req) -> $crate::Result<$resp> {
@@ -153,7 +154,8 @@ macro_rules! rpc_client_method_impl {
                     .$client
                     .to_owned()
                     .$fn_name(request)
-                    .await?
+                    .await
+                    .map_err($crate::error::RpcError::from_stream_status)?
                     .into_inner())
             }
         )*
@@ -170,7 +172,7 @@ macro_rules! meta_rpc_client_method_impl {
                     Ok(resp) => Ok(resp.into_inner()),
                     Err(e) => {
                         self.refresh_client_if_needed(e.code()).await;
-                        Err(RpcError::from(e))
+                        Err($crate::error::RpcError::from_meta_status(e))
                     }
                 }
             }

@@ -59,7 +59,7 @@ macro_rules! define_keywords {
         ];
 
         $(kw_def!($ident $(= $string_keyword)?);)*
-        pub const ALL_KEYWORDS: &[&str] = &[
+        pub const ALL_KEYWORDS: &[&'static str] = &[
             $($ident),*
         ];
     };
@@ -89,6 +89,7 @@ define_keywords!(
     ASC,
     ASENSITIVE,
     ASYMMETRIC,
+    ASYNC,
     AT,
     ATOMIC,
     AUTHORIZATION,
@@ -194,6 +195,7 @@ define_keywords!(
     DESCRIBE,
     DETERMINISTIC,
     DIRECTORY,
+    DISCARD,
     DISCONNECT,
     DISTINCT,
     DISTRIBUTED,
@@ -246,6 +248,7 @@ define_keywords!(
     FUNCTION,
     FUNCTIONS,
     FUSION,
+    GENERATOR,
     GET,
     GLOBAL,
     GRANT,
@@ -402,14 +405,13 @@ define_keywords!(
     READ,
     READS,
     REAL,
+    RECOVER,
     RECURSIVE,
     REF,
     REFERENCES,
     REFERENCING,
     REFRESH,
-    REGCLASS,
     REGISTRY,
-    REGPROC,
     REGR_AVGX,
     REGR_AVGY,
     REGR_COUNT,
@@ -437,6 +439,7 @@ define_keywords!(
     ROWID,
     ROWS,
     ROW_NUMBER,
+    RUNTIME,
     SAVEPOINT,
     SCALAR,
     SCHEMA,
@@ -445,6 +448,8 @@ define_keywords!(
     SCROLL,
     SEARCH,
     SECOND,
+    SECRET,
+    SECRETS,
     SELECT,
     SENSITIVE,
     SEQUENCE,
@@ -458,6 +463,7 @@ define_keywords!(
     SETS,
     SHOW,
     SIMILAR,
+    SINCE,
     SINK,
     SINKS,
     SMALLINT,
@@ -481,6 +487,7 @@ define_keywords!(
     STDDEV_SAMP,
     STDIN,
     STORED,
+    STREAMING_RATE_LIMIT,
     STRING,
     STRUCT,
     SUBMULTISET,
@@ -644,7 +651,7 @@ pub const RESERVED_FOR_COLUMN_ALIAS: &[Keyword] = &[
 /// Can't be used as a column or table name in PostgreSQL.
 ///
 /// This list is taken from the following table, for all "reserved" words in the PostgreSQL column,
-/// includinhg "can be function or type" and "requires AS". <https://www.postgresql.org/docs/14/sql-keywords-appendix.html#KEYWORDS-TABLE>
+/// including "can be function or type" and "requires AS". <https://www.postgresql.org/docs/14/sql-keywords-appendix.html#KEYWORDS-TABLE>
 ///
 /// `SELECT` and `WITH` were commented out because the following won't parse:
 /// `SELECT (SELECT 1)` or `SELECT (WITH a AS (SELECT 1) SELECT 1)`

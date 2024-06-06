@@ -1,3 +1,6 @@
+-- please note that this will create a source that generates 1,000 rows in 10 seconds
+-- you may want to change the configuration for better testing / demo purpose
+
 CREATE table user_behaviors (
     user_id int,
     target_id VARCHAR,

@@ -20,14 +20,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use itertools::{enumerate, Itertools};
 use prometheus::core::{AtomicU64, GenericCounter};
 use prometheus::IntGauge;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
-    object_size_map, BranchedSstInfo,
-};
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::object_size_map;
 use risingwave_hummock_sdk::table_stats::PbTableStatsMap;
 use risingwave_hummock_sdk::version::HummockVersion;
-use risingwave_hummock_sdk::{
-    CompactionGroupId, HummockContextId, HummockEpoch, HummockSstableObjectId, HummockVersionId,
-};
+use risingwave_hummock_sdk::{CompactionGroupId, HummockContextId, HummockEpoch, HummockVersionId};
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
@@ -111,17 +107,6 @@ pub fn trigger_local_table_stat(
             table_metrics.total_key_size.set(table_stats.total_key_size);
         }
     }
-}
-
-pub fn trigger_version_stat(metrics: &MetaMetrics, current_version: &HummockVersion) {
-    metrics
-        .max_committed_epoch
-        .set(current_version.max_committed_epoch as i64);
-    metrics
-        .version_size
-        .set(current_version.estimated_encode_len() as i64);
-    metrics.safe_epoch.set(current_version.safe_epoch as i64);
-    metrics.current_version_id.set(current_version.id as i64);
 }
 
 pub fn trigger_mv_stat(
@@ -431,16 +416,6 @@ pub fn trigger_pin_unpin_snapshot_state(
     }
 }
 
-pub fn trigger_safepoint_stat(metrics: &MetaMetrics, safepoints: &[HummockVersionId]) {
-    if let Some(sp) = safepoints.iter().min() {
-        metrics.min_safepoint_version_id.set(*sp as _);
-    } else {
-        metrics
-            .min_safepoint_version_id
-            .set(HummockVersionId::MAX as _);
-    }
-}
-
 pub fn trigger_gc_stat(
     metrics: &MetaMetrics,
     checkpoint: &HummockVersionCheckpoint,
@@ -476,10 +451,6 @@ pub fn trigger_gc_stat(
         .set(old_version_object_count as _);
     metrics.stale_object_size.set(stale_object_size as _);
     metrics.stale_object_count.set(stale_object_count as _);
-}
-
-pub fn trigger_delta_log_stats(metrics: &MetaMetrics, total_number: usize) {
-    metrics.delta_log_count.set(total_number as _);
 }
 
 // Triggers a report on compact_pending_bytes_needed
@@ -555,36 +526,31 @@ pub fn trigger_write_stop_stats(
     }
 }
 
-pub fn trigger_split_stat(
-    metrics: &MetaMetrics,
-    compaction_group_id: CompactionGroupId,
-    member_table_id_len: usize,
-    branched_ssts: &BTreeMap<
-        // SST object id
-        HummockSstableObjectId,
-        BranchedSstInfo,
-    >,
-) {
-    let group_label = compaction_group_id.to_string();
-    metrics
-        .state_table_count
-        .with_label_values(&[&group_label])
-        .set(member_table_id_len as _);
+pub fn trigger_split_stat(metrics: &MetaMetrics, version: &HummockVersion) {
+    let branched_ssts = version.build_branched_sst_info();
 
-    let branched_sst_count: usize = branched_ssts
-        .values()
-        .map(|branched_map| {
-            branched_map
-                .keys()
-                .filter(|group_id| **group_id == compaction_group_id)
-                .count()
-        })
-        .sum();
+    for (compaction_group_id, group) in &version.levels {
+        let group_label = compaction_group_id.to_string();
+        metrics
+            .state_table_count
+            .with_label_values(&[&group_label])
+            .set(group.member_table_ids.len() as _);
 
-    metrics
-        .branched_sst_count
-        .with_label_values(&[&group_label])
-        .set(branched_sst_count as _);
+        let branched_sst_count: usize = branched_ssts
+            .values()
+            .map(|branched_map| {
+                branched_map
+                    .keys()
+                    .filter(|group_id| *group_id == compaction_group_id)
+                    .count()
+            })
+            .sum();
+
+        metrics
+            .branched_sst_count
+            .with_label_values(&[&group_label])
+            .set(branched_sst_count as _);
+    }
 }
 
 pub fn build_level_metrics_label(compaction_group_id: u64, level_idx: usize) -> String {

@@ -24,6 +24,7 @@ use axum::http::{Method, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::Router;
+use risingwave_common::util::StackTraceResponseExt;
 use risingwave_rpc_client::ComputeClientPool;
 use tokio::net::TcpListener;
 use tower::ServiceBuilder;
@@ -54,7 +55,7 @@ pub(super) mod handlers {
     use itertools::Itertools;
     use risingwave_common_heap_profiling::COLLAPSED_SUFFIX;
     use risingwave_pb::catalog::table::TableType;
-    use risingwave_pb::catalog::{Sink, Source, Table, View};
+    use risingwave_pb::catalog::{PbDatabase, PbSchema, Sink, Source, Subscription, Table, View};
     use risingwave_pb::common::{WorkerNode, WorkerType};
     use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
     use risingwave_pb::meta::PbTableFragments;
@@ -62,6 +63,7 @@ pub(super) mod handlers {
         GetBackPressureResponse, HeapProfilingResponse, ListHeapProfilingResponse,
         StackTraceResponse,
     };
+    use risingwave_pb::user::PbUserInfo;
     use serde_json::json;
     use thiserror_ext::AsReport;
 
@@ -139,6 +141,21 @@ pub(super) mod handlers {
         list_table_catalogs_inner(&srv.metadata_manager, TableType::Index).await
     }
 
+    pub async fn list_subscription(
+        Extension(srv): Extension<Service>,
+    ) -> Result<Json<Vec<Subscription>>> {
+        let subscriptions = match &srv.metadata_manager {
+            MetadataManager::V1(mgr) => mgr.catalog_manager.list_subscriptions().await,
+            MetadataManager::V2(mgr) => mgr
+                .catalog_controller
+                .list_subscriptions()
+                .await
+                .map_err(err)?,
+        };
+
+        Ok(Json(subscriptions))
+    }
+
     pub async fn list_internal_tables(
         Extension(srv): Extension<Service>,
     ) -> Result<Json<Vec<Table>>> {
@@ -194,6 +211,37 @@ pub(super) mod handlers {
         Ok(Json(table_fragments))
     }
 
+    pub async fn list_users(Extension(srv): Extension<Service>) -> Result<Json<Vec<PbUserInfo>>> {
+        let users = match &srv.metadata_manager {
+            MetadataManager::V1(mgr) => mgr.catalog_manager.list_users().await,
+            MetadataManager::V2(mgr) => mgr.catalog_controller.list_users().await.map_err(err)?,
+        };
+
+        Ok(Json(users))
+    }
+
+    pub async fn list_databases(
+        Extension(srv): Extension<Service>,
+    ) -> Result<Json<Vec<PbDatabase>>> {
+        let databases = match &srv.metadata_manager {
+            MetadataManager::V1(mgr) => mgr.catalog_manager.list_databases().await,
+            MetadataManager::V2(mgr) => {
+                mgr.catalog_controller.list_databases().await.map_err(err)?
+            }
+        };
+
+        Ok(Json(databases))
+    }
+
+    pub async fn list_schemas(Extension(srv): Extension<Service>) -> Result<Json<Vec<PbSchema>>> {
+        let schemas = match &srv.metadata_manager {
+            MetadataManager::V1(mgr) => mgr.catalog_manager.list_schemas().await,
+            MetadataManager::V2(mgr) => mgr.catalog_controller.list_schemas().await.map_err(err)?,
+        };
+
+        Ok(Json(schemas))
+    }
+
     pub async fn list_object_dependencies(
         Extension(srv): Extension<Service>,
     ) -> Result<Json<Vec<PbObjectDependencies>>> {
@@ -213,20 +261,13 @@ pub(super) mod handlers {
         worker_nodes: impl IntoIterator<Item = &WorkerNode>,
         compute_clients: &ComputeClientPool,
     ) -> Result<Json<StackTraceResponse>> {
-        let mut all = Default::default();
-
-        fn merge(a: &mut StackTraceResponse, b: StackTraceResponse) {
-            a.actor_traces.extend(b.actor_traces);
-            a.rpc_traces.extend(b.rpc_traces);
-            a.compaction_task_traces.extend(b.compaction_task_traces);
-            a.inflight_barrier_traces.extend(b.inflight_barrier_traces);
-        }
+        let mut all = StackTraceResponse::default();
 
         for worker_node in worker_nodes {
             let client = compute_clients.get(worker_node).await.map_err(err)?;
             let result = client.stack_trace().await.map_err(err)?;
 
-            merge(&mut all, result);
+            all.merge_other(result);
         }
 
         Ok(all.into())
@@ -391,9 +432,13 @@ impl DashboardService {
             .route("/materialized_views", get(list_materialized_views))
             .route("/tables", get(list_tables))
             .route("/indexes", get(list_indexes))
+            .route("/subscriptions", get(list_subscription))
             .route("/internal_tables", get(list_internal_tables))
             .route("/sources", get(list_sources))
             .route("/sinks", get(list_sinks))
+            .route("/users", get(list_users))
+            .route("/databases", get(list_databases))
+            .route("/schemas", get(list_schemas))
             .route("/object_dependencies", get(list_object_dependencies))
             .route("/metrics/cluster", get(prometheus::list_prometheus_cluster))
             .route(

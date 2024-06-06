@@ -136,6 +136,16 @@ pub enum BatchError {
 
     #[error("Streaming vnode mapping not found for fragment {0}")]
     StreamingVnodeMappingNotFound(FragmentId),
+
+    #[error("Not enough memory to run this query, batch memory limit is {0} bytes")]
+    OutOfMemory(u64),
+
+    #[error("Failed to spill out to disk")]
+    Spill(
+        #[from]
+        #[backtrace]
+        opendal::Error,
+    ),
 }
 
 // Serialize/deserialize error.
@@ -147,13 +157,6 @@ impl From<memcomparable::Error> for BatchError {
 impl From<ValueEncodingError> for BatchError {
     fn from(e: ValueEncodingError) -> Self {
         Self::Serde(e.into())
-    }
-}
-
-impl From<tonic::Status> for BatchError {
-    fn from(status: tonic::Status) -> Self {
-        // Always wrap the status into a `RpcError`.
-        Self::from(RpcError::from(status))
     }
 }
 

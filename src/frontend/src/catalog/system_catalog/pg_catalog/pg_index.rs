@@ -22,14 +22,23 @@ use risingwave_frontend_macro::system_catalog;
     "pg_catalog.pg_index",
     "SELECT id AS indexrelid,
         primary_table_id AS indrelid,
-        ARRAY_LENGTH(indkey)::smallint AS indnatts,
+        ARRAY_LENGTH(key_columns || include_columns)::smallint AS indnatts,
+        ARRAY_LENGTH(key_columns)::smallint AS indnkeyatts,
         false AS indisunique,
-        indkey,
+        key_columns || include_columns AS indkey,
         ARRAY[]::smallint[] as indoption,
         NULL AS indexprs,
         NULL AS indpred,
         FALSE AS indisprimary,
-        ARRAY[]::int[] AS indclass
+        ARRAY[]::int[] AS indclass,
+        false AS indisexclusion,
+        true AS indimmediate,
+        false AS indisclustered,
+        true AS indisvalid,
+        false AS indcheckxmin,
+        true AS indisready,
+        true AS indislive,
+        false AS indisreplident
     FROM rw_catalog.rw_indexes"
 )]
 #[derive(Fields)]
@@ -37,6 +46,7 @@ struct PgIndex {
     indexrelid: i32,
     indrelid: i32,
     indnatts: i16,
+    indnkeyatts: i16,
     // We return false as default to indicate that this is NOT a unique index
     indisunique: bool,
     indkey: Vec<i16>,
@@ -49,4 +59,14 @@ struct PgIndex {
     indisprimary: bool,
     // Empty array. We only have a dummy implementation of `pg_opclass` yet.
     indclass: Vec<i32>,
+
+    // Unused columns. Kept for compatibility with PG.
+    indisexclusion: bool,
+    indimmediate: bool,
+    indisclustered: bool,
+    indisvalid: bool,
+    indcheckxmin: bool,
+    indisready: bool,
+    indislive: bool,
+    indisreplident: bool,
 }

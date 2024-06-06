@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_connector::source::kafka::PRIVATELINK_CONNECTION;
@@ -36,7 +36,7 @@ pub(crate) const CLOUD_PROVIDER_AWS: &str = "aws";
 
 #[inline(always)]
 fn get_connection_property_required(
-    with_properties: &HashMap<String, String>,
+    with_properties: &BTreeMap<String, String>,
     property: &str,
 ) -> Result<String> {
     with_properties
@@ -50,7 +50,7 @@ fn get_connection_property_required(
 }
 
 fn resolve_private_link_properties(
-    with_properties: &HashMap<String, String>,
+    with_properties: &BTreeMap<String, String>,
 ) -> Result<create_connection_request::PrivateLink> {
     let provider =
         match get_connection_property_required(with_properties, CONNECTION_PROVIDER_PROP)?.as_str()
@@ -86,7 +86,7 @@ fn resolve_private_link_properties(
 }
 
 fn resolve_create_connection_payload(
-    with_properties: &HashMap<String, String>,
+    with_properties: &BTreeMap<String, String>,
 ) -> Result<create_connection_request::Payload> {
     let connection_type = get_connection_property_required(with_properties, CONNECTION_TYPE_PROP)?;
     let create_connection_payload = match connection_type.as_str() {
@@ -124,12 +124,7 @@ pub async fn handle_create_connection(
         };
     }
     let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
-    let with_properties = handler_args
-        .with_options
-        .inner()
-        .clone()
-        .into_iter()
-        .collect();
+    let with_properties = handler_args.with_options.clone().into_connector_props();
 
     let create_connection_payload = resolve_create_connection_payload(&with_properties)?;
 

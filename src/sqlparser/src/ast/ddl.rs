@@ -104,6 +104,10 @@ pub enum AlterTableOperation {
         deferred: bool,
     },
     RefreshSchema,
+    /// `SET STREAMING_RATE_LIMIT TO <rate_limit>`
+    SetStreamingRateLimit {
+        rate_limit: i32,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -138,6 +142,10 @@ pub enum AlterViewOperation {
         parallelism: SetVariableValue,
         deferred: bool,
     },
+    /// `SET STREAMING_RATE_LIMIT TO <rate_limit>`
+    SetStreamingRateLimit {
+        rate_limit: i32,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -164,20 +172,9 @@ pub enum AlterSinkOperation {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
 pub enum AlterSubscriptionOperation {
-    RenameSubscription {
-        subscription_name: ObjectName,
-    },
-    ChangeOwner {
-        new_owner_name: Ident,
-    },
-    SetSchema {
-        new_schema_name: ObjectName,
-    },
-    /// `SET PARALLELISM TO <parallelism> [ DEFERRED ]`
-    SetParallelism {
-        parallelism: SetVariableValue,
-        deferred: bool,
-    },
+    RenameSubscription { subscription_name: ObjectName },
+    ChangeOwner { new_owner_name: Ident },
+    SetSchema { new_schema_name: ObjectName },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -190,6 +187,7 @@ pub enum AlterSourceOperation {
     SetSchema { new_schema_name: ObjectName },
     FormatEncode { connector_schema: ConnectorSchema },
     RefreshSchema,
+    SetStreamingRateLimit { rate_limit: i32 },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -301,6 +299,9 @@ impl fmt::Display for AlterTableOperation {
             AlterTableOperation::RefreshSchema => {
                 write!(f, "REFRESH SCHEMA")
             }
+            AlterTableOperation::SetStreamingRateLimit { rate_limit } => {
+                write!(f, "SET STREAMING_RATE_LIMIT TO {}", rate_limit)
+            }
         }
     }
 }
@@ -349,6 +350,9 @@ impl fmt::Display for AlterViewOperation {
                     if *deferred { " DEFERRED" } else { "" }
                 )
             }
+            AlterViewOperation::SetStreamingRateLimit { rate_limit } => {
+                write!(f, "SET STREAMING_RATE_LIMIT TO {}", rate_limit)
+            }
         }
     }
 }
@@ -392,17 +396,6 @@ impl fmt::Display for AlterSubscriptionOperation {
             AlterSubscriptionOperation::SetSchema { new_schema_name } => {
                 write!(f, "SET SCHEMA {}", new_schema_name)
             }
-            AlterSubscriptionOperation::SetParallelism {
-                parallelism,
-                deferred,
-            } => {
-                write!(
-                    f,
-                    "SET PARALLELISM TO {} {}",
-                    parallelism,
-                    if *deferred { " DEFERRED" } else { "" }
-                )
-            }
         }
     }
 }
@@ -427,6 +420,9 @@ impl fmt::Display for AlterSourceOperation {
             }
             AlterSourceOperation::RefreshSchema => {
                 write!(f, "REFRESH SCHEMA")
+            }
+            AlterSourceOperation::SetStreamingRateLimit { rate_limit } => {
+                write!(f, "SET STREAMING_RATE_LIMIT TO {}", rate_limit)
             }
         }
     }

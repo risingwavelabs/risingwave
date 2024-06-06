@@ -385,6 +385,10 @@ fn encode_field<D: MaybeData>(
             AvroSchema::Long => maybe.on_base(|s| Ok(Value::Long(s.into_int64())))?,
             _ => return no_match_err(),
         },
+        DataType::Serial => match inner {
+            AvroSchema::Long => maybe.on_base(|s| Ok(Value::Long(s.into_serial().into_inner())))?,
+            _ => return no_match_err(),
+        },
         DataType::Struct(st) => match inner {
             AvroSchema::Record { .. } => maybe.on_struct(st, inner)?,
             _ => return no_match_err(),
@@ -447,7 +451,7 @@ fn encode_field<D: MaybeData>(
         DataType::Decimal => return no_match_err(),
         DataType::Jsonb => return no_match_err(),
         // Group D: unsupported
-        DataType::Serial | DataType::Int256 => {
+        DataType::Int256 => {
             return no_match_err();
         }
     };
@@ -526,7 +530,14 @@ mod tests {
 
         test_ok(
             &DataType::Int64,
-            Some(ScalarImpl::Int64(std::i64::MAX)),
+            Some(ScalarImpl::Int64(i64::MAX)),
+            r#""long""#,
+            Value::Long(i64::MAX),
+        );
+
+        test_ok(
+            &DataType::Serial,
+            Some(ScalarImpl::Serial(i64::MAX.into())),
             r#""long""#,
             Value::Long(i64::MAX),
         );

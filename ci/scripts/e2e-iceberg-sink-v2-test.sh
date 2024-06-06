@@ -37,14 +37,14 @@ bash ./start_spark_connect_server.sh
 
 # Don't remove the `--quiet` option since poetry has a bug when printing output, see
 # https://github.com/python-poetry/poetry/issues/3412
-"$HOME"/.local/bin/poetry update --quiet
-"$HOME"/.local/bin/poetry run python main.py -t ./test_case/no_partition_append_only.toml
-"$HOME"/.local/bin/poetry run python main.py -t ./test_case/no_partition_upsert.toml
-"$HOME"/.local/bin/poetry run python main.py -t ./test_case/partition_append_only.toml
-"$HOME"/.local/bin/poetry run python main.py -t ./test_case/partition_upsert.toml
-"$HOME"/.local/bin/poetry run python main.py -t ./test_case/range_partition_append_only.toml
-"$HOME"/.local/bin/poetry run python main.py -t ./test_case/range_partition_upsert.toml
-"$HOME"/.local/bin/poetry run python main.py -t ./test_case/append_only_with_checkpoint_interval.toml
+poetry update --quiet
+poetry run python main.py -t ./test_case/no_partition_append_only.toml
+poetry run python main.py -t ./test_case/no_partition_upsert.toml
+poetry run python main.py -t ./test_case/partition_append_only.toml
+poetry run python main.py -t ./test_case/partition_upsert.toml
+poetry run python main.py -t ./test_case/range_partition_append_only.toml
+poetry run python main.py -t ./test_case/range_partition_upsert.toml
+poetry run python main.py -t ./test_case/append_only_with_checkpoint_interval.toml
 
 
 echo "--- Kill cluster"

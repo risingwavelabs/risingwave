@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::sync::Arc;
 use std::time::Duration;
@@ -35,7 +35,9 @@ use with_options::WithOptions;
 
 use super::catalog::{SinkFormat, SinkFormatDesc};
 use super::{Sink, SinkError, SinkParam};
-use crate::connector_common::{KafkaCommon, KafkaPrivateLinkCommon, RdKafkaPropertiesCommon};
+use crate::connector_common::{
+    AwsAuthProps, KafkaCommon, KafkaPrivateLinkCommon, RdKafkaPropertiesCommon,
+};
 use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::formatter::SinkFormatterImpl;
 use crate::sink::log_store::DeliveryFutureManagerAddFuture;
@@ -43,7 +45,9 @@ use crate::sink::writer::{
     AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriter, AsyncTruncateSinkWriterExt, FormattedSink,
 };
 use crate::sink::{DummySinkCommitCoordinator, Result, SinkWriterParam};
-use crate::source::kafka::{KafkaProperties, KafkaSplitEnumerator, PrivateLinkProducerContext};
+use crate::source::kafka::{
+    KafkaContextCommon, KafkaProperties, KafkaSplitEnumerator, RwProducerContext,
+};
 use crate::source::{SourceEnumeratorContext, SplitEnumerator};
 use crate::{
     deserialize_duration_from_string, deserialize_u32_from_string, dispatch_sink_formatter_impl,
@@ -162,6 +166,10 @@ pub struct RdKafkaPropertiesProducer {
     )]
     #[serde_as(as = "DisplayFromStr")]
     max_in_flight_requests_per_connection: usize,
+
+    #[serde(rename = "properties.request.required.acks")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    request_required_acks: Option<i32>,
 }
 
 impl RdKafkaPropertiesProducer {
@@ -195,6 +203,9 @@ impl RdKafkaPropertiesProducer {
         }
         if let Some(v) = &self.compression_codec {
             c.set("compression.codec", v.to_string());
+        }
+        if let Some(v) = self.request_required_acks {
+            c.set("request.required.acks", v.to_string());
         }
         c.set("message.timeout.ms", self.message_timeout_ms.to_string());
         c.set(
@@ -237,10 +248,13 @@ pub struct KafkaConfig {
 
     #[serde(flatten)]
     pub privatelink_common: KafkaPrivateLinkCommon,
+
+    #[serde(flatten)]
+    pub aws_auth_props: AwsAuthProps,
 }
 
 impl KafkaConfig {
-    pub fn from_hashmap(values: HashMap<String, String>) -> Result<Self> {
+    pub fn from_btreemap(values: BTreeMap<String, String>) -> Result<Self> {
         let config = serde_json::from_value::<KafkaConfig>(serde_json::to_value(values).unwrap())
             .map_err(|e| SinkError::Config(anyhow!(e)))?;
 
@@ -250,8 +264,6 @@ impl KafkaConfig {
     pub(crate) fn set_client(&self, c: &mut rdkafka::ClientConfig) {
         self.rdkafka_properties_common.set_client(c);
         self.rdkafka_properties_producer.set_client(c);
-
-        tracing::info!("kafka client starts with: {:?}", c);
     }
 }
 
@@ -267,6 +279,7 @@ impl From<KafkaConfig> for KafkaProperties {
             rdkafka_properties_common: val.rdkafka_properties_common,
             rdkafka_properties_consumer: Default::default(),
             privatelink_common: val.privatelink_common,
+            aws_auth_props: val.aws_auth_props,
             unknown_fields: Default::default(),
         }
     }
@@ -287,7 +300,7 @@ impl TryFrom<SinkParam> for KafkaSink {
 
     fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
         let schema = param.schema();
-        let config = KafkaConfig::from_hashmap(param.properties)?;
+        let config = KafkaConfig::from_btreemap(param.properties)?;
         Ok(Self {
             config,
             schema,
@@ -363,7 +376,7 @@ impl Sink for KafkaSink {
         // use enumerator to validate broker reachability and existence of topic
         let check = KafkaSplitEnumerator::new(
             KafkaProperties::from(self.config.clone()),
-            Arc::new(SourceEnumeratorContext::default()),
+            Arc::new(SourceEnumeratorContext::dummy()),
         )
         .await?;
         if !check.check_reachability().await {
@@ -386,7 +399,7 @@ const KAFKA_WRITER_MAX_QUEUE_SIZE_RATIO: f32 = 1.2;
 const KAFKA_WRITER_MAX_QUEUE_SIZE: usize = 100000;
 
 struct KafkaPayloadWriter<'a> {
-    inner: &'a FutureProducer<PrivateLinkProducerContext>,
+    inner: &'a FutureProducer<RwProducerContext>,
     add_future: DeliveryFutureManagerAddFuture<'a, KafkaSinkDeliveryFuture>,
     config: &'a KafkaConfig,
 }
@@ -395,13 +408,13 @@ pub type KafkaSinkDeliveryFuture = impl TryFuture<Ok = (), Error = SinkError> + 
 
 pub struct KafkaSinkWriter {
     formatter: SinkFormatterImpl,
-    inner: FutureProducer<PrivateLinkProducerContext>,
+    inner: FutureProducer<RwProducerContext>,
     config: KafkaConfig,
 }
 
 impl KafkaSinkWriter {
     async fn new(config: KafkaConfig, formatter: SinkFormatterImpl) -> Result<Self> {
-        let inner: FutureProducer<PrivateLinkProducerContext> = {
+        let inner: FutureProducer<RwProducerContext> = {
             let mut c = ClientConfig::new();
 
             // KafkaConfig configuration
@@ -412,13 +425,16 @@ impl KafkaSinkWriter {
             c.set("bootstrap.servers", &config.common.brokers);
 
             // Create the producer context, will be used to create the producer
-            let producer_ctx = PrivateLinkProducerContext::new(
-                config.privatelink_common.broker_rewrite_map.clone(),
-                // fixme: enable kafka native metrics for sink
+            let broker_rewrite_map = config.privatelink_common.broker_rewrite_map.clone();
+            let ctx_common = KafkaContextCommon::new(
+                broker_rewrite_map,
                 None,
                 None,
-            )?;
-
+                config.aws_auth_props.clone(),
+                config.common.is_aws_msk_iam(),
+            )
+            .await?;
+            let producer_ctx = RwProducerContext::new(ctx_common);
             // Generate the producer
             c.create_with_context(producer_ctx).await?
         };
@@ -569,7 +585,7 @@ impl<'a> FormattedSink for KafkaPayloadWriter<'a> {
 
 #[cfg(test)]
 mod test {
-    use maplit::hashmap;
+    use maplit::btreemap;
     use risingwave_common::catalog::Field;
     use risingwave_common::types::DataType;
 
@@ -582,7 +598,7 @@ mod test {
 
     #[test]
     fn parse_rdkafka_props() {
-        let props: HashMap<String, String> = hashmap! {
+        let props: BTreeMap<String, String> = btreemap! {
             // basic
             // "connector".to_string() => "kafka".to_string(),
             "properties.bootstrap.server".to_string() => "localhost:9092".to_string(),
@@ -603,8 +619,9 @@ mod test {
             "properties.compression.codec".to_string() => "zstd".to_string(),
             "properties.message.timeout.ms".to_string() => "114514".to_string(),
             "properties.max.in.flight.requests.per.connection".to_string() => "114514".to_string(),
+            "properties.request.required.acks".to_string() => "-1".to_string(),
         };
-        let c = KafkaConfig::from_hashmap(props).unwrap();
+        let c = KafkaConfig::from_btreemap(props).unwrap();
         assert_eq!(
             c.rdkafka_properties_producer.queue_buffering_max_ms,
             Some(114.514f64)
@@ -619,8 +636,12 @@ mod test {
                 .max_in_flight_requests_per_connection,
             114514
         );
+        assert_eq!(
+            c.rdkafka_properties_producer.request_required_acks,
+            Some(-1)
+        );
 
-        let props: HashMap<String, String> = hashmap! {
+        let props: BTreeMap<String, String> = btreemap! {
             // basic
             "connector".to_string() => "kafka".to_string(),
             "properties.bootstrap.server".to_string() => "localhost:9092".to_string(),
@@ -629,9 +650,9 @@ mod test {
 
             "properties.enable.idempotence".to_string() => "True".to_string(), // can only be 'true' or 'false'
         };
-        assert!(KafkaConfig::from_hashmap(props).is_err());
+        assert!(KafkaConfig::from_btreemap(props).is_err());
 
-        let props: HashMap<String, String> = hashmap! {
+        let props: BTreeMap<String, String> = btreemap! {
             // basic
             "connector".to_string() => "kafka".to_string(),
             "properties.bootstrap.server".to_string() => "localhost:9092".to_string(),
@@ -639,9 +660,9 @@ mod test {
             "type".to_string() => "append-only".to_string(),
             "properties.queue.buffering.max.kbytes".to_string() => "-114514".to_string(), // usize cannot be negative
         };
-        assert!(KafkaConfig::from_hashmap(props).is_err());
+        assert!(KafkaConfig::from_btreemap(props).is_err());
 
-        let props: HashMap<String, String> = hashmap! {
+        let props: BTreeMap<String, String> = btreemap! {
             // basic
             "connector".to_string() => "kafka".to_string(),
             "properties.bootstrap.server".to_string() => "localhost:9092".to_string(),
@@ -649,12 +670,12 @@ mod test {
             "type".to_string() => "append-only".to_string(),
             "properties.compression.codec".to_string() => "notvalid".to_string(), // has to be a valid CompressionCodec
         };
-        assert!(KafkaConfig::from_hashmap(props).is_err());
+        assert!(KafkaConfig::from_btreemap(props).is_err());
     }
 
     #[test]
     fn parse_kafka_config() {
-        let properties: HashMap<String, String> = hashmap! {
+        let properties: BTreeMap<String, String> = btreemap! {
             // "connector".to_string() => "kafka".to_string(),
             "properties.bootstrap.server".to_string() => "localhost:9092".to_string(),
             "topic".to_string() => "test".to_string(),
@@ -669,48 +690,48 @@ mod test {
             // PrivateLink
             "broker.rewrite.endpoints".to_string() => "{\"broker1\": \"10.0.0.1:8001\"}".to_string(),
         };
-        let config = KafkaConfig::from_hashmap(properties).unwrap();
+        let config = KafkaConfig::from_btreemap(properties).unwrap();
         assert_eq!(config.common.brokers, "localhost:9092");
         assert_eq!(config.common.topic, "test");
         assert_eq!(config.max_retry_num, 20);
         assert_eq!(config.retry_interval, Duration::from_millis(500));
 
         // PrivateLink fields
-        let hashmap: HashMap<String, String> = hashmap! {
+        let btreemap: BTreeMap<String, String> = btreemap! {
             "broker1".to_string() => "10.0.0.1:8001".to_string()
         };
-        assert_eq!(config.privatelink_common.broker_rewrite_map, Some(hashmap));
+        assert_eq!(config.privatelink_common.broker_rewrite_map, Some(btreemap));
 
         // Optional fields eliminated.
-        let properties: HashMap<String, String> = hashmap! {
+        let properties: BTreeMap<String, String> = btreemap! {
             // "connector".to_string() => "kafka".to_string(),
             "properties.bootstrap.server".to_string() => "localhost:9092".to_string(),
             "topic".to_string() => "test".to_string(),
             // "type".to_string() => "upsert".to_string(),
         };
-        let config = KafkaConfig::from_hashmap(properties).unwrap();
+        let config = KafkaConfig::from_btreemap(properties).unwrap();
         assert_eq!(config.max_retry_num, 3);
         assert_eq!(config.retry_interval, Duration::from_millis(100));
 
         // Invalid u32 input.
-        let properties: HashMap<String, String> = hashmap! {
+        let properties: BTreeMap<String, String> = btreemap! {
             "connector".to_string() => "kafka".to_string(),
             "properties.bootstrap.server".to_string() => "localhost:9092".to_string(),
             "topic".to_string() => "test".to_string(),
             "type".to_string() => "upsert".to_string(),
             "properties.retry.max".to_string() => "-20".to_string(),  // error!
         };
-        assert!(KafkaConfig::from_hashmap(properties).is_err());
+        assert!(KafkaConfig::from_btreemap(properties).is_err());
 
         // Invalid duration input.
-        let properties: HashMap<String, String> = hashmap! {
+        let properties: BTreeMap<String, String> = btreemap! {
             "connector".to_string() => "kafka".to_string(),
             "properties.bootstrap.server".to_string() => "localhost:9092".to_string(),
             "topic".to_string() => "test".to_string(),
             "type".to_string() => "upsert".to_string(),
             "properties.retry.interval".to_string() => "500minutes".to_string(),  // error!
         };
-        assert!(KafkaConfig::from_hashmap(properties).is_err());
+        assert!(KafkaConfig::from_btreemap(properties).is_err());
     }
 
     /// Note: Please enable the kafka by running `./risedev configure` before commenting #[ignore]
@@ -719,7 +740,7 @@ mod test {
     #[tokio::test]
     async fn test_kafka_producer() -> Result<()> {
         // Create a dummy kafka properties
-        let properties = hashmap! {
+        let properties = btreemap! {
             "connector".to_string() => "kafka".to_string(),
             "properties.bootstrap.server".to_string() => "localhost:29092".to_string(),
             "type".to_string() => "append-only".to_string(),
@@ -743,7 +764,7 @@ mod test {
             },
         ]);
 
-        let kafka_config = KafkaConfig::from_hashmap(properties)?;
+        let kafka_config = KafkaConfig::from_btreemap(properties)?;
 
         // Create the actual sink writer to Kafka
         let sink = KafkaSinkWriter::new(

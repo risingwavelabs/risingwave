@@ -87,7 +87,7 @@ pub async fn handle_commit(
     }
 
     session.txn_commit_explicit();
-    session.drop_all_cursors().await;
+    session.get_cursor_manager().remove_all_query_cursor().await;
 
     Ok(RwPgResponse::empty_result(stmt_type))
 }
@@ -104,7 +104,7 @@ pub async fn handle_rollback(
     }
 
     session.txn_rollback_explicit();
-    session.drop_all_cursors().await;
+    session.get_cursor_manager().remove_all_query_cursor().await;
 
     Ok(RwPgResponse::empty_result(stmt_type))
 }

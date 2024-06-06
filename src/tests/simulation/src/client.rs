@@ -220,9 +220,7 @@ impl sqllogictest::AsyncDB for RisingWave {
         tokio::time::sleep(dur).await
     }
 
-    async fn run_command(
-        _command: std::process::Command,
-    ) -> std::io::Result<std::process::ExitStatus> {
+    async fn run_command(_command: std::process::Command) -> std::io::Result<std::process::Output> {
         unimplemented!("spawning process is not supported in simulation mode")
     }
 }

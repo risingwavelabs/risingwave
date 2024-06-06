@@ -34,16 +34,14 @@
 #![feature(inline_const_pat)]
 #![allow(incomplete_features)]
 #![feature(iterator_try_collect)]
-#![feature(round_ties_even)]
 #![feature(iter_order_by)]
 #![feature(exclusive_range_pattern)]
 #![feature(binary_heap_into_iter_sorted)]
 #![feature(impl_trait_in_assoc_type)]
 #![feature(map_entry_replace)]
 #![feature(negative_impls)]
-#![feature(bound_map)]
-#![feature(array_methods)]
 #![feature(register_tool)]
+#![feature(btree_cursors)]
 #![register_tool(rw)]
 
 #[cfg_attr(not(test), allow(unused_extern_crates))]
@@ -83,9 +81,11 @@ pub use risingwave_common_metrics::{
     register_guarded_histogram_vec_with_registry, register_guarded_int_counter_vec_with_registry,
     register_guarded_int_gauge_vec_with_registry,
 };
+pub mod lru;
 pub mod opts;
 pub mod range;
 pub mod row;
+pub mod sequence;
 pub mod session_config;
 pub mod system_param;
 pub mod telemetry;
@@ -103,7 +103,7 @@ pub const RW_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Placeholder for unknown git sha.
 pub const UNKNOWN_GIT_SHA: &str = "unknown";
 
-// The single source of truth of the pg parameters, Used in ConfigMap and current_cluster_version.
+// The single source of truth of the pg parameters, Used in SessionConfig and current_cluster_version.
 // The version of PostgreSQL that Risingwave claims to be.
 pub const PG_VERSION: &str = "13.14.0";
 /// The version of PostgreSQL that Risingwave claims to be.

@@ -19,11 +19,15 @@ SELECT TRIM(
 CREATE OR REPLACE TABLE example_snowflake_sink_table (user_id INT, target_id VARCHAR, event_timestamp TIMESTAMP_TZ);
 
 -- snowflake stage, we only supports json as sink format at present
-CREATE OR REPLACE STAGE example_snowflake_stage URL = '<S3_PATH>'
-    credentials = ( AWS_KEY_ID = '<S3_CREDENTIALS>' AWS_SECRET_KEY = '<S3_CREDENTIALS>' ) file_format = ( type = JSON );
+CREATE OR REPLACE STAGE example_snowflake_stage
+    url = '<S3_PATH>'
+    credentials = ( AWS_KEY_ID = '<S3_CREDENTIALS>' AWS_SECRET_KEY = '<S3_CREDENTIALS>' )
+    file_format = ( type = JSON );
 
 -- snowflake pipe
-CREATE OR REPLACE PIPE example_snowflake_pipe AS COPY INTO example_snowflake_sink_table FROM @example_snowflake_stage MATCH_BY_COLUMN_NAME = CASE_INSENSITIVE;
+CREATE OR REPLACE PIPE example_snowflake_pipe
+    AS COPY INTO example_snowflake_sink_table
+    FROM @example_snowflake_stage MATCH_BY_COLUMN_NAME = CASE_INSENSITIVE;
 
 -- select from table after sinking from rw
 SELECT * FROM example_snowflake_sink_table WHERE event_timestamp IS NOT NULL;

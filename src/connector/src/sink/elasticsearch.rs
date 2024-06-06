@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use anyhow::anyhow;
 use risingwave_common::array::{
@@ -38,7 +38,7 @@ impl StreamChunkConverter {
         sink_name: &str,
         schema: Schema,
         pk_indices: &Vec<usize>,
-        properties: &HashMap<String, String>,
+        properties: &BTreeMap<String, String>,
     ) -> Result<Self> {
         if is_es_sink(sink_name) {
             let index_column = properties

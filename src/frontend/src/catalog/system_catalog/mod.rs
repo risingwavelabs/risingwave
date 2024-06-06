@@ -19,8 +19,7 @@ pub mod rw_catalog;
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock};
 
-use async_trait::async_trait;
-use futures::future::BoxFuture;
+use futures::stream::BoxStream;
 use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeManagerRef;
@@ -31,7 +30,7 @@ use risingwave_common::catalog::{
     MAX_SYS_CATALOG_NUM, SYS_CATALOG_START_ID,
 };
 use risingwave_common::error::BoxedError;
-use risingwave_common::session_config::ConfigMap;
+use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::types::DataType;
 use risingwave_pb::meta::list_table_fragment_states_response::TableFragmentState;
@@ -110,7 +109,7 @@ pub struct SysCatalogReaderImpl {
     // Read auth context.
     auth_context: Arc<AuthContext>,
     // Read config.
-    config: Arc<RwLock<ConfigMap>>,
+    config: Arc<RwLock<SessionConfig>>,
     // Read system params.
     system_params: SystemParamsReaderRef,
 }
@@ -122,7 +121,7 @@ impl SysCatalogReaderImpl {
         worker_node_manager: WorkerNodeManagerRef,
         meta_client: Arc<dyn FrontendMetaClient>,
         auth_context: Arc<AuthContext>,
-        config: Arc<RwLock<ConfigMap>>,
+        config: Arc<RwLock<SessionConfig>>,
         system_params: SystemParamsReaderRef,
     ) -> Self {
         Self {
@@ -142,7 +141,7 @@ pub struct BuiltinTable {
     schema: &'static str,
     columns: Vec<SystemCatalogColumnsDef<'static>>,
     pk: &'static [usize],
-    function: for<'a> fn(&'a SysCatalogReaderImpl) -> BoxFuture<'a, Result<DataChunk, BoxedError>>,
+    function: for<'a> fn(&'a SysCatalogReaderImpl) -> BoxStream<'a, Result<DataChunk, BoxedError>>,
 }
 
 pub struct BuiltinView {
@@ -340,18 +339,15 @@ pub static SYS_CATALOGS: LazyLock<SystemCatalog> = LazyLock::new(|| {
 #[linkme::distributed_slice]
 pub static SYS_CATALOGS_SLICE: [fn() -> BuiltinCatalog];
 
-#[async_trait]
 impl SysCatalogReader for SysCatalogReaderImpl {
-    async fn read_table(&self, table_id: &TableId) -> Result<DataChunk, BoxedError> {
+    fn read_table(&self, table_id: TableId) -> BoxStream<'_, Result<DataChunk, BoxedError>> {
         let table_name = SYS_CATALOGS
             .catalogs
             .get((table_id.table_id - SYS_CATALOG_START_ID as u32) as usize)
             .unwrap();
         match table_name {
-            BuiltinCatalog::Table(t) => (t.function)(self).await,
-            BuiltinCatalog::View(_) => {
-                panic!("read_table should not be called on a view")
-            }
+            BuiltinCatalog::Table(t) => (t.function)(self),
+            BuiltinCatalog::View(_) => panic!("read_table should not be called on a view"),
         }
     }
 }

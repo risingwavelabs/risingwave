@@ -58,8 +58,6 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
             );
         }
 
-        builder.enable_virtual_host_style();
-
         if let Some(assume_role) = assume_role {
             builder.role_arn(&assume_role);
         }

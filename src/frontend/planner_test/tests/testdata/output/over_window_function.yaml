@@ -73,11 +73,11 @@
       └─LogicalProject { exprs: [t.x, t._row_id] }
         └─LogicalScan { table: t, columns: [t.x, t._row_id] }
   batch_error: |-
-    Feature is not yet implemented: Window function with empty PARTITION BY is not supported yet
-    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+    Feature is not yet implemented: Window function with empty PARTITION BY is not supported because of potential bad performance. If you really need this, please workaround with something like `PARTITION BY 1::int`.
+    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/11505
   stream_error: |-
-    Feature is not yet implemented: Window function with empty PARTITION BY is not supported yet
-    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+    Feature is not yet implemented: Window function with empty PARTITION BY is not supported because of potential bad performance. If you really need this, please workaround with something like `PARTITION BY 1::int`.
+    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/11505
 - id: lead with offset argument and empty over clause
   sql: |
     create table t(x int);
@@ -88,11 +88,11 @@
       └─LogicalProject { exprs: [t.x, t._row_id, 2:Int32] }
         └─LogicalScan { table: t, columns: [t.x, t._row_id] }
   batch_error: |-
-    Feature is not yet implemented: Window function with empty PARTITION BY is not supported yet
-    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+    Feature is not yet implemented: Window function with empty PARTITION BY is not supported because of potential bad performance. If you really need this, please workaround with something like `PARTITION BY 1::int`.
+    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/11505
   stream_error: |-
-    Feature is not yet implemented: Window function with empty PARTITION BY is not supported yet
-    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+    Feature is not yet implemented: Window function with empty PARTITION BY is not supported because of potential bad performance. If you really need this, please workaround with something like `PARTITION BY 1::int`.
+    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/11505
 - id: lead with non-const offset argument and empty over clause
   sql: |
     create table t(x int);
@@ -164,7 +164,7 @@
   stream_error: |-
     Not supported: streaming nested-loop join
     HINT: The non-equal join in the query requires a nested-loop join executor, which could be very expensive to run. Consider rewriting the query to use dynamic filter as a substitute if possible.
-    See also: https://github.com/risingwavelabs/rfcs/blob/main/rfcs/0033-dynamic-filter.md
+    See also: https://docs.risingwave.com/docs/current/sql-pattern-dynamic-filters/
 - id: aggregate with over clause, without ORDER BY and frame definition
   sql: |
     create table t(x int, y int, z int, w int);

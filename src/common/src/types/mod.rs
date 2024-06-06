@@ -17,7 +17,6 @@
 // NOTE: When adding or modifying data types, remember to update the type matrix in
 // src/expr/macro/src/types.rs
 
-use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::hash::Hash;
 use std::str::FromStr;
@@ -49,6 +48,7 @@ use crate::{
 mod datetime;
 mod decimal;
 mod fields;
+mod from_sql;
 mod interval;
 mod jsonb;
 mod macros;
@@ -801,6 +801,12 @@ impl TryFrom<ScalarImpl> for String {
                 other_scalar.get_ident()
             ),
         }
+    }
+}
+
+impl From<char> for ScalarImpl {
+    fn from(c: char) -> Self {
+        Self::Utf8(c.to_string().into())
     }
 }
 

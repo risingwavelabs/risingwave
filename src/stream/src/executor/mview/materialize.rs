@@ -17,17 +17,15 @@ use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::marker::PhantomData;
 use std::ops::{Deref, Index};
-use std::sync::Arc;
 
 use bytes::Bytes;
-use futures::{stream, StreamExt};
-use futures_async_stream::try_stream;
+use futures::stream;
 use itertools::Itertools;
-use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::array::Op;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, ConflictBehavior, Schema, TableId};
-use risingwave_common::row::{CompactedRow, OwnedRow, RowDeserializer};
-use risingwave_common::types::{DataType, DefaultOrd, ScalarImpl};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, ConflictBehavior, TableId};
+use risingwave_common::row::{CompactedRow, RowDeserializer};
+use risingwave_common::types::DefaultOrd;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_common::util::sort_util::ColumnOrder;
@@ -35,18 +33,12 @@ use risingwave_common::util::value_encoding::{BasicSerde, ValueRowSerializer};
 use risingwave_pb::catalog::Table;
 use risingwave_storage::mem_table::KeyOp;
 use risingwave_storage::row_serde::value_serde::{ValueRowSerde, ValueRowSerdeNew};
-use risingwave_storage::StateStore;
 
-use crate::cache::{new_unbounded, ManagedLruCache};
+use crate::cache::ManagedLruCache;
 use crate::common::metrics::MetricsInfo;
-use crate::common::table::state_table::StateTableInner;
-use crate::executor::error::StreamExecutorError;
-use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{
-    expect_first_barrier, ActorContext, ActorContextRef, AddMutation, BoxedMessageStream, Execute,
-    Executor, Message, Mutation, StreamExecutorResult, UpdateMutation,
-};
-use crate::task::{ActorId, AtomicU64Ref};
+use crate::common::table::state_table::{StateTableInner, StateTableOpConsistencyLevel};
+use crate::executor::monitor::MaterializeMetrics;
+use crate::executor::prelude::*;
 
 /// `MaterializeExecutor` materializes changes in stream into a materialized view on storage.
 pub struct MaterializeExecutor<S: StateStore, SD: ValueRowSerde> {
@@ -66,6 +58,28 @@ pub struct MaterializeExecutor<S: StateStore, SD: ValueRowSerde> {
     conflict_behavior: ConflictBehavior,
 
     version_column_index: Option<u32>,
+
+    may_have_downstream: bool,
+
+    depended_subscription_ids: HashSet<u32>,
+
+    metrics: MaterializeMetrics,
+}
+
+fn get_op_consistency_level(
+    conflict_behavior: ConflictBehavior,
+    may_have_downstream: bool,
+    depended_subscriptions: &HashSet<u32>,
+) -> StateTableOpConsistencyLevel {
+    if !depended_subscriptions.is_empty() {
+        StateTableOpConsistencyLevel::LogStoreEnabled
+    } else if !may_have_downstream && matches!(conflict_behavior, ConflictBehavior::Overwrite) {
+        // Table with overwrite conflict behavior could disable conflict check
+        // if no downstream mv depends on it, so we use a inconsistent_op to skip sanity check as well.
+        StateTableOpConsistencyLevel::Inconsistent
+    } else {
+        StateTableOpConsistencyLevel::ConsistentOldValue
+    }
 }
 
 impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
@@ -98,19 +112,35 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
         );
 
         let arrange_key_indices: Vec<usize> = arrange_key.iter().map(|k| k.column_index).collect();
-
+        let may_have_downstream = actor_context.initial_dispatch_num != 0;
+        let depended_subscription_ids = actor_context
+            .related_subscriptions
+            .get(&TableId::new(table_catalog.id))
+            .cloned()
+            .unwrap_or_default();
+        let op_consistency_level = get_op_consistency_level(
+            conflict_behavior,
+            may_have_downstream,
+            &depended_subscription_ids,
+        );
         // Note: The current implementation could potentially trigger a switch on the inconsistent_op flag. If the storage relies on this flag to perform optimizations, it would be advisable to maintain consistency with it throughout the lifecycle.
-        let state_table = if matches!(conflict_behavior, ConflictBehavior::Overwrite)
-            && actor_context.dispatch_num == 0
-        {
-            // Table with overwrite conflict behavior could disable conflict check if no downstream mv depends on it, so we use a inconsistent_op to skip sanity check as well.
-            StateTableInner::from_table_catalog_inconsistent_op(table_catalog, store, vnodes).await
-        } else {
-            StateTableInner::from_table_catalog(table_catalog, store, vnodes).await
-        };
+        let state_table = StateTableInner::from_table_catalog_with_consistency_level(
+            table_catalog,
+            store,
+            vnodes,
+            op_consistency_level,
+        )
+        .await;
+
+        let mv_metrics = metrics.new_materialize_metrics(
+            TableId::new(table_catalog.id),
+            actor_context.id,
+            actor_context.fragment_id,
+        );
 
         let metrics_info =
             MetricsInfo::new(metrics, table_catalog.id, actor_context.id, "Materialize");
+
         Self {
             input,
             schema,
@@ -125,15 +155,15 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
             ),
             conflict_behavior,
             version_column_index,
+            may_have_downstream,
+            depended_subscription_ids,
+            metrics: mv_metrics,
         }
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
-        // for metrics
-        let table_id_str = self.state_table.table_id().to_string();
-        let actor_id_str = self.actor_context.id.to_string();
-        let fragment_id_str = self.actor_context.fragment_id.to_string();
+        let mv_table_id = TableId::new(self.state_table.table_id());
 
         let data_types = self.schema.data_types();
         let mut input = self.input.execute();
@@ -152,10 +182,8 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
             yield match msg {
                 Message::Watermark(w) => Message::Watermark(w),
                 Message::Chunk(chunk) => {
-                    self.actor_context
-                        .streaming_metrics
-                        .mview_input_row_count
-                        .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
+                    self.metrics
+                        .materialize_input_row_count
                         .inc_by(chunk.cardinality() as u64);
 
                     // This is an optimization that handles conflicts only when a particular materialized view downstream has no MV dependencies.
@@ -208,7 +236,12 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
 
                             let fixed_changes = self
                                 .materialize_cache
-                                .handle(row_ops, &self.state_table, &self.conflict_behavior)
+                                .handle(
+                                    row_ops,
+                                    &self.state_table,
+                                    &self.conflict_behavior,
+                                    &self.metrics,
+                                )
                                 .await?;
 
                             match generate_output(fixed_changes, data_types.clone())? {
@@ -231,17 +264,27 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                     }
                 }
                 Message::Barrier(b) => {
-                    let mutation = b.mutation.clone();
                     // If a downstream mv depends on the current table, we need to do conflict check again.
-                    if !self.state_table.is_consistent_op()
-                        && Self::new_downstream_created(mutation, self.actor_context.id)
+                    if !self.may_have_downstream
+                        && b.has_more_downstream_fragments(self.actor_context.id)
                     {
+                        self.may_have_downstream = true;
+                    }
+                    Self::may_update_depended_subscriptions(
+                        &mut self.depended_subscription_ids,
+                        b.mutation.as_deref(),
+                        mv_table_id,
+                    );
+                    let op_consistency_level = get_op_consistency_level(
+                        self.conflict_behavior,
+                        self.may_have_downstream,
+                        &self.depended_subscription_ids,
+                    );
+                    self.state_table
+                        .commit_may_switch_consistent_op(b.epoch, op_consistency_level)
+                        .await?;
+                    if !self.state_table.is_consistent_op() {
                         assert_eq!(self.conflict_behavior, ConflictBehavior::Overwrite);
-                        self.state_table
-                            .commit_with_switch_consistent_op(b.epoch, Some(true))
-                            .await?;
-                    } else {
-                        self.state_table.commit(b.epoch).await?;
                     }
 
                     // Update the vnode bitmap for the state table if asked.
@@ -253,39 +296,60 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                             self.materialize_cache.data.clear();
                         }
                     }
-                    self.materialize_cache.data.update_epoch(b.epoch.curr);
                     Message::Barrier(b)
                 }
             }
         }
     }
 
-    fn new_downstream_created(mutation: Option<Arc<Mutation>>, actor_id: ActorId) -> bool {
-        let Some(mutation) = mutation.as_deref() else {
-            return false;
+    /// return true when changed
+    fn may_update_depended_subscriptions(
+        depended_subscriptions: &mut HashSet<u32>,
+        mutation: Option<&Mutation>,
+        mv_table_id: TableId,
+    ) {
+        let Some(mutation) = mutation else {
+            return;
         };
         match mutation {
-            // Add is for mv, index and sink creation.
-            Mutation::Add(AddMutation { adds, .. }) => adds.get(&actor_id).is_some(),
-            // AddAndUpdate is for sink-into-table.
-            Mutation::AddAndUpdate(
-                AddMutation { adds, .. },
-                UpdateMutation {
-                    dispatchers,
-                    actor_new_dispatchers: actor_dispatchers,
-                    ..
-                },
-            ) => {
-                adds.get(&actor_id).is_some()
-                    || actor_dispatchers.get(&actor_id).is_some()
-                    || dispatchers.get(&actor_id).is_some()
+            Mutation::CreateSubscription {
+                subscription_id,
+                upstream_mv_table_id,
+            } => {
+                if *upstream_mv_table_id == mv_table_id
+                    && !depended_subscriptions.insert(*subscription_id)
+                {
+                    warn!(
+                        ?depended_subscriptions,
+                        ?mv_table_id,
+                        subscription_id,
+                        "subscription id already exists"
+                    );
+                }
             }
-            Mutation::Update(_)
-            | Mutation::Stop(_)
+            Mutation::DropSubscription {
+                subscription_id,
+                upstream_mv_table_id,
+            } => {
+                if *upstream_mv_table_id == mv_table_id
+                    && !depended_subscriptions.remove(subscription_id)
+                {
+                    warn!(
+                        ?depended_subscriptions,
+                        ?mv_table_id,
+                        subscription_id,
+                        "drop non existing subscription id"
+                    );
+                }
+            }
+            Mutation::Stop(_)
+            | Mutation::Update(_)
+            | Mutation::Add(_)
+            | Mutation::SourceChangeSplit(_)
             | Mutation::Pause
             | Mutation::Resume
-            | Mutation::SourceChangeSplit(_)
-            | Mutation::Throttle(_) => false,
+            | Mutation::Throttle(_)
+            | Mutation::AddAndUpdate(_, _) => {}
         }
     }
 }
@@ -324,6 +388,8 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
         )
         .await;
 
+        let metrics = StreamingMetrics::unused().new_materialize_metrics(table_id, 1, 2);
+
         Self {
             input,
             schema,
@@ -338,6 +404,9 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
             ),
             conflict_behavior,
             version_column_index: None,
+            may_have_downstream: true,
+            depended_subscription_ids: HashSet::new(),
+            metrics,
         }
     }
 }
@@ -481,7 +550,6 @@ impl<S: StateStore, SD: ValueRowSerde> std::fmt::Debug for MaterializeExecutor<S
 /// A cache for materialize executors.
 pub struct MaterializeCache<SD> {
     data: ManagedLruCache<Vec<u8>, CacheValue>,
-    metrics_info: MetricsInfo,
     row_serde: BasicSerde,
     version_column_index: Option<u32>,
     _serde: PhantomData<SD>,
@@ -491,16 +559,15 @@ type CacheValue = Option<CompactedRow>;
 
 impl<SD: ValueRowSerde> MaterializeCache<SD> {
     pub fn new(
-        watermark_epoch: AtomicU64Ref,
+        watermark_sequence: AtomicU64Ref,
         metrics_info: MetricsInfo,
         row_serde: BasicSerde,
         version_column_index: Option<u32>,
     ) -> Self {
         let cache: ManagedLruCache<Vec<u8>, CacheValue> =
-            new_unbounded(watermark_epoch, metrics_info.clone());
+            ManagedLruCache::unbounded(watermark_sequence, metrics_info.clone());
         Self {
             data: cache,
-            metrics_info,
             row_serde,
             version_column_index,
             _serde: PhantomData,
@@ -512,13 +579,19 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
         row_ops: Vec<(Op, Vec<u8>, Bytes)>,
         table: &StateTableInner<S, SD>,
         conflict_behavior: &ConflictBehavior,
+        metrics: &MaterializeMetrics,
     ) -> StreamExecutorResult<MaterializeBuffer> {
         let key_set: HashSet<Box<[u8]>> = row_ops
             .iter()
             .map(|(_, k, _)| k.as_slice().into())
             .collect();
-        self.fetch_keys(key_set.iter().map(|v| v.deref()), table, conflict_behavior)
-            .await?;
+        self.fetch_keys(
+            key_set.iter().map(|v| v.deref()),
+            table,
+            conflict_behavior,
+            metrics,
+        )
+        .await?;
         let mut fixed_changes = MaterializeBuffer::new();
         let row_serde = self.row_serde.clone();
         let version_column_index = self.version_column_index;
@@ -663,20 +736,14 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
         keys: impl Iterator<Item = &'a [u8]>,
         table: &StateTableInner<S, SD>,
         conflict_behavior: &ConflictBehavior,
+        metrics: &MaterializeMetrics,
     ) -> StreamExecutorResult<()> {
         let mut futures = vec![];
         for key in keys {
-            self.metrics_info
-                .metrics
-                .materialize_cache_total_count
-                .with_label_values(&[&self.metrics_info.table_id, &self.metrics_info.actor_id])
-                .inc();
+            metrics.materialize_cache_total_count.inc();
+
             if self.data.contains(key) {
-                self.metrics_info
-                    .metrics
-                    .materialize_cache_hit_count
-                    .with_label_values(&[&self.metrics_info.table_id, &self.metrics_info.actor_id])
-                    .inc();
+                metrics.materialize_cache_hit_count.inc();
                 continue;
             }
             futures.push(async {
@@ -775,24 +842,18 @@ mod tests {
     use std::iter;
     use std::sync::atomic::AtomicU64;
 
-    use futures::stream::StreamExt;
     use rand::rngs::SmallRng;
     use rand::{Rng, RngCore, SeedableRng};
     use risingwave_common::array::stream_chunk::{StreamChunkMut, StreamChunkTestExt};
-    use risingwave_common::array::stream_chunk_builder::StreamChunkBuilder;
-    use risingwave_common::array::Op;
-    use risingwave_common::catalog::{ColumnDesc, ConflictBehavior, Field, Schema, TableId};
-    use risingwave_common::row::OwnedRow;
-    use risingwave_common::types::DataType;
+    use risingwave_common::catalog::Field;
     use risingwave_common::util::epoch::test_epoch;
-    use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
+    use risingwave_common::util::sort_util::OrderType;
     use risingwave_hummock_sdk::HummockReadEpoch;
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::table::batch_table::storage_table::StorageTable;
 
-    use crate::executor::test_utils::prelude::StateTable;
+    use super::*;
     use crate::executor::test_utils::*;
-    use crate::executor::*;
 
     #[tokio::test]
     async fn test_materialize_executor() {

@@ -22,8 +22,7 @@ pub fn refcnt_inc_connection(
 ) -> anyhow::Result<()> {
     if let Some(connection_id) = connection_id {
         if let Some(_conn) = database_mgr.get_connection(connection_id) {
-            // TODO(weili): wait for yezizp to refactor ref cnt
-            database_mgr.increase_ref_count(connection_id);
+            database_mgr.increase_connection_ref_count(connection_id);
         } else {
             bail!("connection {} not found.", connection_id);
         }
@@ -36,7 +35,6 @@ pub fn refcnt_dec_connection(
     connection_id: Option<ConnectionId>,
 ) {
     if let Some(connection_id) = connection_id {
-        // TODO: wait for yezizp to refactor ref cnt
-        database_mgr.decrease_ref_count(connection_id);
+        database_mgr.decrease_connection_ref_count(connection_id);
     }
 }

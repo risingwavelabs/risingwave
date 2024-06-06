@@ -31,28 +31,28 @@ kill_cluster() {
   risedev ci-kill
 }
 
-host_args="-h localhost -p 4565 -h localhost -p 4566 -h localhost -p 4567"
+host_args=(-h localhost -p 4565 -h localhost -p 4566 -h localhost -p 4567)
 
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info,risingwave_storage::hummock::compactor::compactor_runner=warn"
 
 echo "--- e2e, ci-3streaming-2serving-3fe, streaming"
 RUST_LOG=$RUST_LOG \
 risedev ci-start ci-3streaming-2serving-3fe
-sqllogictest ${host_args} -d dev './e2e_test/streaming/**/*.slt' -j 16 --junit "parallel-streaming-${profile}"
+sqllogictest "${host_args[@]}" -d dev './e2e_test/streaming/**/*.slt' -j 16 --junit "parallel-streaming-${profile}"
 
 kill_cluster
 
 echo "--- e2e, ci-3streaming-2serving-3fe, batch"
 RUST_LOG=$RUST_LOG \
 risedev ci-start ci-3streaming-2serving-3fe
-sqllogictest ${host_args} -d dev './e2e_test/ddl/**/*.slt' --junit "parallel-batch-ddl-${profile}"
-sqllogictest ${host_args} -d dev './e2e_test/visibility_mode/*.slt' -j 16 --junit "parallel-batch-${profile}"
+sqllogictest "${host_args[@]}" -d dev './e2e_test/ddl/**/*.slt' --junit "parallel-batch-ddl-${profile}"
+sqllogictest "${host_args[@]}" -d dev './e2e_test/visibility_mode/*.slt' -j 16 --junit "parallel-batch-${profile}"
 
 kill_cluster
 
 echo "--- e2e, ci-3streaming-2serving-3fe, generated"
 RUST_LOG=$RUST_LOG \
 risedev ci-start ci-3streaming-2serving-3fe
-sqllogictest ${host_args} -d dev './e2e_test/generated/**/*.slt' -j 16 --junit "parallel-generated-${profile}"
+sqllogictest "${host_args[@]}" -d dev './e2e_test/generated/**/*.slt' -j 16 --junit "parallel-generated-${profile}"
 
 kill_cluster

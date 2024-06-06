@@ -19,7 +19,6 @@ use paste::paste;
 use super::*;
 use crate::optimizer::plan_visitor::ShareParentCounter;
 use crate::optimizer::PlanVisitor;
-use crate::utils::Condition;
 use crate::{for_batch_plan_nodes, for_stream_plan_nodes};
 
 /// The trait for predicate pushdown, only logical plan node will use it, though all plan node impl

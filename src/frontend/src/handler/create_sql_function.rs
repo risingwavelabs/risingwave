@@ -15,15 +15,10 @@
 use std::collections::HashMap;
 
 use fancy_regex::Regex;
-use itertools::Itertools;
-use pgwire::pg_response::StatementType;
 use risingwave_common::catalog::FunctionId;
 use risingwave_common::types::DataType;
 use risingwave_pb::catalog::function::{Kind, ScalarFunction, TableFunction};
 use risingwave_pb::catalog::Function;
-use risingwave_sqlparser::ast::{
-    CreateFunctionBody, FunctionDefinition, ObjectName, OperateFunctionArg,
-};
 use risingwave_sqlparser::parser::{Parser, ParserError};
 
 use super::*;
@@ -344,6 +339,8 @@ pub async fn handle_create_sql_function(
         link: None,
         owner: session.user_id(),
         always_retry_on_network_error: false,
+        runtime: None,
+        function_type: None,
     };
 
     let catalog_writer = session.catalog_writer()?;

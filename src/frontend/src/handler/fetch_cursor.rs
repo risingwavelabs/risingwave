@@ -12,21 +12,36 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_sqlparser::ast::ObjectName;
+use pgwire::types::Row;
+use risingwave_sqlparser::ast::FetchCursorStatement;
 
 use super::RwPgResponse;
 use crate::error::Result;
 use crate::handler::HandlerArgs;
+use crate::{Binder, PgResponseStream};
 
 pub async fn handle_fetch_cursor(
-    handler_args: HandlerArgs,
-    cursor_name: ObjectName,
-    count: Option<i32>,
+    handle_args: HandlerArgs,
+    stmt: FetchCursorStatement,
 ) -> Result<RwPgResponse> {
-    let session = handler_args.session;
-    let (rows, pg_descs) = session.cursor_next(&cursor_name, count).await?;
-    Ok(PgResponse::builder(StatementType::FETCH_CURSOR)
-        .values(rows.into(), pg_descs)
-        .into())
+    let session = handle_args.session.clone();
+    let db_name = session.database();
+    let (_, cursor_name) =
+        Binder::resolve_schema_qualified_name(db_name, stmt.cursor_name.clone())?;
+
+    let cursor_manager = session.get_cursor_manager();
+
+    let (rows, pg_descs) = cursor_manager
+        .get_rows_with_cursor(cursor_name, stmt.count, handle_args)
+        .await?;
+    Ok(build_fetch_cursor_response(rows, pg_descs))
+}
+
+fn build_fetch_cursor_response(rows: Vec<Row>, pg_descs: Vec<PgFieldDescriptor>) -> RwPgResponse {
+    PgResponse::builder(StatementType::FETCH_CURSOR)
+        .row_cnt_opt(Some(rows.len() as i32))
+        .values(PgResponseStream::from(rows), pg_descs)
+        .into()
 }

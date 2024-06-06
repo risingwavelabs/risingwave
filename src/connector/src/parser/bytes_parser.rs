@@ -54,6 +54,7 @@ mod tests {
         BytesProperties, EncodingProperties, ProtocolProperties, SourceColumnDesc,
         SourceStreamChunkBuilder, SpecificParserConfig,
     };
+    use crate::source::SourceContext;
 
     fn get_payload() -> Vec<Vec<u8>> {
         vec![br#"t"#.to_vec(), br#"random"#.to_vec()]
@@ -66,7 +67,7 @@ mod tests {
             encoding_config: EncodingProperties::Bytes(BytesProperties { column_name: None }),
             protocol_config: ProtocolProperties::Plain,
         };
-        let mut parser = PlainParser::new(props, descs.clone(), Default::default())
+        let mut parser = PlainParser::new(props, descs.clone(), SourceContext::dummy().into())
             .await
             .unwrap();
 

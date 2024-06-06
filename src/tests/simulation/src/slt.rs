@@ -223,6 +223,10 @@ pub async fn run_slt_task(
         // NOTE(kwannoel): For background ddl
         let mut background_ddl_enabled = false;
 
+        // If background ddl is set to true within the test case, prevent random setting of background_ddl to true.
+        // We can revert it back to false only if we encounter a record that sets background_ddl to false.
+        let mut manual_background_ddl_enabled = false;
+
         for record in sqllogictest::parse_file(path).expect("failed to parse file") {
             // uncomment to print metrics for task counts
             // let metrics = madsim::runtime::Handle::current().metrics();
@@ -254,8 +258,10 @@ pub async fn run_slt_task(
             };
             tracing::debug!(?cmd, "Running");
 
-            if matches!(cmd, SqlCmd::SetBackgroundDdl { .. }) && background_ddl_rate > 0.0 {
-                panic!("We cannot run background_ddl statement with background_ddl_rate > 0.0, since it could be reset");
+            if background_ddl_rate > 0.0
+                && let SqlCmd::SetBackgroundDdl { enable } = cmd
+            {
+                manual_background_ddl_enabled = enable;
             }
 
             // For each background ddl compatible statement, provide a chance for background_ddl=true.
@@ -266,6 +272,7 @@ pub async fn run_slt_task(
                 ..
             } = &record
                 && matches!(cmd, SqlCmd::CreateMaterializedView { .. })
+                && !manual_background_ddl_enabled
             {
                 let background_ddl_setting = rng.gen_bool(background_ddl_rate);
                 let set_background_ddl = Record::Statement {
@@ -481,6 +488,7 @@ fn hack_kafka_test(path: &Path) -> tempfile::NamedTempFile {
             .expect("failed to get schema path");
     let content = content
         .replace("127.0.0.1:29092", "192.168.11.1:29092")
+        .replace("localhost:29092", "192.168.11.1:29092")
         .replace(
             "/risingwave/avro-simple-schema.avsc",
             simple_avsc_full_path.to_str().unwrap(),

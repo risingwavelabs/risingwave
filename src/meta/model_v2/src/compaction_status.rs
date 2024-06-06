@@ -14,8 +14,6 @@
 
 use risingwave_pb::hummock::LevelHandler as PbLevelHandler;
 use sea_orm::entity::prelude::*;
-use sea_orm::FromJsonQueryResult;
-use serde::{Deserialize, Serialize};
 
 use crate::CompactionGroupId;
 
@@ -32,4 +30,4 @@ pub enum Relation {}
 
 impl ActiveModelBehavior for ActiveModel {}
 
-crate::derive_from_json_struct!(LevelHandlers, Vec<PbLevelHandler>);
+crate::derive_array_from_blob!(LevelHandlers, PbLevelHandler, PbLevelHandlerArray);

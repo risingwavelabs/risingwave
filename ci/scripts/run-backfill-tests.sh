@@ -13,6 +13,7 @@
 #   1002 | CREATE MATERIALIZED VIEW m1 AS SELECT * FROM t | 56.12%   | 2023-09-27 06:37:06.636+00:00
 #(1 row)
 
+# TODO: refactor with inline style.
 
 set -euo pipefail
 
@@ -22,7 +23,7 @@ TEST_DIR=$PWD/e2e_test
 BACKGROUND_DDL_DIR=$TEST_DIR/background_ddl
 COMMON_DIR=$BACKGROUND_DDL_DIR/common
 
-CLUSTER_PROFILE='ci-1cn-1fe-kafka-with-recovery'
+CLUSTER_PROFILE='ci-1cn-1fe-user-kafka-with-recovery'
 echo "--- Configuring cluster profiles"
 if [[ -n "${BUILDKITE:-}" ]]; then
   echo "Running in buildkite"
@@ -186,14 +187,14 @@ test_sink_backfill_recovery() {
 
   # Restart
   restart_cluster
-  sleep 3
+  sleep 5
 
   # Sink back into rw
   run_sql "CREATE TABLE table_kafka (v1 int primary key)
     WITH (
       connector = 'kafka',
       topic = 's_kafka',
-      properties.bootstrap.server = 'localhost:29092',
+      properties.bootstrap.server = 'message_queue:29092',
   ) FORMAT DEBEZIUM ENCODE JSON;"
 
   sleep 10

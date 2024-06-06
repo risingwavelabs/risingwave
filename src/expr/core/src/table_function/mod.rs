@@ -12,16 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use either::Either;
 use futures_async_stream::try_stream;
 use futures_util::stream::BoxStream;
 use futures_util::StreamExt;
-use itertools::Itertools;
-use risingwave_common::array::{Array, ArrayBuilder, ArrayImpl, ArrayRef, DataChunk};
+use risingwave_common::array::{Array, ArrayBuilder, ArrayImpl, DataChunk};
 use risingwave_common::types::{DataType, DatumRef};
-use risingwave_pb::expr::project_set_select_item::SelectItem;
 use risingwave_pb::expr::table_function::PbType;
-use risingwave_pb::expr::{PbProjectSetSelectItem, PbTableFunction};
+use risingwave_pb::expr::PbTableFunction;
 
 use super::{ExprError, Result};
 use crate::expr::{build_from_prost as expr_build_from_prost, BoxedExpression};
@@ -108,9 +105,7 @@ pub trait TableFunction: std::fmt::Debug + Sync + Send {
 pub type BoxedTableFunction = Box<dyn TableFunction>;
 
 pub fn build_from_prost(prost: &PbTableFunction, chunk_size: usize) -> Result<BoxedTableFunction> {
-    use risingwave_pb::expr::table_function::Type::*;
-
-    if prost.get_function_type().unwrap() == Udtf {
+    if prost.get_function_type().unwrap() == PbType::UserDefined {
         return new_user_defined(prost, chunk_size);
     }
 
@@ -129,6 +124,7 @@ pub fn build(
     chunk_size: usize,
     children: Vec<BoxedExpression>,
 ) -> Result<BoxedTableFunction> {
+    use itertools::Itertools;
     let args = children.iter().map(|t| t.return_type()).collect_vec();
     let desc = crate::sig::FUNCTION_REGISTRY
         .get(func, &args, &return_type)
@@ -141,53 +137,6 @@ pub fn build(
             ))
         })?;
     desc.build_table(return_type, chunk_size, children)
-}
-
-/// See also [`PbProjectSetSelectItem`]
-#[derive(Debug)]
-pub enum ProjectSetSelectItem {
-    TableFunction(BoxedTableFunction),
-    Expr(BoxedExpression),
-}
-
-impl From<BoxedTableFunction> for ProjectSetSelectItem {
-    fn from(table_function: BoxedTableFunction) -> Self {
-        ProjectSetSelectItem::TableFunction(table_function)
-    }
-}
-
-impl From<BoxedExpression> for ProjectSetSelectItem {
-    fn from(expr: BoxedExpression) -> Self {
-        ProjectSetSelectItem::Expr(expr)
-    }
-}
-
-impl ProjectSetSelectItem {
-    pub fn from_prost(prost: &PbProjectSetSelectItem, chunk_size: usize) -> Result<Self> {
-        match prost.select_item.as_ref().unwrap() {
-            SelectItem::Expr(expr) => expr_build_from_prost(expr).map(Into::into),
-            SelectItem::TableFunction(tf) => build_from_prost(tf, chunk_size).map(Into::into),
-        }
-    }
-
-    pub fn return_type(&self) -> DataType {
-        match self {
-            ProjectSetSelectItem::TableFunction(tf) => tf.return_type(),
-            ProjectSetSelectItem::Expr(expr) => expr.return_type(),
-        }
-    }
-
-    pub async fn eval<'a>(
-        &'a self,
-        input: &'a DataChunk,
-    ) -> Result<Either<TableFunctionOutputIter<'a>, ArrayRef>> {
-        match self {
-            Self::TableFunction(tf) => Ok(Either::Left(
-                TableFunctionOutputIter::new(tf.eval(input).await).await?,
-            )),
-            Self::Expr(expr) => expr.eval(input).await.map(Either::Right),
-        }
-    }
 }
 
 /// A wrapper over the output of table function that allows iteration by rows.

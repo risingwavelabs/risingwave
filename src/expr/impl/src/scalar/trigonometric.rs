@@ -362,7 +362,7 @@ pub fn radians_f64(input: F64) -> F64 {
 mod tests {
     use std::f64::consts::PI;
 
-    use risingwave_common::types::{FloatExt, F64};
+    use risingwave_common::types::FloatExt;
 
     use crate::scalar::trigonometric::*;
 

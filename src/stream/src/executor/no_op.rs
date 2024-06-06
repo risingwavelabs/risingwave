@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::{ActorContextRef, BoxedMessageStream, Execute, Executor};
+use crate::executor::prelude::*;
 
 /// No-op executor directly forwards the input stream. Currently used to break the multiple edges in
 /// the fragment graph.

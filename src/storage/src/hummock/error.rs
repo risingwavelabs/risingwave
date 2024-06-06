@@ -18,8 +18,8 @@ use thiserror_ext::AsReport;
 use tokio::sync::oneshot::error::RecvError;
 
 // TODO(error-handling): should prefer use error types than strings.
-#[derive(Error, Debug, thiserror_ext::Box)]
-#[thiserror_ext(newtype(name = HummockError, backtrace, report_debug))]
+#[derive(Error, thiserror_ext::ReportDebug, thiserror_ext::Box)]
+#[thiserror_ext(newtype(name = HummockError, backtrace))]
 pub enum HummockErrorInner {
     #[error("Magic number mismatch: expected {expected}, found: {found}")]
     MagicMismatch { expected: u32, found: u32 },
@@ -61,6 +61,8 @@ pub enum HummockErrorInner {
     SstableUploadError(String),
     #[error("Read backup error: {0}")]
     ReadBackupError(String),
+    #[error("Foyer error: {0}")]
+    FoyerError(anyhow::Error),
     #[error("Other error: {0}")]
     Other(String),
 }
@@ -144,6 +146,10 @@ impl HummockError {
 
     pub fn read_backup_error(error: impl ToString) -> HummockError {
         HummockErrorInner::ReadBackupError(error.to_string()).into()
+    }
+
+    pub fn foyer_error(error: anyhow::Error) -> HummockError {
+        HummockErrorInner::FoyerError(error).into()
     }
 
     pub fn other(error: impl ToString) -> HummockError {

@@ -30,7 +30,7 @@ use tokio::sync::RwLock;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tonic::transport::{Channel, Endpoint};
 
-use crate::error::Result;
+use crate::error::{Result, RpcError};
 use crate::retry_rpc;
 const ENDPOINT_KEEP_ALIVE_INTERVAL_SEC: u64 = 60;
 const ENDPOINT_KEEP_ALIVE_TIMEOUT_SEC: u64 = 60;
@@ -59,7 +59,8 @@ impl CompactorClient {
             .monitor_client
             .to_owned()
             .stack_trace(StackTraceRequest::default())
-            .await?
+            .await
+            .map_err(RpcError::from_compactor_status)?
             .into_inner())
     }
 }

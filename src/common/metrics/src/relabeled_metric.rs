@@ -16,8 +16,8 @@ use prometheus::core::{MetricVec, MetricVecBuilder};
 use prometheus::{HistogramVec, IntCounterVec};
 
 use crate::{
-    LabelGuardedHistogramVec, LabelGuardedIntCounterVec, LabelGuardedMetric, LabelGuardedMetricVec,
-    MetricLevel,
+    LabelGuardedHistogramVec, LabelGuardedIntCounterVec, LabelGuardedIntGaugeVec,
+    LabelGuardedMetric, LabelGuardedMetricVec, MetricLevel,
 };
 
 /// For all `Relabeled*Vec` below,
@@ -108,3 +108,5 @@ pub type RelabeledGuardedHistogramVec<const N: usize> =
     RelabeledMetricVec<LabelGuardedHistogramVec<N>>;
 pub type RelabeledGuardedIntCounterVec<const N: usize> =
     RelabeledMetricVec<LabelGuardedIntCounterVec<N>>;
+pub type RelabeledGuardedIntGaugeVec<const N: usize> =
+    RelabeledMetricVec<LabelGuardedIntGaugeVec<N>>;

@@ -80,10 +80,15 @@ impl Task for ComputeNodeService {
 
         let mut cmd = self.compute_node()?;
 
-        cmd.env("RUST_BACKTRACE", "1").env(
+        cmd.env(
             "TOKIO_CONSOLE_BIND",
             format!("127.0.0.1:{}", self.config.port + 1000),
         );
+
+        if crate::util::is_enable_backtrace() {
+            cmd.env("RUST_BACKTRACE", "1");
+        }
+
         if crate::util::is_env_set("RISEDEV_ENABLE_PROFILE") {
             cmd.env(
                 "RW_PROFILE_PATH",

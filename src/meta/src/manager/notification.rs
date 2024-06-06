@@ -47,6 +47,7 @@ pub enum LocalNotification {
     SystemParamsChange(SystemParamsReader),
     FragmentMappingsUpsert(Vec<FragmentId>),
     FragmentMappingsDelete(Vec<FragmentId>),
+    AdhocRecovery,
 }
 
 #[derive(Debug)]
@@ -100,7 +101,6 @@ impl NotificationManager {
                     info: Some(task.info),
                     version: task.version.unwrap_or_default(),
                 };
-
                 core.lock().await.notify(task.target, response);
             }
         });

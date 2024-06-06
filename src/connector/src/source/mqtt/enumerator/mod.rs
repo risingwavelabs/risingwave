@@ -29,7 +29,9 @@ use crate::error::ConnectorResult;
 use crate::source::{SourceEnumeratorContextRef, SplitEnumerator};
 
 pub struct MqttSplitEnumerator {
+    #[expect(dead_code)]
     topic: String,
+    #[expect(dead_code)]
     client: rumqttc::v5::AsyncClient,
     topics: Arc<RwLock<HashSet<String>>>,
     connected: Arc<AtomicBool>,

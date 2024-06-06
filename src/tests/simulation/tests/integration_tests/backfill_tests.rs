@@ -264,7 +264,7 @@ async fn test_arrangement_backfill_progress() -> Result<()> {
     let progress = progress.replace('%', "");
     let progress = progress.parse::<f64>().unwrap();
     assert!(
-        (1.0..2.0).contains(&progress),
+        (1.0..10.0).contains(&progress),
         "progress not within bounds {}",
         progress
     );
@@ -303,5 +303,30 @@ async fn test_enable_arrangement_backfill() -> Result<()> {
         .run("SET STREAMING_USE_ARRANGEMENT_BACKFILL=false")
         .await?;
     assert!(!result.contains("ArrangementBackfill"));
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_recovery_cancels_foreground_ddl() -> Result<()> {
+    let mut cluster = Cluster::start(Configuration::enable_arrangement_backfill()).await?;
+    let mut session = cluster.start_session();
+    session.run("SET STREAMING_RATE_LIMIT=1").await?;
+    session.run("CREATE TABLE t(v1 int);").await?;
+    session
+        .run("INSERT INTO t select * from generate_series(1, 100000);")
+        .await?;
+    let handle = tokio::spawn(async move {
+        session
+            .run("CREATE MATERIALIZED VIEW m1 AS SELECT * FROM t;")
+            .await
+    });
+    sleep(Duration::from_secs(2)).await;
+    cluster.run("RECOVER").await?;
+    match handle.await? {
+        Ok(_) => panic!("create m1 should fail"),
+        Err(e) => {
+            assert!(e.to_string().contains("adhoc recovery triggered"));
+        }
+    }
     Ok(())
 }

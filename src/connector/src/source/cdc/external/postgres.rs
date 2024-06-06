@@ -13,25 +13,25 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
-use std::collections::HashMap;
 
 use anyhow::Context;
 use futures::stream::BoxStream;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use openssl::ssl::{SslConnector, SslMethod};
+use openssl::ssl::{SslConnector, SslMethod, SslVerifyMode};
 use postgres_openssl::MakeTlsConnector;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::{OwnedRow, Row};
-use risingwave_common::types::DatumRef;
+use risingwave_common::util::iter_util::ZipEqFast;
 use serde_derive::{Deserialize, Serialize};
 use thiserror_ext::AsReport;
 use tokio_postgres::types::PgLsn;
-use tokio_postgres::NoTls;
+use tokio_postgres::{NoTls, Statement};
 
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::postgres_row_to_owned_row;
+use crate::parser::scalar_adapter::ScalarAdapter;
 #[cfg(not(madsim))]
 use crate::source::cdc::external::maybe_tls_connector::MaybeMakeTlsConnector;
 use crate::source::cdc::external::{
@@ -72,23 +72,16 @@ impl PostgresOffset {
     }
 }
 
-#[derive(Debug)]
 pub struct PostgresExternalTableReader {
+    #[expect(dead_code)]
     config: ExternalTableConfig,
     rw_schema: Schema,
     field_names: String,
-
+    prepared_scan_stmt: Statement,
     client: tokio::sync::Mutex<tokio_postgres::Client>,
 }
 
 impl ExternalTableReader for PostgresExternalTableReader {
-    fn get_normalized_table_name(&self, table_name: &SchemaTableName) -> String {
-        format!(
-            "\"{}\".\"{}\"",
-            table_name.schema_name, table_name.table_name
-        )
-    }
-
     async fn current_cdc_offset(&self) -> ConnectorResult<CdcOffset> {
         let mut client = self.client.lock().await;
         // start a transaction to read current lsn and txid
@@ -122,45 +115,57 @@ impl ExternalTableReader for PostgresExternalTableReader {
 
 impl PostgresExternalTableReader {
     pub async fn new(
-        properties: HashMap<String, String>,
+        config: ExternalTableConfig,
         rw_schema: Schema,
+        pk_indices: Vec<usize>,
+        scan_limit: u32,
     ) -> ConnectorResult<Self> {
-        tracing::debug!(?rw_schema, "create postgres external table reader");
-
-        let config = serde_json::from_value::<ExternalTableConfig>(
-            serde_json::to_value(properties).unwrap(),
-        )
-        .context("failed to extract postgres connector properties")?;
-
-        let database_url = format!(
-            "postgresql://{}:{}@{}:{}/{}?sslmode={}",
-            config.username,
-            config.password,
-            config.host,
-            config.port,
-            config.database,
-            config.sslmode
+        tracing::info!(
+            ?rw_schema,
+            ?pk_indices,
+            "create postgres external table reader"
         );
+
+        let mut pg_config = tokio_postgres::Config::new();
+        pg_config
+            .user(&config.username)
+            .password(&config.password)
+            .host(&config.host)
+            .port(config.port.parse::<u16>().unwrap())
+            .dbname(&config.database);
 
         #[cfg(not(madsim))]
         let connector = match config.sslmode {
-            SslMode::Disable => MaybeMakeTlsConnector::NoTls(NoTls),
-            SslMode::Prefer => match SslConnector::builder(SslMethod::tls()) {
-                Ok(builder) => MaybeMakeTlsConnector::Tls(MakeTlsConnector::new(builder.build())),
-                Err(e) => {
-                    tracing::warn!(error = %e.as_report(), "SSL connector error");
-                    MaybeMakeTlsConnector::NoTls(NoTls)
+            SslMode::Disabled => {
+                pg_config.ssl_mode(tokio_postgres::config::SslMode::Disable);
+                MaybeMakeTlsConnector::NoTls(NoTls)
+            }
+            SslMode::Preferred => {
+                pg_config.ssl_mode(tokio_postgres::config::SslMode::Prefer);
+                match SslConnector::builder(SslMethod::tls()) {
+                    Ok(mut builder) => {
+                        // disable certificate verification for `prefer`
+                        builder.set_verify(SslVerifyMode::NONE);
+                        MaybeMakeTlsConnector::Tls(MakeTlsConnector::new(builder.build()))
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e.as_report(), "SSL connector error");
+                        MaybeMakeTlsConnector::NoTls(NoTls)
+                    }
                 }
-            },
-            SslMode::Require => {
-                let builder = SslConnector::builder(SslMethod::tls())?;
+            }
+            SslMode::Required => {
+                pg_config.ssl_mode(tokio_postgres::config::SslMode::Require);
+                let mut builder = SslConnector::builder(SslMethod::tls())?;
+                // disable certificate verification for `require`
+                builder.set_verify(SslVerifyMode::NONE);
                 MaybeMakeTlsConnector::Tls(MakeTlsConnector::new(builder.build()))
             }
         };
         #[cfg(madsim)]
         let connector = NoTls;
 
-        let (client, connection) = tokio_postgres::connect(&database_url, connector).await?;
+        let (client, connection) = pg_config.connect(connector).await?;
 
         tokio::spawn(async move {
             if let Err(e) = connection.await {
@@ -174,12 +179,42 @@ impl PostgresExternalTableReader {
             .map(|f| Self::quote_column(&f.name))
             .join(",");
 
+        // prepare once
+        let prepared_scan_stmt = {
+            let primary_keys = pk_indices
+                .iter()
+                .map(|i| rw_schema.fields[*i].name.clone())
+                .collect_vec();
+
+            let table_name = SchemaTableName {
+                schema_name: config.schema.clone(),
+                table_name: config.table.clone(),
+            };
+            let order_key = primary_keys.iter().join(",");
+            let scan_sql = format!(
+                "SELECT {} FROM {} WHERE {} ORDER BY {} LIMIT {scan_limit}",
+                field_names,
+                Self::get_normalized_table_name(&table_name),
+                Self::filter_expression(&primary_keys),
+                order_key,
+            );
+            client.prepare(&scan_sql).await?
+        };
+
         Ok(Self {
             config,
             rw_schema,
             field_names,
+            prepared_scan_stmt,
             client: tokio::sync::Mutex::new(client),
         })
+    }
+
+    pub fn get_normalized_table_name(table_name: &SchemaTableName) -> String {
+        format!(
+            "\"{}\".\"{}\"",
+            table_name.schema_name, table_name.table_name
+        )
     }
 
     pub fn get_cdc_offset_parser() -> CdcOffsetParseFunc {
@@ -199,33 +234,35 @@ impl PostgresExternalTableReader {
         limit: u32,
     ) {
         let order_key = primary_keys.iter().join(",");
-        let sql = if start_pk_row.is_none() {
-            format!(
-                "SELECT {} FROM {} ORDER BY {} LIMIT {limit}",
-                self.field_names,
-                self.get_normalized_table_name(&table_name),
-                order_key,
-            )
-        } else {
-            let filter_expr = Self::filter_expression(&primary_keys);
-            format!(
-                "SELECT {} FROM {} WHERE {} ORDER BY {} LIMIT {limit}",
-                self.field_names,
-                self.get_normalized_table_name(&table_name),
-                filter_expr,
-                order_key,
-            )
-        };
-
         let client = self.client.lock().await;
         client.execute("set time zone '+00:00'", &[]).await?;
 
-        let params: Vec<DatumRef<'_>> = match start_pk_row {
-            Some(ref pk_row) => pk_row.iter().collect_vec(),
-            None => Vec::new(),
+        let stream = match start_pk_row {
+            Some(ref pk_row) => {
+                let params: Vec<Option<ScalarAdapter>> = pk_row
+                    .iter()
+                    .zip_eq_fast(self.prepared_scan_stmt.params())
+                    .map(|(datum, ty)| {
+                        datum
+                            .map(|scalar| ScalarAdapter::from_scalar(scalar, ty))
+                            .transpose()
+                    })
+                    .try_collect()?;
+
+                client.query_raw(&self.prepared_scan_stmt, &params).await?
+            }
+            None => {
+                let sql = format!(
+                    "SELECT {} FROM {} ORDER BY {} LIMIT {limit}",
+                    self.field_names,
+                    Self::get_normalized_table_name(&table_name),
+                    order_key,
+                );
+                let params: Vec<Option<ScalarAdapter>> = vec![];
+                client.query_raw(&sql, &params).await?
+            }
         };
 
-        let stream = client.query_raw(&sql, &params).await?;
         let row_stream = stream.map(|row| {
             let row = row?;
             Ok::<_, crate::error::ConnectorError>(postgres_row_to_owned_row(row, &self.rw_schema))
@@ -261,6 +298,8 @@ impl PostgresExternalTableReader {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use futures::pin_mut;
     use futures_async_stream::for_await;
     use maplit::{convert_args, hashmap};
@@ -269,7 +308,7 @@ mod tests {
     use risingwave_common::types::{DataType, ScalarImpl};
 
     use crate::source::cdc::external::postgres::{PostgresExternalTableReader, PostgresOffset};
-    use crate::source::cdc::external::{ExternalTableReader, SchemaTableName};
+    use crate::source::cdc::external::{ExternalTableConfig, ExternalTableReader, SchemaTableName};
 
     #[test]
     fn test_postgres_offset() {
@@ -311,7 +350,7 @@ mod tests {
             fields: columns.iter().map(Field::from).collect(),
         };
 
-        let props = convert_args!(hashmap!(
+        let props: HashMap<String, String> = convert_args!(hashmap!(
                 "hostname" => "localhost",
                 "port" => "8432",
                 "username" => "myuser",
@@ -319,7 +358,11 @@ mod tests {
                 "database.name" => "mydb",
                 "schema.name" => "public",
                 "table.name" => "t1"));
-        let reader = PostgresExternalTableReader::new(props, rw_schema)
+
+        let config =
+            serde_json::from_value::<ExternalTableConfig>(serde_json::to_value(props).unwrap())
+                .unwrap();
+        let reader = PostgresExternalTableReader::new(config, rw_schema, vec![0, 1], 1000)
             .await
             .unwrap();
 

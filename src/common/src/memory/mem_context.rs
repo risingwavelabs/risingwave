@@ -59,6 +59,7 @@ impl<const N: usize> MemCounter for LabelGuardedIntGauge<N> {
 struct MemoryContextInner {
     counter: Box<dyn MemCounter>,
     parent: Option<MemoryContext>,
+    mem_limit: u64,
 }
 
 #[derive(Clone)]
@@ -70,9 +71,22 @@ pub struct MemoryContext {
 
 impl MemoryContext {
     pub fn new(parent: Option<MemoryContext>, counter: impl MemCounter) -> Self {
+        let mem_limit = parent.as_ref().map_or_else(|| u64::MAX, |p| p.mem_limit());
+        Self::new_with_mem_limit(parent, counter, mem_limit)
+    }
+
+    pub fn new_with_mem_limit(
+        parent: Option<MemoryContext>,
+        counter: impl MemCounter,
+        mem_limit: u64,
+    ) -> Self {
         let c = Box::new(counter);
         Self {
-            inner: Some(Arc::new(MemoryContextInner { counter: c, parent })),
+            inner: Some(Arc::new(MemoryContextInner {
+                counter: c,
+                parent,
+                mem_limit,
+            })),
         }
     }
 
@@ -81,19 +95,28 @@ impl MemoryContext {
         Self { inner: None }
     }
 
-    pub fn root(counter: impl MemCounter) -> Self {
-        Self::new(None, counter)
+    pub fn root(counter: impl MemCounter, mem_limit: u64) -> Self {
+        Self::new_with_mem_limit(None, counter, mem_limit)
     }
 
     /// Add `bytes` memory usage. Pass negative value to decrease memory usage.
-    pub fn add(&self, bytes: i64) {
+    /// Returns `false` if the memory usage exceeds the limit.
+    pub fn add(&self, bytes: i64) -> bool {
         if let Some(inner) = &self.inner {
-            inner.counter.add(bytes);
-
+            if (inner.counter.get_bytes_used() + bytes) as u64 > inner.mem_limit {
+                return false;
+            }
             if let Some(parent) = &inner.parent {
-                parent.add(bytes);
+                if parent.add(bytes) {
+                    inner.counter.add(bytes);
+                } else {
+                    return false;
+                }
+            } else {
+                inner.counter.add(bytes);
             }
         }
+        true
     }
 
     pub fn get_bytes_used(&self) -> i64 {
@@ -102,6 +125,29 @@ impl MemoryContext {
         } else {
             0
         }
+    }
+
+    pub fn mem_limit(&self) -> u64 {
+        if let Some(inner) = &self.inner {
+            inner.mem_limit
+        } else {
+            u64::MAX
+        }
+    }
+
+    /// Check if the memory usage exceeds the limit.
+    /// Returns `false` if the memory usage exceeds the limit.
+    pub fn check_memory_usage(&self) -> bool {
+        if let Some(inner) = &self.inner {
+            if inner.counter.get_bytes_used() as u64 > inner.mem_limit {
+                return false;
+            }
+            if let Some(parent) = &inner.parent {
+                return parent.check_memory_usage();
+            }
+        }
+
+        true
     }
 
     /// Creates a new global allocator that reports memory usage to this context.
@@ -113,7 +159,7 @@ impl MemoryContext {
 impl Drop for MemoryContextInner {
     fn drop(&mut self) {
         if let Some(p) = &self.parent {
-            p.add(-self.counter.get_bytes_used())
+            p.add(-self.counter.get_bytes_used());
         }
     }
 }

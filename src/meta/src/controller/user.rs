@@ -119,7 +119,7 @@ impl CatalogController {
             PbUpdateField::CreateDb => user.can_create_db = Set(update_user.can_create_db),
             PbUpdateField::CreateUser => user.can_create_user = Set(update_user.can_create_user),
             PbUpdateField::AuthInfo => {
-                user.auth_info = Set(update_user.auth_info.clone().map(AuthInfo))
+                user.auth_info = Set(update_user.auth_info.as_ref().map(AuthInfo::from))
             }
             PbUpdateField::Rename => user.name = Set(update_user.name.clone()),
         });

@@ -13,19 +13,28 @@
 // limitations under the License.
 
 use std::rc::Rc;
+use std::str::FromStr;
 
+use anyhow::anyhow;
 use educe::Educe;
 use fixedbitset::FixedBitSet;
 use pretty_xmlish::Pretty;
 use risingwave_common::catalog::{CdcTableDesc, ColumnDesc, Field, Schema};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::sort_util::ColumnOrder;
+use risingwave_connector::source::cdc::{
+    CDC_BACKFILL_ENABLE_KEY, CDC_BACKFILL_SNAPSHOT_BATCH_SIZE_KEY,
+    CDC_BACKFILL_SNAPSHOT_INTERVAL_KEY,
+};
+use risingwave_pb::stream_plan::StreamCdcScanOptions;
 
 use super::GenericPlanNode;
 use crate::catalog::ColumnId;
+use crate::error::Result;
 use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::property::FunctionalDependencySet;
+use crate::WithOptions;
 
 /// [`CdcScan`] reads rows of a table from an external upstream database
 #[derive(Debug, Clone, Educe)]
@@ -40,7 +49,59 @@ pub struct CdcScan {
     #[educe(Hash(ignore))]
     pub ctx: OptimizerContextRef,
 
+    pub options: CdcScanOptions,
+}
+
+#[derive(Debug, Clone, Hash, PartialEq)]
+pub struct CdcScanOptions {
     pub disable_backfill: bool,
+    pub snapshot_barrier_interval: u32,
+    pub snapshot_batch_size: u32,
+}
+
+impl Default for CdcScanOptions {
+    fn default() -> Self {
+        Self {
+            disable_backfill: false,
+            snapshot_barrier_interval: 1,
+            snapshot_batch_size: 1000,
+        }
+    }
+}
+
+impl CdcScanOptions {
+    pub fn from_with_options(with_options: &WithOptions) -> Result<Self> {
+        // unspecified option will use default values
+        let mut scan_options = Self::default();
+
+        // disable backfill if 'snapshot=false'
+        if let Some(snapshot) = with_options.get(CDC_BACKFILL_ENABLE_KEY) {
+            scan_options.disable_backfill = !(bool::from_str(snapshot)
+                .map_err(|_| anyhow!("Invalid value for {}", CDC_BACKFILL_ENABLE_KEY))?);
+        };
+
+        if let Some(snapshot_interval) = with_options.get(CDC_BACKFILL_SNAPSHOT_INTERVAL_KEY) {
+            scan_options.snapshot_barrier_interval = u32::from_str(snapshot_interval)
+                .map_err(|_| anyhow!("Invalid value for {}", CDC_BACKFILL_SNAPSHOT_INTERVAL_KEY))?;
+        };
+
+        if let Some(snapshot_batch_size) = with_options.get(CDC_BACKFILL_SNAPSHOT_BATCH_SIZE_KEY) {
+            scan_options.snapshot_batch_size =
+                u32::from_str(snapshot_batch_size).map_err(|_| {
+                    anyhow!("Invalid value for {}", CDC_BACKFILL_SNAPSHOT_BATCH_SIZE_KEY)
+                })?;
+        };
+
+        Ok(scan_options)
+    }
+
+    pub fn to_proto(&self) -> StreamCdcScanOptions {
+        StreamCdcScanOptions {
+            disable_backfill: self.disable_backfill,
+            snapshot_barrier_interval: self.snapshot_barrier_interval,
+            snapshot_batch_size: self.snapshot_batch_size,
+        }
+    }
 }
 
 impl CdcScan {
@@ -104,14 +165,14 @@ impl CdcScan {
         output_col_idx: Vec<usize>, // the column index in the table
         cdc_table_desc: Rc<CdcTableDesc>,
         ctx: OptimizerContextRef,
-        disable_backfill: bool,
+        options: CdcScanOptions,
     ) -> Self {
         Self {
             table_name,
             output_col_idx,
             cdc_table_desc,
             ctx,
-            disable_backfill,
+            options,
         }
     }
 

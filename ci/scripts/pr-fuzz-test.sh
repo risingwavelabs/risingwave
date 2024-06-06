@@ -13,7 +13,6 @@ source ci/scripts/common.sh
 export RUN_SQLSMITH_FRONTEND=0
 export RUN_SQLSMITH=1
 export SQLSMITH_COUNT=100
-export TEST_NUM=32
 echo "Enabled Sqlsmith tests."
 
 source ci/scripts/run-fuzz-test.sh

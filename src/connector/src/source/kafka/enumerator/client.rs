@@ -25,7 +25,9 @@ use risingwave_common::bail;
 use crate::error::ConnectorResult;
 use crate::source::base::SplitEnumerator;
 use crate::source::kafka::split::KafkaSplit;
-use crate::source::kafka::{KafkaProperties, PrivateLinkConsumerContext, KAFKA_ISOLATION_LEVEL};
+use crate::source::kafka::{
+    KafkaContextCommon, KafkaProperties, RwConsumerContext, KAFKA_ISOLATION_LEVEL,
+};
 use crate::source::SourceEnumeratorContextRef;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -40,7 +42,7 @@ pub struct KafkaSplitEnumerator {
     context: SourceEnumeratorContextRef,
     broker_address: String,
     topic: String,
-    client: BaseConsumer<PrivateLinkConsumerContext>,
+    client: BaseConsumer<RwConsumerContext>,
     start_offset: KafkaEnumeratorOffset,
 
     // maybe used in the future for batch processing
@@ -90,9 +92,29 @@ impl SplitEnumerator for KafkaSplitEnumerator {
         }
 
         // don't need kafka metrics from enumerator
-        let client_ctx = PrivateLinkConsumerContext::new(broker_rewrite_map, None, None)?;
-        let client: BaseConsumer<PrivateLinkConsumerContext> =
+        let ctx_common = KafkaContextCommon::new(
+            broker_rewrite_map,
+            None,
+            None,
+            properties.aws_auth_props,
+            common_props.is_aws_msk_iam(),
+        )
+        .await?;
+        let client_ctx = RwConsumerContext::new(ctx_common);
+        let client: BaseConsumer<RwConsumerContext> =
             config.create_with_context(client_ctx).await?;
+
+        // Note that before any SASL/OAUTHBEARER broker connection can succeed the application must call
+        // rd_kafka_oauthbearer_set_token() once – either directly or, more typically, by invoking either
+        // rd_kafka_poll(), rd_kafka_consumer_poll(), rd_kafka_queue_poll(), etc, in order to cause retrieval
+        // of an initial token to occur.
+        // https://docs.confluent.io/platform/current/clients/librdkafka/html/rdkafka_8h.html#a988395722598f63396d7a1bedb22adaf
+        if common_props.is_aws_msk_iam() {
+            #[cfg(not(madsim))]
+            client.poll(Duration::from_secs(10)); // note: this is a blocking call
+            #[cfg(madsim)]
+            client.poll(Duration::from_secs(10)).await;
+        }
 
         Ok(Self {
             context,
@@ -129,6 +151,7 @@ impl SplitEnumerator for KafkaSplitEnumerator {
                 partition,
                 start_offset: start_offsets.remove(&partition).unwrap(),
                 stop_offset: stop_offsets.remove(&partition).unwrap(),
+                hack_seek_to_latest: false,
             })
             .collect();
 
@@ -232,6 +255,7 @@ impl KafkaSplitEnumerator {
                     partition: *partition,
                     start_offset: Some(start_offset),
                     stop_offset: Some(stop_offset),
+                    hack_seek_to_latest:false
                 }
             })
             .collect::<Vec<KafkaSplit>>())

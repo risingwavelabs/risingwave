@@ -41,6 +41,8 @@ pub struct RestoreOpts {
     /// Type of meta store to restore.
     #[clap(long, value_enum, default_value_t = MetaBackend::Etcd)]
     pub meta_store_type: MetaBackend,
+    #[clap(long, default_value_t = String::from(""))]
+    pub sql_endpoint: String,
     /// Etcd endpoints.
     #[clap(long, default_value_t = String::from(""))]
     pub etcd_endpoints: String,
@@ -80,7 +82,7 @@ async fn restore_hummock_version(
             hummock_storage_url,
             Arc::new(ObjectStoreMetrics::unused()),
             "Version Checkpoint",
-            ObjectStoreConfig::default(),
+            Arc::new(ObjectStoreConfig::default()),
         )
         .await,
     );
@@ -140,7 +142,7 @@ async fn restore_impl(
     match &meta_store {
         MetaStoreBackendImpl::Sql(m) => {
             if format_version < 2 {
-                todo!("write model V1 to meta store V2");
+                unimplemented!("not supported: write model V1 to meta store V2");
             } else {
                 dispatch(
                     target_id,
@@ -227,6 +229,7 @@ mod tests {
         RestoreOpts {
             meta_snapshot_id: 1,
             meta_store_type: MetaBackend::Mem,
+            sql_endpoint: "".to_string(),
             etcd_endpoints: "".to_string(),
             etcd_auth: false,
             etcd_username: "".to_string(),

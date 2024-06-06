@@ -24,7 +24,7 @@ use crate::hummock::level_handler::LevelHandler;
 // key_range and selects the appropriate files to generate compaction
 pub struct SpaceReclaimCompactionPicker {
     // config
-    pub max_space_reclaim_bytes: u64,
+    pub _max_space_reclaim_bytes: u64,
 
     // for filter
     pub all_table_ids: HashSet<u32>,
@@ -40,7 +40,7 @@ pub struct SpaceReclaimPickerState {
 impl SpaceReclaimCompactionPicker {
     pub fn new(max_space_reclaim_bytes: u64, all_table_ids: HashSet<u32>) -> Self {
         Self {
-            max_space_reclaim_bytes,
+            _max_space_reclaim_bytes: max_space_reclaim_bytes,
             all_table_ids,
         }
     }

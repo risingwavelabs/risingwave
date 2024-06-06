@@ -36,7 +36,7 @@
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [x, y] }
-      └─BatchSource { source: s, columns: [x, y, _rw_kafka_timestamp, _row_id], filter: (None, None) }
+      └─BatchKafkaScan { source: s, columns: [x, y, _rw_kafka_timestamp, _row_id], filter: (None, None) }
   stream_plan: |-
     StreamMaterialize { columns: [x, y, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck }
     └─StreamProject { exprs: [x, y, _row_id] }
@@ -52,7 +52,7 @@
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [x, y] }
-      └─BatchSource { source: s, columns: [x, y, _rw_kafka_timestamp, _row_id], filter: (None, None) }
+      └─BatchKafkaScan { source: s, columns: [x, y, _rw_kafka_timestamp, _row_id], filter: (None, None) }
   stream_plan: |-
     StreamMaterialize { columns: [x, y, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck }
     └─StreamProject { exprs: [x, y, _row_id] }
@@ -68,12 +68,12 @@
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [x, y] }
-      └─BatchSource { source: s, columns: [x, y, _rw_kafka_timestamp, _row_id], filter: (None, None) }
+      └─BatchKafkaScan { source: s, columns: [x, y, _rw_kafka_timestamp, _row_id], filter: (None, None) }
   stream_plan: |-
     StreamMaterialize { columns: [x, y, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck }
     └─StreamProject { exprs: [x, y, _row_id] }
       └─StreamRowIdGen { row_id_index: 3 }
-        └─StreamSource { source: s, columns: [x, y, _rw_kafka_timestamp, _row_id, _rw_kafka_partition, _rw_kafka_offset] }
+        └─StreamSourceScan { columns: [x, y, _rw_kafka_timestamp, _row_id, _rw_kafka_partition, _rw_kafka_offset] }
   with_config_map:
     rw_enable_shared_source: 'true'
 - before:
@@ -84,7 +84,7 @@
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [x, y] }
-      └─BatchSource { source: s, columns: [x, y, _rw_kafka_timestamp, _row_id], filter: (None, None) }
+      └─BatchKafkaScan { source: s, columns: [x, y, _rw_kafka_timestamp, _row_id], filter: (None, None) }
   stream_plan: |-
     StreamMaterialize { columns: [x, y, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck }
     └─StreamProject { exprs: [x, y, _row_id] }

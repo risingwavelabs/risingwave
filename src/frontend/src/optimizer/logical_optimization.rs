@@ -172,7 +172,7 @@ static GENERAL_UNNESTING_TRANS_APPLY_WITH_SHARE: LazyLock<OptimizationStage> =
                 // can't handle a join with `output_indices`.
                 ProjectJoinSeparateRule::create(),
             ],
-            ApplyOrder::BottomUp,
+            ApplyOrder::TopDown,
         )
     });
 
@@ -186,7 +186,7 @@ static GENERAL_UNNESTING_TRANS_APPLY_WITHOUT_SHARE: LazyLock<OptimizationStage> 
                 // can't handle a join with `output_indices`.
                 ProjectJoinSeparateRule::create(),
             ],
-            ApplyOrder::BottomUp,
+            ApplyOrder::TopDown,
         )
     });
 
@@ -420,6 +420,17 @@ static LOGICAL_FILTER_EXPRESSION_SIMPLIFY: LazyLock<OptimizationStage> = LazyLoc
     OptimizationStage::new(
         "Logical Filter Expression Simplify",
         vec![LogicalFilterExpressionSimplifyRule::create()],
+        ApplyOrder::TopDown,
+    )
+});
+
+static REWRITE_SOURCE_FOR_BATCH: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
+        "Rewrite Source For Batch",
+        vec![
+            SourceToKafkaScanRule::create(),
+            SourceToIcebergScanRule::create(),
+        ],
         ApplyOrder::TopDown,
     )
 });
@@ -661,6 +672,7 @@ impl LogicalOptimizer {
         // Convert the dag back to the tree, because we don't support DAG plan for batch.
         plan = plan.optimize_by_rules(&DAG_TO_TREE);
 
+        plan = plan.optimize_by_rules(&REWRITE_SOURCE_FOR_BATCH);
         plan = plan.optimize_by_rules(&GROUPING_SETS);
         plan = plan.optimize_by_rules(&REWRITE_LIKE_EXPR);
         plan = plan.optimize_by_rules(&SET_OPERATION_MERGE);
@@ -720,8 +732,8 @@ impl LogicalOptimizer {
         // Do a final column pruning and predicate pushing down to clean up the plan.
         plan = Self::column_pruning(plan, explain_trace, &ctx);
         if last_total_rule_applied_before_predicate_pushdown != ctx.total_rule_applied() {
-            #[allow(unused_assignments)]
-            last_total_rule_applied_before_predicate_pushdown = ctx.total_rule_applied();
+            (#[allow(unused_assignments)]
+            last_total_rule_applied_before_predicate_pushdown) = ctx.total_rule_applied();
             plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
         }
 

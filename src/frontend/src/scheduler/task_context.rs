@@ -94,14 +94,6 @@ impl BatchTaskContext for FrontendBatchTaskContext {
         self.session.env().source_metrics()
     }
 
-    fn store_mem_usage(&self, _val: usize) {
-        todo!()
-    }
-
-    fn mem_usage(&self) -> usize {
-        todo!()
-    }
-
     fn create_executor_mem_context(&self, _executor_id: &str) -> MemoryContext {
         MemoryContext::new(Some(self.mem_context.clone()), TrAdderAtomic::new(0))
     }

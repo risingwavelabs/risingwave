@@ -18,6 +18,7 @@ use std::sync::Arc;
 
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::Epoch;
+use risingwave_pb::catalog::CreateType;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
@@ -430,48 +431,56 @@ impl CreateMviewProgressTracker {
             return Some(TrackingJob::New(command));
         }
 
-        let (creating_mv_id, upstream_mv_count, upstream_total_key_count, definition, ddl_type) =
-            if let Command::CreateStreamingJob {
-                table_fragments,
-                dispatchers,
-                upstream_root_actors,
-                definition,
-                ddl_type,
-                ..
-            } = &command.context.command
-            {
-                // Keep track of how many times each upstream MV appears.
-                let mut upstream_mv_count = HashMap::new();
-                for (table_id, actors) in upstream_root_actors {
-                    assert!(!actors.is_empty());
-                    let dispatch_count: usize = dispatchers
-                        .iter()
-                        .filter(|(upstream_actor_id, _)| actors.contains(upstream_actor_id))
-                        .map(|(_, v)| v.len())
-                        .sum();
-                    upstream_mv_count.insert(*table_id, dispatch_count / actors.len());
-                }
-
-                let upstream_total_key_count: u64 = upstream_mv_count
+        let (
+            creating_mv_id,
+            upstream_mv_count,
+            upstream_total_key_count,
+            definition,
+            ddl_type,
+            create_type,
+        ) = if let Command::CreateStreamingJob {
+            table_fragments,
+            dispatchers,
+            upstream_root_actors,
+            definition,
+            ddl_type,
+            create_type,
+            ..
+        } = &command.context.command
+        {
+            // Keep track of how many times each upstream MV appears.
+            let mut upstream_mv_count = HashMap::new();
+            for (table_id, actors) in upstream_root_actors {
+                assert!(!actors.is_empty());
+                let dispatch_count: usize = dispatchers
                     .iter()
-                    .map(|(upstream_mv, count)| {
-                        *count as u64
-                            * version_stats
-                                .table_stats
-                                .get(&upstream_mv.table_id)
-                                .map_or(0, |stat| stat.total_key_count as u64)
-                    })
+                    .filter(|(upstream_actor_id, _)| actors.contains(upstream_actor_id))
+                    .map(|(_, v)| v.len())
                     .sum();
-                (
-                    table_fragments.table_id(),
-                    upstream_mv_count,
-                    upstream_total_key_count,
-                    definition.to_string(),
-                    ddl_type,
-                )
-            } else {
-                unreachable!("Must be CreateStreamingJob.");
-            };
+                upstream_mv_count.insert(*table_id, dispatch_count / actors.len());
+            }
+
+            let upstream_total_key_count: u64 = upstream_mv_count
+                .iter()
+                .map(|(upstream_mv, count)| {
+                    *count as u64
+                        * version_stats
+                            .table_stats
+                            .get(&upstream_mv.table_id)
+                            .map_or(0, |stat| stat.total_key_count as u64)
+                })
+                .sum();
+            (
+                table_fragments.table_id(),
+                upstream_mv_count,
+                upstream_total_key_count,
+                definition.to_string(),
+                ddl_type,
+                create_type,
+            )
+        } else {
+            unreachable!("Must be CreateStreamingJob.");
+        };
 
         for &actor in &actors {
             self.actor_map.insert(actor, creating_mv_id);
@@ -483,7 +492,7 @@ impl CreateMviewProgressTracker {
             upstream_total_key_count,
             definition,
         );
-        if *ddl_type == DdlType::Sink {
+        if *ddl_type == DdlType::Sink && *create_type == CreateType::Background {
             // We return the original tracking job immediately.
             // This is because sink can be decoupled with backfill progress.
             // We don't need to wait for sink to finish backfill.

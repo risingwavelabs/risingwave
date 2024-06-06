@@ -333,15 +333,12 @@ pub fn decode_row(
 mod tests {
     use std::ops::Neg;
 
-    use itertools::Itertools;
     use rand::thread_rng;
 
     use super::*;
-    use crate::array::{DataChunk, ListValue, StructValue};
-    use crate::row::{OwnedRow, RowExt};
-    use crate::types::{DataType, FloatExt, ScalarImpl, F32};
-    use crate::util::iter_util::ZipEqFast;
-    use crate::util::sort_util::{ColumnOrder, OrderType};
+    use crate::array::{ListValue, StructValue};
+    use crate::row::RowExt;
+    use crate::types::FloatExt;
 
     #[test]
     fn test_memcomparable() {
