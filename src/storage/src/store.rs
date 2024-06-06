@@ -318,6 +318,8 @@ pub trait StateStoreWrite: StaticSendSync {
     ) -> StorageResult<usize>;
 }
 
+pub trait SyncFuture = Future<Output = StorageResult<SyncResult>> + Send + 'static;
+
 pub trait StateStore: StateStoreRead + StaticSendSync + Clone {
     type Local: LocalStateStore;
 
@@ -328,7 +330,7 @@ pub trait StateStore: StateStoreRead + StaticSendSync + Clone {
         epoch: HummockReadEpoch,
     ) -> impl Future<Output = StorageResult<()>> + Send + '_;
 
-    fn sync(&self, epoch: u64) -> impl Future<Output = StorageResult<SyncResult>> + Send + '_;
+    fn sync(&self, epoch: u64) -> impl SyncFuture;
 
     /// update max current epoch in storage.
     fn seal_epoch(&self, epoch: u64, is_checkpoint: bool);

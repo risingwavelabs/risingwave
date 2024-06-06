@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
@@ -77,7 +77,7 @@ pub struct DorisConfig {
     pub r#type: String, // accept "append-only" or "upsert"
 }
 impl DorisConfig {
-    pub fn from_hashmap(properties: HashMap<String, String>) -> Result<Self> {
+    pub fn from_btreemap(properties: BTreeMap<String, String>) -> Result<Self> {
         let config =
             serde_json::from_value::<DorisConfig>(serde_json::to_value(properties).unwrap())
                 .map_err(|e| SinkError::Config(anyhow!(e)))?;
@@ -240,7 +240,7 @@ impl TryFrom<SinkParam> for DorisSink {
 
     fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
         let schema = param.schema();
-        let config = DorisConfig::from_hashmap(param.properties)?;
+        let config = DorisConfig::from_btreemap(param.properties)?;
         DorisSink::new(
             config,
             schema,

@@ -536,7 +536,7 @@ pub(crate) fn gen_create_table_plan(
     for c in &mut columns {
         c.column_desc.column_id = col_id_gen.generate(c.name())
     }
-    let with_properties = context.with_options().inner().clone().into_iter().collect();
+    let with_properties = context.with_options().inner().clone();
     gen_create_table_plan_without_source(
         context,
         table_name,
@@ -560,7 +560,7 @@ pub(crate) fn gen_create_table_plan_without_source(
     columns: Vec<ColumnCatalog>,
     column_defs: Vec<ColumnDef>,
     constraints: Vec<TableConstraint>,
-    with_properties: HashMap<String, String>,
+    with_properties: BTreeMap<String, String>,
     definition: String,
     source_watermarks: Vec<SourceWatermark>,
     append_only: bool,
@@ -628,7 +628,7 @@ fn gen_table_plan_with_source(
         context,
         source_catalog.name,
         source_catalog.columns,
-        source_catalog.with_properties.clone().into_iter().collect(),
+        source_catalog.with_properties.clone(),
         source_catalog.pk_col_ids,
         source_catalog.row_id_index,
         source_catalog.definition,
@@ -648,7 +648,7 @@ fn gen_table_plan_inner(
     context: OptimizerContextRef,
     table_name: String,
     columns: Vec<ColumnCatalog>,
-    with_properties: HashMap<String, String>,
+    with_properties: BTreeMap<String, String>,
     pk_column_ids: Vec<ColumnId>,
     row_id_index: Option<usize>,
     definition: String,
@@ -788,7 +788,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_source(
     };
 
     let mut columns = bind_sql_columns(&column_defs)?;
-    let with_properties = source.with_properties.clone().into_iter().collect();
+    let with_properties = source.with_properties.clone();
     // append additional columns to the end
     handle_addition_columns(&with_properties, include_column_options, &mut columns, true)?;
 
