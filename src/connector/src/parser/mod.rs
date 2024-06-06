@@ -113,6 +113,8 @@ impl SourceStreamChunkBuilder {
     }
 
     pub fn row_writer(&mut self) -> SourceStreamChunkRowWriter<'_> {
+        let len = self.builders.len();
+
         SourceStreamChunkRowWriter {
             descs: &self.descs,
             builders: &mut self.builders,
@@ -488,14 +490,14 @@ impl SourceStreamChunkRowWriter<'_> {
         };
 
         // Columns that changes have been applied to. Used to rollback when an error occurs.
-        let mut applied_columns = Vec::with_capacity(self.descs.len());
+        let mut applied_columns = 0;
 
         let result = (self.descs.iter())
             .zip_eq_fast(self.builders.iter_mut())
             .try_for_each(|(desc, builder)| {
                 wrapped_f(desc).map(|output| {
                     A::apply(builder, output);
-                    applied_columns.push(builder);
+                    applied_columns += 1;
                 })
             });
 
@@ -505,8 +507,8 @@ impl SourceStreamChunkRowWriter<'_> {
                 Ok(())
             }
             Err(e) => {
-                for builder in applied_columns {
-                    A::rollback(builder);
+                for i in 0..applied_columns {
+                    A::rollback(&mut self.builders[i]);
                 }
                 Err(e)
             }
@@ -517,6 +519,7 @@ impl SourceStreamChunkRowWriter<'_> {
     /// produces one [`Datum`] by corresponding [`SourceColumnDesc`].
     ///
     /// See the [struct-level documentation](SourceStreamChunkRowWriter) for more details.
+    #[inline(always)]
     pub fn do_insert(
         &mut self,
         f: impl FnMut(&SourceColumnDesc) -> AccessResult<Datum>,
@@ -528,6 +531,7 @@ impl SourceStreamChunkRowWriter<'_> {
     /// produces one [`Datum`] by corresponding [`SourceColumnDesc`].
     ///
     /// See the [struct-level documentation](SourceStreamChunkRowWriter) for more details.
+    #[inline(always)]
     pub fn do_delete(
         &mut self,
         f: impl FnMut(&SourceColumnDesc) -> AccessResult<Datum>,
@@ -539,6 +543,7 @@ impl SourceStreamChunkRowWriter<'_> {
     /// produces two [`Datum`]s as old and new value by corresponding [`SourceColumnDesc`].
     ///
     /// See the [struct-level documentation](SourceStreamChunkRowWriter) for more details.
+    #[inline(always)]
     pub fn do_update(
         &mut self,
         f: impl FnMut(&SourceColumnDesc) -> AccessResult<(Datum, Datum)>,
