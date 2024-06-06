@@ -404,6 +404,7 @@ impl FrontendEnv {
         join_handles.push(join_handle);
 
         // Clean up the spill directory.
+        #[cfg(not(madsim))]
         SpillOp::clean_spill_directory()
             .await
             .map_err(|err| anyhow!(err))?;
