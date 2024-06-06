@@ -149,6 +149,16 @@ message TableChangeLog {
   repeated EpochNewChangeLog change_logs = 1;
 }
 
+message StateTableInfo {
+  uint64 committed_epoch = 1;
+  uint64 safe_epoch = 2;
+}
+
+message StateTableInfoDelta {
+  uint64 committed_epoch = 1;
+  uint64 safe_epoch = 2;
+}
+
 message HummockVersion {
   message Levels {
     repeated Level levels = 1;
@@ -166,6 +176,7 @@ message HummockVersion {
   uint64 safe_epoch = 4;
   map<uint32, TableWatermarks> table_watermarks = 5;
   map<uint32, TableChangeLog> table_change_logs = 6;
+  map<uint32, StateTableInfo> state_table_info = 7;
 }
 
 message HummockVersionDelta {
@@ -191,6 +202,7 @@ message HummockVersionDelta {
     uint64 truncate_epoch = 2;
   }
   map<uint32, ChangeLogDelta> change_log_delta = 10;
+  map<uint32, StateTableInfoDelta> state_table_info_delta = 11;
 }
 
 message HummockVersionDeltas {
@@ -671,6 +683,11 @@ message RiseCtlListCompactionGroupResponse {
 }
 
 message RiseCtlUpdateCompactionConfigRequest {
+  message CompressionAlgorithm {
+    uint32 level = 1;
+    string compression_algorithm = 2;
+  }
+
   message MutableConfig {
     oneof mutable_config {
       uint64 max_bytes_for_level_base = 1;
@@ -688,6 +705,7 @@ message RiseCtlUpdateCompactionConfigRequest {
       uint64 level0_max_compact_file_number = 14;
       bool enable_emergency_picker = 15;
       uint32 tombstone_reclaim_ratio = 16;
+      CompressionAlgorithm compression_algorithm = 17;
     }
   }
   repeated uint64 compaction_group_ids = 1;

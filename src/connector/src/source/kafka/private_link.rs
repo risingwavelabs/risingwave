@@ -35,6 +35,7 @@ pub const CONNECTION_NAME_KEY: &str = "connection.name";
 #[derive(Debug)]
 pub(super) enum PrivateLinkContextRole {
     Consumer,
+    #[expect(dead_code)]
     Producer,
 }
 
@@ -48,6 +49,7 @@ impl std::fmt::Display for PrivateLinkContextRole {
 }
 
 pub(super) struct BrokerAddrRewriter {
+    #[expect(dead_code)]
     role: PrivateLinkContextRole,
     rewrite_map: BTreeMap<BrokerAddr, BrokerAddr>,
 }
@@ -63,7 +65,7 @@ impl BrokerAddrRewriter {
 
     pub fn new(
         role: PrivateLinkContextRole,
-        broker_rewrite_map: Option<HashMap<String, String>>,
+        broker_rewrite_map: Option<BTreeMap<String, String>>,
     ) -> ConnectorResult<Self> {
         let rewrite_map: ConnectorResult<BTreeMap<BrokerAddr, BrokerAddr>> = broker_rewrite_map
             .map_or(Ok(BTreeMap::new()), |addr_map| {

@@ -61,7 +61,7 @@ use risingwave_pb::hummock::subscribe_compaction_event_response::{
 use risingwave_pb::hummock::{
     compact_task, CompactStatus as PbCompactStatus, CompactTask, CompactTaskAssignment,
     CompactionConfig, GroupDelta, InputLevel, IntraLevelDelta, Level, SstableInfo,
-    SubscribeCompactionEventRequest, TableOption, TableSchema,
+    StateTableInfoDelta, SubscribeCompactionEventRequest, TableOption, TableSchema,
 };
 use rw_futures_util::pending_on_none;
 use thiserror_ext::AsReport;
@@ -185,6 +185,23 @@ impl<'a> HummockVersionTransaction<'a> {
             version_delta.latest_version().safe_epoch,
             compact_task.watermark,
         );
+        if version_delta.latest_version().safe_epoch < version_delta.safe_epoch {
+            version_delta.state_table_info_delta = version_delta
+                .latest_version()
+                .state_table_info
+                .info()
+                .iter()
+                .map(|(table_id, info)| {
+                    (
+                        *table_id,
+                        StateTableInfoDelta {
+                            committed_epoch: info.committed_epoch,
+                            safe_epoch: version_delta.safe_epoch,
+                        },
+                    )
+                })
+                .collect();
+        }
         version_delta.pre_apply();
     }
 }
@@ -831,13 +848,6 @@ impl HummockManager {
                         .latest_version()
                         .safe_epoch_table_watermarks(&compact_task.existing_table_ids);
 
-                    // do not split sst by vnode partition when target_level > base_level
-                    // The purpose of data alignment is mainly to improve the parallelism of base level compaction and reduce write amplification.
-                    // However, at high level, the size of the sst file is often larger and only contains the data of a single table_id, so there is no need to cut it.
-                    if compact_task.target_level > compact_task.base_level {
-                        compact_task.table_vnode_partition.clear();
-                    }
-
                     if self.env.opts.enable_dropped_column_reclaim {
                         // TODO: get all table schemas for all tables in once call to avoid acquiring lock and await.
                         compact_task.table_schemas = match self.metadata_manager() {
@@ -1455,6 +1465,9 @@ impl HummockManager {
         compact_task: &mut CompactTask,
         compaction_config: &CompactionConfig,
     ) {
+        // do not split sst by vnode partition when target_level > base_level
+        // The purpose of data alignment is mainly to improve the parallelism of base level compaction and reduce write amplification.
+        // However, at high level, the size of the sst file is often larger and only contains the data of a single table_id, so there is no need to cut it.
         if compact_task.target_level > compact_task.base_level {
             return;
         }

@@ -158,6 +158,16 @@ impl<'a, 'b> SingleDeltaTransaction<'a, 'b> {
     pub(super) fn pre_apply(mut self) {
         self.version_txn.pre_apply(self.delta.take().unwrap());
     }
+
+    pub(super) fn with_latest_version(
+        &mut self,
+        f: impl FnOnce(&HummockVersion, &mut HummockVersionDelta),
+    ) {
+        f(
+            self.version_txn.latest_version(),
+            self.delta.as_mut().expect("should exist"),
+        )
+    }
 }
 
 impl<'a, 'b> Deref for SingleDeltaTransaction<'a, 'b> {

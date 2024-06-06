@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use anyhow::Context;
@@ -49,7 +49,7 @@ pub struct SourceReader {
 
 impl SourceReader {
     pub fn new(
-        properties: HashMap<String, String>,
+        properties: BTreeMap<String, String>,
         columns: Vec<SourceColumnDesc>,
         connector_message_buffer_size: usize,
         parser_config: SpecificParserConfig,
@@ -165,7 +165,7 @@ impl SourceReader {
             } else {
                 let to_reader_splits = splits.into_iter().map(|split| vec![split]);
                 try_join_all(to_reader_splits.into_iter().map(|splits| {
-                    tracing::debug!(?splits, ?prop, "spawning connector split reader");
+                    tracing::debug!(?splits, "spawning connector split reader");
                     let props = prop.clone();
                     let data_gen_columns = data_gen_columns.clone();
                     let parser_config = parser_config.clone();
