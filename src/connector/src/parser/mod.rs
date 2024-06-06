@@ -30,7 +30,7 @@ use risingwave_common::bail;
 use risingwave_common::catalog::{KAFKA_TIMESTAMP_COLUMN_NAME, TABLE_NAME_COLUMN_NAME};
 use risingwave_common::log::LogSuppresser;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
-use risingwave_common::types::{Datum, DatumRef, Scalar, ScalarImpl, ToDatumRef};
+use risingwave_common::types::{Datum, DatumRef, Scalar, ScalarImpl, ToDatumRef, ToOwnedDatum};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::tracing::InstrumentStream;
 use risingwave_connector_codec::decoder::avro::MapHandling;
@@ -261,7 +261,7 @@ trait OpAction {
 struct OpActionInsert;
 
 impl OpAction for OpActionInsert {
-    type Output<'a> = CowDatum<'a>;
+    type Output<'a> = DatumCow<'a>;
 
     #[inline(always)]
     fn output_for<'a>(datum: Datum) -> Self::Output<'a> {
@@ -269,7 +269,7 @@ impl OpAction for OpActionInsert {
     }
 
     #[inline(always)]
-    fn apply(builder: &mut ArrayBuilderImpl, output: CowDatum<'_>) {
+    fn apply(builder: &mut ArrayBuilderImpl, output: DatumCow<'_>) {
         builder.append(output)
     }
 
@@ -287,7 +287,7 @@ impl OpAction for OpActionInsert {
 struct OpActionDelete;
 
 impl OpAction for OpActionDelete {
-    type Output<'a> = CowDatum<'a>;
+    type Output<'a> = DatumCow<'a>;
 
     #[inline(always)]
     fn output_for<'a>(datum: Datum) -> Self::Output<'a> {
@@ -295,7 +295,7 @@ impl OpAction for OpActionDelete {
     }
 
     #[inline(always)]
-    fn apply(builder: &mut ArrayBuilderImpl, output: CowDatum<'_>) {
+    fn apply(builder: &mut ArrayBuilderImpl, output: DatumCow<'_>) {
         builder.append(output)
     }
 
@@ -313,7 +313,7 @@ impl OpAction for OpActionDelete {
 struct OpActionUpdate;
 
 impl OpAction for OpActionUpdate {
-    type Output<'a> = (CowDatum<'a>, CowDatum<'a>);
+    type Output<'a> = (DatumCow<'a>, DatumCow<'a>);
 
     #[inline(always)]
     fn output_for<'a>(datum: Datum) -> Self::Output<'a> {
@@ -321,7 +321,7 @@ impl OpAction for OpActionUpdate {
     }
 
     #[inline(always)]
-    fn apply(builder: &mut ArrayBuilderImpl, output: (CowDatum<'_>, CowDatum<'_>)) {
+    fn apply(builder: &mut ArrayBuilderImpl, output: (DatumCow<'_>, DatumCow<'_>)) {
         builder.append(output.0);
         builder.append(output.1);
     }
@@ -339,29 +339,46 @@ impl OpAction for OpActionUpdate {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)] // TODO: eq
-pub enum CowDatum<'a> {
+/// 🐮 A borrowed [`DatumRef`] or an owned [`Datum`].
+#[derive(Debug, Clone)]
+pub enum DatumCow<'a> {
     Ref(DatumRef<'a>),
     Owned(Datum),
 }
 
-impl From<Datum> for CowDatum<'_> {
+impl PartialEq for DatumCow<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        self.to_datum_ref() == other.to_datum_ref()
+    }
+}
+impl Eq for DatumCow<'_> {}
+
+impl From<Datum> for DatumCow<'_> {
     fn from(datum: Datum) -> Self {
-        CowDatum::Owned(datum)
+        DatumCow::Owned(datum)
     }
 }
 
-impl<'a> From<DatumRef<'a>> for CowDatum<'a> {
+impl<'a> From<DatumRef<'a>> for DatumCow<'a> {
     fn from(datum: DatumRef<'a>) -> Self {
-        CowDatum::Ref(datum)
+        DatumCow::Ref(datum)
     }
 }
 
-impl ToDatumRef for CowDatum<'_> {
+impl ToDatumRef for DatumCow<'_> {
     fn to_datum_ref(&self) -> DatumRef<'_> {
         match self {
-            CowDatum::Ref(datum) => *datum,
-            CowDatum::Owned(datum) => datum.to_datum_ref(),
+            DatumCow::Ref(datum) => *datum,
+            DatumCow::Owned(datum) => datum.to_datum_ref(),
+        }
+    }
+}
+
+impl ToOwnedDatum for DatumCow<'_> {
+    fn to_owned_datum(self) -> Datum {
+        match self {
+            DatumCow::Ref(datum) => datum.to_owned_datum(),
+            DatumCow::Owned(datum) => datum,
         }
     }
 }
@@ -546,10 +563,13 @@ impl SourceStreamChunkRowWriter<'_> {
     ///
     /// See the [struct-level documentation](SourceStreamChunkRowWriter) for more details.
     #[inline(always)]
-    pub fn do_insert(
+    pub fn do_insert<'a, D>(
         &mut self,
-        mut f: impl FnMut(&SourceColumnDesc) -> AccessResult<Datum>,
-    ) -> AccessResult<()> {
+        mut f: impl FnMut(&SourceColumnDesc) -> AccessResult<D>,
+    ) -> AccessResult<()>
+    where
+        D: Into<DatumCow<'a>>,
+    {
         self.do_action::<OpActionInsert>(|desc| f(desc).map(Into::into))
     }
 
@@ -558,10 +578,13 @@ impl SourceStreamChunkRowWriter<'_> {
     ///
     /// See the [struct-level documentation](SourceStreamChunkRowWriter) for more details.
     #[inline(always)]
-    pub fn do_delete(
+    pub fn do_delete<'a, D>(
         &mut self,
-        mut f: impl FnMut(&SourceColumnDesc) -> AccessResult<Datum>,
-    ) -> AccessResult<()> {
+        mut f: impl FnMut(&SourceColumnDesc) -> AccessResult<D>,
+    ) -> AccessResult<()>
+    where
+        D: Into<DatumCow<'a>>,
+    {
         self.do_action::<OpActionDelete>(|desc| f(desc).map(Into::into))
     }
 
@@ -570,10 +593,14 @@ impl SourceStreamChunkRowWriter<'_> {
     ///
     /// See the [struct-level documentation](SourceStreamChunkRowWriter) for more details.
     #[inline(always)]
-    pub fn do_update(
+    pub fn do_update<'a, D1, D2>(
         &mut self,
-        mut f: impl FnMut(&SourceColumnDesc) -> AccessResult<(Datum, Datum)>,
-    ) -> AccessResult<()> {
+        mut f: impl FnMut(&SourceColumnDesc) -> AccessResult<(D1, D2)>,
+    ) -> AccessResult<()>
+    where
+        D1: Into<DatumCow<'a>>,
+        D2: Into<DatumCow<'a>>,
+    {
         self.do_action::<OpActionUpdate>(|desc| f(desc).map(|(old, new)| (old.into(), new.into())))
     }
 }
@@ -648,7 +675,7 @@ pub trait ByteStreamSourceParser: Send + Debug + Sized + 'static {
     }
 
     fn emit_empty_row<'a>(&'a mut self, mut writer: SourceStreamChunkRowWriter<'a>) {
-        _ = writer.do_insert(|_column| Ok(None));
+        _ = writer.do_insert(|_column| Ok(Datum::None));
     }
 }
 

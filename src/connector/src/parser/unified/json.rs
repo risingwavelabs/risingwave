@@ -35,7 +35,7 @@ use thiserror_ext::AsReport;
 
 use super::{Access, AccessError, AccessResult};
 use crate::parser::common::json_object_get_case_insensitive;
-use crate::parser::CowDatum;
+use crate::parser::DatumCow;
 use crate::schema::{bail_invalid_option_error, InvalidOptionError};
 
 #[derive(Clone, Debug)]
@@ -205,10 +205,10 @@ impl JsonParseOptions {
         &self,
         value: &'a BorrowedValue<'a>,
         type_expected: &DataType,
-    ) -> AccessResult<CowDatum<'a>> {
+    ) -> AccessResult<DatumCow<'a>> {
         Ok(match (type_expected, value.value_type()) {
             (DataType::Varchar, ValueType::String) => {
-                CowDatum::Ref(Some(ScalarRefImpl::Utf8(value.as_str().unwrap().into())))
+                DatumCow::Ref(Some(ScalarRefImpl::Utf8(value.as_str().unwrap().into())))
             }
             _ => self.parse(value, type_expected)?.into(),
         })
@@ -682,7 +682,7 @@ impl<'a, 'b> JsonBorrowAccess<'a, 'b>
 where
     'a: 'b,
 {
-    pub fn access(&self, path: &[&str], type_expected: &DataType) -> AccessResult<CowDatum<'b>> {
+    pub fn access(&self, path: &[&str], type_expected: &DataType) -> AccessResult<DatumCow<'b>> {
         let value = {
             let mut value = self.value;
             for (idx, &key) in path.iter().enumerate() {
