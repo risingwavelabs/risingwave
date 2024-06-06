@@ -1176,11 +1176,10 @@ pub(crate) mod tests {
     }
 
     fn test_hummock_version(epoch: HummockEpoch) -> HummockVersion {
-        HummockVersion {
-            id: epoch,
-            max_committed_epoch: epoch,
-            ..Default::default()
-        }
+        let mut version = HummockVersion::default();
+        version.id = epoch;
+        version.max_committed_epoch = epoch;
+        version
     }
 
     fn initial_pinned_version() -> PinnedVersion {

@@ -15,7 +15,6 @@
 use std::collections::BTreeMap;
 use std::ops::{Deref, DerefMut};
 
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::build_version_delta_after_version;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_pb::hummock::HummockVersionStats;
@@ -38,7 +37,7 @@ fn trigger_version_stat(metrics: &MetaMetrics, current_version: &HummockVersion)
     metrics
         .version_size
         .set(current_version.estimated_encode_len() as i64);
-    metrics.safe_epoch.set(current_version.safe_epoch as i64);
+    metrics.safe_epoch.set(current_version.visible_table_safe_epoch() as i64);
     metrics.current_version_id.set(current_version.id as i64);
 }
 
@@ -86,7 +85,7 @@ impl<'a> HummockVersionTransaction<'a> {
     }
 
     pub(super) fn new_delta<'b>(&'b mut self) -> SingleDeltaTransaction<'a, 'b> {
-        let delta = build_version_delta_after_version(self.latest_version());
+        let delta = self.latest_version().version_delta_after();
         SingleDeltaTransaction {
             version_txn: self,
             delta: Some(delta),
