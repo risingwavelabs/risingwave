@@ -56,7 +56,6 @@ pub trait Access {
     /// and we use different `path` to access one column at a time.
     ///
     /// e.g., for Avro, we access `["col_name"]`; for Debezium Avro, we access `["before", "col_name"]`.
-    // #[deprecated(note = "Use `access_cow` instead.")]
     fn access(&self, path: &[&str], type_expected: &DataType) -> AccessResult<Datum> {
         self.access_cow(path, type_expected)
             .map(ToOwnedDatum::to_owned_datum)
@@ -66,13 +65,12 @@ pub trait Access {
     /// If not overridden, it will call forward to `access` and always wrap the result in [`DatumCow::Owned`].
     ///
     /// This should be preferred over `access` for both callers and implementors.
-    // TODO: remove `access` and make this the only method.
+    // TODO: implement this method in all parsers and remove `access` method.
     fn access_cow<'a>(
         &'a self,
         path: &[&str],
         type_expected: &DataType,
     ) -> AccessResult<DatumCow<'a>> {
-        // #[expect(deprecated)]
         self.access(path, type_expected).map(Into::into)
     }
 }
