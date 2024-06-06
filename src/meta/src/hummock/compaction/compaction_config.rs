@@ -94,6 +94,7 @@ impl CompactionConfigBuilder {
             .max_space_reclaim_bytes(opt.max_space_reclaim_bytes)
             .level0_max_compact_file_number(opt.level0_max_compact_file_number)
             .tombstone_reclaim_ratio(opt.tombstone_reclaim_ratio)
+            .max_level(opt.max_level as u64)
     }
 
     pub fn build(self) -> CompactionConfig {
