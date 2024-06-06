@@ -18,7 +18,7 @@ use risingwave_expr::{function, ExprError, Result};
 
 #[function("generate_series(int4, int4) -> setof int4")]
 #[function("generate_series(int8, int8) -> setof int8")]
-fn generate_series<T>(start: T, stop: T) -> Result<impl Iterator<Item = Result<T>>>
+fn generate_series<T>(start: T, stop: T) -> Result<impl Iterator<Item = T>>
 where
     T: CheckedAdd<Output = T> + PartialOrd + Copy + One + IsNegative,
 {
@@ -26,10 +26,7 @@ where
 }
 
 #[function("generate_series(decimal, decimal) -> setof decimal")]
-fn generate_series_decimal(
-    start: Decimal,
-    stop: Decimal,
-) -> Result<impl Iterator<Item = Result<Decimal>>>
+fn generate_series_decimal(start: Decimal, stop: Decimal) -> Result<impl Iterator<Item = Decimal>>
 where
 {
     validate_range_parameters(start, stop, Decimal::one())?;
@@ -39,7 +36,7 @@ where
 #[function("generate_series(int4, int4, int4) -> setof int4")]
 #[function("generate_series(int8, int8, int8) -> setof int8")]
 #[function("generate_series(timestamp, timestamp, interval) -> setof timestamp")]
-fn generate_series_step<T, S>(start: T, stop: T, step: S) -> Result<impl Iterator<Item = Result<T>>>
+fn generate_series_step<T, S>(start: T, stop: T, step: S) -> Result<impl Iterator<Item = T>>
 where
     T: CheckedAdd<S, Output = T> + PartialOrd + Copy,
     S: IsNegative + Copy,
@@ -52,14 +49,14 @@ fn generate_series_step_decimal(
     start: Decimal,
     stop: Decimal,
     step: Decimal,
-) -> Result<impl Iterator<Item = Result<Decimal>>> {
+) -> Result<impl Iterator<Item = Decimal>> {
     validate_range_parameters(start, stop, step)?;
     range_generic::<_, _, true>(start, stop, step)
 }
 
 #[function("range(int4, int4) -> setof int4")]
 #[function("range(int8, int8) -> setof int8")]
-fn range<T>(start: T, stop: T) -> Result<impl Iterator<Item = Result<T>>>
+fn range<T>(start: T, stop: T) -> Result<impl Iterator<Item = T>>
 where
     T: CheckedAdd<Output = T> + PartialOrd + Copy + One + IsNegative,
 {
@@ -67,7 +64,7 @@ where
 }
 
 #[function("range(decimal, decimal) -> setof decimal")]
-fn range_decimal(start: Decimal, stop: Decimal) -> Result<impl Iterator<Item = Result<Decimal>>>
+fn range_decimal(start: Decimal, stop: Decimal) -> Result<impl Iterator<Item = Decimal>>
 where
 {
     validate_range_parameters(start, stop, Decimal::one())?;
@@ -77,7 +74,7 @@ where
 #[function("range(int4, int4, int4) -> setof int4")]
 #[function("range(int8, int8, int8) -> setof int8")]
 #[function("range(timestamp, timestamp, interval) -> setof timestamp")]
-fn range_step<T, S>(start: T, stop: T, step: S) -> Result<impl Iterator<Item = Result<T>>>
+fn range_step<T, S>(start: T, stop: T, step: S) -> Result<impl Iterator<Item = T>>
 where
     T: CheckedAdd<S, Output = T> + PartialOrd + Copy,
     S: IsNegative + Copy,
@@ -90,7 +87,7 @@ fn range_step_decimal(
     start: Decimal,
     stop: Decimal,
     step: Decimal,
-) -> Result<impl Iterator<Item = Result<Decimal>>> {
+) -> Result<impl Iterator<Item = Decimal>> {
     validate_range_parameters(start, stop, step)?;
     range_generic::<_, _, false>(start, stop, step)
 }
@@ -100,7 +97,7 @@ fn range_generic<T, S, const INCLUSIVE: bool>(
     start: T,
     stop: T,
     step: S,
-) -> Result<impl Iterator<Item = Result<T>>>
+) -> Result<impl Iterator<Item = T>>
 where
     T: CheckedAdd<S, Output = T> + PartialOrd + Copy,
     S: IsNegative + Copy,
@@ -113,19 +110,19 @@ where
     }
     let mut cur = start;
     let neg = step.is_negative();
-    let mut next = move || {
+    let next = move || {
         match (INCLUSIVE, neg) {
-            (true, true) if cur < stop => return Ok(None),
-            (true, false) if cur > stop => return Ok(None),
-            (false, true) if cur <= stop => return Ok(None),
-            (false, false) if cur >= stop => return Ok(None),
+            (true, true) if cur < stop => return None,
+            (true, false) if cur > stop => return None,
+            (false, true) if cur <= stop => return None,
+            (false, false) if cur >= stop => return None,
             _ => {}
         };
         let ret = cur;
-        cur = cur.checked_add(step).ok_or(ExprError::NumericOutOfRange)?;
-        Ok(Some(ret))
+        cur = cur.checked_add(step)?;
+        Some(ret)
     };
-    Ok(std::iter::from_fn(move || next().transpose()))
+    Ok(std::iter::from_fn(next))
 }
 
 #[inline]
