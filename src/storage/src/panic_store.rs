@@ -19,7 +19,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use risingwave_common::buffer::Bitmap;
 use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
-use risingwave_hummock_sdk::{HummockReadEpoch, SyncResult};
+use risingwave_hummock_sdk::HummockReadEpoch;
 
 use crate::error::StorageResult;
 use crate::storage_value::StorageValue;
@@ -159,8 +159,8 @@ impl StateStore for PanicStateStore {
     }
 
     #[allow(clippy::unused_async)]
-    async fn sync(&self, _epoch: u64) -> StorageResult<SyncResult> {
-        panic!("should not await sync epoch from the panic state store!");
+    fn sync(&self, _epoch: u64) -> impl SyncFuture {
+        async { panic!("should not await sync epoch from the panic state store!") }
     }
 
     fn seal_epoch(&self, _epoch: u64, _is_checkpoint: bool) {
