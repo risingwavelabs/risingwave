@@ -172,7 +172,7 @@ static GENERAL_UNNESTING_TRANS_APPLY_WITH_SHARE: LazyLock<OptimizationStage> =
                 // can't handle a join with `output_indices`.
                 ProjectJoinSeparateRule::create(),
             ],
-            ApplyOrder::BottomUp,
+            ApplyOrder::TopDown,
         )
     });
 
@@ -186,7 +186,7 @@ static GENERAL_UNNESTING_TRANS_APPLY_WITHOUT_SHARE: LazyLock<OptimizationStage> 
                 // can't handle a join with `output_indices`.
                 ProjectJoinSeparateRule::create(),
             ],
-            ApplyOrder::BottomUp,
+            ApplyOrder::TopDown,
         )
     });
 

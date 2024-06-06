@@ -467,10 +467,9 @@ class Panels:
             **self.common_options,
         )
 
-    def table_info(self, title, description, targets, columns):
+    def table_info(self, title, description, targets, columns, excludeByName=dict.fromkeys(["Time", "Value"], True)):
         gridPos = self.layout.next_half_width_graph()
         column_indices = {column: index for index, column in enumerate(columns)}
-        excludeByName = dict.fromkeys(["Time", "Value"], True)
         transformations = [
             {"id": "organize", "options": {"indexByName": column_indices, "excludeByName": excludeByName}}
         ]
@@ -514,11 +513,15 @@ def table_metric(name, filter=None):
 
 def quantile(f, percentiles):
     quantile_map = {
-        "60": ["0.6", "60"],
+        "10": ["0.1", "10"],
+        "25": ["0.25", "25"],
         "50": ["0.5", "50"],
+        "60": ["0.6", "60"],
+        "75": ["0.75", "75"],
         "90": ["0.9", "90"],
         "99": ["0.99", "99"],
         "999": ["0.999", "999"],
+        "100": ["1.0", "100"],
         "max": ["1.0", "max"],
     }
     return list(
