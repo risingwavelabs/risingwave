@@ -113,7 +113,7 @@ setup_old_cluster() {
 
 setup_new_cluster() {
   echo "--- Setup Risingwave @ $RW_COMMIT"
-  git checkout -
+  git checkout "$RW_COMMIT"
   download_and_prepare_rw "$profile" common
   # Make sure we always start w/o old config
   rm -r .risingwave/config
@@ -132,7 +132,7 @@ main() {
   # Assume we use the latest version, so we just set to some large number.
   # The current $NEW_VERSION as of this change is 1.7.0, so we can't use that.
   # See: https://github.com/risingwavelabs/risingwave/pull/15448
-  configure_rw "99.99.99" true
+  configure_rw "99.99.99" false
   validate_new_cluster "$NEW_VERSION"
 }
 
