@@ -471,6 +471,10 @@ message SubscribeResponse {
     FragmentWorkerSlotMapping streaming_worker_slot_mapping = 27;
     FragmentWorkerSlotMappings serving_worker_slot_mappings = 28;
     catalog.Secret secret = 29;
+
+    // holds all MVs which have completed their backfill operations
+    // contains IDs from catalog.Table.id
+    repeated uint32 mv_backfills_completed = 30; 
   }
   reserved 12;
   reserved "parallel_unit_mapping";
@@ -560,7 +564,8 @@ message GetReschedulePlanResponse {
 }
 
 service ScaleService {
-  rpc SubscribeClusterInfo(GetClusterInfoRequest) returns (stream GetClusterInfoResponse);
+  // For the first version we will use busy wait and just repeatably send GetClusterInfoRequest
+  // rpc SubscribeClusterInfo(GetClusterInfoRequest) returns (stream GetClusterInfoResponse);
   rpc GetClusterInfo(GetClusterInfoRequest) returns (GetClusterInfoResponse);
   rpc Reschedule(RescheduleRequest) returns (RescheduleResponse);
   rpc GetReschedulePlan(GetReschedulePlanRequest) returns (GetReschedulePlanResponse);
