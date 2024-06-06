@@ -30,7 +30,7 @@ use risingwave_common::bail;
 use risingwave_common::catalog::{KAFKA_TIMESTAMP_COLUMN_NAME, TABLE_NAME_COLUMN_NAME};
 use risingwave_common::log::LogSuppresser;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
-use risingwave_common::types::{Datum, DatumRef, Scalar, ScalarImpl, ToDatumRef, ToOwnedDatum};
+use risingwave_common::types::{Datum, DatumCow, Scalar, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::tracing::InstrumentStream;
 use risingwave_connector_codec::decoder::avro::MapHandling;
@@ -336,50 +336,6 @@ impl OpAction for OpActionUpdate {
     fn finish(writer: &mut SourceStreamChunkRowWriter<'_>) {
         writer.append_op(Op::UpdateDelete);
         writer.append_op(Op::UpdateInsert);
-    }
-}
-
-/// 🐮 A borrowed [`DatumRef`] or an owned [`Datum`].
-#[derive(Debug, Clone)]
-pub enum DatumCow<'a> {
-    Ref(DatumRef<'a>),
-    Owned(Datum),
-}
-
-impl PartialEq for DatumCow<'_> {
-    fn eq(&self, other: &Self) -> bool {
-        self.to_datum_ref() == other.to_datum_ref()
-    }
-}
-impl Eq for DatumCow<'_> {}
-
-impl From<Datum> for DatumCow<'_> {
-    fn from(datum: Datum) -> Self {
-        DatumCow::Owned(datum)
-    }
-}
-
-impl<'a> From<DatumRef<'a>> for DatumCow<'a> {
-    fn from(datum: DatumRef<'a>) -> Self {
-        DatumCow::Ref(datum)
-    }
-}
-
-impl ToDatumRef for DatumCow<'_> {
-    fn to_datum_ref(&self) -> DatumRef<'_> {
-        match self {
-            DatumCow::Ref(datum) => *datum,
-            DatumCow::Owned(datum) => datum.to_datum_ref(),
-        }
-    }
-}
-
-impl ToOwnedDatum for DatumCow<'_> {
-    fn to_owned_datum(self) -> Datum {
-        match self {
-            DatumCow::Ref(datum) => datum.to_owned_datum(),
-            DatumCow::Owned(datum) => datum,
-        }
     }
 }
 
