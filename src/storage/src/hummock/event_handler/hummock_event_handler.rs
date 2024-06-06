@@ -736,7 +736,7 @@ impl HummockEventHandler {
 
                 version_to_apply
             }
-            HummockVersionUpdate::PinnedVersion(version) => version,
+            HummockVersionUpdate::PinnedVersion(version) => *version,
         };
 
         validate_table_key_range(&newly_pinned_version);
@@ -1145,7 +1145,9 @@ mod tests {
         let version1 = make_new_version(epoch1);
         {
             version_update_tx
-                .send(HummockVersionUpdate::PinnedVersion(version1.clone()))
+                .send(HummockVersionUpdate::PinnedVersion(Box::new(
+                    version1.clone(),
+                )))
                 .unwrap();
             let (old_version, new_version, refill_finish_tx) = refill_task_rx.recv().await.unwrap();
             assert_eq!(old_version.version(), initial_version.version());
@@ -1165,10 +1167,14 @@ mod tests {
         let version3 = make_new_version(epoch3);
         {
             version_update_tx
-                .send(HummockVersionUpdate::PinnedVersion(version2.clone()))
+                .send(HummockVersionUpdate::PinnedVersion(Box::new(
+                    version2.clone(),
+                )))
                 .unwrap();
             version_update_tx
-                .send(HummockVersionUpdate::PinnedVersion(version3.clone()))
+                .send(HummockVersionUpdate::PinnedVersion(Box::new(
+                    version3.clone(),
+                )))
                 .unwrap();
             let (old_version2, new_version2, _refill_finish_tx2) =
                 refill_task_rx.recv().await.unwrap();
@@ -1198,11 +1204,15 @@ mod tests {
             let mut rx = send_clear(epoch5);
             assert_pending(&mut rx).await;
             version_update_tx
-                .send(HummockVersionUpdate::PinnedVersion(version4.clone()))
+                .send(HummockVersionUpdate::PinnedVersion(Box::new(
+                    version4.clone(),
+                )))
                 .unwrap();
             assert_pending(&mut rx).await;
             version_update_tx
-                .send(HummockVersionUpdate::PinnedVersion(version5.clone()))
+                .send(HummockVersionUpdate::PinnedVersion(Box::new(
+                    version5.clone(),
+                )))
                 .unwrap();
             rx.await.unwrap();
             assert_eq!(latest_version.load().version(), &version5);

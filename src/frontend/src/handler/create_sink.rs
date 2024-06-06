@@ -792,7 +792,6 @@ fn bind_sink_format_desc(value: ConnectorSchema) -> Result<SinkFormatDesc> {
     options
         .entry(TimestamptzHandlingMode::OPTION_KEY.to_owned())
         .or_insert(TimestamptzHandlingMode::FRONTEND_DEFAULT.to_owned());
-    let options = options.into_iter().collect();
 
     Ok(SinkFormatDesc {
         format,

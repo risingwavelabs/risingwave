@@ -67,18 +67,17 @@ impl CdcTableType {
 
     pub async fn create_table_reader(
         &self,
-        with_properties: HashMap<String, String>,
+        config: ExternalTableConfig,
         schema: Schema,
         pk_indices: Vec<usize>,
         scan_limit: u32,
     ) -> ConnectorResult<ExternalTableReaderImpl> {
         match self {
             Self::MySql => Ok(ExternalTableReaderImpl::MySql(
-                MySqlExternalTableReader::new(with_properties, schema).await?,
+                MySqlExternalTableReader::new(config, schema).await?,
             )),
             Self::Postgres => Ok(ExternalTableReaderImpl::Postgres(
-                PostgresExternalTableReader::new(with_properties, schema, pk_indices, scan_limit)
-                    .await?,
+                PostgresExternalTableReader::new(config, schema, pk_indices, scan_limit).await?,
             )),
             _ => bail!("invalid external table type: {:?}", *self),
         }
@@ -97,13 +96,6 @@ pub const SCHEMA_NAME_KEY: &str = "schema.name";
 pub const DATABASE_NAME_KEY: &str = "database.name";
 
 impl SchemaTableName {
-    pub fn new(schema_name: String, table_name: String) -> Self {
-        Self {
-            schema_name,
-            table_name,
-        }
-    }
-
     pub fn from_properties(properties: &HashMap<String, String>) -> Self {
         let table_type = CdcTableType::from_properties(properties);
         let table_name = properties.get(TABLE_NAME_KEY).cloned().unwrap_or_default();
@@ -309,15 +301,7 @@ impl ExternalTableReader for MySqlExternalTableReader {
 }
 
 impl MySqlExternalTableReader {
-    pub async fn new(
-        with_properties: HashMap<String, String>,
-        rw_schema: Schema,
-    ) -> ConnectorResult<Self> {
-        let config = serde_json::from_value::<ExternalTableConfig>(
-            serde_json::to_value(with_properties).unwrap(),
-        )
-        .context("failed to extract mysql connector properties")?;
-
+    pub async fn new(config: ExternalTableConfig, rw_schema: Schema) -> ConnectorResult<Self> {
         let mut opts_builder = mysql_async::OptsBuilder::default()
             .user(Some(config.username))
             .pass(Some(config.password))
@@ -394,6 +378,7 @@ impl MySqlExternalTableReader {
             )
         };
 
+        tracing::debug!("snapshot sql: {}", sql);
         let mut conn = self.conn.lock().await;
 
         // Set session timezone to UTC
@@ -571,6 +556,7 @@ impl ExternalTableReaderImpl {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
 
     use futures::pin_mut;
     use futures_async_stream::for_await;
@@ -579,7 +565,8 @@ mod tests {
     use risingwave_common::types::DataType;
 
     use crate::source::cdc::external::{
-        CdcOffset, ExternalTableReader, MySqlExternalTableReader, MySqlOffset, SchemaTableName,
+        CdcOffset, ExternalTableConfig, ExternalTableReader, MySqlExternalTableReader, MySqlOffset,
+        SchemaTableName,
     };
 
     #[test]
@@ -629,7 +616,7 @@ mod tests {
         let rw_schema = Schema {
             fields: columns.iter().map(Field::from).collect(),
         };
-        let props = convert_args!(hashmap!(
+        let props: HashMap<String, String> = convert_args!(hashmap!(
                 "hostname" => "localhost",
                 "port" => "8306",
                 "username" => "root",
@@ -637,7 +624,10 @@ mod tests {
                 "database.name" => "mytest",
                 "table.name" => "t1"));
 
-        let reader = MySqlExternalTableReader::new(props, rw_schema)
+        let config =
+            serde_json::from_value::<ExternalTableConfig>(serde_json::to_value(props).unwrap())
+                .unwrap();
+        let reader = MySqlExternalTableReader::new(config, rw_schema)
             .await
             .unwrap();
         let offset = reader.current_cdc_offset().await.unwrap();
