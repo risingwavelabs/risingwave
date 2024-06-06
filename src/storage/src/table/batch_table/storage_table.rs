@@ -24,11 +24,12 @@ use futures::future::try_join_all;
 use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::{Either, Itertools};
-use risingwave_common::array::Op;
+use risingwave_common::array::{DataChunk, Op};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId, TableOption};
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{self, OwnedRow, Row, RowExt};
+use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::row_serde::*;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
@@ -704,6 +705,48 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
 
         Ok(iter)
     }
+
+    pub async fn  batch_chunk_iter_with_pk_bounds(
+        &self,
+        epoch: HummockReadEpoch,
+        pk_prefix: impl Row,
+        range_bounds: impl RangeBounds<OwnedRow>,
+        ordered: bool,
+        chunk_size: usize,
+        prefetch_options: PrefetchOptions,
+    ) -> StorageResult<impl Stream<Item = StorageResult<DataChunk>> + Send> {
+        let iter = self
+            .batch_iter_with_pk_bounds(epoch, pk_prefix, range_bounds, ordered, prefetch_options)
+            .await?;
+
+        let mut data_chunk_builder = DataChunkBuilder::new(self.schema.data_types(), chunk_size);
+        iter.filter_map(|row| async move {
+            match row {
+                Ok(row) => {
+                    data_chunk_builder.append_one_row(row.row);
+                    if data_chunk_builder.is_full() {
+                        let chunk = data_chunk_builder.finish();
+                        data_chunk_builder = DataChunkBuilder::new(self.schema.data_types(), chunk_size);
+                        Some(Ok(chunk))
+                    } else {
+                        None
+                    }
+                },
+                Err(e) => {
+                    Some(e)
+                }
+            }
+        })
+    }
+
+    // #[try_stream(boxed, ok = DataChunk, error = StorageError)]
+    // async fn batch_chunk_stream(row_stream: impl Stream<Item = StorageResult<KeyedRow<Bytes>>> + Send) {
+    //     row_stream.map(f)
+    //     #[for_await]
+    //     for row in row_stream {
+    //         let row = row?;
+    //     }
+    // }
 }
 
 /// [`StorageTableInnerIterInner`] iterates on the storage table.
