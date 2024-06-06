@@ -183,7 +183,6 @@ impl AvroParserConfig {
 
 #[cfg(test)]
 mod test {
-    use std::collections::HashMap;
     use std::env;
     use std::fs::OpenOptions;
     use std::io::Write;
@@ -271,7 +270,7 @@ mod test {
             row_encode: PbEncodeType::Avro.into(),
             ..Default::default()
         };
-        let parser_config = SpecificParserConfig::new(&info, &HashMap::new())?;
+        let parser_config = SpecificParserConfig::new(&info, &Default::default())?;
         AvroParserConfig::new(parser_config.encoding_config).await
     }
 
