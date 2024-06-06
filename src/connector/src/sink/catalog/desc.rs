@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 
 use itertools::Itertools;
 use risingwave_common::catalog::{
@@ -83,7 +83,7 @@ impl SinkDesc {
         owner: UserId,
         connection_id: Option<ConnectionId>,
         dependent_relations: Vec<TableId>,
-        secret_ref: HashMap<String, u32>,
+        secret_ref: BTreeMap<String, u32>,
     ) -> SinkCatalog {
         SinkCatalog {
             id: self.id,

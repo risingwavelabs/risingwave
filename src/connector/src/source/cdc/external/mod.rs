@@ -19,7 +19,7 @@ pub mod postgres;
 mod maybe_tls_connector;
 pub mod mysql;
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 
 use anyhow::anyhow;
@@ -213,7 +213,9 @@ pub struct ExternalTableConfig {
 }
 
 impl ExternalTableConfig {
-    pub fn try_from_hashmap(connect_properties: HashMap<String, String>) -> ConnectorResult<Self> {
+    pub fn try_from_btreemap(
+        connect_properties: BTreeMap<String, String>,
+    ) -> ConnectorResult<Self> {
         let json_value = serde_json::to_value(connect_properties)?;
         let config = serde_json::from_value::<ExternalTableConfig>(json_value)?;
         Ok(config)

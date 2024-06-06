@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -536,7 +536,7 @@ pub(crate) fn gen_create_table_plan(
     for c in &mut columns {
         c.column_desc.column_id = col_id_gen.generate(c.name())
     }
-    let with_properties = context.with_options().inner().clone().into_iter().collect();
+    let with_properties = context.with_options().inner().clone();
     gen_create_table_plan_without_source(
         context,
         table_name,
@@ -560,7 +560,7 @@ pub(crate) fn gen_create_table_plan_without_source(
     columns: Vec<ColumnCatalog>,
     column_defs: Vec<ColumnDef>,
     constraints: Vec<TableConstraint>,
-    with_properties: HashMap<String, String>,
+    with_properties: BTreeMap<String, String>,
     definition: String,
     source_watermarks: Vec<SourceWatermark>,
     append_only: bool,
@@ -628,7 +628,7 @@ fn gen_table_plan_with_source(
         context,
         source_catalog.name,
         source_catalog.columns,
-        source_catalog.with_properties.clone().into_iter().collect(),
+        source_catalog.with_properties.clone(),
         source_catalog.pk_col_ids,
         source_catalog.row_id_index,
         source_catalog.definition,
@@ -648,7 +648,7 @@ fn gen_table_plan_inner(
     context: OptimizerContextRef,
     table_name: String,
     columns: Vec<ColumnCatalog>,
-    with_properties: HashMap<String, String>,
+    with_properties: BTreeMap<String, String>,
     pk_column_ids: Vec<ColumnId>,
     row_id_index: Option<usize>,
     definition: String,
@@ -738,7 +738,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
     external_table_name: String,
     mut columns: Vec<ColumnCatalog>,
     pk_names: Vec<String>,
-    connect_properties: HashMap<String, String>,
+    connect_properties: BTreeMap<String, String>,
     mut col_id_gen: ColumnIdGenerator,
     on_conflict: Option<OnConflict>,
     with_version_column: Option<String>,
@@ -837,9 +837,9 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
 }
 
 fn derive_connect_properties(
-    source_with_properties: &HashMap<String, String>,
+    source_with_properties: &BTreeMap<String, String>,
     external_table_name: String,
-) -> Result<HashMap<String, String>> {
+) -> Result<BTreeMap<String, String>> {
     use source::cdc::{MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR};
     // we should remove the prefix from `full_table_name`
     let mut connect_properties = source_with_properties.clone();
@@ -971,9 +971,8 @@ pub(super) async fn handle_create_table_plan(
                     )?;
                     source.clone()
                 };
-                let source_with_properties = source.with_properties.clone().into_iter().collect();
                 let connect_properties = derive_connect_properties(
-                    &source_with_properties,
+                    &source.with_properties,
                     cdc_table.external_table_name.clone(),
                 )?;
 
@@ -1086,12 +1085,12 @@ fn sanity_check_for_cdc_table(
 async fn derive_schema_for_cdc_table(
     column_defs: &Vec<ColumnDef>,
     constraints: &Vec<TableConstraint>,
-    connect_properties: HashMap<String, String>,
+    connect_properties: BTreeMap<String, String>,
     need_auto_schema_map: bool,
 ) -> Result<(Vec<ColumnCatalog>, Vec<String>)> {
     // read cdc table schema from external db or parsing the schema from SQL definitions
     if need_auto_schema_map {
-        let config = ExternalTableConfig::try_from_hashmap(connect_properties)
+        let config = ExternalTableConfig::try_from_btreemap(connect_properties)
             .context("failed to extract external table config")?;
 
         let table = ExternalTableImpl::connect(config).await?;

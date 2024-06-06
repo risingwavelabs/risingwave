@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use anyhow::{anyhow, Context};
 use aws_sdk_kinesis::operation::put_records::builders::PutRecordsFluentBuilder;
@@ -58,7 +58,7 @@ impl TryFrom<SinkParam> for KinesisSink {
 
     fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
         let schema = param.schema();
-        let config = KinesisSinkConfig::from_hashmap(param.properties)?;
+        let config = KinesisSinkConfig::from_btreemap(param.properties)?;
         Ok(Self {
             config,
             schema,
@@ -141,7 +141,7 @@ pub struct KinesisSinkConfig {
 }
 
 impl KinesisSinkConfig {
-    pub fn from_hashmap(properties: HashMap<String, String>) -> Result<Self> {
+    pub fn from_btreemap(properties: BTreeMap<String, String>) -> Result<Self> {
         let config =
             serde_json::from_value::<KinesisSinkConfig>(serde_json::to_value(properties).unwrap())
                 .map_err(|e| SinkError::Config(anyhow!(e)))?;

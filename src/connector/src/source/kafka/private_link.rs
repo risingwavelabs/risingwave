@@ -65,7 +65,7 @@ impl BrokerAddrRewriter {
 
     pub fn new(
         role: PrivateLinkContextRole,
-        broker_rewrite_map: Option<HashMap<String, String>>,
+        broker_rewrite_map: Option<BTreeMap<String, String>>,
     ) -> ConnectorResult<Self> {
         let rewrite_map: ConnectorResult<BTreeMap<BrokerAddr, BrokerAddr>> = broker_rewrite_map
             .map_or(Ok(BTreeMap::new()), |addr_map| {
