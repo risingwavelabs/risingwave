@@ -285,3 +285,6 @@ if [[ "$mode" == "standalone" ]]; then
   # Make sure any remaining background task exits.
   wait
 fi
+
+echo "--- Upload JUnit test results"
+buildkite-agent artifact upload "*-junit.xml"
