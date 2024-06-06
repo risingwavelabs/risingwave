@@ -17,7 +17,7 @@ use super::{Datum, DatumRef, ToDatumRef, ToOwnedDatum};
 /// 🐮 A borrowed [`DatumRef`] or an owned [`Datum`].
 #[derive(Debug, Clone)]
 pub enum DatumCow<'a> {
-    Ref(DatumRef<'a>),
+    Borrowed(DatumRef<'a>),
     Owned(Datum),
 }
 
@@ -36,14 +36,14 @@ impl From<Datum> for DatumCow<'_> {
 
 impl<'a> From<DatumRef<'a>> for DatumCow<'a> {
     fn from(datum: DatumRef<'a>) -> Self {
-        DatumCow::Ref(datum)
+        DatumCow::Borrowed(datum)
     }
 }
 
 impl ToDatumRef for DatumCow<'_> {
     fn to_datum_ref(&self) -> DatumRef<'_> {
         match self {
-            DatumCow::Ref(datum) => *datum,
+            DatumCow::Borrowed(datum) => *datum,
             DatumCow::Owned(datum) => datum.to_datum_ref(),
         }
     }
@@ -52,7 +52,7 @@ impl ToDatumRef for DatumCow<'_> {
 impl ToOwnedDatum for DatumCow<'_> {
     fn to_owned_datum(self) -> Datum {
         match self {
-            DatumCow::Ref(datum) => datum.to_owned_datum(),
+            DatumCow::Borrowed(datum) => datum.to_owned_datum(),
             DatumCow::Owned(datum) => datum,
         }
     }

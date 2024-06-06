@@ -429,7 +429,7 @@ impl JsonParseOptions {
                 .map_err(|_| create_error())?
                 .into(),
             // ---- Varchar -----
-            (DataType::Varchar, ValueType::String) => return Ok(DatumCow::Ref(Some(value.as_str().unwrap().into()))),
+            (DataType::Varchar, ValueType::String) => return Ok(DatumCow::Borrowed(Some(value.as_str().unwrap().into()))),
             (
                 DataType::Varchar,
                 ValueType::Bool
