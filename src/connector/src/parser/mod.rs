@@ -113,8 +113,6 @@ impl SourceStreamChunkBuilder {
     }
 
     pub fn row_writer(&mut self) -> SourceStreamChunkRowWriter<'_> {
-        let len = self.builders.len();
-
         SourceStreamChunkRowWriter {
             descs: &self.descs,
             builders: &mut self.builders,
