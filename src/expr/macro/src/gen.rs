@@ -1171,11 +1171,24 @@ impl FunctionAttr {
                 "expect `impl Iterator` in return type",
             )
         })?;
-        let output = match iterator_item_type {
-            ReturnTypeKind::T => quote! { Some(output) },
-            ReturnTypeKind::Option => quote! { output },
-            ReturnTypeKind::Result => quote! { Some(output?) },
-            ReturnTypeKind::ResultOption => quote! { output? },
+        let append_output = match iterator_item_type {
+            ReturnTypeKind::T => quote! {
+                let (#(#outputs),*) = output;
+                #(#builders.append(#optioned_outputs);)* error_builder.append_null();
+            },
+            ReturnTypeKind::Option => quote! { match output {
+                Some((#(#outputs),*)) => { #(#builders.append(#optioned_outputs);)* error_builder.append_null(); }
+                None => { #(#builders.append_null();)* error_builder.append_null(); }
+            } },
+            ReturnTypeKind::Result => quote! { match output {
+                Ok((#(#outputs),*)) => { #(#builders.append(#optioned_outputs);)* error_builder.append_null(); }
+                Err(e) => { #(#builders.append_null();)* error_builder.append(Some(&e.to_string())); }
+            } },
+            ReturnTypeKind::ResultOption => quote! { match output {
+                Ok(Some((#(#outputs),*))) => { #(#builders.append(#optioned_outputs);)* error_builder.append_null(); }
+                Ok(None) => { #(#builders.append_null();)* error_builder.append_null(); }
+                Err(e) => { #(#builders.append_null();)* error_builder.append(Some(&e.to_string())); }
+            } },
         };
 
         Ok(quote! {
@@ -1242,12 +1255,7 @@ impl FunctionAttr {
                             #(let #inputs = unsafe { #arrays.value_at_unchecked(i) };)*
                             for output in #iter {
                                 index_builder.append(Some(i as i32));
-                                match #output {
-                                    Some((#(#outputs),*)) => { #(#builders.append(#optioned_outputs);)* }
-                                    None => { #(#builders.append_null();)* }
-                                }
-                                // FIXME: should append error message if output returns error
-                                error_builder.append_null();
+                                #append_output
 
                                 if index_builder.len() == self.chunk_size {
                                     let len = index_builder.len();
