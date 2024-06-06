@@ -21,7 +21,7 @@
 // rely on the internal implementation and allow that to be changed, the tests use
 // `ByteStreamSourceParserImpl` to create a parser instance.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use anyhow::Context as _;
 use apache_avro::Schema;
@@ -83,7 +83,7 @@ impl JsonAccessBuilder {
 pub async fn schema_to_columns(
     schema_location: &str,
     schema_registry_auth: Option<SchemaRegistryAuth>,
-    props: &HashMap<String, String>,
+    props: &BTreeMap<String, String>,
 ) -> ConnectorResult<Vec<ColumnDesc>> {
     let url = handle_sr_list(schema_location)?;
     let json_schema = if let Some(schema_registry_auth) = schema_registry_auth {

@@ -14,7 +14,7 @@
 
 pub mod desc;
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 
 use anyhow::anyhow;
 use itertools::Itertools;
@@ -303,7 +303,7 @@ pub struct SinkCatalog {
     pub distribution_key: Vec<usize>,
 
     /// The properties of the sink.
-    pub properties: HashMap<String, String>,
+    pub properties: BTreeMap<String, String>,
 
     /// Owner of the sink.
     pub owner: UserId,
@@ -339,7 +339,7 @@ pub struct SinkCatalog {
     pub create_type: CreateType,
 
     /// The secret reference for the sink, mapping from property name to secret id.
-    pub secret_ref: HashMap<String, u32>,
+    pub secret_ref: BTreeMap<String, u32>,
 }
 
 impl SinkCatalog {
