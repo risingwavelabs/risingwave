@@ -450,7 +450,14 @@ message SubscribeResponse {
   }
   common.Status status = 1;
   Operation operation = 2;
+  
+  // catalog version
   uint64 version = 3;
+  
+  // holds all MVs which have completed their backfill operations
+  // contains IDs from catalog.Table.id
+  repeated uint32 mv_backfills_completed = 30; 
+  
   oneof info {
     catalog.Database database = 4;
     catalog.Schema schema = 5;
@@ -471,10 +478,6 @@ message SubscribeResponse {
     FragmentWorkerSlotMapping streaming_worker_slot_mapping = 27;
     FragmentWorkerSlotMappings serving_worker_slot_mappings = 28;
     catalog.Secret secret = 29;
-
-    // holds all MVs which have completed their backfill operations
-    // contains IDs from catalog.Table.id
-    repeated uint32 mv_backfills_completed = 30; 
   }
   reserved 12;
   reserved "parallel_unit_mapping";
