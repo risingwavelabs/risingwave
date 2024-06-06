@@ -566,12 +566,27 @@ message GetReschedulePlanResponse {
   bool success = 3;
 }
 
+message ChangeMvNodeLabelRequest {
+  // Id of the MV which label we want to change
+  // contains IDs from catalog.Table.id
+  uint32 mv_id = 1;
+
+  // The new label value. If set should be a UUID
+  // If omitted, the node_label of the MV is removed
+  // meta can schedule MVs without label on any CN without a label (default behavior)
+  optional string new_label = 2;
+}
+
+// We do not need to add an explicit status field here, we can just use the RPC status
+message ChangeMvNodeLabelResponse {}
+
 service ScaleService {
   // For the first version we will use busy wait and just repeatably send GetClusterInfoRequest
   // rpc SubscribeClusterInfo(GetClusterInfoRequest) returns (stream GetClusterInfoResponse);
   rpc GetClusterInfo(GetClusterInfoRequest) returns (GetClusterInfoResponse);
   rpc Reschedule(RescheduleRequest) returns (RescheduleResponse);
   rpc GetReschedulePlan(GetReschedulePlanRequest) returns (GetReschedulePlanResponse);
+  rpc ChangeMvNodeLabel(ChangeMvNodeLabelRequest) return (ChangeMvNodeLabelResponse); 
 }
 
 message MembersRequest {}
