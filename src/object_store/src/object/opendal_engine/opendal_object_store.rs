@@ -265,6 +265,8 @@ pub struct OpendalStreamingUploader {
     not_uploaded_len: usize,
     /// Whether the writer is valid. The writer is invalid after abort/close.
     is_valid: bool,
+
+    abort_on_err: bool,
 }
 
 impl OpendalStreamingUploader {
@@ -297,6 +299,7 @@ impl OpendalStreamingUploader {
             buf: vec![],
             not_uploaded_len: 0,
             is_valid: true,
+            abort_on_err: config.s3.developer.writer_abort_on_err,
         })
     }
 
@@ -308,7 +311,9 @@ impl OpendalStreamingUploader {
         );
         if let Err(err) = self.writer.write(data).await {
             self.is_valid = false;
-            self.writer.abort().await?;
+            if self.abort_on_err {
+                self.writer.abort().await?;
+            }
             return Err(err.into());
         }
         self.not_uploaded_len = 0;
@@ -340,7 +345,9 @@ impl StreamingUploader for OpendalStreamingUploader {
         match self.writer.close().await {
             Ok(_) => (),
             Err(err) => {
-                self.writer.abort().await?;
+                if self.abort_on_err {
+                    self.writer.abort().await?;
+                }
                 return Err(err.into());
             }
         };

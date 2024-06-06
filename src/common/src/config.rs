@@ -1040,6 +1040,9 @@ pub struct S3ObjectStoreDeveloperConfig {
 
     #[serde(default)]
     pub streaming_read_buffer_size: Option<usize>,
+
+    #[serde(default)]
+    pub writer_abort_on_err: bool
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
