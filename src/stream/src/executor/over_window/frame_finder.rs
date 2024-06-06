@@ -189,7 +189,7 @@ pub(super) fn find_left_for_range_frames<'cache>(
     logical_order_value: impl ToDatumRef,
     cache_key_pk_len: usize, // this is dirty but we have no better choice
 ) -> &'cache CacheKey {
-    find_for_range_frames::<true>(
+    find_for_range_frames::<true /* LEFT */>(
         range_frames,
         part_with_delta,
         logical_order_value,
@@ -206,7 +206,7 @@ pub(super) fn find_right_for_range_frames<'cache>(
     logical_order_value: impl ToDatumRef,
     cache_key_pk_len: usize, // this is dirty but we have no better choice
 ) -> &'cache CacheKey {
-    find_for_range_frames::<false>(
+    find_for_range_frames::<false /* RIGHT */>(
         range_frames,
         part_with_delta,
         logical_order_value,
