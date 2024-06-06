@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::thread;
 
@@ -54,7 +54,7 @@ pub struct KafkaContextCommon {
 
 impl KafkaContextCommon {
     pub async fn new(
-        broker_rewrite_map: Option<HashMap<String, String>>,
+        broker_rewrite_map: Option<BTreeMap<String, String>>,
         identifier: Option<String>,
         metrics: Option<Arc<RdKafkaStats>>,
         auth: AwsAuthProps,
