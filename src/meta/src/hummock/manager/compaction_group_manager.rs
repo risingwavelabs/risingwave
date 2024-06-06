@@ -95,6 +95,12 @@ impl CompactionGroupManager {
         compaction_group_manager.init(loaded_compaction_groups);
         Ok(compaction_group_manager)
     }
+
+    fn init(&mut self, loaded_compaction_groups: BTreeMap<CompactionGroupId, CompactionGroup>) {
+        if !loaded_compaction_groups.is_empty() {
+            self.compaction_groups = loaded_compaction_groups;
+        }
+    }
 }
 
 impl HummockManager {
@@ -699,16 +705,8 @@ pub(super) struct CompactionGroupManager {
     pub write_limit: HashMap<CompactionGroupId, WriteLimit>,
 }
 
-// init method
 impl CompactionGroupManager {
-    fn init(&mut self, loaded_compaction_groups: BTreeMap<CompactionGroupId, CompactionGroup>) {
-        if !loaded_compaction_groups.is_empty() {
-            self.compaction_groups = loaded_compaction_groups;
-        }
-    }
-}
-
-impl CompactionGroupManager {
+    /// Starts a transaction to update compaction group configs.
     pub fn start_compaction_groups_txn(&mut self) -> CompactionGroupTransaction<'_> {
         CompactionGroupTransaction::new(&mut self.compaction_groups)
     }
@@ -721,6 +719,7 @@ impl CompactionGroupManager {
         self.compaction_groups.get(&compaction_group_id).cloned()
     }
 
+    /// Tries to get compaction group config for `compaction_group_id`.
     pub(super) fn default_compaction_config(&self) -> Arc<CompactionConfig> {
         self.default_config.clone()
     }
