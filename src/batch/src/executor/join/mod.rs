@@ -52,14 +52,6 @@ pub enum JoinType {
 }
 
 impl JoinType {
-    #[inline(always)]
-    pub(super) fn need_join_remaining(self) -> bool {
-        matches!(
-            self,
-            JoinType::RightOuter | JoinType::RightAnti | JoinType::FullOuter
-        )
-    }
-
     pub fn from_prost(prost: JoinTypePb) -> Self {
         match prost {
             JoinTypePb::Inner => JoinType::Inner,
@@ -72,6 +64,19 @@ impl JoinType {
             JoinTypePb::FullOuter => JoinType::FullOuter,
             JoinTypePb::Unspecified => unreachable!(),
         }
+    }
+}
+
+#[cfg(test)]
+impl JoinType {
+    #![allow(dead_code)]
+
+    #[inline(always)]
+    pub(super) fn need_join_remaining(self) -> bool {
+        matches!(
+            self,
+            JoinType::RightOuter | JoinType::RightAnti | JoinType::FullOuter
+        )
     }
 
     fn need_build(self) -> bool {

@@ -40,6 +40,13 @@ def section_actor_info(outer_panels):
                     [panels.table_target(f"group({metric('table_info')}) by (table_id, table_name, table_type, materialized_view_id, fragment_id, compaction_group_id)")],
                     ["table_id", "table_name", "table_type", "materialized_view_id", "fragment_id", "compaction_group_id"],
                 ),
+                panels.table_info(
+                    "Actor Count (Group By Compute Node)",
+                    "Actor count per compute node",
+                    [panels.table_target(f"count({metric('actor_info')}) by (compute_node)")],
+                    ["table_id", "table_name", "table_type", "materialized_view_id", "fragment_id", "compaction_group_id"],
+                    dict.fromkeys(["Time"], True)
+                )
             ],
         )
     ]
@@ -1960,6 +1967,20 @@ def section_hummock_read(outer_panels):
                         ),
                     ],
                 ),
+                panels.timeseries_percentage(
+                    "Block Cache Efficiency",
+                    "Histogram of the estimated hit ratio of a block while in the block cache.",
+                    [
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"clamp_max(histogram_quantile({quantile}, sum(rate({metric('block_efficiency_histogram_bucket')}[$__rate_interval])) by (le,{COMPONENT_LABEL},{NODE_LABEL})), 1)",
+                                f"block cache efficienfy - p{legend}"
+                                + " - {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
+                            ),
+                            [10, 25, 50, 75, 90, 100],
+                        ),
+                    ]
+                ),
                 panels.timeseries_ops(
                     "Iter keys flow",
                     "",
@@ -2247,6 +2268,23 @@ def section_hummock_write(outer_panels):
                         panels.target(
                             f"sum({metric('state_store_uploader_uploading_task_size')}) by ({COMPONENT_LABEL}, {NODE_LABEL})",
                             "uploading task size - {{%s}} @ {{%s}}"
+                            % (COMPONENT_LABEL, NODE_LABEL),
+                        ),
+                        panels.target(
+                            f"sum({metric('state_store_uploader_imm_size')}) by ({COMPONENT_LABEL}, {NODE_LABEL})",
+                            "uploader imm size - {{%s}} @ {{%s}}"
+                            % (COMPONENT_LABEL, NODE_LABEL),
+                        ),
+                        panels.target(
+                            f"sum({metric('state_store_uploader_imm_size')}) by ({COMPONENT_LABEL}, {NODE_LABEL}) - "
+                            f"sum({metric('state_store_uploader_uploading_task_size')}) by ({COMPONENT_LABEL}, {NODE_LABEL})",
+                            "unflushed imm size - {{%s}} @ {{%s}}"
+                            % (COMPONENT_LABEL, NODE_LABEL),
+                            ),
+                        panels.target(
+                            f"sum({metric('uploading_memory_size')}) by ({COMPONENT_LABEL}, {NODE_LABEL}) - "
+                            f"sum({metric('state_store_uploader_imm_size')}) by ({COMPONENT_LABEL}, {NODE_LABEL})",
+                            "orphan imm size - {{%s}} @ {{%s}}"
                             % (COMPONENT_LABEL, NODE_LABEL),
                         ),
                         panels.target(
@@ -4348,6 +4386,20 @@ def section_udf(outer_panels):
                         panels.target(
                             f"sum(rate({metric('udf_input_bytes')}[$__rate_interval])) by (link, name, fragment_id) / (1024*1024)",
                             "udf_throughput_bytes - {{link}} {{name}} {{fragment_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_bytes(
+                    "UDF Memory Usage (bytes)",
+                    "Currently only embedded JS UDF supports this. Others will always show 0.",
+                    [
+                        panels.target(
+                            f"sum({metric('udf_memory_usage')}) by ({COMPONENT_LABEL}, {NODE_LABEL})",
+                            "udf_memory_usage - {{%s}}" % NODE_LABEL,
+                        ),
+                        panels.target(
+                            f"sum({metric('udf_memory_usage')}) by (name, fragment_id)",
+                            "udf_memory_usage - {{name}} {{fragment_id}}",
                         ),
                     ],
                 ),

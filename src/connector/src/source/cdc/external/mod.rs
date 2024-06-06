@@ -68,18 +68,17 @@ impl CdcTableType {
 
     pub async fn create_table_reader(
         &self,
-        with_properties: HashMap<String, String>,
+        config: ExternalTableConfig,
         schema: Schema,
         pk_indices: Vec<usize>,
         scan_limit: u32,
     ) -> ConnectorResult<ExternalTableReaderImpl> {
         match self {
             Self::MySql => Ok(ExternalTableReaderImpl::MySql(
-                MySqlExternalTableReader::new(with_properties, schema).await?,
+                MySqlExternalTableReader::new(config, schema).await?,
             )),
             Self::Postgres => Ok(ExternalTableReaderImpl::Postgres(
-                PostgresExternalTableReader::new(with_properties, schema, pk_indices, scan_limit)
-                    .await?,
+                PostgresExternalTableReader::new(config, schema, pk_indices, scan_limit).await?,
             )),
             _ => bail!("invalid external table type: {:?}", *self),
         }
@@ -98,13 +97,6 @@ pub const SCHEMA_NAME_KEY: &str = "schema.name";
 pub const DATABASE_NAME_KEY: &str = "database.name";
 
 impl SchemaTableName {
-    pub fn new(schema_name: String, table_name: String) -> Self {
-        Self {
-            schema_name,
-            table_name,
-        }
-    }
-
     pub fn from_properties(properties: &HashMap<String, String>) -> Self {
         let table_type = CdcTableType::from_properties(properties);
         let table_name = properties.get(TABLE_NAME_KEY).cloned().unwrap_or_default();

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
@@ -27,7 +27,9 @@ use risingwave_hummock_sdk::{
 use risingwave_pb::hummock::compact_task::{self};
 use risingwave_pb::hummock::group_delta::DeltaType;
 use risingwave_pb::hummock::hummock_version_delta::ChangeLogDelta;
-use risingwave_pb::hummock::{GroupDelta, GroupMetaChange, HummockSnapshot, IntraLevelDelta};
+use risingwave_pb::hummock::{
+    GroupDelta, GroupMetaChange, HummockSnapshot, IntraLevelDelta, StateTableInfoDelta,
+};
 
 use crate::hummock::error::{Error, Result};
 use crate::hummock::manager::transaction::{
@@ -140,8 +142,11 @@ impl HummockManager {
             .latest_version()
             .build_compaction_group_info();
 
+        let mut new_table_ids = None;
+
         // Add new table
         if let Some(new_fragment_table_info) = new_table_fragment_info {
+            let new_table_ids = new_table_ids.insert(HashSet::new());
             if !new_fragment_table_info.internal_table_ids.is_empty() {
                 if let Some(levels) = new_version_delta
                     .latest_version()
@@ -178,6 +183,7 @@ impl HummockManager {
                 for table_id in &new_fragment_table_info.internal_table_ids {
                     table_compaction_group_mapping
                         .insert(*table_id, StaticCompactionGroupId::StateDefault as u64);
+                    new_table_ids.insert(*table_id);
                 }
             }
 
@@ -208,6 +214,7 @@ impl HummockManager {
                 });
                 let _ = table_compaction_group_mapping
                     .insert(table_id, StaticCompactionGroupId::MaterializedView as u64);
+                new_table_ids.insert(table_id);
             }
         }
 
@@ -328,6 +335,28 @@ impl HummockManager {
             };
             group_deltas.push(group_delta);
         }
+
+        // update state table info
+        new_version_delta.with_latest_version(|version, delta| {
+            for table_id in new_table_ids
+                .into_iter()
+                .flat_map(|ids| ids.into_iter().map(|table_id| table_id.table_id))
+                .chain(
+                    version
+                        .levels
+                        .values()
+                        .flat_map(|group| group.member_table_ids.iter().cloned()),
+                )
+            {
+                delta.state_table_info_delta.insert(
+                    TableId::new(table_id),
+                    StateTableInfoDelta {
+                        committed_epoch: epoch,
+                        safe_epoch: version.safe_epoch,
+                    },
+                );
+            }
+        });
 
         new_version_delta.pre_apply();
 

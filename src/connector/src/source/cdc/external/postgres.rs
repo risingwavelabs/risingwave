@@ -270,7 +270,7 @@ impl ExternalTableReader for PostgresExternalTableReader {
 
 impl PostgresExternalTableReader {
     pub async fn new(
-        properties: HashMap<String, String>,
+        config: ExternalTableConfig,
         rw_schema: Schema,
         pk_indices: Vec<usize>,
         scan_limit: u32,
@@ -280,11 +280,6 @@ impl PostgresExternalTableReader {
             ?pk_indices,
             "create postgres external table reader"
         );
-
-        let config = serde_json::from_value::<ExternalTableConfig>(
-            serde_json::to_value(properties.clone()).unwrap(),
-        )
-        .context("failed to extract postgres connector properties")?;
 
         let mut pg_config = tokio_postgres::Config::new();
         pg_config
@@ -346,7 +341,10 @@ impl PostgresExternalTableReader {
                 .map(|i| rw_schema.fields[*i].name.clone())
                 .collect_vec();
 
-            let table_name = SchemaTableName::from_properties(&properties);
+            let table_name = SchemaTableName {
+                schema_name: config.schema.clone(),
+                table_name: config.table.clone(),
+            };
             let order_key = primary_keys.iter().join(",");
             let scan_sql = format!(
                 "SELECT {} FROM {} WHERE {} ORDER BY {} LIMIT {scan_limit}",
@@ -455,6 +453,8 @@ impl PostgresExternalTableReader {
 #[cfg(test)]
 mod tests {
 
+    use std::collections::HashMap;
+
     use futures::pin_mut;
     use futures_async_stream::for_await;
     use maplit::{convert_args, hashmap};
@@ -528,7 +528,7 @@ mod tests {
             fields: columns.iter().map(Field::from).collect(),
         };
 
-        let props = convert_args!(hashmap!(
+        let props: HashMap<String, String> = convert_args!(hashmap!(
                 "hostname" => "localhost",
                 "port" => "8432",
                 "username" => "myuser",
@@ -536,7 +536,11 @@ mod tests {
                 "database.name" => "mydb",
                 "schema.name" => "public",
                 "table.name" => "t1"));
-        let reader = PostgresExternalTableReader::new(props, rw_schema, vec![0, 1], 1000)
+
+        let config =
+            serde_json::from_value::<ExternalTableConfig>(serde_json::to_value(props).unwrap())
+                .unwrap();
+        let reader = PostgresExternalTableReader::new(config, rw_schema, vec![0, 1], 1000)
             .await
             .unwrap();
 

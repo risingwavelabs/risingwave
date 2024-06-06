@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use std::ops::{Bound, Deref, RangeBounds};
+use std::ops::{Bound, Deref};
 use std::sync::Arc;
 
 use futures::{pin_mut, StreamExt};
@@ -67,11 +67,6 @@ pub struct ScanRange {
 }
 
 impl ScanRange {
-    fn is_full_range<T>(bounds: &impl RangeBounds<T>) -> bool {
-        matches!(bounds.start_bound(), Bound::Unbounded)
-            && matches!(bounds.end_bound(), Bound::Unbounded)
-    }
-
     /// Create a scan range from the prost representation.
     pub fn new(
         scan_range: PbScanRange,

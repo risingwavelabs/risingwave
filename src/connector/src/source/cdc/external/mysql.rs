@@ -243,15 +243,7 @@ impl ExternalTableReader for MySqlExternalTableReader {
 }
 
 impl MySqlExternalTableReader {
-    pub async fn new(
-        with_properties: HashMap<String, String>,
-        rw_schema: Schema,
-    ) -> ConnectorResult<Self> {
-        let config = serde_json::from_value::<ExternalTableConfig>(
-            serde_json::to_value(with_properties).unwrap(),
-        )
-        .context("failed to extract mysql connector properties")?;
-
+    pub async fn new(config: ExternalTableConfig, rw_schema: Schema) -> ConnectorResult<Self> {
         let mut opts_builder = mysql_async::OptsBuilder::default()
             .user(Some(config.username))
             .pass(Some(config.password))
@@ -454,6 +446,7 @@ impl MySqlExternalTableReader {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
 
     use futures::pin_mut;
     use futures_async_stream::for_await;
@@ -534,7 +527,7 @@ mod tests {
         let rw_schema = Schema {
             fields: columns.iter().map(Field::from).collect(),
         };
-        let props = convert_args!(hashmap!(
+        let props: HashMap<String, String> = convert_args!(hashmap!(
                 "hostname" => "localhost",
                 "port" => "8306",
                 "username" => "root",
@@ -542,7 +535,10 @@ mod tests {
                 "database.name" => "mytest",
                 "table.name" => "t1"));
 
-        let reader = MySqlExternalTableReader::new(props, rw_schema)
+        let config =
+            serde_json::from_value::<ExternalTableConfig>(serde_json::to_value(props).unwrap())
+                .unwrap();
+        let reader = MySqlExternalTableReader::new(config, rw_schema)
             .await
             .unwrap();
         let offset = reader.current_cdc_offset().await.unwrap();

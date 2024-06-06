@@ -47,6 +47,7 @@ pub struct JsonAccessBuilder {
 impl AccessBuilder for JsonAccessBuilder {
     #[allow(clippy::unused_async)]
     async fn generate_accessor(&mut self, payload: Vec<u8>) -> ConnectorResult<AccessImpl<'_, '_>> {
+        // XXX: When will we enter this branch?
         if payload.is_empty() {
             self.value = Some("{}".into());
         } else {
@@ -101,7 +102,7 @@ pub async fn schema_to_columns(
     let avro_schema = convert_avro(&json_schema, context).to_string();
     let schema = Schema::parse_str(&avro_schema).context("failed to parse avro schema")?;
     // TODO: do we need to support map type here?
-    avro_schema_to_column_descs(&schema, None)
+    avro_schema_to_column_descs(&schema, None).map_err(Into::into)
 }
 
 #[cfg(test)]

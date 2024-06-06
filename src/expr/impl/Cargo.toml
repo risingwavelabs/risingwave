@@ -40,7 +40,7 @@ chrono = { version = "0.4", default-features = false, features = [
     "std",
 ] }
 chrono-tz = { version = "0.9", features = ["case-insensitive"] }
-educe = "0.5"
+educe = "0.6"
 fancy-regex = "0.13"
 futures-async-stream = { workspace = true }
 futures-util = "0.3"
