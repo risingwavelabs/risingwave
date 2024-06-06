@@ -586,7 +586,7 @@ service ScaleService {
   rpc GetClusterInfo(GetClusterInfoRequest) returns (GetClusterInfoResponse);
   rpc Reschedule(RescheduleRequest) returns (RescheduleResponse);
   rpc GetReschedulePlan(GetReschedulePlanRequest) returns (GetReschedulePlanResponse);
-  rpc ChangeMvNodeLabel(ChangeMvNodeLabelRequest) return (ChangeMvNodeLabelResponse); 
+  rpc ChangeMvNodeLabel(ChangeMvNodeLabelRequest) returns (ChangeMvNodeLabelResponse); 
 }
 
 message MembersRequest {}
