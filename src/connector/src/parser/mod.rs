@@ -30,7 +30,7 @@ use risingwave_common::bail;
 use risingwave_common::catalog::{KAFKA_TIMESTAMP_COLUMN_NAME, TABLE_NAME_COLUMN_NAME};
 use risingwave_common::log::LogSuppresser;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
-use risingwave_common::types::{Datum, Scalar, ScalarImpl};
+use risingwave_common::types::{Datum, DatumRef, Scalar, ScalarImpl, ToDatumRef};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::tracing::InstrumentStream;
 use risingwave_connector_codec::decoder::avro::MapHandling;
@@ -87,6 +87,7 @@ mod util;
 
 pub use debezium::DEBEZIUM_IGNORE_KEY;
 use risingwave_common::buffer::BitmapBuilder;
+pub use unified::json::JsonBorrowAccess;
 pub use unified::{AccessError, AccessResult};
 
 /// A builder for building a [`StreamChunk`] from [`SourceColumnDesc`].
@@ -246,11 +247,11 @@ impl MessageMeta<'_> {
 }
 
 trait OpAction {
-    type Output;
+    type Output<'a>;
 
-    fn output_for(datum: Datum) -> Self::Output;
+    fn output_for<'a>(datum: Datum) -> Self::Output<'a>;
 
-    fn apply(builder: &mut ArrayBuilderImpl, output: Self::Output);
+    fn apply(builder: &mut ArrayBuilderImpl, output: Self::Output<'_>);
 
     fn rollback(builder: &mut ArrayBuilderImpl);
 
@@ -260,16 +261,16 @@ trait OpAction {
 struct OpActionInsert;
 
 impl OpAction for OpActionInsert {
-    type Output = Datum;
+    type Output<'a> = CowDatum<'a>;
 
     #[inline(always)]
-    fn output_for(datum: Datum) -> Self::Output {
-        datum
+    fn output_for<'a>(datum: Datum) -> Self::Output<'a> {
+        datum.into()
     }
 
     #[inline(always)]
-    fn apply(builder: &mut ArrayBuilderImpl, output: Datum) {
-        builder.append(&output)
+    fn apply(builder: &mut ArrayBuilderImpl, output: CowDatum<'_>) {
+        builder.append(output)
     }
 
     #[inline(always)]
@@ -286,16 +287,16 @@ impl OpAction for OpActionInsert {
 struct OpActionDelete;
 
 impl OpAction for OpActionDelete {
-    type Output = Datum;
+    type Output<'a> = CowDatum<'a>;
 
     #[inline(always)]
-    fn output_for(datum: Datum) -> Self::Output {
-        datum
+    fn output_for<'a>(datum: Datum) -> Self::Output<'a> {
+        datum.into()
     }
 
     #[inline(always)]
-    fn apply(builder: &mut ArrayBuilderImpl, output: Datum) {
-        builder.append(&output)
+    fn apply(builder: &mut ArrayBuilderImpl, output: CowDatum<'_>) {
+        builder.append(output)
     }
 
     #[inline(always)]
@@ -312,17 +313,17 @@ impl OpAction for OpActionDelete {
 struct OpActionUpdate;
 
 impl OpAction for OpActionUpdate {
-    type Output = (Datum, Datum);
+    type Output<'a> = (CowDatum<'a>, CowDatum<'a>);
 
     #[inline(always)]
-    fn output_for(datum: Datum) -> Self::Output {
-        (datum.clone(), datum)
+    fn output_for<'a>(datum: Datum) -> Self::Output<'a> {
+        (datum.clone().into(), datum.into())
     }
 
     #[inline(always)]
-    fn apply(builder: &mut ArrayBuilderImpl, output: (Datum, Datum)) {
-        builder.append(&output.0);
-        builder.append(&output.1);
+    fn apply(builder: &mut ArrayBuilderImpl, output: (CowDatum<'_>, CowDatum<'_>)) {
+        builder.append(output.0);
+        builder.append(output.1);
     }
 
     #[inline(always)]
@@ -338,15 +339,42 @@ impl OpAction for OpActionUpdate {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)] // TODO: eq
+pub enum CowDatum<'a> {
+    Ref(DatumRef<'a>),
+    Owned(Datum),
+}
+
+impl From<Datum> for CowDatum<'_> {
+    fn from(datum: Datum) -> Self {
+        CowDatum::Owned(datum)
+    }
+}
+
+impl<'a> From<DatumRef<'a>> for CowDatum<'a> {
+    fn from(datum: DatumRef<'a>) -> Self {
+        CowDatum::Ref(datum)
+    }
+}
+
+impl ToDatumRef for CowDatum<'_> {
+    fn to_datum_ref(&self) -> DatumRef<'_> {
+        match self {
+            CowDatum::Ref(datum) => *datum,
+            CowDatum::Owned(datum) => datum.to_datum_ref(),
+        }
+    }
+}
+
 impl SourceStreamChunkRowWriter<'_> {
     fn append_op(&mut self, op: Op) {
         self.op_builder.push(op);
         self.vis_builder.append(self.visible);
     }
 
-    fn do_action<A: OpAction>(
+    fn do_action<'a, A: OpAction>(
         &mut self,
-        mut f: impl FnMut(&SourceColumnDesc) -> AccessResult<A::Output>,
+        mut f: impl FnMut(&SourceColumnDesc) -> AccessResult<A::Output<'a>>,
     ) -> AccessResult<()> {
         let mut parse_field = |desc: &SourceColumnDesc| {
             match f(desc) {
@@ -520,9 +548,9 @@ impl SourceStreamChunkRowWriter<'_> {
     #[inline(always)]
     pub fn do_insert(
         &mut self,
-        f: impl FnMut(&SourceColumnDesc) -> AccessResult<Datum>,
+        mut f: impl FnMut(&SourceColumnDesc) -> AccessResult<Datum>,
     ) -> AccessResult<()> {
-        self.do_action::<OpActionInsert>(f)
+        self.do_action::<OpActionInsert>(|desc| f(desc).map(Into::into))
     }
 
     /// Write a `Delete` record to the [`StreamChunk`], with the given fallible closure that
@@ -532,9 +560,9 @@ impl SourceStreamChunkRowWriter<'_> {
     #[inline(always)]
     pub fn do_delete(
         &mut self,
-        f: impl FnMut(&SourceColumnDesc) -> AccessResult<Datum>,
+        mut f: impl FnMut(&SourceColumnDesc) -> AccessResult<Datum>,
     ) -> AccessResult<()> {
-        self.do_action::<OpActionDelete>(f)
+        self.do_action::<OpActionDelete>(|desc| f(desc).map(Into::into))
     }
 
     /// Write a `Update` record to the [`StreamChunk`], with the given fallible closure that
@@ -544,9 +572,9 @@ impl SourceStreamChunkRowWriter<'_> {
     #[inline(always)]
     pub fn do_update(
         &mut self,
-        f: impl FnMut(&SourceColumnDesc) -> AccessResult<(Datum, Datum)>,
+        mut f: impl FnMut(&SourceColumnDesc) -> AccessResult<(Datum, Datum)>,
     ) -> AccessResult<()> {
-        self.do_action::<OpActionUpdate>(f)
+        self.do_action::<OpActionUpdate>(|desc| f(desc).map(|(old, new)| (old.into(), new.into())))
     }
 }
 

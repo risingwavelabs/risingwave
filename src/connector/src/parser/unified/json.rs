@@ -22,7 +22,8 @@ use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::cast::{i64_to_timestamp, i64_to_timestamptz, str_to_bytea};
 use risingwave_common::log::LogSuppresser;
 use risingwave_common::types::{
-    DataType, Date, Decimal, Int256, Interval, JsonbVal, ScalarImpl, Time, Timestamp, Timestamptz,
+    DataType, Date, Decimal, Int256, Interval, JsonbVal, ScalarImpl, ScalarRefImpl, Time,
+    Timestamp, Timestamptz,
 };
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector_codec::decoder::utils::extract_decimal;
@@ -34,6 +35,7 @@ use thiserror_ext::AsReport;
 
 use super::{Access, AccessError, AccessResult};
 use crate::parser::common::json_object_get_case_insensitive;
+use crate::parser::CowDatum;
 use crate::schema::{bail_invalid_option_error, InvalidOptionError};
 
 #[derive(Clone, Debug)]
@@ -197,6 +199,19 @@ impl JsonParseOptions {
             struct_handling: StructHandling::Strict,
             ignoring_keycase: true,
         }
+    }
+
+    pub fn parse_borrow<'a>(
+        &self,
+        value: &'a BorrowedValue<'a>,
+        type_expected: &DataType,
+    ) -> AccessResult<CowDatum<'a>> {
+        Ok(match (type_expected, value.value_type()) {
+            (DataType::Varchar, ValueType::String) => {
+                CowDatum::Ref(Some(ScalarRefImpl::Utf8(value.as_str().unwrap().into())))
+            }
+            _ => self.parse(value, type_expected)?.into(),
+        })
     }
 
     pub fn parse(&self, value: &BorrowedValue<'_>, type_expected: &DataType) -> AccessResult {
@@ -645,5 +660,48 @@ where
         }
 
         self.options.parse(value, type_expected)
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct JsonBorrowAccess<'a, 'b> {
+    value: &'b BorrowedValue<'b>,
+    options: &'a JsonParseOptions,
+}
+
+impl<'a, 'b> JsonBorrowAccess<'a, 'b> {
+    pub fn new(value: &'b BorrowedValue<'b>) -> Self {
+        Self {
+            value,
+            options: &JsonParseOptions::DEFAULT,
+        }
+    }
+}
+
+impl<'a, 'b> JsonBorrowAccess<'a, 'b>
+where
+    'a: 'b,
+{
+    pub fn access(&self, path: &[&str], type_expected: &DataType) -> AccessResult<CowDatum<'b>> {
+        let value = {
+            let mut value = self.value;
+            for (idx, &key) in path.iter().enumerate() {
+                if let Some(sub_value) = if self.options.ignoring_keycase {
+                    json_object_get_case_insensitive(value, key)
+                } else {
+                    value.get(key)
+                } {
+                    value = sub_value;
+                } else {
+                    Err(AccessError::Undefined {
+                        name: key.to_string(),
+                        path: path.iter().take(idx).join("."),
+                    })?;
+                }
+            }
+            value
+        };
+
+        self.options.parse_borrow(value, type_expected)
     }
 }
