@@ -14,13 +14,13 @@
 
 use super::expr_visitable::ExprVisitable;
 use super::generic::GenericPlanRef;
-use crate::error::ErrorCode::BindError;
 use super::utils::impl_distill_by_unit;
 use super::{
     gen_filter_and_pushdown, generic, ColPrunable, ColumnPruningContext, ExprRewritable, Logical,
     PlanBase, PlanTreeNodeUnary, PredicatePushdown, RewriteStreamContext, StreamChangedLog,
     StreamRowIdGen, ToBatch, ToStream, ToStreamContext,
 };
+use crate::error::ErrorCode::BindError;
 use crate::error::Result;
 use crate::optimizer::property::Distribution;
 use crate::utils::{ColIndexMapping, Condition};

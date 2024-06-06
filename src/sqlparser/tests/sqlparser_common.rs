@@ -2690,7 +2690,7 @@ fn parse_ctes() {
     fn assert_ctes_in_select(expected: &[&str], sel: &Query) {
         for (i, exp) in expected.iter().enumerate() {
             let Cte { alias, query, .. } = &sel.with.as_ref().unwrap().cte_tables[i];
-            assert_eq!(*exp, query.to_string());
+            assert_eq!(*exp, query.as_ref().unwrap().to_string());
             assert_eq!(
                 if i == 0 {
                     Ident::new_unchecked("a")
@@ -2732,7 +2732,13 @@ fn parse_ctes() {
     // CTE in a CTE...
     let sql = &format!("WITH outer_cte AS ({}) SELECT * FROM outer_cte", with);
     let select = verified_query(sql);
-    assert_ctes_in_select(&cte_sqls, &only(&select.with.unwrap().cte_tables).query);
+    assert_ctes_in_select(
+        &cte_sqls,
+        only(&select.with.unwrap().cte_tables)
+            .query
+            .as_ref()
+            .unwrap(),
+    );
 }
 
 #[test]
