@@ -21,9 +21,14 @@ use arrow_schema_iceberg::DataType as ArrowDataType;
 use either::Either;
 use itertools::Itertools;
 use maplit::{convert_args, hashmap};
+use petgraph::visit::Data;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::catalog::{ConnectionId, DatabaseId, Schema, SchemaId, TableId, UserId};
+use risingwave_common::array::arrow::{FromArrow, IcebergArrowConvert};
+use risingwave_common::catalog::{
+    ColumnCatalog, ConnectionId, DatabaseId, Schema, SchemaId, TableId, UserId,
+};
 use risingwave_common::types::DataType;
 use risingwave_common::{bail, catalog};
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkFormatDesc, SinkType};
@@ -34,8 +39,10 @@ use risingwave_connector::sink::{
 use risingwave_pb::catalog::{PbSource, Table};
 use risingwave_pb::ddl_service::ReplaceTablePlan;
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
-use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::{DispatcherType, MergeNode, StreamFragmentGraph, StreamNode};
+use risingwave_pb::stream_plan::stream_node::{NodeBody, PbNodeBody};
+use risingwave_pb::stream_plan::{
+    DispatcherType, MergeNode, ProjectNode, StreamFragmentGraph, StreamNode,
+};
 use risingwave_sqlparser::ast::{
     ConnectorSchema, CreateSink, CreateSinkStatement, EmitMode, Encode, Format, Query, Statement,
 };
@@ -281,7 +288,8 @@ pub fn gen_sink_plan(
         let exprs = derive_default_column_project_for_sink(
             &sink_catalog,
             sink_plan.schema(),
-            table_catalog,
+            table_catalog.columns(),
+            table_catalog.default_column_exprs().as_ref(),
             user_specified_columns,
         )?;
 
@@ -291,6 +299,7 @@ pub fn gen_sink_plan(
 
         let exprs =
             LogicalSource::derive_output_exprs_from_generated_columns(table_catalog.columns())?;
+
         if let Some(exprs) = exprs {
             let logical_project = generic::Project::new(exprs, sink_plan);
             sink_plan = StreamProject::new(logical_project).into();
@@ -654,15 +663,23 @@ pub(crate) async fn reparse_table_for_sink(
     Ok((graph, table, source))
 }
 
-pub(crate) fn insert_merger_to_union(node: &mut StreamNode) {
+pub(crate) fn insert_merger_to_union(node: &mut StreamNode, project_node: &PbNodeBody) {
     if let Some(NodeBody::Union(_union_node)) = &mut node.node_body {
         node.input.push(StreamNode {
-            identity: "Merge (sink into table)".to_string(),
-            fields: node.fields.clone(),
-            node_body: Some(NodeBody::Merge(MergeNode {
-                upstream_dispatcher_type: DispatcherType::Hash as _,
+            input: vec![StreamNode {
+                identity: "Merge (sink into table)".to_string(),
+                fields: node.fields.clone(),
+                node_body: Some(NodeBody::Merge(MergeNode {
+                    upstream_dispatcher_type: DispatcherType::Hash as _,
+                    ..Default::default()
+                })),
                 ..Default::default()
-            })),
+            }],
+            stream_key: vec![],
+            append_only: false,
+            identity: "".to_string(),
+            fields: vec![],
+            node_body: None,
             ..Default::default()
         });
 
@@ -695,10 +712,11 @@ fn derive_sink_to_table_expr(
     }
 }
 
-fn derive_default_column_project_for_sink(
+pub(crate) fn derive_default_column_project_for_sink(
     sink: &SinkCatalog,
     sink_schema: &Schema,
-    target_table_catalog: &Arc<TableCatalog>,
+    columns: &[ColumnCatalog],
+    default_column_exprs: &[ExprImpl],
     user_specified_columns: bool,
 ) -> Result<Vec<ExprImpl>> {
     assert_eq!(sink.full_schema().len(), sink_schema.len());
@@ -718,17 +736,17 @@ fn derive_default_column_project_for_sink(
         .map(|(i, c)| (c.name(), i))
         .collect::<BTreeMap<_, _>>();
 
-    for (idx, table_column) in target_table_catalog.columns().iter().enumerate() {
-        if table_column.is_generated() {
+    for (idx, column) in columns.iter().enumerate() {
+        if column.is_generated() {
             continue;
         }
 
         let default_col_expr = || -> ExprImpl {
-            rewrite_now_to_proctime(target_table_catalog.default_column_expr(idx))
+            rewrite_now_to_proctime(default_column_exprs[idx].clone())
         };
 
         let sink_col_expr = |sink_col_idx: usize| -> Result<ExprImpl> {
-            derive_sink_to_table_expr(sink_schema, sink_col_idx, table_column.data_type())
+            derive_sink_to_table_expr(sink_schema, sink_col_idx, &column.data_type())
         };
 
         // If users specified the columns to be inserted e.g. `CREATE SINK s INTO t(a, b)`, the expressions of `Project` will be generated accordingly.
@@ -736,7 +754,7 @@ fn derive_default_column_project_for_sink(
         // Otherwise, e.g. `CREATE SINK s INTO t`, the columns will be matched by their order in `select` query and the target table.
         #[allow(clippy::collapsible_else_if)]
         if user_specified_columns {
-            if let Some(idx) = sink_visible_col_idxes_by_name.get(table_column.name()) {
+            if let Some(idx) = sink_visible_col_idxes_by_name.get(column.name()) {
                 exprs.push(sink_col_expr(*idx)?);
             } else {
                 exprs.push(default_col_expr());
