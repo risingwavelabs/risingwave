@@ -7079,9 +7079,9 @@ dependencies = [
 
 [[package]]
 name = "madsim"
-version = "0.2.29"
+version = "0.2.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "288946d12a24c5ed887419a1dd296c9d533381c01efb68f239534ace8d35bfde"
+checksum = "f88753ddf8d3cd43b9cf71a93626dd9aad3c24086a04420beb31922e1f856d02"
 dependencies = [
  "ahash 0.8.11",
  "async-channel 2.2.1",
@@ -7184,9 +7184,9 @@ dependencies = [
 
 [[package]]
 name = "madsim-tokio"
-version = "0.2.27"
+version = "0.2.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f42620135423d9064b71aeca4908e7567eae2b9a0f0651fc1ba9d96a81dd619"
+checksum = "569929c869275edc1e2c1f1381a688a6e5a4200302b58caff819e07414ccddb9"
 dependencies = [
  "madsim",
  "spin 0.9.8",
