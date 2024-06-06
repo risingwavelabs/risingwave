@@ -1122,11 +1122,29 @@ impl FunctionAttr {
         let iter = quote! { #fn_name(#(#inputs,)* #prebuilt_arg #context) };
         let mut iter = match user_fn.return_type_kind {
             ReturnTypeKind::T => quote! { #iter },
-            ReturnTypeKind::Result => quote! { #iter? },
-            ReturnTypeKind::Option => quote! { if let Some(it) = #iter { it } else { continue; } },
-            ReturnTypeKind::ResultOption => {
-                quote! { if let Some(it) = #iter? { it } else { continue; } }
-            }
+            ReturnTypeKind::Option => quote! { match #iter {
+                Some(it) => it,
+                None => continue,
+            } },
+            ReturnTypeKind::Result => quote! { match #iter {
+                Ok(it) => it,
+                Err(e) => {
+                    index_builder.append(Some(i as i32));
+                    #(#builders.append_null();)*
+                    error_builder.append(Some(&e.to_string()));
+                    continue;
+                }
+            } },
+            ReturnTypeKind::ResultOption => quote! { match #iter {
+                Ok(Some(it)) => it,
+                Ok(None) => continue,
+                Err(e) => {
+                    index_builder.append(Some(i as i32));
+                    #(#builders.append_null();)*
+                    error_builder.append(Some(&e.to_string()));
+                    continue;
+                }
+            } },
         };
         // if user function accepts non-option arguments, we assume the function
         // returns empty on null input, so we need to unwrap the inputs before calling.
@@ -1215,6 +1233,7 @@ impl FunctionAttr {
 
                         let mut index_builder = I32ArrayBuilder::new(self.chunk_size);
                         #(let mut #builders = #builder_types::with_type(self.chunk_size, #return_types);)*
+                        let mut error_builder = Utf8ArrayBuilder::new(self.chunk_size);
 
                         for i in 0..input.capacity() {
                             if unsafe { !input.visibility().is_set_unchecked(i) } {
@@ -1227,13 +1246,20 @@ impl FunctionAttr {
                                     Some((#(#outputs),*)) => { #(#builders.append(#optioned_outputs);)* }
                                     None => { #(#builders.append_null();)* }
                                 }
+                                // FIXME: should append error message if output returns error
+                                error_builder.append_null();
 
                                 if index_builder.len() == self.chunk_size {
                                     let len = index_builder.len();
                                     let index_array = std::mem::replace(&mut index_builder, I32ArrayBuilder::new(self.chunk_size)).finish().into_ref();
                                     let value_arrays = [#(std::mem::replace(&mut #builders, #builder_types::with_type(self.chunk_size, #return_types)).finish().into_ref()),*];
                                     #build_value_array
-                                    yield DataChunk::new(vec![index_array, value_array], self.chunk_size);
+                                    let error_array = std::mem::replace(&mut error_builder, Utf8ArrayBuilder::new(self.chunk_size)).finish().into_ref();
+                                    if error_array.null_bitmap().any() {
+                                        yield DataChunk::new(vec![index_array, value_array, error_array], self.chunk_size);
+                                    } else {
+                                        yield DataChunk::new(vec![index_array, value_array], self.chunk_size);
+                                    }
                                 }
                             }
                         }
@@ -1243,7 +1269,12 @@ impl FunctionAttr {
                             let index_array = index_builder.finish().into_ref();
                             let value_arrays = [#(#builders.finish().into_ref()),*];
                             #build_value_array
-                            yield DataChunk::new(vec![index_array, value_array], len);
+                            let error_array = error_builder.finish().into_ref();
+                            if error_array.null_bitmap().any() {
+                                yield DataChunk::new(vec![index_array, value_array, error_array], len);
+                            } else {
+                                yield DataChunk::new(vec![index_array, value_array], len);
+                            }
                         }
                     }
                 }

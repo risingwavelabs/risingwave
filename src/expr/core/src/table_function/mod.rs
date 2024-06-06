@@ -31,20 +31,21 @@ pub use self::empty::*;
 pub use self::repeat::*;
 use self::user_defined::*;
 
-/// Instance of a table function.
+/// A table function takes a row as input and returns multiple rows as output.
 ///
-/// A table function takes a row as input and returns a table. It is also known as Set-Returning
-/// Function.
+/// It is also known as Set-Returning Function.
 #[async_trait::async_trait]
 pub trait TableFunction: std::fmt::Debug + Sync + Send {
+    /// The data type of the output.
     fn return_type(&self) -> DataType;
 
     /// # Contract of the output
     ///
-    /// The returned `DataChunk` contains exact two columns:
+    /// The returned `DataChunk` contains two or three columns:
     /// - The first column is an I32Array containing row indices of input chunk. It should be
     ///   monotonically increasing.
     /// - The second column is the output values. The data type of the column is `return_type`.
+    /// - (Optional) If any error occurs, the error message is stored in the third column.
     ///
     /// i.e., for the `i`-th input row, the output rows are `(i, output_1)`, `(i, output_2)`, ...
     ///
