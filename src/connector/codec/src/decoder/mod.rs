@@ -15,7 +15,7 @@
 pub mod avro;
 pub mod utils;
 
-use risingwave_common::types::{DataType, Datum};
+use risingwave_common::types::{DataType, Datum, DatumCow, ToOwnedDatum};
 use thiserror::Error;
 use thiserror_ext::Macro;
 
@@ -43,6 +43,9 @@ pub enum AccessError {
 
 pub type AccessResult<T = Datum> = std::result::Result<T, AccessError>;
 
+/// Access to a field in the data structure.
+///
+/// Only one of these two methods should be implemented. See documentation for more details.
 pub trait Access {
     /// Accesses `path` in the data structure (*parsed* Avro/JSON/Protobuf data),
     /// and then converts it to RisingWave `Datum`.
@@ -53,5 +56,23 @@ pub trait Access {
     /// and we use different `path` to access one column at a time.
     ///
     /// e.g., for Avro, we access `["col_name"]`; for Debezium Avro, we access `["before", "col_name"]`.
-    fn access(&self, path: &[&str], type_expected: &DataType) -> AccessResult<Datum>;
+    // #[deprecated(note = "Use `access_cow` instead.")]
+    fn access(&self, path: &[&str], type_expected: &DataType) -> AccessResult<Datum> {
+        self.access_cow(path, type_expected)
+            .map(ToOwnedDatum::to_owned_datum)
+    }
+
+    /// Similar to `access`, but may return a borrowed [`DatumCow::Ref`] to avoid unnecessary allocation.
+    /// If not overridden, it will call forward to `access` and always wrap the result in [`DatumCow::Owned`].
+    ///
+    /// This should be preferred over `access` for both callers and implementors.
+    // TODO: remove `access` and make this the only method.
+    fn access_cow<'a>(
+        &'a self,
+        path: &[&str],
+        type_expected: &DataType,
+    ) -> AccessResult<DatumCow<'a>> {
+        // #[expect(deprecated)]
+        self.access(path, type_expected).map(Into::into)
+    }
 }

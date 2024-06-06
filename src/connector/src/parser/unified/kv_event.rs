@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, DatumCow};
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
 
-use super::Access;
+use super::{Access, AccessResult};
 use crate::parser::unified::AccessError;
 use crate::source::SourceColumnDesc;
 
@@ -54,9 +54,9 @@ where
     K: Access,
     V: Access,
 {
-    fn access_key(&self, path: &[&str], type_expected: &DataType) -> super::AccessResult {
+    fn access_key(&self, path: &[&str], type_expected: &DataType) -> AccessResult<DatumCow<'_>> {
         if let Some(ka) = &self.key_accessor {
-            ka.access(path, type_expected)
+            ka.access_cow(path, type_expected)
         } else {
             Err(AccessError::Undefined {
                 name: "key".to_string(),
@@ -65,9 +65,9 @@ where
         }
     }
 
-    fn access_value(&self, path: &[&str], type_expected: &DataType) -> super::AccessResult {
+    fn access_value(&self, path: &[&str], type_expected: &DataType) -> AccessResult<DatumCow<'_>> {
         if let Some(va) = &self.value_accessor {
-            va.access(path, type_expected)
+            va.access_cow(path, type_expected)
         } else {
             Err(AccessError::Undefined {
                 name: "value".to_string(),
@@ -76,7 +76,7 @@ where
         }
     }
 
-    pub fn access_field(&self, desc: &SourceColumnDesc) -> super::AccessResult {
+    pub fn access_field(&self, desc: &SourceColumnDesc) -> AccessResult<DatumCow<'_>> {
         match desc.additional_column.column_type {
             Some(AdditionalColumnType::Key(_)) => self.access_key(&[&desc.name], &desc.data_type),
             None => self.access_value(&[&desc.name], &desc.data_type),

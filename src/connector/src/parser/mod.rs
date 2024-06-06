@@ -87,7 +87,6 @@ mod util;
 
 pub use debezium::DEBEZIUM_IGNORE_KEY;
 use risingwave_common::buffer::BitmapBuilder;
-pub use unified::json::JsonBorrowAccess;
 pub use unified::{AccessError, AccessResult};
 
 /// A builder for building a [`StreamChunk`] from [`SourceColumnDesc`].
