@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::num::NonZeroU32;
 
 use risingwave_connector::source::kafka::private_link::{
@@ -21,7 +21,7 @@ use risingwave_connector::source::kafka::private_link::{
 use risingwave_connector::WithPropertiesExt;
 use risingwave_sqlparser::ast::{
     CreateConnectionStatement, CreateSinkStatement, CreateSourceStatement,
-    CreateSubscriptionStatement, ObjectName, SqlOption, Statement, Value,
+    CreateSubscriptionStatement, SqlOption, Statement, Value,
 };
 
 use super::OverwriteOptions;
@@ -36,14 +36,13 @@ mod options {
 }
 
 /// Options or properties extracted from the `WITH` clause of DDLs.
-#[derive(Default, Clone, Debug, PartialEq, Eq)]
+#[derive(Default, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct WithOptions {
-    inner: HashMap<String, String>,
-    ref_secret: HashMap<String, ObjectName>,
+    inner: BTreeMap<String, String>,
 }
 
 impl std::ops::Deref for WithOptions {
-    type Target = HashMap<String, String>;
+    type Target = BTreeMap<String, String>;
 
     fn deref(&self) -> &Self::Target {
         &self.inner
@@ -61,42 +60,33 @@ impl WithOptions {
     pub fn new(inner: HashMap<String, String>) -> Self {
         Self {
             inner: inner.into_iter().collect(),
-            ref_secret: Default::default(),
         }
     }
 
-    pub fn from_inner(inner: HashMap<String, String>) -> Self {
-        Self {
-            inner,
-            ref_secret: Default::default(),
-        }
+    pub fn from_inner(inner: BTreeMap<String, String>) -> Self {
+        Self { inner }
     }
 
     /// Get the reference of the inner map.
-    pub fn inner(&self) -> &HashMap<String, String> {
+    pub fn inner(&self) -> &BTreeMap<String, String> {
         &self.inner
     }
 
-    pub fn inner_mut(&mut self) -> &mut HashMap<String, String> {
+    pub fn inner_mut(&mut self) -> &mut BTreeMap<String, String> {
         &mut self.inner
     }
 
     /// Take the value of the inner map.
-    pub fn into_inner(self) -> HashMap<String, String> {
+    pub fn into_inner(self) -> BTreeMap<String, String> {
         self.inner
     }
 
     /// Convert to connector props, remove the key-value pairs used in the top-level.
-    pub fn into_connector_props(self) -> Self {
-        let inner = self
-            .inner
+    pub fn into_connector_props(self) -> HashMap<String, String> {
+        self.inner
             .into_iter()
             .filter(|(key, _)| key != OverwriteOptions::STREAMING_RATE_LIMIT_KEY)
-            .collect();
-        Self {
-            inner,
-            ref_secret: self.ref_secret,
-        }
+            .collect()
     }
 
     /// Parse the retention seconds from the options.
@@ -117,10 +107,7 @@ impl WithOptions {
             })
             .collect();
 
-        Self {
-            inner,
-            ref_secret: Default::default(),
-        }
+        Self { inner }
     }
 
     pub fn value_eq_ignore_case(&self, key: &str, val: &str) -> bool {
@@ -187,19 +174,9 @@ impl TryFrom<&[SqlOption]> for WithOptions {
     type Error = RwError;
 
     fn try_from(options: &[SqlOption]) -> Result<Self, Self::Error> {
-        let mut inner: HashMap<String, String> = HashMap::new();
-        let mut ref_secret: HashMap<String, ObjectName> = HashMap::new();
+        let mut inner: BTreeMap<String, String> = BTreeMap::new();
         for option in options {
             let key = option.name.real_value();
-            if let Value::Ref(r) = &option.value {
-                if ref_secret.insert(key.clone(), r.clone()).is_some() || inner.contains_key(&key) {
-                    return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
-                        "Duplicated option: {}",
-                        key
-                    ))));
-                }
-                continue;
-            }
             let value: String = match option.value.clone() {
                 Value::CstyleEscapedString(s) => s.value,
                 Value::SingleQuotedString(s) => s,
@@ -212,7 +189,7 @@ impl TryFrom<&[SqlOption]> for WithOptions {
                     )))
                 }
             };
-            if inner.insert(key.clone(), value).is_some() || ref_secret.contains_key(&key) {
+            if inner.insert(key.clone(), value).is_some() {
                 return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
                     "Duplicated option: {}",
                     key
@@ -220,7 +197,7 @@ impl TryFrom<&[SqlOption]> for WithOptions {
             }
         }
 
-        Ok(Self { inner, ref_secret })
+        Ok(Self { inner })
     }
 }
 
