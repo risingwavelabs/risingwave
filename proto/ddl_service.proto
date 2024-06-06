@@ -120,6 +120,11 @@ message DropSubscriptionResponse {
 message CreateMaterializedViewRequest {
   catalog.Table materialized_view = 1;
   stream_plan.StreamFragmentGraph fragment_graph = 2;
+  
+  // If true, the MV should be created using serverless backfill
+  // For that the controller will create a new CN, which does backfilling and then is deleted. 
+  // May alleviate pressure on the cluster during backfill process. 
+  bool is_serverless_backfill = 3;
 }
 
 message CreateMaterializedViewResponse {
