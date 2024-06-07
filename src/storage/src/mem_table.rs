@@ -38,7 +38,7 @@ use crate::error::{StorageError, StorageResult};
 use crate::hummock::iterator::{Backward, Forward, FromRustIterator, RustIteratorBuilder};
 use crate::hummock::shared_buffer::shared_buffer_batch::{SharedBufferBatch, SharedBufferBatchId};
 use crate::hummock::utils::{
-    do_delete_sanity_check, do_insert_sanity_check, do_update_sanity_check, ENABLE_SANITY_CHECK,
+    do_delete_sanity_check, do_insert_sanity_check, do_update_sanity_check, sanity_check_enabled,
 };
 use crate::hummock::value::HummockValue;
 use crate::row_serde::value_serde::ValueRowSerde;
@@ -162,7 +162,6 @@ impl MemTable {
             self.kv_size.add(&pk, &op);
             let old_op = self.buffer.insert(pk, op);
             self.sub_old_op_size(old_op, key_len);
-
             return Ok(());
         };
         let entry = self.buffer.entry(pk);
@@ -176,6 +175,7 @@ impl MemTable {
             Entry::Occupied(mut e) => {
                 let old_op = e.get_mut();
                 self.kv_size.sub_val(old_op);
+
                 match old_op {
                     KeyOp::Delete(ref mut old_op_old_value) => {
                         let new_op = KeyOp::Update((std::mem::take(old_op_old_value), value));
@@ -184,12 +184,24 @@ impl MemTable {
                         Ok(())
                     }
                     KeyOp::Insert(_) | KeyOp::Update(_) => {
-                        Err(MemTableError::InconsistentOperation {
+                        let new_op = KeyOp::Insert(value);
+                        let err = MemTableError::InconsistentOperation {
                             key: e.key().clone(),
                             prev: e.get().clone(),
-                            new: KeyOp::Insert(value),
+                            new: new_op.clone(),
+                        };
+
+                        if sanity_check_enabled() {
+                            Err(err.into())
+                        } else {
+                            tracing::error!(
+                                error = %err.as_report(),
+                                "double insert / insert on updated, ignoring because sanity check is disabled"
+                            );
+                            self.kv_size.add_val(&new_op);
+                            e.insert(new_op);
+                            Ok(())
                         }
-                        .into())
                     }
                 }
             }
@@ -220,9 +232,10 @@ impl MemTable {
             Entry::Occupied(mut e) => {
                 let old_op = e.get_mut();
                 self.kv_size.sub_val(old_op);
+
                 match old_op {
                     KeyOp::Insert(old_op_new_value) => {
-                        if ENABLE_SANITY_CHECK && !value_checker(old_op_new_value, &old_value) {
+                        if sanity_check_enabled() && !value_checker(old_op_new_value, &old_value) {
                             return Err(Box::new(MemTableError::InconsistentOperation {
                                 key: e.key().clone(),
                                 prev: e.get().clone(),
@@ -232,23 +245,37 @@ impl MemTable {
 
                         self.kv_size.sub_size(key_len);
                         e.remove();
-
                         Ok(())
                     }
-                    KeyOp::Delete(_) => Err(MemTableError::InconsistentOperation {
-                        key: e.key().clone(),
-                        prev: e.get().clone(),
-                        new: KeyOp::Delete(old_value),
+                    KeyOp::Delete(_) => {
+                        let new_op = KeyOp::Delete(old_value);
+                        let err = MemTableError::InconsistentOperation {
+                            key: e.key().clone(),
+                            prev: e.get().clone(),
+                            new: new_op.clone(),
+                        };
+
+                        if sanity_check_enabled() {
+                            Err(err.into())
+                        } else {
+                            tracing::error!(
+                                error = %err.as_report(),
+                                "double delete, ignoring because sanity check is disabled"
+                            );
+                            self.kv_size.add_val(&new_op);
+                            e.insert(new_op);
+                            Ok(())
+                        }
                     }
-                    .into()),
                     KeyOp::Update((old_op_old_value, old_op_new_value)) => {
-                        if ENABLE_SANITY_CHECK && !value_checker(old_op_new_value, &old_value) {
+                        if sanity_check_enabled() && !value_checker(old_op_new_value, &old_value) {
                             return Err(Box::new(MemTableError::InconsistentOperation {
                                 key: e.key().clone(),
                                 prev: e.get().clone(),
                                 new: KeyOp::Delete(old_value),
                             }));
                         }
+
                         let new_op = KeyOp::Delete(std::mem::take(old_op_old_value));
                         self.kv_size.add_val(&new_op);
                         e.insert(new_op);
@@ -271,7 +298,6 @@ impl MemTable {
         } = &self.op_consistency_level
         else {
             let key_len = std::mem::size_of::<Bytes>() + pk.len();
-
             let op = KeyOp::Update((old_value, new_value));
             self.kv_size.add(&pk, &op);
             let old_op = self.buffer.insert(pk, op);
@@ -289,39 +315,56 @@ impl MemTable {
             Entry::Occupied(mut e) => {
                 let old_op = e.get_mut();
                 self.kv_size.sub_val(old_op);
+
                 match old_op {
                     KeyOp::Insert(old_op_new_value) => {
-                        if ENABLE_SANITY_CHECK && !value_checker(old_op_new_value, &old_value) {
+                        if sanity_check_enabled() && !value_checker(old_op_new_value, &old_value) {
                             return Err(Box::new(MemTableError::InconsistentOperation {
                                 key: e.key().clone(),
                                 prev: e.get().clone(),
                                 new: KeyOp::Update((old_value, new_value)),
                             }));
                         }
+
                         let new_op = KeyOp::Insert(new_value);
                         self.kv_size.add_val(&new_op);
                         e.insert(new_op);
                         Ok(())
                     }
                     KeyOp::Update((old_op_old_value, old_op_new_value)) => {
-                        if ENABLE_SANITY_CHECK && !value_checker(old_op_new_value, &old_value) {
+                        if sanity_check_enabled() && !value_checker(old_op_new_value, &old_value) {
                             return Err(Box::new(MemTableError::InconsistentOperation {
                                 key: e.key().clone(),
                                 prev: e.get().clone(),
                                 new: KeyOp::Update((old_value, new_value)),
                             }));
                         }
+
                         let new_op = KeyOp::Update((std::mem::take(old_op_old_value), new_value));
                         self.kv_size.add_val(&new_op);
                         e.insert(new_op);
                         Ok(())
                     }
-                    KeyOp::Delete(_) => Err(MemTableError::InconsistentOperation {
-                        key: e.key().clone(),
-                        prev: e.get().clone(),
-                        new: KeyOp::Update((old_value, new_value)),
+                    KeyOp::Delete(_) => {
+                        let new_op = KeyOp::Update((old_value, new_value));
+                        let err = MemTableError::InconsistentOperation {
+                            key: e.key().clone(),
+                            prev: e.get().clone(),
+                            new: new_op.clone(),
+                        };
+
+                        if sanity_check_enabled() {
+                            Err(err.into())
+                        } else {
+                            tracing::error!(
+                                error = %err.as_report(),
+                                "update on deleted, ignoring because sanity check is disabled"
+                            );
+                            self.kv_size.add_val(&new_op);
+                            e.insert(new_op);
+                            Ok(())
+                        }
                     }
-                    .into()),
                 }
             }
         }
@@ -587,7 +630,7 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
                 // a workaround you may call disable the check by initializing the
                 // state store with `op_consistency_level=Inconsistent`.
                 KeyOp::Insert(value) => {
-                    if ENABLE_SANITY_CHECK {
+                    if sanity_check_enabled() {
                         do_insert_sanity_check(
                             &key,
                             &value,
@@ -602,7 +645,7 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
                     kv_pairs.push((key, StorageValue::new_put(value)));
                 }
                 KeyOp::Delete(old_value) => {
-                    if ENABLE_SANITY_CHECK {
+                    if sanity_check_enabled() {
                         do_delete_sanity_check(
                             &key,
                             &old_value,
@@ -617,7 +660,7 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
                     kv_pairs.push((key, StorageValue::new_delete()));
                 }
                 KeyOp::Update((old_value, new_value)) => {
-                    if ENABLE_SANITY_CHECK {
+                    if sanity_check_enabled() {
                         do_update_sanity_check(
                             &key,
                             &old_value,

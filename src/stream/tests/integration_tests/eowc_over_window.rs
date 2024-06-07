@@ -86,14 +86,14 @@ async fn test_over_window() {
         // lag(x, 1)
         WindowFuncCall {
             kind: WindowFuncKind::Aggregate(AggKind::FirstValue),
-            args: AggArgs::Unary(DataType::Int32, 3),
+            args: AggArgs::from_iter([(DataType::Int32, 3)]),
             return_type: DataType::Int32,
             frame: Frame::rows(FrameBound::Preceding(1), FrameBound::Preceding(1)),
         },
         // lead(x, 1)
         WindowFuncCall {
             kind: WindowFuncKind::Aggregate(AggKind::FirstValue),
-            args: AggArgs::Unary(DataType::Int32, 3),
+            args: AggArgs::from_iter([(DataType::Int32, 3)]),
             return_type: DataType::Int32,
             frame: Frame::rows(FrameBound::Following(1), FrameBound::Following(1)),
         },
@@ -186,7 +186,7 @@ async fn test_over_window_aggregate() {
     let store = MemoryStateStore::new();
     let calls = vec![WindowFuncCall {
         kind: WindowFuncKind::Aggregate(AggKind::Sum),
-        args: AggArgs::Unary(DataType::Int32, 3),
+        args: AggArgs::from_iter([(DataType::Int32, 3)]),
         return_type: DataType::Int64,
         frame: Frame::rows(FrameBound::Preceding(1), FrameBound::Following(1)),
     }];

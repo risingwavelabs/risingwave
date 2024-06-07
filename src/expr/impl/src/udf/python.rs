@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use arrow_schema::{DataType, Field};
 use arrow_udf_python::{CallMode, Runtime};
 use futures_util::StreamExt;
 use risingwave_common::array::arrow::{ToArrow, UdfArrowConvert};
@@ -30,12 +31,24 @@ static PYTHON: UdfImplDescriptor = UdfImplDescriptor {
     },
     build_fn: |opts| {
         let mut runtime = Runtime::builder().sandboxed(true).build()?;
-        runtime.add_function(
-            opts.identifier,
-            UdfArrowConvert::default().to_arrow_field("", opts.return_type)?,
-            CallMode::CalledOnNullInput,
-            opts.body.context("body is required")?,
-        )?;
+        if opts.kind.is_aggregate() {
+            runtime.add_aggregate(
+                opts.identifier,
+                Field::new("state", DataType::Binary, true).with_metadata(
+                    [("ARROW:extension:name".into(), "arrowudf.pickle".into())].into(),
+                ),
+                UdfArrowConvert::default().to_arrow_field("", opts.return_type)?,
+                CallMode::CalledOnNullInput,
+                opts.body.context("body is required")?,
+            )?;
+        } else {
+            runtime.add_function(
+                opts.identifier,
+                UdfArrowConvert::default().to_arrow_field("", opts.return_type)?,
+                CallMode::CalledOnNullInput,
+                opts.body.context("body is required")?,
+            )?;
+        }
         Ok(Box::new(PythonFunction {
             runtime,
             identifier: opts.identifier.to_string(),
@@ -62,5 +75,23 @@ impl UdfImpl for PythonFunction {
         self.runtime
             .call_table_function(&self.identifier, input, 1024)
             .map(|s| futures_util::stream::iter(s).boxed())
+    }
+
+    fn call_agg_create_state(&self) -> Result<ArrayRef> {
+        self.runtime.create_state(&self.identifier)
+    }
+
+    fn call_agg_accumulate_or_retract(
+        &self,
+        state: &ArrayRef,
+        ops: &BooleanArray,
+        input: &RecordBatch,
+    ) -> Result<ArrayRef> {
+        self.runtime
+            .accumulate_or_retract(&self.identifier, state, ops, input)
+    }
+
+    fn call_agg_finish(&self, state: &ArrayRef) -> Result<ArrayRef> {
+        self.runtime.finish(&self.identifier, state)
     }
 }

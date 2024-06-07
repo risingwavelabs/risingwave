@@ -20,11 +20,13 @@ use risingwave_batch::monitor::{
     GLOBAL_BATCH_EXECUTOR_METRICS, GLOBAL_BATCH_MANAGER_METRICS, GLOBAL_BATCH_TASK_METRICS,
 };
 use risingwave_batch::rpc::service::task_service::BatchServiceImpl;
+use risingwave_batch::spill::spill_op::SpillOp;
 use risingwave_batch::task::{BatchEnvironment, BatchManager};
 use risingwave_common::config::{
     load_config, AsyncStackTraceOption, MetricLevel, StorageMemoryConfig,
     MAX_CONNECTION_WINDOW_SIZE, STREAM_WINDOW_SIZE,
 };
+use risingwave_common::lru::init_global_sequencer_args;
 use risingwave_common::monitor::connection::{RouterExt, TcpConfig};
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::system_param::reader::SystemParamsRead;
@@ -100,6 +102,18 @@ pub async fn compute_node_serve(
     // Initialize all the configs
     let stream_config = Arc::new(config.streaming.clone());
     let batch_config = Arc::new(config.batch.clone());
+
+    // Initialize operator lru cache global sequencer args.
+    init_global_sequencer_args(
+        config
+            .streaming
+            .developer
+            .memory_controller_sequence_tls_step,
+        config
+            .streaming
+            .developer
+            .memory_controller_sequence_tls_lag,
+    );
 
     // Register to the cluster. We're not ready to serve until activate is called.
     let (meta_client, system_params) = MetaClient::register_new(
@@ -288,6 +302,18 @@ pub async fn compute_node_serve(
             .streaming
             .developer
             .memory_controller_threshold_stable,
+        eviction_factor_stable: config
+            .streaming
+            .developer
+            .memory_controller_eviction_factor_stable,
+        eviction_factor_graceful: config
+            .streaming
+            .developer
+            .memory_controller_eviction_factor_graceful,
+        eviction_factor_aggressive: config
+            .streaming
+            .developer
+            .memory_controller_eviction_factor_aggressive,
         metrics: streaming_metrics.clone(),
     });
 
@@ -341,7 +367,7 @@ pub async fn compute_node_serve(
         stream_env.clone(),
         streaming_metrics.clone(),
         await_tree_config.clone(),
-        memory_mgr.get_watermark_epoch(),
+        memory_mgr.get_watermark_sequence(),
     );
 
     // Boot the runtime gRPC services.
@@ -365,6 +391,10 @@ pub async fn compute_node_serve(
     } else {
         tracing::info!("Telemetry didn't start due to config");
     }
+
+    // Clean up the spill directory.
+    #[cfg(not(madsim))]
+    SpillOp::clean_spill_directory().await.unwrap();
 
     let (shutdown_send, mut shutdown_recv) = tokio::sync::oneshot::channel::<()>();
     let join_handle = tokio::spawn(async move {

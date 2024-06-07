@@ -111,6 +111,16 @@ message FragmentParallelUnitMappings {
   repeated FragmentParallelUnitMapping mappings = 1;
 }
 
+/// Worker slot mapping with fragment id, used for notification.
+message FragmentWorkerSlotMapping {
+  uint32 fragment_id = 1;
+  common.WorkerSlotMapping mapping = 2;
+}
+
+message FragmentWorkerSlotMappings {
+  repeated FragmentWorkerSlotMapping mappings = 1;
+}
+
 // TODO: remove this when dashboard refactored.
 message ActorLocation {
   common.WorkerNode node = 1;
@@ -378,8 +388,10 @@ message SubscribeRequest {
 message MetaSnapshot {
   message SnapshotVersion {
     uint64 catalog_version = 1;
-    uint64 parallel_unit_mapping_version = 2;
+    reserved 2;
+    reserved "parallel_unit_mapping_version";
     uint64 worker_node_version = 3;
+    uint64 streaming_worker_slot_mapping_version = 4;
   }
   repeated catalog.Database databases = 1;
   repeated catalog.Schema schemas = 2;
@@ -392,16 +404,21 @@ message MetaSnapshot {
   repeated catalog.Connection connections = 17;
   repeated catalog.Subscription subscriptions = 19;
   repeated user.UserInfo users = 8;
+  reserved 9;
+  reserved "parallel_unit_mappings";
   GetSessionParamsResponse session_params = 20;
-  // for streaming
-  repeated FragmentParallelUnitMapping parallel_unit_mappings = 9;
+  repeated catalog.Secret secrets = 23;
   repeated common.WorkerNode nodes = 10;
   hummock.HummockSnapshot hummock_snapshot = 11;
   hummock.HummockVersion hummock_version = 12;
   backup_service.MetaBackupManifestId meta_backup_manifest_id = 14;
   hummock.WriteLimits hummock_write_limits = 16;
-  // for serving
-  repeated FragmentParallelUnitMapping serving_parallel_unit_mappings = 18;
+  reserved 18;
+  reserved "serving_parallel_unit_mappings";
+
+  // for streaming
+  repeated FragmentWorkerSlotMapping streaming_worker_slot_mappings = 21;
+  repeated FragmentWorkerSlotMapping serving_worker_slot_mappings = 22;
 
   SnapshotVersion version = 13;
 }
@@ -440,8 +457,6 @@ message SubscribeResponse {
     catalog.Function function = 6;
     user.UserInfo user = 11;
     SetSessionParamRequest session_param = 26;
-    // for streaming
-    FragmentParallelUnitMapping parallel_unit_mapping = 12;
     common.WorkerNode node = 13;
     hummock.HummockSnapshot hummock_snapshot = 14;
     hummock.HummockVersionDeltas hummock_version_deltas = 15;
@@ -451,10 +466,16 @@ message SubscribeResponse {
     hummock.WriteLimits hummock_write_limits = 20;
     RelationGroup relation_group = 21;
     catalog.Connection connection = 22;
-    FragmentParallelUnitMappings serving_parallel_unit_mappings = 23;
     hummock.HummockVersionStats hummock_stats = 24;
     Recovery recovery = 25;
+    FragmentWorkerSlotMapping streaming_worker_slot_mapping = 27;
+    FragmentWorkerSlotMappings serving_worker_slot_mappings = 28;
+    catalog.Secret secret = 29;
   }
+  reserved 12;
+  reserved "parallel_unit_mapping";
+  reserved 23;
+  reserved "serving_parallel_unit_mappings";
 }
 
 service NotificationService {
@@ -629,8 +650,10 @@ service SessionParamService {
 message GetServingVnodeMappingsRequest {}
 
 message GetServingVnodeMappingsResponse {
-  repeated FragmentParallelUnitMapping mappings = 1;
+  reserved 1;
+  reserved "mappings";
   map<uint32, uint32> fragment_to_table = 2;
+  repeated FragmentWorkerSlotMapping worker_slot_mappings = 3;
 }
 
 service ServingService {

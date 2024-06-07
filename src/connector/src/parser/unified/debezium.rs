@@ -12,12 +12,46 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::types::{DataType, Datum, ScalarImpl};
+use risingwave_common::types::{DataType, Datum, Scalar, ScalarImpl, Timestamptz};
+use risingwave_pb::plan_common::additional_column::ColumnType;
 
 use super::{Access, AccessError, AccessResult, ChangeEvent, ChangeEventOperation};
 use crate::parser::TransactionControl;
 use crate::source::{ConnectorProperties, SourceColumnDesc};
 
+// Example of Debezium JSON value:
+// {
+//     "payload":
+//     {
+//         "before": null,
+//         "after":
+//         {
+//             "O_ORDERKEY": 5,
+//             "O_CUSTKEY": 44485,
+//             "O_ORDERSTATUS": "F",
+//             "O_TOTALPRICE": "144659.20",
+//             "O_ORDERDATE": "1994-07-30"
+//         },
+//         "source":
+//         {
+//             "version": "1.9.7.Final",
+//             "connector": "mysql",
+//             "name": "RW_CDC_1002",
+//             "ts_ms": 1695277757000,
+//             "db": "mydb",
+//             "sequence": null,
+//             "table": "orders",
+//             "server_id": 0,
+//             "gtid": null,
+//             "file": "binlog.000008",
+//             "pos": 3693,
+//             "row": 0,
+//         },
+//         "op": "r",
+//         "ts_ms": 1695277757017,
+//         "transaction": null
+//     }
+// }
 pub struct DebeziumChangeEvent<A> {
     value_accessor: Option<A>,
     key_accessor: Option<A>,
@@ -26,6 +60,14 @@ pub struct DebeziumChangeEvent<A> {
 
 const BEFORE: &str = "before";
 const AFTER: &str = "after";
+
+const SOURCE: &str = "source";
+const SOURCE_TS_MS: &str = "ts_ms";
+const SOURCE_DB: &str = "db";
+const SOURCE_SCHEMA: &str = "schema";
+const SOURCE_TABLE: &str = "table";
+const SOURCE_COLLECTION: &str = "collection";
+
 const OP: &str = "op";
 pub const TRANSACTION_STATUS: &str = "status";
 pub const TRANSACTION_ID: &str = "id";
@@ -43,8 +85,8 @@ pub fn parse_transaction_meta(
     connector_props: &ConnectorProperties,
 ) -> AccessResult<TransactionControl> {
     if let (Some(ScalarImpl::Utf8(status)), Some(ScalarImpl::Utf8(id))) = (
-        accessor.access(&[TRANSACTION_STATUS], Some(&DataType::Varchar))?,
-        accessor.access(&[TRANSACTION_ID], Some(&DataType::Varchar))?,
+        accessor.access(&[TRANSACTION_STATUS], &DataType::Varchar)?,
+        accessor.access(&[TRANSACTION_ID], &DataType::Varchar)?,
     ) {
         // The id field has different meanings for different databases:
         // PG: txID:LSN
@@ -80,14 +122,6 @@ impl<A> DebeziumChangeEvent<A>
 where
     A: Access,
 {
-    pub fn with_value(value_accessor: A) -> Self {
-        Self::new(None, Some(value_accessor))
-    }
-
-    pub fn with_key(key_accessor: A) -> Self {
-        Self::new(Some(key_accessor), None)
-    }
-
     /// Panic: one of the `key_accessor` or `value_accessor` must be provided.
     pub fn new(key_accessor: Option<A>, value_accessor: Option<A>) -> Self {
         assert!(key_accessor.is_some() || value_accessor.is_some());
@@ -136,31 +170,77 @@ where
                         .key_accessor
                         .as_ref()
                         .expect("key_accessor must be provided for delete operation")
-                        .access(&[&desc.name], Some(&desc.data_type));
+                        .access(&[&desc.name], &desc.data_type);
                 }
 
                 if let Some(va) = self.value_accessor.as_ref() {
-                    va.access(&[BEFORE, &desc.name], Some(&desc.data_type))
+                    va.access(&[BEFORE, &desc.name], &desc.data_type)
                 } else {
                     self.key_accessor
                         .as_ref()
                         .unwrap()
-                        .access(&[&desc.name], Some(&desc.data_type))
+                        .access(&[&desc.name], &desc.data_type)
                 }
             }
 
             // value should not be None.
-            ChangeEventOperation::Upsert => self
-                .value_accessor
-                .as_ref()
-                .unwrap()
-                .access(&[AFTER, &desc.name], Some(&desc.data_type)),
+            ChangeEventOperation::Upsert => {
+                // For upsert operation, if desc is an additional column, access field in the `SOURCE` field.
+                desc.additional_column.column_type.as_ref().map_or_else(
+                    || {
+                        self.value_accessor
+                            .as_ref()
+                            .expect("value_accessor must be provided for upsert operation")
+                            .access(&[AFTER, &desc.name], &desc.data_type)
+                    },
+                    |additional_column_type| {
+                        match *additional_column_type {
+                            ColumnType::Timestamp(_) => {
+                                // access payload.source.ts_ms
+                                let ts_ms = self
+                                    .value_accessor
+                                    .as_ref()
+                                    .expect("value_accessor must be provided for upsert operation")
+                                    .access(&[SOURCE, SOURCE_TS_MS], &DataType::Int64)?;
+                                Ok(ts_ms.map(|scalar| {
+                                    Timestamptz::from_millis(scalar.into_int64())
+                                        .expect("source.ts_ms must in millisecond")
+                                        .to_scalar_value()
+                                }))
+                            }
+                            ColumnType::DatabaseName(_) => self
+                                .value_accessor
+                                .as_ref()
+                                .expect("value_accessor must be provided for upsert operation")
+                                .access(&[SOURCE, SOURCE_DB], &desc.data_type),
+                            ColumnType::SchemaName(_) => self
+                                .value_accessor
+                                .as_ref()
+                                .expect("value_accessor must be provided for upsert operation")
+                                .access(&[SOURCE, SOURCE_SCHEMA], &desc.data_type),
+                            ColumnType::TableName(_) => self
+                                .value_accessor
+                                .as_ref()
+                                .expect("value_accessor must be provided for upsert operation")
+                                .access(&[SOURCE, SOURCE_TABLE], &desc.data_type),
+                            ColumnType::CollectionName(_) => self
+                                .value_accessor
+                                .as_ref()
+                                .expect("value_accessor must be provided for upsert operation")
+                                .access(&[SOURCE, SOURCE_COLLECTION], &desc.data_type),
+                            _ => Err(AccessError::UnsupportedAdditionalColumn {
+                                name: desc.name.clone(),
+                            }),
+                        }
+                    },
+                )
+            }
         }
     }
 
     fn op(&self) -> Result<ChangeEventOperation, AccessError> {
         if let Some(accessor) = &self.value_accessor {
-            if let Some(ScalarImpl::Utf8(op)) = accessor.access(&[OP], Some(&DataType::Varchar))? {
+            if let Some(ScalarImpl::Utf8(op)) = accessor.access(&[OP], &DataType::Varchar)? {
                 match op.as_ref() {
                     DEBEZIUM_READ_OP | DEBEZIUM_CREATE_OP | DEBEZIUM_UPDATE_OP => {
                         return Ok(ChangeEventOperation::Upsert)
@@ -247,15 +327,12 @@ impl<A> Access for MongoJsonAccess<A>
 where
     A: Access,
 {
-    fn access(&self, path: &[&str], type_expected: Option<&DataType>) -> super::AccessResult {
+    fn access(&self, path: &[&str], type_expected: &DataType) -> super::AccessResult {
         match path {
             ["after" | "before", "_id"] => {
-                let payload = self.access(&[path[0]], Some(&DataType::Jsonb))?;
+                let payload = self.access(&[path[0]], &DataType::Jsonb)?;
                 if let Some(ScalarImpl::Jsonb(bson_doc)) = payload {
-                    Ok(extract_bson_id(
-                        type_expected.unwrap_or(&DataType::Jsonb),
-                        &bson_doc.take(),
-                    )?)
+                    Ok(extract_bson_id(type_expected, &bson_doc.take())?)
                 } else {
                     // fail to extract the "_id" field from the message payload
                     Err(AccessError::Undefined {
@@ -264,19 +341,16 @@ where
                     })?
                 }
             }
-            ["after" | "before", "payload"] => self.access(&[path[0]], Some(&DataType::Jsonb)),
+            ["after" | "before", "payload"] => self.access(&[path[0]], &DataType::Jsonb),
             // To handle a DELETE message, we need to extract the "_id" field from the message key, because it is not in the payload.
             // In addition, the "_id" field is named as "id" in the key. An example of message key:
             // {"schema":null,"payload":{"id":"{\"$oid\": \"65bc9fb6c485f419a7a877fe\"}"}}
             ["_id"] => {
                 let ret = self.accessor.access(path, type_expected);
                 if matches!(ret, Err(AccessError::Undefined { .. })) {
-                    let id_bson = self.accessor.access(&["id"], Some(&DataType::Jsonb))?;
+                    let id_bson = self.accessor.access(&["id"], &DataType::Jsonb)?;
                     if let Some(ScalarImpl::Jsonb(bson_doc)) = id_bson {
-                        Ok(extract_bson_id(
-                            type_expected.unwrap_or(&DataType::Jsonb),
-                            &bson_doc.take(),
-                        )?)
+                        Ok(extract_bson_id(type_expected, &bson_doc.take())?)
                     } else {
                         // fail to extract the "_id" field from the message key
                         Err(AccessError::Undefined {

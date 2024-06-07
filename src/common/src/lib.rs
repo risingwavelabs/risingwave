@@ -81,9 +81,11 @@ pub use risingwave_common_metrics::{
     register_guarded_histogram_vec_with_registry, register_guarded_int_counter_vec_with_registry,
     register_guarded_int_gauge_vec_with_registry,
 };
+pub mod lru;
 pub mod opts;
 pub mod range;
 pub mod row;
+pub mod sequence;
 pub mod session_config;
 pub mod system_param;
 pub mod telemetry;

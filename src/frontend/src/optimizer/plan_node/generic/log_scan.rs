@@ -141,6 +141,19 @@ impl LogScan {
         Schema { fields }
     }
 
+    pub(crate) fn schema_without_table_name(&self) -> Schema {
+        let mut fields: Vec<_> = self
+            .output_col_idx
+            .iter()
+            .map(|tb_idx| {
+                let col = &self.table_desc.columns[*tb_idx];
+                Field::from(col)
+            })
+            .collect();
+        fields.push(Field::with_name(OP_TYPE, OP_NAME));
+        Schema { fields }
+    }
+
     pub(crate) fn ctx(&self) -> OptimizerContextRef {
         self.ctx.clone()
     }

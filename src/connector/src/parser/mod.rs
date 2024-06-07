@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::sync::LazyLock;
 
@@ -33,6 +33,7 @@ use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::types::{Datum, Scalar, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::tracing::InstrumentStream;
+use risingwave_connector_codec::decoder::avro::MapHandling;
 use risingwave_pb::catalog::{
     SchemaRegistryNameStrategy as PbSchemaRegistryNameStrategy, StreamSourceInfo,
 };
@@ -45,7 +46,8 @@ pub use self::mysql::mysql_row_to_owned_row;
 use self::plain_parser::PlainParser;
 pub use self::postgres::postgres_row_to_owned_row;
 use self::simd_json_parser::DebeziumJsonAccessBuilder;
-pub use self::unified::json::TimestamptzHandling;
+pub use self::unified::json::{JsonAccess, TimestamptzHandling};
+pub use self::unified::Access;
 use self::unified::AccessImpl;
 use self::upsert_parser::UpsertParser;
 use self::util::get_kafka_topic;
@@ -54,7 +56,8 @@ use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::maxwell::MaxwellParser;
 use crate::parser::simd_json_parser::DebeziumMongoJsonAccessBuilder;
 use crate::parser::util::{
-    extract_header_inner_from_meta, extract_headers_from_meta, extreact_timestamp_from_meta,
+    extract_cdc_meta_column, extract_header_inner_from_meta, extract_headers_from_meta,
+    extreact_timestamp_from_meta,
 };
 use crate::schema::schema_registry::SchemaRegistryAuth;
 use crate::source::monitor::GLOBAL_SOURCE_METRICS;
@@ -345,6 +348,35 @@ impl SourceStreamChunkRowWriter<'_> {
         &mut self,
         mut f: impl FnMut(&SourceColumnDesc) -> AccessResult<A::Output>,
     ) -> AccessResult<()> {
+        let mut parse_field = |desc: &SourceColumnDesc| {
+            match f(desc) {
+                Ok(output) => Ok(output),
+
+                // Throw error for failed access to primary key columns.
+                Err(e) if desc.is_pk => Err(e),
+                // Ignore error for other columns and fill in `NULL` instead.
+                Err(error) => {
+                    // TODO: figure out a way to fill in not-null default value if user specifies one
+                    // TODO: decide whether the error should not be ignored (e.g., even not a valid Debezium message)
+                    // TODO: not using tracing span to provide `split_id` and `offset` due to performance concern,
+                    //       see #13105
+                    static LOG_SUPPERSSER: LazyLock<LogSuppresser> =
+                        LazyLock::new(LogSuppresser::default);
+                    if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                        tracing::warn!(
+                            error = %error.as_report(),
+                            split_id = self.row_meta.as_ref().map(|m| m.split_id),
+                            offset = self.row_meta.as_ref().map(|m| m.offset),
+                            column = desc.name,
+                            suppressed_count,
+                            "failed to parse non-pk column, padding with `NULL`"
+                        );
+                    }
+                    Ok(A::output_for(Datum::None))
+                }
+            }
+        };
+
         let mut wrapped_f = |desc: &SourceColumnDesc| {
             match (&desc.column_type, &desc.additional_column.column_type) {
                 (&SourceColumnType::Offset | &SourceColumnType::RowId, _) => {
@@ -370,13 +402,37 @@ impl SourceStreamChunkRowWriter<'_> {
                             .unwrap(), // handled all match cases in internal match, unwrap is safe
                     ));
                 }
-                (_, &Some(AdditionalColumnType::Timestamp(_))) => {
-                    return Ok(A::output_for(
-                        self.row_meta
-                            .as_ref()
-                            .and_then(|ele| extreact_timestamp_from_meta(ele.meta))
-                            .unwrap_or(None),
-                    ))
+
+                (
+                    _, // for cdc tables
+                    &Some(ref col @ AdditionalColumnType::DatabaseName(_))
+                    | &Some(ref col @ AdditionalColumnType::TableName(_)),
+                ) => {
+                    match self.row_meta {
+                        Some(row_meta) => {
+                            if let SourceMeta::DebeziumCdc(cdc_meta) = row_meta.meta {
+                                Ok(A::output_for(
+                                    extract_cdc_meta_column(cdc_meta, col, desc.name.as_str())?
+                                        .unwrap_or(None),
+                                ))
+                            } else {
+                                Err(AccessError::Uncategorized {
+                                    message: "CDC metadata not found in the message".to_string(),
+                                })
+                            }
+                        }
+                        None => parse_field(desc), // parse from payload
+                    }
+                }
+                (_, &Some(AdditionalColumnType::Timestamp(_))) => match self.row_meta {
+                    Some(row_meta) => Ok(A::output_for(
+                        extreact_timestamp_from_meta(row_meta.meta).unwrap_or(None),
+                    )),
+                    None => parse_field(desc), // parse from payload
+                },
+                (_, &Some(AdditionalColumnType::CollectionName(_))) => {
+                    // collection name for `mongodb-cdc` should be parsed from the message payload
+                    parse_field(desc)
                 }
                 (_, &Some(AdditionalColumnType::Partition(_))) => {
                     // the meta info does not involve spec connector
@@ -426,45 +482,20 @@ impl SourceStreamChunkRowWriter<'_> {
                 }
                 (_, _) => {
                     // For normal columns, call the user provided closure.
-                    match f(desc) {
-                        Ok(output) => Ok(output),
-
-                        // Throw error for failed access to primary key columns.
-                        Err(e) if desc.is_pk => Err(e),
-                        // Ignore error for other columns and fill in `NULL` instead.
-                        Err(error) => {
-                            // TODO: figure out a way to fill in not-null default value if user specifies one
-                            // TODO: decide whether the error should not be ignored (e.g., even not a valid Debezium message)
-                            // TODO: not using tracing span to provide `split_id` and `offset` due to performance concern,
-                            //       see #13105
-                            static LOG_SUPPERSSER: LazyLock<LogSuppresser> =
-                                LazyLock::new(LogSuppresser::default);
-                            if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
-                                tracing::warn!(
-                                    error = %error.as_report(),
-                                    split_id = self.row_meta.as_ref().map(|m| m.split_id),
-                                    offset = self.row_meta.as_ref().map(|m| m.offset),
-                                    column = desc.name,
-                                    suppressed_count,
-                                    "failed to parse non-pk column, padding with `NULL`"
-                                );
-                            }
-                            Ok(A::output_for(Datum::None))
-                        }
-                    }
+                    parse_field(desc)
                 }
             }
         };
 
         // Columns that changes have been applied to. Used to rollback when an error occurs.
-        let mut applied_columns = Vec::with_capacity(self.descs.len());
+        let mut applied_columns = 0;
 
         let result = (self.descs.iter())
             .zip_eq_fast(self.builders.iter_mut())
             .try_for_each(|(desc, builder)| {
                 wrapped_f(desc).map(|output| {
                     A::apply(builder, output);
-                    applied_columns.push(builder);
+                    applied_columns += 1;
                 })
             });
 
@@ -474,8 +505,8 @@ impl SourceStreamChunkRowWriter<'_> {
                 Ok(())
             }
             Err(e) => {
-                for builder in applied_columns {
-                    A::rollback(builder);
+                for i in 0..applied_columns {
+                    A::rollback(&mut self.builders[i]);
                 }
                 Err(e)
             }
@@ -486,7 +517,8 @@ impl SourceStreamChunkRowWriter<'_> {
     /// produces one [`Datum`] by corresponding [`SourceColumnDesc`].
     ///
     /// See the [struct-level documentation](SourceStreamChunkRowWriter) for more details.
-    pub fn insert(
+    #[inline(always)]
+    pub fn do_insert(
         &mut self,
         f: impl FnMut(&SourceColumnDesc) -> AccessResult<Datum>,
     ) -> AccessResult<()> {
@@ -497,7 +529,8 @@ impl SourceStreamChunkRowWriter<'_> {
     /// produces one [`Datum`] by corresponding [`SourceColumnDesc`].
     ///
     /// See the [struct-level documentation](SourceStreamChunkRowWriter) for more details.
-    pub fn delete(
+    #[inline(always)]
+    pub fn do_delete(
         &mut self,
         f: impl FnMut(&SourceColumnDesc) -> AccessResult<Datum>,
     ) -> AccessResult<()> {
@@ -508,7 +541,8 @@ impl SourceStreamChunkRowWriter<'_> {
     /// produces two [`Datum`]s as old and new value by corresponding [`SourceColumnDesc`].
     ///
     /// See the [struct-level documentation](SourceStreamChunkRowWriter) for more details.
-    pub fn update(
+    #[inline(always)]
+    pub fn do_update(
         &mut self,
         f: impl FnMut(&SourceColumnDesc) -> AccessResult<(Datum, Datum)>,
     ) -> AccessResult<()> {
@@ -544,8 +578,10 @@ pub enum ParserFormat {
     Plain,
 }
 
-/// `ByteStreamSourceParser` is a new message parser, the parser should consume
-/// the input data stream and return a stream of parsed msgs.
+/// `ByteStreamSourceParser` is the entrypoint abstraction for parsing messages.
+/// It consumes bytes of one individual message and produces parsed records.
+///
+/// It's used by [`ByteStreamSourceParserImpl::into_stream`]. `pub` is for benchmark only.
 pub trait ByteStreamSourceParser: Send + Debug + Sized + 'static {
     /// The column descriptors of the output chunk.
     fn columns(&self) -> &[SourceColumnDesc];
@@ -584,7 +620,7 @@ pub trait ByteStreamSourceParser: Send + Debug + Sized + 'static {
     }
 
     fn emit_empty_row<'a>(&'a mut self, mut writer: SourceStreamChunkRowWriter<'a>) {
-        _ = writer.insert(|_column| Ok(None));
+        _ = writer.do_insert(|_column| Ok(None));
     }
 }
 
@@ -627,7 +663,7 @@ impl<P: ByteStreamSourceParser> P {
 
         // The parser stream will be long-lived. We use `instrument_with` here to create
         // a new span for the polling of each chunk.
-        into_chunk_stream(self, data_stream)
+        into_chunk_stream_inner(self, data_stream)
             .instrument_with(move || tracing::info_span!("source_parse_chunk", actor_id, source_id))
     }
 }
@@ -639,7 +675,10 @@ const MAX_ROWS_FOR_TRANSACTION: usize = 4096;
 // TODO: when upsert is disabled, how to filter those empty payload
 // Currently, an err is returned for non upsert with empty payload
 #[try_stream(ok = StreamChunk, error = crate::error::ConnectorError)]
-async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream: BoxSourceStream) {
+async fn into_chunk_stream_inner<P: ByteStreamSourceParser>(
+    mut parser: P,
+    data_stream: BoxSourceStream,
+) {
     let columns = parser.columns().to_vec();
 
     let mut heartbeat_builder = SourceStreamChunkBuilder::with_capacity(columns.clone(), 0);
@@ -855,10 +894,11 @@ impl AccessBuilderImpl {
     }
 }
 
+/// The entrypoint of parsing. It parses [`SourceMessage`] stream (byte stream) into [`StreamChunk`] stream.
+/// Used by [`crate::source::into_chunk_stream`].
 #[derive(Debug)]
 pub enum ByteStreamSourceParserImpl {
     Csv(CsvParser),
-    Json(JsonParser),
     Debezium(DebeziumParser),
     Plain(PlainParser),
     Upsert(UpsertParser),
@@ -867,15 +907,12 @@ pub enum ByteStreamSourceParserImpl {
     CanalJson(CanalJsonParser),
 }
 
-pub type ParsedStreamImpl = impl ChunkSourceStream + Unpin;
-
 impl ByteStreamSourceParserImpl {
-    /// Converts this `SourceMessage` stream into a stream of [`StreamChunk`].
-    pub fn into_stream(self, msg_stream: BoxSourceStream) -> ParsedStreamImpl {
+    /// Converts [`SourceMessage`] stream into [`StreamChunk`] stream.
+    pub fn into_stream(self, msg_stream: BoxSourceStream) -> impl ChunkSourceStream + Unpin {
         #[auto_enum(futures03::Stream)]
         let stream = match self {
             Self::Csv(parser) => parser.into_stream(msg_stream),
-            Self::Json(parser) => parser.into_stream(msg_stream),
             Self::Debezium(parser) => parser.into_stream(msg_stream),
             Self::DebeziumMongoJson(parser) => parser.into_stream(msg_stream),
             Self::Maxwell(parser) => parser.into_stream(msg_stream),
@@ -929,6 +966,58 @@ impl ByteStreamSourceParserImpl {
             _ => unreachable!(),
         }
     }
+
+    /// Create a parser for testing purposes.
+    pub fn create_for_test(parser_config: ParserConfig) -> ConnectorResult<Self> {
+        futures::executor::block_on(Self::create(parser_config, SourceContext::dummy().into()))
+    }
+}
+
+/// Test utilities for [`ByteStreamSourceParserImpl`].
+#[cfg(test)]
+pub mod test_utils {
+    use futures::StreamExt as _;
+    use itertools::Itertools as _;
+
+    use super::*;
+
+    #[easy_ext::ext(ByteStreamSourceParserImplTestExt)]
+    pub(crate) impl ByteStreamSourceParserImpl {
+        /// Parse the given payloads into a [`StreamChunk`].
+        async fn parse(self, payloads: Vec<Vec<u8>>) -> StreamChunk {
+            let source_messages = payloads
+                .into_iter()
+                .map(|p| SourceMessage {
+                    payload: (!p.is_empty()).then_some(p),
+                    ..SourceMessage::dummy()
+                })
+                .collect_vec();
+
+            self.into_stream(futures::stream::once(async { Ok(source_messages) }).boxed())
+                .next()
+                .await
+                .unwrap()
+                .unwrap()
+        }
+
+        /// Parse the given key-value pairs into a [`StreamChunk`].
+        async fn parse_upsert(self, kvs: Vec<(Vec<u8>, Vec<u8>)>) -> StreamChunk {
+            let source_messages = kvs
+                .into_iter()
+                .map(|(k, v)| SourceMessage {
+                    key: (!k.is_empty()).then_some(k),
+                    payload: (!v.is_empty()).then_some(v),
+                    ..SourceMessage::dummy()
+                })
+                .collect_vec();
+
+            self.into_stream(futures::stream::once(async { Ok(source_messages) }).boxed())
+                .next()
+                .await
+                .unwrap()
+                .unwrap()
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -978,6 +1067,7 @@ pub struct AvroProperties {
     pub record_name: Option<String>,
     pub key_record_name: Option<String>,
     pub name_strategy: PbSchemaRegistryNameStrategy,
+    pub map_handling: Option<MapHandling>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -1016,7 +1106,7 @@ pub enum EncodingProperties {
     Protobuf(ProtobufProperties),
     Csv(CsvProperties),
     Json(JsonProperties),
-    MongoJson(JsonProperties),
+    MongoJson,
     Bytes(BytesProperties),
     Native,
     /// Encoding can't be specified because the source will determines it. Now only used in Iceberg.
@@ -1044,7 +1134,7 @@ impl SpecificParserConfig {
     // The validity of (format, encode) is ensured by `extract_format_encode`
     pub fn new(
         info: &StreamSourceInfo,
-        with_properties: &HashMap<String, String>,
+        with_properties: &BTreeMap<String, String>,
     ) -> ConnectorResult<Self> {
         let source_struct = extract_source_struct(info)?;
         let format = source_struct.format;
@@ -1084,6 +1174,7 @@ impl SpecificParserConfig {
                         .unwrap(),
                     use_schema_registry: info.use_schema_registry,
                     row_schema_location: info.row_schema_location.clone(),
+                    map_handling: MapHandling::from_options(&info.format_encode_options)?,
                     ..Default::default()
                 };
                 if format == SourceFormat::Upsert {

@@ -177,6 +177,7 @@ macro_rules! for_all_metadata_models {
             { risingwave_pb::user::UserInfo },
             { risingwave_pb::catalog::Function },
             { risingwave_pb::catalog::Connection },
+            { risingwave_pb::catalog::Secret },
             // These items need not be included in a meta snapshot.
             { crate::model::cluster::Worker },
             { risingwave_pb::hummock::CompactTaskAssignment },
@@ -251,6 +252,10 @@ impl<'a, T> VarTransaction<'a, T> {
             new_value: None,
             orig_value_ref: val_ref,
         }
+    }
+
+    pub fn has_new_value(&self) -> bool {
+        self.new_value.is_some()
     }
 }
 
@@ -452,10 +457,6 @@ impl<'a, K: Ord + Debug, V: Clone> BTreeMapTransaction<'a, K, V> {
     }
 
     pub fn tree_ref(&self) -> &BTreeMap<K, V> {
-        self.tree_ref
-    }
-
-    pub fn tree_mut(&mut self) -> &mut BTreeMap<K, V> {
         self.tree_ref
     }
 

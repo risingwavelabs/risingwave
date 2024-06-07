@@ -62,12 +62,12 @@ impl AggregateFunction for Distinct {
         self.inner.return_type()
     }
 
-    fn create_state(&self) -> AggregateState {
-        AggregateState::Any(Box::new(State {
-            inner: self.inner.create_state(),
+    fn create_state(&self) -> Result<AggregateState> {
+        Ok(AggregateState::Any(Box::new(State {
+            inner: self.inner.create_state()?,
             exists: HashSet::new(),
             exists_estimated_heap_size: 0,
-        }))
+        })))
     }
 
     async fn update(&self, state: &mut AggregateState, input: &StreamChunk) -> Result<()> {
@@ -203,7 +203,7 @@ mod tests {
 
     fn test_agg(pretty: &str, input: StreamChunk, expected: Datum) {
         let agg = build(&AggCall::from_pretty(pretty)).unwrap();
-        let mut state = agg.create_state();
+        let mut state = agg.create_state().unwrap();
         agg.update(&mut state, &input)
             .now_or_never()
             .unwrap()
