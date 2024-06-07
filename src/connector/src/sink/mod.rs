@@ -226,6 +226,10 @@ impl SinkParam {
             fields: self.columns.iter().map(Field::from).collect(),
         }
     }
+
+    pub fn connector(&self) -> Option<&str> {
+        self.properties.get(CONNECTOR_TYPE_KEY).map(|s| s.as_str())
+    }
 }
 
 impl From<SinkCatalog> for SinkParam {

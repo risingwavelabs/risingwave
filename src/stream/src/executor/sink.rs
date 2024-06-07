@@ -184,6 +184,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         let re_construct_with_sink_pk = need_advance_delete
             && self.sink_param.sink_type == SinkType::Upsert
             && !self.sink_param.downstream_pk.is_empty();
+        let is_blackhole = self.sink_param.connector() == "blackwhole";
         let processed_input = Self::process_msg(
             input,
             self.sink_param.sink_type,
@@ -194,6 +195,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             self.input_data_types,
             self.sink_param.downstream_pk.clone(),
             metrics.sink_chunk_buffer_size,
+            is_blackhole,
         );
 
         if self.sink.is_sink_into_table() {
@@ -300,6 +302,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         input_data_types: Vec<DataType>,
         down_stream_pk: Vec<usize>,
         sink_chunk_buffer_size_metrics: LabelGuardedIntGauge<3>,
+        is_blackhole: bool,
     ) {
         // need to buffer chunks during one barrier
         if need_advance_delete || re_construct_with_sink_pk {
@@ -364,18 +367,18 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             for msg in input {
                 match msg? {
                     Message::Watermark(w) => yield Message::Watermark(w),
-                    Message::Chunk(chunk) => {
+                    Message::Chunk(mut chunk) => {
                         // Compact the chunk to eliminate any useless intermediate result (e.g. UPDATE
                         // V->V).
-                        let chunk = merge_chunk_row(chunk, &stream_key);
-                        let chunk = if sink_type == SinkType::ForceAppendOnly {
+                        if !is_blackhole {
+                            chunk = merge_chunk_row(chunk, &stream_key);
+                        }
+                        if sink_type == SinkType::ForceAppendOnly {
                             // Force append-only by dropping UPDATE/DELETE messages. We do this when the
                             // user forces the sink to be append-only while it is actually not based on
                             // the frontend derivation result.
-                            force_append_only(chunk)
-                        } else {
-                            chunk
-                        };
+                            chunk = force_append_only(chunk)
+                        }
 
                         yield Message::Chunk(chunk);
                     }
