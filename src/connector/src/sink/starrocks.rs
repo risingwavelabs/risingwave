@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::num::NonZeroU64;
 use std::sync::Arc;
 
@@ -117,7 +117,7 @@ pub struct StarrocksConfig {
 }
 
 impl StarrocksConfig {
-    pub fn from_hashmap(properties: HashMap<String, String>) -> Result<Self> {
+    pub fn from_btreemap(properties: BTreeMap<String, String>) -> Result<Self> {
         let config =
             serde_json::from_value::<StarrocksConfig>(serde_json::to_value(properties).unwrap())
                 .map_err(|e| SinkError::Config(anyhow!(e)))?;
@@ -398,7 +398,7 @@ impl TryFrom<SinkParam> for StarrocksSink {
 
     fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
         let schema = param.schema();
-        let config = StarrocksConfig::from_hashmap(param.properties.clone())?;
+        let config = StarrocksConfig::from_btreemap(param.properties.clone())?;
         StarrocksSink::new(param, config, schema)
     }
 }

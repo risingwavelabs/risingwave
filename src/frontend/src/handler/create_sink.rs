@@ -312,13 +312,13 @@ pub fn gen_sink_plan(
 pub async fn get_partition_compute_info(
     with_options: &WithOptions,
 ) -> Result<Option<PartitionComputeInfo>> {
-    let properties = HashMap::from_iter(with_options.clone().into_inner().into_iter());
+    let properties = with_options.clone().into_inner();
     let Some(connector) = properties.get(UPSTREAM_SOURCE_KEY) else {
         return Ok(None);
     };
     match connector.as_str() {
         ICEBERG_SINK => {
-            let iceberg_config = IcebergConfig::from_hashmap(properties)?;
+            let iceberg_config = IcebergConfig::from_btreemap(properties)?;
             get_partition_compute_info_for_iceberg(&iceberg_config).await
         }
         _ => Ok(None),
