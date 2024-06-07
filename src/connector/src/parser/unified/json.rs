@@ -22,8 +22,8 @@ use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::cast::{i64_to_timestamp, i64_to_timestamptz, str_to_bytea};
 use risingwave_common::log::LogSuppresser;
 use risingwave_common::types::{
-    DataType, Date, Datum, Decimal, Int256, Interval, JsonbVal, ScalarImpl, Time, Timestamp,
-    Timestamptz, ToOwnedDatum,
+    DataType, Date, Decimal, Int256, Interval, JsonbVal, ScalarImpl, Time, Timestamp, Timestamptz,
+    ToOwnedDatum,
 };
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector_codec::decoder::utils::extract_decimal;
@@ -213,7 +213,7 @@ impl JsonParseOptions {
         };
 
         let v: ScalarImpl = match (type_expected, value.value_type()) {
-            (_, ValueType::Null) => return Ok(Datum::None.into()),
+            (_, ValueType::Null) => return Ok(DatumCow::NULL),
             // ---- Boolean -----
             (DataType::Boolean, ValueType::Bool) => value.as_bool().unwrap().into(),
 
