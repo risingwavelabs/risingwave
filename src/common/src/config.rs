@@ -765,6 +765,11 @@ pub struct StorageConfig {
 
     #[serde(default)]
     pub object_store: ObjectStoreConfig,
+
+    #[serde(default = "default::storage::fetch_unit")]
+    pub fetch_unit: usize,
+    #[serde(default = "default::storage::fetch_waiter_shards")]
+    pub fetch_waiter_shards: usize,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
@@ -1514,6 +1519,14 @@ pub mod default {
 
         pub fn max_prefetch_block_number() -> usize {
             16
+        }
+
+        pub fn fetch_unit() -> usize {
+            64
+        }
+
+        pub fn fetch_waiter_shards() -> usize {
+            64
         }
     }
 

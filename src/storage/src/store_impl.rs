@@ -755,6 +755,9 @@ impl StateStoreImpl {
 
                     meta_cache_v2,
                     block_cache_v2,
+
+                    fetch_unit: opts.fetch_unit,
+                    fetch_waiter_shards: opts.fetch_waiter_shards,
                 }));
                 let notification_client =
                     RpcNotificationClient::new(hummock_meta_client.get_inner().clone());

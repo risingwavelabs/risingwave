@@ -229,6 +229,8 @@ async fn compaction_test(
         state_store_metrics: state_store_metrics.clone(),
         meta_cache_v2,
         block_cache_v2,
+        fetch_unit: 1,
+        fetch_waiter_shards: 1,
     }));
 
     let store = HummockStorage::new(

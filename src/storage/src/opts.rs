@@ -133,6 +133,9 @@ pub struct StorageOpts {
     pub mem_table_spill_threshold: usize,
 
     pub object_store_config: ObjectStoreConfig,
+
+    pub fetch_unit: usize,
+    pub fetch_waiter_shards: usize,
 }
 
 impl Default for StorageOpts {
@@ -238,6 +241,8 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
                 .compactor_fast_max_compact_delete_ratio,
             compactor_fast_max_compact_task_size: c.storage.compactor_fast_max_compact_task_size,
             compactor_iter_max_io_retry_times: c.storage.compactor_iter_max_io_retry_times,
+            fetch_unit: c.storage.fetch_unit,
+            fetch_waiter_shards: c.storage.fetch_waiter_shards,
         }
     }
 }

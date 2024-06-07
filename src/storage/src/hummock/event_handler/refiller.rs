@@ -606,8 +606,8 @@ impl CacheRefillTask {
         for blk in unit.blks {
             let (range, uncompressed_capacity) = sst.calculate_block_info(blk);
             let key = SstableBlockIndex {
-                sst_id: sst.id,
-                block_idx: blk as u64,
+                sst_obj_id: sst.id,
+                blk_idx: blk as u64,
             };
 
             let mut writer = sstable_store.block_cache().storage_writer(key);

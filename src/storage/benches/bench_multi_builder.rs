@@ -155,6 +155,8 @@ async fn generate_sstable_store(object_store: Arc<ObjectStoreImpl>) -> Arc<Sstab
         state_store_metrics: Arc::new(global_hummock_state_store_metrics(MetricLevel::Disabled)),
         meta_cache_v2,
         block_cache_v2,
+        fetch_unit: 1,
+        fetch_waiter_shards: 1,
     }))
 }
 

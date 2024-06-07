@@ -107,6 +107,8 @@ impl HummockJavaBindingIterator {
             )),
             meta_cache_v2,
             block_cache_v2,
+            fetch_unit: 1,
+            fetch_waiter_shards: 1,
         }));
         let reader = HummockVersionReader::new(
             sstable_store,

@@ -83,6 +83,9 @@ pub async fn mock_sstable_store() -> SstableStoreRef {
 
         meta_cache_v2,
         block_cache_v2,
+
+        fetch_unit: 1,
+        fetch_waiter_shards: 1,
     }))
 }
 
