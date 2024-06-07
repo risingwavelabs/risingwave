@@ -42,11 +42,9 @@ use crate::hummock::compaction::compaction_config::{
 };
 use crate::hummock::error::{Error, Result};
 use crate::hummock::manager::transaction::HummockVersionTransaction;
-use crate::hummock::manager::versioning::{calc_new_write_limits, Versioning};
+use crate::hummock::manager::versioning::Versioning;
 use crate::hummock::manager::{commit_multi_var, HummockManager};
-use crate::hummock::metrics_utils::{
-    remove_compaction_group_in_sst_stat, trigger_write_stop_stats,
-};
+use crate::hummock::metrics_utils::remove_compaction_group_in_sst_stat;
 use crate::hummock::model::CompactionGroup;
 use crate::hummock::sequence::{next_compaction_group_id, next_sstable_object_id};
 use crate::manager::{MetaSrvEnv, MetaStoreImpl};
@@ -394,7 +392,7 @@ impl HummockManager {
         config_to_update: &[MutableConfig],
     ) -> Result<()> {
         {
-            // Avoid lock conflicts with try_update_write_limits
+            // Avoid lock conflicts with `try_update_write_limits``
             let mut compaction_group_manager = self.compaction_group_manager.write().await;
             let mut compaction_groups_txn = compaction_group_manager.start_compaction_groups_txn();
             compaction_groups_txn
@@ -648,46 +646,7 @@ impl HummockManager {
         let default_config = compaction_group_manager.default_compaction_config();
         let mut compaction_groups_txn = compaction_group_manager.start_compaction_groups_txn();
         compaction_groups_txn.try_create_compaction_groups(&all_group_ids, default_config);
-
-        let compaction_groups =
-            compaction_groups_txn.try_get_compaction_group_configs(&all_group_ids);
-
-        // We've already lowered the default limit for write limit in PR-12183, and to prevent older clusters from continuing to use the outdated configuration, we've introduced a new logic to rewrite it in a uniform way.
-        let mut rewrite_cg_ids = vec![];
-        for group in compaction_groups {
-            // update write limit
-            let cg_id = group.group_id;
-            let relaxed_default_write_stop_level_count = 1000;
-            if group.compaction_config.level0_sub_level_compact_level_count
-                == relaxed_default_write_stop_level_count
-            {
-                rewrite_cg_ids.push(cg_id);
-            }
-        }
-
-        tracing::info!("Compaction group {:?} configs rewrite ", rewrite_cg_ids);
-
-        let update_configs =  compaction_groups_txn.update_compaction_config(
-                    &rewrite_cg_ids,
-                    &[
-                        MutableConfig::Level0StopWriteThresholdSubLevelNumber(
-                            risingwave_common::config::default::compaction_config::level0_stop_write_threshold_sub_level_number(),
-                        ),
-                    ],
-                )?;
-
         commit_multi_var!(self.meta_store_ref(), compaction_groups_txn)?;
-        compaction_group_manager.write_limit = calc_new_write_limits(
-            update_configs,
-            HashMap::new(),
-            &versioning_guard.current_version,
-        );
-        trigger_write_stop_stats(&self.metrics, &compaction_group_manager.write_limit);
-
-        tracing::debug!(
-            "Hummock stopped write: {:#?}",
-            compaction_group_manager.write_limit
-        );
 
         Ok(())
     }
@@ -819,22 +778,6 @@ impl<'a> CompactionGroupTransaction<'a> {
         compaction_group_id: CompactionGroupId,
     ) -> Option<CompactionGroup> {
         self.get(&compaction_group_id).cloned()
-    }
-
-    /// Tries to get compaction group config for `compaction_group_id`.
-    pub(super) fn try_get_compaction_group_configs(
-        &self,
-        compaction_group_ids: &Vec<CompactionGroupId>,
-    ) -> Vec<CompactionGroup> {
-        let mut result = Vec::with_capacity(compaction_group_ids.len());
-
-        compaction_group_ids.iter().for_each(|id| {
-            if let Some(group) = self.get(id) {
-                result.push(group.clone());
-            }
-        });
-
-        result
     }
 
     /// Removes stale group configs.
