@@ -772,11 +772,11 @@ impl BlockFetcher {
                     Ok(data) => data,
                     Err(e) => {
                         tracing::error!(
-                            "get_block_response meet error when read {:?} from sst-{}, total length: {}, err: {:?}",
+                            "get_block_response meet error when read {:?} from sst-{}, total length: {}, err: {}",
                             range,
                             self.sst.id,
                             self.sst.meta.estimated_size,
-                            e,
+                            e.as_report(),
                         );
                         // Release all waiters.
                         self.waiters[unit.sst_obj_id as usize % self.waiters.len()]
@@ -844,11 +844,11 @@ impl BlockFetcher {
             .await
             .inspect_err(|e| {
                 tracing::error!(
-                    "get_block_response meet error when read {:?} from sst-{}, total length: {}, err: {:?}",
+                    "get_block_response meet error when read {:?} from sst-{}, total length: {}, err: {}",
                     range,
                     self.sst.id,
                     self.sst.meta.estimated_size,
-                    e,
+                    e.as_report(),
                 )
             })?;
         let block = Block::decode(data, uc)?;
