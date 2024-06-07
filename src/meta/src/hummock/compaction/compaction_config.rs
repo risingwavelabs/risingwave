@@ -27,7 +27,7 @@ impl CompactionConfigBuilder {
             config: CompactionConfig {
                 max_bytes_for_level_base: compaction_config::max_bytes_for_level_base(),
                 max_bytes_for_level_multiplier: compaction_config::max_bytes_for_level_multiplier(),
-                max_level: compaction_config::max_level(),
+                max_level: compaction_config::max_level() as u64,
                 max_compaction_bytes: compaction_config::max_compaction_bytes(),
                 sub_level_max_compaction_bytes: compaction_config::sub_level_max_compaction_bytes(),
                 level0_tier_compact_file_number: compaction_config::level0_tier_compact_file_number(
