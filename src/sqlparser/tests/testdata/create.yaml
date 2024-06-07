@@ -17,12 +17,12 @@
   formatted_sql: CREATE TABLE t (a INT, b INT) AS SELECT 1 AS b, 2 AS a
 - input: CREATE SOURCE src
   error_msg: |-
-    sql parser error: expected description of the format, found: EOF at the end
+    sql parser error: expected description of the format, found: EOF
     LINE 1: CREATE SOURCE src
                              ^
 - input: CREATE SOURCE src-a FORMAT PLAIN ENCODE JSON
   error_msg: |-
-    sql parser error: expected description of the format, found: - at line 1, column 18
+    sql parser error: expected description of the format, found: -
     LINE 1: CREATE SOURCE src-a FORMAT PLAIN ENCODE JSON
                              ^
 - input: CREATE SOURCE src FORMAT PLAIN ENCODE JSON
@@ -33,7 +33,7 @@
   formatted_sql: CREATE TABLE sbtest10 (id INT PRIMARY KEY, k INT, c CHARACTER VARYING, pad CHARACTER VARYING) FROM sbtest TABLE 'mydb.sbtest10'
 - input: CREATE TABLE sbtest10 (id INT PRIMARY KEY, k INT, c CHARACTER VARYING, pad CHARACTER VARYING) FROM sbtest
   error_msg: |-
-    sql parser error: expected TABLE, found: EOF at the end
+    sql parser error: expected TABLE, found: EOF
     LINE 1: CREATE TABLE sbtest10 (id INT PRIMARY KEY, k INT, c CHARACTER VARYING, pad CHARACTER VARYING) FROM sbtest
                                                                                                                      ^
 - input: CREATE SOURCE IF NOT EXISTS src WITH (kafka.topic = 'abc', kafka.servers = 'localhost:1001') FORMAT PLAIN ENCODE PROTOBUF (message = 'Foo', schema.location = 'file://')
@@ -53,9 +53,9 @@
   formatted_sql: CREATE TABLE T (a STRUCT<v1 INT>)
 - input: CREATE TABLE T (FULL INT)
   error_msg: |-
-    sql parser error: syntax error at or near FULL at line 1, column 17
+    sql parser error: syntax error at or near FULL
     LINE 1: CREATE TABLE T (FULL INT)
-                                ^
+                                 ^
 - input: CREATE TABLE T ("FULL" INT)
   formatted_sql: CREATE TABLE T ("FULL" INT)
 - input: CREATE TABLE T ("FULL" INT) ON CONFLICT OVERWRITE WITH VERSION COLUMN("FULL")
@@ -64,26 +64,26 @@
   formatted_sql: CREATE TABLE T ("FULL" INT) ON CONFLICT IGNORE
 - input: CREATE TABLE T ("FULL" INT) ON CONFLICT OVERWRITE WITH VERSION COLUMN
   error_msg: |-
-    sql parser error: expected (, found: EOF at the end
+    sql parser error: expected (, found: EOF
     LINE 1: CREATE TABLE T ("FULL" INT) ON CONFLICT OVERWRITE WITH VERSION COLUMN
                                                                                  ^
 - input: CREATE TABLE T ("FULL" INT) ON CONFLICT OVERWRITE WITH VERSION COLUMN(FULL
   error_msg: |-
-    sql parser error: syntax error at or near FULL at line 1, column 71
+    sql parser error: syntax error at or near FULL
     LINE 1: CREATE TABLE T ("FULL" INT) ON CONFLICT OVERWRITE WITH VERSION COLUMN(FULL
                                                                                       ^
 - input: CREATE TABLE T ("FULL" INT) ON CONFLICT OVERWRITE WITH VERSION COLUMNFULL)
   error_msg: |-
-    sql parser error: expected (, found: VERSION at line 1, column 56
+    sql parser error: expected (, found: VERSION
     LINE 1: CREATE TABLE T ("FULL" INT) ON CONFLICT OVERWRITE WITH VERSION COLUMNFULL)
-                                                                  ^
+                                                                   ^
 - input: CREATE TABLE T ("FULL" INT) ON CONFLICT DO UPDATE IF NOT NULL
   formatted_sql: CREATE TABLE T ("FULL" INT) ON CONFLICT DO UPDATE IF NOT NULL
 - input: CREATE USER user WITH SUPERUSER CREATEDB PASSWORD 'password'
   formatted_sql: CREATE USER user WITH SUPERUSER CREATEDB PASSWORD 'password'
 - input: CREATE SINK snk
   error_msg: |-
-    sql parser error: expected FROM or AS after CREATE SINK sink_name, found: EOF at the end
+    sql parser error: expected FROM or AS after CREATE SINK sink_name, found: EOF
     LINE 1: CREATE SINK snk
                            ^
 - input: CREATE SINK IF NOT EXISTS snk FROM mv WITH (connector = 'mysql', mysql.endpoint = '127.0.0.1:3306', mysql.table = '<table_name>', mysql.database = '<database_name>', mysql.user = '<user_name>', mysql.password = '<password>')
@@ -102,24 +102,24 @@
   formatted_sql: CREATE SINK snk INTO t AS SELECT * FROM t
 - input: CREATE SINK snk FROM mv WITH (connector = 'kafka', properties.bootstrap.server = '127.0.0.1:9092', topic = 'test_topic') format;
   error_msg: |-
-    sql parser error: expected identifier, found: ; at line 1, column 128
+    sql parser error: expected identifier, found: ;
     LINE 1: CREATE SINK snk FROM mv WITH (connector = 'kafka', properties.bootstrap.server = '127.0.0.1:9092', topic = 'test_topic') format;
-                                                                                                                                            ^
+                                                                                                                                           ^
 - input: create sink sk1 from tt where v1 % 10 = 0 with (connector='blackhole')
   error_msg: |-
-    sql parser error: expected WITH, found: where at line 1, column 25
+    sql parser error: expected WITH, found: where
     LINE 1: create sink sk1 from tt where v1 % 10 = 0 with (connector='blackhole')
-                                   ^
+                                    ^
 - input: CREATE SINK snk FROM mv WITH (connector = 'kafka', properties.bootstrap.server = '127.0.0.1:9092', topic = 'test_topic') format debezium;
   error_msg: |-
-    sql parser error: expected ENCODE, found: ; at line 1, column 137
+    sql parser error: expected ENCODE, found: ;
     LINE 1: CREATE SINK snk FROM mv WITH (connector = 'kafka', properties.bootstrap.server = '127.0.0.1:9092', topic = 'test_topic') format debezium;
                                                                                                                                                     ^
 - input: CREATE SINK snk FROM mv WITH (connector = 'kafka', properties.bootstrap.server = '127.0.0.1:9092', topic = 'test_topic') format debezium encode;
   error_msg: |-
-    sql parser error: expected identifier, found: ; at line 1, column 144
+    sql parser error: expected identifier, found: ;
     LINE 1: CREATE SINK snk FROM mv WITH (connector = 'kafka', properties.bootstrap.server = '127.0.0.1:9092', topic = 'test_topic') format debezium encode;
-                                                                                                                                                            ^
+                                                                                                                                                           ^
 - input: create user tmp createdb nocreatedb
   error_msg: |-
     sql parser error: conflicting or redundant options
@@ -142,9 +142,9 @@
                                                                     ^
 - input: create user tmp with encrypted password null
   error_msg: |-
-    sql parser error: expected literal string, found: null at line 1, column 41
+    sql parser error: expected literal string, found: null
     LINE 1: create user tmp with encrypted password null
-                                                        ^
+                                                    ^
 - input: CREATE SECRET secret1 WITH (backend = 'meta') AS 'demo-secret'
   formatted_sql: CREATE SECRET secret1 WITH (backend = 'meta') AS 'demo-secret'
 - input: CREATE SECRET IF NOT EXISTS secret2 WITH (backend = 'meta') AS 'demo-secret

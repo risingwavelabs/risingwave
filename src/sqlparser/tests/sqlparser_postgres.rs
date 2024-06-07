@@ -441,10 +441,12 @@ fn parse_set() {
     for (sql, err_msg) in [
         ("SET", "expected identifier, found: EOF"),
         ("SET a b", "expected equals sign or TO, found: b"),
-        ("SET a =", "expected parameter value, found: EOF"),
+        ("SET a =", "expected parameter value"),
     ] {
-        let res = parse_sql_statements(sql);
-        assert!(format!("{}", res.unwrap_err()).contains(err_msg));
+        let error = parse_sql_statements(sql).unwrap_err().to_string();
+        if !error.contains(err_msg) {
+            panic!("expected error '{}' not found in '{}'", err_msg, error);
+        }
     }
 }
 

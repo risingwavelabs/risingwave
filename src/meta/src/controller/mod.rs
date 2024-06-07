@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use anyhow::anyhow;
 use risingwave_common::util::epoch::Epoch;
@@ -201,9 +201,9 @@ impl From<ObjectModel<source::Model>> for PbSource {
 
 impl From<ObjectModel<sink::Model>> for PbSink {
     fn from(value: ObjectModel<sink::Model>) -> Self {
-        let mut secret_ref_hashmap: HashMap<String, u32> = HashMap::new();
+        let mut secret_ref_map: BTreeMap<String, u32> = BTreeMap::new();
         if let Some(secret_ref) = value.0.secret_ref {
-            secret_ref_hashmap = secret_ref.into_inner();
+            secret_ref_map = secret_ref.into_inner();
         }
         Self {
             id: value.0.sink_id as _,
@@ -234,7 +234,7 @@ impl From<ObjectModel<sink::Model>> for PbSink {
             initialized_at_cluster_version: value.1.initialized_at_cluster_version,
             created_at_cluster_version: value.1.created_at_cluster_version,
             create_type: PbCreateType::Foreground as _,
-            secret_ref: secret_ref_hashmap,
+            secret_ref: secret_ref_map,
         }
     }
 }

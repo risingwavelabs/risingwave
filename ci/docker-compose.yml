@@ -61,7 +61,8 @@ services:
       - "29092:29092"
       - "9092:9092"
       - "9644:9644"
-      - "8081:8081"
+      # Don't use Redpanda's schema registry, use the separated service instead
+      # - "8081:8081"
     environment: {}
     container_name: message_queue
     healthcheck:
@@ -89,6 +90,7 @@ services:
       - mysql
       - db
       - message_queue
+      - schemaregistry
       - elasticsearch
       - clickhouse-server
       - redis-server
