@@ -421,15 +421,17 @@ impl HummockManager {
         let compaction_group_manager = self.compaction_group_manager.read().await;
 
         for levels in current_version.levels.values() {
-            let config = compaction_group_manager
+            let compaction_config = compaction_group_manager
                 .try_get_compaction_group_config(levels.group_id)
                 .unwrap()
-                .compaction_config;
+                .compaction_config
+                .as_ref()
+                .clone();
             let group = CompactionGroupInfo {
                 id: levels.group_id,
                 parent_id: levels.parent_group_id,
                 member_table_ids: levels.member_table_ids.clone(),
-                compaction_config: Some(config.as_ref().clone()),
+                compaction_config: Some(compaction_config),
             };
             results.push(group);
         }
@@ -776,8 +778,8 @@ impl<'a> CompactionGroupTransaction<'a> {
     pub(super) fn try_get_compaction_group_config(
         &self,
         compaction_group_id: CompactionGroupId,
-    ) -> Option<CompactionGroup> {
-        self.get(&compaction_group_id).cloned()
+    ) -> Option<&CompactionGroup> {
+        self.get(&compaction_group_id)
     }
 
     /// Removes stale group configs.
