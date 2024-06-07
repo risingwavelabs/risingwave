@@ -14,18 +14,22 @@
 
 use futures::{pin_mut, StreamExt};
 use itertools::Itertools;
+use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
 use risingwave_common::row::{self, OwnedRow};
 use risingwave_common::types::DataType;
+use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::epoch::{test_epoch, EpochPair};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_hummock_test::test_utils::prepare_hummock_test_env;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::TableIter;
+use serde::de;
 
 use crate::common::table::state_table::StateTable;
 use crate::common::table::test_utils::{gen_prost_table, gen_prost_table_with_value_indices};
+use crate::config::chunk_size;
 
 /// There are three struct in relational layer, StateTable, MemTable and StorageTable.
 /// `StateTable` provides read/write interfaces to the upper layer streaming operator.
@@ -461,7 +465,6 @@ async fn test_batch_scan_with_value_indices() {
     assert!(res.is_none());
 }
 
-
 #[tokio::test]
 async fn test_batch_scan_chunk_with_value_indices() {
     const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
@@ -518,73 +521,64 @@ async fn test_batch_scan_chunk_with_value_indices() {
             Some((i * 10 * scale).into()),
             Some((i * 100).into()),
             Some((i * 1000 * scale).into()),
-    ])};
+        ])
+    };
 
     let mut rows = vec![];
-    
+    let insert_row_idx = (0..20).collect_vec();
+    let delete_row_idx = (0..5).map(|i| i * 2).collect_vec();
+    let updated_row_idx = (0..5).map(|i| i * 2 + 1).collect_vec();
+    for i in &insert_row_idx {
+        let row = gen_row(*i, false);
+        state.insert(row.clone());
+        rows.push(row);
+    }
 
-    state.insert(OwnedRow::new(vec![
-        Some(1_i32.into()),
-        Some(11_i32.into()),
-        Some(111_i32.into()),
-        Some(1111_i32.into()),
-    ]));
-    state.insert(OwnedRow::new(vec![
-        Some(2_i32.into()),
-        Some(22_i32.into()),
-        Some(222_i32.into()),
-        Some(2222_i32.into()),
-    ]));
-    state.delete(OwnedRow::new(vec![
-        Some(2_i32.into()),
-        Some(22_i32.into()),
-        Some(222_i32.into()),
-        Some(2222_i32.into()),
-    ]));
-    state.insert(OwnedRow::new(vec![
-        Some(2_i32.into()),
-        Some(22_i32.into()),
-        Some(222_i32.into()),
-        Some(2222_i32.into()),
-    ]));
-    state.insert(OwnedRow::new(vec![
-        Some(3_i32.into()),
-        Some(33_i32.into()),
-        Some(333_i32.into()),
-        Some(3333_i32.into()),
-    ]));
-    state.insert(OwnedRow::new(vec![
-        Some(4_i32.into()),
-        Some(44_i32.into()),
-        Some(444_i32.into()),
-        Some(4444_i32.into()),
-    ]));
-    state.insert(OwnedRow::new(vec![
-        Some(5_i32.into()),
-        Some(55_i32.into()),
-        Some(555_i32.into()),
-        Some(5555_i32.into()),
-    ]));
+    for i in &updated_row_idx {
+        let row = gen_row(*i, true);
+        state.update(rows[*i as usize].clone(), row.clone());
+        rows[*i as usize] = row;
+    }
+
+    for i in &delete_row_idx {
+        let row = gen_row(*i, false);
+        state.delete(row);
+    }
+
+    let mut rows = rows
+        .into_iter()
+        .enumerate()
+        .filter(|(idx, _)| !delete_row_idx.contains(&(*idx as i32)))
+        .map(|(_, row)| row)
+        .collect_vec();
 
     epoch.inc_for_test();
     state.commit(epoch).await.unwrap();
     test_env.commit_epoch(epoch.prev).await;
 
+    let chunk_size = 2;
     let iter = table
         .batch_chunk_iter_with_pk_bounds(
             HummockReadEpoch::Committed(epoch.prev),
             row::empty(),
             ..,
             false,
-            2,
+            chunk_size,
             Default::default(),
         )
         .await
         .unwrap();
     pin_mut!(iter);
 
-    while let Some(chunk) = iter.next().await {
-        let chunk = chunk.unwrap();
-        println!("{:?}", chunk);
+    let chunks: Vec<_> = iter.collect().await;
+    println!("{:?}", chunks);
+    println!("{:?}", rows);
+    
+    for (chunk, expected_rows) in chunks.into_iter().zip_eq(rows.chunks_mut(chunk_size)) {
+        let mut builder = DataChunkBuilder::new(vec![DataType::Int32, DataType::Int32], 2 * chunk_size);
+        for row in expected_rows {
+            let _ = builder.append_one_row(row.clone());
+        }
+        assert_eq!(builder.consume_all().unwrap(), chunk.unwrap());
     }
 }
