@@ -125,6 +125,7 @@ where
     Ok(std::iter::from_fn(next))
 }
 
+/// Validate decimals can not be NaN or infinity.
 #[inline]
 fn validate_range_parameters(start: Decimal, stop: Decimal, step: Decimal) -> Result<()> {
     validate_decimal(start, "start")?;
@@ -157,8 +158,7 @@ mod tests {
     use risingwave_common::types::test_utils::IntervalTestExt;
     use risingwave_common::types::{DataType, Decimal, Interval, ScalarImpl, Timestamp};
     use risingwave_expr::expr::{BoxedExpression, ExpressionBoxExt, LiteralExpression};
-    use risingwave_expr::table_function::build;
-    use risingwave_expr::ExprError;
+    use risingwave_expr::table_function::{build, check_error};
     use risingwave_pb::expr::table_function::PbType;
 
     const CHUNK_SIZE: usize = 1024;
@@ -306,40 +306,27 @@ mod tests {
 
     #[tokio::test]
     async fn test_generate_series_decimal() {
-        let start = Decimal::from_str("1").unwrap();
-        let start_inf = Decimal::from_str("infinity").unwrap();
-        let stop = Decimal::from_str("5").unwrap();
-        let stop_inf = Decimal::from_str("-infinity").unwrap();
-
-        let step = Decimal::from_str("1").unwrap();
-        let step_nan = Decimal::from_str("nan").unwrap();
-        let step_inf = Decimal::from_str("infinity").unwrap();
-        generate_series_decimal(start, stop, step, true).await;
-        generate_series_decimal(start_inf, stop, step, false).await;
-        generate_series_decimal(start_inf, stop_inf, step, false).await;
-        generate_series_decimal(start, stop_inf, step, false).await;
-        generate_series_decimal(start, stop, step_nan, false).await;
-        generate_series_decimal(start, stop, step_inf, false).await;
-        generate_series_decimal(start, stop_inf, step_nan, false).await;
+        generate_series_decimal("1", "5", "1", true).await;
+        generate_series_decimal("inf", "5", "1", false).await;
+        generate_series_decimal("inf", "-inf", "1", false).await;
+        generate_series_decimal("1", "-inf", "1", false).await;
+        generate_series_decimal("1", "5", "nan", false).await;
+        generate_series_decimal("1", "5", "inf", false).await;
+        generate_series_decimal("1", "-inf", "nan", false).await;
     }
 
-    async fn generate_series_decimal(
-        start: Decimal,
-        stop: Decimal,
-        step: Decimal,
-        expect_ok: bool,
-    ) {
-        fn literal(ty: DataType, v: ScalarImpl) -> BoxedExpression {
-            LiteralExpression::new(ty, Some(v)).boxed()
+    async fn generate_series_decimal(start: &str, stop: &str, step: &str, expect_ok: bool) {
+        fn decimal_literal(v: Decimal) -> BoxedExpression {
+            LiteralExpression::new(DataType::Decimal, Some(v.into())).boxed()
         }
         let function = build(
             PbType::GenerateSeries,
             DataType::Decimal,
             CHUNK_SIZE,
             vec![
-                literal(DataType::Decimal, start.into()),
-                literal(DataType::Decimal, stop.into()),
-                literal(DataType::Decimal, step.into()),
+                decimal_literal(start.parse().unwrap()),
+                decimal_literal(stop.parse().unwrap()),
+                decimal_literal(step.parse().unwrap()),
             ],
         )
         .unwrap();
@@ -347,17 +334,13 @@ mod tests {
         let dummy_chunk = DataChunk::new_dummy(1);
         let mut output = function.eval(&dummy_chunk).await;
         while let Some(res) = output.next().await {
-            match res {
-                Ok(_) => {
-                    assert!(expect_ok);
-                }
-                Err(ExprError::InvalidParam { .. }) => {
-                    assert!(!expect_ok);
-                }
-                Err(_) => {
-                    unreachable!();
-                }
-            }
+            let chunk = res.unwrap();
+            let error = check_error(&chunk);
+            assert_eq!(
+                error.is_ok(),
+                expect_ok,
+                "generate_series({start}, {stop}, {step})"
+            );
         }
     }
 }
