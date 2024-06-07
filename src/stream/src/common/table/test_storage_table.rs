@@ -511,6 +511,18 @@ async fn test_batch_scan_chunk_with_value_indices() {
     let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
     state.init_epoch(epoch);
 
+    let gen_row = |i: i32, is_update: bool| {
+        let scale = if is_update { 10 } else { 1 };
+        OwnedRow::new(vec![
+            Some(i.into()),
+            Some((i * 10 * scale).into()),
+            Some((i * 100).into()),
+            Some((i * 1000 * scale).into()),
+    ])};
+
+    let mut rows = vec![];
+    
+
     state.insert(OwnedRow::new(vec![
         Some(1_i32.into()),
         Some(11_i32.into()),

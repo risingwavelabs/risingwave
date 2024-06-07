@@ -24,7 +24,7 @@ use futures::future::try_join_all;
 use futures::{stream, Stream, StreamExt};
 use futures_async_stream::{for_await, try_stream};
 use itertools::{Either, Itertools};
-use risingwave_common::array::{ArrayImpl, DataChunk, Op};
+use risingwave_common::array::{ArrayImpl, ArrayRef, DataChunk, Op};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId, TableOption};
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
@@ -628,6 +628,8 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         .await
     }
 
+    /// Iterates on the table with the given prefix of the pk in `pk_prefix` and the range bounds.
+    /// Returns a stream of chunks of columns with the provided `chunk_size`
     async fn chunk_iter_with_pk_bounds(
         &self,
         epoch: HummockReadEpoch,
@@ -636,7 +638,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         ordered: bool,
         chunk_size: usize,
         prefetch_options: PrefetchOptions,
-    ) -> StorageResult<impl Stream<Item = StorageResult<(Vec<ArrayImpl>, usize)>> + Send> {
+    ) -> StorageResult<impl Stream<Item = StorageResult<(Vec<ArrayRef>, usize)>> + Send> {
         use risingwave_common::util::iter_util::ZipEqFast;
 
         let iter = self
@@ -650,17 +652,20 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
             Some((Box::pin(iter), builders, row_count, self.schema.clone())),
             move |state| async move {
                 if state.is_none() {
-                    // Already reached end
+                    // Already reached end or met error
+                    // We will only reach here after condition 2 or 3 below is met
                     return None;
                 }
                 let (mut iter, mut builders, mut row_count, schema) = state.unwrap();
                 match iter.next().await {
                     Some(Ok(row)) => {
+                        // 1. the row stream returns a valid row
                         row_count += 1;
                         for (datum, builder) in row.iter().zip_eq_fast(builders.iter_mut()) {
                             builder.append(datum);
                         }
                         if row_count == chunk_size {
+                            // 1.a. yield a new chunk and reset the builder
                             let columns: Vec<_> = builders
                                 .into_iter()
                                 .map(|builder| builder.finish().into())
@@ -668,22 +673,35 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
                             let builders: Vec<risingwave_common::array::ArrayBuilderImpl> =
                                 schema.create_array_builders(chunk_size);
                             Some((
+                                // Chunk to yield
                                 Some(Ok((columns, chunk_size))),
+                                // The new state (row_count == 0)
                                 Some((iter, builders, 0, schema)),
                             ))
                         } else {
-                            Some((None, Some((iter, builders, row_count, schema))))
+                            // 1.b. do not yield because the chunk is not full yet
+                            Some((
+                                // None indicates no chunk to yield. It will be filter out by the filter_map
+                                None, 
+                                Some((iter, builders, row_count, schema)))
+                            )
                         }
                     }
-                    Some(Err(e)) => Some((Some(Err(e)), None)),
+                    Some(Err(e)) => {
+                        // 2. the row stream returns an error.
+                        // yield the error directly and stop the iteration by setting the state to None
+                        Some((Some(Err(e)), None))},
                     None => {
+                        // 3. the row stream has reached the end
                         if row_count > 0 {
+                            // 3.a. yield the last chunk if any
                             let columns: Vec<_> = builders
                                 .into_iter()
                                 .map(|builder| builder.finish().into())
                                 .collect();
                             Some((Some(Ok((columns, row_count))), None))
                         } else {
+                            // 3.b. No need to yield if the last chunk is empty
                             None
                         }
                     }
@@ -772,6 +790,8 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         Ok(iter)
     }
 
+    /// Iterates on the table with the given prefix of the pk in `pk_prefix` and the range bounds.
+    /// Returns a stream of `DataChunk` with the provided `chunk_size`
     pub async fn batch_chunk_iter_with_pk_bounds(
         &self,
         epoch: HummockReadEpoch,
@@ -782,38 +802,13 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         prefetch_options: PrefetchOptions,
     ) -> StorageResult<impl Stream<Item = StorageResult<DataChunk>> + Send> {
         let iter = self
-            .batch_iter_with_pk_bounds(epoch, pk_prefix, range_bounds, ordered, prefetch_options)
+            .chunk_iter_with_pk_bounds(epoch, pk_prefix, range_bounds, ordered, chunk_size, prefetch_options)
             .await?;
 
-        let data_chunk_builder = DataChunkBuilder::new(self.schema.data_types(), chunk_size);
-        let reach_end = false;
-        Ok(stream::unfold(
-            (Box::pin(iter), data_chunk_builder, reach_end),
-            |(mut iter, mut builder, mut reach_end)| async move {
-                if reach_end {
-                    return None;
-                }
-                match iter.next().await {
-                    Some(Ok(row)) => {
-                        if let Some(chunk) = builder.append_one_row(row.into_owned_row()) {
-                            Some((Some(Ok(chunk)), (iter, builder, reach_end)))
-                        } else {
-                            Some((None, (iter, builder, reach_end)))
-                        }
-                    }
-                    Some(Err(e)) => Some((Some(Err(e)), (iter, builder, reach_end))),
-                    None => {
-                        reach_end = true;
-                        if let Some(data_chunk) = builder.consume_all() {
-                            Some((Some(Ok(data_chunk)), (iter, builder, reach_end)))
-                        } else {
-                            None
-                        }
-                    }
-                }
-            },
-        )
-        .filter_map(|x| async { x }))
+        Ok(iter.map(|item| {
+            let (columns, row_count) = item?;
+            Ok(DataChunk::new(columns, row_count))
+        }))
     }
 }
 
