@@ -157,12 +157,14 @@ function execute_sql_and_expect() {
 
 function get_max_committed_epoch() {
   mce=$(${BACKUP_TEST_RW_ALL_IN_ONE} risectl hummock list-version --verbose 2>&1 | grep max_committed_epoch | sed -n 's/^.*max_committed_epoch: \(.*\),/\1/p')
-  echo "${mce}"
+  # always take the smallest one
+  echo "${mce}"|sort -n |head -n 1
 }
 
 function get_safe_epoch() {
   safe_epoch=$(${BACKUP_TEST_RW_ALL_IN_ONE} risectl hummock list-version --verbose 2>&1 | grep safe_epoch | sed -n 's/^.*safe_epoch: \(.*\),/\1/p')
-  echo "${safe_epoch}"
+  # always take the smallest one
+  echo "${safe_epoch}"|sort -n |head -n 1
 }
 
 function get_total_sst_count() {
