@@ -93,11 +93,26 @@ pub struct SqlServerSink {
 
 impl SqlServerSink {
     pub fn new(
-        config: SqlServerConfig,
+        mut config: SqlServerConfig,
         schema: Schema,
         pk_indices: Vec<usize>,
         is_append_only: bool,
     ) -> Result<Self> {
+        // Rewrite config because tiberius allows a maximum of 2100 params in one query request.
+        const TIBERIUS_PARAM_MAX: usize = 2000;
+        let params_per_op = schema.fields().len();
+        let tiberius_max_batch_rows = if params_per_op == 0 {
+            config.max_batch_rows
+        } else {
+            ((TIBERIUS_PARAM_MAX as f64 / params_per_op as f64).floor()) as usize
+        };
+        if tiberius_max_batch_rows == 0 {
+            return Err(SinkError::SqlServer(anyhow!(format!(
+                "too many column {}",
+                params_per_op
+            ))));
+        }
+        config.max_batch_rows = std::cmp::min(config.max_batch_rows, tiberius_max_batch_rows);
         Ok(Self {
             config,
             schema,
@@ -258,7 +273,7 @@ pub struct SqlServerSinkWriter {
 }
 
 impl SqlServerSinkWriter {
-    pub async fn new(
+    async fn new(
         config: SqlServerConfig,
         schema: Schema,
         pk_indices: Vec<usize>,
@@ -276,16 +291,28 @@ impl SqlServerSinkWriter {
         Ok(writer)
     }
 
-    fn delete_one(&mut self, row: RowRef<'_>) {
+    async fn delete_one(&mut self, row: RowRef<'_>) -> Result<()> {
+        if self.ops.len() + 1 >= self.config.max_batch_rows {
+            self.flush().await?;
+        }
         self.ops.push(SqlOp::Delete(row.into_owned_row()));
+        Ok(())
     }
 
-    fn upsert_one(&mut self, row: RowRef<'_>) {
-        if self.is_append_only {
-            self.ops.push(SqlOp::Insert(row.into_owned_row()));
-        } else {
-            self.ops.push(SqlOp::Merge(row.into_owned_row()));
+    async fn upsert_one(&mut self, row: RowRef<'_>) -> Result<()> {
+        if self.ops.len() + 1 >= self.config.max_batch_rows {
+            self.flush().await?;
         }
+        self.ops.push(SqlOp::Merge(row.into_owned_row()));
+        Ok(())
+    }
+
+    async fn insert_one(&mut self, row: RowRef<'_>) -> Result<()> {
+        if self.ops.len() + 1 >= self.config.max_batch_rows {
+            self.flush().await?;
+        }
+        self.ops.push(SqlOp::Insert(row.into_owned_row()));
+        Ok(())
     }
 
     async fn flush(&mut self) -> Result<()> {
@@ -428,21 +455,22 @@ impl SinkWriter for SqlServerSinkWriter {
         for (op, row) in chunk.rows() {
             match op {
                 Op::Insert => {
-                    self.upsert_one(row);
+                    if self.is_append_only {
+                        self.insert_one(row).await?;
+                    } else {
+                        self.upsert_one(row).await?;
+                    }
                 }
                 Op::UpdateInsert => {
                     debug_assert!(!self.is_append_only);
-                    self.upsert_one(row);
+                    self.upsert_one(row).await?;
                 }
                 Op::Delete => {
                     debug_assert!(!self.is_append_only);
-                    self.delete_one(row);
+                    self.delete_one(row).await?;
                 }
                 Op::UpdateDelete => {}
             }
-        }
-        if self.ops.len() >= self.config.max_batch_rows {
-            self.flush().await?;
         }
         Ok(())
     }
