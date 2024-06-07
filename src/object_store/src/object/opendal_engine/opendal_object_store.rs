@@ -143,6 +143,9 @@ impl ObjectStore for OpendalObjectStore {
         let reader_fut = self
             .op
             .clone()
+            .layer(TimeoutLayer::new().with_io_timeout(Duration::from_millis(
+                self.config.retry.streaming_read_attempt_timeout_ms,
+            )))
             .layer(
                 RetryLayer::new()
                     .with_min_delay(Duration::from_millis(
@@ -155,9 +158,6 @@ impl ObjectStore for OpendalObjectStore {
                     .with_factor(self.config.retry.req_backoff_factor as f32)
                     .with_jitter(),
             )
-            .layer(TimeoutLayer::new().with_io_timeout(Duration::from_millis(
-                self.config.retry.streaming_read_attempt_timeout_ms,
-            )))
             .reader_with(path);
         let reader = if let Some(streaming_read_buffer_size) = self.config.s3.developer.streaming_read_buffer_size {
             reader_fut.chunk(streaming_read_buffer_size).await?
@@ -279,6 +279,9 @@ impl OpendalStreamingUploader {
     ) -> ObjectResult<Self> {
         let writer = op
             .clone()
+            .layer(TimeoutLayer::new().with_io_timeout(Duration::from_millis(
+                config.retry.streaming_upload_attempt_timeout_ms,
+            )))
             .layer(
                 RetryLayer::new()
                     .with_min_delay(Duration::from_millis(config.retry.req_backoff_interval_ms))
@@ -287,9 +290,6 @@ impl OpendalStreamingUploader {
                     .with_factor(config.retry.req_backoff_factor as f32)
                     .with_jitter(),
             )
-            .layer(TimeoutLayer::new().with_io_timeout(Duration::from_millis(
-                config.retry.streaming_upload_attempt_timeout_ms,
-            )))
             .writer_with(&path)
             .concurrent(config.s3.developer.upload_concurrency)
             .executor(Executor::new())
