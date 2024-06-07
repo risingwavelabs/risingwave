@@ -1131,7 +1131,7 @@ impl FunctionAttr {
                 Err(e) => {
                     index_builder.append(Some(i as i32));
                     #(#builders.append_null();)*
-                    error_builder.append(Some(&e.to_string()));
+                    error_builder.append_display(Some(e.as_report()));
                     continue;
                 }
             } },
@@ -1141,7 +1141,7 @@ impl FunctionAttr {
                 Err(e) => {
                     index_builder.append(Some(i as i32));
                     #(#builders.append_null();)*
-                    error_builder.append(Some(&e.to_string()));
+                    error_builder.append_display(Some(e.as_report()));
                     continue;
                 }
             } },
@@ -1182,12 +1182,12 @@ impl FunctionAttr {
             } },
             ReturnTypeKind::Result => quote! { match output {
                 Ok((#(#outputs),*)) => { #(#builders.append(#optioned_outputs);)* error_builder.append_null(); }
-                Err(e) => { #(#builders.append_null();)* error_builder.append(Some(&e.to_string())); }
+                Err(e) => { #(#builders.append_null();)* error_builder.append_display(Some(e.as_report())); }
             } },
             ReturnTypeKind::ResultOption => quote! { match output {
                 Ok(Some((#(#outputs),*))) => { #(#builders.append(#optioned_outputs);)* error_builder.append_null(); }
                 Ok(None) => { #(#builders.append_null();)* error_builder.append_null(); }
-                Err(e) => { #(#builders.append_null();)* error_builder.append(Some(&e.to_string())); }
+                Err(e) => { #(#builders.append_null();)* error_builder.append_display(Some(e.as_report())); }
             } },
         };
 

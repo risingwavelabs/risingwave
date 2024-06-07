@@ -174,7 +174,7 @@ pub fn build(
 /// for i in 0..4 {
 ///     let (index, value) = iter.peek().unwrap();
 ///     assert_eq!(index, i);
-///     assert_eq!(value, Ok(Some((i as i64).into())));
+///     assert_eq!(value.unwrap(), Some((i as i64).into()));
 ///     iter.next().await.unwrap();
 /// }
 /// assert!(iter.peek().is_none());

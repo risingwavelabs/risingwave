@@ -166,6 +166,17 @@ impl Utf8ArrayBuilder {
             bytes: self.bytes.writer(),
         }
     }
+
+    /// Append an element as the `Display` format to the array.
+    pub fn append_display(&mut self, value: Option<impl Display>) {
+        if let Some(s) = value {
+            let mut writer = self.writer().begin();
+            write!(writer, "{}", s).unwrap();
+            writer.finish();
+        } else {
+            self.append_null();
+        }
+    }
 }
 
 pub struct StringWriter<'a> {
