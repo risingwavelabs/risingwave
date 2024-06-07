@@ -37,7 +37,9 @@ fn trigger_version_stat(metrics: &MetaMetrics, current_version: &HummockVersion)
     metrics
         .version_size
         .set(current_version.estimated_encode_len() as i64);
-    metrics.safe_epoch.set(current_version.visible_table_safe_epoch() as i64);
+    metrics
+        .safe_epoch
+        .set(current_version.visible_table_safe_epoch() as i64);
     metrics.current_version_id.set(current_version.id as i64);
 }
 
