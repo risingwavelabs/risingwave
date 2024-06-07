@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use futures::pin_mut;
+use futures::{pin_mut, StreamExt};
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
-use risingwave_common::row::OwnedRow;
+use risingwave_common::row::{self, OwnedRow};
 use risingwave_common::types::DataType;
 use risingwave_common::util::epoch::{test_epoch, EpochPair};
 use risingwave_common::util::sort_util::OrderType;
@@ -459,4 +459,120 @@ async fn test_batch_scan_with_value_indices() {
 
     let res = iter.next_row().await.unwrap();
     assert!(res.is_none());
+}
+
+
+#[tokio::test]
+async fn test_batch_scan_chunk_with_value_indices() {
+    const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+    let test_env = prepare_hummock_test_env().await;
+
+    let order_types = vec![OrderType::ascending(), OrderType::descending()];
+    let column_ids = [
+        ColumnId::from(0),
+        ColumnId::from(1),
+        ColumnId::from(2),
+        ColumnId::from(3),
+    ];
+    let column_descs = vec![
+        ColumnDesc::unnamed(column_ids[0], DataType::Int32),
+        ColumnDesc::unnamed(column_ids[1], DataType::Int32),
+        ColumnDesc::unnamed(column_ids[2], DataType::Int32),
+        ColumnDesc::unnamed(column_ids[3], DataType::Int32),
+    ];
+    let pk_indices = vec![0_usize, 2_usize];
+    let value_indices: Vec<usize> = vec![1, 3];
+    let read_prefix_len_hint = 0;
+    let table = gen_prost_table_with_value_indices(
+        TEST_TABLE_ID,
+        column_descs.clone(),
+        order_types.clone(),
+        pk_indices.clone(),
+        read_prefix_len_hint,
+        value_indices.iter().map(|v| *v as i32).collect_vec(),
+    );
+
+    test_env.register_table(table.clone()).await;
+    let mut state =
+        StateTable::from_table_catalog_inconsistent_op(&table, test_env.storage.clone(), None)
+            .await;
+
+    let column_ids_partial = vec![ColumnId::from(1), ColumnId::from(2)];
+
+    let table = StorageTable::for_test_with_partial_columns(
+        test_env.storage.clone(),
+        TEST_TABLE_ID,
+        column_descs.clone(),
+        column_ids_partial,
+        order_types.clone(),
+        pk_indices,
+        value_indices,
+    );
+    let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
+    state.init_epoch(epoch);
+
+    state.insert(OwnedRow::new(vec![
+        Some(1_i32.into()),
+        Some(11_i32.into()),
+        Some(111_i32.into()),
+        Some(1111_i32.into()),
+    ]));
+    state.insert(OwnedRow::new(vec![
+        Some(2_i32.into()),
+        Some(22_i32.into()),
+        Some(222_i32.into()),
+        Some(2222_i32.into()),
+    ]));
+    state.delete(OwnedRow::new(vec![
+        Some(2_i32.into()),
+        Some(22_i32.into()),
+        Some(222_i32.into()),
+        Some(2222_i32.into()),
+    ]));
+    state.insert(OwnedRow::new(vec![
+        Some(2_i32.into()),
+        Some(22_i32.into()),
+        Some(222_i32.into()),
+        Some(2222_i32.into()),
+    ]));
+    state.insert(OwnedRow::new(vec![
+        Some(3_i32.into()),
+        Some(33_i32.into()),
+        Some(333_i32.into()),
+        Some(3333_i32.into()),
+    ]));
+    state.insert(OwnedRow::new(vec![
+        Some(4_i32.into()),
+        Some(44_i32.into()),
+        Some(444_i32.into()),
+        Some(4444_i32.into()),
+    ]));
+    state.insert(OwnedRow::new(vec![
+        Some(5_i32.into()),
+        Some(55_i32.into()),
+        Some(555_i32.into()),
+        Some(5555_i32.into()),
+    ]));
+
+    epoch.inc_for_test();
+    state.commit(epoch).await.unwrap();
+    test_env.commit_epoch(epoch.prev).await;
+
+    let iter = table
+        .batch_chunk_iter_with_pk_bounds(
+            HummockReadEpoch::Committed(epoch.prev),
+            row::empty(),
+            ..,
+            false,
+            2,
+            Default::default(),
+        )
+        .await
+        .unwrap();
+    pin_mut!(iter);
+
+    while let Some(chunk) = iter.next().await {
+        let chunk = chunk.unwrap();
+        println!("{:?}", chunk);
+    }
 }
