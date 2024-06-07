@@ -239,8 +239,13 @@ impl<'a> JsonbRef<'a> {
     }
 
     /// Returns a jsonb `null` value.
-    pub fn null() -> Self {
+    pub const fn null() -> Self {
         Self(ValueRef::Null)
+    }
+
+    /// Returns a value for empty string.
+    pub const fn empty_string() -> Self {
+        Self(ValueRef::String(""))
     }
 
     /// Returns true if this is a jsonb `null`.
