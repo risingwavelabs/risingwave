@@ -125,7 +125,7 @@ where
     Ok(std::iter::from_fn(next))
 }
 
-/// Validate decimals can not be NaN or infinity.
+/// Validate decimals can not be `NaN` or `infinity`.
 #[inline]
 fn validate_range_parameters(start: Decimal, stop: Decimal, step: Decimal) -> Result<()> {
     validate_decimal(start, "start")?;
