@@ -98,7 +98,6 @@ impl SqlServerSink {
         pk_indices: Vec<usize>,
         is_append_only: bool,
     ) -> Result<Self> {
-        tracing::debug!(?config, ?schema, ?pk_indices, is_append_only, "!!!");
         Ok(Self {
             config,
             schema,
@@ -278,12 +277,10 @@ impl SqlServerSinkWriter {
     }
 
     fn delete_one(&mut self, row: RowRef<'_>) {
-        // TODO: avoid into_owned_row
         self.ops.push(SqlOp::Delete(row.into_owned_row()));
     }
 
     fn upsert_one(&mut self, row: RowRef<'_>) {
-        // TODO: avoid into_owned_row
         if self.is_append_only {
             self.ops.push(SqlOp::Insert(row.into_owned_row()));
         } else {
@@ -351,7 +348,7 @@ impl SqlServerSinkWriter {
                 SqlOp::Insert(_) => {
                     write!(
                         &mut query_str,
-                        "INSERT INTO {} ({}) VALUES ({})",
+                        "INSERT INTO {} ({}) VALUES ({});",
                         self.config.table,
                         all_col_names,
                         param_placeholders(&mut next_param_id),
@@ -363,7 +360,7 @@ impl SqlServerSinkWriter {
                         &mut query_str,
                         r#"MERGE {} AS TARGET
                         USING (VALUES ({})) AS SOURCE ({})
-                        ON ({})
+                        ON {}
                         WHEN MATCHED THEN UPDATE SET {}
                         WHEN NOT MATCHED THEN INSERT ({}) VALUES ({});"#,
                         self.config.table,
@@ -379,7 +376,7 @@ impl SqlServerSinkWriter {
                 SqlOp::Delete(_) => {
                     write!(
                         &mut query_str,
-                        r#"DELETE FROM {} WHERE {}"#,
+                        r#"DELETE FROM {} WHERE {};"#,
                         self.config.table,
                         self.pk_indices
                             .iter()
@@ -390,13 +387,12 @@ impl SqlServerSinkWriter {
                                 condition
                             })
                             .collect::<Vec<_>>()
-                            .join(","),
+                            .join(" AND "),
                     )
                     .unwrap();
                 }
             }
         }
-        tracing::debug!(query_str, "!!!");
 
         let mut query = Query::new(query_str);
         for op in self.ops.drain(..) {
