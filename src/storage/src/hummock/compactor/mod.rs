@@ -83,7 +83,6 @@ use crate::filter_key_extractor::{
 use crate::hummock::compactor::compaction_utils::calculate_task_parallelism;
 use crate::hummock::compactor::compactor_runner::{compact_and_build_sst, compact_done};
 use crate::hummock::iterator::{Forward, HummockIterator};
-use crate::hummock::multi_builder::SplitTableOutput;
 use crate::hummock::vacuum::Vacuum;
 use crate::hummock::{
     validate_ssts, BlockedXor16FilterBuilder, FilterBuilder, SharedComapctorObjectIdManager,
@@ -175,15 +174,10 @@ impl Compactor {
 
         compact_timer.observe_duration();
 
-        let ssts = split_table_outputs
-            .into_iter()
-            .map(|x| x.sst_info)
-            .collect();
-
         Self::report_progress(
             self.context.compactor_metrics.clone(),
             task_progress,
-            &ssts,
+            &split_table_outputs,
             self.context.is_share_buffer_compact,
         );
 
@@ -192,7 +186,7 @@ impl Compactor {
             .get_table_id_total_time_duration
             .observe(self.get_id_time.load(Ordering::Relaxed) as f64 / 1000.0 / 1000.0);
 
-        debug_assert!(ssts
+        debug_assert!(split_table_outputs
             .iter()
             .all(|table_info| table_info.sst_info.get_table_ids().is_sorted()));
 
@@ -202,10 +196,10 @@ impl Compactor {
                 "Finish Task {:?} split_index {:?} sst count {}",
                 task_id,
                 split_index,
-                ssts.len()
+                split_table_outputs.len()
             );
         }
-        Ok((ssts, table_stats_map))
+        Ok((split_table_outputs, table_stats_map))
     }
 
     pub fn report_progress(
@@ -236,7 +230,7 @@ impl Compactor {
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
         task_progress: Option<Arc<TaskProgress>>,
         object_id_getter: Box<dyn GetObjectId>,
-    ) -> HummockResult<(Vec<SplitTableOutput>, CompactionStatistics)> {
+    ) -> HummockResult<(Vec<LocalSstableInfo>, CompactionStatistics)> {
         let builder_factory = RemoteBuilderFactory::<F, B> {
             object_id_getter,
             limiter: self.context.memory_limiter.clone(),
@@ -253,6 +247,9 @@ impl Compactor {
             self.context.compactor_metrics.clone(),
             task_progress.clone(),
             self.task_config.table_vnode_partition.clone(),
+            self.context
+                .storage_opts
+                .compactor_concurrent_uploading_sst_count,
         );
         let compaction_statistics = compact_and_build_sst(
             &mut sst_builder,

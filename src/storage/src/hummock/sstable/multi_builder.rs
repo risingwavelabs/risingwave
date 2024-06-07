@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering::SeqCst;
 use std::sync::Arc;
@@ -43,10 +43,6 @@ pub trait TableBuilderFactory {
     async fn open_builder(&mut self) -> HummockResult<SstableBuilder<Self::Writer, Self::Filter>>;
 }
 
-pub struct SplitTableOutput {
-    pub sst_info: LocalSstableInfo,
-}
-
 /// A wrapper for [`SstableBuilder`] which automatically split key-value pairs into multiple tables,
 /// based on their target capacity set in options.
 ///
@@ -58,7 +54,7 @@ where
     /// When creating a new [`SstableBuilder`], caller use this factory to generate it.
     builder_factory: F,
 
-    sst_outputs: Vec<SplitTableOutput>,
+    sst_outputs: Vec<LocalSstableInfo>,
 
     current_builder: Option<SstableBuilder<F::Writer, F::Filter>>,
 
@@ -74,6 +70,10 @@ where
     /// When vnode of the coming key is greater than `largest_vnode_in_current_partition`, we will
     /// switch SST.
     largest_vnode_in_current_partition: usize,
+
+    concurrent_upload_join_handle: VecDeque<UploadJoinHandle>,
+
+    concurrent_uploading_sst_count: Option<usize>,
 }
 
 impl<F> CapacitySplitTableBuilder<F>
@@ -87,6 +87,7 @@ where
         compactor_metrics: Arc<CompactorMetrics>,
         task_progress: Option<Arc<TaskProgress>>,
         table_partition_vnode: BTreeMap<u32, u32>,
+        concurrent_uploading_sst_count: Option<usize>,
     ) -> Self {
         Self {
             builder_factory,
@@ -98,6 +99,14 @@ where
             table_partition_vnode,
             split_weight_by_vnode: 0,
             largest_vnode_in_current_partition: VirtualNode::MAX.to_index(),
+            concurrent_upload_join_handle: if let Some(concurrent_uploading_sst_count) =
+                concurrent_uploading_sst_count
+            {
+                VecDeque::with_capacity(concurrent_uploading_sst_count)
+            } else {
+                VecDeque::new()
+            },
+            concurrent_uploading_sst_count,
         }
     }
 
@@ -112,6 +121,8 @@ where
             table_partition_vnode: BTreeMap::default(),
             split_weight_by_vnode: 0,
             largest_vnode_in_current_partition: VirtualNode::MAX.to_index(),
+            concurrent_upload_join_handle: VecDeque::new(),
+            concurrent_uploading_sst_count: None,
         }
     }
 
@@ -303,22 +314,31 @@ where
                 }
             }
 
-            builder_output
-                .writer_output
-                .verbose_instrument_await("upload")
-                .await
-                .map_err(HummockError::sstable_upload_error)??;
+            self.concurrent_upload_join_handle
+                .push_back(builder_output.writer_output);
 
-            self.sst_outputs.push(SplitTableOutput {
-                sst_info: builder_output.sst_info,
-            });
+            self.sst_outputs.push(builder_output.sst_info);
+
+            if let Some(concurrent_uploading_sst_count) = self.concurrent_uploading_sst_count
+                && self.concurrent_upload_join_handle.len() >= concurrent_uploading_sst_count
+            {
+                let join_handle = self.concurrent_upload_join_handle.pop_front().unwrap();
+                join_handle
+                    .verbose_instrument_await("upload")
+                    .await
+                    .map_err(HummockError::sstable_upload_error)??;
+            }
         }
         Ok(())
     }
 
     /// Finalizes all the tables to be ids, blocks and metadata.
-    pub async fn finish(mut self) -> HummockResult<Vec<SplitTableOutput>> {
+    pub async fn finish(mut self) -> HummockResult<Vec<LocalSstableInfo>> {
+        use futures::future::try_join_all;
         self.seal_current().await?;
+        try_join_all(self.concurrent_upload_join_handle)
+            .await
+            .map_err(HummockError::sstable_upload_error)?;
         Ok(self.sst_outputs)
     }
 }
@@ -510,6 +530,7 @@ mod tests {
             Arc::new(CompactorMetrics::unused()),
             None,
             table_partition_vnode,
+            None,
         );
 
         let mut table_key = VirtualNode::from_index(0).to_be_bytes().to_vec();

@@ -729,6 +729,10 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::mem_table_spill_threshold")]
     pub mem_table_spill_threshold: usize,
 
+    /// The concurrent uploading number of SSTables of buidler
+    #[serde(default = "default::storage::compactor_concurrent_uploading_sst_count")]
+    pub compactor_concurrent_uploading_sst_count: Option<usize>,
+
     /// Object storage configuration
     /// 1. General configuration
     /// 2. Some special configuration of Backend
@@ -1479,6 +1483,10 @@ pub mod default {
 
         pub fn max_prefetch_block_number() -> usize {
             16
+        }
+
+        pub fn compactor_concurrent_uploading_sst_count() -> Option<usize> {
+            None
         }
     }
 
