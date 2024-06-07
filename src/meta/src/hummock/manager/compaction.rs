@@ -190,7 +190,16 @@ impl<'a> HummockVersionTransaction<'a> {
             version_delta.with_latest_version(|version, version_delta| {
                 for (table_id, info) in version.state_table_info.info() {
                     let new_safe_epoch = min(version_delta.safe_epoch, info.committed_epoch);
-                    if new_safe_epoch > version_delta.safe_epoch {
+                    if new_safe_epoch > info.safe_epoch {
+                        if new_safe_epoch != version_delta.safe_epoch {
+                            warn!(
+                                new_safe_epoch,
+                                committed_epoch = info.committed_epoch,
+                                global_safe_epoch = version_delta.safe_epoch,
+                                table_id = table_id.table_id,
+                                "table has different safe epoch to global"
+                            );
+                        }
                         version_delta.state_table_info_delta.insert(
                             *table_id,
                             StateTableInfoDelta {
