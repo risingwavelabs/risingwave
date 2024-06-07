@@ -205,10 +205,8 @@ impl HummockManager {
                                         let versioning_guard =
                                             hummock_manager.versioning.read().await;
 
-                                        let configs: std::collections::BTreeMap<
-                                            u64,
-                                            crate::hummock::model::CompactionGroup,
-                                        > = hummock_manager.get_compaction_group_map().await;
+                                        let configs =
+                                            hummock_manager.get_compaction_group_map().await;
                                         let versioning_deref = versioning_guard;
                                         (
                                             versioning_deref.current_version.clone(),
