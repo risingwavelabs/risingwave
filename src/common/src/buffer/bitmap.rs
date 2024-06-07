@@ -318,6 +318,11 @@ impl Bitmap {
         self.count_ones
     }
 
+    /// Returns true if any bit is set to 1.
+    pub fn any(&self) -> bool {
+        self.count_ones != 0
+    }
+
     /// Returns the length of vector to store `num_bits` bits.
     fn vec_len(num_bits: usize) -> usize {
         (num_bits + BITS - 1) / BITS

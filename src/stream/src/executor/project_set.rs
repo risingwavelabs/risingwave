@@ -26,6 +26,7 @@ use risingwave_pb::expr::project_set_select_item::PbSelectItem;
 use risingwave_pb::expr::PbProjectSetSelectItem;
 
 use crate::executor::prelude::*;
+use crate::task::ActorEvalErrorReport;
 
 const PROJ_ROW_ID_OFFSET: usize = 1;
 
@@ -48,6 +49,7 @@ struct Inner {
     watermark_derivations: MultiMap<usize, usize>,
     /// Indices of nondecreasing expressions in the expression list.
     nondecreasing_expr_indices: Vec<usize>,
+    error_report: ActorEvalErrorReport,
 }
 
 impl ProjectSetExecutor {
@@ -59,6 +61,7 @@ impl ProjectSetExecutor {
         chunk_size: usize,
         watermark_derivations: MultiMap<usize, usize>,
         nondecreasing_expr_indices: Vec<usize>,
+        error_report: ActorEvalErrorReport,
     ) -> Self {
         let inner = Inner {
             _ctx: ctx,
@@ -66,6 +69,7 @@ impl ProjectSetExecutor {
             chunk_size,
             watermark_derivations,
             nondecreasing_expr_indices,
+            error_report,
         };
 
         Self { input, inner }
@@ -155,11 +159,19 @@ impl Inner {
                             for (item, value) in results.iter_mut().zip_eq_fast(&mut row[1..]) {
                                 *value = match item {
                                     Either::Left(state) => {
-                                        if let Some((i, value)) = state.peek()
+                                        if let Some((i, result)) = state.peek()
                                             && i == row_idx
                                         {
-                                            valid = true;
-                                            value
+                                            match result {
+                                                Ok(value) => {
+                                                    valid = true;
+                                                    value
+                                                }
+                                                Err(err) => {
+                                                    self.error_report.report(err);
+                                                    None
+                                                }
+                                            }
                                         } else {
                                             None
                                         }
@@ -306,7 +318,6 @@ impl ProjectSetSelectItem {
     ) -> Result<Either<TableFunctionOutputIter<'a>, ArrayRef>, ExprError> {
         match self {
             Self::Scalar(expr) => Ok(Either::Right(expr.eval_infallible(input).await)),
-            // FIXME(runji): table function should also be evaluated non strictly
             Self::Set(tf) => Ok(Either::Left(
                 TableFunctionOutputIter::new(tf.eval(input).await).await?,
             )),
