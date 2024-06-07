@@ -188,16 +188,10 @@ impl Sink for MongodbSink {
     }
 
     async fn validate(&self) -> Result<()> {
-        if !self.is_append_only {
-            if self.pk_indices.is_empty() {
-                return Err(SinkError::Config(anyhow!(
-                "Primary key not defined for upsert mongodb sink (please define in `primary_key` field)")));
-            }
-            if self.pk_indices.len() != 1 {
-                return Err(SinkError::Config(anyhow!(
-                    "upsert mongodb sink requires exactly one primary field as the _id field"
-                )));
-            }
+        if !self.is_append_only && self.pk_indices.len() != 1 {
+            return Err(SinkError::Config(anyhow!(
+                "upsert mongodb sink requires exactly one primary key field as the _id field"
+            )));
         }
 
         if self.config.bulk_write_max_entries > MONGODB_BULK_WRITE_SIZE_LIMIT {
