@@ -123,15 +123,20 @@ pub struct Utf8ArrayBuilder {
 impl ArrayBuilder for Utf8ArrayBuilder {
     type ArrayType = Utf8Array;
 
-    fn new(capacity: usize) -> Self {
+    /// Creates a new `Utf8ArrayBuilder`.
+    ///
+    /// `item_capacity` is the number of items to pre-allocate. The size of the preallocated
+    /// buffer of offsets is the number of items plus one.
+    /// No additional memory is pre-allocated for the data buffer.
+    fn new(item_capacity: usize) -> Self {
         Self {
-            bytes: BytesArrayBuilder::new(capacity),
+            bytes: BytesArrayBuilder::new(item_capacity),
         }
     }
 
-    fn with_type(capacity: usize, ty: DataType) -> Self {
+    fn with_type(item_capacity: usize, ty: DataType) -> Self {
         assert_eq!(ty, DataType::Varchar);
-        Self::new(capacity)
+        Self::new(item_capacity)
     }
 
     #[inline]
