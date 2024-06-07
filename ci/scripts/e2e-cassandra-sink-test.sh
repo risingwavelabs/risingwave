@@ -33,7 +33,8 @@ tar xf ./risingwave-connector.tar.gz -C ./connector-node
 
 echo "--- starting risingwave cluster"
 risedev ci-start ci-sink-test
-sleep 1
+# Wait cassandra server to start
+sleep 40
 
 echo "--- create cassandra table"
 curl https://downloads.apache.org/cassandra/4.1.3/apache-cassandra-4.1.3-bin.tar.gz  --output apache-cassandra-4.1.3-bin.tar.gz
@@ -45,7 +46,6 @@ apt-get install -y libev4 libev-dev
 pip3 install --break-system-packages cassandra-driver
 
 cd apache-cassandra-4.1.3/bin
-sleep 30
 export CQLSH_HOST=cassandra-server
 export CQLSH_PORT=9042
 ./cqlsh --request-timeout=20 -e "CREATE KEYSPACE demo WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1};use demo;
