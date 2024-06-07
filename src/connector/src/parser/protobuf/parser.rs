@@ -579,7 +579,6 @@ pub(crate) fn resolve_pb_header(payload: &[u8]) -> ConnectorResult<&[u8]> {
 
 #[cfg(test)]
 mod test {
-    use std::collections::HashMap;
     use std::path::PathBuf;
 
     use prost::Message;
@@ -624,7 +623,7 @@ mod test {
             row_encode: PbEncodeType::Protobuf.into(),
             ..Default::default()
         };
-        let parser_config = SpecificParserConfig::new(&info, &HashMap::new())?;
+        let parser_config = SpecificParserConfig::new(&info, &Default::default())?;
         let conf = ProtobufParserConfig::new(parser_config.encoding_config).await?;
         let value = DynamicMessage::decode(conf.message_descriptor, PRE_GEN_PROTO_DATA).unwrap();
 
@@ -669,7 +668,7 @@ mod test {
             row_encode: PbEncodeType::Protobuf.into(),
             ..Default::default()
         };
-        let parser_config = SpecificParserConfig::new(&info, &HashMap::new())?;
+        let parser_config = SpecificParserConfig::new(&info, &Default::default())?;
         let conf = ProtobufParserConfig::new(parser_config.encoding_config).await?;
         let columns = conf.map_to_columns().unwrap();
 
@@ -718,7 +717,7 @@ mod test {
             row_encode: PbEncodeType::Protobuf.into(),
             ..Default::default()
         };
-        let parser_config = SpecificParserConfig::new(&info, &HashMap::new()).unwrap();
+        let parser_config = SpecificParserConfig::new(&info, &Default::default()).unwrap();
         let conf = ProtobufParserConfig::new(parser_config.encoding_config)
             .await
             .unwrap();
@@ -746,7 +745,7 @@ mod test {
             row_encode: PbEncodeType::Protobuf.into(),
             ..Default::default()
         };
-        let parser_config = SpecificParserConfig::new(&info, &HashMap::new()).unwrap();
+        let parser_config = SpecificParserConfig::new(&info, &Default::default()).unwrap();
 
         ProtobufParserConfig::new(parser_config.encoding_config)
             .await

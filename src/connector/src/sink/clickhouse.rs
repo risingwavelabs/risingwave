@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use core::fmt::Debug;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use anyhow::anyhow;
 use clickhouse::insert::Insert;
@@ -221,7 +221,7 @@ pub struct ClickHouseSink {
 }
 
 impl ClickHouseConfig {
-    pub fn from_hashmap(properties: HashMap<String, String>) -> Result<Self> {
+    pub fn from_btreemap(properties: BTreeMap<String, String>) -> Result<Self> {
         let config =
             serde_json::from_value::<ClickHouseConfig>(serde_json::to_value(properties).unwrap())
                 .map_err(|e| SinkError::Config(anyhow!(e)))?;
@@ -242,7 +242,7 @@ impl TryFrom<SinkParam> for ClickHouseSink {
 
     fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
         let schema = param.schema();
-        let config = ClickHouseConfig::from_hashmap(param.properties)?;
+        let config = ClickHouseConfig::from_btreemap(param.properties)?;
         Ok(Self {
             config,
             schema,

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use risingwave_common::catalog::{
     default_key_column_name_version_mapping, TableId, KAFKA_TIMESTAMP_COLUMN_NAME,
@@ -46,7 +46,7 @@ pub fn create_source_desc_builder(
     params: &ExecutorParams,
     source_info: PbStreamSourceInfo,
     row_id_index: Option<u32>,
-    with_properties: HashMap<String, String>,
+    with_properties: BTreeMap<String, String>,
 ) -> SourceDescBuilder {
     {
         // compatible code: introduced in https://github.com/risingwavelabs/risingwave/pull/13707
