@@ -1130,6 +1130,7 @@ impl SpecificParserConfig {
                 delimiter: info.csv_delimiter as u8,
                 has_header: info.csv_has_header,
             }),
+            (SourceFormat::Plain, SourceEncode::Parquet) => EncodingProperties::Parquet,
             (SourceFormat::Plain, SourceEncode::Avro)
             | (SourceFormat::Upsert, SourceEncode::Avro) => {
                 let mut config = AvroProperties {

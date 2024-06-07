@@ -307,6 +307,8 @@ impl<S: StateStore> FsSourceExecutor<S> {
             unreachable!("Partition and offset columns must be set.");
         };
 
+        println!("这里split_idx = {:?}, offset_idx=  {}", split_idx, offset_idx);
+
         // If the first barrier requires us to pause on startup, pause the stream.
         let start_with_paused = barrier.is_pause_on_startup();
 

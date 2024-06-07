@@ -93,6 +93,8 @@ impl<Src: OpendalSource> OpendalReader<Src> {
                 .into_future() // Unlike `rustc`, `try_stream` seems require manual `into_future`.
                 .await?;
             if let EncodingProperties::Parquet = &self.parser_config.specific.encoding_config {
+                println!("到parquet这里了");
+                println!("self.columns = {:?}", self.columns);
                 let record_batch_stream = Box::pin(
                     ParquetRecordBatchStreamBuilder::new(file_reader)
                         .await?
@@ -105,6 +107,8 @@ impl<Src: OpendalSource> OpendalReader<Src> {
                     let record_batch: RecordBatch = record_batch?;
                     let chunk: StreamChunk =
                         convert_record_batch_to_stream_chunk(record_batch, self.columns.clone())?;
+                    println!("这里chunk是{:?}", chunk);
+                    println!("这里data chunk是{:?} {:?}", chunk.data_chunk().column_at(0),  chunk.data_chunk().column_at(1));
                     self.source_ctx
                         .metrics
                         .partition_input_count
@@ -239,8 +243,10 @@ fn convert_record_batch_to_stream_chunk(
                     continue;
                 }
             }
-
-            return Ok(DataChunk::new(chunk_columns, record_batch.num_rows()).into());
+            println!("构建data chunk");
+            let data_chunk  =DataChunk::new(chunk_columns, record_batch.num_rows());
+            println!("构建stream chunk");
+            return Ok(data_chunk.into());
         }
         None => {
             let mut chunk_columns = Vec::with_capacity(record_batch.num_columns());

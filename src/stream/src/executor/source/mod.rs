@@ -66,6 +66,7 @@ pub fn get_split_offset_mapping_from_chunk(
     let mut split_offset_mapping = HashMap::new();
     // All rows (including those visible or invisible) will be used to update the source offset.
     for i in 0..chunk.capacity() {
+        println!("panic在chunk row at {:?}, chunk.capacity = {:?}", i, chunk.capacity());
         let (_, row, _) = chunk.row_at(i);
         let split_id = row.datum_at(split_idx).unwrap().into_utf8().into();
         let offset = row.datum_at(offset_idx).unwrap().into_utf8();
