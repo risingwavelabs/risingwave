@@ -21,8 +21,8 @@ use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use foyer::CacheContext;
 use futures::future::try_join_all;
-use futures::{Stream, StreamExt};
-use futures_async_stream::try_stream;
+use futures::{stream, Stream, StreamExt};
+use futures_async_stream::{for_await, try_stream};
 use itertools::{Either, Itertools};
 use risingwave_common::array::{DataChunk, Op};
 use risingwave_common::buffer::Bitmap;
@@ -718,25 +718,53 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         let iter = self
             .batch_iter_with_pk_bounds(epoch, pk_prefix, range_bounds, ordered, prefetch_options)
             .await?;
-
+        
         let mut data_chunk_builder = DataChunkBuilder::new(self.schema.data_types(), chunk_size);
-        iter.filter_map(|row| async move {
+        stream::unfold(data_chunk_builder, |builder| async move {
+            match iter.next().await {
+                Some(Ok(row)) => {
+                    if let Some(chunk) = builder.append_one_row(row.into_owned_row()) {
+                        Some((Ok(chunk), builder))
+                    } else {
+                        Some((Ok(builder.consume_all().unwrap()), builder))
+                    }
+                },
+                Some(Err(e)) => {
+
+                },
+                None => {
+
+                },
+            }
+
+        })
+
+        Ok(iter.filter_map(|row| async {
+            match iter.next().await {
+                Some(Ok(row)) => {
+
+                },
+                None => Non,
+            }
             match row {
                 Ok(row) => {
-                    data_chunk_builder.append_one_row(row.row);
-                    if data_chunk_builder.is_full() {
-                        let chunk = data_chunk_builder.finish();
-                        data_chunk_builder = DataChunkBuilder::new(self.schema.data_types(), chunk_size);
+                    if let let Some(chunk) = data_chunk_builder.append_one_row(row.into_owned_row()) {
                         Some(Ok(chunk))
                     } else {
                         None
                     }
                 },
                 Err(e) => {
-                    Some(e)
+                    Some(Err(e))
                 }
             }
-        })
+        }).chain(stream::once(async { 1 }).filter_map(|_| async move {
+            if let Some(chunk) = data_chunk_builder.consume_all() {
+                Some(Ok(chunk))
+            } else {
+                None
+            }
+        })))
     }
 
     // #[try_stream(boxed, ok = DataChunk, error = StorageError)]
