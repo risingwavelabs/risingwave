@@ -44,33 +44,36 @@ pub enum AccessError {
 pub type AccessResult<T = Datum> = std::result::Result<T, AccessError>;
 
 /// Access to a field in the data structure.
-///
-/// Only one of these two methods should be implemented. See documentation for more details.
 pub trait Access {
     /// Accesses `path` in the data structure (*parsed* Avro/JSON/Protobuf data),
     /// and then converts it to RisingWave `Datum`.
     /// `type_expected` might or might not be used during the conversion depending on the implementation.
+    ///
+    /// # Path
     ///
     /// We usually expect the data is a record (struct), and `path` represents field path.
     /// The data (or part of the data) represents the whole row (`Vec<Datum>`),
     /// and we use different `path` to access one column at a time.
     ///
     /// e.g., for Avro, we access `["col_name"]`; for Debezium Avro, we access `["before", "col_name"]`.
-    fn access(&self, path: &[&str], type_expected: &DataType) -> AccessResult<Datum> {
-        self.access_cow(path, type_expected)
-            .map(ToOwnedDatum::to_owned_datum)
-    }
-
-    /// Similar to `access`, but may return a borrowed [`DatumCow::Borrowed`] to avoid unnecessary allocation.
-    /// If not overridden, it will call forward to `access` and always wrap the result in [`DatumCow::Owned`].
     ///
-    /// This should be preferred over `access` for both callers and implementors.
-    // TODO: implement this method in all parsers and remove `access` method.
-    fn access_cow<'a>(
-        &'a self,
-        path: &[&str],
-        type_expected: &DataType,
-    ) -> AccessResult<DatumCow<'a>> {
-        self.access(path, type_expected).map(Into::into)
+    /// # Returns
+    ///
+    /// The implementation should prefer to return a borrowed [`DatumRef`](risingwave_common::types::DatumRef)
+    /// through [`DatumCow::Borrowed`] to avoid unnecessary allocation if possible, especially for fields
+    /// with string or bytes data. If that's not the case, it may return an owned [`Datum`] through
+    /// [`DatumCow::Owned`].
+    fn access<'a>(&'a self, path: &[&str], type_expected: &DataType) -> AccessResult<DatumCow<'a>>;
+}
+
+// Note: made an extension trait to disallow implementing or overriding `access_owned`.
+#[easy_ext::ext(AccessExt)]
+impl<A: Access> A {
+    /// Similar to `access`, but always returns an owned [`Datum`]. See [`Access::access`] for more details.
+    ///
+    /// Always prefer calling `access` directly if possible to avoid unnecessary allocation.
+    pub fn access_owned(&self, path: &[&str], type_expected: &DataType) -> AccessResult<Datum> {
+        self.access(path, type_expected)
+            .map(ToOwnedDatum::to_owned_datum)
     }
 }

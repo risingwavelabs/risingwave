@@ -96,7 +96,7 @@ impl UpsertParser {
         payload: Option<Vec<u8>>,
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> ConnectorResult<()> {
-        let mut row_op: KvEvent<AccessImpl<'_, '_>, AccessImpl<'_, '_>> = KvEvent::default();
+        let mut row_op: KvEvent<AccessImpl<'_>, AccessImpl<'_>> = KvEvent::default();
         if let Some(data) = key {
             row_op.with_key(self.key_builder.generate_accessor(data).await?);
         }

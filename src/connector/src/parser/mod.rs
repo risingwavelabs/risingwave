@@ -842,7 +842,7 @@ async fn into_chunk_stream_inner<P: ByteStreamSourceParser>(
 }
 
 pub trait AccessBuilder {
-    async fn generate_accessor(&mut self, payload: Vec<u8>) -> ConnectorResult<AccessImpl<'_, '_>>;
+    async fn generate_accessor(&mut self, payload: Vec<u8>) -> ConnectorResult<AccessImpl<'_>>;
 }
 
 #[derive(Debug)]
@@ -887,10 +887,7 @@ impl AccessBuilderImpl {
         Ok(accessor)
     }
 
-    pub async fn generate_accessor(
-        &mut self,
-        payload: Vec<u8>,
-    ) -> ConnectorResult<AccessImpl<'_, '_>> {
+    pub async fn generate_accessor(&mut self, payload: Vec<u8>) -> ConnectorResult<AccessImpl<'_>> {
         let accessor = match self {
             Self::Avro(builder) => builder.generate_accessor(payload).await?,
             Self::Protobuf(builder) => builder.generate_accessor(payload).await?,

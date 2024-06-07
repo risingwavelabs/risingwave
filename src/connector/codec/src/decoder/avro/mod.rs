@@ -25,7 +25,7 @@ use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::bail;
 use risingwave_common::log::LogSuppresser;
 use risingwave_common::types::{
-    DataType, Date, Interval, JsonbVal, ScalarImpl, Time, Timestamp, Timestamptz,
+    DataType, Date, DatumCow, Interval, JsonbVal, ScalarImpl, Time, Timestamp, Timestamptz,
 };
 use risingwave_common::util::iter_util::ZipEqFast;
 
@@ -266,23 +266,19 @@ impl<'a> AvroParseOptions<'a> {
     }
 }
 
-// TODO: No need to use two lifetimes here.
-pub struct AvroAccess<'a, 'b> {
+pub struct AvroAccess<'a> {
     value: &'a Value,
-    options: AvroParseOptions<'b>,
+    options: AvroParseOptions<'a>,
 }
 
-impl<'a, 'b> AvroAccess<'a, 'b> {
-    pub fn new(value: &'a Value, options: AvroParseOptions<'b>) -> Self {
+impl<'a> AvroAccess<'a> {
+    pub fn new(value: &'a Value, options: AvroParseOptions<'a>) -> Self {
         Self { value, options }
     }
 }
 
-impl<'a, 'b> Access for AvroAccess<'a, 'b>
-where
-    'a: 'b,
-{
-    fn access(&self, path: &[&str], type_expected: &DataType) -> AccessResult {
+impl Access for AvroAccess<'_> {
+    fn access<'a>(&'a self, path: &[&str], type_expected: &DataType) -> AccessResult<DatumCow<'a>> {
         let mut value = self.value;
         let mut options: AvroParseOptions<'_> = self.options.clone();
 
@@ -312,7 +308,10 @@ where
             Err(create_error())?;
         }
 
-        options.convert_to_datum(value, type_expected)
+        // TODO: may borrow the value directly
+        options
+            .convert_to_datum(value, type_expected)
+            .map(Into::into)
     }
 }
 

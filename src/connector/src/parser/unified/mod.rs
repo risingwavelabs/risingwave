@@ -36,36 +36,22 @@ pub mod maxwell;
 pub mod protobuf;
 pub mod util;
 
-pub enum AccessImpl<'a, 'b> {
-    Avro(AvroAccess<'a, 'b>),
+pub enum AccessImpl<'a> {
+    Avro(AvroAccess<'a>),
     Bytes(BytesAccess<'a>),
     Protobuf(ProtobufAccess),
     Json(JsonAccess<'a>),
     MongoJson(MongoJsonAccess<JsonAccess<'a>>),
 }
 
-impl Access for AccessImpl<'_, '_> {
-    fn access(&self, path: &[&str], type_expected: &DataType) -> AccessResult {
+impl Access for AccessImpl<'_> {
+    fn access<'a>(&'a self, path: &[&str], type_expected: &DataType) -> AccessResult<DatumCow<'a>> {
         match self {
             Self::Avro(accessor) => accessor.access(path, type_expected),
             Self::Bytes(accessor) => accessor.access(path, type_expected),
             Self::Protobuf(accessor) => accessor.access(path, type_expected),
             Self::Json(accessor) => accessor.access(path, type_expected),
             Self::MongoJson(accessor) => accessor.access(path, type_expected),
-        }
-    }
-
-    fn access_cow<'a>(
-        &'a self,
-        path: &[&str],
-        type_expected: &DataType,
-    ) -> AccessResult<DatumCow<'a>> {
-        match self {
-            Self::Avro(accessor) => accessor.access_cow(path, type_expected),
-            Self::Bytes(accessor) => accessor.access_cow(path, type_expected),
-            Self::Protobuf(accessor) => accessor.access_cow(path, type_expected),
-            Self::Json(accessor) => accessor.access_cow(path, type_expected),
-            Self::MongoJson(accessor) => accessor.access_cow(path, type_expected),
         }
     }
 }
@@ -82,8 +68,7 @@ pub trait ChangeEvent {
     /// Access the operation type.
     fn op(&self) -> AccessResult<ChangeEventOperation>;
     /// Access the field.
-    // TODO: return `DatumCow`
-    fn access_field(&self, desc: &SourceColumnDesc) -> AccessResult;
+    fn access_field(&self, desc: &SourceColumnDesc) -> AccessResult<DatumCow<'_>>;
 }
 
 impl<A> ChangeEvent for (ChangeEventOperation, A)
@@ -94,7 +79,7 @@ where
         Ok(self.0)
     }
 
-    fn access_field(&self, desc: &SourceColumnDesc) -> AccessResult {
+    fn access_field(&self, desc: &SourceColumnDesc) -> AccessResult<DatumCow<'_>> {
         self.1.access(&[desc.name.as_str()], &desc.data_type)
     }
 }

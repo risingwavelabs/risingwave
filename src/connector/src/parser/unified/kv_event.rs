@@ -56,7 +56,7 @@ where
 {
     fn access_key(&self, path: &[&str], type_expected: &DataType) -> AccessResult<DatumCow<'_>> {
         if let Some(ka) = &self.key_accessor {
-            ka.access_cow(path, type_expected)
+            ka.access(path, type_expected)
         } else {
             Err(AccessError::Undefined {
                 name: "key".to_string(),
@@ -67,7 +67,7 @@ where
 
     fn access_value(&self, path: &[&str], type_expected: &DataType) -> AccessResult<DatumCow<'_>> {
         if let Some(va) = &self.value_accessor {
-            va.access_cow(path, type_expected)
+            va.access(path, type_expected)
         } else {
             Err(AccessError::Undefined {
                 name: "value".to_string(),
