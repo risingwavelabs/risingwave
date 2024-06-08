@@ -50,3 +50,6 @@ tracing = "0.1"
 
 # [features]
 # hdfs-backend = ["opendal/services-hdfs"]
+
+[lints]
+workspace = true
