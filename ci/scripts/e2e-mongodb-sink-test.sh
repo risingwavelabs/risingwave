@@ -50,13 +50,19 @@ fi
 
 upsert_and_dynamic_coll_result1=$(mongo mongodb://mongodb:27017 --eval 'db.getSiblingDB("demo").t2.countDocuments({})' | tail -n 1)
 if [ "$upsert_and_dynamic_coll_result1" != "1" ]; then
-    echo "The append-only output is not as expected."
+    echo "The upsert output is not as expected."
     exit 1
 fi
 
 upsert_and_dynamic_coll_result2=$(mongo mongodb://mongodb:27017 --eval 'db.getSiblingDB("shard_2024_01").tenant_1.countDocuments({})' | tail -n 1)
 if [ "$upsert_and_dynamic_coll_result2" != "1" ]; then
-    echo "The append-only output is not as expected."
+    echo "The upsert output is not as expected."
+    exit 1
+fi
+
+compound_pk_result=$(mongo mongodb://mongodb:27017 --eval 'db.getSiblingDB("demo").t3.countDocuments({})' | tail -n 1)
+if [ "$compound_pk_result" != "1" ]; then
+    echo "The upsert output is not as expected."
     exit 1
 fi
 

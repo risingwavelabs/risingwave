@@ -60,6 +60,31 @@ statement ok
 insert into t2 values(2, '', 'data');
 
 statement ok
+create table t3(
+    a int,
+    b int,
+    value text,
+    primary key (a,b)
+);
+
+statement ok
+create sink t3_sink from t3
+with (
+    connector='mongodb',
+    type = 'upsert',
+    mongodb.url = 'mongodb://mongodb:27017/?replicaSet=rs0',
+    collection.name = 'demo.t3',
+    mongodb.bulk_write.max_entries = '1024',
+    primary_key='a,b'
+);
+
+statement ok
+delete from t3 where a = 1 and b = 2;
+
+statement ok
+insert into t3 values(1, 2, 'abc');
+
+statement ok
 FLUSH;
 
 statement ok
@@ -73,3 +98,9 @@ DROP SINK t2_sink;
 
 statement ok
 DROP TABLE t2;
+
+statement ok
+DROP SINK t3_sink;
+
+statement ok
+DROP TABLE t3;
