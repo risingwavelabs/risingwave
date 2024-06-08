@@ -534,7 +534,7 @@ impl UpsertCommandBuilder {
         }
     }
 
-    fn add_upsert<'a>(&mut self, pk: Document, row: Document) -> Result<()> {
+    fn add_upsert(&mut self, pk: Document, row: Document) -> Result<()> {
         let pk_data = mongodb::bson::to_vec(&pk)
             .map_err(|err| anyhow!(err).context("cannot serialize primary key"))?;
         // under same pk, if the record currently being upserted was marked for deletion previously, we should
@@ -561,14 +561,14 @@ impl UpsertCommandBuilder {
 
     fn build(self) -> (Option<Document>, Option<Document>) {
         let (mut upsert_document, mut delete_document) = (None, None);
-        if self.upserts.len() > 0 {
+        if !self.upserts.is_empty() {
             upsert_document = Some(doc! {
                 "update": self.coll.clone(),
                 "ordered": true,
                 "updates": self.upserts,
             });
         }
-        if self.deletes.len() > 0 {
+        if !self.deletes.is_empty() {
             let deletes = self
                 .deletes
                 .into_values()
@@ -806,22 +806,20 @@ impl MongodbPayloadWriter {
                 }
                 self.insert_builder = Some(insert_builder);
             }
-        } else {
-            if let Some(mut upsert_builder) = self.upsert_builder.take() {
-                for (ns, builder) in upsert_builder.drain() {
-                    let (upsert, delete) = builder.build();
-                    // we are sending the bulk upsert first because, under same pk, the `Insert` and `UpdateInsert`
-                    // should always appear before `Delete`. we have already ignored the `UpdateDelete`
-                    // which is useless in upsert mode.
-                    if upsert.is_some() {
-                        self.send_bulk_write_command(&ns.0, upsert.unwrap()).await?;
-                    }
-                    if delete.is_some() {
-                        self.send_bulk_write_command(&ns.0, delete.unwrap()).await?;
-                    }
+        } else if let Some(mut upsert_builder) = self.upsert_builder.take() {
+            for (ns, builder) in upsert_builder.drain() {
+                let (upsert, delete) = builder.build();
+                // we are sending the bulk upsert first because, under same pk, the `Insert` and `UpdateInsert`
+                // should always appear before `Delete`. we have already ignored the `UpdateDelete`
+                // which is useless in upsert mode.
+                if upsert.is_some() {
+                    self.send_bulk_write_command(&ns.0, upsert.unwrap()).await?;
                 }
-                self.upsert_builder = Some(upsert_builder);
+                if delete.is_some() {
+                    self.send_bulk_write_command(&ns.0, delete.unwrap()).await?;
+                }
             }
+            self.upsert_builder = Some(upsert_builder);
         }
 
         self.buffered_entries = 0;
