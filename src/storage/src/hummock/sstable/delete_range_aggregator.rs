@@ -25,33 +25,6 @@ use crate::hummock::iterator::{DeleteRangeIterator, ForwardMergeRangeIterator};
 use crate::hummock::sstable_store::TableHolder;
 use crate::hummock::{HummockResult, Sstable};
 
-pub struct SortedBoundary {
-    sequence: HummockEpoch,
-    user_key: UserKey<Vec<u8>>,
-}
-
-impl PartialEq<Self> for SortedBoundary {
-    fn eq(&self, other: &Self) -> bool {
-        self.user_key.eq(&other.user_key) && self.sequence == other.sequence
-    }
-}
-
-impl PartialOrd for SortedBoundary {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Eq for SortedBoundary {}
-
-impl Ord for SortedBoundary {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.user_key
-            .cmp(&other.user_key)
-            .then_with(|| other.sequence.cmp(&self.sequence))
-    }
-}
-
 pub struct CompactionDeleteRangeIterator {
     inner: ForwardMergeRangeIterator,
 }
