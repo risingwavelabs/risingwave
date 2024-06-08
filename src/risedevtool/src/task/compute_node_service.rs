@@ -55,9 +55,9 @@ impl ComputeNodeService {
             .arg("--async-stack-trace")
             .arg(&config.async_stack_trace)
             .arg("--parallelism")
-            .arg(&config.parallelism.to_string())
+            .arg(config.parallelism.to_string())
             .arg("--total-memory-bytes")
-            .arg(&config.total_memory_bytes.to_string())
+            .arg(config.total_memory_bytes.to_string())
             .arg("--role")
             .arg(&config.role);
 
