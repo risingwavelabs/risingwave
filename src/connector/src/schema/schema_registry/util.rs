@@ -150,7 +150,7 @@ pub struct Subject {
 #[derive(Debug, Deserialize)]
 pub struct SchemaReference {
     /// The name of the reference.
-    #[expect(dead_code)]
+    #[allow(dead_code)]
     pub name: String,
     /// The subject that the referenced schema belongs to
     pub subject: String,
