@@ -796,10 +796,10 @@ impl BlockFetcher {
                             Ok(block) => Some(Box::new(block)),
                             Err(e) => {
                                 tracing::error!(
-                                    "decode sst {} block {} data error: {:?}",
+                                    "decode sst {} block {} data error: {}",
                                     self.sst.id,
                                     blk,
-                                    e
+                                    e.as_report(),
                                 );
                                 None
                             }
