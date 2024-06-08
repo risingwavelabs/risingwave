@@ -118,7 +118,7 @@ sqllogictest -p 4566 -d dev './e2e_test/udf/graceful_shutdown_python.slt'
 # sqllogictest -p 4566 -d dev './e2e_test/udf/retry_python.slt'
 
 echo "--- e2e, $mode, external java udf"
-java -jar udf.jar &
+java --add-opens=java.base/java.nio=org.apache.arrow.memory.core,ALL-UNNAMED -jar udf.jar &
 sleep 1
 sqllogictest -p 4566 -d dev './e2e_test/udf/external_udf.slt'
 pkill java
