@@ -107,6 +107,7 @@ pub enum BindingCteState {
 pub struct RecursiveUnion {
     /// currently this *must* be true,
     /// otherwise binding will fail.
+    #[expect(dead_code)]
     pub all: bool,
     /// lhs part of the `UNION ALL` operator
     pub base: Box<BoundSetExpr>,

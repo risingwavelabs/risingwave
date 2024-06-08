@@ -441,7 +441,6 @@ impl HummockEventHandler {
             #[cfg(debug_assertions)]
             {
                 // check duplication on debug_mode
-                use std::collections::HashSet;
                 let mut id_set = HashSet::new();
                 for instance in instances {
                     assert!(id_set.insert(instance));

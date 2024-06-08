@@ -219,9 +219,9 @@ impl GlobalStreamManager {
     /// Create streaming job, it works as follows:
     ///
     /// 1. Broadcast the actor info based on the scheduling result in the context, build the hanging
-    /// channels in upstream worker nodes.
+    ///    channels in upstream worker nodes.
     /// 2. (optional) Get the split information of the `StreamSource` via source manager and patch
-    /// actors.
+    ///    actors.
     /// 3. Notify related worker nodes to update and build the actors.
     /// 4. Store related meta data.
     pub async fn create_streaming_job(
