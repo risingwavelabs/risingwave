@@ -2,7 +2,7 @@ control substitution on
 
 # test case need to cover all data types
 system ok
-mysql --protocol=tcp -u root -e "DROP DATABASE IF EXISTS mytest; CREATE DATABASE mytest;"
+mysql -e "DROP DATABASE IF EXISTS mytest; CREATE DATABASE mytest;"
 
 system ok
 mysql --protocol=tcp -u root mytest -e "
