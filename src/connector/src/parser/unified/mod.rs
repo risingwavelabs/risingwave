@@ -15,7 +15,7 @@
 //! Unified parsers for both normal events or CDC events of multiple message formats
 
 use auto_impl::auto_impl;
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, DatumCow};
 pub use risingwave_connector_codec::decoder::{
     bail_uncategorized, uncategorized, Access, AccessError, AccessResult,
 };
@@ -40,8 +40,8 @@ pub enum AccessImpl<'a, 'b> {
     Avro(AvroAccess<'a, 'b>),
     Bytes(BytesAccess<'a>),
     Protobuf(ProtobufAccess),
-    Json(JsonAccess<'a, 'b>),
-    MongoJson(MongoJsonAccess<JsonAccess<'a, 'b>>),
+    Json(JsonAccess<'a>),
+    MongoJson(MongoJsonAccess<JsonAccess<'a>>),
 }
 
 impl Access for AccessImpl<'_, '_> {
@@ -52,6 +52,20 @@ impl Access for AccessImpl<'_, '_> {
             Self::Protobuf(accessor) => accessor.access(path, type_expected),
             Self::Json(accessor) => accessor.access(path, type_expected),
             Self::MongoJson(accessor) => accessor.access(path, type_expected),
+        }
+    }
+
+    fn access_cow<'a>(
+        &'a self,
+        path: &[&str],
+        type_expected: &DataType,
+    ) -> AccessResult<DatumCow<'a>> {
+        match self {
+            Self::Avro(accessor) => accessor.access_cow(path, type_expected),
+            Self::Bytes(accessor) => accessor.access_cow(path, type_expected),
+            Self::Protobuf(accessor) => accessor.access_cow(path, type_expected),
+            Self::Json(accessor) => accessor.access_cow(path, type_expected),
+            Self::MongoJson(accessor) => accessor.access_cow(path, type_expected),
         }
     }
 }
@@ -68,6 +82,7 @@ pub trait ChangeEvent {
     /// Access the operation type.
     fn op(&self) -> AccessResult<ChangeEventOperation>;
     /// Access the field.
+    // TODO: return `DatumCow`
     fn access_field(&self, desc: &SourceColumnDesc) -> AccessResult;
 }
 

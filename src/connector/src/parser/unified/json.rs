@@ -22,7 +22,8 @@ use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::cast::{i64_to_timestamp, i64_to_timestamptz, str_to_bytea};
 use risingwave_common::log::LogSuppresser;
 use risingwave_common::types::{
-    DataType, Date, Decimal, Int256, Interval, JsonbVal, ScalarImpl, Time, Timestamp, Timestamptz,
+    DataType, Date, Datum, Decimal, Int256, Interval, JsonbVal, ScalarImpl, Time, Timestamp,
+    Timestamptz, ToOwnedDatum,
 };
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector_codec::decoder::utils::extract_decimal;
@@ -34,6 +35,7 @@ use thiserror_ext::AsReport;
 
 use super::{Access, AccessError, AccessResult};
 use crate::parser::common::json_object_get_case_insensitive;
+use crate::parser::DatumCow;
 use crate::schema::{bail_invalid_option_error, InvalidOptionError};
 
 #[derive(Clone, Debug)]
@@ -199,7 +201,11 @@ impl JsonParseOptions {
         }
     }
 
-    pub fn parse(&self, value: &BorrowedValue<'_>, type_expected: &DataType) -> AccessResult {
+    pub fn parse<'a>(
+        &self,
+        value: &'a BorrowedValue<'a>,
+        type_expected: &DataType,
+    ) -> AccessResult<DatumCow<'a>> {
         let create_error = || AccessError::TypeError {
             expected: format!("{:?}", type_expected),
             got: value.value_type().to_string(),
@@ -207,9 +213,9 @@ impl JsonParseOptions {
         };
 
         let v: ScalarImpl = match (type_expected, value.value_type()) {
-            (_, ValueType::Null) => return Ok(None),
+            (_, ValueType::Null) => return Ok(Datum::None.into()),
             // ---- Boolean -----
-            (DataType::Boolean , ValueType::Bool) => value.as_bool().unwrap().into(),
+            (DataType::Boolean, ValueType::Bool) => value.as_bool().unwrap().into(),
 
             (
                 DataType::Boolean,
@@ -423,7 +429,7 @@ impl JsonParseOptions {
                 .map_err(|_| create_error())?
                 .into(),
             // ---- Varchar -----
-            (DataType::Varchar , ValueType::String) => value.as_str().unwrap().into(),
+            (DataType::Varchar, ValueType::String) => return Ok(DatumCow::Borrowed(Some(value.as_str().unwrap().into()))),
             (
                 DataType::Varchar,
                 ValueType::Bool
@@ -533,7 +539,7 @@ impl JsonParseOptions {
                                 }
                                 &BorrowedValue::Static(simd_json::StaticNode::Null)
                             });
-                        self.parse(field_value, field_type)
+                        self.parse(field_value, field_type).map(|d| d.to_owned_datum())
                     })
                     .collect::<Result<_, _>>()?,
             )
@@ -549,7 +555,7 @@ impl JsonParseOptions {
                 let mut value = value.as_str().unwrap().as_bytes().to_vec();
                 let value =
                     simd_json::to_borrowed_value(&mut value[..]).map_err(|_| create_error())?;
-                return self.parse(&value, type_expected);
+                return self.parse(&value, type_expected).map(|d| d.to_owned_datum().into());
             }
 
             // ---- List -----
@@ -604,30 +610,31 @@ impl JsonParseOptions {
 
             (_expected, _got) => Err(create_error())?,
         };
-        Ok(Some(v))
+        Ok(DatumCow::Owned(Some(v)))
     }
 }
 
-pub struct JsonAccess<'a, 'b> {
-    value: BorrowedValue<'b>,
+pub struct JsonAccess<'a> {
+    value: BorrowedValue<'a>,
     options: &'a JsonParseOptions,
 }
 
-impl<'a, 'b> JsonAccess<'a, 'b> {
-    pub fn new_with_options(value: BorrowedValue<'b>, options: &'a JsonParseOptions) -> Self {
+impl<'a> JsonAccess<'a> {
+    pub fn new_with_options(value: BorrowedValue<'a>, options: &'a JsonParseOptions) -> Self {
         Self { value, options }
     }
 
-    pub fn new(value: BorrowedValue<'b>) -> Self {
+    pub fn new(value: BorrowedValue<'a>) -> Self {
         Self::new_with_options(value, &JsonParseOptions::DEFAULT)
     }
 }
 
-impl<'a, 'b> Access for JsonAccess<'a, 'b>
-where
-    'a: 'b,
-{
-    fn access(&self, path: &[&str], type_expected: &DataType) -> AccessResult {
+impl Access for JsonAccess<'_> {
+    fn access_cow<'a>(
+        &'a self,
+        path: &[&str],
+        type_expected: &DataType,
+    ) -> AccessResult<DatumCow<'a>> {
         let mut value = &self.value;
         for (idx, &key) in path.iter().enumerate() {
             if let Some(sub_value) = if self.options.ignoring_keycase {
