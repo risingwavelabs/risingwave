@@ -630,11 +630,7 @@ impl<'a> JsonAccess<'a> {
 }
 
 impl Access for JsonAccess<'_> {
-    fn access_cow<'a>(
-        &'a self,
-        path: &[&str],
-        type_expected: &DataType,
-    ) -> AccessResult<DatumCow<'a>> {
+    fn access<'a>(&'a self, path: &[&str], type_expected: &DataType) -> AccessResult<DatumCow<'a>> {
         let mut value = &self.value;
         for (idx, &key) in path.iter().enumerate() {
             if let Some(sub_value) = if self.options.ignoring_keycase {

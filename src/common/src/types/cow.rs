@@ -18,6 +18,19 @@ use super::{Datum, DatumRef, ToDatumRef, ToOwnedDatum};
 ///
 /// We do not use [`std::borrow::Cow`] because it requires the borrowed variant
 /// to be a reference, whereas what we have is a [`DatumRef`] with a lifetime.
+///
+/// # Usage
+///
+/// Generally, you don't need to match on the variants of `DatumCow` to access
+/// the underlying datum. Instead, you can...
+///
+/// - call [`to_datum_ref`](ToDatumRef::to_datum_ref) to get a borrowed
+///   [`DatumRef`] without any allocation, which can be used to append to an
+///   array builder or to encode into the storage representation,
+///
+/// - call [`to_owned_datum`](ToOwnedDatum::to_owned_datum) to get an owned
+///   [`Datum`] with potentially an allocation, which can be used to store in a
+///   struct without lifetime constraints.
 #[derive(Debug, Clone)]
 pub enum DatumCow<'a> {
     Borrowed(DatumRef<'a>),

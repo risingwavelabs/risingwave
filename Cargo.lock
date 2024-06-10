@@ -10675,6 +10675,7 @@ dependencies = [
  "anyhow",
  "apache-avro 0.16.0",
  "chrono",
+ "easy-ext",
  "itertools 0.12.1",
  "jsonbb",
  "num-bigint",
