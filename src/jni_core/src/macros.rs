@@ -904,7 +904,6 @@ mod tests {
                 tracingSlf4jEvent                        (Ljava/lang/String;Ljava/lang/String;ILjava/lang/String;)V,
                 tracingSlf4jEventEnabled                 (I)Z,
                 vnodeCount                               ()I,
-                iteratorNewHummock                       ([B)J,
                 iteratorNewStreamChunk                   (J)J,
                 iteratorNext                             (J)Z,
                 iteratorClose                            (J)V,
