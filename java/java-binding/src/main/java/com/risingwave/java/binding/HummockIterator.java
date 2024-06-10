@@ -20,8 +20,16 @@ public class HummockIterator implements AutoCloseable {
     private final long pointer;
     private boolean isClosed;
 
+    static {
+        Binding.ensureInitialized();
+    }
+
+    // hummock iterator method
+    // Return a pointer to the iterator
+    private static native long iteratorNewHummock(byte[] readPlan);
+
     public HummockIterator(ReadPlan readPlan) {
-        this.pointer = Binding.iteratorNewHummock(readPlan.toByteArray());
+        this.pointer = iteratorNewHummock(readPlan.toByteArray());
         this.isClosed = false;
     }
 

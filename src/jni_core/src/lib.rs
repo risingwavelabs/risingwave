@@ -18,7 +18,6 @@
 #![feature(type_alias_impl_trait)]
 #![feature(try_blocks)]
 
-pub mod hummock_iterator;
 pub mod jvm_runtime;
 mod macros;
 mod tracing_slf4j;
@@ -33,6 +32,8 @@ use anyhow::anyhow;
 use bytes::Bytes;
 use cfg_or_panic::cfg_or_panic;
 use chrono::{Datelike, NaiveDateTime, Timelike};
+use futures::stream::BoxStream;
+use futures::TryStreamExt;
 use jni::objects::{
     AutoElements, GlobalRef, JByteArray, JClass, JMethodID, JObject, JStaticMethodID, JString,
     JValueOwned, ReleaseMode,
@@ -54,17 +55,16 @@ use risingwave_pb::connector_service::{
     SinkWriterStreamRequest, SinkWriterStreamResponse,
 };
 use risingwave_pb::data::Op;
-use risingwave_storage::error::StorageError;
 use thiserror::Error;
 use thiserror_ext::AsReport;
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tracing_slf4j::*;
 
-use crate::hummock_iterator::HummockJavaBindingIterator;
-pub use crate::jvm_runtime::register_native_method_for_jvm;
+pub use paste::paste;
 
-static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| tokio::runtime::Runtime::new().unwrap());
+pub static JAVA_BINDING_ASYNC_RUNTIME: LazyLock<Runtime> =
+    LazyLock::new(|| tokio::runtime::Runtime::new().unwrap());
 
 #[derive(Error, Debug)]
 pub enum BindingError {
@@ -78,7 +78,7 @@ pub enum BindingError {
     #[error("StorageError {error}")]
     Storage {
         #[from]
-        error: StorageError,
+        error: anyhow::Error,
         backtrace: Backtrace,
     },
 
@@ -201,7 +201,7 @@ impl<'a> EnvParam<'a> {
     }
 }
 
-fn execute_and_catch<'env, F, Ret>(mut env: EnvParam<'env>, inner: F) -> Ret
+pub fn execute_and_catch<'env, F, Ret>(mut env: EnvParam<'env>, inner: F) -> Ret
 where
     F: FnOnce(&mut EnvParam<'env>) -> Result<Ret>,
     Ret: Default + 'env,
@@ -245,9 +245,10 @@ struct JavaClassMethodCache {
 }
 
 // TODO: may only return a RowRef
-type StreamChunkRowIterator<'a> = impl Iterator<Item = (Op, OwnedRow)> + 'a;
+pub type StreamChunkRowIterator<'a> = impl Iterator<Item = (Op, OwnedRow)> + 'a;
+pub type HummockJavaBindingIterator = BoxStream<'static, anyhow::Result<(Bytes, OwnedRow)>>;
 
-enum JavaBindingIteratorInner<'a> {
+pub enum JavaBindingIteratorInner<'a> {
     Hummock(HummockJavaBindingIterator),
     StreamChunk(StreamChunkRowIterator<'a>),
 }
@@ -288,10 +289,20 @@ struct RowCursor {
     extra: RowExtra,
 }
 
-struct JavaBindingIterator<'a> {
+pub struct JavaBindingIterator<'a> {
     inner: JavaBindingIteratorInner<'a>,
     cursor: Option<RowCursor>,
     class_cache: JavaClassMethodCache,
+}
+
+impl JavaBindingIterator<'static> {
+    pub fn new_hummock_iter(iter: HummockJavaBindingIterator) -> Self {
+        Self {
+            inner: JavaBindingIteratorInner::Hummock(iter),
+            cursor: None,
+            class_cache: Default::default(),
+        }
+    }
 }
 
 impl<'a> Deref for JavaBindingIterator<'a> {
@@ -309,24 +320,6 @@ impl<'a> Deref for JavaBindingIterator<'a> {
 #[no_mangle]
 extern "system" fn Java_com_risingwave_java_binding_Binding_vnodeCount(_env: EnvParam<'_>) -> jint {
     VirtualNode::COUNT as jint
-}
-
-#[cfg_or_panic(not(madsim))]
-#[no_mangle]
-extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorNewHummock<'a>(
-    env: EnvParam<'a>,
-    read_plan: JByteArray<'a>,
-) -> Pointer<'static, JavaBindingIterator<'static>> {
-    execute_and_catch(env, move |env| {
-        let read_plan = Message::decode(to_guarded_slice(&read_plan, env)?.deref())?;
-        let iter = RUNTIME.block_on(HummockJavaBindingIterator::new(read_plan))?;
-        let iter = JavaBindingIterator {
-            inner: JavaBindingIteratorInner::Hummock(iter),
-            cursor: None,
-            class_cache: Default::default(),
-        };
-        Ok(iter.into())
-    })
 }
 
 #[cfg_or_panic(not(madsim))]
@@ -355,16 +348,15 @@ extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorNext<'a>(
         let iter = pointer.as_mut();
         match &mut iter.inner {
             JavaBindingIteratorInner::Hummock(ref mut hummock_iter) => {
-                match RUNTIME.block_on(hummock_iter.next())? {
+                match JAVA_BINDING_ASYNC_RUNTIME.block_on(hummock_iter.try_next())? {
                     None => {
                         iter.cursor = None;
                         Ok(JNI_FALSE)
                     }
-                    Some(keyed_row) => {
-                        let (key, row) = keyed_row.into_parts();
+                    Some((key, row)) => {
                         iter.cursor = Some(RowCursor {
                             row,
-                            extra: RowExtra::Key(key.0),
+                            extra: RowExtra::Key(key),
                         });
                         Ok(JNI_TRUE)
                     }
