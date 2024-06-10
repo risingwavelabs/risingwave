@@ -1,0 +1,30 @@
+# Intentionally kept out of the main workspace to avoid polluting main Cargo.lock
+[workspace]
+
+[package]
+name = "risingwave_connector_codec_console"
+description = "GUI of codec"
+version = "0.1.0"
+edition = "2021"
+homepage = "https://github.com/risingwavelabs/risingwave"
+license = "Apache-2.0"
+repository = "https://github.com/risingwavelabs/risingwave"
+
+[package.metadata.cargo-machete]
+ignored = ["workspace-hack"]
+
+[package.metadata.cargo-udeps.ignore]
+normal = ["workspace-hack"]
+
+[dependencies]
+anyhow = "1"
+eframe = "0.27.2"
+egui_extras = { version = "0.27.2", features = ["syntect"] }
+itertools = "0.12"
+risingwave_connector_codec = { path = ".." }
+risingwave_pb = { path = "../../../prost" }
+thiserror-ext = "0"
+getrandom = { version = "0.2", features = ["js"] }
+
+[target.'cfg(not(madsim))'.dependencies]
+workspace-hack = { path = "../../../workspace-hack" }
