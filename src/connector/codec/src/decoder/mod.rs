@@ -61,7 +61,7 @@ pub trait Access {
             .map(ToOwnedDatum::to_owned_datum)
     }
 
-    /// Similar to `access`, but may return a borrowed [`DatumCow::Ref`] to avoid unnecessary allocation.
+    /// Similar to `access`, but may return a borrowed [`DatumCow::Borrowed`] to avoid unnecessary allocation.
     /// If not overridden, it will call forward to `access` and always wrap the result in [`DatumCow::Owned`].
     ///
     /// This should be preferred over `access` for both callers and implementors.

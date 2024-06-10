@@ -15,6 +15,9 @@
 use super::{Datum, DatumRef, ToDatumRef, ToOwnedDatum};
 
 /// 🐮 A borrowed [`DatumRef`] or an owned [`Datum`].
+///
+/// We do not use [`std::borrow::Cow`] because it requires the borrowed variant
+/// to be a reference, whereas what we have is a [`DatumRef`] with a lifetime.
 #[derive(Debug, Clone)]
 pub enum DatumCow<'a> {
     Borrowed(DatumRef<'a>),
