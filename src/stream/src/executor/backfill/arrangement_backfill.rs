@@ -113,28 +113,6 @@ where
         let vnodes = upstream_table.vnodes().clone();
         let mut rate_limit = self.rate_limit;
 
-        // These builders will build data chunks.
-        // We must supply them with the full datatypes which correspond to
-        // pk + output_indices.
-        let snapshot_data_types = self
-            .upstream
-            .schema()
-            .fields()
-            .iter()
-            .map(|field| field.data_type.clone())
-            .collect_vec();
-        let mut builders: Builders = upstream_table
-            .vnodes()
-            .iter_vnodes()
-            .map(|vnode| {
-                let builder =
-                    create_builder(rate_limit, self.chunk_size, snapshot_data_types.clone());
-                (vnode, builder)
-            })
-            .collect();
-
-        let mut upstream = self.upstream.execute();
-
         // Query the current barrier latency from meta.
         // Permit a 2x fluctuation in barrier latency. Set threshold to 15s.
         let mut total_barrier_latency = Self::get_total_barrier_latency(&self.metrics);
@@ -158,6 +136,28 @@ where
         if adaptive_rate_limit {
             rate_limit = Some(INITIAL_ADAPTIVE_RATE_LIMIT);
         }
+
+        // These builders will build data chunks.
+        // We must supply them with the full datatypes which correspond to
+        // pk + output_indices.
+        let snapshot_data_types = self
+            .upstream
+            .schema()
+            .fields()
+            .iter()
+            .map(|field| field.data_type.clone())
+            .collect_vec();
+        let mut builders: Builders = upstream_table
+            .vnodes()
+            .iter_vnodes()
+            .map(|vnode| {
+                let builder =
+                    create_builder(rate_limit, self.chunk_size, snapshot_data_types.clone());
+                (vnode, builder)
+            })
+            .collect();
+
+        let mut upstream = self.upstream.execute();
 
         // Poll the upstream to get the first barrier.
         let first_barrier = expect_first_barrier(&mut upstream).await?;
