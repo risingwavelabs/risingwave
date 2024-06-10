@@ -58,7 +58,7 @@ fn make_batch() -> Vec<SourceMessage> {
 
     generator
         .by_ref()
-        .take(1024)
+        .take(16384)
         .map(|(i, e)| {
             let payload = serde_json::to_vec(&e).unwrap();
             SourceMessage {
