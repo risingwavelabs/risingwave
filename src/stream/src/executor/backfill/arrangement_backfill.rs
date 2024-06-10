@@ -124,6 +124,17 @@ where
                 highest_barrier_latency * 2.0
             }
         };
+        let chunk_size_1 = {
+            use std::env;
+            let key = "CHUNK_SIZE_1";
+            match env::var(key) {
+                Ok(_val) => true,
+                Err(_) => false,
+            }
+        };
+        if chunk_size_1 {
+            self.chunk_size = 1;
+        }
         let adaptive_rate_limit = {
             use std::env;
             let key = "ADAPTIVE_RATE_LIMIT";
