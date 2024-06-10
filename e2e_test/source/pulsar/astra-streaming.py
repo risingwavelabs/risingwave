@@ -22,7 +22,7 @@ def do_test(config):
                     connector='pulsar',
                     topic='persistent://meetup/default/ci-test',
                     service.url='pulsar+ssl://pulsar-gcp-useast1.streaming.datastax.com:6651',
-                    auth.token='{config['ASTRA_STREAMING_TOKEN']}'
+                    auth.token='{os.environ["ASTRA_STREAMING_TEST_TOKEN"]}'
                     )
                     FORMAT PLAIN ENCODE JSON''')
     sleep(5)
@@ -39,6 +39,4 @@ def do_test(config):
 
 
 if __name__ == "__main__":
-    config = json.loads(os.environ["ASTRA_STREAMING_TEST_TOKEN"])
-
-    do_test(config)
+    do_test({})
