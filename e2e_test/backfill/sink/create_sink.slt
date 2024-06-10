@@ -7,9 +7,9 @@ create table t (v1 int);
 statement ok
 SET STREAMING_RATE_LIMIT = 1000;
 
-# Should finish in 10s
+# Should finish in 20s
 statement ok
-insert into t select * from generate_series(1, 10000);
+insert into t select * from generate_series(1, 20000);
 
 statement ok
 SET BACKGROUND_DDL=true;
