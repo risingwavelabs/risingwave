@@ -91,7 +91,10 @@ impl Client {
         }
 
         // `unwrap` as the builder is not affected by any input right now
-        let inner = reqwest::Client::builder().build().unwrap();
+        let inner = reqwest::Client::builder()
+            .danger_accept_invalid_certs(true)
+            .build()
+            .unwrap();
 
         Ok(Client {
             inner,
