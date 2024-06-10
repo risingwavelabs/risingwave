@@ -38,18 +38,6 @@ WITH (
 FORMAT UPSERT ENCODE AVRO (schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}');
 
 
-# TODO: Uncomment this when we add test data kafka key with format `"ID":id`
-# statement ok
-# CREATE TABLE upsert_avro_json (
-#   PRIMARY KEY("ID")
-# )
-# WITH (
-# connector = 'kafka',
-#  properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
-# topic = 'upsert_avro_json')
-# FORMAT UPSERT ENCODE AVRO (schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}');
-
-
 #######################
 # record_name_strategy
 #######################
@@ -145,20 +133,6 @@ delete id5 5 7778 7980 value10 8182 info10 2021-05-19T15:22:45.539Z 21474836.49 
 NULL id6 NULL NULL NULL NULL NULL NULL NULL -0.01 NULL (abcdefg) NULL
 NULL id7 NULL NULL NULL NULL NULL NULL NULL -0.01 NULL NULL 67e55044-10b1-426f-9247-bb680e5fe0c8
 
-# query II
-# SELECT
-#  *
-# FROM
-#  upsert_avro_json
-# ORDER BY
-#  "ID";
-# ----
-# update id1 -1 6768 6970 value9 7172 info9 2021-05-18T07:59:58.714Z
-# delete id2 2 7778 7980 value10 8182 info10 2021-05-19T15:22:45.539Z
-# delete id3 3 7778 7980 value10 8182 info10 2021-05-19T15:22:45.539Z
-# delete id5 5 7778 7980 value10 8182 info10 2021-05-19T15:22:45.539Z
-
-
 
 query II
 SELECT
@@ -198,9 +172,6 @@ NULL id7 NULL NULL NULL NULL NULL NULL NULL -0.01 NULL NULL 67e55044-10b1-426f-9
 
 statement ok
 DROP TABLE t_topic;
-
-# statement ok
-# DROP TABLE upsert_avro_json;
 
 statement ok
 DROP TABLE t_record_format_plain;

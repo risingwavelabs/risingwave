@@ -3674,7 +3674,7 @@ dependencies = [
 name = "delta_btree_map"
 version = "1.9.0-alpha"
 dependencies = [
- "educe 0.6.0",
+ "educe",
  "enum-as-inner 0.6.0",
 ]
 
@@ -4474,23 +4474,11 @@ dependencies = [
 
 [[package]]
 name = "educe"
-version = "0.4.23"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0f0042ff8246a363dbe77d2ceedb073339e85a804b9a47636c6e016a9a32c05f"
-dependencies = [
- "enum-ordinalize 3.1.13",
- "proc-macro2",
- "quote",
- "syn 1.0.109",
-]
-
-[[package]]
-name = "educe"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1d7bc049e1bd8cdeb31b68bbd586a9464ecf9f3944af3958a7a9d0f8b9799417"
 dependencies = [
- "enum-ordinalize 4.3.0",
+ "enum-ordinalize",
  "proc-macro2",
  "quote",
  "syn 2.0.57",
@@ -4620,19 +4608,6 @@ version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a1ab991c1362ac86c61ab6f556cff143daa22e5a15e4e189df818b2fd19fe65b"
 dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.57",
-]
-
-[[package]]
-name = "enum-ordinalize"
-version = "3.1.13"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e4f76552f53cefc9a7f64987c3701b99d982f7690606fd67de1d09712fbf52f1"
-dependencies = [
- "num-bigint",
- "num-traits",
  "proc-macro2",
  "quote",
  "syn 2.0.57",
@@ -5082,9 +5057,9 @@ dependencies = [
 
 [[package]]
 name = "foyer"
-version = "0.9.2"
+version = "0.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df2b044c2b62671f594be20a80e303578e6cb7747a60e47e581014edea18ae17"
+checksum = "c67848bfb834bf15396d3a308c44eda6de992c06ad72db53857363725f3dd870"
 dependencies = [
  "ahash 0.8.11",
  "anyhow",
@@ -5097,9 +5072,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-common"
-version = "0.7.2"
+version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9c251fd5d8832cfbdcaec8950558fd14c9fb44e27351a956297bdc3c219d1d37"
+checksum = "8a823da3228992cc6392ddac757e0ed44fa4923588b03fcbbba4bad1ebfea7b2"
 dependencies = [
  "bytes",
  "cfg-if",
@@ -5116,9 +5091,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-intrusive"
-version = "0.7.1"
+version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c92d09d2bafb1dbb1a0b27ee556f39bdf0ad86ee0e61cc2cf26739c7c8437bd1"
+checksum = "5168b34c3e6369a4c6055f08c6b37e416910652bfdd9a84de55a602f2aa3dcea"
 dependencies = [
  "foyer-common",
  "itertools 0.13.0",
@@ -5126,9 +5101,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-memory"
-version = "0.5.1"
+version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b8adaec26f9304026212ce6476fb69639c05eab7277982fb3fe7d83b1cf06194"
+checksum = "56055774fa6ed25d0affe30c04e6a3f18fc00713a42ef6a3dbd96e72fe31a3eb"
 dependencies = [
  "ahash 0.8.11",
  "bitflags 2.5.0",
@@ -5147,9 +5122,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-storage"
-version = "0.8.3"
+version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "412bc36c780928f233665ba1863bbe81f48362b736ec4ab6112af5e8defa2be3"
+checksum = "5874cb737c3a6f29c2b784e02094375a24ddb2ce743a28bf8d69c3c490711044"
 dependencies = [
  "ahash 0.8.11",
  "allocator-api2",
@@ -6890,17 +6865,6 @@ dependencies = [
 
 [[package]]
 name = "libtest-mimic"
-version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6d8de370f98a6cb8a4606618e53e802f93b094ddec0f96988eaec2c27e6e9ce7"
-dependencies = [
- "clap",
- "termcolor",
- "threadpool",
-]
-
-[[package]]
-name = "libtest-mimic"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f0f4c6f44ecfd52e8b443f2ad18f2b996540135771561283c2352ce56a1c70b"
@@ -7079,9 +7043,9 @@ dependencies = [
 
 [[package]]
 name = "madsim"
-version = "0.2.29"
+version = "0.2.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "288946d12a24c5ed887419a1dd296c9d533381c01efb68f239534ace8d35bfde"
+checksum = "f88753ddf8d3cd43b9cf71a93626dd9aad3c24086a04420beb31922e1f856d02"
 dependencies = [
  "ahash 0.8.11",
  "async-channel 2.2.1",
@@ -7184,9 +7148,9 @@ dependencies = [
 
 [[package]]
 name = "madsim-tokio"
-version = "0.2.27"
+version = "0.2.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f42620135423d9064b71aeca4908e7567eae2b9a0f0651fc1ba9d96a81dd619"
+checksum = "569929c869275edc1e2c1f1381a688a6e5a4200302b58caff819e07414ccddb9"
 dependencies = [
  "madsim",
  "spin 0.9.8",
@@ -8277,9 +8241,9 @@ checksum = "b15813163c1d831bf4a13c3610c05c0d03b39feb07f7e09fa234dac9b15aaf39"
 
 [[package]]
 name = "owo-colors"
-version = "3.5.0"
+version = "4.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c1b04fb49957986fdce4d6ee7a65027d55d4b6d2265e5848bbb507b58ccfdb6f"
+checksum = "caff54706df99d2a78a5a4e3455ff45448d81ef1bb63c22cd14052ca0e993a3f"
 
 [[package]]
 name = "p256"
@@ -9260,7 +9224,7 @@ checksum = "8bdf592881d821b83d471f8af290226c8d51402259e9bb5be7f9f8bdebbb11ac"
 dependencies = [
  "bytes",
  "heck 0.4.1",
- "itertools 0.11.0",
+ "itertools 0.10.5",
  "log",
  "multimap 0.8.3",
  "once_cell",
@@ -9294,7 +9258,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "265baba7fabd416cf5078179f7d2cbeca4ce7a9041111900675ea7c4cb8a4c32"
 dependencies = [
  "anyhow",
- "itertools 0.11.0",
+ "itertools 0.10.5",
  "proc-macro2",
  "quote",
  "syn 2.0.57",
@@ -10302,7 +10266,7 @@ dependencies = [
  "criterion",
  "darwin-libproc",
  "easy-ext",
- "educe 0.6.0",
+ "educe",
  "either",
  "enum-as-inner 0.6.0",
  "enumflags2",
@@ -10390,7 +10354,7 @@ name = "risingwave_common_estimate_size"
 version = "1.9.0-alpha"
 dependencies = [
  "bytes",
- "educe 0.6.0",
+ "educe",
  "ethnum",
  "fixedbitset 0.5.0",
  "jsonbb",
@@ -10838,7 +10802,7 @@ dependencies = [
  "const-currying",
  "downcast-rs",
  "easy-ext",
- "educe 0.6.0",
+ "educe",
  "either",
  "enum-as-inner 0.6.0",
  "expect-test",
@@ -10883,7 +10847,7 @@ dependencies = [
  "chrono",
  "chrono-tz 0.9.0",
  "criterion",
- "educe 0.6.0",
+ "educe",
  "expect-test",
  "fancy-regex",
  "futures-async-stream",
@@ -10950,7 +10914,7 @@ dependencies = [
  "downcast-rs",
  "dyn-clone",
  "easy-ext",
- "educe 0.6.0",
+ "educe",
  "either",
  "enum-as-inner 0.6.0",
  "expect-test",
@@ -11399,7 +11363,7 @@ dependencies = [
  "anyhow",
  "expect-test",
  "itertools 0.12.1",
- "libtest-mimic 0.7.0",
+ "libtest-mimic",
  "madsim-tokio",
  "paste",
  "risingwave_expr_impl",
@@ -11550,7 +11514,7 @@ dependencies = [
  "anyhow",
  "console",
  "itertools 0.12.1",
- "libtest-mimic 0.7.0",
+ "libtest-mimic",
  "madsim-tokio",
  "matches",
  "serde",
@@ -11573,7 +11537,7 @@ dependencies = [
  "clap",
  "expect-test",
  "itertools 0.12.1",
- "libtest-mimic 0.7.0",
+ "libtest-mimic",
  "madsim-tokio",
  "rand",
  "rand_chacha",
@@ -11699,7 +11663,7 @@ dependencies = [
  "cfg-if",
  "criterion",
  "delta_btree_map",
- "educe 0.6.0",
+ "educe",
  "either",
  "enum-as-inner 0.6.0",
  "expect-test",
@@ -13289,18 +13253,18 @@ dependencies = [
 
 [[package]]
 name = "sqllogictest"
-version = "0.20.1"
+version = "0.20.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7e7c6a33098cd55e4fead1bd1f85c1d2064f02bafdb9fe004ca39fd94aee36e6"
+checksum = "f20de090b0fde4dcd53b330e7ad2772140304eb34f5e9a99c8963fc4c052f149"
 dependencies = [
  "async-trait",
- "educe 0.4.23",
+ "educe",
  "fs-err",
  "futures",
  "glob",
  "humantime",
- "itertools 0.11.0",
- "libtest-mimic 0.6.1",
+ "itertools 0.13.0",
+ "libtest-mimic",
  "md-5",
  "owo-colors",
  "regex",

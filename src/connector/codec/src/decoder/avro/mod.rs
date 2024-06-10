@@ -266,6 +266,7 @@ impl<'a> AvroParseOptions<'a> {
     }
 }
 
+// TODO: No need to use two lifetimes here.
 pub struct AvroAccess<'a, 'b> {
     value: &'a Value,
     options: AvroParseOptions<'b>,

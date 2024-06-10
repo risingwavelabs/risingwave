@@ -396,23 +396,21 @@ impl<S: StateStore> SourceExecutor<S> {
         };
 
         let mut boot_state = Vec::default();
-        if let Some(mutation) = barrier.mutation.as_deref() {
-            match mutation {
-                Mutation::Add(AddMutation { splits, .. })
-                | Mutation::Update(UpdateMutation {
-                    actor_splits: splits,
-                    ..
-                }) => {
-                    if let Some(splits) = splits.get(&self.actor_ctx.id) {
-                        tracing::debug!(
-                            "source exector: actor {:?} boot with splits: {:?}",
-                            self.actor_ctx.id,
-                            splits
-                        );
-                        boot_state.clone_from(splits);
-                    }
-                }
-                _ => {}
+        if let Some(
+            Mutation::Add(AddMutation { splits, .. })
+            | Mutation::Update(UpdateMutation {
+                actor_splits: splits,
+                ..
+            }),
+        ) = barrier.mutation.as_deref()
+        {
+            if let Some(splits) = splits.get(&self.actor_ctx.id) {
+                tracing::debug!(
+                    "source exector: actor {:?} boot with splits: {:?}",
+                    self.actor_ctx.id,
+                    splits
+                );
+                boot_state.clone_from(splits);
             }
         }
 

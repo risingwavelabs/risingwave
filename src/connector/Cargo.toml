@@ -129,7 +129,7 @@ serde = { version = "1", features = ["derive", "rc"] }
 serde_derive = "1"
 serde_json = "1"
 serde_with = { version = "3", features = ["json"] }
-simd-json = "0.13.3"
+simd-json = { version = "0.13.3", features = ["hints"] }
 sqlx = { workspace = true }
 strum = "0.26"
 strum_macros = "0.26"
