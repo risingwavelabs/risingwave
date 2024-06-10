@@ -29,7 +29,7 @@ hyper-tls = "0.5.0"
 itertools = { workspace = true }
 madsim = "0.2.27"
 # opendal = { version = "0.46", features = [
-opendal = { git = "https://github.com/apache/opendal", rev = "2034a266b8560054b28ad1417c92d7f1f0772bfb", features = [
+opendal = { git = "https://github.com/apache/opendal", rev = "babbfe227f5a8287b113a02874e6931769659ad2", features = [
     "executors-tokio",
     "services-azblob",
     "services-fs",
