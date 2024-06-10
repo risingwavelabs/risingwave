@@ -128,7 +128,7 @@ where
             use std::env;
             let key = "ADAPTIVE_RATE_LIMIT";
             match env::var(key) {
-                Ok(val) => true,
+                Ok(_val) => true,
                 Err(_) => false,
             }
         };
@@ -666,7 +666,7 @@ where
             *highest_barrier_latency = 0.0;
             Some(INITIAL_ADAPTIVE_RATE_LIMIT)
         } else if *highest_barrier_latency > threshold_barrier_latency
-            && let Some(rate_limit_set) = rate_limit
+            && rate_limit.is_some()
         {
             tracing::debug!(
                 target: "adaptive_rate_limit",
@@ -684,7 +684,6 @@ where
             *rate_limit
         };
         *total_barrier_latency = new_total_barrier_latency;
-        *highest_barrier_latency = new_barrier_latency;
         if *rate_limit != new_rate_limit
             && let Some(rate_limit_setting) = new_rate_limit
         {
