@@ -111,12 +111,12 @@ impl Compactor {
 /// `CompactTaskAssignment`.
 ///
 /// A compact task can be in one of these states:
-/// - 1. Success: an assigned task is reported as success via `CompactStatus::report_compact_task`.
-///   It's the final state.
-/// - 2. Failed: an Failed task is reported as success via `CompactStatus::report_compact_task`.
-///   It's the final state.
-/// - 3. Cancelled: a task is reported as cancelled via `CompactStatus::report_compact_task`. It's
-///   the final state.
+/// 1. Success: an assigned task is reported as success via `CompactStatus::report_compact_task`.
+///    It's the final state.
+/// 2. Failed: an Failed task is reported as success via `CompactStatus::report_compact_task`.
+///    It's the final state.
+/// 3. Cancelled: a task is reported as cancelled via `CompactStatus::report_compact_task`. It's
+///    the final state.
 pub struct CompactorManagerInner {
     pub task_expired_seconds: u64,
     pub heartbeat_expired_seconds: u64,
