@@ -388,6 +388,7 @@ where
                         .as_ref()
                         .map(|r| r.check().is_ok())
                         .unwrap_or(true);
+                    let rate_limit_ready = false;
                     if !has_snapshot_read && !paused && rate_limit_ready {
                         debug_assert!(builders.values().all(|b| b.is_empty()));
                         let (_, snapshot) = backfill_stream.into_inner();
