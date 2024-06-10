@@ -15,12 +15,7 @@ normal = ["workspace-hack"]
 
 [dependencies]
 anyhow = "1"
-apache-avro = { git = "https://github.com/risingwavelabs/avro", rev = "25113ba88234a9ae23296e981d8302c290fdaa4b", features = [
-    "snappy",
-    "zstandard",
-    "bzip",
-    "xz",
-] }
+apache-avro = { workspace = true }
 arrow-array = { workspace = true }
 arrow-array-iceberg = { workspace = true }
 arrow-row = { workspace = true }
@@ -66,7 +61,10 @@ gcp-bigquery-client = "0.18.0"
 glob = "0.3"
 google-cloud-bigquery = { version = "0.9.0", features = ["auth"] }
 google-cloud-gax = "0.17.0"
-google-cloud-googleapis = { version = "0.13", features = ["pubsub", "bigquery"] }
+google-cloud-googleapis = { version = "0.13", features = [
+    "pubsub",
+    "bigquery",
+] }
 google-cloud-pubsub = "0.25"
 http = "0.2"
 # TODO: remove this once the opendal version is updated to 0.47
@@ -77,7 +75,6 @@ itertools = { workspace = true }
 jni = { version = "0.21.1", features = ["invocation"] }
 jsonbb = { workspace = true }
 jsonwebtoken = "9.2.0"
-jst = { package = 'jsonschema-transpiler', git = "https://github.com/mozilla/jsonschema-transpiler", rev = "c1a89d720d118843d8bcca51084deb0ed223e4b4" }
 maplit = "1.0.2"
 moka = { version = "0.12", features = ["future"] }
 mongodb = { version = "2.8.2", features = ["tokio-runtime"] }
@@ -113,7 +110,12 @@ rdkafka = { workspace = true, features = [
     "gssapi",
     "zstd",
 ] }
-redis = { version = "0.25", features = ["aio", "tokio-comp", "async-std-comp","cluster-async"] }
+redis = { version = "0.25", features = [
+    "aio",
+    "tokio-comp",
+    "async-std-comp",
+    "cluster-async",
+] }
 regex = "1.4"
 reqwest = { version = "0.12.2", features = ["json", "stream"] }
 risingwave_common = { workspace = true }
@@ -129,7 +131,11 @@ rustls-native-certs = "0.7"
 rustls-pemfile = "2"
 rustls-pki-types = "1"
 rw_futures_util = { workspace = true }
-sea-schema = { version = "0.14", features = ["default", "sqlx-postgres", "sqlx-mysql"] }
+sea-schema = { version = "0.14", features = [
+    "default",
+    "sqlx-postgres",
+    "sqlx-mysql",
+] }
 serde = { version = "1", features = ["derive", "rc"] }
 serde_derive = "1"
 serde_json = "1"
@@ -141,7 +147,14 @@ strum_macros = "0.26"
 tempfile = "3"
 thiserror = "1"
 thiserror-ext = { workspace = true }
-tiberius = { version = "0.12", default-features = false, features = ["chrono", "time", "tds73", "rust_decimal", "bigdecimal", "rustls"] }
+tiberius = { version = "0.12", default-features = false, features = [
+    "chrono",
+    "time",
+    "tds73",
+    "rust_decimal",
+    "bigdecimal",
+    "rustls",
+] }
 time = "0.3.30"
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
