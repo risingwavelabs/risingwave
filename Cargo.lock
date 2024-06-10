@@ -7894,8 +7894,9 @@ dependencies = [
 
 [[package]]
 name = "opendal"
-version = "0.46.0"
-source = "git+https://github.com/apache/opendal?rev=2034a266b8560054b28ad1417c92d7f1f0772bfb#2034a266b8560054b28ad1417c92d7f1f0772bfb"
+version = "0.47.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c3ba698f2258bebdf7a3a38862bb6ef1f96d351627002686dacc228f805bdd6"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -7913,7 +7914,7 @@ dependencies = [
  "once_cell",
  "percent-encoding",
  "quick-xml 0.31.0",
- "reqsign 0.15.0",
+ "reqsign 0.15.2",
  "reqwest 0.12.2",
  "serde",
  "serde_json",
@@ -9788,9 +9789,9 @@ dependencies = [
 
 [[package]]
 name = "reqsign"
-version = "0.15.0"
+version = "0.15.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "01edce6b6c31a16ebc7525ac58c747a6d78bbce33e76bbebd350d6bc25b23e06"
+checksum = "70fe66d4cd0b5ed9b1abbfe639bf6baeaaf509f7da2d51b31111ba945be59286"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -11282,7 +11283,7 @@ dependencies = [
  "madsim",
  "madsim-aws-sdk-s3",
  "madsim-tokio",
- "opendal 0.46.0",
+ "opendal 0.47.0",
  "prometheus",
  "reqwest 0.12.2",
  "risingwave_common",
