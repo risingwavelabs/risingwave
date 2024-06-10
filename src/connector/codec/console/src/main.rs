@@ -105,11 +105,37 @@ fn main() -> Result<(), eframe::Error> {
                 );
             });
 
+            let mut clicked = false;
             ui.vertical(|ui| {
                 ui.label(RichText::new("Encoding:").strong());
-                ui.radio_value(&mut encoding, Encoding::Avro, "Apache Avro");
-                ui.radio_value(&mut encoding, Encoding::Json, "JSON Schema");
+                if ui
+                    .radio_value(&mut encoding, Encoding::Avro, "Apache Avro")
+                    .clicked()
+                {
+                    clicked = true;
+                }
+                if ui
+                    .radio_value(&mut encoding, Encoding::Json, "JSON Schema")
+                    .clicked()
+                {
+                    clicked = true;
+                }
             });
+            // change the default schema, but only when it's not edited by user
+            if clicked {
+                match encoding {
+                    Encoding::Avro => {
+                        if input_editor.code == SAMPLE_JSON_SCHEMA || input_editor.code.is_empty() {
+                            input_editor.code = SAMPLE_AVRO_SCHEMA.to_string();
+                        }
+                    }
+                    Encoding::Json => {
+                        if input_editor.code == SAMPLE_AVRO_SCHEMA || input_editor.code.is_empty() {
+                            input_editor.code = SAMPLE_JSON_SCHEMA.to_string();
+                        }
+                    }
+                }
+            }
 
             ui.collapsing("Code Editor Theme", |ui| {
                 ui.group(|ui| {
@@ -341,3 +367,59 @@ const SAMPLE_AVRO_SCHEMA: &'static str = r#"{
     ]
   }
 "#;
+
+const SAMPLE_JSON_SCHEMA: &'static str = r#"{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://example.com/product.schema.json",
+    "title": "Product",
+    "description": "A product from Acme's catalog",
+    "type": "object",
+    "properties": {
+        "id": {
+            "description": "The unique identifier for a product",
+            "type": "integer"
+        },
+        "productName": {
+            "description": "Name of the product",
+            "type": "string"
+        },
+        "price": {
+            "description": "The price of the product",
+            "type": "number",
+            "exclusiveMinimum": 0
+        },
+        "tags": {
+            "description": "Tags for the product",
+            "type": "array",
+            "items": {
+                "type": "string"
+            },
+            "minItems": 1,
+            "uniqueItems": true
+        },
+        "dimensions": {
+            "type": "object",
+            "properties": {
+                "length": {
+                    "type": "number"
+                },
+                "width": {
+                    "type": "number"
+                },
+                "height": {
+                    "type": "number"
+                }
+            },
+            "required": [
+                "length",
+                "width",
+                "height"
+            ]
+        }
+    },
+    "required": [
+        "id",
+        "productName",
+        "price"
+    ]
+}"#;

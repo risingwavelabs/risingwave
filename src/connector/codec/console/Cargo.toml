@@ -18,9 +18,9 @@ normal = ["workspace-hack"]
 
 [dependencies]
 anyhow = "1"
-eframe = "0.27.2"
-egui_extras = { version = "0.27.2", features = ["syntect"] }
-itertools = "0.12"
+eframe = "0.28.0"
+egui_extras = { version = "0.28.0", features = ["syntect"] }
+itertools = "0.13"
 risingwave_connector_codec = { path = ".." }
 risingwave_pb = { path = "../../../prost" }
 thiserror-ext = "0"
