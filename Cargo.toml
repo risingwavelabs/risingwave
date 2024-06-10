@@ -266,9 +266,6 @@ redundant_explicit_links = "allow"
 [profile.dev]
 lto = 'off'
 
-[profile.bench]
-lto = 'off'
-
 [profile.release]
 debug = "full"
 split-debuginfo = "packed"
