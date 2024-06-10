@@ -1219,12 +1219,12 @@ mod tests {
             ];
 
             let ord_key_1 = StateKey {
-                order_key: memcmp_encoding::encode_value(&Some(ScalarImpl::Int64(1)), order_type)
+                order_key: memcmp_encoding::encode_value(Some(ScalarImpl::Int64(1)), order_type)
                     .unwrap(),
                 pk: OwnedRow::empty().into(),
             };
             let ord_key_2 = StateKey {
-                order_key: memcmp_encoding::encode_value(&Some(ScalarImpl::Int64(3)), order_type)
+                order_key: memcmp_encoding::encode_value(Some(ScalarImpl::Int64(3)), order_type)
                     .unwrap(),
                 pk: OwnedRow::empty().into(),
             };
@@ -1261,7 +1261,7 @@ mod tests {
 
             let ord_key_1 = StateKey {
                 order_key: memcmp_encoding::encode_value(
-                    &Some(ScalarImpl::Timestamp(
+                    Some(ScalarImpl::Timestamp(
                         "2024-01-28 00:30:00".parse().unwrap(),
                     )),
                     order_type,
@@ -1271,7 +1271,7 @@ mod tests {
             };
             let ord_key_2 = StateKey {
                 order_key: memcmp_encoding::encode_value(
-                    &Some(ScalarImpl::Timestamp(
+                    Some(ScalarImpl::Timestamp(
                         "2024-01-26 15:47:00".parse().unwrap(),
                     )),
                     order_type,
