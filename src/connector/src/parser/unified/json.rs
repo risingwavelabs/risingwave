@@ -431,7 +431,9 @@ impl JsonParseOptions {
                 .map_err(|_| create_error())?
                 .into(),
             // ---- Varchar -----
-            (DataType::Varchar, ValueType::String) => return Ok(DatumCow::Borrowed(Some(value.as_str().unwrap().into()))),
+            (DataType::Varchar, ValueType::String) => {
+                return Ok(DatumCow::Borrowed(Some(value.as_str().unwrap().into())))
+            }
             (
                 DataType::Varchar,
                 ValueType::Bool
@@ -546,7 +548,10 @@ impl JsonParseOptions {
                                 }
                                 &BorrowedValue::Static(simd_json::StaticNode::Null)
                             });
-                    fields.push(self.parse(field_value, field_type).map(|d| d.to_owned_datum())?);
+                    fields.push(
+                        self.parse(field_value, field_type)
+                            .map(|d| d.to_owned_datum())?,
+                    );
                 }
                 StructValue::new(fields).into()
             }
@@ -560,7 +565,9 @@ impl JsonParseOptions {
                 let mut value = value.as_str().unwrap().as_bytes().to_vec();
                 let value =
                     simd_json::to_borrowed_value(&mut value[..]).map_err(|_| create_error())?;
-                return self.parse(&value, type_expected).map(|d| d.to_owned_datum().into());
+                return self
+                    .parse(&value, type_expected)
+                    .map(|d| d.to_owned_datum().into());
             }
 
             // ---- List -----
