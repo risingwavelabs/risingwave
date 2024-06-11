@@ -643,7 +643,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
             .iter_with_pk_bounds(epoch, pk_prefix, range_bounds, ordered, prefetch_options)
             .await?;
 
-        // Uses ArraryBuilderImpl instead of DataChunkBuilder here to demonstrate how to build chunk in a columnar manner
+        // Uses ArrayBuilderImpl instead of DataChunkBuilder here to demonstrate how to build chunk in a columnar manner
         let builders = self.schema.create_array_builders(chunk_size);
         let row_count = 0;
         Ok(stream::unfold(
