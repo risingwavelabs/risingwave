@@ -46,7 +46,7 @@ pub struct ProtobufAccessBuilder {
 
 impl AccessBuilder for ProtobufAccessBuilder {
     #[allow(clippy::unused_async)]
-    async fn generate_accessor(&mut self, payload: Vec<u8>) -> ConnectorResult<AccessImpl<'_, '_>> {
+    async fn generate_accessor(&mut self, payload: Vec<u8>) -> ConnectorResult<AccessImpl<'_>> {
         let payload = if self.confluent_wire_type {
             resolve_pb_header(&payload)?
         } else {
@@ -583,6 +583,7 @@ mod test {
 
     use prost::Message;
     use risingwave_common::types::StructType;
+    use risingwave_connector_codec::decoder::AccessExt;
     use risingwave_pb::catalog::StreamSourceInfo;
     use risingwave_pb::data::data_type::PbTypeName;
     use risingwave_pb::plan_common::{PbEncodeType, PbFormatType};
@@ -591,7 +592,6 @@ mod test {
     use super::*;
     use crate::parser::protobuf::recursive::all_types::{EnumType, ExampleOneof, NestedMessage};
     use crate::parser::protobuf::recursive::AllTypes;
-    use crate::parser::unified::Access;
     use crate::parser::SpecificParserConfig;
 
     fn schema_dir() -> String {
@@ -896,7 +896,7 @@ mod test {
 
     fn pb_eq(a: &ProtobufAccess, field_name: &str, value: ScalarImpl) {
         let dummy_type = DataType::Varchar;
-        let d = a.access(&[field_name], &dummy_type).unwrap().unwrap();
+        let d = a.access_owned(&[field_name], &dummy_type).unwrap().unwrap();
         assert_eq!(d, value, "field: {} value: {:?}", field_name, d);
     }
 

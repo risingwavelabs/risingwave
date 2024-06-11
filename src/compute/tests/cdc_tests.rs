@@ -33,8 +33,9 @@ use risingwave_common::types::{Datum, JsonbVal};
 use risingwave_common::util::epoch::{test_epoch, EpochExt};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_connector::source::cdc::external::mock_external_table::MockExternalTableReader;
+use risingwave_connector::source::cdc::external::mysql::MySqlOffset;
 use risingwave_connector::source::cdc::external::{
-    DebeziumOffset, DebeziumSourceOffset, ExternalTableReaderImpl, MySqlOffset, SchemaTableName,
+    DebeziumOffset, DebeziumSourceOffset, ExternalTableReaderImpl, SchemaTableName,
 };
 use risingwave_connector::source::cdc::DebeziumCdcSplit;
 use risingwave_connector::source::SplitImpl;

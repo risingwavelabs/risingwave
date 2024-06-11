@@ -192,7 +192,7 @@ pub struct MetaOpts {
     /// The Dashboard service uses this in the following ways:
     /// 1. Query Prometheus for relevant metrics to find Stream Graph Bottleneck, and display it.
     /// 2. Provide cluster diagnostics, at `/api/monitor/diagnose` to troubleshoot cluster.
-    /// These are just examples which show how the Meta Dashboard Service queries Prometheus.
+    ///    These are just examples which show how the Meta Dashboard Service queries Prometheus.
     pub prometheus_endpoint: Option<String>,
 
     /// The additional selector used when querying Prometheus.
@@ -251,7 +251,7 @@ pub struct MetaOpts {
     /// When `hybrid_partition_vnode_count` > 0, in hybrid compaction group
     /// - Tables with high write throughput will be split at vnode granularity
     /// - Tables with high size tables will be split by table granularity
-    /// When `hybrid_partition_vnode_count` = 0,no longer be special alignment operations for the hybird compaction group
+    ///   When `hybrid_partition_vnode_count` = 0,no longer be special alignment operations for the hybird compaction group
     pub hybrid_partition_node_count: u32,
 
     pub event_log_enabled: bool,
