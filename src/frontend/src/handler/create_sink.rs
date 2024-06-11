@@ -663,7 +663,30 @@ pub(crate) async fn reparse_table_for_sink(
     Ok((graph, table, source))
 }
 
-pub(crate) fn insert_merger_to_union(node: &mut StreamNode, project_node: &PbNodeBody) {
+pub(crate) fn insert_merger_to_union(node: &mut StreamNode) {
+    if let Some(NodeBody::Union(_union_node)) = &mut node.node_body {
+        node.input.push(StreamNode {
+            identity: "Merge (sink into table)".to_string(),
+            fields: node.fields.clone(),
+            node_body: Some(NodeBody::Merge(MergeNode {
+                upstream_dispatcher_type: DispatcherType::Hash as _,
+                ..Default::default()
+            })),
+            ..Default::default()
+        });
+
+        return;
+    }
+
+    for input in &mut node.input {
+        insert_merger_to_union(input);
+    }
+}
+
+pub(crate) fn insert_merger_to_union_with_project(
+    node: &mut StreamNode,
+    project_node: &PbNodeBody,
+) {
     if let Some(NodeBody::Union(_union_node)) = &mut node.node_body {
         node.input.push(StreamNode {
             input: vec![StreamNode {
@@ -679,7 +702,7 @@ pub(crate) fn insert_merger_to_union(node: &mut StreamNode, project_node: &PbNod
             append_only: false,
             identity: "".to_string(),
             fields: vec![],
-            node_body: None,
+            node_body: Some(project_node.clone()),
             ..Default::default()
         });
 
@@ -687,7 +710,7 @@ pub(crate) fn insert_merger_to_union(node: &mut StreamNode, project_node: &PbNod
     }
 
     for input in &mut node.input {
-        insert_merger_to_union(input);
+        insert_merger_to_union_with_project(input, project_node);
     }
 }
 

@@ -38,7 +38,9 @@ use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::table_catalog::TableType;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::ExprImpl;
-use crate::handler::create_sink::{insert_merger_to_union, reparse_table_for_sink};
+use crate::handler::create_sink::{
+    insert_merger_to_union, insert_merger_to_union_with_project, reparse_table_for_sink,
+};
 use crate::optimizer::plan_node::generic::SourceNodeKind;
 use crate::optimizer::plan_node::PlanNodeType::StreamSource;
 use crate::optimizer::plan_node::{
@@ -71,7 +73,7 @@ pub async fn replace_table_with_definition(
         panic!("unexpected statement type: {:?}", definition);
     };
 
-    let (mut graph, table, source) = generate_stream_graph_for_table(
+    let (mut graph, mut table, source) = generate_stream_graph_for_table(
         session,
         table_name,
         original_catalog,
@@ -119,22 +121,6 @@ pub async fn replace_table_with_definition(
         sinks
     };
 
-    // columns
-    //     .iter()
-    //     .map(|c| {
-    //         if let Some(GeneratedOrDefaultColumn::DefaultColumn(DefaultColumnDesc {
-    //                                                                 expr,
-    //                                                                 ..
-    //                                                             })) = c.column_desc.generated_or_default_column.as_ref()
-    //         {
-    //             ExprImpl::from_expr_proto(expr.as_ref().unwrap())
-    //                 .expect("expr in default columns corrupted")
-    //         } else {
-    //             ExprImpl::literal_null(c.data_type().clone())
-    //         }
-    //     })
-    //     .collect()
-
     let mut target_columns = bind_sql_columns(&columns)?;
 
     let default_x: Vec<ExprImpl> = target_columns
@@ -152,16 +138,6 @@ pub async fn replace_table_with_definition(
         })
         .collect();
 
-    // columns
-    //               .iter()
-    //               .map(|col| {
-    //                   (
-    //                       col.data_type.clone().unwrap(),
-    //                       col.name.to_string(),
-    //                       col.is_generated(),
-    //                   )
-    //               })
-    //               .collect(),
     for (_, sink) in incoming_sinks {
         let exprs = crate::handler::create_sink::derive_default_column_project_for_sink(
             sink.as_ref(),
@@ -192,27 +168,16 @@ pub async fn replace_table_with_definition(
 
         let pb_project = x.to_stream_prost_body_inner();
 
-        // let branch = risingwave_pb::stream_plan::StreamNode {
-        //     operator_id: 0,
-        //     input: vec![],
-        //     stream_key: vec![],
-        //     append_only,
-        //     identity: "Merge (sink into table)".to_string(),
-        //     fields: node.fields.clone(),
-        //     node_body: Some(NodeBody::Merge(MergeNode {
-        //         upstream_dispatcher_type: DispatcherType::Hash as _,
-        //         ..Default::default()
-        //     })),
-        //
-        // };
-        //
-
         for fragment in graph.fragments.values_mut() {
             if let Some(node) = &mut fragment.node {
-                insert_merger_to_union(node, &pb_project);
+                insert_merger_to_union_with_project(node, &pb_project);
             }
         }
     }
+
+    table.incoming_sinks = incoming_sink_ids.iter().copied().collect();
+
+    println!("fe table incoming {:?}", table.incoming_sinks);
 
     let catalog_writer = session.catalog_writer()?;
 
