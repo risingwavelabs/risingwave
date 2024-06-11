@@ -791,7 +791,9 @@ impl BlockFetcher {
                         let (r, uc) = self.sst.calculate_block_info(blk);
                         let offset = r.start - range.start;
                         let len = r.end - r.start;
-                        let bytes = data.slice(offset..offset + len);
+                        // Deep copy the underlying slice here to prevent from OOM that is caused by a single block
+                        // holding a large buffer.
+                        let bytes = Bytes::copy_from_slice(&data[offset..offset + len]);
                         match Block::decode(bytes, uc) {
                             Ok(block) => Some(Box::new(block)),
                             Err(e) => {
