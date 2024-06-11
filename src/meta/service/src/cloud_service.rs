@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeMap;
 use std::sync::LazyLock;
 
 use async_trait::async_trait;
@@ -74,7 +75,7 @@ impl CloudService for CloudServiceImpl {
                 "unexpected source type, only kafka source is supported",
             ));
         }
-        let mut source_cfg = req.source_config.clone();
+        let mut source_cfg: BTreeMap<String, String> = req.source_config.into_iter().collect();
         // if connection_id provided, check whether endpoint service is available and resolve
         // broker rewrite map currently only support aws privatelink connection
         if let Some(connection_id_str) = source_cfg.get("connection.id") {

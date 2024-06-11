@@ -2057,22 +2057,22 @@ dependencies = [
 
 [[package]]
 name = "borsh"
-version = "1.2.0"
+version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf617fabf5cdbdc92f774bfe5062d870f228b80056d41180797abf48bed4056e"
+checksum = "a6362ed55def622cddc70a4746a68554d7b687713770de539e59a739b249f8ed"
 dependencies = [
  "borsh-derive",
- "cfg_aliases 0.1.1",
+ "cfg_aliases",
 ]
 
 [[package]]
 name = "borsh-derive"
-version = "1.2.0"
+version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f404657a7ea7b5249e36808dff544bc88a28f26e0ac40009f674b7a009d14be3"
+checksum = "c3ef8005764f53cd4dca619f5bf64cafd4664dada50ece25e4d81de54c80cc0b"
 dependencies = [
  "once_cell",
- "proc-macro-crate 2.0.0",
+ "proc-macro-crate 3.1.0",
  "proc-macro2",
  "quote",
  "syn 2.0.57",
@@ -2377,12 +2377,6 @@ dependencies = [
  "quote",
  "syn 2.0.57",
 ]
-
-[[package]]
-name = "cfg_aliases"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fd16c4719339c4530435d38e511904438d07cce7950afa3718a84ac36c10e89e"
 
 [[package]]
 name = "cfg_aliases"
@@ -3699,7 +3693,7 @@ dependencies = [
 name = "delta_btree_map"
 version = "1.9.0-alpha"
 dependencies = [
- "educe 0.6.0",
+ "educe",
  "enum-as-inner 0.6.0",
 ]
 
@@ -4431,7 +4425,7 @@ dependencies = [
  "serde",
  "thiserror",
  "time",
- "winnow 0.6.9",
+ "winnow 0.6.11",
 ]
 
 [[package]]
@@ -4499,23 +4493,11 @@ dependencies = [
 
 [[package]]
 name = "educe"
-version = "0.4.23"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0f0042ff8246a363dbe77d2ceedb073339e85a804b9a47636c6e016a9a32c05f"
-dependencies = [
- "enum-ordinalize 3.1.13",
- "proc-macro2",
- "quote",
- "syn 1.0.109",
-]
-
-[[package]]
-name = "educe"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1d7bc049e1bd8cdeb31b68bbd586a9464ecf9f3944af3958a7a9d0f8b9799417"
 dependencies = [
- "enum-ordinalize 4.3.0",
+ "enum-ordinalize",
  "proc-macro2",
  "quote",
  "syn 2.0.57",
@@ -4709,19 +4691,6 @@ version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a1ab991c1362ac86c61ab6f556cff143daa22e5a15e4e189df818b2fd19fe65b"
 dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.57",
-]
-
-[[package]]
-name = "enum-ordinalize"
-version = "3.1.13"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e4f76552f53cefc9a7f64987c3701b99d982f7690606fd67de1d09712fbf52f1"
-dependencies = [
- "num-bigint",
- "num-traits",
  "proc-macro2",
  "quote",
  "syn 2.0.57",
@@ -5171,9 +5140,9 @@ dependencies = [
 
 [[package]]
 name = "foyer"
-version = "0.9.2"
+version = "0.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df2b044c2b62671f594be20a80e303578e6cb7747a60e47e581014edea18ae17"
+checksum = "c67848bfb834bf15396d3a308c44eda6de992c06ad72db53857363725f3dd870"
 dependencies = [
  "ahash 0.8.11",
  "anyhow",
@@ -5186,9 +5155,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-common"
-version = "0.7.2"
+version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9c251fd5d8832cfbdcaec8950558fd14c9fb44e27351a956297bdc3c219d1d37"
+checksum = "8a823da3228992cc6392ddac757e0ed44fa4923588b03fcbbba4bad1ebfea7b2"
 dependencies = [
  "bytes",
  "cfg-if",
@@ -5205,9 +5174,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-intrusive"
-version = "0.7.1"
+version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c92d09d2bafb1dbb1a0b27ee556f39bdf0ad86ee0e61cc2cf26739c7c8437bd1"
+checksum = "5168b34c3e6369a4c6055f08c6b37e416910652bfdd9a84de55a602f2aa3dcea"
 dependencies = [
  "foyer-common",
  "itertools 0.13.0",
@@ -5215,9 +5184,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-memory"
-version = "0.5.1"
+version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b8adaec26f9304026212ce6476fb69639c05eab7277982fb3fe7d83b1cf06194"
+checksum = "56055774fa6ed25d0affe30c04e6a3f18fc00713a42ef6a3dbd96e72fe31a3eb"
 dependencies = [
  "ahash 0.8.11",
  "bitflags 2.5.0",
@@ -5236,9 +5205,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-storage"
-version = "0.8.2"
+version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fa39f2ef3dae07aa552d859def785036865222de1c8d3867bb8607e0c3bf8192"
+checksum = "5874cb737c3a6f29c2b784e02094375a24ddb2ce743a28bf8d69c3c490711044"
 dependencies = [
  "ahash 0.8.11",
  "allocator-api2",
@@ -5254,6 +5223,7 @@ dependencies = [
  "futures",
  "itertools 0.13.0",
  "lazy_static",
+ "libc",
  "lz4",
  "madsim-tokio",
  "parking_lot 0.12.1",
@@ -6978,17 +6948,6 @@ dependencies = [
 
 [[package]]
 name = "libtest-mimic"
-version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6d8de370f98a6cb8a4606618e53e802f93b094ddec0f96988eaec2c27e6e9ce7"
-dependencies = [
- "clap",
- "termcolor",
- "threadpool",
-]
-
-[[package]]
-name = "libtest-mimic"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f0f4c6f44ecfd52e8b443f2ad18f2b996540135771561283c2352ce56a1c70b"
@@ -7167,9 +7126,9 @@ dependencies = [
 
 [[package]]
 name = "madsim"
-version = "0.2.29"
+version = "0.2.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "288946d12a24c5ed887419a1dd296c9d533381c01efb68f239534ace8d35bfde"
+checksum = "f88753ddf8d3cd43b9cf71a93626dd9aad3c24086a04420beb31922e1f856d02"
 dependencies = [
  "ahash 0.8.11",
  "async-channel 2.2.1",
@@ -7272,9 +7231,9 @@ dependencies = [
 
 [[package]]
 name = "madsim-tokio"
-version = "0.2.26"
+version = "0.2.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ff38ff2533165380bb529828f59da98908866e68966d38acfe2f741f43c4431c"
+checksum = "569929c869275edc1e2c1f1381a688a6e5a4200302b58caff819e07414ccddb9"
 dependencies = [
  "madsim",
  "spin 0.9.8",
@@ -7743,7 +7702,7 @@ checksum = "71e2746dc3a24dd78b3cfcb7be93368c6de9963d30f43a6a73998a9cf4b17b46"
 dependencies = [
  "bitflags 2.5.0",
  "cfg-if",
- "cfg_aliases 0.2.1",
+ "cfg_aliases",
  "libc",
 ]
 
@@ -8365,9 +8324,9 @@ checksum = "b15813163c1d831bf4a13c3610c05c0d03b39feb07f7e09fa234dac9b15aaf39"
 
 [[package]]
 name = "owo-colors"
-version = "3.5.0"
+version = "4.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c1b04fb49957986fdce4d6ee7a65027d55d4b6d2265e5848bbb507b58ccfdb6f"
+checksum = "caff54706df99d2a78a5a4e3455ff45448d81ef1bb63c22cd14052ca0e993a3f"
 
 [[package]]
 name = "p256"
@@ -9142,15 +9101,6 @@ dependencies = [
 
 [[package]]
 name = "proc-macro-crate"
-version = "2.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7e8366a6159044a37876a2b9817124296703c586a5c92e2c53751fa06d8d43e8"
-dependencies = [
- "toml_edit 0.20.2",
-]
-
-[[package]]
-name = "proc-macro-crate"
 version = "3.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6d37c51ca738a55da99dc0c4a34860fd675453b8b36209178c2249bb13651284"
@@ -9363,7 +9313,7 @@ checksum = "8bdf592881d821b83d471f8af290226c8d51402259e9bb5be7f9f8bdebbb11ac"
 dependencies = [
  "bytes",
  "heck 0.4.1",
- "itertools 0.11.0",
+ "itertools 0.10.5",
  "log",
  "multimap 0.8.3",
  "once_cell",
@@ -9397,7 +9347,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "265baba7fabd416cf5078179f7d2cbeca4ce7a9041111900675ea7c4cb8a4c32"
 dependencies = [
  "anyhow",
- "itertools 0.11.0",
+ "itertools 0.10.5",
  "proc-macro2",
  "quote",
  "syn 2.0.57",
@@ -9558,7 +9508,7 @@ dependencies = [
  "indoc",
  "libc",
  "memoffset",
- "parking_lot 0.12.1",
+ "parking_lot 0.11.2",
  "portable-atomic",
  "pyo3-build-config",
  "pyo3-ffi",
@@ -10405,7 +10355,7 @@ dependencies = [
  "criterion",
  "darwin-libproc",
  "easy-ext",
- "educe 0.6.0",
+ "educe",
  "either",
  "enum-as-inner 0.6.0",
  "enumflags2",
@@ -10493,7 +10443,7 @@ name = "risingwave_common_estimate_size"
 version = "1.9.0-alpha"
 dependencies = [
  "bytes",
- "educe 0.6.0",
+ "educe",
  "ethnum",
  "fixedbitset 0.5.0",
  "jsonbb",
@@ -10767,6 +10717,7 @@ dependencies = [
  "reqwest 0.12.4",
  "risingwave_common",
  "risingwave_common_estimate_size",
+ "risingwave_connector_codec",
  "risingwave_jni_core",
  "risingwave_object_store",
  "risingwave_pb",
@@ -10777,12 +10728,14 @@ dependencies = [
  "rustls-pemfile 2.1.1",
  "rustls-pki-types",
  "rw_futures_util",
+ "sea-schema",
  "serde",
  "serde_derive",
  "serde_json",
  "serde_with",
  "serde_yaml",
  "simd-json",
+ "sqlx",
  "strum 0.26.1",
  "strum_macros 0.26.1",
  "syn 1.0.109",
@@ -10805,6 +10758,27 @@ dependencies = [
  "with_options",
  "workspace-hack",
  "yup-oauth2",
+]
+
+[[package]]
+name = "risingwave_connector_codec"
+version = "1.9.0-alpha"
+dependencies = [
+ "anyhow",
+ "apache-avro 0.16.0",
+ "chrono",
+ "easy-ext",
+ "itertools 0.12.1",
+ "jsonbb",
+ "num-bigint",
+ "risingwave_common",
+ "risingwave_pb",
+ "rust_decimal",
+ "thiserror",
+ "thiserror-ext",
+ "time",
+ "tracing",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -10919,7 +10893,7 @@ dependencies = [
  "const-currying",
  "downcast-rs",
  "easy-ext",
- "educe 0.6.0",
+ "educe",
  "either",
  "enum-as-inner 0.6.0",
  "expect-test",
@@ -10964,7 +10938,7 @@ dependencies = [
  "chrono",
  "chrono-tz 0.9.0",
  "criterion",
- "educe 0.6.0",
+ "educe",
  "expect-test",
  "fancy-regex",
  "futures-async-stream",
@@ -11031,7 +11005,7 @@ dependencies = [
  "downcast-rs",
  "dyn-clone",
  "easy-ext",
- "educe 0.6.0",
+ "educe",
  "either",
  "enum-as-inner 0.6.0",
  "expect-test",
@@ -11480,7 +11454,7 @@ dependencies = [
  "anyhow",
  "expect-test",
  "itertools 0.12.1",
- "libtest-mimic 0.7.0",
+ "libtest-mimic",
  "madsim-tokio",
  "paste",
  "risingwave_expr_impl",
@@ -11631,7 +11605,7 @@ dependencies = [
  "anyhow",
  "console",
  "itertools 0.12.1",
- "libtest-mimic 0.7.0",
+ "libtest-mimic",
  "madsim-tokio",
  "matches",
  "serde",
@@ -11641,7 +11615,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "walkdir",
- "winnow 0.6.9",
+ "winnow 0.6.11",
  "workspace-hack",
 ]
 
@@ -11654,7 +11628,7 @@ dependencies = [
  "clap",
  "expect-test",
  "itertools 0.12.1",
- "libtest-mimic 0.7.0",
+ "libtest-mimic",
  "madsim-tokio",
  "rand",
  "rand_chacha",
@@ -11780,7 +11754,7 @@ dependencies = [
  "cfg-if",
  "criterion",
  "delta_btree_map",
- "educe 0.6.0",
+ "educe",
  "either",
  "enum-as-inner 0.6.0",
  "expect-test",
@@ -12581,7 +12555,9 @@ checksum = "30d148608012d25222442d1ebbfafd1228dbc5221baf4ec35596494e27a2394e"
 dependencies = [
  "futures",
  "sea-query",
+ "sea-query-binder",
  "sea-schema-derive",
+ "sqlx",
 ]
 
 [[package]]
@@ -13380,18 +13356,18 @@ dependencies = [
 
 [[package]]
 name = "sqllogictest"
-version = "0.20.1"
+version = "0.20.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7e7c6a33098cd55e4fead1bd1f85c1d2064f02bafdb9fe004ca39fd94aee36e6"
+checksum = "f20de090b0fde4dcd53b330e7ad2772140304eb34f5e9a99c8963fc4c052f149"
 dependencies = [
  "async-trait",
- "educe 0.4.23",
+ "educe",
  "fs-err",
  "futures",
  "glob",
  "humantime",
- "itertools 0.11.0",
- "libtest-mimic 0.6.1",
+ "itertools 0.13.0",
+ "libtest-mimic",
  "md-5",
  "owo-colors",
  "regex",
@@ -14782,17 +14758,6 @@ dependencies = [
 
 [[package]]
 name = "toml_edit"
-version = "0.20.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "396e4d48bbb2b7554c944bde63101b5ae446cff6ec4a24227428f15eb72ef338"
-dependencies = [
- "indexmap 2.0.0",
- "toml_datetime",
- "winnow 0.5.15",
-]
-
-[[package]]
-name = "toml_edit"
 version = "0.21.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6a8534fd7f78b5405e860340ad6575217ce99f38d4d5c8f2442cb5ecb50090e1"
@@ -14812,7 +14777,7 @@ dependencies = [
  "serde",
  "serde_spanned",
  "toml_datetime",
- "winnow 0.6.9",
+ "winnow 0.6.11",
 ]
 
 [[package]]
@@ -16502,9 +16467,9 @@ dependencies = [
 
 [[package]]
 name = "winnow"
-version = "0.6.9"
+version = "0.6.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "86c949fede1d13936a99f14fafd3e76fd642b556dd2ce96287fbe2e0151bfac6"
+checksum = "56c52728401e1dc672a56e81e593e912aa54c78f40246869f78359a2bf24d29d"
 dependencies = [
  "memchr",
 ]

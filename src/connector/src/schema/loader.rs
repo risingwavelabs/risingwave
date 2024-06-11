@@ -12,20 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use risingwave_pb::catalog::PbSchemaRegistryNameStrategy;
 
 use super::schema_registry::{
     get_subject_by_strategy, handle_sr_list, name_strategy_from_str, Client, Subject,
 };
-use super::{invalid_option_error, InvalidOptionError, SchemaFetchError};
-
-const MESSAGE_NAME_KEY: &str = "message";
-const KEY_MESSAGE_NAME_KEY: &str = "key.message";
-const SCHEMA_LOCATION_KEY: &str = "schema.location";
-const SCHEMA_REGISTRY_KEY: &str = "schema.registry";
-const NAME_STRATEGY_KEY: &str = "schema.registry.name.strategy";
+use super::{
+    invalid_option_error, InvalidOptionError, SchemaFetchError, KEY_MESSAGE_NAME_KEY,
+    MESSAGE_NAME_KEY, NAME_STRATEGY_KEY, SCHEMA_REGISTRY_KEY,
+};
 
 pub struct SchemaLoader {
     pub client: Client,
@@ -38,7 +35,7 @@ pub struct SchemaLoader {
 impl SchemaLoader {
     pub fn from_format_options(
         topic: &str,
-        format_options: &HashMap<String, String>,
+        format_options: &BTreeMap<String, String>,
     ) -> Result<Self, SchemaFetchError> {
         let schema_location = format_options
             .get(SCHEMA_REGISTRY_KEY)

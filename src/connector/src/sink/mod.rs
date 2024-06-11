@@ -45,7 +45,7 @@ pub mod trivial;
 pub mod utils;
 pub mod writer;
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::future::Future;
 
 use ::clickhouse::error::Error as ClickHouseError;
@@ -159,7 +159,7 @@ pub const SINK_USER_FORCE_APPEND_ONLY_OPTION: &str = "force_append_only";
 pub struct SinkParam {
     pub sink_id: SinkId,
     pub sink_name: String,
-    pub properties: HashMap<String, String>,
+    pub properties: BTreeMap<String, String>,
     pub columns: Vec<ColumnDesc>,
     pub downstream_pk: Vec<usize>,
     pub sink_type: SinkType,

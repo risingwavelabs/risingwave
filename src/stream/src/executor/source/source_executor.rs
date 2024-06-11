@@ -396,23 +396,21 @@ impl<S: StateStore> SourceExecutor<S> {
         };
 
         let mut boot_state = Vec::default();
-        if let Some(mutation) = barrier.mutation.as_deref() {
-            match mutation {
-                Mutation::Add(AddMutation { splits, .. })
-                | Mutation::Update(UpdateMutation {
-                    actor_splits: splits,
-                    ..
-                }) => {
-                    if let Some(splits) = splits.get(&self.actor_ctx.id) {
-                        tracing::debug!(
-                            "source exector: actor {:?} boot with splits: {:?}",
-                            self.actor_ctx.id,
-                            splits
-                        );
-                        boot_state.clone_from(splits);
-                    }
-                }
-                _ => {}
+        if let Some(
+            Mutation::Add(AddMutation { splits, .. })
+            | Mutation::Update(UpdateMutation {
+                actor_splits: splits,
+                ..
+            }),
+        ) = barrier.mutation.as_deref()
+        {
+            if let Some(splits) = splits.get(&self.actor_ctx.id) {
+                tracing::debug!(
+                    "source exector: actor {:?} boot with splits: {:?}",
+                    self.actor_ctx.id,
+                    splits
+                );
+                boot_state.clone_from(splits);
             }
         }
 
@@ -827,7 +825,7 @@ impl<S: StateStore> WaitCheckpointWorker<S> {
 mod tests {
     use std::collections::HashSet;
 
-    use maplit::{convert_args, hashmap};
+    use maplit::{btreemap, convert_args, hashmap};
     use risingwave_common::catalog::{ColumnId, Field, TableId};
     use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
     use risingwave_common::test_prelude::StreamChunkTestExt;
@@ -860,7 +858,7 @@ mod tests {
         let column_ids = vec![0].into_iter().map(ColumnId::from).collect();
 
         // This datagen will generate 3 rows at one time.
-        let properties: HashMap<String, String> = convert_args!(hashmap!(
+        let properties = convert_args!(btreemap!(
             "connector" => "datagen",
             "datagen.rows.per.second" => "3",
             "fields.sequence_int.kind" => "sequence",
@@ -944,7 +942,7 @@ mod tests {
             row_format: PbRowFormatType::Native as i32,
             ..Default::default()
         };
-        let properties = convert_args!(hashmap!(
+        let properties = convert_args!(btreemap!(
             "connector" => "datagen",
             "fields.v1.kind" => "sequence",
             "fields.v1.start" => "11",

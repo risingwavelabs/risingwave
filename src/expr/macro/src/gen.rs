@@ -342,10 +342,45 @@ impl FunctionAttr {
             // no prebuilt argument
             (None, _) => quote! {},
         };
-        let variadic_args = variadic.then(|| quote! { variadic_row, });
+        let variadic_args = variadic.then(|| quote! { &variadic_row, });
         let context = user_fn.context.then(|| quote! { &self.context, });
         let writer = user_fn.write.then(|| quote! { &mut writer, });
         let await_ = user_fn.async_.then(|| quote! { .await });
+
+        let record_error = {
+            // Uniform arguments into `DatumRef`.
+            #[allow(clippy::disallowed_methods)] // allow zip
+            let inputs_args = inputs
+                .iter()
+                .zip(user_fn.args_option.iter())
+                .map(|(input, opt)| {
+                    if *opt {
+                        quote! { #input.map(|s| ScalarRefImpl::from(s)) }
+                    } else {
+                        quote! { Some(ScalarRefImpl::from(#input)) }
+                    }
+                });
+            let inputs_args = quote! {
+                let args: &[DatumRef<'_>] = &[#(#inputs_args),*];
+                let args = args.iter().copied();
+            };
+            let var_args = variadic.then(|| {
+                quote! {
+                    let args = args.chain(variadic_row.iter());
+                }
+            });
+
+            quote! {
+                #inputs_args
+                #var_args
+                errors.push(ExprError::function(
+                    stringify!(#fn_name),
+                    args,
+                    e,
+                ));
+            }
+        };
+
         // call the user defined function
         // inputs: [ Option<impl ScalarRef> ]
         let mut output = quote! { #fn_name #generic(
@@ -365,13 +400,19 @@ impl FunctionAttr {
             ReturnTypeKind::Result => quote! {
                 match #output {
                     Ok(x) => Some(x),
-                    Err(e) => { errors.push(ExprError::Function(Box::new(e))); None }
+                    Err(e) => {
+                        #record_error
+                        None
+                    }
                 }
             },
             ReturnTypeKind::ResultOption => quote! {
                 match #output {
                     Ok(x) => x,
-                    Err(e) => { errors.push(ExprError::Function(Box::new(e))); None }
+                    Err(e) => {
+                        #record_error
+                        None
+                    }
                 }
             },
         };
@@ -1081,11 +1122,29 @@ impl FunctionAttr {
         let iter = quote! { #fn_name(#(#inputs,)* #prebuilt_arg #context) };
         let mut iter = match user_fn.return_type_kind {
             ReturnTypeKind::T => quote! { #iter },
-            ReturnTypeKind::Result => quote! { #iter? },
-            ReturnTypeKind::Option => quote! { if let Some(it) = #iter { it } else { continue; } },
-            ReturnTypeKind::ResultOption => {
-                quote! { if let Some(it) = #iter? { it } else { continue; } }
-            }
+            ReturnTypeKind::Option => quote! { match #iter {
+                Some(it) => it,
+                None => continue,
+            } },
+            ReturnTypeKind::Result => quote! { match #iter {
+                Ok(it) => it,
+                Err(e) => {
+                    index_builder.append(Some(i as i32));
+                    #(#builders.append_null();)*
+                    error_builder.append_display(Some(e.as_report()));
+                    continue;
+                }
+            } },
+            ReturnTypeKind::ResultOption => quote! { match #iter {
+                Ok(Some(it)) => it,
+                Ok(None) => continue,
+                Err(e) => {
+                    index_builder.append(Some(i as i32));
+                    #(#builders.append_null();)*
+                    error_builder.append_display(Some(e.as_report()));
+                    continue;
+                }
+            } },
         };
         // if user function accepts non-option arguments, we assume the function
         // returns empty on null input, so we need to unwrap the inputs before calling.
@@ -1112,11 +1171,24 @@ impl FunctionAttr {
                 "expect `impl Iterator` in return type",
             )
         })?;
-        let output = match iterator_item_type {
-            ReturnTypeKind::T => quote! { Some(output) },
-            ReturnTypeKind::Option => quote! { output },
-            ReturnTypeKind::Result => quote! { Some(output?) },
-            ReturnTypeKind::ResultOption => quote! { output? },
+        let append_output = match iterator_item_type {
+            ReturnTypeKind::T => quote! {
+                let (#(#outputs),*) = output;
+                #(#builders.append(#optioned_outputs);)* error_builder.append_null();
+            },
+            ReturnTypeKind::Option => quote! { match output {
+                Some((#(#outputs),*)) => { #(#builders.append(#optioned_outputs);)* error_builder.append_null(); }
+                None => { #(#builders.append_null();)* error_builder.append_null(); }
+            } },
+            ReturnTypeKind::Result => quote! { match output {
+                Ok((#(#outputs),*)) => { #(#builders.append(#optioned_outputs);)* error_builder.append_null(); }
+                Err(e) => { #(#builders.append_null();)* error_builder.append_display(Some(e.as_report())); }
+            } },
+            ReturnTypeKind::ResultOption => quote! { match output {
+                Ok(Some((#(#outputs),*))) => { #(#builders.append(#optioned_outputs);)* error_builder.append_null(); }
+                Ok(None) => { #(#builders.append_null();)* error_builder.append_null(); }
+                Err(e) => { #(#builders.append_null();)* error_builder.append_display(Some(e.as_report())); }
+            } },
         };
 
         Ok(quote! {
@@ -1174,6 +1246,7 @@ impl FunctionAttr {
 
                         let mut index_builder = I32ArrayBuilder::new(self.chunk_size);
                         #(let mut #builders = #builder_types::with_type(self.chunk_size, #return_types);)*
+                        let mut error_builder = Utf8ArrayBuilder::new(self.chunk_size);
 
                         for i in 0..input.capacity() {
                             if unsafe { !input.visibility().is_set_unchecked(i) } {
@@ -1182,17 +1255,19 @@ impl FunctionAttr {
                             #(let #inputs = unsafe { #arrays.value_at_unchecked(i) };)*
                             for output in #iter {
                                 index_builder.append(Some(i as i32));
-                                match #output {
-                                    Some((#(#outputs),*)) => { #(#builders.append(#optioned_outputs);)* }
-                                    None => { #(#builders.append_null();)* }
-                                }
+                                #append_output
 
                                 if index_builder.len() == self.chunk_size {
                                     let len = index_builder.len();
                                     let index_array = std::mem::replace(&mut index_builder, I32ArrayBuilder::new(self.chunk_size)).finish().into_ref();
                                     let value_arrays = [#(std::mem::replace(&mut #builders, #builder_types::with_type(self.chunk_size, #return_types)).finish().into_ref()),*];
                                     #build_value_array
-                                    yield DataChunk::new(vec![index_array, value_array], self.chunk_size);
+                                    let error_array = std::mem::replace(&mut error_builder, Utf8ArrayBuilder::new(self.chunk_size)).finish().into_ref();
+                                    if error_array.null_bitmap().any() {
+                                        yield DataChunk::new(vec![index_array, value_array, error_array], self.chunk_size);
+                                    } else {
+                                        yield DataChunk::new(vec![index_array, value_array], self.chunk_size);
+                                    }
                                 }
                             }
                         }
@@ -1202,7 +1277,12 @@ impl FunctionAttr {
                             let index_array = index_builder.finish().into_ref();
                             let value_arrays = [#(#builders.finish().into_ref()),*];
                             #build_value_array
-                            yield DataChunk::new(vec![index_array, value_array], len);
+                            let error_array = error_builder.finish().into_ref();
+                            if error_array.null_bitmap().any() {
+                                yield DataChunk::new(vec![index_array, value_array, error_array], len);
+                            } else {
+                                yield DataChunk::new(vec![index_array, value_array], len);
+                            }
                         }
                     }
                 }

@@ -46,7 +46,7 @@ pub struct ProtobufAccessBuilder {
 
 impl AccessBuilder for ProtobufAccessBuilder {
     #[allow(clippy::unused_async)]
-    async fn generate_accessor(&mut self, payload: Vec<u8>) -> ConnectorResult<AccessImpl<'_, '_>> {
+    async fn generate_accessor(&mut self, payload: Vec<u8>) -> ConnectorResult<AccessImpl<'_>> {
         let payload = if self.confluent_wire_type {
             resolve_pb_header(&payload)?
         } else {
@@ -579,11 +579,11 @@ pub(crate) fn resolve_pb_header(payload: &[u8]) -> ConnectorResult<&[u8]> {
 
 #[cfg(test)]
 mod test {
-    use std::collections::HashMap;
     use std::path::PathBuf;
 
     use prost::Message;
     use risingwave_common::types::StructType;
+    use risingwave_connector_codec::decoder::AccessExt;
     use risingwave_pb::catalog::StreamSourceInfo;
     use risingwave_pb::data::data_type::PbTypeName;
     use risingwave_pb::plan_common::{PbEncodeType, PbFormatType};
@@ -592,7 +592,6 @@ mod test {
     use super::*;
     use crate::parser::protobuf::recursive::all_types::{EnumType, ExampleOneof, NestedMessage};
     use crate::parser::protobuf::recursive::AllTypes;
-    use crate::parser::unified::Access;
     use crate::parser::SpecificParserConfig;
 
     fn schema_dir() -> String {
@@ -624,7 +623,7 @@ mod test {
             row_encode: PbEncodeType::Protobuf.into(),
             ..Default::default()
         };
-        let parser_config = SpecificParserConfig::new(&info, &HashMap::new())?;
+        let parser_config = SpecificParserConfig::new(&info, &Default::default())?;
         let conf = ProtobufParserConfig::new(parser_config.encoding_config).await?;
         let value = DynamicMessage::decode(conf.message_descriptor, PRE_GEN_PROTO_DATA).unwrap();
 
@@ -669,7 +668,7 @@ mod test {
             row_encode: PbEncodeType::Protobuf.into(),
             ..Default::default()
         };
-        let parser_config = SpecificParserConfig::new(&info, &HashMap::new())?;
+        let parser_config = SpecificParserConfig::new(&info, &Default::default())?;
         let conf = ProtobufParserConfig::new(parser_config.encoding_config).await?;
         let columns = conf.map_to_columns().unwrap();
 
@@ -718,7 +717,7 @@ mod test {
             row_encode: PbEncodeType::Protobuf.into(),
             ..Default::default()
         };
-        let parser_config = SpecificParserConfig::new(&info, &HashMap::new()).unwrap();
+        let parser_config = SpecificParserConfig::new(&info, &Default::default()).unwrap();
         let conf = ProtobufParserConfig::new(parser_config.encoding_config)
             .await
             .unwrap();
@@ -746,7 +745,7 @@ mod test {
             row_encode: PbEncodeType::Protobuf.into(),
             ..Default::default()
         };
-        let parser_config = SpecificParserConfig::new(&info, &HashMap::new()).unwrap();
+        let parser_config = SpecificParserConfig::new(&info, &Default::default()).unwrap();
 
         ProtobufParserConfig::new(parser_config.encoding_config)
             .await
@@ -897,7 +896,7 @@ mod test {
 
     fn pb_eq(a: &ProtobufAccess, field_name: &str, value: ScalarImpl) {
         let dummy_type = DataType::Varchar;
-        let d = a.access(&[field_name], &dummy_type).unwrap().unwrap();
+        let d = a.access_owned(&[field_name], &dummy_type).unwrap().unwrap();
         assert_eq!(d, value, "field: {} value: {:?}", field_name, d);
     }
 

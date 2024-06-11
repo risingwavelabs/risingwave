@@ -236,7 +236,7 @@ pub async fn register_table_ids_to_compaction_group(
     compaction_group_id: CompactionGroupId,
 ) {
     hummock_manager_ref
-        .register_table_ids(
+        .register_table_ids_for_test(
             &table_ids
                 .iter()
                 .map(|table_id| (*table_id, compaction_group_id))
@@ -251,8 +251,9 @@ pub async fn unregister_table_ids_from_compaction_group(
     table_ids: &[u32],
 ) {
     hummock_manager_ref
-        .unregister_table_ids_fail_fast(table_ids)
-        .await;
+        .unregister_table_ids(table_ids)
+        .await
+        .unwrap();
 }
 
 /// Generate keys like `001_key_test_00002` with timestamp `epoch`.
