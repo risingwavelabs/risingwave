@@ -85,7 +85,6 @@ use crate::hummock::manager::transaction::{
     HummockVersionStatsTransaction, HummockVersionTransaction,
 };
 use crate::hummock::manager::versioning::Versioning;
-use crate::hummock::manager::HISTORY_TABLE_INFO_STATISTIC_TIME;
 use crate::hummock::metrics_utils::{
     build_compact_task_level_type_metrics_label, trigger_local_table_stat, trigger_sst_stat,
 };
@@ -1607,7 +1606,8 @@ impl HummockManager {
         let default_group_id: CompactionGroupId = StaticCompactionGroupId::StateDefault.into();
         let mv_group_id: CompactionGroupId = StaticCompactionGroupId::MaterializedView.into();
         let partition_vnode_count = self.env.opts.partition_vnode_count;
-        let window_size = HISTORY_TABLE_INFO_STATISTIC_TIME / (checkpoint_secs as usize);
+        let window_size =
+            self.env.opts.table_info_statistic_history_times / (checkpoint_secs as usize);
 
         let mut is_high_write_throughput = false;
         let mut is_low_write_throughput = true;

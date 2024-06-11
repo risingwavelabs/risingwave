@@ -36,7 +36,6 @@ use crate::hummock::manager::transaction::{
     HummockVersionStatsTransaction, HummockVersionTransaction,
 };
 use crate::hummock::manager::versioning::Versioning;
-use crate::hummock::manager::HISTORY_TABLE_INFO_STATISTIC_TIME;
 use crate::hummock::metrics_utils::{
     get_or_create_local_table_stat, trigger_local_table_stat, trigger_sst_stat,
 };
@@ -455,7 +454,7 @@ impl HummockManager {
             let throughput = (stat.total_value_size + stat.total_key_size) as u64;
             let entry = table_infos.entry(table_id).or_default();
             entry.push_back(throughput);
-            if entry.len() > HISTORY_TABLE_INFO_STATISTIC_TIME {
+            if entry.len() > self.env.opts.table_info_statistic_history_times {
                 entry.pop_front();
             }
         }

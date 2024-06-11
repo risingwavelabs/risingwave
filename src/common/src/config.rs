@@ -755,6 +755,10 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::compactor_iter_max_io_retry_times")]
     pub compactor_iter_max_io_retry_times: usize,
 
+    /// The window size of table info statistic history.
+    #[serde(default = "default::storage::table_info_statistic_history_times")]
+    pub table_info_statistic_history_times: usize,
+
     #[serde(default, flatten)]
     #[config_doc(omitted)]
     pub unrecognized: Unrecognized<Self>,
@@ -1514,6 +1518,10 @@ pub mod default {
 
         pub fn max_prefetch_block_number() -> usize {
             16
+        }
+
+        pub fn table_info_statistic_history_times() -> usize {
+            240
         }
     }
 
