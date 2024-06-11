@@ -27,9 +27,9 @@ pub const MIN_COMPUTE_MEMORY_MB: usize = 512;
 /// overhead, network buffer, etc.) in megabytes.
 pub const MIN_SYSTEM_RESERVED_MEMORY_MB: usize = 512;
 
-const RESERVED_MEMORY_LEVELS: [usize; 4] = [16 << 30, 32 << 30, 64 << 30, usize::MAX];
+const RESERVED_MEMORY_LEVELS: [usize; 2] = [16 << 30, usize::MAX];
 
-const RESERVED_MEMORY_PROPORTIONS: [f64; 4] = [0.3, 0.25, 0.2, 0.15];
+const RESERVED_MEMORY_PROPORTIONS: [f64; 2] = [0.3, 0.2];
 
 const STORAGE_MEMORY_PROPORTION: f64 = 0.3;
 
@@ -71,9 +71,7 @@ pub fn reserve_memory_bytes(opts: &ComputeNodeOpts) -> (usize, usize) {
 /// Calculate the reserved memory based on the total memory size.
 /// The reserved memory size is calculated based on the following gradient:
 /// - 30% of the first 16GB
-/// - 25% of the next 16GB
-/// - 20% of the next 32GB
-/// - 15% of the rest
+/// - 20% of the rest
 fn gradient_reserve_memory_bytes(total_memory_bytes: usize) -> usize {
     let mut total_memory_bytes = total_memory_bytes;
     let mut reserved = 0;
@@ -381,11 +379,11 @@ mod tests {
         assert_eq!(super::gradient_reserve_memory_bytes(4 << 30), 1288490188);
         assert_eq!(super::gradient_reserve_memory_bytes(8 << 30), 2576980377);
         assert_eq!(super::gradient_reserve_memory_bytes(16 << 30), 5153960755);
-        assert_eq!(super::gradient_reserve_memory_bytes(24 << 30), 7301444403);
-        assert_eq!(super::gradient_reserve_memory_bytes(32 << 30), 9448928051);
-        assert_eq!(super::gradient_reserve_memory_bytes(54 << 30), 14173392076);
-        assert_eq!(super::gradient_reserve_memory_bytes(64 << 30), 16320875724);
-        assert_eq!(super::gradient_reserve_memory_bytes(100 << 30), 22119081573);
-        assert_eq!(super::gradient_reserve_memory_bytes(128 << 30), 26628797234);
+        assert_eq!(super::gradient_reserve_memory_bytes(24 << 30), 6871947673);
+        assert_eq!(super::gradient_reserve_memory_bytes(32 << 30), 8589934591);
+        assert_eq!(super::gradient_reserve_memory_bytes(54 << 30), 13314398617);
+        assert_eq!(super::gradient_reserve_memory_bytes(64 << 30), 15461882265);
+        assert_eq!(super::gradient_reserve_memory_bytes(100 << 30), 23192823398);
+        assert_eq!(super::gradient_reserve_memory_bytes(128 << 30), 29205777612);
     }
 }
