@@ -299,6 +299,9 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::split_group_size_limit")]
     pub split_group_size_limit: u64,
 
+    #[serde(default = "default::meta::max_group_size")]
+    pub max_group_size: u64,
+
     #[serde(default = "default::meta::cut_table_size_limit")]
     pub cut_table_size_limit: u64,
 
@@ -1262,11 +1265,15 @@ pub mod default {
         }
 
         pub fn move_table_size_limit() -> u64 {
-            10 * 1024 * 1024 * 1024 // 10GB
+            192 * 1024 * 1024 * 1024 // 192GB
         }
 
         pub fn split_group_size_limit() -> u64 {
-            64 * 1024 * 1024 * 1024 // 64GB
+            256 * 1024 * 1024 * 1024 // 256GB
+        }
+
+        pub fn max_group_size() -> u64 {
+            1024 * 1024 * 1024 * 1024 // 1TB
         }
 
         pub fn partition_vnode_count() -> u32 {
@@ -1795,8 +1802,8 @@ pub mod default {
         const DEFAULT_LEVEL_MULTIPLIER: u64 = 5;
         const DEFAULT_MAX_SPACE_RECLAIM_BYTES: u64 = 512 * 1024 * 1024; // 512MB;
         const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_SUB_LEVEL_NUMBER: u64 = 300;
-        const DEFAULT_MAX_COMPACTION_FILE_COUNT: u64 = 300;
-        const DEFAULT_MIN_SUB_LEVEL_COMPACT_LEVEL_COUNT: u32 = 3;
+        const DEFAULT_MAX_COMPACTION_FILE_COUNT: u64 = 100;
+        const DEFAULT_MIN_SUB_LEVEL_COMPACT_LEVEL_COUNT: u32 = 4;
         const DEFAULT_MIN_OVERLAPPING_SUB_LEVEL_COMPACT_LEVEL_COUNT: u32 = 12;
         const DEFAULT_TOMBSTONE_RATIO_PERCENT: u32 = 40;
         const DEFAULT_EMERGENCY_PICKER: bool = true;

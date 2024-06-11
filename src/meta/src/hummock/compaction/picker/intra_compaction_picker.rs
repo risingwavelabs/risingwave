@@ -22,7 +22,6 @@ use super::{
     CompactionInput, CompactionPicker, CompactionTaskValidator, LocalPickerStatistic,
     ValidationRuleType,
 };
-use crate::hummock::compaction::compaction_config::L0_MAX_SIZE;
 use crate::hummock::compaction::picker::TrivialMovePicker;
 use crate::hummock::compaction::{create_overlap_strategy, CompactionDeveloperConfig};
 use crate::hummock::level_handler::LevelHandler;
@@ -118,13 +117,13 @@ impl IntraCompactionPicker {
             max_vnode_partition_idx = idx;
         }
 
-        let is_too_large = l0.total_file_size > L0_MAX_SIZE;
         for (idx, level) in l0.sub_levels.iter().enumerate() {
             if level.level_type() != LevelType::Nonoverlapping {
                 continue;
             }
-            if (is_too_large && level.total_file_size > self.config.max_compaction_bytes)
-                || level.total_file_size > self.config.sub_level_max_compaction_bytes
+            if level.vnode_partition_count == 0
+                && level.total_file_size > self.config.sub_level_max_compaction_bytes
+                || level.total_file_size > self.config.max_compaction_bytes
             {
                 continue;
             }
@@ -141,14 +140,15 @@ impl IntraCompactionPicker {
 
             let mut level0_sub_level_compact_level_count =
                 self.config.level0_sub_level_compact_level_count;
-            if is_too_large {
+            if level.total_file_size > self.config.sub_level_max_compaction_bytes {
                 level0_sub_level_compact_level_count *= 2;
+                max_compaction_bytes = level.total_file_size;
             }
 
             let non_overlap_sub_level_picker = NonOverlapSubLevelPicker::new(
                 self.config.sub_level_max_compaction_bytes / 2,
                 max_compaction_bytes,
-                self.config.level0_sub_level_compact_level_count as usize,
+                level0_sub_level_compact_level_count as usize,
                 self.config.level0_max_compact_file_number,
                 overlap_strategy.clone(),
                 self.developer_config.enable_check_task_level_overlap,
@@ -192,12 +192,19 @@ impl IntraCompactionPicker {
                     total_file_count += input.total_file_count;
                 }
                 select_level_inputs.reverse();
+                let partition_count =
+                    if level.total_file_size > self.config.sub_level_max_compaction_bytes * 2 {
+                        vnode_partition_count * 2
+                    } else {
+                        vnode_partition_count
+                    };
 
                 let result = CompactionInput {
                     input_levels: select_level_inputs,
                     target_sub_level_id: level.sub_level_id,
                     select_input_size,
                     total_file_count: total_file_count as u64,
+                    vnode_partition_count: partition_count,
                     ..Default::default()
                 };
 
