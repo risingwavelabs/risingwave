@@ -36,13 +36,9 @@ use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::table_catalog::TableType;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::ExprImpl;
-use crate::handler::create_sink::{
-    insert_merger_to_union_with_project,
-};
+use crate::handler::create_sink::insert_merger_to_union_with_project;
 use crate::optimizer::plan_node::generic::SourceNodeKind;
-use crate::optimizer::plan_node::{
-    LogicalSource, StreamProject, ToStream, ToStreamContext,
-};
+use crate::optimizer::plan_node::{LogicalSource, StreamProject, ToStream, ToStreamContext};
 use crate::session::SessionImpl;
 use crate::{Binder, OptimizerContext, TableCatalog, WithOptions};
 

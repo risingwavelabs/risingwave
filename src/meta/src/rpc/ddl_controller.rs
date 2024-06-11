@@ -1198,13 +1198,6 @@ impl DdlController {
 
         let sink_fields = sink_fields.expect("sink fields not found");
 
-        // let output_indices = table
-        //     .columns
-        //     .iter()
-        //     .enumerate()
-        //     .map(|(idx, _)| idx as _)
-        //     .collect_vec();
-
         let output_indices = sink_fields
             .iter()
             .enumerate()
@@ -1251,7 +1244,7 @@ impl DdlController {
                 let fields = sink_fields.clone();
 
                 visit_stream_node_cont_mut(node, |node| {
-                    fn t(
+                    fn hijack_merge_node(
                         sink_id: Option<u32>,
                         sink_actor_ids: &Vec<u32>,
                         upstream_fragment_id: u32,
@@ -1284,7 +1277,7 @@ impl DdlController {
 
                                 input.fields = table_fields.to_vec();
 
-                                t(
+                                hijack_merge_node(
                                     sink_id,
                                     sink_actor_ids,
                                     upstream_fragment_id,
@@ -1299,7 +1292,7 @@ impl DdlController {
 
                     if let Some(NodeBody::Union(_)) = &mut node.node_body {
                         for input in &mut node.input {
-                            if let Some(value) = t(
+                            if let Some(value) = hijack_merge_node(
                                 sink_id,
                                 &sink_actor_ids,
                                 upstream_fragment_id,
