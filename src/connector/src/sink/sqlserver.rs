@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use anyhow::anyhow;
@@ -67,7 +67,7 @@ pub struct SqlServerConfig {
 }
 
 impl SqlServerConfig {
-    pub fn from_hashmap(properties: HashMap<String, String>) -> Result<Self> {
+    pub fn from_btreemap(properties: BTreeMap<String, String>) -> Result<Self> {
         let config =
             serde_json::from_value::<SqlServerConfig>(serde_json::to_value(properties).unwrap())
                 .map_err(|e| SinkError::Config(anyhow!(e)))?;
@@ -127,7 +127,7 @@ impl TryFrom<SinkParam> for SqlServerSink {
 
     fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
         let schema = param.schema();
-        let config = SqlServerConfig::from_hashmap(param.properties)?;
+        let config = SqlServerConfig::from_btreemap(param.properties)?;
         SqlServerSink::new(
             config,
             schema,
