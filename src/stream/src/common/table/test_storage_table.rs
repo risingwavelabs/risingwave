@@ -16,7 +16,7 @@ use futures::{pin_mut, StreamExt};
 use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
-use risingwave_common::row::{self, OwnedRow};
+use risingwave_common::row::{self, OwnedRow, RowExt};
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::epoch::{test_epoch, EpochPair};
@@ -500,7 +500,11 @@ async fn test_batch_scan_chunk_with_value_indices() {
         StateTable::from_table_catalog_inconsistent_op(&table, test_env.storage.clone(), None)
             .await;
 
-    let column_ids_partial = vec![ColumnId::from(1), ColumnId::from(2)];
+    let output_column_idx: Vec<usize> = vec![1, 2];
+    let column_ids_partial = output_column_idx
+        .iter()
+        .map(|i| ColumnId::from(*i as i32))
+        .collect_vec();
 
     let table = StorageTable::for_test_with_partial_columns(
         test_env.storage.clone(),
@@ -509,7 +513,7 @@ async fn test_batch_scan_chunk_with_value_indices() {
         column_ids_partial,
         order_types.clone(),
         pk_indices,
-        value_indices,
+        value_indices.clone(),
     );
     let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
     state.init_epoch(epoch);
@@ -571,13 +575,11 @@ async fn test_batch_scan_chunk_with_value_indices() {
     pin_mut!(iter);
 
     let chunks: Vec<_> = iter.collect().await;
-    println!("{:?}", chunks);
-    println!("{:?}", rows);
-    
     for (chunk, expected_rows) in chunks.into_iter().zip_eq(rows.chunks_mut(chunk_size)) {
-        let mut builder = DataChunkBuilder::new(vec![DataType::Int32, DataType::Int32], 2 * chunk_size);
+        let mut builder =
+            DataChunkBuilder::new(vec![DataType::Int32, DataType::Int32], 2 * chunk_size);
         for row in expected_rows {
-            let _ = builder.append_one_row(row.clone());
+            let _ = builder.append_one_row(row.clone().project(&output_column_idx));
         }
         assert_eq!(builder.consume_all().unwrap(), chunk.unwrap());
     }

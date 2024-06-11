@@ -22,14 +22,13 @@ use bytes::Bytes;
 use foyer::CacheContext;
 use futures::future::try_join_all;
 use futures::{stream, Stream, StreamExt};
-use futures_async_stream::{for_await, try_stream};
+use futures_async_stream::try_stream;
 use itertools::{Either, Itertools};
-use risingwave_common::array::{ArrayImpl, ArrayRef, DataChunk, Op};
+use risingwave_common::array::{ArrayRef, DataChunk, Op};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId, TableOption};
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{self, OwnedRow, Row, RowExt};
-use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::row_serde::*;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
@@ -39,7 +38,6 @@ use risingwave_hummock_sdk::key::{
 };
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::plan_common::StorageTableDesc;
-use tokio::pin;
 use tracing::trace;
 
 use crate::error::{StorageError, StorageResult};
@@ -645,7 +643,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
             .iter_with_pk_bounds(epoch, pk_prefix, range_bounds, ordered, prefetch_options)
             .await?;
 
-        // We uses ArraryBuilderImpl instead of DataChunkBuilder here to demonstrate how to build chunk in a columnar manner
+        // Uses ArraryBuilderImpl instead of DataChunkBuilder here to demonstrate how to build chunk in a columnar manner
         let builders = self.schema.create_array_builders(chunk_size);
         let row_count = 0;
         Ok(stream::unfold(
@@ -682,15 +680,16 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
                             // 1.b. do not yield because the chunk is not full yet
                             Some((
                                 // None indicates no chunk to yield. It will be filter out by the filter_map
-                                None, 
-                                Some((iter, builders, row_count, schema)))
-                            )
+                                None,
+                                Some((iter, builders, row_count, schema)),
+                            ))
                         }
                     }
                     Some(Err(e)) => {
                         // 2. the row stream returns an error.
                         // yield the error directly and stop the iteration by setting the state to None
-                        Some((Some(Err(e)), None))},
+                        Some((Some(Err(e)), None))
+                    }
                     None => {
                         // 3. the row stream has reached the end
                         if row_count > 0 {
@@ -802,7 +801,14 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         prefetch_options: PrefetchOptions,
     ) -> StorageResult<impl Stream<Item = StorageResult<DataChunk>> + Send> {
         let iter = self
-            .chunk_iter_with_pk_bounds(epoch, pk_prefix, range_bounds, ordered, chunk_size, prefetch_options)
+            .chunk_iter_with_pk_bounds(
+                epoch,
+                pk_prefix,
+                range_bounds,
+                ordered,
+                chunk_size,
+                prefetch_options,
+            )
             .await?;
 
         Ok(iter.map(|item| {
