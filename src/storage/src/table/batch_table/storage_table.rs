@@ -648,13 +648,9 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         let row_count = 0;
         Ok(stream::unfold(
             Some((Box::pin(iter), builders, row_count, self.schema.clone())),
-            move |state| async move {
-                if state.is_none() {
-                    // Already reached end or met error
-                    // We will only reach here after condition 2 or 3 below is met
-                    return None;
-                }
-                let (mut iter, mut builders, mut row_count, schema) = state.unwrap();
+            move |mut state| async move {
+                // When state is None, that means we already reached end or met error (condition 2 or 3 below)
+                let (mut iter, mut builders, mut row_count, schema) = state.take()?;
                 match iter.next().await {
                     Some(Ok(row)) => {
                         // 1. the row stream returns a valid row
