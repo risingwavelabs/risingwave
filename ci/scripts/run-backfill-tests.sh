@@ -186,10 +186,11 @@ test_sink_backfill_recovery() {
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/sink/create_sink.slt'
 
   # Sleep before restart cluster, to ensure the downstream sink actually gets created.
-  sleep 10
+  sleep 5
 
   # Restart
   restart_cluster
+  sleep 5
 
   # Sink back into rw
   run_sql "CREATE TABLE table_kafka (v1 int primary key)
