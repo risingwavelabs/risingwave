@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::sync::LazyLock;
 
@@ -30,9 +30,10 @@ use risingwave_common::bail;
 use risingwave_common::catalog::{KAFKA_TIMESTAMP_COLUMN_NAME, TABLE_NAME_COLUMN_NAME};
 use risingwave_common::log::LogSuppresser;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
-use risingwave_common::types::{Datum, Scalar, ScalarImpl};
+use risingwave_common::types::{Datum, DatumCow, Scalar, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::tracing::InstrumentStream;
+use risingwave_connector_codec::decoder::avro::MapHandling;
 use risingwave_pb::catalog::{
     SchemaRegistryNameStrategy as PbSchemaRegistryNameStrategy, StreamSourceInfo,
 };
@@ -55,10 +56,10 @@ use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::maxwell::MaxwellParser;
 use crate::parser::simd_json_parser::DebeziumMongoJsonAccessBuilder;
 use crate::parser::util::{
-    extract_header_inner_from_meta, extract_headers_from_meta, extreact_timestamp_from_meta,
+    extract_cdc_meta_column, extract_header_inner_from_meta, extract_headers_from_meta,
+    extreact_timestamp_from_meta,
 };
 use crate::schema::schema_registry::SchemaRegistryAuth;
-use crate::schema::InvalidOptionError;
 use crate::source::monitor::GLOBAL_SOURCE_METRICS;
 use crate::source::{
     extract_source_struct, BoxSourceStream, ChunkSourceStream, SourceColumnDesc, SourceColumnType,
@@ -245,11 +246,11 @@ impl MessageMeta<'_> {
 }
 
 trait OpAction {
-    type Output;
+    type Output<'a>;
 
-    fn output_for(datum: Datum) -> Self::Output;
+    fn output_for<'a>(datum: Datum) -> Self::Output<'a>;
 
-    fn apply(builder: &mut ArrayBuilderImpl, output: Self::Output);
+    fn apply(builder: &mut ArrayBuilderImpl, output: Self::Output<'_>);
 
     fn rollback(builder: &mut ArrayBuilderImpl);
 
@@ -259,16 +260,16 @@ trait OpAction {
 struct OpActionInsert;
 
 impl OpAction for OpActionInsert {
-    type Output = Datum;
+    type Output<'a> = DatumCow<'a>;
 
     #[inline(always)]
-    fn output_for(datum: Datum) -> Self::Output {
-        datum
+    fn output_for<'a>(datum: Datum) -> Self::Output<'a> {
+        datum.into()
     }
 
     #[inline(always)]
-    fn apply(builder: &mut ArrayBuilderImpl, output: Datum) {
-        builder.append(&output)
+    fn apply(builder: &mut ArrayBuilderImpl, output: DatumCow<'_>) {
+        builder.append(output)
     }
 
     #[inline(always)]
@@ -285,16 +286,16 @@ impl OpAction for OpActionInsert {
 struct OpActionDelete;
 
 impl OpAction for OpActionDelete {
-    type Output = Datum;
+    type Output<'a> = DatumCow<'a>;
 
     #[inline(always)]
-    fn output_for(datum: Datum) -> Self::Output {
-        datum
+    fn output_for<'a>(datum: Datum) -> Self::Output<'a> {
+        datum.into()
     }
 
     #[inline(always)]
-    fn apply(builder: &mut ArrayBuilderImpl, output: Datum) {
-        builder.append(&output)
+    fn apply(builder: &mut ArrayBuilderImpl, output: DatumCow<'_>) {
+        builder.append(output)
     }
 
     #[inline(always)]
@@ -311,17 +312,17 @@ impl OpAction for OpActionDelete {
 struct OpActionUpdate;
 
 impl OpAction for OpActionUpdate {
-    type Output = (Datum, Datum);
+    type Output<'a> = (DatumCow<'a>, DatumCow<'a>);
 
     #[inline(always)]
-    fn output_for(datum: Datum) -> Self::Output {
-        (datum.clone(), datum)
+    fn output_for<'a>(datum: Datum) -> Self::Output<'a> {
+        (datum.clone().into(), datum.into())
     }
 
     #[inline(always)]
-    fn apply(builder: &mut ArrayBuilderImpl, output: (Datum, Datum)) {
-        builder.append(&output.0);
-        builder.append(&output.1);
+    fn apply(builder: &mut ArrayBuilderImpl, output: (DatumCow<'_>, DatumCow<'_>)) {
+        builder.append(output.0);
+        builder.append(output.1);
     }
 
     #[inline(always)]
@@ -343,9 +344,9 @@ impl SourceStreamChunkRowWriter<'_> {
         self.vis_builder.append(self.visible);
     }
 
-    fn do_action<A: OpAction>(
+    fn do_action<'a, A: OpAction>(
         &mut self,
-        mut f: impl FnMut(&SourceColumnDesc) -> AccessResult<A::Output>,
+        mut f: impl FnMut(&SourceColumnDesc) -> AccessResult<A::Output<'a>>,
     ) -> AccessResult<()> {
         let mut parse_field = |desc: &SourceColumnDesc| {
             match f(desc) {
@@ -401,12 +402,38 @@ impl SourceStreamChunkRowWriter<'_> {
                             .unwrap(), // handled all match cases in internal match, unwrap is safe
                     ));
                 }
+
+                (
+                    _, // for cdc tables
+                    &Some(ref col @ AdditionalColumnType::DatabaseName(_))
+                    | &Some(ref col @ AdditionalColumnType::TableName(_)),
+                ) => {
+                    match self.row_meta {
+                        Some(row_meta) => {
+                            if let SourceMeta::DebeziumCdc(cdc_meta) = row_meta.meta {
+                                Ok(A::output_for(
+                                    extract_cdc_meta_column(cdc_meta, col, desc.name.as_str())?
+                                        .unwrap_or(None),
+                                ))
+                            } else {
+                                Err(AccessError::Uncategorized {
+                                    message: "CDC metadata not found in the message".to_string(),
+                                })
+                            }
+                        }
+                        None => parse_field(desc), // parse from payload
+                    }
+                }
                 (_, &Some(AdditionalColumnType::Timestamp(_))) => match self.row_meta {
                     Some(row_meta) => Ok(A::output_for(
                         extreact_timestamp_from_meta(row_meta.meta).unwrap_or(None),
                     )),
                     None => parse_field(desc), // parse from payload
                 },
+                (_, &Some(AdditionalColumnType::CollectionName(_))) => {
+                    // collection name for `mongodb-cdc` should be parsed from the message payload
+                    parse_field(desc)
+                }
                 (_, &Some(AdditionalColumnType::Partition(_))) => {
                     // the meta info does not involve spec connector
                     return Ok(A::output_for(
@@ -461,14 +488,14 @@ impl SourceStreamChunkRowWriter<'_> {
         };
 
         // Columns that changes have been applied to. Used to rollback when an error occurs.
-        let mut applied_columns = Vec::with_capacity(self.descs.len());
+        let mut applied_columns = 0;
 
         let result = (self.descs.iter())
             .zip_eq_fast(self.builders.iter_mut())
             .try_for_each(|(desc, builder)| {
                 wrapped_f(desc).map(|output| {
                     A::apply(builder, output);
-                    applied_columns.push(builder);
+                    applied_columns += 1;
                 })
             });
 
@@ -478,8 +505,8 @@ impl SourceStreamChunkRowWriter<'_> {
                 Ok(())
             }
             Err(e) => {
-                for builder in applied_columns {
-                    A::rollback(builder);
+                for i in 0..applied_columns {
+                    A::rollback(&mut self.builders[i]);
                 }
                 Err(e)
             }
@@ -490,33 +517,46 @@ impl SourceStreamChunkRowWriter<'_> {
     /// produces one [`Datum`] by corresponding [`SourceColumnDesc`].
     ///
     /// See the [struct-level documentation](SourceStreamChunkRowWriter) for more details.
-    pub fn insert(
+    #[inline(always)]
+    pub fn do_insert<'a, D>(
         &mut self,
-        f: impl FnMut(&SourceColumnDesc) -> AccessResult<Datum>,
-    ) -> AccessResult<()> {
-        self.do_action::<OpActionInsert>(f)
+        mut f: impl FnMut(&SourceColumnDesc) -> AccessResult<D>,
+    ) -> AccessResult<()>
+    where
+        D: Into<DatumCow<'a>>,
+    {
+        self.do_action::<OpActionInsert>(|desc| f(desc).map(Into::into))
     }
 
     /// Write a `Delete` record to the [`StreamChunk`], with the given fallible closure that
     /// produces one [`Datum`] by corresponding [`SourceColumnDesc`].
     ///
     /// See the [struct-level documentation](SourceStreamChunkRowWriter) for more details.
-    pub fn delete(
+    #[inline(always)]
+    pub fn do_delete<'a, D>(
         &mut self,
-        f: impl FnMut(&SourceColumnDesc) -> AccessResult<Datum>,
-    ) -> AccessResult<()> {
-        self.do_action::<OpActionDelete>(f)
+        mut f: impl FnMut(&SourceColumnDesc) -> AccessResult<D>,
+    ) -> AccessResult<()>
+    where
+        D: Into<DatumCow<'a>>,
+    {
+        self.do_action::<OpActionDelete>(|desc| f(desc).map(Into::into))
     }
 
     /// Write a `Update` record to the [`StreamChunk`], with the given fallible closure that
     /// produces two [`Datum`]s as old and new value by corresponding [`SourceColumnDesc`].
     ///
     /// See the [struct-level documentation](SourceStreamChunkRowWriter) for more details.
-    pub fn update(
+    #[inline(always)]
+    pub fn do_update<'a, D1, D2>(
         &mut self,
-        f: impl FnMut(&SourceColumnDesc) -> AccessResult<(Datum, Datum)>,
-    ) -> AccessResult<()> {
-        self.do_action::<OpActionUpdate>(f)
+        mut f: impl FnMut(&SourceColumnDesc) -> AccessResult<(D1, D2)>,
+    ) -> AccessResult<()>
+    where
+        D1: Into<DatumCow<'a>>,
+        D2: Into<DatumCow<'a>>,
+    {
+        self.do_action::<OpActionUpdate>(|desc| f(desc).map(|(old, new)| (old.into(), new.into())))
     }
 }
 
@@ -590,7 +630,7 @@ pub trait ByteStreamSourceParser: Send + Debug + Sized + 'static {
     }
 
     fn emit_empty_row<'a>(&'a mut self, mut writer: SourceStreamChunkRowWriter<'a>) {
-        _ = writer.insert(|_column| Ok(None));
+        _ = writer.do_insert(|_column| Ok(Datum::None));
     }
 }
 
@@ -802,7 +842,7 @@ async fn into_chunk_stream_inner<P: ByteStreamSourceParser>(
 }
 
 pub trait AccessBuilder {
-    async fn generate_accessor(&mut self, payload: Vec<u8>) -> ConnectorResult<AccessImpl<'_, '_>>;
+    async fn generate_accessor(&mut self, payload: Vec<u8>) -> ConnectorResult<AccessImpl<'_>>;
 }
 
 #[derive(Debug)]
@@ -847,10 +887,7 @@ impl AccessBuilderImpl {
         Ok(accessor)
     }
 
-    pub async fn generate_accessor(
-        &mut self,
-        payload: Vec<u8>,
-    ) -> ConnectorResult<AccessImpl<'_, '_>> {
+    pub async fn generate_accessor(&mut self, payload: Vec<u8>) -> ConnectorResult<AccessImpl<'_>> {
         let accessor = match self {
             Self::Avro(builder) => builder.generate_accessor(payload).await?,
             Self::Protobuf(builder) => builder.generate_accessor(payload).await?,
@@ -1040,35 +1077,6 @@ pub struct AvroProperties {
     pub map_handling: Option<MapHandling>,
 }
 
-/// How to convert the map type from the input encoding to RisingWave's datatype.
-///
-/// XXX: Should this be `avro.map.handling.mode`? Can it be shared between Avro and Protobuf?
-#[derive(Debug, Copy, Clone)]
-pub enum MapHandling {
-    Jsonb,
-    // TODO: <https://github.com/risingwavelabs/risingwave/issues/13387>
-    // Map
-}
-
-impl MapHandling {
-    pub const OPTION_KEY: &'static str = "map.handling.mode";
-
-    pub fn from_options(
-        options: &std::collections::BTreeMap<String, String>,
-    ) -> Result<Option<Self>, InvalidOptionError> {
-        let mode = match options.get(Self::OPTION_KEY).map(std::ops::Deref::deref) {
-            Some("jsonb") => Self::Jsonb,
-            Some(v) => {
-                return Err(InvalidOptionError {
-                    message: format!("unrecognized {} value {}", Self::OPTION_KEY, v),
-                })
-            }
-            None => return Ok(None),
-        };
-        Ok(Some(mode))
-    }
-}
-
 #[derive(Debug, Default, Clone)]
 pub struct ProtobufProperties {
     pub message_name: String,
@@ -1133,7 +1141,7 @@ impl SpecificParserConfig {
     // The validity of (format, encode) is ensured by `extract_format_encode`
     pub fn new(
         info: &StreamSourceInfo,
-        with_properties: &HashMap<String, String>,
+        with_properties: &BTreeMap<String, String>,
     ) -> ConnectorResult<Self> {
         let source_struct = extract_source_struct(info)?;
         let format = source_struct.format;

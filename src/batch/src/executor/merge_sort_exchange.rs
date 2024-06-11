@@ -47,11 +47,13 @@ pub struct MergeSortExchangeExecutorImpl<CS, C> {
     /// Mock-able `CreateSource`.
     source_creators: Vec<CS>,
     schema: Schema,
+    #[expect(dead_code)]
     task_id: TaskId,
     identity: String,
     /// The maximum size of the chunk produced by executor at a time.
     chunk_size: usize,
     mem_ctx: MemoryContext,
+    #[expect(dead_code)]
     alloc: MonitoredGlobalAlloc,
 }
 

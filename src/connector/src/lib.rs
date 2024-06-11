@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![expect(dead_code)]
 #![allow(clippy::derive_partial_eq_without_eq)]
 #![feature(array_chunks)]
 #![feature(coroutines)]
@@ -162,6 +161,8 @@ mod tests {
 
     /// Test some serde behavior we rely on.
     mod serde {
+        #![expect(dead_code)]
+
         use std::collections::BTreeMap;
 
         use expect_test::expect;

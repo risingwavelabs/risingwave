@@ -21,7 +21,7 @@
 // rely on the internal implementation and allow that to be changed, the tests use
 // `ByteStreamSourceParserImpl` to create a parser instance.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use anyhow::Context as _;
 use apache_avro::Schema;
@@ -46,7 +46,8 @@ pub struct JsonAccessBuilder {
 
 impl AccessBuilder for JsonAccessBuilder {
     #[allow(clippy::unused_async)]
-    async fn generate_accessor(&mut self, payload: Vec<u8>) -> ConnectorResult<AccessImpl<'_, '_>> {
+    async fn generate_accessor(&mut self, payload: Vec<u8>) -> ConnectorResult<AccessImpl<'_>> {
+        // XXX: When will we enter this branch?
         if payload.is_empty() {
             self.value = Some("{}".into());
         } else {
@@ -82,7 +83,7 @@ impl JsonAccessBuilder {
 pub async fn schema_to_columns(
     schema_location: &str,
     schema_registry_auth: Option<SchemaRegistryAuth>,
-    props: &HashMap<String, String>,
+    props: &BTreeMap<String, String>,
 ) -> ConnectorResult<Vec<ColumnDesc>> {
     let url = handle_sr_list(schema_location)?;
     let json_schema = if let Some(schema_registry_auth) = schema_registry_auth {
@@ -101,7 +102,7 @@ pub async fn schema_to_columns(
     let avro_schema = convert_avro(&json_schema, context).to_string();
     let schema = Schema::parse_str(&avro_schema).context("failed to parse avro schema")?;
     // TODO: do we need to support map type here?
-    avro_schema_to_column_descs(&schema, None)
+    avro_schema_to_column_descs(&schema, None).map_err(Into::into)
 }
 
 #[cfg(test)]

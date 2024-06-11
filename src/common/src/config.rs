@@ -651,6 +651,11 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::shared_buffer_flush_ratio")]
     pub shared_buffer_flush_ratio: f32,
 
+    /// The minimum total flush size of shared buffer spill. When a shared buffer spilled is trigger,
+    /// the total flush size across multiple epochs should be at least higher than this size.
+    #[serde(default = "default::storage::shared_buffer_min_batch_flush_size_mb")]
+    pub shared_buffer_min_batch_flush_size_mb: usize,
+
     /// The threshold for the number of immutable memtables to merge to a new imm.
     #[serde(default = "default::storage::imm_merge_threshold")]
     #[deprecated]
@@ -816,12 +821,6 @@ pub struct FileCacheConfig {
     #[serde(default = "default::file_cache::file_capacity_mb")]
     pub file_capacity_mb: usize,
 
-    #[serde(default = "default::file_cache::device_align")]
-    pub device_align: usize,
-
-    #[serde(default = "default::file_cache::device_io_size")]
-    pub device_io_size: usize,
-
     #[serde(default = "default::file_cache::flushers")]
     pub flushers: usize,
 
@@ -840,8 +839,8 @@ pub struct FileCacheConfig {
     #[serde(default = "default::file_cache::insert_rate_limit_mb")]
     pub insert_rate_limit_mb: usize,
 
-    #[serde(default = "default::file_cache::catalog_bits")]
-    pub catalog_bits: usize,
+    #[serde(default = "default::file_cache::indexer_shards")]
+    pub indexer_shards: usize,
 
     #[serde(default = "default::file_cache::compression")]
     pub compression: String,
@@ -1383,6 +1382,10 @@ pub mod default {
             0.8
         }
 
+        pub fn shared_buffer_min_batch_flush_size_mb() -> usize {
+            800
+        }
+
         pub fn imm_merge_threshold() -> usize {
             0 // disable
         }
@@ -1556,14 +1559,6 @@ pub mod default {
             64
         }
 
-        pub fn device_align() -> usize {
-            4096
-        }
-
-        pub fn device_io_size() -> usize {
-            16 * 1024
-        }
-
         pub fn flushers() -> usize {
             4
         }
@@ -1588,8 +1583,8 @@ pub mod default {
             0
         }
 
-        pub fn catalog_bits() -> usize {
-            6
+        pub fn indexer_shards() -> usize {
+            64
         }
 
         pub fn compression() -> String {
@@ -1813,6 +1808,8 @@ pub mod default {
         const DEFAULT_TOMBSTONE_RATIO_PERCENT: u32 = 40;
         const DEFAULT_EMERGENCY_PICKER: bool = true;
 
+        const DEFAULT_MAX_LEVEL: u32 = 6;
+
         use crate::catalog::hummock::CompactionFilterFlag;
 
         pub fn max_bytes_for_level_base() -> u64 {
@@ -1873,6 +1870,10 @@ pub mod default {
 
         pub fn enable_emergency_picker() -> bool {
             DEFAULT_EMERGENCY_PICKER
+        }
+
+        pub fn max_level() -> u32 {
+            DEFAULT_MAX_LEVEL
         }
     }
 
@@ -2207,6 +2208,8 @@ pub struct CompactionConfig {
     pub tombstone_reclaim_ratio: u32,
     #[serde(default = "default::compaction_config::enable_emergency_picker")]
     pub enable_emergency_picker: bool,
+    #[serde(default = "default::compaction_config::max_level")]
+    pub max_level: u32,
 }
 
 #[cfg(test)]

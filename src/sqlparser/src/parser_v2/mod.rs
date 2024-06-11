@@ -116,6 +116,19 @@ where
         .parse_next(input)
 }
 
+/// Consume an 'single-quoted string'.
+pub fn single_quoted_string<S>(input: &mut S) -> PResult<String>
+where
+    S: TokenStream,
+{
+    token
+        .verify_map(|t| match &t.token {
+            Token::SingleQuotedString(s) => Some(s.clone()),
+            _ => None,
+        })
+        .parse_next(input)
+}
+
 /// Consume an object name.
 ///
 /// FIXME: Object name is extremely complex, we only handle a subset here.

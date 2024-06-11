@@ -449,7 +449,7 @@ impl StreamSink {
         let (user_defined_append_only, user_force_append_only, syntax_legacy) = match format_desc {
             Some(f) => (
                 f.format == SinkFormat::AppendOnly,
-                Self::is_user_force_append_only(&WithOptions::from_inner(f.options.clone()))?,
+                Self::is_user_force_append_only(&WithOptions::new(f.options.clone()))?,
                 false,
             ),
             None => (

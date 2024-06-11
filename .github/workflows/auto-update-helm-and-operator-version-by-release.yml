@@ -47,6 +47,7 @@ jobs:
           path: 'helm-charts'
           reviewers: arkbriar
           delete-branch: true
+          signoff: true
 
   update-risingwave-operator:
     runs-on: ubuntu-latest
@@ -75,3 +76,4 @@ jobs:
           path: 'risingwave-operator'
           reviewers: arkbriar
           delete-branch: true
+          signoff: true

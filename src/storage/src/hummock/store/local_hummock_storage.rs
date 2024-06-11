@@ -629,7 +629,6 @@ impl LocalHummockStorage {
                 old_values,
                 size,
                 table_id,
-                instance_id,
                 Some(tracker),
             );
             self.spill_offset += 1;
@@ -639,7 +638,7 @@ impl LocalHummockStorage {
             // insert imm to uploader
             if !self.is_replicated {
                 self.event_sender
-                    .send(HummockEvent::ImmToUploader(imm))
+                    .send(HummockEvent::ImmToUploader { instance_id, imm })
                     .unwrap();
             }
             imm_size

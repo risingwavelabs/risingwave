@@ -804,7 +804,7 @@ impl DataChunkTestExt for DataChunk {
                 let arr = col;
                 let mut builder = arr.create_builder(n * 2);
                 for v in arr.iter() {
-                    builder.append(&v.to_owned_datum());
+                    builder.append(v.to_owned_datum());
                     builder.append_null();
                 }
 

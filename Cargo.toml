@@ -12,6 +12,7 @@ members = [
     "src/common/metrics",
     "src/compute",
     "src/connector",
+    "src/connector/codec",
     "src/connector/with_options",
     "src/ctl",
     "src/dml",
@@ -75,7 +76,7 @@ license = "Apache-2.0"
 repository = "https://github.com/risingwavelabs/risingwave"
 
 [workspace.dependencies]
-foyer = { version = "0.8.6", features = ["nightly"] }
+foyer = { version = "0.9.3", features = ["nightly"] }
 auto_enums = { version = "0.8", features = ["futures03", "tokio1"] }
 await-tree = "0.2.1"
 aws-config = { version = "1", default-features = false, features = [
@@ -136,7 +137,7 @@ arrow-flight = "50"
 arrow-select = "50"
 arrow-ord = "50"
 arrow-row = "50"
-arrow-udf-js = "0.3"
+arrow-udf-js = "0.3.1"
 arrow-udf-js-deno = { git = "https://github.com/risingwavelabs/arrow-udf.git", rev = "fa36365" }
 arrow-udf-wasm = { version = "0.2.2", features = ["build"] }
 arrow-udf-python = "0.2"
@@ -176,6 +177,7 @@ sea-orm = { version = "0.12.14", features = [
     "sqlx-sqlite",
     "runtime-tokio-native-tls",
 ] }
+sqlx = "0.7"
 tokio-util = "0.7"
 tracing-opentelemetry = "0.22"
 rand = { version = "0.8", features = ["small_rng"] }
@@ -192,6 +194,7 @@ risingwave_compactor = { path = "./src/storage/compactor" }
 risingwave_compute = { path = "./src/compute" }
 risingwave_ctl = { path = "./src/ctl" }
 risingwave_connector = { path = "./src/connector" }
+risingwave_connector_codec = { path = "./src/connector/codec" }
 risingwave_dml = { path = "./src/dml" }
 risingwave_error = { path = "./src/error" }
 risingwave_expr = { path = "./src/expr/core" }

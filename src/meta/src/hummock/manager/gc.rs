@@ -173,7 +173,7 @@ impl HummockManager {
     /// Starts a full GC.
     /// 1. Meta node sends a `FullScanTask` to a compactor in this method.
     /// 2. The compactor returns scan result of object store to meta node. See
-    /// `HummockManager::full_scan_inner` in storage crate.
+    ///    `HummockManager::full_scan_inner` in storage crate.
     /// 3. Meta node decides which SSTs to delete. See `HummockManager::complete_full_gc`.
     ///
     /// Returns Ok(false) if there is no worker available.

@@ -102,10 +102,12 @@ impl SplitReader for PulsarSplitReader {
 
 /// This reader reads from pulsar broker
 pub struct PulsarBrokerReader {
+    #[expect(dead_code)]
     pulsar: Pulsar<TokioExecutor>,
     consumer: Consumer<Vec<u8>, TokioExecutor>,
+    #[expect(dead_code)]
     split: PulsarSplit,
-
+    #[expect(dead_code)]
     split_id: SplitId,
     parser_config: ParserConfig,
     source_ctx: SourceContextRef,
@@ -185,12 +187,16 @@ impl SplitReader for PulsarBrokerReader {
                     )
                 } else {
                     builder.with_options(
-                        ConsumerOptions::default().with_initial_position(InitialPosition::Earliest),
+                        ConsumerOptions::default()
+                            .with_initial_position(InitialPosition::Earliest)
+                            .durable(false),
                     )
                 }
             }
             PulsarEnumeratorOffset::Latest => builder.with_options(
-                ConsumerOptions::default().with_initial_position(InitialPosition::Latest),
+                ConsumerOptions::default()
+                    .with_initial_position(InitialPosition::Latest)
+                    .durable(false),
             ),
             PulsarEnumeratorOffset::MessageId(m) => {
                 if topic.starts_with("non-persistent://") {
@@ -251,7 +257,9 @@ impl PulsarBrokerReader {
     }
 }
 
+#[expect(dead_code)]
 const META_COLUMN_TOPIC: &str = "__topic";
+#[expect(dead_code)]
 const META_COLUMN_KEY: &str = "__key";
 const META_COLUMN_LEDGER_ID: &str = "__ledgerId";
 const META_COLUMN_ENTRY_ID: &str = "__entryId";
