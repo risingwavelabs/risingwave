@@ -180,9 +180,9 @@ impl ClientContext for RwConsumerContext {
         self.common.generate_oauth_token(oauthbearer_config)
     }
 
-    fn enable_refresh_oauth_token(&self) -> bool {
-        self.common.enable_refresh_oauth_token()
-    }
+    // fn enable_refresh_oauth_token(&self) -> bool {
+    //     self.common.enable_refresh_oauth_token()
+    // }
 }
 
 // required by the trait bound of BaseConsumer
