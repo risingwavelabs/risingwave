@@ -476,7 +476,7 @@ mod test {
 
         use crate::executor::Barrier;
 
-        let properties = maplit::hashmap! {
+        let properties = maplit::btreemap! {
             "connector".into() => "blackhole".into(),
             "type".into() => "append-only".into(),
             "force_append_only".into() => "true".into()
@@ -602,7 +602,7 @@ mod test {
 
         use crate::executor::Barrier;
 
-        let properties = maplit::hashmap! {
+        let properties = maplit::btreemap! {
             "connector".into() => "blackhole".into(),
         };
 
@@ -725,7 +725,7 @@ mod test {
 
         use crate::executor::Barrier;
 
-        let properties = maplit::hashmap! {
+        let properties = maplit::btreemap! {
             "connector".into() => "blackhole".into(),
             "type".into() => "append-only".into(),
             "force_append_only".into() => "true".into()

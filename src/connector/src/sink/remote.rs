@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, VecDeque};
 use std::marker::PhantomData;
 use std::ops::Deref;
 use std::pin::pin;
@@ -559,7 +559,7 @@ impl<R: RemoteSinkTrait> Sink for CoordinatedRemoteSink<R> {
 
 pub struct CoordinatedRemoteSinkWriter {
     #[expect(dead_code)]
-    properties: HashMap<String, String>,
+    properties: BTreeMap<String, String>,
     epoch: Option<u64>,
     batch_id: u64,
     stream_handle: SinkWriterStreamHandle<JniSinkWriterStreamRequest>,
@@ -589,7 +589,7 @@ impl CoordinatedRemoteSinkWriter {
     ) -> CoordinatedRemoteSinkWriter {
         use futures::StreamExt;
 
-        let properties = HashMap::from([("output.path".to_string(), "/tmp/rw".to_string())]);
+        let properties = BTreeMap::from([("output.path".to_string(), "/tmp/rw".to_string())]);
 
         let stream_handle = SinkWriterStreamHandle::for_test(
             request_sender,
