@@ -393,7 +393,7 @@ pub fn start_compactor(
                         let mut pending_pull_task_count = 0;
                         if pull_task_ack {
                             // TODO: Compute parallelism on meta side
-                            pending_pull_task_count = (max_task_parallelism - running_task_parallelism.load(Ordering::SeqCst)).max(max_pull_task_count);
+                            pending_pull_task_count = (max_task_parallelism - running_task_parallelism.load(Ordering::SeqCst)).min(max_pull_task_count);
 
                             if pending_pull_task_count > 0 {
                                 if let Err(e) = request_sender.send(SubscribeCompactionEventRequest {
@@ -510,7 +510,7 @@ pub fn start_compactor(
                                         &request_sender,
                                     );
 
-                                    continue 'start_stream;
+                                    continue 'consume_stream;
                                 }
 
                                 running_task_parallelism

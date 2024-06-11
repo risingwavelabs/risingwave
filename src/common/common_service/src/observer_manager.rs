@@ -27,6 +27,7 @@ pub trait SubscribeTypeEnum {
 }
 
 pub struct SubscribeFrontend {}
+
 impl SubscribeTypeEnum for SubscribeFrontend {
     fn subscribe_type() -> SubscribeType {
         SubscribeType::Frontend
@@ -34,6 +35,7 @@ impl SubscribeTypeEnum for SubscribeFrontend {
 }
 
 pub struct SubscribeHummock {}
+
 impl SubscribeTypeEnum for SubscribeHummock {
     fn subscribe_type() -> SubscribeType {
         SubscribeType::Hummock
@@ -41,6 +43,7 @@ impl SubscribeTypeEnum for SubscribeHummock {
 }
 
 pub struct SubscribeCompactor {}
+
 impl SubscribeTypeEnum for SubscribeCompactor {
     fn subscribe_type() -> SubscribeType {
         SubscribeType::Compactor
@@ -48,6 +51,7 @@ impl SubscribeTypeEnum for SubscribeCompactor {
 }
 
 pub struct SubscribeCompute {}
+
 impl SubscribeTypeEnum for SubscribeCompute {
     fn subscribe_type() -> SubscribeType {
         SubscribeType::Compute
@@ -142,11 +146,9 @@ where
             | Info::RelationGroup(_)
             | Info::User(_)
             | Info::Connection(_)
+            | Info::Secret(_)
             | Info::Function(_) => {
                 notification.version > info.version.as_ref().unwrap().catalog_version
-            }
-            Info::ParallelUnitMapping(_) => {
-                notification.version > info.version.as_ref().unwrap().parallel_unit_mapping_version
             }
             Info::Node(_) => {
                 notification.version > info.version.as_ref().unwrap().worker_node_version
@@ -157,10 +159,18 @@ where
             Info::HummockSnapshot(_) => true,
             Info::MetaBackupManifestId(_) => true,
             Info::SystemParams(_) | Info::SessionParam(_) => true,
-            Info::ServingParallelUnitMappings(_) => true,
             Info::Snapshot(_) | Info::HummockWriteLimits(_) => unreachable!(),
             Info::HummockStats(_) => true,
             Info::Recovery(_) => true,
+            Info::StreamingWorkerSlotMapping(_) => {
+                notification.version
+                    > info
+                        .version
+                        .as_ref()
+                        .unwrap()
+                        .streaming_worker_slot_mapping_version
+            }
+            Info::ServingWorkerSlotMappings(_) => true,
         });
 
         self.observer_states
@@ -226,6 +236,7 @@ where
         }
     }
 }
+
 const RE_SUBSCRIBE_RETRY_INTERVAL: Duration = Duration::from_millis(100);
 
 #[async_trait::async_trait]

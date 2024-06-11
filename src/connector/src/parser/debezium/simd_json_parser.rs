@@ -41,7 +41,7 @@ impl DebeziumJsonAccessBuilder {
 
 impl AccessBuilder for DebeziumJsonAccessBuilder {
     #[allow(clippy::unused_async)]
-    async fn generate_accessor(&mut self, payload: Vec<u8>) -> ConnectorResult<AccessImpl<'_, '_>> {
+    async fn generate_accessor(&mut self, payload: Vec<u8>) -> ConnectorResult<AccessImpl<'_>> {
         self.value = Some(payload);
         let mut event: BorrowedValue<'_> =
             simd_json::to_borrowed_value(self.value.as_mut().unwrap())
@@ -79,7 +79,7 @@ impl DebeziumMongoJsonAccessBuilder {
 
 impl AccessBuilder for DebeziumMongoJsonAccessBuilder {
     #[allow(clippy::unused_async)]
-    async fn generate_accessor(&mut self, payload: Vec<u8>) -> ConnectorResult<AccessImpl<'_, '_>> {
+    async fn generate_accessor(&mut self, payload: Vec<u8>) -> ConnectorResult<AccessImpl<'_>> {
         self.value = Some(payload);
         let mut event: BorrowedValue<'_> =
             simd_json::to_borrowed_value(self.value.as_mut().unwrap())
@@ -530,7 +530,7 @@ mod tests {
                     // For other overflow, the parsing succeeds but the type conversion fails
                     // The errors are ignored and logged.
                     res.unwrap();
-                    assert!(logs_contain("Expected type"), "{i}");
+                    assert!(logs_contain("expected type"), "{i}");
                 } else {
                     // For f64 overflow, the parsing fails
                     let e = res.unwrap_err();

@@ -79,7 +79,7 @@ impl StateReporter {
 
 #[derive(PartialEq, Eq, Hash, Clone, Debug, Default)]
 pub struct TaskId {
-    pub task_id: u32,
+    pub task_id: u64,
     pub stage_id: u32,
     pub query_id: String,
 }
@@ -87,7 +87,7 @@ pub struct TaskId {
 #[derive(PartialEq, Eq, Hash, Clone, Default)]
 pub struct TaskOutputId {
     pub task_id: TaskId,
-    pub output_id: u32,
+    pub output_id: u64,
 }
 
 /// More compact formatter compared to derived `fmt::Debug`.
@@ -559,8 +559,8 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                         }
                     }
                 }
-                date_chunk = data_chunk_stream.next()=> {
-                    match date_chunk {
+                data_chunk = data_chunk_stream.next()=> {
+                    match data_chunk {
                         Some(Ok(data_chunk)) => {
                             if let Err(e) = sender.send(data_chunk).await {
                                 match e {

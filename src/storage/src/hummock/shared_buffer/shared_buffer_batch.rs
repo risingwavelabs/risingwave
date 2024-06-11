@@ -30,7 +30,6 @@ use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::{FullKey, PointRange, TableKey, TableKeyRange, UserKey};
 use risingwave_hummock_sdk::EpochWithGap;
 
-use crate::hummock::event_handler::LocalInstanceId;
 use crate::hummock::iterator::{
     Backward, DeleteRangeIterator, DirectionEnum, Forward, HummockIterator,
     HummockIteratorDirection, ValueMeta,
@@ -285,7 +284,6 @@ pub static SHARED_BUFFER_BATCH_ID_GENERATOR: LazyLock<AtomicU64> =
 pub struct SharedBufferBatch {
     pub(crate) inner: Arc<SharedBufferBatchInner>,
     pub table_id: TableId,
-    pub instance_id: LocalInstanceId,
 }
 
 impl SharedBufferBatch {
@@ -327,7 +325,6 @@ impl SharedBufferBatch {
                 None,
             )),
             table_id,
-            instance_id: SHARED_BUFFER_BATCH_ID_GENERATOR.fetch_add(1, Relaxed),
         }
     }
 
@@ -519,7 +516,6 @@ impl SharedBufferBatch {
         old_values: Option<SharedBufferBatchOldValues>,
         size: usize,
         table_id: TableId,
-        instance_id: LocalInstanceId,
         tracker: Option<MemoryTracker>,
     ) -> Self {
         let inner = SharedBufferBatchInner::new(
@@ -533,7 +529,6 @@ impl SharedBufferBatch {
         SharedBufferBatch {
             inner: Arc::new(inner),
             table_id,
-            instance_id,
         }
     }
 
@@ -581,7 +576,6 @@ impl SharedBufferBatch {
         SharedBufferBatch {
             inner: Arc::new(inner),
             table_id,
-            instance_id: LocalInstanceId::default(),
         }
     }
 }
@@ -1531,7 +1525,7 @@ mod tests {
         ];
         // newer data comes first
         let imms = vec![imm3, imm2, imm1];
-        let merged_imm = merge_imms_in_memory(table_id, 0, imms.clone(), None).await;
+        let merged_imm = merge_imms_in_memory(table_id, imms.clone(), None).await;
 
         // Point lookup
         for (i, items) in batch_items.iter().enumerate() {
@@ -1716,7 +1710,7 @@ mod tests {
         ];
         // newer data comes first
         let imms = vec![imm3, imm2, imm1];
-        let merged_imm = merge_imms_in_memory(table_id, 0, imms.clone(), None).await;
+        let merged_imm = merge_imms_in_memory(table_id, imms.clone(), None).await;
 
         // Point lookup
         for (i, items) in batch_items.iter().enumerate() {

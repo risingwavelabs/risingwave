@@ -39,6 +39,8 @@ pub(crate) mod system_catalog;
 pub(crate) mod table_catalog;
 pub(crate) mod view_catalog;
 
+pub(crate) mod secret_catalog;
+
 pub(crate) use catalog_service::CatalogReader;
 pub use index_catalog::IndexCatalog;
 pub use table_catalog::TableCatalog;
@@ -55,6 +57,7 @@ pub(crate) type SchemaId = u32;
 pub(crate) type TableId = risingwave_common::catalog::TableId;
 pub(crate) type ColumnId = risingwave_common::catalog::ColumnId;
 pub(crate) type FragmentId = u32;
+pub(crate) type SecretId = risingwave_common::catalog::SecretId;
 
 /// Check if the column name does not conflict with the internally reserved column name.
 pub fn check_valid_column_name(column_name: &str) -> Result<()> {

@@ -42,7 +42,7 @@ impl DockerServiceConfig for PostgresConfig {
     }
 
     fn ports(&self) -> Vec<(String, String)> {
-        vec![(format!("{}:{}", self.address, self.port), "5432".to_owned())]
+        vec![(self.port.to_string(), "5432".to_owned())]
     }
 
     fn data_path(&self) -> Option<String> {

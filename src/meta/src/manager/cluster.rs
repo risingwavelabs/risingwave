@@ -38,7 +38,9 @@ use tokio::sync::{RwLock, RwLockReadGuard};
 use tokio::task::JoinHandle;
 
 use crate::manager::{IdCategory, LocalNotification, MetaSrvEnv};
-use crate::model::{MetadataModel, ValTransaction, VarTransaction, Worker, INVALID_EXPIRE_AT};
+use crate::model::{
+    InMemValTransaction, MetadataModel, ValTransaction, VarTransaction, Worker, INVALID_EXPIRE_AT,
+};
 use crate::storage::{MetaStore, Transaction};
 use crate::{MetaError, MetaResult};
 

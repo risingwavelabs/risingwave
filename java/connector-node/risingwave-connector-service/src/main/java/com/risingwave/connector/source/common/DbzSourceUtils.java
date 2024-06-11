@@ -153,8 +153,9 @@ public class DbzSourceUtils {
                     mbeanServer.getAttribute(
                             getStreamingMetricsObjectName(connector, server, contextName),
                             "Connected");
-        } catch (JMException ex) {
-            LOG.warn("Failed to get streaming metrics", ex);
+        } catch (JMException _ex) {
+            // ignore the exception, as it is expected when the streaming source
+            // (aka. binlog client) is not ready
         }
         return false;
     }

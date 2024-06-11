@@ -17,7 +17,7 @@
 use std::fmt::Write;
 use std::process::Command;
 
-use crate::{add_hummock_backend, HummockInMemoryStrategy, ServiceConfig};
+use crate::{add_hummock_backend, Application, HummockInMemoryStrategy, ServiceConfig};
 
 /// Generate environment variables (put in file `.risingwave/config/risedev-env`)
 /// from the given service configurations to be used by future
@@ -77,7 +77,16 @@ pub fn generate_risedev_env(services: &Vec<ServiceConfig>) -> String {
                 writeln!(env, r#"RISEDEV_KAFKA_WITH_OPTIONS_COMMON="connector='kafka',properties.bootstrap.server='{brokers}'""#).unwrap();
                 writeln!(env, r#"RPK_BROKERS="{brokers}""#).unwrap();
             }
-            ServiceConfig::MySql(c) => {
+            ServiceConfig::SchemaRegistry(c) => {
+                let address = &c.address;
+                let port = &c.port;
+                writeln!(
+                    env,
+                    r#"RISEDEV_SCHEMA_REGISTRY_URL="http://{address}:{port}""#,
+                )
+                .unwrap();
+            }
+            ServiceConfig::MySql(c) if c.application != Application::Metastore => {
                 let host = &c.address;
                 let port = &c.port;
                 let user = &c.user;
@@ -85,7 +94,10 @@ pub fn generate_risedev_env(services: &Vec<ServiceConfig>) -> String {
                 // These envs are used by `mysql` cli.
                 writeln!(env, r#"MYSQL_HOST="{host}""#,).unwrap();
                 writeln!(env, r#"MYSQL_TCP_PORT="{port}""#,).unwrap();
-                writeln!(env, r#"MYSQL_USER="{user}""#,).unwrap();
+                // Note: There's no env var for the username read by `mysql` cli. Here we set
+                // `RISEDEV_MYSQL_USER`, which will be read by `e2e_test/commands/mysql` when
+                // running `risedev slt`, as a wrapper of `mysql` cli.
+                writeln!(env, r#"RISEDEV_MYSQL_USER="{user}""#,).unwrap();
                 writeln!(env, r#"MYSQL_PWD="{password}""#,).unwrap();
                 // Note: user and password are not included in the common WITH options.
                 // It's expected to create another dedicated user for the source.
@@ -94,9 +106,10 @@ pub fn generate_risedev_env(services: &Vec<ServiceConfig>) -> String {
             ServiceConfig::Pubsub(c) => {
                 let address = &c.address;
                 let port = &c.port;
+                writeln!(env, r#"PUBSUB_EMULATOR_HOST="{address}:{port}""#,).unwrap();
                 writeln!(env, r#"RISEDEV_PUBSUB_WITH_OPTIONS_COMMON="connector='google_pubsub',pubsub.emulator_host='{address}:{port}'""#,).unwrap();
             }
-            ServiceConfig::Postgres(c) => {
+            ServiceConfig::Postgres(c) if c.application != Application::Metastore => {
                 let host = &c.address;
                 let port = &c.port;
                 let user = &c.user;

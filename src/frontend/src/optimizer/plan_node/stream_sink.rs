@@ -45,6 +45,7 @@ use super::{generic, ExprRewritable, PlanBase, PlanRef, StreamNode, StreamProjec
 use crate::error::{ErrorCode, Result};
 use crate::expr::{ExprImpl, FunctionCall, InputRef};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
+use crate::optimizer::plan_node::utils::plan_has_backfill_leaf_nodes;
 use crate::optimizer::plan_node::PlanTreeNodeUnary;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -373,7 +374,9 @@ impl StreamSink {
         };
         let input = required_dist.enforce_if_not_satisfies(input, &Order::any())?;
         let distribution_key = input.distribution().dist_column_indices().to_vec();
-        let create_type = if input.ctx().session_ctx().config().background_ddl() {
+        let create_type = if input.ctx().session_ctx().config().background_ddl()
+            && plan_has_backfill_leaf_nodes(&input)
+        {
             CreateType::Background
         } else {
             CreateType::Foreground
@@ -446,7 +449,7 @@ impl StreamSink {
         let (user_defined_append_only, user_force_append_only, syntax_legacy) = match format_desc {
             Some(f) => (
                 f.format == SinkFormat::AppendOnly,
-                Self::is_user_force_append_only(&WithOptions::from_inner(f.options.clone()))?,
+                Self::is_user_force_append_only(&WithOptions::new(f.options.clone()))?,
                 false,
             ),
             None => (

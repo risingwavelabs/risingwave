@@ -93,11 +93,11 @@ impl AggregateFunction for ProjectionOrderBy {
         self.inner.return_type()
     }
 
-    fn create_state(&self) -> AggregateState {
-        AggregateState::Any(Box::new(State {
+    fn create_state(&self) -> Result<AggregateState> {
+        Ok(AggregateState::Any(Box::new(State {
             unordered_values: vec![],
             unordered_values_estimated_heap_size: 0,
-        }))
+        })))
     }
 
     async fn update(&self, state: &mut AggregateState, input: &StreamChunk) -> Result<()> {
@@ -127,7 +127,7 @@ impl AggregateFunction for ProjectionOrderBy {
 
     async fn get_result(&self, state: &AggregateState) -> Result<Datum> {
         let state = state.downcast_ref::<State>();
-        let mut inner_state = self.inner.create_state();
+        let mut inner_state = self.inner.create_state()?;
         // sort
         let mut rows = state.unordered_values.clone();
         rows.sort_unstable_by(|(key_a, _), (key_b, _)| key_a.cmp(key_b));
@@ -168,7 +168,7 @@ mod tests {
             "(array_agg:int4[] $0:int4 orderby $1:asc $0:desc)",
         ))
         .unwrap();
-        let mut state = agg.create_state();
+        let mut state = agg.create_state().unwrap();
         agg.update(&mut state, &chunk).await.unwrap();
         assert_eq!(
             agg.get_result(&state).await.unwrap(),
@@ -189,7 +189,7 @@ mod tests {
             "(string_agg:varchar $0:varchar $1:varchar orderby $2:asc $3:desc $0:desc)",
         ))
         .unwrap();
-        let mut state = agg.create_state();
+        let mut state = agg.create_state().unwrap();
         agg.update(&mut state, &chunk).await.unwrap();
         assert_eq!(
             agg.get_result(&state).await.unwrap(),

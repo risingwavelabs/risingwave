@@ -16,7 +16,5 @@ mod prometheus_gen;
 pub use prometheus_gen::*;
 mod grafana_gen;
 pub use grafana_gen::*;
-mod kafka_gen;
-pub use kafka_gen::*;
 mod tempo_gen;
 pub use tempo_gen::*;

@@ -62,7 +62,6 @@ pub enum Components {
     Hdfs,
     PrometheusAndGrafana,
     Etcd,
-    Kafka,
     Pubsub,
     Redis,
     Tracing,
@@ -75,6 +74,11 @@ pub enum Components {
     HummockTrace,
     Coredump,
     NoBacktrace,
+    ExternalUdf,
+    WasmUdf,
+    JsUdf,
+    DenoUdf,
+    PythonUdf,
 }
 
 impl Components {
@@ -84,7 +88,6 @@ impl Components {
             Self::Hdfs => "[Component] Hummock: Hdfs Backend",
             Self::PrometheusAndGrafana => "[Component] Metrics: Prometheus + Grafana",
             Self::Etcd => "[Component] Etcd",
-            Self::Kafka => "[Component] Kafka",
             Self::Pubsub => "[Component] Google Pubsub",
             Self::Redis => "[Component] Redis",
             Self::BuildConnectorNode => "[Build] Build RisingWave Connector (Java)",
@@ -97,6 +100,11 @@ impl Components {
             Self::HummockTrace => "[Build] Hummock Trace",
             Self::Coredump => "[Runtime] Enable coredump",
             Self::NoBacktrace => "[Runtime] Disable backtrace",
+            Self::ExternalUdf => "[Build] Enable external UDF",
+            Self::WasmUdf => "[Build] Enable Wasm UDF",
+            Self::JsUdf => "[Build] Enable JS UDF",
+            Self::DenoUdf => "[Build] Enable Deno UDF",
+            Self::PythonUdf => "[Build] Enable Python UDF",
         }
         .into()
     }
@@ -118,11 +126,6 @@ Required if you want to view metrics."
             Self::Etcd => {
                 "
 Required if you want to persistent meta-node data.
-                "
-            }
-            Self::Kafka => {
-                "
-Required if you want to create source from Kafka.
                 "
             }
             Self::Pubsub => {
@@ -194,11 +197,16 @@ the binaries will also be codesigned with `get-task-allow` enabled.
 As a result, RisingWave will dump the core on panics.
                 "
             }
-            Components::NoBacktrace => {
+            Self::NoBacktrace => {
                 "
 With this option enabled, RiseDev will not set `RUST_BACKTRACE` when launching nodes.
                 "
             }
+            Self::ExternalUdf => "Required if you want to support external UDF.",
+            Self::WasmUdf => "Required if you want to support WASM UDF.",
+            Self::JsUdf => "Required if you want to support JS UDF.",
+            Self::DenoUdf => "Required if you want to support Deno UDF.",
+            Self::PythonUdf => "Required if you want to support Python UDF.",
         }
         .into()
     }
@@ -209,7 +217,6 @@ With this option enabled, RiseDev will not set `RUST_BACKTRACE` when launching n
             "ENABLE_HDFS" => Some(Self::Hdfs),
             "ENABLE_PROMETHEUS_GRAFANA" => Some(Self::PrometheusAndGrafana),
             "ENABLE_ETCD" => Some(Self::Etcd),
-            "ENABLE_KAFKA" => Some(Self::Kafka),
             "ENABLE_PUBSUB" => Some(Self::Pubsub),
             "ENABLE_BUILD_RUST" => Some(Self::RustComponents),
             "ENABLE_BUILD_DASHBOARD" => Some(Self::Dashboard),
@@ -222,6 +229,11 @@ With this option enabled, RiseDev will not set `RUST_BACKTRACE` when launching n
             "ENABLE_HUMMOCK_TRACE" => Some(Self::HummockTrace),
             "ENABLE_COREDUMP" => Some(Self::Coredump),
             "DISABLE_BACKTRACE" => Some(Self::NoBacktrace),
+            "ENABLE_EXTERNAL_UDF" => Some(Self::ExternalUdf),
+            "ENABLE_WASM_UDF" => Some(Self::WasmUdf),
+            "ENABLE_JS_UDF" => Some(Self::JsUdf),
+            "ENABLE_DENO_UDF" => Some(Self::DenoUdf),
+            "ENABLE_PYTHON_UDF" => Some(Self::PythonUdf),
             _ => None,
         }
     }
@@ -232,7 +244,6 @@ With this option enabled, RiseDev will not set `RUST_BACKTRACE` when launching n
             Self::Hdfs => "ENABLE_HDFS",
             Self::PrometheusAndGrafana => "ENABLE_PROMETHEUS_GRAFANA",
             Self::Etcd => "ENABLE_ETCD",
-            Self::Kafka => "ENABLE_KAFKA",
             Self::Pubsub => "ENABLE_PUBSUB",
             Self::Redis => "ENABLE_REDIS",
             Self::RustComponents => "ENABLE_BUILD_RUST",
@@ -245,6 +256,11 @@ With this option enabled, RiseDev will not set `RUST_BACKTRACE` when launching n
             Self::HummockTrace => "ENABLE_HUMMOCK_TRACE",
             Self::Coredump => "ENABLE_COREDUMP",
             Self::NoBacktrace => "DISABLE_BACKTRACE",
+            Self::ExternalUdf => "ENABLE_EXTERNAL_UDF",
+            Self::WasmUdf => "ENABLE_WASM_UDF",
+            Self::JsUdf => "ENABLE_JS_UDF",
+            Self::DenoUdf => "ENABLE_DENO_UDF",
+            Self::PythonUdf => "ENABLE_PYTHON_UDF",
         }
         .into()
     }

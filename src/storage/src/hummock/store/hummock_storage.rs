@@ -19,6 +19,7 @@ use std::sync::Arc;
 
 use arc_swap::ArcSwap;
 use bytes::Bytes;
+use futures::FutureExt;
 use itertools::Itertools;
 use more_asserts::assert_gt;
 use risingwave_common::catalog::TableId;
@@ -53,8 +54,8 @@ use crate::hummock::observer_manager::HummockObserverNode;
 use crate::hummock::utils::{validate_safe_epoch, wait_for_epoch};
 use crate::hummock::write_limiter::{WriteLimiter, WriteLimiterRef};
 use crate::hummock::{
-    HummockEpoch, HummockError, HummockResult, HummockStorageIterator, MemoryLimiter,
-    SstableObjectIdManager, SstableObjectIdManagerRef, SstableStoreRef,
+    HummockEpoch, HummockError, HummockResult, HummockStorageIterator, HummockStorageRevIterator,
+    MemoryLimiter, SstableObjectIdManager, SstableObjectIdManagerRef, SstableStoreRef,
 };
 use crate::mem_table::ImmutableMemtable;
 use crate::monitor::{CompactorMetrics, HummockStateStoreMetrics, StoreLocalStatistic};
@@ -170,7 +171,7 @@ impl HummockStorage {
         observer_manager.start().await;
 
         let hummock_version = match version_update_rx.recv().await {
-            Some(HummockVersionUpdate::PinnedVersion(version)) => version,
+            Some(HummockVersionUpdate::PinnedVersion(version)) => *version,
             _ => unreachable!("the hummock observer manager is the first one to take the event tx. Should be full hummock version")
         };
 
@@ -283,6 +284,24 @@ impl HummockStorage {
 
         self.hummock_version_reader
             .iter(key_range, epoch, read_options, read_version_tuple)
+            .await
+    }
+
+    async fn rev_iter_inner(
+        &self,
+        key_range: TableKeyRange,
+        epoch: u64,
+        read_options: ReadOptions,
+    ) -> StorageResult<HummockStorageRevIterator> {
+        let (key_range, read_version_tuple) = if read_options.read_version_from_backup {
+            self.build_read_version_tuple_from_backup(epoch, read_options.table_id, key_range)
+                .await?
+        } else {
+            self.build_read_version_tuple(epoch, read_options.table_id, key_range)?
+        };
+
+        self.hummock_version_reader
+            .rev_iter(key_range, epoch, read_options, read_version_tuple, None)
             .await
     }
 
@@ -461,6 +480,7 @@ impl HummockStorage {
 impl StateStoreRead for HummockStorage {
     type ChangeLogIter = ChangeLogIterator;
     type Iter = HummockStorageIterator;
+    type RevIter = HummockStorageRevIterator;
 
     fn get(
         &self,
@@ -486,6 +506,23 @@ impl StateStoreRead for HummockStorage {
             read_options.table_id
         );
         self.iter_inner(key_range, epoch, read_options)
+    }
+
+    fn rev_iter(
+        &self,
+        key_range: TableKeyRange,
+        epoch: u64,
+        read_options: ReadOptions,
+    ) -> impl Future<Output = StorageResult<Self::RevIter>> + '_ {
+        let (l_vnode_inclusive, r_vnode_exclusive) = vnode_range(&key_range);
+        assert_eq!(
+            r_vnode_exclusive - l_vnode_inclusive,
+            1,
+            "read range {:?} for table {} iter contains more than one vnode",
+            key_range,
+            read_options.table_id
+        );
+        self.rev_iter_inner(key_range, epoch, read_options)
     }
 
     async fn iter_log(
@@ -520,15 +557,15 @@ impl StateStore for HummockStorage {
         wait_for_epoch(&self.version_update_notifier_tx, wait_epoch).await
     }
 
-    async fn sync(&self, epoch: u64) -> StorageResult<SyncResult> {
+    fn sync(&self, epoch: u64) -> impl SyncFuture {
         let (tx, rx) = oneshot::channel();
         self.hummock_event_sender
-            .send(HummockEvent::AwaitSyncEpoch {
+            .send(HummockEvent::SyncEpoch {
                 new_sync_epoch: epoch,
                 sync_result_sender: tx,
             })
             .expect("should send success");
-        Ok(rx.await.expect("should wait success")?)
+        rx.map(|recv_result| Ok(recv_result.expect("should wait success")?))
     }
 
     fn seal_epoch(&self, epoch: u64, is_checkpoint: bool) {
@@ -617,7 +654,7 @@ impl HummockStorage {
         use tokio::task::yield_now;
         let version_id = version.id;
         self._version_update_sender
-            .send(HummockVersionUpdate::PinnedVersion(version))
+            .send(HummockVersionUpdate::PinnedVersion(Box::new(version)))
             .unwrap();
         loop {
             if self.pinned_version.load().id() >= version_id {

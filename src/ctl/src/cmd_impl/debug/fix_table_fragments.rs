@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use etcd_client::ConnectOptions;
-use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
+use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont_mut;
 use risingwave_meta::model::{MetadataModel, TableFragments};
 use risingwave_meta::storage::{EtcdMetaStore, WrappedEtcdClient};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -54,7 +54,7 @@ pub async fn fix_table_fragments(
             .upstream_fragment_ids
             .retain(|id| !dirty_fragment_ids.contains(id));
         for actor in &mut fragment.actors {
-            visit_stream_node_cont(actor.nodes.as_mut().unwrap(), |node| {
+            visit_stream_node_cont_mut(actor.nodes.as_mut().unwrap(), |node| {
                 if let Some(NodeBody::Union(_)) = node.node_body {
                     node.input.retain_mut(|input| {
                         if let Some(NodeBody::Merge(merge_node)) = &mut input.node_body

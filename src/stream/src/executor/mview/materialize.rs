@@ -34,9 +34,10 @@ use risingwave_pb::catalog::Table;
 use risingwave_storage::mem_table::KeyOp;
 use risingwave_storage::row_serde::value_serde::{ValueRowSerde, ValueRowSerdeNew};
 
-use crate::cache::{new_unbounded, ManagedLruCache};
+use crate::cache::ManagedLruCache;
 use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::{StateTableInner, StateTableOpConsistencyLevel};
+use crate::executor::monitor::MaterializeMetrics;
 use crate::executor::prelude::*;
 
 /// `MaterializeExecutor` materializes changes in stream into a materialized view on storage.
@@ -61,6 +62,8 @@ pub struct MaterializeExecutor<S: StateStore, SD: ValueRowSerde> {
     may_have_downstream: bool,
 
     depended_subscription_ids: HashSet<u32>,
+
+    metrics: MaterializeMetrics,
 }
 
 fn get_op_consistency_level(
@@ -129,8 +132,15 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
         )
         .await;
 
+        let mv_metrics = metrics.new_materialize_metrics(
+            TableId::new(table_catalog.id),
+            actor_context.id,
+            actor_context.fragment_id,
+        );
+
         let metrics_info =
             MetricsInfo::new(metrics, table_catalog.id, actor_context.id, "Materialize");
+
         Self {
             input,
             schema,
@@ -147,16 +157,12 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
             version_column_index,
             may_have_downstream,
             depended_subscription_ids,
+            metrics: mv_metrics,
         }
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
-        // for metrics
-        let table_id_str = self.state_table.table_id().to_string();
-        let actor_id_str = self.actor_context.id.to_string();
-        let fragment_id_str = self.actor_context.fragment_id.to_string();
-
         let mv_table_id = TableId::new(self.state_table.table_id());
 
         let data_types = self.schema.data_types();
@@ -176,10 +182,8 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
             yield match msg {
                 Message::Watermark(w) => Message::Watermark(w),
                 Message::Chunk(chunk) => {
-                    self.actor_context
-                        .streaming_metrics
-                        .mview_input_row_count
-                        .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
+                    self.metrics
+                        .materialize_input_row_count
                         .inc_by(chunk.cardinality() as u64);
 
                     // This is an optimization that handles conflicts only when a particular materialized view downstream has no MV dependencies.
@@ -232,7 +236,12 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
 
                             let fixed_changes = self
                                 .materialize_cache
-                                .handle(row_ops, &self.state_table, &self.conflict_behavior)
+                                .handle(
+                                    row_ops,
+                                    &self.state_table,
+                                    &self.conflict_behavior,
+                                    &self.metrics,
+                                )
                                 .await?;
 
                             match generate_output(fixed_changes, data_types.clone())? {
@@ -287,7 +296,6 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                             self.materialize_cache.data.clear();
                         }
                     }
-                    self.materialize_cache.data.update_epoch(b.epoch.curr);
                     Message::Barrier(b)
                 }
             }
@@ -380,6 +388,8 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
         )
         .await;
 
+        let metrics = StreamingMetrics::unused().new_materialize_metrics(table_id, 1, 2);
+
         Self {
             input,
             schema,
@@ -396,6 +406,7 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
             version_column_index: None,
             may_have_downstream: true,
             depended_subscription_ids: HashSet::new(),
+            metrics,
         }
     }
 }
@@ -539,7 +550,6 @@ impl<S: StateStore, SD: ValueRowSerde> std::fmt::Debug for MaterializeExecutor<S
 /// A cache for materialize executors.
 pub struct MaterializeCache<SD> {
     data: ManagedLruCache<Vec<u8>, CacheValue>,
-    metrics_info: MetricsInfo,
     row_serde: BasicSerde,
     version_column_index: Option<u32>,
     _serde: PhantomData<SD>,
@@ -549,16 +559,15 @@ type CacheValue = Option<CompactedRow>;
 
 impl<SD: ValueRowSerde> MaterializeCache<SD> {
     pub fn new(
-        watermark_epoch: AtomicU64Ref,
+        watermark_sequence: AtomicU64Ref,
         metrics_info: MetricsInfo,
         row_serde: BasicSerde,
         version_column_index: Option<u32>,
     ) -> Self {
         let cache: ManagedLruCache<Vec<u8>, CacheValue> =
-            new_unbounded(watermark_epoch, metrics_info.clone());
+            ManagedLruCache::unbounded(watermark_sequence, metrics_info.clone());
         Self {
             data: cache,
-            metrics_info,
             row_serde,
             version_column_index,
             _serde: PhantomData,
@@ -570,13 +579,19 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
         row_ops: Vec<(Op, Vec<u8>, Bytes)>,
         table: &StateTableInner<S, SD>,
         conflict_behavior: &ConflictBehavior,
+        metrics: &MaterializeMetrics,
     ) -> StreamExecutorResult<MaterializeBuffer> {
         let key_set: HashSet<Box<[u8]>> = row_ops
             .iter()
             .map(|(_, k, _)| k.as_slice().into())
             .collect();
-        self.fetch_keys(key_set.iter().map(|v| v.deref()), table, conflict_behavior)
-            .await?;
+        self.fetch_keys(
+            key_set.iter().map(|v| v.deref()),
+            table,
+            conflict_behavior,
+            metrics,
+        )
+        .await?;
         let mut fixed_changes = MaterializeBuffer::new();
         let row_serde = self.row_serde.clone();
         let version_column_index = self.version_column_index;
@@ -721,20 +736,14 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
         keys: impl Iterator<Item = &'a [u8]>,
         table: &StateTableInner<S, SD>,
         conflict_behavior: &ConflictBehavior,
+        metrics: &MaterializeMetrics,
     ) -> StreamExecutorResult<()> {
         let mut futures = vec![];
         for key in keys {
-            self.metrics_info
-                .metrics
-                .materialize_cache_total_count
-                .with_label_values(&[&self.metrics_info.table_id, &self.metrics_info.actor_id])
-                .inc();
+            metrics.materialize_cache_total_count.inc();
+
             if self.data.contains(key) {
-                self.metrics_info
-                    .metrics
-                    .materialize_cache_hit_count
-                    .with_label_values(&[&self.metrics_info.table_id, &self.metrics_info.actor_id])
-                    .inc();
+                metrics.materialize_cache_hit_count.inc();
                 continue;
             }
             futures.push(async {

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use core::fmt::Debug;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use anyhow::{anyhow, Context as _};
 use async_nats::jetstream::context::Context;
@@ -59,13 +59,14 @@ pub struct NatsSink {
 pub struct NatsSinkWriter {
     pub config: NatsConfig,
     context: Context,
+    #[expect(dead_code)]
     schema: Schema,
     json_encoder: JsonEncoder,
 }
 
 /// Basic data types for use with the nats interface
 impl NatsConfig {
-    pub fn from_hashmap(values: HashMap<String, String>) -> Result<Self> {
+    pub fn from_btreemap(values: BTreeMap<String, String>) -> Result<Self> {
         let config = serde_json::from_value::<NatsConfig>(serde_json::to_value(values).unwrap())
             .map_err(|e| SinkError::Config(anyhow!(e)))?;
         if config.r#type != SINK_TYPE_APPEND_ONLY {
@@ -83,7 +84,7 @@ impl TryFrom<SinkParam> for NatsSink {
 
     fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
         let schema = param.schema();
-        let config = NatsConfig::from_hashmap(param.properties)?;
+        let config = NatsConfig::from_btreemap(param.properties)?;
         Ok(Self {
             config,
             schema,

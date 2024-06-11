@@ -34,7 +34,8 @@ use risingwave_frontend_macro::system_catalog;
                 schema_id,
                 owner
                 FROM rw_catalog.rw_system_tables) AS t
-        JOIN rw_catalog.rw_schemas s ON t.schema_id = s.id"
+        JOIN rw_catalog.rw_schemas s ON t.schema_id = s.id
+        AND s.name <> 'rw_catalog'"
 )]
 #[derive(Fields)]
 struct PgTable {
