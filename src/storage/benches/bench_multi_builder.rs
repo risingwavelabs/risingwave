@@ -122,7 +122,7 @@ async fn build_tables<F: SstableWriterFactory>(
         .await
         .unwrap()
         .into_iter()
-        .map(|info| info.sst_info.sst_info)
+        .map(|info| info.sst_info)
         .collect()
 }
 
