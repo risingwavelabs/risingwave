@@ -134,19 +134,6 @@ impl HummockManager {
             return Ok(None);
         }
 
-        // TODO: remove the sanity check when supporting partial checkpoint
-        assert_eq!(1, table_committed_epoch.len());
-        assert_eq!(
-            table_committed_epoch.values().next().expect("non-empty"),
-            &versioning_guard
-                .current_version
-                .state_table_info
-                .info()
-                .keys()
-                .cloned()
-                .collect()
-        );
-
         let versioning: &mut Versioning = &mut versioning_guard;
         self.commit_epoch_sanity_check(
             epoch,
@@ -395,6 +382,22 @@ impl HummockManager {
         });
 
         new_version_delta.pre_apply();
+
+        // TODO: remove the sanity check when supporting partial checkpoint
+        assert_eq!(1, table_committed_epoch.len());
+        assert_eq!(
+            table_committed_epoch.iter().next().expect("non-empty"),
+            (
+                &epoch,
+                &version
+                    .latest_version()
+                    .state_table_info
+                    .info()
+                    .keys()
+                    .cloned()
+                    .collect()
+            )
+        );
 
         // Apply stats changes.
         let mut version_stats = HummockVersionStatsTransaction::new(
