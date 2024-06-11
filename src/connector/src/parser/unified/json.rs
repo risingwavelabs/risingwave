@@ -22,8 +22,8 @@ use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::cast::{i64_to_timestamp, i64_to_timestamptz, str_to_bytea};
 use risingwave_common::log::LogSuppresser;
 use risingwave_common::types::{
-    DataType, Date, Datum, Decimal, Int256, Interval, JsonbVal, ScalarImpl, Time, Timestamp,
-    Timestamptz, ToOwnedDatum,
+    DataType, Date, Decimal, Int256, Interval, JsonbVal, ScalarImpl, Time, Timestamp, Timestamptz,
+    ToOwnedDatum,
 };
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector_codec::decoder::utils::extract_decimal;
@@ -213,7 +213,7 @@ impl JsonParseOptions {
         };
 
         let v: ScalarImpl = match (type_expected, value.value_type()) {
-            (_, ValueType::Null) => return Ok(Datum::None.into()),
+            (_, ValueType::Null) => return Ok(DatumCow::NULL),
             // ---- Boolean -----
             (DataType::Boolean, ValueType::Bool) => value.as_bool().unwrap().into(),
 
@@ -366,11 +366,11 @@ impl JsonParseOptions {
                     .map_err(|_| create_error())?
                     .into()
             }
-            (DataType::Float64 , ValueType::F64) => {
+            (DataType::Float64, ValueType::F64) => {
                 value.try_as_f64().map_err(|_| create_error())?.into()
             }
             // ---- Decimal -----
-            (DataType::Decimal , ValueType::I128 | ValueType::U128) => {
+            (DataType::Decimal, ValueType::I128 | ValueType::U128) => {
                 Decimal::from_str(&value.try_as_i128().map_err(|_| create_error())?.to_string())
                     .map_err(|_| create_error())?
                     .into()
@@ -391,7 +391,9 @@ impl JsonParseOptions {
                     "NAN" => ScalarImpl::Decimal(Decimal::NaN),
                     "POSITIVE_INFINITY" => ScalarImpl::Decimal(Decimal::PositiveInf),
                     "NEGATIVE_INFINITY" => ScalarImpl::Decimal(Decimal::NegativeInf),
-                    _ => ScalarImpl::Decimal(Decimal::from_str(str).map_err(|_err| create_error())?),
+                    _ => {
+                        ScalarImpl::Decimal(Decimal::from_str(str).map_err(|_err| create_error())?)
+                    }
                 }
             }
             (DataType::Decimal, ValueType::Object) => {
@@ -429,7 +431,9 @@ impl JsonParseOptions {
                 .map_err(|_| create_error())?
                 .into(),
             // ---- Varchar -----
-            (DataType::Varchar, ValueType::String) => return Ok(DatumCow::Borrowed(Some(value.as_str().unwrap().into()))),
+            (DataType::Varchar, ValueType::String) => {
+                return Ok(DatumCow::Borrowed(Some(value.as_str().unwrap().into())))
+            }
             (
                 DataType::Varchar,
                 ValueType::Bool
@@ -502,11 +506,12 @@ impl JsonParseOptions {
                     .parse::<Timestamptz>()
                     .map_err(|_| create_error())?
                     .into(),
-            }
+            },
             (
                 DataType::Timestamptz,
                 ValueType::I64 | ValueType::I128 | ValueType::U64 | ValueType::U128,
-            ) => value.as_i64()
+            ) => value
+                .as_i64()
                 .and_then(|num| match self.timestamptz_handling {
                     TimestamptzHandling::GuessNumberUnit => i64_to_timestamptz(num).ok(),
                     TimestamptzHandling::Micro => Some(Timestamptz::from_micros(num)),
@@ -517,16 +522,22 @@ impl JsonParseOptions {
                 .ok_or_else(create_error)?
                 .into(),
             // ---- Interval -----
-            (DataType::Interval, ValueType::String) => {
-                value.as_str().unwrap().parse::<Interval>().map_err(|_| create_error())?.into()
-            }
+            (DataType::Interval, ValueType::String) => value
+                .as_str()
+                .unwrap()
+                .parse::<Interval>()
+                .map_err(|_| create_error())?
+                .into(),
             // ---- Struct -----
-            (DataType::Struct(struct_type_info), ValueType::Object) => StructValue::new(
-                struct_type_info
+            (DataType::Struct(struct_type_info), ValueType::Object) => {
+                // Collecting into a Result<Vec<_>> doesn't reserve the capacity in advance, so we `Vec::with_capacity` instead.
+                // https://github.com/rust-lang/rust/issues/48994
+                let mut fields = Vec::with_capacity(struct_type_info.types().len());
+                for (field_name, field_type) in struct_type_info
                     .names()
                     .zip_eq_fast(struct_type_info.types())
-                    .map(|(field_name, field_type)| {
-                        let field_value = json_object_get_case_insensitive(value, field_name)
+                {
+                    let field_value = json_object_get_case_insensitive(value, field_name)
                             .unwrap_or_else(|| {
                                 let error = AccessError::Undefined {
                                     name: field_name.to_owned(),
@@ -539,12 +550,13 @@ impl JsonParseOptions {
                                 }
                                 &BorrowedValue::Static(simd_json::StaticNode::Null)
                             });
-                        self.parse(field_value, field_type).map(|d| d.to_owned_datum())
-                    })
-                    .collect::<Result<_, _>>()?,
-            )
-            .into(),
-
+                    fields.push(
+                        self.parse(field_value, field_type)
+                            .map(|d| d.to_owned_datum())?,
+                    );
+                }
+                StructValue::new(fields).into()
+            }
 
             // String containing json object, e.g. "{\"a\": 1, \"b\": 2}"
             // Try to parse it as json object.
@@ -555,7 +567,9 @@ impl JsonParseOptions {
                 let mut value = value.as_str().unwrap().as_bytes().to_vec();
                 let value =
                     simd_json::to_borrowed_value(&mut value[..]).map_err(|_| create_error())?;
-                return self.parse(&value, type_expected).map(|d| d.to_owned_datum().into());
+                return self
+                    .parse(&value, type_expected)
+                    .map(|d| d.to_owned_datum().into());
             }
 
             // ---- List -----
@@ -602,11 +616,9 @@ impl JsonParseOptions {
                 ValueType::I64 | ValueType::I128 | ValueType::U64 | ValueType::U128,
             ) => Int256::from(value.try_as_i64().map_err(|_| create_error())?).into(),
 
-            (DataType::Int256, ValueType::String) => {
-                Int256::from_str(value.as_str().unwrap())
-                    .map_err(|_| create_error())?
-                    .into()
-            }
+            (DataType::Int256, ValueType::String) => Int256::from_str(value.as_str().unwrap())
+                .map_err(|_| create_error())?
+                .into(),
 
             (_expected, _got) => Err(create_error())?,
         };
