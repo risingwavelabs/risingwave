@@ -438,17 +438,16 @@ impl HummockEventHandler {
         mut f: impl FnMut(LocalInstanceId, &mut HummockReadVersion),
     ) {
         let instances = {
-            #[cfg(debug_assertion)]
+            #[cfg(debug_assertions)]
             {
                 // check duplication on debug_mode
-                use std::collections::HashSet;
                 let mut id_set = HashSet::new();
                 for instance in instances {
                     assert!(id_set.insert(instance));
                 }
                 id_set
             }
-            #[cfg(not(debug_assertion))]
+            #[cfg(not(debug_assertions))]
             {
                 instances
             }

@@ -742,7 +742,7 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
                 "a stream has reached the end but some other stream has not started yet"
             ));
         }
-        if cfg!(debug_assertion) {
+        if cfg!(debug_assertions) {
             while let Some((opt, _stream)) = self.row_streams.next().await {
                 if let Some(result) = opt {
                     return Err(

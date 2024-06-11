@@ -315,18 +315,16 @@ impl<S: StateStore> FsSourceExecutor<S> {
         let start_with_paused = barrier.is_pause_on_startup();
 
         let mut boot_state = Vec::default();
-        if let Some(mutation) = barrier.mutation.as_deref() {
-            match mutation {
-                Mutation::Add(AddMutation { splits, .. })
-                | Mutation::Update(UpdateMutation {
-                    actor_splits: splits,
-                    ..
-                }) => {
-                    if let Some(splits) = splits.get(&self.actor_ctx.id) {
-                        boot_state.clone_from(splits);
-                    }
-                }
-                _ => {}
+        if let Some(
+            Mutation::Add(AddMutation { splits, .. })
+            | Mutation::Update(UpdateMutation {
+                actor_splits: splits,
+                ..
+            }),
+        ) = barrier.mutation.as_deref()
+        {
+            if let Some(splits) = splits.get(&self.actor_ctx.id) {
+                boot_state.clone_from(splits);
             }
         }
 
