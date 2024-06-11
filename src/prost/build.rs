@@ -66,6 +66,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ".plan_common.ExternalTableDesc",
         ".hummock.CompactTask",
         ".catalog.StreamSourceInfo",
+        ".catalog.Source",
+        ".catalog.Sink",
+        ".catalog.View",
+        ".connector_service.ValidateSourceRequest",
+        ".connector_service.GetEventStreamRequest",
+        ".connector_service.SinkParam",
+        ".stream_plan.SinkDesc",
+        ".stream_plan.StreamFsFetch",
+        ".stream_plan.SourceBackfillNode",
+        ".stream_plan.StreamSource",
+        ".batch_plan.SourceNode",
     ];
 
     // Build protobuf structs.

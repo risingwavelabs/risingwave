@@ -15,7 +15,7 @@
 //! Types and functions that store or manipulate state/cache inside one single over window
 //! partition.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::marker::PhantomData;
 use std::ops::{Bound, RangeInclusive};
 
@@ -249,10 +249,10 @@ pub(super) struct OverPartitionStats {
 /// represented by [`DeltaBTreeMap`].
 ///
 /// - `first_curr_key` and `last_curr_key` are the current keys of the first and the last
-///  windows affected. They are used to pinpoint the bounds where state needs to be updated.
+///   windows affected. They are used to pinpoint the bounds where state needs to be updated.
 /// - `first_frame_start` and `last_frame_end` are the frame start and end of the first and
-///  the last windows affected. They are used to pinpoint the bounds where state needs to be
-///  included for computing the new state.
+///   the last windows affected. They are used to pinpoint the bounds where state needs to be
+///   included for computing the new state.
 #[derive(Debug, Educe)]
 #[educe(Clone, Copy)]
 pub(super) struct AffectedRange<'cache> {
@@ -817,12 +817,35 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
                 .await?;
         }
 
-        // prefetch rows before the start of the range
-        self.extend_cache_leftward_by_n(table, range.start())
-            .await?;
+        // TODO(rc): Uncomment the following to enable prefetching rows before the start of the
+        // range once we have STATE TABLE REVERSE ITERATOR.
+        // self.extend_cache_leftward_by_n(table, range.start()).await?;
 
         // prefetch rows after the end of the range
         self.extend_cache_rightward_by_n(table, range.end()).await
+    }
+
+    async fn extend_cache_by_range_inner(
+        &mut self,
+        table: &StateTable<S>,
+        table_sub_range: (Bound<impl Row>, Bound<impl Row>),
+    ) -> StreamExecutorResult<()> {
+        let stream = table
+            .iter_with_prefix(
+                self.this_partition_key,
+                &table_sub_range,
+                PrefetchOptions::default(),
+            )
+            .await?;
+
+        #[for_await]
+        for row in stream {
+            let row: OwnedRow = row?.into_owned_row();
+            let key = self.row_conv.row_to_state_key(&row)?;
+            self.range_cache.insert(CacheKey::from(key), row);
+        }
+
+        Ok(())
     }
 
     async fn extend_cache_leftward_by_n(
@@ -870,6 +893,55 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         Ok(())
     }
 
+    async fn extend_cache_leftward_by_n_inner(
+        &mut self,
+        table: &StateTable<S>,
+        range_to_exclusive: &StateKey,
+    ) -> StreamExecutorResult<()> {
+        let mut to_extend: VecDeque<OwnedRow> = VecDeque::with_capacity(MAGIC_BATCH_SIZE);
+        {
+            let sub_range = (
+                Bound::<OwnedRow>::Unbounded,
+                Bound::Excluded(
+                    self.row_conv
+                        .state_key_to_table_sub_pk(range_to_exclusive)?,
+                ),
+            );
+            let stream = table
+                .iter_with_prefix(
+                    self.this_partition_key,
+                    &sub_range,
+                    PrefetchOptions::default(),
+                )
+                .await?;
+
+            #[for_await]
+            for row in stream {
+                let row: OwnedRow = row?.into_owned_row();
+
+                // For leftward extension, we now must iterate the table in order from the beginning
+                // of this partition and fill only the last n rows to the cache.
+                // TODO(rc): WE NEED STATE TABLE REVERSE ITERATOR!!
+                if to_extend.len() == MAGIC_BATCH_SIZE {
+                    to_extend.pop_front();
+                }
+                to_extend.push_back(row);
+            }
+        }
+
+        let n_extended = to_extend.len();
+        for row in to_extend {
+            let key = self.row_conv.row_to_state_key(&row)?;
+            self.range_cache.insert(CacheKey::from(key), row);
+        }
+        if n_extended < MAGIC_BATCH_SIZE && self.cache_real_len() > 0 {
+            // we reached the beginning of this partition in the table
+            self.range_cache.remove(&CacheKey::Smallest);
+        }
+
+        Ok(())
+    }
+
     async fn extend_cache_rightward_by_n(
         &mut self,
         table: &StateTable<S>,
@@ -910,73 +982,6 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
                 self.range_cache.remove(&CacheKey::Smallest);
                 self.range_cache.remove(&CacheKey::Largest);
             }
-        }
-
-        Ok(())
-    }
-
-    async fn extend_cache_by_range_inner(
-        &mut self,
-        table: &StateTable<S>,
-        table_sub_range: (Bound<impl Row>, Bound<impl Row>),
-    ) -> StreamExecutorResult<()> {
-        let stream = table
-            .iter_with_prefix(
-                self.this_partition_key,
-                &table_sub_range,
-                PrefetchOptions::default(),
-            )
-            .await?;
-
-        #[for_await]
-        for row in stream {
-            let row: OwnedRow = row?.into_owned_row();
-            let key = self.row_conv.row_to_state_key(&row)?;
-            self.range_cache.insert(CacheKey::from(key), row);
-        }
-
-        Ok(())
-    }
-
-    async fn extend_cache_leftward_by_n_inner(
-        &mut self,
-        table: &StateTable<S>,
-        range_to_exclusive: &StateKey,
-    ) -> StreamExecutorResult<()> {
-        let mut n_extended = 0usize;
-        {
-            let sub_range = (
-                Bound::<OwnedRow>::Unbounded,
-                Bound::Excluded(
-                    self.row_conv
-                        .state_key_to_table_sub_pk(range_to_exclusive)?,
-                ),
-            );
-            let rev_stream = table
-                .rev_iter_with_prefix(
-                    self.this_partition_key,
-                    &sub_range,
-                    PrefetchOptions::default(),
-                )
-                .await?;
-
-            #[for_await]
-            for row in rev_stream {
-                let row: OwnedRow = row?.into_owned_row();
-
-                let key = self.row_conv.row_to_state_key(&row)?;
-                self.range_cache.insert(CacheKey::from(key), row);
-
-                n_extended += 1;
-                if n_extended == MAGIC_BATCH_SIZE {
-                    break;
-                }
-            }
-        }
-
-        if n_extended < MAGIC_BATCH_SIZE && self.cache_real_len() > 0 {
-            // we reached the beginning of this partition in the table
-            self.range_cache.remove(&CacheKey::Smallest);
         }
 
         Ok(())
