@@ -42,7 +42,6 @@ use thiserror_ext::AsReport;
 use self::avro::AvroAccessBuilder;
 use self::bytes_parser::BytesAccessBuilder;
 pub use self::mysql::mysql_row_to_owned_row;
-use self::parquet_parser::ParquetParser;
 use self::plain_parser::PlainParser;
 pub use self::postgres::postgres_row_to_owned_row;
 use self::simd_json_parser::DebeziumJsonAccessBuilder;
@@ -74,7 +73,6 @@ mod debezium;
 mod json_parser;
 mod maxwell;
 mod mysql;
-mod parquet_parser;
 pub mod plain_parser;
 mod postgres;
 mod protobuf;
@@ -908,7 +906,6 @@ impl AccessBuilderImpl {
 pub enum ByteStreamSourceParserImpl {
     Csv(CsvParser),
     Json(JsonParser),
-    Parquet(ParquetParser),
     Debezium(DebeziumParser),
     Plain(PlainParser),
     Upsert(UpsertParser),
@@ -925,7 +922,6 @@ impl ByteStreamSourceParserImpl {
         #[auto_enum(futures03::Stream)]
         let stream = match self {
             Self::Csv(parser) => parser.into_stream(msg_stream),
-            Self::Parquet(parser) => parser.into_stream(msg_stream),
             Self::Json(parser) => parser.into_stream(msg_stream),
             Self::Debezium(parser) => parser.into_stream(msg_stream),
             Self::DebeziumMongoJson(parser) => parser.into_stream(msg_stream),
@@ -949,9 +945,6 @@ impl ByteStreamSourceParserImpl {
         match (protocol, encode) {
             (ProtocolProperties::Plain, EncodingProperties::Csv(config)) => {
                 CsvParser::new(rw_columns, *config, source_ctx).map(Self::Csv)
-            }
-            (ProtocolProperties::Plain, EncodingProperties::Parquet) => {
-                ParquetParser::new(rw_columns, source_ctx).map(Self::Parquet)
             }
             (ProtocolProperties::DebeziumMongo, EncodingProperties::Json(_)) => {
                 DebeziumMongoJsonParser::new(rw_columns, source_ctx).map(Self::DebeziumMongoJson)
