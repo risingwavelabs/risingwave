@@ -1,4 +1,2 @@
 statement ok
 SET VISIBILITY_MODE TO all;
-
-include ../batch/**/*.slt
