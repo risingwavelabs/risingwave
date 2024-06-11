@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::sync::Arc;
 use std::{fmt, vec};
 
 use fixedbitset::FixedBitSet;
@@ -30,6 +31,7 @@ use risingwave_pb::stream_plan::{agg_call_state, AggCallState as AggCallStatePb}
 
 use super::super::utils::TableCatalogBuilder;
 use super::{impl_distill_unit_from_fields, stream, GenericPlanNode, GenericPlanRef};
+use crate::catalog::function_catalog::FunctionCatalog;
 use crate::expr::{Expr, ExprRewriter, ExprVisitor, InputRef, InputRefDisplay, Literal};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::batch::BatchPlanRef;
@@ -520,6 +522,11 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
             .iter()
             .zip_eq_fast(&mut out_fields[self.group_key.len()..])
         {
+            if agg_call.agg_kind == AggKind::UserDefined {
+                // for user defined aggregate, the state type is always BYTEA
+                field.data_type = DataType::Bytea;
+                continue;
+            }
             let sig = FUNCTION_REGISTRY
                 .get(
                     agg_call.agg_kind,
@@ -703,6 +710,9 @@ pub struct PlanAggCall {
     /// `filter` evaluates to `true` will be fed to the aggregate function.
     pub filter: Condition,
     pub direct_args: Vec<Literal>,
+
+    /// Catalog of user defined aggregate function.
+    pub user_defined: Option<Arc<FunctionCatalog>>,
 }
 
 impl fmt::Debug for PlanAggCall {
@@ -771,6 +781,7 @@ impl PlanAggCall {
                     r#type: Some(x.return_type().to_protobuf()),
                 })
                 .collect(),
+            udf: self.user_defined.as_ref().map(|c| c.as_ref().into()),
         }
     }
 
@@ -797,6 +808,7 @@ impl PlanAggCall {
             order_by: vec![],
             filter: Condition::true_cond(),
             direct_args: vec![],
+            user_defined: None,
         }
     }
 

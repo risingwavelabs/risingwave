@@ -86,7 +86,7 @@ impl MockExternalTableReader {
             ]),
         ];
 
-        let snapshots = vec![snap0];
+        let snapshots = [snap0];
         if snap_idx >= snapshots.len() {
             return Ok(());
         }

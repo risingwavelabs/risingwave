@@ -18,6 +18,7 @@ use std::fmt::Debug;
 use std::mem::take;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
+use std::time::Instant;
 
 use anyhow::anyhow;
 use async_recursion::async_recursion;
@@ -172,6 +173,12 @@ impl LocalStreamManager {
         await_tree_config: Option<await_tree::Config>,
         watermark_epoch: AtomicU64Ref,
     ) -> Self {
+        if !env.config().unsafe_enable_strict_consistency {
+            // If strict consistency is disabled, should disable storage sanity check.
+            // Since this is a special config, we have to check it here.
+            risingwave_storage::hummock::utils::disable_sanity_check();
+        }
+
         let await_tree_reg = await_tree_config.clone().map(await_tree::Registry::new);
 
         let (actor_op_tx, actor_op_rx) = unbounded_channel();
@@ -255,6 +262,21 @@ impl LocalStreamManager {
             })
             .await?
     }
+
+    pub async fn inspect_barrier_state(&self) -> StreamResult<String> {
+        info!("start inspecting barrier state");
+        let start = Instant::now();
+        self.actor_op_tx
+            .send_and_await(|result_sender| LocalActorOperation::InspectState { result_sender })
+            .inspect(|result| {
+                info!(
+                    ok = result.is_ok(),
+                    time = ?start.elapsed(),
+                    "finish inspecting barrier state"
+                );
+            })
+            .await
+    }
 }
 
 impl LocalBarrierWorker {
@@ -310,7 +332,7 @@ impl LocalBarrierWorker {
         actors: &[ActorId],
         result_sender: oneshot::Sender<StreamResult<()>>,
     ) {
-        let actors = {
+        let actors: Vec<_> = {
             let actor_result = actors
                 .iter()
                 .map(|actor_id| {
@@ -328,6 +350,10 @@ impl LocalBarrierWorker {
                 }
             }
         };
+        let actor_ids = actors
+            .iter()
+            .map(|actor| actor.actor.as_ref().unwrap().actor_id)
+            .collect();
         let actor_manager = self.actor_manager.clone();
         let create_actors_fut = crate::CONFIG.scope(
             self.actor_manager.env.config().clone(),
@@ -336,7 +362,7 @@ impl LocalBarrierWorker {
         let join_handle = self.actor_manager.runtime.spawn(create_actors_fut);
         self.actor_manager_state
             .creating_actors
-            .push(AttachedFuture::new(join_handle, result_sender));
+            .push(AttachedFuture::new(join_handle, (actor_ids, result_sender)));
     }
 }
 
@@ -632,54 +658,43 @@ impl LocalBarrierWorker {
 
             if self.actor_manager.streaming_metrics.level >= MetricLevel::Debug {
                 tracing::info!("Tokio metrics are enabled because metrics_level >= Debug");
-                let actor_id_str = actor_id.to_string();
-                let metrics = self.actor_manager.streaming_metrics.clone();
+                let streaming_metrics = self.actor_manager.streaming_metrics.clone();
                 let actor_monitor_task = self.actor_manager.runtime.spawn(async move {
+                    let metrics = streaming_metrics.new_actor_metrics(actor_id);
                     loop {
                         let task_metrics = monitor.cumulative();
                         metrics
                             .actor_execution_time
-                            .with_label_values(&[&actor_id_str])
                             .set(task_metrics.total_poll_duration.as_secs_f64());
                         metrics
                             .actor_fast_poll_duration
-                            .with_label_values(&[&actor_id_str])
                             .set(task_metrics.total_fast_poll_duration.as_secs_f64());
                         metrics
                             .actor_fast_poll_cnt
-                            .with_label_values(&[&actor_id_str])
                             .set(task_metrics.total_fast_poll_count as i64);
                         metrics
                             .actor_slow_poll_duration
-                            .with_label_values(&[&actor_id_str])
                             .set(task_metrics.total_slow_poll_duration.as_secs_f64());
                         metrics
                             .actor_slow_poll_cnt
-                            .with_label_values(&[&actor_id_str])
                             .set(task_metrics.total_slow_poll_count as i64);
                         metrics
                             .actor_poll_duration
-                            .with_label_values(&[&actor_id_str])
                             .set(task_metrics.total_poll_duration.as_secs_f64());
                         metrics
                             .actor_poll_cnt
-                            .with_label_values(&[&actor_id_str])
                             .set(task_metrics.total_poll_count as i64);
                         metrics
                             .actor_idle_duration
-                            .with_label_values(&[&actor_id_str])
                             .set(task_metrics.total_idle_duration.as_secs_f64());
                         metrics
                             .actor_idle_cnt
-                            .with_label_values(&[&actor_id_str])
                             .set(task_metrics.total_idled_count as i64);
                         metrics
                             .actor_scheduled_duration
-                            .with_label_values(&[&actor_id_str])
                             .set(task_metrics.total_scheduled_duration.as_secs_f64());
                         metrics
                             .actor_scheduled_cnt
-                            .with_label_values(&[&actor_id_str])
                             .set(task_metrics.total_scheduled_count as i64);
                         tokio::time::sleep(Duration::from_secs(1)).await;
                     }

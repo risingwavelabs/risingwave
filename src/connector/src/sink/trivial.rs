@@ -80,14 +80,10 @@ impl<T: TrivialSinkName> LogSinker for TrivialSink<T> {
             let (epoch, item) = log_reader.next_item().await?;
             match item {
                 LogStoreReadItem::StreamChunk { chunk_id, .. } => {
-                    log_reader
-                        .truncate(TruncateOffset::Chunk { epoch, chunk_id })
-                        .await?;
+                    log_reader.truncate(TruncateOffset::Chunk { epoch, chunk_id })?;
                 }
                 LogStoreReadItem::Barrier { .. } => {
-                    log_reader
-                        .truncate(TruncateOffset::Barrier { epoch })
-                        .await?;
+                    log_reader.truncate(TruncateOffset::Barrier { epoch })?;
                 }
                 LogStoreReadItem::UpdateVnodeBitmap(_) => {}
             }

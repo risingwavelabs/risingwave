@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::{BinaryHeap, HashMap, HashSet};
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use await_tree::InstrumentAwait;
@@ -30,8 +29,8 @@ use risingwave_hummock_sdk::table_stats::{add_table_stats_map, TableStats, Table
 use risingwave_hummock_sdk::{
     can_concat, compact_task_output_to_string, HummockSstableObjectId, KeyComparator,
 };
-use risingwave_pb::hummock::compact_task::{TaskStatus, TaskType};
-use risingwave_pb::hummock::{BloomFilterType, CompactTask, LevelType, SstableInfo};
+use risingwave_pb::hummock::compact_task::TaskStatus;
+use risingwave_pb::hummock::{CompactTask, LevelType, SstableInfo};
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Receiver;
 
@@ -40,7 +39,8 @@ use super::task_progress::TaskProgress;
 use super::{CompactionStatistics, TaskConfig};
 use crate::filter_key_extractor::{FilterKeyExtractorImpl, FilterKeyExtractorManager};
 use crate::hummock::compactor::compaction_utils::{
-    build_multi_compaction_filter, estimate_task_output_capacity, generate_splits,
+    build_multi_compaction_filter, estimate_task_output_capacity, generate_splits_for_task,
+    metrics_report_for_task, optimize_by_copy_block,
 };
 use crate::hummock::compactor::iterator::ConcatSstableIterator;
 use crate::hummock::compactor::task_progress::TaskProgressGuard;
@@ -276,7 +276,9 @@ pub fn partition_overlapping_sstable_infos(
                 &prev_group.max_right_bound,
                 &sst.key_range.as_ref().unwrap().left,
             ) {
-                prev_group.max_right_bound = sst.key_range.as_ref().unwrap().right.clone();
+                prev_group
+                    .max_right_bound
+                    .clone_from(&sst.key_range.as_ref().unwrap().right);
                 prev_group.ssts.push(sst);
                 continue;
             }
@@ -304,46 +306,7 @@ pub async fn compact(
 ) {
     let context = compactor_context.clone();
     let group_label = compact_task.compaction_group_id.to_string();
-    let cur_level_label = compact_task.input_ssts[0].level_idx.to_string();
-    let select_table_infos = compact_task
-        .input_ssts
-        .iter()
-        .filter(|level| level.level_idx != compact_task.target_level)
-        .flat_map(|level| level.table_infos.iter())
-        .collect_vec();
-    let target_table_infos = compact_task
-        .input_ssts
-        .iter()
-        .filter(|level| level.level_idx == compact_task.target_level)
-        .flat_map(|level| level.table_infos.iter())
-        .collect_vec();
-    let select_size = select_table_infos
-        .iter()
-        .map(|table| table.file_size)
-        .sum::<u64>();
-    context
-        .compactor_metrics
-        .compact_read_current_level
-        .with_label_values(&[&group_label, &cur_level_label])
-        .inc_by(select_size);
-    context
-        .compactor_metrics
-        .compact_read_sstn_current_level
-        .with_label_values(&[&group_label, &cur_level_label])
-        .inc_by(select_table_infos.len() as u64);
-
-    let target_level_read_bytes = target_table_infos.iter().map(|t| t.file_size).sum::<u64>();
-    let next_level_label = compact_task.target_level.to_string();
-    context
-        .compactor_metrics
-        .compact_read_next_level
-        .with_label_values(&[&group_label, next_level_label.as_str()])
-        .inc_by(target_level_read_bytes);
-    context
-        .compactor_metrics
-        .compact_read_sstn_next_level
-        .with_label_values(&[&group_label, next_level_label.as_str()])
-        .inc_by(target_table_infos.len() as u64);
+    metrics_report_for_task(&compact_task, &context);
 
     let timer = context
         .compactor_metrics
@@ -356,151 +319,52 @@ pub async fn compact(
 
     let multi_filter = build_multi_compaction_filter(&compact_task);
 
-    let mut compact_table_ids = compact_task
-        .input_ssts
-        .iter()
-        .flat_map(|level| level.table_infos.iter())
-        .flat_map(|sst| sst.table_ids.clone())
-        .collect_vec();
-    compact_table_ids.sort();
-    compact_table_ids.dedup();
-    let single_table = compact_table_ids.len() == 1;
-
     let existing_table_ids: HashSet<u32> =
         HashSet::from_iter(compact_task.existing_table_ids.clone());
     let compact_table_ids = HashSet::from_iter(
-        compact_table_ids
-            .into_iter()
+        compact_task
+            .input_ssts
+            .iter()
+            .flat_map(|level| level.table_infos.iter())
+            .flat_map(|sst| sst.table_ids.clone())
             .filter(|table_id| existing_table_ids.contains(table_id)),
     );
-    let multi_filter_key_extractor = match filter_key_extractor_manager
-        .acquire(compact_table_ids.clone())
-        .await
+
+    let multi_filter_key_extractor = match build_filter_key_extractor(
+        &compact_task,
+        filter_key_extractor_manager,
+        &compact_table_ids,
+    )
+    .await
     {
-        Err(e) => {
-            tracing::error!(error = %e.as_report(), "Failed to fetch filter key extractor tables [{:?}], it may caused by some RPC error", compact_task.existing_table_ids);
+        Some(multi_filter_key_extractor) => multi_filter_key_extractor,
+        None => {
             let task_status = TaskStatus::ExecuteFailed;
             return (
                 compact_done(compact_task, context.clone(), vec![], task_status),
                 None,
             );
         }
-        Ok(extractor) => extractor,
     };
 
-    if let FilterKeyExtractorImpl::Multi(multi) = &multi_filter_key_extractor {
-        let found_tables = multi.get_existing_table_ids();
-        let removed_tables = compact_table_ids
-            .iter()
-            .filter(|table_id| !found_tables.contains(table_id))
-            .collect_vec();
-        if !removed_tables.is_empty() {
-            tracing::error!("Failed to fetch filter key extractor tables [{:?}. [{:?}] may be removed by meta-service. ", compact_table_ids, removed_tables);
-            let task_status = TaskStatus::ExecuteFailed;
-            return (
-                compact_done(compact_task, context.clone(), vec![], task_status),
-                None,
-            );
-        }
-    }
-
-    let multi_filter_key_extractor = Arc::new(multi_filter_key_extractor);
-    let has_tombstone = compact_task
-        .input_ssts
-        .iter()
-        .flat_map(|level| level.table_infos.iter())
-        .any(|sst| sst.range_tombstone_count > 0);
-    let has_ttl = compact_task
-        .table_options
-        .iter()
-        .any(|(_, table_option)| table_option.retention_seconds.is_some_and(|ttl| ttl > 0));
     let mut task_status = TaskStatus::Success;
-    // skip sst related to non-existent able_id to reduce io
-    let sstable_infos = compact_task
-        .input_ssts
-        .iter()
-        .flat_map(|level| level.table_infos.iter())
-        .filter(|table_info| {
-            let table_ids = &table_info.table_ids;
-            table_ids
-                .iter()
-                .any(|table_id| existing_table_ids.contains(table_id))
-        })
-        .cloned()
-        .collect_vec();
-    let compaction_size = sstable_infos
-        .iter()
-        .map(|table_info| table_info.file_size)
-        .sum::<u64>();
-    let all_ssts_are_blocked_filter = sstable_infos
-        .iter()
-        .all(|table_info| table_info.bloom_filter_kind() == BloomFilterType::Blocked);
+    let optimize_by_copy_block = optimize_by_copy_block(&compact_task, &context);
 
-    let delete_key_count = sstable_infos
-        .iter()
-        .map(|table_info| table_info.stale_key_count + table_info.range_tombstone_count)
-        .sum::<u64>();
-    let total_key_count = sstable_infos
-        .iter()
-        .map(|table_info| table_info.total_key_count)
-        .sum::<u64>();
-    let optimize_by_copy_block = context.storage_opts.enable_fast_compaction
-        && all_ssts_are_blocked_filter
-        && !has_tombstone
-        && !has_ttl
-        && single_table
-        && compact_task.target_level > 0
-        && compact_task.input_ssts.len() == 2
-        && compaction_size < context.storage_opts.compactor_fast_max_compact_task_size
-        && delete_key_count * 100
-            < context.storage_opts.compactor_fast_max_compact_delete_ratio as u64 * total_key_count
-        && compact_task.task_type() == TaskType::Dynamic;
-
-    if !optimize_by_copy_block {
-        match generate_splits(&sstable_infos, compaction_size, context.clone()).await {
-            Ok(splits) => {
-                if !splits.is_empty() {
-                    compact_task.splits = splits;
-                }
-            }
-            Err(e) => {
-                tracing::warn!(error = %e.as_report(), "Failed to generate_splits");
-                task_status = TaskStatus::ExecuteFailed;
-                return (
-                    compact_done(compact_task, context.clone(), vec![], task_status),
-                    None,
-                );
-            }
-        }
-    }
-    let compact_task_statistics = statistics_compact_task(&compact_task);
-    // Number of splits (key ranges) is equal to number of compaction tasks
-    let parallelism = compact_task.splits.len();
-    assert_ne!(parallelism, 0, "splits cannot be empty");
-    if !context.acquire_task_quota(parallelism as u32) {
-        tracing::warn!(
-            "Not enough core parallelism to serve the task {} task_parallelism {} running_task_parallelism {} max_task_parallelism {}",
-            compact_task.task_id,
-            parallelism,
-            context.running_task_parallelism.load(Ordering::Relaxed),
-            context.max_task_parallelism.load(Ordering::Relaxed),
-        );
+    if let Err(e) =
+        generate_splits_for_task(&mut compact_task, &context, optimize_by_copy_block).await
+    {
+        tracing::warn!(error = %e.as_report(), "Failed to generate_splits");
+        task_status = TaskStatus::ExecuteFailed;
         return (
-            compact_done(
-                compact_task,
-                context.clone(),
-                vec![],
-                TaskStatus::NoAvailCpuResourceCanceled,
-            ),
+            compact_done(compact_task, context.clone(), vec![], task_status),
             None,
         );
     }
 
-    let _release_quota_guard =
-        scopeguard::guard((parallelism, context.clone()), |(parallelism, context)| {
-            context.release_task_quota(parallelism as u32);
-        });
-
+    let compact_task_statistics = statistics_compact_task(&compact_task);
+    // Number of splits (key ranges) is equal to number of compaction tasks
+    let parallelism = compact_task.splits.len();
+    assert_ne!(parallelism, 0, "splits cannot be empty");
     let mut output_ssts = Vec::with_capacity(parallelism);
     let mut compaction_futures = vec![];
     let mut abort_handles = vec![];
@@ -707,7 +571,7 @@ pub async fn compact(
 }
 
 /// Fills in the compact task and tries to report the task result to meta node.
-fn compact_done(
+pub(crate) fn compact_done(
     mut compact_task: CompactTask,
     context: CompactorContext,
     output_ssts: Vec<CompactOutput>,
@@ -931,6 +795,39 @@ where
     Ok(compaction_statistics)
 }
 
+async fn build_filter_key_extractor(
+    compact_task: &CompactTask,
+    filter_key_extractor_manager: FilterKeyExtractorManager,
+    compact_table_ids: &HashSet<u32>,
+) -> Option<Arc<FilterKeyExtractorImpl>> {
+    let multi_filter_key_extractor = match filter_key_extractor_manager
+        .acquire(compact_table_ids.clone())
+        .await
+    {
+        Err(e) => {
+            tracing::error!(error = %e.as_report(), "Failed to fetch filter key extractor tables [{:?}], it may caused by some RPC error", compact_task.existing_table_ids);
+            return None;
+        }
+        Ok(extractor) => extractor,
+    };
+
+    if let FilterKeyExtractorImpl::Multi(multi) = &multi_filter_key_extractor {
+        let found_tables = multi.get_existing_table_ids();
+        let removed_tables = compact_table_ids
+            .iter()
+            .filter(|table_id| !found_tables.contains(table_id))
+            .collect_vec();
+        if !removed_tables.is_empty() {
+            tracing::error!("Failed to fetch filter key extractor tables [{:?}. [{:?}] may be removed by meta-service. ", compact_table_ids, removed_tables);
+            return None;
+        }
+    }
+
+    let multi_filter_key_extractor = Arc::new(multi_filter_key_extractor);
+
+    Some(multi_filter_key_extractor)
+}
+
 #[cfg(test)]
 pub mod tests {
     use risingwave_hummock_sdk::can_concat;
@@ -945,7 +842,7 @@ pub mod tests {
     #[tokio::test]
     async fn test_partition_overlapping_level() {
         const TEST_KEYS_COUNT: usize = 10;
-        let sstable_store = mock_sstable_store();
+        let sstable_store = mock_sstable_store().await;
         let mut table_infos = vec![];
         for object_id in 0..10 {
             let start_index = object_id * TEST_KEYS_COUNT;

@@ -23,7 +23,6 @@ use super::stream::prelude::*;
 use super::utils::{impl_distill_by_unit, TableCatalogBuilder};
 use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::TableCatalog;
 

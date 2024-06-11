@@ -81,6 +81,7 @@ impl Strong {
             | ExprType::IsDistinctFrom
             | ExprType::IsNotDistinctFrom
             | ExprType::IsTrue
+            | ExprType::QuoteNullable
             | ExprType::IsNotTrue
             | ExprType::IsFalse
             | ExprType::IsNotFalse => false,
@@ -180,6 +181,7 @@ impl Strong {
             | ExprType::ToAscii
             | ExprType::ToHex
             | ExprType::QuoteIdent
+            | ExprType::QuoteLiteral
             | ExprType::Sin
             | ExprType::Cos
             | ExprType::Tan
@@ -301,6 +303,9 @@ impl Strong {
             | ExprType::PgRelationSize
             | ExprType::PgGetSerialSequence
             | ExprType::IcebergTransform
+            | ExprType::HasTablePrivilege
+            | ExprType::HasAnyColumnPrivilege
+            | ExprType::HasSchemaPrivilege
             | ExprType::InetAton
             | ExprType::InetNtoa => false,
             ExprType::Unspecified => unreachable!(),

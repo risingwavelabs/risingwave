@@ -52,7 +52,7 @@ async fn create_snapshot_store(
             &config.0,
             Arc::new(ObjectStoreMetrics::unused()),
             "Meta Backup",
-            object_store_config.clone(),
+            Arc::new(object_store_config.clone()),
         )
         .await,
     );

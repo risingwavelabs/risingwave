@@ -17,7 +17,6 @@ use std::ops::Bound::{Excluded, Included};
 use std::ops::{Deref, DerefMut};
 use std::sync::atomic::Ordering;
 
-use function_name::named;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     object_size_map, summarize_group_deltas,
 };
@@ -32,8 +31,7 @@ use tracing::warn;
 
 use crate::hummock::error::Result;
 use crate::hummock::manager::versioning::Versioning;
-use crate::hummock::manager::{read_lock, write_lock};
-use crate::hummock::metrics_utils::trigger_gc_stat;
+use crate::hummock::metrics_utils::{trigger_gc_stat, trigger_split_stat};
 use crate::hummock::HummockManager;
 
 #[derive(Default)]
@@ -122,11 +120,10 @@ impl HummockManager {
     /// Returns the diff between new and old checkpoint id.
     /// Note that this method must not be called concurrently, because internally it doesn't hold
     /// lock throughout the method.
-    #[named]
     pub async fn create_version_checkpoint(&self, min_delta_log_num: u64) -> Result<u64> {
         let timer = self.metrics.version_checkpoint_latency.start_timer();
         // 1. hold read lock and create new checkpoint
-        let versioning_guard = read_lock!(self, versioning).await;
+        let versioning_guard = self.versioning.read().await;
         let versioning: &Versioning = versioning_guard.deref();
         let current_version: &HummockVersion = &versioning.current_version;
         let old_checkpoint: &HummockVersionCheckpoint = &versioning.checkpoint;
@@ -137,9 +134,10 @@ impl HummockManager {
         }
         if cfg!(test) && new_checkpoint_id == old_checkpoint_id {
             drop(versioning_guard);
-            let mut versioning = write_lock!(self, versioning).await;
-            versioning.mark_objects_for_deletion();
-            let min_pinned_version_id = versioning.min_pinned_version_id();
+            let versioning = self.versioning.read().await;
+            let context_info = self.context_info.read().await;
+            versioning.mark_objects_for_deletion(&context_info, &self.delete_object_tracker);
+            let min_pinned_version_id = context_info.min_pinned_version_id();
             trigger_gc_stat(&self.metrics, &versioning.checkpoint, min_pinned_version_id);
             return Ok(0);
         }
@@ -176,13 +174,11 @@ impl HummockManager {
                         ),
                 );
             }
-
             versions_object_ids.extend(version_delta.newly_added_object_ids());
         }
 
         // Object ids that once exist in any hummock version but not exist in the latest hummock version
         let removed_object_ids = &versions_object_ids - &current_version.get_object_ids();
-
         let total_file_size = removed_object_ids
             .iter()
             .map(|t| {
@@ -226,17 +222,19 @@ impl HummockManager {
             }
         }
         // 3. hold write lock and update in memory state
-        let mut versioning_guard = write_lock!(self, versioning).await;
+        let mut versioning_guard = self.versioning.write().await;
         let versioning = versioning_guard.deref_mut();
+        let context_info = self.context_info.read().await;
         assert!(new_checkpoint.version.id > versioning.checkpoint.version.id);
         versioning.checkpoint = new_checkpoint;
         // Not delete stale objects when archive is enabled
         if !self.env.opts.enable_hummock_data_archive {
-            versioning.mark_objects_for_deletion();
+            versioning.mark_objects_for_deletion(&context_info, &self.delete_object_tracker);
         }
 
-        let min_pinned_version_id = versioning.min_pinned_version_id();
+        let min_pinned_version_id = context_info.min_pinned_version_id();
         trigger_gc_stat(&self.metrics, &versioning.checkpoint, min_pinned_version_id);
+        trigger_split_stat(&self.metrics, &versioning.current_version);
         drop(versioning_guard);
         timer.observe_duration();
         self.metrics
@@ -261,9 +259,8 @@ impl HummockManager {
         self.pause_version_checkpoint.load(Ordering::Relaxed)
     }
 
-    #[named]
     pub async fn get_checkpoint_version(&self) -> HummockVersion {
-        let versioning_guard = read_lock!(self, versioning).await;
+        let versioning_guard = self.versioning.read().await;
         versioning_guard.checkpoint.version.clone()
     }
 }

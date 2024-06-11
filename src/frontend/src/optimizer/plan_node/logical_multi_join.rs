@@ -406,7 +406,7 @@ impl LogicalMultiJoin {
     ///        a. a filter with the non eq conditions
     ///        b. a projection which reorders the output column ordering to agree with the
     ///           original ordering of the joins.
-    ///   The filter will then be pushed down by another filter pushdown pass.
+    ///    The filter will then be pushed down by another filter pushdown pass.
     pub(crate) fn heuristic_ordering(&self) -> Result<Vec<usize>> {
         let mut labeller = ConnectedComponentLabeller::new(self.inputs.len());
 
@@ -494,9 +494,9 @@ impl LogicalMultiJoin {
     /// 2. Second, for every isolated node will create connection to every other nodes.
     /// 3. Third, select and merge one node for a iteration, and use a bfs policy for which node the
     ///    selected node merged with.
-    ///   i. The select node mentioned above is the node with least number of relations and the
+    ///    i. The select node mentioned above is the node with least number of relations and the
     ///      lowerst join tree.
-    ///   ii. nodes with a join tree higher than the temporal optimal join tree will be pruned.
+    ///    ii. nodes with a join tree higher than the temporal optimal join tree will be pruned.
     pub fn as_bushy_tree_join(&self) -> Result<PlanRef> {
         let (nodes, condition) = self.get_join_graph()?;
 
@@ -871,7 +871,7 @@ mod test {
     use risingwave_pb::expr::expr_node::Type;
 
     use super::*;
-    use crate::expr::{FunctionCall, InputRef};
+    use crate::expr::InputRef;
     use crate::optimizer::optimizer_context::OptimizerContext;
     use crate::optimizer::plan_node::generic::GenericPlanRef;
     use crate::optimizer::plan_node::LogicalValues;

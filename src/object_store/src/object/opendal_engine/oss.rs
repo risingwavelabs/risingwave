@@ -12,16 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use opendal::layers::{LoggingLayer, RetryLayer};
+use std::sync::Arc;
+
+use opendal::layers::LoggingLayer;
 use opendal::services::Oss;
 use opendal::Operator;
+use risingwave_common::config::ObjectStoreConfig;
 
 use super::{EngineType, OpendalObjectStore};
 use crate::object::ObjectResult;
 
 impl OpendalObjectStore {
     /// create opendal oss engine.
-    pub fn new_oss_engine(bucket: String, root: String) -> ObjectResult<Self> {
+    pub fn new_oss_engine(
+        bucket: String,
+        root: String,
+        config: Arc<ObjectStoreConfig>,
+    ) -> ObjectResult<Self> {
         // Create oss backend builder.
         let mut builder = Oss::default();
 
@@ -43,11 +50,11 @@ impl OpendalObjectStore {
 
         let op: Operator = Operator::new(builder)?
             .layer(LoggingLayer::default())
-            .layer(RetryLayer::default())
             .finish();
         Ok(Self {
             op,
             engine_type: EngineType::Oss,
+            config,
         })
     }
 }

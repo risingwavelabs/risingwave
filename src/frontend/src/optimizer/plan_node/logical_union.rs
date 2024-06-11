@@ -327,8 +327,7 @@ impl ToStream for LogicalUnion {
 #[cfg(test)]
 mod tests {
 
-    use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::types::DataType;
+    use risingwave_common::catalog::Field;
 
     use super::*;
     use crate::optimizer::optimizer_context::OptimizerContext;

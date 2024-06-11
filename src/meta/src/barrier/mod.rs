@@ -426,6 +426,7 @@ enum CompletingCommand {
         // that has finished but not checkpointed. If there is any, we will force checkpoint on the next barrier
         join_handle: JoinHandle<MetaResult<BarrierCompleteOutput>>,
     },
+    #[expect(dead_code)]
     Err(MetaError),
 }
 

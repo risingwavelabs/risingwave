@@ -22,7 +22,7 @@ use thiserror_ext::AsReport;
 use tokio::sync::RwLock;
 use tracing::info;
 
-use crate::model::{ValTransaction, VarTransaction};
+use crate::model::{InMemValTransaction, ValTransaction, VarTransaction};
 use crate::storage::{MetaStore, MetaStoreRef, Snapshot, Transaction};
 use crate::MetaResult;
 

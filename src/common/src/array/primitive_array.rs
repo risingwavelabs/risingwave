@@ -315,7 +315,6 @@ impl<T: PrimitiveArrayItemType> ArrayBuilder for PrimitiveArrayBuilder<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{F32, F64};
 
     fn helper_test_builder<T: PrimitiveArrayItemType>(data: Vec<Option<T>>) -> PrimitiveArray<T> {
         let mut builder = PrimitiveArrayBuilder::<T>::new(data.len());

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::types::{Datum, Scalar, ScalarImpl, Timestamptz};
 use risingwave_pb::connector_service::CdcMessage;
 
 use crate::source::base::SourceMessage;
@@ -19,11 +20,49 @@ use crate::source::SourceMeta;
 
 #[derive(Debug, Clone)]
 pub struct DebeziumCdcMeta {
+    db_name_prefix_len: usize,
+
     pub full_table_name: String,
     // extracted from `payload.source.ts_ms`, the time that the change event was made in the database
     pub source_ts_ms: i64,
     // Whether the message is a transaction metadata
     pub is_transaction_meta: bool,
+}
+
+impl DebeziumCdcMeta {
+    pub fn extract_timestamp(&self) -> Option<Datum> {
+        Some(
+            Timestamptz::from_millis(self.source_ts_ms)
+                .unwrap()
+                .to_scalar_value(),
+        )
+        .into()
+    }
+
+    pub fn extract_database_name(&self) -> Option<Datum> {
+        Some(ScalarImpl::from(
+            self.full_table_name.as_str()[0..self.db_name_prefix_len].to_string(),
+        ))
+        .into()
+    }
+
+    pub fn extract_table_name(&self) -> Option<Datum> {
+        Some(ScalarImpl::from(
+            self.full_table_name.as_str()[self.db_name_prefix_len..].to_string(),
+        ))
+        .into()
+    }
+
+    pub fn new(full_table_name: String, source_ts_ms: i64, is_transaction_meta: bool) -> Self {
+        // full_table_name is in the format of `database_name.table_name`
+        let db_name_prefix_len = full_table_name.as_str().find('.').unwrap_or(0);
+        Self {
+            db_name_prefix_len,
+            full_table_name,
+            source_ts_ms,
+            is_transaction_meta,
+        }
+    }
 }
 
 impl From<CdcMessage> for SourceMessage {
@@ -41,11 +80,11 @@ impl From<CdcMessage> for SourceMessage {
             },
             offset: message.offset,
             split_id: message.partition.into(),
-            meta: SourceMeta::DebeziumCdc(DebeziumCdcMeta {
-                full_table_name: message.full_table_name,
-                source_ts_ms: message.source_ts_ms,
-                is_transaction_meta: message.is_transaction_meta,
-            }),
+            meta: SourceMeta::DebeziumCdc(DebeziumCdcMeta::new(
+                message.full_table_name,
+                message.source_ts_ms,
+                message.is_transaction_meta,
+            )),
         }
     }
 }

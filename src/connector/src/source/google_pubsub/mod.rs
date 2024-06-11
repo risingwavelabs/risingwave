@@ -14,26 +14,39 @@
 
 use std::collections::HashMap;
 
+use anyhow::Context;
+use google_cloud_pubsub::client::{Client, ClientConfig};
+use google_cloud_pubsub::subscription::Subscription;
 use serde::Deserialize;
 
 pub mod enumerator;
 pub mod source;
 pub mod split;
-
 pub use enumerator::*;
+use serde_with::{serde_as, DisplayFromStr};
 pub use source::*;
 pub use split::*;
 use with_options::WithOptions;
 
+use crate::error::ConnectorResult;
 use crate::source::SourceProperties;
 
 pub const GOOGLE_PUBSUB_CONNECTOR: &str = "google_pubsub";
 
+/// # Implementation Notes
+/// Pub/Sub does not rely on persisted state (`SplitImpl`) to start from a position.
+/// It rely on Pub/Sub to load-balance messages between all Readers.
+/// We `ack` received messages after checkpoint (see `WaitCheckpointWorker`) to achieve at-least-once delivery.
+#[serde_as]
 #[derive(Clone, Debug, Deserialize, WithOptions)]
 pub struct PubsubProperties {
-    /// pubsub subscription to consume messages from
-    /// The subscription should be configured with the `retain-on-ack` property to enable
-    /// message recovery within risingwave.
+    /// Pub/Sub subscription to consume messages from.
+    ///
+    /// Note that we rely on Pub/Sub to load-balance messages between all Readers pulling from
+    /// the same subscription. So one `subscription` (i.e., one `Source`) can only used for one MV
+    /// (shared between the actors of its fragment).
+    /// Otherwise, different MVs on the same Source will both receive part of the messages.
+    /// TODO: check and enforce this on Meta.
     #[serde(rename = "pubsub.subscription")]
     pub subscription: String,
 
@@ -62,11 +75,17 @@ pub struct PubsubProperties {
     /// in pub/sub because they guarantee retention of:
     /// - All unacknowledged messages at the time of their creation.
     /// - All messages created after their creation.
-    /// Besides retention guarantees, timestamps are also more precise than timestamp-based seeks.
+    /// Besides retention guarantees, snapshots are also more precise than timestamp-based seeks.
     /// See [Seeking to a snapshot](https://cloud.google.com/pubsub/docs/replay-overview#seeking_to_a_timestamp) for
     /// more details.
     #[serde(rename = "pubsub.start_snapshot")]
     pub start_snapshot: Option<String>,
+
+    /// `parallelism` is the number of parallel consumers to run for the subscription.
+    /// TODO: use system parallelism if not set
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    #[serde(rename = "pubsub.parallelism")]
+    pub parallelism: Option<u32>,
 
     #[serde(flatten)]
     pub unknown_fields: HashMap<String, String>,
@@ -97,6 +116,18 @@ impl PubsubProperties {
             std::env::set_var("GOOGLE_APPLICATION_CREDENTIALS_JSON", credentials);
         }
     }
+
+    pub(crate) async fn subscription_client(&self) -> ConnectorResult<Subscription> {
+        self.initialize_env();
+
+        // Validate config
+        let config = ClientConfig::default().with_auth().await?;
+        let client = Client::new(config)
+            .await
+            .context("error initializing pubsub client")?;
+
+        Ok(client.subscription(&self.subscription))
+    }
 }
 
 #[cfg(test)]
@@ -123,7 +154,7 @@ mod tests {
             start_offset: None,
             start_snapshot: None,
             subscription: String::from("test-subscription"),
-
+            parallelism: None,
             unknown_fields: Default::default(),
         };
 

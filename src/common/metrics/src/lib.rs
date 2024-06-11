@@ -15,7 +15,6 @@
 #![feature(lazy_cell)]
 #![feature(type_alias_impl_trait)]
 #![feature(impl_trait_in_assoc_type)]
-#![feature(array_methods)]
 use std::ops::Deref;
 use std::sync::LazyLock;
 

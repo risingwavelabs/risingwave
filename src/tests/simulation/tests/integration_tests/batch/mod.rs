@@ -54,7 +54,7 @@ fn cluster_config_no_compute_nodes() -> Configuration {
         file.write_all(
             "\
 [meta]
-max_heartbeat_interval_secs = 60
+max_heartbeat_interval_secs = 300
 
 [system]
 barrier_interval_ms = 1000
@@ -63,6 +63,9 @@ checkpoint_frequency = 1
 [server]
 telemetry_enabled = false
 metrics_level = \"Disabled\"
+
+[batch]
+mask_worker_temporary_secs = 30
         "
             .as_bytes(),
         )
@@ -163,7 +166,7 @@ async fn test_serving_cluster_availability() {
     tokio::time::sleep(Duration::from_secs(15)).await;
     query_and_assert(session.clone()).await;
     // wait for mask expire
-    tokio::time::sleep(Duration::from_secs(30)).await;
+    tokio::time::sleep(Duration::from_secs(60)).await;
     session.run(select).await.unwrap_err();
     // wait for previous nodes expire
     tokio::time::sleep(Duration::from_secs(300)).await;

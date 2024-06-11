@@ -12,7 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use opendal::layers::RetryLayer;
+use std::sync::Arc;
+
+use opendal::layers::LoggingLayer;
 use opendal::services::Fs;
 use opendal::Operator;
 use risingwave_common::config::ObjectStoreConfig;
@@ -23,7 +25,7 @@ use crate::object::ObjectResult;
 
 impl OpendalObjectStore {
     /// create opendal fs engine.
-    pub fn new_fs_engine(root: String, config: ObjectStoreConfig) -> ObjectResult<Self> {
+    pub fn new_fs_engine(root: String, config: Arc<ObjectStoreConfig>) -> ObjectResult<Self> {
         // Create fs backend builder.
         let mut builder = Fs::default();
         builder.root(&root);
@@ -33,11 +35,12 @@ impl OpendalObjectStore {
         }
 
         let op: Operator = Operator::new(builder)?
-            .layer(RetryLayer::default())
+            .layer(LoggingLayer::default())
             .finish();
         Ok(Self {
             op,
             engine_type: EngineType::Fs,
+            config,
         })
     }
 }

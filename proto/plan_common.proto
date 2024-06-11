@@ -147,6 +147,7 @@ enum EncodeType {
   ENCODE_TYPE_BYTES = 6;
   ENCODE_TYPE_TEMPLATE = 7;
   ENCODE_TYPE_NONE = 8;
+  ENCODE_TYPE_TEXT = 9;
 }
 
 enum RowFormatType {
@@ -202,6 +203,15 @@ message AdditionalColumnHeader {
   data.DataType data_type = 2;
 }
 
+// metadata column for cdc table
+message AdditionalDatabaseName {}
+
+message AdditionalSchemaName {}
+
+message AdditionalTableName {}
+
+message AdditionalCollectionName {}
+
 // this type means we read all headers as a whole
 message AdditionalColumnHeaders {}
 
@@ -214,6 +224,10 @@ message AdditionalColumn {
     AdditionalColumnHeader header_inner = 5;
     AdditionalColumnFilename filename = 6;
     AdditionalColumnHeaders headers = 7;
+    AdditionalDatabaseName database_name = 8;
+    AdditionalSchemaName schema_name = 9;
+    AdditionalTableName table_name = 10;
+    AdditionalCollectionName collection_name = 11;
   }
 }
 

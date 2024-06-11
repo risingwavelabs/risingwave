@@ -257,11 +257,9 @@ pub fn default_source_internal_table(id: u32) -> PbTable {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use std::sync::Arc;
 
-    use risingwave_common::row::OwnedRow;
-    use risingwave_common::types::{Datum, ScalarImpl};
-    use risingwave_common::util::epoch::{test_epoch, EpochPair};
+    use risingwave_common::types::Datum;
+    use risingwave_common::util::epoch::test_epoch;
     use risingwave_connector::source::kafka::KafkaSplit;
     use risingwave_storage::memory::MemoryStateStore;
     use serde_json::Value;

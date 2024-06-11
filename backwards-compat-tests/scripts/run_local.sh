@@ -13,8 +13,11 @@ trap on_exit EXIT
 source backwards-compat-tests/scripts/utils.sh
 
 configure_rw() {
-echo "--- Setting up cluster config"
-cat <<EOF > risedev-profiles.user.yml
+  VERSION="$1"
+
+  echo "--- Setting up cluster config"
+  if version_le "$VERSION" "1.9.0"; then
+    cat <<EOF > risedev-profiles.user.yml
 full-without-monitoring:
   steps:
     - use: minio
@@ -23,16 +26,34 @@ full-without-monitoring:
     - use: compute-node
     - use: frontend
     - use: compactor
-    - use: zookeeper
     - use: kafka
+      user-managed: true
+      address: message_queue
+      port: 29092
 EOF
+  else
+    cat <<EOF > risedev-profiles.user.yml
+ full-without-monitoring:
+   steps:
+     - use: minio
+     - use: etcd
+     - use: meta-node
+       meta-backend: etcd
+     - use: compute-node
+     - use: frontend
+     - use: compactor
+     - use: kafka
+       user-managed: true
+       address: message_queue
+       port: 29092
+EOF
+  fi
 
 cat <<EOF > risedev-components.user.env
 RISEDEV_CONFIGURED=false
 
 ENABLE_MINIO=true
 ENABLE_ETCD=true
-ENABLE_KAFKA=true
 
 # Fetch risingwave binary from release.
 ENABLE_BUILD_RUST=true
@@ -57,11 +78,11 @@ main() {
   set -euo pipefail
   get_rw_versions
   setup_old_cluster
-  configure_rw
+  configure_rw "$OLD_VERSION"
   seed_old_cluster "$OLD_VERSION"
 
   setup_new_cluster
-  configure_rw
+  configure_rw "99.99.99"
   validate_new_cluster "$NEW_VERSION"
 }
 

@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![expect(dead_code)]
 #![allow(clippy::derive_partial_eq_without_eq)]
 #![feature(array_chunks)]
 #![feature(coroutines)]
@@ -41,7 +40,6 @@
 use std::time::Duration;
 
 use duration_str::parse_std;
-use risingwave_pb::connector_service::SinkPayloadFormat;
 use serde::de;
 
 pub mod aws_utils;
@@ -63,19 +61,6 @@ pub use with_options::WithPropertiesExt;
 
 #[cfg(test)]
 mod with_options_test;
-
-#[derive(Clone, Debug, Default)]
-pub struct ConnectorParams {
-    pub sink_payload_format: SinkPayloadFormat,
-}
-
-impl ConnectorParams {
-    pub fn new(sink_payload_format: SinkPayloadFormat) -> Self {
-        Self {
-            sink_payload_format,
-        }
-    }
-}
 
 pub(crate) fn deserialize_u32_from_string<'de, D>(deserializer: D) -> Result<u32, D::Error>
 where
@@ -176,6 +161,8 @@ mod tests {
 
     /// Test some serde behavior we rely on.
     mod serde {
+        #![expect(dead_code)]
+
         use std::collections::BTreeMap;
 
         use expect_test::expect;

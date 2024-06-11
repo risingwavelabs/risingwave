@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+
+# A simple wrapper around `mysql` but add an `-u` option to specify the user.
+# The environment variable `RISEDEV_MYSQL_USER` will be set by `risedev-env`.
+
+# Strip the current directory from the PATH to access the system `mysql`.
+REAL_PATH=$(echo "$PATH" | sed "s,$(dirname "$0"):,,g")
+
+PATH=${REAL_PATH} mysql -u "${RISEDEV_MYSQL_USER}" "$@"

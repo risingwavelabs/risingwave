@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, VecDeque};
 use std::marker::PhantomData;
 use std::ops::Deref;
 use std::pin::pin;
@@ -22,7 +22,7 @@ use anyhow::{anyhow, Context};
 use async_trait::async_trait;
 use await_tree::InstrumentAwait;
 use futures::future::select;
-use futures::{StreamExt, TryStreamExt};
+use futures::TryStreamExt;
 use itertools::Itertools;
 use jni::JavaVM;
 use prost::Message;
@@ -42,8 +42,8 @@ use risingwave_pb::connector_service::sink_writer_stream_request::{
 use risingwave_pb::connector_service::{
     sink_coordinator_stream_request, sink_coordinator_stream_response, sink_writer_stream_response,
     PbSinkParam, SinkCoordinatorStreamRequest, SinkCoordinatorStreamResponse, SinkMetadata,
-    SinkPayloadFormat, SinkWriterStreamRequest, SinkWriterStreamResponse, TableSchema,
-    ValidateSinkRequest, ValidateSinkResponse,
+    SinkWriterStreamRequest, SinkWriterStreamResponse, TableSchema, ValidateSinkRequest,
+    ValidateSinkResponse,
 };
 use risingwave_rpc_client::error::RpcError;
 use risingwave_rpc_client::{
@@ -53,7 +53,7 @@ use risingwave_rpc_client::{
 use rw_futures_util::drop_either_future;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc;
-use tokio::sync::mpsc::{unbounded_channel, Receiver, Sender};
+use tokio::sync::mpsc::{unbounded_channel, Receiver};
 use tokio::task::spawn_blocking;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::warn;
@@ -68,7 +68,6 @@ use crate::sink::{
     DummySinkCommitCoordinator, LogSinker, Result, Sink, SinkCommitCoordinator, SinkError,
     SinkLogReader, SinkMetrics, SinkParam, SinkWriterParam,
 };
-use crate::ConnectorParams;
 
 macro_rules! def_remote_sink {
     () => {
@@ -82,7 +81,6 @@ macro_rules! def_remote_sink {
             { HttpJava, HttpJavaSink, "http" }
         }
     };
-    () => {};
     ({ $variant_name:ident, $sink_type_name:ident, $sink_name:expr }) => {
         #[derive(Debug)]
         pub struct $variant_name;
@@ -168,7 +166,7 @@ impl<R: RemoteSinkTrait> Sink for RemoteSink<R> {
 async fn validate_remote_sink(param: &SinkParam, sink_name: &str) -> ConnectorResult<()> {
     if sink_name == ElasticSearchSink::SINK_NAME
         && param.downstream_pk.len() > 1
-        && param.properties.get(ES_OPTION_DELIMITER).is_none()
+        && !param.properties.contains_key(ES_OPTION_DELIMITER)
     {
         bail!("Es sink only support single pk or pk with delimiter option");
     }
@@ -283,7 +281,7 @@ impl RemoteLogSinker {
             request_sender,
             response_stream,
         } = EmbeddedConnectorClient::new()?
-            .start_sink_writer_stream(payload_schema, sink_proto, SinkPayloadFormat::StreamChunk)
+            .start_sink_writer_stream(payload_schema, sink_proto)
             .await?;
 
         let sink_metrics = writer_param.sink_metrics;
@@ -330,7 +328,7 @@ impl LogSinker for RemoteLogSinker {
         };
 
         let poll_consume_log_and_sink = async move {
-            async fn truncate_matched_offset(
+            fn truncate_matched_offset(
                 queue: &mut VecDeque<(TruncateOffset, Option<Instant>)>,
                 persisted_offset: TruncateOffset,
                 log_reader: &mut impl SinkLogReader,
@@ -361,7 +359,7 @@ impl LogSinker for RemoteLogSinker {
                         .observe(start_time.elapsed().as_millis() as f64);
                 }
 
-                log_reader.truncate(persisted_offset).await?;
+                log_reader.truncate(persisted_offset)?;
                 Ok(())
             }
 
@@ -406,8 +404,7 @@ impl LogSinker for RemoteLogSinker {
                                     },
                                     log_reader,
                                     &sink_metrics,
-                                )
-                                .await?;
+                                )?;
                             }
                             SinkWriterStreamResponse {
                                 response:
@@ -426,8 +423,7 @@ impl LogSinker for RemoteLogSinker {
                                     TruncateOffset::Barrier { epoch },
                                     log_reader,
                                     &sink_metrics,
-                                )
-                                .await?;
+                                )?;
                             }
                             response => {
                                 return Err(SinkError::Remote(anyhow!(
@@ -549,12 +545,8 @@ impl<R: RemoteSinkTrait> Sink for CoordinatedRemoteSink<R> {
                     "sink needs coordination should not have singleton input"
                 ))
             })?,
-            CoordinatedRemoteSinkWriter::new(
-                self.param.clone(),
-                writer_param.connector_params,
-                writer_param.sink_metrics.clone(),
-            )
-            .await?,
+            CoordinatedRemoteSinkWriter::new(self.param.clone(), writer_param.sink_metrics.clone())
+                .await?,
         )
         .await?
         .into_log_sinker(writer_param.sink_metrics))
@@ -566,7 +558,8 @@ impl<R: RemoteSinkTrait> Sink for CoordinatedRemoteSink<R> {
 }
 
 pub struct CoordinatedRemoteSinkWriter {
-    properties: HashMap<String, String>,
+    #[expect(dead_code)]
+    properties: BTreeMap<String, String>,
     epoch: Option<u64>,
     batch_id: u64,
     stream_handle: SinkWriterStreamHandle<JniSinkWriterStreamRequest>,
@@ -574,18 +567,10 @@ pub struct CoordinatedRemoteSinkWriter {
 }
 
 impl CoordinatedRemoteSinkWriter {
-    pub async fn new(
-        param: SinkParam,
-        connector_params: ConnectorParams,
-        sink_metrics: SinkMetrics,
-    ) -> Result<Self> {
+    pub async fn new(param: SinkParam, sink_metrics: SinkMetrics) -> Result<Self> {
         let sink_proto = param.to_proto();
         let stream_handle = EmbeddedConnectorClient::new()?
-            .start_sink_writer_stream(
-                sink_proto.table_schema.clone(),
-                sink_proto,
-                connector_params.sink_payload_format,
-            )
+            .start_sink_writer_stream(sink_proto.table_schema.clone(), sink_proto)
             .await?;
 
         Ok(Self {
@@ -597,11 +582,14 @@ impl CoordinatedRemoteSinkWriter {
         })
     }
 
+    #[cfg(test)]
     fn for_test(
         response_receiver: Receiver<ConnectorResult<SinkWriterStreamResponse>>,
-        request_sender: Sender<JniSinkWriterStreamRequest>,
+        request_sender: tokio::sync::mpsc::Sender<JniSinkWriterStreamRequest>,
     ) -> CoordinatedRemoteSinkWriter {
-        let properties = HashMap::from([("output.path".to_string(), "/tmp/rw".to_string())]);
+        use futures::StreamExt;
+
+        let properties = BTreeMap::from([("output.path".to_string(), "/tmp/rw".to_string())]);
 
         let stream_handle = SinkWriterStreamHandle::for_test(
             request_sender,
@@ -682,11 +670,7 @@ impl RemoteCoordinator {
             .start_sink_coordinator_stream(param.clone())
             .await?;
 
-        tracing::trace!(
-            "{:?} RemoteCoordinator started with properties: {:?}",
-            R::SINK_NAME,
-            &param.properties
-        );
+        tracing::trace!("{:?} RemoteCoordinator started", R::SINK_NAME,);
 
         Ok(RemoteCoordinator { stream_handle })
     }
@@ -719,13 +703,11 @@ impl EmbeddedConnectorClient {
         &self,
         payload_schema: Option<TableSchema>,
         sink_proto: PbSinkParam,
-        sink_payload_format: SinkPayloadFormat,
     ) -> Result<SinkWriterStreamHandle<JniSinkWriterStreamRequest>> {
         let (handle, first_rsp) = SinkWriterStreamHandle::initialize(
             SinkWriterStreamRequest {
                 request: Some(SinkRequest::Start(StartSink {
                     sink_param: Some(sink_proto),
-                    format: sink_payload_format as i32,
                     payload_schema,
                 })),
             },

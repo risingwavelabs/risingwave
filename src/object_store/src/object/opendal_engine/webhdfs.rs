@@ -12,9 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use opendal::layers::{LoggingLayer, RetryLayer};
+use std::sync::Arc;
+
+use opendal::layers::LoggingLayer;
 use opendal::services::Webhdfs;
 use opendal::Operator;
+use risingwave_common::config::ObjectStoreConfig;
 
 use super::{EngineType, OpendalObjectStore};
 use crate::object::opendal_engine::ATOMIC_WRITE_DIR;
@@ -22,7 +25,11 @@ use crate::object::ObjectResult;
 
 impl OpendalObjectStore {
     /// create opendal webhdfs engine.
-    pub fn new_webhdfs_engine(endpoint: String, root: String) -> ObjectResult<Self> {
+    pub fn new_webhdfs_engine(
+        endpoint: String,
+        root: String,
+        config: Arc<ObjectStoreConfig>,
+    ) -> ObjectResult<Self> {
         // Create webhdfs backend builder.
         let mut builder = Webhdfs::default();
         // Set the name node for webhdfs.
@@ -35,11 +42,11 @@ impl OpendalObjectStore {
         builder.atomic_write_dir(&atomic_write_dir);
         let op: Operator = Operator::new(builder)?
             .layer(LoggingLayer::default())
-            .layer(RetryLayer::default())
             .finish();
         Ok(Self {
             op,
             engine_type: EngineType::Webhdfs,
+            config,
         })
     }
 }

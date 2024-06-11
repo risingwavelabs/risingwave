@@ -195,10 +195,9 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
                 var field = res.getString(1);
                 var dataType = res.getString(2);
                 var key = res.getString(3);
-                schema.put(field.toLowerCase(), dataType);
+                schema.put(field, dataType);
                 if (key.equalsIgnoreCase("PRI")) {
-                    // RisingWave always use lower case for column name
-                    pkFields.add(field.toLowerCase());
+                    pkFields.add(field);
                 }
             }
 
@@ -208,7 +207,7 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
                 if (e.getKey().startsWith(ValidatorUtils.INTERNAL_COLUMN_PREFIX)) {
                     continue;
                 }
-                var dataType = schema.get(e.getKey().toLowerCase());
+                var dataType = schema.get(e.getKey());
                 if (dataType == null) {
                     throw ValidatorUtils.invalidArgument(
                             "Column '" + e.getKey() + "' not found in the upstream database");

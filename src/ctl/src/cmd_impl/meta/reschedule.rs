@@ -24,7 +24,6 @@ use risingwave_pb::meta::get_reschedule_plan_request::PbPolicy;
 use risingwave_pb::meta::table_fragments::ActorStatus;
 use risingwave_pb::meta::{GetClusterInfoResponse, GetReschedulePlanResponse, Reschedule};
 use serde::{Deserialize, Serialize};
-use serde_yaml;
 use thiserror_ext::AsReport;
 
 use crate::CtlContext;

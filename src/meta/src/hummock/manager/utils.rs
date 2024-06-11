@@ -19,16 +19,18 @@ macro_rules! commit_multi_var {
     ($meta_store:expr, $($val_txn:expr),*) => {
         {
             async {
+                use crate::model::{InMemValTransaction, ValTransaction};
                 match &$meta_store {
-                    crate::manager::MetaStoreImpl::Kv(meta_store) => {
+                    $crate::manager::MetaStoreImpl::Kv(meta_store) => {
                         use crate::storage::Transaction;
+                        use crate::storage::meta_store::MetaStore;
                         let mut trx = Transaction::default();
                         $(
-                            $val_txn.as_v1_ref().apply_to_txn(&mut trx).await?;
+                            $val_txn.apply_to_txn(&mut trx).await?;
                         )*
                         meta_store.txn(trx).await?;
                         $(
-                            $val_txn.into_v1().commit();
+                            $val_txn.commit();
                         )*
                         Result::Ok(())
                     }
@@ -37,11 +39,11 @@ macro_rules! commit_multi_var {
                         use crate::model::MetadataModelError;
                         let mut trx = sql_meta_store.conn.begin().await.map_err(MetadataModelError::from)?;
                         $(
-                            $val_txn.as_v2_ref().apply_to_txn(&mut trx).await?;
+                            $val_txn.apply_to_txn(&mut trx).await?;
                         )*
                         trx.commit().await.map_err(MetadataModelError::from)?;
                         $(
-                            $val_txn.into_v2().commit();
+                            $val_txn.commit();
                         )*
                         Result::Ok(())
                     }
@@ -51,14 +53,70 @@ macro_rules! commit_multi_var {
     };
 }
 pub(crate) use commit_multi_var;
+use risingwave_hummock_sdk::SstObjectIdRange;
 
-macro_rules! create_trx_wrapper {
-    ($meta_store:expr, $wrapper:ident, $inner:expr) => {{
-        match &$meta_store {
-            crate::manager::MetaStoreImpl::Kv(_) => $wrapper::V1($inner),
-            crate::manager::MetaStoreImpl::Sql(_) => $wrapper::V2($inner),
-        }
-    }};
+use crate::hummock::error::Result;
+use crate::hummock::sequence::next_sstable_object_id;
+use crate::hummock::HummockManager;
+
+impl HummockManager {
+    #[cfg(test)]
+    pub(super) async fn check_state_consistency(&self) {
+        use crate::hummock::manager::compaction::Compaction;
+        use crate::hummock::manager::context::ContextInfo;
+        use crate::hummock::manager::versioning::Versioning;
+        let mut compaction_guard = self.compaction.write().await;
+        let mut versioning_guard = self.versioning.write().await;
+        let mut context_info_guard = self.context_info.write().await;
+        let objects_to_delete = self.delete_object_tracker.current();
+        // We don't check `checkpoint` because it's allowed to update its in memory state without
+        // persisting to object store.
+        let get_state = |compaction_guard: &mut Compaction,
+                         versioning_guard: &mut Versioning,
+                         context_info_guard: &mut ContextInfo| {
+            let compact_statuses_copy = compaction_guard.compaction_statuses.clone();
+            let compact_task_assignment_copy = compaction_guard.compact_task_assignment.clone();
+            let pinned_versions_copy = context_info_guard.pinned_versions.clone();
+            let pinned_snapshots_copy = context_info_guard.pinned_snapshots.clone();
+            let hummock_version_deltas_copy = versioning_guard.hummock_version_deltas.clone();
+            let version_stats_copy = versioning_guard.version_stats.clone();
+            ((
+                compact_statuses_copy,
+                compact_task_assignment_copy,
+                pinned_versions_copy,
+                pinned_snapshots_copy,
+                hummock_version_deltas_copy,
+                version_stats_copy,
+            ),)
+        };
+        let mem_state = get_state(
+            &mut compaction_guard,
+            &mut versioning_guard,
+            &mut context_info_guard,
+        );
+        self.load_meta_store_state_impl(
+            &mut compaction_guard,
+            &mut versioning_guard,
+            &mut context_info_guard,
+        )
+        .await
+        .expect("Failed to load state from meta store");
+        let loaded_state = get_state(
+            &mut compaction_guard,
+            &mut versioning_guard,
+            &mut context_info_guard,
+        );
+        assert_eq!(
+            mem_state, loaded_state,
+            "hummock in-mem state is inconsistent with meta store state",
+        );
+        self.delete_object_tracker.clear();
+        self.delete_object_tracker
+            .add(objects_to_delete.into_iter());
+    }
+
+    pub async fn get_new_sst_ids(&self, number: u32) -> Result<SstObjectIdRange> {
+        let start_id = next_sstable_object_id(&self.env, number).await?;
+        Ok(SstObjectIdRange::new(start_id, start_id + number as u64))
+    }
 }
-
-pub(crate) use create_trx_wrapper;

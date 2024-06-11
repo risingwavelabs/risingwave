@@ -17,7 +17,6 @@
 // NOTE: When adding or modifying data types, remember to update the type matrix in
 // src/expr/macro/src/types.rs
 
-use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::hash::Hash;
 use std::str::FromStr;
@@ -46,9 +45,11 @@ use crate::{
     for_all_scalar_variants, for_all_type_pairs,
 };
 
+mod cow;
 mod datetime;
 mod decimal;
 mod fields;
+mod from_sql;
 mod interval;
 mod jsonb;
 mod macros;
@@ -72,6 +73,7 @@ mod with_data_type;
 pub use fields::Fields;
 pub use risingwave_fields_derive::Fields;
 
+pub use self::cow::DatumCow;
 pub use self::datetime::{Date, Time, Timestamp};
 pub use self::decimal::{Decimal, PowError as DecimalPowError};
 pub use self::interval::{test_utils, DateTimeField, Interval, IntervalDisplay};

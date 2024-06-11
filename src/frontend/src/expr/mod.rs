@@ -647,10 +647,11 @@ impl ExprImpl {
                 fn is_short_circuit(&self, func_call: &FunctionCall) -> bool {
                     /// evaluate the first parameter of `Or` or `And` function call
                     fn eval_first(e: &ExprImpl, expect: bool) -> bool {
-                        let Some(Ok(Some(scalar))) = e.try_fold_const() else {
-                            return false;
-                        };
-                        scalar == ScalarImpl::Bool(expect)
+                        if let ExprImpl::Literal(l) = e {
+                            *l.get_data() == Some(ScalarImpl::Bool(expect))
+                        } else {
+                            false
+                        }
                     }
 
                     match func_call.func_type {

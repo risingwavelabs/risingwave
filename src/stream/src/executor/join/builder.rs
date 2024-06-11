@@ -20,7 +20,6 @@ use risingwave_common::types::{DataType, DatumRef};
 use self::row::JoinRow;
 // Re-export `StreamChunkBuilder`.
 use super::*;
-use super::{JoinTypePrimitive, SideTypePrimitive};
 
 type IndexMappings = Vec<(usize, usize)>;
 

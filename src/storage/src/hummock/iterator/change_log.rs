@@ -56,10 +56,10 @@ struct ChangeLogIteratorInner<
     /// Indicate whether the current new value is delete.
     is_new_value_delete: bool,
 
-    /// Whether Indicate whether the current `old_value_iter` represents the old value in ChangeLogValue
+    /// Whether Indicate whether the current `old_value_iter` represents the old value in `ChangeLogValue`
     is_old_value_set: bool,
 
-    /// Whether the iterator is currently pointing at a valid key with ChangeLogValue
+    /// Whether the iterator is currently pointing at a valid key with `ChangeLogValue`
     is_current_pos_valid: bool,
 }
 
