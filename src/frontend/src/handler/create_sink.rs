@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::{Arc, LazyLock};
 
@@ -53,11 +53,14 @@ use crate::binder::Binder;
 use crate::catalog::catalog_service::CatalogReadGuard;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::view_catalog::ViewCatalog;
+use crate::catalog::SinkId;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{rewrite_now_to_proctime, ExprImpl, InputRef};
 use crate::handler::alter_table_column::fetch_table_catalog_for_alter;
 use crate::handler::create_mv::parse_column_names;
-use crate::handler::create_table::{generate_stream_graph_for_table, ColumnIdGenerator};
+use crate::handler::create_table::{
+    bind_sql_columns, generate_stream_graph_for_table, ColumnIdGenerator,
+};
 use crate::handler::privilege::resolve_query_privileges;
 use crate::handler::util::SourceSchemaCompatExt;
 use crate::handler::HandlerArgs;
@@ -286,7 +289,7 @@ pub fn gen_sink_plan(
             &sink_catalog,
             sink_plan.schema(),
             table_catalog.columns(),
-            table_catalog.default_column_exprs().as_ref(),
+            TableCatalog::default_column_exprs(table_catalog.columns()).as_ref(),
             user_specified_columns,
         )?;
 
@@ -418,7 +421,7 @@ pub async fn handle_create_sink(
     let partition_info = get_partition_compute_info(&handle_args.with_options).await?;
 
     let (sink, graph, target_table_catalog) = {
-        let context = Rc::new(OptimizerContext::from_handler_args(handle_args));
+        let context = Rc::new(OptimizerContext::from_handler_args(handle_args.clone()));
 
         let SinkPlanContext {
             query,
@@ -459,12 +462,27 @@ pub async fn handle_create_sink(
             .incoming_sinks
             .clone_from(&table_catalog.incoming_sinks);
 
-        for _ in 0..(table_catalog.incoming_sinks.len() + 1) {
-            for fragment in graph.fragments.values_mut() {
-                if let Some(node) = &mut fragment.node {
-                    insert_merger_to_union(node);
-                }
-            }
+        // let target_columns = bind_sql_columns(&columns)?;
+
+        let default_columns: Vec<ExprImpl> =
+            TableCatalog::default_column_exprs(table_catalog.columns());
+        // let default_columns: Vec<ExprImpl> = TableCatalog::default_column_exprs(&target_columns);
+
+        let incoming_sink_ids: HashSet<_> = table_catalog.incoming_sinks.iter().copied().collect();
+
+        let mut incoming_sinks = fetch_incoming_sinks(&session, &incoming_sink_ids)?;
+
+        incoming_sinks.push(Arc::new(sink.clone()));
+
+        let context = Rc::new(OptimizerContext::from_handler_args(handle_args.clone()));
+        for sink in incoming_sinks {
+            crate::handler::alter_table_column::hijack_merger_for_target_table(
+                &mut graph,
+                table_catalog.columns(),
+                &default_columns,
+                &sink,
+                context.clone(),
+            )?;
         }
 
         target_table_replace_plan = Some(ReplaceTablePlan {
@@ -492,6 +510,24 @@ pub async fn handle_create_sink(
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_SINK))
+}
+
+pub fn fetch_incoming_sinks(
+    session: &Arc<SessionImpl>,
+    incoming_sink_ids: &HashSet<SinkId>,
+) -> Result<Vec<Arc<SinkCatalog>>> {
+    let reader = session.env().catalog_reader().read_guard();
+    let mut sinks = Vec::with_capacity(incoming_sink_ids.len());
+    let db_name = session.database();
+    for schema in reader.iter_schemas(db_name)? {
+        for sink in schema.iter_sink() {
+            if incoming_sink_ids.contains(&sink.id.sink_id) {
+                sinks.push(sink.clone());
+            }
+        }
+    }
+
+    Ok(sinks)
 }
 
 fn check_cycle_for_sink(

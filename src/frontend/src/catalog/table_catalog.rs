@@ -464,8 +464,8 @@ impl TableCatalog {
         }
     }
 
-    pub fn default_column_exprs(&self) -> Vec<ExprImpl> {
-        self.columns
+    pub fn default_column_exprs(columns: &[ColumnCatalog]) -> Vec<ExprImpl> {
+        columns
             .iter()
             .map(|c| {
                 if let Some(GeneratedOrDefaultColumn::DefaultColumn(DefaultColumnDesc {
