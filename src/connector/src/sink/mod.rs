@@ -226,10 +226,6 @@ impl SinkParam {
             fields: self.columns.iter().map(Field::from).collect(),
         }
     }
-
-    pub fn connector(&self) -> Option<&str> {
-        self.properties.get(CONNECTOR_TYPE_KEY).map(|s| s.as_str())
-    }
 }
 
 impl From<SinkCatalog> for SinkParam {
@@ -444,6 +440,10 @@ impl SinkImpl {
 
     pub fn is_sink_into_table(&self) -> bool {
         matches!(self, SinkImpl::Table(_))
+    }
+
+    pub fn is_blackhole(&self) -> bool {
+        matches!(self, SinkImpl::BlackHole(_))
     }
 }
 
