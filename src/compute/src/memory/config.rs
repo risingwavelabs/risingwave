@@ -27,7 +27,9 @@ pub const MIN_COMPUTE_MEMORY_MB: usize = 512;
 /// overhead, network buffer, etc.) in megabytes.
 pub const MIN_SYSTEM_RESERVED_MEMORY_MB: usize = 512;
 
-const SYSTEM_RESERVED_MEMORY_PROPORTION: f64 = 0.3;
+const RESERVED_MEMORY_LEVELS: [usize; 2] = [16 << 30, usize::MAX];
+
+const RESERVED_MEMORY_PROPORTIONS: [f64; 2] = [0.3, 0.2];
 
 const STORAGE_MEMORY_PROPORTION: f64 = 0.3;
 
@@ -44,7 +46,7 @@ const STORAGE_SHARED_BUFFER_MEMORY_PROPORTION: f64 = 0.3;
 const COMPUTE_BATCH_MEMORY_PROPORTION: f64 = 0.3;
 
 /// Each compute node reserves some memory for stack and code segment of processes, allocation
-/// overhead, network buffer, etc. based on `SYSTEM_RESERVED_MEMORY_PROPORTION`. The reserve memory
+/// overhead, network buffer, etc. based on gradient reserve memory proportion. The reserve memory
 /// size must be larger than `MIN_SYSTEM_RESERVED_MEMORY_MB`
 pub fn reserve_memory_bytes(opts: &ComputeNodeOpts) -> (usize, usize) {
     if opts.total_memory_bytes < MIN_COMPUTE_MEMORY_MB << 20 {
@@ -55,15 +57,40 @@ pub fn reserve_memory_bytes(opts: &ComputeNodeOpts) -> (usize, usize) {
         );
     }
 
-    // If `reserved_memory_bytes` is not set, use `SYSTEM_RESERVED_MEMORY_PROPORTION` * `total_memory_bytes`.
-    let reserved = opts.reserved_memory_bytes.unwrap_or_else(|| {
-        (opts.total_memory_bytes as f64 * SYSTEM_RESERVED_MEMORY_PROPORTION).ceil() as usize
-    });
+    // If `reserved_memory_bytes` is not set, calculate total_memory_bytes based on gradient reserve memory proportion.
+    let reserved = opts
+        .reserved_memory_bytes
+        .unwrap_or_else(|| gradient_reserve_memory_bytes(opts.total_memory_bytes));
 
     // Should have at least `MIN_SYSTEM_RESERVED_MEMORY_MB` for reserved memory.
     let reserved = std::cmp::max(reserved, MIN_SYSTEM_RESERVED_MEMORY_MB << 20);
 
     (reserved, opts.total_memory_bytes - reserved)
+}
+
+/// Calculate the reserved memory based on the total memory size.
+/// The reserved memory size is calculated based on the following gradient:
+/// - 30% of the first 16GB
+/// - 20% of the rest
+fn gradient_reserve_memory_bytes(total_memory_bytes: usize) -> usize {
+    let mut total_memory_bytes = total_memory_bytes;
+    let mut reserved = 0;
+    for i in 0..RESERVED_MEMORY_LEVELS.len() {
+        let level_diff = if i == 0 {
+            RESERVED_MEMORY_LEVELS[0]
+        } else {
+            RESERVED_MEMORY_LEVELS[i] - RESERVED_MEMORY_LEVELS[i - 1]
+        };
+        if total_memory_bytes <= level_diff {
+            reserved += (total_memory_bytes as f64 * RESERVED_MEMORY_PROPORTIONS[i]) as usize;
+            break;
+        } else {
+            reserved += (level_diff as f64 * RESERVED_MEMORY_PROPORTIONS[i]) as usize;
+            total_memory_bytes -= level_diff;
+        }
+    }
+
+    reserved
 }
 
 /// Decide the memory limit for each storage cache. If not specified in `StorageConfig`, memory
@@ -345,5 +372,18 @@ mod tests {
         assert_eq!(memory_config.meta_cache_capacity_mb, 128);
         assert_eq!(memory_config.shared_buffer_capacity_mb, 1024);
         assert_eq!(memory_config.compactor_memory_limit_mb, 512);
+    }
+
+    #[test]
+    fn test_gradient_reserve_memory_bytes() {
+        assert_eq!(super::gradient_reserve_memory_bytes(4 << 30), 1288490188);
+        assert_eq!(super::gradient_reserve_memory_bytes(8 << 30), 2576980377);
+        assert_eq!(super::gradient_reserve_memory_bytes(16 << 30), 5153960755);
+        assert_eq!(super::gradient_reserve_memory_bytes(24 << 30), 6871947673);
+        assert_eq!(super::gradient_reserve_memory_bytes(32 << 30), 8589934591);
+        assert_eq!(super::gradient_reserve_memory_bytes(54 << 30), 13314398617);
+        assert_eq!(super::gradient_reserve_memory_bytes(64 << 30), 15461882265);
+        assert_eq!(super::gradient_reserve_memory_bytes(100 << 30), 23192823398);
+        assert_eq!(super::gradient_reserve_memory_bytes(128 << 30), 29205777612);
     }
 }
