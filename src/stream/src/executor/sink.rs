@@ -368,16 +368,25 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                         // Compact the chunk to eliminate any useless intermediate result (e.g. UPDATE
                         // V->V).
                         let chunk = merge_chunk_row(chunk, &stream_key);
-                        let chunk = if sink_type == SinkType::ForceAppendOnly {
-                            // Force append-only by dropping UPDATE/DELETE messages. We do this when the
-                            // user forces the sink to be append-only while it is actually not based on
-                            // the frontend derivation result.
-                            force_append_only(chunk)
-                        } else {
-                            chunk
-                        };
-
-                        yield Message::Chunk(chunk);
+                        match sink_type {
+                            SinkType::AppendOnly => yield Message::Chunk(chunk),
+                            SinkType::ForceAppendOnly => {
+                                // Force append-only by dropping UPDATE/DELETE messages. We do this when the
+                                // user forces the sink to be append-only while it is actually not based on
+                                // the frontend derivation result.
+                                yield Message::Chunk(force_append_only(chunk))
+                            }
+                            SinkType::Upsert => {
+                                // Making sure the optimization in https://github.com/risingwavelabs/risingwave/pull/12250 is correct,
+                                // it is needed to do the compaction here.
+                                for chunk in
+                                    StreamChunkCompactor::new(stream_key.clone(), vec![chunk])
+                                        .into_compacted_chunks()
+                                {
+                                    yield Message::Chunk(chunk)
+                                }
+                            }
+                        }
                     }
                     Message::Barrier(barrier) => {
                         yield Message::Barrier(barrier);

@@ -26,6 +26,7 @@ use risingwave_common::bail;
 use risingwave_common::log::LogSuppresser;
 use risingwave_common::types::{
     DataType, Date, DatumCow, Interval, JsonbVal, ScalarImpl, Time, Timestamp, Timestamptz,
+    ToOwnedDatum,
 };
 use risingwave_common::util::iter_util::ZipEqFast;
 
@@ -56,7 +57,7 @@ impl<'a> AvroParseOptions<'a> {
 }
 
 impl<'a> AvroParseOptions<'a> {
-    fn extract_inner_schema(&self, key: Option<&'a str>) -> Option<&'a Schema> {
+    fn extract_inner_schema(&self, key: Option<&str>) -> Option<&'a Schema> {
         self.schema
             .map(|schema| avro_extract_field_schema(schema, key))
             .transpose()
@@ -87,8 +88,8 @@ impl<'a> AvroParseOptions<'a> {
     pub fn convert_to_datum<'b>(
         &self,
         value: &'b Value,
-        type_expected: &'b DataType,
-    ) -> AccessResult
+        type_expected: &DataType,
+    ) -> AccessResult<DatumCow<'b>>
     where
         'b: 'a,
     {
@@ -98,8 +99,14 @@ impl<'a> AvroParseOptions<'a> {
             value: String::new(),
         };
 
+        macro_rules! borrowed {
+            ($v:expr) => {
+                return Ok(DatumCow::Borrowed(Some($v.into())))
+            };
+        }
+
         let v: ScalarImpl = match (type_expected, value) {
-            (_, Value::Null) => return Ok(None),
+            (_, Value::Null) => return Ok(DatumCow::NULL),
             (_, Value::Union(_, v)) => {
                 let schema = self.extract_inner_schema(None);
                 return Self {
@@ -183,8 +190,8 @@ impl<'a> AvroParseOptions<'a> {
                 .map_err(|_| create_error())?
                 .into(),
             // ---- Varchar -----
-            (DataType::Varchar, Value::Enum(_, symbol)) => symbol.clone().into_boxed_str().into(),
-            (DataType::Varchar, Value::String(s)) => s.clone().into_boxed_str().into(),
+            (DataType::Varchar, Value::Enum(_, symbol)) => borrowed!(symbol.as_str()),
+            (DataType::Varchar, Value::String(s)) => borrowed!(s.as_str()),
             // ---- Timestamp -----
             (DataType::Timestamp, Value::LocalTimestampMillis(ms)) => Timestamp::with_millis(*ms)
                 .map_err(|_| create_error())?
@@ -223,7 +230,8 @@ impl<'a> AvroParseOptions<'a> {
                                 schema,
                                 relax_numeric: self.relax_numeric,
                             }
-                            .convert_to_datum(value, field_type)?)
+                            .convert_to_datum(value, field_type)?
+                            .to_owned_datum())
                         } else {
                             Ok(None)
                         }
@@ -247,7 +255,7 @@ impl<'a> AvroParseOptions<'a> {
             })
             .into(),
             // ---- Bytea -----
-            (DataType::Bytea, Value::Bytes(value)) => value.clone().into_boxed_slice().into(),
+            (DataType::Bytea, Value::Bytes(value)) => borrowed!(value.as_slice()),
             // ---- Jsonb -----
             (DataType::Jsonb, v @ Value::Map(_)) => {
                 let mut builder = jsonbb::Builder::default();
@@ -262,7 +270,7 @@ impl<'a> AvroParseOptions<'a> {
 
             (_expected, _got) => Err(create_error())?,
         };
-        Ok(Some(v))
+        Ok(DatumCow::Owned(Some(v)))
     }
 }
 
@@ -308,10 +316,7 @@ impl Access for AvroAccess<'_> {
             Err(create_error())?;
         }
 
-        // TODO: may borrow the value directly
-        options
-            .convert_to_datum(value, type_expected)
-            .map(Into::into)
+        options.convert_to_datum(value, type_expected)
     }
 }
 
@@ -352,7 +357,7 @@ pub fn avro_schema_skip_union(schema: &Schema) -> anyhow::Result<&Schema> {
 // extract inner filed/item schema of record/array/union
 pub fn avro_extract_field_schema<'a>(
     schema: &'a Schema,
-    name: Option<&'a str>,
+    name: Option<&str>,
 ) -> anyhow::Result<&'a Schema> {
     match schema {
         Schema::Record(RecordSchema { fields, lookup, .. }) => {
@@ -524,9 +529,9 @@ mod tests {
         value_schema: &Schema,
         shape: &DataType,
     ) -> anyhow::Result<Datum> {
-        AvroParseOptions::create(value_schema)
-            .convert_to_datum(&value, shape)
-            .map_err(Into::into)
+        Ok(AvroParseOptions::create(value_schema)
+            .convert_to_datum(&value, shape)?
+            .to_owned_datum())
     }
 
     #[test]
@@ -569,7 +574,8 @@ mod tests {
         let options = AvroParseOptions::create(&schema);
         let resp = options
             .convert_to_datum(&value, &DataType::Decimal)
-            .unwrap();
+            .unwrap()
+            .to_owned_datum();
         assert_eq!(
             resp,
             Some(ScalarImpl::Decimal(Decimal::Normalized(
@@ -608,7 +614,8 @@ mod tests {
         let options = AvroParseOptions::create(&schema);
         let resp = options
             .convert_to_datum(&value, &DataType::Decimal)
-            .unwrap();
+            .unwrap()
+            .to_owned_datum();
         assert_eq!(resp, Some(ScalarImpl::Decimal(Decimal::from(66051))));
     }
 }
