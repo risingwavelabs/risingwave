@@ -3897,6 +3897,23 @@ impl CatalogManager {
         Ok(subscription.clone())
     }
 
+    pub async fn get_sinks(&self, sink_ids: &[SinkId]) -> Vec<Sink> {
+        let mut sinks = vec![];
+        let guard = self.core.lock().await;
+        for sink_id in sink_ids {
+            // if let Some(table) = guard.database.in_progress_creating_tables.get(table_id) {
+            //     sinks.push(table.clone());
+            // } else if let Some(table) = guard.database.tables.get(table_id) {
+            //     sinks.push(table.clone());
+            // }
+
+            if let Some(sink) = guard.database.sinks.get(sink_id) {
+                sinks.push(sink.clone());
+            }
+        }
+        sinks
+    }
+
     pub async fn get_created_table_ids(&self) -> Vec<u32> {
         let guard = self.core.lock().await;
         guard

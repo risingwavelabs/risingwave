@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -21,11 +21,9 @@ use create_sink::derive_default_column_project_for_sink;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::bail_not_implemented;
-use risingwave_common::catalog::ColumnCatalog;
+use risingwave_common::catalog::{ColumnCatalog, Field};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_connector::sink::catalog::SinkCatalog;
-use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
-use risingwave_pb::plan_common::DefaultColumnDesc;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_sqlparser::ast::{
     AlterTableOperation, ColumnOption, ConnectorSchema, Encode, ObjectName, Statement,
@@ -141,10 +139,15 @@ pub(crate) fn hijack_merger_for_target_table(
     let exprs = derive_default_column_project_for_sink(
         sink,
         &sink.full_schema(),
-        &target_columns,
-        &default_columns,
+        target_columns,
+        default_columns,
         false, // todo
     )?;
+
+    println!(
+        "sink {} exprs {:?} target {:?} default {:?}",
+        sink.name, exprs, target_columns, default_columns
+    );
 
     let pb_project = StreamProject::new(generic::Project::new(
         exprs,
@@ -162,7 +165,14 @@ pub(crate) fn hijack_merger_for_target_table(
 
     for fragment in graph.fragments.values_mut() {
         if let Some(node) = &mut fragment.node {
-            insert_merger_to_union_with_project(node, &pb_project);
+            insert_merger_to_union_with_project(
+                node,
+                &pb_project,
+                &format!(
+                    "{}.{}.{}",
+                    sink.database_id.database_id, sink.schema_id.schema_id, sink.name
+                ),
+            );
         }
     }
 

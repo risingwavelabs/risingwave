@@ -14,7 +14,6 @@
 
 use std::collections::HashSet;
 use std::rc::Rc;
-use std::sync::Arc;
 
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_pb::ddl_service::ReplaceTablePlan;
@@ -25,9 +24,7 @@ use crate::binder::Binder;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::error::Result;
 use crate::expr::ExprImpl;
-use crate::handler::create_sink::{
-    fetch_incoming_sinks, insert_merger_to_union, reparse_table_for_sink,
-};
+use crate::handler::create_sink::{fetch_incoming_sinks, reparse_table_for_sink};
 use crate::handler::HandlerArgs;
 use crate::{OptimizerContext, TableCatalog};
 
@@ -92,7 +89,7 @@ pub async fn handle_drop_sink(
 
         assert!(incoming_sink_ids.remove(&sink_id.sink_id));
 
-        let mut incoming_sinks = fetch_incoming_sinks(&session, &incoming_sink_ids)?;
+        let incoming_sinks = fetch_incoming_sinks(&session, &incoming_sink_ids)?;
 
         for sink in incoming_sinks {
             let context = Rc::new(OptimizerContext::from_handler_args(handler_args.clone()));

@@ -37,6 +37,7 @@ use risingwave_connector::sink::{
 };
 use risingwave_pb::catalog::{PbSource, Table};
 use risingwave_pb::ddl_service::ReplaceTablePlan;
+use risingwave_pb::plan_common::PbField;
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::stream_node::{NodeBody, PbNodeBody};
 use risingwave_pb::stream_plan::{DispatcherType, MergeNode, StreamFragmentGraph, StreamNode};
@@ -58,9 +59,7 @@ use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{rewrite_now_to_proctime, ExprImpl, InputRef};
 use crate::handler::alter_table_column::fetch_table_catalog_for_alter;
 use crate::handler::create_mv::parse_column_names;
-use crate::handler::create_table::{
-    bind_sql_columns, generate_stream_graph_for_table, ColumnIdGenerator,
-};
+use crate::handler::create_table::{generate_stream_graph_for_table, ColumnIdGenerator};
 use crate::handler::privilege::resolve_query_privileges;
 use crate::handler::util::SourceSchemaCompatExt;
 use crate::handler::HandlerArgs;
@@ -696,44 +695,22 @@ pub(crate) async fn reparse_table_for_sink(
     Ok((graph, table, source))
 }
 
-pub(crate) fn insert_merger_to_union(node: &mut StreamNode) {
-    if let Some(NodeBody::Union(_union_node)) = &mut node.node_body {
-        node.input.push(StreamNode {
-            identity: "Merge (sink into table)".to_string(),
-            fields: node.fields.clone(),
-            node_body: Some(NodeBody::Merge(MergeNode {
-                upstream_dispatcher_type: DispatcherType::Hash as _,
-                ..Default::default()
-            })),
-            ..Default::default()
-        });
-
-        return;
-    }
-
-    for input in &mut node.input {
-        insert_merger_to_union(input);
-    }
-}
-
 pub(crate) fn insert_merger_to_union_with_project(
     node: &mut StreamNode,
     project_node: &PbNodeBody,
+    uniq_name: &str,
 ) {
     if let Some(NodeBody::Union(_union_node)) = &mut node.node_body {
         node.input.push(StreamNode {
             input: vec![StreamNode {
-                identity: "Merge (sink into table)".to_string(),
-                fields: node.fields.clone(),
                 node_body: Some(NodeBody::Merge(MergeNode {
-                    upstream_dispatcher_type: DispatcherType::Hash as _,
                     ..Default::default()
                 })),
                 ..Default::default()
             }],
             stream_key: vec![],
             append_only: false,
-            identity: "".to_string(),
+            identity: uniq_name.to_string(),
             fields: vec![],
             node_body: Some(project_node.clone()),
             ..Default::default()
@@ -743,7 +720,7 @@ pub(crate) fn insert_merger_to_union_with_project(
     }
 
     for input in &mut node.input {
-        insert_merger_to_union_with_project(input, project_node);
+        insert_merger_to_union_with_project(input, project_node, uniq_name);
     }
 }
 
