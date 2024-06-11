@@ -835,12 +835,6 @@ pub struct FileCacheConfig {
     #[serde(default = "default::file_cache::recover_concurrency")]
     pub recover_concurrency: usize,
 
-    #[serde(default = "default::file_cache::lfu_window_to_cache_size_ratio")]
-    pub lfu_window_to_cache_size_ratio: usize,
-
-    #[serde(default = "default::file_cache::lfu_tiny_lru_capacity_ratio")]
-    pub lfu_tiny_lru_capacity_ratio: f64,
-
     #[serde(default = "default::file_cache::insert_rate_limit_mb")]
     pub insert_rate_limit_mb: usize,
 
@@ -1601,14 +1595,6 @@ pub mod default {
 
         pub fn recover_concurrency() -> usize {
             8
-        }
-
-        pub fn lfu_window_to_cache_size_ratio() -> usize {
-            1
-        }
-
-        pub fn lfu_tiny_lru_capacity_ratio() -> f64 {
-            0.01
         }
 
         pub fn insert_rate_limit_mb() -> usize {
