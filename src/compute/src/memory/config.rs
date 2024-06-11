@@ -26,9 +26,10 @@ pub const MIN_COMPUTE_MEMORY_MB: usize = 512;
 /// The memory reserved for system usage (stack and code segment of processes, allocation
 /// overhead, network buffer, etc.) in megabytes.
 pub const MIN_SYSTEM_RESERVED_MEMORY_MB: usize = 512;
-pub const MAX_SYSTEM_RESERVED_MEMORY_MB: usize = 8192;
 
-const SYSTEM_RESERVED_MEMORY_PROPORTION: f64 = 0.3;
+const GB16: usize = 16 << 30;
+const GB32: usize = 32 << 30;
+const GB64: usize = 64 << 30;
 
 const STORAGE_MEMORY_PROPORTION: f64 = 0.3;
 
@@ -45,7 +46,7 @@ const STORAGE_SHARED_BUFFER_MEMORY_PROPORTION: f64 = 0.3;
 const COMPUTE_BATCH_MEMORY_PROPORTION: f64 = 0.3;
 
 /// Each compute node reserves some memory for stack and code segment of processes, allocation
-/// overhead, network buffer, etc. based on `SYSTEM_RESERVED_MEMORY_PROPORTION`. The reserve memory
+/// overhead, network buffer, etc. based on gradient reserve memory proportion. The reserve memory
 /// size must be larger than `MIN_SYSTEM_RESERVED_MEMORY_MB`
 pub fn reserve_memory_bytes(opts: &ComputeNodeOpts) -> (usize, usize) {
     if opts.total_memory_bytes < MIN_COMPUTE_MEMORY_MB << 20 {
@@ -56,19 +57,37 @@ pub fn reserve_memory_bytes(opts: &ComputeNodeOpts) -> (usize, usize) {
         );
     }
 
-    // If `reserved_memory_bytes` is not set, use `SYSTEM_RESERVED_MEMORY_PROPORTION` * `total_memory_bytes`.
-    let reserved = opts.reserved_memory_bytes.unwrap_or_else(|| {
-        (opts.total_memory_bytes as f64 * SYSTEM_RESERVED_MEMORY_PROPORTION).ceil() as usize
-    });
+    // If `reserved_memory_bytes` is not set, calculate total_memory_bytes based on gradient reserve memory proportion.
+    let reserved = opts
+        .reserved_memory_bytes
+        .unwrap_or_else(|| gradient_reserve_memory_bytes(opts.total_memory_bytes));
 
     // Should have at least `MIN_SYSTEM_RESERVED_MEMORY_MB` for reserved memory.
-    let mut reserved = std::cmp::max(reserved, MIN_SYSTEM_RESERVED_MEMORY_MB << 20);
-    // Limit the maximum reserved memory size if it is not explicitly specified.
-    if opts.reserved_memory_bytes.is_none() {
-        reserved = std::cmp::min(reserved, MAX_SYSTEM_RESERVED_MEMORY_MB << 20);
-    }
+    let reserved = std::cmp::max(reserved, MIN_SYSTEM_RESERVED_MEMORY_MB << 20);
 
     (reserved, opts.total_memory_bytes - reserved)
+}
+
+/// Calculate the reserved memory based on the total memory size.
+/// The reserved memory size is calculated based on the following gradient:
+/// - 30% of the first 16GB
+/// - 25% of the next 16GB
+/// - 20% of the next 32GB
+/// - 15% of the rest
+fn gradient_reserve_memory_bytes(total_memory_bytes: usize) -> usize {
+    let reserved = if total_memory_bytes <= GB16 {
+        total_memory_bytes as f64 * 0.3
+    } else if total_memory_bytes <= GB32 {
+        GB16 as f64 * 0.3 + (total_memory_bytes - GB16) as f64 * 0.25
+    } else if total_memory_bytes <= GB64 {
+        GB16 as f64 * 0.3 + (GB32 - GB16) as f64 * 0.25 + (total_memory_bytes - GB32) as f64 * 0.2
+    } else {
+        GB16 as f64 * 0.3
+            + (GB32 - GB16) as f64 * 0.25
+            + (GB64 - GB32) as f64 * 0.2
+            + (total_memory_bytes - GB64) as f64 * 0.15
+    };
+    reserved.ceil() as usize
 }
 
 /// Decide the memory limit for each storage cache. If not specified in `StorageConfig`, memory
@@ -350,5 +369,15 @@ mod tests {
         assert_eq!(memory_config.meta_cache_capacity_mb, 128);
         assert_eq!(memory_config.shared_buffer_capacity_mb, 1024);
         assert_eq!(memory_config.compactor_memory_limit_mb, 512);
+    }
+
+    #[test]
+    fn test_gradient_reserve_memory_bytes() {
+        assert_eq!(super::gradient_reserve_memory_bytes(4 << 30), 1288490189);
+        assert_eq!(super::gradient_reserve_memory_bytes(8 << 30), 2576980378);
+        assert_eq!(super::gradient_reserve_memory_bytes(16 << 30), 5153960756);
+        assert_eq!(super::gradient_reserve_memory_bytes(32 << 30), 9448928052);
+        assert_eq!(super::gradient_reserve_memory_bytes(64 << 30), 16320875725);
+        assert_eq!(super::gradient_reserve_memory_bytes(128 << 30), 26628797236);
     }
 }
