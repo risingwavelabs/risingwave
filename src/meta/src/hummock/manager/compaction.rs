@@ -1545,53 +1545,6 @@ impl HummockManager {
                 .retain(|table_id, _| compact_task.existing_table_ids.contains(table_id));
         }
     }
-}
-
-#[cfg(any(test, feature = "test"))]
-impl HummockManager {
-    pub fn compactor_manager_ref_for_test(&self) -> crate::hummock::CompactorManagerRef {
-        self.compactor_manager.clone()
-    }
-
-    pub async fn compaction_task_from_assignment_for_test(
-        &self,
-        task_id: u64,
-    ) -> Option<CompactTaskAssignment> {
-        let compaction_guard = self.compaction.read().await;
-        let assignment_ref = &compaction_guard.compact_task_assignment;
-        assignment_ref.get(&task_id).cloned()
-    }
-
-    pub async fn report_compact_task_for_test(
-        &self,
-        task_id: u64,
-        compact_task: Option<CompactTask>,
-        task_status: TaskStatus,
-        sorted_output_ssts: Vec<SstableInfo>,
-        table_stats_change: Option<PbTableStatsMap>,
-    ) -> Result<()> {
-        if let Some(task) = compact_task {
-            let mut guard = self.compaction.write().await;
-            guard.compact_task_assignment.insert(
-                task_id,
-                CompactTaskAssignment {
-                    compact_task: Some(task),
-                    context_id: 0,
-                },
-            );
-        }
-
-        // In the test, the contents of the compact task may have been modified directly, while the contents of compact_task_assignment were not modified.
-        // So we pass the modified compact_task directly into the `report_compact_task_impl`
-        self.report_compact_tasks(vec![ReportTask {
-            task_id,
-            task_status: task_status as i32,
-            sorted_output_ssts,
-            table_stats_change: table_stats_change.unwrap_or_default(),
-        }])
-        .await?;
-        Ok(())
-    }
 
     pub async fn try_move_table_to_dedicated_cg(
         &self,
@@ -1665,6 +1618,53 @@ impl HummockManager {
                 )
             }
         }
+    }
+}
+
+#[cfg(any(test, feature = "test"))]
+impl HummockManager {
+    pub fn compactor_manager_ref_for_test(&self) -> crate::hummock::CompactorManagerRef {
+        self.compactor_manager.clone()
+    }
+
+    pub async fn compaction_task_from_assignment_for_test(
+        &self,
+        task_id: u64,
+    ) -> Option<CompactTaskAssignment> {
+        let compaction_guard = self.compaction.read().await;
+        let assignment_ref = &compaction_guard.compact_task_assignment;
+        assignment_ref.get(&task_id).cloned()
+    }
+
+    pub async fn report_compact_task_for_test(
+        &self,
+        task_id: u64,
+        compact_task: Option<CompactTask>,
+        task_status: TaskStatus,
+        sorted_output_ssts: Vec<SstableInfo>,
+        table_stats_change: Option<PbTableStatsMap>,
+    ) -> Result<()> {
+        if let Some(task) = compact_task {
+            let mut guard = self.compaction.write().await;
+            guard.compact_task_assignment.insert(
+                task_id,
+                CompactTaskAssignment {
+                    compact_task: Some(task),
+                    context_id: 0,
+                },
+            );
+        }
+
+        // In the test, the contents of the compact task may have been modified directly, while the contents of compact_task_assignment were not modified.
+        // So we pass the modified compact_task directly into the `report_compact_task_impl`
+        self.report_compact_tasks(vec![ReportTask {
+            task_id,
+            task_status: task_status as i32,
+            sorted_output_ssts,
+            table_stats_change: table_stats_change.unwrap_or_default(),
+        }])
+        .await?;
+        Ok(())
     }
 }
 
