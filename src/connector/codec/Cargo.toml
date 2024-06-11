@@ -26,6 +26,7 @@ chrono = { version = "0.4", default-features = false, features = [
     "clock",
     "std",
 ] }
+easy-ext = "1"
 itertools = { workspace = true }
 jsonbb = { workspace = true }
 num-bigint = "0.4"

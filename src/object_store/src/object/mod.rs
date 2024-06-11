@@ -383,7 +383,7 @@ impl<U: StreamingUploader> MonitoredStreamingUploader<U> {
 }
 
 /// NOTICE: after #16231, streaming uploader implemented via aws-sdk-s3 will maintain metrics internally in s3.rs
-/// so MonitoredStreamingUploader will only be used when the inner object store is opendal.
+/// so `MonitoredStreamingUploader` will only be used when the inner object store is opendal.
 impl<U: StreamingUploader> MonitoredStreamingUploader<U> {
     async fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()> {
         let operation_type = OperationType::StreamingUpload;
