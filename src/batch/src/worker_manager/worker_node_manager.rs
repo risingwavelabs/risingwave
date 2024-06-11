@@ -373,8 +373,7 @@ impl WorkerNodeSelector {
             };
             // 2. Temporary mapping that filters out unavailable workers.
             let new_workers = self.apply_worker_node_mask(self.manager.list_serving_worker_nodes());
-            // let masked_mapping = place_vnode(hint.as_ref(), &new_workers, parallelism);
-            let masked_mapping = place_vnode(None, &new_workers, parallelism);
+            let masked_mapping = place_vnode(hint.as_ref(), &new_workers, parallelism);
             masked_mapping.ok_or_else(|| BatchError::EmptyWorkerNodes)
         }
     }
