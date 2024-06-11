@@ -21,7 +21,6 @@ use arrow_schema_iceberg::DataType as ArrowDataType;
 use either::Either;
 use itertools::Itertools;
 use maplit::{convert_args, hashmap};
-use petgraph::visit::Data;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::catalog::{ConnectionId, DatabaseId, Schema, SchemaId, TableId, UserId};
@@ -41,7 +40,7 @@ use risingwave_pb::ddl_service::ReplaceTablePlan;
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::stream_node::{NodeBody, PbNodeBody};
 use risingwave_pb::stream_plan::{
-    DispatcherType, MergeNode, ProjectNode, StreamFragmentGraph, StreamNode,
+    DispatcherType, MergeNode, StreamFragmentGraph, StreamNode,
 };
 use risingwave_sqlparser::ast::{
     ConnectorSchema, CreateSink, CreateSinkStatement, EmitMode, Encode, Format, Query, Statement,
@@ -769,7 +768,7 @@ pub(crate) fn derive_default_column_project_for_sink(
         };
 
         let sink_col_expr = |sink_col_idx: usize| -> Result<ExprImpl> {
-            derive_sink_to_table_expr(sink_schema, sink_col_idx, &column.data_type())
+            derive_sink_to_table_expr(sink_schema, sink_col_idx, column.data_type())
         };
 
         // If users specified the columns to be inserted e.g. `CREATE SINK s INTO t(a, b)`, the expressions of `Project` will be generated accordingly.

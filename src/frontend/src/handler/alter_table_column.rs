@@ -23,8 +23,6 @@ use risingwave_common::bail_not_implemented;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::DefaultColumnDesc;
-use risingwave_pb::stream_plan::stream_node::{NodeBody, PbNodeBody};
-use risingwave_pb::stream_plan::{DispatcherType, MergeNode, ProjectNode};
 use risingwave_sqlparser::ast::{
     AlterTableOperation, ColumnOption, ConnectorSchema, Encode, ObjectName, Statement,
 };
@@ -39,12 +37,11 @@ use crate::catalog::table_catalog::TableType;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::ExprImpl;
 use crate::handler::create_sink::{
-    insert_merger_to_union, insert_merger_to_union_with_project, reparse_table_for_sink,
+    insert_merger_to_union_with_project,
 };
 use crate::optimizer::plan_node::generic::SourceNodeKind;
-use crate::optimizer::plan_node::PlanNodeType::StreamSource;
 use crate::optimizer::plan_node::{
-    LogicalSource, StreamNode, StreamProject, ToStream, ToStreamContext,
+    LogicalSource, StreamProject, ToStream, ToStreamContext,
 };
 use crate::session::SessionImpl;
 use crate::{Binder, OptimizerContext, TableCatalog, WithOptions};
@@ -121,7 +118,7 @@ pub async fn replace_table_with_definition(
         sinks
     };
 
-    let mut target_columns = bind_sql_columns(&columns)?;
+    let target_columns = bind_sql_columns(&columns)?;
 
     let default_x: Vec<ExprImpl> = target_columns
         .iter()

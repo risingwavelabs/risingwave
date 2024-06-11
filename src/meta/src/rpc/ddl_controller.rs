@@ -14,7 +14,6 @@
 
 use std::cmp::Ordering;
 use std::collections::HashMap;
-use std::io::sink;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Duration;
@@ -31,7 +30,7 @@ use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::stream_graph_visitor::{
-    visit_fragment, visit_stream_node, visit_stream_node_cont, visit_stream_node_cont_mut,
+    visit_fragment, visit_stream_node, visit_stream_node_cont_mut,
 };
 use risingwave_common::{bail, current_cluster_version};
 use risingwave_connector::dispatch_source_prop;
@@ -1278,21 +1277,21 @@ impl DdlController {
 
                                 input.fields = sink_fields.to_vec();
 
-                                return Some(false);
+                                Some(false)
                             }
                             Some(NodeBody::Project(_)) => {
                                 let merge_node = input.input.iter_mut().exactly_one().unwrap();
 
                                 input.fields = table_fields.to_vec();
 
-                                return t(
+                                t(
                                     sink_id,
                                     sink_actor_ids,
                                     upstream_fragment_id,
                                     sink_fields,
                                     table_fields,
                                     merge_node,
-                                );
+                                )
                             }
                             _ => None,
                         }
