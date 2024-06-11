@@ -290,6 +290,15 @@ impl ListArray {
     pub fn offsets(&self) -> &[u32] {
         &self.offsets
     }
+
+    /// Creates a single value list array from `ListValue`.
+    pub fn from_value(value: ListValue) -> Self {
+        Self {
+            bitmap: Bitmap::ones(1),
+            offsets: Box::new([0, value.len() as u32]),
+            value: value.values,
+        }
+    }
 }
 
 impl<T, L> FromIterator<Option<L>> for ListArray

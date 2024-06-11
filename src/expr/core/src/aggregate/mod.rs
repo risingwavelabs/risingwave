@@ -27,6 +27,7 @@ use crate::{ExprError, Result};
 
 // aggregate definition
 mod def;
+mod scalar_wrapper;
 // user defined aggregate function
 mod user_defined;
 
