@@ -12,7 +12,8 @@
 
 use winnow::stream::{Checkpoint, Offset, SliceLen, Stream, StreamIsPartial, UpdateSlice};
 
-use crate::tokenizer::{Token, TokenWithLocation, Whitespace};
+use crate::parser::Parser;
+use crate::tokenizer::TokenWithLocation;
 
 #[derive(Copy, Clone, Debug)]
 pub struct CheckpointWrapper<'a>(Checkpoint<&'a [TokenWithLocation], &'a [TokenWithLocation]>);
@@ -24,59 +25,52 @@ impl<'a> Offset<CheckpointWrapper<'a>> for CheckpointWrapper<'a> {
     }
 }
 
-/// Customized wrapper that implements [`TokenStream`][super::TokenStream], override [`Debug`] implementation for better diagnostics.
-#[derive(Default, Copy, Clone)]
-pub struct TokenStreamWrapper<'a> {
-    pub tokens: &'a [TokenWithLocation],
-}
-
-impl<'a> std::fmt::Debug for TokenStreamWrapper<'a> {
+// Used for diagnostics with `--features winnow/debug`.
+impl<'a> std::fmt::Debug for Parser<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        for tok in self.tokens {
-            let tok = &tok.token;
-            if matches!(tok, Token::Whitespace(Whitespace::Newline)) {
-                write!(f, "\\n")?;
-            } else {
-                write!(f, "{}", tok)?;
-            }
+        if let Some(token) = self.0.first() {
+            write!(f, "{}", token.token)?;
+        }
+        for token in self.0.iter().skip(1) {
+            write!(f, " {}", token.token)?;
         }
         Ok(())
     }
 }
 
-impl<'a> Offset<TokenStreamWrapper<'a>> for TokenStreamWrapper<'a> {
+impl<'a> Offset<Parser<'a>> for Parser<'a> {
     #[inline(always)]
     fn offset_from(&self, start: &Self) -> usize {
-        self.tokens.offset_from(&start.tokens)
+        self.0.offset_from(&start.0)
     }
 }
 
-impl<'a> Offset<CheckpointWrapper<'a>> for TokenStreamWrapper<'a> {
+impl<'a> Offset<CheckpointWrapper<'a>> for Parser<'a> {
     #[inline(always)]
     fn offset_from(&self, start: &CheckpointWrapper<'a>) -> usize {
-        self.tokens.offset_from(&start.0)
+        self.0.offset_from(&start.0)
     }
 }
 
-impl<'a> SliceLen for TokenStreamWrapper<'a> {
+impl<'a> SliceLen for Parser<'a> {
     #[inline(always)]
     fn slice_len(&self) -> usize {
-        self.tokens.len()
+        self.0.len()
     }
 }
 
-impl<'a> StreamIsPartial for TokenStreamWrapper<'a> {
+impl<'a> StreamIsPartial for Parser<'a> {
     type PartialState = <&'a [TokenWithLocation] as StreamIsPartial>::PartialState;
 
     #[must_use]
     #[inline(always)]
     fn complete(&mut self) -> Self::PartialState {
-        self.tokens.complete()
+        self.0.complete()
     }
 
     #[inline(always)]
     fn restore_partial(&mut self, state: Self::PartialState) {
-        self.tokens.restore_partial(state)
+        self.0.restore_partial(state)
     }
 
     #[inline(always)]
@@ -85,25 +79,25 @@ impl<'a> StreamIsPartial for TokenStreamWrapper<'a> {
     }
 }
 
-impl<'a> Stream for TokenStreamWrapper<'a> {
+impl<'a> Stream for Parser<'a> {
     type Checkpoint = CheckpointWrapper<'a>;
     type IterOffsets = <&'a [TokenWithLocation] as Stream>::IterOffsets;
-    type Slice = TokenStreamWrapper<'a>;
+    type Slice = Parser<'a>;
     type Token = <&'a [TokenWithLocation] as Stream>::Token;
 
     #[inline(always)]
     fn iter_offsets(&self) -> Self::IterOffsets {
-        self.tokens.iter_offsets()
+        self.0.iter_offsets()
     }
 
     #[inline(always)]
     fn eof_offset(&self) -> usize {
-        self.tokens.eof_offset()
+        self.0.eof_offset()
     }
 
     #[inline(always)]
     fn next_token(&mut self) -> Option<Self::Token> {
-        self.tokens.next_token()
+        self.0.next_token()
     }
 
     #[inline(always)]
@@ -111,43 +105,39 @@ impl<'a> Stream for TokenStreamWrapper<'a> {
     where
         P: Fn(Self::Token) -> bool,
     {
-        self.tokens.offset_for(predicate)
+        self.0.offset_for(predicate)
     }
 
     #[inline(always)]
     fn offset_at(&self, tokens: usize) -> Result<usize, winnow::error::Needed> {
-        self.tokens.offset_at(tokens)
+        self.0.offset_at(tokens)
     }
 
     #[inline(always)]
     fn next_slice(&mut self, offset: usize) -> Self::Slice {
-        TokenStreamWrapper {
-            tokens: self.tokens.next_slice(offset),
-        }
+        Parser(self.0.next_slice(offset))
     }
 
     #[inline(always)]
     fn checkpoint(&self) -> Self::Checkpoint {
-        CheckpointWrapper(self.tokens.checkpoint())
+        CheckpointWrapper(self.0.checkpoint())
     }
 
     #[inline(always)]
     fn reset(&mut self, checkpoint: &Self::Checkpoint) {
-        self.tokens.reset(&checkpoint.0)
+        self.0.reset(&checkpoint.0)
     }
 
     #[inline(always)]
     fn raw(&self) -> &dyn std::fmt::Debug {
-        // We customized the `Debug` implementation in the wrapper, so don't return `self.tokens` here.
+        // We customized the `Debug` implementation in the wrapper, so don't return `self.0` here.
         self
     }
 }
 
-impl<'a> UpdateSlice for TokenStreamWrapper<'a> {
+impl<'a> UpdateSlice for Parser<'a> {
     #[inline(always)]
     fn update_slice(self, inner: Self::Slice) -> Self {
-        TokenStreamWrapper {
-            tokens: self.tokens.update_slice(inner.tokens),
-        }
+        Parser(self.0.update_slice(inner.0))
     }
 }

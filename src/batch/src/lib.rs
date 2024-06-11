@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![expect(dead_code)]
 #![allow(clippy::derive_partial_eq_without_eq)]
 #![feature(trait_alias)]
 #![feature(exact_size_is_empty)]
@@ -39,6 +38,7 @@ pub mod execution;
 pub mod executor;
 pub mod monitor;
 pub mod rpc;
+pub mod spill;
 pub mod task;
 pub mod worker_manager;
 

@@ -204,3 +204,28 @@ async fn read_hummock_table_watermarks(
         })
         .collect())
 }
+
+#[derive(Fields)]
+struct RwHummockSnapshot {
+    #[primary_key]
+    table_id: i32,
+    safe_epoch: i64,
+    committed_epoch: i64,
+}
+
+#[system_catalog(table, "rw_catalog.rw_hummock_snapshot")]
+async fn read_hummock_snapshot_groups(
+    reader: &SysCatalogReaderImpl,
+) -> Result<Vec<RwHummockSnapshot>> {
+    let version = reader.meta_client.get_hummock_current_version().await?;
+    Ok(version
+        .state_table_info
+        .info()
+        .iter()
+        .map(|(table_id, info)| RwHummockSnapshot {
+            table_id: table_id.table_id as _,
+            committed_epoch: info.committed_epoch as _,
+            safe_epoch: info.safe_epoch as _,
+        })
+        .collect())
+}

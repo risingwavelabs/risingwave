@@ -19,6 +19,7 @@ use std::sync::Arc;
 
 use arc_swap::ArcSwap;
 use bytes::Bytes;
+use futures::FutureExt;
 use itertools::Itertools;
 use more_asserts::assert_gt;
 use risingwave_common::catalog::TableId;
@@ -170,7 +171,7 @@ impl HummockStorage {
         observer_manager.start().await;
 
         let hummock_version = match version_update_rx.recv().await {
-            Some(HummockVersionUpdate::PinnedVersion(version)) => version,
+            Some(HummockVersionUpdate::PinnedVersion(version)) => *version,
             _ => unreachable!("the hummock observer manager is the first one to take the event tx. Should be full hummock version")
         };
 
@@ -556,15 +557,15 @@ impl StateStore for HummockStorage {
         wait_for_epoch(&self.version_update_notifier_tx, wait_epoch).await
     }
 
-    async fn sync(&self, epoch: u64) -> StorageResult<SyncResult> {
+    fn sync(&self, epoch: u64) -> impl SyncFuture {
         let (tx, rx) = oneshot::channel();
         self.hummock_event_sender
-            .send(HummockEvent::AwaitSyncEpoch {
+            .send(HummockEvent::SyncEpoch {
                 new_sync_epoch: epoch,
                 sync_result_sender: tx,
             })
             .expect("should send success");
-        Ok(rx.await.expect("should wait success")?)
+        rx.map(|recv_result| Ok(recv_result.expect("should wait success")?))
     }
 
     fn seal_epoch(&self, epoch: u64, is_checkpoint: bool) {
@@ -653,7 +654,7 @@ impl HummockStorage {
         use tokio::task::yield_now;
         let version_id = version.id;
         self._version_update_sender
-            .send(HummockVersionUpdate::PinnedVersion(version))
+            .send(HummockVersionUpdate::PinnedVersion(Box::new(version)))
             .unwrap();
         loop {
             if self.pinned_version.load().id() >= version_id {

@@ -33,6 +33,7 @@ use crate::source::{
 
 pub struct DatagenSplitReader {
     generator: DatagenEventGenerator,
+    #[expect(dead_code)]
     assigned_split: DatagenSplit,
 
     split_id: SplitId,

@@ -29,7 +29,7 @@ clap = { workspace = true }
 downcast-rs = "1.2"
 dyn-clone = "1.0.14"
 easy-ext = "1"
-educe = "0.5"
+educe = "0.6"
 either = "1"
 enum-as-inner = "0.6"
 fancy-regex = "0.13.0"

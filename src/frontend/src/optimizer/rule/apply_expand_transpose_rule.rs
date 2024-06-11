@@ -61,7 +61,7 @@ impl Rule for ApplyExpandTransposeRule {
             return None;
         }
 
-        let new_apply: PlanRef = LogicalApply::new(
+        let new_apply: PlanRef = LogicalApply::create(
             left,
             expand_input,
             JoinType::Inner,
@@ -69,8 +69,7 @@ impl Rule for ApplyExpandTransposeRule {
             correlated_id,
             correlated_indices,
             false,
-        )
-        .into();
+        );
 
         let new_apply_schema_len = new_apply.schema().len();
 

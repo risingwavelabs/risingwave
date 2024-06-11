@@ -12,6 +12,4 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub const MAXWELL_INSERT_OP: &str = "insert";
-pub const MAXWELL_UPDATE_OP: &str = "update";
-pub const MAXWELL_DELETE_OP: &str = "delete";
+pub mod spill_op;

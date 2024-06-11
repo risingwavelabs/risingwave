@@ -30,7 +30,7 @@ chrono = { version = "0.4", default-features = false, features = [
 const-currying = "0.0.4"
 downcast-rs = "1.2"
 easy-ext = "1"
-educe = "0.5"
+educe = "0.6"
 either = "1"
 enum-as-inner = "0.6"
 futures = "0.3"

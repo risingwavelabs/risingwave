@@ -6,7 +6,7 @@ with (
   topic = 'test-rw-sink-upsert-avro',
   properties.bootstrap.server = 'message_queue:29092')
 format upsert encode avro (
-  schema.registry = 'http://message_queue:8081');
+  schema.registry = 'http://schemaregistry:8082');
 
 statement ok
 create table into_kafka (
@@ -40,7 +40,7 @@ create sink sink0 from into_kafka with (
   properties.bootstrap.server = 'message_queue:29092',
   primary_key = 'int32_field,string_field')
 format upsert encode avro (
-  schema.registry = 'http://message_queue:8081');
+  schema.registry = 'http://schemaregistry:8082');
 
 sleep 2s
 
@@ -72,7 +72,7 @@ create sink sink_err from into_kafka with (
   properties.bootstrap.server = 'message_queue:29092',
   primary_key = 'int32_field,string_field')
 format upsert encode avro (
-  schema.registry = 'http://message_queue:8081');
+  schema.registry = 'http://schemaregistry:8082');
 
 statement error field not in avro
 create sink sink_err as select 1 as extra_column, * from into_kafka with (
@@ -81,7 +81,7 @@ create sink sink_err as select 1 as extra_column, * from into_kafka with (
   properties.bootstrap.server = 'message_queue:29092',
   primary_key = 'int32_field,string_field')
 format upsert encode avro (
-  schema.registry = 'http://message_queue:8081');
+  schema.registry = 'http://schemaregistry:8082');
 
 statement error unrecognized
 create sink sink_err from into_kafka with (
@@ -90,7 +90,7 @@ create sink sink_err from into_kafka with (
   properties.bootstrap.server = 'message_queue:29092',
   primary_key = 'int32_field,string_field')
 format upsert encode avro (
-  schema.registry = 'http://message_queue:8081',
+  schema.registry = 'http://schemaregistry:8082',
   schema.registry.name.strategy = 'typo');
 
 statement error empty field key.message
@@ -100,7 +100,7 @@ create sink sink_err from into_kafka with (
   properties.bootstrap.server = 'message_queue:29092',
   primary_key = 'int32_field,string_field')
 format upsert encode avro (
-  schema.registry = 'http://message_queue:8081',
+  schema.registry = 'http://schemaregistry:8082',
   schema.registry.name.strategy = 'record_name_strategy');
 
 statement ok

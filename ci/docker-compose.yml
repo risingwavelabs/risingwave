@@ -61,7 +61,8 @@ services:
       - "29092:29092"
       - "9092:9092"
       - "9644:9644"
-      - "8081:8081"
+      # Don't use Redpanda's schema registry, use the separated service instead
+      # - "8081:8081"
     environment: {}
     container_name: message_queue
     healthcheck:
@@ -71,7 +72,7 @@ services:
       retries: 5
 
   source-test-env:
-    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20240514-1
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20240606
     depends_on:
       - mysql
       - db
@@ -84,11 +85,12 @@ services:
       - ..:/risingwave
 
   sink-test-env:
-    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20240514-1
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20240606
     depends_on:
       - mysql
       - db
       - message_queue
+      - schemaregistry
       - elasticsearch
       - clickhouse-server
       - redis-server
@@ -103,12 +105,12 @@ services:
 
 
   rw-build-env:
-    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20240514-1
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20240606
     volumes:
       - ..:/risingwave
 
   ci-flamegraph-env:
-    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20240514-1
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20240606
     # NOTE(kwannoel): This is used in order to permit
     # syscalls for `nperf` (perf_event_open),
     # so it can do CPU profiling.
@@ -119,7 +121,7 @@ services:
       - ..:/risingwave
 
   regress-test-env:
-    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20240514-1
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20240606
     depends_on:
       db:
         condition: service_healthy

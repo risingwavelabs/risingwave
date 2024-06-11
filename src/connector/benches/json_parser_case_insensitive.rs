@@ -12,24 +12,29 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Benchmarking JSON parsers for scenarios with exact key matches and case-insensitive key matches.
+
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
+use futures::StreamExt;
 use maplit::hashmap;
 use rand::Rng;
 use risingwave_common::types::DataType;
 use risingwave_connector::parser::{
-    EncodingProperties, JsonParser, JsonProperties, ProtocolProperties, SourceStreamChunkBuilder,
-    SpecificParserConfig,
+    ByteStreamSourceParserImpl, CommonParserConfig, ParserConfig, SpecificParserConfig,
 };
-use risingwave_connector::source::{SourceColumnDesc, SourceContext};
+use risingwave_connector::source::{SourceColumnDesc, SourceMessage};
 use serde_json::json;
 use tokio::runtime::Runtime;
 
-fn gen_input(mode: &str, chunk_size: usize, chunk_num: usize) -> Vec<Vec<Vec<u8>>> {
+type Input = Vec<Vec<SourceMessage>>;
+type Parser = ByteStreamSourceParserImpl;
+
+fn gen_input(mode: &str, chunk_size: usize, chunk_num: usize) -> Input {
     let mut input = Vec::with_capacity(chunk_num);
     for _ in 0..chunk_num {
         let mut input_inner = Vec::with_capacity(chunk_size);
         for _ in 0..chunk_size {
-            input_inner.push(match mode {
+            let payload = match mode {
                 "match" => r#"{"alpha": 1, "bravo": 2, "charlie": 3, "delta": 4}"#
                     .as_bytes()
                     .to_vec(),
@@ -55,6 +60,10 @@ fn gen_input(mode: &str, chunk_size: usize, chunk_num: usize) -> Vec<Vec<Vec<u8>
                     serde_json::to_string(&value).unwrap().as_bytes().to_vec()
                 }
                 _ => unreachable!(),
+            };
+            input_inner.push(SourceMessage {
+                payload: Some(payload),
+                ..SourceMessage::dummy()
             });
         }
         input.push(input_inner);
@@ -62,40 +71,27 @@ fn gen_input(mode: &str, chunk_size: usize, chunk_num: usize) -> Vec<Vec<Vec<u8>
     input
 }
 
-fn create_parser(
-    chunk_size: usize,
-    chunk_num: usize,
-    mode: &str,
-) -> (JsonParser, Vec<SourceColumnDesc>, Vec<Vec<Vec<u8>>>) {
+fn create_parser(chunk_size: usize, chunk_num: usize, mode: &str) -> (Parser, Input) {
     let desc = vec![
         SourceColumnDesc::simple("alpha", DataType::Int16, 0.into()),
         SourceColumnDesc::simple("bravo", DataType::Int32, 1.into()),
         SourceColumnDesc::simple("charlie", DataType::Int64, 2.into()),
         SourceColumnDesc::simple("delta", DataType::Int64, 3.into()),
     ];
-    let props = SpecificParserConfig {
-        key_encoding_config: None,
-        encoding_config: EncodingProperties::Json(JsonProperties {
-            use_schema_registry: false,
-            timestamptz_handling: None,
-        }),
-        protocol_config: ProtocolProperties::Plain,
+    let config = ParserConfig {
+        common: CommonParserConfig { rw_columns: desc },
+        specific: SpecificParserConfig::DEFAULT_PLAIN_JSON,
     };
-    let parser = JsonParser::new(props, desc.clone(), SourceContext::dummy().into()).unwrap();
+    let parser = ByteStreamSourceParserImpl::create_for_test(config).unwrap();
     let input = gen_input(mode, chunk_size, chunk_num);
-    (parser, desc, input)
+    (parser, input)
 }
 
-async fn parse(parser: JsonParser, column_desc: Vec<SourceColumnDesc>, input: Vec<Vec<Vec<u8>>>) {
-    for input_inner in input {
-        let mut builder =
-            SourceStreamChunkBuilder::with_capacity(column_desc.clone(), input_inner.len());
-        for payload in input_inner {
-            let row_writer = builder.row_writer();
-            parser.parse_inner(payload, row_writer).await.unwrap();
-        }
-        builder.finish();
-    }
+async fn parse(parser: Parser, input: Input) {
+    parser
+        .into_stream(futures::stream::iter(input.into_iter().map(Ok)).boxed())
+        .count() // consume the stream
+        .await;
 }
 
 fn do_bench(c: &mut Criterion, mode: &str) {
@@ -110,7 +106,7 @@ fn do_bench(c: &mut Criterion, mode: &str) {
                 let chunk_num = TOTAL_SIZE / chunk_size;
                 b.to_async(&rt).iter_batched(
                     || create_parser(chunk_size, chunk_num, mode),
-                    |(parser, column_desc, input)| parse(parser, column_desc, input),
+                    |(parser, input)| parse(parser, input),
                     BatchSize::SmallInput,
                 );
             },

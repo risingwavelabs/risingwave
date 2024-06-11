@@ -22,7 +22,7 @@ use risingwave_hummock_sdk::{HummockEpoch, SyncResult};
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot;
 
-use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
+use crate::hummock::shared_buffer::shared_buffer_batch::{SharedBufferBatch, SharedBufferBatchId};
 use crate::hummock::HummockResult;
 use crate::mem_table::ImmutableMemtable;
 use crate::store::SealCurrentEpochOptions;
@@ -47,7 +47,7 @@ pub struct BufferWriteRequest {
 #[derive(Debug)]
 pub enum HummockVersionUpdate {
     VersionDeltas(Vec<HummockVersionDelta>),
-    PinnedVersion(HummockVersion),
+    PinnedVersion(Box<HummockVersion>),
 }
 
 pub enum HummockEvent {
@@ -57,7 +57,7 @@ pub enum HummockEvent {
     /// An epoch is going to be synced. Once the event is processed, there will be no more flush
     /// task on this epoch. Previous concurrent flush task join handle will be returned by the join
     /// handle sender.
-    AwaitSyncEpoch {
+    SyncEpoch {
         new_sync_epoch: HummockEpoch,
         sync_result_sender: oneshot::Sender<HummockResult<SyncResult>>,
     },
@@ -67,7 +67,10 @@ pub enum HummockEvent {
 
     Shutdown,
 
-    ImmToUploader(ImmutableMemtable),
+    ImmToUploader {
+        instance_id: SharedBufferBatchId,
+        imm: ImmutableMemtable,
+    },
 
     SealEpoch {
         epoch: HummockEpoch,
@@ -104,7 +107,7 @@ impl HummockEvent {
         match self {
             HummockEvent::BufferMayFlush => "BufferMayFlush".to_string(),
 
-            HummockEvent::AwaitSyncEpoch {
+            HummockEvent::SyncEpoch {
                 new_sync_epoch,
                 sync_result_sender: _,
             } => format!("AwaitSyncEpoch epoch {} ", new_sync_epoch),
@@ -113,8 +116,8 @@ impl HummockEvent {
 
             HummockEvent::Shutdown => "Shutdown".to_string(),
 
-            HummockEvent::ImmToUploader(imm) => {
-                format!("ImmToUploader {:?}", imm)
+            HummockEvent::ImmToUploader { instance_id, imm } => {
+                format!("ImmToUploader {} {}", instance_id, imm.batch_id())
             }
 
             HummockEvent::SealEpoch {
