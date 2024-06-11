@@ -32,7 +32,7 @@ else
     exit 1
 fi
 
-source backwards-compat-tests/scripts/utils.sh
+source e2e_test/backwards-compat-tests/scripts/utils.sh
 
 ################################### Main
 

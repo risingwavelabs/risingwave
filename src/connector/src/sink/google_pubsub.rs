@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::BTreeMap;
-use std::usize;
 
 use anyhow::{anyhow, Context};
 use google_cloud_gax::conn::Environment;

@@ -2766,7 +2766,6 @@ impl fmt::Display for DropFunctionOption {
 /// Function describe in DROP FUNCTION.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
 pub struct FunctionDesc {
     pub name: ObjectName,
     pub args: Option<Vec<OperateFunctionArg>>,

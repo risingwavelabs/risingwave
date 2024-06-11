@@ -827,12 +827,6 @@ pub struct FileCacheConfig {
     #[serde(default = "default::file_cache::recover_concurrency")]
     pub recover_concurrency: usize,
 
-    #[serde(default = "default::file_cache::lfu_window_to_cache_size_ratio")]
-    pub lfu_window_to_cache_size_ratio: usize,
-
-    #[serde(default = "default::file_cache::lfu_tiny_lru_capacity_ratio")]
-    pub lfu_tiny_lru_capacity_ratio: f64,
-
     #[serde(default = "default::file_cache::insert_rate_limit_mb")]
     pub insert_rate_limit_mb: usize,
 
@@ -1564,14 +1558,6 @@ pub mod default {
             8
         }
 
-        pub fn lfu_window_to_cache_size_ratio() -> usize {
-            1
-        }
-
-        pub fn lfu_tiny_lru_capacity_ratio() -> f64 {
-            0.01
-        }
-
         pub fn insert_rate_limit_mb() -> usize {
             0
         }
@@ -1801,6 +1787,8 @@ pub mod default {
         const DEFAULT_TOMBSTONE_RATIO_PERCENT: u32 = 40;
         const DEFAULT_EMERGENCY_PICKER: bool = true;
 
+        const DEFAULT_MAX_LEVEL: u32 = 6;
+
         use crate::catalog::hummock::CompactionFilterFlag;
 
         pub fn max_bytes_for_level_base() -> u64 {
@@ -1861,6 +1849,10 @@ pub mod default {
 
         pub fn enable_emergency_picker() -> bool {
             DEFAULT_EMERGENCY_PICKER
+        }
+
+        pub fn max_level() -> u32 {
+            DEFAULT_MAX_LEVEL
         }
     }
 
@@ -2195,6 +2187,8 @@ pub struct CompactionConfig {
     pub tombstone_reclaim_ratio: u32,
     #[serde(default = "default::compaction_config::enable_emergency_picker")]
     pub enable_emergency_picker: bool,
+    #[serde(default = "default::compaction_config::max_level")]
+    pub max_level: u32,
 }
 
 #[cfg(test)]
