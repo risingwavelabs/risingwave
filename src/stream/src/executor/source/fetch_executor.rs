@@ -189,7 +189,10 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
         else {
             unreachable!("Partition and offset columns must be set.");
         };
-
+        println!(
+            "这里split_idx = {:?}, offset_idx=  {}",
+            split_idx, offset_idx
+        );
         // Initialize state table.
         state_store_handler.init_epoch(barrier.epoch);
 

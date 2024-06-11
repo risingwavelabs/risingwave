@@ -307,7 +307,10 @@ impl<S: StateStore> FsSourceExecutor<S> {
             unreachable!("Partition and offset columns must be set.");
         };
 
-        println!("这里split_idx = {:?}, offset_idx=  {}", split_idx, offset_idx);
+        println!(
+            "这里split_idx = {:?}, offset_idx=  {}",
+            split_idx, offset_idx
+        );
 
         // If the first barrier requires us to pause on startup, pause the stream.
         let start_with_paused = barrier.is_pause_on_startup();
@@ -435,7 +438,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
 
                 Either::Right(chunk) => {
                     // TODO: confirm when split_offset_mapping is None
-                    let split_offset_mapping =
+                    let split_offset_mapping: Option<HashMap<Arc<str>, String>> =
                         get_split_offset_mapping_from_chunk(&chunk, split_idx, offset_idx);
                     if last_barrier_time.elapsed().as_millis() > max_wait_barrier_time_ms {
                         // Exceeds the max wait barrier time, the source will be paused. Currently
