@@ -21,9 +21,7 @@ use futures::stream::BoxStream;
 use futures::{FutureExt, StreamExt};
 use itertools::Itertools;
 use risingwave_common::system_param::reader::SystemParamsRead;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
-    get_compaction_group_ids,
-};
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::get_compaction_group_ids;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_pb::hummock::compact_task::{self, TaskStatus};
@@ -452,7 +450,9 @@ impl HummockManager {
         group_infos.reverse();
 
         for group in &mut group_infos {
-            if group.table_statistic.len() == 1 {
+            if group.table_statistic.len() == 1
+                && group.group_id != StaticCompactionGroupId::MaterializedView as u64
+            {
                 // no need to handle the separate compaciton group
                 continue;
             }
@@ -540,6 +540,12 @@ impl HummockManager {
         } else if is_high_write_throughput {
             return TableAlignRule::SplitToDedicatedCg(partition_vnode_count);
         } else if group_size < self.env.opts.max_group_size {
+            tracing::warn!(
+                "low write throughput for table-{}, table size: {}, window: {:?}",
+                table_id,
+                state_table_size,
+                table_write_throughput.get(table_id)
+            );
             return TableAlignRule::NoOptimization;
         }
 
