@@ -215,9 +215,9 @@ impl ClientContext for RwProducerContext {
         self.common.generate_oauth_token(oauthbearer_config)
     }
 
-    fn enable_refresh_oauth_token(&self) -> bool {
-        self.common.enable_refresh_oauth_token()
-    }
+    // fn enable_refresh_oauth_token(&self) -> bool {
+    //     self.common.enable_refresh_oauth_token()
+    // }
 }
 
 impl ProducerContext for RwProducerContext {
