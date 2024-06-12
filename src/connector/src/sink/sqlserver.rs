@@ -203,7 +203,7 @@ ORDER BY
             match sql_server_table_metadata.get(&col.name) {
                 None => {
                     return Err(SinkError::SqlServer(anyhow!(format!(
-                        "column {} not found in SQL Server table {}",
+                        "column {} not found in the downstream SQL Server table {}",
                         col.name, self.config.table
                     ))));
                 }
@@ -213,13 +213,13 @@ ORDER BY
                     }
                     if rw_is_pk && !*sql_server_is_pk {
                         return Err(SinkError::SqlServer(anyhow!(format!(
-                            "column {} is primary key in RisingWave sink, but not in SQL Server table {}",
+                            "column {} specified in primary_key mismatches with the downstream SQL Server table {} PK",
                             col.name, self.config.table,
                         ))));
                     }
                     if !rw_is_pk && *sql_server_is_pk {
                         return Err(SinkError::SqlServer(anyhow!(format!(
-                            "column {} is primary key in SQL Server table {}, but not in RisingWave sink",
+                            "column {} unspecified in primary_key mismatches with the downstream SQL Server table {} PK",
                             col.name, self.config.table,
                         ))));
                     }
