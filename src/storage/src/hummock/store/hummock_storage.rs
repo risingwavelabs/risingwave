@@ -29,7 +29,7 @@ use risingwave_hummock_sdk::key::{
     is_empty_key_range, vnode, vnode_range, TableKey, TableKeyRange,
 };
 use risingwave_hummock_sdk::table_watermark::TableWatermarksIndex;
-use risingwave_hummock_sdk::{HummockReadEpoch, SyncResult};
+use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::hummock::SstableInfo;
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
@@ -582,12 +582,6 @@ impl StateStore for HummockStorage {
                 MemOrdering::SeqCst,
             );
         }
-        self.hummock_event_sender
-            .send(HummockEvent::SealEpoch {
-                epoch,
-                is_checkpoint,
-            })
-            .expect("should send success");
         StoreLocalStatistic::flush_all();
     }
 
@@ -643,7 +637,10 @@ use risingwave_hummock_sdk::version::HummockVersion;
 
 #[cfg(any(test, feature = "test"))]
 impl HummockStorage {
-    pub async fn seal_and_sync_epoch(&self, epoch: u64) -> StorageResult<SyncResult> {
+    pub async fn seal_and_sync_epoch(
+        &self,
+        epoch: u64,
+    ) -> StorageResult<risingwave_hummock_sdk::SyncResult> {
         self.seal_epoch(epoch, true);
         self.sync(epoch).await
     }
