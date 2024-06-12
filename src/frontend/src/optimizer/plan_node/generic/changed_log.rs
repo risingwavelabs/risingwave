@@ -71,12 +71,18 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for ChangedLog<PlanRef> {
         match self.input.stream_key() {
             Some(keys) => {
                 let mut keys = keys.to_vec();
-                keys.push(self.schema().len() - 1);
+                if self.need_changed_log_row_id {
+                    keys.push(self.schema().len() - 1);
+                }
                 Some(keys)
             }
             None => {
-                let keys = vec![self.schema().len() - 1];
-                Some(keys)
+                if self.need_changed_log_row_id {
+                    let keys = vec![self.schema().len() - 1];
+                    Some(keys)
+                } else {
+                    None
+                }
             }
         }
     }
