@@ -138,7 +138,8 @@ where
     }
 
     fn use_new_object_prefix_strategy(&self) -> bool {
-        *self.inner()
+        *self
+            .inner()
             .use_new_object_prefix_strategy
             .as_ref()
             .unwrap()
