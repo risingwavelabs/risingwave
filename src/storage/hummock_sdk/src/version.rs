@@ -89,7 +89,16 @@ impl HummockVersionStateTableInfo {
             };
             match self.state_table_info.entry(*table_id) {
                 Entry::Occupied(mut entry) => {
-                    let prev_info = replace(entry.get_mut(), new_info);
+                    let prev_info = entry.get_mut();
+                    assert!(
+                        new_info.safe_epoch >= prev_info.safe_epoch
+                            && new_info.committed_epoch >= prev_info.committed_epoch,
+                        "state table info regress. table id: {}, prev_info: {:?}, new_info: {:?}",
+                        table_id.table_id,
+                        prev_info,
+                        new_info
+                    );
+                    let prev_info = replace(prev_info, new_info);
                     changed_table.insert(*table_id, Some(prev_info));
                 }
                 Entry::Vacant(entry) => {
