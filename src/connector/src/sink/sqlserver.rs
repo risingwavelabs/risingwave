@@ -330,14 +330,14 @@ impl SqlServerSinkWriter {
             .schema
             .fields
             .iter()
-            .map(|f| f.name.as_str())
+            .map(|f| format!("[{}]", f.name))
             .collect::<Vec<_>>()
             .join(",");
         let all_source_col_names = self
             .schema
             .fields
             .iter()
-            .map(|f| format!("SOURCE.{}", f.name))
+            .map(|f| format!("[SOURCE].[{}]", f.name))
             .collect::<Vec<_>>()
             .join(",");
         let pk_match = self
@@ -345,7 +345,7 @@ impl SqlServerSinkWriter {
             .iter()
             .map(|idx| {
                 format!(
-                    "SOURCE.{}=TARGET.{}",
+                    "[SOURCE].[{}]=[TARGET].[{}]",
                     &self.schema[*idx].name, &self.schema[*idx].name
                 )
             })
@@ -363,7 +363,7 @@ impl SqlServerSinkWriter {
             .iter()
             .map(|idx| {
                 format!(
-                    "{}=SOURCE.{}",
+                    "[{}]=[SOURCE].[{}]",
                     &self.schema[*idx].name, &self.schema[*idx].name
                 )
             })
@@ -375,7 +375,7 @@ impl SqlServerSinkWriter {
                 SqlOp::Insert(_) => {
                     write!(
                         &mut query_str,
-                        "INSERT INTO {} ({}) VALUES ({});",
+                        "INSERT INTO [{}] ({}) VALUES ({});",
                         self.config.table,
                         all_col_names,
                         param_placeholders(&mut next_param_id),
@@ -385,8 +385,8 @@ impl SqlServerSinkWriter {
                 SqlOp::Merge(_) => {
                     write!(
                         &mut query_str,
-                        r#"MERGE {} AS TARGET
-                        USING (VALUES ({})) AS SOURCE ({})
+                        r#"MERGE [{}] AS [TARGET]
+                        USING (VALUES ({})) AS [SOURCE] ({})
                         ON {}
                         WHEN MATCHED THEN UPDATE SET {}
                         WHEN NOT MATCHED THEN INSERT ({}) VALUES ({});"#,
@@ -403,13 +403,13 @@ impl SqlServerSinkWriter {
                 SqlOp::Delete(_) => {
                     write!(
                         &mut query_str,
-                        r#"DELETE FROM {} WHERE {};"#,
+                        r#"DELETE FROM [{}] WHERE {};"#,
                         self.config.table,
                         self.pk_indices
                             .iter()
                             .map(|idx| {
                                 let condition =
-                                    format!("{}=@P{}", self.schema[*idx].name, next_param_id);
+                                    format!("[{}]=@P{}", self.schema[*idx].name, next_param_id);
                                 next_param_id += 1;
                                 condition
                             })
