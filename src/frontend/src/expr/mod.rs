@@ -54,7 +54,7 @@ pub use agg_call::AggCall;
 pub use correlated_input_ref::{CorrelatedId, CorrelatedInputRef, Depth};
 pub use expr_mutator::ExprMutator;
 pub use expr_rewriter::{default_rewrite_expr, ExprRewriter};
-pub use expr_visitor::ExprVisitor;
+pub use expr_visitor::{default_visit_expr, ExprVisitor};
 pub use function_call::{is_row_function, FunctionCall, FunctionCallDisplay};
 pub use function_call_with_lambda::FunctionCallWithLambda;
 pub use input_ref::{input_ref_to_column_indices, InputRef, InputRefDisplay};
