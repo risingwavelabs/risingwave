@@ -256,9 +256,7 @@ impl HummockManager {
     ) {
         assert_ne!(0, pull_task_count);
         if let Some(compactor) = self.compactor_manager.get_compactor(context_id) {
-            let (groups, task_type) = self
-                .auto_pick_compaction_groups_and_type(pull_task_count)
-                .await;
+            let (groups, task_type) = self.auto_pick_compaction_groups_and_type().await;
             if !groups.is_empty() {
                 let selector: &mut Box<dyn CompactionSelector> =
                     compaction_selectors.get_mut(&task_type).unwrap();
@@ -534,7 +532,6 @@ impl HummockManager {
     /// If these groups get different task-type, it will return all group id with `TaskType::Dynamic` if the first group get `TaskType::Dynamic`, otherwise it will return the single group with other task type.
     async fn auto_pick_compaction_groups_and_type(
         &self,
-        len: usize,
     ) -> (Vec<CompactionGroupId>, compact_task::TaskType) {
         let mut compaction_group_ids = self.compaction_group_ids().await;
         compaction_group_ids.shuffle(&mut thread_rng());
@@ -548,17 +545,7 @@ impl HummockManager {
                     return (vec![cg_id], pick_type);
                 }
             }
-
-            if normal_groups.len() >= len {
-                break;
-            }
         }
-
-        tracing::info!(
-            "auto_pick_compaction_groups_and_type expect {} pick {}",
-            len,
-            normal_groups.len()
-        );
 
         (normal_groups, TaskType::Dynamic)
     }
