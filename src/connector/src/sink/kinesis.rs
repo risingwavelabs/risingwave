@@ -80,7 +80,7 @@ impl Sink for KinesisSink {
 
     const SINK_NAME: &'static str = KINESIS_SINK;
 
-    fn is_sink_decouple(desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
+    fn is_sink_decouple(_desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
         match user_specified {
             SinkDecouple::Default | SinkDecouple::Enable => Ok(true),
             SinkDecouple::Disable => Ok(false),
