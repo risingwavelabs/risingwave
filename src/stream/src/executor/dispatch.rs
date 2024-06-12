@@ -755,19 +755,6 @@ impl Dispatcher for HashDataDispatcher {
         let mut last_vnode_when_update_delete = None;
         let mut new_ops: Vec<Op> = Vec::with_capacity(chunk.capacity());
 
-        println!(
-            "dispatcher {}, chunk {}",
-            self.dispatcher_id_str,
-            chunk.to_pretty()
-        );
-
-        println!(
-            "{:?} {} {}",
-            self.output_indices,
-            self.output_indices.len(),
-            chunk.columns().len()
-        );
-
         // Apply output indices after calculating the vnode.
         let chunk = if self.output_indices.len() < chunk.columns().len() {
             chunk

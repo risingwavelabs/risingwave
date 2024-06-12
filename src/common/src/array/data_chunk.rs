@@ -183,7 +183,6 @@ impl DataChunk {
     }
 
     pub fn column_at(&self, idx: usize) -> &ArrayRef {
-        println!("chunk {:?} idx {}", self, idx);
         &self.columns[idx]
     }
 

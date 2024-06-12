@@ -21,7 +21,7 @@ use create_sink::derive_default_column_project_for_sink;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::bail_not_implemented;
-use risingwave_common::catalog::{ColumnCatalog, Field};
+use risingwave_common::catalog::ColumnCatalog;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_connector::sink::catalog::SinkCatalog;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
@@ -119,8 +119,6 @@ pub async fn replace_table_with_definition(
 
     table.incoming_sinks = incoming_sink_ids.iter().copied().collect();
 
-    println!("fe table incoming {:?}", table.incoming_sinks);
-
     let catalog_writer = session.catalog_writer()?;
 
     catalog_writer
@@ -143,11 +141,6 @@ pub(crate) fn hijack_merger_for_target_table(
         default_columns,
         false, // todo
     )?;
-
-    println!(
-        "sink {} exprs {:?} target {:?} default {:?}",
-        sink.name, exprs, target_columns, default_columns
-    );
 
     let pb_project = StreamProject::new(generic::Project::new(
         exprs,
@@ -292,21 +285,6 @@ pub async fn handle_alter_table_column(
 
         _ => unreachable!(),
     }
-
-    println!("cols {:?}", columns);
-    println!("defs {:?}", definition);
-
-    println!("orig colums {:#?}", original_catalog.columns());
-
-    // original_catalog.incoming_sinks {
-    //     let (mut graph, mut table, source) =
-    //         reparse_table_for_sink(&session, &table_catalog).await?;
-    //
-    //     table
-    //         .incoming_sinks
-    //         .clone_from(&table_catalog.incoming_sinks);
-
-    // }
 
     replace_table_with_definition(
         &session,

@@ -14,7 +14,6 @@
 
 use std::cmp::Ordering;
 use std::collections::HashMap;
-use std::io::sink;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Duration;
@@ -57,11 +56,10 @@ use risingwave_pb::ddl_service::{
 };
 use risingwave_pb::meta::table_fragments::PbFragment;
 use risingwave_pb::meta::PbTableParallelism;
-use risingwave_pb::plan_common::Field;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
     Dispatcher, DispatcherType, FragmentTypeFlag, MergeNode, PbStreamFragmentGraph,
-    StreamFragmentGraph as StreamFragmentGraphProto, StreamNode,
+    StreamFragmentGraph as StreamFragmentGraphProto,
 };
 use serde::{Deserialize, Serialize};
 use thiserror_ext::AsReport;
@@ -1123,10 +1121,6 @@ impl DdlController {
 
         assert_eq!(table_catalog.incoming_sinks, target_table.incoming_sinks);
 
-        println!("in {:?}", table_catalog.incoming_sinks);
-
-        println!("drop {:?}", dropping_sink_id);
-
         {
             let catalogs = mgr
                 .get_sink_catalog_by_ids(&table_catalog.incoming_sinks)
@@ -1142,7 +1136,6 @@ impl DdlController {
                 };
 
                 let uniq_name = &format!("{}.{}.{}", sink.database_id, sink.schema_id, sink.name);
-                println!("??????1");
 
                 let sink_table_fragments = mgr
                     .get_job_fragments_by_id(&risingwave_common::catalog::TableId::new(sink_id))
@@ -1161,8 +1154,6 @@ impl DdlController {
                 );
             }
         }
-
-        println!("??????2222");
 
         // check if the union fragment is fully assigned.
         for fragment in table_fragments.fragments.values_mut() {
@@ -1206,8 +1197,6 @@ impl DdlController {
             .map(|actor| actor.actor_id)
             .collect_vec();
 
-        println!("table cols {:#?}", table.columns);
-
         let mut sink_fields = None;
 
         for actor in &sink_fragment.actors {
@@ -1217,8 +1206,6 @@ impl DdlController {
             }
         }
 
-        println!("sink filesd {:#?}", sink_fields);
-
         let sink_fields = sink_fields.expect("sink fields not found");
 
         let output_indices = sink_fields
@@ -1227,11 +1214,7 @@ impl DdlController {
             .map(|(idx, _)| idx as _)
             .collect_vec();
 
-        println!("output indice {:?}", output_indices);
-
         let dist_key_indices = table.distribution_key.iter().map(|i| *i as _).collect_vec();
-
-        println!("dist key {:?}", dist_key_indices);
 
         let mapping = downstream_actor_ids
             .iter()
@@ -1266,18 +1249,13 @@ impl DdlController {
         let upstream_fragment_id = sink_fragment.fragment_id;
 
         for actor in &mut union_fragment.actors {
-            println!("actor {:#?}", actor.actor_id);
-
             if let Some(node) = &mut actor.nodes {
                 visit_stream_node_cont_mut(node, |node| {
                     if let Some(NodeBody::Union(_)) = &mut node.node_body {
                         for input in &mut node.input {
-                            if let Some(NodeBody::Project(p)) = &mut input.node_body {
+                            if let Some(NodeBody::Project(_)) = &mut input.node_body {
                                 let merge_stream_node =
                                     input.input.iter_mut().exactly_one().unwrap();
-
-                                println!("uniq name {}", uniq_name);
-                                println!("iden {}", input.identity);
 
                                 if input.identity.as_str() != uniq_name {
                                     continue;
@@ -1301,8 +1279,7 @@ impl DdlController {
 
                                     merge_stream_node.fields = sink_fields.to_vec();
 
-                                    // input.fields = sink_fields.to_vec();
-                                    input.fields = node.fields.clone();
+                                    input.fields.clone_from(&node.fields);
 
                                     return false;
                                 }
@@ -1507,20 +1484,14 @@ impl DdlController {
                     )
                     .await?;
 
-                println!("111111");
-
                 // Add table fragments to meta store with state: `State::Initial`.
                 mgr.fragment_manager
                     .start_create_table_fragments(table_fragments.clone())
                     .await?;
 
-                println!("222222");
-
                 self.stream_manager
                     .replace_table(table_fragments, context)
                     .await?;
-
-                println!("333333");
             };
 
             match result {
@@ -1894,8 +1865,6 @@ impl DdlController {
                 )
                 .await?;
 
-            println!("222222222222");
-
             let StreamingJob::Table(_, table, _) = &stream_job else {
                 unreachable!("unexpected job: {stream_job:?}");
             };
@@ -1922,8 +1891,6 @@ impl DdlController {
             let target_fragment_id =
                 union_fragment_id.expect("fragment of placeholder merger not found");
 
-            println!("incoming sinks {:#?}", table.incoming_sinks);
-
             let catalogs = self
                 .metadata_manager
                 .get_sink_catalog_by_ids(&table.incoming_sinks)
@@ -1940,11 +1907,6 @@ impl DdlController {
                     .await?;
 
                 let sink_fragment = sink_table_fragments.sink_fragment().unwrap();
-
-                println!(
-                    "sink frag id {}, target frag {}",
-                    sink_fragment.fragment_id, target_fragment_id
-                );
 
                 Self::inject_replace_table_plan_for_sink(
                     Some(*sink_id),
@@ -2090,8 +2052,6 @@ impl DdlController {
             .generate_graph(&self.env, stream_job, expr_context)
             .await?;
         assert!(dispatchers.is_empty());
-
-        println!("11111111111111");
 
         // 3. Build the table fragments structure that will be persisted in the stream manager, and
         // the context that contains all information needed for building the actors on the compute

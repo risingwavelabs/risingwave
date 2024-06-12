@@ -37,8 +37,6 @@ impl Expression for InputRefExpression {
     }
 
     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        println!("self {:?}", self);
-        println!("input {:?} idx  {}", input, self.idx);
         Ok(input.column_at(self.idx).clone())
     }
 
