@@ -311,7 +311,11 @@ impl HummockStorage {
         table_id: TableId,
         key_range: TableKeyRange,
     ) -> StorageResult<(TableKeyRange, ReadVersionTuple)> {
-        match self.backup_reader.try_get_hummock_version(epoch).await {
+        match self
+            .backup_reader
+            .try_get_hummock_version(table_id, epoch)
+            .await
+        {
             Ok(Some(backup_version)) => {
                 validate_safe_epoch(backup_version.version(), table_id, epoch)?;
 
