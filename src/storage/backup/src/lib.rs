@@ -36,6 +36,7 @@ use std::collections::HashSet;
 use std::hash::Hasher;
 
 use itertools::Itertools;
+use risingwave_common::RW_VERSION;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{HummockSstableObjectId, HummockVersionId};
 use risingwave_pb::backup_service::{PbMetaSnapshotManifest, PbMetaSnapshotMetadata};
@@ -57,6 +58,7 @@ pub struct MetaSnapshotMetadata {
     #[serde(default)]
     pub format_version: u32,
     pub remarks: Option<String>,
+    pub rw_version: Option<String>,
 }
 
 impl MetaSnapshotMetadata {
@@ -74,6 +76,7 @@ impl MetaSnapshotMetadata {
             safe_epoch: v.visible_table_safe_epoch(),
             format_version,
             remarks,
+            rw_version: Some(RW_VERSION.to_owned()),
         }
     }
 }

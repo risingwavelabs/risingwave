@@ -93,41 +93,28 @@ impl WriterModelV2ToMetaStoreV2 {
     }
 }
 
+macro_rules! define_write_model_v2_to_meta_store_v2 {
+    ($( {$name:ident, $mod_path:ident::$mod_name:ident} ),*) => {
+        async fn write_model_v2_to_meta_store_v2(
+          metadata: &risingwave_backup::meta_snapshot_v2::MetadataV2,
+          db: &sea_orm::DatabaseConnection,
+        ) -> BackupResult<()> {
+          $(
+              insert_models(metadata.$name.clone(), db).await?;
+          )*
+          Ok(())
+        }
+    };
+}
+
+risingwave_backup::for_all_metadata_models_v2!(define_write_model_v2_to_meta_store_v2);
+
 #[async_trait::async_trait]
 impl Writer<MetadataV2> for WriterModelV2ToMetaStoreV2 {
     async fn write(&self, target_snapshot: MetaSnapshot<MetadataV2>) -> BackupResult<()> {
         let metadata = target_snapshot.metadata;
         let db = &self.meta_store.conn;
-        insert_models(metadata.seaql_migrations.clone(), db).await?;
-        insert_models(metadata.clusters.clone(), db).await?;
-        insert_models(metadata.version_stats.clone(), db).await?;
-        insert_models(metadata.compaction_configs.clone(), db).await?;
-        insert_models(metadata.hummock_sequences.clone(), db).await?;
-        insert_models(metadata.workers.clone(), db).await?;
-        insert_models(metadata.worker_properties.clone(), db).await?;
-        insert_models(metadata.users.clone(), db).await?;
-        insert_models(metadata.user_privileges.clone(), db).await?;
-        insert_models(metadata.objects.clone(), db).await?;
-        insert_models(metadata.object_dependencies.clone(), db).await?;
-        insert_models(metadata.databases.clone(), db).await?;
-        insert_models(metadata.schemas.clone(), db).await?;
-        insert_models(metadata.streaming_jobs.clone(), db).await?;
-        insert_models(metadata.fragments.clone(), db).await?;
-        insert_models(metadata.actors.clone(), db).await?;
-        insert_models(metadata.actor_dispatchers.clone(), db).await?;
-        insert_models(metadata.connections.clone(), db).await?;
-        insert_models(metadata.sources.clone(), db).await?;
-        insert_models(metadata.tables.clone(), db).await?;
-        insert_models(metadata.sinks.clone(), db).await?;
-        insert_models(metadata.views.clone(), db).await?;
-        insert_models(metadata.indexes.clone(), db).await?;
-        insert_models(metadata.functions.clone(), db).await?;
-        insert_models(metadata.system_parameters.clone(), db).await?;
-        insert_models(metadata.catalog_versions.clone(), db).await?;
-        insert_models(metadata.subscriptions.clone(), db).await?;
-        insert_models(metadata.session_parameters.clone(), db).await?;
-        insert_models(metadata.secrets.clone(), db).await?;
-
+        write_model_v2_to_meta_store_v2(&metadata, db).await?;
         // update_auto_inc must be called last.
         update_auto_inc(&metadata, db).await?;
         Ok(())
