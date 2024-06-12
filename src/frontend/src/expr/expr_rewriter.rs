@@ -12,33 +12,56 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::util::recursive::{tracker, Recurse};
+
 use super::{
     AggCall, CorrelatedInputRef, ExprImpl, FunctionCall, FunctionCallWithLambda, InputRef, Literal,
-    Parameter, Subquery, TableFunction, UserDefinedFunction, WindowFunction,
+    Parameter, Subquery, TableFunction, UserDefinedFunction, WindowFunction, EXPR_DEPTH_THRESHOLD,
+    EXPR_TOO_DEEP_NOTICE,
 };
 use crate::expr::Now;
+use crate::session::current::notice_to_user;
+
+/// The default implementation of [`ExprRewriter::rewrite_expr`] that simply dispatches to other
+/// methods based on the type of the expression.
+///
+/// You can use this function as a helper to reduce boilerplate code when implementing the trait.
+// TODO: This is essentially a mimic of `super` pattern from OO languages. Ideally, we should
+// adopt the style proposed in https://github.com/risingwavelabs/risingwave/issues/13477.
+pub fn default_rewrite_expr<R: ExprRewriter + ?Sized>(
+    rewriter: &mut R,
+    expr: ExprImpl,
+) -> ExprImpl {
+    tracker!().recurse(|t| {
+        if t.depth_reaches(EXPR_DEPTH_THRESHOLD) {
+            notice_to_user(EXPR_TOO_DEEP_NOTICE);
+        }
+
+        match expr {
+            ExprImpl::InputRef(inner) => rewriter.rewrite_input_ref(*inner),
+            ExprImpl::Literal(inner) => rewriter.rewrite_literal(*inner),
+            ExprImpl::FunctionCall(inner) => rewriter.rewrite_function_call(*inner),
+            ExprImpl::FunctionCallWithLambda(inner) => {
+                rewriter.rewrite_function_call_with_lambda(*inner)
+            }
+            ExprImpl::AggCall(inner) => rewriter.rewrite_agg_call(*inner),
+            ExprImpl::Subquery(inner) => rewriter.rewrite_subquery(*inner),
+            ExprImpl::CorrelatedInputRef(inner) => rewriter.rewrite_correlated_input_ref(*inner),
+            ExprImpl::TableFunction(inner) => rewriter.rewrite_table_function(*inner),
+            ExprImpl::WindowFunction(inner) => rewriter.rewrite_window_function(*inner),
+            ExprImpl::UserDefinedFunction(inner) => rewriter.rewrite_user_defined_function(*inner),
+            ExprImpl::Parameter(inner) => rewriter.rewrite_parameter(*inner),
+            ExprImpl::Now(inner) => rewriter.rewrite_now(*inner),
+        }
+    })
+}
 
 /// By default, `ExprRewriter` simply traverses the expression tree and leaves nodes unchanged.
 /// Implementations can override a subset of methods and perform transformation on some particular
 /// types of expression.
 pub trait ExprRewriter {
     fn rewrite_expr(&mut self, expr: ExprImpl) -> ExprImpl {
-        match expr {
-            ExprImpl::InputRef(inner) => self.rewrite_input_ref(*inner),
-            ExprImpl::Literal(inner) => self.rewrite_literal(*inner),
-            ExprImpl::FunctionCall(inner) => self.rewrite_function_call(*inner),
-            ExprImpl::FunctionCallWithLambda(inner) => {
-                self.rewrite_function_call_with_lambda(*inner)
-            }
-            ExprImpl::AggCall(inner) => self.rewrite_agg_call(*inner),
-            ExprImpl::Subquery(inner) => self.rewrite_subquery(*inner),
-            ExprImpl::CorrelatedInputRef(inner) => self.rewrite_correlated_input_ref(*inner),
-            ExprImpl::TableFunction(inner) => self.rewrite_table_function(*inner),
-            ExprImpl::WindowFunction(inner) => self.rewrite_window_function(*inner),
-            ExprImpl::UserDefinedFunction(inner) => self.rewrite_user_defined_function(*inner),
-            ExprImpl::Parameter(inner) => self.rewrite_parameter(*inner),
-            ExprImpl::Now(inner) => self.rewrite_now(*inner),
-        }
+        default_rewrite_expr(self, expr)
     }
 
     fn rewrite_function_call(&mut self, func_call: FunctionCall) -> ExprImpl {
