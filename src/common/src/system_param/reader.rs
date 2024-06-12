@@ -138,7 +138,10 @@ where
     }
 
     fn use_new_object_prefix_strategy(&self) -> bool {
-        self.inner().use_new_object_prefix_strategy.unwrap_or(true)
+        *self.inner()
+            .use_new_object_prefix_strategy
+            .as_ref()
+            .unwrap()
     }
 
     fn backup_storage_url(&self) -> &str {
