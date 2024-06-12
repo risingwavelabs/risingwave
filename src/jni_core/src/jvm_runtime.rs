@@ -20,8 +20,7 @@ use anyhow::{bail, Context};
 use fs_err as fs;
 use fs_err::PathExt;
 use jni::objects::{JObject, JString};
-use jni::strings::JNIString;
-use jni::{InitArgsBuilder, JNIEnv, JNIVersion, JavaVM, NativeMethod};
+use jni::{AttachGuard, InitArgsBuilder, JNIEnv, JNIVersion, JavaVM};
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
 use thiserror_ext::AsReport;
 use tracing::error;
@@ -122,19 +121,27 @@ impl JavaVmWrapper {
 
         tracing::info!("initialize JVM successfully");
 
-        register_native_method_for_jvm(&jvm).context("failed to register native method")?;
+        let result: std::result::Result<(), jni::errors::Error> = try {
+            let mut env = jvm_env(&jvm)?;
+            register_java_binding_native_methods(&mut env)?;
+        };
+
+        result.context("failed to register native method")?;
 
         Ok(jvm)
     }
 }
 
-pub fn register_native_method_for_jvm(jvm: &JavaVM) -> Result<(), jni::errors::Error> {
-    let mut env = jvm
-        .attach_current_thread()
-        .inspect_err(|e| tracing::error!(error = ?e.as_report(), "jvm attach thread error"))?;
+pub fn jvm_env(jvm: &JavaVM) -> Result<AttachGuard<'_>, jni::errors::Error> {
+    jvm.attach_current_thread()
+        .inspect_err(|e| tracing::error!(error = ?e.as_report(), "jvm attach thread error"))
+}
 
+pub fn register_java_binding_native_methods(
+    env: &mut JNIEnv<'_>,
+) -> Result<(), jni::errors::Error> {
     let binding_class = env
-        .find_class("com/risingwave/java/binding/Binding")
+        .find_class(gen_class_name!(com.risingwave.java.binding.Binding))
         .inspect_err(|e| tracing::error!(error = ?e.as_report(), "jvm find class error"))?;
     use crate::*;
     macro_rules! gen_native_method_array {
@@ -144,14 +151,8 @@ pub fn register_native_method_for_jvm(jvm: &JavaVM) -> Result<(), jni::errors::E
         ({$({ $func_name:ident, {$($ret:tt)+}, {$($args:tt)*} })*}) => {
             [
                 $(
-                    {
-                        let fn_ptr = paste::paste! {[<Java_com_risingwave_java_binding_Binding_ $func_name> ]} as *mut c_void;
-                        let sig = $crate::gen_jni_sig! { {$($ret)+}, {$($args)*}};
-                        NativeMethod {
-                            name: JNIString::from(stringify! {$func_name}),
-                            sig: JNIString::from(sig),
-                            fn_ptr,
-                        }
+                    $crate::gen_native_method_entry! {
+                        Java_com_risingwave_java_binding_Binding_, $func_name, {$($ret)+}, {$($args)*}
                     },
                 )*
             ]

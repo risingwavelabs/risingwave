@@ -106,7 +106,7 @@ fn version_to_compaction_group_rows(version: &HummockVersion) -> Vec<RwHummockVe
         .map(|cg| RwHummockVersion {
             version_id: version.id as _,
             max_committed_epoch: version.max_committed_epoch as _,
-            safe_epoch: version.safe_epoch as _,
+            safe_epoch: version.visible_table_safe_epoch() as _,
             compaction_group: json!(cg).into(),
         })
         .collect()
