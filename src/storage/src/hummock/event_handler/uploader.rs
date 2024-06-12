@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
-use std::collections::hash_map::Entry;
+use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::fmt::{Debug, Display, Formatter};
 use std::future::{poll_fn, Future};
@@ -22,7 +22,6 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{ready, Context, Poll};
 
-use ahash::HashSet;
 use futures::future::{try_join_all, TryJoinAll};
 use futures::FutureExt;
 use itertools::Itertools;
@@ -53,6 +52,16 @@ use crate::mem_table::ImmId;
 use crate::monitor::HummockStateStoreMetrics;
 use crate::opts::StorageOpts;
 use crate::store::SealCurrentEpochOptions;
+
+/// Take epoch data inclusively before `epoch` out from `data`
+fn take_before_epoch<T>(
+    data: &mut BTreeMap<HummockEpoch, T>,
+    epoch: HummockEpoch,
+) -> BTreeMap<HummockEpoch, T> {
+    let mut before_epoch_data = data.split_off(&(epoch + 1));
+    swap(&mut before_epoch_data, data);
+    before_epoch_data
+}
 
 type UploadTaskInput = HashMap<LocalInstanceId, Vec<UploaderImm>>;
 pub type UploadTaskPayload = HashMap<LocalInstanceId, Vec<ImmutableMemtable>>;
@@ -360,8 +369,6 @@ impl SpilledData {
 #[derive(Default, Debug)]
 struct EpochData {
     spilled_data: SpilledData,
-
-    table_watermarks: HashMap<TableId, (WatermarkDirection, Vec<VnodeWatermark>, BitmapBuilder)>,
 }
 
 impl EpochData {
@@ -385,10 +392,12 @@ impl EpochData {
             0
         }
     }
+}
 
+impl TableUnsyncData {
     fn add_table_watermarks(
         &mut self,
-        table_id: TableId,
+        epoch: HummockEpoch,
         table_watermarks: Vec<VnodeWatermark>,
         direction: WatermarkDirection,
     ) {
@@ -407,21 +416,33 @@ impl EpochData {
                 }
             }
         }
-        match self.table_watermarks.entry(table_id) {
-            Entry::Occupied(mut entry) => {
-                let (prev_direction, prev_watermarks, vnode_bitmap) = entry.get_mut();
+        match &mut self.table_watermarks {
+            Some((prev_direction, prev_watermarks)) => {
                 assert_eq!(
                     *prev_direction, direction,
                     "table id {} new watermark direction not match with previous",
-                    table_id
+                    self.table_id
                 );
-                apply_new_vnodes(vnode_bitmap, &table_watermarks);
-                prev_watermarks.extend(table_watermarks);
+                match prev_watermarks.entry(epoch) {
+                    Entry::Occupied(mut entry) => {
+                        let (prev_watermarks, vnode_bitmap) = entry.get_mut();
+                        apply_new_vnodes(vnode_bitmap, &table_watermarks);
+                        prev_watermarks.extend(table_watermarks);
+                    }
+                    Entry::Vacant(entry) => {
+                        let mut vnode_bitmap = BitmapBuilder::zeroed(VirtualNode::COUNT);
+                        apply_new_vnodes(&mut vnode_bitmap, &table_watermarks);
+                        entry.insert((table_watermarks, vnode_bitmap));
+                    }
+                }
             }
-            Entry::Vacant(entry) => {
+            None => {
                 let mut vnode_bitmap = BitmapBuilder::zeroed(VirtualNode::COUNT);
                 apply_new_vnodes(&mut vnode_bitmap, &table_watermarks);
-                entry.insert((direction, table_watermarks, vnode_bitmap));
+                self.table_watermarks = Some((
+                    direction,
+                    BTreeMap::from_iter([(epoch, (table_watermarks, vnode_bitmap))]),
+                ));
             }
         }
     }
@@ -487,19 +508,35 @@ impl SyncDataBuilder {
             .append(&mut self.spilled_data.uploaded_data);
         self.spilled_data.uploading_tasks = unseal_epoch_data.spilled_data.uploading_tasks;
         self.spilled_data.uploaded_data = unseal_epoch_data.spilled_data.uploaded_data;
-        for (table_id, (direction, watermarks, _)) in unseal_epoch_data.table_watermarks {
-            match self.table_watermarks.entry(table_id) {
-                Entry::Occupied(mut entry) => {
-                    entry.get_mut().add_new_epoch_watermarks(
+    }
+
+    fn add_table_watermarks(
+        &mut self,
+        table_id: TableId,
+        direction: WatermarkDirection,
+        watermarks: impl Iterator<Item = (HummockEpoch, Vec<VnodeWatermark>)>,
+    ) {
+        let mut table_watermarks: Option<TableWatermarks> = None;
+        for (epoch, watermarks) in watermarks {
+            match &mut table_watermarks {
+                Some(prev_watermarks) => {
+                    prev_watermarks.add_new_epoch_watermarks(
                         epoch,
                         Arc::from(watermarks),
                         direction,
                     );
                 }
-                Entry::Vacant(entry) => {
-                    entry.insert(TableWatermarks::single_epoch(epoch, watermarks, direction));
+                None => {
+                    table_watermarks =
+                        Some(TableWatermarks::single_epoch(epoch, watermarks, direction));
                 }
-            };
+            }
+        }
+        if let Some(table_watermarks) = table_watermarks {
+            assert!(self
+                .table_watermarks
+                .insert(table_id, table_watermarks)
+                .is_none());
         }
     }
 
@@ -690,15 +727,62 @@ impl LocalInstanceUnsyncData {
     }
 }
 
+struct TableUnsyncData {
+    table_id: TableId,
+    instance_data: HashMap<LocalInstanceId, LocalInstanceUnsyncData>,
+    table_watermarks: Option<(
+        WatermarkDirection,
+        BTreeMap<HummockEpoch, (Vec<VnodeWatermark>, BitmapBuilder)>,
+    )>,
+}
+
+impl TableUnsyncData {
+    fn new(table_id: TableId) -> Self {
+        Self {
+            table_id,
+            instance_data: Default::default(),
+            table_watermarks: None,
+        }
+    }
+
+    fn sync(
+        &mut self,
+        epoch: HummockEpoch,
+    ) -> (
+        impl Iterator<Item = (LocalInstanceId, Vec<UploaderImm>)> + '_,
+        Option<(
+            WatermarkDirection,
+            impl Iterator<Item = (HummockEpoch, Vec<VnodeWatermark>)>,
+        )>,
+    ) {
+        (
+            self.instance_data
+                .iter_mut()
+                .map(move |(instance_id, data)| (*instance_id, data.sync(epoch))),
+            self.table_watermarks
+                .as_mut()
+                .map(|(direction, watermarks)| {
+                    let watermarks = take_before_epoch(watermarks, epoch);
+                    (
+                        *direction,
+                        watermarks
+                            .into_iter()
+                            .map(|(epoch, (watermarks, _))| (epoch, watermarks)),
+                    )
+                }),
+        )
+    }
+}
+
 #[derive(Default)]
 /// Unsync data, can be either imm or spilled sst, and some aggregated epoch information.
 ///
 /// `instance_data` holds the imm of each individual local instance, and data are first added here.
 /// The aggregated epoch information (table watermarks, etc.) and the spilled sst will be added to `epoch_data`.
 struct UnsyncData {
-    instance_data: HashMap<LocalInstanceId, LocalInstanceUnsyncData>,
-    // An index of `instance_data` that maintains the set of existing instance id of a table id
-    table_instance_id: HashMap<TableId, HashSet<LocalInstanceId>>,
+    table_data: HashMap<TableId, TableUnsyncData>,
+    // An index as a mapping from instance id to its table id
+    instance_table_id: HashMap<LocalInstanceId, TableId>,
     epoch_data: BTreeMap<HummockEpoch, EpochData>,
 }
 
@@ -713,7 +797,11 @@ impl UnsyncData {
             table_id = table_id.table_id,
             instance_id, init_epoch, "init epoch"
         );
-        assert!(self
+        let table_data = self
+            .table_data
+            .entry(table_id)
+            .or_insert_with(|| TableUnsyncData::new(table_id));
+        assert!(table_data
             .instance_data
             .insert(
                 instance_id,
@@ -721,16 +809,31 @@ impl UnsyncData {
             )
             .is_none());
         assert!(self
-            .table_instance_id
-            .entry(table_id)
-            .or_default()
-            .insert(instance_id));
+            .instance_table_id
+            .insert(instance_id, table_id)
+            .is_none());
         self.epoch_data.entry(init_epoch).or_default();
     }
 
-    fn add_imm(&mut self, instance_id: LocalInstanceId, imm: UploaderImm) {
-        self.instance_data
+    fn instance_data(
+        &mut self,
+        instance_id: LocalInstanceId,
+    ) -> Option<&mut LocalInstanceUnsyncData> {
+        self.instance_table_id
             .get_mut(&instance_id)
+            .cloned()
+            .map(move |table_id| {
+                self.table_data
+                    .get_mut(&table_id)
+                    .expect("should exist")
+                    .instance_data
+                    .get_mut(&instance_id)
+                    .expect("should exist")
+            })
+    }
+
+    fn add_imm(&mut self, instance_id: LocalInstanceId, imm: UploaderImm) {
+        self.instance_data(instance_id)
             .expect("should exist")
             .add_imm(imm);
     }
@@ -741,39 +844,32 @@ impl UnsyncData {
         next_epoch: HummockEpoch,
         opts: SealCurrentEpochOptions,
     ) {
-        let instance_data = self
+        let table_id = self.instance_table_id[&instance_id];
+        let table_data = self.table_data.get_mut(&table_id).expect("should exist");
+        let instance_data = table_data
             .instance_data
             .get_mut(&instance_id)
             .expect("should exist");
         let epoch = instance_data.local_seal_epoch(next_epoch);
         self.epoch_data.entry(next_epoch).or_default();
         if let Some((direction, table_watermarks)) = opts.table_watermarks {
-            self.epoch_data
-                .get_mut(&epoch)
-                .expect("should be created in a previous init_epoch or local_seal_epoch")
-                .add_table_watermarks(instance_data.table_id, table_watermarks, direction);
+            table_data.add_table_watermarks(epoch, table_watermarks, direction);
         }
     }
 
     fn may_destroy_instance(&mut self, instance_id: LocalInstanceId) {
-        if let Some(instance) = self.instance_data.remove(&instance_id) {
+        if let Some(table_id) = self.instance_table_id.remove(&instance_id) {
             debug!(instance_id, "destroy instance");
-            let instance_ids = self
-                .table_instance_id
-                .get_mut(&instance.table_id)
-                .expect("should exist");
-            assert!(instance_ids.remove(&instance_id));
-            if instance_ids.is_empty() {
-                assert!(self.table_instance_id.remove(&instance.table_id).is_some());
+            let table_data = self.table_data.get_mut(&table_id).expect("should exist");
+            assert!(table_data.instance_data.remove(&instance_id).is_some());
+            if table_data.instance_data.is_empty() {
+                self.table_data.remove(&table_id);
             }
         }
     }
 
     fn sync(&mut self, epoch: HummockEpoch, context: &UploaderContext) -> SyncDataBuilder {
-        let mut sync_epoch_data = self.epoch_data.split_off(&(epoch + 1));
-        swap(&mut sync_epoch_data, &mut self.epoch_data);
-
-        // by now, epoch data inclusively before epoch is in sync_epoch_data
+        let sync_epoch_data = take_before_epoch(&mut self.epoch_data, epoch);
 
         let mut sync_data = SyncDataBuilder::default();
         for (epoch, epoch_data) in sync_epoch_data {
@@ -781,10 +877,15 @@ impl UnsyncData {
         }
 
         let mut flush_payload = HashMap::new();
-        for (instance_id, instance_data) in &mut self.instance_data {
-            let payload = instance_data.sync(epoch);
-            if !payload.is_empty() {
-                flush_payload.insert(*instance_id, payload);
+        for (table_id, table_data) in &mut self.table_data {
+            let (unflushed_payload, table_watermarks) = table_data.sync(epoch);
+            for (instance_id, payload) in unflushed_payload {
+                if !payload.is_empty() {
+                    flush_payload.insert(instance_id, payload);
+                }
+            }
+            if let Some((direction, watermarks)) = table_watermarks {
+                sync_data.add_table_watermarks(*table_id, direction, watermarks);
             }
         }
         sync_data.flush(context, flush_payload);
@@ -793,7 +894,7 @@ impl UnsyncData {
 
     fn ack_flushed(&mut self, sstable_info: &StagingSstableInfo) {
         for (instance_id, imm_ids) in sstable_info.imm_ids() {
-            if let Some(instance_data) = self.instance_data.get_mut(instance_id) {
+            if let Some(instance_data) = self.instance_data(*instance_id) {
                 // take `rev` to let old imm id goes first
                 instance_data.ack_flushed(imm_ids.iter().rev().cloned());
             }
@@ -1066,7 +1167,12 @@ impl HummockUploader {
         if self.max_syncing_epoch < max_committed_epoch {
             self.max_syncing_epoch = max_committed_epoch;
             if let UploaderState::Working(data) = &self.state {
-                for instance_data in data.unsync_data.instance_data.values() {
+                for instance_data in data
+                    .unsync_data
+                    .table_data
+                    .values()
+                    .flat_map(|data| data.instance_data.values())
+                {
                     if let Some(oldest_epoch) = instance_data.sealed_data.back() {
                         assert_gt!(oldest_epoch.epoch, max_committed_epoch);
                     } else if let Some(current_epoch) = &instance_data.current_epoch_data {
@@ -1093,7 +1199,12 @@ impl HummockUploader {
                     break;
                 }
                 let mut payload = HashMap::new();
-                for (instance_id, instance_data) in &mut data.unsync_data.instance_data {
+                for (instance_id, instance_data) in data
+                    .unsync_data
+                    .table_data
+                    .values_mut()
+                    .flat_map(|data| data.instance_data.iter_mut())
+                {
                     let instance_payload = instance_data.spill(*epoch);
                     if !instance_payload.is_empty() {
                         payload.insert(*instance_id, instance_payload);
