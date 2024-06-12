@@ -730,6 +730,7 @@ impl LocalInstanceUnsyncData {
 struct TableUnsyncData {
     table_id: TableId,
     instance_data: HashMap<LocalInstanceId, LocalInstanceUnsyncData>,
+    #[expect(clippy::type_complexity)]
     table_watermarks: Option<(
         WatermarkDirection,
         BTreeMap<HummockEpoch, (Vec<VnodeWatermark>, BitmapBuilder)>,
