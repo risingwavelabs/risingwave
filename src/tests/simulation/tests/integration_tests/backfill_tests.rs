@@ -256,7 +256,8 @@ async fn test_arrangement_backfill_progress() -> Result<()> {
         .run("CREATE MATERIALIZED VIEW m1 AS SELECT * FROM t")
         .await?;
 
-    // Verify arrangement backfill progress after 10s, it should be 1% at least.
+    // Verify arrangement backfill progress after 10s, it should be around 1%,
+    // since 10s = 10 records processed.
     sleep(Duration::from_secs(10)).await;
     let progress = session
         .run("SELECT progress FROM rw_catalog.rw_ddl_progress")
@@ -264,7 +265,7 @@ async fn test_arrangement_backfill_progress() -> Result<()> {
     let progress = progress.replace('%', "");
     let progress = progress.parse::<f64>().unwrap();
     assert!(
-        (1.0..10.0).contains(&progress),
+        (0.5..1.5).contains(&progress),
         "progress not within bounds {}",
         progress
     );

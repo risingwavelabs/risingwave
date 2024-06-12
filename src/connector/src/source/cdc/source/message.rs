@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::types::{Datum, Scalar, ScalarImpl, Timestamptz};
+use risingwave_common::types::{DatumRef, ScalarRefImpl, Timestamptz};
 use risingwave_pb::connector_service::CdcMessage;
 
 use crate::source::base::SourceMessage;
@@ -30,27 +30,22 @@ pub struct DebeziumCdcMeta {
 }
 
 impl DebeziumCdcMeta {
-    pub fn extract_timestamp(&self) -> Option<Datum> {
-        Some(
-            Timestamptz::from_millis(self.source_ts_ms)
-                .unwrap()
-                .to_scalar_value(),
-        )
-        .into()
+    pub fn extract_timestamp(&self) -> DatumRef<'_> {
+        Some(ScalarRefImpl::Timestamptz(
+            Timestamptz::from_millis(self.source_ts_ms).unwrap(),
+        ))
     }
 
-    pub fn extract_database_name(&self) -> Option<Datum> {
-        Some(ScalarImpl::from(
-            self.full_table_name.as_str()[0..self.db_name_prefix_len].to_string(),
+    pub fn extract_database_name(&self) -> DatumRef<'_> {
+        Some(ScalarRefImpl::Utf8(
+            &self.full_table_name.as_str()[0..self.db_name_prefix_len],
         ))
-        .into()
     }
 
-    pub fn extract_table_name(&self) -> Option<Datum> {
-        Some(ScalarImpl::from(
-            self.full_table_name.as_str()[self.db_name_prefix_len..].to_string(),
+    pub fn extract_table_name(&self) -> DatumRef<'_> {
+        Some(ScalarRefImpl::Utf8(
+            &self.full_table_name.as_str()[self.db_name_prefix_len..],
         ))
-        .into()
     }
 
     pub fn new(full_table_name: String, source_ts_ms: i64, is_transaction_meta: bool) -> Self {
