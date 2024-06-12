@@ -78,7 +78,7 @@ impl Display for SessionFrameBounds {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "SESSION GAPPED BY {}",
+            "SESSION WITH GAP {}",
             self.gap.as_scalar_ref_impl().to_text()
         )
     }

@@ -477,7 +477,7 @@ pub(super) struct SessionWindow<V: Clone> {
 
 #[derive(Debug)]
 struct LatestSession {
-    /// The stating index of the latest session.
+    /// The starting index of the latest session.
     start_idx: usize,
 
     /// Minimal next start means the minimal order value that can start a new session.
