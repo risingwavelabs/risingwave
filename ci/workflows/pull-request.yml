@@ -34,10 +34,6 @@ steps:
   - label: "build"
     command: "ci/scripts/build.sh -p ci-dev"
     key: "build"
-    if: |
-      !(build.pull_request.labels includes "ci/skip-ci") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-build"
-      || build.env("CI_STEPS") =~ /(^|,)build(,|$$)/
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v5.1.0:
@@ -50,10 +46,6 @@ steps:
   - label: "build other components"
     command: "ci/scripts/build-other.sh"
     key: "build-other"
-    if: |
-      !(build.pull_request.labels includes "ci/skip-ci") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-build-other"
-      || build.env("CI_STEPS") =~ /(^|,)build-other(,|$$)/
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - seek-oss/aws-sm#v2.3.1:
@@ -71,10 +63,6 @@ steps:
   - label: "build (deterministic simulation)"
     command: "ci/scripts/build-simulation.sh"
     key: "build-simulation"
-    if: |
-      !(build.pull_request.labels includes "ci/skip-ci") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-build-simulation"
-      || build.env("CI_STEPS") =~ /(^|,)build-simulation(,|$$)/
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v5.1.0:
@@ -86,10 +74,6 @@ steps:
   - label: "docslt"
     command: "ci/scripts/docslt.sh"
     key: "docslt"
-    if: |
-      !(build.pull_request.labels includes "ci/skip-ci") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-docslt"
-      || build.env("CI_STEPS") =~ /(^|,)docslt(,|$$)/
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v5.1.0:
@@ -102,7 +86,7 @@ steps:
   - label: "end-to-end test"
     command: "ci/scripts/e2e-test.sh -p ci-dev -m ci-3streaming-2serving-3fe"
     if: |
-      !(build.pull_request.labels includes "ci/skip-ci") && build.env("CI_STEPS") == null
+      !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-e2e-test"
       || build.env("CI_STEPS") =~ /(^|,)e2e-tests?(,|$$)/
     depends_on:
@@ -122,7 +106,7 @@ steps:
     key: "slow-e2e-test"
     command: "ci/scripts/slow-e2e-test.sh -p ci-dev -m ci-3streaming-2serving-3fe"
     if: |
-      !(build.pull_request.labels includes "ci/skip-ci") && build.env("CI_STEPS") == null
+      !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-slow-e2e-tests"
       || build.env("CI_STEPS") =~ /(^|,)slow-e2e-tests?(,|$$)/
     depends_on:
@@ -140,7 +124,7 @@ steps:
   - label: "end-to-end test (parallel)"
     command: "ci/scripts/e2e-test-parallel.sh -p ci-dev"
     if: |
-      !(build.pull_request.labels includes "ci/skip-ci") && build.env("CI_STEPS") == null
+      !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-e2e-parallel-tests"
       || build.env("CI_STEPS") =~ /(^|,)e2e-parallel-tests?(,|$$)/
     depends_on:
@@ -186,7 +170,7 @@ steps:
   - label: "end-to-end source test"
     command: "ci/scripts/e2e-source-test.sh -p ci-dev"
     if: |
-      !(build.pull_request.labels includes "ci/skip-ci") && build.env("CI_STEPS") == null
+      !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-e2e-source-tests"
       || build.env("CI_STEPS") =~ /(^|,)e2e-source-tests?(,|$$)/
     depends_on:
@@ -205,7 +189,7 @@ steps:
   - label: "end-to-end sink test"
     command: "ci/scripts/e2e-sink-test.sh -p ci-dev"
     if: |
-      !(build.pull_request.labels includes "ci/skip-ci") && build.env("CI_STEPS") == null
+      !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-e2e-sink-tests"
       || build.env("CI_STEPS") =~ /(^|,)e2e-sink-tests?(,|$$)/
     depends_on:
@@ -424,7 +408,7 @@ steps:
   - label: "regress test"
     command: "ci/scripts/regress-test.sh -p ci-dev"
     if: |
-      !(build.pull_request.labels includes "ci/skip-ci") && build.env("CI_STEPS") == null
+      !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-regress-test"
       || build.env("CI_STEPS") =~ /(^|,)regress-tests?(,|$$)/
     depends_on: "build"
@@ -443,7 +427,7 @@ steps:
   - label: "unit test"
     command: "ci/scripts/pr-unit-test.sh"
     if: |
-      !(build.pull_request.labels includes "ci/skip-ci") && build.env("CI_STEPS") == null
+      !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-unit-test"
       || build.env("CI_STEPS") =~ /(^|,)unit-tests?(,|$$)/
     plugins:
@@ -463,7 +447,7 @@ steps:
   - label: "check"
     command: "ci/scripts/check.sh"
     if: |
-      !(build.pull_request.labels includes "ci/skip-ci") && build.env("CI_STEPS") == null
+      !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-check"
       || build.env("CI_STEPS") =~ /(^|,)check(,|$$)/
     plugins:
@@ -477,7 +461,7 @@ steps:
   - label: "check dylint"
     command: "ci/scripts/check-dylint.sh"
     if: |
-      !(build.pull_request.labels includes "ci/skip-ci") && build.env("CI_STEPS") == null
+      !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-check"
       || build.env("CI_STEPS") =~ /(^|,)check(,|$$)/
     plugins:
@@ -491,7 +475,7 @@ steps:
   - label: "unit test (deterministic simulation)"
     command: "ci/scripts/deterministic-unit-test.sh"
     if: |
-      !(build.pull_request.labels includes "ci/skip-ci") && build.env("CI_STEPS") == null
+      !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-unit-test-deterministic-simulation"
       || build.env("CI_STEPS") =~ /(^|,)unit-tests?-deterministic-simulation(,|$$)/
     plugins:
@@ -506,7 +490,7 @@ steps:
   - label: "integration test (deterministic simulation)"
     command: "TEST_NUM=5 ci/scripts/deterministic-it-test.sh"
     if: |
-      !(build.pull_request.labels includes "ci/skip-ci") && build.env("CI_STEPS") == null
+      !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-integration-test-deterministic-simulation"
       || build.env("CI_STEPS") =~ /(^|,)integration-tests?-deterministic-simulation(,|$$)/
     depends_on: "build-simulation"
@@ -522,7 +506,7 @@ steps:
   - label: "end-to-end test (deterministic simulation)"
     command: "TEST_NUM=16 ci/scripts/deterministic-e2e-test.sh"
     if: |
-      !(build.pull_request.labels includes "ci/skip-ci") && build.env("CI_STEPS") == null
+      !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-e2e-test-deterministic-simulation"
       || build.env("CI_STEPS") =~ /(^|,)e2e-tests?-deterministic-simulation(,|$$)/
     depends_on: "build-simulation"
@@ -544,7 +528,7 @@ steps:
   - label: "recovery test (deterministic simulation)"
     command: "TEST_NUM=8 KILL_RATE=1.0 BACKGROUND_DDL_RATE=0.0 ci/scripts/deterministic-recovery-test.sh"
     if: |
-      !(build.pull_request.labels includes "ci/skip-ci") && build.env("CI_STEPS") == null
+      !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-recovery-test-deterministic-simulation"
       || build.env("CI_STEPS") =~ /(^|,)recovery-tests?-deterministic-simulation(,|$$)/
     depends_on: "build-simulation"
@@ -568,7 +552,7 @@ steps:
   - label: "misc check"
     command: "ci/scripts/misc-check.sh"
     if: |
-      !(build.pull_request.labels includes "ci/skip-ci") && build.env("CI_STEPS") == null
+      !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-misc-check"
       || build.env("CI_STEPS") =~ /(^|,)misc-check(,|$$)/
     plugins:
@@ -786,10 +770,10 @@ steps:
     timeout_in_minutes: 15
     retry: *auto-retry
 
-  - label: "enable ci/skip-ci only in draft PRs"
-    if: build.pull_request.labels includes "ci/skip-ci" && !build.pull_request.draft
+  - label: "enable ci/pr/run-selected only in draft PRs"
+    if: build.pull_request.labels includes "ci/pr/run-selected" && !build.pull_request.draft
     commands:
-      - echo "ci/skip-ci is only usable for draft Pull Requests"
+      - echo "ci/pr/run-selected is only usable for draft Pull Requests"
       - exit 1
 
   - label: "micro benchmark"
