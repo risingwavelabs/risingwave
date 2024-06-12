@@ -517,24 +517,18 @@ impl HummockVersion {
                 );
             } else if let Some(group_change) = &summary.group_table_change {
                 // TODO: may deprecate this branch? This enum variant is not created anywhere
-                let member_table_ids =
-                    if group_change.version >= CompatibilityVersion::NoMemberTableIds as _ {
-                        self.state_table_info
-                            .compaction_group_member_table_ids(*compaction_group_id)
-                            .iter()
-                            .map(|table_id| table_id.table_id)
-                            .collect()
-                    } else {
-                        #[expect(deprecated)]
-                        // for backward-compatibility of previous hummock version delta
-                        HashSet::from_iter(group_change.table_ids.clone())
-                    };
+                assert!(
+                    group_change.version <= CompatibilityVersion::NoTrivialSplit as _,
+                    "DeltaType::GroupTableChange is not used anymore after CompatibilityVersion::NoMemberTableIds is added"
+                );
+                #[expect(deprecated)]
+                // for backward-compatibility of previous hummock version delta
                 self.init_with_parent_group(
                     group_change.origin_group_id,
                     group_change.target_group_id,
-                    member_table_ids,
+                    HashSet::from_iter(group_change.table_ids.clone()),
                     group_change.new_sst_start_id,
-                    group_change.version < CompatibilityVersion::NoTrivialSplit as _,
+                    group_change.version() == CompatibilityVersion::VersionUnspecified,
                 );
 
                 let levels = self
