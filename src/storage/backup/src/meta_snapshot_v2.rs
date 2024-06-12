@@ -60,6 +60,7 @@ pub struct MetadataV2 {
     pub worker_properties: Vec<model_v2::worker_property::Model>,
     pub hummock_sequences: Vec<model_v2::hummock_sequence::Model>,
     pub session_parameters: Vec<model_v2::session_parameter::Model>,
+    pub secrets: Vec<model_v2::secret::Model>,
 }
 
 impl Display for MetadataV2 {
@@ -106,6 +107,7 @@ impl Metadata for MetadataV2 {
         put_n(buf, &self.worker_properties)?;
         put_n(buf, &self.hummock_sequences)?;
         put_n(buf, &self.session_parameters)?;
+        put_n(buf, &self.secrets)?;
         Ok(())
     }
 
@@ -142,6 +144,7 @@ impl Metadata for MetadataV2 {
         let worker_properties = get_n(&mut buf)?;
         let hummock_sequences = get_n(&mut buf)?;
         let session_parameters = get_n(&mut buf)?;
+        let secrets = get_n(&mut buf)?;
         Ok(Self {
             seaql_migrations,
             hummock_version: HummockVersion::from_persisted_protobuf(&pb_hummock_version),
@@ -172,6 +175,7 @@ impl Metadata for MetadataV2 {
             worker_properties,
             hummock_sequences,
             session_parameters,
+            secrets,
         })
     }
 

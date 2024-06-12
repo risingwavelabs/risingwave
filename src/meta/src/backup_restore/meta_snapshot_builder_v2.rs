@@ -203,6 +203,10 @@ impl MetaSnapshotV2Builder {
             .all(&txn)
             .await
             .map_err(map_db_err)?;
+        let secrets = model_v2::prelude::Secret::find()
+            .all(&txn)
+            .await
+            .map_err(map_db_err)?;
 
         txn.commit().await.map_err(map_db_err)?;
         self.snapshot.metadata = MetadataV2 {
@@ -235,6 +239,7 @@ impl MetaSnapshotV2Builder {
             worker_properties,
             hummock_sequences,
             session_parameters,
+            secrets,
         };
         Ok(())
     }
