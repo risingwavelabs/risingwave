@@ -472,7 +472,7 @@ impl StreamSink {
                     ErrorKind::InvalidInput,
                     format!(
                         "The sink cannot be append-only. Please add \"force_append_only='true'\" in {} options to force the sink to be append-only. \
-                        Notice that this will cause the sink executor to drop DELETE messages and convert UPDATE messages to INSERTs.",
+                        Notice that this will cause the sink executor to drop DELETE messages and convert UPDATE messages to INSERT.",
                         if syntax_legacy { "WITH" } else { "FORMAT ENCODE" }
                     ),
                 )))
