@@ -18,16 +18,15 @@ use std::ops::Deref;
 use std::sync::LazyLock;
 
 use anyhow::anyhow;
-use mongodb::bson::spec::BinarySubtype;
-use mongodb::bson::{bson, doc, Array, Binary, Bson, DateTime, Document};
+use itertools::Itertools;
+use mongodb::bson::{bson, doc, Array, Bson, Document};
 use mongodb::{Client, Namespace};
 use risingwave_common::array::{Op, RowRef, StreamChunk};
-use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::catalog::Schema;
 use risingwave_common::log::LogSuppresser;
 use risingwave_common::row::Row;
 use risingwave_common::session_config::sink_decouple::SinkDecouple;
-use risingwave_common::types::{DataType, JsonbVal, ScalarRefImpl};
-use risingwave_common::util::iter_util::ZipEqDebug;
+use risingwave_common::types::ScalarRefImpl;
 use serde_derive::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
 use thiserror_ext::AsReport;
@@ -35,8 +34,10 @@ use tonic::async_trait;
 use with_options::WithOptions;
 
 use super::catalog::desc::SinkDesc;
+use super::encoder::BsonEncoder;
 use crate::connector_common::MongodbCommon;
 use crate::deserialize_bool_from_string;
+use crate::sink::encoder::RowEncoder;
 use crate::sink::writer::{LogSinkerOf, SinkWriter, SinkWriterExt};
 use crate::sink::{
     DummySinkCommitCoordinator, Result, Sink, SinkError, SinkParam, SinkWriterParam,
@@ -180,9 +181,10 @@ impl Sink for MongodbSink {
 
     const SINK_NAME: &'static str = MONGODB_SINK;
 
-    fn is_sink_decouple(desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
+    fn is_sink_decouple(_desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
         match user_specified {
-            SinkDecouple::Default => Ok(desc.sink_type.is_append_only()),
+            // Set default sink decouple to false, because mongodb sink writer only ensure delivery on checkpoint barrier
+            SinkDecouple::Default => Ok(false),
             SinkDecouple::Disable => Ok(false),
             SinkDecouple::Enable => Ok(true),
         }
@@ -224,9 +226,8 @@ impl Sink for MongodbSink {
                     .any(|field| field == MONGODB_PK_NAME)
             {
                 return Err(SinkError::Config(anyhow!(
-                    concat!("the _id field of the sink's primary key will be overridden, please either make the sink's ",
-                    "primary key to a single field or give the _id field another name"
-                ))));
+                    "primary key fields must not contain a field named _id"
+                )));
             }
         }
 
@@ -288,7 +289,7 @@ impl Sink for MongodbSink {
                 )));
             }
 
-            if !self.is_append_only && self.pk_indices[0] == coll_field_index {
+            if !self.is_append_only && self.pk_indices.iter().any(|idx| *idx == coll_field_index) {
                 return Err(SinkError::Config(anyhow!(
                     "collection.name.field {} must not be equal to the primary key field",
                     coll_field
@@ -348,15 +349,33 @@ impl MongodbSinkWriter {
                         .position(|&name| coll_name_field == name)
                 });
 
+        let col_indices = if let Some(coll_name_field_index) = coll_name_field_index
+            && config.drop_collection_name_field
+        {
+            (0..schema.fields.len())
+                .filter(|idx| *idx != coll_name_field_index)
+                .collect_vec()
+        } else {
+            (0..schema.fields.len()).collect_vec()
+        };
+
+        let row_encoder = BsonEncoder::new(schema.clone(), Some(col_indices), pk_indices.clone());
+
+        let command_builder = if is_append_only {
+            CommandBuilder::AppendOnly(HashMap::new())
+        } else {
+            CommandBuilder::Upsert(HashMap::new())
+        };
+
         let payload_writer = MongodbPayloadWriter::new(
             schema,
             pk_indices,
             default_namespace,
             coll_name_field_index,
-            config.drop_collection_name_field,
-            is_append_only,
             client.clone(),
             config.bulk_write_max_entries,
+            row_encoder,
+            command_builder,
         );
 
         Ok(Self {
@@ -388,111 +407,6 @@ impl SinkWriter for MongodbSinkWriter {
     }
 }
 
-/// We support converting all types to `MongoDB`. If there is an unmatched type, it will be
-/// converted to its string representation. If there is an conversion error, a warning log is printed
-/// and a `Bson::Null` is returned
-fn bson_from_scalar_ref<'a>(field: &'a Field, datum: Option<ScalarRefImpl<'a>>) -> Bson {
-    let scalar_ref = match datum {
-        None => {
-            return Bson::Null;
-        }
-        Some(datum) => datum,
-    };
-
-    let data_type = field.data_type();
-
-    match (data_type, scalar_ref) {
-        (DataType::Int16, ScalarRefImpl::Int16(v)) => Bson::Int32(v as i32),
-        (DataType::Int32, ScalarRefImpl::Int32(v)) => Bson::Int32(v),
-        (DataType::Int64, ScalarRefImpl::Int64(v)) => Bson::Int64(v),
-        (DataType::Int256, ScalarRefImpl::Int256(v)) => Bson::String(v.to_string()),
-        (DataType::Float32, ScalarRefImpl::Float32(v)) => Bson::Double(v.into_inner() as f64),
-        (DataType::Float64, ScalarRefImpl::Float64(v)) => Bson::Double(v.into_inner()),
-        (DataType::Varchar, ScalarRefImpl::Utf8(v)) => Bson::String(v.to_string()),
-        (DataType::Boolean, ScalarRefImpl::Bool(v)) => Bson::Boolean(v),
-        (DataType::Decimal, ScalarRefImpl::Decimal(v)) => {
-            let decimal_str = v.to_string();
-            let converted = decimal_str.parse();
-            match converted {
-                Ok(v) => Bson::Decimal128(v),
-                Err(err) => {
-                    if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
-                        tracing::warn!(
-                            suppressed_count,
-                            error = %err.as_report(),
-                            ?field,
-                            "risingwave decimal {} convert to bson decimal128 failed",
-                            decimal_str,
-                        );
-                    }
-                    Bson::Null
-                }
-            }
-        }
-        (DataType::Interval, ScalarRefImpl::Interval(v)) => Bson::String(v.to_string()),
-        (DataType::Date, ScalarRefImpl::Date(v)) => Bson::String(v.to_string()),
-        (DataType::Time, ScalarRefImpl::Time(v)) => Bson::String(v.to_string()),
-        (DataType::Timestamp, ScalarRefImpl::Timestamp(v)) => {
-            Bson::DateTime(DateTime::from_millis(v.0.timestamp_millis()))
-        }
-        (DataType::Timestamptz, ScalarRefImpl::Timestamptz(v)) => {
-            Bson::DateTime(DateTime::from_millis(v.timestamp_millis()))
-        }
-        (DataType::Jsonb, ScalarRefImpl::Jsonb(v)) => {
-            let jsonb_val: JsonbVal = v.into();
-            match jsonb_val.take().try_into() {
-                Ok(doc) => doc,
-                Err(err) => {
-                    if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
-                        tracing::warn!(
-                            suppressed_count,
-                            error = %err.as_report(),
-                            ?field,
-                            "convert jsonb to mongodb bson failed",
-                        );
-                    }
-                    Bson::Null
-                }
-            }
-        }
-        (DataType::Serial, ScalarRefImpl::Serial(v)) => Bson::Int64(v.into_inner()),
-        (DataType::Struct(st), ScalarRefImpl::Struct(struct_ref)) => {
-            let mut doc = Document::new();
-            for (sub_datum_ref, sub_field) in struct_ref.iter_fields_ref().zip_eq_debug(
-                st.iter()
-                    .map(|(name, dt)| Field::with_name(dt.clone(), name)),
-            ) {
-                doc.insert(
-                    sub_field.name.clone(),
-                    bson_from_scalar_ref(&sub_field, sub_datum_ref),
-                );
-            }
-            Bson::Document(doc)
-        }
-        (DataType::List(dt), ScalarRefImpl::List(v)) => {
-            let inner_field = Field::unnamed(Box::<DataType>::into_inner(dt));
-            v.iter()
-                .map(|scalar_ref| bson_from_scalar_ref(&inner_field, scalar_ref))
-                .collect::<Bson>()
-        }
-        (DataType::Bytea, ScalarRefImpl::Bytea(v)) => Bson::Binary(Binary {
-            subtype: BinarySubtype::Generic,
-            bytes: v.into(),
-        }),
-        _ => {
-            if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
-                tracing::warn!(
-                    suppressed_count,
-                    ?field,
-                    ?scalar_ref,
-                    "bson_from_scalar_ref: unsupported data type"
-                );
-            }
-            Bson::Null
-        }
-    }
-}
-
 struct InsertCommandBuilder {
     coll: String,
     inserts: Array,
@@ -521,7 +435,7 @@ impl InsertCommandBuilder {
 
 struct UpsertCommandBuilder {
     coll: String,
-    upserts: Array,
+    updates: Array,
     deletes: HashMap<Vec<u8>, Document>,
 }
 
@@ -529,7 +443,7 @@ impl UpsertCommandBuilder {
     fn new(coll: String, capacity: usize) -> Self {
         Self {
             coll,
-            upserts: Array::with_capacity(capacity),
+            updates: Array::with_capacity(capacity),
             deletes: HashMap::with_capacity(capacity),
         }
     }
@@ -542,7 +456,7 @@ impl UpsertCommandBuilder {
         // see https://github.com/risingwavelabs/risingwave/pull/17102#discussion_r1630684160 for more information.
         self.deletes.remove(&pk_data);
 
-        self.upserts.push(bson!( {
+        self.updates.push(bson!( {
             "q": pk,
             "u": row,
             "upsert": true,
@@ -561,11 +475,11 @@ impl UpsertCommandBuilder {
 
     fn build(self) -> (Option<Document>, Option<Document>) {
         let (mut upsert_document, mut delete_document) = (None, None);
-        if !self.upserts.is_empty() {
+        if !self.updates.is_empty() {
             upsert_document = Some(doc! {
                 "update": self.coll.clone(),
                 "ordered": true,
-                "updates": self.upserts,
+                "updates": self.updates,
             });
         }
         if !self.deletes.is_empty() {
@@ -590,6 +504,11 @@ impl UpsertCommandBuilder {
     }
 }
 
+enum CommandBuilder {
+    AppendOnly(HashMap<MongodbNamespace, InsertCommandBuilder>),
+    Upsert(HashMap<MongodbNamespace, UpsertCommandBuilder>),
+}
+
 type MongodbNamespace = (String, String);
 
 // In the future, we may build the payload into RawBSON to gain a better performance.
@@ -599,14 +518,12 @@ struct MongodbPayloadWriter {
     pk_indices: Vec<usize>,
     default_namespace: Namespace,
     coll_name_field_index: Option<usize>,
-    ignore_coll_name_field: bool,
-    is_append_only: bool,
     client: Client,
     buffered_entries: usize,
     max_entries: usize,
+    row_encoder: BsonEncoder,
     // TODO switching to bulk write API when mongodb driver supports it
-    insert_builder: Option<HashMap<MongodbNamespace, InsertCommandBuilder>>,
-    upsert_builder: Option<HashMap<MongodbNamespace, UpsertCommandBuilder>>,
+    command_builder: Option<CommandBuilder>,
 }
 
 impl MongodbPayloadWriter {
@@ -615,56 +532,25 @@ impl MongodbPayloadWriter {
         pk_indices: Vec<usize>,
         default_namespace: Namespace,
         coll_name_field_index: Option<usize>,
-        ignore_coll_name_field: bool,
-        is_append_only: bool,
         client: Client,
         max_entries: usize,
+        row_encoder: BsonEncoder,
+        command_builder: CommandBuilder,
     ) -> Self {
         Self {
             schema,
             pk_indices,
             default_namespace,
             coll_name_field_index,
-            ignore_coll_name_field,
-            is_append_only,
             client,
             buffered_entries: 0,
             max_entries,
-            insert_builder: if is_append_only {
-                Some(HashMap::new())
-            } else {
-                None
-            },
-            upsert_builder: if is_append_only {
-                None
-            } else {
-                Some(HashMap::new())
-            },
+            row_encoder,
+            command_builder: Some(command_builder),
         }
     }
 
-    #[inline(always)]
-    fn document_from_row_ref<'a>(&'a mut self, row: RowRef<'a>) -> Document {
-        // Why there is no Document::with_capacity in bson crate?
-        self.schema
-            .fields()
-            .iter()
-            .zip_eq_debug(row.iter())
-            .enumerate()
-            .filter_map(|(index, (field, datum))| {
-                if let Some(coll_name_field_index) = self.coll_name_field_index
-                    && coll_name_field_index == index
-                    && self.ignore_coll_name_field
-                {
-                    None
-                } else {
-                    Some((field.name.clone(), bson_from_scalar_ref(field, datum)))
-                }
-            })
-            .collect()
-    }
-
-    fn extract_namespace_from_row_ref<'a>(&'a mut self, row: RowRef<'a>) -> MongodbNamespace {
+    fn extract_namespace_from_row_ref(&self, row: RowRef<'_>) -> MongodbNamespace {
         let ns = self.coll_name_field_index.and_then(|coll_name_field_index| {
             match row.datum_at(coll_name_field_index) {
                 Some(ScalarRefImpl::Utf8(v)) => match v.parse::<Namespace>() {
@@ -701,31 +587,15 @@ impl MongodbPayloadWriter {
         }
     }
 
-    fn construct_pk<'a>(&'a self, row: RowRef<'a>) -> Bson {
-        if self.pk_indices.len() == 1 {
-            let pk_field = &self.schema.fields[self.pk_indices[0]];
-            let pk_datum = row.datum_at(self.pk_indices[0]);
-            bson_from_scalar_ref(pk_field, pk_datum)
-        } else {
-            self.pk_indices
-                .iter()
-                .map(|&idx| {
-                    let pk_field = &self.schema.fields[idx];
-                    (
-                        pk_field.name.clone(),
-                        bson_from_scalar_ref(pk_field, row.datum_at(idx)),
-                    )
-                })
-                .collect::<Document>()
-                .into()
-        }
-    }
-
-    fn append<'a>(&'a mut self, row: RowRef<'a>) {
-        let document = self.document_from_row_ref(row);
+    fn append(
+        &self,
+        insert_builder: &mut HashMap<MongodbNamespace, InsertCommandBuilder>,
+        row: RowRef<'_>,
+    ) -> Result<()> {
+        let document = self.row_encoder.encode(row)?;
         let ns = self.extract_namespace_from_row_ref(row);
         let coll = ns.1.clone();
-        match self.insert_builder.as_mut().unwrap().entry(ns) {
+        match insert_builder.entry(ns) {
             Entry::Occupied(mut entry) => entry.get_mut().append(document),
             Entry::Vacant(entry) => {
                 let mut builder = InsertCommandBuilder::new(coll, self.max_entries);
@@ -733,14 +603,20 @@ impl MongodbPayloadWriter {
                 entry.insert(builder);
             }
         }
+        Ok(())
     }
 
-    fn upsert<'a>(&'a mut self, op: Op, row: RowRef<'a>) -> Result<()> {
-        let mut document = self.document_from_row_ref(row);
+    fn upsert(
+        &self,
+        upsert_builder: &mut HashMap<MongodbNamespace, UpsertCommandBuilder>,
+        op: Op,
+        row: RowRef<'_>,
+    ) -> Result<()> {
+        let mut document = self.row_encoder.encode(row)?;
         let ns = self.extract_namespace_from_row_ref(row);
         let coll = ns.1.clone();
 
-        let pk = self.construct_pk(row);
+        let pk = self.row_encoder.construct_pk(row);
 
         // Specify the primary key (_id) for the MongoDB collection if the user does not provide one.
         if self.pk_indices.len() > 1
@@ -752,19 +628,17 @@ impl MongodbPayloadWriter {
 
         let pk = doc! {MONGODB_PK_NAME: pk};
         match op {
-            Op::Insert | Op::UpdateInsert => {
-                match self.upsert_builder.as_mut().unwrap().entry(ns) {
-                    Entry::Occupied(mut entry) => entry.get_mut().add_upsert(pk, document),
-                    Entry::Vacant(entry) => {
-                        let mut builder = UpsertCommandBuilder::new(coll, self.max_entries);
-                        builder.add_upsert(pk, document)?;
-                        entry.insert(builder);
-                        Ok(())
-                    }
+            Op::Insert | Op::UpdateInsert => match upsert_builder.entry(ns) {
+                Entry::Occupied(mut entry) => entry.get_mut().add_upsert(pk, document),
+                Entry::Vacant(entry) => {
+                    let mut builder = UpsertCommandBuilder::new(coll, self.max_entries);
+                    builder.add_upsert(pk, document)?;
+                    entry.insert(builder);
+                    Ok(())
                 }
-            }
+            },
             Op::UpdateDelete => Ok(()),
-            Op::Delete => match self.upsert_builder.as_mut().unwrap().entry(ns) {
+            Op::Delete => match upsert_builder.entry(ns) {
                 Entry::Occupied(mut entry) => entry.get_mut().add_delete(pk),
                 Entry::Vacant(entry) => {
                     let mut builder = UpsertCommandBuilder::new(coll, self.max_entries);
@@ -776,19 +650,25 @@ impl MongodbPayloadWriter {
         }
     }
 
-    async fn write<'a>(&'a mut self, op: Op, row: RowRef<'a>) -> Result<()> {
-        if self.is_append_only {
-            if op != Op::Insert {
-                return Ok(());
+    async fn write(&mut self, op: Op, row: RowRef<'_>) -> Result<()> {
+        let mut command_builder = self.command_builder.take();
+        match command_builder {
+            Some(CommandBuilder::AppendOnly(ref mut insert_builder)) => {
+                if op != Op::Insert {
+                    return Ok(());
+                }
+                self.append(insert_builder, row)?;
             }
-            self.append(row);
-        } else {
-            if op == Op::UpdateDelete {
-                // we should ignore the `UpdateDelete` in upsert mode
-                return Ok(());
+            Some(CommandBuilder::Upsert(ref mut upsert_builder)) => {
+                if op == Op::UpdateDelete {
+                    // we should ignore the `UpdateDelete` in upsert mode
+                    return Ok(());
+                }
+                self.upsert(upsert_builder, op, row)?;
             }
-            self.upsert(op, row)?;
+            _ => unreachable!(),
         }
+        self.command_builder = command_builder;
 
         self.buffered_entries += 1;
         if self.buffered_entries >= self.max_entries {
@@ -799,34 +679,36 @@ impl MongodbPayloadWriter {
     }
 
     async fn flush(&mut self) -> Result<()> {
-        if self.is_append_only {
-            if let Some(mut insert_builder) = self.insert_builder.take() {
+        let mut command_builder = self.command_builder.take();
+        match command_builder {
+            Some(CommandBuilder::AppendOnly(ref mut insert_builder)) => {
                 for (ns, builder) in insert_builder.drain() {
                     self.send_bulk_write_command(&ns.0, builder.build()).await?;
                 }
-                self.insert_builder = Some(insert_builder);
             }
-        } else if let Some(mut upsert_builder) = self.upsert_builder.take() {
-            for (ns, builder) in upsert_builder.drain() {
-                let (upsert, delete) = builder.build();
-                // we are sending the bulk upsert first because, under same pk, the `Insert` and `UpdateInsert`
-                // should always appear before `Delete`. we have already ignored the `UpdateDelete`
-                // which is useless in upsert mode.
-                if upsert.is_some() {
-                    self.send_bulk_write_command(&ns.0, upsert.unwrap()).await?;
-                }
-                if delete.is_some() {
-                    self.send_bulk_write_command(&ns.0, delete.unwrap()).await?;
+            Some(CommandBuilder::Upsert(ref mut upsert_builder)) => {
+                for (ns, builder) in upsert_builder.drain() {
+                    let (upsert, delete) = builder.build();
+                    // we are sending the bulk upsert first because, under same pk, the `Insert` and `UpdateInsert`
+                    // should always appear before `Delete`. we have already ignored the `UpdateDelete`
+                    // which is useless in upsert mode.
+                    if let Some(upsert) = upsert {
+                        self.send_bulk_write_command(&ns.0, upsert).await?;
+                    }
+                    if let Some(delete) = delete {
+                        self.send_bulk_write_command(&ns.0, delete).await?;
+                    }
                 }
             }
-            self.upsert_builder = Some(upsert_builder);
+            _ => unreachable!(),
         }
+        self.command_builder = command_builder;
 
         self.buffered_entries = 0;
         Ok(())
     }
 
-    async fn send_bulk_write_command(&mut self, database: &str, command: Document) -> Result<()> {
+    async fn send_bulk_write_command(&self, database: &str, command: Document) -> Result<()> {
         let db = self.client.database(database);
 
         let result = db.run_command(command, None).await.map_err(|err| {

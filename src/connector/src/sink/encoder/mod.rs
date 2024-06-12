@@ -21,12 +21,14 @@ use risingwave_common::row::Row;
 use crate::sink::Result;
 
 mod avro;
+mod bson;
 mod json;
 mod proto;
 pub mod template;
 pub mod text;
 
 pub use avro::{AvroEncoder, AvroHeader};
+pub use bson::BsonEncoder;
 pub use json::JsonEncoder;
 pub use proto::{ProtoEncoder, ProtoHeader};
 
