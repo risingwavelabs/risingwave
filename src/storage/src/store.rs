@@ -630,10 +630,10 @@ pub struct NewLocalOptions {
     /// Whether the operation is consistent. The term `consistent` requires the following:
     ///
     /// 1. A key cannot be inserted or deleted for more than once, i.e. inserting to an existing
-    /// key or deleting an non-existing key is not allowed.
+    ///    key or deleting an non-existing key is not allowed.
     ///
     /// 2. The old value passed from
-    /// `update` and `delete` should match the original stored value.
+    ///    `update` and `delete` should match the original stored value.
     pub op_consistency_level: OpConsistencyLevel,
     pub table_option: TableOption,
 

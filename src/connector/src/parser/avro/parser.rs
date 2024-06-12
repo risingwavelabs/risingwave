@@ -42,7 +42,7 @@ pub struct AvroAccessBuilder {
 }
 
 impl AccessBuilder for AvroAccessBuilder {
-    async fn generate_accessor(&mut self, payload: Vec<u8>) -> ConnectorResult<AccessImpl<'_, '_>> {
+    async fn generate_accessor(&mut self, payload: Vec<u8>) -> ConnectorResult<AccessImpl<'_>> {
         self.value = self.parse_avro_value(&payload).await?;
         Ok(AccessImpl::Avro(AvroAccess::new(
             self.value.as_ref().unwrap(),
@@ -183,7 +183,6 @@ impl AvroParserConfig {
 
 #[cfg(test)]
 mod test {
-    use std::collections::HashMap;
     use std::env;
     use std::fs::OpenOptions;
     use std::io::Write;
@@ -271,7 +270,7 @@ mod test {
             row_encode: PbEncodeType::Avro.into(),
             ..Default::default()
         };
-        let parser_config = SpecificParserConfig::new(&info, &HashMap::new())?;
+        let parser_config = SpecificParserConfig::new(&info, &Default::default())?;
         AvroParserConfig::new(parser_config.encoding_config).await
     }
 
