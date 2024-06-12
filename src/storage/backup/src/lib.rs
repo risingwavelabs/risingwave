@@ -115,6 +115,7 @@ impl From<&MetaSnapshotMetadata> for PbMetaSnapshotMetadata {
             safe_epoch: m.safe_epoch,
             format_version: Some(m.format_version),
             remarks: m.remarks.clone(),
+            rw_version: m.rw_version.clone(),
         }
     }
 }
