@@ -185,6 +185,9 @@ test_sink_backfill_recovery() {
   # Check progress
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/sink/create_sink.slt'
 
+  # Sleep before restart cluster, to ensure the downstream sink actually gets created.
+  sleep 5
+
   # Restart
   restart_cluster
   sleep 5
