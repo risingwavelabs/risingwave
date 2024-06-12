@@ -1096,7 +1096,7 @@ async fn derive_schema_for_cdc_table(
 
         let table = ExternalTableImpl::connect(config)
             .await
-            .context("frontend: failed to auto derive table schema")?;
+            .context("failed to auto derive table schema")?;
         Ok((
             table
                 .column_descs()
