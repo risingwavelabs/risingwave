@@ -79,7 +79,7 @@ impl HummockJavaBindingIterator {
             .await,
         );
 
-        let meta_cache_v2 = HybridCacheBuilder::new()
+        let meta_cache = HybridCacheBuilder::new()
             .memory(1 << 10)
             .with_shards(2)
             .storage()
@@ -87,7 +87,7 @@ impl HummockJavaBindingIterator {
             .map_err(HummockError::foyer_error)
             .map_err(StorageError::from)
             .await?;
-        let block_cache_v2 = HybridCacheBuilder::new()
+        let block_cache = HybridCacheBuilder::new()
             .memory(1 << 10)
             .with_shards(2)
             .storage()
@@ -105,8 +105,8 @@ impl HummockJavaBindingIterator {
             state_store_metrics: Arc::new(global_hummock_state_store_metrics(
                 MetricLevel::Disabled,
             )),
-            meta_cache_v2,
-            block_cache_v2,
+            meta_cache,
+            block_cache,
         }));
         let reader = HummockVersionReader::new(
             sstable_store,

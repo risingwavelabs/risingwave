@@ -13,18 +13,24 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
+use std::collections::HashMap;
 
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use futures::stream::BoxStream;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use openssl::ssl::{SslConnector, SslMethod, SslVerifyMode};
 use postgres_openssl::MakeTlsConnector;
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema};
 use risingwave_common::row::{OwnedRow, Row};
+use risingwave_common::types::{DataType, StructType};
 use risingwave_common::util::iter_util::ZipEqFast;
+use sea_schema::postgres::def::{ColumnType, TableInfo};
+use sea_schema::postgres::discovery::SchemaDiscovery;
 use serde_derive::{Deserialize, Serialize};
+use sqlx::postgres::{PgConnectOptions, PgSslMode};
+use sqlx::PgPool;
 use thiserror_ext::AsReport;
 use tokio_postgres::types::PgLsn;
 use tokio_postgres::{NoTls, Statement};
@@ -72,9 +78,158 @@ impl PostgresOffset {
     }
 }
 
+pub struct PostgresExternalTable {
+    column_descs: Vec<ColumnDesc>,
+    pk_names: Vec<String>,
+}
+
+impl PostgresExternalTable {
+    pub async fn connect(config: ExternalTableConfig) -> ConnectorResult<Self> {
+        tracing::debug!("connect to postgres external table");
+        let options = PgConnectOptions::new()
+            .username(&config.username)
+            .password(&config.password)
+            .host(&config.host)
+            .port(config.port.parse::<u16>().unwrap())
+            .database(&config.database)
+            .ssl_mode(match config.sslmode {
+                SslMode::Disabled => PgSslMode::Disable,
+                SslMode::Preferred => PgSslMode::Prefer,
+                SslMode::Required => PgSslMode::Require,
+            });
+
+        let connection = PgPool::connect_with(options).await?;
+        let schema_discovery = SchemaDiscovery::new(connection, config.schema.as_str());
+        // fetch column schema and primary key
+        let empty_map = HashMap::new();
+        let table_schema = schema_discovery
+            .discover_table(
+                TableInfo {
+                    name: config.table.clone(),
+                    of_type: None,
+                },
+                &empty_map,
+            )
+            .await?;
+
+        let mut column_descs = vec![];
+        for col in &table_schema.columns {
+            let data_type = type_to_rw_type(&col.col_type)?;
+            column_descs.push(ColumnDesc::named(
+                col.name.clone(),
+                ColumnId::placeholder(),
+                data_type,
+            ));
+        }
+
+        if table_schema.primary_key_constraints.is_empty() {
+            return Err(anyhow!("Postgres table doesn't define the primary key").into());
+        }
+        let mut pk_names = vec![];
+        table_schema.primary_key_constraints.iter().for_each(|pk| {
+            pk_names.extend(pk.columns.clone());
+        });
+
+        Ok(Self {
+            column_descs,
+            pk_names,
+        })
+    }
+
+    pub fn column_descs(&self) -> &Vec<ColumnDesc> {
+        &self.column_descs
+    }
+
+    pub fn pk_names(&self) -> &Vec<String> {
+        &self.pk_names
+    }
+}
+
+fn type_to_rw_type(col_type: &ColumnType) -> ConnectorResult<DataType> {
+    let dtype = match col_type {
+        ColumnType::SmallInt | ColumnType::SmallSerial => DataType::Int16,
+        ColumnType::Integer | ColumnType::Serial => DataType::Int32,
+        ColumnType::BigInt | ColumnType::BigSerial => DataType::Int64,
+        ColumnType::Money | ColumnType::Decimal(_) | ColumnType::Numeric(_) => DataType::Decimal,
+        ColumnType::Real => DataType::Float32,
+        ColumnType::DoublePrecision => DataType::Float64,
+        ColumnType::Varchar(_) | ColumnType::Char(_) | ColumnType::Text => DataType::Varchar,
+        ColumnType::Bytea => DataType::Bytea,
+        ColumnType::Timestamp(_) => DataType::Timestamp,
+        ColumnType::TimestampWithTimeZone(_) => DataType::Timestamptz,
+        ColumnType::Date => DataType::Date,
+        ColumnType::Time(_) | ColumnType::TimeWithTimeZone(_) => DataType::Time,
+        ColumnType::Interval(_) => DataType::Interval,
+        ColumnType::Boolean => DataType::Boolean,
+        ColumnType::Point => DataType::Struct(StructType::new(vec![
+            ("x", DataType::Float32),
+            ("y", DataType::Float32),
+        ])),
+        ColumnType::Uuid => DataType::Varchar,
+        ColumnType::Xml => DataType::Varchar,
+        ColumnType::Json => DataType::Jsonb,
+        ColumnType::JsonBinary => DataType::Jsonb,
+        ColumnType::Array(def) => {
+            let item_type = match def.col_type.as_ref() {
+                Some(ty) => type_to_rw_type(ty.as_ref())?,
+                None => {
+                    return Err(anyhow!("ARRAY type missing element type").into());
+                }
+            };
+
+            DataType::List(Box::new(item_type))
+        }
+        ColumnType::PgLsn => DataType::Int64,
+        ColumnType::Cidr
+        | ColumnType::Inet
+        | ColumnType::MacAddr
+        | ColumnType::MacAddr8
+        | ColumnType::Int4Range
+        | ColumnType::Int8Range
+        | ColumnType::NumRange
+        | ColumnType::TsRange
+        | ColumnType::TsTzRange
+        | ColumnType::DateRange
+        | ColumnType::Enum(_) => DataType::Varchar,
+
+        ColumnType::Line => {
+            return Err(anyhow!("LINE type not supported").into());
+        }
+        ColumnType::Lseg => {
+            return Err(anyhow!("LSEG type not supported").into());
+        }
+        ColumnType::Box => {
+            return Err(anyhow!("BOX type not supported").into());
+        }
+        ColumnType::Path => {
+            return Err(anyhow!("PATH type not supported").into());
+        }
+        ColumnType::Polygon => {
+            return Err(anyhow!("POLYGON type not supported").into());
+        }
+        ColumnType::Circle => {
+            return Err(anyhow!("CIRCLE type not supported").into());
+        }
+        ColumnType::Bit(_) => {
+            return Err(anyhow!("BIT type not supported").into());
+        }
+        ColumnType::TsVector => {
+            return Err(anyhow!("TSVECTOR type not supported").into());
+        }
+        ColumnType::TsQuery => {
+            return Err(anyhow!("TSQUERY type not supported").into());
+        }
+        ColumnType::Unknown(name) => {
+            // NOTES: user-defined enum type is classified as `Unknown`
+            tracing::warn!("Unknown Postgres data type: {name}, map to varchar");
+            DataType::Varchar
+        }
+    };
+
+    Ok(dtype)
+}
+
 pub struct PostgresExternalTableReader {
-    #[expect(dead_code)]
-    config: ExternalTableConfig,
     rw_schema: Schema,
     field_names: String,
     prepared_scan_stmt: Statement,
@@ -202,7 +357,6 @@ impl PostgresExternalTableReader {
         };
 
         Ok(Self {
-            config,
             rw_schema,
             field_names,
             prepared_scan_stmt,
@@ -298,6 +452,7 @@ impl PostgresExternalTableReader {
 
 #[cfg(test)]
 mod tests {
+
     use std::collections::HashMap;
 
     use futures::pin_mut;
@@ -307,8 +462,31 @@ mod tests {
     use risingwave_common::row::OwnedRow;
     use risingwave_common::types::{DataType, ScalarImpl};
 
-    use crate::source::cdc::external::postgres::{PostgresExternalTableReader, PostgresOffset};
+    use crate::source::cdc::external::postgres::{
+        PostgresExternalTable, PostgresExternalTableReader, PostgresOffset,
+    };
     use crate::source::cdc::external::{ExternalTableConfig, ExternalTableReader, SchemaTableName};
+
+    #[ignore]
+    #[tokio::test]
+    async fn test_postgres_schema() {
+        let config = ExternalTableConfig {
+            connector: "postgres-cdc".to_string(),
+            host: "localhost".to_string(),
+            port: "8432".to_string(),
+            username: "myuser".to_string(),
+            password: "123456".to_string(),
+            database: "mydb".to_string(),
+            schema: "public".to_string(),
+            table: "mytest".to_string(),
+            sslmode: Default::default(),
+        };
+
+        let table = PostgresExternalTable::connect(config).await.unwrap();
+
+        println!("columns: {:?}", &table.column_descs);
+        println!("primary keys: {:?}", &table.pk_names);
+    }
 
     #[test]
     fn test_postgres_offset() {

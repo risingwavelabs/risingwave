@@ -54,7 +54,7 @@ use crate::task::{BatchTaskContext, ShutdownToken};
 /// 2. Iterate over the probe side (i.e. left table) and compute the hash value of each row.
 ///    Then find the matched build side row for each probe side row in the hash map.
 /// 3. Concatenate the matched pair of probe side row and build side row into a single row and push
-/// it into the data chunk builder.
+///    it into the data chunk builder.
 /// 4. Yield chunks from the builder.
 pub struct HashJoinExecutor<K> {
     /// Join type e.g. inner, left outer, ...
@@ -1669,7 +1669,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
     /// | 4 | 3 | 3 | - |
     ///
     /// 3. Remove duplicate rows with NULL build side. This is done by setting the visibility bitmap
-    /// of the chunk.
+    ///    of the chunk.
     ///
     /// | offset | v1 | v2 | v3 |
     /// |---|---|---|---|

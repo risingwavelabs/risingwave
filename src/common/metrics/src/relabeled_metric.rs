@@ -24,8 +24,9 @@ use crate::{
 /// - when `metric_level` <= `relabel_threshold`, they behaves exactly the same as their inner
 ///   metric.
 /// - when `metric_level` > `relabel_threshold`, all their input label values are rewrite to "" when
-/// calling `with_label_values`. That's means the metric vec is aggregated into a single metric.
-
+///   calling `with_label_values`. That's means the metric vec is aggregated into a single metric.
+///
+///
 /// These wrapper classes add a `metric_level` field to corresponding metric.
 /// We could have use one single struct to represent all `MetricVec<T: MetricVecBuilder>`, rather
 /// than specializing them one by one. However, that's undoable because prometheus crate doesn't

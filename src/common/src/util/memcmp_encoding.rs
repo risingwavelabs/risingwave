@@ -543,7 +543,7 @@ mod tests {
         use rand::seq::SliceRandom;
 
         fn serialize(f: F32) -> MemcmpEncoded {
-            encode_value(&Some(ScalarImpl::from(f)), OrderType::default()).unwrap()
+            encode_value(Some(ScalarImpl::from(f)), OrderType::default()).unwrap()
         }
 
         fn deserialize(data: MemcmpEncoded) -> F32 {

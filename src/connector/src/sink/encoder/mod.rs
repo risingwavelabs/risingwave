@@ -58,7 +58,7 @@ pub trait RowEncoder {
 /// * an json object
 /// * a protobuf message
 /// * an avro record
-/// into
+///   into
 /// * string (required by kinesis key)
 /// * bytes
 ///
