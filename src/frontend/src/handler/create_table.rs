@@ -1094,7 +1094,9 @@ async fn derive_schema_for_cdc_table(
         let config = ExternalTableConfig::try_from_btreemap(connect_properties)
             .context("failed to extract external table config")?;
 
-        let table = ExternalTableImpl::connect(config).await?;
+        let table = ExternalTableImpl::connect(config)
+            .await
+            .context("frontend: failed to auto derive table schema")?;
         Ok((
             table
                 .column_descs()
