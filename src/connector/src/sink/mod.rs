@@ -46,7 +46,6 @@ pub mod utils;
 pub mod writer;
 
 use std::collections::BTreeMap;
-use std::convert::Infallible;
 use std::future::Future;
 
 use ::clickhouse::error::Error as ClickHouseError;
@@ -387,7 +386,7 @@ impl<R: LogReader> SinkLogReader for R {
 
 #[async_trait]
 pub trait LogSinker: 'static {
-    async fn consume_log_and_sink(self, log_reader: &mut impl SinkLogReader) -> Result<Infallible>;
+    async fn consume_log_and_sink(self, log_reader: &mut impl SinkLogReader) -> Result<!>;
 }
 
 #[async_trait]

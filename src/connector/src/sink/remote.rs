@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, VecDeque};
-use std::convert::Infallible;
 use std::marker::PhantomData;
 use std::ops::Deref;
 use std::pin::pin;
@@ -302,7 +301,7 @@ impl RemoteLogSinker {
 
 #[async_trait]
 impl LogSinker for RemoteLogSinker {
-    async fn consume_log_and_sink(self, log_reader: &mut impl SinkLogReader) -> Result<Infallible> {
+    async fn consume_log_and_sink(self, log_reader: &mut impl SinkLogReader) -> Result<!> {
         let mut request_tx = self.request_sender;
         let mut response_err_stream_rx = self.response_stream;
         let sink_metrics = self.sink_metrics;
