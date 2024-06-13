@@ -93,3 +93,10 @@ impl CompactorContext {
         }
     }
 }
+
+#[derive(Debug, Clone, Default)]
+pub struct CompactTaskContext {
+    pub capacity: usize,
+    pub task_memory_capacity_with_parallelism: u64,
+    pub optimize_by_copy_block: bool,
+}
