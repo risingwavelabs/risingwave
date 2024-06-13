@@ -704,15 +704,15 @@ impl HummockManager {
             // When the last table of a compaction group is deleted, the compaction group (and its
             // config) is destroyed as well. Then a compaction task for this group may come later and
             // cannot find its config.
-            let group_config = match self
-                .compaction_group_manager
-                .read()
-                .await
-                .try_get_compaction_group_config(compaction_group_id)
-            {
-                Some(config) => config,
-                None => continue,
+            let group_config = {
+                let config_manager = self.compaction_group_manager.read().await;
+
+                match config_manager.try_get_compaction_group_config(compaction_group_id) {
+                    Some(config) => config,
+                    None => continue,
+                }
             };
+
             // StoredIdGenerator already implements ids pre-allocation by ID_PREALLOCATE_INTERVAL.
             let task_id = next_compaction_task_id(&self.env).await?;
 
