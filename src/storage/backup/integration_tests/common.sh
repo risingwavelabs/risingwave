@@ -156,15 +156,15 @@ function execute_sql_and_expect() {
 }
 
 function get_max_committed_epoch() {
-  mce=$(${BACKUP_TEST_RW_ALL_IN_ONE} risectl hummock list-version --verbose 2>&1 | grep max_committed_epoch | sed -n 's/^.*max_committed_epoch: \(.*\),/\1/p')
+  mce=$(${BACKUP_TEST_RW_ALL_IN_ONE} risectl hummock list-version --verbose 2>&1 | grep committed_epoch | sed -n 's/^.*committed_epoch: \(.*\),/\1/p')
   # always take the smallest one
   echo "${mce}"|sort -n |head -n 1
 }
 
 function get_safe_epoch() {
   safe_epoch=$(${BACKUP_TEST_RW_ALL_IN_ONE} risectl hummock list-version --verbose 2>&1 | grep safe_epoch | sed -n 's/^.*safe_epoch: \(.*\),/\1/p')
-  # always take the smallest one
-  echo "${safe_epoch}"|sort -n |head -n 1
+  # always take the largest one
+  echo "${safe_epoch}"|sort -n -r |head -n 1
 }
 
 function get_total_sst_count() {
@@ -173,17 +173,13 @@ function get_total_sst_count() {
 }
 
 function get_max_committed_epoch_in_backup() {
-  local id
-  id=$1
-  sed_str="s/.*{\"id\":${id},\"hummock_version_id\":.*,\"ssts\":\[.*\],\"max_committed_epoch\":\([[:digit:]]*\),\"safe_epoch\":.*}.*/\1/p"
+  sed_str="s/.*\"state_table_info\":{\"[[:digit:]]*\":{\"committedEpoch\":\"\([[:digit:]]*\)\",\"safeEpoch\":\"\([[:digit:]]*\)\"}.*/\1/p"
   ${BACKUP_TEST_MCLI} -C "${BACKUP_TEST_MCLI_CONFIG}" \
   cat "hummock-minio/hummock001/backup/manifest.json" | sed -n "${sed_str}"
 }
 
 function get_safe_epoch_in_backup() {
-  local id
-  id=$1
-  sed_str="s/.*{\"id\":${id},\"hummock_version_id\":.*,\"ssts\":\[.*\],\"max_committed_epoch\":.*,\"safe_epoch\":\([[:digit:]]*\).*}.*/\1/p"
+  sed_str="s/.*\"state_table_info\":{\"[[:digit:]]*\":{\"committedEpoch\":\"\([[:digit:]]*\)\",\"safeEpoch\":\"\([[:digit:]]*\)\"}.*/\2/p"
   ${BACKUP_TEST_MCLI} -C "${BACKUP_TEST_MCLI_CONFIG}" \
   cat "hummock-minio/hummock001/backup/manifest.json" | sed -n "${sed_str}"
 }

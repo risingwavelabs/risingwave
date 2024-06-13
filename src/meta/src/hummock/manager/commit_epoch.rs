@@ -337,21 +337,23 @@ impl HummockManager {
 
         // update state table info
         new_version_delta.with_latest_version(|version, delta| {
-            for table_id in new_table_ids
-                .into_iter()
-                .flat_map(|ids| ids.into_iter().map(|table_id| table_id.table_id))
-                .chain(
-                    version
-                        .levels
-                        .values()
-                        .flat_map(|group| group.member_table_ids.iter().cloned()),
-                )
-            {
+            if let Some(new_table_ids) = new_table_ids {
+                for table_id in new_table_ids {
+                    delta.state_table_info_delta.insert(
+                        table_id,
+                        StateTableInfoDelta {
+                            committed_epoch: epoch,
+                            safe_epoch: epoch,
+                        },
+                    );
+                }
+            }
+            for (table_id, info) in version.state_table_info.info() {
                 delta.state_table_info_delta.insert(
-                    TableId::new(table_id),
+                    *table_id,
                     StateTableInfoDelta {
                         committed_epoch: epoch,
-                        safe_epoch: version.safe_epoch,
+                        safe_epoch: info.safe_epoch,
                     },
                 );
             }

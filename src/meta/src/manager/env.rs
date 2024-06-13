@@ -465,11 +465,11 @@ impl MetaSrvEnv {
         Ok(env)
     }
 
-    pub fn meta_store_ref(&self) -> MetaStoreImpl {
+    pub fn meta_store(&self) -> MetaStoreImpl {
         self.meta_store_impl.clone()
     }
 
-    pub fn meta_store(&self) -> &MetaStoreImpl {
+    pub fn meta_store_ref(&self) -> &MetaStoreImpl {
         &self.meta_store_impl
     }
 
