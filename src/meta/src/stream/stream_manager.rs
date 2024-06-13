@@ -29,7 +29,7 @@ use tracing::Instrument;
 
 use super::{Locations, RescheduleOptions, ScaleControllerRef, TableResizePolicy};
 use crate::barrier::{BarrierScheduler, Command, ReplaceTablePlan, StreamRpcManager};
-use crate::manager::{DdlType, MetaSrvEnv, MetadataManager, StreamingJob};
+use crate::manager::{CatalogManagerRef, DdlType, MetaSrvEnv, MetadataManager, StreamingJob};
 use crate::model::{ActorId, MetadataModel, TableFragments, TableParallelism};
 use crate::stream::{to_build_actor_info, SourceManagerRef};
 use crate::{MetaError, MetaResult};
@@ -85,9 +85,18 @@ impl CreateStreamingJobContext {
 }
 
 pub enum CreatingState {
-    Failed { reason: MetaError },
+    Failed {
+        reason: MetaError,
+    },
     // sender is used to notify the canceling result.
-    Canceling { finish_tx: oneshot::Sender<()> },
+    Canceling {
+        finish_tx: oneshot::Sender<()>,
+    },
+    /// The stream jobs actors are built and running,
+    /// the first barrier is collected successfully.
+    Built,
+    /// The stream jobs creation process is complete,
+    /// it has caught up to the upstream's data.
     Created,
 }
 
@@ -226,6 +235,7 @@ impl GlobalStreamManager {
     /// 4. Store related meta data.
     pub async fn create_streaming_job(
         self: &Arc<Self>,
+        stream_job: &StreamingJob,
         table_fragments: TableFragments,
         ctx: CreateStreamingJobContext,
     ) -> MetaResult<()> {
@@ -316,6 +326,12 @@ impl GlobalStreamManager {
                             self.creating_job_info.delete_job(table_id).await;
                             return Err(MetaError::cancelled("create"));
                         }
+                    }
+                    CreatingState::Built => {
+                        self.metadata_manager
+                            .update_catalog_to_frontend(stream_job)
+                            .await;
+                        continue;
                     }
                     CreatingState::Created => {
                         self.creating_job_info.delete_job(table_id).await;
@@ -1134,7 +1150,11 @@ mod tests {
                 .start_create_table_fragments(table_fragments.clone())
                 .await?;
             self.global_stream_manager
-                .create_streaming_job(table_fragments, ctx)
+                .create_streaming_job(
+                    &StreamingJob::MaterializedView(table.clone()),
+                    table_fragments,
+                    ctx,
+                )
                 .await?;
             self.catalog_manager
                 .finish_create_table_procedure(vec![], table)

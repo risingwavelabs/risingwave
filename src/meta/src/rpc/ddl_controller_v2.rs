@@ -205,10 +205,10 @@ impl DdlController {
         // create streaming jobs.
         let stream_job_id = streaming_job.id();
         match (streaming_job.create_type(), streaming_job) {
-            (CreateType::Unspecified, _)
-            | (CreateType::Foreground, _)
+            (CreateType::Unspecified, streaming_job)
+            | (CreateType::Foreground, streaming_job)
             // FIXME(kwannoel): Unify background stream's creation path with MV below.
-            | (CreateType::Background, StreamingJob::Sink(_, _)) => {
+            | (CreateType::Background, streaming_job @ StreamingJob::Sink(_, _)) => {
                 let replace_table_job_info = ctx.replace_table_job_info.as_ref().map(
                     |(streaming_job, ctx, table_fragments)| {
                         (
@@ -220,7 +220,7 @@ impl DdlController {
                 );
 
                 self.stream_manager
-                    .create_streaming_job(table_fragments, ctx)
+                    .create_streaming_job(streaming_job, table_fragments, ctx)
                     .await?;
 
                 let version = mgr
@@ -230,13 +230,14 @@ impl DdlController {
 
                 Ok(version)
             }
-            (CreateType::Background, _) => {
+            (CreateType::Background, streaming_job) => {
                 let ctrl = self.clone();
                 let mgr = mgr.clone();
+                let streaming_job = streaming_job.clone();
                 let fut = async move {
                     let result = ctrl
                         .stream_manager
-                        .create_streaming_job(table_fragments, ctx)
+                        .create_streaming_job(&streaming_job, table_fragments, ctx)
                         .await.inspect_err(|err| {
                             tracing::error!(id = stream_job_id, error = ?err.as_report(), "failed to create background streaming job");
                         });

@@ -35,7 +35,7 @@ use crate::controller::catalog::CatalogControllerRef;
 use crate::controller::cluster::{ClusterControllerRef, WorkerExtraInfo};
 use crate::manager::{
     CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, LocalNotification,
-    StreamingClusterInfo, WorkerId,
+    NotificationVersion, StreamingClusterInfo, StreamingJob, WorkerId,
 };
 use crate::model::{ActorId, FragmentId, MetadataModel, TableFragments, TableParallelism};
 use crate::stream::{to_build_actor_info, SplitAssignment};
@@ -828,5 +828,23 @@ impl MetadataManager {
     ) -> MetaResult<HashMap<TableId, HashMap<u32, u64>>> {
         // TODO(subscription): support the correct logic when supporting L0 log store subscriptions
         Ok(HashMap::new())
+    }
+
+    pub async fn update_catalog_to_frontend(
+        &self,
+        stream_job: &StreamingJob,
+    ) -> NotificationVersion {
+        match self {
+            MetadataManager::V1(mgr) => {
+                mgr.catalog_manager
+                    .update_catalog_to_frontend(stream_job)
+                    .await
+            }
+            MetadataManager::V2(mgr) => {
+                mgr.catalog_controller
+                    .update_catalog_to_frontend(stream_job)
+                    .await
+            }
+        }
     }
 }

@@ -2860,6 +2860,13 @@ impl CatalogController {
 
         Ok(table_ids)
     }
+
+    pub async fn update_catalog_to_frontend(
+        &self,
+        stream_job: &crate::manager::StreamingJob,
+    ) -> NotificationVersion {
+        todo!()
+    }
 }
 
 /// `CatalogStats` is a struct to store the statistics of all catalogs.

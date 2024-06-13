@@ -1282,7 +1282,7 @@ impl DdlController {
                 .await?;
 
             self.stream_manager
-                .create_streaming_job(table_fragments, ctx)
+                .create_streaming_job(&stream_job, table_fragments, ctx)
                 .await?
         };
 
