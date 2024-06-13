@@ -357,7 +357,7 @@ impl HummockVersion {
         self.safe_epoch
     }
 
-    pub fn create_init_version(default_compaction_config: CompactionConfig) -> HummockVersion {
+    pub fn create_init_version(default_compaction_config: Arc<CompactionConfig>) -> HummockVersion {
         let mut init_version = HummockVersion {
             id: FIRST_VERSION_ID,
             levels: Default::default(),
@@ -373,7 +373,7 @@ impl HummockVersion {
         ] {
             init_version.levels.insert(
                 group_id,
-                build_initial_compaction_group_levels(group_id, &default_compaction_config),
+                build_initial_compaction_group_levels(group_id, default_compaction_config.as_ref()),
             );
         }
         init_version

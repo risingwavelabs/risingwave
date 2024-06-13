@@ -96,7 +96,7 @@ mod tests {
     #[tokio::test]
     async fn test_database() -> MetadataModelResult<()> {
         let env = MetaSrvEnv::for_test().await;
-        let store = env.meta_store().as_kv();
+        let store = env.meta_store_ref().as_kv();
         let databases = Database::list(store).await?;
         assert!(databases.is_empty());
         assert!(Database::select(store, &0).await.unwrap().is_none());

@@ -151,7 +151,7 @@ mod tests {
         use sea_orm::QueryFilter;
 
         let env = MetaSrvEnv::for_test_with_sql_meta_store().await;
-        let meta_store = env.meta_store().as_sql();
+        let meta_store = env.meta_store_ref().as_sql();
         let init_params = SessionConfig::default();
 
         // init system parameter controller as first launch.
