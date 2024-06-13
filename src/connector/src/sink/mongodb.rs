@@ -655,6 +655,14 @@ impl MongodbPayloadWriter {
         match command_builder {
             Some(CommandBuilder::AppendOnly(ref mut insert_builder)) => {
                 if op != Op::Insert {
+                    if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                        tracing::warn!(
+                            suppressed_count,
+                            ?op,
+                            ?row,
+                            "non-insert op received in append-only mode"
+                        );
+                    }
                     return Ok(());
                 }
                 self.append(insert_builder, row)?;
