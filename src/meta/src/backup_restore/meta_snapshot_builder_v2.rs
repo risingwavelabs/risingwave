@@ -31,6 +31,25 @@ fn map_db_err(e: DbErr) -> BackupError {
     BackupError::MetaStorage(e.into())
 }
 
+macro_rules! define_set_metadata {
+    ($( {$name:ident, $mod_path:ident::$mod_name:ident} ),*) => {
+        pub async fn set_metadata(
+            metadata: &mut MetadataV2,
+            txn: &sea_orm::DatabaseTransaction,
+        ) -> BackupResult<()> {
+          $(
+              metadata.$name = $mod_path::$mod_name::Entity::find()
+                                    .all(txn)
+                                    .await
+                                    .map_err(map_db_err)?;
+          )*
+          Ok(())
+        }
+    };
+}
+
+risingwave_backup::for_all_metadata_models_v2!(define_set_metadata);
+
 pub struct MetaSnapshotV2Builder {
     snapshot: MetaSnapshotV2,
     meta_store: SqlMetaStore,
@@ -91,151 +110,14 @@ impl MetaSnapshotV2Builder {
             }
             redo_state
         };
-        let version_stats = model_v2::prelude::HummockVersionStats::find()
-            .all(&txn)
-            .await
-            .map_err(map_db_err)?;
-        let compaction_configs = model_v2::prelude::CompactionConfig::find()
-            .all(&txn)
-            .await
-            .map_err(map_db_err)?;
-        let actors = model_v2::prelude::Actor::find()
-            .all(&txn)
-            .await
-            .map_err(map_db_err)?;
-        let clusters = model_v2::prelude::Cluster::find()
-            .all(&txn)
-            .await
-            .map_err(map_db_err)?;
-        let actor_dispatchers = model_v2::prelude::ActorDispatcher::find()
-            .all(&txn)
-            .await
-            .map_err(map_db_err)?;
-        let catalog_versions = model_v2::prelude::CatalogVersion::find()
-            .all(&txn)
-            .await
-            .map_err(map_db_err)?;
-        let connections = model_v2::prelude::Connection::find()
-            .all(&txn)
-            .await
-            .map_err(map_db_err)?;
-        let databases = model_v2::prelude::Database::find()
-            .all(&txn)
-            .await
-            .map_err(map_db_err)?;
-        let fragments = model_v2::prelude::Fragment::find()
-            .all(&txn)
-            .await
-            .map_err(map_db_err)?;
-        let functions = model_v2::prelude::Function::find()
-            .all(&txn)
-            .await
-            .map_err(map_db_err)?;
-        let indexes = model_v2::prelude::Index::find()
-            .all(&txn)
-            .await
-            .map_err(map_db_err)?;
-        let objects = model_v2::prelude::Object::find()
-            .all(&txn)
-            .await
-            .map_err(map_db_err)?;
-        let object_dependencies = model_v2::prelude::ObjectDependency::find()
-            .all(&txn)
-            .await
-            .map_err(map_db_err)?;
-        let schemas = model_v2::prelude::Schema::find()
-            .all(&txn)
-            .await
-            .map_err(map_db_err)?;
-        let sinks = model_v2::prelude::Sink::find()
-            .all(&txn)
-            .await
-            .map_err(map_db_err)?;
-        let sources = model_v2::prelude::Source::find()
-            .all(&txn)
-            .await
-            .map_err(map_db_err)?;
-        let streaming_jobs = model_v2::prelude::StreamingJob::find()
-            .all(&txn)
-            .await
-            .map_err(map_db_err)?;
-        let subscriptions = model_v2::prelude::Subscription::find()
-            .all(&txn)
-            .await
-            .map_err(map_db_err)?;
-        let system_parameters = model_v2::prelude::SystemParameter::find()
-            .all(&txn)
-            .await
-            .map_err(map_db_err)?;
-        let tables = model_v2::prelude::Table::find()
-            .all(&txn)
-            .await
-            .map_err(map_db_err)?;
-        let users = model_v2::prelude::User::find()
-            .all(&txn)
-            .await
-            .map_err(map_db_err)?;
-        let user_privileges = model_v2::prelude::UserPrivilege::find()
-            .all(&txn)
-            .await
-            .map_err(map_db_err)?;
-        let views = model_v2::prelude::View::find()
-            .all(&txn)
-            .await
-            .map_err(map_db_err)?;
-        let workers = model_v2::prelude::Worker::find()
-            .all(&txn)
-            .await
-            .map_err(map_db_err)?;
-        let worker_properties = model_v2::prelude::WorkerProperty::find()
-            .all(&txn)
-            .await
-            .map_err(map_db_err)?;
-        let hummock_sequences = model_v2::prelude::HummockSequence::find()
-            .all(&txn)
-            .await
-            .map_err(map_db_err)?;
-        let seaql_migrations = model_v2::serde_seaql_migration::Entity::find()
-            .all(&txn)
-            .await
-            .map_err(map_db_err)?;
-        let session_parameters = model_v2::prelude::SessionParameter::find()
-            .all(&txn)
-            .await
-            .map_err(map_db_err)?;
+        let mut metadata = MetadataV2 {
+            hummock_version,
+            ..Default::default()
+        };
+        set_metadata(&mut metadata, &txn).await?;
 
         txn.commit().await.map_err(map_db_err)?;
-        self.snapshot.metadata = MetadataV2 {
-            seaql_migrations,
-            hummock_version,
-            version_stats,
-            compaction_configs,
-            actors,
-            clusters,
-            actor_dispatchers,
-            catalog_versions,
-            connections,
-            databases,
-            fragments,
-            functions,
-            indexes,
-            objects,
-            object_dependencies,
-            schemas,
-            sinks,
-            sources,
-            streaming_jobs,
-            subscriptions,
-            system_parameters,
-            tables,
-            users,
-            user_privileges,
-            views,
-            workers,
-            worker_properties,
-            hummock_sequences,
-            session_parameters,
-        };
+        self.snapshot.metadata = metadata;
         Ok(())
     }
 
