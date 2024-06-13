@@ -257,16 +257,25 @@ impl HummockManager {
                                     // progress (meta + compactor)
                                     // 2. meta periodically scans the task and performs a cancel on
                                     // the meta side for tasks that are not updated by heartbeat
-                                    for task in compactor_manager.get_heartbeat_expired_tasks() {
+                                    let expired_tasks: Vec<u64> = compactor_manager
+                                        .get_heartbeat_expired_tasks()
+                                        .into_iter()
+                                        .map(|task| task.task_id)
+                                        .collect();
+                                    if !expired_tasks.is_empty() {
+                                        tracing::info!(
+                                            expired_tasks = ?expired_tasks,
+                                            "Heartbeat expired compaction tasks detected. Attempting to cancel tasks.",
+                                        );
                                         if let Err(e) = hummock_manager
-                                            .cancel_compact_task(
-                                                task.task_id,
+                                            .cancel_compact_tasks(
+                                                expired_tasks.clone(),
                                                 TaskStatus::HeartbeatCanceled,
                                             )
                                             .await
                                         {
                                             tracing::error!(
-                                                task_id = task.task_id,
+                                                expired_tasks = ?expired_tasks,
                                                 error = %e.as_report(),
                                                 "Attempt to remove compaction task due to elapsed heartbeat failed. We will continue to track its heartbeat
                                                 until we can successfully report its status",
