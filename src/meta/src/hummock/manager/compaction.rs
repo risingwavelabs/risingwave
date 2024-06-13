@@ -736,15 +736,13 @@ impl HummockManager {
                 || matches!(selector.task_type(), TaskType::Emergency);
 
             let mut stats = LocalSelectorStatistic::default();
-            let mut member_table_ids: Vec<_> = version
+            let member_table_ids: Vec<_> = version
                 .latest_version()
                 .state_table_info
                 .compaction_group_member_table_ids(compaction_group_id)
                 .iter()
                 .map(|table_id| table_id.table_id)
                 .collect();
-
-            member_table_ids.sort();
 
             let mut table_id_to_option: HashMap<u32, _> = HashMap::default();
 

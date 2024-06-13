@@ -201,6 +201,7 @@ impl TtlReclaimCompactionPicker {
 
 #[cfg(test)]
 mod test {
+    use std::collections::BTreeSet;
     use std::sync::Arc;
 
     use itertools::Itertools;
@@ -377,7 +378,7 @@ mod test {
                     1,
                     &group_config,
                     &levels,
-                    &HashSet::new(),
+                    &BTreeSet::new(),
                     &mut levels_handler,
                     &mut local_stats,
                     table_id_to_options,
@@ -428,7 +429,7 @@ mod test {
                     1,
                     &group_config,
                     &levels,
-                    &HashSet::new(),
+                    &BTreeSet::new(),
                     &mut levels_handler,
                     &mut local_stats,
                     table_id_to_options.clone(),
@@ -462,7 +463,7 @@ mod test {
                     1,
                     &group_config,
                     &levels,
-                    &HashSet::new(),
+                    &BTreeSet::new(),
                     &mut levels_handler,
                     &mut local_stats,
                     table_id_to_options.clone(),
@@ -519,7 +520,7 @@ mod test {
                     1,
                     &group_config,
                     &levels,
-                    &HashSet::new(),
+                    &BTreeSet::new(),
                     &mut levels_handler,
                     &mut local_stats,
                     table_id_to_options,
@@ -561,7 +562,7 @@ mod test {
                 1,
                 &group_config,
                 &levels,
-                &HashSet::new(),
+                &BTreeSet::new(),
                 &mut levels_handler,
                 &mut local_stats,
                 HashMap::default(),
@@ -624,7 +625,7 @@ mod test {
                         1,
                         &group_config,
                         &levels,
-                        &HashSet::new(),
+                        &BTreeSet::new(),
                         &mut levels_handler,
                         &mut local_stats,
                         table_id_to_options.clone(),
@@ -717,7 +718,7 @@ mod test {
                         1,
                         &group_config,
                         &levels,
-                        &HashSet::new(),
+                        &BTreeSet::new(),
                         &mut levels_handler,
                         &mut local_stats,
                         table_id_to_options.clone(),

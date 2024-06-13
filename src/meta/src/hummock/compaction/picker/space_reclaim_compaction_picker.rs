@@ -168,7 +168,7 @@ impl SpaceReclaimCompactionPicker {
 #[cfg(test)]
 mod test {
 
-    use std::collections::HashMap;
+    use std::collections::{BTreeSet, HashMap};
     use std::sync::Arc;
 
     use itertools::Itertools;
@@ -240,7 +240,7 @@ mod test {
             l0: Some(l0),
             ..Default::default()
         };
-        let mut member_table_ids = HashSet::new();
+        let mut member_table_ids = BTreeSet::new();
         let mut levels_handler = (0..5).map(LevelHandler::new).collect_vec();
         let mut local_stats = LocalSelectorStatistic::default();
 
@@ -357,7 +357,7 @@ mod test {
                 }
             }
 
-            member_table_ids = HashSet::from_iter(
+            member_table_ids = BTreeSet::from_iter(
                 [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
                     .into_iter()
                     .map(TableId::new),
@@ -384,7 +384,7 @@ mod test {
             }
 
             member_table_ids =
-                HashSet::from_iter([2, 3, 4, 5, 6, 7, 8, 9].into_iter().map(TableId::new));
+                BTreeSet::from_iter([2, 3, 4, 5, 6, 7, 8, 9].into_iter().map(TableId::new));
             // pick space reclaim
             let task = selector
                 .pick_compaction(
@@ -420,7 +420,7 @@ mod test {
             // rebuild selector
             selector = SpaceReclaimCompactionSelector::default();
             // cut range [3,4] [6] [8,9,10]
-            member_table_ids = HashSet::from_iter([0, 1, 2, 5, 7].into_iter().map(TableId::new));
+            member_table_ids = BTreeSet::from_iter([0, 1, 2, 5, 7].into_iter().map(TableId::new));
             let expect_task_file_count = [2, 1, 4];
             let expect_task_sst_id_range = [vec![3, 4], vec![6], vec![8, 9, 10, 11]];
             for (index, x) in expect_task_file_count.iter().enumerate() {
@@ -473,12 +473,12 @@ mod test {
             selector = SpaceReclaimCompactionSelector::default();
             // cut range [3,4] [6] [8,9,10]
 
-            member_table_ids = HashSet::from_iter([0, 1, 2, 5, 7].into_iter().map(TableId::new));
+            member_table_ids = BTreeSet::from_iter([0, 1, 2, 5, 7].into_iter().map(TableId::new));
             let expect_task_file_count = [2, 1, 5];
             let expect_task_sst_id_range = [vec![3, 4], vec![6], vec![7, 8, 9, 10, 11]];
             for (index, x) in expect_task_file_count.iter().enumerate() {
                 if index == expect_task_file_count.len() - 1 {
-                    member_table_ids = HashSet::from_iter([2, 5].into_iter().map(TableId::new));
+                    member_table_ids = BTreeSet::from_iter([2, 5].into_iter().map(TableId::new));
                 }
 
                 // // pick space reclaim

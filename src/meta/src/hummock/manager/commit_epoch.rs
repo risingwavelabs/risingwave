@@ -136,11 +136,10 @@ impl HummockManager {
         new_version_delta.new_table_watermarks = new_table_watermarks;
         new_version_delta.change_log_delta = change_log_delta;
 
-        let mut table_compaction_group_mapping = (**new_version_delta
+        let mut table_compaction_group_mapping = new_version_delta
             .latest_version()
             .state_table_info
-            .table_compaction_group_id())
-        .clone();
+            .build_table_compaction_group_id();
 
         let mut new_table_ids = None;
 

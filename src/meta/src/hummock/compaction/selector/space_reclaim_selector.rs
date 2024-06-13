@@ -17,7 +17,7 @@
 // COPYING file in the root directory) and Apache 2.0 License
 // (found in the LICENSE.Apache file in the root directory).
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 
 use risingwave_common::catalog::{TableId, TableOption};
@@ -44,7 +44,7 @@ impl CompactionSelector for SpaceReclaimCompactionSelector {
         task_id: HummockCompactionTaskId,
         group: &CompactionGroup,
         levels: &Levels,
-        member_table_ids: &HashSet<TableId>,
+        member_table_ids: &BTreeSet<TableId>,
         level_handlers: &mut [LevelHandler],
         _selector_stats: &mut LocalSelectorStatistic,
         _table_id_to_options: HashMap<u32, TableOption>,

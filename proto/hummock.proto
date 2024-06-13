@@ -105,7 +105,7 @@ message GroupDelta {
     GroupConstruct group_construct = 2;
     GroupDestroy group_destroy = 3;
     GroupMetaChange group_meta_change = 4;
-    GroupTableChange group_table_change = 5;
+    GroupTableChange group_table_change = 5 [deprecated = true];
   }
 }
 

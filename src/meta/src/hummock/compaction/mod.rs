@@ -21,7 +21,7 @@ use risingwave_pb::hummock::compact_task::{self, TaskType};
 
 mod picker;
 pub mod selector;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
@@ -92,7 +92,7 @@ impl CompactStatus {
     pub fn get_compact_task(
         &mut self,
         levels: &Levels,
-        member_table_ids: &HashSet<TableId>,
+        member_table_ids: &BTreeSet<TableId>,
         task_id: HummockCompactionTaskId,
         group: &CompactionGroup,
         stats: &mut LocalSelectorStatistic,

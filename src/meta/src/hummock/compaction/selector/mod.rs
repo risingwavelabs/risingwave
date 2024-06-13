@@ -24,7 +24,7 @@ mod space_reclaim_selector;
 mod tombstone_compaction_selector;
 mod ttl_selector;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 
 pub use emergency_selector::EmergencySelector;
@@ -53,7 +53,7 @@ pub trait CompactionSelector: Sync + Send {
         task_id: HummockCompactionTaskId,
         group: &CompactionGroup,
         levels: &Levels,
-        member_table_ids: &HashSet<TableId>,
+        member_table_ids: &BTreeSet<TableId>,
         level_handlers: &mut [LevelHandler],
         selector_stats: &mut LocalSelectorStatistic,
         table_id_to_options: HashMap<u32, TableOption>,

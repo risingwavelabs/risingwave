@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::collections::hash_map::Entry;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::mem::{replace, size_of};
 use std::ops::Deref;
 use std::sync::{Arc, LazyLock};
@@ -42,23 +42,21 @@ pub struct HummockVersionStateTableInfo {
     state_table_info: HashMap<TableId, PbStateTableInfo>,
 
     // in memory index
-    compaction_group_member_tables: Arc<HashMap<CompactionGroupId, HashSet<TableId>>>,
-    table_compaction_group_id: Arc<HashMap<TableId, CompactionGroupId>>,
+    compaction_group_member_tables: HashMap<CompactionGroupId, BTreeSet<TableId>>,
 }
 
 impl HummockVersionStateTableInfo {
     pub fn empty() -> Self {
         Self {
             state_table_info: HashMap::new(),
-            compaction_group_member_tables: Arc::new(HashMap::new()),
-            table_compaction_group_id: Arc::new(HashMap::new()),
+            compaction_group_member_tables: HashMap::new(),
         }
     }
 
     fn build_compaction_group_member_tables(
         state_table_info: &HashMap<TableId, PbStateTableInfo>,
-    ) -> HashMap<CompactionGroupId, HashSet<TableId>> {
-        let mut ret: HashMap<_, HashSet<_>> = HashMap::new();
+    ) -> HashMap<CompactionGroupId, BTreeSet<TableId>> {
+        let mut ret: HashMap<_, BTreeSet<_>> = HashMap::new();
         for (table_id, info) in state_table_info {
             assert!(ret
                 .entry(info.compaction_group_id)
@@ -68,22 +66,11 @@ impl HummockVersionStateTableInfo {
         ret
     }
 
-    fn build_table_compaction_group_id(
-        state_table_info: &HashMap<TableId, PbStateTableInfo>,
-    ) -> HashMap<TableId, CompactionGroupId> {
-        state_table_info
+    pub fn build_table_compaction_group_id(&self) -> HashMap<TableId, CompactionGroupId> {
+        self.state_table_info
             .iter()
             .map(|(table_id, info)| (*table_id, info.compaction_group_id))
             .collect()
-    }
-
-    fn rebuild_in_memory_index(&mut self) {
-        self.compaction_group_member_tables = Arc::new(Self::build_compaction_group_member_tables(
-            &self.state_table_info,
-        ));
-        self.table_compaction_group_id = Arc::new(Self::build_table_compaction_group_id(
-            &self.state_table_info,
-        ));
     }
 
     pub fn from_protobuf(state_table_info: &HashMap<u32, PbStateTableInfo>) -> Self {
@@ -91,13 +78,12 @@ impl HummockVersionStateTableInfo {
             .iter()
             .map(|(table_id, info)| (TableId::new(*table_id), info.clone()))
             .collect();
-        let mut ret = Self {
+        let compaction_group_member_tables =
+            Self::build_compaction_group_member_tables(&state_table_info);
+        Self {
             state_table_info,
-            compaction_group_member_tables: Default::default(),
-            table_compaction_group_id: Default::default(),
-        };
-        ret.rebuild_in_memory_index();
-        ret
+            compaction_group_member_tables,
+        }
     }
 
     pub fn to_protobuf(&self) -> HashMap<u32, PbStateTableInfo> {
@@ -113,8 +99,28 @@ impl HummockVersionStateTableInfo {
         removed_table_id: &HashSet<TableId>,
     ) -> HashMap<TableId, Option<StateTableInfo>> {
         let mut changed_table = HashMap::new();
+        fn remove_table_from_compaction_group(
+            compaction_group_member_tables: &mut HashMap<CompactionGroupId, BTreeSet<TableId>>,
+            compaction_group_id: CompactionGroupId,
+            table_id: TableId,
+        ) {
+            let member_tables = compaction_group_member_tables
+                .get_mut(&compaction_group_id)
+                .expect("should exist");
+            assert!(member_tables.remove(&table_id));
+            if member_tables.is_empty() {
+                assert!(compaction_group_member_tables
+                    .remove(&compaction_group_id)
+                    .is_some());
+            }
+        }
         for table_id in removed_table_id {
             if let Some(prev_info) = self.state_table_info.remove(table_id) {
+                remove_table_from_compaction_group(
+                    &mut self.compaction_group_member_tables,
+                    prev_info.compaction_group_id,
+                    *table_id,
+                );
                 assert!(changed_table.insert(*table_id, Some(prev_info)).is_none());
             } else {
                 warn!(
@@ -143,16 +149,37 @@ impl HummockVersionStateTableInfo {
                         prev_info,
                         new_info
                     );
+                    if prev_info.compaction_group_id != new_info.compaction_group_id {
+                        // table moved to another compaction group
+                        remove_table_from_compaction_group(
+                            &mut self.compaction_group_member_tables,
+                            prev_info.compaction_group_id,
+                            *table_id,
+                        );
+                        assert!(self
+                            .compaction_group_member_tables
+                            .entry(new_info.compaction_group_id)
+                            .or_default()
+                            .insert(*table_id));
+                    }
                     let prev_info = replace(prev_info, new_info);
                     changed_table.insert(*table_id, Some(prev_info));
                 }
                 Entry::Vacant(entry) => {
+                    assert!(self
+                        .compaction_group_member_tables
+                        .entry(new_info.compaction_group_id)
+                        .or_default()
+                        .insert(*table_id));
                     entry.insert(new_info);
                     changed_table.insert(*table_id, None);
                 }
             }
         }
-        self.rebuild_in_memory_index();
+        debug_assert_eq!(
+            self.compaction_group_member_tables,
+            Self::build_compaction_group_member_tables(&self.state_table_info)
+        );
         changed_table
     }
 
@@ -163,21 +190,15 @@ impl HummockVersionStateTableInfo {
     pub fn compaction_group_member_table_ids(
         &self,
         compaction_group_id: CompactionGroupId,
-    ) -> &HashSet<TableId> {
-        static EMPTY_SET: LazyLock<HashSet<TableId>> = LazyLock::new(HashSet::new);
+    ) -> &BTreeSet<TableId> {
+        static EMPTY_SET: LazyLock<BTreeSet<TableId>> = LazyLock::new(BTreeSet::new);
         self.compaction_group_member_tables
             .get(&compaction_group_id)
             .unwrap_or_else(|| EMPTY_SET.deref())
     }
 
-    pub fn compaction_group_member_tables(
-        &self,
-    ) -> &Arc<HashMap<CompactionGroupId, HashSet<TableId>>> {
+    pub fn compaction_group_member_tables(&self) -> &HashMap<CompactionGroupId, BTreeSet<TableId>> {
         &self.compaction_group_member_tables
-    }
-
-    pub fn table_compaction_group_id(&self) -> &Arc<HashMap<TableId, CompactionGroupId>> {
-        &self.table_compaction_group_id
     }
 }
 

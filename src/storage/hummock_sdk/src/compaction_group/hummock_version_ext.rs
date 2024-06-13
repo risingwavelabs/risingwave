@@ -781,7 +781,7 @@ impl Levels {
     pub fn apply_compact_ssts(
         &mut self,
         summary: GroupDeltasSummary,
-        member_table_ids: &HashSet<TableId>,
+        member_table_ids: &BTreeSet<TableId>,
     ) {
         let GroupDeltasSummary {
             delete_sst_levels,
