@@ -183,13 +183,6 @@ impl CompactionTaskValidationRule for BaseCompactionTaskValidationRule {
             return true;
         }
 
-        // The size of target level may be too large, we shall skip this compact task and wait
-        //  the data in base level compact to lower level.
-        if input.target_input_size > self.config.max_compaction_bytes {
-            stats.skip_by_count_limit += 1;
-            return false;
-        }
-
         if input.select_input_size < input.target_input_size {
             stats.skip_by_write_amp_limit += 1;
             return false;

@@ -25,6 +25,7 @@ use super::{
     CompactionInput, CompactionPicker, CompactionTaskValidator, LocalPickerStatistic,
     ValidationRuleType,
 };
+use crate::hummock::compaction::compaction_config::L0_MAX_SIZE;
 use crate::hummock::compaction::picker::TrivialMovePicker;
 use crate::hummock::compaction::{create_overlap_strategy, CompactionDeveloperConfig};
 use crate::hummock::level_handler::LevelHandler;
@@ -153,14 +154,22 @@ impl LevelCompactionPicker {
     ) -> Option<CompactionInput> {
         let overlap_strategy = create_overlap_strategy(self.config.compaction_mode());
         let min_compaction_bytes = self.config.sub_level_max_compaction_bytes;
-        let non_overlap_sub_level_picker = NonOverlapSubLevelPicker::new(
-            min_compaction_bytes,
+        let max_compaction_bytes = if l0.total_file_size > L0_MAX_SIZE {
+            std::cmp::max(
+                target_level.total_file_size,
+                self.config.max_compaction_bytes * 4,
+            )
+        } else {
             // divide by 2 because we need to select files of base level and it need use the other
             // half quota.
             std::cmp::max(
-                self.config.max_bytes_for_level_base,
+                target_level.total_file_size,
                 self.config.max_compaction_bytes / 2,
-            ),
+            )
+        };
+        let non_overlap_sub_level_picker = NonOverlapSubLevelPicker::new(
+            min_compaction_bytes,
+            max_compaction_bytes,
             1,
             // The maximum number of sub_level compact level per task
             self.config.level0_max_compact_file_number,

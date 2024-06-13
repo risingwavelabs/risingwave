@@ -184,7 +184,7 @@ impl DynamicLevelSelectorCore {
                 ctx.base_level -= 1;
                 cur_level_size /= self.config.max_bytes_for_level_multiplier;
             }
-            std::cmp::min(base_bytes_max, cur_level_size)
+            cur_level_size
         };
 
         let level_multiplier = self.config.max_bytes_for_level_multiplier as f64;
@@ -314,6 +314,7 @@ impl DynamicLevelSelectorCore {
             if level_idx < ctx.base_level || level_idx >= self.config.max_level as usize {
                 continue;
             }
+
             let output_file_size =
                 handlers[level_idx].get_pending_output_file_size(level.level_idx + 1);
             let total_size = level.total_file_size.saturating_sub(output_file_size);
@@ -485,6 +486,7 @@ pub mod tests {
     use risingwave_common::constants::hummock::CompactionFilterFlag;
     use risingwave_pb::hummock::compaction_config::CompactionMode;
     use risingwave_pb::hummock::hummock_version::Levels;
+    use risingwave_pb::hummock::OverlappingLevel;
 
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
     use crate::hummock::compaction::selector::tests::{
@@ -739,16 +741,52 @@ pub mod tests {
         assert_eq!(15000, levels.levels.get(2).unwrap().total_file_size); // l3
         assert_eq!(10000, levels.levels.get(3).unwrap().total_file_size); // l4
 
-        assert_eq!(100, ctx.level_max_bytes[1]); // l1
-        assert_eq!(500, ctx.level_max_bytes[2]); // l2
-        assert_eq!(2500, ctx.level_max_bytes[3]); // l3
-        assert_eq!(12500, ctx.level_max_bytes[4]); // l4
+        assert_eq!(200, ctx.level_max_bytes[1]); // l1
+        assert_eq!(1000, ctx.level_max_bytes[2]); // l2
+        assert_eq!(5000, ctx.level_max_bytes[3]); // l3
+        assert_eq!(25000, ctx.level_max_bytes[4]); // l4
 
-        // l1 pending = (0 + 1000 - 100) * ((25000 / 1000) + 1) + 1000 = 24400
-        // l2 pending = (25000 + 900 - 500) * ((15000 / (25000 + 900)) + 1) = 40110
-        // l3 pending = (15000 + 25400 - 2500) * ((10000 / (15000 + 25400) + 1)) = 47281
+        // l1 pending = (0 + 1000 - 200) * ((25000 / 1000) + 1) + 1000 = 21800
+        // l2 pending = (25000 + 800 - 1000) * ((15000 / (25000 + 800)) + 1) = 39218
+        // l3 pending = (15000 + 24800 - 5000) * ((10000 / (15000 + 24800) + 1)) = 43543
 
         let compact_pending_bytes = dynamic_level_core.compact_pending_bytes_needed(&levels);
-        assert_eq!(24400 + 40110 + 47281, compact_pending_bytes);
+        assert_eq!(21800 + 39218 + 43543, compact_pending_bytes);
+    }
+
+    #[test]
+    fn test_compact_score() {
+        let config = CompactionConfigBuilder::new().build();
+        let mut levels = vec![
+            generate_level(1, generate_tables(1..2, 0..1000, 3, 500)),
+            generate_level(2, generate_tables(2..3, 0..1000, 3, 500)),
+            generate_level(3, generate_tables(3..4, 0..1000, 2, 500)),
+            generate_level(4, generate_tables(4..5, 0..1000, 1, 1000)),
+            generate_level(5, generate_tables(5..6, 0..1000, 1, 1000)),
+            generate_level(6, generate_tables(6..7, 0..1000, 1, 1000)),
+        ];
+        levels[0].total_file_size = 2048 * 1024 * 1024;
+        levels[1].total_file_size = 5 * 2048 * 1024 * 1024;
+        levels[2].total_file_size = 25 * 2048 * 1024 * 1024;
+        levels[3].total_file_size = 125 * 2048 * 1024 * 1024;
+        levels[4].total_file_size = 625 * 2048 * 1024 * 1024;
+        levels[5].total_file_size = 3125 * 2048 * 1024 * 1024;
+        let levels = Levels {
+            levels,
+            l0: Some(OverlappingLevel::default()),
+            ..Default::default()
+        };
+        let config = Arc::new(config);
+        let dynamic_level_core = DynamicLevelSelectorCore::new(
+            config.clone(),
+            Arc::new(CompactionDeveloperConfig::default()),
+        );
+        let ctx = dynamic_level_core.calculate_level_base_size(&levels);
+        assert!(ctx.level_max_bytes[0] > config.max_bytes_for_level_base);
+        let levels_handlers = (0..7).map(LevelHandler::new).collect_vec();
+        let ctx = dynamic_level_core.get_priority_levels(&levels, &levels_handlers);
+        for info in &ctx.score_levels {
+            assert_eq!(info.score, 100);
+        }
     }
 }
