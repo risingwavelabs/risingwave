@@ -24,13 +24,32 @@ jobs:
         repo-token: ${{ secrets.GITHUB_TOKEN }}
         stale-issue-message: >
           This issue has been open for 60 days with no activity.
-          Could you please update the status? Feel free to continue discussion or close as not planned.
+
+          If you think it is still relevant today, and needs to be done *in the near future*, you can comment to update the status, or just manually remove the `no-issue-activity` label.
+
+          You can also confidently close this issue as not planned to keep our backlog clean. (If no further action taken, the issue will be automatically closed after 7 days. Sorry!)
+          Don't worry if you think the issue is still valuable to continue in the future.
+          It's searchable and can be reopened when it's time. 😄
         stale-pr-message: >
           This PR has been open for 60 days with no activity.
-          Could you please update the status? Feel free to ping a reviewer if you are waiting for review.
+
+          If it's blocked by code review, feel free to ping a reviewer.
+
+          If you think it is still relevant today, and have time to work on it *in the near future*, you can comment to update the status, or just manually remove the `no-pr-activity` label.
+
+          You can also confidently close this PR to keep our backlog clean. (If no further action taken, the PR will be automatically closed after 7 days. Sorry!)
+          Don't worry if you think the PR is still valuable to continue in the future.
+          It's searchable and can be reopened when it's time. 😄
+        close-issue-message: >
+          Close this issue as there's no further actions taken after it is marked as stale for 7 days. Sorry!
+
+          You can reopen it when it's relevant again.
+        close-pr-message: >
+          Close this PR as there's no further actions taken after it is marked as stale for 7 days. Sorry!
+
+          You can reopen it when you have time to continue working on it.
         stale-issue-label: 'no-issue-activity'
         stale-pr-label: 'no-pr-activity'
-        days-before-close: -1
-        days-before-pr-close: 7
+        days-before-close: 7
         operations-per-run: ${{ github.event.inputs.operationsPerRun }}
         enable-statistics: true
