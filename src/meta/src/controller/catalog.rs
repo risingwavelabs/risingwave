@@ -48,6 +48,7 @@ use risingwave_pb::meta::subscribe_response::{
 };
 use risingwave_pb::meta::{
     FragmentParallelUnitMapping, PbFragmentWorkerSlotMapping, PbRelation, PbRelationGroup,
+    RelationGroup,
 };
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::FragmentTypeFlag;
@@ -2865,7 +2866,12 @@ impl CatalogController {
         &self,
         stream_job: &crate::manager::StreamingJob,
     ) -> NotificationVersion {
-        todo!()
+        let relations = stream_job.to_relations();
+        self.notify_frontend(
+            Operation::Update,
+            Info::RelationGroup(RelationGroup { relations }),
+        )
+        .await
     }
 }
 

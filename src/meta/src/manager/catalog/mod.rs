@@ -4397,23 +4397,11 @@ impl CatalogManager {
         stream_job: &StreamingJob,
         // internal_tables: &[Table],
     ) -> NotificationVersion {
-        todo!()
-        // let version = self
-        //     .notify_frontend(
-        //         Operation::Add,
-        //         Info::RelationGroup(RelationGroup {
-        //             relations: vec![Relation {
-        //                 relation_info: RelationInfo::Table(table.to_owned()).into(),
-        //             }]
-        //                 .into_iter()
-        //                 .chain(internal_tables.into_iter().map(|internal_table| Relation {
-        //                     relation_info: RelationInfo::Table(internal_table.clone()).into(),
-        //                 }))
-        //                 .collect_vec(),
-        //         }),
-        //     )
-        //     .await;
-        //
-        // Ok(version)
+        let relations = stream_job.to_relations();
+        self.notify_frontend(
+            Operation::Update,
+            Info::RelationGroup(RelationGroup { relations }),
+        )
+        .await
     }
 }

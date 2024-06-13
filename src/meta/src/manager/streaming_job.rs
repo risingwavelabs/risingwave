@@ -18,6 +18,7 @@ use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::catalog::{CreateType, Index, PbSource, Sink, Table};
 use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::meta::relation::RelationInfo;
+use risingwave_pb::meta::Relation;
 use strum::EnumDiscriminants;
 
 use crate::model::FragmentId;
@@ -129,24 +130,34 @@ impl StreamingJob {
         }
     }
 
-    pub fn to_relation_infos(&self) -> Vec<RelationInfo> {
+    pub fn to_relations(&self) -> Vec<Relation> {
         let mut relation_infos = vec![];
         match self {
-            StreamingJob::MaterializedView(table) => {
-                relation_infos.push(RelationInfo::Table(table.clone()))
-            }
-            StreamingJob::Sink(sink, _) => relation_infos.push(RelationInfo::Sink(sink.clone())),
+            StreamingJob::MaterializedView(table) => relation_infos.push(Relation {
+                relation_info: Some(RelationInfo::Table(table.clone())),
+            }),
+            StreamingJob::Sink(sink, _) => relation_infos.push(Relation {
+                relation_info: Some(RelationInfo::Sink(sink.clone())),
+            }),
             StreamingJob::Table(source_opt, table, _) => {
-                relation_infos.push(RelationInfo::Table(table.clone()));
+                relation_infos.push(Relation {
+                    relation_info: Some(RelationInfo::Table(table.clone())),
+                });
                 if let Some(source) = source_opt {
-                    relation_infos.push(RelationInfo::Source(source.clone()));
+                    relation_infos.push(Relation {
+                        relation_info: Some(RelationInfo::Source(source.clone())),
+                    });
                 }
             }
             StreamingJob::Index(index, _) => {
-                relation_infos.push(RelationInfo::Index(index.clone()));
+                relation_infos.push(Relation {
+                    relation_info: Some(RelationInfo::Index(index.clone())),
+                });
             }
             StreamingJob::Source(source) => {
-                relation_infos.push(RelationInfo::Source(source.clone()));
+                relation_infos.push(Relation {
+                    relation_info: Some(RelationInfo::Source(source.clone())),
+                });
             }
         }
         relation_infos
