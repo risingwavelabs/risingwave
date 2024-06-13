@@ -452,6 +452,7 @@ message WindowFrame {
 
     TYPE_ROWS = 5;
     TYPE_RANGE = 10;
+    TYPE_SESSION = 15;
   }
   enum BoundType {
     BOUND_TYPE_UNSPECIFIED = 0;
@@ -497,6 +498,13 @@ message WindowFrame {
     BoundType type = 1;
     optional data.Datum offset = 3;
   }
+  message SessionFrameBounds {
+    data.Datum gap = 1;
+
+    data.DataType order_data_type = 10;
+    common.OrderType order_type = 15;
+    data.DataType gap_data_type = 20;
+  }
 
   Type type = 1;
 
@@ -508,6 +516,7 @@ message WindowFrame {
   oneof bounds {
     RowsFrameBounds rows = 10;
     RangeFrameBounds range = 15;
+    SessionFrameBounds session = 20;
   }
 }
 

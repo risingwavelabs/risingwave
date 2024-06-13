@@ -19,7 +19,7 @@ chrono = { version = "0.4", features = ['serde'] }
 clap = { workspace = true }
 pg_interval = "0.4"
 rust_decimal = { version = "1.35", features = ["db-postgres"] }
-tokio = { version = "0.2.24", package = "madsim-tokio", features = [
+tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
     "macros",
     "rt-multi-thread",

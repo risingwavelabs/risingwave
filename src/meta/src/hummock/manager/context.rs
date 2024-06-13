@@ -99,7 +99,7 @@ impl HummockManager {
     ) -> Result<()> {
         let mut context_info = self.context_info.write().await;
         context_info
-            .release_contexts(context_ids, self.meta_store_ref())
+            .release_contexts(context_ids, self.env.meta_store())
             .await?;
         #[cfg(test)]
         {
@@ -188,7 +188,7 @@ impl HummockManager {
         }
 
         context_info
-            .release_contexts(&invalid_context_ids, self.meta_store_ref())
+            .release_contexts(&invalid_context_ids, self.env.meta_store())
             .await?;
 
         Ok(invalid_context_ids)
