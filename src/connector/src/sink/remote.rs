@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, VecDeque};
+use std::convert::Infallible;
 use std::marker::PhantomData;
 use std::ops::Deref;
 use std::pin::pin;
@@ -301,7 +302,7 @@ impl RemoteLogSinker {
 
 #[async_trait]
 impl LogSinker for RemoteLogSinker {
-    async fn consume_log_and_sink(self, log_reader: &mut impl SinkLogReader) -> Result<()> {
+    async fn consume_log_and_sink(self, log_reader: &mut impl SinkLogReader) -> Result<Infallible> {
         let mut request_tx = self.request_sender;
         let mut response_err_stream_rx = self.response_stream;
         let sink_metrics = self.sink_metrics;
@@ -313,7 +314,7 @@ impl LogSinker for RemoteLogSinker {
                 let result = response_err_stream_rx
                     .stream
                     .try_next()
-                    .instrument_await("Wait Response Stream")
+                    .instrument_await("log_sinker_wait_next_response")
                     .await;
                 match result {
                     Ok(Some(response)) => {
@@ -368,20 +369,12 @@ impl LogSinker for RemoteLogSinker {
             let mut sent_offset_queue: VecDeque<(TruncateOffset, Option<Instant>)> =
                 VecDeque::new();
 
-            let mut curr_epoch = 0;
-
             loop {
                 let either_result: futures::future::Either<
                     Option<SinkWriterStreamResponse>,
                     LogStoreResult<(u64, LogStoreReadItem)>,
                 > = drop_either_future(
-                    select(
-                        pin!(response_rx.recv()),
-                        pin!(log_reader
-                            .next_item()
-                            .instrument_await(format!("Wait Next Item: {}", curr_epoch))),
-                    )
-                    .await,
+                    select(pin!(response_rx.recv()), pin!(log_reader.next_item())).await,
                 );
                 match either_result {
                     futures::future::Either::Left(opt) => {
@@ -435,7 +428,6 @@ impl LogSinker for RemoteLogSinker {
                     }
                     futures::future::Either::Right(result) => {
                         let (epoch, item): (u64, LogStoreReadItem) = result?;
-                        curr_epoch = epoch;
 
                         match item {
                             LogStoreReadItem::StreamChunk { chunk, chunk_id } => {
@@ -456,8 +448,7 @@ impl LogSinker for RemoteLogSinker {
                                         chunk,
                                     })
                                     .instrument_await(format!(
-                                        "Send Chunk Request: {} {}",
-                                        curr_epoch, chunk_id
+                                        "log_sinker_send_chunk (chunk {chunk_id})"
                                     ))
                                     .await?;
                                 prev_offset = Some(offset);
@@ -473,15 +464,16 @@ impl LogSinker for RemoteLogSinker {
                                     let start_time = Instant::now();
                                     request_tx
                                         .barrier(epoch, true)
-                                        .instrument_await(format!("Commit: {}", curr_epoch))
+                                        .instrument_await(format!(
+                                            "log_sinker_commit_checkpoint (epoch {epoch})"
+                                        ))
                                         .await?;
                                     Some(start_time)
                                 } else {
                                     request_tx
                                         .barrier(epoch, false)
                                         .instrument_await(format!(
-                                            "Send Barrier Request: {}",
-                                            curr_epoch
+                                            "log_sinker_send_barrier (epoch {epoch})"
                                         ))
                                         .await?;
                                     None

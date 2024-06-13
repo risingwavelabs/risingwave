@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::convert::Infallible;
 use std::marker::PhantomData;
 
 use async_trait::async_trait;
@@ -75,7 +76,7 @@ impl<T: TrivialSinkName> Sink for TrivialSink<T> {
 
 #[async_trait]
 impl<T: TrivialSinkName> LogSinker for TrivialSink<T> {
-    async fn consume_log_and_sink(self, log_reader: &mut impl SinkLogReader) -> Result<()> {
+    async fn consume_log_and_sink(self, log_reader: &mut impl SinkLogReader) -> Result<Infallible> {
         loop {
             let (epoch, item) = log_reader.next_item().await?;
             match item {

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::convert::Infallible;
 use std::future::{Future, Ready};
 use std::pin::pin;
 use std::sync::Arc;
@@ -126,7 +127,7 @@ impl<W> LogSinkerOf<W> {
 
 #[async_trait]
 impl<W: SinkWriter<CommitMetadata = ()>> LogSinker for LogSinkerOf<W> {
-    async fn consume_log_and_sink(self, log_reader: &mut impl SinkLogReader) -> Result<()> {
+    async fn consume_log_and_sink(self, log_reader: &mut impl SinkLogReader) -> Result<Infallible> {
         let mut sink_writer = self.writer;
         let sink_metrics = self.sink_metrics;
         #[derive(Debug)]
@@ -242,7 +243,10 @@ impl<W: AsyncTruncateSinkWriter> AsyncTruncateLogSinkerOf<W> {
 
 #[async_trait]
 impl<W: AsyncTruncateSinkWriter> LogSinker for AsyncTruncateLogSinkerOf<W> {
-    async fn consume_log_and_sink(mut self, log_reader: &mut impl SinkLogReader) -> Result<()> {
+    async fn consume_log_and_sink(
+        mut self,
+        log_reader: &mut impl SinkLogReader,
+    ) -> Result<Infallible> {
         loop {
             let select_result = drop_either_future(
                 select(

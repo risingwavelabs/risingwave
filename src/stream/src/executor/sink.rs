@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::convert::Infallible;
 use std::mem;
 
 use anyhow::anyhow;
@@ -217,10 +218,9 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                             self.sink_writer_param,
                             self.actor_context,
                         )
-                        .instrument_await(format!(
-                            "Consume Log: sink_id: {} actor_id: {}, executor_id: {}",
-                            sink_id, actor_id, executor_id,
-                        ));
+                        .instrument_await(format!("consume_log (sink_id {sink_id})"))
+                        .map_ok(|f| match f {}); // unify return type to `Message`
+
                         // TODO: may try to remove the boxed
                         select(consume_log_stream.into_stream(), write_log_stream).boxed()
                     })
@@ -403,7 +403,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         sink_param: SinkParam,
         mut sink_writer_param: SinkWriterParam,
         actor_context: ActorContextRef,
-    ) -> StreamExecutorResult<Message> {
+    ) -> StreamExecutorResult<Infallible> {
         let metrics = sink_writer_param.sink_metrics.clone();
 
         let visible_columns = columns
