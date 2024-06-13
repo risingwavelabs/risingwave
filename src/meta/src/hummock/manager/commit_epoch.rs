@@ -315,7 +315,7 @@ impl HummockManager {
                         table_id,
                         StateTableInfoDelta {
                             committed_epoch: epoch,
-                            safe_epoch: version.safe_epoch,
+                            safe_epoch: epoch,
                             compaction_group_id: cg_id,
                         },
                     );
@@ -329,7 +329,7 @@ impl HummockManager {
                             *table_id,
                             StateTableInfoDelta {
                                 committed_epoch: epoch,
-                                safe_epoch: version.safe_epoch,
+                                safe_epoch: info.safe_epoch,
                                 compaction_group_id: info.compaction_group_id,
                             }
                         )

@@ -26,16 +26,14 @@ public class Binding {
         }
     }
 
+    static void ensureInitialized() {}
+
     public static native void tracingSlf4jEvent(
             String threadName, String name, int level, String message);
 
     public static native boolean tracingSlf4jEventEnabled(int level);
 
     public static native int vnodeCount();
-
-    // hummock iterator method
-    // Return a pointer to the iterator
-    static native long iteratorNewHummock(byte[] readPlan);
 
     static native long iteratorNewStreamChunk(long pointer);
 

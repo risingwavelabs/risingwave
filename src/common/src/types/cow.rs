@@ -73,3 +73,8 @@ impl ToOwnedDatum for DatumCow<'_> {
         }
     }
 }
+
+impl DatumCow<'_> {
+    /// Equivalent to `DatumCow::Owned(Datum::None)`.
+    pub const NULL: DatumCow<'static> = DatumCow::Owned(None);
+}

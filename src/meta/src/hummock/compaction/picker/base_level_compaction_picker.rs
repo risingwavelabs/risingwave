@@ -166,6 +166,7 @@ impl LevelCompactionPicker {
             self.config.level0_max_compact_file_number,
             overlap_strategy.clone(),
             self.developer_config.enable_check_task_level_overlap,
+            self.config.max_l0_compact_level_count as usize,
         );
 
         let mut max_vnode_partition_idx = 0;

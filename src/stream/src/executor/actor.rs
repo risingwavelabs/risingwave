@@ -223,13 +223,14 @@ where
             )
             .into()));
 
-            // Collect barriers to local barrier manager
-            self.barrier_manager.collect(id, &barrier);
-
             // Then stop this actor if asked
             if barrier.is_stop(id) {
-                break Ok(());
+                debug!(actor_id = id, epoch = ?barrier.epoch, "stop at barrier");
+                break Ok(barrier);
             }
+
+            // Collect barriers to local barrier manager
+            self.barrier_manager.collect(id, &barrier);
 
             // Tracing related work
             last_epoch = Some(barrier.epoch);
@@ -238,7 +239,12 @@ where
 
         spawn_blocking_drop_stream(stream).await;
 
-        tracing::trace!(actor_id = id, "actor exit");
+        let result = result.map(|stop_barrier| {
+            // Collect the stop barrier after the stream has been dropped to ensure that all resources
+            self.barrier_manager.collect(id, &stop_barrier);
+        });
+
+        tracing::debug!(actor_id = id, ok = result.is_ok(), "actor exit");
         result
     }
 }

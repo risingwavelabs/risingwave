@@ -29,7 +29,6 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::window_function::{
     create_window_state, StateKey, WindowFuncCall, WindowStates,
 };
-use risingwave_storage::row_serde::row_serde_util::serialize_pk_with_vnode;
 
 use super::over_partition::{
     new_empty_partition_cache, shrink_partition_cache, CacheKey, OverPartition, PartitionCache,
@@ -37,6 +36,7 @@ use super::over_partition::{
 };
 use crate::cache::ManagedLruCache;
 use crate::common::metrics::MetricsInfo;
+use crate::consistency::consistency_panic;
 use crate::executor::monitor::OverWindowMetrics;
 use crate::executor::over_window::over_partition::AffectedRange;
 use crate::executor::prelude::*;
@@ -212,7 +212,20 @@ impl<S: StateStore> OverWindowExecutor<S> {
                                     new_row: row,
                                 };
                             }
-                            _ => panic!("inconsistent changes in input chunk"),
+                            _ => {
+                                consistency_panic!(
+                                    ?pk,
+                                    "inconsistent changes in input chunk, double-inserting"
+                                );
+                                if let Record::Update { old_row, .. } = prev_change {
+                                    *prev_change = Record::Update {
+                                        old_row: *old_row,
+                                        new_row: row,
+                                    };
+                                } else {
+                                    *prev_change = Record::Insert { new_row: row };
+                                }
+                            }
                         }
                     } else {
                         changes_merged.insert(pk, Record::Insert { new_row: row });
@@ -232,7 +245,13 @@ impl<S: StateStore> OverWindowExecutor<S> {
                                     old_row: *real_old_row,
                                 };
                             }
-                            _ => panic!("inconsistent changes in input chunk"),
+                            _ => {
+                                consistency_panic!(
+                                    ?pk,
+                                    "inconsistent changes in input chunk, double-deleting"
+                                );
+                                *prev_change = Record::Delete { old_row: row };
+                            }
                         }
                     } else {
                         changes_merged.insert(pk, Record::Delete { old_row: row });
@@ -357,13 +376,17 @@ impl<S: StateStore> OverWindowExecutor<S> {
                                 }
                             }
                             (existed, record) => {
-                                let vnode = this.state_table.compute_vnode_by_pk(&key.pk);
-                                let raw_key = serialize_pk_with_vnode(
-                                    &key.pk,
-                                    this.state_table.pk_serde(),
-                                    vnode,
+                                // when stream is inconsistent, there may be an `Update` of which the old pk does not actually exist
+                                consistency_panic!(
+                                    ?existed,
+                                    ?record,
+                                    "other cases should not exist",
                                 );
-                                panic!("other cases should not exist. raw_key: {:?}, existed: {:?}, new: {:?}", raw_key, existed, record);
+
+                                key_change_update_buffer.insert(pk, record);
+                                if let Some(chunk) = chunk_builder.append_record(existed) {
+                                    yield chunk;
+                                }
                             }
                         }
                     } else {
@@ -373,6 +396,15 @@ impl<S: StateStore> OverWindowExecutor<S> {
 
                 // Apply the change record.
                 partition.write_record(&mut this.state_table, key, record);
+            }
+
+            if !key_change_update_buffer.is_empty() {
+                consistency_panic!(
+                    ?key_change_update_buffer,
+                    "key-change update buffer should be empty after processing"
+                );
+                // if in non-strict mode, we can reach here, but we don't know the `StateKey`,
+                // so just ignore the buffer.
             }
 
             let cache_len = partition.cache_real_len();
@@ -423,21 +455,17 @@ impl<S: StateStore> OverWindowExecutor<S> {
     async fn build_changes_for_partition(
         this: &ExecutorInner<S>,
         partition: &mut OverPartition<'_, S>,
-        delta: PartitionDelta,
+        mut delta: PartitionDelta,
     ) -> StreamExecutorResult<(
         BTreeMap<StateKey, Record<OwnedRow>>,
         Option<RangeInclusive<StateKey>>,
     )> {
-        assert!(!delta.is_empty(), "if there's no delta, we won't be here");
-
         let mut part_changes = BTreeMap::new();
 
         // Find affected ranges, this also ensures that all rows in the affected ranges are loaded
         // into the cache.
-        // TODO(rc): maybe we can find affected ranges for each window function call (each frame) to simplify
-        // the implementation of `find_affected_ranges`
         let (part_with_delta, affected_ranges) = partition
-            .find_affected_ranges(&this.state_table, &delta)
+            .find_affected_ranges(&this.state_table, &mut delta)
             .await?;
 
         let snapshot = part_with_delta.snapshot();

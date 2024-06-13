@@ -448,10 +448,6 @@ macro_rules! for_all_plain_native_methods {
 
                 public static native int vnodeCount();
 
-                // hummock iterator method
-                // Return a pointer to the iterator
-                static native long iteratorNewHummock(byte[] readPlan);
-
                 static native long iteratorNewStreamChunk(long pointer);
 
                 static native boolean iteratorNext(long pointer);
@@ -839,6 +835,23 @@ macro_rules! call_method {
     }};
 }
 
+#[macro_export]
+macro_rules! gen_native_method_entry {
+    (
+        $class_prefix:ident, $func_name:ident, {$($ret:tt)+}, {$($args:tt)*}
+    ) => {{
+        {
+            let fn_ptr = $crate::paste! {[<$class_prefix $func_name> ]} as *mut c_void;
+            let sig = $crate::gen_jni_sig! { {$($ret)+}, {$($args)*}};
+            jni::NativeMethod {
+                name: jni::strings::JNIString::from(stringify! {$func_name}),
+                sig: jni::strings::JNIString::from(sig),
+                fn_ptr,
+            }
+        }
+    }};
+}
+
 #[cfg(test)]
 mod tests {
     use std::fmt::Formatter;
@@ -891,7 +904,6 @@ mod tests {
                 tracingSlf4jEvent                        (Ljava/lang/String;Ljava/lang/String;ILjava/lang/String;)V,
                 tracingSlf4jEventEnabled                 (I)Z,
                 vnodeCount                               ()I,
-                iteratorNewHummock                       ([B)J,
                 iteratorNewStreamChunk                   (J)J,
                 iteratorNext                             (J)Z,
                 iteratorClose                            (J)V,

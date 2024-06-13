@@ -21,7 +21,6 @@ use super::{
     CompactionInput, CompactionPicker, CompactionTaskValidator, LocalPickerStatistic,
     ValidationRuleType,
 };
-use crate::hummock::compaction::picker::MAX_COMPACT_LEVEL_COUNT;
 use crate::hummock::level_handler::LevelHandler;
 
 pub struct TierCompactionPicker {
@@ -87,10 +86,7 @@ impl TierCompactionPicker {
             let mut compaction_bytes = level.total_file_size;
             let mut compact_file_count = level.table_infos.len() as u64;
             // Limit sstable file count to avoid using too much memory.
-            let overlapping_max_compact_file_numer = std::cmp::min(
-                self.config.level0_max_compact_file_number,
-                MAX_COMPACT_LEVEL_COUNT as u64,
-            );
+            let overlapping_max_compact_file_numer = self.config.level0_max_compact_file_number;
 
             for other in &l0.sub_levels[idx + 1..] {
                 if compaction_bytes > max_compaction_bytes {

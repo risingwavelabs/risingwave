@@ -43,8 +43,6 @@ pub use ttl_reclaim_compaction_picker::{TtlPickerState, TtlReclaimCompactionPick
 
 use crate::hummock::level_handler::LevelHandler;
 
-pub const MAX_COMPACT_LEVEL_COUNT: usize = 42;
-
 #[derive(Default, Debug)]
 pub struct LocalPickerStatistic {
     pub skip_by_write_amp_limit: u64,

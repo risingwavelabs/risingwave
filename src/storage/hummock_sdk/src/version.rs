@@ -20,18 +20,22 @@ use std::sync::{Arc, LazyLock};
 
 use prost::Message;
 use risingwave_common::catalog::TableId;
+use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_pb::hummock::group_delta::DeltaType;
 use risingwave_pb::hummock::hummock_version::Levels as PbLevels;
 use risingwave_pb::hummock::hummock_version_delta::{ChangeLogDelta, GroupDeltas as PbGroupDeltas};
 use risingwave_pb::hummock::{
-    HummockVersion as PbHummockVersion, HummockVersionDelta as PbHummockVersionDelta, SstableInfo,
-    StateTableInfo as PbStateTableInfo, StateTableInfo, StateTableInfoDelta,
+    CompactionConfig, HummockVersion as PbHummockVersion,
+    HummockVersionDelta as PbHummockVersionDelta, SstableInfo, StateTableInfo as PbStateTableInfo,
+    StateTableInfo, StateTableInfoDelta,
 };
 use tracing::warn;
 
 use crate::change_log::TableChangeLog;
+use crate::compaction_group::hummock_version_ext::build_initial_compaction_group_levels;
+use crate::compaction_group::StaticCompactionGroupId;
 use crate::table_watermark::TableWatermarks;
-use crate::{CompactionGroupId, HummockSstableObjectId, HummockVersionId};
+use crate::{CompactionGroupId, HummockSstableObjectId, HummockVersionId, FIRST_VERSION_ID};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct HummockVersionStateTableInfo {
@@ -130,7 +134,16 @@ impl HummockVersionStateTableInfo {
             };
             match self.state_table_info.entry(*table_id) {
                 Entry::Occupied(mut entry) => {
-                    let prev_info = replace(entry.get_mut(), new_info);
+                    let prev_info = entry.get_mut();
+                    assert!(
+                        new_info.safe_epoch >= prev_info.safe_epoch
+                            && new_info.committed_epoch >= prev_info.committed_epoch,
+                        "state table info regress. table id: {}, prev_info: {:?}, new_info: {:?}",
+                        table_id.table_id,
+                        prev_info,
+                        new_info
+                    );
+                    let prev_info = replace(prev_info, new_info);
                     changed_table.insert(*table_id, Some(prev_info));
                 }
                 Entry::Vacant(entry) => {
@@ -173,7 +186,7 @@ pub struct HummockVersion {
     pub id: u64,
     pub levels: HashMap<CompactionGroupId, PbLevels>,
     pub max_committed_epoch: u64,
-    pub safe_epoch: u64,
+    safe_epoch: u64,
     pub table_watermarks: HashMap<TableId, Arc<TableWatermarks>>,
     pub table_change_log: HashMap<TableId, TableChangeLog>,
     pub state_table_info: HummockVersionStateTableInfo,
@@ -312,6 +325,51 @@ impl HummockVersion {
                     cg_id
                 );
             }
+        }
+    }
+
+    pub(crate) fn set_safe_epoch(&mut self, safe_epoch: u64) {
+        self.safe_epoch = safe_epoch;
+    }
+
+    pub fn visible_table_safe_epoch(&self) -> u64 {
+        self.safe_epoch
+    }
+
+    pub fn create_init_version(default_compaction_config: CompactionConfig) -> HummockVersion {
+        let mut init_version = HummockVersion {
+            id: FIRST_VERSION_ID,
+            levels: Default::default(),
+            max_committed_epoch: INVALID_EPOCH,
+            safe_epoch: INVALID_EPOCH,
+            table_watermarks: HashMap::new(),
+            table_change_log: HashMap::new(),
+            state_table_info: HummockVersionStateTableInfo::empty(),
+        };
+        for group_id in [
+            StaticCompactionGroupId::StateDefault as CompactionGroupId,
+            StaticCompactionGroupId::MaterializedView as CompactionGroupId,
+        ] {
+            init_version.levels.insert(
+                group_id,
+                build_initial_compaction_group_levels(group_id, &default_compaction_config),
+            );
+        }
+        init_version
+    }
+
+    pub fn version_delta_after(&self) -> HummockVersionDelta {
+        HummockVersionDelta {
+            id: self.next_version_id(),
+            prev_id: self.id,
+            safe_epoch: self.safe_epoch,
+            trivial_move: false,
+            max_committed_epoch: self.max_committed_epoch,
+            group_deltas: Default::default(),
+            new_table_watermarks: HashMap::new(),
+            removed_table_ids: HashSet::new(),
+            change_log_delta: HashMap::new(),
+            state_table_info_delta: Default::default(),
         }
     }
 }
