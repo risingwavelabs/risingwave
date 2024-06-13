@@ -17,8 +17,6 @@ use risingwave_common::config::CompactionConfig as CompactionConfigOpt;
 use risingwave_pb::hummock::compaction_config::CompactionMode;
 use risingwave_pb::hummock::CompactionConfig;
 
-pub const L0_MAX_SIZE: u64 = 32 * 1024 * 1024 * 1024; // 32GB
-
 pub struct CompactionConfigBuilder {
     config: CompactionConfig,
 }
@@ -32,8 +30,7 @@ impl CompactionConfigBuilder {
                 max_level: compaction_config::max_level() as u64,
                 max_compaction_bytes: compaction_config::max_compaction_bytes(),
                 sub_level_max_compaction_bytes: compaction_config::sub_level_max_compaction_bytes(),
-                level0_tier_compact_file_number: compaction_config::level0_tier_compact_file_number(
-                ),
+                level0_tier_compact_file_number: compaction_config::level0_tier_compact_file_number(),
                 target_file_size_base: compaction_config::target_file_size_base(),
                 compaction_mode: CompactionMode::Range as i32,
                 // support compression setting per level

@@ -525,7 +525,8 @@ impl HummockManager {
         if let Some(history) = table_write_throughput.get(table_id) {
             if history.len() >= window_size {
                 let sum = history.iter().sum::<u64>();
-                is_high_write_throughput = sum / checkpoint_secs > self.env.opts.table_write_throughput_threshold * history.len() as u64;
+                is_high_write_throughput = sum / checkpoint_secs
+                    > self.env.opts.table_write_throughput_threshold * history.len() as u64;
             }
         }
 

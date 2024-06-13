@@ -118,12 +118,8 @@ impl IntraCompactionPicker {
         }
 
         for (idx, level) in l0.sub_levels.iter().enumerate() {
-            if level.level_type() != LevelType::Nonoverlapping {
-                continue;
-            }
-            if level.vnode_partition_count == 0
-                && level.total_file_size > self.config.sub_level_max_compaction_bytes
-                || level.total_file_size > self.config.max_compaction_bytes
+            if level.level_type() != LevelType::Nonoverlapping
+                || level.total_file_size > self.config.sub_level_max_compaction_bytes
             {
                 continue;
             }
@@ -136,19 +132,15 @@ impl IntraCompactionPicker {
                 continue;
             }
 
-            let mut max_compaction_bytes = self.config.sub_level_max_compaction_bytes;
-
-            let mut level0_sub_level_compact_level_count =
-                self.config.level0_sub_level_compact_level_count;
-            if level.total_file_size > self.config.sub_level_max_compaction_bytes {
-                level0_sub_level_compact_level_count *= 2;
-                max_compaction_bytes = level.total_file_size;
-            }
+            let max_compaction_bytes = std::cmp::min(
+                self.config.max_compaction_bytes,
+                self.config.sub_level_max_compaction_bytes,
+            );
 
             let non_overlap_sub_level_picker = NonOverlapSubLevelPicker::new(
                 self.config.sub_level_max_compaction_bytes / 2,
                 max_compaction_bytes,
-                level0_sub_level_compact_level_count as usize,
+                self.config.level0_sub_level_compact_level_count as usize,
                 self.config.level0_max_compact_file_number,
                 overlap_strategy.clone(),
                 self.developer_config.enable_check_task_level_overlap,
@@ -192,19 +184,13 @@ impl IntraCompactionPicker {
                     total_file_count += input.total_file_count;
                 }
                 select_level_inputs.reverse();
-                let partition_count =
-                    if level.total_file_size > self.config.sub_level_max_compaction_bytes * 2 {
-                        vnode_partition_count * 2
-                    } else {
-                        vnode_partition_count
-                    };
 
                 let result = CompactionInput {
                     input_levels: select_level_inputs,
                     target_sub_level_id: level.sub_level_id,
                     select_input_size,
                     total_file_count: total_file_count as u64,
-                    vnode_partition_count: partition_count,
+                    vnode_partition_count,
                     ..Default::default()
                 };
 
