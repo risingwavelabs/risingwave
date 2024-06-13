@@ -1786,8 +1786,8 @@ pub mod default {
         const DEFAULT_MIN_OVERLAPPING_SUB_LEVEL_COMPACT_LEVEL_COUNT: u32 = 12;
         const DEFAULT_TOMBSTONE_RATIO_PERCENT: u32 = 40;
         const DEFAULT_EMERGENCY_PICKER: bool = true;
-
         const DEFAULT_MAX_LEVEL: u32 = 6;
+        const DEFAULT_MAX_L0_COMPACT_LEVEL_COUNT: u32 = 42;
 
         use crate::catalog::hummock::CompactionFilterFlag;
 
@@ -1853,6 +1853,10 @@ pub mod default {
 
         pub fn max_level() -> u32 {
             DEFAULT_MAX_LEVEL
+        }
+
+        pub fn max_l0_compact_level_count() -> u32 {
+            DEFAULT_MAX_L0_COMPACT_LEVEL_COUNT
         }
     }
 

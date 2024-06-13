@@ -548,17 +548,18 @@ Instructions about submitting PRs are included in the [contribution guidelines](
 
 ## CI Labels Guide
 
-- `[ci/run-xxx ...]`: Run additional steps indicated by `ci/run-xxx` in your PR.
-- `ci/skip-ci` + `[ci/run-xxx ...]` : Skip steps except for those indicated by `ci/run-xxx` in your **DRAFT PR.**
-- `ci/run-main-cron`: Run full `main-cron`.
-- `ci/run-main-cron` + `ci/main-cron/skip-ci` + `[ci/run-xxx …]` : Run specific steps indicated by `ci/run-xxx`
+- `[ci/run-xxx ...]`: Run additional steps in the PR workflow indicated by `ci/run-xxx` in your PR.
+- `ci/pr/run-selected` + `[ci/run-xxx ...]` : Only run selected steps indicated by `ci/run-xxx` in your **DRAFT PR.**
+- `ci/main-cron/run-all`: Run full `main-cron` workflow for your PR.
+- `ci/main-cron/run-selected` + `[ci/run-xxx …]` : Run specific steps indicated by `ci/run-xxx`
   from the `main-cron` workflow, in your PR. Can use to verify some `main-cron` fix works as expected.
 - To reference `[ci/run-xxx ...]` labels, you may look at steps from `pull-request.yml` and `main-cron.yml`.
-- **Be sure to add all the dependencies.**
 
-  For example to run `e2e-test` for `main-cron` in your pull request:
-  1. Add `ci/run-build`, `ci/run-build-other`, `ci/run-docslt` .
-     These correspond to its `depends` field in `pull-request.yml` and `main-cron.yml` .
-  2. Add `ci/run-e2e-test` to run the step as well.
-  3. Add `ci/run-main-cron` to run `main-cron` workflow in your pull request,
-  4. Add `ci/main-cron/skip-ci` to skip all other steps which were not selected with `ci/run-xxx`.
+### Example
+
+https://github.com/risingwavelabs/risingwave/pull/17197
+
+To run `e2e-test` and `e2e-source-test` for `main-cron` in your pull request:
+1. Add `ci/run-e2e-test`.
+2. Add `ci/run-e2e-source-tests`.
+3. Add `ci/main-cron/run-selected` to skip all other steps which were not selected with `ci/run-xxx`.
