@@ -21,10 +21,11 @@ use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use foyer::CacheContext;
 use futures::future::try_join_all;
-use futures::{stream, Stream, StreamExt};
+use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::{Either, Itertools};
-use risingwave_common::array::{ArrayRef, DataChunk, Op};
+use more_asserts::assert_gt;
+use risingwave_common::array::{ArrayBuilderImpl, ArrayRef, DataChunk, Op};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId, TableOption};
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
@@ -626,6 +627,53 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         .await
     }
 
+    // Construct a stream of (columns, row_count) from a row stream
+    #[try_stream(ok = (Vec<ArrayRef>, usize), error = StorageError)]
+    async fn convert_row_stream_to_array_vec_stream(
+        iter: impl Stream<Item = StorageResult<KeyedRow<Bytes>>>,
+        schema: Schema,
+        chunk_size: usize,
+    ) {
+        use futures::{pin_mut, TryStreamExt};
+        use risingwave_common::util::iter_util::ZipEqFast;
+
+        pin_mut!(iter);
+
+        let mut builders: Option<Vec<ArrayBuilderImpl>> = None;
+        let mut row_count = 0;
+
+        while let Some(row) = iter.try_next().await? {
+            row_count += 1;
+            // Uses ArrayBuilderImpl instead of DataChunkBuilder here to demonstrate how to build chunk in a columnar manner
+            let builders_ref =
+                builders.get_or_insert_with(|| schema.create_array_builders(chunk_size));
+            for (datum, builder) in row.iter().zip_eq_fast(builders_ref.iter_mut()) {
+                builder.append(datum);
+            }
+            if row_count == chunk_size {
+                let columns: Vec<_> = builders
+                    .take()
+                    .unwrap()
+                    .into_iter()
+                    .map(|builder| builder.finish().into())
+                    .collect();
+                yield (columns, row_count);
+                assert!(builders.is_none());
+                row_count = 0;
+            }
+        }
+
+        if let Some(builders) = builders {
+            assert_gt!(row_count, 0);
+            // yield the last chunk if any
+            let columns: Vec<_> = builders
+                .into_iter()
+                .map(|builder| builder.finish().into())
+                .collect();
+            yield (columns, row_count);
+        }
+    }
+
     /// Iterates on the table with the given prefix of the pk in `pk_prefix` and the range bounds.
     /// Returns a stream of chunks of columns with the provided `chunk_size`
     async fn chunk_iter_with_pk_bounds(
@@ -637,73 +685,15 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         chunk_size: usize,
         prefetch_options: PrefetchOptions,
     ) -> StorageResult<impl Stream<Item = StorageResult<(Vec<ArrayRef>, usize)>> + Send> {
-        use risingwave_common::util::iter_util::ZipEqFast;
-
         let iter = self
             .iter_with_pk_bounds(epoch, pk_prefix, range_bounds, ordered, prefetch_options)
             .await?;
 
-        // Uses ArrayBuilderImpl instead of DataChunkBuilder here to demonstrate how to build chunk in a columnar manner
-        let builders = self.schema.create_array_builders(chunk_size);
-        let row_count = 0;
-        Ok(stream::unfold(
-            Some((Box::pin(iter), builders, row_count, self.schema.clone())),
-            move |mut state| async move {
-                // When state is None, that means we already reached end or met error (condition 2 or 3 below)
-                let (mut iter, mut builders, mut row_count, schema) = state.take()?;
-                match iter.next().await {
-                    Some(Ok(row)) => {
-                        // 1. the row stream returns a valid row
-                        row_count += 1;
-                        for (datum, builder) in row.iter().zip_eq_fast(builders.iter_mut()) {
-                            builder.append(datum);
-                        }
-                        if row_count == chunk_size {
-                            // 1.a. yield a new chunk and reset the builder
-                            let columns: Vec<_> = builders
-                                .into_iter()
-                                .map(|builder| builder.finish().into())
-                                .collect();
-                            let builders: Vec<risingwave_common::array::ArrayBuilderImpl> =
-                                schema.create_array_builders(chunk_size);
-                            Some((
-                                // Chunk to yield
-                                Some(Ok((columns, chunk_size))),
-                                // The new state (row_count == 0)
-                                Some((iter, builders, 0, schema)),
-                            ))
-                        } else {
-                            // 1.b. do not yield because the chunk is not full yet
-                            Some((
-                                // None indicates no chunk to yield. It will be filter out by the filter_map
-                                None,
-                                Some((iter, builders, row_count, schema)),
-                            ))
-                        }
-                    }
-                    Some(Err(e)) => {
-                        // 2. the row stream returns an error.
-                        // yield the error directly and stop the iteration by setting the state to None
-                        Some((Some(Err(e)), None))
-                    }
-                    None => {
-                        // 3. the row stream has reached the end
-                        if row_count > 0 {
-                            // 3.a. yield the last chunk if any
-                            let columns: Vec<_> = builders
-                                .into_iter()
-                                .map(|builder| builder.finish().into())
-                                .collect();
-                            Some((Some(Ok((columns, row_count))), None))
-                        } else {
-                            // 3.b. No need to yield if the last chunk is empty
-                            None
-                        }
-                    }
-                }
-            },
-        )
-        .filter_map(|x| async { x }))
+        Ok(Self::convert_row_stream_to_array_vec_stream(
+            iter,
+            self.schema.clone(),
+            chunk_size,
+        ))
     }
 
     /// Construct a stream item `StorageResult<KeyedRow<Bytes>>` for batch executors.
