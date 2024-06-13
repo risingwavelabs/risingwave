@@ -25,6 +25,9 @@ import java.util.Properties;
 
 public abstract class JdbcUtils {
 
+    static final int CONNECTION_TIMEOUT = 30;
+    static final int SOCKET_TIMEOUT = 300;
+
     public static Optional<JdbcDialectFactory> getDialectFactory(String jdbcUrl) {
         if (jdbcUrl.startsWith("jdbc:mysql")) {
             return Optional.of(new MySqlDialectFactory());
@@ -45,8 +48,6 @@ public abstract class JdbcUtils {
         props.setProperty("tcpKeepAlive", "true");
 
         // default timeout in seconds
-        final int CONNECTION_TIMEOUT = 30;
-        final int SOCKET_TIMEOUT = 300;
         boolean isPg = jdbcUrl.startsWith("jdbc:postgresql");
 
         // postgres use seconds and mysql use milliseconds
