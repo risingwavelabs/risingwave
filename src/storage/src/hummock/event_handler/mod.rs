@@ -72,15 +72,14 @@ pub enum HummockEvent {
         imm: ImmutableMemtable,
     },
 
-    SealEpoch {
-        epoch: HummockEpoch,
-        is_checkpoint: bool,
+    InitEpoch {
+        instance_id: LocalInstanceId,
+        init_epoch: HummockEpoch,
     },
 
     LocalSealEpoch {
         instance_id: LocalInstanceId,
-        table_id: TableId,
-        epoch: HummockEpoch,
+        next_epoch: HummockEpoch,
         opts: SealCurrentEpochOptions,
     },
 
@@ -97,7 +96,6 @@ pub enum HummockEvent {
     },
 
     DestroyReadVersion {
-        table_id: TableId,
         instance_id: LocalInstanceId,
     },
 }
@@ -116,27 +114,25 @@ impl HummockEvent {
 
             HummockEvent::Shutdown => "Shutdown".to_string(),
 
+            HummockEvent::InitEpoch {
+                instance_id,
+                init_epoch,
+            } => {
+                format!("InitEpoch {} {}", instance_id, init_epoch)
+            }
+
             HummockEvent::ImmToUploader { instance_id, imm } => {
                 format!("ImmToUploader {} {}", instance_id, imm.batch_id())
             }
 
-            HummockEvent::SealEpoch {
-                epoch,
-                is_checkpoint,
-            } => format!(
-                "SealEpoch epoch {:?} is_checkpoint {:?}",
-                epoch, is_checkpoint
-            ),
-
             HummockEvent::LocalSealEpoch {
-                epoch,
                 instance_id,
-                table_id,
+                next_epoch,
                 opts,
             } => {
                 format!(
-                    "LocalSealEpoch epoch: {}, table_id: {}, instance_id: {}, opts: {:?}",
-                    epoch, table_id.table_id, instance_id, opts
+                    "LocalSealEpoch next_epoch: {}, instance_id: {}, opts: {:?}",
+                    next_epoch, instance_id, opts
                 )
             }
 
@@ -150,13 +146,9 @@ impl HummockEvent {
                 table_id, is_replicated
             ),
 
-            HummockEvent::DestroyReadVersion {
-                table_id,
-                instance_id,
-            } => format!(
-                "DestroyReadVersion table_id {:?} instance_id {:?}",
-                table_id, instance_id
-            ),
+            HummockEvent::DestroyReadVersion { instance_id } => {
+                format!("DestroyReadVersion instance_id {:?}", instance_id)
+            }
 
             #[cfg(any(test, feature = "test"))]
             HummockEvent::FlushEvent(_) => "FlushEvent".to_string(),
@@ -210,7 +202,6 @@ impl Drop for LocalInstanceGuard {
             // need to handle failure
             sender
                 .send(HummockEvent::DestroyReadVersion {
-                    table_id: self.table_id,
                     instance_id: self.instance_id,
                 })
                 .unwrap_or_else(|err| {

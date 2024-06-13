@@ -26,6 +26,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::min;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Arc, LazyLock};
 use std::time::{Instant, SystemTime};
@@ -104,6 +105,7 @@ static CANCEL_STATUS_SET: LazyLock<HashSet<TaskStatus>> = LazyLock::new(|| {
         TaskStatus::InvalidGroupCanceled,
         TaskStatus::NoAvailMemoryResourceCanceled,
         TaskStatus::NoAvailCpuResourceCanceled,
+        TaskStatus::HeartbeatProgressCanceled,
     ]
     .into_iter()
     .collect()
@@ -182,25 +184,33 @@ impl<'a> HummockVersionTransaction<'a> {
         };
         group_deltas.push(group_delta);
         version_delta.safe_epoch = std::cmp::max(
-            version_delta.latest_version().safe_epoch,
+            version_delta.latest_version().visible_table_safe_epoch(),
             compact_task.watermark,
         );
-        if version_delta.latest_version().safe_epoch < version_delta.safe_epoch {
-            version_delta.state_table_info_delta = version_delta
-                .latest_version()
-                .state_table_info
-                .info()
-                .iter()
-                .map(|(table_id, info)| {
-                    (
-                        *table_id,
-                        StateTableInfoDelta {
-                            committed_epoch: info.committed_epoch,
-                            safe_epoch: version_delta.safe_epoch,
-                        },
-                    )
-                })
-                .collect();
+        if version_delta.latest_version().visible_table_safe_epoch() < version_delta.safe_epoch {
+            version_delta.with_latest_version(|version, version_delta| {
+                for (table_id, info) in version.state_table_info.info() {
+                    let new_safe_epoch = min(version_delta.safe_epoch, info.committed_epoch);
+                    if new_safe_epoch > info.safe_epoch {
+                        if new_safe_epoch != version_delta.safe_epoch {
+                            warn!(
+                                new_safe_epoch,
+                                committed_epoch = info.committed_epoch,
+                                global_safe_epoch = version_delta.safe_epoch,
+                                table_id = table_id.table_id,
+                                "table has different safe epoch to global"
+                            );
+                        }
+                        version_delta.state_table_info_delta.insert(
+                            *table_id,
+                            StateTableInfoDelta {
+                                committed_epoch: info.committed_epoch,
+                                safe_epoch: new_safe_epoch,
+                            },
+                        );
+                    }
+                }
+            });
         }
         version_delta.pre_apply();
     }
@@ -455,40 +465,36 @@ impl HummockManager {
                                 progress,
                             }) => {
                                 let compactor_manager = hummock_manager.compactor_manager.clone();
-                                let cancel_tasks = compactor_manager.update_task_heartbeats(&progress);
-                                if let Some(compactor) = compactor_manager.get_compactor(context_id) {
-                                    // TODO: task cancellation can be batched
-                                    for task in cancel_tasks {
-                                        tracing::info!(
-                                            "Task with group_id {} task_id {} with context_id {} has expired due to lack of visible progress",
-                                            task.compaction_group_id,
-                                            task.task_id,
-                                            context_id,
-                                        );
+                                let cancel_tasks = compactor_manager.update_task_heartbeats(&progress).into_iter().map(|task|task.task_id).collect::<Vec<_>>();
+                                if !cancel_tasks.is_empty() {
+                                    tracing::info!(
+                                        "Tasks cancel with task_ids {:?} with context_id {} has expired due to lack of visible progress",
+                                        cancel_tasks,
+                                        context_id,
+                                    );
 
-                                        if let Err(e) =
-                                            hummock_manager
-                                            .cancel_compact_task(task.task_id, TaskStatus::HeartbeatCanceled)
-                                            .await
-                                        {
-                                            tracing::error!(
-                                                task_id = task.task_id,
-                                                error = %e.as_report(),
-                                                "Attempt to remove compaction task due to elapsed heartbeat failed. We will continue to track its heartbeat
-                                                until we can successfully report its status."
-                                            );
-                                        }
-
-                                        // Forcefully cancel the task so that it terminates
-                                        // early on the compactor
-                                        // node.
-                                        let _ = compactor.cancel_task(task.task_id);
-                                        tracing::info!(
-                                            "CancelTask operation for task_id {} has been sent to node with context_id {}",
-                                            context_id,
-                                            task.task_id
+                                    if let Err(e) = hummock_manager
+                                        .cancel_compact_tasks(cancel_tasks.clone(), TaskStatus::HeartbeatProgressCanceled)
+                                        .await
+                                    {
+                                        tracing::error!(
+                                            error = %e.as_report(),
+                                            "Attempt to remove compaction task due to elapsed heartbeat failed. We will continue to track its heartbeat
+                                            until we can successfully report its status."
                                         );
                                     }
+                                }
+
+                                if let Some(compactor) = compactor_manager.get_compactor(context_id) {
+                                    // Forcefully cancel the task so that it terminates
+                                    // early on the compactor
+                                    // node.
+                                    let _ = compactor.cancel_tasks(&cancel_tasks);
+                                    tracing::info!(
+                                        "CancelTask operation for task_id {:?} has been sent to node with context_id {}",
+                                        cancel_tasks,
+                                        context_id
+                                    );
                                 } else {
                                     // Determine the validity of the compactor streaming rpc. When the compactor no longer exists in the manager, the stream will be removed.
                                     // Tip: Connectivity to the compactor will be determined through the `send_event` operation. When send fails, it will be removed from the manager
@@ -698,15 +704,15 @@ impl HummockManager {
             // When the last table of a compaction group is deleted, the compaction group (and its
             // config) is destroyed as well. Then a compaction task for this group may come later and
             // cannot find its config.
-            let group_config = match self
-                .compaction_group_manager
-                .read()
-                .await
-                .try_get_compaction_group_config(compaction_group_id)
-            {
-                Some(config) => config,
-                None => continue,
+            let group_config = {
+                let config_manager = self.compaction_group_manager.read().await;
+
+                match config_manager.try_get_compaction_group_config(compaction_group_id) {
+                    Some(config) => config,
+                    None => continue,
+                }
             };
+
             // StoredIdGenerator already implements ids pre-allocation by ID_PREALLOCATE_INTERVAL.
             let task_id = next_compaction_task_id(&self.env).await?;
 
@@ -995,7 +1001,7 @@ impl HummockManager {
         Ok(ret[0])
     }
 
-    async fn cancel_compact_tasks(
+    pub async fn cancel_compact_tasks(
         &self,
         tasks: Vec<u64>,
         task_status: TaskStatus,

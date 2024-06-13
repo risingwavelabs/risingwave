@@ -1031,11 +1031,8 @@ mod tests {
             watermark3.clone(),
         );
 
-        let mut version = HummockVersion {
-            max_committed_epoch: EPOCH1,
-            safe_epoch: EPOCH1,
-            ..Default::default()
-        };
+        let mut version = HummockVersion::default();
+        version.max_committed_epoch = EPOCH1;
         let test_table_id = TableId::from(233);
         version.table_watermarks.insert(
             test_table_id,

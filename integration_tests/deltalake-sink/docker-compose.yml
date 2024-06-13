@@ -1,5 +1,4 @@
 ---
-version: "3"
 services:
   spark:
     image: apache/spark:3.3.1
