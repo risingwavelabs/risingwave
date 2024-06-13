@@ -27,7 +27,7 @@ jobs:
 
           If you think it is still relevant today, and needs to be done *in the near future*, you can comment to update the status, or just manually remove the `no-issue-activity` label.
 
-          You can also confidently close this issue as not planned to keep our backlog clean. (If no further action taken, the issue will be automatically closed after 7 days. Sorry!)
+          You can also confidently close this issue as not planned to keep our backlog clean. (If no further action taken, the issue will be automatically closed after 7 days. Sorry! 🙏)
           Don't worry if you think the issue is still valuable to continue in the future.
           It's searchable and can be reopened when it's time. 😄
         stale-pr-message: >
@@ -37,15 +37,15 @@ jobs:
 
           If you think it is still relevant today, and have time to work on it *in the near future*, you can comment to update the status, or just manually remove the `no-pr-activity` label.
 
-          You can also confidently close this PR to keep our backlog clean. (If no further action taken, the PR will be automatically closed after 7 days. Sorry!)
+          You can also confidently close this PR to keep our backlog clean. (If no further action taken, the PR will be automatically closed after 7 days. Sorry!  🙏)
           Don't worry if you think the PR is still valuable to continue in the future.
           It's searchable and can be reopened when it's time. 😄
         close-issue-message: >
-          Close this issue as there's no further actions taken after it is marked as stale for 7 days. Sorry!
+          Close this issue as there's no further actions taken after it is marked as stale for 7 days. Sorry! 🙏
 
           You can reopen it when it's relevant again.
         close-pr-message: >
-          Close this PR as there's no further actions taken after it is marked as stale for 7 days. Sorry!
+          Close this PR as there's no further actions taken after it is marked as stale for 7 days. Sorry! 🙏
 
           You can reopen it when you have time to continue working on it.
         stale-issue-label: 'no-issue-activity'
