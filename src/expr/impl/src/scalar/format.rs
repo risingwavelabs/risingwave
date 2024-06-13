@@ -18,7 +18,6 @@ use std::str::FromStr;
 use risingwave_common::row::Row;
 use risingwave_common::types::{ScalarRefImpl, ToText};
 use risingwave_expr::{function, ExprError, Result};
-use thiserror_ext::AsReport;
 
 use super::string::quote_ident;
 

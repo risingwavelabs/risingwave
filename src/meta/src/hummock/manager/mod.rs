@@ -392,7 +392,7 @@ impl HummockManager {
                 .read()
                 .await
                 .default_compaction_config();
-            let checkpoint_version = create_init_version(default_compaction_config);
+            let checkpoint_version = HummockVersion::create_init_version(default_compaction_config);
             tracing::info!("init hummock version checkpoint");
             versioning_guard.checkpoint = HummockVersionCheckpoint {
                 version: checkpoint_version.clone(),
@@ -507,7 +507,7 @@ impl HummockManager {
                 .init_compaction_config_for_replay(group.id, group_config)
                 .await
                 .unwrap();
-            self.register_table_ids(&pairs).await?;
+            self.register_table_ids_for_test(&pairs).await?;
             tracing::info!("Registered table ids {:?}", pairs);
         }
 

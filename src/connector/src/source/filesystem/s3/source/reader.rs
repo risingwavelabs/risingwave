@@ -43,11 +43,11 @@ use crate::source::{
     into_chunk_stream, BoxChunkSourceStream, Column, SourceContextRef, SourceMessage, SourceMeta,
 };
 
-const MAX_CHANNEL_BUFFER_SIZE: usize = 2048;
 const STREAM_READER_CAPACITY: usize = 4096;
 
 #[derive(Debug)]
 pub struct S3FileReader {
+    #[expect(dead_code)]
     split_offset: HashMap<String, u64>,
     bucket_name: String,
     s3_client: s3_client::Client,

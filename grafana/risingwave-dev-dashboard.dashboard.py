@@ -40,6 +40,13 @@ def section_actor_info(outer_panels):
                     [panels.table_target(f"group({metric('table_info')}) by (table_id, table_name, table_type, materialized_view_id, fragment_id, compaction_group_id)")],
                     ["table_id", "table_name", "table_type", "materialized_view_id", "fragment_id", "compaction_group_id"],
                 ),
+                panels.table_info(
+                    "Actor Count (Group By Compute Node)",
+                    "Actor count per compute node",
+                    [panels.table_target(f"count({metric('actor_info')}) by (compute_node)")],
+                    ["table_id", "table_name", "table_type", "materialized_view_id", "fragment_id", "compaction_group_id"],
+                    dict.fromkeys(["Time"], True)
+                )
             ],
         )
     ]
@@ -2261,6 +2268,23 @@ def section_hummock_write(outer_panels):
                         panels.target(
                             f"sum({metric('state_store_uploader_uploading_task_size')}) by ({COMPONENT_LABEL}, {NODE_LABEL})",
                             "uploading task size - {{%s}} @ {{%s}}"
+                            % (COMPONENT_LABEL, NODE_LABEL),
+                        ),
+                        panels.target(
+                            f"sum({metric('state_store_uploader_imm_size')}) by ({COMPONENT_LABEL}, {NODE_LABEL})",
+                            "uploader imm size - {{%s}} @ {{%s}}"
+                            % (COMPONENT_LABEL, NODE_LABEL),
+                        ),
+                        panels.target(
+                            f"sum({metric('state_store_uploader_imm_size')}) by ({COMPONENT_LABEL}, {NODE_LABEL}) - "
+                            f"sum({metric('state_store_uploader_uploading_task_size')}) by ({COMPONENT_LABEL}, {NODE_LABEL})",
+                            "unflushed imm size - {{%s}} @ {{%s}}"
+                            % (COMPONENT_LABEL, NODE_LABEL),
+                            ),
+                        panels.target(
+                            f"sum({metric('uploading_memory_size')}) by ({COMPONENT_LABEL}, {NODE_LABEL}) - "
+                            f"sum({metric('state_store_uploader_imm_size')}) by ({COMPONENT_LABEL}, {NODE_LABEL})",
+                            "orphan imm size - {{%s}} @ {{%s}}"
                             % (COMPONENT_LABEL, NODE_LABEL),
                         ),
                         panels.target(

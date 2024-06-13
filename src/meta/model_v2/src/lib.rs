@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 
 use risingwave_pb::catalog::{PbCreateType, PbStreamJobStatus};
 use risingwave_pb::meta::table_fragments::PbState as PbStreamJobState;
@@ -286,7 +286,7 @@ impl From<BTreeMap<u32, Vec<u32>>> for ActorUpstreamActors {
     }
 }
 
-derive_from_json_struct!(SecretRef, HashMap<String, u32>);
+derive_from_json_struct!(SecretRef, BTreeMap<String, u32>);
 
 derive_from_blob!(StreamNode, PbStreamNode);
 derive_from_blob!(DataType, risingwave_pb::data::PbDataType);
@@ -300,7 +300,7 @@ derive_array_from_blob!(
     risingwave_pb::plan_common::PbField,
     PbFieldArray
 );
-derive_from_json_struct!(Property, HashMap<String, String>);
+derive_from_json_struct!(Property, BTreeMap<String, String>);
 derive_from_blob!(ColumnCatalog, risingwave_pb::plan_common::PbColumnCatalog);
 derive_array_from_blob!(
     ColumnCatalogArray,

@@ -26,6 +26,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::min;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Arc, LazyLock};
 use std::time::{Instant, SystemTime};
@@ -61,7 +62,7 @@ use risingwave_pb::hummock::subscribe_compaction_event_response::{
 use risingwave_pb::hummock::{
     compact_task, CompactStatus as PbCompactStatus, CompactTask, CompactTaskAssignment,
     CompactionConfig, GroupDelta, InputLevel, IntraLevelDelta, Level, SstableInfo,
-    SubscribeCompactionEventRequest, TableOption, TableSchema,
+    StateTableInfoDelta, SubscribeCompactionEventRequest, TableOption, TableSchema,
 };
 use rw_futures_util::pending_on_none;
 use thiserror_ext::AsReport;
@@ -182,9 +183,34 @@ impl<'a> HummockVersionTransaction<'a> {
         };
         group_deltas.push(group_delta);
         version_delta.safe_epoch = std::cmp::max(
-            version_delta.latest_version().safe_epoch,
+            version_delta.latest_version().visible_table_safe_epoch(),
             compact_task.watermark,
         );
+        if version_delta.latest_version().visible_table_safe_epoch() < version_delta.safe_epoch {
+            version_delta.with_latest_version(|version, version_delta| {
+                for (table_id, info) in version.state_table_info.info() {
+                    let new_safe_epoch = min(version_delta.safe_epoch, info.committed_epoch);
+                    if new_safe_epoch > info.safe_epoch {
+                        if new_safe_epoch != version_delta.safe_epoch {
+                            warn!(
+                                new_safe_epoch,
+                                committed_epoch = info.committed_epoch,
+                                global_safe_epoch = version_delta.safe_epoch,
+                                table_id = table_id.table_id,
+                                "table has different safe epoch to global"
+                            );
+                        }
+                        version_delta.state_table_info_delta.insert(
+                            *table_id,
+                            StateTableInfoDelta {
+                                committed_epoch: info.committed_epoch,
+                                safe_epoch: new_safe_epoch,
+                            },
+                        );
+                    }
+                }
+            });
+        }
         version_delta.pre_apply();
     }
 }

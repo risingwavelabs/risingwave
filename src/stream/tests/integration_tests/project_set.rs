@@ -15,6 +15,7 @@
 use multimap::MultiMap;
 use risingwave_expr::table_function::repeat;
 use risingwave_stream::executor::ProjectSetExecutor;
+use risingwave_stream::task::ActorEvalErrorReport;
 
 use crate::prelude::*;
 
@@ -47,6 +48,10 @@ fn create_executor() -> (MessageSender, BoxedMessageStream) {
         CHUNK_SIZE,
         MultiMap::from_iter(std::iter::once((0, 1))),
         vec![],
+        ActorEvalErrorReport {
+            actor_context: ActorContext::for_test(123),
+            identity: "ProjectSetExecutor".into(),
+        },
     );
     (tx, project_set.boxed().execute())
 }

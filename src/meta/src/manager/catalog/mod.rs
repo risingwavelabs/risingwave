@@ -187,6 +187,7 @@ impl CatalogManager {
     /// We identify a 'legacy' source based on two conditions:
     /// 1. The `format_encode_options` in `source_info` is empty.
     /// 2. Keys with certain prefixes belonging to `format_encode_options` exist in `with_properties` instead.
+    ///
     /// And if the source is identified as 'legacy', we copy the misplaced keys from `with_properties` to `format_encode_options`.
     async fn source_backward_compat_check(&self) -> MetaResult<()> {
         let core = &mut *self.core.lock().await;
@@ -897,6 +898,7 @@ impl CatalogManager {
     ///    with:
     ///    1. `stream_job_status` = CREATING
     ///    2. Not belonging to a background stream job.
+    ///
     ///    Clean up these hanging tables by the id.
     pub async fn clean_dirty_tables(&self, fragment_manager: FragmentManagerRef) -> MetaResult<()> {
         let core = &mut *self.core.lock().await;

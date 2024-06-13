@@ -33,11 +33,6 @@ use crate::schema::schema_registry::{
     extract_schema_id, get_subject_by_strategy, handle_sr_list, Client,
 };
 
-const BEFORE: &str = "before";
-const AFTER: &str = "after";
-const OP: &str = "op";
-const PAYLOAD: &str = "payload";
-
 #[derive(Debug)]
 pub struct DebeziumAvroAccessBuilder {
     schema: ResolvedAvroSchema,
@@ -49,7 +44,7 @@ pub struct DebeziumAvroAccessBuilder {
 
 // TODO: reduce encodingtype match
 impl AccessBuilder for DebeziumAvroAccessBuilder {
-    async fn generate_accessor(&mut self, payload: Vec<u8>) -> ConnectorResult<AccessImpl<'_, '_>> {
+    async fn generate_accessor(&mut self, payload: Vec<u8>) -> ConnectorResult<AccessImpl<'_>> {
         let (schema_id, mut raw_payload) = extract_schema_id(&payload)?;
         let schema = self.schema_resolver.get_by_id(schema_id).await?;
         self.value = Some(from_avro_datum(schema.as_ref(), &mut raw_payload, None)?);
@@ -126,6 +121,7 @@ impl DebeziumAvroParserConfig {
             // TODO: do we need to support map type here?
             None,
         )
+        .map_err(Into::into)
     }
 
     pub fn map_to_columns(&self) -> ConnectorResult<Vec<ColumnDesc>> {
@@ -140,6 +136,7 @@ impl DebeziumAvroParserConfig {
             // TODO: do we need to support map type here?
             None,
         )
+        .map_err(Into::into)
     }
 }
 
@@ -149,7 +146,7 @@ mod tests {
     use std::path::PathBuf;
 
     use itertools::Itertools;
-    use maplit::{convert_args, hashmap};
+    use maplit::{btreemap, convert_args};
     use risingwave_common::array::Op;
     use risingwave_common::catalog::ColumnDesc as CatColumnDesc;
     use risingwave_common::row::{OwnedRow, Row};
@@ -357,7 +354,7 @@ mod tests {
     #[ignore]
     #[tokio::test]
     async fn test_debezium_avro_parser() -> crate::error::ConnectorResult<()> {
-        let props = convert_args!(hashmap!(
+        let props = convert_args!(btreemap!(
             "kafka.topic" => "dbserver1.inventory.customers"
         ));
         let info = StreamSourceInfo {

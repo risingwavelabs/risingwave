@@ -12,8 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
-use std::usize;
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use anyhow::{anyhow, Context};
 use aws_sdk_dynamodb as dynamodb;
@@ -69,7 +68,7 @@ impl DynamoDbConfig {
         Ok(Client::new(&aws_config))
     }
 
-    fn from_hashmap(values: HashMap<String, String>) -> Result<Self> {
+    fn from_btreemap(values: BTreeMap<String, String>) -> Result<Self> {
         serde_json::from_value::<DynamoDbConfig>(serde_json::to_value(values).unwrap())
             .map_err(|e| SinkError::Config(anyhow!(e)))
     }
@@ -149,7 +148,7 @@ impl TryFrom<SinkParam> for DynamoDbSink {
 
     fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
         let schema = param.schema();
-        let config = DynamoDbConfig::from_hashmap(param.properties)?;
+        let config = DynamoDbConfig::from_btreemap(param.properties)?;
 
         Ok(Self {
             config,

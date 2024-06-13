@@ -17,23 +17,20 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
-    build_initial_compaction_group_levels, get_compaction_group_ids,
-    get_table_compaction_group_id_mapping, BranchedSstInfo,
+    get_compaction_group_ids, get_table_compaction_group_id_mapping, BranchedSstInfo,
 };
-use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGroupId};
+use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::table_stats::add_prost_table_stats_map;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockContextId, HummockEpoch, HummockSstableObjectId, HummockVersionId,
-    FIRST_VERSION_ID,
 };
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
-    CompactionConfig, HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot,
-    HummockVersionStats, SstableInfo, TableStats,
+    HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersionStats, SstableInfo,
+    TableStats,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 
@@ -43,6 +40,7 @@ use crate::hummock::manager::checkpoint::HummockVersionCheckpoint;
 use crate::hummock::manager::commit_multi_var;
 use crate::hummock::manager::context::ContextInfo;
 use crate::hummock::manager::gc::DeleteObjectTracker;
+use crate::hummock::manager::transaction::HummockVersionTransaction;
 use crate::hummock::metrics_utils::{trigger_write_stop_stats, LocalTableMetrics};
 use crate::hummock::model::CompactionGroup;
 use crate::hummock::HummockManager;
@@ -248,6 +246,29 @@ impl HummockManager {
         Ok(())
     }
 
+    pub async fn may_fill_backward_state_table_info(&self) -> Result<()> {
+        let mut versioning = self.versioning.write().await;
+        if versioning
+            .current_version
+            .need_fill_backward_compatible_state_table_info_delta()
+        {
+            let versioning: &mut Versioning = &mut versioning;
+            let mut version = HummockVersionTransaction::new(
+                &mut versioning.current_version,
+                &mut versioning.hummock_version_deltas,
+                self.env.notification_manager(),
+                &self.metrics,
+            );
+            let mut new_version_delta = version.new_delta();
+            new_version_delta.with_latest_version(|version, delta| {
+                version.may_fill_backward_compatible_state_table_info_delta(delta)
+            });
+            new_version_delta.pre_apply();
+            commit_multi_var!(self.meta_store_ref(), version)?;
+        }
+        Ok(())
+    }
+
     pub fn latest_snapshot(&self) -> HummockSnapshot {
         let snapshot = self.latest_snapshot.load();
         HummockSnapshot::clone(&snapshot)
@@ -321,27 +342,6 @@ pub(super) fn calc_new_write_limits(
         new_write_limits.remove(id);
     }
     new_write_limits
-}
-
-pub(super) fn create_init_version(default_compaction_config: CompactionConfig) -> HummockVersion {
-    let mut init_version = HummockVersion {
-        id: FIRST_VERSION_ID,
-        levels: Default::default(),
-        max_committed_epoch: INVALID_EPOCH,
-        safe_epoch: INVALID_EPOCH,
-        table_watermarks: HashMap::new(),
-        table_change_log: HashMap::new(),
-    };
-    for group_id in [
-        StaticCompactionGroupId::StateDefault as CompactionGroupId,
-        StaticCompactionGroupId::MaterializedView as CompactionGroupId,
-    ] {
-        init_version.levels.insert(
-            group_id,
-            build_initial_compaction_group_levels(group_id, &default_compaction_config),
-        );
-    }
-    init_version
 }
 
 /// Rebuilds table stats from the given version.
@@ -548,14 +548,9 @@ mod tests {
             );
         }
 
-        let mut version = HummockVersion {
-            id: 123,
-            levels: Default::default(),
-            max_committed_epoch: 0,
-            safe_epoch: 0,
-            table_watermarks: HashMap::new(),
-            table_change_log: HashMap::new(),
-        };
+        let mut version = HummockVersion::default();
+        version.id = 123;
+
         for cg in 1..3 {
             version.levels.insert(
                 cg,

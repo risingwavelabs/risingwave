@@ -46,6 +46,7 @@ def_anyhow_newtype! {
     // Connector errors
     opendal::Error => transparent, // believed to be self-explanatory
 
+    sqlx::Error => transparent, // believed to be self-explanatory
     mysql_async::Error => "MySQL error",
     tokio_postgres::Error => "Postgres error",
     apache_avro::Error => "Avro error",

@@ -16,7 +16,7 @@ mod jni_catalog;
 mod mock_catalog;
 mod prometheus;
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt::Debug;
 use std::num::NonZeroU64;
 use std::ops::Deref;
@@ -134,7 +134,7 @@ pub struct IcebergConfig {
 }
 
 impl IcebergConfig {
-    pub fn from_hashmap(values: HashMap<String, String>) -> Result<Self> {
+    pub fn from_btreemap(values: BTreeMap<String, String>) -> Result<Self> {
         let mut config =
             serde_json::from_value::<IcebergConfig>(serde_json::to_value(&values).unwrap())
                 .map_err(|e| SinkError::Config(anyhow!(e)))?;
@@ -443,7 +443,7 @@ impl TryFrom<SinkParam> for IcebergSink {
     type Error = SinkError;
 
     fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
-        let config = IcebergConfig::from_hashmap(param.properties.clone())?;
+        let config = IcebergConfig::from_btreemap(param.properties.clone())?;
         IcebergSink::new(config, param)
     }
 }
@@ -1048,7 +1048,7 @@ pub fn try_matches_arrow_schema(
 
 #[cfg(test)]
 mod test {
-    use std::collections::HashMap;
+    use std::collections::BTreeMap;
 
     use risingwave_common::catalog::Field;
 
@@ -1111,7 +1111,7 @@ mod test {
         .map(|(k, v)| (k.to_string(), v.to_string()))
         .collect();
 
-        let iceberg_config = IcebergConfig::from_hashmap(values).unwrap();
+        let iceberg_config = IcebergConfig::from_btreemap(values).unwrap();
 
         let expected_iceberg_config = IcebergConfig {
             connector: "iceberg".to_string(),
@@ -1143,8 +1143,8 @@ mod test {
         );
     }
 
-    async fn test_create_catalog(configs: HashMap<String, String>) {
-        let iceberg_config = IcebergConfig::from_hashmap(configs).unwrap();
+    async fn test_create_catalog(configs: BTreeMap<String, String>) {
+        let iceberg_config = IcebergConfig::from_btreemap(configs).unwrap();
 
         let table = iceberg_config.load_table().await.unwrap();
 

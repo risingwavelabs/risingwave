@@ -67,14 +67,14 @@ pub async fn mock_sstable_store() -> SstableStoreRef {
 
 pub async fn mock_sstable_store_with_object_store(store: ObjectStoreRef) -> SstableStoreRef {
     let path = "test".to_string();
-    let meta_cache_v2 = HybridCacheBuilder::new()
+    let meta_cache = HybridCacheBuilder::new()
         .memory(64 << 20)
         .with_shards(2)
         .storage()
         .build()
         .await
         .unwrap();
-    let block_cache_v2 = HybridCacheBuilder::new()
+    let block_cache = HybridCacheBuilder::new()
         .memory(64 << 20)
         .with_shards(2)
         .storage()
@@ -91,8 +91,8 @@ pub async fn mock_sstable_store_with_object_store(store: ObjectStoreRef) -> Ssta
         recent_filter: None,
         state_store_metrics: Arc::new(global_hummock_state_store_metrics(MetricLevel::Disabled)),
 
-        meta_cache_v2,
-        block_cache_v2,
+        meta_cache,
+        block_cache,
     }))
 }
 

@@ -239,8 +239,8 @@ impl TableFragments {
         self.fragments.keys().cloned()
     }
 
-    pub fn fragments(&self) -> Vec<&Fragment> {
-        self.fragments.values().collect_vec()
+    pub fn fragments(&self) -> impl Iterator<Item = &Fragment> {
+        self.fragments.values()
     }
 
     /// Returns the table id.

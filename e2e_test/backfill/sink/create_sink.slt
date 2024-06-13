@@ -5,9 +5,9 @@ statement ok
 create table t (v1 int);
 
 statement ok
-SET STREAMING_RATE_LIMIT = 1000;
+SET STREAMING_RATE_LIMIT = 500;
 
-# Should finish in 10s
+# Should finish in 20s
 statement ok
 insert into t select * from generate_series(1, 10000);
 

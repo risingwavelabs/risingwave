@@ -92,7 +92,11 @@ sqllogictest -p 4566 -d dev './e2e_test/ddl/**/*.slt' --junit "batch-ddl-${profi
 if [[ "$mode" != "single-node" ]]; then
   sqllogictest -p 4566 -d dev './e2e_test/background_ddl/basic.slt' --junit "batch-ddl-${profile}"
 fi
-sqllogictest -p 4566 -d dev './e2e_test/visibility_mode/*.slt' --junit "batch-${profile}"
+
+if [[ $mode != "single-node" ]]; then
+  sqllogictest -p 4566 -d dev './e2e_test/visibility_mode/*.slt' --junit "batch-${profile}"
+fi
+
 sqllogictest -p 4566 -d dev './e2e_test/ttl/ttl.slt'
 sqllogictest -p 4566 -d dev './e2e_test/database/prepare.slt'
 sqllogictest -p 4566 -d test './e2e_test/database/test.slt'
@@ -118,7 +122,7 @@ sqllogictest -p 4566 -d dev './e2e_test/udf/graceful_shutdown_python.slt'
 # sqllogictest -p 4566 -d dev './e2e_test/udf/retry_python.slt'
 
 echo "--- e2e, $mode, external java udf"
-java -jar udf.jar &
+java --add-opens=java.base/java.nio=org.apache.arrow.memory.core,ALL-UNNAMED -jar udf.jar &
 sleep 1
 sqllogictest -p 4566 -d dev './e2e_test/udf/external_udf.slt'
 pkill java
@@ -285,3 +289,6 @@ if [[ "$mode" == "standalone" ]]; then
   # Make sure any remaining background task exits.
   wait
 fi
+
+echo "--- Upload JUnit test results"
+buildkite-agent artifact upload "*-junit.xml"

@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::borrow::Cow;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::io::Write;
 use std::time::Duration;
 
@@ -238,7 +238,7 @@ pub struct KafkaPrivateLinkCommon {
     /// This is generated from `private_link_targets` and `private_link_endpoint` in frontend, instead of given by users.
     #[serde(rename = "broker.rewrite.endpoints")]
     #[serde_as(as = "Option<JsonString>")]
-    pub broker_rewrite_map: Option<HashMap<String, String>>,
+    pub broker_rewrite_map: Option<BTreeMap<String, String>>,
 }
 
 const fn default_kafka_sync_call_timeout() -> Duration {

@@ -280,6 +280,7 @@ message ExprNode {
     JSONB_PATH_QUERY_FIRST = 623;
     JSONB_POPULATE_RECORD = 629;
     JSONB_TO_RECORD = 630;
+    JSONB_SET = 631;
 
     // Non-pure functions below (> 1000)
     // ------------------------
