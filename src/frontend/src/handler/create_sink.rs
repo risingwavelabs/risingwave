@@ -287,7 +287,6 @@ pub fn gen_sink_plan(
             &sink_catalog,
             sink_plan.schema(),
             table_catalog.columns(),
-            TableCatalog::default_column_exprs(table_catalog.columns()).as_ref(),
             user_specified_columns,
         )?;
 
@@ -418,7 +417,7 @@ pub async fn handle_create_sink(
 
     let partition_info = get_partition_compute_info(&handle_args.with_options).await?;
 
-    let (sink, graph, target_table_catalog) = {
+    let (mut sink, graph, target_table_catalog) = {
         let context = Rc::new(OptimizerContext::from_handler_args(handle_args.clone()));
 
         let SinkPlanContext {
@@ -456,30 +455,24 @@ pub async fn handle_create_sink(
         let (mut graph, mut table, source) =
             reparse_table_for_sink(&session, &table_catalog).await?;
 
+        sink.original_target_columns = table
+            .columns
+            .iter()
+            .map(|col| ColumnCatalog::from(col.clone()))
+            .collect_vec();
+
         table
             .incoming_sinks
             .clone_from(&table_catalog.incoming_sinks);
 
-        // let target_columns = bind_sql_columns(&columns)?;
-
-        let default_columns: Vec<ExprImpl> =
-            TableCatalog::default_column_exprs(table_catalog.columns());
-        // let default_columns: Vec<ExprImpl> = TableCatalog::default_column_exprs(&target_columns);
-
         let incoming_sink_ids: HashSet<_> = table_catalog.incoming_sinks.iter().copied().collect();
-
         let mut incoming_sinks = fetch_incoming_sinks(&session, &incoming_sink_ids)?;
-
         incoming_sinks.push(Arc::new(sink.clone()));
-
-        let context = Rc::new(OptimizerContext::from_handler_args(handle_args.clone()));
         for sink in incoming_sinks {
             crate::handler::alter_table_column::hijack_merger_for_target_table(
                 &mut graph,
                 table_catalog.columns(),
-                &default_columns,
                 &sink,
-                context.clone(),
             )?;
         }
 
@@ -748,10 +741,11 @@ pub(crate) fn derive_default_column_project_for_sink(
     sink: &SinkCatalog,
     sink_schema: &Schema,
     columns: &[ColumnCatalog],
-    default_column_exprs: &[ExprImpl],
     user_specified_columns: bool,
 ) -> Result<Vec<ExprImpl>> {
     assert_eq!(sink.full_schema().len(), sink_schema.len());
+
+    let default_column_exprs = TableCatalog::default_column_exprs(columns);
 
     let mut exprs = vec![];
 

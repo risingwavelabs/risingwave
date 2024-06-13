@@ -1171,7 +1171,7 @@ impl DdlController {
         Ok((replace_table_ctx, table_fragments))
     }
 
-    fn inject_replace_table_plan_for_sink(
+    pub(crate) fn inject_replace_table_plan_for_sink(
         sink_id: Option<u32>,
         sink_fragment: &PbFragment,
         table: &Table,
@@ -1252,12 +1252,12 @@ impl DdlController {
             if let Some(node) = &mut actor.nodes {
                 visit_stream_node_cont_mut(node, |node| {
                     if let Some(NodeBody::Union(_)) = &mut node.node_body {
-                        for input in &mut node.input {
-                            if let Some(NodeBody::Project(_)) = &mut input.node_body {
+                        for input_project_node in &mut node.input {
+                            if let Some(NodeBody::Project(_)) = &mut input_project_node.node_body {
                                 let merge_stream_node =
-                                    input.input.iter_mut().exactly_one().unwrap();
+                                    input_project_node.input.iter_mut().exactly_one().unwrap();
 
-                                if input.identity.as_str() != uniq_name {
+                                if input_project_node.identity.as_str() != uniq_name {
                                     continue;
                                 }
 
@@ -1279,7 +1279,7 @@ impl DdlController {
 
                                     merge_stream_node.fields = sink_fields.to_vec();
 
-                                    input.fields.clone_from(&node.fields);
+                                    input_project_node.fields.clone_from(&node.fields);
 
                                     return false;
                                 }
@@ -1503,6 +1503,7 @@ impl DdlController {
                             None,
                             None,
                             Some(sink_id),
+                            vec![],
                         )
                         .await?;
                 }
@@ -1854,6 +1855,8 @@ impl DdlController {
             .generate::<{ IdCategory::Table }>()
             .await? as u32;
 
+        let mut updated_sink_catalogs = vec![];
+
         let result: MetaResult<()> = try {
             let (mut ctx, mut table_fragments) = self
                 .build_replace_table(
@@ -1917,6 +1920,10 @@ impl DdlController {
                     target_fragment_id,
                     uniq_name,
                 );
+
+                if sink.original_target_columns.is_empty() {
+                    updated_sink_catalogs.push(sink.id);
+                }
             }
 
             // Add table fragments to meta store with state: `State::Initial`.
@@ -1937,6 +1944,7 @@ impl DdlController {
                     table_col_index_mapping,
                     None,
                     None,
+                    updated_sink_catalogs,
                 )
                 .await
             }
@@ -2082,6 +2090,7 @@ impl DdlController {
         table_col_index_mapping: Option<ColIndexMapping>,
         creating_sink_id: Option<SinkId>,
         dropping_sink_id: Option<SinkId>,
+        updated_sink_ids: Vec<SinkId>,
     ) -> MetaResult<NotificationVersion> {
         let StreamingJob::Table(source, table, ..) = stream_job else {
             unreachable!("unexpected job: {stream_job:?}")
@@ -2094,6 +2103,7 @@ impl DdlController {
                 table_col_index_mapping,
                 creating_sink_id,
                 dropping_sink_id,
+                updated_sink_ids,
             )
             .await
     }

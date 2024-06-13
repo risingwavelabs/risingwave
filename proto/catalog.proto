@@ -190,6 +190,8 @@ message Sink {
   // Handle the sink relies on any sceret. The key is the propertity name and the value is the secret id and type.
   // Used for connect options.
   map<string, secret.SecretRef> secret_refs = 25;
+
+  repeated plan_common.ColumnCatalog original_target_columns = 26;
 }
 
 message Subscription {

@@ -1105,7 +1105,7 @@ impl CatalogManager {
 
                 if let Some((table, source)) = target_table {
                     version = self
-                        .finish_replace_table_procedure(&source, &table, None, Some(sink_id), None)
+                        .finish_replace_table_procedure(&source, &table, None, Some(sink_id), None, vec![])
                         .await?;
                 }
 
@@ -3457,12 +3457,14 @@ impl CatalogManager {
         table_col_index_mapping: Option<ColIndexMapping>,
         creating_sink_id: Option<SinkId>,
         dropping_sink_id: Option<SinkId>,
+        updated_sink_ids: Vec<SinkId>,
     ) -> MetaResult<NotificationVersion> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
         let mut sources = BTreeMapTransaction::new(&mut database_core.sources);
         let mut indexes = BTreeMapTransaction::new(&mut database_core.indexes);
+        let mut sinks = BTreeMapTransaction::new(&mut database_core.sinks);
         let key = (table.database_id, table.schema_id, table.name.clone());
 
         assert!(
@@ -3470,6 +3472,16 @@ impl CatalogManager {
                 && database_core.in_progress_creation_tracker.contains(&key),
             "table must exist and be in altering procedure"
         );
+
+        let original_table = tables.get(&table.id).unwrap();
+        let mut updated_sinks = vec![];
+        for sink_id in updated_sink_ids {
+            let mut sink = sinks.get_mut(sink_id).unwrap().clone();
+            sink.original_target_columns
+                .clone_from(&original_table.columns);
+            sinks.insert(sink.id, sink.clone());
+            updated_sinks.push(sink);
+        }
 
         if let Some(source) = source {
             let source_key = (source.database_id, source.schema_id, source.name.clone());
@@ -3544,6 +3556,9 @@ impl CatalogManager {
                     }))
                     .chain(updated_indexes.into_iter().map(|index| Relation {
                         relation_info: RelationInfo::Index(index).into(),
+                    }))
+                    .chain(updated_sinks.into_iter().map(|sink| Relation {
+                        relation_info: RelationInfo::Sink(sink).into(),
                     }))
                     .collect_vec(),
                 }),

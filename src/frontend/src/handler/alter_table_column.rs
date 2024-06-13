@@ -13,18 +13,17 @@
 // limitations under the License.
 
 use std::collections::HashSet;
-use std::rc::Rc;
 use std::sync::Arc;
 
 use anyhow::Context;
-use create_sink::derive_default_column_project_for_sink;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::ColumnCatalog;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_connector::sink::catalog::SinkCatalog;
-use risingwave_pb::stream_plan::StreamFragmentGraph;
+use risingwave_pb::stream_plan::stream_node::PbNodeBody;
+use risingwave_pb::stream_plan::{ProjectNode, StreamFragmentGraph};
 use risingwave_sqlparser::ast::{
     AlterTableOperation, ColumnOption, ConnectorSchema, Encode, ObjectName, Statement,
 };
@@ -33,18 +32,14 @@ use risingwave_sqlparser::parser::Parser;
 use super::create_source::get_json_schema_location;
 use super::create_table::{bind_sql_columns, generate_stream_graph_for_table, ColumnIdGenerator};
 use super::util::SourceSchemaCompatExt;
-use super::{create_sink, HandlerArgs, RwPgResponse};
+use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::table_catalog::TableType;
 use crate::error::{ErrorCode, Result, RwError};
-use crate::expr::ExprImpl;
+use crate::expr::{Expr, ExprImpl, InputRef, Literal};
 use crate::handler::create_sink::{fetch_incoming_sinks, insert_merger_to_union_with_project};
-use crate::optimizer::plan_node::generic::SourceNodeKind;
-use crate::optimizer::plan_node::{
-    generic, LogicalSource, StreamProject, ToStream, ToStreamContext,
-};
 use crate::session::SessionImpl;
-use crate::{Binder, OptimizerContext, TableCatalog, WithOptions};
+use crate::{Binder, TableCatalog, WithOptions};
 
 pub async fn replace_table_with_definition(
     session: &Arc<SessionImpl>,
@@ -102,19 +97,10 @@ pub async fn replace_table_with_definition(
     );
 
     let incoming_sink_ids: HashSet<_> = original_catalog.incoming_sinks.iter().copied().collect();
-    let incoming_sinks = fetch_incoming_sinks(session, &incoming_sink_ids)?;
     let target_columns = bind_sql_columns(&columns)?;
-    let default_columns: Vec<ExprImpl> = TableCatalog::default_column_exprs(&target_columns);
 
-    for sink in incoming_sinks {
-        let context = Rc::new(OptimizerContext::from_handler_args(handler_args.clone()));
-        hijack_merger_for_target_table(
-            &mut graph,
-            &target_columns,
-            &default_columns,
-            &sink,
-            context,
-        )?;
+    for sink in fetch_incoming_sinks(session, &incoming_sink_ids)? {
+        hijack_merger_for_target_table(&mut graph, &target_columns, &sink)?;
     }
 
     table.incoming_sinks = incoming_sink_ids.iter().copied().collect();
@@ -130,31 +116,40 @@ pub async fn replace_table_with_definition(
 pub(crate) fn hijack_merger_for_target_table(
     graph: &mut StreamFragmentGraph,
     target_columns: &[ColumnCatalog],
-    default_columns: &[ExprImpl],
     sink: &SinkCatalog,
-    context: Rc<OptimizerContext>,
 ) -> Result<()> {
-    let exprs = derive_default_column_project_for_sink(
-        sink,
-        &sink.full_schema(),
-        target_columns,
-        default_columns,
-        false, // todo
-    )?;
+    let mut sink_columns = sink.original_target_columns.clone();
+    if sink_columns.is_empty() {
+        sink_columns = target_columns.to_vec();
+    }
 
-    let pb_project = StreamProject::new(generic::Project::new(
-        exprs,
-        LogicalSource::new(
-            None,
-            sink.full_columns().to_vec(),
-            None,
-            SourceNodeKind::CreateTable,
-            context,
-            None,
-        )
-        .and_then(|s| s.to_stream(&mut ToStreamContext::new(false)))?,
-    ))
-    .to_stream_prost_body_inner();
+    let mut i = 0;
+    let mut j = 0;
+    let mut exprs = Vec::new();
+
+    while j < target_columns.len() {
+        if i < sink_columns.len() && sink_columns[i].data_type() == target_columns[j].data_type() {
+            exprs.push(ExprImpl::InputRef(Box::new(InputRef {
+                data_type: sink_columns[i].data_type().clone(),
+                index: i,
+            })));
+
+            i += 1;
+            j += 1;
+        } else {
+            exprs.push(ExprImpl::Literal(Box::new(Literal::new(
+                None,
+                target_columns[j].data_type().clone(),
+            ))));
+
+            j += 1;
+        }
+    }
+
+    let pb_project = PbNodeBody::Project(ProjectNode {
+        select_list: exprs.iter().map(|expr| expr.to_expr_proto()).collect(),
+        ..Default::default()
+    });
 
     for fragment in graph.fragments.values_mut() {
         if let Some(node) = &mut fragment.node {
@@ -181,9 +176,6 @@ pub async fn handle_alter_table_column(
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
     let original_catalog = fetch_table_catalog_for_alter(session.as_ref(), &table_name)?;
-    // if !original_catalog.incoming_sinks.is_empty() {
-    //     bail_not_implemented!("alter table with incoming sinks");
-    // }
 
     // TODO(yuhao): alter table with generated columns.
     if original_catalog.has_generated_column() {
@@ -217,6 +209,14 @@ pub async fn handle_alter_table_column(
             )
             .into());
         }
+    }
+
+    if !original_catalog.incoming_sinks.is_empty()
+        && matches!(operation, AlterTableOperation::DropColumn { .. })
+    {
+        return Err(ErrorCode::InvalidInputSyntax(
+            "dropping columns in target table of sinks is not supported".to_string(),
+        ))?;
     }
 
     match operation {

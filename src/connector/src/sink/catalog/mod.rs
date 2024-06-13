@@ -342,6 +342,8 @@ pub struct SinkCatalog {
 
     /// The secret reference for the sink, mapping from property name to secret id.
     pub secret_refs: BTreeMap<String, PbSecretRef>,
+
+    pub original_target_columns: Vec<ColumnCatalog>,
 }
 
 impl SinkCatalog {
@@ -384,6 +386,11 @@ impl SinkCatalog {
             initialized_at_cluster_version: self.initialized_at_cluster_version.clone(),
             create_type: self.create_type.to_proto() as i32,
             secret_refs: self.secret_refs.clone(),
+            original_target_columns: self
+                .original_target_columns
+                .iter()
+                .map(|c| c.to_protobuf())
+                .collect_vec(),
         }
     }
 
@@ -478,6 +485,11 @@ impl From<PbSink> for SinkCatalog {
             created_at_cluster_version: pb.created_at_cluster_version,
             create_type: CreateType::from_proto(create_type),
             secret_refs: pb.secret_refs,
+            original_target_columns: pb
+                .original_target_columns
+                .into_iter()
+                .map(ColumnCatalog::from)
+                .collect_vec(),
         }
     }
 }

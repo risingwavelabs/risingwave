@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::HashSet;
-use std::rc::Rc;
 
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_pb::ddl_service::ReplaceTablePlan;
@@ -23,10 +22,9 @@ use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::error::Result;
-use crate::expr::ExprImpl;
+use crate::handler::alter_table_column::hijack_merger_for_target_table;
 use crate::handler::create_sink::{fetch_incoming_sinks, reparse_table_for_sink};
 use crate::handler::HandlerArgs;
-use crate::{OptimizerContext, TableCatalog};
 
 pub async fn handle_drop_sink(
     handler_args: HandlerArgs,
@@ -81,25 +79,13 @@ pub async fn handle_drop_sink(
             .incoming_sinks
             .clone_from(&table_catalog.incoming_sinks);
 
-        let default_columns: Vec<ExprImpl> =
-            TableCatalog::default_column_exprs(table_catalog.columns());
-
         let mut incoming_sink_ids: HashSet<_> =
             table_catalog.incoming_sinks.iter().copied().collect();
 
         assert!(incoming_sink_ids.remove(&sink_id.sink_id));
 
-        let incoming_sinks = fetch_incoming_sinks(&session, &incoming_sink_ids)?;
-
-        for sink in incoming_sinks {
-            let context = Rc::new(OptimizerContext::from_handler_args(handler_args.clone()));
-            crate::handler::alter_table_column::hijack_merger_for_target_table(
-                &mut graph,
-                table_catalog.columns(),
-                &default_columns,
-                &sink,
-                context,
-            )?;
+        for sink in fetch_incoming_sinks(&session, &incoming_sink_ids)? {
+            hijack_merger_for_target_table(&mut graph, table_catalog.columns(), &sink)?;
         }
 
         affected_table_change = Some(ReplaceTablePlan {
