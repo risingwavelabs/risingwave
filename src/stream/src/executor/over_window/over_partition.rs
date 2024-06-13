@@ -22,7 +22,6 @@ use std::ops::{Bound, RangeInclusive};
 use delta_btree_map::{Change, DeltaBTreeMap};
 use educe::Educe;
 use futures_async_stream::for_await;
-use itertools::Itertools;
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::session_config::OverWindowCachePolicy as CachePolicy;
