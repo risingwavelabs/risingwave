@@ -97,8 +97,8 @@ macro_rules! def_visitor {
                     use crate::session::current::notice_to_user;
 
                     tracker!().recurse(|t| {
-                        if t.depth_reaches(30) {
-                            notice_to_user("shit!");
+                        if t.depth_reaches(PLAN_DEPTH_THRESHOLD) {
+                            notice_to_user(PLAN_TOO_DEEP_NOTICE);
                         }
 
                         match plan.node_type() {

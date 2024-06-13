@@ -28,6 +28,9 @@ use crate::session::current::notice_to_user;
 // TODO: This is essentially a mimic of `super` pattern from OO languages. Ideally, we should
 // adopt the style proposed in https://github.com/risingwavelabs/risingwave/issues/13477.
 pub fn default_visit_expr<V: ExprVisitor + ?Sized>(visitor: &mut V, expr: &ExprImpl) {
+    // TODO: Implementors may choose to not use this function at all, in which case we will fail
+    // to track the recursion and grow the stack as necessary. The current approach is only a
+    // best-effort attempt to prevent stack overflow.
     tracker!().recurse(|t| {
         if t.depth_reaches(EXPR_DEPTH_THRESHOLD) {
             notice_to_user(EXPR_TOO_DEEP_NOTICE);

@@ -32,6 +32,9 @@ pub fn default_rewrite_expr<R: ExprRewriter + ?Sized>(
     rewriter: &mut R,
     expr: ExprImpl,
 ) -> ExprImpl {
+    // TODO: Implementors may choose to not use this function at all, in which case we will fail
+    // to track the recursion and grow the stack as necessary. The current approach is only a
+    // best-effort attempt to prevent stack overflow.
     tracker!().recurse(|t| {
         if t.depth_reaches(EXPR_DEPTH_THRESHOLD) {
             notice_to_user(EXPR_TOO_DEEP_NOTICE);
