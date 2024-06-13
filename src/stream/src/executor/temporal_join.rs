@@ -743,17 +743,17 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const APPEND_ONLY: b
                         // Joined result without evaluating non-lookup conditions.
                         let st1 =
                             phase1::handle_chunk::<K, S, phase1::LeftOuterWithCond, APPEND_ONLY>(
-                            self.chunk_size,
-                            right_size,
-                            full_schema,
-                            epoch,
-                            &self.left_join_keys,
-                            &mut self.right_table,
-                            &memo_table_lookup_prefix,
-                            &mut self.memo_table,
-                            &null_matched,
-                            chunk,
-                        );
+                                self.chunk_size,
+                                right_size,
+                                full_schema,
+                                epoch,
+                                &self.left_join_keys,
+                                &mut self.right_table,
+                                &memo_table_lookup_prefix,
+                                &mut self.memo_table,
+                                &null_matched,
+                                chunk,
+                            );
                         let mut matched_count = 0usize;
                         #[for_await]
                         for chunk in st1 {
