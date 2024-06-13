@@ -74,7 +74,7 @@ impl StreamTemporalJoin {
         let base = PlanBase::new_stream_with_core(
             &core,
             dist,
-            true,
+            append_only,
             false, // TODO(rc): derive EOWC property from input
             watermark_columns,
         );

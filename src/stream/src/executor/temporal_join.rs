@@ -579,8 +579,8 @@ mod phase1 {
     }
 }
 
-impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const A: bool>
-    TemporalJoinExecutor<K, S, T, A>
+impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const APPEND_ONLY: bool>
+    TemporalJoinExecutor<K, S, T, APPEND_ONLY>
 {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -709,7 +709,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const A: bool>
                     let full_schema = full_schema.clone();
 
                     if T == JoinType::Inner {
-                        let st1 = phase1::handle_chunk::<K, S, phase1::Inner, A>(
+                        let st1 = phase1::handle_chunk::<K, S, phase1::Inner, APPEND_ONLY>(
                             self.chunk_size,
                             right_size,
                             full_schema,
@@ -741,7 +741,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const A: bool>
                         }
                     } else if let Some(ref cond) = self.condition {
                         // Joined result without evaluating non-lookup conditions.
-                        let st1 = phase1::handle_chunk::<K, S, phase1::LeftOuterWithCond, A>(
+                        let st1 =
+                            phase1::handle_chunk::<K, S, phase1::LeftOuterWithCond, APPEND_ONLY>(
                             self.chunk_size,
                             right_size,
                             full_schema,
@@ -792,7 +793,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const A: bool>
                         // The last row should always be marker row,
                         assert_eq!(matched_count, 0);
                     } else {
-                        let st1 = phase1::handle_chunk::<K, S, phase1::LeftOuter, A>(
+                        let st1 = phase1::handle_chunk::<K, S, phase1::LeftOuter, APPEND_ONLY>(
                             self.chunk_size,
                             right_size,
                             full_schema,
@@ -813,7 +814,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const A: bool>
                     }
                 }
                 InternalMessage::Barrier(updates, barrier) => {
-                    if !A {
+                    if !APPEND_ONLY {
                         if wait_first_barrier {
                             wait_first_barrier = false;
                             self.memo_table.as_mut().unwrap().init_epoch(barrier.epoch);
@@ -846,8 +847,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const A: bool>
     }
 }
 
-impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const A: bool> Execute
-    for TemporalJoinExecutor<K, S, T, A>
+impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const APPEND_ONLY: bool> Execute
+    for TemporalJoinExecutor<K, S, T, APPEND_ONLY>
 {
     fn execute(self: Box<Self>) -> super::BoxedMessageStream {
         self.into_stream().boxed()
