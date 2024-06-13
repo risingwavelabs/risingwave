@@ -70,13 +70,45 @@ pub fn default_compaction_selector() -> Box<dyn CompactionSelector> {
     Box::<DynamicLevelSelector>::default()
 }
 
+struct TableVirtualGroup {
+    table_id: u32,
+    select_level: usize,
+    target_level: usize,
+}
+
 #[derive(Default)]
 pub struct LocalSelectorStatistic {
     skip_picker: Vec<(usize, usize, LocalPickerStatistic)>,
+    table_virtual_group: Option<TableVirtualGroup>,
 }
 
 impl LocalSelectorStatistic {
+    pub fn record_virtual_group_task(
+        &mut self,
+        table_id: u32,
+        select_level: usize,
+        target_level: usize,
+    ) {
+        self.table_virtual_group = Some(TableVirtualGroup {
+            table_id,
+            select_level,
+            target_level,
+        });
+    }
+
     pub fn report_to_metrics(&self, group_id: u64, metrics: &MetaMetrics) {
+        if let Some(group) = self.table_virtual_group.as_ref() {
+            let level_label = format!("{}-to-{}", group.select_level, group.target_level);
+            metrics
+                .compact_frequency
+                .with_label_values(&[
+                    "Virtual",
+                    &group_id.to_string(),
+                    &group.table_id.to_string(),
+                    level_label.as_str(),
+                ])
+                .inc();
+        }
         for (start_level, target_level, stats) in &self.skip_picker {
             let level_label = format!("cg{}-{}-to-{}", group_id, start_level, target_level);
             if stats.skip_by_write_amp_limit > 0 {

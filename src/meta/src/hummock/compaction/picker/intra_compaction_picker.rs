@@ -159,16 +159,6 @@ impl IntraCompactionPicker {
             let mut select_input_size = 0;
             let mut total_file_count = 0;
             for input in l0_select_tables_vec {
-                let mut max_level_size = 0;
-                for level_select_table in &input.sstable_infos {
-                    let level_select_size = level_select_table
-                        .iter()
-                        .map(|sst| sst.file_size)
-                        .sum::<u64>();
-
-                    max_level_size = std::cmp::max(max_level_size, level_select_size);
-                }
-
                 let mut select_level_inputs = Vec::with_capacity(input.sstable_infos.len());
                 for level_select_sst in input.sstable_infos {
                     if level_select_sst.is_empty() {
@@ -238,6 +228,8 @@ impl IntraCompactionPicker {
             {
                 continue;
             }
+
+            assert!(l0.sub_levels[idx + 1].sub_level_id != l0.sub_levels[idx].sub_level_id);
 
             let trivial_move_picker = TrivialMovePicker::new(0, 0, overlap_strategy.clone());
 
