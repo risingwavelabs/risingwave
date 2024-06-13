@@ -173,17 +173,13 @@ function get_total_sst_count() {
 }
 
 function get_max_committed_epoch_in_backup() {
-  local id
-  id=$1
-  sed_str="s/.*\"state_table_info\":{\"${id}\":{\"committedEpoch\":\"\([[:digit:]]*\)\",\"safeEpoch\":\"\([[:digit:]]*\)\"}.*/\1/p"
+  sed_str="s/.*\"state_table_info\":{\"[[:digit:]]*\":{\"committedEpoch\":\"\([[:digit:]]*\)\",\"safeEpoch\":\"\([[:digit:]]*\)\"}.*/\1/p"
   ${BACKUP_TEST_MCLI} -C "${BACKUP_TEST_MCLI_CONFIG}" \
   cat "hummock-minio/hummock001/backup/manifest.json" | sed -n "${sed_str}"
 }
 
 function get_safe_epoch_in_backup() {
-  local id
-  id=$1
-  sed_str="s/.*\"state_table_info\":{\"${id}\":{\"committedEpoch\":\"\([[:digit:]]*\)\",\"safeEpoch\":\"\([[:digit:]]*\)\"}.*/\2/p"
+  sed_str="s/.*\"state_table_info\":{\"[[:digit:]]*\":{\"committedEpoch\":\"\([[:digit:]]*\)\",\"safeEpoch\":\"\([[:digit:]]*\)\"}.*/\2/p"
   ${BACKUP_TEST_MCLI} -C "${BACKUP_TEST_MCLI_CONFIG}" \
   cat "hummock-minio/hummock001/backup/manifest.json" | sed -n "${sed_str}"
 }

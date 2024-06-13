@@ -24,9 +24,8 @@ select * from t1;
 
 job_id=$(backup)
 echo "${job_id}"
-table_id=1
-backup_mce=$(get_max_committed_epoch_in_backup "${table_id}")
-backup_safe_epoch=$(get_safe_epoch_in_backup "${table_id}")
+backup_mce=$(get_max_committed_epoch_in_backup)
+backup_safe_epoch=$(get_safe_epoch_in_backup)
 echo "backup MCE: ${backup_mce}"
 echo "backup safe_epoch: ${backup_safe_epoch}"
 
