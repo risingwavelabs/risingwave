@@ -51,7 +51,7 @@ public abstract class JdbcUtils {
 
         // postgres use seconds and mysql use milliseconds
         int connectTimeout = isPg ? CONNECTION_TIMEOUT : CONNECTION_TIMEOUT * 1000;
-        int socketTimeout = isPg ? SOCKET_TIMEOUT: SOCKET_TIMEOUT * 1000;
+        int socketTimeout = isPg ? SOCKET_TIMEOUT : SOCKET_TIMEOUT * 1000;
         props.setProperty("connectTimeout", String.valueOf(connectTimeout));
         props.setProperty("socketTimeout", String.valueOf(socketTimeout));
 
