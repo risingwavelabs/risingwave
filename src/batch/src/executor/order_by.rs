@@ -12,19 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BinaryHeap;
 use bytes::Bytes;
 use futures_async_stream::try_stream;
-use itertools::Itertools;
 use prost::Message;
 use risingwave_common::array::DataChunk;
-use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
-use risingwave_common::memory::{MemMonitoredHeap, MemoryContext};
+use risingwave_common::memory::MemoryContext;
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::memcmp_encoding::encode_chunk;
-use risingwave_common::util::sort_util::{ColumnOrder, HeapElem};
+use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::data::DataChunk as PbDataChunk;
@@ -35,9 +32,7 @@ use super::{
 };
 use crate::error::{BatchError, Result};
 use crate::executor::merge_sort::MergeSortExecutor;
-use crate::spill::spill_op::{
-    SpillBuildHasher, SpillOp, DEFAULT_SPILL_PARTITION_NUM, SPILL_AT_LEAST_MEMORY,
-};
+use crate::spill::spill_op::{SpillOp, DEFAULT_SPILL_PARTITION_NUM, SPILL_AT_LEAST_MEMORY};
 use crate::task::BatchTaskContext;
 
 /// Sort Executor
@@ -106,11 +101,6 @@ impl SortExecutor {
     #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
         let child_schema = self.child.schema().clone();
-        let orders_indices = self
-            .column_orders
-            .iter()
-            .map(|x| x.column_index)
-            .collect_vec();
         let mut need_to_spill = false;
         // If the memory upper bound is less than 1MB, we don't need to check memory usage.
         let check_memory = match self.memory_upper_bound {
@@ -178,34 +168,14 @@ impl SortExecutor {
 
             // Spill buffer
             for chunk in chunks {
-                let hash_codes =
-                    chunk.get_hash_values(&orders_indices, sort_spill_manager.spill_build_hasher);
-                sort_spill_manager
-                    .write_input_chunk(
-                        chunk,
-                        hash_codes
-                            .into_iter()
-                            .map(|hash_code| hash_code.value())
-                            .collect(),
-                    )
-                    .await?;
+                sort_spill_manager.write_input_chunk(chunk).await?;
             }
 
             // Spill input chunks.
             #[for_await]
             for chunk in input_stream {
                 let chunk: DataChunk = chunk?;
-                let hash_codes =
-                    chunk.get_hash_values(&orders_indices, sort_spill_manager.spill_build_hasher);
-                sort_spill_manager
-                    .write_input_chunk(
-                        chunk,
-                        hash_codes
-                            .into_iter()
-                            .map(|hash_code| hash_code.value())
-                            .collect(),
-                    )
-                    .await?;
+                sort_spill_manager.write_input_chunk(chunk).await?;
             }
 
             sort_spill_manager.close_writers().await?;
@@ -302,20 +272,18 @@ impl SortExecutor {
             schema,
             chunk_size,
             mem_context,
-            memory_upper_bound,
             enable_spill,
+            memory_upper_bound,
         }
     }
 }
 
-
 struct SortSpillManager {
     op: SpillOp,
     partition_num: usize,
+    round_robin_idx: usize,
     input_writers: Vec<opendal::Writer>,
     input_chunk_builders: Vec<DataChunkBuilder>,
-    /// TODO: Use round robin to partition data might be better.
-    spill_build_hasher: SpillBuildHasher,
     child_data_types: Vec<DataType>,
     spill_chunk_size: usize,
 }
@@ -332,13 +300,12 @@ impl SortSpillManager {
         let op = SpillOp::create(dir)?;
         let input_writers = Vec::with_capacity(partition_num);
         let input_chunk_builders = Vec::with_capacity(partition_num);
-        let spill_build_hasher = SpillBuildHasher(suffix_uuid.as_u64_pair().1);
         Ok(Self {
             op,
             partition_num,
             input_writers,
             input_chunk_builders,
-            spill_build_hasher,
+            round_robin_idx: 0,
             child_data_types,
             spill_chunk_size,
         })
@@ -357,23 +324,17 @@ impl SortSpillManager {
         Ok(())
     }
 
-    async fn write_input_chunk(&mut self, chunk: DataChunk, hash_codes: Vec<u64>) -> Result<()> {
-        let (columns, vis) = chunk.into_parts_v2();
-        for partition in 0..self.partition_num {
-            let new_vis = vis.clone()
-                & Bitmap::from_iter(
-                    hash_codes
-                        .iter()
-                        .map(|hash_code| (*hash_code as usize % self.partition_num) == partition),
-                );
-            let new_chunk = DataChunk::from_parts(columns.clone(), new_vis);
-            for output_chunk in self.input_chunk_builders[partition].append_chunk(new_chunk) {
-                let chunk_pb: PbDataChunk = output_chunk.to_protobuf();
+    async fn write_input_chunk(&mut self, chunk: DataChunk) -> Result<()> {
+        for row in chunk.rows() {
+            let partition = self.round_robin_idx;
+            if let Some(chunk) = self.input_chunk_builders[partition].append_one_row(row) {
+                let chunk_pb: PbDataChunk = chunk.to_protobuf();
                 let buf = Message::encode_to_vec(&chunk_pb);
                 let len_bytes = Bytes::copy_from_slice(&(buf.len() as u32).to_le_bytes());
                 self.input_writers[partition].write(len_bytes).await?;
                 self.input_writers[partition].write(buf).await?;
             }
+            self.round_robin_idx = (self.round_robin_idx + 1) % self.partition_num;
         }
         Ok(())
     }

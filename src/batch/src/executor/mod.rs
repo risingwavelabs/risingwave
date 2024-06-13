@@ -27,6 +27,7 @@ mod limit;
 mod log_row_seq_scan;
 mod managed;
 mod max_one_row;
+mod merge_sort;
 mod merge_sort_exchange;
 mod order_by;
 mod project;
@@ -43,7 +44,6 @@ mod union;
 mod update;
 mod utils;
 mod values;
-mod merge_sort;
 
 use anyhow::Context;
 use async_recursion::async_recursion;

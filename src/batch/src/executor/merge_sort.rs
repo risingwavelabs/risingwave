@@ -12,22 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::mem;
 use std::sync::Arc;
+
 use futures_async_stream::try_stream;
 use futures_util::StreamExt;
 use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::memory::{MemMonitoredHeap, MemoryContext, MonitoredGlobalAlloc};
+use risingwave_common::types::ToOwnedDatum;
 use risingwave_common::util::sort_util::{ColumnOrder, HeapElem};
 use risingwave_common_estimate_size::EstimateSize;
-use risingwave_pb::batch_plan::plan_node::NodeBody;
 
-use super::{
-    BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
-};
+use super::{BoxedDataChunkStream, BoxedExecutor, Executor};
 use crate::error::{BatchError, Result};
-use crate::task::BatchTaskContext;
 
 pub struct MergeSortExecutor {
     inputs: Vec<BoxedExecutor>,
@@ -54,16 +53,27 @@ impl Executor for MergeSortExecutor {
     }
 }
 
-
 impl MergeSortExecutor {
     #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_execute(mut self: Box<Self>) {
-        let mut input_streams = self.inputs.into_iter().map(|input| input.execute()).collect_vec();
-        for mut input_stream in &mut input_streams {
+        let mut inputs = vec![];
+        mem::swap(&mut inputs, &mut self.inputs);
+        let mut input_streams = inputs
+            .into_iter()
+            .map(|input| input.execute())
+            .collect_vec();
+        for (input_idx, input_stream) in input_streams.iter_mut().enumerate() {
             match input_stream.next().await {
                 Some(chunk) => {
                     let chunk = chunk?;
                     self.current_chunks.push(Some(chunk));
+                    if let Some(chunk) = &self.current_chunks[input_idx] {
+                        // We assume that we would always get a non-empty chunk from the upstream of
+                        // exchange, therefore we are sure that there is at least
+                        // one visible row.
+                        let next_row_idx = chunk.next_visible_row_idx(0);
+                        self.push_row_into_heap(input_idx, next_row_idx.unwrap());
+                    }
                 }
                 None => {
                     self.current_chunks.push(None);
@@ -71,10 +81,61 @@ impl MergeSortExecutor {
             }
         }
 
+        while !self.min_heap.is_empty() {
+            // It is possible that we cannot produce this much as
+            // we may run out of input data chunks from sources.
+            let mut want_to_produce = self.chunk_size;
 
+            let mut builders: Vec<_> = self
+                .schema
+                .fields
+                .iter()
+                .map(|field| field.data_type.create_array_builder(self.chunk_size))
+                .collect();
+            let mut array_len = 0;
+            while want_to_produce > 0 && !self.min_heap.is_empty() {
+                let top_elem = self.min_heap.pop().unwrap();
+                let child_idx = top_elem.chunk_idx();
+                let cur_chunk = top_elem.chunk();
+                let row_idx = top_elem.elem_idx();
+                for (idx, builder) in builders.iter_mut().enumerate() {
+                    let chunk_arr = cur_chunk.column_at(idx);
+                    let chunk_arr = chunk_arr.as_ref();
+                    let datum = chunk_arr.value_at(row_idx).to_owned_datum();
+                    builder.append(&datum);
+                }
+                want_to_produce -= 1;
+                array_len += 1;
+                // check whether we have another row from the same chunk being popped
+                let possible_next_row_idx = cur_chunk.next_visible_row_idx(row_idx + 1);
+                match possible_next_row_idx {
+                    Some(next_row_idx) => {
+                        self.push_row_into_heap(child_idx, next_row_idx);
+                    }
+                    None => {
+                        self.get_input_chunk(&mut input_streams, child_idx).await?;
+                        if let Some(chunk) = &self.current_chunks[child_idx] {
+                            let next_row_idx = chunk.next_visible_row_idx(0);
+                            self.push_row_into_heap(child_idx, next_row_idx.unwrap());
+                        }
+                    }
+                }
+            }
+
+            let columns = builders
+                .into_iter()
+                .map(|builder| builder.finish().into())
+                .collect::<Vec<_>>();
+            let chunk = DataChunk::new(columns, array_len);
+            yield chunk
+        }
     }
 
-    async fn get_input_chunk(&mut self, input_streams: &mut Vec<BoxedDataChunkStream>, input_idx: usize) -> Result<()> {
+    async fn get_input_chunk(
+        &mut self,
+        input_streams: &mut Vec<BoxedDataChunkStream>,
+        input_idx: usize,
+    ) -> Result<()> {
         assert!(input_idx < input_streams.len());
         let res = input_streams[input_idx].next().await;
         let old = match res {
@@ -96,7 +157,6 @@ impl MergeSortExecutor {
 
         Ok(())
     }
-
 
     fn push_row_into_heap(&mut self, input_idx: usize, row_idx: usize) {
         assert!(input_idx < self.current_chunks.len());
@@ -133,4 +193,3 @@ impl MergeSortExecutor {
         }
     }
 }
-
