@@ -14,29 +14,23 @@
 
 use std::cmp;
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
-    build_initial_compaction_group_levels, get_compaction_group_ids,
-    get_table_compaction_group_id_mapping, BranchedSstInfo,
+    get_compaction_group_ids, get_table_compaction_group_id_mapping, BranchedSstInfo,
 };
-use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGroupId};
+use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::table_stats::add_prost_table_stats_map;
-use risingwave_hummock_sdk::version::{
-    HummockVersion, HummockVersionDelta, HummockVersionStateTableInfo,
-};
+use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockContextId, HummockEpoch, HummockSstableObjectId, HummockVersionId,
-    FIRST_VERSION_ID,
 };
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
-    CompactionConfig, HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot,
-    HummockVersionStats, SstableInfo, TableStats,
+    HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersionStats, SstableInfo,
+    TableStats,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 
@@ -350,30 +344,6 @@ pub(super) fn calc_new_write_limits(
     new_write_limits
 }
 
-pub(super) fn create_init_version(
-    default_compaction_config: Arc<CompactionConfig>,
-) -> HummockVersion {
-    let mut init_version = HummockVersion {
-        id: FIRST_VERSION_ID,
-        levels: Default::default(),
-        max_committed_epoch: INVALID_EPOCH,
-        safe_epoch: INVALID_EPOCH,
-        table_watermarks: HashMap::new(),
-        table_change_log: HashMap::new(),
-        state_table_info: HummockVersionStateTableInfo::empty(),
-    };
-    for group_id in [
-        StaticCompactionGroupId::StateDefault as CompactionGroupId,
-        StaticCompactionGroupId::MaterializedView as CompactionGroupId,
-    ] {
-        init_version.levels.insert(
-            group_id,
-            build_initial_compaction_group_levels(group_id, default_compaction_config.as_ref()),
-        );
-    }
-    init_version
-}
-
 /// Rebuilds table stats from the given version.
 /// Note that the result is approximate value. See `estimate_table_stats`.
 fn rebuild_table_stats(version: &HummockVersion) -> HummockVersionStats {
@@ -578,10 +548,9 @@ mod tests {
             );
         }
 
-        let mut version = HummockVersion {
-            id: 123,
-            ..Default::default()
-        };
+        let mut version = HummockVersion::default();
+        version.id = 123;
+
         for cg in 1..3 {
             version.levels.insert(
                 cg,

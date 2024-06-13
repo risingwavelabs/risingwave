@@ -102,7 +102,7 @@ impl PlainParser {
             };
         }
 
-        let mut row_op: KvEvent<AccessImpl<'_, '_>, AccessImpl<'_, '_>> = KvEvent::default();
+        let mut row_op: KvEvent<AccessImpl<'_>, AccessImpl<'_>> = KvEvent::default();
 
         if let Some(data) = key
             && let Some(key_builder) = self.key_builder.as_mut()

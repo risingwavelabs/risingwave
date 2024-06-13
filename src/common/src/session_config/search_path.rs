@@ -23,12 +23,12 @@ pub const USER_NAME_WILD_CARD: &str = "\"$user\"";
 /// see <https://www.postgresql.org/docs/14/runtime-config-client.html#GUC-SEARCH-PATH>
 ///
 /// 1. when we `select` or `drop` object and don't give a specified schema, it will search the
-/// object from the valid items in schema `rw_catalog`, `pg_catalog` and `search_path`. If schema
-/// `rw_catalog` and `pg_catalog` are not in `search_path`, we will search them firstly. If they're
-/// in `search_path`, we will follow the order in `search_path`.
+///    object from the valid items in schema `rw_catalog`, `pg_catalog` and `search_path`. If schema
+///    `rw_catalog` and `pg_catalog` are not in `search_path`, we will search them firstly. If they're
+///    in `search_path`, we will follow the order in `search_path`.
 ///
 /// 2. when we `create` a `source` or `mv` and don't give a specified schema, it will use the first
-/// valid schema in `search_path`.
+///    valid schema in `search_path`.
 ///
 /// 3. when we `create` a `index` or `sink`, it will use the schema of the associated table.
 #[derive(Clone, Debug, PartialEq)]

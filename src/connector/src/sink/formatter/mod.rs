@@ -45,9 +45,9 @@ pub trait SinkFormatter {
     type V;
 
     /// * Key may be None so that messages are partitioned using round-robin.
-    /// For example append-only without `primary_key` (aka `downstream_pk`) set.
+    ///   For example append-only without `primary_key` (aka `downstream_pk`) set.
     /// * Value may be None so that messages with same key are removed during log compaction.
-    /// For example debezium tombstone event.
+    ///   For example debezium tombstone event.
     fn format_chunk(
         &self,
         chunk: &StreamChunk,

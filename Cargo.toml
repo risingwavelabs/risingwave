@@ -177,6 +177,7 @@ sea-orm = { version = "0.12.14", features = [
     "sqlx-sqlite",
     "runtime-tokio-native-tls",
 ] }
+sqlx = "0.7"
 tokio-util = "0.7"
 tracing-opentelemetry = "0.22"
 rand = { version = "0.8", features = ["small_rng"] }

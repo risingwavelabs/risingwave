@@ -58,6 +58,7 @@ mod jsonb_info;
 mod jsonb_object;
 mod jsonb_path;
 mod jsonb_record;
+mod jsonb_set;
 mod length;
 mod lower;
 mod make_time;

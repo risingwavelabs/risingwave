@@ -392,7 +392,7 @@ impl HummockManager {
                 .read()
                 .await
                 .default_compaction_config();
-            let checkpoint_version = create_init_version(default_compaction_config);
+            let checkpoint_version = HummockVersion::create_init_version(default_compaction_config);
             tracing::info!("init hummock version checkpoint");
             versioning_guard.checkpoint = HummockVersionCheckpoint {
                 version: checkpoint_version.clone(),
