@@ -14,7 +14,6 @@
 
 use futures::{pin_mut, StreamExt};
 use itertools::Itertools;
-use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
 use risingwave_common::row::{self, OwnedRow, RowExt};
 use risingwave_common::types::DataType;
@@ -25,11 +24,9 @@ use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_hummock_test::test_utils::prepare_hummock_test_env;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::TableIter;
-use serde::de;
 
 use crate::common::table::state_table::StateTable;
 use crate::common::table::test_utils::{gen_prost_table, gen_prost_table_with_value_indices};
-use crate::config::chunk_size;
 
 /// There are three struct in relational layer, StateTable, MemTable and StorageTable.
 /// `StateTable` provides read/write interfaces to the upper layer streaming operator.
