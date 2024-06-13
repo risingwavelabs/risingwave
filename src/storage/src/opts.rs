@@ -128,6 +128,8 @@ pub struct StorageOpts {
 
     pub mem_table_spill_threshold: usize,
 
+    pub compactor_concurrent_uploading_sst_count: Option<usize>,
+
     pub object_store_config: ObjectStoreConfig,
 }
 
@@ -218,6 +220,9 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
                 .compactor_fast_max_compact_delete_ratio,
             compactor_fast_max_compact_task_size: c.storage.compactor_fast_max_compact_task_size,
             compactor_iter_max_io_retry_times: c.storage.compactor_iter_max_io_retry_times,
+            compactor_concurrent_uploading_sst_count: c
+                .storage
+                .compactor_concurrent_uploading_sst_count,
         }
     }
 }
