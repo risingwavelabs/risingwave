@@ -885,10 +885,12 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
             MutableConfig::TombstoneReclaimRatio(c) => {
                 target.tombstone_reclaim_ratio = *c;
             }
-
             MutableConfig::CompressionAlgorithm(c) => {
                 target.compression_algorithm[c.get_level() as usize]
                     .clone_from(&c.compression_algorithm);
+            }
+            MutableConfig::MaxL0CompactLevelCount(c) => {
+                target.max_l0_compact_level_count = *c;
             }
         }
     }
