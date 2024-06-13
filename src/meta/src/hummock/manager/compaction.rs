@@ -104,6 +104,7 @@ static CANCEL_STATUS_SET: LazyLock<HashSet<TaskStatus>> = LazyLock::new(|| {
         TaskStatus::InvalidGroupCanceled,
         TaskStatus::NoAvailMemoryResourceCanceled,
         TaskStatus::NoAvailCpuResourceCanceled,
+        TaskStatus::HeartbeatProgressCanceled,
     ]
     .into_iter()
     .collect()
@@ -455,40 +456,36 @@ impl HummockManager {
                                 progress,
                             }) => {
                                 let compactor_manager = hummock_manager.compactor_manager.clone();
-                                let cancel_tasks = compactor_manager.update_task_heartbeats(&progress);
-                                if let Some(compactor) = compactor_manager.get_compactor(context_id) {
-                                    // TODO: task cancellation can be batched
-                                    for task in cancel_tasks {
-                                        tracing::info!(
-                                            "Task with group_id {} task_id {} with context_id {} has expired due to lack of visible progress",
-                                            task.compaction_group_id,
-                                            task.task_id,
-                                            context_id,
-                                        );
+                                let cancel_tasks = compactor_manager.update_task_heartbeats(&progress).into_iter().map(|task|task.task_id).collect::<Vec<_>>();
+                                if !cancel_tasks.is_empty() {
+                                    tracing::info!(
+                                        "Tasks cancel with task_ids {:?} with context_id {} has expired due to lack of visible progress",
+                                        cancel_tasks,
+                                        context_id,
+                                    );
 
-                                        if let Err(e) =
-                                            hummock_manager
-                                            .cancel_compact_task(task.task_id, TaskStatus::HeartbeatCanceled)
-                                            .await
-                                        {
-                                            tracing::error!(
-                                                task_id = task.task_id,
-                                                error = %e.as_report(),
-                                                "Attempt to remove compaction task due to elapsed heartbeat failed. We will continue to track its heartbeat
-                                                until we can successfully report its status."
-                                            );
-                                        }
-
-                                        // Forcefully cancel the task so that it terminates
-                                        // early on the compactor
-                                        // node.
-                                        let _ = compactor.cancel_task(task.task_id);
-                                        tracing::info!(
-                                            "CancelTask operation for task_id {} has been sent to node with context_id {}",
-                                            context_id,
-                                            task.task_id
+                                    if let Err(e) = hummock_manager
+                                        .cancel_compact_tasks(cancel_tasks.clone(), TaskStatus::HeartbeatProgressCanceled)
+                                        .await
+                                    {
+                                        tracing::error!(
+                                            error = %e.as_report(),
+                                            "Attempt to remove compaction task due to elapsed heartbeat failed. We will continue to track its heartbeat
+                                            until we can successfully report its status."
                                         );
                                     }
+                                }
+
+                                if let Some(compactor) = compactor_manager.get_compactor(context_id) {
+                                    // Forcefully cancel the task so that it terminates
+                                    // early on the compactor
+                                    // node.
+                                    let _ = compactor.cancel_tasks(&cancel_tasks);
+                                    tracing::info!(
+                                        "CancelTask operation for task_id {:?} has been sent to node with context_id {}",
+                                        cancel_tasks,
+                                        context_id
+                                    );
                                 } else {
                                     // Determine the validity of the compactor streaming rpc. When the compactor no longer exists in the manager, the stream will be removed.
                                     // Tip: Connectivity to the compactor will be determined through the `send_event` operation. When send fails, it will be removed from the manager
@@ -995,7 +992,7 @@ impl HummockManager {
         Ok(ret[0])
     }
 
-    async fn cancel_compact_tasks(
+    pub async fn cancel_compact_tasks(
         &self,
         tasks: Vec<u64>,
         task_status: TaskStatus,
