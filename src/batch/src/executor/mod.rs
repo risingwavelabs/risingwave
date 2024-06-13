@@ -43,6 +43,7 @@ mod union;
 mod update;
 mod utils;
 mod values;
+mod merge_sort;
 
 use anyhow::Context;
 use async_recursion::async_recursion;
