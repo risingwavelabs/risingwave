@@ -196,7 +196,7 @@ pub struct HummockEventHandler {
     version_update_rx: UnboundedReceiver<HummockVersionUpdate>,
     read_version_mapping: Arc<RwLock<ReadVersionMappingType>>,
     /// A copy of `read_version_mapping` but owned by event handler
-    local_read_version_mapping: HashMap<LocalInstanceId, HummockReadVersionRef>,
+    local_read_version_mapping: HashMap<LocalInstanceId, (TableId, HummockReadVersionRef)>,
 
     version_update_notifier_tx: Arc<tokio::sync::watch::Sender<HummockEpoch>>,
     pinned_version: Arc<ArcSwap<PinnedVersion>>,
@@ -455,7 +455,7 @@ impl HummockEventHandler {
         let mut pending = VecDeque::new();
         let mut total_count = 0;
         for instance_id in instances {
-            let Some(read_version) = self.local_read_version_mapping.get(&instance_id) else {
+            let Some((_, read_version)) = self.local_read_version_mapping.get(&instance_id) else {
                 continue;
             };
             total_count += 1;
@@ -475,7 +475,7 @@ impl HummockEventHandler {
         const TRY_LOCK_TIMEOUT: Duration = Duration::from_millis(1);
 
         while let Some(instance_id) = pending.pop_front() {
-            let read_version = self
+            let (_, read_version) = self
                 .local_read_version_mapping
                 .get(&instance_id)
                 .expect("have checked exist before");
@@ -520,7 +520,6 @@ impl HummockEventHandler {
             prev_epoch,
             max_committed_epoch = self.uploader.max_committed_epoch(),
             max_synced_epoch = self.uploader.max_synced_epoch(),
-            max_sealed_epoch = self.uploader.max_sealed_epoch(),
             "handle clear event"
         );
 
@@ -588,7 +587,7 @@ impl HummockEventHandler {
             "read version mapping not empty when clear. remaining tables: {:?}",
             self.local_read_version_mapping
                 .values()
-                .map(|read_version| read_version.read().table_id())
+                .map(|(_, read_version)| read_version.read().table_id())
                 .collect_vec()
         );
 
@@ -784,6 +783,18 @@ impl HummockEventHandler {
             HummockEvent::Shutdown => {
                 unreachable!("shutdown is handled specially")
             }
+            HummockEvent::InitEpoch {
+                instance_id,
+                init_epoch,
+            } => {
+                let table_id = self
+                    .local_read_version_mapping
+                    .get(&instance_id)
+                    .expect("should exist")
+                    .0;
+                self.uploader
+                    .init_instance(instance_id, table_id, init_epoch);
+            }
             HummockEvent::ImmToUploader { instance_id, imm } => {
                 assert!(
                     self.local_read_version_mapping.contains_key(&instance_id),
@@ -795,29 +806,13 @@ impl HummockEventHandler {
                 self.uploader.may_flush();
             }
 
-            HummockEvent::SealEpoch {
-                epoch,
-                is_checkpoint: _,
-            } => {
-                self.uploader.seal_epoch(epoch);
-            }
-
             HummockEvent::LocalSealEpoch {
-                epoch,
+                next_epoch,
                 opts,
-                table_id,
                 instance_id,
             } => {
-                assert!(
-                    self.local_read_version_mapping
-                        .contains_key(&instance_id),
-                    "seal epoch from non-existing read version instance: instance_id: {}, table_id: {}, epoch: {}",
-                    instance_id, table_id, epoch,
-                );
-                if let Some((direction, watermarks)) = opts.table_watermarks {
-                    self.uploader
-                        .add_table_watermarks(epoch, table_id, watermarks, direction)
-                }
+                self.uploader
+                    .local_seal_epoch(instance_id, next_epoch, opts);
             }
 
             #[cfg(any(test, feature = "test"))]
@@ -852,7 +847,7 @@ impl HummockEventHandler {
 
                 {
                     self.local_read_version_mapping
-                        .insert(instance_id, basic_read_version.clone());
+                        .insert(instance_id, (table_id, basic_read_version.clone()));
                     let mut read_version_mapping_guard = self.read_version_mapping.write();
 
                     read_version_mapping_guard
@@ -876,33 +871,29 @@ impl HummockEventHandler {
                             table_id, instance_id
                         );
                         guard.event_sender.take().expect("sender is just set");
-                        self.destroy_read_version(table_id, instance_id);
+                        self.destroy_read_version(instance_id);
                     }
                 }
             }
 
-            HummockEvent::DestroyReadVersion {
-                table_id,
-                instance_id,
-            } => {
-                self.destroy_read_version(table_id, instance_id);
+            HummockEvent::DestroyReadVersion { instance_id } => {
+                self.uploader.may_destroy_instance(instance_id);
+                self.destroy_read_version(instance_id);
             }
         }
     }
 
-    fn destroy_read_version(&mut self, table_id: TableId, instance_id: LocalInstanceId) {
+    fn destroy_read_version(&mut self, instance_id: LocalInstanceId) {
         {
             {
-                debug!(
-                    "read version deregister: table_id: {}, instance_id: {}",
-                    table_id, instance_id
-                );
-                self.local_read_version_mapping
+                debug!("read version deregister: instance_id: {}", instance_id);
+                let (table_id, _) = self
+                    .local_read_version_mapping
                     .remove(&instance_id)
                     .unwrap_or_else(|| {
                         panic!(
-                            "DestroyHummockInstance inexist instance table_id {} instance_id {}",
-                            table_id, instance_id
+                            "DestroyHummockInstance inexist instance instance_id {}",
+                            instance_id
                         )
                     });
                 let mut read_version_mapping_guard = self.read_version_mapping.write();
@@ -994,6 +985,7 @@ mod tests {
     use crate::hummock::test_utils::default_opts_for_test;
     use crate::hummock::HummockError;
     use crate::monitor::HummockStateStoreMetrics;
+    use crate::store::SealCurrentEpochOptions;
 
     #[tokio::test]
     async fn test_clear_shared_buffer() {
@@ -1197,6 +1189,11 @@ mod tests {
             rx.await.unwrap()
         };
 
+        send_event(HummockEvent::InitEpoch {
+            instance_id: guard.instance_id,
+            init_epoch: epoch1,
+        });
+
         let imm1 = gen_imm(epoch1).await;
         read_version
             .write()
@@ -1205,6 +1202,12 @@ mod tests {
         send_event(HummockEvent::ImmToUploader {
             instance_id: guard.instance_id,
             imm: imm1,
+        });
+
+        send_event(HummockEvent::LocalSealEpoch {
+            instance_id: guard.instance_id,
+            next_epoch: epoch2,
+            opts: SealCurrentEpochOptions::for_test(),
         });
 
         let imm2 = gen_imm(epoch2).await;
@@ -1217,20 +1220,19 @@ mod tests {
             imm: imm2,
         });
 
-        send_event(HummockEvent::SealEpoch {
-            epoch: epoch1,
-            is_checkpoint: true,
+        let epoch3 = epoch2.next_epoch();
+        send_event(HummockEvent::LocalSealEpoch {
+            instance_id: guard.instance_id,
+            next_epoch: epoch3,
+            opts: SealCurrentEpochOptions::for_test(),
         });
+
         let (tx1, mut rx1) = oneshot::channel();
         send_event(HummockEvent::SyncEpoch {
             new_sync_epoch: epoch1,
             sync_result_sender: tx1,
         });
         assert!(poll_fn(|cx| Poll::Ready(rx1.poll_unpin(cx).is_pending())).await);
-        send_event(HummockEvent::SealEpoch {
-            epoch: epoch2,
-            is_checkpoint: true,
-        });
         let (tx2, mut rx2) = oneshot::channel();
         send_event(HummockEvent::SyncEpoch {
             new_sync_epoch: epoch2,

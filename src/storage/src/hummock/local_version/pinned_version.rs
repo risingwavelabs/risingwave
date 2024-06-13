@@ -155,10 +155,6 @@ impl PinnedVersion {
         self.version.max_committed_epoch
     }
 
-    pub fn safe_epoch(&self) -> u64 {
-        self.version.safe_epoch
-    }
-
     /// ret value can't be used as `HummockVersion`. it must be modified with delta
     pub fn version(&self) -> &HummockVersion {
         &self.version
