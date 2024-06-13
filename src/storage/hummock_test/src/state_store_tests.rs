@@ -1046,11 +1046,12 @@ async fn test_delete_get_v2() {
         )
         .await
         .unwrap();
-    let res = hummock_storage.seal_and_sync_epoch(epoch1).await.unwrap();
-    meta_client.commit_epoch(epoch1, res).await.unwrap();
     let epoch2 = epoch1.next_epoch();
 
     local.seal_current_epoch(epoch2, SealCurrentEpochOptions::for_test());
+    let res = hummock_storage.seal_and_sync_epoch(epoch1).await.unwrap();
+    meta_client.commit_epoch(epoch1, res).await.unwrap();
+
     let batch2 = vec![(
         gen_key_from_str(VirtualNode::ZERO, "bb"),
         StorageValue::new_delete(),

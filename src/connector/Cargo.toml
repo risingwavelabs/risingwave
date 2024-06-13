@@ -136,6 +136,7 @@ strum_macros = "0.26"
 tempfile = "3"
 thiserror = "1"
 thiserror-ext = { workspace = true }
+tiberius = { version = "0.12", default-features = false, features = ["chrono", "time", "tds73", "rust_decimal", "bigdecimal", "rustls"] }
 time = "0.3.30"
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",

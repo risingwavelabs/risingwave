@@ -26,6 +26,7 @@ struct RwMetaSnapshot {
     hummock_version_id: i64,
     remarks: Option<String>,
     state_table_info: Option<JsonbVal>,
+    rw_version: Option<String>,
 }
 
 #[system_catalog(table, "rw_catalog.rw_meta_snapshot")]
@@ -40,6 +41,7 @@ async fn read_meta_snapshot(reader: &SysCatalogReaderImpl) -> Result<Vec<RwMetaS
             hummock_version_id: s.hummock_version_id as _,
             remarks: s.remarks,
             state_table_info: Some(json!(s.state_table_info).into()),
+            rw_version: s.rw_version.clone(),
         })
         .collect();
     Ok(meta_snapshots)

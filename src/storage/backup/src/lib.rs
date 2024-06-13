@@ -37,6 +37,7 @@ use std::hash::Hasher;
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
+use risingwave_common::RW_VERSION;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{HummockSstableObjectId, HummockVersionId};
 use risingwave_pb::backup_service::{PbMetaSnapshotManifest, PbMetaSnapshotMetadata};
@@ -61,6 +62,7 @@ pub struct MetaSnapshotMetadata {
     pub remarks: Option<String>,
     #[serde(with = "table_id_key_map")]
     pub state_table_info: HashMap<TableId, PbStateTableInfo>,
+    pub rw_version: Option<String>,
 }
 
 impl MetaSnapshotMetadata {
@@ -79,6 +81,7 @@ impl MetaSnapshotMetadata {
             format_version,
             remarks,
             state_table_info: v.state_table_info.info().clone(),
+            rw_version: Some(RW_VERSION.to_owned()),
         }
     }
 }
@@ -122,6 +125,7 @@ impl From<&MetaSnapshotMetadata> for PbMetaSnapshotMetadata {
                 .iter()
                 .map(|(t, i)| (t.table_id, i.clone()))
                 .collect(),
+            rw_version: m.rw_version.clone(),
         }
     }
 }

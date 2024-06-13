@@ -587,12 +587,6 @@ impl StateStore for HummockStorage {
                 MemOrdering::SeqCst,
             );
         }
-        self.hummock_event_sender
-            .send(HummockEvent::SealEpoch {
-                epoch,
-                is_checkpoint,
-            })
-            .expect("should send success");
         StoreLocalStatistic::flush_all();
     }
 
