@@ -188,10 +188,7 @@ impl HummockManager {
             &self.metrics,
         );
         let mut new_version_delta = version.new_delta();
-        let (committed_epoch, safe_epoch) = {
-            let version = new_version_delta.latest_version();
-            (version.max_committed_epoch, version.safe_epoch)
-        };
+        let epoch = new_version_delta.latest_version().max_committed_epoch;
 
         for (table_id, raw_group_id) in pairs {
             let mut group_id = *raw_group_id;
@@ -247,8 +244,8 @@ impl HummockManager {
                 .insert(
                     TableId::new(*table_id),
                     StateTableInfoDelta {
-                        committed_epoch,
-                        safe_epoch,
+                        committed_epoch: epoch,
+                        safe_epoch: epoch,
                     }
                 )
                 .is_none());
@@ -888,10 +885,12 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
             MutableConfig::TombstoneReclaimRatio(c) => {
                 target.tombstone_reclaim_ratio = *c;
             }
-
             MutableConfig::CompressionAlgorithm(c) => {
                 target.compression_algorithm[c.get_level() as usize]
                     .clone_from(&c.compression_algorithm);
+            }
+            MutableConfig::MaxL0CompactLevelCount(c) => {
+                target.max_l0_compact_level_count = *c;
             }
         }
     }

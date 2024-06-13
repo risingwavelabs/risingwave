@@ -707,6 +707,7 @@ message RiseCtlUpdateCompactionConfigRequest {
       bool enable_emergency_picker = 15;
       uint32 tombstone_reclaim_ratio = 16;
       CompressionAlgorithm compression_algorithm = 17;
+      uint32 max_l0_compact_level_count = 18;
     }
   }
   repeated uint64 compaction_group_ids = 1;
@@ -886,6 +887,9 @@ message CompactionConfig {
   uint32 level0_overlapping_sub_level_compact_level_count = 18;
   uint32 tombstone_reclaim_ratio = 19;
   bool enable_emergency_picker = 20;
+
+  // The limitation of the level count of l0 compaction
+  uint32 max_l0_compact_level_count = 21;
 }
 
 message TableStats {

@@ -246,8 +246,15 @@ impl HummockVersion {
                 if !existing_table_ids.contains(&u32_table_id) {
                     None
                 } else {
-                    extract_single_table_watermark(table_watermarks, self.safe_epoch)
-                        .map(|table_watermarks| (table_id.table_id, table_watermarks))
+                    extract_single_table_watermark(
+                        table_watermarks,
+                        self.state_table_info
+                            .info()
+                            .get(table_id)
+                            .expect("table should exist")
+                            .safe_epoch,
+                    )
+                    .map(|table_watermarks| (table_id.table_id, table_watermarks))
                 }
             })
             .collect()
@@ -584,7 +591,7 @@ impl HummockVersion {
         }
         self.id = version_delta.id;
         self.max_committed_epoch = version_delta.max_committed_epoch;
-        self.safe_epoch = version_delta.safe_epoch;
+        self.set_safe_epoch(version_delta.safe_epoch);
 
         // apply to table watermark
 
@@ -1116,21 +1123,6 @@ pub fn insert_new_sub_level(
     l0.sub_levels.insert(insert_pos, level);
 }
 
-pub fn build_version_delta_after_version(version: &HummockVersion) -> HummockVersionDelta {
-    HummockVersionDelta {
-        id: version.next_version_id(),
-        prev_id: version.id,
-        safe_epoch: version.safe_epoch,
-        trivial_move: false,
-        max_committed_epoch: version.max_committed_epoch,
-        group_deltas: Default::default(),
-        new_table_watermarks: HashMap::new(),
-        removed_table_ids: HashSet::new(),
-        change_log_delta: HashMap::new(),
-        state_table_info_delta: Default::default(),
-    }
-}
-
 /// Delete sstables if the table id is in the id set.
 ///
 /// Return `true` if some sst is deleted, and `false` is the deletion is trivial
@@ -1209,10 +1201,11 @@ pub fn validate_version(version: &HummockVersion) -> Vec<String> {
     let mut res = Vec::new();
 
     // Ensure safe_epoch <= max_committed_epoch
-    if version.safe_epoch > version.max_committed_epoch {
+    if version.visible_table_safe_epoch() > version.max_committed_epoch {
         res.push(format!(
             "VERSION: safe_epoch {} > max_committed_epoch {}",
-            version.safe_epoch, version.max_committed_epoch
+            version.visible_table_safe_epoch(),
+            version.max_committed_epoch
         ));
     }
 
@@ -1353,22 +1346,20 @@ mod tests {
 
     #[test]
     fn test_get_sst_object_ids() {
-        let mut version = HummockVersion {
-            id: 0,
-            levels: HashMap::from_iter([(
-                0,
-                Levels {
-                    levels: vec![],
-                    l0: Some(OverlappingLevel {
-                        sub_levels: vec![],
-                        total_file_size: 0,
-                        uncompressed_file_size: 0,
-                    }),
-                    ..Default::default()
-                },
-            )]),
-            ..Default::default()
-        };
+        let mut version = HummockVersion::default();
+        version.id = 0;
+        version.levels = HashMap::from_iter([(
+            0,
+            Levels {
+                levels: vec![],
+                l0: Some(OverlappingLevel {
+                    sub_levels: vec![],
+                    total_file_size: 0,
+                    uncompressed_file_size: 0,
+                }),
+                ..Default::default()
+            },
+        )]);
         assert_eq!(version.get_object_ids().len(), 0);
 
         // Add to sub level
@@ -1404,32 +1395,30 @@ mod tests {
 
     #[test]
     fn test_apply_version_delta() {
-        let mut version = HummockVersion {
-            id: 0,
-            levels: HashMap::from_iter([
-                (
+        let mut version = HummockVersion::default();
+        version.id = 0;
+        version.levels = HashMap::from_iter([
+            (
+                0,
+                build_initial_compaction_group_levels(
                     0,
-                    build_initial_compaction_group_levels(
-                        0,
-                        &CompactionConfig {
-                            max_level: 6,
-                            ..Default::default()
-                        },
-                    ),
+                    &CompactionConfig {
+                        max_level: 6,
+                        ..Default::default()
+                    },
                 ),
-                (
+            ),
+            (
+                1,
+                build_initial_compaction_group_levels(
                     1,
-                    build_initial_compaction_group_levels(
-                        1,
-                        &CompactionConfig {
-                            max_level: 6,
-                            ..Default::default()
-                        },
-                    ),
+                    &CompactionConfig {
+                        max_level: 6,
+                        ..Default::default()
+                    },
                 ),
-            ]),
-            ..Default::default()
-        };
+            ),
+        ]);
         let version_delta = HummockVersionDelta {
             id: 1,
             group_deltas: HashMap::from_iter([
@@ -1492,25 +1481,23 @@ mod tests {
             }],
             ..Default::default()
         };
-        assert_eq!(
-            version,
-            HummockVersion {
-                id: 1,
-                levels: HashMap::from_iter([
-                    (
+        assert_eq!(version, {
+            let mut version = HummockVersion::default();
+            version.id = 1;
+            version.levels = HashMap::from_iter([
+                (
+                    2,
+                    build_initial_compaction_group_levels(
                         2,
-                        build_initial_compaction_group_levels(
-                            2,
-                            &CompactionConfig {
-                                max_level: 6,
-                                ..Default::default()
-                            }
-                        ),
+                        &CompactionConfig {
+                            max_level: 6,
+                            ..Default::default()
+                        },
                     ),
-                    (1, cg1,),
-                ]),
-                ..Default::default()
-            }
-        );
+                ),
+                (1, cg1),
+            ]);
+            version
+        });
     }
 }

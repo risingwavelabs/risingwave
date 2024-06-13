@@ -49,6 +49,7 @@ message MetaSnapshotMetadata {
   uint64 safe_epoch = 4;
   optional uint32 format_version = 5;
   optional string remarks = 6;
+  optional string rw_version = 7;
 }
 
 service BackupService {
