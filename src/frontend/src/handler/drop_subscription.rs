@@ -65,6 +65,10 @@ pub async fn handle_drop_subscription(
     catalog_writer
         .drop_subscription(subscription_id.subscription_id, cascade)
         .await?;
+    session
+        .get_cursor_manager()
+        .drop_subscription(subscription_id.subscription_id)
+        .await;
 
     Ok(PgResponse::empty_result(StatementType::DROP_SUBSCRIPTION))
 }

@@ -535,6 +535,16 @@ impl CursorManager {
         Ok(())
     }
 
+    pub async fn drop_subscription(&self, subscription_id: u32) {
+        self.cursor_map.lock().await.retain(|_, v| {
+            if let Cursor::Subscription(cursor) = v {
+                cursor.subscription.id.subscription_id != subscription_id
+            } else {
+                true
+            }
+        });
+    }
+
     pub async fn add_query_cursor(
         &self,
         cursor_name: ObjectName,
