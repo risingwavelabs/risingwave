@@ -122,15 +122,18 @@ impl StreamTableScan {
 
     /// Build catalog for backfill state
     ///
-    /// Schema: | vnode | pk ... | `backfill_finished` | `row_count` |
+    /// Schema: | vnode | pk ... | `pk_inclusive` | `backfill_finished` | `row_count` |
     ///
     /// key:    | vnode |
-    /// value:  | pk ... | `backfill_finished` | `row_count` |
+    /// value:  | pk ... | `pk_inclusive` | `backfill_finished` | `row_count` |
     ///
     /// When we update the backfill progress,
     /// we update it for all vnodes.
     ///
     /// `pk` refers to the upstream pk which we use to track the backfill progress.
+    ///
+    /// `pk_inclusive` is a boolean which indicates if the backfill has also yielded this pk,
+    /// OR it just maintained the progress up to this pk, but we can still yield it.
     ///
     /// `vnode` is the corresponding vnode of the upstream's distribution key.
     ///         It should also match the vnode of the backfill executor.
@@ -140,21 +143,10 @@ impl StreamTableScan {
     /// `row_count` is a count of rows which indicates the # of rows per executor.
     ///             We used to track this in memory.
     ///             But for backfill persistence we have to also persist it.
-    ///
-    /// FIXME(kwannoel):
-    /// - Across all vnodes, the values are the same.
-    /// - e.g. | vnode | pk ...  | `backfill_finished` | `row_count` |
-    ///        | 1002 | Int64(1) | t                   | 10          |
-    ///        | 1003 | Int64(1) | t                   | 10          |
-    ///        | 1003 | Int64(1) | t                   | 10          |
-    ///
-    /// Eventually we should track progress per vnode, to support scaling with both mview and
-    /// the corresponding `no_shuffle_backfill`.
-    /// However this is not high priority, since we are working on supporting arrangement backfill,
-    /// which already has this capability.
     pub fn build_backfill_state_catalog(
         &self,
         state: &mut BuildFragmentGraphState,
+        is_arrangement_backfill: bool,
     ) -> TableCatalog {
         let mut catalog_builder = TableCatalogBuilder::default();
         let upstream_schema = &self.core.get_table_columns();
@@ -168,6 +160,12 @@ impl StreamTableScan {
         for col_order in self.core.primary_key() {
             let col = &upstream_schema[col_order.column_index];
             catalog_builder.add_column(&Field::from(col));
+        }
+
+        // `pk_inclusive` column
+        // Only present for arrangement backfill.
+        if is_arrangement_backfill {
+            catalog_builder.add_column(&Field::with_name(DataType::Boolean, "pk_inclusive"));
         }
 
         // `backfill_finished` column
@@ -288,8 +286,10 @@ impl StreamTableScan {
             column_ids: upstream_column_ids.clone(),
         };
 
+        let is_arrangement_backfill = self.stream_scan_type == StreamScanType::ArrangementBackfill;
+
         let catalog = self
-            .build_backfill_state_catalog(state)
+            .build_backfill_state_catalog(state, is_arrangement_backfill)
             .to_internal_table_prost();
 
         // For backfill, we first read pk + output_indices from upstream.
@@ -307,7 +307,7 @@ impl StreamTableScan {
             })
             .collect_vec();
 
-        let arrangement_table = if self.stream_scan_type == StreamScanType::ArrangementBackfill {
+        let arrangement_table = if is_arrangement_backfill {
             let upstream_table_catalog = self.get_upstream_state_table();
             Some(upstream_table_catalog.to_internal_table_prost())
         } else {
