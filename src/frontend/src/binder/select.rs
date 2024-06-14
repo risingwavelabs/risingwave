@@ -363,7 +363,7 @@ impl Binder {
                                 && !except_indices.contains(&c.index)
                         }));
 
-                    select_list.extend(exprs.clone());
+                    select_list.extend(exprs);
                     aliases.extend(names);
                     // TODO: we will need to be able to handle wildcard expressions bound to
                     // aliases in the future. We'd then need a

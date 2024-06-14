@@ -27,7 +27,7 @@ use crate::error::{ErrorCode, Result};
 #[derive(Debug, Clone)]
 pub enum BoundShareInput {
     Query(Either<BoundQuery, RecursiveUnion>),
-    ChangedLog(Relation),
+    ChangeLog(Relation),
 }
 impl BoundShareInput {
     pub fn fields(&self) -> Result<Vec<(bool, Field)>> {
@@ -48,7 +48,7 @@ impl BoundShareInput {
                     .map(|f| (false, f))
                     .collect_vec()),
             },
-            BoundShareInput::ChangedLog(r) => {
+            BoundShareInput::ChangeLog(r) => {
                 let (fields, _name) = if let Relation::BaseTable(bound_base_table) = r {
                     (
                         bound_base_table.table_catalog.columns().to_vec(),
@@ -80,7 +80,7 @@ impl BoundShareInput {
                             true,
                             Field::with_name(
                                 risingwave_common::types::DataType::Serial,
-                                "_changedlog_row_id".to_string(),
+                                "_changelog_row_id".to_string(),
                             ),
                         ),
                     ])
@@ -103,7 +103,7 @@ impl RewriteExprsRecursive for BoundShare {
                 Either::Left(q) => q.rewrite_exprs_recursive(rewriter),
                 Either::Right(r) => r.rewrite_exprs_recursive(rewriter),
             },
-            BoundShareInput::ChangedLog(r) => r.rewrite_exprs_recursive(rewriter),
+            BoundShareInput::ChangeLog(r) => r.rewrite_exprs_recursive(rewriter),
         };
     }
 }

@@ -2741,12 +2741,90 @@ fn parse_ctes() {
 }
 
 #[test]
+fn parse_change_log_ctes() {
+    let cte_sqls = vec!["foo", "bar"];
+    let with = &format!(
+        "WITH a AS changelog from {}, b AS changelog from {} SELECT foo + bar FROM a, b",
+        cte_sqls[0], cte_sqls[1]
+    );
+
+    fn assert_change_log_ctes(expected: &[&str], sel: &Query) {
+        for (i, exp) in expected.iter().enumerate() {
+            let Cte { alias, query, from } = &sel.with.as_ref().unwrap().cte_tables[i];
+            assert!(query.is_none());
+            assert_eq!(*exp, from.as_ref().unwrap().to_string());
+            assert_eq!(
+                if i == 0 {
+                    Ident::new_unchecked("a")
+                } else {
+                    Ident::new_unchecked("b")
+                },
+                alias.name
+            );
+            assert!(alias.columns.is_empty());
+        }
+    }
+
+    // Top-level CTE
+    assert_change_log_ctes(&cte_sqls, &verified_query(with));
+    // CTE in a subquery
+    let sql = &format!("SELECT ({})", with);
+    let select = verified_only_select(sql);
+    match expr_from_projection(only(&select.projection)) {
+        Expr::Subquery(ref subquery) => {
+            assert_change_log_ctes(&cte_sqls, subquery.as_ref());
+        }
+        _ => panic!("expected subquery"),
+    }
+    // CTE in a derived table
+    let sql = &format!("SELECT * FROM ({})", with);
+    let select = verified_only_select(sql);
+    match only(select.from).relation {
+        TableFactor::Derived { subquery, .. } => {
+            assert_change_log_ctes(&cte_sqls, subquery.as_ref())
+        }
+        _ => panic!("expected derived table"),
+    }
+    // CTE in a view
+    let sql = &format!("CREATE VIEW v AS {}", with);
+    match verified_stmt(sql) {
+        Statement::CreateView { query, .. } => assert_change_log_ctes(&cte_sqls, &query),
+        _ => panic!("expected CREATE VIEW"),
+    }
+    // CTE in a CTE...
+    let sql = &format!("WITH outer_cte AS ({}) SELECT * FROM outer_cte", with);
+    let select = verified_query(sql);
+    assert_change_log_ctes(
+        &cte_sqls,
+        only(&select.with.unwrap().cte_tables)
+            .query
+            .as_ref()
+            .unwrap(),
+    );
+}
+
+#[test]
 fn parse_cte_renamed_columns() {
     let sql = "WITH cte (col1, col2) AS (SELECT foo, bar FROM baz) SELECT * FROM cte";
     let query = verified_query(sql);
     assert_eq!(
         vec![Ident::new_unchecked("col1"), Ident::new_unchecked("col2")],
         query
+            .with
+            .unwrap()
+            .cte_tables
+            .first()
+            .unwrap()
+            .alias
+            .columns
+    );
+
+    let sql_change_log = "WITH cte (col1, col2) AS changelog from baz SELECT * FROM cte";
+
+    let query_change_log = verified_query(sql_change_log);
+    assert_eq!(
+        vec![Ident::new_unchecked("col1"), Ident::new_unchecked("col2")],
+        query_change_log
             .with
             .unwrap()
             .cte_tables

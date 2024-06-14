@@ -20,7 +20,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_sqlparser::ast::{
-    Cte, Expr, Fetch, ObjectName, OrderByExpr, Query, SetExpr, SetOperator, Value, With,
+    Cte, CteInner, Expr, Fetch, ObjectName, OrderByExpr, Query, SetExpr, SetOperator, Value, With,
 };
 use thiserror_ext::AsReport;
 
@@ -145,7 +145,7 @@ impl Binder {
     /// After finishing binding, we pop the previous context from the stack.
     pub fn bind_query(&mut self, query: Query) -> Result<BoundQuery> {
         self.push_context();
-        let result = self.bind_query_inner(query.clone());
+        let result = self.bind_query_inner(query);
         self.pop_context()?;
         result
     }
@@ -286,77 +286,81 @@ impl Binder {
         for cte_table in with.cte_tables {
             // note that the new `share_id` for the rcte is generated here
             let share_id = self.next_share_id();
-            let Cte { alias, query, from } = cte_table;
+            let Cte { alias, cte_inner } = cte_table;
             let table_name = alias.name.real_value();
 
             if with.recursive {
-                let query = query.ok_or_else(|| {
-                    ErrorCode::BindError("RECURSIVE CTE don't support changedlog from".to_string())
-                })?;
-                let (
-                    SetExpr::SetOperation {
-                        op: SetOperator::Union,
-                        all,
-                        left,
-                        right,
-                    },
-                    with,
-                ) = Self::validate_rcte(query)?
-                else {
+                if let CteInner::Query(query) = cte_inner {
+                    let (
+                        SetExpr::SetOperation {
+                            op: SetOperator::Union,
+                            all,
+                            left,
+                            right,
+                        },
+                        with,
+                    ) = Self::validate_rcte(query)?
+                    else {
+                        return Err(ErrorCode::BindError(
+                            "expect `SetOperation` as the return type of validation".into(),
+                        )
+                        .into());
+                    };
+
+                    let entry = self
+                        .context
+                        .cte_to_relation
+                        .entry(table_name)
+                        .insert_entry(Rc::new(RefCell::new(BindingCte {
+                            share_id,
+                            state: BindingCteState::Init,
+                            alias,
+                        })))
+                        .get()
+                        .clone();
+
+                    self.bind_rcte(with, entry, *left, *right, all)?;
+                } else {
                     return Err(ErrorCode::BindError(
-                        "expect `SetOperation` as the return type of validation".into(),
+                        "RECURSIVE CTE only support query".to_string(),
                     )
                     .into());
-                };
-
-                let entry = self
-                    .context
-                    .cte_to_relation
-                    .entry(table_name)
-                    .insert_entry(Rc::new(RefCell::new(BindingCte {
-                        share_id,
-                        state: BindingCteState::Init,
-                        alias,
-                    })))
-                    .get()
-                    .clone();
-
-                self.bind_rcte(with, entry, *left, *right, all)?;
-            } else if let Some(query) = query {
-                let bound_query = self.bind_query(query)?;
-                self.context.cte_to_relation.insert(
-                    table_name,
-                    Rc::new(RefCell::new(BindingCte {
-                        share_id,
-                        state: BindingCteState::Bound {
-                            query: either::Either::Left(bound_query),
-                        },
-                        alias,
-                    })),
-                );
+                }
             } else {
-                let from_table_name = from.ok_or_else(|| {
-                    ErrorCode::BindError(
-                        "CTE with changedlog from must have a table/mv".to_string(),
-                    )
-                })?;
-                self.push_context();
-                let from_table_relation = self.bind_relation_by_name(
-                    ObjectName::from(vec![from_table_name]),
-                    None,
-                    None,
-                )?;
-                self.pop_context()?;
-                self.context.cte_to_relation.insert(
-                    table_name,
-                    Rc::new(RefCell::new(BindingCte {
-                        share_id,
-                        state: BindingCteState::ChangedLog {
-                            table: from_table_relation,
-                        },
-                        alias,
-                    })),
-                );
+                match cte_inner {
+                    CteInner::Query(query) => {
+                        let bound_query = self.bind_query(query)?;
+                        self.context.cte_to_relation.insert(
+                            table_name,
+                            Rc::new(RefCell::new(BindingCte {
+                                share_id,
+                                state: BindingCteState::Bound {
+                                    query: either::Either::Left(bound_query),
+                                },
+                                alias,
+                            })),
+                        );
+                    }
+                    CteInner::ChangeLog(from_table_name) => {
+                        self.push_context();
+                        let from_table_relation = self.bind_relation_by_name(
+                            ObjectName::from(vec![from_table_name]),
+                            None,
+                            None,
+                        )?;
+                        self.pop_context()?;
+                        self.context.cte_to_relation.insert(
+                            table_name,
+                            Rc::new(RefCell::new(BindingCte {
+                                share_id,
+                                state: BindingCteState::ChangeLog {
+                                    table: from_table_relation,
+                                },
+                                alias,
+                            })),
+                        );
+                    }
+                }
             }
         }
         Ok(())

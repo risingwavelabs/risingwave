@@ -24,22 +24,24 @@ use crate::utils::ColIndexMappingRewriteExt;
 use crate::OptimizerContextRef;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct ChangedLog<PlanRef> {
+pub struct ChangeLog<PlanRef> {
     pub input: PlanRef,
+    // If there is no op in the output result, it is false, example 'create materialized view mv1 as with sub as changelog from t1 select v1 from sub;'
     pub need_op: bool,
-    pub need_changed_log_row_id: bool,
+    // False before rewrite, true after rewrite
+    pub need_change_log_row_id: bool,
 }
-impl<PlanRef: GenericPlanRef> DistillUnit for ChangedLog<PlanRef> {
+impl<PlanRef: GenericPlanRef> DistillUnit for ChangeLog<PlanRef> {
     fn distill_with_name<'a>(&self, name: impl Into<Str<'a>>) -> XmlNode<'a> {
         childless_record(name, vec![])
     }
 }
-impl<PlanRef: GenericPlanRef> ChangedLog<PlanRef> {
-    pub fn new(input: PlanRef, need_op: bool, need_changed_log_row_id: bool) -> Self {
-        ChangedLog {
+impl<PlanRef: GenericPlanRef> ChangeLog<PlanRef> {
+    pub fn new(input: PlanRef, need_op: bool, need_change_log_row_id: bool) -> Self {
+        ChangeLog {
             input,
             need_op,
-            need_changed_log_row_id,
+            need_change_log_row_id,
         }
     }
 
@@ -49,7 +51,7 @@ impl<PlanRef: GenericPlanRef> ChangedLog<PlanRef> {
         ColIndexMapping::new(map, self.schema().len())
     }
 }
-impl<PlanRef: GenericPlanRef> GenericPlanNode for ChangedLog<PlanRef> {
+impl<PlanRef: GenericPlanRef> GenericPlanNode for ChangeLog<PlanRef> {
     fn schema(&self) -> Schema {
         let mut fields = self.input.schema().fields.clone();
         if self.need_op {
@@ -58,32 +60,21 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for ChangedLog<PlanRef> {
                 "op",
             ));
         }
-        if self.need_changed_log_row_id {
+        if self.need_change_log_row_id {
             fields.push(Field::with_name(
                 risingwave_common::types::DataType::Serial,
-                "_changed_log_row_id",
+                "_change_log_row_id",
             ));
         }
         Schema::new(fields)
     }
 
     fn stream_key(&self) -> Option<Vec<usize>> {
-        match self.input.stream_key() {
-            Some(keys) => {
-                let mut keys = keys.to_vec();
-                if self.need_changed_log_row_id {
-                    keys.push(self.schema().len() - 1);
-                }
-                Some(keys)
-            }
-            None => {
-                if self.need_changed_log_row_id {
-                    let keys = vec![self.schema().len() - 1];
-                    Some(keys)
-                } else {
-                    None
-                }
-            }
+        if self.need_change_log_row_id {
+            let keys = vec![self.schema().len() - 1];
+            Some(keys)
+        } else {
+            None
         }
     }
 

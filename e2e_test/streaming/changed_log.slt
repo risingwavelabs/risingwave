@@ -11,24 +11,27 @@ statement ok
 create table t3 (v1 int primary key, v2 int);
 
 statement ok
-create materialized view mv1 as with sub as changedlog from t1 select * from sub;
+create materialized view mv1 as with sub as changelog from t1 select * from sub;
 
 statement ok
-create materialized view mv2 as with sub as changedlog from t2 select * from sub;
+create materialized view mv2 as with sub as changelog from t2 select * from sub;
 
 statement ok
-create materialized view mv3 as with sub as changedlog from t1 select v1, v2 from sub;
+create materialized view mv3 as with sub as changelog from t1 select v1, v2 from sub;
 
 statement ok
-create materialized view mv4 as with sub1 as changedlog from t1, sub2 as changedlog from t2
+create materialized view mv4 as with sub1 as changelog from t1, sub2 as changelog from t2
 select sub1.v1 as v11, sub1.v2 as v12, sub2.v1 as v21, sub2.v2 as v22 from sub1 inner join sub2 on sub1.v1 = sub2.v1;
 
 statement ok
-create materialized view mv5 as with sub1 as changedlog from t1, sub2 as changedlog from t2
+create materialized view mv5 as with sub1 as changelog from t1, sub2 as changelog from t2
 select sub1.v1 as v11, sub1.v2 as v12, sub2.v1 as v21, sub2.v2 as v22, sub1.op as op1, sub2.op as op2 from sub1 inner join sub2 on sub1.v1 = sub2.v1;
 
 statement ok
-create materialized view mv6 as with sub as changedlog from t3 select * from sub;
+create materialized view mv6 as with sub as changelog from t3 select * from sub;
+
+statement ok
+create materialized view mv7(col1,col2,col3) as with sub as changelog from t3 select * from sub;
 
 statement ok
 insert into t1 values(1,1),(2,2);
@@ -50,6 +53,12 @@ update t3 set v2 = 500 where v1 = 5;
 
 statement ok
 delete from t1 where v1 = 2;
+
+statement ok
+alter materialized view mv7 rename to mv7_rename;
+
+statement ok
+alter table t3 rename to t3_rename;
 
 query III rowsort
 select * from mv1 order by v1;
@@ -116,6 +125,16 @@ select * from mv6 order by v1;
 5 500 3
 6 6 1
 
+query III rowsort
+select * from mv7_rename order by col1;
+----
+5 5 1
+5 5 4
+5 500 3
+6 6 1
+
+statement ok
+drop materialized view mv7_rename;
 
 statement ok
 drop materialized view mv6;
@@ -135,9 +154,8 @@ drop materialized view mv2;
 statement ok
 drop materialized view mv1;
 
-
 statement ok
-drop table t3;
+drop table t3_rename;
 
 statement ok
 drop table t2;

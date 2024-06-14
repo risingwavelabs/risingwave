@@ -13,13 +13,13 @@
 // limitations under the License.
 use crate::binder::Relation;
 use crate::error::Result;
-use crate::optimizer::plan_node::LogicalChangedLog;
+use crate::optimizer::plan_node::LogicalChangeLog;
 use crate::{PlanRef, Planner};
 
 impl Planner {
-    pub(super) fn plan_changed_log(&mut self, relation: Relation) -> Result<PlanRef> {
+    pub(super) fn plan_change_log(&mut self, relation: Relation) -> Result<PlanRef> {
         let root = self.plan_relation(relation)?;
-        let plan = LogicalChangedLog::create(root);
+        let plan = LogicalChangeLog::create(root);
         Ok(plan)
     }
 }

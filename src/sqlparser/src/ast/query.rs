@@ -282,22 +282,26 @@ impl fmt::Display for With {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Cte {
     pub alias: TableAlias,
-    pub query: Option<Query>,
-    pub from: Option<Ident>,
+    pub cte_inner: CteInner,
 }
 
 impl fmt::Display for Cte {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if let Some(query) = &self.query {
-            write!(f, "{} AS ({})", self.alias, query)?;
-            if let Some(ref fr) = self.from {
-                write!(f, " FROM {}", fr)?;
+        match &self.cte_inner {
+            CteInner::Query(query) => write!(f, "{} AS ({})", self.alias, query)?,
+            CteInner::ChangeLog(ident) => {
+                write!(f, "{} AS changelog from {}", self.alias, ident.value)?
             }
-        } else {
-            write!(f, "{} AS changedlog from {:?}", self.alias, self.from)?;
         }
         Ok(())
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum CteInner {
+    Query(Query),
+    ChangeLog(Ident),
 }
 
 /// One item of the comma-separated list following `SELECT`

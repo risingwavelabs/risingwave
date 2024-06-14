@@ -103,7 +103,7 @@ pub enum BindingCteState {
         query: Either<BoundQuery, RecursiveUnion>,
     },
 
-    ChangedLog {
+    ChangeLog {
         table: Relation,
     },
 }

@@ -3965,43 +3965,36 @@ impl Parser<'_> {
     /// Parse a CTE (`alias [( col1, col2, ... )] AS (subquery)`)
     fn parse_cte(&mut self) -> PResult<Cte> {
         let name = self.parse_identifier_non_reserved()?;
-
-        let mut cte = if self.parse_keyword(Keyword::AS) {
-            let query = if let Ok(()) = self.expect_token(&Token::LParen) {
-                let query = self.parse_query()?;
-                self.expect_token(&Token::RParen)?;
-                Some(query)
-            } else {
-                let changed_log = self.parse_identifier_non_reserved()?;
-                assert!(changed_log.to_string().to_lowercase() == "changedlog");
-                None
-            };
+        let cte = if self.parse_keyword(Keyword::AS) {
+            let cte_inner = self.parse_cte_inner()?;
             let alias = TableAlias {
                 name,
                 columns: vec![],
             };
-            Cte {
-                alias,
-                query,
-                from: None,
-            }
+            Cte { alias, cte_inner }
         } else {
             let columns = self.parse_parenthesized_column_list(Optional)?;
             self.expect_keyword(Keyword::AS)?;
-            self.expect_token(&Token::LParen)?;
+            let cte_inner = self.parse_cte_inner()?;
+            let alias = TableAlias { name, columns };
+            Cte { alias, cte_inner }
+        };
+        Ok(cte)
+    }
+
+    fn parse_cte_inner(&mut self) -> PResult<CteInner> {
+        if let Ok(()) = self.expect_token(&Token::LParen) {
             let query = self.parse_query()?;
             self.expect_token(&Token::RParen)?;
-            let alias = TableAlias { name, columns };
-            Cte {
-                alias,
-                query: Some(query),
-                from: None,
+            Ok(CteInner::Query(query))
+        } else {
+            let change_log = self.parse_identifier_non_reserved()?;
+            if change_log.to_string().to_lowercase() != "changelog" {
+                parser_err!("Expected 'changelog' but found '{}'", change_log);
             }
-        };
-        if self.parse_keyword(Keyword::FROM) {
-            cte.from = Some(self.parse_identifier()?);
+            self.expect_keyword(Keyword::FROM)?;
+            Ok(CteInner::ChangeLog(self.parse_identifier()?))
         }
-        Ok(cte)
     }
 
     /// Parse a "query body", which is an expression with roughly the

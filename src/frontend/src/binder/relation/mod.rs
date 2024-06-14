@@ -392,8 +392,8 @@ impl Binder {
                     // no matter it's recursive or not.
                     Ok(Relation::Share(Box::new(BoundShare { share_id, input})))
                 }
-                BindingCteState::ChangedLog { table } => {
-                    let input = BoundShareInput::ChangedLog(table);
+                BindingCteState::ChangeLog { table } => {
+                    let input = BoundShareInput::ChangeLog(table);
                     self.bind_table_to_context(
                         input.fields()?,
                         table_name.clone(),

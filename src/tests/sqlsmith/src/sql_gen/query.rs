@@ -130,11 +130,9 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     fn gen_with_inner(&mut self) -> (With, Vec<Table>) {
         let alias = self.gen_table_alias_with_prefix("with");
         let (query, query_schema) = self.gen_local_query();
-        let from = None;
         let cte = Cte {
             alias: alias.clone(),
-            query: Some(query),
-            from,
+            cte_inner: risingwave_sqlparser::ast::CteInner::Query(query),
         };
 
         let with_tables = vec![Table::new(alias.name.real_value(), query_schema)];

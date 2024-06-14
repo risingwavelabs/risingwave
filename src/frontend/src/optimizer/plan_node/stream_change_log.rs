@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
-use risingwave_pb::stream_plan::ChangedLogNode;
+use risingwave_pb::stream_plan::ChangeLogNode;
 
 use super::expr_visitable::ExprVisitable;
 use super::stream::prelude::PhysicalPlanRef;
@@ -24,13 +24,13 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::PlanRef;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct StreamChangedLog {
+pub struct StreamChangeLog {
     pub base: PlanBase<Stream>,
-    core: generic::ChangedLog<PlanRef>,
+    core: generic::ChangeLog<PlanRef>,
 }
 
-impl StreamChangedLog {
-    pub fn new(core: generic::ChangedLog<PlanRef>) -> Self {
+impl StreamChangeLog {
+    pub fn new(core: generic::ChangeLog<PlanRef>) -> Self {
         let input = core.input.clone();
         let dist = input.distribution().clone();
         // Filter executor won't change the append-only behavior of the stream.
@@ -47,11 +47,11 @@ impl StreamChangedLog {
             input.emit_on_window_close(),
             watermark_columns,
         );
-        StreamChangedLog { base, core }
+        StreamChangeLog { base, core }
     }
 }
 
-impl PlanTreeNodeUnary for StreamChangedLog {
+impl PlanTreeNodeUnary for StreamChangeLog {
     fn input(&self) -> PlanRef {
         self.core.input.clone()
     }
@@ -63,17 +63,17 @@ impl PlanTreeNodeUnary for StreamChangedLog {
     }
 }
 
-impl_plan_tree_node_for_unary! { StreamChangedLog }
-impl_distill_by_unit!(StreamChangedLog, core, "StreamChangedLog");
+impl_plan_tree_node_for_unary! { StreamChangeLog }
+impl_distill_by_unit!(StreamChangeLog, core, "StreamChangeLog");
 
-impl StreamNode for StreamChangedLog {
+impl StreamNode for StreamChangeLog {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
-        PbNodeBody::ChangedLog(ChangedLogNode {
+        PbNodeBody::ChangeLog(ChangeLogNode {
             need_op: self.core.need_op,
         })
     }
 }
 
-impl ExprRewritable for StreamChangedLog {}
+impl ExprRewritable for StreamChangeLog {}
 
-impl ExprVisitable for StreamChangedLog {}
+impl ExprVisitable for StreamChangeLog {}
