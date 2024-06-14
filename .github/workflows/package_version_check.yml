@@ -1,4 +1,4 @@
-name: Check if package version is greater than the latest release version
+name: Package Version Checker
 
 on:
   pull_request:
@@ -6,7 +6,7 @@ on:
       - 'main'
 
 jobs:
-  list-and-pick-latest-release-branch:
+  compare-package-version-with-latest-release-version:
     runs-on: ubuntu-latest
 
     steps:
@@ -49,7 +49,7 @@ jobs:
           cargo_major=$(echo $cargo_version | cut -d. -f1)
           cargo_minor=$(echo $cargo_version | cut -d. -f2)
 
-          if [ "$cargo_major" -lt "$latest_major" ] || { [ "$cargo_major" -eq "$latest_major" ] && [ "$cargo_minor" -lt "$latest_minor" ]; }; then
+          if [ "$cargo_major" -lt "$latest_major" ] || { [ "$cargo_major" -eq "$latest_major" ] && [ "$cargo_minor" -le "$latest_minor" ]; }; then
             echo "Error: Cargo.toml package version $cargo_version is not larger than $latest_version"
             exit 1
           else
