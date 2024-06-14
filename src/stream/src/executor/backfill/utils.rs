@@ -102,7 +102,7 @@ impl BackfillState {
             BackfillProgressPerVnode::NotStarted => {
                 *state = BackfillProgressPerVnode::InProgress {
                     current_pos: new_pos,
-                    pos_inclusive: false,
+                    yielded: true,
                     snapshot_row_count: snapshot_row_count_delta,
                 };
             }
@@ -111,7 +111,7 @@ impl BackfillState {
             } => {
                 *state = BackfillProgressPerVnode::InProgress {
                     current_pos: new_pos,
-                    pos_inclusive: false,
+                    yielded: true,
                     snapshot_row_count: *snapshot_row_count + snapshot_row_count_delta,
                 };
             }
@@ -127,8 +127,8 @@ impl BackfillState {
             BackfillProgressPerVnode::NotStarted => (finished_placeholder_position, 0),
             BackfillProgressPerVnode::InProgress {
                 current_pos,
-                pos_inclusive,
                 snapshot_row_count,
+                ..
             } => (current_pos.clone(), *snapshot_row_count),
             BackfillProgressPerVnode::Completed { .. } => {
                 return;
@@ -147,7 +147,7 @@ impl BackfillState {
             BackfillProgressPerVnode::NotStarted => unreachable!(),
             BackfillProgressPerVnode::InProgress {
                 current_pos,
-                pos_inclusive,
+                yielded,
                 snapshot_row_count,
             } => {
                 let mut encoded_state = vec![None; current_pos.len() + METADATA_STATE_LEN];
@@ -174,7 +174,7 @@ impl BackfillState {
             BackfillProgressPerVnode::NotStarted => None,
             BackfillProgressPerVnode::InProgress {
                 current_pos,
-                pos_inclusive,
+                yielded,
                 snapshot_row_count,
             } => {
                 let committed_pos = current_pos;
@@ -285,7 +285,7 @@ pub enum BackfillProgressPerVnode {
         /// The current snapshot offset
         current_pos: OwnedRow,
         /// Whether the current pos has been yielded downstream
-        pos_inclusive: bool,
+        yielded: bool,
         /// Number of snapshot records read for this vnode.
         snapshot_row_count: u64,
     },
@@ -364,9 +364,16 @@ pub(crate) fn mark_chunk_ref_by_vnode<S: StateStore, SD: ValueRowSerde>(
             // If not started, no need to forward.
             BackfillProgressPerVnode::NotStarted => false,
             // If in progress, we need to check row <= current_pos.
-            BackfillProgressPerVnode::InProgress { current_pos, .. } => {
+            BackfillProgressPerVnode::InProgress {
+                current_pos,
+                yielded,
+                ..
+            } => {
                 match cmp_datum_iter(pk.iter(), current_pos.iter(), pk_order.iter().copied()) {
-                    Ordering::Less | Ordering::Equal => true,
+                    Ordering::Less => true,
+                    // If current pos is already yielded, it means we can update it => mark update as visible.
+                    // Reverse is true.
+                    Ordering::Equal => *yielded,
                     Ordering::Greater => false,
                 }
             }
@@ -494,7 +501,7 @@ pub(crate) async fn get_progress_per_vnode<S: StateStore, const IS_REPLICATED: b
     let tasks = vnode_keys.map(|vnode_key| state_table.get_row(vnode_key));
     // 2. Fetch the state for each vnode.
     //    It should have the following schema, it should not contain vnode:
-    //    | pk ... | `pk_inclusive`  | `backfill_finished` | `row_count` |
+    //    | pk ... | `yielded`  | `backfill_finished` | `row_count` |
     let state_for_vnodes = try_join_all(tasks).await?;
     for (vnode, state_for_vnode) in state_table
         .vnodes()
@@ -514,9 +521,9 @@ pub(crate) async fn get_progress_per_vnode<S: StateStore, const IS_REPLICATED: b
                 let vnode_is_finished = row.as_inner().get(row.len() - 2).unwrap();
                 let vnode_is_finished = vnode_is_finished.as_ref().unwrap();
 
-                // 5. Decode the `pk_inclusive` flag.
-                let pk_inclusive = row.as_inner().get(row.len() - 3).unwrap();
-                let pk_inclusive = pk_inclusive.as_ref().unwrap();
+                // 5. Decode the `yielded` flag.
+                let yielded = row.as_inner().get(row.len() - 3).unwrap();
+                let yielded = yielded.as_ref().unwrap();
 
                 // 6. Decode the `current_pos`.
                 let current_pos = row.as_inner().get(..row.len() - 3).unwrap();
@@ -538,12 +545,12 @@ pub(crate) async fn get_progress_per_vnode<S: StateStore, const IS_REPLICATED: b
                     BackfillStatePerVnode::new(
                         BackfillProgressPerVnode::InProgress {
                             current_pos: current_pos.clone(),
-                            pos_inclusive: *pk_inclusive.as_bool(),
+                            yielded: *yielded.as_bool(),
                             snapshot_row_count,
                         },
                         BackfillProgressPerVnode::InProgress {
                             current_pos,
-                            pos_inclusive: *pk_inclusive.as_bool(),
+                            yielded: *yielded.as_bool(),
                             snapshot_row_count,
                         },
                     )
@@ -663,7 +670,7 @@ pub(crate) fn construct_initial_finished_state(pos_len: usize) -> OwnedRow {
 /// `current_pos`: The current pos to start scanning from.
 pub(crate) fn compute_bounds(
     pk_indices: &[usize],
-    inclusive: bool,
+    exclusive: bool,
     current_pos: Option<OwnedRow>,
 ) -> Option<(Bound<OwnedRow>, Bound<OwnedRow>)> {
     // `current_pos` is None means it needs to scan from the beginning, so we use Unbounded to
@@ -676,10 +683,10 @@ pub(crate) fn compute_bounds(
             assert!(pk_indices.is_empty());
             return None;
         }
-        let lower_bound = if inclusive {
-            Bound::Included(current_pos)
-        } else {
+        let lower_bound = if exclusive {
             Bound::Excluded(current_pos)
+        } else {
+            Bound::Included(current_pos)
         };
 
         Some((lower_bound, Bound::Unbounded))

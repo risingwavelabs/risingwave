@@ -122,17 +122,17 @@ impl StreamTableScan {
 
     /// Build catalog for backfill state
     ///
-    /// Schema: | vnode | pk ... | `pk_inclusive` | `backfill_finished` | `row_count` |
+    /// Schema: | vnode | pk ... | `yielded` | `backfill_finished` | `row_count` |
     ///
     /// key:    | vnode |
-    /// value:  | pk ... | `pk_inclusive` | `backfill_finished` | `row_count` |
+    /// value:  | pk ... | `yielded` | `backfill_finished` | `row_count` |
     ///
     /// When we update the backfill progress,
     /// we update it for all vnodes.
     ///
     /// `pk` refers to the upstream pk which we use to track the backfill progress.
     ///
-    /// `pk_inclusive` is a boolean which indicates if the backfill has also yielded this pk,
+    /// `yielded` is a boolean which indicates if the backfill has also yielded this pk,
     /// OR it just maintained the progress up to this pk, but we can still yield it.
     ///
     /// `vnode` is the corresponding vnode of the upstream's distribution key.
@@ -162,10 +162,10 @@ impl StreamTableScan {
             catalog_builder.add_column(&Field::from(col));
         }
 
-        // `pk_inclusive` column
+        // `yielded` column
         // Only present for arrangement backfill.
         if is_arrangement_backfill {
-            catalog_builder.add_column(&Field::with_name(DataType::Boolean, "pk_inclusive"));
+            catalog_builder.add_column(&Field::with_name(DataType::Boolean, "yielded"));
         }
 
         // `backfill_finished` column
