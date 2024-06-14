@@ -12,8 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::hash_map::Entry;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::ops::Deref;
 use std::sync::LazyLock;
 
@@ -24,6 +23,7 @@ use mongodb::{Client, Namespace};
 use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::log::LogSuppresser;
+use risingwave_common::must_match;
 use risingwave_common::row::Row;
 use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use risingwave_common::types::ScalarRefImpl;
@@ -88,7 +88,7 @@ pub struct MongodbConfig {
 }
 
 impl MongodbConfig {
-    pub fn from_hashmap(properties: HashMap<String, String>) -> crate::sink::Result<Self> {
+    pub fn from_btreemap(properties: BTreeMap<String, String>) -> crate::sink::Result<Self> {
         let config =
             serde_json::from_value::<MongodbConfig>(serde_json::to_value(properties).unwrap())
                 .map_err(|e| SinkError::Config(anyhow!(e)))?;
@@ -111,14 +111,14 @@ impl MongodbConfig {
 /// cleaned up eventually due to the session expiration.
 /// see [this issue](https://github.com/mongodb/mongo-rust-driver/issues/719) for more information
 struct ClientGuard {
-    tx: tokio::sync::oneshot::Sender<()>,
+    _tx: tokio::sync::oneshot::Sender<()>,
     client: Client,
 }
 
 impl ClientGuard {
     fn new(name: String, client: Client) -> Self {
         let client_copy = client.clone();
-        let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+        let (_tx, rx) = tokio::sync::oneshot::channel::<()>();
         tokio::spawn(async move {
             tracing::debug!(%name, "waiting for client to shut down");
             let _ = rx.await;
@@ -130,7 +130,7 @@ impl ClientGuard {
             client_copy.shutdown().await;
             tracing::debug!(%name, "client shutdown succeeded");
         });
-        Self { tx, client }
+        Self { _tx, client }
     }
 }
 
@@ -153,7 +153,7 @@ pub struct MongodbSink {
 
 impl MongodbSink {
     pub fn new(param: SinkParam) -> Result<Self> {
-        let config = MongodbConfig::from_hashmap(param.properties.clone())?;
+        let config = MongodbConfig::from_btreemap(param.properties.clone())?;
         let pk_indices = param.downstream_pk.clone();
         let is_append_only = param.sink_type.is_append_only();
         let schema = param.schema();
@@ -184,8 +184,7 @@ impl Sink for MongodbSink {
     fn is_sink_decouple(_desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
         match user_specified {
             // Set default sink decouple to false, because mongodb sink writer only ensure delivery on checkpoint barrier
-            SinkDecouple::Default => Ok(false),
-            SinkDecouple::Disable => Ok(false),
+            SinkDecouple::Default | SinkDecouple::Disable => Ok(false),
             SinkDecouple::Enable => Ok(true),
         }
     }
@@ -315,8 +314,10 @@ impl Sink for MongodbSink {
 
 pub struct MongodbSinkWriter {
     pub config: MongodbConfig,
-    client: ClientGuard,
     payload_writer: MongodbPayloadWriter,
+    is_append_only: bool,
+    // TODO switching to bulk write API when mongodb driver supports it
+    command_builder: CommandBuilder,
 }
 
 impl MongodbSinkWriter {
@@ -372,17 +373,50 @@ impl MongodbSinkWriter {
             pk_indices,
             default_namespace,
             coll_name_field_index,
-            client.clone(),
+            ClientGuard::new(name, client),
             config.bulk_write_max_entries,
             row_encoder,
-            command_builder,
         );
 
         Ok(Self {
             config,
-            client: ClientGuard::new(name, client),
             payload_writer,
+            is_append_only,
+            command_builder,
         })
+    }
+
+    async fn append(&mut self, chunk: StreamChunk) -> Result<()> {
+        let insert_builder =
+            must_match!(&mut self.command_builder, CommandBuilder::AppendOnly(builder) => builder);
+        for (op, row) in chunk.rows() {
+            if op != Op::Insert {
+                if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                    tracing::warn!(
+                        suppressed_count,
+                        ?op,
+                        ?row,
+                        "non-insert op received in append-only mode"
+                    );
+                }
+                continue;
+            }
+            self.payload_writer.append(insert_builder, row).await?;
+        }
+        Ok(())
+    }
+
+    async fn upsert(&mut self, chunk: StreamChunk) -> Result<()> {
+        let upsert_builder =
+            must_match!(&mut self.command_builder, CommandBuilder::Upsert(builder) => builder);
+        for (op, row) in chunk.rows() {
+            if op == Op::UpdateDelete {
+                // we should ignore the `UpdateDelete` in upsert mode
+                continue;
+            }
+            self.payload_writer.upsert(upsert_builder, op, row).await?;
+        }
+        Ok(())
     }
 }
 
@@ -393,15 +427,22 @@ impl SinkWriter for MongodbSinkWriter {
     }
 
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
-        for (op, row) in chunk.rows() {
-            self.payload_writer.write(op, row).await?;
+        if self.is_append_only {
+            self.append(chunk).await
+        } else {
+            self.upsert(chunk).await
         }
-        Ok(())
     }
 
     async fn barrier(&mut self, is_checkpoint: bool) -> Result<Self::CommitMetadata> {
         if is_checkpoint {
-            self.payload_writer.flush().await?;
+            if self.is_append_only {
+                let insert_builder = must_match!(&mut self.command_builder, CommandBuilder::AppendOnly(builder) => builder);
+                self.payload_writer.flush_insert(insert_builder).await?;
+            } else {
+                let upsert_builder = must_match!(&mut self.command_builder, CommandBuilder::Upsert(builder) => builder);
+                self.payload_writer.flush_upsert(upsert_builder).await?;
+            }
         }
         Ok(())
     }
@@ -449,8 +490,9 @@ impl UpsertCommandBuilder {
     }
 
     fn add_upsert(&mut self, pk: Document, row: Document) -> Result<()> {
-        let pk_data = mongodb::bson::to_vec(&pk)
-            .map_err(|err| anyhow!(err).context("cannot serialize primary key"))?;
+        let pk_data = mongodb::bson::to_vec(&pk).map_err(|err| {
+            SinkError::Mongodb(anyhow!(err).context("cannot serialize primary key"))
+        })?;
         // under same pk, if the record currently being upserted was marked for deletion previously, we should
         // revert the deletion, otherwise, the upserting record may be accidentally deleted.
         // see https://github.com/risingwavelabs/risingwave/pull/17102#discussion_r1630684160 for more information.
@@ -467,8 +509,9 @@ impl UpsertCommandBuilder {
     }
 
     fn add_delete(&mut self, pk: Document) -> Result<()> {
-        let pk_data = mongodb::bson::to_vec(&pk)
-            .map_err(|err| anyhow!(err).context("cannot serialize primary key"))?;
+        let pk_data = mongodb::bson::to_vec(&pk).map_err(|err| {
+            SinkError::Mongodb(anyhow!(err).context("cannot serialize primary key"))
+        })?;
         self.deletes.insert(pk_data, pk);
         Ok(())
     }
@@ -518,12 +561,10 @@ struct MongodbPayloadWriter {
     pk_indices: Vec<usize>,
     default_namespace: Namespace,
     coll_name_field_index: Option<usize>,
-    client: Client,
+    client: ClientGuard,
     buffered_entries: usize,
     max_entries: usize,
     row_encoder: BsonEncoder,
-    // TODO switching to bulk write API when mongodb driver supports it
-    command_builder: Option<CommandBuilder>,
 }
 
 impl MongodbPayloadWriter {
@@ -532,10 +573,9 @@ impl MongodbPayloadWriter {
         pk_indices: Vec<usize>,
         default_namespace: Namespace,
         coll_name_field_index: Option<usize>,
-        client: Client,
+        client: ClientGuard,
         max_entries: usize,
         row_encoder: BsonEncoder,
-        command_builder: CommandBuilder,
     ) -> Self {
         Self {
             schema,
@@ -546,7 +586,6 @@ impl MongodbPayloadWriter {
             buffered_entries: 0,
             max_entries,
             row_encoder,
-            command_builder: Some(command_builder),
         }
     }
 
@@ -587,27 +626,29 @@ impl MongodbPayloadWriter {
         }
     }
 
-    fn append(
-        &self,
+    async fn append(
+        &mut self,
         insert_builder: &mut HashMap<MongodbNamespace, InsertCommandBuilder>,
         row: RowRef<'_>,
     ) -> Result<()> {
         let document = self.row_encoder.encode(row)?;
         let ns = self.extract_namespace_from_row_ref(row);
         let coll = ns.1.clone();
-        match insert_builder.entry(ns) {
-            Entry::Occupied(mut entry) => entry.get_mut().append(document),
-            Entry::Vacant(entry) => {
-                let mut builder = InsertCommandBuilder::new(coll, self.max_entries);
-                builder.append(document);
-                entry.insert(builder);
-            }
+
+        insert_builder
+            .entry(ns)
+            .or_insert_with(|| InsertCommandBuilder::new(coll, self.max_entries))
+            .append(document);
+
+        self.buffered_entries += 1;
+        if self.buffered_entries >= self.max_entries {
+            self.flush_insert(insert_builder).await?;
         }
         Ok(())
     }
 
-    fn upsert(
-        &self,
+    async fn upsert(
+        &mut self,
         upsert_builder: &mut HashMap<MongodbNamespace, UpsertCommandBuilder>,
         op: Op,
         row: RowRef<'_>,
@@ -628,90 +669,57 @@ impl MongodbPayloadWriter {
 
         let pk = doc! {MONGODB_PK_NAME: pk};
         match op {
-            Op::Insert | Op::UpdateInsert => match upsert_builder.entry(ns) {
-                Entry::Occupied(mut entry) => entry.get_mut().add_upsert(pk, document),
-                Entry::Vacant(entry) => {
-                    let mut builder = UpsertCommandBuilder::new(coll, self.max_entries);
-                    builder.add_upsert(pk, document)?;
-                    entry.insert(builder);
-                    Ok(())
-                }
-            },
-            Op::UpdateDelete => Ok(()),
-            Op::Delete => match upsert_builder.entry(ns) {
-                Entry::Occupied(mut entry) => entry.get_mut().add_delete(pk),
-                Entry::Vacant(entry) => {
-                    let mut builder = UpsertCommandBuilder::new(coll, self.max_entries);
-                    builder.add_delete(pk)?;
-                    entry.insert(builder);
-                    Ok(())
-                }
-            },
+            Op::Insert | Op::UpdateInsert => upsert_builder
+                .entry(ns)
+                .or_insert_with(|| UpsertCommandBuilder::new(coll, self.max_entries))
+                .add_upsert(pk, document)?,
+            Op::UpdateDelete => (),
+            Op::Delete => upsert_builder
+                .entry(ns)
+                .or_insert_with(|| UpsertCommandBuilder::new(coll, self.max_entries))
+                .add_delete(pk)?,
         }
-    }
-
-    async fn write(&mut self, op: Op, row: RowRef<'_>) -> Result<()> {
-        let mut command_builder = self.command_builder.take();
-        match command_builder {
-            Some(CommandBuilder::AppendOnly(ref mut insert_builder)) => {
-                if op != Op::Insert {
-                    if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
-                        tracing::warn!(
-                            suppressed_count,
-                            ?op,
-                            ?row,
-                            "non-insert op received in append-only mode"
-                        );
-                    }
-                    return Ok(());
-                }
-                self.append(insert_builder, row)?;
-            }
-            Some(CommandBuilder::Upsert(ref mut upsert_builder)) => {
-                if op == Op::UpdateDelete {
-                    // we should ignore the `UpdateDelete` in upsert mode
-                    return Ok(());
-                }
-                self.upsert(upsert_builder, op, row)?;
-            }
-            _ => unreachable!(),
-        }
-        self.command_builder = command_builder;
 
         self.buffered_entries += 1;
         if self.buffered_entries >= self.max_entries {
-            self.flush().await?;
+            self.flush_upsert(upsert_builder).await?;
         }
-
         Ok(())
     }
 
-    async fn flush(&mut self) -> Result<()> {
-        let mut command_builder = self.command_builder.take();
-        match command_builder {
-            Some(CommandBuilder::AppendOnly(ref mut insert_builder)) => {
-                for (ns, builder) in insert_builder.drain() {
-                    self.send_bulk_write_command(&ns.0, builder.build()).await?;
-                }
-            }
-            Some(CommandBuilder::Upsert(ref mut upsert_builder)) => {
-                for (ns, builder) in upsert_builder.drain() {
-                    let (upsert, delete) = builder.build();
-                    // we are sending the bulk upsert first because, under same pk, the `Insert` and `UpdateInsert`
-                    // should always appear before `Delete`. we have already ignored the `UpdateDelete`
-                    // which is useless in upsert mode.
-                    if let Some(upsert) = upsert {
-                        self.send_bulk_write_command(&ns.0, upsert).await?;
-                    }
-                    if let Some(delete) = delete {
-                        self.send_bulk_write_command(&ns.0, delete).await?;
-                    }
-                }
-            }
-            _ => unreachable!(),
+    async fn flush_insert(
+        &mut self,
+        insert_builder: &mut HashMap<MongodbNamespace, InsertCommandBuilder>,
+    ) -> Result<()> {
+        // TODO try sending bulk-write of each collection concurrently to improve the performance when
+        // `dynamic collection` is enabled. We may need to provide best practice to guide user on setting
+        // the MongoDB driver's connection properties.
+        for (ns, builder) in insert_builder.drain() {
+            self.send_bulk_write_command(&ns.0, builder.build()).await?;
         }
-        self.command_builder = command_builder;
+        self.buffered_entries = 0;
+        Ok(())
+    }
 
+    async fn flush_upsert(
+        &mut self,
+        upsert_builder: &mut HashMap<MongodbNamespace, UpsertCommandBuilder>,
+    ) -> Result<()> {
+        // TODO try sending bulk-write of each collection concurrently to improve the performance when
+        // `dynamic collection` is enabled. We may need to provide best practice to guide user on setting
+        // the MongoDB driver's connection properties.
+        for (ns, builder) in upsert_builder.drain() {
+            let (upsert, delete) = builder.build();
+            // we are sending the bulk upsert first because, under same pk, the `Insert` and `UpdateInsert`
+            // should always appear before `Delete`. we have already ignored the `UpdateDelete`
+            // which is useless in upsert mode.
+            if let Some(upsert) = upsert {
+                self.send_bulk_write_command(&ns.0, upsert).await?;
+            }
+            if let Some(delete) = delete {
+                self.send_bulk_write_command(&ns.0, delete).await?;
+            }
+        }
         self.buffered_entries = 0;
         Ok(())
     }
