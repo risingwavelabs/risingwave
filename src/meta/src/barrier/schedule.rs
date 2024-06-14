@@ -24,6 +24,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_pb::hummock::HummockSnapshot;
 use risingwave_pb::meta::PausedReason;
 use tokio::select;
+use tokio::sync::oneshot::Receiver;
 use tokio::sync::{oneshot, watch};
 use tokio::time::Interval;
 
@@ -244,6 +245,53 @@ impl BarrierScheduler {
         rx.await
             .ok()
             .context("failed to wait for barrier collect")?
+    }
+
+    async fn run_multiple_commands_until_collect(
+        &self,
+        commands: Vec<Command>,
+    ) -> MetaResult<(Vec<BarrierInfo>, Vec<Receiver<MetaResult<()>>>)> {
+        let mut contexts = Vec::with_capacity(commands.len());
+        let mut finished = Vec::with_capacity(commands.len());
+        let mut scheduleds = Vec::with_capacity(commands.len());
+
+        for command in commands {
+            let (started_tx, started_rx) = oneshot::channel();
+            let (collect_tx, collect_rx) = oneshot::channel();
+            let (finish_tx, finish_rx) = oneshot::channel();
+
+            contexts.push((started_rx, collect_rx));
+            finished.push(finish_rx);
+            scheduleds.push(self.inner.new_scheduled(
+                command.need_checkpoint(),
+                command,
+                once(Notifier {
+                    started: Some(started_tx),
+                    collected: Some(collect_tx),
+                    finished: Some(finish_tx),
+                }),
+            ));
+        }
+
+        self.push(scheduleds)?;
+
+        let mut infos = Vec::with_capacity(contexts.len());
+
+        for (injected_rx, collect_rx) in contexts {
+            // Wait for this command to be injected, and record the result.
+            tracing::trace!("waiting for injected_rx");
+            let info = injected_rx.await.ok().context("failed to inject barrier")?;
+            infos.push(info);
+
+            tracing::trace!("waiting for collect_rx");
+            // Throw the error if it occurs when collecting this barrier.
+            collect_rx
+                .await
+                .ok()
+                .context("failed to collect barrier")??;
+        }
+
+        Ok((infos, finished))
     }
 
     /// Run multiple commands and return when they're all completely finished. It's ensured that
