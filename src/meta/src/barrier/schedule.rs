@@ -247,7 +247,14 @@ impl BarrierScheduler {
             .context("failed to wait for barrier collect")?
     }
 
-    async fn run_multiple_commands_until_collect(
+    /// Run multiple commands and return when the command barrier is collected. It's ensured that
+    /// multiple commands are executed continuously.
+    ///
+    /// Returns the barrier info of each command, and a receiver for each command to check if it's
+    /// finished.
+    ///
+    /// TODO: atomicity of multiple commands is not guaranteed.
+    async fn run_multiple_commands_until_collected(
         &self,
         commands: Vec<Command>,
     ) -> MetaResult<(Vec<BarrierInfo>, Vec<Receiver<MetaResult<()>>>)> {
@@ -361,6 +368,21 @@ impl BarrierScheduler {
         ])
         .await
         .map(|i| i[1])
+    }
+
+    pub async fn run_command_until_collected(
+        &self,
+        command: Command,
+    ) -> MetaResult<(BarrierInfo, Receiver<MetaResult<()>>)> {
+        let (info, finished_rx) = self
+            .run_multiple_commands_until_collected(vec![command])
+            .await?;
+        assert_eq!(info.len(), 1);
+        assert_eq!(finished_rx.len(), 1);
+        Ok((
+            info.into_iter().next().unwrap(),
+            finished_rx.into_iter().next().unwrap(),
+        ))
     }
 
     /// Run a command and return when it's completely finished.

@@ -15,6 +15,7 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
+use anyhow::Context;
 use futures::future::join_all;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
@@ -474,7 +475,17 @@ impl GlobalStreamManager {
             create_type,
         };
         tracing::debug!("sending Command::CreateStreamingJob");
-        if let Err(err) = self.barrier_scheduler.run_command(command).await {
+        let collect_result = self
+            .barrier_scheduler
+            .run_command_until_collected(command)
+            .await;
+        let result: MetaResult<()> = try {
+            let (_barrier_info, finish_rx) = collect_result?;
+            finish_rx.await.ok().context("failed to finish command")??;
+        };
+        if let Err(err) = result {
+            // TODO(kwannoel): This will not be needed anymore,
+            // if we only commit the state once the barrier is finished.
             if create_type == CreateType::Foreground || err.is_cancelled() {
                 let mut table_ids = HashSet::from_iter(std::iter::once(table_id));
                 if let Some(dummy_table_id) = replace_table_id {
@@ -486,10 +497,8 @@ impl GlobalStreamManager {
                         .await?;
                 }
             }
-
             return Err(err);
         }
-
         Ok(())
     }
 
