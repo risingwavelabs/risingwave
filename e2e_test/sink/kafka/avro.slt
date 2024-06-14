@@ -1,4 +1,7 @@
 statement ok
+set sink_decouple = false;
+
+statement ok
 create table from_kafka ( *, gen_i32_field int as int32_field + 2, primary key (some_key) )
 include key as some_key
 with (
