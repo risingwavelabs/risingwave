@@ -120,7 +120,11 @@ impl BackfillState {
         Ok(())
     }
 
-    pub(crate) fn finish_progress(&mut self, vnode: VirtualNode, pos_len: usize) {
+    pub(crate) fn finish_progress(
+        &mut self,
+        vnode: VirtualNode,
+        pos_len: usize,
+    ) -> StreamExecutorResult<()> {
         let finished_placeholder_position = construct_initial_finished_state(pos_len);
         let current_state = self.get_current_state(&vnode);
         let (new_pos, snapshot_row_count) = match current_state {
@@ -128,16 +132,22 @@ impl BackfillState {
             BackfillProgressPerVnode::InProgress {
                 current_pos,
                 snapshot_row_count,
-                ..
-            } => (current_pos.clone(), *snapshot_row_count),
+                yielded,
+            } => {
+                if !*yielded {
+                    bail!("the current_pos: {current_pos:?} must be yielded downstream before backfill finishes");
+                }
+                (current_pos.clone(), *snapshot_row_count)
+            }
             BackfillProgressPerVnode::Completed { .. } => {
-                return;
+                return Ok(());
             }
         };
         *current_state = BackfillProgressPerVnode::Completed {
             current_pos: new_pos,
             snapshot_row_count,
         };
+        Ok(())
     }
 
     /// Return state to be committed.
