@@ -5140,9 +5140,9 @@ dependencies = [
 
 [[package]]
 name = "foyer"
-version = "0.9.3"
+version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c67848bfb834bf15396d3a308c44eda6de992c06ad72db53857363725f3dd870"
+checksum = "0720e9cc504174e952382345ea25fe887fbd4c1761dccdd4c5276c6d1a93dbc5"
 dependencies = [
  "ahash 0.8.11",
  "anyhow",
@@ -5205,9 +5205,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-storage"
-version = "0.8.4"
+version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5874cb737c3a6f29c2b784e02094375a24ddb2ce743a28bf8d69c3c490711044"
+checksum = "74811aec3df193b9c304d031e9f4879c4aab86cb78ff6e4cadf1188d014e7069"
 dependencies = [
  "ahash 0.8.11",
  "allocator-api2",
@@ -9313,7 +9313,7 @@ checksum = "8bdf592881d821b83d471f8af290226c8d51402259e9bb5be7f9f8bdebbb11ac"
 dependencies = [
  "bytes",
  "heck 0.4.1",
- "itertools 0.10.5",
+ "itertools 0.11.0",
  "log",
  "multimap 0.8.3",
  "once_cell",
@@ -9347,7 +9347,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "265baba7fabd416cf5078179f7d2cbeca4ce7a9041111900675ea7c4cb8a4c32"
 dependencies = [
  "anyhow",
- "itertools 0.10.5",
+ "itertools 0.11.0",
  "proc-macro2",
  "quote",
  "syn 2.0.57",
@@ -9508,7 +9508,7 @@ dependencies = [
  "indoc",
  "libc",
  "memoffset",
- "parking_lot 0.11.2",
+ "parking_lot 0.12.1",
  "portable-atomic",
  "pyo3-build-config",
  "pyo3-ffi",
