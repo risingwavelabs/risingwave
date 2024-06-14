@@ -153,8 +153,9 @@ impl BackfillState {
                 let mut encoded_state = vec![None; current_pos.len() + METADATA_STATE_LEN];
                 encoded_state[0] = Some(vnode.to_scalar().into());
                 encoded_state[1..current_pos.len() + 1].clone_from_slice(current_pos.as_inner());
-                encoded_state[current_pos.len() + 1] = Some(false.into());
-                encoded_state[current_pos.len() + 2] = Some((snapshot_row_count as i64).into());
+                encoded_state[current_pos.len() + 1] = Some(yielded.into());
+                encoded_state[current_pos.len() + 2] = Some(false.into());
+                encoded_state[current_pos.len() + 3] = Some((snapshot_row_count as i64).into());
                 encoded_state
             }
             BackfillProgressPerVnode::Completed {
@@ -165,7 +166,8 @@ impl BackfillState {
                 encoded_state[0] = Some(vnode.to_scalar().into());
                 encoded_state[1..current_pos.len() + 1].clone_from_slice(current_pos.as_inner());
                 encoded_state[current_pos.len() + 1] = Some(true.into());
-                encoded_state[current_pos.len() + 2] = Some((snapshot_row_count as i64).into());
+                encoded_state[current_pos.len() + 2] = Some(true.into());
+                encoded_state[current_pos.len() + 3] = Some((snapshot_row_count as i64).into());
                 encoded_state
             }
         };
@@ -182,8 +184,9 @@ impl BackfillState {
                 encoded_state[0] = Some(vnode.to_scalar().into());
                 encoded_state[1..committed_pos.len() + 1]
                     .clone_from_slice(committed_pos.as_inner());
-                encoded_state[committed_pos.len() + 1] = Some(false.into());
-                encoded_state[committed_pos.len() + 2] = Some((snapshot_row_count as i64).into());
+                encoded_state[committed_pos.len() + 1] = Some(yielded.into());
+                encoded_state[committed_pos.len() + 2] = Some(false.into());
+                encoded_state[committed_pos.len() + 3] = Some((snapshot_row_count as i64).into());
                 Some(encoded_state)
             }
             BackfillProgressPerVnode::Completed {
@@ -196,7 +199,8 @@ impl BackfillState {
                 encoded_state[1..committed_pos.len() + 1]
                     .clone_from_slice(committed_pos.as_inner());
                 encoded_state[committed_pos.len() + 1] = Some(true.into());
-                encoded_state[committed_pos.len() + 2] = Some((snapshot_row_count as i64).into());
+                encoded_state[committed_pos.len() + 2] = Some(true.into());
+                encoded_state[committed_pos.len() + 3] = Some((snapshot_row_count as i64).into());
                 Some(encoded_state)
             }
         };
