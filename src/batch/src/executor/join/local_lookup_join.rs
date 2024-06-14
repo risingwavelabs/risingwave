@@ -598,6 +598,7 @@ mod tests {
             "SortExecutor".into(),
             CHUNK_SIZE,
             MemoryContext::none(),
+            false,
         ))
     }
 

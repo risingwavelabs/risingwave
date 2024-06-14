@@ -155,6 +155,12 @@ impl SortExecutor {
         }
 
         if need_to_spill {
+            // A spilling version of sort, a.k.a. external sort.
+            // When SortExecutor told memory is insufficient, SortSpillManager will start to partition the sort buffer and spill to disk.
+            // After spilling the sort buffer, SortSpillManager will consume all chunks from its input executor.
+            // Finally, we would get e.g. 20 partitions. Each partition should contain a portion of the original input data.
+            // A sub SortExecutor would be used to sort each partition respectively and then a MergeSortExecutor would be used to merge all sorted partitions.
+            // If memory is still not enough in the sub SortExecutor, it will spill its inputs recursively.
             let mut sort_spill_manager = SortSpillManager::new(
                 &self.identity,
                 DEFAULT_SPILL_PARTITION_NUM,
@@ -278,6 +284,20 @@ impl SortExecutor {
     }
 }
 
+/// `SortSpillManager` is used to manage how to write spill data file and read them back.
+/// The spill data first need to be partitioned in a round-robin way. Each partition contains 1 file: `input_chunks_file`
+/// The spill file consume a data chunk and serialize the chunk into a protobuf bytes.
+/// Finally, spill file content will look like the below.
+/// The file write pattern is append-only and the read pattern is sequential scan.
+/// This can maximize the disk IO performance.
+///
+/// ```text
+/// [proto_len]
+/// [proto_bytes]
+/// ...
+/// [proto_len]
+/// [proto_bytes]
+/// ```
 struct SortSpillManager {
     op: SpillOp,
     partition_num: usize,
@@ -379,7 +399,7 @@ mod tests {
     use risingwave_common::array::*;
     use risingwave_common::catalog::Field;
     use risingwave_common::types::{
-        DataType, Date, Interval, Scalar, StructType, Time, Timestamp, F32,
+        Date, Interval, Scalar, StructType, Time, Timestamp, F32,
     };
     use risingwave_common::util::sort_util::OrderType;
 
@@ -420,6 +440,7 @@ mod tests {
             "SortExecutor2".to_string(),
             CHUNK_SIZE,
             MemoryContext::none(),
+            false,
         ));
         let fields = &order_by_executor.schema().fields;
         assert_eq!(fields[0].data_type, DataType::Int32);
@@ -470,6 +491,7 @@ mod tests {
             "SortExecutor2".to_string(),
             CHUNK_SIZE,
             MemoryContext::none(),
+            false,
         ));
         let fields = &order_by_executor.schema().fields;
         assert_eq!(fields[0].data_type, DataType::Float32);
@@ -520,6 +542,7 @@ mod tests {
             "SortExecutor2".to_string(),
             CHUNK_SIZE,
             MemoryContext::none(),
+            false,
         ));
         let fields = &order_by_executor.schema().fields;
         assert_eq!(fields[0].data_type, DataType::Varchar);
@@ -595,6 +618,7 @@ mod tests {
             "SortExecutor".to_string(),
             CHUNK_SIZE,
             MemoryContext::none(),
+            false,
         ));
 
         let mut stream = order_by_executor.execute();
@@ -675,6 +699,7 @@ mod tests {
             "SortExecutor".to_string(),
             CHUNK_SIZE,
             MemoryContext::none(),
+            false,
         ));
 
         let mut stream = order_by_executor.execute();
@@ -781,6 +806,7 @@ mod tests {
             "SortExecutor".to_string(),
             CHUNK_SIZE,
             MemoryContext::none(),
+            false,
         ));
 
         let mut stream = order_by_executor.execute();
@@ -929,6 +955,7 @@ mod tests {
             "SortExecutor".to_string(),
             CHUNK_SIZE,
             MemoryContext::none(),
+            false,
         ));
 
         let mut stream = order_by_executor.execute();
