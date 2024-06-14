@@ -290,28 +290,14 @@ impl HummockManager {
             );
         }
 
+        drop(versioning_guard);
         tracing::trace!("new committed epoch {}", epoch);
 
-        let mut table_groups = HashMap::<u32, usize>::default();
-        for group in versioning.current_version.levels.values() {
-            for table_id in &group.member_table_ids {
-                table_groups.insert(*table_id, group.member_table_ids.len());
-            }
-        }
-        drop(versioning_guard);
         // Don't trigger compactions if we enable deterministic compaction
         if !self.env.opts.compaction_deterministic_test {
             // commit_epoch may contains SSTs from any compaction group
             for id in &modified_compaction_groups {
                 self.try_send_compaction_request(*id, compact_task::TaskType::Dynamic);
-            }
-            if !table_stats_change.is_empty() {
-                table_stats_change.retain(|table_id, _| {
-                    table_groups
-                        .get(table_id)
-                        .map(|table_count| *table_count > 1)
-                        .unwrap_or(false)
-                });
             }
             if !table_stats_change.is_empty() {
                 self.collect_table_write_throughput(table_stats_change);
