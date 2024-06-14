@@ -102,6 +102,7 @@ impl BackfillState {
             BackfillProgressPerVnode::NotStarted => {
                 *state = BackfillProgressPerVnode::InProgress {
                     current_pos: new_pos,
+                    pos_inclusive: false,
                     snapshot_row_count: snapshot_row_count_delta,
                 };
             }
@@ -110,6 +111,7 @@ impl BackfillState {
             } => {
                 *state = BackfillProgressPerVnode::InProgress {
                     current_pos: new_pos,
+                    pos_inclusive: false,
                     snapshot_row_count: *snapshot_row_count + snapshot_row_count_delta,
                 };
             }
@@ -125,6 +127,7 @@ impl BackfillState {
             BackfillProgressPerVnode::NotStarted => (finished_placeholder_position, 0),
             BackfillProgressPerVnode::InProgress {
                 current_pos,
+                pos_inclusive,
                 snapshot_row_count,
             } => (current_pos.clone(), *snapshot_row_count),
             BackfillProgressPerVnode::Completed { .. } => {
@@ -144,6 +147,7 @@ impl BackfillState {
             BackfillProgressPerVnode::NotStarted => unreachable!(),
             BackfillProgressPerVnode::InProgress {
                 current_pos,
+                pos_inclusive,
                 snapshot_row_count,
             } => {
                 let mut encoded_state = vec![None; current_pos.len() + METADATA_STATE_LEN];
@@ -170,6 +174,7 @@ impl BackfillState {
             BackfillProgressPerVnode::NotStarted => None,
             BackfillProgressPerVnode::InProgress {
                 current_pos,
+                pos_inclusive,
                 snapshot_row_count,
             } => {
                 let committed_pos = current_pos;
@@ -279,6 +284,8 @@ pub enum BackfillProgressPerVnode {
     InProgress {
         /// The current snapshot offset
         current_pos: OwnedRow,
+        /// Whether the current pos has been yielded downstream
+        pos_inclusive: bool,
         /// Number of snapshot records read for this vnode.
         snapshot_row_count: u64,
     },
@@ -487,7 +494,7 @@ pub(crate) async fn get_progress_per_vnode<S: StateStore, const IS_REPLICATED: b
     let tasks = vnode_keys.map(|vnode_key| state_table.get_row(vnode_key));
     // 2. Fetch the state for each vnode.
     //    It should have the following schema, it should not contain vnode:
-    //    | pk | `backfill_finished` | `row_count` |
+    //    | pk ... | `pk_inclusive`  | `backfill_finished` | `row_count` |
     let state_for_vnodes = try_join_all(tasks).await?;
     for (vnode, state_for_vnode) in state_table
         .vnodes()
@@ -507,8 +514,12 @@ pub(crate) async fn get_progress_per_vnode<S: StateStore, const IS_REPLICATED: b
                 let vnode_is_finished = row.as_inner().get(row.len() - 2).unwrap();
                 let vnode_is_finished = vnode_is_finished.as_ref().unwrap();
 
-                // 5. Decode the `current_pos`.
-                let current_pos = row.as_inner().get(..row.len() - 2).unwrap();
+                // 5. Decode the `pk_inclusive` flag.
+                let pk_inclusive = row.as_inner().get(row.len() - 3).unwrap();
+                let pk_inclusive = pk_inclusive.as_ref().unwrap();
+
+                // 6. Decode the `current_pos`.
+                let current_pos = row.as_inner().get(..row.len() - 3).unwrap();
                 let current_pos = current_pos.into_owned_row();
 
                 // 6. Construct the in-memory state per vnode, based on the decoded state.
@@ -527,10 +538,12 @@ pub(crate) async fn get_progress_per_vnode<S: StateStore, const IS_REPLICATED: b
                     BackfillStatePerVnode::new(
                         BackfillProgressPerVnode::InProgress {
                             current_pos: current_pos.clone(),
+                            pos_inclusive: *pk_inclusive.as_bool(),
                             snapshot_row_count,
                         },
                         BackfillProgressPerVnode::InProgress {
                             current_pos,
+                            pos_inclusive: *pk_inclusive.as_bool(),
                             snapshot_row_count,
                         },
                     )
