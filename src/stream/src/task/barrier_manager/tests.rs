@@ -20,10 +20,8 @@ use std::task::Poll;
 use assert_matches::assert_matches;
 use futures::future::join_all;
 use futures::FutureExt;
-use itertools::Itertools;
 use risingwave_common::util::epoch::test_epoch;
 use risingwave_pb::stream_service::{streaming_control_stream_request, InjectBarrierRequest};
-use tokio::sync::mpsc::unbounded_channel;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use super::*;

@@ -21,7 +21,9 @@ use itertools::Itertools;
 use risingwave_common::array::stream_chunk::StreamChunkMut;
 use risingwave_common::array::Op;
 use risingwave_common::catalog::{ColumnCatalog, Field};
-use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
+use risingwave_common::metrics::{LabelGuardedIntGauge, GLOBAL_ERROR_METRICS};
+use risingwave_common_estimate_size::collections::EstimatedVec;
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_connector::dispatch_sink;
 use risingwave_connector::sink::catalog::SinkType;
 use risingwave_connector::sink::log_store::{
@@ -122,8 +124,14 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
     fn execute_inner(self) -> BoxedMessageStream {
         let sink_id = self.sink_param.sink_id;
         let actor_id = self.actor_context.id;
+        let fragment_id = self.actor_context.fragment_id;
 
         let stream_key = self.info.pk_indices.clone();
+        let metrics = self.actor_context.streaming_metrics.new_sink_exec_metrics(
+            sink_id,
+            actor_id,
+            fragment_id,
+        );
 
         let stream_key_sink_pk_mismatch = {
             stream_key
@@ -133,19 +141,9 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
 
         let input = self.input.execute();
 
-        let input_row_count = self
-            .actor_context
-            .streaming_metrics
-            .sink_input_row_count
-            .with_guarded_label_values(&[
-                &sink_id.to_string(),
-                &actor_id.to_string(),
-                &self.actor_context.fragment_id.to_string(),
-            ]);
-
         let input = input.inspect_ok(move |msg| {
             if let Message::Chunk(c) = msg {
-                input_row_count.inc_by(c.capacity() as u64);
+                metrics.sink_input_row_count.inc_by(c.capacity() as u64);
             }
         });
 
@@ -194,6 +192,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             self.chunk_size,
             self.input_data_types,
             self.sink_param.downstream_pk.clone(),
+            metrics.sink_chunk_buffer_size,
         );
 
         if self.sink.is_sink_into_table() {
@@ -216,7 +215,10 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                             self.sink_param,
                             self.sink_writer_param,
                             self.actor_context,
-                        );
+                        )
+                        .instrument_await(format!("consume_log (sink_id {sink_id})"))
+                        .map_ok(|never| match never {}); // unify return type to `Message`
+
                         // TODO: may try to remove the boxed
                         select(consume_log_stream.into_stream(), write_log_stream).boxed()
                     })
@@ -295,10 +297,11 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         chunk_size: usize,
         input_data_types: Vec<DataType>,
         down_stream_pk: Vec<usize>,
+        sink_chunk_buffer_size_metrics: LabelGuardedIntGauge<3>,
     ) {
         // need to buffer chunks during one barrier
         if need_advance_delete || re_construct_with_sink_pk {
-            let mut chunk_buffer = vec![];
+            let mut chunk_buffer = EstimatedVec::new();
             let mut watermark: Option<super::Watermark> = None;
             #[for_await]
             for msg in input {
@@ -306,9 +309,11 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                     Message::Watermark(w) => watermark = Some(w),
                     Message::Chunk(c) => {
                         chunk_buffer.push(c);
+
+                        sink_chunk_buffer_size_metrics.set(chunk_buffer.estimated_size() as i64);
                     }
                     Message::Barrier(barrier) => {
-                        let chunks = mem::take(&mut chunk_buffer);
+                        let chunks = mem::take(&mut chunk_buffer).into_inner();
                         let chunks = if need_advance_delete {
                             let mut delete_chunks = vec![];
                             let mut insert_chunks = vec![];
@@ -361,16 +366,25 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                         // Compact the chunk to eliminate any useless intermediate result (e.g. UPDATE
                         // V->V).
                         let chunk = merge_chunk_row(chunk, &stream_key);
-                        let chunk = if sink_type == SinkType::ForceAppendOnly {
-                            // Force append-only by dropping UPDATE/DELETE messages. We do this when the
-                            // user forces the sink to be append-only while it is actually not based on
-                            // the frontend derivation result.
-                            force_append_only(chunk)
-                        } else {
-                            chunk
-                        };
-
-                        yield Message::Chunk(chunk);
+                        match sink_type {
+                            SinkType::AppendOnly => yield Message::Chunk(chunk),
+                            SinkType::ForceAppendOnly => {
+                                // Force append-only by dropping UPDATE/DELETE messages. We do this when the
+                                // user forces the sink to be append-only while it is actually not based on
+                                // the frontend derivation result.
+                                yield Message::Chunk(force_append_only(chunk))
+                            }
+                            SinkType::Upsert => {
+                                // Making sure the optimization in https://github.com/risingwavelabs/risingwave/pull/12250 is correct,
+                                // it is needed to do the compaction here.
+                                for chunk in
+                                    StreamChunkCompactor::new(stream_key.clone(), vec![chunk])
+                                        .into_compacted_chunks()
+                                {
+                                    yield Message::Chunk(chunk)
+                                }
+                            }
+                        }
                     }
                     Message::Barrier(barrier) => {
                         yield Message::Barrier(barrier);
@@ -387,7 +401,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         sink_param: SinkParam,
         mut sink_writer_param: SinkWriterParam,
         actor_context: ActorContextRef,
-    ) -> StreamExecutorResult<Message> {
+    ) -> StreamExecutorResult<!> {
         let metrics = sink_writer_param.sink_metrics.clone();
 
         let visible_columns = columns
@@ -460,7 +474,6 @@ mod test {
     use super::*;
     use crate::common::log_store_impl::in_mem::BoundedInMemLogStoreFactory;
     use crate::executor::test_utils::*;
-    use crate::executor::ActorContext;
 
     #[tokio::test]
     async fn test_force_append_only_sink() {
@@ -470,7 +483,7 @@ mod test {
 
         use crate::executor::Barrier;
 
-        let properties = maplit::hashmap! {
+        let properties = maplit::btreemap! {
             "connector".into() => "blackhole".into(),
             "type".into() => "append-only".into(),
             "force_append_only".into() => "true".into()
@@ -596,7 +609,7 @@ mod test {
 
         use crate::executor::Barrier;
 
-        let properties = maplit::hashmap! {
+        let properties = maplit::btreemap! {
             "connector".into() => "blackhole".into(),
         };
 
@@ -719,7 +732,7 @@ mod test {
 
         use crate::executor::Barrier;
 
-        let properties = maplit::hashmap! {
+        let properties = maplit::btreemap! {
             "connector".into() => "blackhole".into(),
             "type".into() => "append-only".into(),
             "force_append_only".into() => "true".into()

@@ -21,9 +21,8 @@ use anyhow::anyhow;
 use either::Either;
 use futures::stream::{select_with_strategy, PollNext};
 use itertools::Itertools;
-use prometheus::IntCounter;
 use risingwave_common::buffer::BitmapBuilder;
-use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
+use risingwave_common::metrics::{LabelGuardedIntCounter, GLOBAL_ERROR_METRICS};
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::types::JsonbVal;
@@ -36,9 +35,10 @@ use thiserror_ext::AsReport;
 
 use super::executor_core::StreamSourceCore;
 use super::source_backfill_state_table::BackfillStateTableHandler;
+use super::{apply_rate_limit, get_split_offset_col_idx};
+use crate::common::rate_limit::limited_chunk_size;
 use crate::executor::prelude::*;
 use crate::executor::source::source_executor::WAIT_BARRIER_MULTIPLE_TIMES;
-use crate::executor::source::{apply_rate_limit, get_split_offset_col_idx};
 use crate::executor::{AddMutation, UpdateMutation};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -126,15 +126,15 @@ pub struct SourceBackfillExecutorInner<S: StateStore> {
 
     /// Metrics for monitor.
     metrics: Arc<StreamingMetrics>,
-    source_split_change_count: IntCounter,
+    source_split_change_count: LabelGuardedIntCounter<4>,
 
     // /// Receiver of barrier channel.
     // barrier_receiver: Option<UnboundedReceiver<Barrier>>,
     /// System parameter reader to read barrier interval
     system_params: SystemParamsReaderRef,
 
-    // control options for connector level
-    source_ctrl_opts: SourceCtrlOpts,
+    /// Rate limit in rows/s.
+    rate_limit_rps: Option<u32>,
 }
 
 /// Local variables used in the backfill stage.
@@ -172,15 +172,17 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
         stream_source_core: StreamSourceCore<S>,
         metrics: Arc<StreamingMetrics>,
         system_params: SystemParamsReaderRef,
-        source_ctrl_opts: SourceCtrlOpts,
         backfill_state_store: BackfillStateTableHandler<S>,
+        rate_limit_rps: Option<u32>,
     ) -> Self {
-        let source_split_change_count = metrics.source_split_change_count.with_label_values(&[
-            &stream_source_core.source_id.to_string(),
-            &stream_source_core.source_name,
-            &actor_ctx.id.to_string(),
-            &actor_ctx.fragment_id.to_string(),
-        ]);
+        let source_split_change_count = metrics
+            .source_split_change_count
+            .with_guarded_label_values(&[
+                &stream_source_core.source_id.to_string(),
+                &stream_source_core.source_name,
+                &actor_ctx.id.to_string(),
+                &actor_ctx.fragment_id.to_string(),
+            ]);
         Self {
             actor_ctx,
             info,
@@ -189,7 +191,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             metrics,
             source_split_change_count,
             system_params,
-            source_ctrl_opts,
+            rate_limit_rps,
         }
     }
 
@@ -209,15 +211,18 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             self.actor_ctx.fragment_id,
             self.stream_source_core.source_name.clone(),
             source_desc.metrics.clone(),
-            self.source_ctrl_opts.clone(),
+            SourceCtrlOpts {
+                chunk_size: limited_chunk_size(self.rate_limit_rps),
+                rate_limit: self.rate_limit_rps,
+            },
             source_desc.source.config.clone(),
         );
         let stream = source_desc
             .source
-            .to_stream(Some(splits), column_ids, Arc::new(source_ctx))
+            .build_stream(Some(splits), column_ids, Arc::new(source_ctx))
             .await
             .map_err(StreamExecutorError::connector_error)?;
-        Ok(apply_rate_limit(stream, self.source_ctrl_opts.rate_limit).boxed())
+        Ok(apply_rate_limit(stream, self.rate_limit_rps).boxed())
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
@@ -729,11 +734,11 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
         if split_changed {
             stage
                 .unfinished_splits
-                .retain(|split| target_state.get(split.id().as_ref()).is_some());
+                .retain(|split| target_state.contains_key(split.id().as_ref()));
 
             let dropped_splits = stage
                 .states
-                .extract_if(|split_id, _| target_state.get(split_id).is_none())
+                .extract_if(|split_id, _| !target_state.contains_key(split_id))
                 .map(|(split_id, _)| split_id);
 
             if should_trim_state {
@@ -822,7 +827,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             );
 
             let dropped_splits =
-                current_splits.extract_if(|split_id| target_splits.get(split_id).is_none());
+                current_splits.extract_if(|split_id| !target_splits.contains(split_id));
 
             if should_trim_state {
                 // trim dropped splits' state

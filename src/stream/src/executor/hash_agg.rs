@@ -31,8 +31,9 @@ use super::aggregation::{
     agg_call_filter_res, iter_table_storage, AggStateStorage, DistinctDeduplicater, GroupKey,
     OnlyOutputIfHasInput,
 };
+use super::monitor::HashAggMetrics;
 use super::sort_buffer::SortBuffer;
-use crate::cache::{cache_may_stale, new_with_hasher, ManagedLruCache};
+use crate::cache::{cache_may_stale, ManagedLruCache};
 use crate::common::metrics::MetricsInfo;
 use crate::executor::aggregation::AggGroup as GenericAggGroup;
 use crate::executor::prelude::*;
@@ -109,7 +110,7 @@ struct ExecutorInner<K: HashKey, S: StateStore> {
     distinct_dedup_tables: HashMap<usize, StateTable<S>>,
 
     /// Watermark epoch.
-    watermark_epoch: AtomicU64Ref,
+    watermark_sequence: AtomicU64Ref,
 
     /// State cache size for extreme agg.
     extreme_cache_size: usize,
@@ -133,6 +134,9 @@ impl<K: HashKey, S: StateStore> ExecutorInner<K, S> {
 }
 
 struct ExecutionVars<K: HashKey, S: StateStore> {
+    metrics: HashAggMetrics,
+
+    // Stats collected during execution, will be flushed to metrics at the end of each barrier.
     stats: ExecutionStats,
 
     /// Cache for [`AggGroup`]s. `HashKey` -> `AggGroup`.
@@ -215,7 +219,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 storages: args.storages,
                 intermediate_state_table: args.intermediate_state_table,
                 distinct_dedup_tables: args.distinct_dedup_tables,
-                watermark_epoch: args.watermark_epoch,
+                watermark_sequence: args.watermark_epoch,
                 extreme_cache_size: args.extreme_cache_size,
                 chunk_size: args.extra.chunk_size,
                 max_dirty_groups_heap_size: args.extra.max_dirty_groups_heap_size,
@@ -388,18 +392,11 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         }
 
         // Update the metrics.
-        let actor_id_str = this.actor_ctx.id.to_string();
-        let fragment_id_str = this.actor_ctx.fragment_id.to_string();
-        let table_id_str = this.intermediate_state_table.table_id().to_string();
-        this.actor_ctx
-            .streaming_metrics
+        vars.metrics
             .agg_dirty_groups_count
-            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
             .set(vars.dirty_groups.len() as i64);
-        this.actor_ctx
-            .streaming_metrics
+        vars.metrics
             .agg_dirty_groups_heap_size
-            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
             .set(vars.dirty_groups.estimated_heap_size() as i64);
 
         Ok(())
@@ -502,34 +499,21 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         vars.agg_group_cache.evict();
     }
 
-    fn update_metrics(this: &ExecutorInner<K, S>, vars: &mut ExecutionVars<K, S>) {
-        let actor_id_str = this.actor_ctx.id.to_string();
-        let fragment_id_str = this.actor_ctx.fragment_id.to_string();
-        let table_id_str = this.intermediate_state_table.table_id().to_string();
-        this.actor_ctx
-            .streaming_metrics
+    fn flush_metrics(_this: &ExecutorInner<K, S>, vars: &mut ExecutionVars<K, S>) {
+        vars.metrics
             .agg_lookup_miss_count
-            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
             .inc_by(std::mem::take(&mut vars.stats.lookup_miss_count));
-        this.actor_ctx
-            .streaming_metrics
+        vars.metrics
             .agg_total_lookup_count
-            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
             .inc_by(std::mem::take(&mut vars.stats.total_lookup_count));
-        this.actor_ctx
-            .streaming_metrics
+        vars.metrics
             .agg_cached_entry_count
-            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
             .set(vars.agg_group_cache.len() as i64);
-        this.actor_ctx
-            .streaming_metrics
+        vars.metrics
             .agg_chunk_lookup_miss_count
-            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
             .inc_by(std::mem::take(&mut vars.stats.chunk_lookup_miss_count));
-        this.actor_ctx
-            .streaming_metrics
+        vars.metrics
             .agg_chunk_total_lookup_count
-            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
             .inc_by(std::mem::take(&mut vars.stats.chunk_total_lookup_count));
     }
 
@@ -570,20 +554,26 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             this.actor_ctx.id,
             "agg intermediate state table",
         );
+        let metrics = this.actor_ctx.streaming_metrics.new_hash_agg_metrics(
+            this.intermediate_state_table.table_id(),
+            this.actor_ctx.id,
+            this.actor_ctx.fragment_id,
+        );
 
         let mut vars = ExecutionVars {
+            metrics,
             stats: ExecutionStats::new(),
-            agg_group_cache: new_with_hasher(
-                this.watermark_epoch.clone(),
+            agg_group_cache: ManagedLruCache::unbounded_with_hasher(
+                this.watermark_sequence.clone(),
                 agg_group_cache_metrics_info,
                 PrecomputedBuildHasher,
             ),
             dirty_groups: Default::default(),
             distinct_dedup: DistinctDeduplicater::new(
                 &this.agg_calls,
-                this.watermark_epoch.clone(),
+                this.watermark_sequence.clone(),
                 &this.distinct_dedup_tables,
-                this.actor_ctx.clone(),
+                &this.actor_ctx,
             ),
             buffered_watermarks: vec![None; this.group_key_indices.len()],
             window_watermark: None,
@@ -605,10 +595,6 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         let barrier = expect_first_barrier(&mut input).await?;
         this.all_state_tables_mut().for_each(|table| {
             table.init_epoch(barrier.epoch);
-        });
-        vars.agg_group_cache.update_epoch(barrier.epoch.curr);
-        vars.distinct_dedup.dedup_caches_mut().for_each(|cache| {
-            cache.update_epoch(barrier.epoch.curr);
         });
 
         yield Message::Barrier(barrier);
@@ -642,7 +628,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                     Self::try_flush_data(&mut this).await?;
                 }
                 Message::Barrier(barrier) => {
-                    Self::update_metrics(&this, &mut vars);
+                    Self::flush_metrics(&this, &mut vars);
 
                     #[for_await]
                     for chunk in Self::flush_data(&mut this, &mut vars) {
@@ -680,12 +666,6 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                             });
                         }
                     }
-
-                    // Update the current epoch.
-                    vars.agg_group_cache.update_epoch(barrier.epoch.curr);
-                    vars.distinct_dedup.dedup_caches_mut().for_each(|cache| {
-                        cache.update_epoch(barrier.epoch.curr);
-                    });
 
                     yield Message::Barrier(barrier);
                 }

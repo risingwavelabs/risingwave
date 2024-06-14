@@ -26,7 +26,7 @@ export const PREDEFINED_API_ENDPOINTS = [
 ]
 
 export const DEFAULT_API_ENDPOINT: string =
-  process.env.NODE_ENV === "production" ? PROD_API_ENDPOINT : MOCK_API_ENDPOINT
+  process.env.NODE_ENV === "production" ? PROD_API_ENDPOINT : MOCK_API_ENDPOINT // EXTERNAL_META_NODE_API_ENDPOINT to debug with RisingWave servers
 
 export const API_ENDPOINT_KEY = "risingwave.dashboard.api.endpoint"
 

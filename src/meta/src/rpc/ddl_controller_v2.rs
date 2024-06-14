@@ -214,7 +214,7 @@ impl DdlController {
                         (
                             streaming_job.clone(),
                             ctx.merge_updates.clone(),
-                            table_fragments.table_id(),
+                            table_fragments.table_id().table_id(),
                         )
                     },
                 );
@@ -223,24 +223,10 @@ impl DdlController {
                     .create_streaming_job(table_fragments, ctx)
                     .await?;
 
-                let mut version = mgr
+                let version = mgr
                     .catalog_controller
-                    .finish_streaming_job(stream_job_id as _)
+                    .finish_streaming_job(stream_job_id as _, replace_table_job_info)
                     .await?;
-
-                if let Some((streaming_job, merge_updates, table_id)) = replace_table_job_info {
-                    version = mgr
-                        .catalog_controller
-                        .finish_replace_streaming_job(
-                            table_id.table_id as _,
-                            streaming_job,
-                            merge_updates,
-                            None,
-                            Some(stream_job_id),
-                            None,
-                        )
-                        .await?;
-                }
 
                 Ok(version)
             }
@@ -257,7 +243,7 @@ impl DdlController {
                     if result.is_ok() {
                         let _ = mgr
                             .catalog_controller
-                            .finish_streaming_job(stream_job_id as _)
+                            .finish_streaming_job(stream_job_id as _, None)
                             .await.inspect_err(|err| {
                                 tracing::error!(id = stream_job_id, error = ?err.as_report(), "failed to finish background streaming job");
                             });

@@ -16,13 +16,14 @@ use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::PbSource;
 use sea_orm::entity::prelude::*;
 use sea_orm::ActiveValue::Set;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     ColumnCatalogArray, ConnectionId, I32Array, Property, SourceId, StreamSourceInfo, TableId,
     WatermarkDescArray,
 };
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize)]
 #[sea_orm(table_name = "source")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]

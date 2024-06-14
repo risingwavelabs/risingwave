@@ -20,10 +20,7 @@ import com.risingwave.proto.Data;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
     private final Map<String, String> userProps;
@@ -51,9 +48,14 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
         var dbName = userProps.get(DbzConnectorConfig.DB_NAME);
         var jdbcUrl = ValidatorUtils.getJdbcUrl(SourceTypeE.MYSQL, dbHost, dbPort, dbName);
 
-        var user = userProps.get(DbzConnectorConfig.USER);
-        var password = userProps.get(DbzConnectorConfig.PASSWORD);
-        this.jdbcConnection = DriverManager.getConnection(jdbcUrl, user, password);
+        var properties = new Properties();
+        properties.setProperty("user", userProps.get(DbzConnectorConfig.USER));
+        properties.setProperty("password", userProps.get(DbzConnectorConfig.PASSWORD));
+        properties.setProperty(
+                "sslMode", userProps.getOrDefault(DbzConnectorConfig.MYSQL_SSL_MODE, "DISABLED"));
+        properties.setProperty("allowPublicKeyRetrieval", "true");
+
+        this.jdbcConnection = DriverManager.getConnection(jdbcUrl, properties);
         this.isCdcSourceJob = isCdcSourceJob;
         this.isBackfillTable = isBackfillTable;
     }
@@ -193,10 +195,9 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
                 var field = res.getString(1);
                 var dataType = res.getString(2);
                 var key = res.getString(3);
-                schema.put(field.toLowerCase(), dataType);
+                schema.put(field, dataType);
                 if (key.equalsIgnoreCase("PRI")) {
-                    // RisingWave always use lower case for column name
-                    pkFields.add(field.toLowerCase());
+                    pkFields.add(field);
                 }
             }
 
@@ -206,7 +207,7 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
                 if (e.getKey().startsWith(ValidatorUtils.INTERNAL_COLUMN_PREFIX)) {
                     continue;
                 }
-                var dataType = schema.get(e.getKey().toLowerCase());
+                var dataType = schema.get(e.getKey());
                 if (dataType == null) {
                     throw ValidatorUtils.invalidArgument(
                             "Column '" + e.getKey() + "' not found in the upstream database");

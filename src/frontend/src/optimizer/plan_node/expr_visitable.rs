@@ -12,10 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::Deref;
-
 use super::*;
-use crate::expr::ExprVisitor;
 
 /// Vistis expressions in a `PlanRef`.
 /// To visit recursively, call `visit_exprs_recursive` on [`VisitExprsRecursive`].

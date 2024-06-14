@@ -58,7 +58,7 @@ impl Rule for ApplyOverWindowTransposeRule {
         let apply_left_len = left.schema().len();
         let apply_left_schema = left.schema().clone();
 
-        let new_apply = LogicalApply::new(
+        let new_apply = LogicalApply::create(
             left,
             window_input,
             JoinType::Inner,
@@ -66,8 +66,7 @@ impl Rule for ApplyOverWindowTransposeRule {
             correlated_id,
             correlated_indices,
             false,
-        )
-        .into();
+        );
 
         let new_over_window = {
             // Shift index of window functions' `InputRef` with `apply_left_len`.

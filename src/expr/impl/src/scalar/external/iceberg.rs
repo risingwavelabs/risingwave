@@ -19,10 +19,10 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use arrow_schema::DataType as ArrowDataType;
 use icelake::types::{
     create_transform_function, Any as IcelakeDataType, BoxedTransformFunction, Transform,
 };
+use risingwave_common::array::arrow::{FromArrow, IcebergArrowConvert, ToArrow};
 use risingwave_common::array::{ArrayRef, DataChunk};
 use risingwave_common::ensure;
 use risingwave_common::row::OwnedRow;
@@ -34,6 +34,8 @@ use thiserror_ext::AsReport;
 pub struct IcebergTransform {
     child: BoxedExpression,
     transform: BoxedTransformFunction,
+    input_arrow_type: arrow_schema::DataType,
+    output_arrow_field: arrow_schema::Field,
     return_type: DataType,
 }
 
@@ -56,11 +58,13 @@ impl risingwave_expr::expr::Expression for IcebergTransform {
         // Get the child array
         let array = self.child.eval(data_chunk).await?;
         // Convert to arrow array
-        let arrow_array = array.as_ref().try_into().unwrap();
+        let arrow_array = IcebergArrowConvert.to_array(&self.input_arrow_type, &array)?;
         // Transform
         let res_array = self.transform.transform(arrow_array).unwrap();
         // Convert back to array ref and return it
-        Ok(Arc::new((&res_array).try_into().unwrap()))
+        Ok(Arc::new(
+            IcebergArrowConvert.from_array(&self.output_arrow_field, &res_array)?,
+        ))
     }
 
     async fn eval_row(&self, _row: &OwnedRow) -> Result<Datum> {
@@ -91,15 +95,21 @@ fn build(return_type: DataType, mut children: Vec<BoxedExpression>) -> Result<Bo
     // Check type:
     // 1. input type can be transform successfully
     // 2. return type is the same as the result type
-    let input_type = IcelakeDataType::try_from(ArrowDataType::try_from(children[1].return_type())?)
-        .map_err(|err| ExprError::InvalidParam {
+    let input_arrow_type = IcebergArrowConvert
+        .to_arrow_field("", &children[1].return_type())?
+        .data_type()
+        .clone();
+    let output_arrow_field = IcebergArrowConvert.to_arrow_field("", &return_type)?;
+    let input_type = IcelakeDataType::try_from(input_arrow_type.clone()).map_err(|err| {
+        ExprError::InvalidParam {
             name: "input type in iceberg_transform",
             reason: format!(
                 "Failed to convert input type to icelake type, got error: {}",
                 err.as_report()
             )
             .into(),
-        })?;
+        }
+    })?;
     let expect_res_type = transform_type.result_type(&input_type).map_err(
         |err| ExprError::InvalidParam {
             name: "input type in iceberg_transform",
@@ -109,15 +119,20 @@ fn build(return_type: DataType, mut children: Vec<BoxedExpression>) -> Result<Bo
             )
             .into()
         })?;
-    let actual_res_type = IcelakeDataType::try_from(ArrowDataType::try_from(return_type.clone())?)
-        .map_err(|err| ExprError::InvalidParam {
-            name: "return type in iceberg_transform",
-            reason: format!(
-                "Failed to convert return type to icelake type, got error: {}",
-                err.as_report()
-            )
-            .into(),
-        })?;
+    let actual_res_type = IcelakeDataType::try_from(
+        IcebergArrowConvert
+            .to_arrow_field("", &return_type)?
+            .data_type()
+            .clone(),
+    )
+    .map_err(|err| ExprError::InvalidParam {
+        name: "return type in iceberg_transform",
+        reason: format!(
+            "Failed to convert return type to icelake type, got error: {}",
+            err.as_report()
+        )
+        .into(),
+    })?;
     ensure!(
         expect_res_type == actual_res_type,
         ExprError::InvalidParam {
@@ -134,6 +149,8 @@ fn build(return_type: DataType, mut children: Vec<BoxedExpression>) -> Result<Bo
         child: children.remove(1),
         transform: create_transform_function(&transform_type)
             .map_err(|err| ExprError::Internal(err.into()))?,
+        input_arrow_type,
+        output_arrow_field,
         return_type,
     }))
 }

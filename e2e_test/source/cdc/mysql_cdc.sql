@@ -49,9 +49,11 @@ VALUES (1,1,'no'),
        (3,3,'no'),
        (4,4,'no');
 
+-- This user is for non-shared CDC
 CREATE USER 'dbz'@'%' IDENTIFIED BY '123456';
 GRANT SELECT, RELOAD, SHOW DATABASES, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO 'dbz'@'%';
 
+-- This user is for shared CDC
 CREATE USER 'rwcdc'@'%' IDENTIFIED BY '123456';
 GRANT SELECT, RELOAD, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO 'rwcdc'@'%';
 

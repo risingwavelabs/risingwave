@@ -47,11 +47,13 @@ pub struct MergeSortExchangeExecutorImpl<CS, C> {
     /// Mock-able `CreateSource`.
     source_creators: Vec<CS>,
     schema: Schema,
+    #[expect(dead_code)]
     task_id: TaskId,
     identity: String,
     /// The maximum size of the chunk produced by executor at a time.
     chunk_size: usize,
     mem_ctx: MemoryContext,
+    #[expect(dead_code)]
     alloc: MonitoredGlobalAlloc,
 }
 
@@ -273,10 +275,8 @@ impl BoxedExecutorBuilder for MergeSortExchangeExecutorBuilder {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use futures::StreamExt;
-    use risingwave_common::array::{Array, DataChunk};
+    use risingwave_common::array::Array;
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;

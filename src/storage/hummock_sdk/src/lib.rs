@@ -17,13 +17,12 @@
 #![feature(hash_extract_if)]
 #![feature(lint_reasons)]
 #![feature(map_many_mut)]
-#![feature(bound_map)]
 #![feature(type_alias_impl_trait)]
 #![feature(impl_trait_in_assoc_type)]
 #![feature(is_sorted)]
 #![feature(let_chains)]
 #![feature(btree_cursors)]
-#![feature(split_array)]
+#![feature(lazy_cell)]
 
 mod key_cmp;
 use std::cmp::Ordering;
@@ -101,6 +100,8 @@ pub struct SyncResult {
     pub uncommitted_ssts: Vec<LocalSstableInfo>,
     /// The collected table watermarks written by state tables.
     pub table_watermarks: HashMap<TableId, TableWatermarks>,
+    /// Sstable that holds the uncommitted old value
+    pub old_value_ssts: Vec<LocalSstableInfo>,
 }
 
 #[derive(Debug, Clone)]

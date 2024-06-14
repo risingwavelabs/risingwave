@@ -22,7 +22,7 @@ use std::str::FromStr;
 
 use bytes::{Bytes, BytesMut};
 use chrono::{Datelike, Days, Duration, NaiveDate, NaiveDateTime, NaiveTime, Timelike, Weekday};
-use postgres_types::{accepts, to_sql_checked, IsNull, ToSql, Type};
+use postgres_types::{accepts, to_sql_checked, FromSql, IsNull, ToSql, Type};
 use risingwave_common_estimate_size::ZeroHeapSize;
 use thiserror::Error;
 
@@ -88,6 +88,20 @@ impl ToSql for Date {
     }
 }
 
+impl<'a> FromSql<'a> for Date {
+    fn from_sql(
+        ty: &Type,
+        raw: &'a [u8],
+    ) -> std::result::Result<Self, Box<dyn std::error::Error + Sync + Send>> {
+        let instant = NaiveDate::from_sql(ty, raw)?;
+        Ok(Self::from(instant))
+    }
+
+    fn accepts(ty: &Type) -> bool {
+        matches!(*ty, Type::DATE)
+    }
+}
+
 impl ToSql for Time {
     accepts!(TIME);
 
@@ -105,6 +119,20 @@ impl ToSql for Time {
     }
 }
 
+impl<'a> FromSql<'a> for Time {
+    fn from_sql(
+        ty: &Type,
+        raw: &'a [u8],
+    ) -> std::result::Result<Self, Box<dyn std::error::Error + Sync + Send>> {
+        let instant = NaiveTime::from_sql(ty, raw)?;
+        Ok(Self::from(instant))
+    }
+
+    fn accepts(ty: &Type) -> bool {
+        matches!(*ty, Type::TIME)
+    }
+}
+
 impl ToSql for Timestamp {
     accepts!(TIMESTAMP);
 
@@ -119,6 +147,20 @@ impl ToSql for Timestamp {
         Self: Sized,
     {
         self.0.to_sql(ty, out)
+    }
+}
+
+impl<'a> FromSql<'a> for Timestamp {
+    fn from_sql(
+        ty: &Type,
+        raw: &'a [u8],
+    ) -> std::result::Result<Self, Box<dyn std::error::Error + Sync + Send>> {
+        let instant = NaiveDateTime::from_sql(ty, raw)?;
+        Ok(Self::from(instant))
+    }
+
+    fn accepts(ty: &Type) -> bool {
+        matches!(*ty, Type::TIMESTAMP)
     }
 }
 

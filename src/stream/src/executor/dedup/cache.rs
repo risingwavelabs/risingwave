@@ -16,7 +16,7 @@ use std::hash::Hash;
 
 use risingwave_common_estimate_size::EstimateSize;
 
-use crate::cache::{new_unbounded, ManagedLruCache};
+use crate::cache::ManagedLruCache;
 use crate::common::metrics::MetricsInfo;
 use crate::executor::prelude::*;
 
@@ -27,8 +27,8 @@ pub struct DedupCache<K: Hash + Eq + EstimateSize> {
 }
 
 impl<K: Hash + Eq + EstimateSize> DedupCache<K> {
-    pub fn new(watermark_epoch: AtomicU64Ref, metrics_info: MetricsInfo) -> Self {
-        let cache = new_unbounded(watermark_epoch, metrics_info);
+    pub fn new(watermark_sequence: AtomicU64Ref, metrics_info: MetricsInfo) -> Self {
+        let cache = ManagedLruCache::unbounded(watermark_sequence, metrics_info);
         Self { inner: cache }
     }
 
@@ -51,11 +51,6 @@ impl<K: Hash + Eq + EstimateSize> DedupCache<K> {
     /// Evict the inner LRU cache according to the watermark epoch.
     pub fn evict(&mut self) {
         self.inner.evict()
-    }
-
-    pub fn update_epoch(&mut self, epoch: u64) {
-        // Update the current epoch in `ManagedLruCache`
-        self.inner.update_epoch(epoch)
     }
 
     /// Clear everything in the cache.

@@ -105,7 +105,7 @@ type OpRowMap<'a, 'b> =
 pub enum RowOp<'a> {
     Insert(RowRef<'a>),
     Delete(RowRef<'a>),
-    /// (old_value, new_value)
+    /// (`old_value`, `new_value`)
     Update((RowRef<'a>, RowRef<'a>)),
 }
 static LOG_SUPPERSSER: LazyLock<LogSuppresser> = LazyLock::new(LogSuppresser::default);
@@ -232,6 +232,7 @@ impl StreamChunkCompactor {
     ///   have three kind of patterns Insert, Delete or Update.
     /// - For the update (-old row, +old row), when old row is exactly same. The two rowOp will be
     ///   removed.
+    ///
     /// All UPDATE INSERT and UPDATE DELETE will be converted to INSERT and DELETE, and dropped according to
     /// certain rules (see `merge_insert` and `merge_delete` for more details).
     pub fn into_compacted_chunks(self) -> impl Iterator<Item = StreamChunk> {
@@ -333,7 +334,6 @@ pub fn merge_chunk_row(stream_chunk: StreamChunk, pk_indices: &[usize]) -> Strea
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::array::StreamChunk;
     use risingwave_common::test_prelude::StreamChunkTestExt;
 
     use super::*;

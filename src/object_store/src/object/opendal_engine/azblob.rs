@@ -12,9 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use opendal::layers::{LoggingLayer, RetryLayer};
+use std::sync::Arc;
+
+use opendal::layers::LoggingLayer;
 use opendal::services::Azblob;
 use opendal::Operator;
+use risingwave_common::config::ObjectStoreConfig;
 
 use super::{EngineType, OpendalObjectStore};
 use crate::object::ObjectResult;
@@ -22,7 +25,11 @@ use crate::object::ObjectResult;
 const AZBLOB_ENDPOINT: &str = "AZBLOB_ENDPOINT";
 impl OpendalObjectStore {
     /// create opendal azblob engine.
-    pub fn new_azblob_engine(container_name: String, root: String) -> ObjectResult<Self> {
+    pub fn new_azblob_engine(
+        container_name: String,
+        root: String,
+        config: Arc<ObjectStoreConfig>,
+    ) -> ObjectResult<Self> {
         // Create azblob backend builder.
         let mut builder = Azblob::default();
         builder.root(&root);
@@ -35,11 +42,11 @@ impl OpendalObjectStore {
 
         let op: Operator = Operator::new(builder)?
             .layer(LoggingLayer::default())
-            .layer(RetryLayer::default())
             .finish();
         Ok(Self {
             op,
             engine_type: EngineType::Azblob,
+            config,
         })
     }
 }

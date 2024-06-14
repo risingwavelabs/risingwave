@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use futures::StreamExt;
@@ -49,7 +48,7 @@ pub struct SourceExecutor {
     schema: Schema,
     identity: String,
 
-    source_ctrl_opts: SourceCtrlOpts,
+    chunk_size: usize,
 }
 
 #[async_trait::async_trait]
@@ -65,8 +64,7 @@ impl BoxedExecutorBuilder for SourceExecutor {
         )?;
 
         // prepare connector source
-        let source_props: HashMap<String, String> =
-            HashMap::from_iter(source_node.with_properties.clone());
+        let source_props = source_node.with_properties.clone();
         let config =
             ConnectorProperties::extract(source_props, false).map_err(BatchError::connector)?;
 
@@ -78,11 +76,6 @@ impl BoxedExecutorBuilder for SourceExecutor {
             .iter()
             .map(|c| SourceColumnDesc::from(&ColumnDesc::from(c.column_desc.as_ref().unwrap())))
             .collect();
-
-        let source_ctrl_opts = SourceCtrlOpts {
-            chunk_size: source.context().get_config().developer.chunk_size,
-            rate_limit: None,
-        };
 
         let column_ids: Vec<_> = source_node
             .columns
@@ -144,7 +137,7 @@ impl BoxedExecutorBuilder for SourceExecutor {
                 split_list,
                 schema,
                 identity: source.plan_node().get_identity().clone(),
-                source_ctrl_opts,
+                chunk_size: source.context().get_config().developer.chunk_size,
             }))
         }
     }
@@ -173,12 +166,15 @@ impl SourceExecutor {
             u32::MAX,
             "NA".to_owned(), // source name was not passed in batch plan
             self.metrics,
-            self.source_ctrl_opts.clone(),
+            SourceCtrlOpts {
+                chunk_size: self.chunk_size,
+                rate_limit: None,
+            },
             ConnectorProperties::default(),
         ));
         let stream = self
             .source
-            .to_stream(Some(self.split_list), self.column_ids, source_ctx)
+            .build_stream(Some(self.split_list), self.column_ids, source_ctx)
             .await?;
 
         #[for_await]

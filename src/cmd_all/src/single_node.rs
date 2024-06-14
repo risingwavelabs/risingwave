@@ -186,7 +186,7 @@ pub fn map_single_node_opts_to_standalone_opts(opts: SingleNodeOpts) -> ParsedSt
             std::fs::create_dir_all(&meta_store_dir).unwrap();
             let meta_store_endpoint =
                 format!("sqlite://{}/single_node.db?mode=rwc", &meta_store_dir);
-            meta_opts.sql_endpoint = Some(meta_store_endpoint);
+            meta_opts.sql_endpoint = Some(meta_store_endpoint.into());
         }
     }
 

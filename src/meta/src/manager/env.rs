@@ -188,7 +188,11 @@ pub struct MetaOpts {
     /// Interval of reporting the number of nodes in the cluster.
     pub node_num_monitor_interval_sec: u64,
 
-    /// The Prometheus endpoint for dashboard service.
+    /// The Prometheus endpoint for Meta Dashboard Service.
+    /// The Dashboard service uses this in the following ways:
+    /// 1. Query Prometheus for relevant metrics to find Stream Graph Bottleneck, and display it.
+    /// 2. Provide cluster diagnostics, at `/api/monitor/diagnose` to troubleshoot cluster.
+    ///    These are just examples which show how the Meta Dashboard Service queries Prometheus.
     pub prometheus_endpoint: Option<String>,
 
     /// The additional selector used when querying Prometheus.
@@ -243,12 +247,12 @@ pub struct MetaOpts {
 
     /// hybird compaction group config
     ///
-    /// `hybird_partition_vnode_count` determines the granularity of vnodes in the hybrid compaction group for SST alignment.
-    /// When `hybird_partition_vnode_count` > 0, in hybrid compaction group
+    /// `hybrid_partition_vnode_count` determines the granularity of vnodes in the hybrid compaction group for SST alignment.
+    /// When `hybrid_partition_vnode_count` > 0, in hybrid compaction group
     /// - Tables with high write throughput will be split at vnode granularity
     /// - Tables with high size tables will be split by table granularity
-    /// When `hybird_partition_vnode_count` = 0,no longer be special alignment operations for the hybird compaction group
-    pub hybird_partition_vnode_count: u32,
+    ///   When `hybrid_partition_vnode_count` = 0,no longer be special alignment operations for the hybird compaction group
+    pub hybrid_partition_node_count: u32,
 
     pub event_log_enabled: bool,
     pub event_log_channel_max_size: u32,
@@ -267,6 +271,18 @@ pub struct MetaOpts {
     pub enable_check_task_level_overlap: bool,
     pub enable_dropped_column_reclaim: bool,
     pub object_store_config: ObjectStoreConfig,
+
+    /// The maximum number of trivial move tasks to be picked in a single loop
+    pub max_trivial_move_task_count_per_loop: usize,
+
+    /// The maximum number of times to probe for `PullTaskEvent`
+    pub max_get_task_probe_times: usize,
+
+    pub compact_task_table_size_partition_threshold_low: u64,
+    pub compact_task_table_size_partition_threshold_high: u64,
+
+    // The private key for the secret store, used when the secret is stored in the meta.
+    pub secret_store_private_key: Vec<u8>,
 }
 
 impl MetaOpts {
@@ -305,6 +321,8 @@ impl MetaOpts {
             periodic_split_compact_group_interval_sec: 60,
             split_group_size_limit: 5 * 1024 * 1024 * 1024,
             min_table_split_size: 2 * 1024 * 1024 * 1024,
+            compact_task_table_size_partition_threshold_low: 128 * 1024 * 1024,
+            compact_task_table_size_partition_threshold_high: 512 * 1024 * 1024,
             table_write_throughput_threshold: 128 * 1024 * 1024,
             min_table_split_write_throughput: 64 * 1024 * 1024,
             do_not_config_object_storage_lifecycle: true,
@@ -313,7 +331,7 @@ impl MetaOpts {
             compaction_task_max_progress_interval_secs: 1,
             compaction_config: None,
             cut_table_size_limit: 1024 * 1024 * 1024,
-            hybird_partition_vnode_count: 4,
+            hybrid_partition_node_count: 4,
             event_log_enabled: false,
             event_log_channel_max_size: 1,
             advertise_addr: "".to_string(),
@@ -323,6 +341,9 @@ impl MetaOpts {
             enable_check_task_level_overlap: true,
             enable_dropped_column_reclaim: false,
             object_store_config: ObjectStoreConfig::default(),
+            max_trivial_move_task_count_per_loop: 256,
+            max_get_task_probe_times: 5,
+            secret_store_private_key: "demo-secret-private-key".as_bytes().to_vec(),
         }
     }
 }
@@ -441,11 +462,11 @@ impl MetaSrvEnv {
         Ok(env)
     }
 
-    pub fn meta_store_ref(&self) -> MetaStoreImpl {
+    pub fn meta_store(&self) -> MetaStoreImpl {
         self.meta_store_impl.clone()
     }
 
-    pub fn meta_store(&self) -> &MetaStoreImpl {
+    pub fn meta_store_ref(&self) -> &MetaStoreImpl {
         &self.meta_store_impl
     }
 

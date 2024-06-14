@@ -61,7 +61,7 @@ fn create_hash_join_executor(
         _ => vec![0, 1],
     };
 
-    let cond = with_cond.then(|| build_from_pretty("(greater_than:int8 $0:int8 100:int8)"));
+    let cond = with_cond.then(|| build_from_pretty("(greater_than:int8 $0:int8 100:int8)").into());
 
     Box::new(HashJoinExecutor::<hash::Key64>::new(
         join_type,
@@ -74,6 +74,7 @@ fn create_hash_join_executor(
         cond,
         "HashJoinExecutor".into(),
         CHUNK_SIZE,
+        false,
         ShutdownToken::empty(),
         MemoryContext::none(),
     ))

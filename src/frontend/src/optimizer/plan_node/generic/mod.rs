@@ -44,6 +44,8 @@ mod table_scan;
 pub use table_scan::*;
 mod sys_scan;
 pub use sys_scan::*;
+mod log_scan;
+pub use log_scan::*;
 
 mod cdc_scan;
 pub use cdc_scan::*;
@@ -72,6 +74,10 @@ mod limit;
 pub use limit::*;
 mod max_one_row;
 pub use max_one_row::*;
+mod cte_ref;
+pub use cte_ref::*;
+mod recursive_union;
+pub use recursive_union::*;
 
 pub trait DistillUnit {
     fn distill_with_name<'a>(&self, name: impl Into<Cow<'a, str>>) -> XmlNode<'a>;

@@ -41,11 +41,13 @@ use risingwave_pb::meta::table_fragments::fragment::{
     FragmentDistributionType, PbFragmentDistributionType,
 };
 use risingwave_pb::meta::table_fragments::{self, ActorStatus, PbFragment, State};
-use risingwave_pb::meta::FragmentParallelUnitMappings;
+use risingwave_pb::meta::FragmentWorkerSlotMappings;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
     Dispatcher, DispatcherType, FragmentTypeFlag, PbStreamActor, StreamNode,
 };
+use risingwave_pb::stream_service::build_actor_info::SubscriptionIds;
+use risingwave_pb::stream_service::BuildActorInfo;
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Receiver;
 use tokio::sync::{oneshot, RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -59,8 +61,7 @@ use crate::manager::{
 };
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments, TableParallelism};
 use crate::serving::{
-    to_deleted_fragment_parallel_unit_mapping, to_fragment_parallel_unit_mapping,
-    ServingVnodeMapping,
+    to_deleted_fragment_worker_slot_mapping, to_fragment_worker_slot_mapping, ServingVnodeMapping,
 };
 use crate::storage::{MetaStore, MetaStoreError, MetaStoreRef, Transaction, DEFAULT_COLUMN_FAMILY};
 use crate::stream::{GlobalStreamManager, SourceManagerRef};
@@ -236,19 +237,19 @@ impl RescheduleContext {
 /// The specific process is as follows
 ///
 /// 1. Calculate the number of target actors, and calculate the average value and the remainder, and
-/// use the average value as expected.
+///    use the average value as expected.
 ///
 /// 2. Filter out the actor to be removed and the actor to be retained, and sort them from largest
-/// to smallest (according to the number of virtual nodes held).
+///    to smallest (according to the number of virtual nodes held).
 ///
 /// 3. Calculate their balance, 1) For the actors to be removed, the number of virtual nodes per
-/// actor is the balance. 2) For retained actors, the number of virtual nodes - expected is the
-/// balance. 3) For newly created actors, -expected is the balance (always negative).
+///    actor is the balance. 2) For retained actors, the number of virtual nodes - expected is the
+///    balance. 3) For newly created actors, -expected is the balance (always negative).
 ///
 /// 4. Allocate the remainder, high priority to newly created nodes.
 ///
 /// 5. After that, merge removed, retained and created into a queue, with the head of the queue
-/// being the source, and move the virtual nodes to the destination at the end of the queue.
+///    being the source, and move the virtual nodes to the destination at the end of the queue.
 ///
 /// This can handle scale in, scale out, migration, and simultaneous scaling with as much affinity
 /// as possible.
@@ -824,7 +825,7 @@ impl ScaleController {
         &self,
         worker_nodes: &HashMap<WorkerId, WorkerNode>,
         actor_infos_to_broadcast: BTreeMap<ActorId, ActorInfo>,
-        node_actors_to_create: HashMap<WorkerId, Vec<PbStreamActor>>,
+        node_actors_to_create: HashMap<WorkerId, Vec<BuildActorInfo>>,
         broadcast_worker_ids: HashSet<WorkerId>,
     ) -> MetaResult<()> {
         self.stream_rpc_manager
@@ -846,7 +847,7 @@ impl ScaleController {
                             *node_id,
                             stream_actors
                                 .iter()
-                                .map(|stream_actor| stream_actor.actor_id)
+                                .map(|stream_actor| stream_actor.actor.as_ref().unwrap().actor_id)
                                 .collect_vec(),
                         )
                     }),
@@ -1124,8 +1125,23 @@ impl ScaleController {
             // After modification, for newly created actors, both upstream and downstream actor ids
             // have been modified
             let mut actor_infos_to_broadcast = BTreeMap::new();
-            let mut node_actors_to_create: HashMap<WorkerId, Vec<_>> = HashMap::new();
+            let mut node_actors_to_create: HashMap<WorkerId, Vec<BuildActorInfo>> = HashMap::new();
             let mut broadcast_worker_ids = HashSet::new();
+
+            let subscriptions: HashMap<_, SubscriptionIds> = self
+                .metadata_manager
+                .get_mv_depended_subscriptions()
+                .await?
+                .iter()
+                .map(|(table_id, subscriptions)| {
+                    (
+                        table_id.table_id,
+                        SubscriptionIds {
+                            subscription_ids: subscriptions.keys().cloned().collect(),
+                        },
+                    )
+                })
+                .collect();
 
             for actors_to_create in fragment_actors_to_create.values() {
                 for (new_actor_id, new_parallel_unit_id) in actors_to_create {
@@ -1188,7 +1204,12 @@ impl ScaleController {
                     node_actors_to_create
                         .entry(worker.id)
                         .or_default()
-                        .push(new_actor.clone());
+                        .push(BuildActorInfo {
+                            actor: Some(new_actor.clone()),
+                            // TODO: may include only the subscriptions related to the table fragment
+                            // of the actor.
+                            related_subscriptions: subscriptions.clone(),
+                        });
 
                     broadcast_worker_ids.insert(worker.id);
 
@@ -1703,8 +1724,8 @@ impl ScaleController {
                     .notification_manager()
                     .notify_frontend_without_version(
                         Operation::Update,
-                        Info::ServingParallelUnitMappings(FragmentParallelUnitMappings {
-                            mappings: to_fragment_parallel_unit_mapping(&upserted),
+                        Info::ServingWorkerSlotMappings(FragmentWorkerSlotMappings {
+                            mappings: to_fragment_worker_slot_mapping(&upserted),
                         }),
                     );
             }
@@ -1717,8 +1738,8 @@ impl ScaleController {
                     .notification_manager()
                     .notify_frontend_without_version(
                         Operation::Delete,
-                        Info::ServingParallelUnitMappings(FragmentParallelUnitMappings {
-                            mappings: to_deleted_fragment_parallel_unit_mapping(&failed),
+                        Info::ServingWorkerSlotMappings(FragmentWorkerSlotMappings {
+                            mappings: to_deleted_fragment_worker_slot_mapping(&failed),
                         }),
                     );
             }
@@ -2504,9 +2525,7 @@ impl ScaleController {
         // We trace the upstreams of each downstream under the hierarchy until we reach the top
         // for every no_shuffle relation.
         while let Some(fragment_id) = queue.pop_front() {
-            if !no_shuffle_target_fragment_ids.contains(&fragment_id)
-                && !no_shuffle_source_fragment_ids.contains(&fragment_id)
-            {
+            if !no_shuffle_target_fragment_ids.contains(&fragment_id) {
                 continue;
             }
 
@@ -2573,9 +2592,7 @@ impl ScaleController {
         // We trace the upstreams of each downstream under the hierarchy until we reach the top
         // for every no_shuffle relation.
         while let Some(fragment_id) = queue.pop_front() {
-            if !no_shuffle_target_fragment_ids.contains(&fragment_id)
-                && !no_shuffle_source_fragment_ids.contains(&fragment_id)
-            {
+            if !no_shuffle_target_fragment_ids.contains(&fragment_id) {
                 continue;
             }
 

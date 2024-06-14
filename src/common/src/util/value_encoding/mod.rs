@@ -20,7 +20,7 @@ use either::{for_both, Either};
 use enum_as_inner::EnumAsInner;
 use risingwave_pb::data::PbDatum;
 
-use crate::array::{ArrayImpl, ListRef, ListValue, StructRef, StructValue};
+use crate::array::ArrayImpl;
 use crate::row::{Row, RowDeserializer as BasicDeserializer};
 use crate::types::*;
 

@@ -20,6 +20,7 @@ use std::sync::Arc;
 use itertools::Itertools;
 use prometheus_http_query::response::Data::Vector;
 use risingwave_common::types::Timestamptz;
+use risingwave_common::util::StackTraceResponseExt;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::hummock::Level;
 use risingwave_pb::meta::event_log::Event;
@@ -664,53 +665,18 @@ impl DiagnoseCommand {
             return;
         };
 
-        let mut all = Default::default();
-
-        fn merge(a: &mut StackTraceResponse, b: StackTraceResponse) {
-            a.actor_traces.extend(b.actor_traces);
-            a.rpc_traces.extend(b.rpc_traces);
-            a.compaction_task_traces.extend(b.compaction_task_traces);
-            a.inflight_barrier_traces.extend(b.inflight_barrier_traces);
-        }
+        let mut all = StackTraceResponse::default();
 
         let compute_clients = ComputeClientPool::default();
         for worker_node in &worker_nodes {
             if let Ok(client) = compute_clients.get(worker_node).await
                 && let Ok(result) = client.stack_trace().await
             {
-                merge(&mut all, result);
+                all.merge_other(result);
             }
         }
 
-        if !all.actor_traces.is_empty() {
-            let _ = writeln!(s, "--- Actor Traces ---");
-            for (actor_id, trace) in &all.actor_traces {
-                let _ = writeln!(s, ">> Actor {}", *actor_id);
-                let _ = writeln!(s, "{trace}");
-            }
-        }
-        if !all.rpc_traces.is_empty() {
-            let _ = writeln!(s, "--- RPC Traces ---");
-            for (name, trace) in &all.rpc_traces {
-                let _ = writeln!(s, ">> RPC {name}");
-                let _ = writeln!(s, "{trace}");
-            }
-        }
-        if !all.compaction_task_traces.is_empty() {
-            let _ = writeln!(s, "--- Compactor Traces ---");
-            for (name, trace) in &all.compaction_task_traces {
-                let _ = writeln!(s, ">> Compaction Task {name}");
-                let _ = writeln!(s, "{trace}");
-            }
-        }
-
-        if !all.inflight_barrier_traces.is_empty() {
-            let _ = writeln!(s, "--- Inflight Barrier Traces ---");
-            for (name, trace) in &all.inflight_barrier_traces {
-                let _ = writeln!(s, ">> Barrier {name}");
-                let _ = writeln!(s, "{trace}");
-            }
-        }
+        write!(s, "{}", all.output()).unwrap();
     }
 }
 

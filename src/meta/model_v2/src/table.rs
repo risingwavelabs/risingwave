@@ -18,13 +18,16 @@ use risingwave_pb::catalog::{PbHandleConflictBehavior, PbTable};
 use sea_orm::entity::prelude::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::NotSet;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     Cardinality, ColumnCatalogArray, ColumnOrderArray, FragmentId, I32Array, ObjectId, SourceId,
     TableId, TableVersion,
 };
 
-#[derive(Clone, Debug, PartialEq, Hash, Copy, Eq, EnumIter, DeriveActiveEnum)]
+#[derive(
+    Clone, Debug, PartialEq, Hash, Copy, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize,
+)]
 #[sea_orm(rs_type = "String", db_type = "String(None)")]
 pub enum TableType {
     #[sea_orm(string_value = "TABLE")]
@@ -60,7 +63,7 @@ impl From<PbTableType> for TableType {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum)]
+#[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
 #[sea_orm(rs_type = "String", db_type = "String(None)")]
 pub enum HandleConflictBehavior {
     #[sea_orm(string_value = "OVERWRITE")]
@@ -98,7 +101,7 @@ impl From<PbHandleConflictBehavior> for HandleConflictBehavior {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize)]
 #[sea_orm(table_name = "table")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]

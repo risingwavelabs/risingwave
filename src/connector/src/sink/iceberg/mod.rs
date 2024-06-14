@@ -13,11 +13,10 @@
 // limitations under the License.
 
 mod jni_catalog;
-mod log_sink;
 mod mock_catalog;
 mod prometheus;
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt::Debug;
 use std::num::NonZeroU64;
 use std::ops::Deref;
@@ -41,9 +40,8 @@ use icelake::transaction::Transaction;
 use icelake::types::{data_file_from_json, data_file_to_json, Any, DataFile};
 use icelake::{Table, TableIdentifier};
 use itertools::Itertools;
-use risingwave_common::array::{
-    iceberg_to_arrow_type, to_iceberg_record_batch_with_schema, Op, StreamChunk,
-};
+use risingwave_common::array::arrow::{IcebergArrowConvert, ToArrow};
+use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
@@ -55,11 +53,11 @@ use thiserror_ext::AsReport;
 use url::Url;
 use with_options::WithOptions;
 
-use self::log_sink::IcebergLogSinkerOf;
 use self::mock_catalog::MockCatalog;
 use self::prometheus::monitored_base_file_writer::MonitoredBaseFileWriterBuilder;
 use self::prometheus::monitored_position_delete_writer::MonitoredPositionDeleteWriterBuilder;
 use super::catalog::desc::SinkDesc;
+use super::decouple_checkpoint_log_sink::DecoupleCheckpointLogSinkerOf;
 use super::{
     Sink, SinkError, SinkWriterParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
 };
@@ -136,7 +134,7 @@ pub struct IcebergConfig {
 }
 
 impl IcebergConfig {
-    pub fn from_hashmap(values: HashMap<String, String>) -> Result<Self> {
+    pub fn from_btreemap(values: BTreeMap<String, String>) -> Result<Self> {
         let mut config =
             serde_json::from_value::<IcebergConfig>(serde_json::to_value(&values).unwrap())
                 .map_err(|e| SinkError::Config(anyhow!(e)))?;
@@ -445,7 +443,7 @@ impl TryFrom<SinkParam> for IcebergSink {
     type Error = SinkError;
 
     fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
-        let config = IcebergConfig::from_hashmap(param.properties.clone())?;
+        let config = IcebergConfig::from_btreemap(param.properties.clone())?;
         IcebergSink::new(config, param)
     }
 }
@@ -475,7 +473,7 @@ impl IcebergSink {
             .try_into()
             .map_err(|err: icelake::Error| SinkError::Iceberg(anyhow!(err)))?;
 
-        try_matches_arrow_schema(&sink_schema, &iceberg_schema, false)
+        try_matches_arrow_schema(&sink_schema, &iceberg_schema)
             .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
 
         Ok(table)
@@ -517,7 +515,7 @@ impl IcebergSink {
 
 impl Sink for IcebergSink {
     type Coordinator = IcebergSinkCommitter;
-    type LogSinker = IcebergLogSinkerOf<CoordinatedSinkWriter<IcebergWriter>>;
+    type LogSinker = DecoupleCheckpointLogSinkerOf<CoordinatedSinkWriter<IcebergWriter>>;
 
     const SINK_NAME: &'static str = ICEBERG_SINK;
 
@@ -578,7 +576,7 @@ impl Sink for IcebergSink {
                 "commit_checkpoint_interval should be greater than 0, and it should be checked in config validation",
             );
 
-        Ok(IcebergLogSinkerOf::new(
+        Ok(DecoupleCheckpointLogSinkerOf::new(
             writer,
             writer_param.sink_metrics,
             commit_checkpoint_interval,
@@ -797,14 +795,15 @@ impl SinkWriter for IcebergWriter {
                 let filters =
                     chunk.visibility() & ops.iter().map(|op| *op == Op::Insert).collect::<Bitmap>();
                 chunk.set_visibility(filters);
-                let chunk =
-                    to_iceberg_record_batch_with_schema(self.schema.clone(), &chunk.compact())
-                        .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
+                let chunk = IcebergArrowConvert
+                    .to_record_batch(self.schema.clone(), &chunk.compact())
+                    .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
 
                 writer.write(chunk).await?;
             }
             IcebergWriterEnum::Upsert(writer) => {
-                let chunk = to_iceberg_record_batch_with_schema(self.schema.clone(), &chunk)
+                let chunk = IcebergArrowConvert
+                    .to_record_batch(self.schema.clone(), &chunk)
                     .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
 
                 writer
@@ -1002,11 +1001,9 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
 }
 
 /// Try to match our schema with iceberg schema.
-/// `for_source` = true means the schema is used for source, otherwise it's used for sink.
 pub fn try_matches_arrow_schema(
     rw_schema: &Schema,
     arrow_schema: &ArrowSchema,
-    for_source: bool,
 ) -> anyhow::Result<()> {
     if rw_schema.fields.len() != arrow_schema.fields().len() {
         bail!(
@@ -1029,17 +1026,11 @@ pub fn try_matches_arrow_schema(
             .ok_or_else(|| anyhow!("Field {} not found in our schema", arrow_field.name()))?;
 
         // Iceberg source should be able to read iceberg decimal type.
-        // Since the arrow type default conversion is used by udf, in udf, decimal is converted to
-        // large binary type which is not compatible with iceberg decimal type,
-        // so we need to convert it to decimal type manually.
-        let converted_arrow_data_type = if for_source
-            && matches!(our_field_type, risingwave_common::types::DataType::Decimal)
-        {
-            // RisingWave decimal type cannot specify precision and scale, so we use the default value.
-            ArrowDataType::Decimal128(38, 0)
-        } else {
-            iceberg_to_arrow_type(our_field_type).map_err(|e| anyhow!(e))?
-        };
+        let converted_arrow_data_type = IcebergArrowConvert
+            .to_arrow_field("", our_field_type)
+            .map_err(|e| anyhow!(e))?
+            .data_type()
+            .clone();
 
         let compatible = match (&converted_arrow_data_type, arrow_field.data_type()) {
             (ArrowDataType::Decimal128(_, _), ArrowDataType::Decimal128(_, _)) => true,
@@ -1057,7 +1048,7 @@ pub fn try_matches_arrow_schema(
 
 #[cfg(test)]
 mod test {
-    use std::collections::HashMap;
+    use std::collections::BTreeMap;
 
     use risingwave_common::catalog::Field;
 
@@ -1080,7 +1071,7 @@ mod test {
             ArrowField::new("c", ArrowDataType::Int32, false),
         ]);
 
-        try_matches_arrow_schema(&risingwave_schema, &arrow_schema, false).unwrap();
+        try_matches_arrow_schema(&risingwave_schema, &arrow_schema).unwrap();
 
         let risingwave_schema = Schema::new(vec![
             Field::with_name(DataType::Int32, "d"),
@@ -1094,7 +1085,7 @@ mod test {
             ArrowField::new("d", ArrowDataType::Int32, false),
             ArrowField::new("c", ArrowDataType::Int32, false),
         ]);
-        try_matches_arrow_schema(&risingwave_schema, &arrow_schema, false).unwrap();
+        try_matches_arrow_schema(&risingwave_schema, &arrow_schema).unwrap();
     }
 
     #[test]
@@ -1120,7 +1111,7 @@ mod test {
         .map(|(k, v)| (k.to_string(), v.to_string()))
         .collect();
 
-        let iceberg_config = IcebergConfig::from_hashmap(values).unwrap();
+        let iceberg_config = IcebergConfig::from_btreemap(values).unwrap();
 
         let expected_iceberg_config = IcebergConfig {
             connector: "iceberg".to_string(),
@@ -1152,8 +1143,8 @@ mod test {
         );
     }
 
-    async fn test_create_catalog(configs: HashMap<String, String>) {
-        let iceberg_config = IcebergConfig::from_hashmap(configs).unwrap();
+    async fn test_create_catalog(configs: BTreeMap<String, String>) {
+        let iceberg_config = IcebergConfig::from_btreemap(configs).unwrap();
 
         let table = iceberg_config.load_table().await.unwrap();
 

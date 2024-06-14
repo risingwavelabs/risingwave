@@ -382,7 +382,7 @@ fn assemble_materialize(
         }))
         .collect_vec();
 
-    PlanRoot::new(
+    PlanRoot::new_with_logical_plan(
         logical_project,
         // schema of logical_project is such that index columns come first.
         // so we can use distributed_by_columns_len to represent distributed by columns indices.

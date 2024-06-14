@@ -26,7 +26,6 @@ use risingwave_sqlparser::ast::{
 use thiserror::Error;
 use thiserror_ext::AsReport;
 
-use self::cte_ref::BoundBackCteRef;
 use super::bind_context::ColumnBinding;
 use super::statement::RewriteExprsRecursive;
 use crate::binder::bind_context::{BindingCte, BindingCteState};
@@ -43,6 +42,7 @@ mod table_or_source;
 mod watermark;
 mod window_table_function;
 
+pub use cte_ref::BoundBackCteRef;
 pub use join::BoundJoin;
 pub use share::BoundShare;
 pub use subquery::BoundSubquery;
@@ -374,13 +374,13 @@ impl Binder {
                 BindingCteState::Init => {
                     Err(ErrorCode::BindError("Base term of recursive CTE not found, consider writing it to left side of the `UNION ALL` operator".to_string()).into())
                 }
-                BindingCteState::BaseResolved { schema } => {
+                BindingCteState::BaseResolved { base } => {
                     self.bind_table_to_context(
-                        schema.fields.iter().map(|f| (false, f.clone())),
+                        base.schema().fields.iter().map(|f| (false, f.clone())),
                         table_name.clone(),
                         Some(original_alias),
                     )?;
-                    Ok(Relation::BackCteRef(Box::new(BoundBackCteRef { share_id })))
+                    Ok(Relation::BackCteRef(Box::new(BoundBackCteRef { share_id, base })))
                 }
                 BindingCteState::Bound { query } => {
                     let schema = match &query {

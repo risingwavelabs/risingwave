@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 
 use risingwave_pb::catalog::{PbCreateType, PbStreamJobStatus};
 use risingwave_pb::meta::table_fragments::PbState as PbStreamJobState;
@@ -43,6 +43,8 @@ pub mod index;
 pub mod object;
 pub mod object_dependency;
 pub mod schema;
+pub mod secret;
+pub mod serde_seaql_migration;
 pub mod session_parameter;
 pub mod sink;
 pub mod source;
@@ -71,6 +73,7 @@ pub type IndexId = ObjectId;
 pub type ViewId = ObjectId;
 pub type FunctionId = ObjectId;
 pub type ConnectionId = ObjectId;
+pub type SecretId = ObjectId;
 pub type UserId = i32;
 pub type PrivilegeId = i32;
 
@@ -83,7 +86,7 @@ pub type HummockSstableObjectId = i64;
 pub type FragmentId = i32;
 pub type ActorId = i32;
 
-#[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum)]
+#[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
 #[sea_orm(rs_type = "String", db_type = "String(None)")]
 pub enum JobStatus {
     #[sea_orm(string_value = "INITIAL")]
@@ -115,7 +118,7 @@ impl From<JobStatus> for PbStreamJobState {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum)]
+#[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
 #[sea_orm(rs_type = "String", db_type = "String(None)")]
 pub enum CreateType {
     #[sea_orm(string_value = "BACKGROUND")]
@@ -170,7 +173,7 @@ macro_rules! derive_from_json_struct {
 /// Defines struct with a byte array that derives `DeriveValueType`, it will helps to map blob stored in database to Pb struct.
 macro_rules! derive_from_blob {
     ($struct_name:ident, $field_type:ty) => {
-        #[derive(Clone, PartialEq, Eq, Serialize, Deserialize, DeriveValueType)]
+        #[derive(Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, DeriveValueType)]
         pub struct $struct_name(#[sea_orm] Vec<u8>);
 
         impl $struct_name {
@@ -212,7 +215,7 @@ macro_rules! derive_from_blob {
 /// Defines struct with a byte array that derives `DeriveValueType`, it will helps to map blob stored in database to Pb struct array.
 macro_rules! derive_array_from_blob {
     ($struct_name:ident, $field_type:ty, $field_array_name:ident) => {
-        #[derive(Clone, PartialEq, Eq, DeriveValueType)]
+        #[derive(Clone, PartialEq, Eq, DeriveValueType, serde::Deserialize, serde::Serialize)]
         pub struct $struct_name(#[sea_orm] Vec<u8>);
 
         #[derive(Clone, PartialEq, ::prost::Message)]
@@ -255,7 +258,7 @@ macro_rules! derive_array_from_blob {
     };
 }
 
-pub(crate) use {derive_array_from_blob, derive_from_blob, derive_from_json_struct};
+pub(crate) use {derive_array_from_blob, derive_from_blob};
 
 derive_from_json_struct!(I32Array, Vec<i32>);
 
@@ -283,6 +286,8 @@ impl From<BTreeMap<u32, Vec<u32>>> for ActorUpstreamActors {
     }
 }
 
+derive_from_json_struct!(SecretRef, BTreeMap<String, u32>);
+
 derive_from_blob!(StreamNode, PbStreamNode);
 derive_from_blob!(DataType, risingwave_pb::data::PbDataType);
 derive_array_from_blob!(
@@ -295,7 +300,7 @@ derive_array_from_blob!(
     risingwave_pb::plan_common::PbField,
     PbFieldArray
 );
-derive_from_json_struct!(Property, HashMap<String, String>);
+derive_from_json_struct!(Property, BTreeMap<String, String>);
 derive_from_blob!(ColumnCatalog, risingwave_pb::plan_common::PbColumnCatalog);
 derive_array_from_blob!(
     ColumnCatalogArray,

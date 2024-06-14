@@ -32,6 +32,7 @@ pub use super::index::Entity as Index;
 pub use super::object::Entity as Object;
 pub use super::object_dependency::Entity as ObjectDependency;
 pub use super::schema::Entity as Schema;
+pub use super::secret::Entity as Secret;
 pub use super::session_parameter::Entity as SessionParameter;
 pub use super::sink::Entity as Sink;
 pub use super::source::Entity as Source;

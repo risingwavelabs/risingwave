@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::fmt::{Debug, Formatter};
-use std::option::Option;
 use std::sync::Arc;
 
 use anyhow::anyhow;

@@ -544,7 +544,7 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
     }
 }
 
-pub(crate) type LogStoreItemMergeStream<S> =
+pub(crate) type LogStoreItemMergeStream<S: StateStoreReadIter> =
     impl Stream<Item = LogStoreResult<(u64, KvLogStoreItem)>>;
 pub(crate) fn merge_log_store_item_stream<S: StateStoreReadIter>(
     iters: Vec<S>,
@@ -742,7 +742,7 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
                 "a stream has reached the end but some other stream has not started yet"
             ));
         }
-        if cfg!(debug_assertion) {
+        if cfg!(debug_assertions) {
             while let Some((opt, _stream)) = self.row_streams.next().await {
                 if let Some(result) = opt {
                     return Err(

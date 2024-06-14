@@ -46,7 +46,6 @@ mod source_backfill;
 mod stateless_simple_agg;
 mod stream_cdc_scan;
 mod stream_scan;
-mod subscription;
 mod temporal_join;
 mod top_n;
 mod union;
@@ -96,7 +95,6 @@ use self::union::*;
 use self::watermark_filter::WatermarkFilterBuilder;
 use crate::error::StreamResult;
 use crate::executor::{Execute, Executor, ExecutorInfo};
-use crate::from_proto::subscription::SubscriptionExecutorBuilder;
 use crate::from_proto::values::ValuesExecutorBuilder;
 use crate::task::ExecutorParams;
 
@@ -149,7 +147,6 @@ pub async fn create_executor(
         NodeBody::BatchPlan => BatchQueryExecutorBuilder,
         NodeBody::Merge => MergeExecutorBuilder,
         NodeBody::Materialize => MaterializeExecutorBuilder,
-        NodeBody::Subscription => SubscriptionExecutorBuilder,
         NodeBody::Filter => FilterExecutorBuilder,
         NodeBody::CdcFilter => CdcFilterExecutorBuilder,
         NodeBody::Arrange => ArrangeExecutorBuilder,

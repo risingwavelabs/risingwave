@@ -37,6 +37,17 @@ impl MigrationTrait for Migration {
                             .string()
                             .not_null(),
                     )
+                    .foreign_key(
+                        &mut ForeignKey::create()
+                            .name("FK_subscription_object_id")
+                            .from(Subscription::Table, Subscription::SubscriptionId)
+                            .to(
+                                crate::m20230908_072257_init::Object::Table,
+                                crate::m20230908_072257_init::Object::Oid,
+                            )
+                            .on_delete(ForeignKeyAction::Cascade)
+                            .to_owned(),
+                    )
                     .to_owned(),
             )
             .await?;

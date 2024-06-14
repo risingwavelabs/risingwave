@@ -55,7 +55,7 @@ use risingwave_pb::meta::list_fragment_distribution_response::FragmentDistributi
 use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
 use risingwave_pb::meta::list_table_fragment_states_response::TableFragmentState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
-use risingwave_pb::meta::{EventLog, PbTableParallelism, SystemParams};
+use risingwave_pb::meta::{EventLog, PbTableParallelism, PbThrottleTarget, SystemParams};
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::{GrantPrivilege, UserInfo};
@@ -64,7 +64,7 @@ use tempfile::{Builder, NamedTempFile};
 
 use crate::catalog::catalog_service::CatalogWriter;
 use crate::catalog::root_catalog::Catalog;
-use crate::catalog::{ConnectionId, DatabaseId, SchemaId};
+use crate::catalog::{ConnectionId, DatabaseId, SchemaId, SecretId};
 use crate::error::{ErrorCode, Result};
 use crate::handler::RwPgResponse;
 use crate::meta_client::FrontendMetaClient;
@@ -242,6 +242,15 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
+    async fn list_change_log_epochs(
+        &self,
+        _table_id: u32,
+        _min_epoch: u64,
+        _max_count: u32,
+    ) -> Result<Vec<u64>> {
+        unreachable!()
+    }
+
     async fn create_schema(
         &self,
         db_id: DatabaseId,
@@ -325,12 +334,8 @@ impl CatalogWriter for MockCatalogWriter {
         self.create_sink_inner(sink, graph)
     }
 
-    async fn create_subscription(
-        &self,
-        subscription: PbSubscription,
-        graph: StreamFragmentGraph,
-    ) -> Result<()> {
-        self.create_subscription_inner(subscription, graph)
+    async fn create_subscription(&self, subscription: PbSubscription) -> Result<()> {
+        self.create_subscription_inner(subscription)
     }
 
     async fn create_index(
@@ -364,6 +369,17 @@ impl CatalogWriter for MockCatalogWriter {
         _schema_id: u32,
         _owner_id: u32,
         _connection: create_connection_request::Payload,
+    ) -> Result<()> {
+        unreachable!()
+    }
+
+    async fn create_secret(
+        &self,
+        _secret_name: String,
+        _database_id: u32,
+        _schema_id: u32,
+        _owner_id: u32,
+        _payload: Vec<u8>,
     ) -> Result<()> {
         unreachable!()
     }
@@ -522,6 +538,10 @@ impl CatalogWriter for MockCatalogWriter {
     }
 
     async fn drop_connection(&self, _connection_id: ConnectionId) -> Result<()> {
+        unreachable!()
+    }
+
+    async fn drop_secret(&self, _secret_id: SecretId) -> Result<()> {
         unreachable!()
     }
 
@@ -773,11 +793,7 @@ impl MockCatalogWriter {
         Ok(())
     }
 
-    fn create_subscription_inner(
-        &self,
-        mut subscription: PbSubscription,
-        _graph: StreamFragmentGraph,
-    ) -> Result<()> {
+    fn create_subscription_inner(&self, mut subscription: PbSubscription) -> Result<()> {
         subscription.id = self.gen_id();
         self.catalog.write().create_subscription(&subscription);
         self.add_table_or_subscription_id(
@@ -1057,6 +1073,15 @@ impl FrontendMetaClient for MockFrontendMetaClient {
     }
 
     async fn recover(&self) -> RpcResult<()> {
+        unimplemented!()
+    }
+
+    async fn apply_throttle(
+        &self,
+        _kind: PbThrottleTarget,
+        _id: u32,
+        _rate_limit: Option<u32>,
+    ) -> RpcResult<()> {
         unimplemented!()
     }
 }

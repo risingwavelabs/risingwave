@@ -66,7 +66,7 @@ message GrantPrivilege {
 
     uint32 all_tables_schema_id = 11;
     uint32 all_sources_schema_id = 12;
-    uint32 all_dml_tables_schema_id = 13;
+    uint32 all_dml_relations_schema_id = 13;
     uint32 subscription_id = 14;
   }
   repeated ActionWithGrantOption action_with_opts = 7;

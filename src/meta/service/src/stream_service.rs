@@ -108,7 +108,7 @@ impl StreamManagerService for StreamServiceImpl {
         let request = request.into_inner();
 
         let actor_to_apply = match request.kind() {
-            ThrottleTarget::Source => {
+            ThrottleTarget::Source | ThrottleTarget::TableWithSource => {
                 self.metadata_manager
                     .update_source_rate_limit_by_source_id(request.id as SourceId, request.rate)
                     .await?

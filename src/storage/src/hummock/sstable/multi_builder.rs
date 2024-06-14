@@ -18,6 +18,8 @@ use std::sync::atomic::Ordering::SeqCst;
 use std::sync::Arc;
 
 use bytes::Bytes;
+use futures::stream::FuturesUnordered;
+use futures::StreamExt;
 use num_integer::Integer;
 use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::{FullKey, UserKey};
@@ -29,8 +31,8 @@ use crate::hummock::sstable::filter::FilterBuilder;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
-    BatchUploadWriter, BlockMeta, CachePolicy, HummockResult, MemoryLimiter, SstableBuilder,
-    SstableBuilderOptions, SstableWriter, SstableWriterOptions, Xor16FilterBuilder,
+    BatchUploadWriter, BlockMeta, CachePolicy, HummockError, HummockResult, MemoryLimiter,
+    SstableBuilder, SstableBuilderOptions, SstableWriter, SstableWriterOptions, Xor16FilterBuilder,
 };
 use crate::monitor::CompactorMetrics;
 
@@ -41,11 +43,6 @@ pub trait TableBuilderFactory {
     type Writer: SstableWriter<Output = UploadJoinHandle>;
     type Filter: FilterBuilder;
     async fn open_builder(&mut self) -> HummockResult<SstableBuilder<Self::Writer, Self::Filter>>;
-}
-
-pub struct SplitTableOutput {
-    pub sst_info: LocalSstableInfo,
-    pub upload_join_handle: UploadJoinHandle,
 }
 
 /// A wrapper for [`SstableBuilder`] which automatically split key-value pairs into multiple tables,
@@ -59,7 +56,7 @@ where
     /// When creating a new [`SstableBuilder`], caller use this factory to generate it.
     builder_factory: F,
 
-    sst_outputs: Vec<SplitTableOutput>,
+    sst_outputs: Vec<LocalSstableInfo>,
 
     current_builder: Option<SstableBuilder<F::Writer, F::Filter>>,
 
@@ -75,6 +72,10 @@ where
     /// When vnode of the coming key is greater than `largest_vnode_in_current_partition`, we will
     /// switch SST.
     largest_vnode_in_current_partition: usize,
+
+    concurrent_upload_join_handle: FuturesUnordered<UploadJoinHandle>,
+
+    concurrent_uploading_sst_count: Option<usize>,
 }
 
 impl<F> CapacitySplitTableBuilder<F>
@@ -88,6 +89,7 @@ where
         compactor_metrics: Arc<CompactorMetrics>,
         task_progress: Option<Arc<TaskProgress>>,
         table_partition_vnode: BTreeMap<u32, u32>,
+        concurrent_uploading_sst_count: Option<usize>,
     ) -> Self {
         Self {
             builder_factory,
@@ -99,6 +101,8 @@ where
             table_partition_vnode,
             split_weight_by_vnode: 0,
             largest_vnode_in_current_partition: VirtualNode::MAX.to_index(),
+            concurrent_upload_join_handle: FuturesUnordered::new(),
+            concurrent_uploading_sst_count,
         }
     }
 
@@ -113,6 +117,8 @@ where
             table_partition_vnode: BTreeMap::default(),
             split_weight_by_vnode: 0,
             largest_vnode_in_current_partition: VirtualNode::MAX.to_index(),
+            concurrent_upload_join_handle: FuturesUnordered::new(),
+            concurrent_uploading_sst_count: None,
         }
     }
 
@@ -264,6 +270,7 @@ where
     /// If there's no builder created, or current one is already sealed before, then this function
     /// will be no-op.
     pub async fn seal_current(&mut self) -> HummockResult<()> {
+        use await_tree::InstrumentAwait;
         if let Some(builder) = self.current_builder.take() {
             let builder_output = builder.finish().await?;
             {
@@ -302,17 +309,33 @@ where
                         .observe(builder_output.epoch_count as _);
                 }
             }
-            self.sst_outputs.push(SplitTableOutput {
-                upload_join_handle: builder_output.writer_output,
-                sst_info: builder_output.sst_info,
-            });
+
+            self.concurrent_upload_join_handle
+                .push(builder_output.writer_output);
+
+            self.sst_outputs.push(builder_output.sst_info);
+
+            if let Some(concurrent_uploading_sst_count) = self.concurrent_uploading_sst_count
+                && self.concurrent_upload_join_handle.len() >= concurrent_uploading_sst_count
+            {
+                self.concurrent_upload_join_handle
+                    .next()
+                    .verbose_instrument_await("upload")
+                    .await
+                    .unwrap()
+                    .map_err(HummockError::sstable_upload_error)??;
+            }
         }
         Ok(())
     }
 
     /// Finalizes all the tables to be ids, blocks and metadata.
-    pub async fn finish(mut self) -> HummockResult<Vec<SplitTableOutput>> {
+    pub async fn finish(mut self) -> HummockResult<Vec<LocalSstableInfo>> {
+        use futures::future::try_join_all;
         self.seal_current().await?;
+        try_join_all(self.concurrent_upload_join_handle.into_iter())
+            .await
+            .map_err(HummockError::sstable_upload_error)?;
         Ok(self.sst_outputs)
     }
 }
@@ -370,13 +393,12 @@ impl TableBuilderFactory for LocalTableBuilderFactory {
 #[cfg(test)]
 mod tests {
     use risingwave_common::catalog::TableId;
-    use risingwave_common::hash::VirtualNode;
     use risingwave_common::util::epoch::{test_epoch, EpochExt};
 
     use super::*;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::test_utils::{default_builder_opt_for_test, test_key_of, test_user_key_of};
-    use crate::hummock::{SstableBuilderOptions, DEFAULT_RESTART_INTERVAL};
+    use crate::hummock::DEFAULT_RESTART_INTERVAL;
 
     #[tokio::test]
     async fn test_empty() {
@@ -389,7 +411,7 @@ mod tests {
             bloom_false_positive: 0.1,
             ..Default::default()
         };
-        let builder_factory = LocalTableBuilderFactory::new(1001, mock_sstable_store(), opts);
+        let builder_factory = LocalTableBuilderFactory::new(1001, mock_sstable_store().await, opts);
         let builder = CapacitySplitTableBuilder::for_test(builder_factory);
         let results = builder.finish().await.unwrap();
         assert!(results.is_empty());
@@ -406,7 +428,7 @@ mod tests {
             bloom_false_positive: 0.1,
             ..Default::default()
         };
-        let builder_factory = LocalTableBuilderFactory::new(1001, mock_sstable_store(), opts);
+        let builder_factory = LocalTableBuilderFactory::new(1001, mock_sstable_store().await, opts);
         let mut builder = CapacitySplitTableBuilder::for_test(builder_factory);
 
         for i in 0..table_capacity {
@@ -432,7 +454,7 @@ mod tests {
         let opts = default_builder_opt_for_test();
         let mut builder = CapacitySplitTableBuilder::for_test(LocalTableBuilderFactory::new(
             1001,
-            mock_sstable_store(),
+            mock_sstable_store().await,
             opts,
         ));
         let mut epoch = test_epoch(100);
@@ -476,7 +498,7 @@ mod tests {
         let opts = default_builder_opt_for_test();
         let mut builder = CapacitySplitTableBuilder::for_test(LocalTableBuilderFactory::new(
             1001,
-            mock_sstable_store(),
+            mock_sstable_store().await,
             opts,
         ));
         builder
@@ -501,10 +523,11 @@ mod tests {
             BTreeMap::from([(1_u32, 4_u32), (2_u32, 4_u32), (3_u32, 4_u32)]);
 
         let mut builder = CapacitySplitTableBuilder::new(
-            LocalTableBuilderFactory::new(1001, mock_sstable_store(), opts),
+            LocalTableBuilderFactory::new(1001, mock_sstable_store().await, opts),
             Arc::new(CompactorMetrics::unused()),
             None,
             table_partition_vnode,
+            None,
         );
 
         let mut table_key = VirtualNode::from_index(0).to_be_bytes().to_vec();

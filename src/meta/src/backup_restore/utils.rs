@@ -17,11 +17,12 @@ use std::time::Duration;
 
 use anyhow::Context;
 use etcd_client::ConnectOptions;
-use risingwave_backup::error::BackupResult;
+use risingwave_backup::error::{BackupError, BackupResult};
 use risingwave_backup::storage::{MetaSnapshotStorageRef, ObjectStoreMetaSnapshotStorage};
 use risingwave_common::config::{MetaBackend, ObjectStoreConfig};
 use risingwave_object_store::object::build_remote_object_store;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
+use sea_orm::DbBackend;
 
 use crate::backup_restore::RestoreOpts;
 use crate::controller::SqlMetaStore;
@@ -32,7 +33,6 @@ use crate::MetaStoreBackend;
 pub enum MetaStoreBackendImpl {
     Etcd(EtcdMetaStore),
     Mem(MemStore),
-    #[expect(dead_code, reason = "WIP")]
     Sql(SqlMetaStore),
 }
 
@@ -62,7 +62,9 @@ pub async fn get_meta_store(opts: RestoreOpts) -> BackupResult<MetaStoreBackendI
             },
         },
         MetaBackend::Mem => MetaStoreBackend::Mem,
-        MetaBackend::Sql => panic!("not supported"),
+        MetaBackend::Sql => MetaStoreBackend::Sql {
+            endpoint: opts.sql_endpoint,
+        },
     };
     match meta_store_backend {
         MetaStoreBackend::Etcd {
@@ -80,7 +82,25 @@ pub async fn get_meta_store(opts: RestoreOpts) -> BackupResult<MetaStoreBackendI
             Ok(MetaStoreBackendImpl::Etcd(EtcdMetaStore::new(client)))
         }
         MetaStoreBackend::Mem => Ok(MetaStoreBackendImpl::Mem(MemStore::new())),
-        MetaStoreBackend::Sql { .. } => panic!("not supported"),
+        MetaStoreBackend::Sql { endpoint } => {
+            let max_connection = if DbBackend::Sqlite.is_prefix_of(&endpoint) {
+                // Due to the fact that Sqlite is prone to the error "(code: 5) database is locked" under concurrent access,
+                // here we forcibly specify the number of connections as 1.
+                1
+            } else {
+                10
+            };
+            let mut options = sea_orm::ConnectOptions::new(endpoint);
+            options
+                .max_connections(max_connection)
+                .connect_timeout(Duration::from_secs(10))
+                .idle_timeout(Duration::from_secs(30));
+            let conn = sea_orm::Database::connect(options)
+                .await
+                .map_err(|e| BackupError::MetaStorage(e.into()))?;
+            let meta_store_sql = SqlMetaStore::new(conn);
+            Ok(MetaStoreBackendImpl::Sql(meta_store_sql))
+        }
     }
 }
 
@@ -89,7 +109,7 @@ pub async fn get_backup_store(opts: RestoreOpts) -> BackupResult<MetaSnapshotSto
         &opts.backup_storage_url,
         Arc::new(ObjectStoreMetrics::unused()),
         "Meta Backup",
-        ObjectStoreConfig::default(),
+        Arc::new(ObjectStoreConfig::default()),
     )
     .await;
     let backup_store =

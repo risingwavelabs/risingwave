@@ -530,13 +530,10 @@ mod tests {
 
     use bytes::Bytes;
     use mockall::predicate;
-    use tokio::sync::mpsc::unbounded_channel;
 
     use super::*;
     use crate::replay::{MockGlobalReplayInterface, MockLocalReplayInterface};
-    use crate::{
-        MockReplayIterStream, StorageType, TracedBytes, TracedNewLocalOptions, TracedReadOptions,
-    };
+    use crate::{MockReplayIterStream, TracedBytes, TracedReadOptions};
 
     #[tokio::test]
     async fn test_handle_record() {
