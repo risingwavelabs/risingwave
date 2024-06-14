@@ -386,7 +386,7 @@ impl<R: LogReader> SinkLogReader for R {
 
 #[async_trait]
 pub trait LogSinker: 'static {
-    async fn consume_log_and_sink(self, log_reader: &mut impl SinkLogReader) -> Result<()>;
+    async fn consume_log_and_sink(self, log_reader: &mut impl SinkLogReader) -> Result<!>;
 }
 
 #[async_trait]

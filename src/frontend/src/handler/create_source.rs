@@ -32,8 +32,8 @@ use risingwave_connector::parser::additional_columns::{
     build_additional_column_catalog, get_supported_additional_columns,
 };
 use risingwave_connector::parser::{
-    schema_to_columns, AvroParserConfig, DebeziumAvroParserConfig, ProtobufParserConfig,
-    SpecificParserConfig, TimestamptzHandling, DEBEZIUM_IGNORE_KEY,
+    fetch_json_schema_and_map_to_columns, AvroParserConfig, DebeziumAvroParserConfig,
+    ProtobufParserConfig, SpecificParserConfig, TimestamptzHandling, DEBEZIUM_IGNORE_KEY,
 };
 use risingwave_connector::schema::schema_registry::{
     name_strategy_from_str, SchemaRegistryAuth, SCHEMA_REGISTRY_PASSWORD, SCHEMA_REGISTRY_USERNAME,
@@ -102,14 +102,18 @@ async fn extract_json_table_schema(
                 auth
             });
             Ok(Some(
-                schema_to_columns(&schema_location.0, schema_registry_auth, with_properties)
-                    .await?
-                    .into_iter()
-                    .map(|col| ColumnCatalog {
-                        column_desc: col.into(),
-                        is_hidden: false,
-                    })
-                    .collect_vec(),
+                fetch_json_schema_and_map_to_columns(
+                    &schema_location.0,
+                    schema_registry_auth,
+                    with_properties,
+                )
+                .await?
+                .into_iter()
+                .map(|col| ColumnCatalog {
+                    column_desc: col.into(),
+                    is_hidden: false,
+                })
+                .collect_vec(),
             ))
         }
     }

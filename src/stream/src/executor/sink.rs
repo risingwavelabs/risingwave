@@ -125,7 +125,6 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         let sink_id = self.sink_param.sink_id;
         let actor_id = self.actor_context.id;
         let fragment_id = self.actor_context.fragment_id;
-        let executor_id = self.sink_writer_param.executor_id;
 
         let stream_key = self.info.pk_indices.clone();
         let metrics = self.actor_context.streaming_metrics.new_sink_exec_metrics(
@@ -217,10 +216,9 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                             self.sink_writer_param,
                             self.actor_context,
                         )
-                        .instrument_await(format!(
-                            "Consume Log: sink_id: {} actor_id: {}, executor_id: {}",
-                            sink_id, actor_id, executor_id,
-                        ));
+                        .instrument_await(format!("consume_log (sink_id {sink_id})"))
+                        .map_ok(|never| match never {}); // unify return type to `Message`
+
                         // TODO: may try to remove the boxed
                         select(consume_log_stream.into_stream(), write_log_stream).boxed()
                     })
@@ -403,7 +401,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         sink_param: SinkParam,
         mut sink_writer_param: SinkWriterParam,
         actor_context: ActorContextRef,
-    ) -> StreamExecutorResult<Message> {
+    ) -> StreamExecutorResult<!> {
         let metrics = sink_writer_param.sink_metrics.clone();
 
         let visible_columns = columns

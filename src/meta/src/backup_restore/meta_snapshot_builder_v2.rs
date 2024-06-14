@@ -33,7 +33,7 @@ fn map_db_err(e: DbErr) -> BackupError {
 
 macro_rules! define_set_metadata {
     ($( {$name:ident, $mod_path:ident::$mod_name:ident} ),*) => {
-        pub async fn set_metadata(
+        async fn set_metadata(
             metadata: &mut MetadataV2,
             txn: &sea_orm::DatabaseTransaction,
         ) -> BackupResult<()> {

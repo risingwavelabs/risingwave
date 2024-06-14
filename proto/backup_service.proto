@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package backup_service;
 
+import "hummock.proto";
+
 option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
 
@@ -50,6 +52,7 @@ message MetaSnapshotMetadata {
   optional uint32 format_version = 5;
   optional string remarks = 6;
   optional string rw_version = 7;
+  map<uint32, hummock.StateTableInfo> state_table_info = 8;
 }
 
 service BackupService {

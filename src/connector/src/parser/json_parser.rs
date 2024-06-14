@@ -26,6 +26,7 @@ use std::collections::BTreeMap;
 use anyhow::Context as _;
 use apache_avro::Schema;
 use jst::{convert_avro, Context};
+use risingwave_connector_codec::decoder::avro::MapHandling;
 use risingwave_pb::plan_common::ColumnDesc;
 
 use super::util::{bytes_from_url, get_kafka_topic};
@@ -80,7 +81,7 @@ impl JsonAccessBuilder {
     }
 }
 
-pub async fn schema_to_columns(
+pub async fn fetch_json_schema_and_map_to_columns(
     schema_location: &str,
     schema_registry_auth: Option<SchemaRegistryAuth>,
     props: &BTreeMap<String, String>,
@@ -98,11 +99,21 @@ pub async fn schema_to_columns(
         let bytes = bytes_from_url(url, None).await?;
         serde_json::from_slice(&bytes)?
     };
-    let context = Context::default();
-    let avro_schema = convert_avro(&json_schema, context).to_string();
+    json_schema_to_columns(&json_schema)
+}
+
+/// FIXME: when the JSON schema is invalid, it will panic.
+///
+/// ## Notes on type conversion
+/// Map will be used when an object doesn't have `properties` but has `additionalProperties`.
+/// When an object has `properties` and `additionalProperties`, the latter will be ignored.
+/// <https://github.com/mozilla/jsonschema-transpiler/blob/fb715c7147ebd52427e0aea09b2bba2d539850b1/src/jsonschema.rs#L228-L280>
+///
+/// TODO: examine other stuff like `oneOf`, `patternProperties`, etc.
+fn json_schema_to_columns(json_schema: &serde_json::Value) -> ConnectorResult<Vec<ColumnDesc>> {
+    let avro_schema = convert_avro(json_schema, Context::default()).to_string();
     let schema = Schema::parse_str(&avro_schema).context("failed to parse avro schema")?;
-    // TODO: do we need to support map type here?
-    avro_schema_to_column_descs(&schema, None).map_err(Into::into)
+    avro_schema_to_column_descs(&schema, Some(MapHandling::Jsonb)).map_err(Into::into)
 }
 
 #[cfg(test)]

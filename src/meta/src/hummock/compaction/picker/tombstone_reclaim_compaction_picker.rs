@@ -154,7 +154,6 @@ pub mod tests {
                     ],
                 ),
             ],
-            member_table_ids: vec![1],
             ..Default::default()
         };
         let levels_handler = vec![
