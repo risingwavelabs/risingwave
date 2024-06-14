@@ -2688,17 +2688,23 @@ fn parse_ctes() {
 
     fn assert_ctes_in_select(expected: &[&str], sel: &Query) {
         for (i, exp) in expected.iter().enumerate() {
-            let Cte { alias, query, .. } = &sel.with.as_ref().unwrap().cte_tables[i];
-            assert_eq!(*exp, query.as_ref().unwrap().to_string());
-            assert_eq!(
-                if i == 0 {
-                    Ident::new_unchecked("a")
-                } else {
-                    Ident::new_unchecked("b")
-                },
-                alias.name
-            );
-            assert!(alias.columns.is_empty());
+            let Cte {
+                alias, cte_inner, ..
+            } = &sel.with.as_ref().unwrap().cte_tables[i];
+            if let CteInner::Query(query) = cte_inner {
+                assert_eq!(*exp, query.to_string());
+                assert_eq!(
+                    if i == 0 {
+                        Ident::new_unchecked("a")
+                    } else {
+                        Ident::new_unchecked("b")
+                    },
+                    alias.name
+                );
+                assert!(alias.columns.is_empty());
+            } else {
+                panic!("expected CteInner::Query")
+            }
         }
     }
 
@@ -2731,13 +2737,11 @@ fn parse_ctes() {
     // CTE in a CTE...
     let sql = &format!("WITH outer_cte AS ({}) SELECT * FROM outer_cte", with);
     let select = verified_query(sql);
-    assert_ctes_in_select(
-        &cte_sqls,
-        only(&select.with.unwrap().cte_tables)
-            .query
-            .as_ref()
-            .unwrap(),
-    );
+    if let CteInner::Query(query) = &only(&select.with.unwrap().cte_tables).cte_inner {
+        assert_ctes_in_select(&cte_sqls, query);
+    } else {
+        panic!("expected CteInner::Query")
+    }
 }
 
 #[test]
@@ -2750,18 +2754,21 @@ fn parse_change_log_ctes() {
 
     fn assert_change_log_ctes(expected: &[&str], sel: &Query) {
         for (i, exp) in expected.iter().enumerate() {
-            let Cte { alias, query, from } = &sel.with.as_ref().unwrap().cte_tables[i];
-            assert!(query.is_none());
-            assert_eq!(*exp, from.as_ref().unwrap().to_string());
-            assert_eq!(
-                if i == 0 {
-                    Ident::new_unchecked("a")
-                } else {
-                    Ident::new_unchecked("b")
-                },
-                alias.name
-            );
-            assert!(alias.columns.is_empty());
+            let Cte { alias, cte_inner } = &sel.with.as_ref().unwrap().cte_tables[i];
+            if let CteInner::ChangeLog(from) = cte_inner {
+                assert_eq!(*exp, from.to_string());
+                assert_eq!(
+                    if i == 0 {
+                        Ident::new_unchecked("a")
+                    } else {
+                        Ident::new_unchecked("b")
+                    },
+                    alias.name
+                );
+                assert!(alias.columns.is_empty());
+            } else {
+                panic!("expected CteInner::ChangeLog")
+            }
         }
     }
 
@@ -2794,13 +2801,11 @@ fn parse_change_log_ctes() {
     // CTE in a CTE...
     let sql = &format!("WITH outer_cte AS ({}) SELECT * FROM outer_cte", with);
     let select = verified_query(sql);
-    assert_change_log_ctes(
-        &cte_sqls,
-        only(&select.with.unwrap().cte_tables)
-            .query
-            .as_ref()
-            .unwrap(),
-    );
+    if let CteInner::Query(query) = &only(&select.with.unwrap().cte_tables).cte_inner {
+        assert_change_log_ctes(&cte_sqls, query);
+    } else {
+        panic!("expected CteInner::Query")
+    }
 }
 
 #[test]
@@ -2854,8 +2859,7 @@ fn parse_recursive_cte() {
             name: Ident::new_unchecked("nums"),
             columns: vec![Ident::new_unchecked("val")],
         },
-        query: Some(cte_query),
-        from: None,
+        cte_inner: CteInner::Query(cte_query),
     };
     assert_eq!(with.cte_tables.first().unwrap(), &expected);
 }
