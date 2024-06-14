@@ -1794,7 +1794,7 @@ def section_batch(outer_panels):
                 ),
                 panels.timeseries_bytes_per_sec(
                     "Batch Spill Throughput",
-                    "",
+                    "Disk throughputs of spilling-out in the bacth query engine",
                     [
                         panels.target(
                             f"sum(rate({metric('batch_spill_read_bytes')}[$__rate_interval]))by({COMPONENT_LABEL}, {NODE_LABEL})",
