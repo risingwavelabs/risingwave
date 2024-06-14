@@ -325,7 +325,7 @@ impl JoinSpillManager {
         &mut self,
         chunk: DataChunk,
         hash_codes: Vec<u64>,
-    ) -> std::result::Result<()> {
+    ) -> Result<()> {
         let (columns, vis) = chunk.into_parts_v2();
         for partition in 0..self.partition_num {
             let new_vis = vis.clone()
@@ -353,7 +353,7 @@ impl JoinSpillManager {
         &mut self,
         chunk: DataChunk,
         hash_codes: Vec<u64>,
-    ) -> std::result::Result<()> {
+    ) -> Result<()> {
         let (columns, vis) = chunk.into_parts_v2();
         for partition in 0..self.partition_num {
             let new_vis = vis.clone()
@@ -377,7 +377,7 @@ impl JoinSpillManager {
         Ok(())
     }
 
-    pub async fn close_writers(&mut self) -> std::result::Result<()> {
+    pub async fn close_writers(&mut self) -> Result<()> {
         for partition in 0..self.partition_num {
             if let Some(output_chunk) = self.probe_side_chunk_builders[partition].consume_all() {
                 let chunk_pb: PbDataChunk = output_chunk.to_protobuf();
@@ -414,7 +414,7 @@ impl JoinSpillManager {
     async fn read_probe_side_partition(
         &mut self,
         partition: usize,
-    ) -> std::result::Result<BoxedDataChunkStream> {
+    ) -> Result<BoxedDataChunkStream> {
         let join_probe_side_partition_file_name = format!("join-probe-side-p{}", partition);
         let r = self
             .op
@@ -426,7 +426,7 @@ impl JoinSpillManager {
     async fn read_build_side_partition(
         &mut self,
         partition: usize,
-    ) -> std::result::Result<BoxedDataChunkStream> {
+    ) -> Result<BoxedDataChunkStream> {
         let join_build_side_partition_file_name = format!("join-build-side-p{}", partition);
         let r = self
             .op
