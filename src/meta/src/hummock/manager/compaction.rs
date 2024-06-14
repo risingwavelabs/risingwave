@@ -155,11 +155,11 @@ impl HummockManager {
 
                     match compact_ret {
                         Ok((compact_tasks, unschedule_groups)) => {
+                            no_task_groups.extend(unschedule_groups);
                             if compact_tasks.is_empty() {
                                 break;
                             }
                             generated_task_count += compact_tasks.len();
-                            no_task_groups.extend(unschedule_groups);
                             for task in compact_tasks {
                                 let task_id = task.task_id;
                                 if let Err(e) =
