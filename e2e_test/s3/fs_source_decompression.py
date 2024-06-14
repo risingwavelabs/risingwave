@@ -77,7 +77,7 @@ def do_test(config, file_num, item_num_per_file, prefix, fmt):
         mark int,
     ) WITH (
         connector = 's3_v2',
-        match_pattern = '{prefix}*.{fmt}',
+        match_pattern = '{prefix}*.gz',
         s3.region_name = '{config['S3_REGION']}',
         s3.bucket_name = '{config['S3_BUCKET']}',
         s3.credentials.access = '{config['S3_ACCESS_KEY']}',
