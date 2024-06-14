@@ -658,8 +658,12 @@ pub(crate) fn construct_initial_finished_state(pos_len: usize) -> OwnedRow {
     OwnedRow::new(vec![None; pos_len])
 }
 
+/// `pk_indices`: Just used to check if the current pos is empty.
+/// `inclusive`: Whether it's inclusive of the current pos.
+/// `current_pos`: The current pos to start scanning from.
 pub(crate) fn compute_bounds(
     pk_indices: &[usize],
+    inclusive: bool,
     current_pos: Option<OwnedRow>,
 ) -> Option<(Bound<OwnedRow>, Bound<OwnedRow>)> {
     // `current_pos` is None means it needs to scan from the beginning, so we use Unbounded to
@@ -672,8 +676,13 @@ pub(crate) fn compute_bounds(
             assert!(pk_indices.is_empty());
             return None;
         }
+        let lower_bound = if inclusive {
+            Bound::Included(current_pos)
+        } else {
+            Bound::Excluded(current_pos)
+        };
 
-        Some((Bound::Excluded(current_pos), Bound::Unbounded))
+        Some((lower_bound, Bound::Unbounded))
     } else {
         Some((Bound::Unbounded, Bound::Unbounded))
     }
