@@ -64,6 +64,7 @@ impl CompactionConfigBuilder {
                     compaction_config::level0_overlapping_sub_level_compact_level_count(),
                 tombstone_reclaim_ratio: compaction_config::tombstone_reclaim_ratio(),
                 enable_emergency_picker: compaction_config::enable_emergency_picker(),
+                max_l0_compact_level_count: compaction_config::max_l0_compact_level_count(),
             },
         }
     }

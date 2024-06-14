@@ -1,5 +1,4 @@
 ---
-version: "3"
 x-image: &image
   image: ${RW_IMAGE:-risingwavelabs/risingwave:v1.9.1-rc.2}
 services:

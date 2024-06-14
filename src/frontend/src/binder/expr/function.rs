@@ -1160,6 +1160,7 @@ impl Binder {
                 ("jsonb_path_exists", raw_call(ExprType::JsonbPathExists)),
                 ("jsonb_path_query_array", raw_call(ExprType::JsonbPathQueryArray)),
                 ("jsonb_path_query_first", raw_call(ExprType::JsonbPathQueryFirst)),
+                ("jsonb_set", raw_call(ExprType::JsonbSet)),
                 // Functions that return a constant value
                 ("pi", pi()),
                 // greatest and least

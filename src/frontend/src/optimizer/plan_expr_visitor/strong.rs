@@ -289,6 +289,7 @@ impl Strong {
             | ExprType::JsonbPathQueryFirst
             | ExprType::JsonbPopulateRecord
             | ExprType::JsonbToRecord
+            | ExprType::JsonbSet
             | ExprType::Vnode
             | ExprType::Proctime
             | ExprType::PgSleep

@@ -12,11 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Cow;
 use std::sync::{Arc, LazyLock};
 
 use prost_reflect::{DescriptorPool, DynamicMessage, ReflectMessage};
 use risingwave_common::log::LogSuppresser;
-use risingwave_common::types::{DataType, DatumCow};
+use risingwave_common::types::{DataType, DatumCow, ToOwnedDatum};
 use thiserror_ext::AsReport;
 
 use super::{Access, AccessResult};
@@ -56,9 +57,14 @@ impl Access for ProtobufAccess {
                     tracing::error!(suppressed_count, "{}", e.as_report());
                 }
             })?;
-        let value = self.message.get_field(&field_desc);
 
-        // TODO: may borrow the value directly
-        from_protobuf_value(&field_desc, &value, &self.descriptor_pool).map(Into::into)
+        match self.message.get_field(&field_desc) {
+            Cow::Borrowed(value) => from_protobuf_value(&field_desc, value, &self.descriptor_pool),
+
+            // `Owned` variant occurs only if there's no such field and the default value is returned.
+            Cow::Owned(value) => from_protobuf_value(&field_desc, &value, &self.descriptor_pool)
+                // enforce `Owned` variant to avoid returning a reference to a temporary value
+                .map(|d| d.to_owned_datum().into()),
+        }
     }
 }

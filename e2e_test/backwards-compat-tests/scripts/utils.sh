@@ -18,9 +18,9 @@
 RECOVERY_DURATION=20
 
 # Setup test directory
-TEST_DIR=.risingwave/backwards-compat-tests/
+TEST_DIR=.risingwave/e2e_test/backwards-compat-tests/
 mkdir -p $TEST_DIR
-cp -r backwards-compat-tests/slt/* $TEST_DIR
+cp -r e2e_test/backwards-compat-tests/slt/* $TEST_DIR
 
 wait_for_process() {
   process_name="$1"
