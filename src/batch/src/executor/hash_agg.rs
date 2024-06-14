@@ -81,6 +81,7 @@ pub struct HashAggExecutorBuilder {
     group_key_types: Vec<DataType>,
     child: BoxedExecutor,
     schema: Schema,
+    #[expect(dead_code)]
     task_id: TaskId,
     identity: String,
     chunk_size: usize,
@@ -301,10 +302,8 @@ pub struct AggSpillManager {
     op: SpillOp,
     partition_num: usize,
     agg_state_writers: Vec<opendal::Writer>,
-    agg_state_readers: Vec<opendal::Reader>,
     agg_state_chunk_builder: Vec<DataChunkBuilder>,
     input_writers: Vec<opendal::Writer>,
-    input_readers: Vec<opendal::Reader>,
     input_chunk_builders: Vec<DataChunkBuilder>,
     spill_build_hasher: SpillBuildHasher,
     group_key_types: Vec<DataType>,
@@ -328,10 +327,8 @@ impl AggSpillManager {
         let dir = format!("/{}-{}/", agg_identity, suffix_uuid);
         let op = SpillOp::create(dir)?;
         let agg_state_writers = Vec::with_capacity(partition_num);
-        let agg_state_readers = Vec::with_capacity(partition_num);
         let agg_state_chunk_builder = Vec::with_capacity(partition_num);
         let input_writers = Vec::with_capacity(partition_num);
-        let input_readers = Vec::with_capacity(partition_num);
         let input_chunk_builders = Vec::with_capacity(partition_num);
         // Use uuid to generate an unique hasher so that when recursive spilling happens they would use a different hasher to avoid data skew.
         let spill_build_hasher = SpillBuildHasher(suffix_uuid.as_u64_pair().1);
@@ -339,10 +336,8 @@ impl AggSpillManager {
             op,
             partition_num,
             agg_state_writers,
-            agg_state_readers,
             agg_state_chunk_builder,
             input_writers,
-            input_readers,
             input_chunk_builders,
             spill_build_hasher,
             group_key_types,
@@ -593,7 +588,7 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
             // partition and spill to disk with the same hash function as the hash table spilling.
             // Finally, we would get e.g. 20 partitions. Each partition should contain a portion of the original hash table and input data.
             // A sub HashAggExecutor would be used to consume each partition one by one.
-            // If memory is still not enough in the sub HashAggExecutor, it will partition its hash table and input recursively.
+            // If memory is still not enough in the sub HashAggExecutor, it will spill its hash table and input recursively.
             let mut agg_spill_manager = AggSpillManager::new(
                 &self.identity,
                 DEFAULT_SPILL_PARTITION_NUM,
@@ -918,6 +913,7 @@ mod tests {
 
             #[derive(Clone)]
             struct MyAlloc {
+                #[expect(dead_code)]
                 inner: Arc<MyAllocInner>,
             }
 

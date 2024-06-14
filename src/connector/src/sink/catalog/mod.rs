@@ -14,7 +14,7 @@
 
 pub mod desc;
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use anyhow::anyhow;
 use itertools::Itertools;
@@ -114,11 +114,11 @@ impl SinkType {
 /// May replace [`SinkType`].
 ///
 /// TODO: consolidate with [`crate::source::SourceStruct`] and [`crate::parser::SpecificParserConfig`].
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SinkFormatDesc {
     pub format: SinkFormat,
     pub encode: SinkEncode,
-    pub options: HashMap<String, String>,
+    pub options: BTreeMap<String, String>,
 
     pub key_encode: Option<SinkEncode>,
 }
@@ -303,7 +303,7 @@ pub struct SinkCatalog {
     pub distribution_key: Vec<usize>,
 
     /// The properties of the sink.
-    pub properties: HashMap<String, String>,
+    pub properties: BTreeMap<String, String>,
 
     /// Owner of the sink.
     pub owner: UserId,
@@ -339,7 +339,7 @@ pub struct SinkCatalog {
     pub create_type: CreateType,
 
     /// The secret reference for the sink, mapping from property name to secret id.
-    pub secret_ref: HashMap<String, u32>,
+    pub secret_ref: BTreeMap<String, u32>,
 }
 
 impl SinkCatalog {

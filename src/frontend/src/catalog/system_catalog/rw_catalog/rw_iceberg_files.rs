@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::ops::Deref;
 
 use anyhow::anyhow;
@@ -78,8 +77,7 @@ async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwIcebergFiles>> {
 
     let mut result = vec![];
     for (schema_name, source) in iceberg_sources {
-        let source_props: HashMap<String, String> =
-            HashMap::from_iter(source.with_properties.clone());
+        let source_props = source.with_properties.clone();
         let config = ConnectorProperties::extract(source_props, false)?;
         if let ConnectorProperties::Iceberg(iceberg_properties) = config {
             let iceberg_config: IcebergConfig = iceberg_properties.to_iceberg_config();

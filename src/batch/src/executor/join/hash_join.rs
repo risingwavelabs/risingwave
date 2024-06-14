@@ -55,12 +55,13 @@ use crate::task::{BatchTaskContext, ShutdownToken};
 /// 2. Iterate over the probe side (i.e. left table) and compute the hash value of each row.
 ///    Then find the matched build side row for each probe side row in the hash map.
 /// 3. Concatenate the matched pair of probe side row and build side row into a single row and push
-/// it into the data chunk builder.
+///    it into the data chunk builder.
 /// 4. Yield chunks from the builder.
 pub struct HashJoinExecutor<K> {
     /// Join type e.g. inner, left outer, ...
     join_type: JoinType,
     /// Output schema without applying `output_indices`
+    #[expect(dead_code)]
     original_schema: Schema,
     /// Output schema after applying `output_indices`
     schema: Schema,
@@ -237,9 +238,7 @@ pub struct JoinSpillManager {
     op: SpillOp,
     partition_num: usize,
     probe_side_writers: Vec<opendal::Writer>,
-    probe_side_readers: Vec<opendal::Reader>,
     build_side_writers: Vec<opendal::Writer>,
-    build_side_readers: Vec<opendal::Reader>,
     probe_side_chunk_builders: Vec<DataChunkBuilder>,
     build_side_chunk_builders: Vec<DataChunkBuilder>,
     spill_build_hasher: SpillBuildHasher,
@@ -249,6 +248,20 @@ pub struct JoinSpillManager {
     spill_metrics: Arc<BatchSpillMetrics>,
 }
 
+/// `JoinSpillManager` is used to manage how to write spill data file and read them back.
+/// The spill data first need to be partitioned. Each partition contains 2 files: `join_probe_side_file` and `join_build_side_file`.
+/// The spill file consume a data chunk and serialize the chunk into a protobuf bytes.
+/// Finally, spill file content will look like the below.
+/// The file write pattern is append-only and the read pattern is sequential scan.
+/// This can maximize the disk IO performance.
+///
+/// ```text
+/// [proto_len]
+/// [proto_bytes]
+/// ...
+/// [proto_len]
+/// [proto_bytes]
+/// ```
 impl JoinSpillManager {
     pub fn new(
         join_identity: &String,
@@ -262,9 +275,7 @@ impl JoinSpillManager {
         let dir = format!("/{}-{}/", join_identity, suffix_uuid);
         let op = SpillOp::create(dir)?;
         let probe_side_writers = Vec::with_capacity(partition_num);
-        let probe_side_readers = Vec::with_capacity(partition_num);
         let build_side_writers = Vec::with_capacity(partition_num);
-        let build_side_readers = Vec::with_capacity(partition_num);
         let probe_side_chunk_builders = Vec::with_capacity(partition_num);
         let build_side_chunk_builders = Vec::with_capacity(partition_num);
         let spill_build_hasher = SpillBuildHasher(suffix_uuid.as_u64_pair().1);
@@ -272,9 +283,7 @@ impl JoinSpillManager {
             op,
             partition_num,
             probe_side_writers,
-            probe_side_readers,
             build_side_writers,
-            build_side_readers,
             probe_side_chunk_builders,
             build_side_chunk_builders,
             spill_build_hasher,
@@ -316,7 +325,7 @@ impl JoinSpillManager {
         &mut self,
         chunk: DataChunk,
         hash_codes: Vec<u64>,
-    ) -> Result<()> {
+    ) -> std::result::Result<()> {
         let (columns, vis) = chunk.into_parts_v2();
         for partition in 0..self.partition_num {
             let new_vis = vis.clone()
@@ -344,7 +353,7 @@ impl JoinSpillManager {
         &mut self,
         chunk: DataChunk,
         hash_codes: Vec<u64>,
-    ) -> Result<()> {
+    ) -> std::result::Result<()> {
         let (columns, vis) = chunk.into_parts_v2();
         for partition in 0..self.partition_num {
             let new_vis = vis.clone()
@@ -368,7 +377,7 @@ impl JoinSpillManager {
         Ok(())
     }
 
-    pub async fn close_writers(&mut self) -> Result<()> {
+    pub async fn close_writers(&mut self) -> std::result::Result<()> {
         for partition in 0..self.partition_num {
             if let Some(output_chunk) = self.probe_side_chunk_builders[partition].consume_all() {
                 let chunk_pb: PbDataChunk = output_chunk.to_protobuf();
@@ -405,7 +414,7 @@ impl JoinSpillManager {
     async fn read_probe_side_partition(
         &mut self,
         partition: usize,
-    ) -> Result<BoxedDataChunkStream> {
+    ) -> std::result::Result<BoxedDataChunkStream> {
         let join_probe_side_partition_file_name = format!("join-probe-side-p{}", partition);
         let r = self
             .op
@@ -417,7 +426,7 @@ impl JoinSpillManager {
     async fn read_build_side_partition(
         &mut self,
         partition: usize,
-    ) -> Result<BoxedDataChunkStream> {
+    ) -> std::result::Result<BoxedDataChunkStream> {
         let join_build_side_partition_file_name = format!("join-build-side-p{}", partition);
         let r = self
             .op
@@ -533,6 +542,12 @@ impl<K: HashKey> HashJoinExecutor<K> {
         }
 
         if need_to_spill {
+            // A spilling version of hash join based on the RFC: Spill Hash Join https://github.com/risingwavelabs/rfcs/pull/91
+            // When HashJoinExecutor told memory is insufficient, JoinSpillManager will start to partition the hash table and spill to disk.
+            // After spilling the hash table, JoinSpillManager will consume all chunks from its build side input executor and probe side input executor.
+            // Finally, we would get e.g. 20 partitions. Each partition should contain a portion of the original build side input and probr side input data.
+            // A sub HashJoinExecutor would be used to consume each partition one by one.
+            // If memory is still not enough in the sub HashJoinExecutor, it will spill its inputs recursively.
             let mut join_spill_manager = JoinSpillManager::new(
                 &self.identity,
                 DEFAULT_SPILL_PARTITION_NUM,
@@ -1673,7 +1688,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
     /// | 4 | 3 | 3 | - |
     ///
     /// 3. Remove duplicate rows with NULL build side. This is done by setting the visibility bitmap
-    /// of the chunk.
+    ///    of the chunk.
     ///
     /// | offset | v1 | v2 | v3 |
     /// |---|---|---|---|
@@ -2398,7 +2413,6 @@ mod tests {
     const CHUNK_SIZE: usize = 1024;
 
     struct DataChunkMerger {
-        data_types: Vec<DataType>,
         array_builders: Vec<ArrayBuilderImpl>,
         array_len: usize,
     }
@@ -2411,7 +2425,6 @@ mod tests {
                 .collect();
 
             Ok(Self {
-                data_types,
                 array_builders,
                 array_len: 0,
             })
@@ -2552,10 +2565,6 @@ mod tests {
             ));
 
             Box::new(executor)
-        }
-
-        fn full_data_types(&self) -> Vec<DataType> {
-            [self.left_types.clone(), self.right_types.clone()].concat()
         }
 
         fn output_data_types(&self) -> Vec<DataType> {

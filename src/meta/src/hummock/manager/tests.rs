@@ -100,7 +100,7 @@ fn get_compaction_group_object_ids(
 }
 
 async fn list_pinned_snapshot_from_meta_store(env: &MetaSrvEnv) -> Vec<HummockPinnedSnapshot> {
-    match env.meta_store() {
+    match env.meta_store_ref() {
         MetaStoreImpl::Kv(meta_store) => HummockPinnedSnapshot::list(meta_store).await.unwrap(),
         MetaStoreImpl::Sql(sql_meta_store) => {
             use risingwave_meta_model_v2::hummock_pinned_snapshot;
@@ -117,7 +117,7 @@ async fn list_pinned_snapshot_from_meta_store(env: &MetaSrvEnv) -> Vec<HummockPi
 }
 
 async fn list_pinned_version_from_meta_store(env: &MetaSrvEnv) -> Vec<HummockPinnedVersion> {
-    match env.meta_store() {
+    match env.meta_store_ref() {
         MetaStoreImpl::Kv(meta_store) => HummockPinnedVersion::list(meta_store).await.unwrap(),
         MetaStoreImpl::Sql(sql_meta_store) => {
             use risingwave_meta_model_v2::hummock_pinned_version;
@@ -1339,11 +1339,11 @@ async fn test_split_compaction_group_on_commit() {
     let (_env, hummock_manager, _, worker_node) = setup_compute_env(80).await;
     let context_id = worker_node.id;
     hummock_manager
-        .register_table_ids(&[(100, 2)])
+        .register_table_ids_for_test(&[(100, 2)])
         .await
         .unwrap();
     hummock_manager
-        .register_table_ids(&[(101, 3)])
+        .register_table_ids_for_test(&[(101, 3)])
         .await
         .unwrap();
     let sst_1 = ExtendedSstableInfo {
@@ -1378,14 +1378,20 @@ async fn test_split_compaction_group_on_commit() {
     );
     assert_eq!(
         current_version
-            .get_compaction_group_levels(2)
-            .member_table_ids,
+            .state_table_info
+            .compaction_group_member_table_ids(2)
+            .iter()
+            .map(|table_id| table_id.table_id)
+            .collect_vec(),
         vec![100]
     );
     assert_eq!(
         current_version
-            .get_compaction_group_levels(3)
-            .member_table_ids,
+            .state_table_info
+            .compaction_group_member_table_ids(3)
+            .iter()
+            .map(|table_id| table_id.table_id)
+            .collect_vec(),
         vec![101]
     );
 }
@@ -1425,11 +1431,11 @@ async fn test_split_compaction_group_on_demand_basic() {
     );
 
     hummock_manager
-        .register_table_ids(&[(100, 2)])
+        .register_table_ids_for_test(&[(100, 2)])
         .await
         .unwrap();
     hummock_manager
-        .register_table_ids(&[(101, 2)])
+        .register_table_ids_for_test(&[(101, 2)])
         .await
         .unwrap();
     let sst_1 = ExtendedSstableInfo {
@@ -1489,7 +1495,7 @@ async fn test_split_compaction_group_on_demand_basic() {
     // Now group 2 has member tables [100,101,102], so split [100, 101] can succeed even though
     // there is no data of 102.
     hummock_manager
-        .register_table_ids(&[(102, 2)])
+        .register_table_ids_for_test(&[(102, 2)])
         .await
         .unwrap();
 
@@ -1511,14 +1517,21 @@ async fn test_split_compaction_group_on_demand_basic() {
     );
     assert_eq!(
         current_version
-            .get_compaction_group_levels(2)
-            .member_table_ids,
+            .state_table_info
+            .compaction_group_member_table_ids(2)
+            .iter()
+            .map(|table_id| table_id.table_id)
+            .collect_vec(),
         vec![102]
     );
     assert_eq!(
         current_version
-            .get_compaction_group_levels(new_group_id)
-            .member_table_ids,
+            .state_table_info
+            .compaction_group_member_table_ids(new_group_id)
+            .iter()
+            .map(|table_id| table_id.table_id)
+            .sorted()
+            .collect_vec(),
         vec![100, 101]
     );
 }
@@ -1541,11 +1554,11 @@ async fn test_split_compaction_group_on_demand_non_trivial() {
         table_stats: Default::default(),
     };
     hummock_manager
-        .register_table_ids(&[(100, 2)])
+        .register_table_ids_for_test(&[(100, 2)])
         .await
         .unwrap();
     hummock_manager
-        .register_table_ids(&[(101, 2)])
+        .register_table_ids_for_test(&[(101, 2)])
         .await
         .unwrap();
     hummock_manager
@@ -1575,14 +1588,20 @@ async fn test_split_compaction_group_on_demand_non_trivial() {
     );
     assert_eq!(
         current_version
-            .get_compaction_group_levels(2)
-            .member_table_ids,
+            .state_table_info
+            .compaction_group_member_table_ids(2)
+            .iter()
+            .map(|table_id| table_id.table_id)
+            .collect_vec(),
         vec![101]
     );
     assert_eq!(
         current_version
-            .get_compaction_group_levels(new_group_id)
-            .member_table_ids,
+            .state_table_info
+            .compaction_group_member_table_ids(new_group_id)
+            .iter()
+            .map(|table_id| table_id.table_id)
+            .collect_vec(),
         vec![100]
     );
 }
@@ -1603,11 +1622,11 @@ async fn test_split_compaction_group_trivial_expired() {
     hummock_manager.compactor_manager.add_compactor(context_id);
 
     hummock_manager
-        .register_table_ids(&[(100, 2)])
+        .register_table_ids_for_test(&[(100, 2)])
         .await
         .unwrap();
     hummock_manager
-        .register_table_ids(&[(101, 2)])
+        .register_table_ids_for_test(&[(101, 2)])
         .await
         .unwrap();
     let sst_1 = ExtendedSstableInfo {
@@ -1669,7 +1688,7 @@ async fn test_split_compaction_group_trivial_expired() {
     // Now group 2 has member tables [100,101,102], so split [100, 101] can succeed even though
     // there is no data of 102.
     hummock_manager
-        .register_table_ids(&[(102, 2)])
+        .register_table_ids_for_test(&[(102, 2)])
         .await
         .unwrap();
     let task = hummock_manager
@@ -1698,14 +1717,21 @@ async fn test_split_compaction_group_trivial_expired() {
     assert!(new_group_id > StaticCompactionGroupId::End as u64);
     assert_eq!(
         current_version
-            .get_compaction_group_levels(2)
-            .member_table_ids,
+            .state_table_info
+            .compaction_group_member_table_ids(2)
+            .iter()
+            .map(|table_id| table_id.table_id)
+            .sorted()
+            .collect_vec(),
         vec![101, 102]
     );
     assert_eq!(
         current_version
-            .get_compaction_group_levels(new_group_id)
-            .member_table_ids,
+            .state_table_info
+            .compaction_group_member_table_ids(new_group_id)
+            .iter()
+            .map(|table_id| table_id.table_id)
+            .collect_vec(),
         vec![100]
     );
 
@@ -1765,11 +1791,11 @@ async fn test_split_compaction_group_on_demand_bottom_levels() {
     let context_id = worker_node.id;
 
     hummock_manager
-        .register_table_ids(&[(100, 2)])
+        .register_table_ids_for_test(&[(100, 2)])
         .await
         .unwrap();
     hummock_manager
-        .register_table_ids(&[(101, 2)])
+        .register_table_ids_for_test(&[(101, 2)])
         .await
         .unwrap();
 
@@ -1905,11 +1931,11 @@ async fn test_compaction_task_expiration_due_to_split_group() {
     let context_id = worker_node.id;
 
     hummock_manager
-        .register_table_ids(&[(100, 2)])
+        .register_table_ids_for_test(&[(100, 2)])
         .await
         .unwrap();
     hummock_manager
-        .register_table_ids(&[(101, 2)])
+        .register_table_ids_for_test(&[(101, 2)])
         .await
         .unwrap();
     let sst_1 = ExtendedSstableInfo {
@@ -1996,15 +2022,15 @@ async fn test_move_tables_between_compaction_group() {
     let context_id = worker_node.id;
 
     hummock_manager
-        .register_table_ids(&[(100, 2)])
+        .register_table_ids_for_test(&[(100, 2)])
         .await
         .unwrap();
     hummock_manager
-        .register_table_ids(&[(101, 2)])
+        .register_table_ids_for_test(&[(101, 2)])
         .await
         .unwrap();
     hummock_manager
-        .register_table_ids(&[(102, 2)])
+        .register_table_ids_for_test(&[(102, 2)])
         .await
         .unwrap();
     let sst_1 = gen_extend_sstable_info(10, 2, 1, vec![100, 101, 102]);
@@ -2178,11 +2204,11 @@ async fn test_partition_level() {
     let context_id = worker_node.id;
 
     hummock_manager
-        .register_table_ids(&[(100, 2)])
+        .register_table_ids_for_test(&[(100, 2)])
         .await
         .unwrap();
     hummock_manager
-        .register_table_ids(&[(101, 2)])
+        .register_table_ids_for_test(&[(101, 2)])
         .await
         .unwrap();
     let sst_1 = gen_extend_sstable_info(10, 2, 1, vec![100, 101]);
@@ -2295,11 +2321,11 @@ async fn test_unregister_moved_table() {
     );
 
     hummock_manager
-        .register_table_ids(&[(100, 2)])
+        .register_table_ids_for_test(&[(100, 2)])
         .await
         .unwrap();
     hummock_manager
-        .register_table_ids(&[(101, 2)])
+        .register_table_ids_for_test(&[(101, 2)])
         .await
         .unwrap();
     let sst_1 = ExtendedSstableInfo {
@@ -2370,14 +2396,20 @@ async fn test_unregister_moved_table() {
     );
     assert_eq!(
         current_version
-            .get_compaction_group_levels(2)
-            .member_table_ids,
+            .state_table_info
+            .compaction_group_member_table_ids(2)
+            .iter()
+            .map(|table_id| table_id.table_id)
+            .collect_vec(),
         vec![101]
     );
     assert_eq!(
         current_version
-            .get_compaction_group_levels(new_group_id)
-            .member_table_ids,
+            .state_table_info
+            .compaction_group_member_table_ids(new_group_id)
+            .iter()
+            .map(|table_id| table_id.table_id)
+            .collect_vec(),
         vec![100]
     );
 
@@ -2391,8 +2423,11 @@ async fn test_unregister_moved_table() {
     );
     assert_eq!(
         current_version
-            .get_compaction_group_levels(2)
-            .member_table_ids,
+            .state_table_info
+            .compaction_group_member_table_ids(2)
+            .iter()
+            .map(|table_id| table_id.table_id)
+            .collect_vec(),
         vec![101]
     );
 }

@@ -14,7 +14,7 @@
 
 use std::hash::BuildHasher;
 use std::ops::{Deref, DerefMut};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use anyhow::anyhow;
 use futures_async_stream::try_stream;
@@ -26,6 +26,7 @@ use prost::Message;
 use risingwave_common::array::DataChunk;
 use risingwave_pb::data::DataChunk as PbDataChunk;
 use thiserror_ext::AsReport;
+use tokio::sync::Mutex;
 use twox_hash::XxHash64;
 
 use crate::error::{BatchError, Result};
@@ -58,6 +59,24 @@ impl SpillOp {
             .layer(RetryLayer::default())
             .finish();
         Ok(SpillOp { op })
+    }
+
+    pub async fn clean_spill_directory() -> opendal::Result<()> {
+        static LOCK: LazyLock<Mutex<usize>> = LazyLock::new(|| Mutex::new(0));
+        let _guard = LOCK.lock().await;
+
+        let spill_dir =
+            std::env::var(RW_BATCH_SPILL_DIR_ENV).unwrap_or_else(|_| DEFAULT_SPILL_DIR.to_string());
+        let root = format!("/{}/{}/", spill_dir, RW_MANAGED_SPILL_DIR);
+
+        let mut builder = Fs::default();
+        builder.root(&root);
+
+        let op: Operator = Operator::new(builder)?
+            .layer(RetryLayer::default())
+            .finish();
+
+        op.remove_all("/").await
     }
 
     pub async fn writer_with(&self, name: &str) -> Result<opendal::Writer> {

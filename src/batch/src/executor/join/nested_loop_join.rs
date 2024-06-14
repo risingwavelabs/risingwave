@@ -529,8 +529,6 @@ mod tests {
     const CHUNK_SIZE: usize = 1024;
 
     struct TestFixture {
-        left_types: Vec<DataType>,
-        right_types: Vec<DataType>,
         join_type: JoinType,
     }
 
@@ -551,11 +549,7 @@ mod tests {
     /// ```
     impl TestFixture {
         fn with_join_type(join_type: JoinType) -> Self {
-            Self {
-                left_types: vec![DataType::Int32, DataType::Float32],
-                right_types: vec![DataType::Int32, DataType::Float64],
-                join_type,
-            }
+            Self { join_type }
         }
 
         fn create_left_executor(&self) -> BoxedExecutor {

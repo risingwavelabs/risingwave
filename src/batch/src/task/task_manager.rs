@@ -297,8 +297,8 @@ mod tests {
     use crate::monitor::BatchManagerMetrics;
     use crate::task::{BatchManager, TaskId};
 
-    #[test]
-    fn test_task_not_found() {
+    #[tokio::test]
+    async fn test_task_not_found() {
         let manager = Arc::new(BatchManager::new(
             BatchConfig::default(),
             BatchManagerMetrics::for_test(),

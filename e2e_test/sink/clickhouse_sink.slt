@@ -1,4 +1,7 @@
 statement ok
+set sink_decouple = false;
+
+statement ok
 CREATE TABLE t6 (v1 int primary key, v2 bigint, v3 varchar, v4 smallint, v5 decimal);
 
 statement ok

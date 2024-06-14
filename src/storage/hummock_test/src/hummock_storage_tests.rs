@@ -530,6 +530,9 @@ async fn test_state_store_sync() {
         .await
         .unwrap();
 
+    let epoch3 = epoch2.next_epoch();
+    hummock_storage.seal_current_epoch(epoch3, SealCurrentEpochOptions::for_test());
+
     let res = test_env.storage.seal_and_sync_epoch(epoch1).await.unwrap();
     test_env
         .meta_client
@@ -829,14 +832,15 @@ async fn test_delete_get() {
         .await
         .unwrap();
 
+    let epoch2 = epoch1.next_epoch();
+    hummock_storage.seal_current_epoch(epoch2, SealCurrentEpochOptions::for_test());
     let res = test_env.storage.seal_and_sync_epoch(epoch1).await.unwrap();
     test_env
         .meta_client
         .commit_epoch(epoch1, res)
         .await
         .unwrap();
-    let epoch2 = epoch1.next_epoch();
-    hummock_storage.seal_current_epoch(epoch2, SealCurrentEpochOptions::for_test());
+
     let batch2 = vec![(
         gen_key_from_str(VirtualNode::ZERO, "bb"),
         StorageValue::new_delete(),
@@ -851,6 +855,7 @@ async fn test_delete_get() {
         )
         .await
         .unwrap();
+    hummock_storage.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
     let res = test_env.storage.seal_and_sync_epoch(epoch2).await.unwrap();
     test_env
         .meta_client
@@ -1005,6 +1010,8 @@ async fn test_multiple_epoch_sync() {
     };
     test_get().await;
 
+    let epoch4 = epoch3.next_epoch();
+    hummock_storage.seal_current_epoch(epoch4, SealCurrentEpochOptions::for_test());
     test_env.storage.seal_epoch(epoch1, false);
     let sync_result2 = test_env.storage.seal_and_sync_epoch(epoch2).await.unwrap();
     let sync_result3 = test_env.storage.seal_and_sync_epoch(epoch3).await.unwrap();
@@ -1078,6 +1085,9 @@ async fn test_iter_with_min_epoch() {
         )
         .await
         .unwrap();
+
+    let epoch3 = (33 * 1000) << 16;
+    hummock_storage.seal_current_epoch(epoch3, SealCurrentEpochOptions::for_test());
 
     {
         // test before sync
@@ -1328,6 +1338,9 @@ async fn test_hummock_version_reader() {
             )
             .await
             .unwrap();
+
+        let epoch4 = (34 * 1000) << 16;
+        hummock_storage.seal_current_epoch(epoch4, SealCurrentEpochOptions::for_test());
 
         {
             // test before sync
@@ -1738,6 +1751,8 @@ async fn test_get_with_min_epoch() {
         )
         .await
         .unwrap();
+
+    hummock_storage.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
 
     {
         // test before sync

@@ -12,7 +12,7 @@
 
 //! This module defines
 //! 1) a list of constants for every keyword that
-//! can appear in [crate::tokenizer::Word::keyword]:
+//!    can appear in [crate::tokenizer::Word::keyword]:
 //!    pub const KEYWORD = "KEYWORD"
 //! 2) an `ALL_KEYWORDS` array with every keyword in it
 //!     This is not a list of *reserved* keywords: some of these can be
@@ -22,7 +22,7 @@
 //!     As a matter of fact, most of these keywords are not used at all
 //!     and could be removed.
 //! 3) a `RESERVED_FOR_TABLE_ALIAS` array with keywords reserved in a
-//! "table alias" context.
+//!    "table alias" context.
 
 use core::fmt;
 
@@ -248,6 +248,7 @@ define_keywords!(
     FUNCTION,
     FUNCTIONS,
     FUSION,
+    GAP,
     GENERATOR,
     GET,
     GLOBAL,

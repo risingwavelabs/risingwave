@@ -10,7 +10,7 @@ on_exit() {
 
 trap on_exit EXIT
 
-source backwards-compat-tests/scripts/utils.sh
+source e2e_test/backwards-compat-tests/scripts/utils.sh
 
 configure_rw() {
   VERSION="$1"

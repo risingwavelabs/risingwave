@@ -215,7 +215,7 @@ pub mod verify {
     use bytes::Bytes;
     use risingwave_common::buffer::Bitmap;
     use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
-    use risingwave_hummock_sdk::{HummockReadEpoch, SyncResult};
+    use risingwave_hummock_sdk::HummockReadEpoch;
     use tracing::log::warn;
 
     use crate::error::StorageResult;
@@ -558,11 +558,15 @@ pub mod verify {
             self.actual.try_wait_epoch(epoch)
         }
 
-        async fn sync(&self, epoch: u64) -> StorageResult<SyncResult> {
-            if let Some(expected) = &self.expected {
-                let _ = expected.sync(epoch).await;
+        fn sync(&self, epoch: u64) -> impl SyncFuture {
+            let expected_future = self.expected.as_ref().map(|expected| expected.sync(epoch));
+            let actual_future = self.actual.sync(epoch);
+            async move {
+                if let Some(expected_future) = expected_future {
+                    expected_future.await?;
+                }
+                actual_future.await
             }
-            self.actual.sync(epoch).await
         }
 
         fn seal_epoch(&self, epoch: u64, is_checkpoint: bool) {
@@ -622,7 +626,7 @@ impl StateStoreImpl {
                 .build_and_install();
         }
 
-        let meta_cache_v2 = {
+        let meta_cache = {
             let mut builder = HybridCacheBuilder::new()
                 .with_name("foyer.meta")
                 .memory(opts.meta_cache_capacity_mb * MB)
@@ -670,7 +674,7 @@ impl StateStoreImpl {
             builder.build().await.map_err(HummockError::foyer_error)?
         };
 
-        let block_cache_v2 = {
+        let block_cache = {
             let mut builder = HybridCacheBuilder::new()
                 .with_name("foyer.data")
                 .with_event_listener(Arc::new(BlockCacheEventListener::new(
@@ -749,8 +753,8 @@ impl StateStoreImpl {
                     recent_filter,
                     state_store_metrics: state_store_metrics.clone(),
 
-                    meta_cache_v2,
-                    block_cache_v2,
+                    meta_cache,
+                    block_cache,
                 }));
                 let notification_client =
                     RpcNotificationClient::new(hummock_meta_client.get_inner().clone());
@@ -820,6 +824,8 @@ pub mod boxed_state_store {
 
     use bytes::Bytes;
     use dyn_clone::{clone_trait_object, DynClone};
+    use futures::future::BoxFuture;
+    use futures::FutureExt;
     use risingwave_common::buffer::Bitmap;
     use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
     use risingwave_hummock_sdk::{HummockReadEpoch, SyncResult};
@@ -1146,7 +1152,7 @@ pub mod boxed_state_store {
     pub trait DynamicDispatchedStateStoreExt: StaticSendSync {
         async fn try_wait_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()>;
 
-        async fn sync(&self, epoch: u64) -> StorageResult<SyncResult>;
+        fn sync(&self, epoch: u64) -> BoxFuture<'static, StorageResult<SyncResult>>;
 
         fn seal_epoch(&self, epoch: u64, is_checkpoint: bool);
 
@@ -1163,8 +1169,8 @@ pub mod boxed_state_store {
             self.try_wait_epoch(epoch).await
         }
 
-        async fn sync(&self, epoch: u64) -> StorageResult<SyncResult> {
-            self.sync(epoch).await
+        fn sync(&self, epoch: u64) -> BoxFuture<'static, StorageResult<SyncResult>> {
+            self.sync(epoch).boxed()
         }
 
         fn seal_epoch(&self, epoch: u64, is_checkpoint: bool) {
@@ -1257,7 +1263,10 @@ pub mod boxed_state_store {
             self.deref().try_wait_epoch(epoch)
         }
 
-        fn sync(&self, epoch: u64) -> impl Future<Output = StorageResult<SyncResult>> + Send + '_ {
+        fn sync(
+            &self,
+            epoch: u64,
+        ) -> impl Future<Output = StorageResult<SyncResult>> + Send + 'static {
             self.deref().sync(epoch)
         }
 

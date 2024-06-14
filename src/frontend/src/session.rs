@@ -20,6 +20,7 @@ use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 
+use anyhow::anyhow;
 use bytes::Bytes;
 use either::Either;
 use parking_lot::{Mutex, RwLock, RwLockReadGuard};
@@ -35,6 +36,7 @@ use pgwire::pg_server::{
 use pgwire::types::{Format, FormatIterator};
 use rand::RngCore;
 use risingwave_batch::monitor::{BatchSpillMetrics, GLOBAL_BATCH_SPILL_METRICS};
+use risingwave_batch::spill::spill_op::SpillOp;
 use risingwave_batch::task::{ShutdownSender, ShutdownToken};
 use risingwave_batch::worker_manager::worker_node_manager::{
     WorkerNodeManager, WorkerNodeManagerRef,
@@ -406,6 +408,12 @@ impl FrontendEnv {
             }
         });
         join_handles.push(join_handle);
+
+        // Clean up the spill directory.
+        #[cfg(not(madsim))]
+        SpillOp::clean_spill_directory()
+            .await
+            .map_err(|err| anyhow!(err))?;
 
         let total_memory_bytes = resource_util::memory::system_memory_available_bytes();
         let heap_profiler =

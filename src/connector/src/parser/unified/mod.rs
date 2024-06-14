@@ -15,9 +15,10 @@
 //! Unified parsers for both normal events or CDC events of multiple message formats
 
 use auto_impl::auto_impl;
-use risingwave_common::types::{DataType, Datum};
-use thiserror::Error;
-use thiserror_ext::Macro;
+use risingwave_common::types::{DataType, DatumCow};
+pub use risingwave_connector_codec::decoder::{
+    bail_uncategorized, uncategorized, Access, AccessError, AccessResult,
+};
 
 use self::avro::AvroAccess;
 use self::bytes::BytesAccess;
@@ -35,23 +36,16 @@ pub mod maxwell;
 pub mod protobuf;
 pub mod util;
 
-pub type AccessResult<T = Datum> = std::result::Result<T, AccessError>;
-
-/// Access a certain field in an object according to the path
-pub trait Access {
-    fn access(&self, path: &[&str], type_expected: &DataType) -> AccessResult;
-}
-
-pub enum AccessImpl<'a, 'b> {
-    Avro(AvroAccess<'a, 'b>),
+pub enum AccessImpl<'a> {
+    Avro(AvroAccess<'a>),
     Bytes(BytesAccess<'a>),
     Protobuf(ProtobufAccess),
-    Json(JsonAccess<'a, 'b>),
-    MongoJson(MongoJsonAccess<JsonAccess<'a, 'b>>),
+    Json(JsonAccess<'a>),
+    MongoJson(MongoJsonAccess<JsonAccess<'a>>),
 }
 
-impl Access for AccessImpl<'_, '_> {
-    fn access(&self, path: &[&str], type_expected: &DataType) -> AccessResult {
+impl Access for AccessImpl<'_> {
+    fn access<'a>(&'a self, path: &[&str], type_expected: &DataType) -> AccessResult<DatumCow<'a>> {
         match self {
             Self::Avro(accessor) => accessor.access(path, type_expected),
             Self::Bytes(accessor) => accessor.access(path, type_expected),
@@ -74,7 +68,7 @@ pub trait ChangeEvent {
     /// Access the operation type.
     fn op(&self) -> AccessResult<ChangeEventOperation>;
     /// Access the field.
-    fn access_field(&self, desc: &SourceColumnDesc) -> AccessResult;
+    fn access_field(&self, desc: &SourceColumnDesc) -> AccessResult<DatumCow<'_>>;
 }
 
 impl<A> ChangeEvent for (ChangeEventOperation, A)
@@ -85,29 +79,7 @@ where
         Ok(self.0)
     }
 
-    fn access_field(&self, desc: &SourceColumnDesc) -> AccessResult {
+    fn access_field(&self, desc: &SourceColumnDesc) -> AccessResult<DatumCow<'_>> {
         self.1.access(&[desc.name.as_str()], &desc.data_type)
     }
-}
-
-#[derive(Error, Debug, Macro)]
-#[thiserror_ext(macro(mangle))]
-pub enum AccessError {
-    #[error("Undefined field `{name}` at `{path}`")]
-    Undefined { name: String, path: String },
-    #[error("Cannot parse value `{value}` with type `{got}` into expected type `{expected}`")]
-    TypeError {
-        expected: String,
-        got: String,
-        value: String,
-    },
-    #[error("Unsupported data type `{ty}`")]
-    UnsupportedType { ty: String },
-
-    #[error("Unsupported additional column `{name}`")]
-    UnsupportedAdditionalColumn { name: String },
-
-    /// Errors that are not categorized into variants above.
-    #[error("{message}")]
-    Uncategorized { message: String },
 }

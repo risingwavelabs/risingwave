@@ -32,7 +32,7 @@ else
     exit 1
 fi
 
-source backwards-compat-tests/scripts/utils.sh
+source e2e_test/backwards-compat-tests/scripts/utils.sh
 
 ################################### Main
 
@@ -113,7 +113,7 @@ setup_old_cluster() {
 
 setup_new_cluster() {
   echo "--- Setup Risingwave @ $RW_COMMIT"
-  git checkout -
+  git checkout "$RW_COMMIT"
   download_and_prepare_rw "$profile" common
   # Make sure we always start w/o old config
   rm -r .risingwave/config
