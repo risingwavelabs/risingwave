@@ -1732,11 +1732,11 @@ pub mod default {
         }
 
         pub fn memory_controller_threshold_graceful() -> f64 {
-            0.8
+            0.81
         }
 
         pub fn memory_controller_threshold_stable() -> f64 {
-            0.7
+            0.72
         }
 
         pub fn memory_controller_eviction_factor_aggressive() -> f64 {
