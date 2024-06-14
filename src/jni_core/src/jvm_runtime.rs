@@ -25,7 +25,7 @@ use risingwave_common::util::resource_util::memory::system_memory_available_byte
 use thiserror_ext::AsReport;
 use tracing::error;
 
-use crate::call_method;
+use crate::{call_method, call_static_method};
 
 /// Use 10% of compute total memory by default. Compute node uses 0.7 * system memory by default.
 const DEFAULT_MEMORY_PROPORTION: f64 = 0.07;
@@ -240,4 +240,37 @@ pub fn jobj_to_str(env: &mut JNIEnv<'_>, obj: JObject<'_>) -> anyhow::Result<Str
     let jstr = JString::from(obj);
     let java_str = env.get_string(&jstr)?;
     Ok(java_str.to_str()?.to_string())
+}
+
+/// Dumps the JVM stack traces.
+///
+/// # Returns
+///
+/// - `Ok(None)` if JVM is not initialized.
+/// - `Ok(Some(String))` if JVM is initialized and stack traces are dumped.
+/// - `Err` if failed to dump stack traces.
+pub fn dump_jvm_stack_traces() -> anyhow::Result<Option<String>> {
+    match JVM.get() {
+        None => Ok(None),
+        Some(jvm) => {
+            let mut env = jvm
+                .attach_current_thread()
+                .with_context(|| "Failed to attach thread to JVM")?;
+
+            let result = call_static_method!(
+                env,
+                {com.risingwave.connector.api.Monitor},
+                {String dumpStackTrace()}
+            )
+            .with_context(|| "Failed to call Java function")?;
+            let result = JString::from(result);
+            let result = env
+                .get_string(&result)
+                .with_context(|| "Failed to convert JString")?;
+            let result = result
+                .to_str()
+                .with_context(|| "Failed to convert JavaStr")?;
+            Ok(Some(result.to_string()))
+        }
+    }
 }

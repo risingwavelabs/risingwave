@@ -22,6 +22,7 @@ use itertools::Itertools;
 use prometheus::core::Collector;
 use risingwave_common::config::{MetricLevel, ServerConfig};
 use risingwave_common_heap_profiling::{AUTO_DUMP_SUFFIX, COLLAPSED_SUFFIX, MANUALLY_DUMP_SUFFIX};
+use risingwave_jni_core::jvm_runtime::dump_jvm_stack_traces;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorService;
 use risingwave_pb::monitor_service::{
     AnalyzeHeapRequest, AnalyzeHeapResponse, BackPressureInfo, GetBackPressureRequest,
@@ -102,6 +103,12 @@ impl MonitorService for MonitorServiceImpl {
 
         let barrier_worker_state = self.stream_mgr.inspect_barrier_state().await?;
 
+        let jvm_stack_traces = match dump_jvm_stack_traces() {
+            Ok(None) => None,
+            Err(err) => Some(err.as_report().to_string()),
+            Ok(Some(stack_traces)) => Some(stack_traces),
+        };
+
         Ok(Response::new(StackTraceResponse {
             actor_traces,
             rpc_traces,
@@ -111,6 +118,12 @@ impl MonitorService for MonitorServiceImpl {
                 self.stream_mgr.env.worker_id(),
                 barrier_worker_state,
             )]),
+            jvm_stack_traces: match jvm_stack_traces {
+                Some(stack_traces) => {
+                    BTreeMap::from_iter([(self.stream_mgr.env.worker_id(), stack_traces)])
+                }
+                None => BTreeMap::new(),
+            },
         }))
     }
 
