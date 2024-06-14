@@ -2,7 +2,6 @@ name: Check if package version is greater than the latest release version
 
 on:
   pull_request:
-    types: [opened, edited]
     branches:
       - 'main'
 
