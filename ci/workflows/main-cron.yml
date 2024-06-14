@@ -495,7 +495,7 @@ steps:
     retry: *auto-retry
 
   - label: "S3_v2 source check on parquet file"
-    key: "s3-v2-source-check-aws-json-parser"
+    key: "s3-v2-source-check-parquet-file"
     command: "ci/scripts/s3-source-test.sh -p ci-release -s fs_parquet_source.py"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
