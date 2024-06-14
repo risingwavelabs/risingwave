@@ -20,6 +20,7 @@ use risingwave_common::config::{
 };
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsReader;
+use risingwave_meta_model_migration::{MigrationStatus, Migrator, MigratorTrait};
 use risingwave_meta_model_v2::prelude::Cluster;
 use risingwave_pb::meta::SystemParams;
 use risingwave_rpc_client::{StreamClientPool, StreamClientPoolRef};
@@ -344,13 +345,32 @@ impl MetaOpts {
     }
 }
 
+/// This function `is_first_launch_for_sql_backend_cluster` is used to check whether the cluster, which uses SQL as the backend, is a new cluster.
+/// It determines this by inspecting the applied migrations. If the migration `m20230908_072257_init` has been applied,
+/// then it is considered an old cluster.
+///
+/// Note: this check should be performed before `Migrator::up()`.
+pub async fn is_first_launch_for_sql_backend_cluster(
+    sql_meta_store: &SqlMetaStore,
+) -> MetaResult<bool> {
+    let migrations = Migrator::get_applied_migrations(&sql_meta_store.conn).await?;
+    let mut cluster_first_launch = true;
+    for migration in migrations {
+        if migration.name() == "m20230908_072257_init"
+            && migration.status() == MigrationStatus::Applied
+        {
+            cluster_first_launch = false;
+        }
+    }
+    Ok(cluster_first_launch)
+}
+
 impl MetaSrvEnv {
     pub async fn new(
         opts: MetaOpts,
         init_system_params: SystemParams,
         init_session_config: SessionConfig,
         meta_store_impl: MetaStoreImpl,
-        is_sql_backend_cluster_first_launch: bool,
     ) -> MetaResult<Self> {
         let notification_manager =
             Arc::new(NotificationManager::new(meta_store_impl.clone()).await);
@@ -412,6 +432,15 @@ impl MetaSrvEnv {
                 }
             }
             MetaStoreImpl::Sql(sql_meta_store) => {
+                let mut is_sql_backend_cluster_first_launch = true;
+                if let MetaStoreImpl::Sql(sql_store) = &meta_store_impl {
+                    is_sql_backend_cluster_first_launch =
+                        is_first_launch_for_sql_backend_cluster(sql_store).await?;
+                    // Try to upgrade if any new model changes are added.
+                    Migrator::up(&sql_store.conn, None)
+                        .await
+                        .expect("Failed to upgrade models in meta store");
+                }
                 let cluster_id = Cluster::find()
                     .one(&sql_meta_store.conn)
                     .await?
@@ -540,7 +569,6 @@ impl MetaSrvEnv {
             risingwave_common::system_param::system_params_for_test(),
             Default::default(),
             MetaStoreImpl::Sql(SqlMetaStore::for_test().await),
-            true,
         )
         .await
         .unwrap()
@@ -554,7 +582,6 @@ impl MetaSrvEnv {
             risingwave_common::system_param::system_params_for_test(),
             Default::default(),
             MetaStoreImpl::Kv(MemStore::default().into_ref()),
-            true,
         )
         .await
         .unwrap()
