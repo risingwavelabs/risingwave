@@ -95,6 +95,7 @@ impl BackfillState {
         &mut self,
         vnode: VirtualNode,
         new_pos: OwnedRow,
+        yielded: bool,
         snapshot_row_count_delta: u64,
     ) -> StreamExecutorResult<()> {
         let state = self.get_current_state(&vnode);
@@ -102,7 +103,7 @@ impl BackfillState {
             BackfillProgressPerVnode::NotStarted => {
                 *state = BackfillProgressPerVnode::InProgress {
                     current_pos: new_pos,
-                    yielded: true,
+                    yielded,
                     snapshot_row_count: snapshot_row_count_delta,
                 };
             }
@@ -111,7 +112,7 @@ impl BackfillState {
             } => {
                 *state = BackfillProgressPerVnode::InProgress {
                     current_pos: new_pos,
-                    yielded: true,
+                    yielded,
                     snapshot_row_count: *snapshot_row_count + snapshot_row_count_delta,
                 };
             }
@@ -643,7 +644,7 @@ pub(crate) fn update_pos_by_vnode(
 ) -> StreamExecutorResult<()> {
     let new_pos = get_new_pos(chunk, pk_in_output_indices);
     assert_eq!(new_pos.len(), pk_in_output_indices.len());
-    backfill_state.update_progress(vnode, new_pos, snapshot_row_count_delta)?;
+    backfill_state.update_progress(vnode, new_pos, true, snapshot_row_count_delta)?;
     Ok(())
 }
 

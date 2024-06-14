@@ -460,6 +460,18 @@ impl Bitmap {
             count_ones: range.len(),
         }
     }
+
+    pub fn set_bit(&mut self, idx: usize) {
+        assert!(idx < self.len());
+        if let Some(bits) = &mut self.bits {
+            bits[idx / BITS] |= 1 << (idx % BITS);
+        } else {
+            self.count_ones += 1;
+            if self.count_ones == self.num_bits {
+                self.bits = None;
+            }
+        }
+    }
 }
 
 impl From<usize> for Bitmap {
