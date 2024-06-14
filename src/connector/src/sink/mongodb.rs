@@ -45,6 +45,10 @@ use crate::sink::{
 };
 
 pub const MONGODB_SINK: &str = "mongodb";
+
+// 65536 seems like a reasonable limit, but we may consider setting this limit to 100,000,
+// which is the actual limit imposed by the server.
+// see https://www.mongodb.com/docs/v4.2/reference/command/hello/#hello.maxWriteBatchSize for more details
 pub const MONGODB_BULK_WRITE_SIZE_LIMIT: usize = 65536;
 pub const MONGODB_PK_NAME: &str = "_id";
 
