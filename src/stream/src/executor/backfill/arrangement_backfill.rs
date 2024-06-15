@@ -109,6 +109,7 @@ where
         let upstream_table_id = self.upstream_table.table_id();
         let mut upstream_table = self.upstream_table;
         let vnodes = upstream_table.vnodes().clone();
+        let vnode_bitset = vnodes.to_fixed_bitset();
         let mut rate_limit = self.rate_limit;
 
         // These builders will build data chunks.
@@ -344,7 +345,7 @@ where
                     if !has_snapshot_read && !paused && rate_limit_ready {
                         debug_assert!(builders.values().all(|b| b.is_empty()));
                         let (_, snapshot) = backfill_stream.into_inner();
-                        let mut remaining_vnodes = vnodes.as_ref().clone();
+                        let mut remaining_vnodes = vnode_bitset.clone();
                         let mut yielded = false;
 
                         #[for_await]
@@ -369,10 +370,11 @@ where
                                     // We could actually drop the snapshot iteration stream
                                     // for that vnode once we have read at least 1 record from it.
                                     let vnode_idx = vnode.to_index();
-                                    if !remaining_vnodes.is_set(vnode_idx) {
+                                    if remaining_vnodes.contains(vnode_idx) {
                                         // FIXME(kwannoel): This is not needed.
-                                        // The main point of reading the snapshot here is by
-                                        // skip over long tombstone ranges, not to guarantee that snapshot read makes progress.
+                                        // The main point of reading the snapshot here is to
+                                        // skip over long tombstone ranges,
+                                        // not to guarantee that snapshot read makes progress.
                                         // Because skipping over long tombstone ranges is a transient step,
                                         // once we skip over the initial run, we don't need to do it again.
                                         //
@@ -408,7 +410,7 @@ where
                                             )?;
                                         }
 
-                                        remaining_vnodes.set_bit(vnode_idx);
+                                        remaining_vnodes.set(vnode_idx, false);
                                         if remaining_vnodes.is_empty() {
                                             break;
                                         }
