@@ -135,13 +135,8 @@ impl BackfillState {
             BackfillProgressPerVnode::InProgress {
                 current_pos,
                 snapshot_row_count,
-                yielded,
-            } => {
-                if !*yielded {
-                    bail!("the current_pos: {current_pos:?} must be yielded downstream before backfill finishes");
-                }
-                (current_pos.clone(), *snapshot_row_count)
-            }
+                ..
+            } => (current_pos.clone(), *snapshot_row_count),
             BackfillProgressPerVnode::Completed { .. } => {
                 return Ok(());
             }
@@ -701,7 +696,7 @@ pub(crate) fn construct_initial_finished_state(pos_len: usize) -> OwnedRow {
 }
 
 /// `pk_indices`: Just used to check if the current pos is empty.
-/// `inclusive`: Whether it's inclusive of the current pos.
+/// `exclusive`: Whether the snapshot read iteration is exclusive of the current pos.
 /// `current_pos`: The current pos to start scanning from.
 pub(crate) fn compute_bounds(
     pk_indices: &[usize],
