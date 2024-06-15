@@ -673,7 +673,7 @@ where
         epoch: u64,
         current_pos: Option<OwnedRow>,
     ) {
-        let range_bounds = compute_bounds(upstream_table.pk_indices(), false, current_pos);
+        let range_bounds = compute_bounds(upstream_table.pk_indices(), true, current_pos);
         let range_bounds = match range_bounds {
             None => {
                 yield None;
