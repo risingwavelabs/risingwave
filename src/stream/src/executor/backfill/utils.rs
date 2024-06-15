@@ -50,8 +50,10 @@ use crate::executor::{
     Message, PkIndicesRef, StreamExecutorError, StreamExecutorResult, Watermark,
 };
 
+/// `vnode`, `yielded`, `is_finished`, `row_count`, all occupy 1 column each.
+pub const METADATA_STATE_LEN: usize = 4;
 /// `vnode`, `is_finished`, `row_count`, all occupy 1 column each.
-pub const METADATA_STATE_LEN: usize = 3;
+pub const METADATA_STATE_LEN_NO_YIELDED: usize = 3;
 
 #[derive(Clone, Debug)]
 pub struct BackfillState {
@@ -513,6 +515,17 @@ pub(crate) async fn get_progress_per_vnode<S: StateStore, const IS_REPLICATED: b
         let datum: [Datum; 1] = [Some(vnode.to_scalar().into())];
         datum
     });
+    // Track this for backwards compat
+    let meta_data_len = state_table.get_data_types().len() - state_table.pk_indices().len();
+    let has_yielded = METADATA_STATE_LEN == meta_data_len;
+    if !has_yielded && meta_data_len != METADATA_STATE_LEN_NO_YIELDED {
+        bail!(
+            "metadata state length mismatch: expected {}, got {}",
+            METADATA_STATE_LEN,
+            meta_data_len
+        );
+    }
+
     let tasks = vnode_keys.map(|vnode_key| state_table.get_row(vnode_key));
     // 2. Fetch the state for each vnode.
     //    It should have the following schema, it should not contain vnode:
@@ -537,12 +550,19 @@ pub(crate) async fn get_progress_per_vnode<S: StateStore, const IS_REPLICATED: b
                 let vnode_is_finished = vnode_is_finished.as_ref().unwrap();
 
                 // 5. Decode the `yielded` flag.
-                let yielded = row.as_inner().get(row.len() - 3).unwrap();
-                let yielded = yielded.as_ref().unwrap();
+                let (yielded, current_pos) = if has_yielded {
+                    let yielded = row.as_inner().get(row.len() - 3).unwrap();
+                    let yielded = yielded.as_ref().unwrap();
 
-                // 6. Decode the `current_pos`.
-                let current_pos = row.as_inner().get(..row.len() - 3).unwrap();
-                let current_pos = current_pos.into_owned_row();
+                    // 6. Decode the `current_pos`.
+                    let current_pos = row.as_inner().get(..row.len() - 3).unwrap();
+                    let current_pos = current_pos.into_owned_row();
+                    (*yielded.as_bool(), current_pos)
+                } else {
+                    let current_pos = row.as_inner().get(..row.len() - 2).unwrap();
+                    let current_pos = current_pos.into_owned_row();
+                    (true, current_pos)
+                };
 
                 // 6. Construct the in-memory state per vnode, based on the decoded state.
                 if *vnode_is_finished.as_bool() {
@@ -560,12 +580,12 @@ pub(crate) async fn get_progress_per_vnode<S: StateStore, const IS_REPLICATED: b
                     BackfillStatePerVnode::new(
                         BackfillProgressPerVnode::InProgress {
                             current_pos: current_pos.clone(),
-                            yielded: *yielded.as_bool(),
+                            yielded,
                             snapshot_row_count,
                         },
                         BackfillProgressPerVnode::InProgress {
                             current_pos,
-                            yielded: *yielded.as_bool(),
+                            yielded,
                             snapshot_row_count,
                         },
                     )
