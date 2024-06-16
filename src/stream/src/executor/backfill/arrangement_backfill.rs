@@ -215,6 +215,7 @@ where
             'backfill_loop: loop {
                 let mut cur_barrier_snapshot_processed_rows: u64 = 0;
                 let mut cur_barrier_upstream_processed_rows: u64 = 0;
+                let mut snapshot_read_complete = false;
                 let mut has_snapshot_read = false;
 
                 // NOTE(kwannoel): Scope it so that immutable reference to `upstream_table` can be
@@ -354,14 +355,10 @@ where
                             };
                             match msg? {
                                 None => {
-                                    // NOTE(kwannoel): We can't finish backfill here.
-                                    // There could be some records skipped.
-                                    //
-                                    // There are two ways we can improve this.
-                                    // 1. We can support vnode level backfill completion.
-                                    //    so in this part we will only iterate across vnodes
-                                    //    which are not yet finished.
-                                    // 2. We can buffer any skipped records, and yield them here.
+                                    // End of the snapshot read stream.
+                                    // We let the barrier handling logic take care of upstream updates.
+                                    // But we still want to exit backfill loop, so we mark snapshot read complete.
+                                    snapshot_read_complete = true;
                                     break;
                                 }
                                 Some((vnode, row)) => {
@@ -579,6 +576,12 @@ where
                 }
 
                 yield Message::Barrier(barrier);
+
+                // We will switch snapshot at the start of the next iteration of the backfill loop.
+                // Unless snapshot read is already completed.
+                if snapshot_read_complete {
+                    break 'backfill_loop;
+                }
             }
         }
 
