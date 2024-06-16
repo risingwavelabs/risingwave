@@ -346,7 +346,7 @@ where
                         debug_assert!(builders.values().all(|b| b.is_empty()));
                         let (_, snapshot) = backfill_stream.into_inner();
                         let mut remaining_vnodes = vnode_bitset.clone();
-                        let mut yielded = false;
+                        let yielded = false;
 
                         #[for_await]
                         for msg in snapshot {
@@ -398,7 +398,8 @@ where
                                                     &self.output_indices,
                                                 )?);
                                             }
-                                            yielded = true;
+                                            // yielded = true;
+                                            break;
                                         } else {
                                             let new_pos = row.project(&pk_in_output_indices);
                                             assert_eq!(new_pos.len(), pk_in_output_indices.len());
