@@ -17,6 +17,7 @@ package com.risingwave.connector.source.core;
 import com.risingwave.connector.api.source.SourceTypeE;
 import com.risingwave.connector.cdc.debezium.internal.DebeziumOffset;
 import com.risingwave.connector.cdc.debezium.internal.DebeziumOffsetSerializer;
+import com.risingwave.connector.source.common.CdcConnectorException;
 import com.risingwave.proto.ConnectorServiceProto.CdcMessage;
 import com.risingwave.proto.ConnectorServiceProto.GetEventStreamResponse;
 import io.debezium.connector.postgresql.PostgresOffsetContext;
@@ -43,6 +44,7 @@ enum EventType {
     HEARTBEAT,
     TRANSACTION,
     DATA,
+    SCHEMA_CHANGE,
 }
 
 public class DbzChangeEventConsumer
@@ -57,6 +59,7 @@ public class DbzChangeEventConsumer
     private final JsonConverter keyConverter;
     private final String heartbeatTopicPrefix;
     private final String transactionTopic;
+    private final String schemaChangeTopic;
 
     private volatile DebeziumEngine.RecordCommitter<ChangeEvent<SourceRecord, SourceRecord>>
             currentRecordCommitter;
@@ -66,12 +69,14 @@ public class DbzChangeEventConsumer
             long sourceId,
             String heartbeatTopicPrefix,
             String transactionTopic,
+            String schemaChangeTopic,
             BlockingQueue<GetEventStreamResponse> queue) {
         this.connector = connector;
         this.sourceId = sourceId;
         this.outputChannel = queue;
         this.heartbeatTopicPrefix = heartbeatTopicPrefix;
         this.transactionTopic = transactionTopic;
+        this.schemaChangeTopic = schemaChangeTopic;
         LOG.info("heartbeat topic: {}, trnx topic: {}", heartbeatTopicPrefix, transactionTopic);
 
         // The default JSON converter will output the schema field in the JSON which is unnecessary
@@ -105,6 +110,8 @@ public class DbzChangeEventConsumer
             return EventType.HEARTBEAT;
         } else if (isTransactionMetaEvent(record)) {
             return EventType.TRANSACTION;
+        } else if (isSchemaChangeEvent(record)) {
+            return EventType.SCHEMA_CHANGE;
         } else {
             return EventType.DATA;
         }
@@ -122,6 +129,11 @@ public class DbzChangeEventConsumer
         return topic != null && topic.equals(transactionTopic);
     }
 
+    private boolean isSchemaChangeEvent(SourceRecord record) {
+        String topic = record.topic();
+        return topic != null && topic.equals(schemaChangeTopic);
+    }
+
     @Override
     public void handleBatch(
             List<ChangeEvent<SourceRecord, SourceRecord>> events,
@@ -131,6 +143,7 @@ public class DbzChangeEventConsumer
         currentRecordCommitter = committer;
         for (ChangeEvent<SourceRecord, SourceRecord> event : events) {
             var record = event.value();
+            LOG.info("connect record: {}", record);
             EventType eventType = getEventType(record);
             DebeziumOffset offset =
                     new DebeziumOffset(
@@ -176,6 +189,49 @@ public class DbzChangeEventConsumer
                         respBuilder.addEvents(message);
                         break;
                     }
+
+                case SCHEMA_CHANGE:
+                    {
+                        var ddl = ((Struct) record.value()).getString("ddl");
+                        if (ddl.contains("CREATE") || ddl.contains("DROP")) {
+                            LOG.info("skip create/drop table event");
+                            continue;
+                        }
+
+                        var sourceStruct = ((Struct) record.value()).getStruct("source");
+                        if (sourceStruct == null) {
+                            throw new CdcConnectorException(
+                                    "source field is missing in schema change event");
+                        }
+
+                        // upstream event time
+                        long sourceTsMs = sourceStruct.getInt64("ts_ms");
+                        // concat full table name, right now we only support MySQL schema change
+                        // event
+                        var fullTableName =
+                                String.format(
+                                        "%s.%s",
+                                        sourceStruct.getString("db"),
+                                        sourceStruct.getString("table"));
+                        byte[] payload =
+                                payloadConverter.fromConnectData(
+                                        record.topic(), record.valueSchema(), record.value());
+
+                        var message =
+                                msgBuilder
+                                        .setFullTableName(fullTableName)
+                                        .setPayload(new String(payload, StandardCharsets.UTF_8))
+                                        .setSourceTsMs(sourceTsMs)
+                                        .build();
+                        LOG.info(
+                                "offset => {}, key => {}, payload => {}",
+                                message.getOffset(),
+                                message.getKey(),
+                                message.getPayload());
+                        respBuilder.addEvents(message);
+                        break;
+                    }
+
                 case DATA:
                     {
                         // Topic naming conventions
@@ -192,16 +248,18 @@ public class DbzChangeEventConsumer
                         }
                         // get upstream event time from the "source" field
                         var sourceStruct = ((Struct) record.value()).getStruct("source");
-                        long sourceTsMs =
-                                sourceStruct == null
-                                        ? System.currentTimeMillis()
-                                        : sourceStruct.getInt64("ts_ms");
+                        if (sourceStruct == null) {
+                            throw new CdcConnectorException(
+                                    "source field is missing in data change event");
+                        }
+                        long sourceTsMs = sourceStruct.getInt64("ts_ms");
                         byte[] payload =
                                 payloadConverter.fromConnectData(
                                         record.topic(), record.valueSchema(), record.value());
                         byte[] key =
                                 keyConverter.fromConnectData(
                                         record.topic(), record.keySchema(), record.key());
+
                         var message =
                                 msgBuilder
                                         .setFullTableName(fullTableName)
