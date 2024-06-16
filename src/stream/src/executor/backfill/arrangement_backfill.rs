@@ -346,7 +346,7 @@ where
                         debug_assert!(builders.values().all(|b| b.is_empty()));
                         let (_, snapshot) = backfill_stream.into_inner();
                         let mut remaining_vnodes = vnode_bitset.clone();
-                        let yielded = false;
+                        let mut yielded = false;
 
                         #[for_await]
                         for msg in snapshot {
@@ -365,7 +365,7 @@ where
                                     // FIXME(kwannoel):
                                     // Perhaps we should introduce a custom stream combinator,
                                     // so we can iterate on individual streams here.
-                                    // Otherwise here we will iterate across all vnodes,
+                                    // Otherwise here we will continue iterating across all vnodes,
                                     // even if some vnode is already done.
                                     // We could actually drop the snapshot iteration stream
                                     // for that vnode once we have read at least 1 record from it.
@@ -398,8 +398,7 @@ where
                                                     &self.output_indices,
                                                 )?);
                                             }
-                                            // yielded = true;
-                                            break;
+                                            yielded = true;
                                         } else {
                                             let new_pos = row.project(&pk_in_output_indices);
                                             assert_eq!(new_pos.len(), pk_in_output_indices.len());
@@ -720,9 +719,6 @@ where
     /// The `StreamChunk` is the chunk that contains the rows from the vnode.
     /// If it's `None`, it means the vnode has no more rows for this snapshot read.
     ///
-    /// The `snapshot_read_epoch` is supplied as a parameter for `state_table`.
-    /// It is required to ensure we read a fully-checkpointed snapshot the **first time**.
-    ///
     /// The rows from upstream snapshot read will be buffered inside the `builder`.
     /// If snapshot is dropped before its rows are consumed,
     /// remaining data in `builder` must be flushed manually.
@@ -738,8 +734,8 @@ where
             let backfill_progress = backfill_state.get_progress(&vnode)?;
             let (current_pos, exclusive) = match backfill_progress {
                 BackfillProgressPerVnode::NotStarted => (None, false),
-                BackfillProgressPerVnode::Completed { current_pos, .. } => {
-                    (Some(current_pos.clone()), false)
+                BackfillProgressPerVnode::Completed { .. } => {
+                    continue;
                 }
                 BackfillProgressPerVnode::InProgress {
                     current_pos,
