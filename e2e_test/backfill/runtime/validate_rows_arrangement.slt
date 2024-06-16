@@ -1,4 +1,7 @@
 query I
-select (select count(*) from arrangement_backfill) = (select count(*) from t);
+select v1 from arrangement_backfill where v1 not in (select v1 from t);
 ----
-t
+
+query I
+select v1 from t where v1 not in (select v1 from arrangement_backfill);
+----
