@@ -303,6 +303,7 @@ impl Strong {
             | ExprType::PgIndexesSize
             | ExprType::PgRelationSize
             | ExprType::PgGetSerialSequence
+            | ExprType::PgIndexColumnHasProperty
             | ExprType::IcebergTransform
             | ExprType::HasTablePrivilege
             | ExprType::HasAnyColumnPrivilege

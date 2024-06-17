@@ -274,6 +274,7 @@ impl From<ObjectModel<index::Model>> for PbIndex {
             index_table_id: value.0.index_table_id as _,
             primary_table_id: value.0.primary_table_id as _,
             index_item: value.0.index_items.to_protobuf(),
+            index_column_properties: value.0.index_column_properties.to_protobuf(),
             index_columns_len: value.0.index_columns_len as _,
             initialized_at_epoch: Some(
                 Epoch::from_unix_millis(value.1.initialized_at.timestamp_millis() as _).0,

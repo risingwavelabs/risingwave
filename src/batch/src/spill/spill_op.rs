@@ -14,7 +14,7 @@
 
 use std::hash::BuildHasher;
 use std::ops::{Deref, DerefMut};
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 
 use anyhow::anyhow;
 use futures_async_stream::try_stream;
@@ -30,6 +30,7 @@ use tokio::sync::Mutex;
 use twox_hash::XxHash64;
 
 use crate::error::{BatchError, Result};
+use crate::monitor::BatchSpillMetrics;
 
 const RW_BATCH_SPILL_DIR_ENV: &str = "RW_BATCH_SPILL_DIR";
 pub const DEFAULT_SPILL_PARTITION_NUM: usize = 20;
@@ -105,7 +106,7 @@ impl SpillOp {
     /// [proto_bytes]
     /// ```
     #[try_stream(boxed, ok = DataChunk, error = BatchError)]
-    pub async fn read_stream(mut reader: opendal::Reader) {
+    pub async fn read_stream(mut reader: opendal::Reader, spill_metrics: Arc<BatchSpillMetrics>) {
         let mut buf = [0u8; 4];
         loop {
             if let Err(err) = reader.read_exact(&mut buf).await {
@@ -116,6 +117,7 @@ impl SpillOp {
                 }
             }
             let len = u32::from_le_bytes(buf) as usize;
+            spill_metrics.batch_spill_read_bytes.inc_by(len as u64 + 4);
             let mut buf = vec![0u8; len];
             reader.read_exact(&mut buf).await.map_err(|e| anyhow!(e))?;
             let chunk_pb: PbDataChunk = Message::decode(buf.as_slice()).map_err(|e| anyhow!(e))?;

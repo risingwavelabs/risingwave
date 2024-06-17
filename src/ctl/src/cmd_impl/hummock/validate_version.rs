@@ -65,6 +65,7 @@ pub async fn print_user_key_in_archive(
     archive_ids: Vec<HummockVersionId>,
     data_dir: String,
     user_key: String,
+    use_new_object_prefix_strategy: bool,
 ) -> anyhow::Result<()> {
     let user_key_bytes = hex::decode(user_key.clone()).unwrap_or_else(|_| {
         panic!("cannot decode user key {} into raw bytes", user_key);
@@ -72,7 +73,8 @@ pub async fn print_user_key_in_archive(
     let user_key = UserKey::decode(&user_key_bytes);
     println!("user key: {user_key:?}");
 
-    let hummock_opts = HummockServiceOpts::from_env(Some(data_dir.clone()))?;
+    let hummock_opts =
+        HummockServiceOpts::from_env(Some(data_dir.clone()), use_new_object_prefix_strategy)?;
     let hummock = context.hummock_store(hummock_opts).await?;
     let sstable_store = hummock.sstable_store();
     let archive_object_store = sstable_store.store();
@@ -178,8 +180,10 @@ pub async fn print_version_delta_in_archive(
     archive_ids: Vec<HummockVersionId>,
     data_dir: String,
     sst_id: HummockSstableObjectId,
+    use_new_object_prefix_strategy: bool,
 ) -> anyhow::Result<()> {
-    let hummock_opts = HummockServiceOpts::from_env(Some(data_dir.clone()))?;
+    let hummock_opts =
+        HummockServiceOpts::from_env(Some(data_dir.clone()), use_new_object_prefix_strategy)?;
     let hummock = context.hummock_store(hummock_opts).await?;
     let sstable_store = hummock.sstable_store();
     let archive_object_store = sstable_store.store();
