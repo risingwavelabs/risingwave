@@ -366,6 +366,9 @@ pub struct MetaConfig {
     /// Whether compactor should rewrite row to remove dropped column.
     #[serde(default = "default::meta::enable_dropped_column_reclaim")]
     pub enable_dropped_column_reclaim: bool,
+
+    #[serde(default = "default::meta::secret_store_private_key")]
+    pub secret_store_private_key: Vec<u8>,
 }
 
 #[derive(Copy, Clone, Debug, Default)]
@@ -532,6 +535,10 @@ pub struct BatchConfig {
     /// A SQL option with a name containing any of these keywords will be redacted.
     #[serde(default = "default::batch::redact_sql_option_keywords")]
     pub redact_sql_option_keywords: Vec<String>,
+
+    /// Enable the spill out to disk feature for batch queries.
+    #[serde(default = "default::batch::enable_spill")]
+    pub enable_spill: bool,
 }
 
 /// The section `[streaming]` in `risingwave.toml`.
@@ -641,6 +648,11 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::shared_buffer_flush_ratio")]
     pub shared_buffer_flush_ratio: f32,
 
+    /// The minimum total flush size of shared buffer spill. When a shared buffer spilled is trigger,
+    /// the total flush size across multiple epochs should be at least higher than this size.
+    #[serde(default = "default::storage::shared_buffer_min_batch_flush_size_mb")]
+    pub shared_buffer_min_batch_flush_size_mb: usize,
+
     /// The threshold for the number of immutable memtables to merge to a new imm.
     #[serde(default = "default::storage::imm_merge_threshold")]
     #[deprecated]
@@ -714,10 +726,6 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::min_sst_size_for_streaming_upload")]
     pub min_sst_size_for_streaming_upload: u64,
 
-    /// Max sub compaction task numbers
-    #[serde(default = "default::storage::max_sub_compaction")]
-    pub max_sub_compaction: u32,
-
     #[serde(default = "default::storage::max_concurrent_compaction_task_number")]
     pub max_concurrent_compaction_task_number: u64,
 
@@ -755,6 +763,14 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::mem_table_spill_threshold")]
     pub mem_table_spill_threshold: usize,
 
+    /// The concurrent uploading number of `SSTables` of buidler
+    #[serde(default = "default::storage::compactor_concurrent_uploading_sst_count")]
+    pub compactor_concurrent_uploading_sst_count: Option<usize>,
+
+    /// Object storage configuration
+    /// 1. General configuration
+    /// 2. Some special configuration of Backend
+    /// 3. Retry and timeout configuration
     #[serde(default)]
     pub object_store: ObjectStoreConfig,
 }
@@ -810,12 +826,6 @@ pub struct FileCacheConfig {
     #[serde(default = "default::file_cache::file_capacity_mb")]
     pub file_capacity_mb: usize,
 
-    #[serde(default = "default::file_cache::device_align")]
-    pub device_align: usize,
-
-    #[serde(default = "default::file_cache::device_io_size")]
-    pub device_io_size: usize,
-
     #[serde(default = "default::file_cache::flushers")]
     pub flushers: usize,
 
@@ -825,17 +835,11 @@ pub struct FileCacheConfig {
     #[serde(default = "default::file_cache::recover_concurrency")]
     pub recover_concurrency: usize,
 
-    #[serde(default = "default::file_cache::lfu_window_to_cache_size_ratio")]
-    pub lfu_window_to_cache_size_ratio: usize,
-
-    #[serde(default = "default::file_cache::lfu_tiny_lru_capacity_ratio")]
-    pub lfu_tiny_lru_capacity_ratio: f64,
-
     #[serde(default = "default::file_cache::insert_rate_limit_mb")]
     pub insert_rate_limit_mb: usize,
 
-    #[serde(default = "default::file_cache::catalog_bits")]
-    pub catalog_bits: usize,
+    #[serde(default = "default::file_cache::indexer_shards")]
+    pub indexer_shards: usize,
 
     #[serde(default = "default::file_cache::compression")]
     pub compression: String,
@@ -976,6 +980,11 @@ pub struct StreamingDeveloperConfig {
     /// If true, the arrangement backfill will be disabled,
     /// even if session variable set.
     pub enable_arrangement_backfill: bool,
+
+    #[serde(default = "default::developer::stream_high_join_amplification_threshold")]
+    /// If number of hash join matches exceeds this threshold number,
+    /// it will be logged.
+    pub high_join_amplification_threshold: usize,
 }
 
 /// The subsections `[batch.developer]`.
@@ -1023,9 +1032,13 @@ pub struct ObjectStoreConfig {
     #[serde(default = "default::object_store_config::object_store_set_atomic_write_dir")]
     pub object_store_set_atomic_write_dir: bool,
 
+    /// Retry and timeout configuration
+    /// Description retry strategy driven by exponential back-off
+    /// Exposes the timeout and retries of each Object store interface. Therefore, the total timeout for each interface is determined based on the interface's timeout/retry configuration and the exponential back-off policy.
     #[serde(default)]
     pub retry: ObjectStoreRetryConfig,
 
+    /// Some special configuration of S3 Backend
     #[serde(default)]
     pub s3: S3ObjectStoreConfig,
 }
@@ -1079,66 +1092,89 @@ pub struct S3ObjectStoreDeveloperConfig {
 
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
 pub struct ObjectStoreRetryConfig {
+    // A retry strategy driven by exponential back-off.
+    // The retry strategy is used for all object store operations.
+    /// Given a base duration for retry strategy in milliseconds.
     #[serde(default = "default::object_store_config::object_store_req_backoff_interval_ms")]
     pub req_backoff_interval_ms: u64,
+
+    /// The max delay interval for the retry strategy. No retry delay will be longer than this `Duration`.
     #[serde(default = "default::object_store_config::object_store_req_backoff_max_delay_ms")]
     pub req_backoff_max_delay_ms: u64,
+
+    /// A multiplicative factor that will be applied to the exponential back-off retry delay.
     #[serde(default = "default::object_store_config::object_store_req_backoff_factor")]
     pub req_backoff_factor: u64,
 
-    // upload
+    /// Maximum timeout for `upload` operation
     #[serde(default = "default::object_store_config::object_store_upload_attempt_timeout_ms")]
     pub upload_attempt_timeout_ms: u64,
+
+    /// Total counts of `upload` operation retries
     #[serde(default = "default::object_store_config::object_store_upload_retry_attempts")]
     pub upload_retry_attempts: usize,
 
-    // streaming_upload_init + streaming_upload
+    /// Maximum timeout for `streaming_upload_init` and `streaming_upload`
     #[serde(
         default = "default::object_store_config::object_store_streaming_upload_attempt_timeout_ms"
     )]
     pub streaming_upload_attempt_timeout_ms: u64,
+
+    /// Total counts of `streaming_upload` operation retries
     #[serde(
         default = "default::object_store_config::object_store_streaming_upload_retry_attempts"
     )]
     pub streaming_upload_retry_attempts: usize,
 
-    // read
+    /// Maximum timeout for `read` operation
     #[serde(default = "default::object_store_config::object_store_read_attempt_timeout_ms")]
     pub read_attempt_timeout_ms: u64,
+
+    /// Total counts of `read` operation retries
     #[serde(default = "default::object_store_config::object_store_read_retry_attempts")]
     pub read_retry_attempts: usize,
 
-    // streaming_read_init + streaming_read
+    /// Maximum timeout for `streaming_read_init` and `streaming_read` operation
     #[serde(
         default = "default::object_store_config::object_store_streaming_read_attempt_timeout_ms"
     )]
     pub streaming_read_attempt_timeout_ms: u64,
+
+    /// Total counts of `streaming_read operation` retries
     #[serde(default = "default::object_store_config::object_store_streaming_read_retry_attempts")]
     pub streaming_read_retry_attempts: usize,
 
-    // metadata
+    /// Maximum timeout for `metadata` operation
     #[serde(default = "default::object_store_config::object_store_metadata_attempt_timeout_ms")]
     pub metadata_attempt_timeout_ms: u64,
+
+    /// Total counts of `metadata` operation retries
     #[serde(default = "default::object_store_config::object_store_metadata_retry_attempts")]
     pub metadata_retry_attempts: usize,
 
-    // delete
+    /// Maximum timeout for `delete` operation
     #[serde(default = "default::object_store_config::object_store_delete_attempt_timeout_ms")]
     pub delete_attempt_timeout_ms: u64,
+
+    /// Total counts of `delete` operation retries
     #[serde(default = "default::object_store_config::object_store_delete_retry_attempts")]
     pub delete_retry_attempts: usize,
 
-    // delete_object
+    /// Maximum timeout for `delete_object` operation
     #[serde(
         default = "default::object_store_config::object_store_delete_objects_attempt_timeout_ms"
     )]
     pub delete_objects_attempt_timeout_ms: u64,
+
+    /// Total counts of `delete_object` operation retries
     #[serde(default = "default::object_store_config::object_store_delete_objects_retry_attempts")]
     pub delete_objects_retry_attempts: usize,
 
-    // list
+    /// Maximum timeout for `list` operation
     #[serde(default = "default::object_store_config::object_store_list_attempt_timeout_ms")]
     pub list_attempt_timeout_ms: u64,
+
+    /// Total counts of `list` operation retries
     #[serde(default = "default::object_store_config::object_store_list_retry_attempts")]
     pub list_retry_attempts: usize,
 }
@@ -1317,8 +1353,13 @@ pub mod default {
         pub fn parallelism_control_trigger_first_delay_sec() -> u64 {
             30
         }
+
         pub fn enable_dropped_column_reclaim() -> bool {
             false
+        }
+
+        pub fn secret_store_private_key() -> Vec<u8> {
+            "demo-secret-private-key".as_bytes().to_vec()
         }
     }
 
@@ -1361,6 +1402,10 @@ pub mod default {
 
         pub fn shared_buffer_flush_ratio() -> f32 {
             0.8
+        }
+
+        pub fn shared_buffer_min_batch_flush_size_mb() -> usize {
+            800
         }
 
         pub fn imm_merge_threshold() -> usize {
@@ -1444,10 +1489,6 @@ pub mod default {
             32 * 1024 * 1024
         }
 
-        pub fn max_sub_compaction() -> u32 {
-            4
-        }
-
         pub fn max_concurrent_compaction_task_number() -> u64 {
             16
         }
@@ -1487,6 +1528,7 @@ pub mod default {
         pub fn max_preload_io_retry_times() -> usize {
             3
         }
+
         pub fn mem_table_spill_threshold() -> usize {
             4 << 20
         }
@@ -1501,6 +1543,10 @@ pub mod default {
 
         pub fn max_prefetch_block_number() -> usize {
             16
+        }
+
+        pub fn compactor_concurrent_uploading_sst_count() -> Option<usize> {
+            None
         }
     }
 
@@ -1527,7 +1573,6 @@ pub mod default {
     }
 
     pub mod file_cache {
-
         pub fn dir() -> String {
             "".to_string()
         }
@@ -1538,14 +1583,6 @@ pub mod default {
 
         pub fn file_capacity_mb() -> usize {
             64
-        }
-
-        pub fn device_align() -> usize {
-            4096
-        }
-
-        pub fn device_io_size() -> usize {
-            16 * 1024
         }
 
         pub fn flushers() -> usize {
@@ -1560,20 +1597,12 @@ pub mod default {
             8
         }
 
-        pub fn lfu_window_to_cache_size_ratio() -> usize {
-            1
-        }
-
-        pub fn lfu_tiny_lru_capacity_ratio() -> f64 {
-            0.01
-        }
-
         pub fn insert_rate_limit_mb() -> usize {
             0
         }
 
-        pub fn catalog_bits() -> usize {
-            6
+        pub fn indexer_shards() -> usize {
+            64
         }
 
         pub fn compression() -> String {
@@ -1733,6 +1762,10 @@ pub mod default {
         pub fn stream_enable_arrangement_backfill() -> bool {
             true
         }
+
+        pub fn stream_high_join_amplification_threshold() -> usize {
+            2048
+        }
     }
 
     pub use crate::system_param::default as system;
@@ -1740,6 +1773,10 @@ pub mod default {
     pub mod batch {
         pub fn enable_barrier_read() -> bool {
             false
+        }
+
+        pub fn enable_spill() -> bool {
+            true
         }
 
         pub fn statement_timeout_in_sec() -> u32 {
@@ -1777,7 +1814,8 @@ pub mod default {
 
         // decrease this configure when the generation of checkpoint barrier is not frequent.
         const DEFAULT_TIER_COMPACT_TRIGGER_NUMBER: u64 = 12;
-        const DEFAULT_TARGET_FILE_SIZE_BASE: u64 = 32 * 1024 * 1024; // 32MB
+        const DEFAULT_TARGET_FILE_SIZE_BASE: u64 = 32 * 1024 * 1024;
+        // 32MB
         const DEFAULT_MAX_SUB_COMPACTION: u32 = 4;
         const DEFAULT_LEVEL_MULTIPLIER: u64 = 5;
         const DEFAULT_MAX_SPACE_RECLAIM_BYTES: u64 = 512 * 1024 * 1024; // 512MB;
@@ -1787,54 +1825,77 @@ pub mod default {
         const DEFAULT_MIN_OVERLAPPING_SUB_LEVEL_COMPACT_LEVEL_COUNT: u32 = 12;
         const DEFAULT_TOMBSTONE_RATIO_PERCENT: u32 = 40;
         const DEFAULT_EMERGENCY_PICKER: bool = true;
+        const DEFAULT_MAX_LEVEL: u32 = 6;
+        const DEFAULT_MAX_L0_COMPACT_LEVEL_COUNT: u32 = 42;
 
         use crate::catalog::hummock::CompactionFilterFlag;
 
         pub fn max_bytes_for_level_base() -> u64 {
             DEFAULT_MAX_BYTES_FOR_LEVEL_BASE
         }
+
         pub fn max_bytes_for_level_multiplier() -> u64 {
             DEFAULT_LEVEL_MULTIPLIER
         }
+
         pub fn max_compaction_bytes() -> u64 {
             DEFAULT_MAX_COMPACTION_BYTES
         }
+
         pub fn sub_level_max_compaction_bytes() -> u64 {
             DEFAULT_MIN_COMPACTION_BYTES
         }
+
         pub fn level0_tier_compact_file_number() -> u64 {
             DEFAULT_TIER_COMPACT_TRIGGER_NUMBER
         }
+
         pub fn target_file_size_base() -> u64 {
             DEFAULT_TARGET_FILE_SIZE_BASE
         }
+
         pub fn compaction_filter_mask() -> u32 {
             (CompactionFilterFlag::STATE_CLEAN | CompactionFilterFlag::TTL).into()
         }
+
         pub fn max_sub_compaction() -> u32 {
             DEFAULT_MAX_SUB_COMPACTION
         }
+
         pub fn level0_stop_write_threshold_sub_level_number() -> u64 {
             DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_SUB_LEVEL_NUMBER
         }
+
         pub fn level0_sub_level_compact_level_count() -> u32 {
             DEFAULT_MIN_SUB_LEVEL_COMPACT_LEVEL_COUNT
         }
+
         pub fn level0_overlapping_sub_level_compact_level_count() -> u32 {
             DEFAULT_MIN_OVERLAPPING_SUB_LEVEL_COMPACT_LEVEL_COUNT
         }
+
         pub fn max_space_reclaim_bytes() -> u64 {
             DEFAULT_MAX_SPACE_RECLAIM_BYTES
         }
+
         pub fn level0_max_compact_file_number() -> u64 {
             DEFAULT_MAX_COMPACTION_FILE_COUNT
         }
+
         pub fn tombstone_reclaim_ratio() -> u32 {
             DEFAULT_TOMBSTONE_RATIO_PERCENT
         }
 
         pub fn enable_emergency_picker() -> bool {
             DEFAULT_EMERGENCY_PICKER
+        }
+
+        pub fn max_level() -> u32 {
+            DEFAULT_MAX_LEVEL
+        }
+
+        pub fn max_l0_compact_level_count() -> u32 {
+            DEFAULT_MAX_L0_COMPACT_LEVEL_COUNT
         }
     }
 
@@ -1953,6 +2014,7 @@ pub mod default {
 
             pub mod developer {
                 use crate::util::env_var::env_var_is_true_or;
+
                 const RW_USE_OPENDAL_FOR_S3: &str = "RW_USE_OPENDAL_FOR_S3";
 
                 pub fn object_store_retry_unknown_service_error() -> bool {
@@ -2168,6 +2230,8 @@ pub struct CompactionConfig {
     pub tombstone_reclaim_ratio: u32,
     #[serde(default = "default::compaction_config::enable_emergency_picker")]
     pub enable_emergency_picker: bool,
+    #[serde(default = "default::compaction_config::max_level")]
+    pub max_level: u32,
 }
 
 #[cfg(test)]

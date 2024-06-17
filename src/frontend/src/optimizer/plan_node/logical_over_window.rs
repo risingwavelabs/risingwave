@@ -604,6 +604,16 @@ impl PredicatePushdown for LogicalOverWindow {
     }
 }
 
+macro_rules! empty_partition_by_not_implemented {
+    () => {
+        bail_not_implemented!(
+            issue = 11505,
+            "Window function with empty PARTITION BY is not supported because of potential bad performance. \
+            If you really need this, please workaround with something like `PARTITION BY 1::int`."
+        )
+    };
+}
+
 impl ToBatch for LogicalOverWindow {
     fn to_batch(&self) -> Result<PlanRef> {
         assert!(
@@ -619,7 +629,7 @@ impl ToBatch for LogicalOverWindow {
             .map(|e| e.index())
             .collect_vec();
         if partition_key_indices.is_empty() {
-            bail_not_implemented!("Window function with empty PARTITION BY is not supported yet");
+            empty_partition_by_not_implemented!();
         }
 
         let input = self.input().to_batch()?;
@@ -670,9 +680,7 @@ impl ToStream for LogicalOverWindow {
                 .map(|e| e.index())
                 .collect_vec();
             if partition_key_indices.is_empty() {
-                bail_not_implemented!(
-                    "Window function with empty PARTITION BY is not supported yet"
-                );
+                empty_partition_by_not_implemented!();
             }
 
             let sort_input =
@@ -686,6 +694,17 @@ impl ToStream for LogicalOverWindow {
         } else {
             // General (Emit-On-Update) case
 
+            if self
+                .window_functions()
+                .iter()
+                .any(|f| f.frame.bounds.is_session())
+            {
+                bail_not_implemented!(
+                    "Session frame is not yet supported in general streaming mode. \
+                    Please consider using Emit-On-Window-Close mode."
+                );
+            }
+
             // TODO(rc): Let's not introduce too many cases at once. Later we may decide to support
             // empty PARTITION BY by simply removing the following check.
             let partition_key_indices = self.window_functions()[0]
@@ -694,9 +713,7 @@ impl ToStream for LogicalOverWindow {
                 .map(|e| e.index())
                 .collect_vec();
             if partition_key_indices.is_empty() {
-                bail_not_implemented!(
-                    "Window function with empty PARTITION BY is not supported yet"
-                );
+                empty_partition_by_not_implemented!();
             }
 
             let new_input =

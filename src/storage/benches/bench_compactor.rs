@@ -58,14 +58,14 @@ pub async fn mock_sstable_store() -> SstableStoreRef {
     );
     let store = Arc::new(ObjectStoreImpl::InMem(store));
     let path = "test".to_string();
-    let meta_cache_v2 = HybridCacheBuilder::new()
+    let meta_cache = HybridCacheBuilder::new()
         .memory(64 << 20)
         .with_shards(2)
         .storage()
         .build()
         .await
         .unwrap();
-    let block_cache_v2 = HybridCacheBuilder::new()
+    let block_cache = HybridCacheBuilder::new()
         .memory(128 << 20)
         .with_shards(2)
         .storage()
@@ -82,8 +82,8 @@ pub async fn mock_sstable_store() -> SstableStoreRef {
         state_store_metrics: Arc::new(global_hummock_state_store_metrics(MetricLevel::Disabled)),
         use_new_object_prefix_strategy: true,
 
-        meta_cache_v2,
-        block_cache_v2,
+        meta_cache,
+        block_cache,
     }))
 }
 

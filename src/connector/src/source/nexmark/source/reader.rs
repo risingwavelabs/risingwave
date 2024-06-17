@@ -41,6 +41,7 @@ use crate::source::{
 #[derive(Debug)]
 pub struct NexmarkSplitReader {
     generator: EventGenerator,
+    #[expect(dead_code)]
     assigned_split: NexmarkSplit,
     event_num: u64,
     event_type: Option<EventType>,

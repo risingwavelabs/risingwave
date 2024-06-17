@@ -106,10 +106,11 @@ impl Rule for ApplyAggTransposeRule {
                 correlated_id,
                 correlated_indices.clone(),
                 false,
+                false,
             )
             .translate_apply(left, eq_predicates)
         } else {
-            LogicalApply::new(
+            LogicalApply::create(
                 left,
                 input,
                 JoinType::Inner,
@@ -118,7 +119,6 @@ impl Rule for ApplyAggTransposeRule {
                 correlated_indices.clone(),
                 false,
             )
-            .into()
         };
 
         let group_agg = {

@@ -29,7 +29,6 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::window_function::{
     create_window_state, StateKey, WindowFuncCall, WindowStates,
 };
-use risingwave_storage::row_serde::row_serde_util::serialize_pk_with_vnode;
 
 use super::over_partition::{
     new_empty_partition_cache, shrink_partition_cache, CacheKey, OverPartition, PartitionCache,
@@ -37,6 +36,8 @@ use super::over_partition::{
 };
 use crate::cache::ManagedLruCache;
 use crate::common::metrics::MetricsInfo;
+use crate::consistency::consistency_panic;
+use crate::executor::monitor::OverWindowMetrics;
 use crate::executor::over_window::over_partition::AffectedRange;
 use crate::executor::prelude::*;
 
@@ -65,7 +66,6 @@ struct ExecutorInner<S: StateStore> {
 
     state_table: StateTable<S>,
     watermark_sequence: AtomicU64Ref,
-    metrics: Arc<StreamingMetrics>,
 
     /// The maximum size of the chunk produced by executor at a time.
     chunk_size: usize,
@@ -183,7 +183,6 @@ impl<S: StateStore> OverWindowExecutor<S> {
                 state_key_to_table_sub_pk_proj,
                 state_table: args.state_table,
                 watermark_sequence: args.watermark_epoch,
-                metrics: args.metrics,
                 chunk_size: args.chunk_size,
                 cache_policy,
             },
@@ -213,7 +212,20 @@ impl<S: StateStore> OverWindowExecutor<S> {
                                     new_row: row,
                                 };
                             }
-                            _ => panic!("inconsistent changes in input chunk"),
+                            _ => {
+                                consistency_panic!(
+                                    ?pk,
+                                    "inconsistent changes in input chunk, double-inserting"
+                                );
+                                if let Record::Update { old_row, .. } = prev_change {
+                                    *prev_change = Record::Update {
+                                        old_row: *old_row,
+                                        new_row: row,
+                                    };
+                                } else {
+                                    *prev_change = Record::Insert { new_row: row };
+                                }
+                            }
                         }
                     } else {
                         changes_merged.insert(pk, Record::Insert { new_row: row });
@@ -233,7 +245,13 @@ impl<S: StateStore> OverWindowExecutor<S> {
                                     old_row: *real_old_row,
                                 };
                             }
-                            _ => panic!("inconsistent changes in input chunk"),
+                            _ => {
+                                consistency_panic!(
+                                    ?pk,
+                                    "inconsistent changes in input chunk, double-deleting"
+                                );
+                                *prev_change = Record::Delete { old_row: row };
+                            }
                         }
                     } else {
                         changes_merged.insert(pk, Record::Delete { old_row: row });
@@ -249,6 +267,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
         this: &'a mut ExecutorInner<S>,
         vars: &'a mut ExecutionVars<S>,
         chunk: StreamChunk,
+        metrics: &'a OverWindowMetrics,
     ) {
         // partition key => changes happened in the partition.
         let mut deltas: BTreeMap<DefaultOrdered<OwnedRow>, PartitionDelta> = BTreeMap::new();
@@ -307,11 +326,6 @@ impl<S: StateStore> OverWindowExecutor<S> {
             BTreeMap::new();
         let mut chunk_builder = StreamChunkBuilder::new(this.chunk_size, this.schema.data_types());
 
-        // Prepare things needed by metrics.
-        let actor_id = this.actor_ctx.id.to_string();
-        let fragment_id = this.actor_ctx.fragment_id.to_string();
-        let table_id = this.state_table.table_id().to_string();
-
         // Build final changes partition by partition.
         for (part_key, delta) in deltas {
             vars.stats.cache_lookup += 1;
@@ -362,13 +376,17 @@ impl<S: StateStore> OverWindowExecutor<S> {
                                 }
                             }
                             (existed, record) => {
-                                let vnode = this.state_table.compute_vnode_by_pk(&key.pk);
-                                let raw_key = serialize_pk_with_vnode(
-                                    &key.pk,
-                                    this.state_table.pk_serde(),
-                                    vnode,
+                                // when stream is inconsistent, there may be an `Update` of which the old pk does not actually exist
+                                consistency_panic!(
+                                    ?existed,
+                                    ?record,
+                                    "other cases should not exist",
                                 );
-                                panic!("other cases should not exist. raw_key: {:?}, existed: {:?}, new: {:?}", raw_key, existed, record);
+
+                                key_change_update_buffer.insert(pk, record);
+                                if let Some(chunk) = chunk_builder.append_record(existed) {
+                                    yield chunk;
+                                }
                             }
                         }
                     } else {
@@ -380,24 +398,28 @@ impl<S: StateStore> OverWindowExecutor<S> {
                 partition.write_record(&mut this.state_table, key, record);
             }
 
+            if !key_change_update_buffer.is_empty() {
+                consistency_panic!(
+                    ?key_change_update_buffer,
+                    "key-change update buffer should be empty after processing"
+                );
+                // if in non-strict mode, we can reach here, but we don't know the `StateKey`,
+                // so just ignore the buffer.
+            }
+
             let cache_len = partition.cache_real_len();
             let stats = partition.summarize();
-            let metrics = this.actor_ctx.streaming_metrics.clone();
             metrics
                 .over_window_range_cache_entry_count
-                .with_label_values(&[&table_id, &actor_id, &fragment_id])
                 .set(cache_len as i64);
             metrics
                 .over_window_range_cache_lookup_count
-                .with_label_values(&[&table_id, &actor_id, &fragment_id])
                 .inc_by(stats.lookup_count);
             metrics
                 .over_window_range_cache_left_miss_count
-                .with_label_values(&[&table_id, &actor_id, &fragment_id])
                 .inc_by(stats.left_miss_count);
             metrics
                 .over_window_range_cache_right_miss_count
-                .with_label_values(&[&table_id, &actor_id, &fragment_id])
                 .inc_by(stats.right_miss_count);
 
             // Update recently accessed range for later shrinking cache.
@@ -433,21 +455,17 @@ impl<S: StateStore> OverWindowExecutor<S> {
     async fn build_changes_for_partition(
         this: &ExecutorInner<S>,
         partition: &mut OverPartition<'_, S>,
-        delta: PartitionDelta,
+        mut delta: PartitionDelta,
     ) -> StreamExecutorResult<(
         BTreeMap<StateKey, Record<OwnedRow>>,
         Option<RangeInclusive<StateKey>>,
     )> {
-        assert!(!delta.is_empty(), "if there's no delta, we won't be here");
-
         let mut part_changes = BTreeMap::new();
 
         // Find affected ranges, this also ensures that all rows in the affected ranges are loaded
         // into the cache.
-        // TODO(rc): maybe we can find affected ranges for each window function call (each frame) to simplify
-        // the implementation of `find_affected_ranges`
         let (part_with_delta, affected_ranges) = partition
-            .find_affected_ranges(&this.state_table, &delta)
+            .find_affected_ranges(&this.state_table, &mut delta)
             .await?;
 
         let snapshot = part_with_delta.snapshot();
@@ -597,6 +615,12 @@ impl<S: StateStore> OverWindowExecutor<S> {
             "OverWindow",
         );
 
+        let metrics = metrics_info.metrics.new_over_window_metrics(
+            this.state_table.table_id(),
+            this.actor_ctx.id,
+            this.actor_ctx.fragment_id,
+        );
+
         let mut vars = ExecutionVars {
             cached_partitions: ManagedLruCache::unbounded(
                 this.watermark_sequence.clone(),
@@ -624,7 +648,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
                 }
                 Message::Chunk(chunk) => {
                     #[for_await]
-                    for chunk in Self::apply_chunk(&mut this, &mut vars, chunk) {
+                    for chunk in Self::apply_chunk(&mut this, &mut vars, chunk, &metrics) {
                         yield Message::Chunk(chunk?);
                     }
                     this.state_table.try_flush().await?;
@@ -633,24 +657,15 @@ impl<S: StateStore> OverWindowExecutor<S> {
                     this.state_table.commit(barrier.epoch).await?;
                     vars.cached_partitions.evict();
 
-                    {
-                        // update metrics
-                        let actor_id_str = this.actor_ctx.id.to_string();
-                        let fragment_id_str = this.actor_ctx.fragment_id.to_string();
-                        let table_id_str = this.state_table.table_id().to_string();
-                        this.metrics
-                            .over_window_cached_entry_count
-                            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
-                            .set(vars.cached_partitions.len() as _);
-                        this.metrics
-                            .over_window_cache_lookup_count
-                            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
-                            .inc_by(std::mem::take(&mut vars.stats.cache_lookup));
-                        this.metrics
-                            .over_window_cache_miss_count
-                            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
-                            .inc_by(std::mem::take(&mut vars.stats.cache_miss));
-                    }
+                    metrics
+                        .over_window_cached_entry_count
+                        .set(vars.cached_partitions.len() as _);
+                    metrics
+                        .over_window_cache_lookup_count
+                        .inc_by(std::mem::take(&mut vars.stats.cache_lookup));
+                    metrics
+                        .over_window_cache_miss_count
+                        .inc_by(std::mem::take(&mut vars.stats.cache_miss));
 
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(this.actor_ctx.id) {
                         let (_, cache_may_stale) =

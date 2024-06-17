@@ -69,9 +69,9 @@ impl CompactionTestMetrics {
 /// 1. Start the cluster with ci-compaction-test config: `./risedev d ci-compaction-test`
 /// 2. Ingest enough L0 SSTs, for example we can use the tpch-bench tool
 /// 3. Disable hummock manager commit new epochs: `./risedev ctl hummock disable-commit-epoch`, and
-/// it will print the current max committed epoch in Meta.
+///    it will print the current max committed epoch in Meta.
 /// 4. Use the test tool to replay hummock version deltas and trigger compactions:
-/// `./risedev compaction-test --state-store hummock+s3://your-bucket -t <table_id>`
+///    `./risedev compaction-test --state-store hummock+s3://your-bucket -t <table_id>`
 pub async fn compaction_test_main(
     _listen_addr: SocketAddr,
     advertise_addr: HostAddr,

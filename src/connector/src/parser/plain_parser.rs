@@ -15,6 +15,7 @@
 use risingwave_common::bail;
 
 use super::unified::json::TimestamptzHandling;
+use super::unified::kv_event::KvEvent;
 use super::{
     AccessBuilderImpl, ByteStreamSourceParser, EncodingProperties, EncodingType,
     SourceStreamChunkRowWriter, SpecificParserConfig,
@@ -23,9 +24,7 @@ use crate::error::ConnectorResult;
 use crate::parser::bytes_parser::BytesAccessBuilder;
 use crate::parser::simd_json_parser::DebeziumJsonAccessBuilder;
 use crate::parser::unified::debezium::parse_transaction_meta;
-use crate::parser::unified::upsert::UpsertChangeEvent;
-use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer_with_op;
-use crate::parser::unified::{AccessImpl, ChangeEventOperation};
+use crate::parser::unified::AccessImpl;
 use crate::parser::upsert_parser::get_key_column_name;
 use crate::parser::{BytesProperties, ParseResult, ParserFormat};
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef, SourceMeta};
@@ -103,30 +102,22 @@ impl PlainParser {
             };
         }
 
-        // reuse upsert component but always insert
-        let mut row_op: UpsertChangeEvent<AccessImpl<'_, '_>, AccessImpl<'_, '_>> =
-            UpsertChangeEvent::default();
-        let change_event_op = ChangeEventOperation::Upsert;
+        let mut row_op: KvEvent<AccessImpl<'_>, AccessImpl<'_>> = KvEvent::default();
 
         if let Some(data) = key
             && let Some(key_builder) = self.key_builder.as_mut()
         {
             // key is optional in format plain
-            row_op = row_op.with_key(key_builder.generate_accessor(data).await?);
+            row_op.with_key(key_builder.generate_accessor(data).await?);
         }
         if let Some(data) = payload {
             // the data part also can be an empty vec
-            row_op = row_op.with_value(self.payload_builder.generate_accessor(data).await?);
+            row_op.with_value(self.payload_builder.generate_accessor(data).await?);
         }
 
-        Ok(
-            apply_row_operation_on_stream_chunk_writer_with_op(
-                row_op,
-                &mut writer,
-                change_event_op,
-            )
-            .map(|_| ParseResult::Rows)?,
-        )
+        writer.do_insert(|column: &SourceColumnDesc| row_op.access_field(column))?;
+
+        Ok(ParseResult::Rows)
     }
 }
 
@@ -287,11 +278,11 @@ mod tests {
             if i == 0 {
                 // put begin message at first
                 source_msg_batch.push(SourceMessage {
-                    meta: SourceMeta::DebeziumCdc(DebeziumCdcMeta {
-                        full_table_name: "orders".to_string(),
-                        source_ts_ms: 0,
-                        is_transaction_meta: transactional,
-                    }),
+                    meta: SourceMeta::DebeziumCdc(DebeziumCdcMeta::new(
+                        "orders".to_string(),
+                        0,
+                        transactional,
+                    )),
                     split_id: SplitId::from("1001"),
                     offset: "0".into(),
                     key: None,
@@ -301,11 +292,11 @@ mod tests {
             // put data messages
             for data_msg in batch {
                 source_msg_batch.push(SourceMessage {
-                    meta: SourceMeta::DebeziumCdc(DebeziumCdcMeta {
-                        full_table_name: "orders".to_string(),
-                        source_ts_ms: 0,
-                        is_transaction_meta: false,
-                    }),
+                    meta: SourceMeta::DebeziumCdc(DebeziumCdcMeta::new(
+                        "orders".to_string(),
+                        0,
+                        false,
+                    )),
                     split_id: SplitId::from("1001"),
                     offset: "0".into(),
                     key: None,
@@ -315,11 +306,11 @@ mod tests {
             if i == data_batches.len() - 1 {
                 // put commit message at last
                 source_msg_batch.push(SourceMessage {
-                    meta: SourceMeta::DebeziumCdc(DebeziumCdcMeta {
-                        full_table_name: "orders".to_string(),
-                        source_ts_ms: 0,
-                        is_transaction_meta: transactional,
-                    }),
+                    meta: SourceMeta::DebeziumCdc(DebeziumCdcMeta::new(
+                        "orders".to_string(),
+                        0,
+                        transactional,
+                    )),
                     split_id: SplitId::from("1001"),
                     offset: "0".into(),
                     key: None,
@@ -364,11 +355,7 @@ mod tests {
         let begin_msg = r#"{"schema":null,"payload":{"status":"BEGIN","id":"3E11FA47-71CA-11E1-9E33-C80AA9429562:23","event_count":null,"data_collections":null,"ts_ms":1704269323180}}"#;
         let commit_msg = r#"{"schema":null,"payload":{"status":"END","id":"3E11FA47-71CA-11E1-9E33-C80AA9429562:23","event_count":11,"data_collections":[{"data_collection":"public.orders_tx","event_count":5},{"data_collection":"public.person","event_count":6}],"ts_ms":1704269323180}}"#;
 
-        let cdc_meta = SourceMeta::DebeziumCdc(DebeziumCdcMeta {
-            full_table_name: "orders".to_string(),
-            source_ts_ms: 0,
-            is_transaction_meta: true,
-        });
+        let cdc_meta = SourceMeta::DebeziumCdc(DebeziumCdcMeta::new("orders".to_string(), 0, true));
         let msg_meta = MessageMeta {
             meta: &cdc_meta,
             split_id: "1001",

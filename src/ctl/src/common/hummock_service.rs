@@ -179,13 +179,13 @@ impl HummockServiceOpts {
 
         let opts = self.get_storage_opts();
 
-        let meta_cache_v2 = HybridCacheBuilder::new()
+        let meta_cache = HybridCacheBuilder::new()
             .memory(opts.meta_cache_capacity_mb * (1 << 20))
             .with_shards(opts.meta_cache_shard_num)
             .storage()
             .build()
             .await?;
-        let block_cache_v2 = HybridCacheBuilder::new()
+        let block_cache = HybridCacheBuilder::new()
             .memory(opts.block_cache_capacity_mb * (1 << 20))
             .with_shards(opts.block_cache_shard_num)
             .storage()
@@ -202,8 +202,8 @@ impl HummockServiceOpts {
                 MetricLevel::Disabled,
             )),
             use_new_object_prefix_strategy,
-            meta_cache_v2,
-            block_cache_v2,
+            meta_cache,
+            block_cache,
         })))
     }
 }

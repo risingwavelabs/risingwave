@@ -34,7 +34,7 @@ use risingwave_rpc_client::MetaClient;
 use tokio::sync::watch::Receiver;
 
 use super::root_catalog::Catalog;
-use super::{DatabaseId, TableId};
+use super::{DatabaseId, SecretId, TableId};
 use crate::error::Result;
 use crate::user::UserId;
 
@@ -43,6 +43,7 @@ pub type CatalogReadGuard = ArcRwLockReadGuard<RawRwLock, Catalog>;
 /// [`CatalogReader`] can read catalog from local catalog and force the holder can not modify it.
 #[derive(Clone)]
 pub struct CatalogReader(Arc<RwLock<Catalog>>);
+
 impl CatalogReader {
     pub fn new(inner: Arc<RwLock<Catalog>>) -> Self {
         CatalogReader(inner)
@@ -130,6 +131,15 @@ pub trait CatalogWriter: Send + Sync {
         connection: create_connection_request::Payload,
     ) -> Result<()>;
 
+    async fn create_secret(
+        &self,
+        secret_name: String,
+        database_id: u32,
+        schema_id: u32,
+        owner_id: u32,
+        payload: Vec<u8>,
+    ) -> Result<()>;
+
     async fn comment_on(&self, comment: PbComment) -> Result<()>;
 
     async fn drop_table(
@@ -163,6 +173,8 @@ pub trait CatalogWriter: Send + Sync {
     async fn drop_function(&self, function_id: FunctionId) -> Result<()>;
 
     async fn drop_connection(&self, connection_id: u32) -> Result<()>;
+
+    async fn drop_secret(&self, secret_id: SecretId) -> Result<()>;
 
     async fn alter_table_name(&self, table_id: u32, table_name: &str) -> Result<()>;
 
@@ -373,6 +385,21 @@ impl CatalogWriter for CatalogWriterImpl {
         self.wait_version(version).await
     }
 
+    async fn create_secret(
+        &self,
+        secret_name: String,
+        database_id: u32,
+        schema_id: u32,
+        owner_id: u32,
+        payload: Vec<u8>,
+    ) -> Result<()> {
+        let version = self
+            .meta_client
+            .create_secret(secret_name, database_id, schema_id, owner_id, payload)
+            .await?;
+        self.wait_version(version).await
+    }
+
     async fn comment_on(&self, comment: PbComment) -> Result<()> {
         let version = self.meta_client.comment_on(comment).await?;
         self.wait_version(version).await
@@ -452,6 +479,11 @@ impl CatalogWriter for CatalogWriterImpl {
 
     async fn drop_connection(&self, connection_id: u32) -> Result<()> {
         let version = self.meta_client.drop_connection(connection_id).await?;
+        self.wait_version(version).await
+    }
+
+    async fn drop_secret(&self, secret_id: SecretId) -> Result<()> {
+        let version = self.meta_client.drop_secret(secret_id).await?;
         self.wait_version(version).await
     }
 

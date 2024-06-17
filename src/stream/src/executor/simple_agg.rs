@@ -236,7 +236,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
             &this.agg_calls,
             this.watermark_epoch.clone(),
             &this.distinct_dedup_tables,
-            this.actor_ctx.clone(),
+            &this.actor_ctx,
         );
 
         yield Message::Barrier(barrier);

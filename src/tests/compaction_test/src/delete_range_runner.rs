@@ -208,13 +208,13 @@ async fn compaction_test(
         Arc::new(ObjectStoreConfig::default()),
     )
     .await;
-    let meta_cache_v2 = HybridCacheBuilder::new()
+    let meta_cache = HybridCacheBuilder::new()
         .memory(storage_memory_config.meta_cache_capacity_mb * (1 << 20))
         .with_shards(storage_memory_config.meta_cache_shard_num)
         .storage()
         .build()
         .await?;
-    let block_cache_v2 = HybridCacheBuilder::new()
+    let block_cache = HybridCacheBuilder::new()
         .memory(storage_memory_config.block_cache_capacity_mb * (1 << 20))
         .with_shards(storage_memory_config.block_cache_shard_num)
         .storage()
@@ -228,8 +228,8 @@ async fn compaction_test(
         recent_filter: None,
         state_store_metrics: state_store_metrics.clone(),
         use_new_object_prefix_strategy: system_params.use_new_object_prefix_strategy(),
-        meta_cache_v2,
-        block_cache_v2,
+        meta_cache,
+        block_cache,
     }));
 
     let store = HummockStorage::new(

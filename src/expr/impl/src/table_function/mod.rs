@@ -16,5 +16,6 @@ mod generate_series;
 mod generate_subscripts;
 mod jsonb;
 mod pg_expandarray;
+mod pg_get_keywords;
 mod regexp_matches;
 mod unnest;

@@ -32,6 +32,7 @@ pub struct MqttSplitReader {
     client: rumqttc::v5::AsyncClient,
     qos: QoS,
     splits: Vec<MqttSplit>,
+    #[expect(dead_code)]
     properties: MqttProperties,
     parser_config: ParserConfig,
     source_ctx: SourceContextRef,

@@ -45,20 +45,20 @@ use risingwave_meta_model_v2::hummock_version_stats::TableStats;
 use risingwave_meta_model_v2::object::ObjectType;
 use risingwave_meta_model_v2::prelude::{
     Actor, ActorDispatcher, CatalogVersion, Cluster, Connection, Database, Fragment, Function,
-    Index, Object, ObjectDependency, Schema, Sink, Source, StreamingJob, Subscription,
+    Index, Object, ObjectDependency, Schema, Secret, Sink, Source, StreamingJob, Subscription,
     SystemParameter, Table, User, UserPrivilege, View, Worker, WorkerProperty,
 };
 use risingwave_meta_model_v2::{
     catalog_version, cluster, compaction_config, compaction_status, compaction_task, connection,
     database, function, hummock_pinned_snapshot, hummock_pinned_version, hummock_sequence,
-    hummock_version_delta, hummock_version_stats, index, object, object_dependency, schema, sink,
-    source, streaming_job, subscription, table, user, user_privilege, view, worker,
+    hummock_version_delta, hummock_version_stats, index, object, object_dependency, schema, secret,
+    sink, source, streaming_job, subscription, table, user, user_privilege, view, worker,
     worker_property, CreateType, JobStatus, ObjectId, StreamingParallelism,
 };
 use risingwave_pb::catalog::table::PbTableType;
 use risingwave_pb::catalog::{
-    PbConnection, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbSubscription,
-    PbTable, PbView,
+    PbConnection, PbDatabase, PbFunction, PbIndex, PbSchema, PbSecret, PbSink, PbSource,
+    PbSubscription, PbTable, PbView,
 };
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::hummock::{
@@ -188,6 +188,7 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
     let functions = PbFunction::list(&meta_store).await?;
     let connections = PbConnection::list(&meta_store).await?;
     let subscriptions = PbSubscription::list(&meta_store).await?;
+    let secrets = PbSecret::list(&meta_store).await?;
 
     // inuse object ids.
     let mut inuse_obj_ids = tables
@@ -318,6 +319,28 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
             .await?;
     }
     println!("connections migrated");
+
+    // secret mapping
+    let mut secret_rewrite = HashMap::new();
+    for mut secret in secrets {
+        let id = next_available_id();
+        secret_rewrite.insert(secret.id, id);
+        secret.id = id as _;
+
+        let obj = object::ActiveModel {
+            oid: Set(id as _),
+            obj_type: Set(ObjectType::Secret),
+            owner_id: Set(secret.owner as _),
+            database_id: Set(Some(*db_rewrite.get(&secret.database_id).unwrap() as _)),
+            schema_id: Set(Some(*schema_rewrite.get(&secret.schema_id).unwrap() as _)),
+            ..Default::default()
+        };
+        Object::insert(obj).exec(&meta_store_sql.conn).await?;
+        Secret::insert(secret::ActiveModel::from(secret))
+            .exec(&meta_store_sql.conn)
+            .await?;
+    }
+    println!("secrets migrated");
 
     // add object: table, source, sink, index, view, subscription.
     macro_rules! insert_objects {
@@ -525,6 +548,16 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
                 if let Some(id) = s.connection_id.as_mut() {
                     *id = *connection_rewrite.get(id).unwrap();
                 }
+                for secret_id in s.secret_ref.values_mut() {
+                    *secret_id = *secret_rewrite.get(secret_id).unwrap();
+                }
+                object_dependencies.extend(s.secret_ref.values().map(|id| {
+                    object_dependency::ActiveModel {
+                        id: NotSet,
+                        oid: Set(*id as _),
+                        used_by: Set(s.id as _),
+                    }
+                }));
                 s.into()
             })
             .collect();

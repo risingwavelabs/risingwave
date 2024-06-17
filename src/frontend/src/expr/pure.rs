@@ -209,6 +209,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::JsonbPathMatch
             | Type::JsonbPathQueryArray
             | Type::JsonbPathQueryFirst
+            | Type::JsonbSet
             | Type::IsJson
             | Type::ToJsonb
             | Type::Sind
