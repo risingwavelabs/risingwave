@@ -14,6 +14,7 @@
 
 pub mod gcs;
 pub mod s3;
+pub mod fs;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -63,11 +64,10 @@ impl SinkWriter for OpenDalSinkWriter {
     }
 
     async fn barrier(&mut self, is_checkpoint: bool) -> Result<()> {
-        if is_checkpoint {
-            let sink_writer = self
-                .sink_writer
-                .take()
-                .ok_or_else(|| SinkError::Opendal("Can't get sink writer".to_string()))?;
+        if is_checkpoint && let Some(sink_writer) =self
+        .sink_writer
+        .take() {
+           
             sink_writer.close().await?;
         }
 

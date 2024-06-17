@@ -127,12 +127,11 @@ impl S3Sink {
             );
         }
 
-        builder.enable_virtual_host_style();
 
         if let Some(assume_role) = config.common.assume_role {
             builder.role_arn(&assume_role);
         }
-
+        builder.disable_config_load();
         let operator: Operator = Operator::new(builder)?
             .layer(LoggingLayer::default())
             .layer(RetryLayer::default())
