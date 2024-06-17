@@ -219,6 +219,43 @@ impl Fragment {
 
         (all_parallel_units, current_parallel_units)
     }
+
+    pub fn all_worker_slots(&self) -> HashMap<u32, usize> {
+        self.r
+            .worker_nodes
+            .iter()
+            .map(|w| (w.id, w.parallel_units.len()))
+            .collect()
+    }
+
+    pub fn parallelism(&self) -> usize {
+        self.inner.actors.len()
+    }
+
+    pub fn used_worker_slots(&self) -> HashMap<u32, usize> {
+        let actor_to_worker: HashMap<_, _> = self
+            .r
+            .table_fragments
+            .iter()
+            .flat_map(|tf| {
+                tf.actor_status.iter().map(|(&actor_id, status)| {
+                    (
+                        actor_id,
+                        status.get_parallel_unit().unwrap().get_worker_node_id(),
+                    )
+                })
+            })
+            .collect();
+
+        self.inner
+            .actors
+            .iter()
+            .map(|a| actor_to_worker[&a.actor_id])
+            .fold(HashMap::<u32, usize>::new(), |mut acc, num| {
+                *acc.entry(num).or_insert(0) += 1;
+                acc
+            })
+    }
 }
 
 impl Cluster {
