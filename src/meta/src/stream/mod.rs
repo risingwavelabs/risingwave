@@ -20,6 +20,7 @@ mod stream_manager;
 #[cfg(test)]
 mod test_fragmenter;
 mod test_scale;
+mod scale_prev;
 
 use std::collections::HashMap;
 
@@ -28,6 +29,7 @@ use risingwave_pb::stream_plan::StreamActor;
 use risingwave_pb::stream_service::build_actor_info::SubscriptionIds;
 use risingwave_pb::stream_service::BuildActorInfo;
 pub use scale::*;
+pub use scale_prev::*;
 pub use sink::*;
 pub use source_manager::*;
 pub use stream_graph::*;

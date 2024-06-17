@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use risingwave_common::catalog;
 use risingwave_meta::manager::MetadataManager;
 use risingwave_meta::model::TableParallelism;
-use risingwave_meta::stream::{ScaleControllerRef, TableRevision};
+use risingwave_meta::stream::{ParallelUnitReschedule, ScaleControllerRef, TableRevision};
 use risingwave_meta_model_v2::FragmentId;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::scale_service_server::ScaleService;
@@ -30,9 +30,7 @@ use tonic::{Request, Response, Status};
 
 use crate::barrier::BarrierManagerRef;
 use crate::model::MetadataModel;
-use crate::stream::{
-    GlobalStreamManagerRef, ParallelUnitReschedule, RescheduleOptions, SourceManagerRef,
-};
+use crate::stream::{GlobalStreamManagerRef, RescheduleOptions, SourceManagerRef};
 
 pub struct ScaleServiceImpl {
     metadata_manager: MetadataManager,
