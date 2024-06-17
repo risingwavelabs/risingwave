@@ -700,10 +700,8 @@ pub(crate) fn insert_merger_to_union_with_project(
                 })),
                 ..Default::default()
             }],
-            stream_key: vec![],
-            append_only: false,
             identity: uniq_name.to_string(),
-            fields: vec![],
+            fields: node.fields.clone(),
             node_body: Some(project_node.clone()),
             ..Default::default()
         });

@@ -1279,8 +1279,6 @@ impl DdlController {
 
                                     merge_stream_node.fields = sink_fields.to_vec();
 
-                                    input_project_node.fields.clone_from(&node.fields);
-
                                     return false;
                                 }
                             }
