@@ -13,10 +13,10 @@
 // limitations under the License.
 
 use std::borrow::Cow;
+use std::fmt;
 use std::fmt::Display;
 use std::hash::BuildHasher;
 use std::sync::Arc;
-use std::{fmt, usize};
 
 use bytes::Bytes;
 use either::Either;
@@ -249,6 +249,7 @@ impl DataChunk {
         Self::new(columns, Bitmap::ones(cardinality))
     }
 
+    /// Scatter a compacted chunk to a new chunk with the given visibility.
     pub fn uncompact(self, vis: Bitmap) -> Self {
         let mut uncompact_builders: Vec<_> = self
             .columns
@@ -803,7 +804,7 @@ impl DataChunkTestExt for DataChunk {
                 let arr = col;
                 let mut builder = arr.create_builder(n * 2);
                 for v in arr.iter() {
-                    builder.append(&v.to_owned_datum());
+                    builder.append(v.to_owned_datum());
                     builder.append_null();
                 }
 

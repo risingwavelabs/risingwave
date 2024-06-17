@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use foyer::memory::{LfuConfig, LruConfig, S3FifoConfig};
+use foyer::{LfuConfig, LruConfig, S3FifoConfig};
 use risingwave_common::config::{
     CacheEvictionConfig, EvictionConfig, StorageConfig, StorageMemoryConfig,
     MAX_BLOCK_CACHE_SHARD_BITS, MAX_META_CACHE_SHARD_BITS, MIN_BUFFER_SIZE_PER_SHARD,
@@ -27,7 +27,9 @@ pub const MIN_COMPUTE_MEMORY_MB: usize = 512;
 /// overhead, network buffer, etc.) in megabytes.
 pub const MIN_SYSTEM_RESERVED_MEMORY_MB: usize = 512;
 
-const SYSTEM_RESERVED_MEMORY_PROPORTION: f64 = 0.3;
+const RESERVED_MEMORY_LEVELS: [usize; 2] = [16 << 30, usize::MAX];
+
+const RESERVED_MEMORY_PROPORTIONS: [f64; 2] = [0.3, 0.2];
 
 const STORAGE_MEMORY_PROPORTION: f64 = 0.3;
 
@@ -40,8 +42,11 @@ const STORAGE_SHARED_BUFFER_MAX_MEMORY_MB: usize = 4096;
 const STORAGE_META_CACHE_MEMORY_PROPORTION: f64 = 0.35;
 const STORAGE_SHARED_BUFFER_MEMORY_PROPORTION: f64 = 0.3;
 
+/// The proportion of compute memory used for batch processing.
+const COMPUTE_BATCH_MEMORY_PROPORTION: f64 = 0.3;
+
 /// Each compute node reserves some memory for stack and code segment of processes, allocation
-/// overhead, network buffer, etc. based on `SYSTEM_RESERVED_MEMORY_PROPORTION`. The reserve memory
+/// overhead, network buffer, etc. based on gradient reserve memory proportion. The reserve memory
 /// size must be larger than `MIN_SYSTEM_RESERVED_MEMORY_MB`
 pub fn reserve_memory_bytes(opts: &ComputeNodeOpts) -> (usize, usize) {
     if opts.total_memory_bytes < MIN_COMPUTE_MEMORY_MB << 20 {
@@ -52,15 +57,40 @@ pub fn reserve_memory_bytes(opts: &ComputeNodeOpts) -> (usize, usize) {
         );
     }
 
-    // If `reserved_memory_bytes` is not set, use `SYSTEM_RESERVED_MEMORY_PROPORTION` * `total_memory_bytes`.
-    let reserved = opts.reserved_memory_bytes.unwrap_or_else(|| {
-        (opts.total_memory_bytes as f64 * SYSTEM_RESERVED_MEMORY_PROPORTION).ceil() as usize
-    });
+    // If `reserved_memory_bytes` is not set, calculate total_memory_bytes based on gradient reserve memory proportion.
+    let reserved = opts
+        .reserved_memory_bytes
+        .unwrap_or_else(|| gradient_reserve_memory_bytes(opts.total_memory_bytes));
 
     // Should have at least `MIN_SYSTEM_RESERVED_MEMORY_MB` for reserved memory.
     let reserved = std::cmp::max(reserved, MIN_SYSTEM_RESERVED_MEMORY_MB << 20);
 
     (reserved, opts.total_memory_bytes - reserved)
+}
+
+/// Calculate the reserved memory based on the total memory size.
+/// The reserved memory size is calculated based on the following gradient:
+/// - 30% of the first 16GB
+/// - 20% of the rest
+fn gradient_reserve_memory_bytes(total_memory_bytes: usize) -> usize {
+    let mut total_memory_bytes = total_memory_bytes;
+    let mut reserved = 0;
+    for i in 0..RESERVED_MEMORY_LEVELS.len() {
+        let level_diff = if i == 0 {
+            RESERVED_MEMORY_LEVELS[0]
+        } else {
+            RESERVED_MEMORY_LEVELS[i] - RESERVED_MEMORY_LEVELS[i - 1]
+        };
+        if total_memory_bytes <= level_diff {
+            reserved += (total_memory_bytes as f64 * RESERVED_MEMORY_PROPORTIONS[i]) as usize;
+            break;
+        } else {
+            reserved += (level_diff as f64 * RESERVED_MEMORY_PROPORTIONS[i]) as usize;
+            total_memory_bytes -= level_diff;
+        }
+    }
+
+    reserved
 }
 
 /// Decide the memory limit for each storage cache. If not specified in `StorageConfig`, memory
@@ -69,6 +99,7 @@ pub fn storage_memory_config(
     non_reserved_memory_bytes: usize,
     embedded_compactor_enabled: bool,
     storage_config: &StorageConfig,
+    is_serving: bool,
 ) -> StorageMemoryConfig {
     let (storage_memory_proportion, compactor_memory_proportion) = if embedded_compactor_enabled {
         (STORAGE_MEMORY_PROPORTION, COMPACTOR_MEMORY_PROPORTION)
@@ -110,14 +141,18 @@ pub fn storage_memory_config(
         * STORAGE_SHARED_BUFFER_MEMORY_PROPORTION)
         .ceil() as usize)
         >> 20;
-    let shared_buffer_capacity_mb =
+    let mut shared_buffer_capacity_mb =
         storage_config
             .shared_buffer_capacity_mb
             .unwrap_or(std::cmp::min(
                 default_shared_buffer_capacity_mb,
                 STORAGE_SHARED_BUFFER_MAX_MEMORY_MB,
             ));
-    if shared_buffer_capacity_mb != default_shared_buffer_capacity_mb {
+    if is_serving {
+        default_block_cache_capacity_mb += default_shared_buffer_capacity_mb;
+        // set 1 to pass internal check
+        shared_buffer_capacity_mb = 1;
+    } else if shared_buffer_capacity_mb != default_shared_buffer_capacity_mb {
         default_block_cache_capacity_mb += default_shared_buffer_capacity_mb;
         default_block_cache_capacity_mb =
             default_block_cache_capacity_mb.saturating_sub(shared_buffer_capacity_mb);
@@ -208,12 +243,22 @@ pub fn storage_memory_config(
         }),
         CacheEvictionConfig::S3Fifo {
             small_queue_capacity_ratio_in_percent,
+            ghost_queue_capacity_ratio_in_percent,
+            small_to_main_freq_threshold,
         } => EvictionConfig::S3Fifo(S3FifoConfig {
             small_queue_capacity_ratio: small_queue_capacity_ratio_in_percent.unwrap_or(
                 risingwave_common::config::default::storage::small_queue_capacity_ratio_in_percent(
                 ),
             ) as f64
                 / 100.0,
+            ghost_queue_capacity_ratio: ghost_queue_capacity_ratio_in_percent.unwrap_or(
+                risingwave_common::config::default::storage::ghost_queue_capacity_ratio_in_percent(
+                ),
+            ) as f64
+                / 100.0,
+            small_to_main_freq_threshold: small_to_main_freq_threshold.unwrap_or(
+                risingwave_common::config::default::storage::small_to_main_freq_threshold(),
+            ),
         }),
     };
 
@@ -232,6 +277,10 @@ pub fn storage_memory_config(
         block_cache_eviction_config,
         meta_cache_eviction_config,
     }
+}
+
+pub fn batch_mem_limit(compute_memory_bytes: usize) -> u64 {
+    (compute_memory_bytes as f64 * COMPUTE_BATCH_MEMORY_PROPORTION) as u64
 }
 
 #[cfg(test)]
@@ -279,17 +328,36 @@ mod tests {
 
         let total_non_reserved_memory_bytes = 8 << 30;
 
-        let memory_config =
-            storage_memory_config(total_non_reserved_memory_bytes, true, &storage_config);
+        let memory_config = storage_memory_config(
+            total_non_reserved_memory_bytes,
+            true,
+            &storage_config,
+            false,
+        );
         assert_eq!(memory_config.block_cache_capacity_mb, 737);
         assert_eq!(memory_config.meta_cache_capacity_mb, 860);
         assert_eq!(memory_config.shared_buffer_capacity_mb, 737);
         assert_eq!(memory_config.compactor_memory_limit_mb, 819);
 
+        let memory_config = storage_memory_config(
+            total_non_reserved_memory_bytes,
+            false,
+            &storage_config,
+            true,
+        );
+        assert_eq!(memory_config.block_cache_capacity_mb, 1966);
+        assert_eq!(memory_config.meta_cache_capacity_mb, 1146);
+        assert_eq!(memory_config.shared_buffer_capacity_mb, 1);
+        assert_eq!(memory_config.compactor_memory_limit_mb, 0);
+
         storage_config.data_file_cache.dir = "data".to_string();
         storage_config.meta_file_cache.dir = "meta".to_string();
-        let memory_config =
-            storage_memory_config(total_non_reserved_memory_bytes, true, &storage_config);
+        let memory_config = storage_memory_config(
+            total_non_reserved_memory_bytes,
+            true,
+            &storage_config,
+            false,
+        );
         assert_eq!(memory_config.block_cache_capacity_mb, 737);
         assert_eq!(memory_config.meta_cache_capacity_mb, 860);
         assert_eq!(memory_config.shared_buffer_capacity_mb, 737);
@@ -299,10 +367,23 @@ mod tests {
         storage_config.cache.meta_cache_capacity_mb = Some(128);
         storage_config.shared_buffer_capacity_mb = Some(1024);
         storage_config.compactor_memory_limit_mb = Some(512);
-        let memory_config = storage_memory_config(0, true, &storage_config);
+        let memory_config = storage_memory_config(0, true, &storage_config, false);
         assert_eq!(memory_config.block_cache_capacity_mb, 512);
         assert_eq!(memory_config.meta_cache_capacity_mb, 128);
         assert_eq!(memory_config.shared_buffer_capacity_mb, 1024);
         assert_eq!(memory_config.compactor_memory_limit_mb, 512);
+    }
+
+    #[test]
+    fn test_gradient_reserve_memory_bytes() {
+        assert_eq!(super::gradient_reserve_memory_bytes(4 << 30), 1288490188);
+        assert_eq!(super::gradient_reserve_memory_bytes(8 << 30), 2576980377);
+        assert_eq!(super::gradient_reserve_memory_bytes(16 << 30), 5153960755);
+        assert_eq!(super::gradient_reserve_memory_bytes(24 << 30), 6871947673);
+        assert_eq!(super::gradient_reserve_memory_bytes(32 << 30), 8589934591);
+        assert_eq!(super::gradient_reserve_memory_bytes(54 << 30), 13314398617);
+        assert_eq!(super::gradient_reserve_memory_bytes(64 << 30), 15461882265);
+        assert_eq!(super::gradient_reserve_memory_bytes(100 << 30), 23192823398);
+        assert_eq!(super::gradient_reserve_memory_bytes(128 << 30), 29205777612);
     }
 }

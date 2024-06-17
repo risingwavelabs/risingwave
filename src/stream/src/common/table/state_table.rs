@@ -13,14 +13,13 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::default::Default;
 use std::ops::Bound;
 use std::ops::Bound::*;
 use std::sync::Arc;
 
 use bytes::{BufMut, Bytes, BytesMut};
 use either::Either;
-use foyer::memory::CacheContext;
+use foyer::CacheContext;
 use futures::{pin_mut, FutureExt, Stream, StreamExt, TryStreamExt};
 use futures_async_stream::for_await;
 use itertools::{izip, Itertools};
@@ -409,14 +408,8 @@ where
             )
         };
 
-        let state_table_op_consistency_level = if crate::consistency::insane() {
-            // In insane mode, we will have inconsistent operations applied on the table, even if
-            // our executor code do not expect that.
-            StateTableOpConsistencyLevel::Inconsistent
-        } else {
-            op_consistency_level
-        };
-        let op_consistency_level = match state_table_op_consistency_level {
+        let state_table_op_consistency_level = op_consistency_level;
+        let op_consistency_level = match op_consistency_level {
             StateTableOpConsistencyLevel::Inconsistent => OpConsistencyLevel::Inconsistent,
             StateTableOpConsistencyLevel::ConsistentOldValue => {
                 let row_serde = make_row_serde();
@@ -601,6 +594,7 @@ where
         .await
     }
 
+    /// Create a state table with distribution and without sanity check, used for unit tests.
     pub async fn new_with_distribution_inconsistent_op(
         store: S,
         table_id: TableId,

@@ -19,6 +19,7 @@ use risingwave_common::memory::MemoryContext;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::memcmp_encoding::encode_chunk;
 use risingwave_common::util::sort_util::ColumnOrder;
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use super::{BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
@@ -91,7 +92,12 @@ impl SortExecutor {
 
         #[for_await]
         for chunk in self.child.execute() {
-            chunks.push(chunk?.compact());
+            let chunk = chunk?.compact();
+            let chunk_estimated_heap_size = chunk.estimated_heap_size();
+            chunks.push(chunk);
+            if !self.mem_context.add(chunk_estimated_heap_size as i64) {
+                Err(BatchError::OutOfMemory(self.mem_context.mem_limit()))?;
+            }
         }
 
         let mut encoded_rows =
@@ -99,12 +105,19 @@ impl SortExecutor {
 
         for chunk in &chunks {
             let encoded_chunk = encode_chunk(chunk, &self.column_orders)?;
+            let chunk_estimated_heap_size = encoded_chunk
+                .iter()
+                .map(|x| x.estimated_heap_size())
+                .sum::<usize>();
             encoded_rows.extend(
                 encoded_chunk
                     .into_iter()
                     .enumerate()
                     .map(|(row_id, row)| (chunk.row_at_unchecked_vis(row_id), row)),
             );
+            if !self.mem_context.add(chunk_estimated_heap_size as i64) {
+                Err(BatchError::OutOfMemory(self.mem_context.mem_limit()))?;
+            }
         }
 
         encoded_rows.sort_unstable_by(|(_, a), (_, b)| a.cmp(b));
@@ -145,8 +158,7 @@ impl SortExecutor {
 mod tests {
     use futures::StreamExt;
     use risingwave_common::array::*;
-    use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::test_prelude::DataChunkTestExt;
+    use risingwave_common::catalog::Field;
     use risingwave_common::types::{
         DataType, Date, Interval, Scalar, StructType, Time, Timestamp, F32,
     };

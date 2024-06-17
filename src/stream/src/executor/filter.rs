@@ -157,11 +157,8 @@ impl FilterExecutor {
 
 #[cfg(test)]
 mod tests {
-    use futures::StreamExt;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
-    use risingwave_common::array::StreamChunk;
-    use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::types::DataType;
+    use risingwave_common::catalog::Field;
 
     use super::super::test_utils::expr::build_from_pretty;
     use super::super::test_utils::MockSource;

@@ -209,6 +209,10 @@ fn datum_to_json_object(
         (DataType::Int64, ScalarRefImpl::Int64(v)) => {
             json!(v)
         }
+        (DataType::Serial, ScalarRefImpl::Serial(v)) => {
+            // The serial type needs to be handled as a string to prevent primary key conflicts caused by the precision issues of JSON numbers.
+            json!(format!("{:#018x}", v.into_inner()))
+        }
         (DataType::Float32, ScalarRefImpl::Float32(v)) => {
             json!(f32::from(v))
         }
@@ -402,7 +406,7 @@ pub(crate) fn schema_type_mapping(rw_type: &DataType) -> &'static str {
         DataType::List(_) => "array",
         DataType::Bytea => "bytes",
         DataType::Jsonb => "string",
-        DataType::Serial => "int32",
+        DataType::Serial => "string",
         DataType::Int256 => "string",
     }
 }
@@ -434,13 +438,13 @@ fn type_as_json_schema(rw_type: &DataType) -> Map<String, Value> {
 
 #[cfg(test)]
 mod tests {
-
     use risingwave_common::types::{
-        DataType, Date, Decimal, Interval, Scalar, ScalarImpl, StructRef, StructType, StructValue,
-        Time, Timestamp,
+        Date, Decimal, Interval, Scalar, ScalarImpl, StructRef, StructType, StructValue, Time,
+        Timestamp,
     };
 
     use super::*;
+
     #[test]
     fn test_to_json_basic_type() {
         let mock_field = Field {
@@ -485,7 +489,7 @@ mod tests {
                 data_type: DataType::Int64,
                 ..mock_field.clone()
             },
-            Some(ScalarImpl::Int64(std::i64::MAX).as_scalar_ref_impl()),
+            Some(ScalarImpl::Int64(i64::MAX).as_scalar_ref_impl()),
             DateHandlingMode::FromCe,
             TimestampHandlingMode::String,
             TimestamptzHandlingMode::UtcString,
@@ -495,7 +499,25 @@ mod tests {
         .unwrap();
         assert_eq!(
             serde_json::to_string(&int64_value).unwrap(),
-            std::i64::MAX.to_string()
+            i64::MAX.to_string()
+        );
+
+        let serial_value = datum_to_json_object(
+            &Field {
+                data_type: DataType::Serial,
+                ..mock_field.clone()
+            },
+            Some(ScalarImpl::Serial(i64::MAX.into()).as_scalar_ref_impl()),
+            DateHandlingMode::FromCe,
+            TimestampHandlingMode::String,
+            TimestamptzHandlingMode::UtcString,
+            TimeHandlingMode::Milli,
+            &CustomJsonType::None,
+        )
+        .unwrap();
+        assert_eq!(
+            serde_json::to_string(&serial_value).unwrap(),
+            format!("\"{:#018x}\"", i64::MAX)
         );
 
         // https://github.com/debezium/debezium/blob/main/debezium-core/src/main/java/io/debezium/time/ZonedTimestamp.java
@@ -820,7 +842,7 @@ mod tests {
         let schema = json_converter_with_schema(json!({}), "test".to_owned(), fields.iter())
             ["schema"]
             .to_string();
-        let ans = r#"{"fields":[{"field":"v1","optional":true,"type":"boolean"},{"field":"v2","optional":true,"type":"int16"},{"field":"v3","optional":true,"type":"int32"},{"field":"v4","optional":true,"type":"float"},{"field":"v5","optional":true,"type":"string"},{"field":"v6","optional":true,"type":"int32"},{"field":"v7","optional":true,"type":"string"},{"field":"v8","optional":true,"type":"int64"},{"field":"v9","optional":true,"type":"string"},{"field":"v10","fields":[{"field":"a","optional":true,"type":"int64"},{"field":"b","optional":true,"type":"string"},{"field":"c","fields":[{"field":"aa","optional":true,"type":"int64"},{"field":"bb","optional":true,"type":"double"}],"optional":true,"type":"struct"}],"optional":true,"type":"struct"},{"field":"v11","items":{"items":{"fields":[{"field":"aa","optional":true,"type":"int64"},{"field":"bb","optional":true,"type":"double"}],"optional":true,"type":"struct"},"optional":true,"type":"array"},"optional":true,"type":"array"},{"field":"12","optional":true,"type":"string"},{"field":"13","optional":true,"type":"int32"},{"field":"14","optional":true,"type":"string"}],"name":"test","optional":false,"type":"struct"}"#;
+        let ans = r#"{"fields":[{"field":"v1","optional":true,"type":"boolean"},{"field":"v2","optional":true,"type":"int16"},{"field":"v3","optional":true,"type":"int32"},{"field":"v4","optional":true,"type":"float"},{"field":"v5","optional":true,"type":"string"},{"field":"v6","optional":true,"type":"int32"},{"field":"v7","optional":true,"type":"string"},{"field":"v8","optional":true,"type":"int64"},{"field":"v9","optional":true,"type":"string"},{"field":"v10","fields":[{"field":"a","optional":true,"type":"int64"},{"field":"b","optional":true,"type":"string"},{"field":"c","fields":[{"field":"aa","optional":true,"type":"int64"},{"field":"bb","optional":true,"type":"double"}],"optional":true,"type":"struct"}],"optional":true,"type":"struct"},{"field":"v11","items":{"items":{"fields":[{"field":"aa","optional":true,"type":"int64"},{"field":"bb","optional":true,"type":"double"}],"optional":true,"type":"struct"},"optional":true,"type":"array"},"optional":true,"type":"array"},{"field":"12","optional":true,"type":"string"},{"field":"13","optional":true,"type":"string"},{"field":"14","optional":true,"type":"string"}],"name":"test","optional":false,"type":"struct"}"#;
         assert_eq!(schema, ans);
     }
 }

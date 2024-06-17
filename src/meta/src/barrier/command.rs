@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
-use std::default::Default;
 use std::sync::Arc;
 
 use futures::future::try_join_all;
@@ -96,7 +95,7 @@ pub struct ReplaceTablePlan {
     /// We need to reassign splits for it.
     ///
     /// Note that there's no `SourceBackfillExecutor` involved for table with connector, so we don't need to worry about
-    /// backfill_splits.
+    /// `backfill_splits`.
     pub init_split_assignment: SplitAssignment,
 }
 
@@ -389,7 +388,7 @@ pub struct CommandContext {
     /// Differs from [`TracedEpoch`], this span focuses on the lifetime of the corresponding
     /// barrier, including the process of waiting for the barrier to be sent, flowing through the
     /// stream graph on compute nodes, and finishing its `post_collect` stuffs.
-    pub span: tracing::Span,
+    pub _span: tracing::Span,
 }
 
 impl CommandContext {
@@ -412,7 +411,7 @@ impl CommandContext {
             command,
             kind,
             barrier_manager_context,
-            span,
+            _span: span,
         }
     }
 
@@ -1117,7 +1116,20 @@ impl CommandContext {
                     .await;
             }
 
-            Command::CreateSubscription { .. } => {}
+            Command::CreateSubscription {
+                subscription_id, ..
+            } => match &self.barrier_manager_context.metadata_manager {
+                MetadataManager::V1(mgr) => {
+                    mgr.catalog_manager
+                        .finish_create_subscription_procedure(*subscription_id)
+                        .await?;
+                }
+                MetadataManager::V2(mgr) => {
+                    mgr.catalog_controller
+                        .finish_create_subscription_catalog(*subscription_id)
+                        .await?;
+                }
+            },
             Command::DropSubscription { .. } => {}
         }
 

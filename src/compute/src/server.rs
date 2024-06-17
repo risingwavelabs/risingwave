@@ -13,19 +13,21 @@
 // limitations under the License.
 
 use std::net::SocketAddr;
-use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 use std::time::Duration;
 
 use risingwave_batch::monitor::{
-    GLOBAL_BATCH_EXECUTOR_METRICS, GLOBAL_BATCH_MANAGER_METRICS, GLOBAL_BATCH_TASK_METRICS,
+    GLOBAL_BATCH_EXECUTOR_METRICS, GLOBAL_BATCH_MANAGER_METRICS, GLOBAL_BATCH_SPILL_METRICS,
+    GLOBAL_BATCH_TASK_METRICS,
 };
 use risingwave_batch::rpc::service::task_service::BatchServiceImpl;
+use risingwave_batch::spill::spill_op::SpillOp;
 use risingwave_batch::task::{BatchEnvironment, BatchManager};
 use risingwave_common::config::{
     load_config, AsyncStackTraceOption, MetricLevel, StorageMemoryConfig,
     MAX_CONNECTION_WINDOW_SIZE, STREAM_WINDOW_SIZE,
 };
+use risingwave_common::lru::init_global_sequencer_args;
 use risingwave_common::monitor::connection::{RouterExt, TcpConfig};
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::system_param::reader::SystemParamsRead;
@@ -42,7 +44,6 @@ use risingwave_connector::source::monitor::GLOBAL_SOURCE_METRICS;
 use risingwave_dml::dml_manager::DmlManager;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::compute::config_service_server::ConfigServiceServer;
-use risingwave_pb::connector_service::SinkPayloadFormat;
 use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::meta::add_worker_node_request::Property;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer;
@@ -68,7 +69,9 @@ use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 use tower::Layer;
 
-use crate::memory::config::{reserve_memory_bytes, storage_memory_config, MIN_COMPUTE_MEMORY_MB};
+use crate::memory::config::{
+    batch_mem_limit, reserve_memory_bytes, storage_memory_config, MIN_COMPUTE_MEMORY_MB,
+};
 use crate::memory::manager::{MemoryManager, MemoryManagerConfig};
 use crate::observer::observer_manager::ComputeObserverNode;
 use crate::rpc::service::config_service::ConfigServiceImpl;
@@ -101,6 +104,18 @@ pub async fn compute_node_serve(
     let stream_config = Arc::new(config.streaming.clone());
     let batch_config = Arc::new(config.batch.clone());
 
+    // Initialize operator lru cache global sequencer args.
+    init_global_sequencer_args(
+        config
+            .streaming
+            .developer
+            .memory_controller_sequence_tls_step,
+        config
+            .streaming
+            .developer
+            .memory_controller_sequence_tls_lag,
+    );
+
     // Register to the cluster. We're not ready to serve until activate is called.
     let (meta_client, system_params) = MetaClient::register_new(
         opts.meta_address.clone(),
@@ -127,6 +142,7 @@ pub async fn compute_node_serve(
         non_reserved_memory_bytes,
         embedded_compactor_enabled,
         &config.storage,
+        !opts.role.for_streaming(),
     );
 
     let storage_memory_bytes = total_storage_memory_limit_bytes(&storage_memory_config);
@@ -162,6 +178,7 @@ pub async fn compute_node_serve(
     let batch_executor_metrics = Arc::new(GLOBAL_BATCH_EXECUTOR_METRICS.clone());
     let batch_manager_metrics = Arc::new(GLOBAL_BATCH_MANAGER_METRICS.clone());
     let exchange_srv_metrics = Arc::new(GLOBAL_EXCHANGE_SERVICE_METRICS.clone());
+    let batch_spill_metrics = Arc::new(GLOBAL_BATCH_SPILL_METRICS.clone());
 
     // Initialize state store.
     let state_store_metrics = Arc::new(global_hummock_state_store_metrics(
@@ -215,12 +232,6 @@ pub async fn compute_node_serve(
             ));
 
             let compaction_executor = Arc::new(CompactionExecutor::new(Some(1)));
-            let max_task_parallelism = Arc::new(AtomicU32::new(
-                (compaction_executor.worker_num() as f32
-                    * storage_opts.compactor_max_task_multiplier)
-                    .ceil() as u32,
-            ));
-
             let compactor_context = CompactorContext {
                 storage_opts,
                 sstable_store: storage.sstable_store(),
@@ -233,8 +244,6 @@ pub async fn compute_node_serve(
                 await_tree_reg: await_tree_config
                     .clone()
                     .map(new_compaction_await_tree_reg_ref),
-                running_task_parallelism: Arc::new(AtomicU32::new(0)),
-                max_task_parallelism,
             };
 
             let (handle, shutdown_sender) = start_compactor(
@@ -271,6 +280,7 @@ pub async fn compute_node_serve(
     let batch_mgr = Arc::new(BatchManager::new(
         config.batch.clone(),
         batch_manager_metrics,
+        batch_mem_limit(compute_memory_bytes),
     ));
 
     // NOTE: Due to some limits, we use `compute_memory_bytes + storage_memory_bytes` as
@@ -294,6 +304,18 @@ pub async fn compute_node_serve(
             .streaming
             .developer
             .memory_controller_threshold_stable,
+        eviction_factor_stable: config
+            .streaming
+            .developer
+            .memory_controller_eviction_factor_stable,
+        eviction_factor_graceful: config
+            .streaming
+            .developer
+            .memory_controller_eviction_factor_graceful,
+        eviction_factor_aggressive: config
+            .streaming
+            .developer
+            .memory_controller_eviction_factor_aggressive,
         metrics: streaming_metrics.clone(),
     });
 
@@ -328,31 +350,13 @@ pub async fn compute_node_serve(
         client_pool,
         dml_mgr.clone(),
         source_metrics.clone(),
+        batch_spill_metrics.clone(),
         config.server.metrics_level,
     );
-
-    info!(
-        "connector param: payload_format={:?}",
-        opts.connector_rpc_sink_payload_format
-    );
-
-    let connector_params = risingwave_connector::ConnectorParams {
-        sink_payload_format: match opts.connector_rpc_sink_payload_format.as_deref() {
-            None | Some("stream_chunk") => SinkPayloadFormat::StreamChunk,
-            Some("json") => SinkPayloadFormat::Json,
-            _ => {
-                unreachable!(
-                    "invalid sink payload format: {:?}. Should be either json or stream_chunk",
-                    opts.connector_rpc_sink_payload_format
-                )
-            }
-        },
-    };
 
     // Initialize the streaming environment.
     let stream_env = StreamEnvironment::new(
         advertise_addr.clone(),
-        connector_params,
         stream_config,
         worker_id,
         state_store,
@@ -366,7 +370,7 @@ pub async fn compute_node_serve(
         stream_env.clone(),
         streaming_metrics.clone(),
         await_tree_config.clone(),
-        memory_mgr.get_watermark_epoch(),
+        memory_mgr.get_watermark_sequence(),
     );
 
     // Boot the runtime gRPC services.
@@ -390,6 +394,10 @@ pub async fn compute_node_serve(
     } else {
         tracing::info!("Telemetry didn't start due to config");
     }
+
+    // Clean up the spill directory.
+    #[cfg(not(madsim))]
+    SpillOp::clean_spill_directory().await.unwrap();
 
     let (shutdown_send, mut shutdown_recv) = tokio::sync::oneshot::channel::<()>();
     let join_handle = tokio::spawn(async move {

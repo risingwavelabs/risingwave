@@ -17,7 +17,7 @@ use sea_orm::entity::prelude::*;
 use sea_orm::ActiveValue::Set;
 use serde::{Deserialize, Serialize};
 
-use crate::{ColumnCatalogArray, ColumnOrderArray, I32Array, Property, SubscriptionId};
+use crate::SubscriptionId;
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize)]
 #[sea_orm(table_name = "subscription")]
@@ -25,13 +25,10 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub subscription_id: SubscriptionId,
     pub name: String,
-    pub columns: ColumnCatalogArray,
-    pub plan_pk: ColumnOrderArray,
-    pub distribution_key: I32Array,
-    pub properties: Property,
+    pub retention_seconds: i64,
     pub definition: String,
-    pub subscription_from_name: String,
-    pub subscription_internal_table_name: Option<String>,
+    pub subscription_state: i32,
+    pub dependent_table_id: i32,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -59,13 +56,10 @@ impl From<PbSubscription> for ActiveModel {
         Self {
             subscription_id: Set(pb_subscription.id as _),
             name: Set(pb_subscription.name),
-            columns: Set(pb_subscription.column_catalogs.into()),
-            plan_pk: Set(pb_subscription.plan_pk.into()),
-            distribution_key: Set(pb_subscription.distribution_key.into()),
-            properties: Set(pb_subscription.properties.into()),
+            retention_seconds: Set(pb_subscription.retention_seconds as _),
             definition: Set(pb_subscription.definition),
-            subscription_from_name: Set(pb_subscription.subscription_from_name),
-            subscription_internal_table_name: Set(pb_subscription.subscription_internal_table_name),
+            subscription_state: Set(pb_subscription.subscription_state),
+            dependent_table_id: Set(pb_subscription.dependent_table_id as _),
         }
     }
 }

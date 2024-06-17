@@ -25,6 +25,7 @@ use risingwave_backup::error::BackupError;
 use risingwave_backup::meta_snapshot::{MetaSnapshot, Metadata};
 use risingwave_backup::storage::{MetaSnapshotStorage, ObjectStoreMetaSnapshotStorage};
 use risingwave_backup::{meta_snapshot_v1, meta_snapshot_v2, MetaSnapshotId};
+use risingwave_common::catalog::TableId;
 use risingwave_common::config::ObjectStoreConfig;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
@@ -52,7 +53,7 @@ async fn create_snapshot_store(
             &config.0,
             Arc::new(ObjectStoreMetrics::unused()),
             "Meta Backup",
-            object_store_config.clone(),
+            Arc::new(object_store_config.clone()),
         )
         .await,
     );
@@ -182,6 +183,7 @@ impl BackupReader {
     /// Otherwise, reading the version may encounter object store error, due to SST absence.
     pub async fn try_get_hummock_version(
         self: &BackupReaderRef,
+        table_id: TableId,
         epoch: u64,
     ) -> StorageResult<Option<PinnedVersion>> {
         // Use the same store throughout the call.
@@ -192,7 +194,15 @@ impl BackupReader {
             .manifest()
             .snapshot_metadata
             .iter()
-            .find(|v| epoch >= v.safe_epoch && epoch <= v.max_committed_epoch)
+            .find(|v| {
+                if v.state_table_info.is_empty() {
+                    return epoch >= v.safe_epoch && epoch <= v.max_committed_epoch;
+                }
+                if let Some(m) = v.state_table_info.get(&table_id) {
+                    return epoch >= m.safe_epoch && epoch <= m.committed_epoch;
+                }
+                false
+            })
             .cloned()
         else {
             return Ok(None);

@@ -29,7 +29,7 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::panic::FutureCatchUnwindExt;
 use risingwave_common::util::query_log::*;
 use risingwave_common::{PG_VERSION, SERVER_ENCODING, STANDARD_CONFORMING_STRINGS};
-use risingwave_sqlparser::ast::Statement;
+use risingwave_sqlparser::ast::{RedactSqlOptionKeywordsRef, Statement};
 use risingwave_sqlparser::parser::Parser;
 use thiserror_ext::AsReport;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
@@ -101,6 +101,8 @@ where
 
     // Client Address
     peer_addr: AddressRef,
+
+    redact_sql_option_keywords: Option<RedactSqlOptionKeywordsRef>,
 }
 
 /// Configures TLS encryption for connections.
@@ -152,14 +154,29 @@ pub fn cstr_to_str(b: &Bytes) -> Result<&str, Utf8Error> {
 }
 
 /// Record `sql` in the current tracing span.
-fn record_sql_in_span(sql: &str) {
+fn record_sql_in_span(sql: &str, redact_sql_option_keywords: Option<RedactSqlOptionKeywordsRef>) {
+    let redacted_sql = if let Some(keywords) = redact_sql_option_keywords {
+        redact_sql(sql, keywords)
+    } else {
+        sql.to_owned()
+    };
     tracing::Span::current().record(
         "sql",
         tracing::field::display(truncated_fmt::TruncatedFmt(
-            &sql,
+            &redacted_sql,
             *RW_QUERY_LOG_TRUNCATE_LEN,
         )),
     );
+}
+
+fn redact_sql(sql: &str, keywords: RedactSqlOptionKeywordsRef) -> String {
+    match Parser::parse_sql(sql) {
+        Ok(sqls) => sqls
+            .into_iter()
+            .map(|sql| sql.to_redacted_string(keywords.clone()))
+            .join(";"),
+        Err(_) => sql.to_owned(),
+    }
 }
 
 impl<S, SM> PgProtocol<S, SM>
@@ -172,6 +189,7 @@ where
         session_mgr: Arc<SM>,
         tls_config: Option<TlsConfig>,
         peer_addr: AddressRef,
+        redact_sql_option_keywords: Option<RedactSqlOptionKeywordsRef>,
     ) -> Self {
         Self {
             stream: Conn::Unencrypted(PgStream {
@@ -193,6 +211,7 @@ where
             statement_portal_dependency: Default::default(),
             ignore_util_sync: false,
             peer_addr,
+            redact_sql_option_keywords,
         }
     }
 
@@ -555,7 +574,7 @@ where
     async fn process_query_msg(&mut self, query_string: io::Result<&str>) -> PsqlResult<()> {
         let sql: Arc<str> =
             Arc::from(query_string.map_err(|err| PsqlError::SimpleQueryError(Box::new(err)))?);
-        record_sql_in_span(&sql);
+        record_sql_in_span(&sql, self.redact_sql_option_keywords.clone());
         let session = self.session.clone().unwrap();
 
         session.check_idle_in_transaction_timeout()?;
@@ -664,7 +683,7 @@ where
 
     fn process_parse_msg(&mut self, msg: FeParseMessage) -> PsqlResult<()> {
         let sql = cstr_to_str(&msg.sql_bytes).unwrap();
-        record_sql_in_span(sql);
+        record_sql_in_span(sql, self.redact_sql_option_keywords.clone());
         let session = self.session.clone().unwrap();
         let statement_name = cstr_to_str(&msg.statement_name).unwrap().to_string();
 
@@ -767,7 +786,7 @@ where
             self.unnamed_portal.replace(portal);
         } else {
             assert!(
-                self.result_cache.get(&portal_name).is_none(),
+                !self.result_cache.contains_key(&portal_name),
                 "Named portal never can be overridden."
             );
             self.portal_store.insert(portal_name.clone(), portal);
@@ -798,7 +817,7 @@ where
         } else {
             let portal = self.get_portal(&portal_name)?;
             let sql: Arc<str> = Arc::from(format!("{}", portal));
-            record_sql_in_span(&sql);
+            record_sql_in_span(&sql, self.redact_sql_option_keywords.clone());
 
             session.check_idle_in_transaction_timeout()?;
             let _exec_context_guard = session.init_exec_context(sql.clone());
@@ -1203,5 +1222,27 @@ pub mod truncated_fmt {
                 "select '...(truncated)",
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+
+    use super::*;
+
+    #[test]
+    fn test_redact_parsable_sql() {
+        let keywords = Arc::new(HashSet::from(["v2".into(), "v4".into(), "b".into()]));
+        let sql = r"
+        create source temp (k bigint, v varchar) with (
+            connector = 'datagen',
+            v1 = 123,
+            v2 = 'with',
+            v3 = false,
+            v4 = '',
+        ) FORMAT plain ENCODE json (a='1',b='2')
+        ";
+        assert_eq!(redact_sql(sql, keywords), "CREATE SOURCE temp (k BIGINT, v CHARACTER VARYING) WITH (connector = 'datagen', v1 = 123, v2 = [REDACTED], v3 = false, v4 = [REDACTED]) FORMAT PLAIN ENCODE JSON (a = '1', b = [REDACTED])");
     }
 }

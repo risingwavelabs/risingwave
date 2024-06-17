@@ -75,6 +75,7 @@ pub struct HummockStateStoreMetrics {
     // uploading task
     pub uploader_uploading_task_size: GenericGauge<AtomicU64>,
     pub uploader_uploading_task_count: IntGauge,
+    pub uploader_imm_size: GenericGauge<AtomicU64>,
     pub uploader_upload_task_latency: Histogram,
     pub uploader_syncing_epoch_count: IntGauge,
     pub uploader_wait_poll_latency: Histogram,
@@ -84,7 +85,7 @@ pub struct HummockStateStoreMetrics {
     pub old_value_size: IntGauge,
 
     // block statistics
-    pub block_efficiency_histogram: RelabeledHistogramVec,
+    pub block_efficiency_histogram: Histogram,
 
     pub event_handler_pending_event: IntGauge,
     pub event_handler_latency: HistogramVec,
@@ -324,6 +325,15 @@ impl HummockStateStoreMetrics {
         )
         .unwrap();
 
+        let uploader_imm_size = GenericGauge::new(
+            "state_store_uploader_imm_size",
+            "Total size of imms tracked by uploader",
+        )
+        .unwrap();
+        registry
+            .register(Box::new(uploader_imm_size.clone()))
+            .unwrap();
+
         let opts = histogram_opts!(
             "state_store_uploader_upload_task_latency",
             "Latency of uploader uploading tasks",
@@ -417,13 +427,7 @@ impl HummockStateStoreMetrics {
             "Access ratio of in-memory block.",
             exponential_buckets(0.001, 2.0, 11).unwrap(),
         );
-        let block_efficiency_histogram =
-            register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
-        let block_efficiency_histogram = RelabeledHistogramVec::with_metric_level(
-            MetricLevel::Info,
-            block_efficiency_histogram,
-            metric_level,
-        );
+        let block_efficiency_histogram = register_histogram_with_registry!(opts, registry).unwrap();
 
         let event_handler_pending_event = register_int_gauge_with_registry!(
             "state_store_event_handler_pending_event",
@@ -466,6 +470,7 @@ impl HummockStateStoreMetrics {
             spill_task_size_from_unsealed: spill_task_size.with_label_values(&["unsealed"]),
             uploader_uploading_task_size,
             uploader_uploading_task_count,
+            uploader_imm_size,
             uploader_upload_task_latency,
             uploader_syncing_epoch_count,
             uploader_wait_poll_latency,
@@ -487,6 +492,7 @@ pub trait MemoryCollector: Sync + Send {
     fn get_meta_memory_usage(&self) -> u64;
     fn get_data_memory_usage(&self) -> u64;
     fn get_uploading_memory_usage(&self) -> u64;
+    fn get_prefetch_memory_usage(&self) -> usize;
     fn get_meta_cache_memory_usage_ratio(&self) -> f64;
     fn get_block_cache_memory_usage_ratio(&self) -> f64;
     fn get_shared_buffer_usage_ratio(&self) -> f64;
@@ -499,6 +505,7 @@ struct StateStoreCollector {
     block_cache_size: IntGauge,
     meta_cache_size: IntGauge,
     uploading_memory_size: IntGauge,
+    prefetch_memory_size: IntGauge,
     meta_cache_usage_ratio: Gauge,
     block_cache_usage_ratio: Gauge,
     uploading_memory_usage_ratio: Gauge,
@@ -550,12 +557,20 @@ impl StateStoreCollector {
         .unwrap();
         descs.extend(uploading_memory_usage_ratio.desc().into_iter().cloned());
 
+        let prefetch_memory_size = IntGauge::with_opts(Opts::new(
+            "state_store_prefetch_memory_size",
+            "the size of prefetch memory usage",
+        ))
+        .unwrap();
+        descs.extend(prefetch_memory_size.desc().into_iter().cloned());
+
         Self {
             memory_collector,
             descs,
             block_cache_size,
             meta_cache_size,
             uploading_memory_size,
+            prefetch_memory_size,
             meta_cache_usage_ratio,
             block_cache_usage_ratio,
 
@@ -576,6 +591,8 @@ impl Collector for StateStoreCollector {
             .set(self.memory_collector.get_meta_memory_usage() as i64);
         self.uploading_memory_size
             .set(self.memory_collector.get_uploading_memory_usage() as i64);
+        self.prefetch_memory_size
+            .set(self.memory_collector.get_prefetch_memory_usage() as i64);
         self.meta_cache_usage_ratio
             .set(self.memory_collector.get_meta_cache_memory_usage_ratio());
         self.block_cache_usage_ratio

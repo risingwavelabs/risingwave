@@ -18,7 +18,7 @@ pub mod jni_source;
 pub mod source;
 pub mod split;
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::marker::PhantomData;
 
 pub use enumerator::*;
@@ -31,7 +31,7 @@ use simd_json::prelude::ArrayTrait;
 pub use source::*;
 
 use crate::error::ConnectorResult;
-use crate::source::{SourceProperties, SplitImpl, TryFromHashmap};
+use crate::source::{SourceProperties, SplitImpl, TryFromBTreeMap};
 use crate::{for_all_classified_sources, impl_cdc_source_type};
 
 pub const CDC_CONNECTOR_NAME_SUFFIX: &str = "-cdc";
@@ -44,6 +44,7 @@ pub const CDC_BACKFILL_SNAPSHOT_INTERVAL_KEY: &str = "snapshot.interval";
 pub const CDC_BACKFILL_SNAPSHOT_BATCH_SIZE_KEY: &str = "snapshot.batch_size";
 // We enable transaction for shared cdc source by default
 pub const CDC_TRANSACTIONAL_KEY: &str = "transactional";
+pub const CDC_WAIT_FOR_STREAMING_START_TIMEOUT: &str = "cdc.source.wait.streaming.start.timeout";
 
 pub const MYSQL_CDC_CONNECTOR: &str = Mysql::CDC_CONNECTOR_NAME;
 pub const POSTGRES_CDC_CONNECTOR: &str = Postgres::CDC_CONNECTOR_NAME;
@@ -84,7 +85,7 @@ impl CdcSourceType {
 #[derive(Clone, Debug, Default)]
 pub struct CdcProperties<T: CdcSourceTypeTrait> {
     /// Properties specified in the WITH clause by user
-    pub properties: HashMap<String, String>,
+    pub properties: BTreeMap<String, String>,
 
     /// Schema of the source specified by users
     pub table_schema: TableSchema,
@@ -98,9 +99,25 @@ pub struct CdcProperties<T: CdcSourceTypeTrait> {
     pub _phantom: PhantomData<T>,
 }
 
-impl<T: CdcSourceTypeTrait> TryFromHashmap for CdcProperties<T> {
-    fn try_from_hashmap(
-        properties: HashMap<String, String>,
+pub fn table_schema_exclude_additional_columns(table_schema: &TableSchema) -> TableSchema {
+    TableSchema {
+        columns: table_schema
+            .columns
+            .iter()
+            .filter(|col| {
+                col.additional_column
+                    .as_ref()
+                    .is_some_and(|val| val.column_type.is_none())
+            })
+            .cloned()
+            .collect(),
+        pk_indices: table_schema.pk_indices.clone(),
+    }
+}
+
+impl<T: CdcSourceTypeTrait> TryFromBTreeMap for CdcProperties<T> {
+    fn try_from_btreemap(
+        properties: BTreeMap<String, String>,
         _deny_unknown_fields: bool,
     ) -> ConnectorResult<Self> {
         let is_share_source = properties
@@ -163,8 +180,7 @@ where
     }
 
     fn init_from_pb_cdc_table_desc(&mut self, table_desc: &ExternalTableDesc) {
-        let properties: HashMap<String, String> =
-            table_desc.connect_properties.clone().into_iter().collect();
+        let properties = table_desc.connect_properties.clone();
 
         let table_schema = TableSchema {
             columns: table_desc

@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use expect_test::expect;
-use foyer::memory::CacheContext;
+use foyer::CacheContext;
 use futures::{pin_mut, StreamExt};
 use itertools::Itertools;
 use risingwave_common::buffer::Bitmap;
@@ -526,7 +526,7 @@ async fn test_state_store_sync_v2() {
 /// Fix this when we finished epoch management.
 #[ignore]
 async fn test_reload_storage() {
-    let sstable_store = mock_sstable_store();
+    let sstable_store = mock_sstable_store().await;
     let hummock_options = Arc::new(default_opts_for_test());
     let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;
@@ -1046,11 +1046,12 @@ async fn test_delete_get_v2() {
         )
         .await
         .unwrap();
-    let res = hummock_storage.seal_and_sync_epoch(epoch1).await.unwrap();
-    meta_client.commit_epoch(epoch1, res).await.unwrap();
     let epoch2 = epoch1.next_epoch();
 
     local.seal_current_epoch(epoch2, SealCurrentEpochOptions::for_test());
+    let res = hummock_storage.seal_and_sync_epoch(epoch1).await.unwrap();
+    meta_client.commit_epoch(epoch1, res).await.unwrap();
+
     let batch2 = vec![(
         gen_key_from_str(VirtualNode::ZERO, "bb"),
         StorageValue::new_delete(),

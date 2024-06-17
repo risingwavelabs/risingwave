@@ -12,12 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::{anyhow, Context};
 use async_trait::async_trait;
-use chrono::{NaiveDateTime, TimeZone, Utc};
 use futures_async_stream::try_stream;
-use google_cloud_pubsub::client::{Client, ClientConfig};
-use google_cloud_pubsub::subscription::{SeekTo, Subscription};
+use google_cloud_pubsub::subscription::Subscription;
 use risingwave_common::{bail, ensure};
 use tonic::Code;
 
@@ -26,22 +23,21 @@ use crate::error::{ConnectorError, ConnectorResult as Result};
 use crate::parser::ParserConfig;
 use crate::source::google_pubsub::{PubsubProperties, PubsubSplit};
 use crate::source::{
-    into_chunk_stream, BoxChunkSourceStream, Column, CommonSplitReader, SourceContextRef,
-    SourceMessage, SplitId, SplitMetaData, SplitReader,
+    into_chunk_stream, BoxChunkSourceStream, Column, SourceContextRef, SourceMessage, SplitId,
+    SplitMetaData, SplitReader,
 };
 
 const PUBSUB_MAX_FETCH_MESSAGES: usize = 1024;
 
 pub struct PubsubSplitReader {
     subscription: Subscription,
-    stop_offset: Option<NaiveDateTime>,
 
     split_id: SplitId,
     parser_config: ParserConfig,
     source_ctx: SourceContextRef,
 }
 
-impl CommonSplitReader for PubsubSplitReader {
+impl PubsubSplitReader {
     #[try_stream(ok = Vec<SourceMessage>, error = ConnectorError)]
     async fn into_data_stream(self) {
         loop {
@@ -67,41 +63,16 @@ impl CommonSplitReader for PubsubSplitReader {
                 continue;
             }
 
-            let latest_offset: NaiveDateTime = raw_chunk
-                .last()
-                .map(|m| m.message.publish_time.clone().unwrap_or_default())
-                .map(|t| {
-                    let mut t = t;
-                    t.normalize();
-                    NaiveDateTime::from_timestamp_opt(t.seconds, t.nanos as u32).unwrap_or_default()
-                })
-                .unwrap_or_default();
-
             let mut chunk: Vec<SourceMessage> = Vec::with_capacity(raw_chunk.len());
-            let mut ack_ids: Vec<String> = Vec::with_capacity(raw_chunk.len());
 
             for message in raw_chunk {
-                ack_ids.push(message.ack_id().into());
                 chunk.push(SourceMessage::from(TaggedReceivedMessage(
                     self.split_id.clone(),
                     message,
                 )));
             }
 
-            self.subscription
-                .ack(ack_ids)
-                .await
-                .map_err(|e| anyhow!(e))
-                .context("failed to ack pubsub messages")?;
-
             yield chunk;
-
-            // Stop if we've approached the stop_offset
-            if let Some(stop_offset) = self.stop_offset
-                && latest_offset >= stop_offset
-            {
-                return Ok(());
-            }
         }
     }
 }
@@ -124,42 +95,11 @@ impl SplitReader for PubsubSplitReader {
         );
         let split = splits.into_iter().next().unwrap();
 
-        // Set environment variables consumed by `google_cloud_pubsub`
-        properties.initialize_env();
-
-        let config = ClientConfig::default().with_auth().await?;
-        let client = Client::new(config).await.map_err(|e| anyhow!(e))?;
-        let subscription = client.subscription(&properties.subscription);
-
-        if let Some(ref offset) = split.start_offset {
-            let timestamp = offset
-                .as_str()
-                .parse::<i64>()
-                .map(|nanos| Utc.timestamp_nanos(nanos))
-                .context("error parsing offset")?;
-
-            subscription
-                .seek(SeekTo::Timestamp(timestamp.into()), None)
-                .await
-                .context("error seeking to pubsub offset")?;
-        }
-
-        let stop_offset = if let Some(ref offset) = split.stop_offset {
-            Some(
-                offset
-                    .as_str()
-                    .parse::<i64>()
-                    .map_err(|e| anyhow!(e))
-                    .map(|nanos| NaiveDateTime::from_timestamp_opt(nanos, 0).unwrap_or_default())?,
-            )
-        } else {
-            None
-        };
+        let subscription = properties.subscription_client().await?;
 
         Ok(Self {
             subscription,
             split_id: split.id(),
-            stop_offset,
             parser_config,
             source_ctx,
         })
@@ -168,6 +108,6 @@ impl SplitReader for PubsubSplitReader {
     fn into_stream(self) -> BoxChunkSourceStream {
         let parser_config = self.parser_config.clone();
         let source_context = self.source_ctx.clone();
-        into_chunk_stream(self, parser_config, source_context)
+        into_chunk_stream(self.into_data_stream(), parser_config, source_context)
     }
 }

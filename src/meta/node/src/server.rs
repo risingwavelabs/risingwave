@@ -25,7 +25,7 @@ use risingwave_common::monitor::connection::{RouterExt, TcpConfig};
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::telemetry::manager::TelemetryManager;
-use risingwave_common::telemetry::telemetry_env_enabled;
+use risingwave_common::telemetry::{report_scarf_enabled, report_to_scarf, telemetry_env_enabled};
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_common_service::tracing::TracingExtractLayer;
 use risingwave_meta::barrier::StreamRpcManager;
@@ -587,6 +587,11 @@ pub async fn start_service_as_election_leader(
         .unwrap(),
     );
 
+    hummock_manager
+        .may_fill_backward_state_table_info()
+        .await
+        .unwrap();
+
     // Initialize services.
     let backup_manager = BackupManager::new(
         env.clone(),
@@ -654,7 +659,7 @@ pub async fn start_service_as_election_leader(
     );
     let health_srv = HealthServiceImpl::new();
     let backup_srv = BackupServiceImpl::new(backup_manager);
-    let telemetry_srv = TelemetryInfoServiceImpl::new(env.meta_store_ref());
+    let telemetry_srv = TelemetryInfoServiceImpl::new(env.meta_store());
     let system_params_srv = SystemParamsServiceImpl::new(env.system_params_manager_impl_ref());
     let session_params_srv = SessionParamsServiceImpl::new(env.session_params_manager_impl_ref());
     let serving_srv =
@@ -754,6 +759,11 @@ pub async fn start_service_as_election_leader(
     } else {
         tracing::info!("Telemetry didn't start due to meta backend or config");
     }
+    if report_scarf_enabled() {
+        tokio::spawn(report_to_scarf());
+    } else {
+        tracing::info!("Scarf reporting is disabled");
+    };
 
     if let Some(pair) = env.event_log_manager_ref().take_join_handle() {
         sub_tasks.push(pair);

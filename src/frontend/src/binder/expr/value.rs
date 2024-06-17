@@ -221,13 +221,12 @@ impl Binder {
 #[cfg(test)]
 mod tests {
     use risingwave_common::types::test_utils::IntervalTestExt;
-    use risingwave_common::types::DataType;
     use risingwave_expr::expr::build_from_prost;
     use risingwave_sqlparser::ast::Value::Number;
 
     use super::*;
     use crate::binder::test_utils::mock_binder;
-    use crate::expr::{Expr, ExprImpl, ExprType, FunctionCall};
+    use crate::expr::Expr;
 
     #[tokio::test]
     async fn test_bind_value() {

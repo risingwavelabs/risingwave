@@ -145,7 +145,9 @@ public class DbzCdcEngineRunner {
                             .getProperty(CommonConnectorConfig.TOPIC_PREFIX.name());
             startOk =
                     DbzSourceUtils.waitForStreamingRunning(
-                            config.getSourceType(), databaseServerName);
+                            config.getSourceType(),
+                            databaseServerName,
+                            config.getWaitStreamingStartTimeout());
         }
 
         running.set(true);

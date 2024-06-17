@@ -24,6 +24,7 @@ mod avro;
 mod json;
 mod proto;
 pub mod template;
+pub mod text;
 
 pub use avro::{AvroEncoder, AvroHeader};
 pub use json::JsonEncoder;
@@ -57,7 +58,7 @@ pub trait RowEncoder {
 /// * an json object
 /// * a protobuf message
 /// * an avro record
-/// into
+///   into
 /// * string (required by kinesis key)
 /// * bytes
 ///

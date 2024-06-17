@@ -284,6 +284,7 @@ impl Binder {
 
     fn bind_with(&mut self, with: With) -> Result<()> {
         for cte_table in with.cte_tables {
+            // note that the new `share_id` for the rcte is generated here
             let share_id = self.next_share_id();
             let Cte { alias, query, .. } = cte_table;
             let table_name = alias.name.real_value();
@@ -423,9 +424,7 @@ impl Binder {
         // reference: <https://www.postgresql.org/docs/16/sql-select.html#:~:text=the%20recursive%20self%2Dreference%20must%20appear%20on%20the%20right%2Dhand%20side%20of%20the%20UNION>
         let mut base = self.bind_set_expr(left)?;
 
-        entry.borrow_mut().state = BindingCteState::BaseResolved {
-            schema: base.schema().clone(),
-        };
+        entry.borrow_mut().state = BindingCteState::BaseResolved { base: base.clone() };
 
         // Reset context for right side, but keep `cte_to_relation`.
         let new_context = std::mem::take(&mut self.context);

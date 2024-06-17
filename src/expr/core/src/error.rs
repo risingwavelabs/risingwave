@@ -15,7 +15,7 @@
 use std::fmt::{Debug, Display};
 
 use risingwave_common::array::{ArrayError, ArrayRef};
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, DatumRef, ToText};
 use risingwave_pb::PbFieldNotFound;
 use thiserror::Error;
 use thiserror_ext::AsReport;
@@ -95,13 +95,6 @@ pub enum ExprError {
         anyhow::Error,
     ),
 
-    #[error("UDF error: {0}")]
-    Udf(
-        #[from]
-        #[backtrace]
-        risingwave_udf::Error,
-    ),
-
     #[error("not a constant")]
     NotConstant,
 
@@ -117,25 +110,71 @@ pub enum ExprError {
     #[error("invalid state: {0}")]
     InvalidState(String),
 
-    #[error("error in cryptography: {0}")]
-    Cryptography(Box<CryptographyError>),
-}
+    /// Function error message returned by UDF.
+    #[error("{0}")]
+    Custom(String),
 
-#[derive(Debug)]
-pub enum CryptographyStage {
-    Encrypt,
-    Decrypt,
-}
-
-#[derive(Debug, Error)]
-#[error("{stage:?} stage, reason: {reason}")]
-pub struct CryptographyError {
-    pub stage: CryptographyStage,
-    #[source]
-    pub reason: openssl::error::ErrorStack,
+    /// Error from a function call.
+    ///
+    /// Use [`ExprError::function`] to create this error.
+    #[error("error while evaluating expression `{display}`")]
+    Function {
+        display: Box<str>,
+        #[backtrace]
+        // We don't use `anyhow::Error` because we don't want to always capture the backtrace.
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
 }
 
 static_assertions::const_assert_eq!(std::mem::size_of::<ExprError>(), 40);
+
+impl ExprError {
+    /// Constructs a [`ExprError::Function`] error with the given information for display.
+    pub fn function<'a>(
+        fn_name: &str,
+        args: impl IntoIterator<Item = DatumRef<'a>>,
+        source: impl Into<Box<dyn std::error::Error + Send + Sync>>,
+    ) -> Self {
+        use std::fmt::Write;
+
+        let display = {
+            let mut s = String::new();
+            write!(s, "{}(", fn_name).unwrap();
+            for (i, arg) in args.into_iter().enumerate() {
+                if i > 0 {
+                    write!(s, ", ").unwrap();
+                }
+                if let Some(arg) = arg {
+                    // Act like `quote_literal(arg::varchar)`.
+                    // Since this is mainly for debugging, we don't need to be too precise.
+                    let arg = arg.to_text();
+                    if arg.contains('\\') {
+                        // use escape format: E'...'
+                        write!(s, "E").unwrap();
+                    }
+                    write!(s, "'").unwrap();
+                    for c in arg.chars() {
+                        match c {
+                            '\'' => write!(s, "''").unwrap(),
+                            '\\' => write!(s, "\\\\").unwrap(),
+                            _ => write!(s, "{}", c).unwrap(),
+                        }
+                    }
+                    write!(s, "'").unwrap();
+                } else {
+                    write!(s, "NULL").unwrap();
+                }
+            }
+            write!(s, ")").unwrap();
+            s
+        };
+
+        Self::Function {
+            display: display.into(),
+            source: source.into(),
+        }
+    }
+}
 
 impl From<chrono::ParseError> for ExprError {
     fn from(e: chrono::ParseError) -> Self {
@@ -175,6 +214,12 @@ impl Display for MultiExprError {
 impl From<Vec<ExprError>> for MultiExprError {
     fn from(v: Vec<ExprError>) -> Self {
         Self(v.into_boxed_slice())
+    }
+}
+
+impl FromIterator<ExprError> for MultiExprError {
+    fn from_iter<T: IntoIterator<Item = ExprError>>(iter: T) -> Self {
+        Self(iter.into_iter().collect())
     }
 }
 

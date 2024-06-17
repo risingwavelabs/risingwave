@@ -51,7 +51,7 @@ pub struct InflightActorInfo {
     /// `actor_id` => `WorkerId`
     pub actor_location_map: HashMap<ActorId, WorkerId>,
 
-    /// mv_table_id => subscription_id => retention seconds
+    /// `mv_table_id` => `subscription_id` => retention seconds
     pub mv_depended_subscriptions: HashMap<TableId, HashMap<u32, u64>>,
 }
 

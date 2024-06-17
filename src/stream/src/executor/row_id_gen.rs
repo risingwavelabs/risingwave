@@ -123,16 +123,14 @@ impl Execute for RowIdGenExecutor {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::array::{Array, PrimitiveArray};
-    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::array::PrimitiveArray;
+    use risingwave_common::catalog::Field;
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::test_prelude::StreamChunkTestExt;
-    use risingwave_common::types::DataType;
     use risingwave_common::util::epoch::test_epoch;
 
     use super::*;
     use crate::executor::test_utils::MockSource;
-    use crate::executor::{ActorContext, Execute};
 
     #[tokio::test]
     async fn test_row_id_gen_executor() {

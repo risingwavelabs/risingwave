@@ -209,21 +209,9 @@ where
             let mut pending_barrier: Option<Barrier> = None;
             let mut rate_limiter = rate_limit.and_then(create_limiter);
 
-            let backfill_snapshot_read_row_count_metric = self
+            let metrics = self
                 .metrics
-                .backfill_snapshot_read_row_count
-                .with_guarded_label_values(&[
-                    upstream_table_id.to_string().as_str(),
-                    self.actor_id.to_string().as_str(),
-                ]);
-
-            let backfill_upstream_output_row_count_metric = self
-                .metrics
-                .backfill_upstream_output_row_count
-                .with_guarded_label_values(&[
-                    upstream_table_id.to_string().as_str(),
-                    self.actor_id.to_string().as_str(),
-                ]);
+                .new_backfill_metrics(upstream_table_id, self.actor_id);
 
             'backfill_loop: loop {
                 let mut cur_barrier_snapshot_processed_rows: u64 = 0;
@@ -311,9 +299,11 @@ where
                                                 &self.output_indices,
                                             ));
                                         }
-                                        backfill_snapshot_read_row_count_metric
+                                        metrics
+                                            .backfill_snapshot_read_row_count
                                             .inc_by(cur_barrier_snapshot_processed_rows);
-                                        backfill_upstream_output_row_count_metric
+                                        metrics
+                                            .backfill_upstream_output_row_count
                                             .inc_by(cur_barrier_upstream_processed_rows);
                                         break 'backfill_loop;
                                     }
@@ -416,8 +406,11 @@ where
                     upstream_chunk_buffer.clear()
                 }
 
-                backfill_snapshot_read_row_count_metric.inc_by(cur_barrier_snapshot_processed_rows);
-                backfill_upstream_output_row_count_metric
+                metrics
+                    .backfill_snapshot_read_row_count
+                    .inc_by(cur_barrier_snapshot_processed_rows);
+                metrics
+                    .backfill_upstream_output_row_count
                     .inc_by(cur_barrier_upstream_processed_rows);
 
                 // Update snapshot read epoch.
@@ -505,7 +498,10 @@ where
                 // If not finished then we need to update state, otherwise no need.
                 if let Message::Barrier(barrier) = &msg {
                     if is_finished {
-                        // If already finished, no need persist any state.
+                        // If already finished, no need persist any state, but we need to advance the epoch of the state table anyway.
+                        if let Some(table) = &mut self.state_table {
+                            table.commit(barrier.epoch).await?;
+                        }
                     } else {
                         // If snapshot was empty, we do not need to backfill,
                         // but we still need to persist the finished state.
@@ -571,6 +567,13 @@ where
         #[for_await]
         for msg in upstream {
             if let Some(msg) = mapping_message(msg?, &self.output_indices) {
+                if let Message::Barrier(barrier) = &msg {
+                    // If already finished, no need persist any state, but we need to advance the epoch of the state table anyway.
+                    if let Some(table) = &mut self.state_table {
+                        table.commit(barrier.epoch).await?;
+                    }
+                }
+
                 yield msg;
             }
         }

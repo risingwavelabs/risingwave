@@ -14,7 +14,7 @@
 
 pub mod desc;
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 
 use anyhow::anyhow;
 use itertools::Itertools;
@@ -119,6 +119,8 @@ pub struct SinkFormatDesc {
     pub format: SinkFormat,
     pub encode: SinkEncode,
     pub options: BTreeMap<String, String>,
+
+    pub key_encode: Option<SinkEncode>,
 }
 
 /// TODO: consolidate with [`crate::source::SourceFormat`] and [`crate::parser::ProtocolProperties`].
@@ -136,6 +138,7 @@ pub enum SinkEncode {
     Protobuf,
     Avro,
     Template,
+    Text,
 }
 
 impl SinkFormatDesc {
@@ -166,6 +169,7 @@ impl SinkFormatDesc {
             format,
             encode,
             options: Default::default(),
+            key_encode: None,
         }))
     }
 
@@ -177,12 +181,16 @@ impl SinkFormatDesc {
             SinkFormat::Upsert => F::Upsert,
             SinkFormat::Debezium => F::Debezium,
         };
-        let encode = match self.encode {
+        let mapping_encode = |sink_encode: &SinkEncode| match sink_encode {
             SinkEncode::Json => E::Json,
             SinkEncode::Protobuf => E::Protobuf,
             SinkEncode::Avro => E::Avro,
             SinkEncode::Template => E::Template,
+            SinkEncode::Text => E::Text,
         };
+
+        let encode = mapping_encode(&self.encode);
+        let key_encode = self.key_encode.as_ref().map(|e| mapping_encode(e).into());
         let options = self
             .options
             .iter()
@@ -193,6 +201,7 @@ impl SinkFormatDesc {
             format: format.into(),
             encode: encode.into(),
             options,
+            key_encode,
         }
     }
 }
@@ -224,10 +233,27 @@ impl TryFrom<PbSinkFormatDesc> for SinkFormatDesc {
             E::Protobuf => SinkEncode::Protobuf,
             E::Template => SinkEncode::Template,
             E::Avro => SinkEncode::Avro,
-            e @ (E::Unspecified | E::Native | E::Csv | E::Bytes | E::None) => {
+            e @ (E::Unspecified | E::Native | E::Csv | E::Bytes | E::None | E::Text) => {
                 return Err(SinkError::Config(anyhow!(
                     "sink encode unsupported: {}",
                     e.as_str_name()
+                )))
+            }
+        };
+        let key_encode = match &value.key_encode() {
+            E::Text => Some(SinkEncode::Text),
+            E::Unspecified => None,
+            encode @ (E::Avro
+            | E::Bytes
+            | E::Csv
+            | E::Json
+            | E::Protobuf
+            | E::Template
+            | E::Native
+            | E::None) => {
+                return Err(SinkError::Config(anyhow!(
+                    "unsupported {} as sink key encode",
+                    encode.as_str_name()
                 )))
             }
         };
@@ -237,6 +263,7 @@ impl TryFrom<PbSinkFormatDesc> for SinkFormatDesc {
             format,
             encode,
             options,
+            key_encode,
         })
     }
 }
@@ -276,7 +303,7 @@ pub struct SinkCatalog {
     pub distribution_key: Vec<usize>,
 
     /// The properties of the sink.
-    pub properties: HashMap<String, String>,
+    pub properties: BTreeMap<String, String>,
 
     /// Owner of the sink.
     pub owner: UserId,
@@ -310,6 +337,9 @@ pub struct SinkCatalog {
     pub created_at_cluster_version: Option<String>,
     pub initialized_at_cluster_version: Option<String>,
     pub create_type: CreateType,
+
+    /// The secret reference for the sink, mapping from property name to secret id.
+    pub secret_ref: BTreeMap<String, u32>,
 }
 
 impl SinkCatalog {
@@ -351,6 +381,7 @@ impl SinkCatalog {
             created_at_cluster_version: self.created_at_cluster_version.clone(),
             initialized_at_cluster_version: self.initialized_at_cluster_version.clone(),
             create_type: self.create_type.to_proto() as i32,
+            secret_ref: self.secret_ref.clone(),
         }
     }
 
@@ -444,6 +475,7 @@ impl From<PbSink> for SinkCatalog {
             initialized_at_cluster_version: pb.initialized_at_cluster_version,
             created_at_cluster_version: pb.created_at_cluster_version,
             create_type: CreateType::from_proto(create_type),
+            secret_ref: pb.secret_ref,
         }
     }
 }

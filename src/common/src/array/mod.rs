@@ -14,11 +14,7 @@
 
 //! `Array` defines all in-memory representations of vectorized execution framework.
 
-mod arrow;
-pub use arrow::{
-    iceberg_to_arrow_type, to_deltalake_record_batch_with_schema,
-    to_iceberg_record_batch_with_schema, to_record_batch_with_schema,
-};
+pub mod arrow;
 mod bool_array;
 pub mod bytes_array;
 mod chrono_array;
