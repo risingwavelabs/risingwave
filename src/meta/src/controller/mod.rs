@@ -201,9 +201,9 @@ impl From<ObjectModel<source::Model>> for PbSource {
 
 impl From<ObjectModel<sink::Model>> for PbSink {
     fn from(value: ObjectModel<sink::Model>) -> Self {
-        let mut secret_ref_map: BTreeMap<String, u32> = BTreeMap::new();
+        let mut secret_ref_map = BTreeMap::new();
         if let Some(secret_ref) = value.0.secret_ref {
-            secret_ref_map = secret_ref.into_inner();
+            secret_ref_map = secret_ref.to_protobuf();
         }
         Self {
             id: value.0.sink_id as _,
