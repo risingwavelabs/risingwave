@@ -121,7 +121,7 @@ impl ActorBuilder {
     ///
     /// During this process, the following things will be done:
     /// 1. Replace the logical `Exchange` in node's input with `Merge`, which can be executed on the
-    /// compute nodes.
+    ///    compute nodes.
     /// 2. Fill the upstream mview info of the `Merge` node under the other "leaf" nodes.
     fn rewrite(&self) -> MetaResult<StreamNode> {
         self.rewrite_inner(&self.nodes, 0)

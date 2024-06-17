@@ -38,13 +38,14 @@ pub mod redis;
 pub mod remote;
 pub mod snowflake;
 pub mod snowflake_connector;
+pub mod sqlserver;
 pub mod starrocks;
 pub mod test_sink;
 pub mod trivial;
 pub mod utils;
 pub mod writer;
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::future::Future;
 
 use ::clickhouse::error::Error as ClickHouseError;
@@ -100,6 +101,7 @@ macro_rules! for_all_sinks {
                 { DeltaLake, $crate::sink::deltalake::DeltaLakeSink },
                 { BigQuery, $crate::sink::big_query::BigQuerySink },
                 { DynamoDb, $crate::sink::dynamodb::DynamoDbSink },
+                { SqlServer, $crate::sink::sqlserver::SqlServerSink },
                 { Test, $crate::sink::test_sink::TestSink },
                 { Table, $crate::sink::trivial::TableSink }
             }
@@ -157,7 +159,7 @@ pub const SINK_USER_FORCE_APPEND_ONLY_OPTION: &str = "force_append_only";
 pub struct SinkParam {
     pub sink_id: SinkId,
     pub sink_name: String,
-    pub properties: HashMap<String, String>,
+    pub properties: BTreeMap<String, String>,
     pub columns: Vec<ColumnDesc>,
     pub downstream_pk: Vec<usize>,
     pub sink_type: SinkType,
@@ -384,7 +386,7 @@ impl<R: LogReader> SinkLogReader for R {
 
 #[async_trait]
 pub trait LogSinker: 'static {
-    async fn consume_log_and_sink(self, log_reader: &mut impl SinkLogReader) -> Result<()>;
+    async fn consume_log_and_sink(self, log_reader: &mut impl SinkLogReader) -> Result<!>;
 }
 
 #[async_trait]
@@ -577,6 +579,12 @@ pub enum SinkError {
         #[backtrace]
         anyhow::Error,
     ),
+    #[error("SQL Server error: {0}")]
+    SqlServer(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
     #[error(transparent)]
     Connector(
         #[from]
@@ -612,5 +620,11 @@ impl From<DeltaTableError> for SinkError {
 impl From<RedisError> for SinkError {
     fn from(value: RedisError) -> Self {
         SinkError::Redis(value.to_report_string())
+    }
+}
+
+impl From<tiberius::error::Error> for SinkError {
+    fn from(err: tiberius::error::Error) -> Self {
+        SinkError::SqlServer(anyhow!(err))
     }
 }

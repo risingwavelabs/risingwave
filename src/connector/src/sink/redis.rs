@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 
 use anyhow::anyhow;
 use async_trait::async_trait;
@@ -150,7 +150,7 @@ pub struct RedisConfig {
 }
 
 impl RedisConfig {
-    pub fn from_hashmap(properties: HashMap<String, String>) -> Result<Self> {
+    pub fn from_btreemap(properties: BTreeMap<String, String>) -> Result<Self> {
         let config =
             serde_json::from_value::<RedisConfig>(serde_json::to_value(properties).unwrap())
                 .map_err(|e| SinkError::Config(anyhow!(e)))?;
@@ -178,7 +178,7 @@ impl TryFrom<SinkParam> for RedisSink {
                 "Redis Sink Primary Key must be specified."
             )));
         }
-        let config = RedisConfig::from_hashmap(param.properties.clone())?;
+        let config = RedisConfig::from_btreemap(param.properties.clone())?;
         Ok(Self {
             config,
             schema: param.schema(),
@@ -249,8 +249,11 @@ impl Sink for RedisSink {
 }
 
 pub struct RedisSinkWriter {
+    #[expect(dead_code)]
     epoch: u64,
+    #[expect(dead_code)]
     schema: Schema,
+    #[expect(dead_code)]
     pk_indices: Vec<usize>,
     formatter: SinkFormatterImpl,
     payload_writer: RedisSinkPayloadWriter,
@@ -406,7 +409,7 @@ mod test {
         let format_desc = SinkFormatDesc {
             format: SinkFormat::AppendOnly,
             encode: SinkEncode::Json,
-            options: HashMap::default(),
+            options: BTreeMap::default(),
             key_encode: None,
         };
 
@@ -474,16 +477,16 @@ mod test {
             },
         ]);
 
-        let mut hash_map = HashMap::default();
-        hash_map.insert(KEY_FORMAT.to_string(), "key-{id}".to_string());
-        hash_map.insert(
+        let mut btree_map = BTreeMap::default();
+        btree_map.insert(KEY_FORMAT.to_string(), "key-{id}".to_string());
+        btree_map.insert(
             VALUE_FORMAT.to_string(),
             "values:{id:{id},name:{name}}".to_string(),
         );
         let format_desc = SinkFormatDesc {
             format: SinkFormat::AppendOnly,
             encode: SinkEncode::Template,
-            options: hash_map,
+            options: btree_map,
             key_encode: None,
         };
 

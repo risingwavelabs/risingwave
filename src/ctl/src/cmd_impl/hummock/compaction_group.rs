@@ -65,6 +65,7 @@ pub fn build_compaction_config_vec(
     enable_emergency_picker: Option<bool>,
     tombstone_reclaim_ratio: Option<u32>,
     compress_algorithm: Option<CompressionAlgorithm>,
+    max_l0_compact_level: Option<u32>,
 ) -> Vec<MutableConfig> {
     let mut configs = vec![];
     if let Some(c) = max_bytes_for_level_base {
@@ -114,6 +115,9 @@ pub fn build_compaction_config_vec(
     }
     if let Some(c) = compress_algorithm {
         configs.push(MutableConfig::CompressionAlgorithm(c))
+    }
+    if let Some(c) = max_l0_compact_level {
+        configs.push(MutableConfig::MaxL0CompactLevelCount(c))
     }
 
     configs

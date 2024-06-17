@@ -467,10 +467,9 @@ class Panels:
             **self.common_options,
         )
 
-    def table_info(self, title, description, targets, columns):
+    def table_info(self, title, description, targets, columns, excludeByName=dict.fromkeys(["Time", "Value"], True)):
         gridPos = self.layout.next_half_width_graph()
         column_indices = {column: index for index, column in enumerate(columns)}
-        excludeByName = dict.fromkeys(["Time", "Value"], True)
         transformations = [
             {"id": "organize", "options": {"indexByName": column_indices, "excludeByName": excludeByName}}
         ]

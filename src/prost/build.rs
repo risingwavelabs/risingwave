@@ -65,7 +65,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ".monitor_service.StackTraceResponse",
         ".plan_common.ExternalTableDesc",
         ".hummock.CompactTask",
-        // ".catalog.StreamSourceInfo",
+        ".catalog.StreamSourceInfo",
+        ".catalog.Source",
+        ".catalog.Sink",
+        ".catalog.View",
+        ".connector_service.ValidateSourceRequest",
+        ".connector_service.GetEventStreamRequest",
+        ".connector_service.SinkParam",
+        ".stream_plan.SinkDesc",
+        ".stream_plan.StreamFsFetch",
+        ".stream_plan.SourceBackfillNode",
+        ".stream_plan.StreamSource",
+        ".batch_plan.SourceNode",
     ];
 
     // Build protobuf structs.
@@ -99,7 +110,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Eq + Hash are for plan nodes to do common sub-plan detection.
         // The requirement is from Source node -> SourceCatalog -> WatermarkDesc -> expr
         .type_attribute("catalog.WatermarkDesc", "#[derive(Eq, Hash)]")
-        .type_attribute("catalog.StreamSourceInfo", "#[derive(Eq)]")
+        .type_attribute("catalog.StreamSourceInfo", "#[derive(Eq, Hash)]")
         .type_attribute("expr.ExprNode", "#[derive(Eq, Hash)]")
         .type_attribute("data.DataType", "#[derive(Eq, Hash)]")
         .type_attribute("expr.ExprNode.rex_node", "#[derive(Eq, Hash)]")
@@ -139,6 +150,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute("plan_common.AdditionalColumnHeader", "#[derive(Eq, Hash)]")
         .type_attribute("plan_common.AdditionalColumnHeaders", "#[derive(Eq, Hash)]")
         .type_attribute("plan_common.AdditionalColumnOffset", "#[derive(Eq, Hash)]")
+        .type_attribute("plan_common.AdditionalDatabaseName", "#[derive(Eq, Hash)]")
+        .type_attribute("plan_common.AdditionalSchemaName", "#[derive(Eq, Hash)]")
+        .type_attribute("plan_common.AdditionalTableName", "#[derive(Eq, Hash)]")
+        .type_attribute(
+            "plan_common.AdditionalCollectionName",
+            "#[derive(Eq, Hash)]",
+        )
         .type_attribute("common.ColumnOrder", "#[derive(Eq, Hash)]")
         .type_attribute("common.OrderType", "#[derive(Eq, Hash)]")
         .type_attribute("common.Buffer", "#[derive(Eq)]")

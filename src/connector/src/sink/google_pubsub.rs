@@ -12,8 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
-use std::usize;
+use std::collections::BTreeMap;
 
 use anyhow::{anyhow, Context};
 use google_cloud_gax::conn::Environment;
@@ -73,7 +72,7 @@ pub struct GooglePubSubConfig {
 }
 
 impl GooglePubSubConfig {
-    fn from_hashmap(values: HashMap<String, String>) -> Result<Self> {
+    fn from_btreemap(values: BTreeMap<String, String>) -> Result<Self> {
         serde_json::from_value::<GooglePubSubConfig>(serde_json::to_value(values).unwrap())
             .map_err(|e| SinkError::Config(anyhow!(e)))
     }
@@ -97,11 +96,10 @@ impl Sink for GooglePubSubSink {
 
     const SINK_NAME: &'static str = PUBSUB_SINK;
 
-    fn is_sink_decouple(desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
+    fn is_sink_decouple(_desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
         match user_specified {
-            SinkDecouple::Default => Ok(desc.sink_type.is_append_only()),
+            SinkDecouple::Default | SinkDecouple::Enable => Ok(true),
             SinkDecouple::Disable => Ok(false),
-            SinkDecouple::Enable => Ok(true),
         }
     }
 
@@ -141,7 +139,7 @@ impl TryFrom<SinkParam> for GooglePubSubSink {
 
     fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
         let schema = param.schema();
-        let config = GooglePubSubConfig::from_hashmap(param.properties)?;
+        let config = GooglePubSubConfig::from_btreemap(param.properties)?;
 
         let format_desc = param
             .format_desc

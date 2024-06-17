@@ -763,6 +763,14 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::mem_table_spill_threshold")]
     pub mem_table_spill_threshold: usize,
 
+    /// The concurrent uploading number of `SSTables` of buidler
+    #[serde(default = "default::storage::compactor_concurrent_uploading_sst_count")]
+    pub compactor_concurrent_uploading_sst_count: Option<usize>,
+
+    /// Object storage configuration
+    /// 1. General configuration
+    /// 2. Some special configuration of Backend
+    /// 3. Retry and timeout configuration
     #[serde(default)]
     pub object_store: ObjectStoreConfig,
 }
@@ -826,12 +834,6 @@ pub struct FileCacheConfig {
 
     #[serde(default = "default::file_cache::recover_concurrency")]
     pub recover_concurrency: usize,
-
-    #[serde(default = "default::file_cache::lfu_window_to_cache_size_ratio")]
-    pub lfu_window_to_cache_size_ratio: usize,
-
-    #[serde(default = "default::file_cache::lfu_tiny_lru_capacity_ratio")]
-    pub lfu_tiny_lru_capacity_ratio: f64,
 
     #[serde(default = "default::file_cache::insert_rate_limit_mb")]
     pub insert_rate_limit_mb: usize,
@@ -1030,9 +1032,13 @@ pub struct ObjectStoreConfig {
     #[serde(default = "default::object_store_config::object_store_set_atomic_write_dir")]
     pub object_store_set_atomic_write_dir: bool,
 
+    /// Retry and timeout configuration
+    /// Description retry strategy driven by exponential back-off
+    /// Exposes the timeout and retries of each Object store interface. Therefore, the total timeout for each interface is determined based on the interface's timeout/retry configuration and the exponential back-off policy.
     #[serde(default)]
     pub retry: ObjectStoreRetryConfig,
 
+    /// Some special configuration of S3 Backend
     #[serde(default)]
     pub s3: S3ObjectStoreConfig,
 }
@@ -1086,66 +1092,89 @@ pub struct S3ObjectStoreDeveloperConfig {
 
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
 pub struct ObjectStoreRetryConfig {
+    // A retry strategy driven by exponential back-off.
+    // The retry strategy is used for all object store operations.
+    /// Given a base duration for retry strategy in milliseconds.
     #[serde(default = "default::object_store_config::object_store_req_backoff_interval_ms")]
     pub req_backoff_interval_ms: u64,
+
+    /// The max delay interval for the retry strategy. No retry delay will be longer than this `Duration`.
     #[serde(default = "default::object_store_config::object_store_req_backoff_max_delay_ms")]
     pub req_backoff_max_delay_ms: u64,
+
+    /// A multiplicative factor that will be applied to the exponential back-off retry delay.
     #[serde(default = "default::object_store_config::object_store_req_backoff_factor")]
     pub req_backoff_factor: u64,
 
-    // upload
+    /// Maximum timeout for `upload` operation
     #[serde(default = "default::object_store_config::object_store_upload_attempt_timeout_ms")]
     pub upload_attempt_timeout_ms: u64,
+
+    /// Total counts of `upload` operation retries
     #[serde(default = "default::object_store_config::object_store_upload_retry_attempts")]
     pub upload_retry_attempts: usize,
 
-    // streaming_upload_init + streaming_upload
+    /// Maximum timeout for `streaming_upload_init` and `streaming_upload`
     #[serde(
         default = "default::object_store_config::object_store_streaming_upload_attempt_timeout_ms"
     )]
     pub streaming_upload_attempt_timeout_ms: u64,
+
+    /// Total counts of `streaming_upload` operation retries
     #[serde(
         default = "default::object_store_config::object_store_streaming_upload_retry_attempts"
     )]
     pub streaming_upload_retry_attempts: usize,
 
-    // read
+    /// Maximum timeout for `read` operation
     #[serde(default = "default::object_store_config::object_store_read_attempt_timeout_ms")]
     pub read_attempt_timeout_ms: u64,
+
+    /// Total counts of `read` operation retries
     #[serde(default = "default::object_store_config::object_store_read_retry_attempts")]
     pub read_retry_attempts: usize,
 
-    // streaming_read_init + streaming_read
+    /// Maximum timeout for `streaming_read_init` and `streaming_read` operation
     #[serde(
         default = "default::object_store_config::object_store_streaming_read_attempt_timeout_ms"
     )]
     pub streaming_read_attempt_timeout_ms: u64,
+
+    /// Total counts of `streaming_read operation` retries
     #[serde(default = "default::object_store_config::object_store_streaming_read_retry_attempts")]
     pub streaming_read_retry_attempts: usize,
 
-    // metadata
+    /// Maximum timeout for `metadata` operation
     #[serde(default = "default::object_store_config::object_store_metadata_attempt_timeout_ms")]
     pub metadata_attempt_timeout_ms: u64,
+
+    /// Total counts of `metadata` operation retries
     #[serde(default = "default::object_store_config::object_store_metadata_retry_attempts")]
     pub metadata_retry_attempts: usize,
 
-    // delete
+    /// Maximum timeout for `delete` operation
     #[serde(default = "default::object_store_config::object_store_delete_attempt_timeout_ms")]
     pub delete_attempt_timeout_ms: u64,
+
+    /// Total counts of `delete` operation retries
     #[serde(default = "default::object_store_config::object_store_delete_retry_attempts")]
     pub delete_retry_attempts: usize,
 
-    // delete_object
+    /// Maximum timeout for `delete_object` operation
     #[serde(
         default = "default::object_store_config::object_store_delete_objects_attempt_timeout_ms"
     )]
     pub delete_objects_attempt_timeout_ms: u64,
+
+    /// Total counts of `delete_object` operation retries
     #[serde(default = "default::object_store_config::object_store_delete_objects_retry_attempts")]
     pub delete_objects_retry_attempts: usize,
 
-    // list
+    /// Maximum timeout for `list` operation
     #[serde(default = "default::object_store_config::object_store_list_attempt_timeout_ms")]
     pub list_attempt_timeout_ms: u64,
+
+    /// Total counts of `list` operation retries
     #[serde(default = "default::object_store_config::object_store_list_retry_attempts")]
     pub list_retry_attempts: usize,
 }
@@ -1515,6 +1544,10 @@ pub mod default {
         pub fn max_prefetch_block_number() -> usize {
             16
         }
+
+        pub fn compactor_concurrent_uploading_sst_count() -> Option<usize> {
+            None
+        }
     }
 
     pub mod streaming {
@@ -1562,14 +1595,6 @@ pub mod default {
 
         pub fn recover_concurrency() -> usize {
             8
-        }
-
-        pub fn lfu_window_to_cache_size_ratio() -> usize {
-            1
-        }
-
-        pub fn lfu_tiny_lru_capacity_ratio() -> f64 {
-            0.01
         }
 
         pub fn insert_rate_limit_mb() -> usize {
@@ -1800,6 +1825,8 @@ pub mod default {
         const DEFAULT_MIN_OVERLAPPING_SUB_LEVEL_COMPACT_LEVEL_COUNT: u32 = 12;
         const DEFAULT_TOMBSTONE_RATIO_PERCENT: u32 = 40;
         const DEFAULT_EMERGENCY_PICKER: bool = true;
+        const DEFAULT_MAX_LEVEL: u32 = 6;
+        const DEFAULT_MAX_L0_COMPACT_LEVEL_COUNT: u32 = 42;
 
         use crate::catalog::hummock::CompactionFilterFlag;
 
@@ -1861,6 +1888,14 @@ pub mod default {
 
         pub fn enable_emergency_picker() -> bool {
             DEFAULT_EMERGENCY_PICKER
+        }
+
+        pub fn max_level() -> u32 {
+            DEFAULT_MAX_LEVEL
+        }
+
+        pub fn max_l0_compact_level_count() -> u32 {
+            DEFAULT_MAX_L0_COMPACT_LEVEL_COUNT
         }
     }
 
@@ -2195,6 +2230,8 @@ pub struct CompactionConfig {
     pub tombstone_reclaim_ratio: u32,
     #[serde(default = "default::compaction_config::enable_emergency_picker")]
     pub enable_emergency_picker: bool,
+    #[serde(default = "default::compaction_config::max_level")]
+    pub max_level: u32,
 }
 
 #[cfg(test)]

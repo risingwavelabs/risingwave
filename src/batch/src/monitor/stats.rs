@@ -14,7 +14,8 @@
 
 use std::sync::{Arc, LazyLock};
 
-use prometheus::{IntGauge, Registry};
+use prometheus::core::{AtomicU64, GenericCounter};
+use prometheus::{register_int_counter_with_registry, IntGauge, Registry};
 use risingwave_common::metrics::{
     LabelGuardedGauge, LabelGuardedGaugeVec, LabelGuardedHistogramVec, LabelGuardedIntCounterVec,
     LabelGuardedIntGauge, LabelGuardedIntGaugeVec, TrAdderGauge,
@@ -300,5 +301,39 @@ impl BatchManagerMetrics {
     #[cfg(test)]
     pub fn for_test() -> Arc<Self> {
         Arc::new(GLOBAL_BATCH_MANAGER_METRICS.clone())
+    }
+}
+
+#[derive(Clone)]
+pub struct BatchSpillMetrics {
+    pub batch_spill_read_bytes: GenericCounter<AtomicU64>,
+    pub batch_spill_write_bytes: GenericCounter<AtomicU64>,
+}
+
+pub static GLOBAL_BATCH_SPILL_METRICS: LazyLock<BatchSpillMetrics> =
+    LazyLock::new(|| BatchSpillMetrics::new(&GLOBAL_METRICS_REGISTRY));
+
+impl BatchSpillMetrics {
+    fn new(registry: &Registry) -> Self {
+        let batch_spill_read_bytes = register_int_counter_with_registry!(
+            "batch_spill_read_bytes",
+            "Total bytes of requests read from spill files",
+            registry,
+        )
+        .unwrap();
+        let batch_spill_write_bytes = register_int_counter_with_registry!(
+            "batch_spill_write_bytes",
+            "Total bytes of requests write to spill files",
+            registry,
+        )
+        .unwrap();
+        Self {
+            batch_spill_read_bytes,
+            batch_spill_write_bytes,
+        }
+    }
+
+    pub fn for_test() -> Arc<Self> {
+        Arc::new(GLOBAL_BATCH_SPILL_METRICS.clone())
     }
 }

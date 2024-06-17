@@ -260,8 +260,8 @@ mod tests {
     use crate::executor::ExecutorBuilder;
     use crate::task::{ComputeNodeContext, ShutdownToken, TaskId};
 
-    #[test]
-    fn test_clone_for_plan() {
+    #[tokio::test]
+    async fn test_clone_for_plan() {
         let plan_node = PlanNode::default();
         let task_id = &TaskId {
             task_id: 1,

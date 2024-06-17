@@ -170,7 +170,7 @@ type ColumnsDefTuple = (
 
 /// Reference:
 /// <https://www.postgresql.org/docs/current/sql-syntax-lexical.html#SQL-PRECEDENCE>
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Precedence {
     Zero = 0,
     LogicalOr, // 5 in upstream
@@ -820,7 +820,7 @@ impl Parser<'_> {
         let distinct = self.parse_all_or_distinct()?;
         let (args, order_by, variadic) = self.parse_optional_args()?;
         let over = if self.parse_keyword(Keyword::OVER) {
-            // TBD: support window names (`OVER mywin`) in place of inline specification
+            // TODO: support window names (`OVER mywin`) in place of inline specification
             self.expect_token(&Token::LParen)?;
             let partition_by = if self.parse_keywords(&[Keyword::PARTITION, Keyword::BY]) {
                 // a list of possibly-qualified column names
@@ -887,6 +887,7 @@ impl Parser<'_> {
             Keyword::ROWS => keyword.value(WindowFrameUnits::Rows),
             Keyword::RANGE => keyword.value(WindowFrameUnits::Range),
             Keyword::GROUPS => keyword.value(WindowFrameUnits::Groups),
+            Keyword::SESSION => keyword.value(WindowFrameUnits::Session),
             _ => fail,
         }
         .expect("ROWS, RANGE, or GROUPS")
@@ -895,13 +896,21 @@ impl Parser<'_> {
 
     pub fn parse_window_frame(&mut self) -> PResult<WindowFrame> {
         let units = self.parse_window_frame_units()?;
-        let (start_bound, end_bound) = if self.parse_keyword(Keyword::BETWEEN) {
-            let start_bound = self.parse_window_frame_bound()?;
+        let bounds = if self.parse_keyword(Keyword::BETWEEN) {
+            // `BETWEEN <frame_start> AND <frame_end>`
+            let start = self.parse_window_frame_bound()?;
             self.expect_keyword(Keyword::AND)?;
-            let end_bound = Some(self.parse_window_frame_bound()?);
-            (start_bound, end_bound)
+            let end = Some(self.parse_window_frame_bound()?);
+            WindowFrameBounds::Bounds { start, end }
+        } else if self.parse_keywords(&[Keyword::WITH, Keyword::GAP]) {
+            // `WITH GAP <gap>`, only for session frames
+            WindowFrameBounds::Gap(Box::new(self.parse_expr()?))
         } else {
-            (self.parse_window_frame_bound()?, None)
+            // `<frame_start>`
+            WindowFrameBounds::Bounds {
+                start: self.parse_window_frame_bound()?,
+                end: None,
+            }
         };
         let exclusion = if self.parse_keyword(Keyword::EXCLUDE) {
             Some(self.parse_window_frame_exclusion()?)
@@ -910,8 +919,7 @@ impl Parser<'_> {
         };
         Ok(WindowFrame {
             units,
-            start_bound,
-            end_bound,
+            bounds,
             exclusion,
         })
     }
@@ -1009,28 +1017,12 @@ impl Parser<'_> {
 
     /// Parse a SQL CAST function e.g. `CAST(expr AS FLOAT)`
     pub fn parse_cast_expr(&mut self) -> PResult<Expr> {
-        self.expect_token(&Token::LParen)?;
-        let expr = self.parse_expr()?;
-        self.expect_keyword(Keyword::AS)?;
-        let data_type = self.parse_data_type()?;
-        self.expect_token(&Token::RParen)?;
-        Ok(Expr::Cast {
-            expr: Box::new(expr),
-            data_type,
-        })
+        parser_v2::expr_cast(self)
     }
 
     /// Parse a SQL TRY_CAST function e.g. `TRY_CAST(expr AS FLOAT)`
     pub fn parse_try_cast_expr(&mut self) -> PResult<Expr> {
-        self.expect_token(&Token::LParen)?;
-        let expr = self.parse_expr()?;
-        self.expect_keyword(Keyword::AS)?;
-        let data_type = self.parse_data_type()?;
-        self.expect_token(&Token::RParen)?;
-        Ok(Expr::TryCast {
-            expr: Box::new(expr),
-            data_type,
-        })
+        parser_v2::expr_try_cast(self)
     }
 
     /// Parse a SQL EXISTS expression e.g. `WHERE EXISTS(SELECT ...)`.
@@ -1042,83 +1034,21 @@ impl Parser<'_> {
     }
 
     pub fn parse_extract_expr(&mut self) -> PResult<Expr> {
-        self.expect_token(&Token::LParen)?;
-        let field = self.parse_date_time_field_in_extract()?;
-        self.expect_keyword(Keyword::FROM)?;
-        let expr = self.parse_expr()?;
-        self.expect_token(&Token::RParen)?;
-        Ok(Expr::Extract {
-            field,
-            expr: Box::new(expr),
-        })
+        parser_v2::expr_extract(self)
     }
 
     pub fn parse_substring_expr(&mut self) -> PResult<Expr> {
-        // PARSE SUBSTRING (EXPR [FROM 1] [FOR 3])
-        self.expect_token(&Token::LParen)?;
-        let expr = self.parse_expr()?;
-        let mut from_expr = None;
-        if self.parse_keyword(Keyword::FROM) || self.consume_token(&Token::Comma) {
-            from_expr = Some(self.parse_expr()?);
-        }
-
-        let mut to_expr = None;
-        if self.parse_keyword(Keyword::FOR) || self.consume_token(&Token::Comma) {
-            to_expr = Some(self.parse_expr()?);
-        }
-        self.expect_token(&Token::RParen)?;
-
-        Ok(Expr::Substring {
-            expr: Box::new(expr),
-            substring_from: from_expr.map(Box::new),
-            substring_for: to_expr.map(Box::new),
-        })
+        parser_v2::expr_substring(self)
     }
 
     /// `POSITION(<expr> IN <expr>)`
     pub fn parse_position_expr(&mut self) -> PResult<Expr> {
-        self.expect_token(&Token::LParen)?;
-
-        // Logically `parse_expr`, but limited to those with precedence higher than `BETWEEN`/`IN`,
-        // to avoid conflict with general IN operator, for example `position(a IN (b) IN (c))`.
-        // https://github.com/postgres/postgres/blob/REL_15_2/src/backend/parser/gram.y#L16012
-        let substring = self.parse_subexpr(Precedence::Between)?;
-        self.expect_keyword(Keyword::IN)?;
-        let string = self.parse_subexpr(Precedence::Between)?;
-
-        self.expect_token(&Token::RParen)?;
-
-        Ok(Expr::Position {
-            substring: Box::new(substring),
-            string: Box::new(string),
-        })
+        parser_v2::expr_position(self)
     }
 
     /// `OVERLAY(<expr> PLACING <expr> FROM <expr> [ FOR <expr> ])`
     pub fn parse_overlay_expr(&mut self) -> PResult<Expr> {
-        self.expect_token(&Token::LParen)?;
-
-        let expr = self.parse_expr()?;
-
-        self.expect_keyword(Keyword::PLACING)?;
-        let new_substring = self.parse_expr()?;
-
-        self.expect_keyword(Keyword::FROM)?;
-        let start = self.parse_expr()?;
-
-        let mut count = None;
-        if self.parse_keyword(Keyword::FOR) {
-            count = Some(self.parse_expr()?);
-        }
-
-        self.expect_token(&Token::RParen)?;
-
-        Ok(Expr::Overlay {
-            expr: Box::new(expr),
-            new_substring: Box::new(new_substring),
-            start: Box::new(start),
-            count: count.map(Box::new),
-        })
+        parser_v2::expr_overlay(self)
     }
 
     /// `TRIM ([WHERE] ['text'] FROM 'text')`\
@@ -3558,10 +3488,6 @@ impl Parser<'_> {
                     Some('\'') => Ok(Value::SingleQuotedString(w.value)),
                     _ => self.expected_at(checkpoint, "A value")?,
                 },
-                Keyword::REF => {
-                    self.expect_keyword(Keyword::SECRET)?;
-                    Ok(Value::Ref(self.parse_object_name()?))
-                }
                 _ => self.expected_at(checkpoint, "a concrete value"),
             },
             Token::Number(ref n) => Ok(Value::Number(n.clone())),

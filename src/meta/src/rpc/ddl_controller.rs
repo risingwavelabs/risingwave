@@ -1040,11 +1040,7 @@ impl DdlController {
                 actor.nodes.as_ref().unwrap().node_body
                 && let Some(ref cdc_table_desc) = stream_cdc_scan.cdc_table_desc
             {
-                let properties: HashMap<String, String> = cdc_table_desc
-                    .connect_properties
-                    .iter()
-                    .map(|(k, v)| (k.clone(), v.clone()))
-                    .collect();
+                let properties = cdc_table_desc.connect_properties.clone();
                 let mut props = ConnectorProperties::extract(properties, true)?;
                 props.init_from_pb_cdc_table_desc(cdc_table_desc);
 

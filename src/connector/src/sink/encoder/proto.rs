@@ -205,6 +205,7 @@ impl MaybeData for () {
 /// * Top level is always a message.
 /// * All message fields can be omitted in proto3.
 /// * All repeated elements must have a value.
+///
 /// So we handle [`ScalarRefImpl`] rather than [`DatumRef`] here.
 impl MaybeData for ScalarRefImpl<'_> {
     type Out = Value;
@@ -275,6 +276,7 @@ fn encode_fields<'a>(
 
 // Full name of Well-Known Types
 const WKT_TIMESTAMP: &str = "google.protobuf.Timestamp";
+#[expect(dead_code)]
 const WKT_BOOL_VALUE: &str = "google.protobuf.BoolValue";
 
 /// Handles both `validate` (without actual data) and `encode`.

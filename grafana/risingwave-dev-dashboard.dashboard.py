@@ -40,6 +40,13 @@ def section_actor_info(outer_panels):
                     [panels.table_target(f"group({metric('table_info')}) by (table_id, table_name, table_type, materialized_view_id, fragment_id, compaction_group_id)")],
                     ["table_id", "table_name", "table_type", "materialized_view_id", "fragment_id", "compaction_group_id"],
                 ),
+                panels.table_info(
+                    "Actor Count (Group By Compute Node)",
+                    "Actor count per compute node",
+                    [panels.table_target(f"count({metric('actor_info')}) by (compute_node)")],
+                    ["table_id", "table_name", "table_type", "materialized_view_id", "fragment_id", "compaction_group_id"],
+                    dict.fromkeys(["Time"], True)
+                )
             ],
         )
     ]
@@ -1785,6 +1792,20 @@ def section_batch(outer_panels):
                         ),
                     ],
                 ),
+                panels.timeseries_bytes_per_sec(
+                    "Batch Spill Throughput",
+                    "Disk throughputs of spilling-out in the bacth query engine",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('batch_spill_read_bytes')}[$__rate_interval]))by({COMPONENT_LABEL}, {NODE_LABEL})",
+                            "read - {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
+                            ),
+                        panels.target(
+                            f"sum(rate({metric('batch_spill_write_bytes')}[$__rate_interval]))by({COMPONENT_LABEL}, {NODE_LABEL})",
+                            "write - {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
+                            ),
+                    ],
+                ),
             ],
         ),
     ]
@@ -2264,6 +2285,23 @@ def section_hummock_write(outer_panels):
                             % (COMPONENT_LABEL, NODE_LABEL),
                         ),
                         panels.target(
+                            f"sum({metric('state_store_uploader_imm_size')}) by ({COMPONENT_LABEL}, {NODE_LABEL})",
+                            "uploader imm size - {{%s}} @ {{%s}}"
+                            % (COMPONENT_LABEL, NODE_LABEL),
+                        ),
+                        panels.target(
+                            f"sum({metric('state_store_uploader_imm_size')}) by ({COMPONENT_LABEL}, {NODE_LABEL}) - "
+                            f"sum({metric('state_store_uploader_uploading_task_size')}) by ({COMPONENT_LABEL}, {NODE_LABEL})",
+                            "unflushed imm size - {{%s}} @ {{%s}}"
+                            % (COMPONENT_LABEL, NODE_LABEL),
+                            ),
+                        panels.target(
+                            f"sum({metric('uploading_memory_size')}) by ({COMPONENT_LABEL}, {NODE_LABEL}) - "
+                            f"sum({metric('state_store_uploader_imm_size')}) by ({COMPONENT_LABEL}, {NODE_LABEL})",
+                            "orphan imm size - {{%s}} @ {{%s}}"
+                            % (COMPONENT_LABEL, NODE_LABEL),
+                        ),
+                        panels.target(
                             f"sum({metric('state_store_old_value_size')}) by ({COMPONENT_LABEL}, {NODE_LABEL})",
                             "old value size - {{%s}} @ {{%s}}"
                             % (COMPONENT_LABEL, NODE_LABEL),
@@ -2664,8 +2702,8 @@ def section_hummock_tiered_cache(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"sum({metric('foyer_storage_region')}) by (name, type, {NODE_LABEL}) * on(name, {NODE_LABEL}) group_left() foyer_storage_region_size_bytes",
-                            "{{name}} - memory - size @ {{%s}}" % NODE_LABEL,
+                            f"sum({metric('foyer_storage_region')}) by (name, type, {NODE_LABEL}) * on(name, {NODE_LABEL}) group_left() avg({metric('foyer_storage_region_size_bytes')}) by (name, type, {NODE_LABEL})",
+                            "{{name}} - {{type}} region - size @ {{%s}}" % NODE_LABEL,
                         ),
                     ],
                 ),

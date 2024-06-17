@@ -43,6 +43,7 @@ pub struct KinesisSplitReader {
     latest_offset: Option<String>,
     shard_iter: Option<String>,
     start_position: KinesisOffset,
+    #[expect(dead_code)]
     end_position: KinesisOffset,
 
     split_id: SplitId,

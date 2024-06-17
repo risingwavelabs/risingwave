@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use core::fmt::Debug;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
@@ -120,6 +120,7 @@ pub struct MqttSink {
 pub struct MqttSinkWriter {
     pub config: MqttConfig,
     payload_writer: MqttSinkPayloadWriter,
+    #[expect(dead_code)]
     schema: Schema,
     encoder: RowEncoderWrapper,
     stopped: Arc<AtomicBool>,
@@ -127,7 +128,7 @@ pub struct MqttSinkWriter {
 
 /// Basic data types for use with the mqtt interface
 impl MqttConfig {
-    pub fn from_hashmap(values: HashMap<String, String>) -> Result<Self> {
+    pub fn from_btreemap(values: BTreeMap<String, String>) -> Result<Self> {
         let config = serde_json::from_value::<MqttConfig>(serde_json::to_value(values).unwrap())
             .map_err(|e| SinkError::Config(anyhow!(e)))?;
         if config.r#type != SINK_TYPE_APPEND_ONLY {
@@ -145,7 +146,7 @@ impl TryFrom<SinkParam> for MqttSink {
 
     fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
         let schema = param.schema();
-        let config = MqttConfig::from_hashmap(param.properties)?;
+        let config = MqttConfig::from_btreemap(param.properties)?;
         Ok(Self {
             config,
             schema,
@@ -164,11 +165,10 @@ impl Sink for MqttSink {
 
     const SINK_NAME: &'static str = MQTT_SINK;
 
-    fn is_sink_decouple(desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
+    fn is_sink_decouple(_desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
         match user_specified {
-            SinkDecouple::Default => Ok(desc.sink_type.is_append_only()),
+            SinkDecouple::Default | SinkDecouple::Enable => Ok(true),
             SinkDecouple::Disable => Ok(false),
-            SinkDecouple::Enable => Ok(true),
         }
     }
 

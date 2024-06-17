@@ -26,7 +26,9 @@ use risingwave_storage::StateStoreImpl;
 
 use super::TaskId;
 use crate::error::Result;
-use crate::monitor::{BatchMetricsWithTaskLabels, BatchMetricsWithTaskLabelsInner};
+use crate::monitor::{
+    BatchMetricsWithTaskLabels, BatchMetricsWithTaskLabelsInner, BatchSpillMetrics,
+};
 use crate::task::{BatchEnvironment, TaskOutput, TaskOutputId};
 use crate::worker_manager::worker_node_manager::WorkerNodeManagerRef;
 
@@ -52,6 +54,8 @@ pub trait BatchTaskContext: Clone + Send + Sync + 'static {
     /// Get batch metrics.
     /// None indicates that not collect task metrics.
     fn batch_metrics(&self) -> Option<BatchMetricsWithTaskLabels>;
+
+    fn spill_metrics(&self) -> Arc<BatchSpillMetrics>;
 
     /// Get compute client pool. This is used in grpc exchange to avoid creating new compute client
     /// for each grpc call.
@@ -102,6 +106,10 @@ impl BatchTaskContext for ComputeNodeContext {
 
     fn batch_metrics(&self) -> Option<BatchMetricsWithTaskLabels> {
         self.batch_metrics.clone()
+    }
+
+    fn spill_metrics(&self) -> Arc<BatchSpillMetrics> {
+        self.env.spill_metrics()
     }
 
     fn client_pool(&self) -> ComputeClientPoolRef {
