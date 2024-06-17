@@ -143,10 +143,10 @@ impl From<ObjectModel<table::Model>> for PbTable {
                 .cardinality
                 .map(|cardinality| cardinality.to_protobuf()),
             initialized_at_epoch: Some(
-                Epoch::from_unix_millis(value.1.initialized_at.timestamp_millis() as _).0,
+                Epoch::from_unix_millis(value.1.initialized_at.and_utc().timestamp_millis() as _).0,
             ),
             created_at_epoch: Some(
-                Epoch::from_unix_millis(value.1.created_at.timestamp_millis() as _).0,
+                Epoch::from_unix_millis(value.1.created_at.and_utc().timestamp_millis() as _).0,
             ),
             cleaned_by_watermark: value.0.cleaned_by_watermark,
             stream_job_status: PbStreamJobStatus::Created as _, // todo: deprecate it.
@@ -183,10 +183,10 @@ impl From<ObjectModel<source::Model>> for PbSource {
             connection_id: value.0.connection_id.map(|id| id as _),
             // todo: using the timestamp from the database directly.
             initialized_at_epoch: Some(
-                Epoch::from_unix_millis(value.1.initialized_at.timestamp_millis() as _).0,
+                Epoch::from_unix_millis(value.1.initialized_at.and_utc().timestamp_millis() as _).0,
             ),
             created_at_epoch: Some(
-                Epoch::from_unix_millis(value.1.created_at.timestamp_millis() as _).0,
+                Epoch::from_unix_millis(value.1.created_at.and_utc().timestamp_millis() as _).0,
             ),
             version: value.0.version as _,
             optional_associated_table_id: value
@@ -221,10 +221,10 @@ impl From<ObjectModel<sink::Model>> for PbSink {
             definition: value.0.definition,
             connection_id: value.0.connection_id.map(|id| id as _),
             initialized_at_epoch: Some(
-                Epoch::from_unix_millis(value.1.initialized_at.timestamp_millis() as _).0,
+                Epoch::from_unix_millis(value.1.initialized_at.and_utc().timestamp_millis() as _).0,
             ),
             created_at_epoch: Some(
-                Epoch::from_unix_millis(value.1.created_at.timestamp_millis() as _).0,
+                Epoch::from_unix_millis(value.1.created_at.and_utc().timestamp_millis() as _).0,
             ),
             db_name: value.0.db_name,
             sink_from_name: value.0.sink_from_name,
@@ -250,10 +250,10 @@ impl From<ObjectModel<subscription::Model>> for PbSubscription {
             retention_seconds: value.0.retention_seconds as _,
             definition: value.0.definition,
             initialized_at_epoch: Some(
-                Epoch::from_unix_millis(value.1.initialized_at.timestamp_millis() as _).0,
+                Epoch::from_unix_millis(value.1.initialized_at.and_utc().timestamp_millis() as _).0,
             ),
             created_at_epoch: Some(
-                Epoch::from_unix_millis(value.1.created_at.timestamp_millis() as _).0,
+                Epoch::from_unix_millis(value.1.created_at.and_utc().timestamp_millis() as _).0,
             ),
             initialized_at_cluster_version: value.1.initialized_at_cluster_version,
             created_at_cluster_version: value.1.created_at_cluster_version,
@@ -274,12 +274,13 @@ impl From<ObjectModel<index::Model>> for PbIndex {
             index_table_id: value.0.index_table_id as _,
             primary_table_id: value.0.primary_table_id as _,
             index_item: value.0.index_items.to_protobuf(),
+            index_column_properties: value.0.index_column_properties.to_protobuf(),
             index_columns_len: value.0.index_columns_len as _,
             initialized_at_epoch: Some(
-                Epoch::from_unix_millis(value.1.initialized_at.timestamp_millis() as _).0,
+                Epoch::from_unix_millis(value.1.initialized_at.and_utc().timestamp_millis() as _).0,
             ),
             created_at_epoch: Some(
-                Epoch::from_unix_millis(value.1.created_at.timestamp_millis() as _).0,
+                Epoch::from_unix_millis(value.1.created_at.and_utc().timestamp_millis() as _).0,
             ),
             stream_job_status: PbStreamJobStatus::Created as _, // todo: deprecate it.
             initialized_at_cluster_version: value.1.initialized_at_cluster_version,

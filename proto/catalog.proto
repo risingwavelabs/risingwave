@@ -241,6 +241,7 @@ message Index {
   // Only `InputRef` type index is supported Now.
   // The index of `InputRef` is the column index of the primary table.
   repeated expr.ExprNode index_item = 8;
+  repeated IndexColumnProperties index_column_properties = 16;
   reserved 9; // Deprecated repeated int32 original_columns = 9;
 
   optional uint64 initialized_at_epoch = 10;
@@ -253,6 +254,14 @@ message Index {
   // Cluster version (tracked by git commit) when initialized/created
   optional string initialized_at_cluster_version = 14;
   optional string created_at_cluster_version = 15;
+}
+
+// https://www.postgresql.org/docs/current/functions-info.html#FUNCTIONS-INFO-INDEX-COLUMN-PROPS
+message IndexColumnProperties {
+  // Whether the column sort in ascending(false) or descending(true) order on a forward scan.
+  bool is_desc = 1;
+  // Does the column sort with nulls first on a forward scan?
+  bool nulls_first = 2;
 }
 
 message Function {

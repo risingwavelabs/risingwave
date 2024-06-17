@@ -16,6 +16,7 @@ use std::collections::{BTreeSet, HashMap};
 use std::time::Duration;
 
 use anyhow::Context;
+use chrono::DateTime;
 use etcd_client::ConnectOptions;
 use itertools::Itertools;
 use risingwave_common::util::epoch::Epoch;
@@ -68,7 +69,6 @@ use risingwave_pb::meta::table_fragments::State;
 use risingwave_pb::meta::PbSystemParams;
 use risingwave_pb::user::grant_privilege::PbObject as GrantObject;
 use risingwave_pb::user::PbUserInfo;
-use sea_orm::prelude::DateTime;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
     ColumnTrait, ConnectionTrait, DatabaseBackend, DbBackend, EntityTrait, IntoActiveModel, NotSet,
@@ -360,11 +360,15 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
                 };
                 if let Some(epoch) = object.initialized_at_epoch.map(Epoch::from) {
                     obj.initialized_at =
-                        Set(DateTime::from_timestamp_millis(epoch.as_unix_millis() as _).unwrap());
+                        Set(DateTime::from_timestamp_millis(epoch.as_unix_millis() as _)
+                            .unwrap()
+                            .naive_utc());
                 }
                 if let Some(epoch) = object.created_at_epoch.map(Epoch::from) {
                     obj.created_at =
-                        Set(DateTime::from_timestamp_millis(epoch.as_unix_millis() as _).unwrap());
+                        Set(DateTime::from_timestamp_millis(epoch.as_unix_millis() as _)
+                            .unwrap()
+                            .naive_utc());
                 }
                 Object::insert(obj).exec(&meta_store_sql.conn).await?;
             }
@@ -390,12 +394,14 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
             ..Default::default()
         };
         if let Some(epoch) = table.initialized_at_epoch.map(Epoch::from) {
-            obj.initialized_at =
-                Set(DateTime::from_timestamp_millis(epoch.as_unix_millis() as _).unwrap());
+            obj.initialized_at = Set(DateTime::from_timestamp_millis(epoch.as_unix_millis() as _)
+                .unwrap()
+                .naive_utc());
         }
         if let Some(epoch) = table.created_at_epoch.map(Epoch::from) {
-            obj.created_at =
-                Set(DateTime::from_timestamp_millis(epoch.as_unix_millis() as _).unwrap());
+            obj.created_at = Set(DateTime::from_timestamp_millis(epoch.as_unix_millis() as _)
+                .unwrap()
+                .naive_utc());
         }
         Object::insert(obj).exec(&meta_store_sql.conn).await?;
     }

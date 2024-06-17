@@ -373,6 +373,11 @@ derive_array_from_blob!(
     risingwave_pb::common::PbColumnOrder,
     PbColumnOrderArray
 );
+derive_array_from_blob!(
+    IndexColumnPropertiesArray,
+    risingwave_pb::catalog::PbIndexColumnProperties,
+    PbIndexColumnPropertiesArray
+);
 derive_from_blob!(SinkFormatDesc, risingwave_pb::catalog::PbSinkFormatDesc);
 derive_from_blob!(Cardinality, risingwave_pb::plan_common::PbCardinality);
 derive_from_blob!(TableVersion, risingwave_pb::catalog::table::PbTableVersion);

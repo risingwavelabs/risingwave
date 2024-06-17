@@ -2386,9 +2386,9 @@ checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
 
 [[package]]
 name = "chrono"
-version = "0.4.31"
+version = "0.4.38"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f2c685bad3eb3d45a01354cedb7d5faa66194d1d58ba6e267a8de788f79db38"
+checksum = "a21f936df1771bf62b77f047b726c4625ff2e8aa607c01ec06e5a05bd8463401"
 dependencies = [
  "android-tzdata",
  "iana-time-zone",
@@ -2396,7 +2396,7 @@ dependencies = [
  "num-traits",
  "serde",
  "wasm-bindgen",
- "windows-targets 0.48.5",
+ "windows-targets 0.52.0",
 ]
 
 [[package]]
@@ -3691,7 +3691,7 @@ dependencies = [
 
 [[package]]
 name = "delta_btree_map"
-version = "1.10.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "educe",
  "enum-as-inner 0.6.0",
@@ -7025,7 +7025,7 @@ checksum = "c4cd1a83af159aa67994778be9070f0ae1bd732942279cabb14f86f986a21456"
 
 [[package]]
 name = "local_stats_alloc"
-version = "1.10.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "workspace-hack",
 ]
@@ -8665,7 +8665,7 @@ dependencies = [
 
 [[package]]
 name = "pgwire"
-version = "1.10.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "anyhow",
  "auto_enums",
@@ -10100,7 +10100,7 @@ dependencies = [
 
 [[package]]
 name = "risedev"
-version = "1.10.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "anyhow",
  "chrono",
@@ -10130,7 +10130,7 @@ dependencies = [
 
 [[package]]
 name = "risedev-config"
-version = "1.10.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "anyhow",
  "clap",
@@ -10143,7 +10143,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave-fields-derive"
-version = "1.10.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "expect-test",
  "indoc",
@@ -10155,7 +10155,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_backup"
-version = "1.10.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -10177,7 +10177,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_batch"
-version = "1.10.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "anyhow",
  "arrow-array 50.0.0",
@@ -10233,7 +10233,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_bench"
-version = "1.10.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -10274,7 +10274,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_cmd"
-version = "1.10.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "clap",
  "madsim-tokio",
@@ -10294,7 +10294,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_cmd_all"
-version = "1.10.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "anyhow",
  "clap",
@@ -10327,7 +10327,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_common"
-version = "1.10.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "ahash 0.8.11",
  "anyhow",
@@ -10440,7 +10440,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_common_estimate_size"
-version = "1.10.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "bytes",
  "educe",
@@ -10455,7 +10455,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_common_heap_profiling"
-version = "1.10.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "anyhow",
  "chrono",
@@ -10470,7 +10470,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_common_metrics"
-version = "1.10.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "bytes",
  "clap",
@@ -10502,7 +10502,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_common_proc_macro"
-version = "1.10.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "bae",
  "itertools 0.12.1",
@@ -10514,7 +10514,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_common_service"
-version = "1.10.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "async-trait",
  "axum 0.7.4",
@@ -10536,7 +10536,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_compaction_test"
-version = "1.10.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -10564,7 +10564,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_compactor"
-version = "1.10.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "async-trait",
  "await-tree",
@@ -10587,7 +10587,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_compute"
-version = "1.10.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -10632,7 +10632,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_connector"
-version = "1.10.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "anyhow",
  "apache-avro 0.16.0",
@@ -10762,7 +10762,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_connector_codec"
-version = "1.10.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "anyhow",
  "apache-avro 0.16.0",
@@ -10783,7 +10783,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_ctl"
-version = "1.10.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "anyhow",
  "bytes",
@@ -10825,7 +10825,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_dml"
-version = "1.10.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "assert_matches",
  "criterion",
@@ -10849,7 +10849,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_e2e_extended_mode_test"
-version = "1.10.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "anyhow",
  "chrono",
@@ -10864,7 +10864,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_error"
-version = "1.10.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "anyhow",
  "bincode 1.3.3",
@@ -10880,7 +10880,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_expr"
-version = "1.10.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "anyhow",
  "arrow-array 50.0.0",
@@ -10921,7 +10921,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_expr_impl"
-version = "1.10.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "aho-corasick",
  "anyhow",
@@ -10988,7 +10988,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_frontend"
-version = "1.10.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -11070,7 +11070,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_frontend_macro"
-version = "1.10.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -11079,7 +11079,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_hummock_sdk"
-version = "1.10.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "bytes",
  "easy-ext",
@@ -11098,7 +11098,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_hummock_test"
-version = "1.10.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "async-trait",
  "bytes",
@@ -11131,7 +11131,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_hummock_trace"
-version = "1.10.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "async-trait",
  "bincode 2.0.0-rc.3",
@@ -11208,7 +11208,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_mem_table_spill_test"
-version = "1.10.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "async-trait",
  "bytes",
@@ -11224,7 +11224,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_meta"
-version = "1.10.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "aes-siv",
  "anyhow",
@@ -11299,7 +11299,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_meta_dashboard"
-version = "1.10.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "anyhow",
  "axum 0.7.4",
@@ -11320,7 +11320,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_meta_model_migration"
-version = "1.10.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "async-std",
  "sea-orm-migration",
@@ -11329,7 +11329,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_meta_model_v2"
-version = "1.10.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "prost 0.12.1",
  "risingwave_common",
@@ -11342,7 +11342,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_meta_node"
-version = "1.10.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "anyhow",
  "clap",
@@ -11374,7 +11374,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_meta_service"
-version = "1.10.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -11402,7 +11402,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_object_store"
-version = "1.10.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "async-trait",
  "await-tree",
@@ -11438,7 +11438,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_pb"
-version = "1.10.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "enum-as-inner 0.6.0",
  "fs-err",
@@ -11458,7 +11458,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_planner_test"
-version = "1.10.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "anyhow",
  "expect-test",
@@ -11480,7 +11480,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_regress_test"
-version = "1.10.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "anyhow",
  "clap",
@@ -11494,7 +11494,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_rpc_client"
-version = "1.10.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -11528,7 +11528,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_rt"
-version = "1.10.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "await-tree",
  "console",
@@ -11609,7 +11609,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_sqlparser"
-version = "1.10.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "anyhow",
  "console",
@@ -11630,7 +11630,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_sqlsmith"
-version = "1.10.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "anyhow",
  "chrono",
@@ -11658,7 +11658,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_state_cleaning_test"
-version = "1.10.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "anyhow",
  "clap",
@@ -11678,7 +11678,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_storage"
-version = "1.10.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "ahash 0.8.11",
  "anyhow",
@@ -11750,7 +11750,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_stream"
-version = "1.10.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "anyhow",
  "assert_matches",
@@ -11818,7 +11818,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_test_runner"
-version = "1.10.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "fail",
  "sync-point",
@@ -11827,7 +11827,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_variables"
-version = "1.10.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "chrono",
  "workspace-hack",
@@ -16533,7 +16533,7 @@ dependencies = [
 
 [[package]]
 name = "with_options"
-version = "1.10.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -16554,7 +16554,7 @@ dependencies = [
 
 [[package]]
 name = "workspace-config"
-version = "1.10.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "libz-sys",
  "log",
@@ -16566,7 +16566,7 @@ dependencies = [
 
 [[package]]
 name = "workspace-hack"
-version = "1.10.0-alpha"
+version = "1.11.0-alpha"
 
 [[package]]
 name = "wyz"
