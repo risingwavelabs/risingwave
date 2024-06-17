@@ -45,9 +45,9 @@ pub trait SinkFormatter {
     type V;
 
     /// * Key may be None so that messages are partitioned using round-robin.
-    /// For example append-only without `primary_key` (aka `downstream_pk`) set.
+    ///   For example append-only without `primary_key` (aka `downstream_pk`) set.
     /// * Value may be None so that messages with same key are removed during log compaction.
-    /// For example debezium tombstone event.
+    ///   For example debezium tombstone event.
     fn format_chunk(
         &self,
         chunk: &StreamChunk,
@@ -73,6 +73,8 @@ pub enum SinkFormatterImpl {
     // append-only
     AppendOnlyJson(AppendOnlyFormatter<JsonEncoder, JsonEncoder>),
     AppendOnlyTextJson(AppendOnlyFormatter<TextEncoder, JsonEncoder>),
+    AppendOnlyAvro(AppendOnlyFormatter<AvroEncoder, AvroEncoder>),
+    AppendOnlyTextAvro(AppendOnlyFormatter<TextEncoder, AvroEncoder>),
     AppendOnlyProto(AppendOnlyFormatter<JsonEncoder, ProtoEncoder>),
     AppendOnlyTextProto(AppendOnlyFormatter<TextEncoder, ProtoEncoder>),
     AppendOnlyTemplate(AppendOnlyFormatter<TemplateEncoder, TemplateEncoder>),
@@ -335,6 +337,10 @@ impl SinkFormatterImpl {
                     Impl::AppendOnlyTextJson(build(p).await?)
                 }
                 (F::AppendOnly, E::Json, None) => Impl::AppendOnlyJson(build(p).await?),
+                (F::AppendOnly, E::Avro, Some(E::Text)) => {
+                    Impl::AppendOnlyTextAvro(build(p).await?)
+                }
+                (F::AppendOnly, E::Avro, None) => Impl::AppendOnlyAvro(build(p).await?),
                 (F::AppendOnly, E::Protobuf, Some(E::Text)) => {
                     Impl::AppendOnlyTextProto(build(p).await?)
                 }
@@ -381,6 +387,8 @@ macro_rules! dispatch_sink_formatter_impl {
         match $impl {
             SinkFormatterImpl::AppendOnlyJson($name) => $body,
             SinkFormatterImpl::AppendOnlyTextJson($name) => $body,
+            SinkFormatterImpl::AppendOnlyAvro($name) => $body,
+            SinkFormatterImpl::AppendOnlyTextAvro($name) => $body,
             SinkFormatterImpl::AppendOnlyProto($name) => $body,
             SinkFormatterImpl::AppendOnlyTextProto($name) => $body,
 
@@ -403,6 +411,8 @@ macro_rules! dispatch_sink_formatter_str_key_impl {
         match $impl {
             SinkFormatterImpl::AppendOnlyJson($name) => $body,
             SinkFormatterImpl::AppendOnlyTextJson($name) => $body,
+            SinkFormatterImpl::AppendOnlyAvro(_) => unreachable!(),
+            SinkFormatterImpl::AppendOnlyTextAvro($name) => $body,
             SinkFormatterImpl::AppendOnlyProto($name) => $body,
             SinkFormatterImpl::AppendOnlyTextProto($name) => $body,
 

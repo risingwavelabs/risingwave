@@ -100,7 +100,7 @@ impl ProjectSetExecutor {
                                     && i == row_idx
                                 {
                                     valid = true;
-                                    value
+                                    value?
                                 } else {
                                     None
                                 }

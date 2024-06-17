@@ -16,12 +16,12 @@
 
 pub mod compaction_config;
 mod overlap_strategy;
-use risingwave_common::catalog::TableOption;
+use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_pb::hummock::compact_task::{self, TaskType};
 
 mod picker;
 pub mod selector;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
@@ -92,6 +92,7 @@ impl CompactStatus {
     pub fn get_compact_task(
         &mut self,
         levels: &Levels,
+        member_table_ids: &BTreeSet<TableId>,
         task_id: HummockCompactionTaskId,
         group: &CompactionGroup,
         stats: &mut LocalSelectorStatistic,
@@ -106,6 +107,7 @@ impl CompactStatus {
             task_id,
             group,
             levels,
+            member_table_ids,
             &mut self.level_handlers,
             stats,
             table_id_to_options.clone(),
@@ -121,6 +123,7 @@ impl CompactStatus {
                     task_id,
                     group,
                     levels,
+                    member_table_ids,
                     &mut self.level_handlers,
                     stats,
                     table_id_to_options,

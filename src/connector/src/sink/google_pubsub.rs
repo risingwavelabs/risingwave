@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::BTreeMap;
-use std::usize;
 
 use anyhow::{anyhow, Context};
 use google_cloud_gax::conn::Environment;
@@ -97,11 +96,10 @@ impl Sink for GooglePubSubSink {
 
     const SINK_NAME: &'static str = PUBSUB_SINK;
 
-    fn is_sink_decouple(desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
+    fn is_sink_decouple(_desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
         match user_specified {
-            SinkDecouple::Default => Ok(desc.sink_type.is_append_only()),
+            SinkDecouple::Default | SinkDecouple::Enable => Ok(true),
             SinkDecouple::Disable => Ok(false),
-            SinkDecouple::Enable => Ok(true),
         }
     }
 

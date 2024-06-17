@@ -14,9 +14,10 @@
 
 use std::sync::Arc;
 
+use anyhow::anyhow;
 use bytes::Bytes;
 use foyer::HybridCacheBuilder;
-use futures::{Stream, TryFutureExt, TryStreamExt};
+use futures::{TryFutureExt, TryStreamExt};
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::config::{MetricLevel, ObjectStoreConfig};
 use risingwave_common::hash::VirtualNode;
@@ -25,6 +26,7 @@ use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAw
 use risingwave_common::util::value_encoding::{BasicSerde, EitherSerde, ValueRowDeserializer};
 use risingwave_hummock_sdk::key::{prefixed_range_with_vnode, TableKeyRange};
 use risingwave_hummock_sdk::version::HummockVersion;
+use risingwave_jni_core::HummockJavaBindingIterator;
 use risingwave_object_store::object::build_remote_object_store;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_pb::java_binding::key_range::Bound;
@@ -39,35 +41,34 @@ use risingwave_storage::hummock::{
 use risingwave_storage::monitor::{global_hummock_state_store_metrics, HummockStateStoreMetrics};
 use risingwave_storage::row_serde::value_serde::ValueRowSerdeNew;
 use risingwave_storage::store::{ReadOptions, StateStoreIterExt};
-use risingwave_storage::table::KeyedRow;
 use rw_futures_util::select_all;
 use tokio::sync::mpsc::unbounded_channel;
 
-type SelectAllIterStream = impl Stream<Item = StorageResult<KeyedRow<Bytes>>> + Unpin;
-type SingleIterStream = impl Stream<Item = StorageResult<KeyedRow<Bytes>>>;
+type SingleIterStream = HummockJavaBindingIterator;
 
-fn select_all_vnode_stream(streams: Vec<SingleIterStream>) -> SelectAllIterStream {
-    select_all(streams.into_iter().map(Box::pin))
+fn select_all_vnode_stream(streams: Vec<SingleIterStream>) -> HummockJavaBindingIterator {
+    Box::pin(select_all(streams))
 }
 
 fn to_deserialized_stream(
     iter: HummockStorageIterator,
     row_serde: EitherSerde,
 ) -> SingleIterStream {
-    iter.into_stream(move |(key, value)| {
-        Ok(KeyedRow::new(
-            key.user_key.table_key.copy_into(),
-            row_serde.deserialize(value).map(OwnedRow::new)?,
-        ))
-    })
+    Box::pin(
+        iter.into_stream(move |(key, value)| {
+            Ok((
+                Bytes::copy_from_slice(key.user_key.table_key.0),
+                row_serde.deserialize(value).map(OwnedRow::new)?,
+            ))
+        })
+        .map_err(|e| anyhow!(e)),
+    )
 }
 
-pub struct HummockJavaBindingIterator {
-    stream: SelectAllIterStream,
-}
-
-impl HummockJavaBindingIterator {
-    pub async fn new(read_plan: ReadPlan) -> StorageResult<Self> {
+pub(crate) async fn new_hummock_java_binding_iter(
+    read_plan: ReadPlan,
+) -> StorageResult<HummockJavaBindingIterator> {
+    {
         // Note(bugen): should we forward the implementation to the `StorageTable`?
         let object_store = Arc::new(
             build_remote_object_store(
@@ -79,7 +80,7 @@ impl HummockJavaBindingIterator {
             .await,
         );
 
-        let meta_cache_v2 = HybridCacheBuilder::new()
+        let meta_cache = HybridCacheBuilder::new()
             .memory(1 << 10)
             .with_shards(2)
             .storage()
@@ -87,7 +88,7 @@ impl HummockJavaBindingIterator {
             .map_err(HummockError::foyer_error)
             .map_err(StorageError::from)
             .await?;
-        let block_cache_v2 = HybridCacheBuilder::new()
+        let block_cache = HybridCacheBuilder::new()
             .memory(1 << 10)
             .with_shards(2)
             .storage()
@@ -105,8 +106,8 @@ impl HummockJavaBindingIterator {
             state_store_metrics: Arc::new(global_hummock_state_store_metrics(
                 MetricLevel::Disabled,
             )),
-            meta_cache_v2,
-            block_cache_v2,
+            meta_cache,
+            block_cache,
         }));
         let reader = HummockVersionReader::new(
             sstable_store,
@@ -170,11 +171,7 @@ impl HummockJavaBindingIterator {
 
         let stream = select_all_vnode_stream(streams);
 
-        Ok(Self { stream })
-    }
-
-    pub async fn next(&mut self) -> StorageResult<Option<KeyedRow<Bytes>>> {
-        self.stream.try_next().await
+        Ok(stream)
     }
 }
 

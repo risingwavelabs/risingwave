@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::usize;
 
 use anyhow::{anyhow, Context};
 use aws_sdk_dynamodb as dynamodb;

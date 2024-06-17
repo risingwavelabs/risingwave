@@ -57,9 +57,9 @@ pub struct SharedContext {
     /// There are three cases when we need local channels to pass around messages:
     /// 1. pass `Message` between two local actors
     /// 2. The RPC client at the downstream actor forwards received `Message` to one channel in
-    /// `ReceiverExecutor` or `MergerExecutor`.
+    ///    `ReceiverExecutor` or `MergerExecutor`.
     /// 3. The RPC `Output` at the upstream actor forwards received `Message` to
-    /// `ExchangeServiceImpl`.
+    ///    `ExchangeServiceImpl`.
     ///
     /// The channel serves as a buffer because `ExchangeServiceImpl`
     /// is on the server-side and we will also introduce backpressure.

@@ -716,6 +716,7 @@ where
 /// - Format: | vnode | pk | true | `row_count` |
 /// - If previous state is `InProgress` / `NotStarted`: Persist.
 /// - If previous state is Completed: Do not persist.
+///
 /// TODO(kwannoel): we should check committed state to be all `finished` in the tests.
 /// TODO(kwannoel): Instead of persisting state per vnode each time,
 /// we can optimize by persisting state for a subset of vnodes which were updated.

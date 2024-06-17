@@ -144,6 +144,7 @@ impl IntraCompactionPicker {
                 self.config.level0_max_compact_file_number,
                 overlap_strategy.clone(),
                 self.developer_config.enable_check_task_level_overlap,
+                self.config.max_l0_compact_level_count as usize,
             );
 
             let l0_select_tables_vec = non_overlap_sub_level_picker
@@ -427,7 +428,6 @@ pub mod tests {
                 total_file_size: 0,
                 uncompressed_file_size: 0,
             }),
-            member_table_ids: vec![1],
             ..Default::default()
         };
         push_tables_level0_nonoverlapping(
@@ -472,7 +472,6 @@ pub mod tests {
                 generate_table(1, 1, 100, 210, 2),
                 generate_table(2, 1, 200, 250, 2),
             ])),
-            member_table_ids: vec![1],
             ..Default::default()
         };
         let mut levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
@@ -510,7 +509,6 @@ pub mod tests {
             let levels = Levels {
                 l0: Some(l0),
                 levels: vec![generate_level(1, vec![generate_table(100, 1, 0, 1000, 1)])],
-                member_table_ids: vec![1],
                 ..Default::default()
             };
             let mut levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
@@ -559,7 +557,6 @@ pub mod tests {
             let levels = Levels {
                 l0: Some(l0),
                 levels: vec![generate_level(1, vec![generate_table(100, 1, 0, 1000, 1)])],
-                member_table_ids: vec![1],
                 ..Default::default()
             };
             let mut levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
@@ -631,7 +628,6 @@ pub mod tests {
             let levels = Levels {
                 l0: Some(l0),
                 levels: vec![generate_level(1, vec![generate_table(100, 1, 0, 1000, 1)])],
-                member_table_ids: vec![1],
                 ..Default::default()
             };
             let mut levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
@@ -707,7 +703,6 @@ pub mod tests {
         let levels = Levels {
             l0: Some(l0),
             levels: vec![generate_level(1, vec![generate_table(100, 1, 0, 1000, 1)])],
-            member_table_ids: vec![1],
             ..Default::default()
         };
         levels_handler[1].add_pending_task(100, 1, levels.levels[0].get_table_infos());
@@ -728,7 +723,6 @@ pub mod tests {
         let mut levels = Levels {
             l0: Some(l0),
             levels: vec![generate_level(1, vec![generate_table(100, 1, 0, 1000, 1)])],
-            member_table_ids: vec![1],
             ..Default::default()
         };
         assert!(picker
@@ -826,7 +820,6 @@ pub mod tests {
         let levels = Levels {
             l0: Some(l0),
             levels: vec![generate_level(1, vec![generate_table(100, 1, 0, 1000, 1)])],
-            member_table_ids: vec![1],
             ..Default::default()
         };
 
