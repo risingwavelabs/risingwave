@@ -19,6 +19,7 @@ use std::sync::Arc;
 
 use arc_swap::ArcSwap;
 use bytes::Bytes;
+use futures::FutureExt;
 use itertools::Itertools;
 use more_asserts::assert_gt;
 use risingwave_common::catalog::TableId;
@@ -28,7 +29,7 @@ use risingwave_hummock_sdk::key::{
     is_empty_key_range, vnode, vnode_range, TableKey, TableKeyRange,
 };
 use risingwave_hummock_sdk::table_watermark::TableWatermarksIndex;
-use risingwave_hummock_sdk::{HummockReadEpoch, SyncResult};
+use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::hummock::SstableInfo;
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
@@ -170,7 +171,7 @@ impl HummockStorage {
         observer_manager.start().await;
 
         let hummock_version = match version_update_rx.recv().await {
-            Some(HummockVersionUpdate::PinnedVersion(version)) => version,
+            Some(HummockVersionUpdate::PinnedVersion(version)) => *version,
             _ => unreachable!("the hummock observer manager is the first one to take the event tx. Should be full hummock version")
         };
 
@@ -310,9 +311,14 @@ impl HummockStorage {
         table_id: TableId,
         key_range: TableKeyRange,
     ) -> StorageResult<(TableKeyRange, ReadVersionTuple)> {
-        match self.backup_reader.try_get_hummock_version(epoch).await {
+        match self
+            .backup_reader
+            .try_get_hummock_version(table_id, epoch)
+            .await
+        {
             Ok(Some(backup_version)) => {
-                validate_safe_epoch(backup_version.safe_epoch(), epoch)?;
+                validate_safe_epoch(backup_version.version(), table_id, epoch)?;
+
                 Ok(get_committed_read_version_tuple(
                     backup_version,
                     table_id,
@@ -336,7 +342,7 @@ impl HummockStorage {
         key_range: TableKeyRange,
     ) -> StorageResult<(TableKeyRange, ReadVersionTuple)> {
         let pinned_version = self.pinned_version.load();
-        validate_safe_epoch(pinned_version.safe_epoch(), epoch)?;
+        validate_safe_epoch(pinned_version.version(), table_id, epoch)?;
 
         // check epoch if lower mce
         let ret = if epoch <= pinned_version.max_committed_epoch() {
@@ -556,15 +562,15 @@ impl StateStore for HummockStorage {
         wait_for_epoch(&self.version_update_notifier_tx, wait_epoch).await
     }
 
-    async fn sync(&self, epoch: u64) -> StorageResult<SyncResult> {
+    fn sync(&self, epoch: u64) -> impl SyncFuture {
         let (tx, rx) = oneshot::channel();
         self.hummock_event_sender
-            .send(HummockEvent::AwaitSyncEpoch {
+            .send(HummockEvent::SyncEpoch {
                 new_sync_epoch: epoch,
                 sync_result_sender: tx,
             })
             .expect("should send success");
-        Ok(rx.await.expect("should wait success")?)
+        rx.map(|recv_result| Ok(recv_result.expect("should wait success")?))
     }
 
     fn seal_epoch(&self, epoch: u64, is_checkpoint: bool) {
@@ -581,12 +587,6 @@ impl StateStore for HummockStorage {
                 MemOrdering::SeqCst,
             );
         }
-        self.hummock_event_sender
-            .send(HummockEvent::SealEpoch {
-                epoch,
-                is_checkpoint,
-            })
-            .expect("should send success");
         StoreLocalStatistic::flush_all();
     }
 
@@ -642,7 +642,10 @@ use risingwave_hummock_sdk::version::HummockVersion;
 
 #[cfg(any(test, feature = "test"))]
 impl HummockStorage {
-    pub async fn seal_and_sync_epoch(&self, epoch: u64) -> StorageResult<SyncResult> {
+    pub async fn seal_and_sync_epoch(
+        &self,
+        epoch: u64,
+    ) -> StorageResult<risingwave_hummock_sdk::SyncResult> {
         self.seal_epoch(epoch, true);
         self.sync(epoch).await
     }
@@ -653,7 +656,7 @@ impl HummockStorage {
         use tokio::task::yield_now;
         let version_id = version.id;
         self._version_update_sender
-            .send(HummockVersionUpdate::PinnedVersion(version))
+            .send(HummockVersionUpdate::PinnedVersion(Box::new(version)))
             .unwrap();
         loop {
             if self.pinned_version.load().id() >= version_id {

@@ -27,6 +27,7 @@ pub trait SubscribeTypeEnum {
 }
 
 pub struct SubscribeFrontend {}
+
 impl SubscribeTypeEnum for SubscribeFrontend {
     fn subscribe_type() -> SubscribeType {
         SubscribeType::Frontend
@@ -34,6 +35,7 @@ impl SubscribeTypeEnum for SubscribeFrontend {
 }
 
 pub struct SubscribeHummock {}
+
 impl SubscribeTypeEnum for SubscribeHummock {
     fn subscribe_type() -> SubscribeType {
         SubscribeType::Hummock
@@ -41,6 +43,7 @@ impl SubscribeTypeEnum for SubscribeHummock {
 }
 
 pub struct SubscribeCompactor {}
+
 impl SubscribeTypeEnum for SubscribeCompactor {
     fn subscribe_type() -> SubscribeType {
         SubscribeType::Compactor
@@ -48,6 +51,7 @@ impl SubscribeTypeEnum for SubscribeCompactor {
 }
 
 pub struct SubscribeCompute {}
+
 impl SubscribeTypeEnum for SubscribeCompute {
     fn subscribe_type() -> SubscribeType {
         SubscribeType::Compute
@@ -142,6 +146,7 @@ where
             | Info::RelationGroup(_)
             | Info::User(_)
             | Info::Connection(_)
+            | Info::Secret(_)
             | Info::Function(_) => {
                 notification.version > info.version.as_ref().unwrap().catalog_version
             }
@@ -231,6 +236,7 @@ where
         }
     }
 }
+
 const RE_SUBSCRIBE_RETRY_INTERVAL: Duration = Duration::from_millis(100);
 
 #[async_trait::async_trait]

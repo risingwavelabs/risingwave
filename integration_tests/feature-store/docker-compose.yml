@@ -1,5 +1,4 @@
 ---
-version: "3"
 services:
   kafka:
     image: confluentinc/cp-kafka:7.1.0

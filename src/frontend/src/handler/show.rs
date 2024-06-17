@@ -318,7 +318,6 @@ pub async fn handle_show_object(
             .read_guard()
             .get_schema_by_name(session.database(), &schema_or_default(&schema))?
             .iter_source()
-            .filter(|t| t.associated_table_id.is_none())
             .map(|t| t.name.clone())
             .collect(),
         ShowObject::Sink { schema } => catalog_reader
@@ -331,6 +330,12 @@ pub async fn handle_show_object(
             .read_guard()
             .get_schema_by_name(session.database(), &schema_or_default(&schema))?
             .iter_subscription()
+            .map(|t| t.name.clone())
+            .collect(),
+        ShowObject::Secret { schema } => catalog_reader
+            .read_guard()
+            .get_schema_by_name(session.database(), &schema_or_default(&schema))?
+            .iter_secret()
             .map(|t| t.name.clone())
             .collect(),
         ShowObject::Columns { table } => {

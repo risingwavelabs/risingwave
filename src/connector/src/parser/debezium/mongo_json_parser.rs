@@ -31,8 +31,6 @@ use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 #[derive(Debug)]
 pub struct DebeziumMongoJsonParser {
     pub(crate) rw_columns: Vec<SourceColumnDesc>,
-    id_column: SourceColumnDesc,
-    payload_column: SourceColumnDesc,
     source_ctx: SourceContextRef,
     key_builder: AccessBuilderImpl,
     payload_builder: AccessBuilderImpl,
@@ -52,7 +50,7 @@ impl DebeziumMongoJsonParser {
         rw_columns: Vec<SourceColumnDesc>,
         source_ctx: SourceContextRef,
     ) -> ConnectorResult<Self> {
-        let id_column = rw_columns
+        let _id_column = rw_columns
             .iter()
             .find(|desc| {
                 desc.name == "_id"
@@ -65,7 +63,7 @@ impl DebeziumMongoJsonParser {
                     )
             })
             .context("Debezium Mongo needs a `_id` column with supported types (Varchar Jsonb int32 int64) in table")?.clone();
-        let payload_column = rw_columns
+        let _payload_column = rw_columns
             .iter()
             .find(|desc| desc.name == "payload" && matches!(desc.data_type, DataType::Jsonb))
             .context("Debezium Mongo needs a `payload` column with supported types Jsonb in table")?
@@ -87,8 +85,6 @@ impl DebeziumMongoJsonParser {
 
         Ok(Self {
             rw_columns,
-            id_column,
-            payload_column,
             source_ctx,
             key_builder,
             payload_builder,

@@ -55,6 +55,7 @@ pub struct SnowflakeHttpClient {
     account: String,
     user: String,
     private_key: String,
+    #[expect(dead_code)]
     header: HashMap<String, String>,
     s3_path: Option<String>,
 }
@@ -179,6 +180,7 @@ impl SnowflakeHttpClient {
 
 /// todo: refactor this part after s3 sink is available
 pub struct SnowflakeS3Client {
+    #[expect(dead_code)]
     s3_bucket: String,
     s3_path: Option<String>,
     pub opendal_s3_engine: OpendalObjectStore,

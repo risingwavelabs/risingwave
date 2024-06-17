@@ -12,16 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Cow;
 use std::sync::{Arc, LazyLock};
 
 use prost_reflect::{DescriptorPool, DynamicMessage, ReflectMessage};
 use risingwave_common::log::LogSuppresser;
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, DatumCow, ToOwnedDatum};
 use thiserror_ext::AsReport;
 
 use super::{Access, AccessResult};
 use crate::parser::from_protobuf_value;
-use crate::parser::unified::{uncategorized, AccessError};
+use crate::parser::unified::uncategorized;
 
 pub struct ProtobufAccess {
     message: DynamicMessage,
@@ -38,7 +39,11 @@ impl ProtobufAccess {
 }
 
 impl Access for ProtobufAccess {
-    fn access(&self, path: &[&str], _type_expected: Option<&DataType>) -> AccessResult {
+    fn access<'a>(
+        &'a self,
+        path: &[&str],
+        _type_expected: &DataType,
+    ) -> AccessResult<DatumCow<'a>> {
         debug_assert_eq!(1, path.len());
         let field_desc = self
             .message
@@ -52,8 +57,14 @@ impl Access for ProtobufAccess {
                     tracing::error!(suppressed_count, "{}", e.as_report());
                 }
             })?;
-        let value = self.message.get_field(&field_desc);
 
-        from_protobuf_value(&field_desc, &value, &self.descriptor_pool)
+        match self.message.get_field(&field_desc) {
+            Cow::Borrowed(value) => from_protobuf_value(&field_desc, value, &self.descriptor_pool),
+
+            // `Owned` variant occurs only if there's no such field and the default value is returned.
+            Cow::Owned(value) => from_protobuf_value(&field_desc, &value, &self.descriptor_pool)
+                // enforce `Owned` variant to avoid returning a reference to a temporary value
+                .map(|d| d.to_owned_datum().into()),
+        }
     }
 }

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 
 use risingwave_pb::catalog::{PbCreateType, PbStreamJobStatus};
 use risingwave_pb::meta::table_fragments::PbState as PbStreamJobState;
@@ -43,6 +43,7 @@ pub mod index;
 pub mod object;
 pub mod object_dependency;
 pub mod schema;
+pub mod secret;
 pub mod serde_seaql_migration;
 pub mod session_parameter;
 pub mod sink;
@@ -72,6 +73,7 @@ pub type IndexId = ObjectId;
 pub type ViewId = ObjectId;
 pub type FunctionId = ObjectId;
 pub type ConnectionId = ObjectId;
+pub type SecretId = ObjectId;
 pub type UserId = i32;
 pub type PrivilegeId = i32;
 
@@ -284,6 +286,8 @@ impl From<BTreeMap<u32, Vec<u32>>> for ActorUpstreamActors {
     }
 }
 
+derive_from_json_struct!(SecretRef, BTreeMap<String, u32>);
+
 derive_from_blob!(StreamNode, PbStreamNode);
 derive_from_blob!(DataType, risingwave_pb::data::PbDataType);
 derive_array_from_blob!(
@@ -296,7 +300,7 @@ derive_array_from_blob!(
     risingwave_pb::plan_common::PbField,
     PbFieldArray
 );
-derive_from_json_struct!(Property, HashMap<String, String>);
+derive_from_json_struct!(Property, BTreeMap<String, String>);
 derive_from_blob!(ColumnCatalog, risingwave_pb::plan_common::PbColumnCatalog);
 derive_array_from_blob!(
     ColumnCatalogArray,
