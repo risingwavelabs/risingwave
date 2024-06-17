@@ -882,10 +882,10 @@ mod tests {
             Timestamp::from_str("2022-08-03 10:34:02").unwrap()
         );
         let ts = Timestamp::from_str("0001-11-15 07:35:40.999999").unwrap();
-        assert_eq!(ts.0.timestamp_micros(), -62108094259000001);
+        assert_eq!(ts.0.and_utc().timestamp_micros(), -62108094259000001);
 
         let ts = Timestamp::from_str("1969-12-31 23:59:59.999999").unwrap();
-        assert_eq!(ts.0.timestamp_micros(), -1);
+        assert_eq!(ts.0.and_utc().timestamp_micros(), -1);
 
         // invalid datetime
         Date::from_str("1999-01-08AA").unwrap_err();
