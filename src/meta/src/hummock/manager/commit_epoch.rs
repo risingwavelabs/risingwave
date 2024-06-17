@@ -16,6 +16,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::split_sst;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::table_stats::{
     add_prost_table_stats_map, purge_prost_table_stats, PbTableStatsMap,
@@ -358,14 +359,12 @@ impl HummockManager {
         let mut new_sst_id = next_sstable_object_id(&self.env, new_sst_id_number).await?;
         let mut commit_sstables = Vec::with_capacity(sst_to_cg_vec.len() + new_sst_id_number);
 
-        for (sst, group_table_ids) in sst_to_cg_vec {
+        for (mut sst, group_table_ids) in sst_to_cg_vec {
             for (group_id, _match_ids) in group_table_ids {
-                let mut branch_sst = sst.sst_info.clone();
-                branch_sst.sst_id = new_sst_id;
+                let branch_sst = split_sst(&mut sst.sst_info, &mut new_sst_id);
                 commit_sstables.push(ExtendedSstableInfo::with_compaction_group(
                     group_id, branch_sst,
                 ));
-                new_sst_id += 1;
             }
 
             new_sst_id += 1;
