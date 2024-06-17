@@ -128,7 +128,8 @@ prost = { version = "0.12" }
 icelake = { git = "https://github.com/icelake-io/icelake", rev = "54fd72fbd1dd8c592f05eeeb79223c8a6a33c297", features = [
     "prometheus",
 ] }
-iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", branch = "zj/reader" }
+iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "e6ae6229dfd0c0a8793cde42a7d626c704ea9088" }
+iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "e6ae6229dfd0c0a8793cde42a7d626c704ea9088" }
 arrow-array = "50"
 arrow-arith = "50"
 arrow-cast = "50"

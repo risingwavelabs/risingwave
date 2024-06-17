@@ -2109,7 +2109,7 @@ dependencies = [
  "bitflags 2.5.0",
  "cexpr",
  "clang-sys",
- "itertools 0.12.1",
+ "itertools 0.10.5",
  "lazy_static",
  "lazycell",
  "log",
@@ -6527,7 +6527,7 @@ dependencies = [
 [[package]]
 name = "iceberg"
 version = "0.2.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?branch=zj/reader#7f3e074bbfd28cf632262e4e8ddf644ef06df79b"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=e6ae6229dfd0c0a8793cde42a7d626c704ea9088#e6ae6229dfd0c0a8793cde42a7d626c704ea9088"
 dependencies = [
  "anyhow",
  "apache-avro 0.16.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -6567,6 +6567,25 @@ dependencies = [
  "tokio",
  "typed-builder 0.18.0",
  "url",
+ "urlencoding",
+ "uuid",
+]
+
+[[package]]
+name = "iceberg-catalog-rest"
+version = "0.2.0"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=e6ae6229dfd0c0a8793cde42a7d626c704ea9088#e6ae6229dfd0c0a8793cde42a7d626c704ea9088"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "iceberg",
+ "itertools 0.13.0",
+ "log",
+ "reqwest 0.12.4",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "typed-builder 0.18.0",
  "urlencoding",
  "uuid",
 ]
@@ -11034,6 +11053,7 @@ dependencies = [
  "google-cloud-pubsub",
  "http 0.2.9",
  "iceberg",
+ "iceberg-catalog-rest",
  "icelake",
  "indexmap 1.9.3",
  "itertools 0.12.1",
@@ -11107,6 +11127,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "tracing-test",
+ "typed-builder 0.18.0",
  "url",
  "urlencoding",
  "uuid",

@@ -15,6 +15,7 @@
 mod jni_catalog;
 mod mock_catalog;
 mod prometheus;
+mod storage_catalog;
 
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::Debug;
@@ -28,7 +29,7 @@ use arrow_schema::{
 };
 use async_trait::async_trait;
 use iceberg::table::Table as TableV2;
-use iceberg::Catalog as CatalogV2;
+use iceberg::{Catalog as CatalogV2, TableIdent};
 use icelake::catalog::{
     load_catalog, load_iceberg_base_catalog_config, BaseCatalogConfig, CatalogRef, CATALOG_NAME,
     CATALOG_TYPE,
@@ -51,6 +52,7 @@ use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
 use risingwave_pb::connector_service::SinkMetadata;
 use serde_derive::Deserialize;
+use storage_catalog::StorageCatalogConfig;
 use thiserror_ext::AsReport;
 use url::Url;
 use with_options::WithOptions;
@@ -403,7 +405,7 @@ impl IcebergConfig {
                     _ => unreachable!(),
                 };
 
-                jni_catalog::JniCatalog::build(
+                jni_catalog::JniCatalog::build_catalog(
                     base_catalog_config,
                     self.catalog_name(),
                     catalog_impl,
@@ -435,12 +437,75 @@ impl IcebergConfig {
 }
 
 impl IcebergConfig {
+    fn full_table_name_v2(&self) -> Result<TableIdent> {
+        let ret = if let Some(database_name) = &self.database_name {
+            TableIdent::from_strs(vec![database_name, &self.table_name])
+        } else {
+            TableIdent::from_strs(vec![&self.table_name])
+        };
+
+        ret.context("Failed to create table identifier")
+            .map_err(|e| SinkError::Iceberg(anyhow!(e)))
+    }
+
     async fn create_catalog_v2(&self) -> ConnectorResult<Arc<dyn CatalogV2>> {
-        todo!()
+        match self.catalog_type() {
+            "storage" => {
+                let config = StorageCatalogConfig::builder()
+                    .warehouse(self.path.clone())
+                    .access_key(self.access_key.clone())
+                    .secret_key(self.secret_key.clone())
+                    .region(self.region.clone())
+                    .endpoint(self.endpoint.clone())
+                    .build();
+                let catalog = storage_catalog::StorageCatalog::new(config)?;
+                Ok(Arc::new(catalog))
+            }
+            "rest" => {
+                let config = iceberg_catalog_rest::RestCatalogConfig::builder()
+                    .uri(self.uri.clone().ok_or_else(|| {
+                        SinkError::Iceberg(anyhow!("`catalog.uri` must be set in rest catalog"))
+                    })?)
+                    .build();
+                let catalog = iceberg_catalog_rest::RestCatalog::new(config).await?;
+                Ok(Arc::new(catalog))
+            }
+            catalog_type if catalog_type == "hive" || catalog_type == "jdbc" => {
+                // Create java catalog
+                let (base_catalog_config, java_catalog_props) = self.build_jni_catalog_configs()?;
+                let catalog_impl = match catalog_type {
+                    "hive" => "org.apache.iceberg.hive.HiveCatalog",
+                    "jdbc" => "org.apache.iceberg.jdbc.JdbcCatalog",
+                    _ => unreachable!(),
+                };
+
+                jni_catalog::JniCatalog::build_catalog_v2(
+                    base_catalog_config,
+                    self.catalog_name(),
+                    catalog_impl,
+                    java_catalog_props,
+                )
+            }
+            _ => {
+                bail!(
+                    "Unsupported catalog type: {}, only support `storage`, `rest`, `hive`, `jdbc`",
+                    self.catalog_type()
+                )
+            }
+        }
     }
 
     pub async fn load_table_v2(&self) -> ConnectorResult<TableV2> {
-        todo!()
+        let catalog = self
+            .create_catalog_v2()
+            .await
+            .context("Unable to load iceberg catalog")?;
+
+        let table_id = self
+            .full_table_name_v2()
+            .context("Unable to parse table name")?;
+
+        catalog.load_table(&table_id).await.map_err(Into::into)
     }
 }
 

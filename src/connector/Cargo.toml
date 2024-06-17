@@ -68,6 +68,7 @@ google-cloud-googleapis = { version = "0.13", features = ["pubsub", "bigquery"] 
 google-cloud-pubsub = "0.25"
 http = "0.2"
 iceberg = { workspace = true }
+iceberg-catalog-rest = { workspace = true }
 icelake = { workspace = true }
 indexmap = { version = "1.9.3", features = ["serde"] }
 itertools = { workspace = true }
@@ -155,6 +156,7 @@ tokio-stream = "0.1"
 tokio-util = { version = "0.7", features = ["codec", "io"] }
 tonic = { workspace = true }
 tracing = "0.1"
+typed-builder = "^0.18"
 url = "2"
 urlencoding = "2"
 uuid = { version = "1", features = ["v4", "fast-rng"] }
