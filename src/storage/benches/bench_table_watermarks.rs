@@ -15,7 +15,7 @@
 #![feature(lazy_cell)]
 
 use std::collections::hash_map::Entry;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, LazyLock};
 
 use bytes::Bytes;
@@ -25,11 +25,13 @@ use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::test_epoch;
+use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::table_watermark::{
     TableWatermarks, TableWatermarksIndex, VnodeWatermark, WatermarkDirection,
 };
-use risingwave_hummock_sdk::version::HummockVersion;
+use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionStateTableInfo};
 use risingwave_hummock_sdk::HummockEpoch;
+use risingwave_pb::hummock::StateTableInfoDelta;
 use risingwave_storage::hummock::local_version::pinned_version::PinnedVersion;
 use spin::Mutex;
 use tokio::sync::mpsc::unbounded_channel;
@@ -115,17 +117,31 @@ fn gen_version(
         new_epoch_idx,
         vnode_part_count,
     ));
-    // let table_watermarks =
-    //     gen_committed_table_watermarks(old_epoch_idx, new_epoch_idx, vnode_part_count);
-    HummockVersion {
-        id: new_epoch_idx as _,
-        max_committed_epoch: test_epoch(new_epoch_idx as _),
-        safe_epoch: test_epoch(old_epoch_idx as _),
-        table_watermarks: (0..table_count)
-            .map(|table_id| (TableId::new(table_id as _), table_watermarks.clone()))
+    let mut version = HummockVersion::default();
+    let committed_epoch = test_epoch(new_epoch_idx as _);
+    version.id = new_epoch_idx as _;
+    version.max_committed_epoch = committed_epoch;
+    version.table_watermarks = (0..table_count)
+        .map(|table_id| (TableId::new(table_id as _), table_watermarks.clone()))
+        .collect();
+    let mut state_table_info = HummockVersionStateTableInfo::empty();
+    state_table_info.apply_delta(
+        &(0..table_count)
+            .map(|table_id| {
+                (
+                    TableId::new(table_id as _),
+                    StateTableInfoDelta {
+                        committed_epoch,
+                        safe_epoch: test_epoch(old_epoch_idx as _),
+                        compaction_group_id: StaticCompactionGroupId::StateDefault as _,
+                    },
+                )
+            })
             .collect(),
-        ..Default::default()
-    }
+        &HashSet::new(),
+    );
+    version.state_table_info = state_table_info;
+    version
 }
 
 fn bench_table_watermarks(c: &mut Criterion) {

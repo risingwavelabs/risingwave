@@ -626,7 +626,7 @@ impl StateStoreImpl {
                 .build_and_install();
         }
 
-        let meta_cache_v2 = {
+        let meta_cache = {
             let mut builder = HybridCacheBuilder::new()
                 .with_name("foyer.meta")
                 .memory(opts.meta_cache_capacity_mb * MB)
@@ -674,7 +674,7 @@ impl StateStoreImpl {
             builder.build().await.map_err(HummockError::foyer_error)?
         };
 
-        let block_cache_v2 = {
+        let block_cache = {
             let mut builder = HybridCacheBuilder::new()
                 .with_name("foyer.data")
                 .with_event_listener(Arc::new(BlockCacheEventListener::new(
@@ -753,8 +753,8 @@ impl StateStoreImpl {
                     recent_filter,
                     state_store_metrics: state_store_metrics.clone(),
 
-                    meta_cache_v2,
-                    block_cache_v2,
+                    meta_cache,
+                    block_cache,
                 }));
                 let notification_client =
                     RpcNotificationClient::new(hummock_meta_client.get_inner().clone());

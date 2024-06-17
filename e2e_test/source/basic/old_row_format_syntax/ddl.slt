@@ -142,7 +142,7 @@ create table s (
 query T
 show sources
 ----
-
+s
 
 query T
 show tables

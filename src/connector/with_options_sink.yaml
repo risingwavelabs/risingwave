@@ -423,7 +423,7 @@ KafkaConfig:
     field_type: i32
     required: false
   - name: broker.rewrite.endpoints
-    field_type: HashMap<String,String>
+    field_type: BTreeMap<String,String>
     comments: This is generated from `private_link_targets` and `private_link_endpoint` in frontend, instead of given by users.
     required: false
   - name: aws.region
@@ -750,6 +750,33 @@ SnowflakeConfig:
   - name: snowflake.aws_region
     field_type: String
     comments: The s3 region, e.g., us-east-2
+    required: true
+SqlServerConfig:
+  fields:
+  - name: sqlserver.host
+    field_type: String
+    required: true
+  - name: sqlserver.port
+    field_type: u16
+    required: true
+  - name: sqlserver.user
+    field_type: String
+    required: true
+  - name: sqlserver.password
+    field_type: String
+    required: true
+  - name: sqlserver.database
+    field_type: String
+    required: true
+  - name: sqlserver.table
+    field_type: String
+    required: true
+  - name: sqlserver.max_batch_rows
+    field_type: usize
+    required: false
+    default: '1024'
+  - name: r#type
+    field_type: String
     required: true
 StarrocksConfig:
   fields:

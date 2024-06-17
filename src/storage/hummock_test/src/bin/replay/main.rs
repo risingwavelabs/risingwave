@@ -110,14 +110,14 @@ async fn create_replay_hummock(r: Record, args: &Args) -> Result<impl GlobalRepl
     )
     .await;
 
-    let meta_cache_v2 = HybridCacheBuilder::new()
+    let meta_cache = HybridCacheBuilder::new()
         .memory(storage_opts.meta_cache_capacity_mb * (1 << 20))
         .with_shards(storage_opts.meta_cache_shard_num)
         .storage()
         .build()
         .await
         .unwrap();
-    let block_cache_v2 = HybridCacheBuilder::new()
+    let block_cache = HybridCacheBuilder::new()
         .memory(storage_opts.block_cache_capacity_mb * (1 << 20))
         .with_shards(storage_opts.block_cache_shard_num)
         .storage()
@@ -132,8 +132,8 @@ async fn create_replay_hummock(r: Record, args: &Args) -> Result<impl GlobalRepl
         max_prefetch_block_number: storage_opts.max_prefetch_block_number,
         recent_filter: None,
         state_store_metrics: state_store_metrics.clone(),
-        meta_cache_v2,
-        block_cache_v2,
+        meta_cache,
+        block_cache,
     }));
 
     let (hummock_meta_client, notification_client, notifier) = {
