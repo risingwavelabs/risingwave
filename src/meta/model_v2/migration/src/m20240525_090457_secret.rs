@@ -37,12 +37,22 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        // Add a new column to the table
+        // Add a new column to the `sink` table
         manager
             .alter_table(
                 MigrationTable::alter()
                     .table(Sink::Table)
                     .add_column(ColumnDef::new(Sink::SecretRef).json_binary())
+                    .to_owned(),
+            )
+            .await?;
+
+        // Add a new column to the `source` table
+        manager
+            .alter_table(
+                MigrationTable::alter()
+                    .table(Source::Table)
+                    .add_column(ColumnDef::new(Source::SecretRef).json_binary())
                     .to_owned(),
             )
             .await?;
@@ -60,6 +70,14 @@ impl MigrationTrait for Migration {
                     .to_owned(),
             )
             .await?;
+        manager
+            .alter_table(
+                MigrationTable::alter()
+                    .table(Source::Table)
+                    .drop_column(Source::SecretRef)
+                    .to_owned(),
+            )
+            .await?;
         Ok(())
     }
 }
@@ -74,6 +92,12 @@ enum Secret {
 
 #[derive(DeriveIden)]
 enum Sink {
+    Table,
+    SecretRef,
+}
+
+#[derive(DeriveIden)]
+enum Source {
     Table,
     SecretRef,
 }
