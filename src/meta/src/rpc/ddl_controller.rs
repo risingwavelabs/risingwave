@@ -21,7 +21,7 @@ use std::time::Duration;
 use aes_siv::aead::generic_array::GenericArray;
 use aes_siv::aead::Aead;
 use aes_siv::{Aes128SivAead, KeyInit};
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use itertools::Itertools;
 use rand::{Rng, RngCore};
 use risingwave_common::config::DefaultParallelism;
@@ -71,9 +71,9 @@ use tracing::Instrument;
 use crate::barrier::BarrierManagerRef;
 use crate::error::MetaErrorInner;
 use crate::manager::{
-    CatalogManagerRef, ConnectionId, DatabaseId, FragmentManagerRef, FunctionId, IdCategory,
-    IdCategoryType, IndexId, LocalNotification, MetaSrvEnv, MetadataManager, MetadataManagerV1,
-    NotificationVersion, RelationIdEnum, SchemaId, SecretId, SinkId, SourceId,
+    CatalogManagerRef, ConnectionId, DatabaseId, DdlType, FragmentManagerRef, FunctionId,
+    IdCategory, IdCategoryType, IndexId, LocalNotification, MetaSrvEnv, MetadataManager,
+    MetadataManagerV1, NotificationVersion, RelationIdEnum, SchemaId, SecretId, SinkId, SourceId,
     StreamingClusterInfo, StreamingJob, StreamingJobDiscriminants, SubscriptionId, TableId, UserId,
     ViewId, IGNORED_NOTIFICATION_VERSION,
 };
@@ -1993,6 +1993,14 @@ impl DdlController {
             .mview_fragment()
             .expect("mview fragment not found");
 
+        let ddl_type = DdlType::from(stream_job);
+        let DdlType::Table(table_job_type) = &ddl_type else {
+            bail!(
+                "only support replacing table streaming job, ddl_type: {:?}",
+                ddl_type
+            )
+        };
+
         // Map the column indices in the dispatchers with the given mapping.
         let downstream_fragments = self.metadata_manager.get_downstream_chain_fragments(id).await?
             .into_iter()
@@ -2010,12 +2018,32 @@ impl DdlController {
                 )
             })?;
 
-        let complete_graph = CompleteStreamFragmentGraph::with_downstreams(
-            fragment_graph,
-            original_table_fragment.fragment_id,
-            downstream_fragments,
-            stream_job.into(),
-        )?;
+        let complete_graph = match table_job_type {
+            TableJobType::General => CompleteStreamFragmentGraph::with_downstreams(
+                fragment_graph,
+                original_table_fragment.fragment_id,
+                downstream_fragments,
+                ddl_type,
+            )?,
+
+            TableJobType::SharedCdcSource => {
+                // get the upstream fragment
+                let upstream_root_fragments = self
+                    .metadata_manager
+                    .get_upstream_root_fragments(fragment_graph.dependent_table_ids())
+                    .await?;
+                CompleteStreamFragmentGraph::with_upstreams_and_downstreams(
+                    fragment_graph,
+                    upstream_root_fragments,
+                    original_table_fragment.fragment_id,
+                    downstream_fragments,
+                    ddl_type,
+                )?
+            }
+            TableJobType::Unspecified => {
+                unreachable!()
+            }
+        };
 
         // 2. Build the actor graph.
         let cluster_info = self.metadata_manager.get_streaming_cluster_info().await?;

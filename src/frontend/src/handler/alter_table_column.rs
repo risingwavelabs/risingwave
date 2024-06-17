@@ -18,6 +18,7 @@ use anyhow::Context;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::bail_not_implemented;
+use risingwave_common::catalog::ColumnCatalog;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_sqlparser::ast::{
     AlterTableOperation, ColumnOption, ConnectorSchema, Encode, ObjectName, Statement,
@@ -25,7 +26,7 @@ use risingwave_sqlparser::ast::{
 use risingwave_sqlparser::parser::Parser;
 
 use super::create_source::get_json_schema_location;
-use super::create_table::{generate_stream_graph_for_table, ColumnIdGenerator};
+use super::create_table::{bind_sql_columns, generate_stream_graph_for_table, ColumnIdGenerator};
 use super::util::SourceSchemaCompatExt;
 use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::root_catalog::SchemaPath;
@@ -39,11 +40,13 @@ pub async fn replace_table_with_definition(
     table_name: ObjectName,
     definition: Statement,
     original_catalog: &Arc<TableCatalog>,
+    columns_altered: Vec<ColumnCatalog>,
     source_schema: Option<ConnectorSchema>,
 ) -> Result<()> {
     // Create handler args as if we're creating a new table with the altered definition.
     let handler_args = HandlerArgs::new(session.clone(), &definition, Arc::from(""))?;
     let col_id_gen = ColumnIdGenerator::new_alter(original_catalog);
+    // TODO: We need to handle cdc table info here
     let Statement::CreateTable {
         columns,
         constraints,
@@ -52,13 +55,14 @@ pub async fn replace_table_with_definition(
         on_conflict,
         with_version_column,
         wildcard_idx,
+        cdc_table_info,
         ..
     } = definition
     else {
         panic!("unexpected statement type: {:?}", definition);
     };
 
-    let (graph, table, source) = generate_stream_graph_for_table(
+    let (graph, table, source, job_type) = generate_stream_graph_for_table(
         session,
         table_name,
         original_catalog,
@@ -66,12 +70,14 @@ pub async fn replace_table_with_definition(
         handler_args,
         col_id_gen,
         columns,
+        columns_altered,
         wildcard_idx,
         constraints,
         source_watermarks,
         append_only,
         on_conflict,
         with_version_column,
+        cdc_table_info,
     )
     .await?;
 
@@ -91,8 +97,9 @@ pub async fn replace_table_with_definition(
 
     let catalog_writer = session.catalog_writer()?;
 
+    // TODO: pass job_type to DdlService
     catalog_writer
-        .replace_table(source, table, graph, col_index_mapping)
+        .replace_table(source, table, graph, col_index_mapping, job_type)
         .await?;
     Ok(())
 }
@@ -145,6 +152,7 @@ pub async fn handle_alter_table_column(
         }
     }
 
+    let mut columns_altered = original_catalog.columns.clone();
     match operation {
         AlterTableOperation::AddColumn {
             column_def: new_column,
@@ -172,7 +180,8 @@ pub async fn handle_alter_table_column(
             }
 
             // Add the new column to the table definition.
-            columns.push(new_column);
+            columns.push(new_column.clone());
+            columns_altered.extend(bind_sql_columns(vec![new_column].as_slice())?)
         }
 
         AlterTableOperation::DropColumn {
@@ -194,6 +203,10 @@ pub async fn handle_alter_table_column(
 
             if removed_column.is_some() {
                 // PASS
+                // retain untouch columns
+                columns_altered.retain(|col| {
+                    !(col.name() == removed_column.as_ref().unwrap().name.real_value().as_str())
+                })
             } else if if_exists {
                 return Ok(PgResponse::builder(StatementType::ALTER_TABLE)
                     .notice(format!(
@@ -210,13 +223,15 @@ pub async fn handle_alter_table_column(
         }
 
         _ => unreachable!(),
-    }
+    };
 
+    // Siyuan: 上面是把新增的column添加到column list里
     replace_table_with_definition(
         &session,
         table_name,
         definition,
         &original_catalog,
+        columns_altered,
         source_schema,
     )
     .await?;
