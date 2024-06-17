@@ -73,8 +73,8 @@ pub trait StreamingUploader: Send {
 #[async_trait::async_trait]
 pub trait ObjectStore: Send + Sync {
     type StreamingUploader: StreamingUploader;
-    /// Get the key prefix for object
-    fn get_object_prefix(&self, obj_id: u64) -> String;
+    /// Get the key prefix for object, the prefix is determined by the type of object store and `devise_object_prefix`.
+    fn get_object_prefix(&self, obj_id: u64, use_new_object_prefix_strategy: bool) -> String;
 
     /// Uploads the object to `ObjectStore`.
     async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()>;
@@ -325,8 +325,10 @@ impl ObjectStoreImpl {
         object_store_impl_method_body!(self, list(prefix).await)
     }
 
-    pub fn get_object_prefix(&self, obj_id: u64) -> String {
-        dispatch_object_store_enum!(self, |store| store.inner.get_object_prefix(obj_id))
+    pub fn get_object_prefix(&self, obj_id: u64, use_new_object_prefix_strategy: bool) -> String {
+        dispatch_object_store_enum!(self, |store| store
+            .inner
+            .get_object_prefix(obj_id, use_new_object_prefix_strategy))
     }
 
     pub fn support_streaming_upload(&self) -> bool {
