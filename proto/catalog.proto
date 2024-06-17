@@ -83,7 +83,7 @@ message StreamSourceInfo {
   // Options specified by user in the FORMAT ENCODE clause.
   map<string, string> format_encode_options = 14;
 
-  // Handle the source relies on any sceret. The key is the propertity name and the value is the secret id.
+  // Handle the source relies on any sceret. The key is the propertity name and the value is the secret id and type.
   map<string, SecretRef> secret_ref = 16;
 }
 
@@ -180,7 +180,7 @@ message Sink {
   // Whether it should use background ddl or block until backfill finishes.
   CreateType create_type = 24;
 
-  // Handle the sink relies on any sceret. The key is the propertity name and the value is the secret id.
+  // Handle the sink relies on any sceret. The key is the propertity name and the value is the secret id and type.
   map<string, SecretRef> secret_ref = 25;
 }
 
