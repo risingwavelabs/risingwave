@@ -18,6 +18,7 @@ use criterion::{criterion_group, criterion_main, Criterion};
 use risingwave_batch::executor::hash_join::HashJoinExecutor;
 use risingwave_batch::executor::test_utils::{gen_projected_data, MockExecutor};
 use risingwave_batch::executor::{BoxedExecutor, JoinType};
+use risingwave_batch::monitor::BatchSpillMetrics;
 use risingwave_batch::task::ShutdownToken;
 use risingwave_common::catalog::schema_test_utils::field_n;
 use risingwave_common::memory::MemoryContext;
@@ -75,6 +76,7 @@ fn create_hash_join_executor(
         "HashJoinExecutor".into(),
         CHUNK_SIZE,
         false,
+        BatchSpillMetrics::for_test(),
         ShutdownToken::empty(),
         MemoryContext::none(),
     ))
