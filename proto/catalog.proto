@@ -444,9 +444,10 @@ message Secret {
 
 message SecretRef {
   enum RefAsType {
-    TEXT = 0;
+    UNSPECIFIED = 0;
+    TEXT = 1;
     // AS FILE
-    FILE = 1;
+    FILE = 2;
   }
   uint32 secret_id = 1;
   RefAsType ref_as = 2;
