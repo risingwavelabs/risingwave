@@ -423,18 +423,6 @@ impl GlobalBarrierManager {
                             })?
                     };
 
-                    let mut control_stream_manager =
-                        ControlStreamManager::new(self.context.clone());
-
-                    control_stream_manager
-                        .reset(prev_epoch.value().0, active_streaming_nodes.current())
-                        .await
-                        .inspect_err(|err| {
-                            warn!(error = %err.as_report(), "reset compute nodes failed");
-                        })?;
-
-                    self.context.sink_manager.reset().await;
-
                     if self
                         .context
                         .pre_apply_drop_cancel(&self.scheduled_barriers)
@@ -453,6 +441,18 @@ impl GlobalBarrierManager {
                         .purge_state_table_from_hummock()
                         .await
                         .context("purge state table from hummock")?;
+
+                    let mut control_stream_manager =
+                        ControlStreamManager::new(self.context.clone());
+
+                    control_stream_manager
+                        .reset(prev_epoch.value().0, active_streaming_nodes.current())
+                        .await
+                        .inspect_err(|err| {
+                            warn!(error = %err.as_report(), "reset compute nodes failed");
+                        })?;
+
+                    self.context.sink_manager.reset().await;
 
                     // update and build all actors.
                     self.context.update_actors(&info).await.inspect_err(|err| {
