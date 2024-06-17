@@ -112,24 +112,11 @@ impl GlobalBarrierManagerContext {
         Ok(())
     }
 
-    async fn purge_state_table_from_hummock(&self) -> MetaResult<()> {
-        let all_state_table_ids = match &self.metadata_manager {
-            MetadataManager::V1(mgr) => mgr
-                .catalog_manager
-                .list_tables()
-                .await
-                .into_iter()
-                .map(|t| t.id)
-                .collect_vec(),
-            MetadataManager::V2(mgr) => mgr
-                .catalog_controller
-                .list_all_state_table_ids()
-                .await?
-                .into_iter()
-                .map(|id| id as u32)
-                .collect_vec(),
-        };
-        self.hummock_manager.purge(&all_state_table_ids).await?;
+    async fn purge_state_table_from_hummock(
+        &self,
+        all_state_table_ids: &HashSet<TableId>,
+    ) -> MetaResult<()> {
+        self.hummock_manager.purge(all_state_table_ids).await?;
         Ok(())
     }
 
@@ -437,8 +424,10 @@ impl GlobalBarrierManager {
                             })?
                     }
 
+                    let info = info;
+
                     self.context
-                        .purge_state_table_from_hummock()
+                        .purge_state_table_from_hummock(&info.existing_table_ids())
                         .await
                         .context("purge state table from hummock")?;
 
