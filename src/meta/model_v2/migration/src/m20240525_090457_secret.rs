@@ -42,7 +42,7 @@ impl MigrationTrait for Migration {
             .alter_table(
                 MigrationTable::alter()
                     .table(Sink::Table)
-                    .add_column(ColumnDef::new(Sink::SecretRef).json_binary())
+                    .add_column(ColumnDef::new(Sink::SecretRef).blob(BlobSize::Long))
                     .to_owned(),
             )
             .await?;
@@ -52,7 +52,7 @@ impl MigrationTrait for Migration {
             .alter_table(
                 MigrationTable::alter()
                     .table(Source::Table)
-                    .add_column(ColumnDef::new(Source::SecretRef).json_binary())
+                    .add_column(ColumnDef::new(Source::SecretRef).blob(BlobSize::Long))
                     .to_owned(),
             )
             .await?;

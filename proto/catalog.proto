@@ -84,7 +84,7 @@ message StreamSourceInfo {
   map<string, string> format_encode_options = 14;
 
   // Handle the source relies on any sceret. The key is the propertity name and the value is the secret id.
-  map<string, uint32> secret_ref = 16;
+  map<string, SecretRef> secret_ref = 16;
 }
 
 message Source {
@@ -181,7 +181,7 @@ message Sink {
   CreateType create_type = 24;
 
   // Handle the sink relies on any sceret. The key is the propertity name and the value is the secret id.
-  map<string, uint32> secret_ref = 25;
+  map<string, SecretRef> secret_ref = 25;
 }
 
 message Subscription {
@@ -440,4 +440,14 @@ message Secret {
   bytes value = 4;
   uint32 owner = 5;
   uint32 schema_id = 6;
+}
+
+message SecretRef {
+  enum RefAsType {
+    BYTES = 0;
+    // AS FILE
+    FILE = 1;
+  }
+  uint32 secret_id = 1;
+  RefAsType ref_as = 2;
 }
