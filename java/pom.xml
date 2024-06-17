@@ -80,7 +80,7 @@
         <hadoop.version>3.4.0</hadoop.version>
         <elasticsearch.version>7.17.19</elasticsearch.version>
         <datastax.version>4.17.0</datastax.version>
-        <flink.version>1.18.0</flink.version>
+        <flink.version>1.19.1</flink.version>
         <testcontainers.version>1.17.6</testcontainers.version>
         <postgresql.version>42.5.5</postgresql.version>
         <mysql.connector.java.version>8.3.0</mysql.connector.java.version>
