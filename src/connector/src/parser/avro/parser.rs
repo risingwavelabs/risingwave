@@ -373,12 +373,14 @@ mod test {
             }
             Schema::TimestampMillis => {
                 let datetime = Date::from_ymd_uncheck(1970, 1, 1).and_hms_uncheck(0, 0, 0);
-                let timestamp_mills = Value::TimestampMillis(datetime.0.and_utc().timestamp() * 1_000);
+                let timestamp_mills =
+                    Value::TimestampMillis(datetime.0.and_utc().timestamp() * 1_000);
                 Some(timestamp_mills)
             }
             Schema::TimestampMicros => {
                 let datetime = Date::from_ymd_uncheck(1970, 1, 1).and_hms_uncheck(0, 0, 0);
-                let timestamp_micros = Value::TimestampMicros(datetime.0.and_utc().timestamp() * 1_000_000);
+                let timestamp_micros =
+                    Value::TimestampMicros(datetime.0.and_utc().timestamp() * 1_000_000);
                 Some(timestamp_micros)
             }
             Schema::Duration => {
