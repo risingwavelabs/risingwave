@@ -14,8 +14,10 @@
 
 mod arrow_deltalake;
 mod arrow_iceberg;
+mod arrow_iceberg_v2;
 mod arrow_udf;
 
 pub use arrow_deltalake::DeltaLakeConvert;
 pub use arrow_iceberg::IcebergArrowConvert;
+pub use arrow_iceberg_v2::{from_record_batch_for_iceberg_v2, to_record_batch_for_iceberg_v2};
 pub use arrow_udf::{FromArrow, ToArrow, UdfArrowConvert};

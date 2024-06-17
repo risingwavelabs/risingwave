@@ -27,6 +27,8 @@ use arrow_schema::{
     DataType as ArrowDataType, Field as ArrowField, Fields, Schema as ArrowSchema, SchemaRef,
 };
 use async_trait::async_trait;
+use iceberg::table::Table as TableV2;
+use iceberg::Catalog as CatalogV2;
 use icelake::catalog::{
     load_catalog, load_iceberg_base_catalog_config, BaseCatalogConfig, CatalogRef, CATALOG_NAME,
     CATALOG_TYPE,
@@ -429,6 +431,16 @@ impl IcebergConfig {
             .context("Unable to parse table name")?;
 
         catalog.load_table(&table_id).await.map_err(Into::into)
+    }
+}
+
+impl IcebergConfig {
+    async fn create_catalog_v2(&self) -> ConnectorResult<Arc<dyn CatalogV2>> {
+        todo!()
+    }
+
+    pub async fn load_table_v2(&self) -> ConnectorResult<TableV2> {
+        todo!()
     }
 }
 

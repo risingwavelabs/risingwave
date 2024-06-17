@@ -128,6 +128,7 @@ prost = { version = "0.12" }
 icelake = { git = "https://github.com/icelake-io/icelake", rev = "54fd72fbd1dd8c592f05eeeb79223c8a6a33c297", features = [
     "prometheus",
 ] }
+iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", branch = "zj/reader" }
 arrow-array = "50"
 arrow-arith = "50"
 arrow-cast = "50"
@@ -146,6 +147,10 @@ arrow-array-deltalake = { package = "arrow-array", version = "48.0.1" }
 arrow-buffer-deltalake = { package = "arrow-buffer", version = "48.0.1" }
 arrow-cast-deltalake = { package = "arrow-cast", version = "48.0.1" }
 arrow-schema-deltalake = { package = "arrow-schema", version = "48.0.1" }
+arrow-array-iceberg = { package = "arrow-array", version = "52" }
+arrow-buffer-iceberg = { package = "arrow-buffer", version = "52" }
+arrow-cast-iceberg = { package = "arrow-cast", version = "52" }
+arrow-schema-iceberg = { package = "arrow-schema", version = "52" }
 clap = { version = "4", features = ["cargo", "derive", "env"] }
 # Use a forked version which removes the dependencies on dynamo db to reduce
 # compile time and binary size.
