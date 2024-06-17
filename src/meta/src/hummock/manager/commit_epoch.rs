@@ -326,8 +326,10 @@ impl HummockManager {
                 table_compaction_group_mapping,
             );
 
-            let mut group_table_ids: BTreeMap<_, Vec<u32>> = BTreeMap::new();
+            let mut group_table_ids = None;
             if !is_sst_belong_to_group_declared {
+                let group_table_ids: &mut BTreeMap<u64, Vec<u32>> =
+                    group_table_ids.insert(BTreeMap::new());
                 for table_id in commit_sst.sst_info.get_table_ids() {
                     match table_compaction_group_mapping.get(&TableId::new(*table_id)) {
                         Some(cg_id_from_meta) => {
@@ -347,11 +349,6 @@ impl HummockManager {
                 }
 
                 new_sst_id_number += group_table_ids.len();
-            } else {
-                group_table_ids.insert(
-                    commit_sst.compaction_group_id,
-                    commit_sst.sst_info.get_table_ids().clone(),
-                );
             }
 
             sst_to_cg_vec.push((commit_sst, group_table_ids));
@@ -360,11 +357,15 @@ impl HummockManager {
         let mut commit_sstables = Vec::with_capacity(sst_to_cg_vec.len() + new_sst_id_number);
 
         for (mut sst, group_table_ids) in sst_to_cg_vec {
-            for (group_id, _match_ids) in group_table_ids {
-                let branch_sst = split_sst(&mut sst.sst_info, &mut new_sst_id);
-                commit_sstables.push(ExtendedSstableInfo::with_compaction_group(
-                    group_id, branch_sst,
-                ));
+            if let Some(group_table_ids) = group_table_ids {
+                for (group_id, _match_ids) in group_table_ids {
+                    let branch_sst = split_sst(&mut sst.sst_info, &mut new_sst_id);
+                    commit_sstables.push(ExtendedSstableInfo::with_compaction_group(
+                        group_id, branch_sst,
+                    ));
+                }
+            } else {
+                commit_sstables.push(sst);
             }
 
             new_sst_id += 1;
