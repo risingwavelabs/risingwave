@@ -406,8 +406,6 @@ impl HummockManager {
             } else {
                 commit_sstables.push(sst);
             }
-
-            new_sst_id += 1;
         }
 
         let commit_sstables = commit_sstables
