@@ -19,5 +19,6 @@ mod has_privilege;
 mod pg_get_indexdef;
 mod pg_get_userbyid;
 mod pg_get_viewdef;
+mod pg_index_column_has_property;
 mod pg_indexes_size;
 mod pg_relation_size;
