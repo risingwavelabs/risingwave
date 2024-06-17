@@ -140,7 +140,8 @@ where
         let first_epoch = first_barrier.epoch;
         self.state_table.init_epoch(first_barrier.epoch);
 
-        let progress_per_vnode = get_progress_per_vnode(&self.state_table).await?;
+        let progress_per_vnode =
+            get_progress_per_vnode(&self.state_table, pk_in_output_indices.len()).await?;
 
         let is_completely_finished = progress_per_vnode.iter().all(|(_, p)| {
             matches!(

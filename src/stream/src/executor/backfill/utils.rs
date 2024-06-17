@@ -499,8 +499,10 @@ pub(crate) fn mapping_message(msg: Message, upstream_indices: &[usize]) -> Optio
 
 /// Recovers progress per vnode, so we know which to backfill.
 /// See how it decodes the state with the inline comments.
-pub(crate) async fn get_progress_per_vnode<S: StateStore, const IS_REPLICATED: bool>(
-    state_table: &StateTableInner<S, BasicSerde, IS_REPLICATED>,
+/// `pk_len` is the pk length of the backfilling stream.
+pub(crate) async fn get_progress_per_vnode<S: StateStore>(
+    state_table: &StateTableInner<S, BasicSerde, false>,
+    pk_len: usize,
 ) -> StreamExecutorResult<Vec<(VirtualNode, BackfillStatePerVnode)>> {
     debug_assert!(!state_table.vnodes().is_empty());
     let vnodes = state_table.vnodes().iter_vnodes();
@@ -511,7 +513,7 @@ pub(crate) async fn get_progress_per_vnode<S: StateStore, const IS_REPLICATED: b
         datum
     });
     // Track this for backwards compat
-    let meta_data_len = state_table.get_data_types().len() - state_table.pk_indices().len();
+    let meta_data_len = state_table.get_data_types().len() - pk_len;
     let has_yielded = METADATA_STATE_LEN == meta_data_len;
     if !has_yielded && meta_data_len != METADATA_STATE_LEN_NO_YIELDED {
         bail!(
