@@ -44,7 +44,7 @@ use std::fmt::Write;
 
 use arrow_buffer::OffsetBuffer;
 use arrow_buffer_iceberg::IntervalMonthDayNano;
-use chrono::{NaiveDateTime, NaiveTime};
+use chrono::{DateTime, NaiveDateTime, NaiveTime};
 use itertools::Itertools;
 
 // This is important because we want to use the arrow version specified by the outer mod.
@@ -849,11 +849,9 @@ impl FromIntoArrow for Timestamp {
 
     fn from_arrow(value: Self::ArrowType) -> Self {
         Timestamp(
-            NaiveDateTime::from_timestamp_opt(
-                (value / 1_000_000) as _,
-                (value % 1_000_000 * 1000) as _,
-            )
-            .unwrap(),
+            DateTime::from_timestamp((value / 1_000_000) as _, (value % 1_000_000 * 1000) as _)
+                .unwrap()
+                .naive_utc(),
         )
     }
 
