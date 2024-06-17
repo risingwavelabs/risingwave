@@ -101,6 +101,13 @@ impl Compactor {
         Ok(())
     }
 
+    pub fn cancel_tasks(&self, task_ids: &Vec<u64>) -> MetaResult<()> {
+        for task_id in task_ids {
+            self.cancel_task(*task_id)?;
+        }
+        Ok(())
+    }
+
     pub fn context_id(&self) -> HummockContextId {
         self.context_id
     }
@@ -131,7 +138,7 @@ impl CompactorManagerInner {
         use risingwave_meta_model_v2::compaction_task;
         use sea_orm::EntityTrait;
         // Retrieve the existing task assignments from metastore.
-        let task_assignment: Vec<CompactTaskAssignment> = match env.meta_store() {
+        let task_assignment: Vec<CompactTaskAssignment> = match env.meta_store_ref() {
             MetaStoreImpl::Kv(meta_store) => CompactTaskAssignment::list(meta_store).await?,
             MetaStoreImpl::Sql(sql_meta_store) => compaction_task::Entity::find()
                 .all(&sql_meta_store.conn)

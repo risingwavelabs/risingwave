@@ -17,7 +17,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use risingwave_batch::monitor::{
-    GLOBAL_BATCH_EXECUTOR_METRICS, GLOBAL_BATCH_MANAGER_METRICS, GLOBAL_BATCH_TASK_METRICS,
+    GLOBAL_BATCH_EXECUTOR_METRICS, GLOBAL_BATCH_MANAGER_METRICS, GLOBAL_BATCH_SPILL_METRICS,
+    GLOBAL_BATCH_TASK_METRICS,
 };
 use risingwave_batch::rpc::service::task_service::BatchServiceImpl;
 use risingwave_batch::spill::spill_op::SpillOp;
@@ -177,6 +178,7 @@ pub async fn compute_node_serve(
     let batch_executor_metrics = Arc::new(GLOBAL_BATCH_EXECUTOR_METRICS.clone());
     let batch_manager_metrics = Arc::new(GLOBAL_BATCH_MANAGER_METRICS.clone());
     let exchange_srv_metrics = Arc::new(GLOBAL_EXCHANGE_SERVICE_METRICS.clone());
+    let batch_spill_metrics = Arc::new(GLOBAL_BATCH_SPILL_METRICS.clone());
 
     // Initialize state store.
     let state_store_metrics = Arc::new(global_hummock_state_store_metrics(
@@ -348,6 +350,7 @@ pub async fn compute_node_serve(
         client_pool,
         dml_mgr.clone(),
         source_metrics.clone(),
+        batch_spill_metrics.clone(),
         config.server.metrics_level,
     );
 

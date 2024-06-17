@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
@@ -28,9 +28,7 @@ use risingwave_pb::hummock::compact_task::{self};
 use risingwave_pb::hummock::group_delta::DeltaType;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::hummock_version_delta::ChangeLogDelta;
-use risingwave_pb::hummock::{
-    GroupDelta, GroupMetaChange, HummockSnapshot, IntraLevelDelta, StateTableInfoDelta,
-};
+use risingwave_pb::hummock::{GroupDelta, HummockSnapshot, IntraLevelDelta, StateTableInfoDelta};
 
 use super::transaction::SingleDeltaTransaction;
 use crate::hummock::error::{Error, Result};
@@ -144,38 +142,33 @@ impl HummockManager {
 
         let mut table_compaction_group_mapping = new_version_delta
             .latest_version()
-            .build_compaction_group_info();
+            .state_table_info
+            .build_table_compaction_group_id();
 
         let mut new_table_ids = None;
         // Add new table
         if let Some(new_fragment_table_info) = new_table_fragment_info {
-            let new_table_ids = new_table_ids.insert(HashSet::new());
+            // let new_table_ids = new_table_ids.insert(HashMap::new());
             if !new_fragment_table_info.internal_table_ids.is_empty() {
-                self.on_handle_add_new_table(
+                let new_table_id_to_cg = self.on_handle_add_new_table(
                     &mut new_version_delta,
                     &new_fragment_table_info.internal_table_ids,
                     StaticCompactionGroupId::StateDefault as u64,
+                    &mut table_compaction_group_mapping,
                 )?;
 
-                for table_id in &new_fragment_table_info.internal_table_ids {
-                    table_compaction_group_mapping
-                        .insert(*table_id, StaticCompactionGroupId::StateDefault as u64);
-                    new_table_ids.insert(*table_id);
-                }
+                let _ = new_table_ids.insert(new_table_id_to_cg);
             }
 
             if let Some(mv_table_id) = new_fragment_table_info.mv_table_id {
-                self.on_handle_add_new_table(
+                let new_table_id_to_cg = self.on_handle_add_new_table(
                     &mut new_version_delta,
                     &vec![mv_table_id],
                     StaticCompactionGroupId::MaterializedView as u64,
+                    &mut table_compaction_group_mapping,
                 )?;
 
-                let _ = table_compaction_group_mapping.insert(
-                    mv_table_id,
-                    StaticCompactionGroupId::MaterializedView as u64,
-                );
-                new_table_ids.insert(mv_table_id);
+                let _ = new_table_ids.insert(new_table_id_to_cg);
             }
         }
 
@@ -216,23 +209,32 @@ impl HummockManager {
         // update state table info
         new_version_delta.with_latest_version(|version, delta| {
             if let Some(new_table_ids) = new_table_ids {
-                for table_id in new_table_ids {
+                for (table_id, cg_id) in new_table_ids {
                     delta.state_table_info_delta.insert(
                         table_id,
                         StateTableInfoDelta {
                             committed_epoch: epoch,
                             safe_epoch: epoch,
+                            compaction_group_id: cg_id,
                         },
                     );
                 }
             }
             for (table_id, info) in version.state_table_info.info() {
-                delta.state_table_info_delta.insert(
-                    *table_id,
-                    StateTableInfoDelta {
-                        committed_epoch: epoch,
-                        safe_epoch: info.safe_epoch,
-                    },
+                assert!(
+                    delta
+                        .state_table_info_delta
+                        .insert(
+                            *table_id,
+                            StateTableInfoDelta {
+                                committed_epoch: epoch,
+                                safe_epoch: info.safe_epoch,
+                                compaction_group_id: info.compaction_group_id,
+                            }
+                        )
+                        .is_none(),
+                    "newly added table exists previously: {:?}",
+                    table_id
                 );
             }
         });
@@ -332,39 +334,31 @@ impl HummockManager {
         new_version_delta: &mut SingleDeltaTransaction<'_, '_>,
         table_ids: &Vec<TableId>,
         compaction_group_id: CompactionGroupId,
-    ) -> Result<()> {
+        table_compaction_group_mapping: &mut HashMap<TableId, CompactionGroupId>,
+    ) -> Result<HashMap<TableId, CompactionGroupId>> {
         if table_ids.is_empty() {
             return Err(Error::CompactionGroup("empty table ids".to_string()));
         }
 
-        if let Some(levels) = new_version_delta
-            .latest_version()
-            .levels
-            .get(&(compaction_group_id))
-        {
-            for table_id in table_ids {
-                if levels.member_table_ids.contains(&table_id.table_id) {
-                    return Err(Error::CompactionGroup(format!(
-                        "table {:?} already in group {}",
-                        table_id, compaction_group_id
-                    )));
-                }
+        let mut new_table_ids = HashMap::new();
+
+        for table_id in table_ids {
+            if let Some(info) = new_version_delta
+                .latest_version()
+                .state_table_info
+                .info()
+                .get(table_id)
+            {
+                return Err(Error::CompactionGroup(format!(
+                    "table {} already exist {:?}",
+                    table_id.table_id, info,
+                )));
             }
+            table_compaction_group_mapping.insert(*table_id, compaction_group_id);
+            new_table_ids.insert(*table_id, compaction_group_id);
         }
 
-        let group_deltas = &mut new_version_delta
-            .group_deltas
-            .entry(compaction_group_id)
-            .or_default()
-            .group_deltas;
-        group_deltas.push(GroupDelta {
-            delta_type: Some(DeltaType::GroupMetaChange(GroupMetaChange {
-                table_ids_add: table_ids.iter().map(|table_id| table_id.table_id).collect(),
-                ..Default::default()
-            })),
-        });
-
-        Ok(())
+        Ok(new_table_ids)
     }
 
     async fn correct_commit_ssts(
@@ -380,6 +374,7 @@ impl HummockManager {
                 &commit_sst.sst_info,
                 levels,
                 commit_sst.compaction_group_id,
+                table_compaction_group_mapping,
             );
 
             let mut group_table_ids: BTreeMap<_, Vec<u32>> = BTreeMap::new();
