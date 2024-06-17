@@ -39,7 +39,7 @@ pub struct Model {
     pub optional_associated_table_id: Option<TableId>,
     pub connection_id: Option<ConnectionId>,
     pub version: i64,
-    // `secret_ref` stores a json string, mapping from property name to secret id.
+    // `secret_ref` stores the mapping info mapping from property name to secret id and type.
     pub secret_ref: Option<SecretRef>,
 }
 
