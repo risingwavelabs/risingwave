@@ -1058,10 +1058,6 @@ pub struct BytesProperties {
 }
 
 #[derive(Debug, Default, Clone)]
-pub struct ParquetProperties {
-    pub column_name: Option<String>,
-}
-#[derive(Debug, Default, Clone)]
 pub enum EncodingProperties {
     Avro(AvroProperties),
     Protobuf(ProtobufProperties),
