@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use bytes::Bytes;
 use futures_async_stream::try_stream;
 use prost::Message;
@@ -32,6 +34,7 @@ use super::{
 };
 use crate::error::{BatchError, Result};
 use crate::executor::merge_sort::MergeSortExecutor;
+use crate::monitor::BatchSpillMetrics;
 use crate::spill::spill_op::{SpillOp, DEFAULT_SPILL_PARTITION_NUM, SPILL_AT_LEAST_MEMORY};
 use crate::task::BatchTaskContext;
 
@@ -50,6 +53,7 @@ pub struct SortExecutor {
     chunk_size: usize,
     mem_context: MemoryContext,
     enable_spill: bool,
+    spill_metrics: Arc<BatchSpillMetrics>,
     /// The upper bound of memory usage for this executor.
     memory_upper_bound: Option<u64>,
 }
@@ -93,6 +97,7 @@ impl BoxedExecutorBuilder for SortExecutor {
             source.context.get_config().developer.chunk_size,
             source.context.create_executor_mem_context(identity),
             source.context.get_config().enable_spill,
+            source.context.spill_metrics(),
         )))
     }
 }
@@ -166,6 +171,7 @@ impl SortExecutor {
                 DEFAULT_SPILL_PARTITION_NUM,
                 child_schema.data_types(),
                 self.chunk_size,
+                self.spill_metrics.clone(),
             )?;
             sort_spill_manager.init_writers().await?;
 
@@ -201,6 +207,7 @@ impl SortExecutor {
                     self.chunk_size,
                     self.mem_context.clone(),
                     self.enable_spill,
+                    self.spill_metrics.clone(),
                     Some(partition_size),
                 );
 
@@ -249,6 +256,7 @@ impl SortExecutor {
         chunk_size: usize,
         mem_context: MemoryContext,
         enable_spill: bool,
+        spill_metrics: Arc<BatchSpillMetrics>,
     ) -> Self {
         Self::new_inner(
             child,
@@ -257,6 +265,7 @@ impl SortExecutor {
             chunk_size,
             mem_context,
             enable_spill,
+            spill_metrics,
             None,
         )
     }
@@ -268,6 +277,7 @@ impl SortExecutor {
         chunk_size: usize,
         mem_context: MemoryContext,
         enable_spill: bool,
+        spill_metrics: Arc<BatchSpillMetrics>,
         memory_upper_bound: Option<u64>,
     ) -> Self {
         let schema = child.schema().clone();
@@ -279,6 +289,7 @@ impl SortExecutor {
             chunk_size,
             mem_context,
             enable_spill,
+            spill_metrics,
             memory_upper_bound,
         }
     }
@@ -306,6 +317,7 @@ struct SortSpillManager {
     input_chunk_builders: Vec<DataChunkBuilder>,
     child_data_types: Vec<DataType>,
     spill_chunk_size: usize,
+    spill_metrics: Arc<BatchSpillMetrics>,
 }
 
 impl SortSpillManager {
@@ -314,6 +326,7 @@ impl SortSpillManager {
         partition_num: usize,
         child_data_types: Vec<DataType>,
         spill_chunk_size: usize,
+        spill_metrics: Arc<BatchSpillMetrics>,
     ) -> Result<Self> {
         let suffix_uuid = uuid::Uuid::new_v4();
         let dir = format!("/{}-{}/", agg_identity, suffix_uuid);
@@ -328,6 +341,7 @@ impl SortSpillManager {
             round_robin_idx: 0,
             child_data_types,
             spill_chunk_size,
+            spill_metrics,
         })
     }
 
@@ -351,6 +365,9 @@ impl SortSpillManager {
                 let chunk_pb: PbDataChunk = chunk.to_protobuf();
                 let buf = Message::encode_to_vec(&chunk_pb);
                 let len_bytes = Bytes::copy_from_slice(&(buf.len() as u32).to_le_bytes());
+                self.spill_metrics
+                    .batch_spill_write_bytes
+                    .inc_by((buf.len() + len_bytes.len()) as u64);
                 self.input_writers[partition].write(len_bytes).await?;
                 self.input_writers[partition].write(buf).await?;
             }
@@ -365,6 +382,9 @@ impl SortSpillManager {
                 let chunk_pb: PbDataChunk = output_chunk.to_protobuf();
                 let buf = Message::encode_to_vec(&chunk_pb);
                 let len_bytes = Bytes::copy_from_slice(&(buf.len() as u32).to_le_bytes());
+                self.spill_metrics
+                    .batch_spill_write_bytes
+                    .inc_by((buf.len() + len_bytes.len()) as u64);
                 self.input_writers[partition].write(len_bytes).await?;
                 self.input_writers[partition].write(buf).await?;
             }
@@ -379,7 +399,7 @@ impl SortSpillManager {
     async fn read_input_partition(&mut self, partition: usize) -> Result<BoxedDataChunkStream> {
         let input_partition_file_name = format!("input-chunks-p{}", partition);
         let r = self.op.reader_with(&input_partition_file_name).await?;
-        Ok(SpillOp::read_stream(r))
+        Ok(SpillOp::read_stream(r, self.spill_metrics.clone()))
     }
 
     async fn estimate_partition_size(&self, partition: usize) -> Result<u64> {
@@ -398,9 +418,7 @@ mod tests {
     use futures::StreamExt;
     use risingwave_common::array::*;
     use risingwave_common::catalog::Field;
-    use risingwave_common::types::{
-        Date, Interval, Scalar, StructType, Time, Timestamp, F32,
-    };
+    use risingwave_common::types::{Date, Interval, Scalar, StructType, Time, Timestamp, F32};
     use risingwave_common::util::sort_util::OrderType;
 
     use super::*;
@@ -700,6 +718,7 @@ mod tests {
             CHUNK_SIZE,
             MemoryContext::none(),
             false,
+            BatchSpillMetrics::for_test(),
         ));
 
         let mut stream = order_by_executor.execute();
@@ -807,6 +826,7 @@ mod tests {
             CHUNK_SIZE,
             MemoryContext::none(),
             false,
+            BatchSpillMetrics::for_test(),
         ));
 
         let mut stream = order_by_executor.execute();
@@ -956,6 +976,7 @@ mod tests {
             CHUNK_SIZE,
             MemoryContext::none(),
             false,
+            BatchSpillMetrics::for_test(),
         ));
 
         let mut stream = order_by_executor.execute();
