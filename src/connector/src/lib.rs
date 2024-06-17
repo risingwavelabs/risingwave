@@ -34,6 +34,7 @@
 #![feature(negative_impls)]
 #![feature(register_tool)]
 #![feature(assert_matches)]
+#![feature(never_type)]
 #![register_tool(rw)]
 #![recursion_limit = "256"]
 

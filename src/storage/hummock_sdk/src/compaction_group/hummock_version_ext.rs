@@ -496,18 +496,40 @@ impl HummockVersion {
                 );
                 let parent_group_id = group_construct.parent_group_id;
                 new_levels.parent_group_id = parent_group_id;
+                #[expect(deprecated)]
+                // for backward-compatibility of previous hummock version delta
                 new_levels
                     .member_table_ids
                     .clone_from(&group_construct.table_ids);
                 self.levels.insert(*compaction_group_id, new_levels);
+                let member_table_ids =
+                    if group_construct.version >= CompatibilityVersion::NoMemberTableIds as _ {
+                        self.state_table_info
+                            .compaction_group_member_table_ids(*compaction_group_id)
+                            .iter()
+                            .map(|table_id| table_id.table_id)
+                            .collect()
+                    } else {
+                        #[expect(deprecated)]
+                        // for backward-compatibility of previous hummock version delta
+                        HashSet::from_iter(group_construct.table_ids.clone())
+                    };
+
                 self.init_with_parent_group(
                     parent_group_id,
                     *compaction_group_id,
-                    HashSet::from_iter(group_construct.table_ids.clone()),
+                    member_table_ids,
                     group_construct.get_new_sst_start_id(),
-                    group_construct.version() == CompatibilityVersion::VersionUnspecified,
+                    group_construct.version < CompatibilityVersion::NoTrivialSplit as _,
                 );
             } else if let Some(group_change) = &summary.group_table_change {
+                // TODO: may deprecate this branch? This enum variant is not created anywhere
+                assert!(
+                    group_change.version <= CompatibilityVersion::NoTrivialSplit as _,
+                    "DeltaType::GroupTableChange is not used anymore after CompatibilityVersion::NoMemberTableIds is added"
+                );
+                #[expect(deprecated)]
+                // for backward-compatibility of previous hummock version delta
                 self.init_with_parent_group(
                     group_change.origin_group_id,
                     group_change.target_group_id,
@@ -520,10 +542,14 @@ impl HummockVersion {
                     .levels
                     .get_mut(&group_change.origin_group_id)
                     .expect("compaction group should exist");
+                #[expect(deprecated)]
+                // for backward-compatibility of previous hummock version delta
                 let mut moving_tables = levels
                     .member_table_ids
                     .extract_if(|t| group_change.table_ids.contains(t))
                     .collect_vec();
+                #[expect(deprecated)]
+                // for backward-compatibility of previous hummock version delta
                 self.levels
                     .get_mut(compaction_group_id)
                     .expect("compaction group should exist")
@@ -536,6 +562,7 @@ impl HummockVersion {
                 .get_mut(compaction_group_id)
                 .expect("compaction group should exist");
 
+            #[expect(deprecated)] // for backward-compatibility of previous hummock version delta
             for group_meta_delta in &summary.group_meta_changes {
                 levels
                     .member_table_ids
@@ -583,7 +610,11 @@ impl HummockVersion {
                 }
             } else {
                 // `max_committed_epoch` is not changed. The delta is caused by compaction.
-                levels.apply_compact_ssts(summary);
+                levels.apply_compact_ssts(
+                    summary,
+                    self.state_table_info
+                        .compaction_group_member_table_ids(*compaction_group_id),
+                );
             }
             if has_destroy {
                 self.levels.remove(compaction_group_id);
@@ -693,16 +724,6 @@ impl HummockVersion {
         }
     }
 
-    pub fn build_compaction_group_info(&self) -> HashMap<TableId, CompactionGroupId> {
-        let mut ret = HashMap::new();
-        for (compaction_group_id, levels) in &self.levels {
-            for table_id in &levels.member_table_ids {
-                ret.insert(TableId::new(*table_id), *compaction_group_id);
-            }
-        }
-        ret
-    }
-
     pub fn build_branched_sst_info(&self) -> BTreeMap<HummockSstableObjectId, BranchedSstInfo> {
         let mut ret: BTreeMap<_, _> = BTreeMap::new();
         for (compaction_group_id, group) in &self.levels {
@@ -757,7 +778,11 @@ impl Levels {
             .sum()
     }
 
-    pub fn apply_compact_ssts(&mut self, summary: GroupDeltasSummary) {
+    pub fn apply_compact_ssts(
+        &mut self,
+        summary: GroupDeltasSummary,
+        member_table_ids: &BTreeSet<TableId>,
+    ) {
         let GroupDeltasSummary {
             delete_sst_levels,
             delete_sst_ids_set,
@@ -810,9 +835,11 @@ impl Levels {
                     insert_sub_level_id, delete_sst_ids_set, l0.sub_levels.iter().map(|level| level.sub_level_id).collect_vec()
                 );
                 if l0.sub_levels[index].table_infos.is_empty()
-                    && self.member_table_ids.len() == 1
+                    && member_table_ids.len() == 1
                     && insert_table_infos.iter().all(|sst| {
-                        sst.table_ids.len() == 1 && sst.table_ids[0] == self.member_table_ids[0]
+                        sst.table_ids.len() == 1
+                            && sst.table_ids[0]
+                                == member_table_ids.iter().next().expect("non-empty").table_id
                     })
                 {
                     // Only change vnode_partition_count for group which has only one state-table.
@@ -830,7 +857,7 @@ impl Levels {
                     self.levels[idx].vnode_partition_count = new_vnode_partition_count;
                 } else if self.levels[idx].vnode_partition_count != 0
                     && new_vnode_partition_count == 0
-                    && self.member_table_ids.len() > 1
+                    && member_table_ids.len() > 1
                 {
                     self.levels[idx].vnode_partition_count = 0;
                 }
@@ -901,6 +928,7 @@ pub fn build_initial_compaction_group_levels(
             vnode_partition_count: 0,
         });
     }
+    #[expect(deprecated)] // for backward-compatibility of previous hummock version delta
     Levels {
         levels,
         l0: Some(OverlappingLevel {
@@ -952,18 +980,6 @@ fn split_sst_info_for_level(
     insert_table_infos
 }
 
-pub fn try_get_compaction_group_id_by_table_id(
-    version: &HummockVersion,
-    table_id: StateTableId,
-) -> Option<CompactionGroupId> {
-    for (group_id, levels) in &version.levels {
-        if levels.member_table_ids.contains(&table_id) {
-            return Some(*group_id);
-        }
-    }
-    None
-}
-
 /// Gets all compaction group ids.
 pub fn get_compaction_group_ids(
     version: &HummockVersion,
@@ -974,9 +990,10 @@ pub fn get_compaction_group_ids(
 /// Gets all member table ids.
 pub fn get_member_table_ids(version: &HummockVersion) -> HashSet<StateTableId> {
     version
-        .levels
-        .iter()
-        .flat_map(|(_, levels)| levels.member_table_ids.clone())
+        .state_table_info
+        .info()
+        .keys()
+        .map(|table_id| table_id.table_id)
         .collect()
 }
 
@@ -984,14 +1001,10 @@ pub fn get_table_compaction_group_id_mapping(
     version: &HummockVersion,
 ) -> HashMap<StateTableId, CompactionGroupId> {
     version
-        .levels
+        .state_table_info
+        .info()
         .iter()
-        .flat_map(|(group_id, levels)| {
-            levels
-                .member_table_ids
-                .iter()
-                .map(|table_id| (*table_id, *group_id))
-        })
+        .map(|(table_id, info)| (table_id.table_id, info.compaction_group_id))
         .collect()
 }
 
@@ -1209,7 +1222,6 @@ pub fn validate_version(version: &HummockVersion) -> Vec<String> {
         ));
     }
 
-    let mut table_to_group = HashMap::new();
     // Ensure each table maps to only one compaction group
     for (group_id, levels) in &version.levels {
         // Ensure compaction group id matches
@@ -1218,31 +1230,6 @@ pub fn validate_version(version: &HummockVersion) -> Vec<String> {
                 "GROUP {}: inconsistent group id {} in Levels",
                 group_id, levels.group_id
             ));
-        }
-
-        // Ensure table id is sorted
-        if !levels.member_table_ids.is_sorted() {
-            res.push(format!(
-                "GROUP {}: memtable_table_ids is not sorted: {:?}",
-                group_id, levels.member_table_ids
-            ));
-        }
-
-        // Ensure table id is unique
-        for table_id in &levels.member_table_ids {
-            match table_to_group.entry(table_id) {
-                Entry::Occupied(e) => {
-                    res.push(format!(
-                        "GROUP {}: Duplicated table_id {}. First found in group {}",
-                        group_id,
-                        table_id,
-                        e.get()
-                    ));
-                }
-                Entry::Vacant(e) => {
-                    e.insert(group_id);
-                }
-            }
         }
 
         let validate_level = |group: CompactionGroupId,

@@ -332,7 +332,12 @@ pub(super) fn calc_new_write_limits(
             new_write_limits.insert(
                 *id,
                 WriteLimit {
-                    table_ids: levels.member_table_ids.clone(),
+                    table_ids: version
+                        .state_table_info
+                        .compaction_group_member_table_ids(*id)
+                        .iter()
+                        .map(|table_id| table_id.table_id)
+                        .collect(),
                     reason: write_limit_type.as_str(),
                 },
             );

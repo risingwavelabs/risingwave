@@ -13,9 +13,10 @@
 // limitations under the License.
 
 use std::collections::hash_map::Entry;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::mem::{replace, size_of};
-use std::sync::Arc;
+use std::ops::Deref;
+use std::sync::{Arc, LazyLock};
 
 use prost::Message;
 use risingwave_common::catalog::TableId;
@@ -39,13 +40,37 @@ use crate::{CompactionGroupId, HummockSstableObjectId, HummockVersionId, FIRST_V
 #[derive(Debug, Clone, PartialEq)]
 pub struct HummockVersionStateTableInfo {
     state_table_info: HashMap<TableId, PbStateTableInfo>,
+
+    // in memory index
+    compaction_group_member_tables: HashMap<CompactionGroupId, BTreeSet<TableId>>,
 }
 
 impl HummockVersionStateTableInfo {
     pub fn empty() -> Self {
         Self {
             state_table_info: HashMap::new(),
+            compaction_group_member_tables: HashMap::new(),
         }
+    }
+
+    fn build_compaction_group_member_tables(
+        state_table_info: &HashMap<TableId, PbStateTableInfo>,
+    ) -> HashMap<CompactionGroupId, BTreeSet<TableId>> {
+        let mut ret: HashMap<_, BTreeSet<_>> = HashMap::new();
+        for (table_id, info) in state_table_info {
+            assert!(ret
+                .entry(info.compaction_group_id)
+                .or_default()
+                .insert(*table_id));
+        }
+        ret
+    }
+
+    pub fn build_table_compaction_group_id(&self) -> HashMap<TableId, CompactionGroupId> {
+        self.state_table_info
+            .iter()
+            .map(|(table_id, info)| (*table_id, info.compaction_group_id))
+            .collect()
     }
 
     pub fn from_protobuf(state_table_info: &HashMap<u32, PbStateTableInfo>) -> Self {
@@ -53,7 +78,12 @@ impl HummockVersionStateTableInfo {
             .iter()
             .map(|(table_id, info)| (TableId::new(*table_id), info.clone()))
             .collect();
-        Self { state_table_info }
+        let compaction_group_member_tables =
+            Self::build_compaction_group_member_tables(&state_table_info);
+        Self {
+            state_table_info,
+            compaction_group_member_tables,
+        }
     }
 
     pub fn to_protobuf(&self) -> HashMap<u32, PbStateTableInfo> {
@@ -69,8 +99,28 @@ impl HummockVersionStateTableInfo {
         removed_table_id: &HashSet<TableId>,
     ) -> HashMap<TableId, Option<StateTableInfo>> {
         let mut changed_table = HashMap::new();
+        fn remove_table_from_compaction_group(
+            compaction_group_member_tables: &mut HashMap<CompactionGroupId, BTreeSet<TableId>>,
+            compaction_group_id: CompactionGroupId,
+            table_id: TableId,
+        ) {
+            let member_tables = compaction_group_member_tables
+                .get_mut(&compaction_group_id)
+                .expect("should exist");
+            assert!(member_tables.remove(&table_id));
+            if member_tables.is_empty() {
+                assert!(compaction_group_member_tables
+                    .remove(&compaction_group_id)
+                    .is_some());
+            }
+        }
         for table_id in removed_table_id {
             if let Some(prev_info) = self.state_table_info.remove(table_id) {
+                remove_table_from_compaction_group(
+                    &mut self.compaction_group_member_tables,
+                    prev_info.compaction_group_id,
+                    *table_id,
+                );
                 assert!(changed_table.insert(*table_id, Some(prev_info)).is_none());
             } else {
                 warn!(
@@ -86,6 +136,7 @@ impl HummockVersionStateTableInfo {
             let new_info = StateTableInfo {
                 committed_epoch: delta.committed_epoch,
                 safe_epoch: delta.safe_epoch,
+                compaction_group_id: delta.compaction_group_id,
             };
             match self.state_table_info.entry(*table_id) {
                 Entry::Occupied(mut entry) => {
@@ -98,20 +149,56 @@ impl HummockVersionStateTableInfo {
                         prev_info,
                         new_info
                     );
+                    if prev_info.compaction_group_id != new_info.compaction_group_id {
+                        // table moved to another compaction group
+                        remove_table_from_compaction_group(
+                            &mut self.compaction_group_member_tables,
+                            prev_info.compaction_group_id,
+                            *table_id,
+                        );
+                        assert!(self
+                            .compaction_group_member_tables
+                            .entry(new_info.compaction_group_id)
+                            .or_default()
+                            .insert(*table_id));
+                    }
                     let prev_info = replace(prev_info, new_info);
                     changed_table.insert(*table_id, Some(prev_info));
                 }
                 Entry::Vacant(entry) => {
+                    assert!(self
+                        .compaction_group_member_tables
+                        .entry(new_info.compaction_group_id)
+                        .or_default()
+                        .insert(*table_id));
                     entry.insert(new_info);
                     changed_table.insert(*table_id, None);
                 }
             }
         }
+        debug_assert_eq!(
+            self.compaction_group_member_tables,
+            Self::build_compaction_group_member_tables(&self.state_table_info)
+        );
         changed_table
     }
 
     pub fn info(&self) -> &HashMap<TableId, StateTableInfo> {
         &self.state_table_info
+    }
+
+    pub fn compaction_group_member_table_ids(
+        &self,
+        compaction_group_id: CompactionGroupId,
+    ) -> &BTreeSet<TableId> {
+        static EMPTY_SET: LazyLock<BTreeSet<TableId>> = LazyLock::new(BTreeSet::new);
+        self.compaction_group_member_tables
+            .get(&compaction_group_id)
+            .unwrap_or_else(|| EMPTY_SET.deref())
+    }
+
+    pub fn compaction_group_member_tables(&self) -> &HashMap<CompactionGroupId, BTreeSet<TableId>> {
+        &self.compaction_group_member_tables
     }
 }
 
@@ -225,18 +312,21 @@ impl HummockVersion {
     }
 
     pub fn need_fill_backward_compatible_state_table_info_delta(&self) -> bool {
-        // state_table_info is not previously filled, but there previously exists some tables
+        // for backward-compatibility of previous hummock version delta
         self.state_table_info.state_table_info.is_empty()
-            && self
-                .levels
-                .values()
-                .any(|group| !group.member_table_ids.is_empty())
+            && self.levels.values().any(|group| {
+                // state_table_info is not previously filled, but there previously exists some tables
+                #[expect(deprecated)]
+                !group.member_table_ids.is_empty()
+            })
     }
 
     pub fn may_fill_backward_compatible_state_table_info_delta(
         &self,
         delta: &mut HummockVersionDelta,
     ) {
+        #[expect(deprecated)]
+        // for backward-compatibility of previous hummock version delta
         for (cg_id, group) in &self.levels {
             for table_id in &group.member_table_ids {
                 assert!(
@@ -247,6 +337,7 @@ impl HummockVersion {
                             StateTableInfoDelta {
                                 committed_epoch: self.max_committed_epoch,
                                 safe_epoch: self.safe_epoch,
+                                compaction_group_id: *cg_id,
                             }
                         )
                         .is_none(),
