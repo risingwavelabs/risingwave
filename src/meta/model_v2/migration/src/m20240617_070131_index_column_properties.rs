@@ -21,7 +21,7 @@ impl MigrationTrait for Migration {
             .alter_table(
                 Table::alter()
                     .table(Index::Table)
-                    .drop_column(Alias::new(Index::IndexColumnProperties.to_string()))
+                    .drop_column(Index::IndexColumnProperties)
                     .to_owned(),
             )
             .await
