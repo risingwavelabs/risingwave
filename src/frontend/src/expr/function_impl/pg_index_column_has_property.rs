@@ -29,6 +29,8 @@ use crate::catalog::CatalogReader;
 ///
 /// - `asc`: Does the column sort in ascending order on a forward scan?
 /// - `desc`: Does the column sort in descending order on a forward scan?
+/// - `nulls_first`: Does the column sort with nulls first on a forward scan?
+/// - `nulls_last`: Does the column sort with nulls last on a forward scan?
 ///
 /// # Examples
 ///
@@ -37,7 +39,7 @@ use crate::catalog::CatalogReader;
 /// create table t(a int, b int);
 ///
 /// statement ok
-/// create index i on t (a asc);
+/// create index i on t (a asc, b desc);
 ///
 /// query B
 /// select pg_index_column_has_property('i'::regclass, 1, 'asc');
@@ -45,7 +47,37 @@ use crate::catalog::CatalogReader;
 /// t
 ///
 /// query B
-/// select pg_index_column_has_property('i'::regclass, 1, 'desc');
+/// select pg_index_column_has_property('i'::regclass, 1, 'DESC');
+/// ----
+/// f
+///
+/// query B
+/// select pg_index_column_has_property('i'::regclass, 1, 'nulls_FIRST');
+/// ----
+/// f
+///
+/// query B
+/// select pg_index_column_has_property('i'::regclass, 1, 'nulls_last');
+/// ----
+/// t
+///
+/// query B
+/// select pg_index_column_has_property('i'::regclass, 2, 'asc');
+/// ----
+/// f
+///
+/// query B
+/// select pg_index_column_has_property('i'::regclass, 2, 'desc');
+/// ----
+/// t
+///
+/// query B
+/// select pg_index_column_has_property('i'::regclass, 2, 'nulls_first');
+/// ----
+/// t
+///
+/// query B
+/// select pg_index_column_has_property('i'::regclass, 2, 'nulls_last');
 /// ----
 /// f
 ///
@@ -83,13 +115,14 @@ fn pg_index_column_has_property_impl(
     let Ok(index) = catalog_reader.get_index_by_id(db_name, index_id as u32) else {
         return Ok(None);
     };
-    let Some(_) = index.get_column((column_idx - 1) as usize) else {
+    let Some(properties) = index.get_column_properties((column_idx - 1) as usize) else {
         return Ok(None);
     };
-    Ok(match property {
-        // FIXME: all columns are returned as ascending because we don't store this property in column catalog.
-        "asc" => Some(true),
-        "desc" => Some(false),
+    Ok(match property.to_lowercase().as_str() {
+        "asc" => Some(!properties.is_desc),
+        "desc" => Some(properties.is_desc),
+        "nulls_first" => Some(properties.nulls_first),
+        "nulls_last" => Some(!properties.nulls_first),
         _ => None,
     })
 }

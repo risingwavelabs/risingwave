@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use educe::Educe;
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnCatalog, Field, IndexId, Schema};
+use risingwave_common::catalog::{Field, IndexId, Schema};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::catalog::{PbIndex, PbIndexColumnProperties, PbStreamJobStatus};
@@ -194,13 +194,9 @@ impl IndexCatalog {
         }
     }
 
-    /// Get the column catalog by the column index.
-    pub fn get_column(&self, column_idx: usize) -> Option<&ColumnCatalog> {
-        let column = self.index_table.columns.get(column_idx)?;
-        if column.is_hidden {
-            return None;
-        }
-        Some(column)
+    /// Get the column properties of the index column.
+    pub fn get_column_properties(&self, column_idx: usize) -> Option<PbIndexColumnProperties> {
+        self.index_column_properties.get(column_idx).cloned()
     }
 
     pub fn get_column_def(&self, column_idx: usize) -> Option<String> {
