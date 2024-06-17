@@ -16,13 +16,20 @@ use risingwave_common::array::{Array, ArrayBuilderImpl, DataChunk, ListArray};
 use risingwave_common::types::ListValue;
 
 use super::*;
-use crate::expr::BoxedExpression;
+use crate::expr::{BoxedExpression, Expression};
 
 /// Wraps a scalar function that takes a list as input as an aggregate function.
 #[derive(Debug)]
 pub struct ScalarWrapper {
     arg_type: DataType,
     scalar: BoxedExpression,
+}
+
+impl ScalarWrapper {
+    /// Creates a new scalar wrapper.
+    pub fn new(arg_type: DataType, scalar: BoxedExpression) -> Self {
+        Self { arg_type, scalar }
+    }
 }
 
 #[async_trait::async_trait]

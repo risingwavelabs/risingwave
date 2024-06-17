@@ -184,6 +184,14 @@ impl FromStr for crate::expr::table_function::PbType {
     }
 }
 
+impl FromStr for crate::expr::agg_call::PbType {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::from_str_name(&s.to_uppercase()).ok_or(())
+    }
+}
+
 impl stream_plan::MaterializeNode {
     pub fn dist_key_indices(&self) -> Vec<u32> {
         self.get_table()
