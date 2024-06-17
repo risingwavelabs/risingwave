@@ -407,7 +407,6 @@ pub async fn start_service_as_election_leader(
     mut svc_shutdown_rx: WatchReceiver<()>,
 ) -> MetaResult<()> {
     tracing::info!("Defining leader services");
-
     let env = MetaSrvEnv::new(
         opts.clone(),
         init_system_params,

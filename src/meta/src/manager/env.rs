@@ -354,24 +354,33 @@ pub async fn is_first_launch_for_sql_backend_cluster(
     sql_meta_store: &SqlMetaStore,
 ) -> MetaResult<bool> {
     let migrations = Migrator::get_applied_migrations(&sql_meta_store.conn).await?;
-    let mut cluster_first_launch = true;
     for migration in migrations {
         if migration.name() == "m20230908_072257_init"
             && migration.status() == MigrationStatus::Applied
         {
-            cluster_first_launch = false;
+            return Ok(false);
         }
     }
-    Ok(cluster_first_launch)
+    Ok(true)
 }
 
 impl MetaSrvEnv {
     pub async fn new(
         opts: MetaOpts,
-        init_system_params: SystemParams,
+        mut init_system_params: SystemParams,
         init_session_config: SessionConfig,
         meta_store_impl: MetaStoreImpl,
     ) -> MetaResult<Self> {
+        let mut is_sql_backend_cluster_first_launch = true;
+        if let MetaStoreImpl::Sql(sql_store) = &meta_store_impl {
+            is_sql_backend_cluster_first_launch =
+                is_first_launch_for_sql_backend_cluster(sql_store).await?;
+            // Try to upgrade if any new model changes are added.
+            Migrator::up(&sql_store.conn, None)
+                .await
+                .expect("Failed to upgrade models in meta store");
+        }
+
         let notification_manager =
             Arc::new(NotificationManager::new(meta_store_impl.clone()).await);
         let idle_manager = Arc::new(IdleManager::new(opts.max_idle_ms));
@@ -390,6 +399,10 @@ impl MetaSrvEnv {
                     } else {
                         (ClusterId::new(), true)
                     };
+                // For new clusters, the name of the object store needs to be prefixed according to the object id.
+                // For old clusters, the prefix is ​​not divided for the sake of compatibility.
+
+                init_system_params.use_new_object_prefix_strategy = Some(cluster_first_launch);
                 let system_params_manager = Arc::new(
                     SystemParamsManager::new(
                         meta_store.clone(),
@@ -432,31 +445,20 @@ impl MetaSrvEnv {
                 }
             }
             MetaStoreImpl::Sql(sql_meta_store) => {
-                let mut is_sql_backend_cluster_first_launch = true;
-                if let MetaStoreImpl::Sql(sql_store) = &meta_store_impl {
-                    is_sql_backend_cluster_first_launch =
-                        is_first_launch_for_sql_backend_cluster(sql_store).await?;
-                    // Try to upgrade if any new model changes are added.
-                    Migrator::up(&sql_store.conn, None)
-                        .await
-                        .expect("Failed to upgrade models in meta store");
-                }
                 let cluster_id = Cluster::find()
                     .one(&sql_meta_store.conn)
                     .await?
                     .map(|c| c.cluster_id.to_string().into())
                     .unwrap();
-
-                let mut system_params = init_system_params;
+                init_system_params.use_new_object_prefix_strategy =
+                    Some(is_sql_backend_cluster_first_launch);
                 // For new clusters, the name of the object store needs to be prefixed according to the object id.
                 // For old clusters, the prefix is ​​not divided for the sake of compatibility.
-                system_params.use_new_object_prefix_strategy =
-                    Some(is_sql_backend_cluster_first_launch);
                 let system_param_controller = Arc::new(
                     SystemParamsController::new(
                         sql_meta_store.clone(),
                         notification_manager.clone(),
-                        system_params,
+                        init_system_params,
                     )
                     .await?,
                 );
