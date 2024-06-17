@@ -377,7 +377,7 @@ macro_rules! impl_system_params_for_test {
             ret.state_store = Some("hummock+memory".to_string());
             ret.backup_storage_url = Some("memory".into());
             ret.backup_storage_directory = Some("backup".into());
-            ret.use_new_object_prefix_strategy = Some(true);
+            ret.use_new_object_prefix_strategy = Some(false);
             ret
         }
     };
