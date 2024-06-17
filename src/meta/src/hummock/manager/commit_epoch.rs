@@ -145,10 +145,9 @@ impl HummockManager {
             .state_table_info
             .build_table_compaction_group_id();
 
-        let mut new_table_ids = None;
+        let mut new_table_ids = HashMap::new();
         // Add new table
         if let Some(new_fragment_table_info) = new_table_fragment_info {
-            // let new_table_ids = new_table_ids.insert(HashMap::new());
             if !new_fragment_table_info.internal_table_ids.is_empty() {
                 let new_table_id_to_cg = self.on_handle_add_new_table(
                     &mut new_version_delta,
@@ -157,7 +156,7 @@ impl HummockManager {
                     &mut table_compaction_group_mapping,
                 )?;
 
-                let _ = new_table_ids.insert(new_table_id_to_cg);
+                new_table_ids.extend(new_table_id_to_cg.into_iter());
             }
 
             if let Some(mv_table_id) = new_fragment_table_info.mv_table_id {
@@ -168,7 +167,7 @@ impl HummockManager {
                     &mut table_compaction_group_mapping,
                 )?;
 
-                let _ = new_table_ids.insert(new_table_id_to_cg);
+                new_table_ids.extend(new_table_id_to_cg.into_iter());
             }
         }
 
@@ -181,64 +180,13 @@ impl HummockManager {
             )
             .await?;
 
-        // Append SSTs to a new version.
-        for (compaction_group_id, sstables) in commit_sstables {
-            modified_compaction_groups.push(compaction_group_id);
-            let group_sstables = sstables
-                .into_iter()
-                .map(|ExtendedSstableInfo { sst_info, .. }| sst_info)
-                .collect_vec();
-
-            let group_deltas = &mut new_version_delta
-                .group_deltas
-                .entry(compaction_group_id)
-                .or_default()
-                .group_deltas;
-            let l0_sub_level_id = epoch;
-            let group_delta = GroupDelta {
-                delta_type: Some(DeltaType::IntraLevel(IntraLevelDelta {
-                    level_idx: 0,
-                    inserted_table_infos: group_sstables,
-                    l0_sub_level_id,
-                    ..Default::default()
-                })),
-            };
-            group_deltas.push(group_delta);
-        }
-
-        // update state table info
-        new_version_delta.with_latest_version(|version, delta| {
-            if let Some(new_table_ids) = new_table_ids {
-                for (table_id, cg_id) in new_table_ids {
-                    delta.state_table_info_delta.insert(
-                        table_id,
-                        StateTableInfoDelta {
-                            committed_epoch: epoch,
-                            safe_epoch: epoch,
-                            compaction_group_id: cg_id,
-                        },
-                    );
-                }
-            }
-            for (table_id, info) in version.state_table_info.info() {
-                assert!(
-                    delta
-                        .state_table_info_delta
-                        .insert(
-                            *table_id,
-                            StateTableInfoDelta {
-                                committed_epoch: epoch,
-                                safe_epoch: info.safe_epoch,
-                                compaction_group_id: info.compaction_group_id,
-                            }
-                        )
-                        .is_none(),
-                    "newly added table exists previously: {:?}",
-                    table_id
-                );
-            }
-        });
-
+        self.pre_commit_ssts_to_delta(
+            epoch,
+            commit_sstables,
+            new_table_ids,
+            &mut new_version_delta,
+            &mut modified_compaction_groups,
+        );
         new_version_delta.pre_apply();
 
         // Apply stats changes.
@@ -273,6 +221,7 @@ impl HummockManager {
             );
             table_metrics.inc_write_throughput(stats_value as u64);
         }
+
         commit_multi_var!(self.meta_store_ref(), version, version_stats)?;
 
         let snapshot = HummockSnapshot {
@@ -328,7 +277,6 @@ impl HummockManager {
         }
     }
 
-    // gen group delta for new table
     fn on_handle_add_new_table(
         &self,
         new_version_delta: &mut SingleDeltaTransaction<'_, '_>,
@@ -419,6 +367,8 @@ impl HummockManager {
                 ));
                 new_sst_id += 1;
             }
+
+            new_sst_id += 1;
         }
 
         let commit_sstables = commit_sstables
@@ -444,5 +394,71 @@ impl HummockManager {
             .collect_vec();
 
         Ok(commit_sstables)
+    }
+
+    fn pre_commit_ssts_to_delta(
+        &self,
+        epoch: HummockEpoch,
+        commit_sstables: Vec<(CompactionGroupId, Vec<ExtendedSstableInfo>)>,
+        new_table_ids: HashMap<TableId, CompactionGroupId>,
+        new_version_delta: &mut SingleDeltaTransaction<'_, '_>,
+        modified_compaction_groups: &mut Vec<CompactionGroupId>,
+    ) {
+        // Append SSTs to a new version.
+        for (compaction_group_id, sstables) in commit_sstables {
+            modified_compaction_groups.push(compaction_group_id);
+            let group_sstables = sstables
+                .into_iter()
+                .map(|ExtendedSstableInfo { sst_info, .. }| sst_info)
+                .collect_vec();
+
+            let group_deltas = &mut new_version_delta
+                .group_deltas
+                .entry(compaction_group_id)
+                .or_default()
+                .group_deltas;
+            let l0_sub_level_id = epoch;
+            let group_delta = GroupDelta {
+                delta_type: Some(DeltaType::IntraLevel(IntraLevelDelta {
+                    level_idx: 0,
+                    inserted_table_infos: group_sstables,
+                    l0_sub_level_id,
+                    ..Default::default()
+                })),
+            };
+            group_deltas.push(group_delta);
+        }
+
+        // update state table info
+        new_version_delta.with_latest_version(|version, delta| {
+            for (table_id, cg_id) in new_table_ids {
+                delta.state_table_info_delta.insert(
+                    table_id,
+                    StateTableInfoDelta {
+                        committed_epoch: epoch,
+                        safe_epoch: epoch,
+                        compaction_group_id: cg_id,
+                    },
+                );
+            }
+
+            for (table_id, info) in version.state_table_info.info() {
+                assert!(
+                    delta
+                        .state_table_info_delta
+                        .insert(
+                            *table_id,
+                            StateTableInfoDelta {
+                                committed_epoch: epoch,
+                                safe_epoch: info.safe_epoch,
+                                compaction_group_id: info.compaction_group_id,
+                            }
+                        )
+                        .is_none(),
+                    "newly added table exists previously: {:?}",
+                    table_id
+                );
+            }
+        });
     }
 }
