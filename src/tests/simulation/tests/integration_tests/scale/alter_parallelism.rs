@@ -12,16 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use anyhow::Result;
-use itertools::Itertools;
-use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_simulation::cluster::{Cluster, Configuration};
 use risingwave_simulation::ctl_ext::predicate::{identity_contains, no_identity_contains};
-use risingwave_simulation::ctl_ext::Fragment;
-use risingwave_simulation::utils::AssertResult;
 use tokio::time::sleep;
 
 #[tokio::test]
@@ -57,7 +52,6 @@ async fn test_diamond_cascade_materialized_view_alter() -> Result<()> {
 
     session.run("alter table t1 set parallelism = 1;").await?;
     sleep(Duration::from_secs(3)).await;
-    //
     // let fragment = cluster.locate_fragment_by_id(id).await?;
     // assert_eq!(fragment.inner.actors.len(), 1);
     //

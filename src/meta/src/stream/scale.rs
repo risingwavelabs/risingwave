@@ -251,7 +251,7 @@ impl RescheduleContext {
                     "could not found Worker for ParallelUint {}",
                     parallel_unit_id
                 )
-                    .into()
+                .into()
             })
     }
 }
@@ -1342,7 +1342,7 @@ impl ScaleController {
 
             let mut parallel_unit_id_to_actor_id = HashMap::new();
             for (actor_id, parallel_unit_id) in
-            fragment_actors_after_reschedule.get(fragment_id).unwrap()
+                fragment_actors_after_reschedule.get(fragment_id).unwrap()
             {
                 parallel_unit_id_to_actor_id.insert(*parallel_unit_id, *actor_id);
             }
@@ -1580,7 +1580,7 @@ impl ScaleController {
                 node_actors_to_create,
                 broadcast_worker_ids,
             )
-                .await?;
+            .await?;
         }
 
         // For stream source fragments, we need to reallocate the splits.
@@ -1700,7 +1700,7 @@ impl ScaleController {
             for actor in &fragment.actors {
                 if let Some(upstream_actor_tuples) = ctx.upstream_dispatchers.get(&actor.actor_id) {
                     for (upstream_fragment_id, upstream_dispatcher_id, upstream_dispatcher_type) in
-                    upstream_actor_tuples
+                        upstream_actor_tuples
                     {
                         match upstream_dispatcher_type {
                             DispatcherType::Unspecified => unreachable!(),
@@ -1944,12 +1944,11 @@ impl ScaleController {
             for upstream_actor in &upstream_fragment.actors {
                 for dispatcher in &upstream_actor.dispatcher {
                     if let DispatcherType::NoShuffle = dispatcher.get_type().unwrap() {
-                        let downstream_actor_id = dispatcher
+                        let downstream_actor_id = *dispatcher
                             .downstream_actor_id
                             .iter()
                             .exactly_one()
-                            .unwrap()
-                            .clone();
+                            .unwrap();
 
                         // upstream is root
                         if !ctx
@@ -1965,10 +1964,9 @@ impl ScaleController {
                                 (upstream_fragment.fragment_id, upstream_actor.actor_id),
                             );
                         } else {
-                            let root_actor_id = actor_group_map
+                            let root_actor_id = *actor_group_map
                                 .get(&upstream_actor.actor_id)
-                                .unwrap()
-                                .clone();
+                                .unwrap();
 
                             actor_group_map.insert(downstream_actor_id, root_actor_id);
                         }
@@ -2184,6 +2182,21 @@ impl ScaleController {
             let mut node_actors_to_create: HashMap<WorkerId, Vec<_>> = HashMap::new();
             let mut broadcast_worker_ids = HashSet::new();
 
+            let subscriptions: HashMap<_, SubscriptionIds> = self
+                .metadata_manager
+                .get_mv_depended_subscriptions()
+                .await?
+                .iter()
+                .map(|(table_id, subscriptions)| {
+                    (
+                        table_id.table_id,
+                        SubscriptionIds {
+                            subscription_ids: subscriptions.keys().cloned().collect(),
+                        },
+                    )
+                })
+                .collect();
+
             for actors_to_create in fragment_actors_to_create.values() {
                 for (new_actor_id, worker_id) in actors_to_create {
                     let new_actor = new_created_actors.get(new_actor_id).unwrap();
@@ -2244,7 +2257,12 @@ impl ScaleController {
                     node_actors_to_create
                         .entry(worker.id)
                         .or_default()
-                        .push(new_actor.clone());
+                        .push(BuildActorInfo {
+                            actor: Some(new_actor.clone()),
+                            // TODO: may include only the subscriptions related to the table fragment
+                            // of the actor.
+                            related_subscriptions: subscriptions.clone(),
+                        });
 
                     broadcast_worker_ids.insert(worker.id);
 
@@ -2264,7 +2282,7 @@ impl ScaleController {
                 node_actors_to_create,
                 broadcast_worker_ids,
             )
-                .await?;
+            .await?;
         }
 
         // For stream source fragments, we need to reallocate the splits.
@@ -2370,7 +2388,7 @@ impl ScaleController {
             for actor in &fragment.actors {
                 if let Some(upstream_actor_tuples) = ctx.upstream_dispatchers.get(&actor.actor_id) {
                     for (upstream_fragment_id, upstream_dispatcher_id, upstream_dispatcher_type) in
-                    upstream_actor_tuples
+                        upstream_actor_tuples
                     {
                         match upstream_dispatcher_type {
                             DispatcherType::Unspecified => unreachable!(),
@@ -2613,16 +2631,25 @@ impl ScaleController {
 
             for (created_worker, n) in increased_actor_count {
                 for _ in 0..*n {
-                    let id = match self.env.sql_id_gen_manager_ref() {
-                        None => {
-                            self.env
-                                .id_gen_manager()
-                                .generate::<{ IdCategory::Actor }>()
-                                .await? as ActorId
-                        }
-                        Some(id_gen) => {
-                            let id = id_gen.generate_interval::<{ IdCategory::Actor }>(1);
+                    // let id = match self.env.id_gen_manager() {
+                    //     None => {
+                    //         self.env
+                    //             .id_gen_manager()
+                    //             .generate::<{ IdCategory::Actor }>()
+                    //             .await? as ActorId
+                    //     }
+                    //     Some(id_gen) => {
+                    //         let id = mgr.generate_interval::<{ IdCategory::Actor }>(1);
+                    //         id as ActorId
+                    //     }
+                    // };
 
+                    let id = match self.env.id_gen_manager() {
+                        IdGenManagerImpl::Kv(mgr) => {
+                            mgr.generate::<{ IdCategory::Actor }>().await? as ActorId
+                        }
+                        IdGenManagerImpl::Sql(mgr) => {
+                            let id = mgr.generate_interval::<{ IdCategory::Actor }>(1);
                             id as ActorId
                         }
                     };
@@ -3757,9 +3784,9 @@ impl ScaleController {
             for worker_id in include_worker_ids.iter().chain(exclude_worker_ids.iter()) {
                 if !worker_parallel_units.contains_key(worker_id)
                     && !parallel_unit_hints
-                    .as_ref()
-                    .map(|hints| hints.contains_key(worker_id))
-                    .unwrap_or(false)
+                        .as_ref()
+                        .map(|hints| hints.contains_key(worker_id))
+                        .unwrap_or(false)
                 {
                     bail!("Worker id {} not found", worker_id);
                 }
@@ -4127,8 +4154,8 @@ impl ScaleController {
         no_shuffle_source_fragment_ids: &HashSet<FragmentId>,
         no_shuffle_target_fragment_ids: &HashSet<FragmentId>,
     ) -> MetaResult<()>
-        where
-            T: Clone + Eq,
+    where
+        T: Clone + Eq,
     {
         let mut queue: VecDeque<FragmentId> = reschedule.keys().cloned().collect();
 
@@ -4262,9 +4289,9 @@ impl GlobalStreamManager {
                     .await?;
                 Result::<_, MetaError>::Ok((*fragment_id, actor_ids))
             }))
-                .await?
-                .into_iter()
-                .collect();
+            .await?
+            .into_iter()
+            .collect();
 
         let command = Command::RescheduleFragment {
             reschedules: reschedule_fragment,
@@ -4334,9 +4361,9 @@ impl GlobalStreamManager {
                     .await?;
                 Result::<_, MetaError>::Ok((*fragment_id, actor_ids))
             }))
-                .await?
-                .into_iter()
-                .collect();
+            .await?
+            .into_iter()
+            .collect();
 
         let command = Command::RescheduleFragment {
             reschedules: reschedule_fragment,
@@ -4524,7 +4551,7 @@ impl GlobalStreamManager {
             },
             None,
         )
-            .await?;
+        .await?;
 
         Ok(true)
     }
@@ -4708,7 +4735,6 @@ pub fn schedule_units_for_slots_v2(
     Ok(target_distribution
         .into_iter()
         .map(|(worker_id, task_count)| (worker_id as WorkerId, task_count as usize))
-
         .collect())
 }
 

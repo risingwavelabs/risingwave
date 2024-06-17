@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap};
 use std::time::Duration;
 
 use anyhow::Result;
@@ -71,7 +71,7 @@ async fn test_passive_online_and_offline() -> Result<()> {
 
     assert_eq!(should_be_one, 1);
 
-    let mut worker_map: HashMap<_, _> = cluster
+    let worker_map: HashMap<_, _> = cluster
         .get_cluster_info()
         .await?
         .worker_nodes
