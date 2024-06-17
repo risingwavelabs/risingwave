@@ -2102,9 +2102,8 @@ dependencies = [
 
 [[package]]
 name = "bson"
-version = "2.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4d43b38e074cc0de2957f10947e376a1d88b9c4dbab340b590800cc1b2e066b2"
+version = "2.11.0"
+source = "git+https://github.com/risingwavelabs/bson-rust?rev=e5175ec#e5175ecfe3bebaaf58df543a1ae2bf868e476052"
 dependencies = [
  "ahash 0.8.11",
  "base64 0.13.1",
@@ -12875,7 +12874,6 @@ version = "1.0.113"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "69801b70b1c3dac963ecb03a364ba0ceda9cf60c71cfe475e99864759c8b8a79"
 dependencies = [
- "indexmap 2.2.6",
  "itoa",
  "ryu",
  "serde",
