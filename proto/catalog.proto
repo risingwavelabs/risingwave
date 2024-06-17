@@ -444,7 +444,7 @@ message Secret {
 
 message SecretRef {
   enum RefAsType {
-    BYTES = 0;
+    TEXT = 0;
     // AS FILE
     FILE = 1;
   }
