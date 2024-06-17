@@ -153,6 +153,7 @@ impl Sink for GcsSink {
             self.schema.clone(),
             self.pk_indices.clone(),
             self.is_append_only,
+            writer_param.connector_params.sink_payload_format,
         )?
         .into_log_sinker(writer_param.sink_metrics))
     }

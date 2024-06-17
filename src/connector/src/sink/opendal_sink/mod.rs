@@ -17,7 +17,7 @@ pub mod s3;
 pub mod fs;
 use std::collections::HashMap;
 use std::sync::Arc;
-
+use crate::SinkPayloadFormat;
 use anyhow::anyhow;
 use arrow_schema::{DataType as ArrowDataType, Field as ArrowField, SchemaRef};
 use async_trait::async_trait;
@@ -40,13 +40,20 @@ pub struct OpenDalSinkWriter {
     pk_indices: Vec<usize>,
     is_append_only: bool,
     write_path: String,
+    epoch: Option<u64>,
+    sink_payload_format: SinkPayloadFormat,
 }
+
+
 
 #[async_trait]
 impl SinkWriter for OpenDalSinkWriter {
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
+        let epoch = self.epoch.ok_or_else(|| {
+            SinkError::Opendal("epoch has not been initialize, call `begin_epoch`".to_string())
+        })?;
         if self.sink_writer.is_none() {
-            self.create_sink_writer().await?;
+            self.create_sink_writer(epoch).await?;
         }
         if self.is_append_only {
             self.append_only(chunk).await
@@ -67,6 +74,7 @@ impl SinkWriter for OpenDalSinkWriter {
         if is_checkpoint && let Some(sink_writer) =self
         .sink_writer
         .take() {
+
            
             sink_writer.close().await?;
         }
@@ -86,6 +94,7 @@ impl OpenDalSinkWriter {
         rw_schema: Schema,
         pk_indices: Vec<usize>,
         is_append_only: bool,
+        sink_payload_format: SinkPayloadFormat,
     ) -> Result<Self> {
         let arrow_schema = convert_rw_schema_to_arrow_schema(rw_schema)?;
         Ok(Self {
@@ -95,13 +104,16 @@ impl OpenDalSinkWriter {
             operator,
             sink_writer: None,
             is_append_only,
+            sink_payload_format,
+            epoch: None,
         })
     }
 
-    async fn create_sink_writer(&mut self) -> Result<()> {
+    async fn create_sink_writer(&mut self, epoch: u64) -> Result<()> {
+        let object_name = format!("{}/{}.parquet", self.write_path, epoch.to_string());
         let object_store_writer = self
             .operator
-            .writer_with(&self.write_path)
+            .writer_with(&object_name)
             .concurrent(8)
             .buffer(SINK_WRITE_BUFFER_SIZE)
             .await?;
