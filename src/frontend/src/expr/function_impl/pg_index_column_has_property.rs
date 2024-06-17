@@ -94,7 +94,7 @@ use crate::catalog::CatalogReader;
 /// statement ok
 /// drop index i;
 ///
-/// statement ok;
+/// statement ok
 /// drop table t;
 /// ```
 #[function("pg_index_column_has_property(int4, int4, varchar) -> boolean")]
