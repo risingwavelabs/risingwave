@@ -913,13 +913,9 @@ impl CommandContext {
                 // Tell compute nodes to drop actors.
                 self.clean_up(actors.clone()).await?;
 
-                let unregistered_state_table_ids = unregistered_state_table_ids
-                    .iter()
-                    .map(|table_id| table_id.table_id)
-                    .collect_vec();
                 self.barrier_manager_context
                     .hummock_manager
-                    .unregister_table_ids(&unregistered_state_table_ids)
+                    .unregister_table_ids(unregistered_state_table_ids.iter().cloned())
                     .await?;
             }
 
@@ -936,12 +932,9 @@ impl CommandContext {
                 // It won't clean the tables on failure,
                 // since the failure could be recoverable.
                 // As such it needs to be handled here.
-                let table_id = table_fragments.table_id().table_id;
-                let mut table_ids = table_fragments.internal_table_ids();
-                table_ids.push(table_id);
                 self.barrier_manager_context
                     .hummock_manager
-                    .unregister_table_ids(&table_ids)
+                    .unregister_table_ids(table_fragments.all_table_ids().map(TableId::new))
                     .await?;
 
                 match &self.barrier_manager_context.metadata_manager {
@@ -982,7 +975,10 @@ impl CommandContext {
                     }
                     MetadataManager::V2(mgr) => {
                         mgr.catalog_controller
-                            .try_abort_creating_streaming_job(table_id as _, true)
+                            .try_abort_creating_streaming_job(
+                                table_fragments.table_id().table_id as _,
+                                true,
+                            )
                             .await?;
                     }
                 }

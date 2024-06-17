@@ -21,6 +21,7 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use prometheus::Registry;
+use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::{test_epoch, EpochExt, INVALID_EPOCH};
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::get_compaction_group_ssts;
@@ -2386,7 +2387,10 @@ async fn test_unregister_moved_table() {
         vec![100]
     );
 
-    hummock_manager.unregister_table_ids(&[100]).await.unwrap();
+    hummock_manager
+        .unregister_table_ids([TableId::new(100)])
+        .await
+        .unwrap();
     let current_version = hummock_manager.get_current_version().await;
     assert_eq!(current_version.levels.len(), 2);
     assert!(!current_version.levels.contains_key(&new_group_id));

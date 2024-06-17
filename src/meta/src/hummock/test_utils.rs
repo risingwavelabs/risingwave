@@ -18,6 +18,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use itertools::Itertools;
+use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::test_epoch;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::key_with_epoch;
@@ -250,7 +251,7 @@ pub async fn unregister_table_ids_from_compaction_group(
     table_ids: &[u32],
 ) {
     hummock_manager_ref
-        .unregister_table_ids(table_ids)
+        .unregister_table_ids(table_ids.iter().map(|table_id| TableId::new(*table_id)))
         .await
         .unwrap();
 }
