@@ -407,10 +407,44 @@ where
                 };
 
                 // Process barrier:
+                // - snapshot read if we forced tombstone iteration progress.
                 // - consume snapshot rows left in builder.
                 // - consume upstream buffer chunk
                 // - handle mutations
                 // - switch snapshot
+
+                // snapshot read if we forced tombstone iteration progress.
+                if snapshot_read_complete {
+                    let snapshot = Self::make_snapshot_stream(
+                        &upstream_table,
+                        backfill_state.clone(),
+                        paused,
+                        &rate_limiter,
+                    );
+                    #[for_await]
+                    for msg in snapshot {
+                        let msg = msg?;
+                        match msg {
+                            None => {
+                                break;
+                            }
+                            Some((vnode, row)) => {
+                                let builder = builders.get_mut(&vnode).unwrap();
+                                if let Some(chunk) = builder.append_one_row(row) {
+                                    yield Message::Chunk(Self::handle_snapshot_chunk(
+                                        chunk,
+                                        vnode,
+                                        &pk_in_output_indices,
+                                        &mut backfill_state,
+                                        &mut cur_barrier_snapshot_processed_rows,
+                                        &mut total_snapshot_processed_rows,
+                                        &self.output_indices,
+                                    )?);
+                                }
+                            }
+                        }
+                    }
+                }
 
                 // consume snapshot rows left in builder.
                 // NOTE(kwannoel): `zip_eq_debug` does not work here,
