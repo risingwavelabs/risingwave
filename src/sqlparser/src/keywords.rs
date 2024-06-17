@@ -248,6 +248,7 @@ define_keywords!(
     FUNCTION,
     FUNCTIONS,
     FUSION,
+    GAP,
     GENERATOR,
     GET,
     GLOBAL,

@@ -565,8 +565,13 @@ impl HummockManager {
             )
             .await;
         match ret {
-            Ok((new_group_id, table_vnode_partition_count)) => {
-                tracing::info!("move state table [{}] from group-{} to group-{} success table_vnode_partition_count {:?}", table_id, parent_group_id, new_group_id, table_vnode_partition_count);
+            Ok(new_group_id) => {
+                tracing::info!(
+                    "move state table [{}] from group-{} to group-{} success",
+                    table_id,
+                    parent_group_id,
+                    new_group_id
+                );
             }
             Err(e) => {
                 tracing::info!(
