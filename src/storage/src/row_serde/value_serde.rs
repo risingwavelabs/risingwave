@@ -141,21 +141,6 @@ impl ValueRowSerde for ColumnAwareSerde {
     }
 }
 
-#[derive(Clone)]
-pub struct PartialRowDeserializer(Deserializer);
-
-impl PartialRowDeserializer {
-    pub fn new(inner: Deserializer) -> Self {
-        Self(inner)
-    }
-}
-
-impl ValueRowDeserializer for PartialRowDeserializer {
-    fn deserialize(&self, encoded_bytes: &[u8]) -> Result<Vec<Datum>> {
-        self.0.deserialize(encoded_bytes)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;

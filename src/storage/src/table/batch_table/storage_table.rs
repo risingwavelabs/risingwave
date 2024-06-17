@@ -32,7 +32,9 @@ use risingwave_common::row::{self, OwnedRow, Row, RowExt};
 use risingwave_common::util::row_serde::*;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
-use risingwave_common::util::value_encoding::{BasicSerde, EitherSerde, ValueRowDeserializer};
+use risingwave_common::util::value_encoding::{
+    column_aware_row_encoding, BasicSerde, EitherSerde, ValueRowDeserializer,
+};
 use risingwave_hummock_sdk::key::{
     end_bound_of_prefix, next_key, prefixed_range_with_vnode, TableKeyRange,
 };
@@ -43,7 +45,7 @@ use tracing::trace;
 use crate::error::{StorageError, StorageResult};
 use crate::hummock::CachePolicy;
 use crate::row_serde::row_serde_util::{serialize_pk, serialize_pk_with_vnode};
-use crate::row_serde::value_serde::{PartialRowDeserializer, ValueRowSerde, ValueRowSerdeNew};
+use crate::row_serde::value_serde::{ValueRowSerde, ValueRowSerdeNew};
 use crate::row_serde::{find_columns_by_ids, ColumnMapping};
 use crate::store::{ChangeLogValue, PrefetchOptions, ReadLogOptions, ReadOptions, StateStoreIter};
 use crate::table::merge_sort::merge_sort;
@@ -83,7 +85,13 @@ pub struct StorageTableInner<S: StateStore, SD: ValueRowSerde> {
 
     /// Row deserializer to deserialize the whole value in storage to a row.
     row_serde: Arc<SD>,
-    partial_row_deserializer: Option<Arc<PartialRowDeserializer>>,
+    /// The `Deserializer` deserializes the columns specified in `value_output_indices`.
+    /// The `Deserializer` ensures there are no duplicate columns because `ColumnAwareSerde` disallows them.
+    /// The `ColumnMapping` restores all columns specified in `value_output_indices`.
+    partial_row_deserializer: Option<(
+        Arc<column_aware_row_encoding::Deserializer>,
+        Arc<ColumnMapping>,
+    )>,
 
     /// Indices of primary key.
     /// Note that the index is based on the all columns of the table, instead of the output ones.
@@ -266,13 +274,28 @@ impl<S: StateStore> StorageTableInner<S, EitherSerde> {
         let pk_serializer = OrderedRowSerde::new(pk_data_types, order_types);
 
         let partial_row_deserializer = if versioned {
+            let value_output_indices_dedup = value_output_indices
+                .iter()
+                .sorted()
+                .dedup()
+                .copied()
+                .collect::<Vec<_>>();
+            let output_row_in_value_output_indices_dedup = value_output_indices
+                .iter()
+                .map(|&di| {
+                    value_output_indices_dedup
+                        .iter()
+                        .position(|&pi| di == pi)
+                        .unwrap()
+                })
+                .collect_vec();
             let partial_row_serde = ColumnAwareSerde::new(
-                value_output_indices.clone().into(),
+                value_output_indices_dedup.into(),
                 table_columns.clone().into(),
             );
-            Some(Arc::new(PartialRowDeserializer::new(
-                partial_row_serde.deserializer.clone(),
-            )))
+            let de = Arc::new(partial_row_serde.deserializer);
+            let mapping = Arc::new(ColumnMapping::new(output_row_in_value_output_indices_dedup));
+            Some((de, mapping))
         } else {
             None
         };
@@ -381,8 +404,9 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
             self.store.validate_read_epoch(wait_epoch)?;
 
             let result_row_in_value =
-                if let Some(ref partial_row_deserializer) = self.partial_row_deserializer {
-                    OwnedRow::new(partial_row_deserializer.deserialize(&value)?)
+                if let Some((ref de, ref mapping)) = self.partial_row_deserializer {
+                    let partial_row = de.deserialize(&value)?;
+                    mapping.project(OwnedRow::new(partial_row)).into_owned_row()
                 } else {
                     let full_row = self.row_serde.deserialize(&value)?;
                     self.mapping
@@ -733,7 +757,11 @@ struct StorageTableInnerIterInner<S: StateStore, SD: ValueRowSerde> {
     mapping: Arc<ColumnMapping>,
 
     row_deserializer: Arc<SD>,
-    partial_row_deserializer: Option<Arc<PartialRowDeserializer>>,
+    /// Refer to [`StorageTableInner::partial_row_deserializer`].
+    partial_row_deserializer: Option<(
+        Arc<column_aware_row_encoding::Deserializer>,
+        Arc<ColumnMapping>,
+    )>,
 
     /// Used for serializing and deserializing the primary key.
     pk_serializer: Option<Arc<OrderedRowSerde>>,
@@ -765,7 +793,10 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterInner<S, SD> {
         table_key_range: TableKeyRange,
         read_options: ReadOptions,
         epoch: HummockReadEpoch,
-        partial_row_deserializer: Option<Arc<PartialRowDeserializer>>,
+        partial_row_deserializer: Option<(
+            Arc<column_aware_row_encoding::Deserializer>,
+            Arc<ColumnMapping>,
+        )>,
     ) -> StorageResult<Self> {
         let raw_epoch = epoch.get_epoch();
         store.try_wait_epoch(epoch).await?;
@@ -800,8 +831,9 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterInner<S, SD> {
         {
             let (table_key, value) = (k.user_key.table_key, v);
             let result_row_in_value =
-                if let Some(ref partial_row_deserializer) = self.partial_row_deserializer {
-                    OwnedRow::new(partial_row_deserializer.deserialize(value)?)
+                if let Some((ref de, ref mapping)) = self.partial_row_deserializer {
+                    let partial_row = de.deserialize(value)?;
+                    mapping.project(OwnedRow::new(partial_row)).into_owned_row()
                 } else {
                     let full_row = self.row_deserializer.deserialize(value)?;
                     self.mapping
