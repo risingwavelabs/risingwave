@@ -384,6 +384,7 @@ impl DdlController {
             connections,
             source_fragments,
             removed_actors,
+            removed_fragments,
         } = release_ctx;
 
         // delete vpc endpoints.
@@ -423,6 +424,7 @@ impl DdlController {
                 removed_actors.into_iter().map(|id| id as _).collect(),
                 streaming_job_ids,
                 state_table_ids,
+                removed_fragments.iter().map(|id| *id as _).collect(),
             )
             .await;
 

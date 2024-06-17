@@ -59,6 +59,8 @@ pub struct SstDumpArgs {
     print_table: bool,
     #[clap(short = 'd')]
     data_dir: Option<String>,
+    #[clap(short, long = "use-new-object-prefix-strategy", default_value = "true")]
+    use_new_object_prefix_strategy: bool,
 }
 
 pub async fn sst_dump(context: &CtlContext, args: SstDumpArgs) -> anyhow::Result<()> {
@@ -72,7 +74,10 @@ pub async fn sst_dump(context: &CtlContext, args: SstDumpArgs) -> anyhow::Result
     if args.print_level {
         // Level information is retrieved from meta service
         let hummock = context
-            .hummock_store(HummockServiceOpts::from_env(args.data_dir.clone())?)
+            .hummock_store(HummockServiceOpts::from_env(
+                args.data_dir.clone(),
+                args.use_new_object_prefix_strategy,
+            )?)
             .await?;
         let version = hummock.inner().get_pinned_version().version().clone();
         let sstable_store = hummock.sstable_store();
@@ -108,8 +113,13 @@ pub async fn sst_dump(context: &CtlContext, args: SstDumpArgs) -> anyhow::Result
         }
     } else {
         // Object information is retrieved from object store. Meta service is not required.
-        let hummock_service_opts = HummockServiceOpts::from_env(args.data_dir.clone())?;
-        let sstable_store = hummock_service_opts.create_sstable_store().await?;
+        let hummock_service_opts = HummockServiceOpts::from_env(
+            args.data_dir.clone(),
+            args.use_new_object_prefix_strategy,
+        )?;
+        let sstable_store = hummock_service_opts
+            .create_sstable_store(args.use_new_object_prefix_strategy)
+            .await?;
         if let Some(obj_id) = &args.object_id {
             let obj_store = sstable_store.store();
             let obj_path = sstable_store.get_sst_data_path(*obj_id);

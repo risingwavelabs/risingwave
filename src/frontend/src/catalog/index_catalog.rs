@@ -21,7 +21,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{Field, IndexId, Schema};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
-use risingwave_pb::catalog::{PbIndex, PbStreamJobStatus};
+use risingwave_pb::catalog::{PbIndex, PbIndexColumnProperties, PbStreamJobStatus};
 
 use crate::catalog::{DatabaseId, OwnedByUserCatalog, SchemaId, TableCatalog};
 use crate::expr::{Expr, ExprDisplay, ExprImpl, FunctionCall};
@@ -39,6 +39,10 @@ pub struct IndexCatalog {
     /// The `index_item` size is equal to the index table columns size
     /// The input args of `FuncCall` is also the column index of the primary table.
     pub index_item: Vec<ExprImpl>,
+
+    /// The properties of the index columns.
+    /// <https://www.postgresql.org/docs/current/functions-info.html#FUNCTIONS-INFO-INDEX-COLUMN-PROPS>
+    pub index_column_properties: Vec<PbIndexColumnProperties>,
 
     pub index_table: Arc<TableCatalog>,
 
@@ -112,6 +116,7 @@ impl IndexCatalog {
             id: index_prost.id.into(),
             name: index_prost.name.clone(),
             index_item,
+            index_column_properties: index_prost.index_column_properties.clone(),
             index_table: Arc::new(index_table.clone()),
             primary_table: Arc::new(primary_table.clone()),
             primary_to_secondary_mapping,
@@ -179,6 +184,7 @@ impl IndexCatalog {
                 .iter()
                 .map(|expr| expr.to_expr_proto())
                 .collect_vec(),
+            index_column_properties: self.index_column_properties.clone(),
             index_columns_len: self.index_columns_len,
             initialized_at_epoch: self.initialized_at_epoch.map(|e| e.0),
             created_at_epoch: self.created_at_epoch.map(|e| e.0),
@@ -186,6 +192,11 @@ impl IndexCatalog {
             initialized_at_cluster_version: self.initialized_at_cluster_version.clone(),
             created_at_cluster_version: self.created_at_cluster_version.clone(),
         }
+    }
+
+    /// Get the column properties of the index column.
+    pub fn get_column_properties(&self, column_idx: usize) -> Option<PbIndexColumnProperties> {
+        self.index_column_properties.get(column_idx).cloned()
     }
 
     pub fn get_column_def(&self, column_idx: usize) -> Option<String> {

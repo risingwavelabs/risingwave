@@ -42,6 +42,8 @@ pub enum BenchCommands {
         #[clap(long, default_value_t = 1)]
         threads: usize,
         data_dir: Option<String>,
+        #[clap(short, long = "use-new-object-prefix-strategy", default_value = "true")]
+        use_new_object_prefix_strategy: bool,
     },
 }
 
@@ -86,9 +88,13 @@ pub async fn do_bench(context: &CtlContext, cmd: BenchCommands) -> Result<()> {
             mv_name,
             threads,
             data_dir,
+            use_new_object_prefix_strategy,
         } => {
             let (hummock, metrics) = context
-                .hummock_store_with_metrics(HummockServiceOpts::from_env(data_dir)?)
+                .hummock_store_with_metrics(HummockServiceOpts::from_env(
+                    data_dir,
+                    use_new_object_prefix_strategy,
+                )?)
                 .await?;
             let table = get_table_catalog(meta.clone(), mv_name).await?;
             let mut handlers = vec![];
