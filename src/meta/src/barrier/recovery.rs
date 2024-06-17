@@ -313,30 +313,22 @@ impl GlobalBarrierManagerContext {
         let (dropped_actors, cancelled) = scheduled_barriers.pre_apply_drop_cancel_scheduled();
         let applied = !dropped_actors.is_empty() || !cancelled.is_empty();
         if !cancelled.is_empty() {
-            let unregister_table_ids = match &self.metadata_manager {
+            match &self.metadata_manager {
                 MetadataManager::V1(mgr) => {
                     mgr.fragment_manager
                         .drop_table_fragments_vec(&cancelled)
-                        .await?
+                        .await?;
                 }
                 MetadataManager::V2(mgr) => {
-                    let mut unregister_table_ids = Vec::new();
                     for job_id in cancelled {
-                        let (_, table_ids_to_unregister) = mgr
-                            .catalog_controller
+                        mgr.catalog_controller
                             .try_abort_creating_streaming_job(job_id.table_id as _, true)
                             .await?;
-                        unregister_table_ids.extend(table_ids_to_unregister);
                     }
-                    unregister_table_ids
-                        .into_iter()
-                        .map(|table_id| table_id as u32)
-                        .collect()
                 }
             };
-            self.hummock_manager
-                .unregister_table_ids(&unregister_table_ids)
-                .await?;
+            // no need to unregister state table id from hummock manager here, because it's expected that
+            // we call `purge_state_table_from_hummock` anyway after the current method returns.
         }
         Ok(applied)
     }
@@ -376,11 +368,6 @@ impl GlobalBarrierManager {
                         .clean_dirty_streaming_jobs()
                         .await
                         .context("clean dirty streaming jobs")?;
-
-                    self.context
-                        .purge_state_table_from_hummock()
-                        .await
-                        .context("purge state table from hummock")?;
 
                     // Mview progress needs to be recovered.
                     tracing::info!("recovering mview progress");
@@ -461,6 +448,11 @@ impl GlobalBarrierManager {
                                 warn!(error = %err.as_report(), "resolve actor info failed");
                             })?
                     }
+
+                    self.context
+                        .purge_state_table_from_hummock()
+                        .await
+                        .context("purge state table from hummock")?;
 
                     // update and build all actors.
                     self.context.update_actors(&info).await.inspect_err(|err| {
