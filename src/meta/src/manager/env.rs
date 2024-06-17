@@ -371,18 +371,6 @@ impl MetaSrvEnv {
         init_session_config: SessionConfig,
         meta_store_impl: MetaStoreImpl,
     ) -> MetaResult<Self> {
-        let mut is_sql_backend_cluster_first_launch = true;
-        if let MetaStoreImpl::Sql(sql_store) = &meta_store_impl {
-            is_sql_backend_cluster_first_launch =
-                is_first_launch_for_sql_backend_cluster(sql_store).await?;
-            // Try to upgrade if any new model changes are added.
-            Migrator::up(&sql_store.conn, None)
-                .await
-                .expect("Failed to upgrade models in meta store");
-        }
-
-        let notification_manager =
-            Arc::new(NotificationManager::new(meta_store_impl.clone()).await);
         let idle_manager = Arc::new(IdleManager::new(opts.max_idle_ms));
         let stream_client_pool = Arc::new(StreamClientPool::default());
         let event_log_manager = Arc::new(start_event_log_manager(
@@ -392,6 +380,8 @@ impl MetaSrvEnv {
 
         let env = match &meta_store_impl {
             MetaStoreImpl::Kv(meta_store) => {
+                let notification_manager =
+                    Arc::new(NotificationManager::new(meta_store_impl.clone()).await);
                 let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
                 let (cluster_id, cluster_first_launch) =
                     if let Some(id) = ClusterId::from_meta_store(meta_store).await? {
@@ -399,6 +389,7 @@ impl MetaSrvEnv {
                     } else {
                         (ClusterId::new(), true)
                     };
+
                 // For new clusters, the name of the object store needs to be prefixed according to the object id.
                 // For old clusters, the prefix is ​​not divided for the sake of compatibility.
 
@@ -445,6 +436,15 @@ impl MetaSrvEnv {
                 }
             }
             MetaStoreImpl::Sql(sql_meta_store) => {
+                let is_sql_backend_cluster_first_launch =
+                    is_first_launch_for_sql_backend_cluster(sql_meta_store).await?;
+                // Try to upgrade if any new model changes are added.
+                Migrator::up(&sql_meta_store.conn, None)
+                    .await
+                    .expect("Failed to upgrade models in meta store");
+
+                let notification_manager =
+                    Arc::new(NotificationManager::new(meta_store_impl.clone()).await);
                 let cluster_id = Cluster::find()
                     .one(&sql_meta_store.conn)
                     .await?
