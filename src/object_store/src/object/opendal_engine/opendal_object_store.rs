@@ -72,18 +72,20 @@ impl OpendalObjectStore {
 impl ObjectStore for OpendalObjectStore {
     type StreamingUploader = OpendalStreamingUploader;
 
-    fn get_object_prefix(&self, obj_id: u64) -> String {
+    fn get_object_prefix(&self, obj_id: u64, use_new_object_prefix_strategy: bool) -> String {
         match self.engine_type {
             EngineType::S3 => prefix::s3::get_object_prefix(obj_id),
             EngineType::Minio => prefix::s3::get_object_prefix(obj_id),
             EngineType::Memory => String::default(),
-            EngineType::Hdfs => String::default(),
-            EngineType::Gcs => String::default(),
-            EngineType::Obs => String::default(),
-            EngineType::Oss => String::default(),
-            EngineType::Webhdfs => String::default(),
-            EngineType::Azblob => String::default(),
-            EngineType::Fs => String::default(),
+            EngineType::Hdfs
+            | EngineType::Gcs
+            | EngineType::Obs
+            | EngineType::Oss
+            | EngineType::Webhdfs
+            | EngineType::Azblob
+            | EngineType::Fs => {
+                prefix::opendal_engine::get_object_prefix(obj_id, use_new_object_prefix_strategy)
+            }
         }
     }
 
