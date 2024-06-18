@@ -411,7 +411,7 @@ impl CatalogController {
         &self,
         job_id: ObjectId,
         is_cancelled: bool,
-    ) -> MetaResult<(bool, Vec<TableId>)> {
+    ) -> MetaResult<bool> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
@@ -421,7 +421,7 @@ impl CatalogController {
                 id = job_id,
                 "streaming job not found when aborting creating, might be cleaned by recovery"
             );
-            return Ok((true, Vec::new()));
+            return Ok(true);
         }
 
         if !is_cancelled {
@@ -436,7 +436,7 @@ impl CatalogController {
                         id = job_id,
                         "streaming job is created in background and still in creating status"
                     );
-                    return Ok((false, Vec::new()));
+                    return Ok(false);
                 }
             }
         }
@@ -447,13 +447,6 @@ impl CatalogController {
             .filter(table::Column::BelongsToJobId.eq(job_id))
             .into_tuple()
             .all(&txn)
-            .await?;
-
-        let mv_table_id: Option<TableId> = Table::find_by_id(job_id)
-            .select_only()
-            .column(table::Column::TableId)
-            .into_tuple()
-            .one(&txn)
             .await?;
 
         let associated_source_id: Option<SourceId> = Table::find_by_id(job_id)
@@ -476,11 +469,7 @@ impl CatalogController {
         }
         txn.commit().await?;
 
-        let mut state_table_ids = internal_table_ids;
-
-        state_table_ids.extend(mv_table_id.into_iter());
-
-        Ok((true, state_table_ids))
+        Ok(true)
     }
 
     pub async fn post_collect_table_fragments(

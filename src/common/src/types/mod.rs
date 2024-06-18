@@ -1001,8 +1001,8 @@ impl ScalarRefImpl<'_> {
             Self::Interval(v) => v.serialize(ser)?,
             Self::Date(v) => v.0.num_days_from_ce().serialize(ser)?,
             Self::Timestamp(v) => {
-                v.0.timestamp().serialize(&mut *ser)?;
-                v.0.timestamp_subsec_nanos().serialize(ser)?;
+                v.0.and_utc().timestamp().serialize(&mut *ser)?;
+                v.0.and_utc().timestamp_subsec_nanos().serialize(ser)?;
             }
             Self::Timestamptz(v) => v.serialize(ser)?,
             Self::Time(v) => {

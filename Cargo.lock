@@ -1098,6 +1098,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "asynchronous-codec"
+version = "0.6.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4057f2c32adbb2fc158e22fb38433c8e9bbf76b75a4732c7c0cbaf695fb65568"
+dependencies = [
+ "bytes",
+ "futures-sink",
+ "futures-util",
+ "memchr",
+ "pin-project-lite",
+]
+
+[[package]]
 name = "atoi"
 version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2373,9 +2386,9 @@ checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
 
 [[package]]
 name = "chrono"
-version = "0.4.31"
+version = "0.4.38"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f2c685bad3eb3d45a01354cedb7d5faa66194d1d58ba6e267a8de788f79db38"
+checksum = "a21f936df1771bf62b77f047b726c4625ff2e8aa607c01ec06e5a05bd8463401"
 dependencies = [
  "android-tzdata",
  "iana-time-zone",
@@ -2383,7 +2396,7 @@ dependencies = [
  "num-traits",
  "serde",
  "wasm-bindgen",
- "windows-targets 0.48.5",
+ "windows-targets 0.52.0",
 ]
 
 [[package]]
@@ -2653,6 +2666,12 @@ checksum = "62ec6771ecfa0762d24683ee5a32ad78487a3d3afdc0fb8cae19d2c5deb50b7c"
 dependencies = [
  "crossbeam-utils",
 ]
+
+[[package]]
+name = "connection-string"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "510ca239cf13b7f8d16a2b48f263de7b4f8c566f0af58d901031473c76afb1e3"
 
 [[package]]
 name = "console"
@@ -3672,7 +3691,7 @@ dependencies = [
 
 [[package]]
 name = "delta_btree_map"
-version = "1.9.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "educe",
  "enum-as-inner 0.6.0",
@@ -4541,6 +4560,70 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a357d28ed41a50f9c765dbfe56cbc04a64e53e5fc58ba79fbc34c10ef3df831f"
 
 [[package]]
+name = "encoding"
+version = "0.2.33"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6b0d943856b990d12d3b55b359144ff341533e516d94098b1d3fc1ac666d36ec"
+dependencies = [
+ "encoding-index-japanese",
+ "encoding-index-korean",
+ "encoding-index-simpchinese",
+ "encoding-index-singlebyte",
+ "encoding-index-tradchinese",
+]
+
+[[package]]
+name = "encoding-index-japanese"
+version = "1.20141219.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "04e8b2ff42e9a05335dbf8b5c6f7567e5591d0d916ccef4e0b1710d32a0d0c91"
+dependencies = [
+ "encoding_index_tests",
+]
+
+[[package]]
+name = "encoding-index-korean"
+version = "1.20141219.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4dc33fb8e6bcba213fe2f14275f0963fd16f0a02c878e3095ecfdf5bee529d81"
+dependencies = [
+ "encoding_index_tests",
+]
+
+[[package]]
+name = "encoding-index-simpchinese"
+version = "1.20141219.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d87a7194909b9118fc707194baa434a4e3b0fb6a5a757c73c3adb07aa25031f7"
+dependencies = [
+ "encoding_index_tests",
+]
+
+[[package]]
+name = "encoding-index-singlebyte"
+version = "1.20141219.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3351d5acffb224af9ca265f435b859c7c01537c0849754d3db3fdf2bfe2ae84a"
+dependencies = [
+ "encoding_index_tests",
+]
+
+[[package]]
+name = "encoding-index-tradchinese"
+version = "1.20141219.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fd0e20d5688ce3cab59eb3ef3a2083a5c77bf496cb798dc6fcdb75f323890c18"
+dependencies = [
+ "encoding_index_tests",
+]
+
+[[package]]
+name = "encoding_index_tests"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a246d82be1c9d791c5dfde9a2bd045fc3cbba3fa2b11ad558f27d01712f00569"
+
+[[package]]
 name = "encoding_rs"
 version = "0.8.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5057,9 +5140,9 @@ dependencies = [
 
 [[package]]
 name = "foyer"
-version = "0.9.3"
+version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c67848bfb834bf15396d3a308c44eda6de992c06ad72db53857363725f3dd870"
+checksum = "0720e9cc504174e952382345ea25fe887fbd4c1761dccdd4c5276c6d1a93dbc5"
 dependencies = [
  "ahash 0.8.11",
  "anyhow",
@@ -5122,9 +5205,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-storage"
-version = "0.8.4"
+version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5874cb737c3a6f29c2b784e02094375a24ddb2ce743a28bf8d69c3c490711044"
+checksum = "74811aec3df193b9c304d031e9f4879c4aab86cb78ff6e4cadf1188d014e7069"
 dependencies = [
  "ahash 0.8.11",
  "allocator-api2",
@@ -6942,7 +7025,7 @@ checksum = "c4cd1a83af159aa67994778be9070f0ae1bd732942279cabb14f86f986a21456"
 
 [[package]]
 name = "local_stats_alloc"
-version = "1.9.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "workspace-hack",
 ]
@@ -8582,7 +8665,7 @@ dependencies = [
 
 [[package]]
 name = "pgwire"
-version = "1.9.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "anyhow",
  "auto_enums",
@@ -8956,6 +9039,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "04bfa62906ce8d9badf8d1764501640ae7f0bcea3437a209315830e0f73564d1"
 
 [[package]]
+name = "pretty-hex"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c6fa0831dd7cc608c38a5e323422a0077678fa5744aa2be4ad91c4ece8eec8d5"
+
+[[package]]
 name = "pretty-xmlish"
 version = "0.1.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9224,7 +9313,7 @@ checksum = "8bdf592881d821b83d471f8af290226c8d51402259e9bb5be7f9f8bdebbb11ac"
 dependencies = [
  "bytes",
  "heck 0.4.1",
- "itertools 0.10.5",
+ "itertools 0.11.0",
  "log",
  "multimap 0.8.3",
  "once_cell",
@@ -9258,7 +9347,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "265baba7fabd416cf5078179f7d2cbeca4ce7a9041111900675ea7c4cb8a4c32"
 dependencies = [
  "anyhow",
- "itertools 0.10.5",
+ "itertools 0.11.0",
  "proc-macro2",
  "quote",
  "syn 2.0.57",
@@ -9419,7 +9508,7 @@ dependencies = [
  "indoc",
  "libc",
  "memoffset",
- "parking_lot 0.11.2",
+ "parking_lot 0.12.1",
  "portable-atomic",
  "pyo3-build-config",
  "pyo3-ffi",
@@ -10011,7 +10100,7 @@ dependencies = [
 
 [[package]]
 name = "risedev"
-version = "1.9.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "anyhow",
  "chrono",
@@ -10041,7 +10130,7 @@ dependencies = [
 
 [[package]]
 name = "risedev-config"
-version = "1.9.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "anyhow",
  "clap",
@@ -10054,7 +10143,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave-fields-derive"
-version = "1.9.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "expect-test",
  "indoc",
@@ -10066,7 +10155,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_backup"
-version = "1.9.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -10088,7 +10177,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_batch"
-version = "1.9.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "anyhow",
  "arrow-array 50.0.0",
@@ -10144,7 +10233,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_bench"
-version = "1.9.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -10185,7 +10274,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_cmd"
-version = "1.9.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "clap",
  "madsim-tokio",
@@ -10205,7 +10294,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_cmd_all"
-version = "1.9.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "anyhow",
  "clap",
@@ -10238,7 +10327,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_common"
-version = "1.9.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "ahash 0.8.11",
  "anyhow",
@@ -10351,7 +10440,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_common_estimate_size"
-version = "1.9.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "bytes",
  "educe",
@@ -10366,7 +10455,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_common_heap_profiling"
-version = "1.9.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "anyhow",
  "chrono",
@@ -10381,7 +10470,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_common_metrics"
-version = "1.9.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "bytes",
  "clap",
@@ -10413,7 +10502,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_common_proc_macro"
-version = "1.9.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "bae",
  "itertools 0.12.1",
@@ -10425,7 +10514,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_common_service"
-version = "1.9.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "async-trait",
  "axum 0.7.4",
@@ -10447,7 +10536,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_compaction_test"
-version = "1.9.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -10475,7 +10564,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_compactor"
-version = "1.9.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "async-trait",
  "await-tree",
@@ -10498,7 +10587,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_compute"
-version = "1.9.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -10543,7 +10632,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_connector"
-version = "1.9.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "anyhow",
  "apache-avro 0.16.0",
@@ -10653,6 +10742,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "thiserror-ext",
+ "tiberius",
  "time",
  "tokio-postgres",
  "tokio-retry",
@@ -10672,7 +10762,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_connector_codec"
-version = "1.9.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "anyhow",
  "apache-avro 0.16.0",
@@ -10693,7 +10783,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_ctl"
-version = "1.9.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "anyhow",
  "bytes",
@@ -10735,7 +10825,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_dml"
-version = "1.9.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "assert_matches",
  "criterion",
@@ -10759,7 +10849,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_e2e_extended_mode_test"
-version = "1.9.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "anyhow",
  "chrono",
@@ -10774,7 +10864,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_error"
-version = "1.9.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "anyhow",
  "bincode 1.3.3",
@@ -10790,7 +10880,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_expr"
-version = "1.9.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "anyhow",
  "arrow-array 50.0.0",
@@ -10831,7 +10921,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_expr_impl"
-version = "1.9.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "aho-corasick",
  "anyhow",
@@ -10898,7 +10988,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_frontend"
-version = "1.9.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -10980,7 +11070,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_frontend_macro"
-version = "1.9.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -10989,7 +11079,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_hummock_sdk"
-version = "1.9.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "bytes",
  "easy-ext",
@@ -11008,7 +11098,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_hummock_test"
-version = "1.9.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "async-trait",
  "bytes",
@@ -11041,7 +11131,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_hummock_trace"
-version = "1.9.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "async-trait",
  "bincode 2.0.0-rc.3",
@@ -11066,14 +11156,25 @@ dependencies = [
 name = "risingwave_java_binding"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "bytes",
+ "cfg-or-panic",
+ "foyer",
+ "futures",
  "jni",
+ "madsim-tokio",
  "prost 0.12.1",
  "risingwave_common",
  "risingwave_expr",
+ "risingwave_hummock_sdk",
  "risingwave_jni_core",
+ "risingwave_object_store",
  "risingwave_pb",
+ "risingwave_storage",
+ "rw_futures_util",
  "serde",
  "serde_json",
+ "tracing",
 ]
 
 [[package]]
@@ -11096,9 +11197,7 @@ dependencies = [
  "risingwave_common",
  "risingwave_expr",
  "risingwave_hummock_sdk",
- "risingwave_object_store",
  "risingwave_pb",
- "risingwave_storage",
  "rw_futures_util",
  "serde",
  "serde_json",
@@ -11109,7 +11208,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_mem_table_spill_test"
-version = "1.9.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "async-trait",
  "bytes",
@@ -11125,7 +11224,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_meta"
-version = "1.9.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "aes-siv",
  "anyhow",
@@ -11200,7 +11299,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_meta_dashboard"
-version = "1.9.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "anyhow",
  "axum 0.7.4",
@@ -11221,7 +11320,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_meta_model_migration"
-version = "1.9.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "async-std",
  "sea-orm-migration",
@@ -11230,7 +11329,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_meta_model_v2"
-version = "1.9.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "prost 0.12.1",
  "risingwave_common",
@@ -11243,7 +11342,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_meta_node"
-version = "1.9.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "anyhow",
  "clap",
@@ -11275,7 +11374,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_meta_service"
-version = "1.9.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -11303,7 +11402,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_object_store"
-version = "1.9.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "async-trait",
  "await-tree",
@@ -11339,7 +11438,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_pb"
-version = "1.9.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "enum-as-inner 0.6.0",
  "fs-err",
@@ -11359,7 +11458,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_planner_test"
-version = "1.9.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "anyhow",
  "expect-test",
@@ -11381,7 +11480,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_regress_test"
-version = "1.9.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "anyhow",
  "clap",
@@ -11395,7 +11494,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_rpc_client"
-version = "1.9.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -11429,7 +11528,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_rt"
-version = "1.9.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "await-tree",
  "console",
@@ -11510,7 +11609,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_sqlparser"
-version = "1.9.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "anyhow",
  "console",
@@ -11531,7 +11630,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_sqlsmith"
-version = "1.9.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "anyhow",
  "chrono",
@@ -11559,7 +11658,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_state_cleaning_test"
-version = "1.9.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "anyhow",
  "clap",
@@ -11579,7 +11678,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_storage"
-version = "1.9.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "ahash 0.8.11",
  "anyhow",
@@ -11651,7 +11750,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_stream"
-version = "1.9.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "anyhow",
  "assert_matches",
@@ -11719,7 +11818,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_test_runner"
-version = "1.9.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "fail",
  "sync-point",
@@ -11728,7 +11827,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_variables"
-version = "1.9.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "chrono",
  "workspace-hack",
@@ -11989,6 +12088,18 @@ dependencies = [
  "linux-raw-sys 0.4.12",
  "once_cell",
  "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "rustls"
+version = "0.20.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1b80e3dec595989ea8510028f30c408a4630db12c9cbb8de34203b89d6577e99"
+dependencies = [
+ "log",
+ "ring 0.16.20",
+ "sct",
+ "webpki",
 ]
 
 [[package]]
@@ -14295,6 +14406,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "tiberius"
+version = "0.12.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dc6e2bf3e4b5be181a2a2ceff4b9b12e2684010d436a6958bd564fbc8094d44d"
+dependencies = [
+ "async-trait",
+ "asynchronous-codec",
+ "bigdecimal 0.3.1",
+ "byteorder",
+ "bytes",
+ "chrono",
+ "connection-string",
+ "encoding",
+ "enumflags2",
+ "futures-util",
+ "num-traits",
+ "once_cell",
+ "pin-project-lite",
+ "pretty-hex",
+ "rust_decimal",
+ "rustls-native-certs 0.6.3",
+ "rustls-pemfile 1.0.4",
+ "thiserror",
+ "time",
+ "tokio-rustls 0.23.4",
+ "tokio-util",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "tikv-jemalloc-ctl"
 version = "0.5.4"
 source = "git+https://github.com/risingwavelabs/jemallocator.git?rev=64a2d9#64a2d988d687a94cd859855e19241cd8b0705466"
@@ -14499,6 +14641,17 @@ dependencies = [
 
 [[package]]
 name = "tokio-rustls"
+version = "0.23.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c43ee83903113e03984cb9e5cebe6c04a5116269e900e3ddba8f068a62adda59"
+dependencies = [
+ "rustls 0.20.9",
+ "tokio",
+ "webpki",
+]
+
+[[package]]
+name = "tokio-rustls"
 version = "0.24.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c28327cf380ac148141087fbfb9de9d7bd4e84ab5d2c28fbc911d753de8a7081"
@@ -14559,6 +14712,7 @@ checksum = "1d68074620f57a0b21594d9735eb2e98ab38b17f80d3fcb189fca266771ca60d"
 dependencies = [
  "bytes",
  "futures-core",
+ "futures-io",
  "futures-sink",
  "pin-project-lite",
  "tokio",
@@ -15910,6 +16064,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "webpki"
+version = "0.22.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ed63aea5ce73d0ff405984102c42de94fc55a6b75765d621c65262469b3c9b53"
+dependencies = [
+ "ring 0.17.5",
+ "untrusted 0.9.0",
+]
+
+[[package]]
 name = "webpki-roots"
 version = "0.25.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -16369,7 +16533,7 @@ dependencies = [
 
 [[package]]
 name = "with_options"
-version = "1.9.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -16390,7 +16554,7 @@ dependencies = [
 
 [[package]]
 name = "workspace-config"
-version = "1.9.0-alpha"
+version = "1.11.0-alpha"
 dependencies = [
  "libz-sys",
  "log",
@@ -16402,7 +16566,7 @@ dependencies = [
 
 [[package]]
 name = "workspace-hack"
-version = "1.9.0-alpha"
+version = "1.11.0-alpha"
 
 [[package]]
 name = "wyz"

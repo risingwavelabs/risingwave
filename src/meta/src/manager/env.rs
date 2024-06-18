@@ -20,6 +20,7 @@ use risingwave_common::config::{
 };
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsReader;
+use risingwave_meta_model_migration::{MigrationStatus, Migrator, MigratorTrait};
 use risingwave_meta_model_v2::prelude::Cluster;
 use risingwave_pb::meta::SystemParams;
 use risingwave_rpc_client::{StreamClientPool, StreamClientPoolRef};
@@ -348,15 +349,32 @@ impl MetaOpts {
     }
 }
 
+/// This function `is_first_launch_for_sql_backend_cluster` is used to check whether the cluster, which uses SQL as the backend, is a new cluster.
+/// It determines this by inspecting the applied migrations. If the migration `m20230908_072257_init` has been applied,
+/// then it is considered an old cluster.
+///
+/// Note: this check should be performed before `Migrator::up()`.
+pub async fn is_first_launch_for_sql_backend_cluster(
+    sql_meta_store: &SqlMetaStore,
+) -> MetaResult<bool> {
+    let migrations = Migrator::get_applied_migrations(&sql_meta_store.conn).await?;
+    for migration in migrations {
+        if migration.name() == "m20230908_072257_init"
+            && migration.status() == MigrationStatus::Applied
+        {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
 impl MetaSrvEnv {
     pub async fn new(
         opts: MetaOpts,
-        init_system_params: SystemParams,
+        mut init_system_params: SystemParams,
         init_session_config: SessionConfig,
         meta_store_impl: MetaStoreImpl,
     ) -> MetaResult<Self> {
-        let notification_manager =
-            Arc::new(NotificationManager::new(meta_store_impl.clone()).await);
         let idle_manager = Arc::new(IdleManager::new(opts.max_idle_ms));
         let stream_client_pool = Arc::new(StreamClientPool::default());
         let event_log_manager = Arc::new(start_event_log_manager(
@@ -366,6 +384,8 @@ impl MetaSrvEnv {
 
         let env = match &meta_store_impl {
             MetaStoreImpl::Kv(meta_store) => {
+                let notification_manager =
+                    Arc::new(NotificationManager::new(meta_store_impl.clone()).await);
                 let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
                 let (cluster_id, cluster_first_launch) =
                     if let Some(id) = ClusterId::from_meta_store(meta_store).await? {
@@ -373,6 +393,11 @@ impl MetaSrvEnv {
                     } else {
                         (ClusterId::new(), true)
                     };
+
+                // For new clusters, the name of the object store needs to be prefixed according to the object id.
+                // For old clusters, the prefix is ​​not divided for the sake of compatibility.
+
+                init_system_params.use_new_object_prefix_strategy = Some(cluster_first_launch);
                 let system_params_manager = Arc::new(
                     SystemParamsManager::new(
                         meta_store.clone(),
@@ -415,11 +440,24 @@ impl MetaSrvEnv {
                 }
             }
             MetaStoreImpl::Sql(sql_meta_store) => {
+                let is_sql_backend_cluster_first_launch =
+                    is_first_launch_for_sql_backend_cluster(sql_meta_store).await?;
+                // Try to upgrade if any new model changes are added.
+                Migrator::up(&sql_meta_store.conn, None)
+                    .await
+                    .expect("Failed to upgrade models in meta store");
+
+                let notification_manager =
+                    Arc::new(NotificationManager::new(meta_store_impl.clone()).await);
                 let cluster_id = Cluster::find()
                     .one(&sql_meta_store.conn)
                     .await?
                     .map(|c| c.cluster_id.to_string().into())
                     .unwrap();
+                init_system_params.use_new_object_prefix_strategy =
+                    Some(is_sql_backend_cluster_first_launch);
+                // For new clusters, the name of the object store needs to be prefixed according to the object id.
+                // For old clusters, the prefix is ​​not divided for the sake of compatibility.
                 let system_param_controller = Arc::new(
                     SystemParamsController::new(
                         sql_meta_store.clone(),
@@ -462,11 +500,11 @@ impl MetaSrvEnv {
         Ok(env)
     }
 
-    pub fn meta_store_ref(&self) -> MetaStoreImpl {
+    pub fn meta_store(&self) -> MetaStoreImpl {
         self.meta_store_impl.clone()
     }
 
-    pub fn meta_store(&self) -> &MetaStoreImpl {
+    pub fn meta_store_ref(&self) -> &MetaStoreImpl {
         &self.meta_store_impl
     }
 

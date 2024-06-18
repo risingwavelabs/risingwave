@@ -70,9 +70,19 @@ where
     !too_left && !too_right
 }
 
-pub fn validate_safe_epoch(safe_epoch: u64, epoch: u64) -> HummockResult<()> {
-    if epoch < safe_epoch {
-        return Err(HummockError::expired_epoch(safe_epoch, epoch));
+pub fn validate_safe_epoch(
+    version: &HummockVersion,
+    table_id: TableId,
+    epoch: u64,
+) -> HummockResult<()> {
+    if let Some(info) = version.state_table_info.info().get(&table_id)
+        && epoch < info.safe_epoch
+    {
+        return Err(HummockError::expired_epoch(
+            table_id,
+            info.safe_epoch,
+            epoch,
+        ));
     }
 
     Ok(())

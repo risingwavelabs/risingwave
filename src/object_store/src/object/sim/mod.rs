@@ -118,7 +118,7 @@ pub struct SimObjectStore {
 impl ObjectStore for SimObjectStore {
     type StreamingUploader = SimStreamingUploader;
 
-    fn get_object_prefix(&self, _obj_id: u64) -> String {
+    fn get_object_prefix(&self, _obj_id: u64, _use_new_object_prefix_strategy: bool) -> String {
         String::default()
     }
 

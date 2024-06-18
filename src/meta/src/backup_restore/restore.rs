@@ -246,6 +246,7 @@ mod tests {
         SystemParams {
             state_store: Some("state_store".into()),
             data_directory: Some("data_directory".into()),
+            use_new_object_prefix_strategy: Some(true),
             backup_storage_url: Some("backup_storage_url".into()),
             backup_storage_directory: Some("backup_storage_directory".into()),
             ..SystemConfig::default().into_init_system_params()
@@ -266,9 +267,10 @@ mod tests {
         let snapshot = MetaSnapshot {
             id: opts.meta_snapshot_id,
             metadata: ClusterMetadata {
-                hummock_version: HummockVersion {
-                    id: 123,
-                    ..Default::default()
+                hummock_version: {
+                    let mut version = HummockVersion::default();
+                    version.id = 123;
+                    version
                 },
                 system_param: system_param.clone(),
                 ..Default::default()
@@ -448,9 +450,10 @@ mod tests {
                         memcomparable::to_vec(&"some_value_2".to_string()).unwrap(),
                     ),
                 ]),
-                hummock_version: HummockVersion {
-                    id: 123,
-                    ..Default::default()
+                hummock_version: {
+                    let mut version = HummockVersion::default();
+                    version.id = 123;
+                    version
                 },
                 system_param: system_param.clone(),
                 ..Default::default()
