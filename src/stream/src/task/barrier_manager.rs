@@ -316,17 +316,17 @@ pub(super) struct LocalBarrierWorkerDebugInfo<'a> {
 
 impl Display for LocalBarrierWorkerDebugInfo<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Running actors:")?;
+        write!(f, "running_actors: ")?;
         for actor_id in &self.running_actors {
             write!(f, "{}, ", actor_id)?;
         }
 
-        write!(f, "\nActors to send:")?;
+        write!(f, "\nactor_to_send: ")?;
         for actor_id in &self.actor_to_send {
             write!(f, "{}, ", actor_id)?;
         }
 
-        write!(f, "\nCreating actors:")?;
+        write!(f, "\ncreating_actors: ")?;
         for actors in &self.creating_actors {
             for actor_id in actors {
                 write!(f, "{}, ", actor_id)?;
@@ -335,11 +335,11 @@ impl Display for LocalBarrierWorkerDebugInfo<'_> {
 
         writeln!(
             f,
-            "\nhas_control_stream_connected: {:}",
+            "\nhas_control_stream_connected: {}",
             self.has_control_stream_connected
         )?;
 
-        writeln!(f, "Managed Barrier State: {}", self.managed_barrier_state)?;
+        writeln!(f, "managed_barrier_state:\n{}", self.managed_barrier_state)?;
         Ok(())
     }
 }
@@ -1004,3 +1004,33 @@ impl LocalBarrierManager {
         rx.await.unwrap()
     }
 }
+// #[cfg(test)]
+// mod tests {
+//     use super::*;
+//     #[test]
+//     fn test_debug_info_display() {
+//         LocalBarrierWorkerDebugInfo {
+//             actor_to_send: BTreeSet::from([
+//                 435670, 435671, 435672, 435673, 435674, 435675, 435676, 435677, 436568, 436569,
+//                 436570, 436571, 436572, 436573, 436574, 436575, 436984, 436985, 436986, 436987,
+//                 436988, 436989, 436990, 436991, 437146, 437147, 437148, 437149, 437150, 437151,
+//                 437152, 437153, 437755, 438195, 438196, 438197, 438198, 438199, 438200, 438201,
+//                 438202, 438739, 438740, 438741, 438742, 438743, 438744, 438745, 438746, 438803,
+//                 438804, 438805, 438806, 438807, 438808, 438809, 438810, 439188, 439189, 439190,
+//                 439191, 439192, 439193, 439194, 439195, 439349, 439350, 439351, 439352, 439353,
+//                 439354, 439355, 439356, 444797, 444798, 444799, 444800, 444801, 444802, 444803,
+//                 444804, 444917, 444918, 444919, 444920, 444921, 444922, 444923, 444924, 445205,
+//                 445206, 445207, 445208, 445209, 445210, 445211, 445212, 445261, 445262, 445263,
+//                 445264, 445265, 445266, 445267, 445268, 445357, 445358, 445359, 445360, 445361,
+//                 445362, 445363, 445364, 445437, 445438, 445439, 445440, 445441, 445442, 445443,
+//                 445444, 445501, 445502, 445503, 445504, 445505, 445506, 445507, 445508, 445581,
+//                 445582, 445583, 445584, 445585, 445586, 445587, 445588, 445949, 445950, 445951,
+//                 445952, 445953, 445954, 445955, 445956,
+//             ]),
+//             running_actors: BTreeSet::new(),
+//             creating_actors: vec![],
+//             managed_barrier_state: (),
+//             has_control_stream_connected: false,
+//         }
+//     }
+// }
