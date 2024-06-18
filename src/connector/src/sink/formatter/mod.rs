@@ -109,6 +109,9 @@ impl SinkFormatterImpl {
                 });
 
                 match format_desc.encode {
+                    SinkEncode::Parquet => {
+                        unreachable!()
+                    }
                     SinkEncode::Json => {
                         let val_encoder = JsonEncoder::new(
                             schema,
@@ -256,7 +259,7 @@ impl SinkFormatterImpl {
                         let formatter = UpsertFormatter::new(key_encoder, val_encoder);
                         Ok(SinkFormatterImpl::UpsertAvro(formatter))
                     }
-                    SinkEncode::Protobuf => err_unsupported(),
+                    SinkEncode::Protobuf | SinkEncode::Parquet => err_unsupported(),
                 }
             }
         }

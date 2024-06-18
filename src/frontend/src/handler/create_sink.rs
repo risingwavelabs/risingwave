@@ -738,6 +738,7 @@ fn bind_sink_format_desc(value: ConnectorSchema) -> Result<SinkFormatDesc> {
         E::Protobuf => SinkEncode::Protobuf,
         E::Avro => SinkEncode::Avro,
         E::Template => SinkEncode::Template,
+        E::Parquet => SinkEncode::Parquet,
         e @ (E::Native | E::Csv | E::Bytes | E::None) => {
             return Err(ErrorCode::BindError(format!("sink encode unsupported: {e}")).into());
         }
@@ -759,6 +760,7 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
     LazyLock::new(|| {
         use risingwave_connector::sink::kafka::KafkaSink;
         use risingwave_connector::sink::kinesis::KinesisSink;
+        use risingwave_connector::sink::opendal_sink::s3::S3Sink;
         use risingwave_connector::sink::pulsar::PulsarSink;
         use risingwave_connector::sink::redis::RedisSink;
         use risingwave_connector::sink::Sink as _;
@@ -768,6 +770,9 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                     Format::Plain => vec![Encode::Json, Encode::Protobuf],
                     Format::Upsert => vec![Encode::Json, Encode::Avro],
                     Format::Debezium => vec![Encode::Json],
+                ),
+                S3Sink::SINK_NAME => hashmap!(
+                    Format::Plain => vec![Encode::Json, Encode::Parquet],
                 ),
                 KinesisSink::SINK_NAME => hashmap!(
                     Format::Plain => vec![Encode::Json],

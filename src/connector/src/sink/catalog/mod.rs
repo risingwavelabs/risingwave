@@ -134,6 +134,7 @@ pub enum SinkEncode {
     Protobuf,
     Avro,
     Template,
+    Parquet,
 }
 
 impl SinkFormatDesc {
@@ -180,6 +181,7 @@ impl SinkFormatDesc {
             SinkEncode::Protobuf => E::Protobuf,
             SinkEncode::Avro => E::Avro,
             SinkEncode::Template => E::Template,
+            SinkEncode::Parquet => E::Parquet,
         };
         let options = self
             .options
@@ -222,6 +224,7 @@ impl TryFrom<PbSinkFormatDesc> for SinkFormatDesc {
             E::Protobuf => SinkEncode::Protobuf,
             E::Template => SinkEncode::Template,
             E::Avro => SinkEncode::Avro,
+            E::Parquet => SinkEncode::Parquet,
             e @ (E::Unspecified | E::Native | E::Csv | E::Bytes | E::None) => {
                 return Err(SinkError::Config(anyhow!(
                     "sink encode unsupported: {}",

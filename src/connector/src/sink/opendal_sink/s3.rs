@@ -25,8 +25,8 @@ use with_options::WithOptions;
 use crate::sink::opendal_sink::OpenDalSinkWriter;
 use crate::sink::writer::{LogSinkerOf, SinkWriterExt};
 use crate::sink::{
-    DummySinkCommitCoordinator, Result, Sink, SinkError, SinkParam, SINK_TYPE_APPEND_ONLY,
-    SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
+    DummySinkCommitCoordinator, Result, Sink, SinkError, SinkFormatDesc, SinkParam,
+    SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
 };
 
 #[derive(Deserialize, Debug, Clone, WithOptions)]
@@ -78,24 +78,9 @@ impl S3Config {
 pub struct S3Sink {
     pub config: S3Config,
     schema: Schema,
-    pk_indices: Vec<usize>,
     is_append_only: bool,
-}
-
-impl S3Sink {
-    pub fn new(
-        config: S3Config,
-        schema: Schema,
-        pk_indices: Vec<usize>,
-        is_append_only: bool,
-    ) -> Result<Self> {
-        Ok(Self {
-            config,
-            schema,
-            pk_indices,
-            is_append_only,
-        })
-    }
+    pk_indices: Vec<usize>,
+    format_desc: SinkFormatDesc,
 }
 
 impl S3Sink {
@@ -126,7 +111,6 @@ impl S3Sink {
                 config.common.bucket_name
             );
         }
-
 
         if let Some(assume_role) = config.common.assume_role {
             builder.role_arn(&assume_role);
@@ -164,7 +148,8 @@ impl Sink for S3Sink {
             self.schema.clone(),
             self.pk_indices.clone(),
             self.is_append_only,
-            writer_param.connector_params.sink_payload_format,
+            writer_param.executor_id,
+            self.format_desc.encode.clone(),
         )?
         .into_log_sinker(writer_param.sink_metrics))
     }
@@ -176,11 +161,14 @@ impl TryFrom<SinkParam> for S3Sink {
     fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
         let schema = param.schema();
         let config = S3Config::from_hashmap(param.properties)?;
-        S3Sink::new(
+        Ok(Self {
             config,
             schema,
-            param.downstream_pk,
-            param.sink_type.is_append_only(),
-        )
+            is_append_only: param.sink_type.is_append_only(),
+            pk_indices: param.downstream_pk,
+            format_desc: param
+                .format_desc
+                .ok_or_else(|| SinkError::Config(anyhow!("missing FORMAT ... ENCODE ...")))?,
+        })
     }
 }

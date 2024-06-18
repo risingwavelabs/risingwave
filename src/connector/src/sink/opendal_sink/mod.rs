@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod fs;
 pub mod gcs;
 pub mod s3;
-pub mod fs;
 use std::collections::HashMap;
 use std::sync::Arc;
-use crate::SinkPayloadFormat;
+
 use anyhow::anyhow;
 use arrow_schema::{DataType as ArrowDataType, Field as ArrowField, SchemaRef};
 use async_trait::async_trait;
@@ -29,6 +29,7 @@ use risingwave_common::array::{to_record_batch_with_schema, Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 
+use crate::sink::catalog::SinkEncode;
 use crate::sink::{Result, SinkError, SinkWriter};
 
 const SINK_WRITE_BUFFER_SIZE: usize = 16 * 1024 * 1024;
@@ -36,15 +37,19 @@ const SINK_WRITE_BUFFER_SIZE: usize = 16 * 1024 * 1024;
 pub struct OpenDalSinkWriter {
     schema: SchemaRef,
     operator: Operator,
-    sink_writer: Option<AsyncArrowWriter<OpendalWriter>>,
+    sink_writer: Option<FileWriterEnum>,
     pk_indices: Vec<usize>,
     is_append_only: bool,
     write_path: String,
     epoch: Option<u64>,
-    sink_payload_format: SinkPayloadFormat,
+    executor_id: u64,
+    encode_type: SinkEncode,
 }
 
-
+enum FileWriterEnum {
+    ParquetWriter(AsyncArrowWriter<OpendalWriter>),
+    FileWriter(OpendalWriter),
+}
 
 #[async_trait]
 impl SinkWriter for OpenDalSinkWriter {
@@ -72,12 +77,13 @@ impl SinkWriter for OpenDalSinkWriter {
     }
 
     async fn barrier(&mut self, is_checkpoint: bool) -> Result<()> {
-        if is_checkpoint && let Some(sink_writer) =self
-        .sink_writer
-        .take() {
-
-           
-            sink_writer.close().await?;
+        if is_checkpoint && let Some(sink_writer) = self.sink_writer.take() {
+            match sink_writer {
+                FileWriterEnum::ParquetWriter(mut w) => {
+                    let _ = w.close().await?;
+                }
+                FileWriterEnum::FileWriter(mut w) => w.close().await?,
+            };
         }
 
         Ok(())
@@ -95,7 +101,8 @@ impl OpenDalSinkWriter {
         rw_schema: Schema,
         pk_indices: Vec<usize>,
         is_append_only: bool,
-        sink_payload_format: SinkPayloadFormat,
+        executor_id: u64,
+        encode_type: SinkEncode,
     ) -> Result<Self> {
         let arrow_schema = convert_rw_schema_to_arrow_schema(rw_schema)?;
         Ok(Self {
@@ -105,37 +112,61 @@ impl OpenDalSinkWriter {
             operator,
             sink_writer: None,
             is_append_only,
-            sink_payload_format,
             epoch: None,
+            executor_id,
+            encode_type,
         })
     }
 
-    async fn create_sink_writer(&mut self, epoch: u64) -> Result<()> {
-        println!("这里epoch = {:?}", epoch.to_string());
-        let object_name = format!("{}/epoch_{}.parquet", self.write_path, epoch.to_string());
-        let object_store_writer = self
+    async fn create_object_writer(&mut self, epoch: u64) -> Result<(OpendalWriter)> {
+        let suffix = match self.encode_type {
+            SinkEncode::Json => "json",
+            SinkEncode::Parquet => "parquet",
+            _ => unimplemented!(),
+        };
+        let object_name = format!(
+            "{}/epoch_{}_executor_{}.{}",
+            self.write_path,
+            epoch.to_string(),
+            self.executor_id.to_string(),
+            suffix.to_string(),
+        );
+        Ok(self
             .operator
             .writer_with(&object_name)
             .concurrent(8)
             .buffer(SINK_WRITE_BUFFER_SIZE)
-            .await?;
-        let parquet_config = ParquetWriterConfig::default();
-        let mut props = WriterProperties::builder()
-            .set_writer_version(WriterVersion::PARQUET_1_0)
-            .set_bloom_filter_enabled(parquet_config.enable_bloom_filter)
-            .set_compression(parquet_config.compression)
-            .set_max_row_group_size(parquet_config.max_row_group_size)
-            .set_write_batch_size(parquet_config.write_batch_size)
-            .set_data_page_size_limit(parquet_config.data_page_size);
-        if let Some(created_by) = parquet_config.created_by.as_ref() {
-            props = props.set_created_by(created_by.to_string());
+            .await?)
+    }
+
+    async fn create_sink_writer(&mut self, epoch: u64) -> Result<()> {
+        let object_writer = self.create_object_writer(epoch).await?;
+        match self.encode_type {
+            SinkEncode::Parquet => {
+                let parquet_config = ParquetWriterConfig::default();
+                let mut props = WriterProperties::builder()
+                    .set_writer_version(WriterVersion::PARQUET_1_0)
+                    .set_bloom_filter_enabled(parquet_config.enable_bloom_filter)
+                    .set_compression(parquet_config.compression)
+                    .set_max_row_group_size(parquet_config.max_row_group_size)
+                    .set_write_batch_size(parquet_config.write_batch_size)
+                    .set_data_page_size_limit(parquet_config.data_page_size);
+                if let Some(created_by) = parquet_config.created_by.as_ref() {
+                    props = props.set_created_by(created_by.to_string());
+                }
+                self.sink_writer = Some(FileWriterEnum::ParquetWriter(AsyncArrowWriter::try_new(
+                    object_writer,
+                    self.schema.clone(),
+                    SINK_WRITE_BUFFER_SIZE,
+                    Some(props.build()),
+                )?));
+            }
+            SinkEncode::Json => {
+                self.sink_writer = Some(FileWriterEnum::FileWriter(object_writer));
+            }
+            _ => unimplemented!(),
         }
-        self.sink_writer = Some(AsyncArrowWriter::try_new(
-            object_store_writer,
-            self.schema.clone(),
-            SINK_WRITE_BUFFER_SIZE,
-            Some(props.build()),
-        )?);
+
         Ok(())
     }
 
@@ -144,14 +175,18 @@ impl OpenDalSinkWriter {
         let filters =
             chunk.visibility() & ops.iter().map(|op| *op == Op::Insert).collect::<Bitmap>();
         chunk.set_visibility(filters);
-        println!("schema是{:?}", self.schema.clone());
-        let batch = to_record_batch_with_schema(self.schema.clone(), &chunk.compact())?;
 
-        self.sink_writer
+        match self
+            .sink_writer
             .as_mut()
             .ok_or_else(|| SinkError::Opendal("Sink writer is not created.".to_string()))?
-            .write(&batch)
-            .await?;
+        {
+            FileWriterEnum::ParquetWriter(w) => {
+                let batch = to_record_batch_with_schema(self.schema.clone(), &chunk.compact())?;
+                w.write(&batch).await?;
+            }
+            FileWriterEnum::FileWriter(_w) => unimplemented!(),
+        }
 
         Ok(())
     }
