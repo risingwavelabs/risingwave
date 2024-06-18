@@ -104,7 +104,6 @@ async fn compact_shared_buffer<const IS_NEW_VALUE: bool>(
         assert!(payload.iter().all(|imm| imm.has_old_value()));
     }
     // Local memory compaction looks at all key ranges.
-
     let mut existing_table_ids: HashSet<u32> = payload
         .iter()
         .map(|imm| imm.table_id.table_id)
@@ -132,8 +131,8 @@ async fn compact_shared_buffer<const IS_NEW_VALUE: bool>(
     });
 
     let total_key_count = payload.iter().map(|imm| imm.key_count()).sum::<usize>();
-    let (splits, sub_compaction_sstable_size) =
-        generate_splits(&payload, context.storage_opts.as_ref());
+    let (splits, sub_compaction_sstable_size, table_vnode_partition) =
+        generate_splits(&payload, &existing_table_ids, context.storage_opts.as_ref());
     let parallelism = splits.len();
     let mut compact_success = true;
     let mut output_ssts = Vec::with_capacity(parallelism);
@@ -146,7 +145,7 @@ async fn compact_shared_buffer<const IS_NEW_VALUE: bool>(
             key_range,
             context.clone(),
             sub_compaction_sstable_size as usize,
-            BTreeMap::default(),
+            table_vnode_partition.clone(),
             use_block_based_filter,
             Box::new(sstable_object_id_manager.clone()),
         );
@@ -415,11 +414,13 @@ pub async fn merge_imms_in_memory(
 ///  Based on the incoming payload and opts, calculate the sharding method and sstable size of shared buffer compaction.
 fn generate_splits(
     payload: &Vec<ImmutableMemtable>,
+    existing_table_ids: &HashSet<u32>,
     storage_opts: &StorageOpts,
-) -> (Vec<KeyRange>, u64) {
+) -> (Vec<KeyRange>, u64, BTreeMap<u32, u32>) {
     let mut size_and_start_user_keys = vec![];
     let mut compact_data_size = 0;
     let mut table_size_infos: HashMap<u32, u64> = HashMap::default();
+    let mut table_vnode_partition = BTreeMap::default();
     for imm in payload {
         let data_size = {
             // calculate encoded bytes of key var length
@@ -438,6 +439,7 @@ fn generate_splits(
         splits.push(KeyRange::new(key_before_last.clone(), Bytes::new()));
     };
     let sstable_size = (storage_opts.sstable_size_mb as u64) << 20;
+    let min_sstable_size = (storage_opts.min_sstable_size_mb as u64) << 20;
     let parallel_compact_size = (storage_opts.parallel_compact_size_mb as u64) << 20;
     let parallelism = std::cmp::min(
         storage_opts.share_buffers_sync_parallelism as u64,
@@ -449,24 +451,38 @@ fn generate_splits(
         compact_data_size
     };
 
-    if parallelism > 1 && compact_data_size > sstable_size {
-        let mut last_buffer_size = 0;
-        let mut last_user_key: UserKey<Vec<u8>> = UserKey::default();
-        for (data_size, user_key) in size_and_start_user_keys {
-            if last_buffer_size >= sub_compaction_data_size && last_user_key.as_ref() != user_key {
-                last_user_key.set(user_key);
-                key_split_append(
-                    &FullKey {
-                        user_key,
-                        epoch_with_gap: EpochWithGap::new_max_epoch(),
-                    }
-                    .encode()
-                    .into(),
-                );
-                last_buffer_size = data_size;
-            } else {
-                last_user_key.set(user_key);
-                last_buffer_size += data_size;
+    if existing_table_ids.len() > 1 {
+        if parallelism > 1 && compact_data_size > sstable_size {
+            let mut last_buffer_size = 0;
+            let mut last_user_key: UserKey<Vec<u8>> = UserKey::default();
+            for (data_size, user_key) in size_and_start_user_keys {
+                if last_buffer_size >= sub_compaction_data_size
+                    && last_user_key.as_ref() != user_key
+                {
+                    last_user_key.set(user_key);
+                    key_split_append(
+                        &FullKey {
+                            user_key,
+                            epoch_with_gap: EpochWithGap::new_max_epoch(),
+                        }
+                        .encode()
+                        .into(),
+                    );
+                    last_buffer_size = data_size;
+                } else {
+                    last_user_key.set(user_key);
+                    last_buffer_size += data_size;
+                }
+            }
+        }
+
+        // Meta node will calculate size of each state-table in one task in `risingwave_meta::hummock::manager::compaction::calculate_vnode_partition`.
+        // To make the calculate result more accurately we shall split the large state-table from other small ones.
+        for table_id in existing_table_ids {
+            if let Some(table_size) = table_size_infos.get(table_id)
+                && *table_size > min_sstable_size
+            {
+                table_vnode_partition.insert(*table_id, 1);
             }
         }
     }
@@ -474,7 +490,7 @@ fn generate_splits(
     // mul 1.2 for other extra memory usage.
     // Ensure that the size of each sstable is still less than `sstable_size` after optimization to avoid generating a huge size sstable which will affect the object store
     let sub_compaction_sstable_size = std::cmp::min(sstable_size, sub_compaction_data_size * 6 / 5);
-    (splits, sub_compaction_sstable_size)
+    (splits, sub_compaction_sstable_size, table_vnode_partition)
 }
 
 pub struct SharedBufferCompactRunner {
@@ -541,6 +557,8 @@ impl SharedBufferCompactRunner {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     use bytes::Bytes;
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
@@ -621,11 +639,13 @@ mod tests {
             ..Default::default()
         };
         let payload = vec![imm1, imm2, imm3, imm4, imm5];
-        let (splits, _sstable_capacity) = generate_splits(&payload, &storage_opts);
+        let (splits, _sstable_capacity, vnodes) =
+            generate_splits(&payload, &HashSet::from_iter([1, 2]), &storage_opts);
         assert_eq!(
             splits.len(),
             storage_opts.share_buffers_sync_parallelism as usize
         );
+        assert!(vnodes.is_empty());
         for i in 1..splits.len() {
             assert_eq!(splits[i].left, splits[i - 1].right);
             assert!(splits[i].left > splits[i - 1].left);
