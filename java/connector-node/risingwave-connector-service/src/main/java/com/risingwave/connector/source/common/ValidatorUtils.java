@@ -78,7 +78,7 @@ public final class ValidatorUtils {
             return false;
         }
         for (var colName : sourceSchema.getPrimaryKeys()) {
-            if (!pkFields.contains(colName)) {
+            if (!pkFields.contains(colName.toLowerCase())) {
                 return false;
             }
         }
