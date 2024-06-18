@@ -90,7 +90,6 @@
         <hive.version>4.0.0</hive.version>
         <jetty.version>12.0.10</jetty.version>
         <snappy.version>1.1.10.5</snappy.version>
-        <compress.version>1.26.2</compress.version>
     </properties>
 
     <dependencyManagement>
@@ -400,17 +399,6 @@
                 <groupId>org.xerial.snappy</groupId>
                 <artifactId>snappy-java</artifactId>
                 <version>${snappy.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>org.apache.commons</groupId>
-                <artifactId>commons-compress</artifactId>
-                <version>${compress.version}</version>
-                <exclusions>
-                    <exclusion>
-                        <groupId>org.apache.commons</groupId>
-                        <artifactId>commons-lang3</artifactId>
-                    </exclusion>                
-                </exclusions>
             </dependency>
             <dependency>
                 <groupId>org.apache.spark</groupId>
