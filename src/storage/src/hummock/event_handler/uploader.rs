@@ -14,7 +14,7 @@
 
 use std::cmp::Ordering;
 use std::collections::btree_map::Entry;
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::fmt::{Debug, Display, Formatter};
 use std::future::{poll_fn, Future};
 use std::mem::{replace, swap, take};
@@ -725,6 +725,17 @@ impl LocalInstanceUnsyncData {
         }
         ret
     }
+
+    fn assert_after_epoch(&self, epoch: HummockEpoch) {
+        if let Some(oldest_sealed_data) = self.sealed_data.back() {
+            assert!(!oldest_sealed_data.imms.is_empty());
+            assert_gt!(oldest_sealed_data.epoch, epoch);
+        } else if let Some(current_data) = &self.current_epoch_data {
+            if current_data.epoch <= epoch {
+                assert!(current_data.imms.is_empty() && !current_data.has_spilled);
+            }
+        }
+    }
 }
 
 struct TableUnsyncData {
@@ -772,6 +783,17 @@ impl TableUnsyncData {
                     )
                 }),
         )
+    }
+
+    fn assert_after_epoch(&self, epoch: HummockEpoch) {
+        self.instance_data
+            .values()
+            .for_each(|instance_data| instance_data.assert_after_epoch(epoch));
+        if let Some((_, watermarks)) = &self.table_watermarks
+            && let Some((oldest_epoch, _)) = watermarks.first_key_value()
+        {
+            assert_gt!(*oldest_epoch, epoch);
+        }
     }
 }
 
@@ -869,7 +891,12 @@ impl UnsyncData {
         }
     }
 
-    fn sync(&mut self, epoch: HummockEpoch, context: &UploaderContext) -> SyncDataBuilder {
+    fn sync(
+        &mut self,
+        epoch: HummockEpoch,
+        context: &UploaderContext,
+        table_ids: HashSet<TableId>,
+    ) -> SyncDataBuilder {
         let sync_epoch_data = take_before_epoch(&mut self.epoch_data, epoch);
 
         let mut sync_data = SyncDataBuilder::default();
@@ -879,6 +906,10 @@ impl UnsyncData {
 
         let mut flush_payload = HashMap::new();
         for (table_id, table_data) in &mut self.table_data {
+            if !table_ids.contains(table_id) {
+                table_data.assert_after_epoch(epoch);
+                continue;
+            }
             let (unflushed_payload, table_watermarks) = table_data.sync(epoch);
             for (instance_id, payload) in unflushed_payload {
                 if !payload.is_empty() {
@@ -1082,6 +1113,7 @@ impl HummockUploader {
         &mut self,
         epoch: HummockEpoch,
         sync_result_sender: oneshot::Sender<HummockResult<SyncResult>>,
+        table_ids: HashSet<TableId>,
     ) {
         let data = match &mut self.state {
             UploaderState::Working(data) => data,
@@ -1107,7 +1139,7 @@ impl HummockUploader {
 
         self.max_syncing_epoch = epoch;
 
-        let sync_data = data.unsync_data.sync(epoch, &self.context);
+        let sync_data = data.unsync_data.sync(epoch, &self.context, table_ids);
 
         let SyncDataBuilder {
             spilled_data:

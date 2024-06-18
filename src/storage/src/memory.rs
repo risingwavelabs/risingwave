@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::{Bound, RangeBounds};
 use std::sync::{Arc, LazyLock};
@@ -745,7 +745,7 @@ impl<R: RangeKv> StateStore for RangeKvStateStore<R> {
     }
 
     #[allow(clippy::unused_async)]
-    fn sync(&self, _epoch: u64) -> impl SyncFuture {
+    fn sync(&self, _epoch: u64, _table_ids: HashSet<TableId>) -> impl SyncFuture {
         let result = self.inner.flush();
         // memory backend doesn't need to push to S3, so this is a no-op
         async move {

@@ -505,6 +505,7 @@ impl HummockEventHandler {
         &mut self,
         new_sync_epoch: HummockEpoch,
         sync_result_sender: oneshot::Sender<HummockResult<SyncResult>>,
+        table_ids: HashSet<TableId>,
     ) {
         debug!(
             "awaiting for epoch to be synced: {}, max_synced_epoch: {}",
@@ -512,7 +513,7 @@ impl HummockEventHandler {
             self.uploader.max_synced_epoch()
         );
         self.uploader
-            .start_sync_epoch(new_sync_epoch, sync_result_sender);
+            .start_sync_epoch(new_sync_epoch, sync_result_sender, table_ids);
     }
 
     async fn handle_clear(&mut self, notifier: oneshot::Sender<()>, prev_epoch: u64) {
@@ -774,8 +775,9 @@ impl HummockEventHandler {
             HummockEvent::SyncEpoch {
                 new_sync_epoch,
                 sync_result_sender,
+                table_ids,
             } => {
-                self.handle_sync_epoch(new_sync_epoch, sync_result_sender);
+                self.handle_sync_epoch(new_sync_epoch, sync_result_sender, table_ids);
             }
             HummockEvent::Clear(_, _) => {
                 unreachable!("clear is handled in separated async context")
