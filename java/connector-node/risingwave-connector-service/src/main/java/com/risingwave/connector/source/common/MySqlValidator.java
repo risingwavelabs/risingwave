@@ -187,17 +187,18 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
             stmt.setString(1, dbName);
             stmt.setString(2, tableName);
 
-            // Field name in lower case -> data type
-            var schema = new HashMap<String, String>();
+            // Field name in lower case -> data type, because MySQL column name is case-insensitive
+            // https://dev.mysql.com/doc/refman/5.7/en/identifier-case-sensitivity.html
+            var upstreamSchema = new HashMap<String, String>();
             var pkFields = new HashSet<String>();
             var res = stmt.executeQuery();
             while (res.next()) {
-                var field = res.getString(1);
+                var fieldName = res.getString(1).toLowerCase();
                 var dataType = res.getString(2);
                 var key = res.getString(3);
-                schema.put(field, dataType);
+                upstreamSchema.put(fieldName, dataType);
                 if (key.equalsIgnoreCase("PRI")) {
-                    pkFields.add(field);
+                    pkFields.add(fieldName);
                 }
             }
 
@@ -207,7 +208,7 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
                 if (e.getKey().startsWith(ValidatorUtils.INTERNAL_COLUMN_PREFIX)) {
                     continue;
                 }
-                var dataType = schema.get(e.getKey());
+                var dataType = upstreamSchema.get(e.getKey().toLowerCase());
                 if (dataType == null) {
                     throw ValidatorUtils.invalidArgument(
                             "Column '" + e.getKey() + "' not found in the upstream database");
