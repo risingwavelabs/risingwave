@@ -97,7 +97,8 @@ impl ValueRowSerdeNew for ColumnAwareSerde {
             }
         }
 
-        let column_with_default = table_columns.iter().enumerate().filter_map(|(i, c)| {
+        let partial_columns = value_indices.iter().map(|idx| &table_columns[*idx]);
+        let column_with_default = partial_columns.enumerate().filter_map(|(i, c)| {
             if let Some(GeneratedOrDefaultColumn::DefaultColumn(DefaultColumnDesc {
                 snapshot_value,
                 expr,
@@ -305,5 +306,60 @@ mod tests {
 
         // drop all columns is now allowed
         assert!(try_drop_invalid_columns(&row_bytes, &HashSet::new()).is_none());
+    }
+
+    #[test]
+    fn test_deserialize_partial_columns() {
+        let column_ids = vec![ColumnId::new(0), ColumnId::new(1), ColumnId::new(2)];
+        let row1 = OwnedRow::new(vec![
+            Some(Int16(5)),
+            Some(Utf8("abc".into())),
+            Some(Utf8("ABC".into())),
+        ]);
+        let serializer = column_aware_row_encoding::Serializer::new(&column_ids);
+        let row_bytes = serializer.serialize(row1);
+
+        let deserializer = column_aware_row_encoding::Deserializer::new(
+            &[ColumnId::new(2), ColumnId::new(0)],
+            Arc::from(vec![DataType::Varchar, DataType::Int16].into_boxed_slice()),
+            std::iter::empty(),
+        );
+        let decoded = deserializer.deserialize(&row_bytes[..]);
+        assert_eq!(
+            decoded.unwrap(),
+            vec![Some(Utf8("ABC".into())), Some(Int16(5))]
+        );
+    }
+
+    #[test]
+    fn test_deserialize_partial_columns_with_default_columns() {
+        let column_ids = vec![ColumnId::new(0), ColumnId::new(1), ColumnId::new(2)];
+        let row1 = OwnedRow::new(vec![
+            Some(Int16(5)),
+            Some(Utf8("abc".into())),
+            Some(Utf8("ABC".into())),
+        ]);
+        let serializer = column_aware_row_encoding::Serializer::new(&column_ids);
+        let row_bytes = serializer.serialize(row1);
+
+        // default column of ColumnId::new(3)
+        let default_columns = vec![(1, Some(Utf8("new column".into())))];
+
+        let deserializer = column_aware_row_encoding::Deserializer::new(
+            &[ColumnId::new(2), ColumnId::new(3), ColumnId::new(0)],
+            Arc::from(
+                vec![DataType::Varchar, DataType::Varchar, DataType::Int16].into_boxed_slice(),
+            ),
+            default_columns.into_iter(),
+        );
+        let decoded = deserializer.deserialize(&row_bytes[..]);
+        assert_eq!(
+            decoded.unwrap(),
+            vec![
+                Some(Utf8("ABC".into())),
+                Some(Utf8("new column".into())),
+                Some(Int16(5))
+            ]
+        );
     }
 }
