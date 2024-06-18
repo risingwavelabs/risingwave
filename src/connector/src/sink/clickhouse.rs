@@ -107,7 +107,9 @@ impl ClickHouseEngine {
     pub fn get_delete_col(&self) -> Option<String> {
         match self {
             ClickHouseEngine::ReplacingMergeTree(Some(delete_col)) => Some(delete_col.to_string()),
-            ClickHouseEngine::ReplicatedReplacingMergeTree(Some(delete_col)) => Some(delete_col.to_string()),
+            ClickHouseEngine::ReplicatedReplacingMergeTree(Some(delete_col)) => {
+                Some(delete_col.to_string())
+            }
             _ => None,
         }
     }
