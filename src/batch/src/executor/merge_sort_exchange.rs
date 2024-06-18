@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::Deref;
 use std::sync::Arc;
 
 use futures_async_stream::try_stream;
@@ -26,7 +25,7 @@ use risingwave_pb::batch_plan::PbExchangeSource;
 use crate::error::{BatchError, Result};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, CreateSource, DefaultCreateSource,
-    Executor, ExecutorBuilder, WrapStreamExecutor, MergeSortExecutor,
+    Executor, ExecutorBuilder, MergeSortExecutor, WrapStreamExecutor,
 };
 use crate::task::{BatchTaskContext, TaskId};
 
@@ -111,7 +110,7 @@ impl<CS: 'static + Send + CreateSource, C: BatchTaskContext> MergeSortExchangeEx
 
         let merge_sort_executor = Box::new(MergeSortExecutor::new(
             sources,
-            self.column_orders.deref().clone(),
+            self.column_orders.clone(),
             self.schema,
             format!("MergeSortExecutor{}", &self.task_id.task_id),
             self.chunk_size,
