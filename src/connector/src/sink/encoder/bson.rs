@@ -142,7 +142,7 @@ fn datum_to_bson(field: &Field, datum: DatumRef<'_>) -> Bson {
         (DataType::Date, ScalarRefImpl::Date(v)) => Bson::String(v.to_string()),
         (DataType::Time, ScalarRefImpl::Time(v)) => Bson::String(v.to_string()),
         (DataType::Timestamp, ScalarRefImpl::Timestamp(v)) => {
-            Bson::DateTime(DateTime::from_millis(v.0.timestamp_millis()))
+            Bson::DateTime(DateTime::from_millis(v.0.and_utc().timestamp_millis()))
         }
         (DataType::Timestamptz, ScalarRefImpl::Timestamptz(v)) => {
             Bson::DateTime(DateTime::from_millis(v.timestamp_millis()))
