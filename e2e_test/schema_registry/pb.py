@@ -33,7 +33,7 @@ def get_user_with_more_fields(i):
         city="City_{}".format(i),
         gender=user_pb2.MALE if i % 2 == 0 else user_pb2.FEMALE,
         sc=SourceContext(file_name="source/context_{:03}.proto".format(i)),
-        age=i,
+        age=100 + i,
     )
 
 def send_to_kafka(producer_conf, schema_registry_conf, topic, num_records, get_user_fn, pb_message):

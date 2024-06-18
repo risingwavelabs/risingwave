@@ -502,11 +502,11 @@ pub(crate) async fn bind_columns_from_source(
                 *i += 1;
             }
             for col in columns {
-                check_col(&col.column_desc, &mut i, columns);
                 for nested_col in &col.column_desc.field_descs {
                     // What's the usage of struct fields' column IDs?
                     check_col(nested_col, &mut i, columns);
                 }
+                check_col(&col.column_desc, &mut i, columns);
             }
         }
     }

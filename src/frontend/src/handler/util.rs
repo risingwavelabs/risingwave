@@ -151,7 +151,15 @@ fn to_pg_rows(
     session_data: &StaticSessionData,
 ) -> RwResult<Vec<Row>> {
     assert_eq!(chunk.dimension(), column_types.len());
-    debug_assert_eq!(chunk.data_types(), column_types);
+    if cfg!(debug_assertions) {
+        let chunk_data_types = chunk.data_types();
+        for (ty1, ty2) in chunk_data_types.iter().zip_eq_fast(column_types) {
+            debug_assert!(
+                ty1.equals_datatype(ty2),
+                "chunk_data_types: {chunk_data_types:?}, column_types: {column_types:?}"
+            )
+        }
+    }
 
     chunk
         .rows()
