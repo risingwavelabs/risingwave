@@ -20,3 +20,6 @@ SELECT id from iceberg_source ORDER by id;
 3
 4
 5
+
+statement ok
+DROP SOURCE iceberg_source
