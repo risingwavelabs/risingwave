@@ -57,9 +57,25 @@ pub const STARROCKS_SINK: &str = "starrocks";
 const STARROCK_MYSQL_PREFER_SOCKET: &str = "false";
 const STARROCK_MYSQL_MAX_ALLOWED_PACKET: usize = 1024;
 const STARROCK_MYSQL_WAIT_TIMEOUT: usize = 28800;
+const STARROCKS_UPSERT_MODELS: [&str; 3] = ["PRIMARY_KEYS", "UNIQUE_KEYS", "AGG_KEYS"];
+const STARROCKS_MODEL_PRIMARY_KEY: &str = "PRIMARY_KEYS";
+const STARROCKS_DELETE_SIGN_UPSERT: &str = "0";
+const STARROCKS_DELETE_SIGN_DELETE: &str = "1";
 
 const fn _default_stream_load_http_timeout_ms() -> u64 {
     30 * 1000
+}
+
+fn _default_delete_sign_field() -> String {
+    STARROCKS_DELETE_SIGN.to_string()
+}
+
+fn _default_delete_sign_upsert() -> String {
+    STARROCKS_DELETE_SIGN_UPSERT.to_string()
+}
+
+fn _default_delete_sign_delete() -> String {
+    STARROCKS_DELETE_SIGN_DELETE.to_string()
 }
 
 #[derive(Deserialize, Debug, Clone, WithOptions)]
@@ -112,6 +128,30 @@ pub struct StarrocksConfig {
     /// Enable partial update
     #[serde(rename = "starrocks.partial_update")]
     pub partial_update: Option<String>,
+
+    /// Specify the name of the `StarRocks` delete sign field used in upsert mode; defaults to `__op`.
+    /// this option is available only when the `StarRocks` table model is `Unique` or `Aggregation`.
+    #[serde(
+        rename = "starrocks.stream_load.delete_sign.field",
+        default = "_default_delete_sign_field"
+    )]
+    pub delete_sign_field: String,
+
+    /// Specify the value that signifies the upsert operation; defaults to `0`.
+    /// this option is available only when the `StarRocks` table model is `Unique` or `Aggregation`.
+    #[serde(
+        rename = "starrocks.stream_load.delete_sign.upsert",
+        default = "_default_delete_sign_upsert"
+    )]
+    pub delete_sign_upsert: String,
+
+    /// Specify the value that signifies the delete operation; defaults to `1`.
+    /// this option is available only when the `StarRocks` table model is `Unique` or `Aggregation`.
+    #[serde(
+        rename = "starrocks.stream_load.delete_sign.delete",
+        default = "_default_delete_sign_delete"
+    )]
+    pub delete_sign_delete: String,
 
     pub r#type: String, // accept "append-only" or "upsert"
 }
@@ -297,10 +337,35 @@ impl Sink for StarrocksSink {
         .await?;
         let (read_model, pks) = client.get_pk_from_starrocks().await?;
 
-        if !self.is_append_only && read_model.ne("PRIMARY_KEYS") {
-            return Err(SinkError::Config(anyhow!(
-                "If you want to use upsert, please set the keysType of starrocks to PRIMARY_KEY"
-            )));
+        let starrocks_columns_desc = client.get_columns_from_starrocks().await?;
+
+        if !self.is_append_only {
+            if !STARROCKS_UPSERT_MODELS.contains(&read_model.as_str()) {
+                return Err(SinkError::Config(anyhow!(
+                    "If you want to use upsert, please set the keysType of starrocks to one of [PRIMARY_KEYS, UNIQUE_KEYS, AGG_KEYS]"
+                )));
+            }
+            // if the `StarRocks` table is PRIMARY KEY, we cannot allow users specify the options related to delete sign, instead,
+            // these options must remain at their default values, which align the upsert rules in `StarRocks`.
+            // see https://docs.starrocks.io/docs/loading/Load_to_Primary_Key_tables/#upsert-and-delete
+            if read_model == STARROCKS_MODEL_PRIMARY_KEY
+                && (self.config.delete_sign_field != STARROCKS_DELETE_SIGN
+                    || self.config.delete_sign_upsert != STARROCKS_DELETE_SIGN_UPSERT
+                    || self.config.delete_sign_delete != STARROCKS_DELETE_SIGN_DELETE)
+            {
+                return Err(SinkError::Config(anyhow!(
+                    "options related to delete sign cannot be specified when the starrocks table model is PRIMARY KEY",
+                )));
+            }
+
+            if read_model != STARROCKS_MODEL_PRIMARY_KEY
+                && !starrocks_columns_desc.contains_key(&self.config.delete_sign_field)
+            {
+                return Err(SinkError::Config(anyhow!(
+                    "delete sign field {} not found in starrocks table",
+                    self.config.delete_sign_field
+                )));
+            }
         }
 
         for (index, filed) in self.schema.fields().iter().enumerate() {
@@ -311,8 +376,6 @@ impl Sink for StarrocksSink {
                 )));
             }
         }
-
-        let starrocks_columns_desc = client.get_columns_from_starrocks().await?;
 
         self.check_column_name_and_type(starrocks_columns_desc)?;
         Ok(())
@@ -411,17 +474,27 @@ impl StarrocksSinkWriter {
         is_append_only: bool,
         executor_id: u64,
     ) -> Result<Self> {
-        let mut fields_name = schema.names_str();
+        let mut field_names = schema.names_str();
         if !is_append_only {
-            fields_name.push(STARROCKS_DELETE_SIGN);
+            field_names.push(&config.delete_sign_field);
         };
+        // we should quote field names in `MySQL` style to prevent `StarRocks` from rejecting the request due to
+        // a field name being a reserved word. For example, `order`, 'from`, etc.
+        let field_names = field_names
+            .into_iter()
+            .map(|name| format!("`{}`", name))
+            .collect::<Vec<String>>();
+        let field_names_str = field_names
+            .iter()
+            .map(|name| name.as_str())
+            .collect::<Vec<&str>>();
 
         let header = HeaderBuilder::new()
             .add_common_header()
             .set_user_password(config.common.user.clone(), config.common.password.clone())
             .add_json_format()
             .set_partial_update(config.partial_update.clone())
-            .set_columns_name(fields_name)
+            .set_columns_name(field_names_str)
             .set_db(config.common.database.clone())
             .set_table(config.common.table.clone())
             .build();
@@ -468,8 +541,8 @@ impl StarrocksSinkWriter {
                 Op::Insert => {
                     let mut row_json_value = self.row_encoder.encode(row)?;
                     row_json_value.insert(
-                        STARROCKS_DELETE_SIGN.to_string(),
-                        Value::String("0".to_string()),
+                        self.config.delete_sign_field.clone(),
+                        Value::String(self.config.delete_sign_upsert.clone()),
                     );
                     let row_json_string = serde_json::to_string(&row_json_value).map_err(|e| {
                         SinkError::Starrocks(format!("Json derialize error: {}", e.as_report()))
@@ -485,8 +558,8 @@ impl StarrocksSinkWriter {
                 Op::Delete => {
                     let mut row_json_value = self.row_encoder.encode(row)?;
                     row_json_value.insert(
-                        STARROCKS_DELETE_SIGN.to_string(),
-                        Value::String("1".to_string()),
+                        self.config.delete_sign_field.clone(),
+                        Value::String(self.config.delete_sign_delete.clone()),
                     );
                     let row_json_string = serde_json::to_string(&row_json_value).map_err(|e| {
                         SinkError::Starrocks(format!("Json derialize error: {}", e.as_report()))
@@ -503,8 +576,8 @@ impl StarrocksSinkWriter {
                 Op::UpdateInsert => {
                     let mut row_json_value = self.row_encoder.encode(row)?;
                     row_json_value.insert(
-                        STARROCKS_DELETE_SIGN.to_string(),
-                        Value::String("0".to_string()),
+                        self.config.delete_sign_field.clone(),
+                        Value::String(self.config.delete_sign_upsert.clone()),
                     );
                     let row_json_string = serde_json::to_string(&row_json_value).map_err(|e| {
                         SinkError::Starrocks(format!("Json derialize error: {}", e.as_report()))
@@ -673,12 +746,19 @@ impl StarrocksSchemaClient {
     }
 
     pub async fn get_pk_from_starrocks(&mut self) -> Result<(String, String)> {
-        let query = format!("select table_model, primary_key from information_schema.tables_config where table_name = {:?} and table_schema = {:?};",self.table,self.db);
+        let query = format!("select table_model, primary_key, sort_key from information_schema.tables_config where table_name = {:?} and table_schema = {:?};",self.table,self.db);
         let table_mode_pk: (String, String) = self
             .conn
-            .query_map(query, |(table_model, primary_key)| {
-                (table_model, primary_key)
-            })
+            .query_map(
+                query,
+                |(table_model, primary_key, sort_key): (String, String, String)| match table_model
+                    .as_str()
+                {
+                    // we obtain the primary key of aggregation model from the sort_key field
+                    "AGG_KEYS" => (table_model, sort_key),
+                    _ => (table_model, primary_key),
+                },
+            )
             .await
             .map_err(|err| SinkError::DorisStarrocksConnect(anyhow!(err)))?
             .first()
@@ -729,6 +809,8 @@ pub struct StarrocksInsertResultResponse {
     pub stream_load_plan_time_ms: Option<i32>,
     #[serde(rename = "ExistingJobStatus")]
     pub existing_job_status: Option<String>,
+    #[serde(rename = "ErrorURL")]
+    pub error_url: Option<String>,
 }
 
 pub struct StarrocksClient {
@@ -751,8 +833,10 @@ impl StarrocksClient {
 
         if !STARROCKS_SUCCESS_STATUS.contains(&res.status.as_str()) {
             return Err(SinkError::DorisStarrocksConnect(anyhow::anyhow!(
-                "Insert error: {:?}",
+                "Insert error: {}, {}, {:?}",
+                res.status,
                 res.message,
+                res.error_url,
             )));
         };
         Ok(res)
@@ -773,8 +857,10 @@ impl StarrocksTxnClient {
             .map_err(|err| SinkError::DorisStarrocksConnect(anyhow!(err)))?;
         if !STARROCKS_SUCCESS_STATUS.contains(&res.status.as_str()) {
             return Err(SinkError::DorisStarrocksConnect(anyhow::anyhow!(
-                "transaction error: {:?}",
+                "transaction error: {}, {}, {:?}",
+                res.status,
                 res.message,
+                res.error_url,
             )));
         }
         res.label.ok_or_else(|| {
