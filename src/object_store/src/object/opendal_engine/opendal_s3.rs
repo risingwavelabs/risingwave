@@ -95,11 +95,11 @@ impl OpendalObjectStore {
     pub fn new_http_client(config: &ObjectStoreConfig) -> ObjectResult<HttpClient> {
         let mut client_builder = reqwest::ClientBuilder::new();
 
-        if let Some(keepalive_ms) = config.s3.object_store_keepalive_ms.as_ref() {
+        if let Some(keepalive_ms) = config.s3.keepalive_ms.as_ref() {
             client_builder = client_builder.tcp_keepalive(Duration::from_millis(*keepalive_ms));
         }
 
-        if let Some(nodelay) = config.s3.object_store_nodelay.as_ref() {
+        if let Some(nodelay) = config.s3.nodelay.as_ref() {
             client_builder = client_builder.tcp_nodelay(*nodelay);
         }
 
