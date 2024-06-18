@@ -219,7 +219,7 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
                 }
             }
 
-            if (!ValidatorUtils.isPrimaryKeyMatch(tableSchema, pkFields)) {
+            if (!isPrimaryKeyMatch(tableSchema, pkFields)) {
                 throw ValidatorUtils.invalidArgument("Primary key mismatch");
             }
         }
@@ -230,6 +230,18 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
         if (null != jdbcConnection) {
             jdbcConnection.close();
         }
+    }
+
+    private boolean isPrimaryKeyMatch(TableSchema sourceSchema, Set<String> pkFields) {
+        if (sourceSchema.getPrimaryKeys().size() != pkFields.size()) {
+            return false;
+        }
+        for (var colName : sourceSchema.getPrimaryKeys()) {
+            if (!pkFields.contains(colName.toLowerCase())) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private boolean isDataTypeCompatible(String mysqlDataType, Data.DataType.TypeName typeName) {
