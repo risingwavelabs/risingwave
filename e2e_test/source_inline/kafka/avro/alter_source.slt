@@ -1,0 +1,129 @@
+control substitution on
+
+# https://github.com/risingwavelabs/risingwave/issues/16486
+
+# cleanup
+system ok
+rpk topic delete 'avro_alter_source_test' || true; \\
+(rpk sr subject delete 'avro_alter_source_test-value' && rpk sr subject delete 'avro_alter_source_test-value' --permanent) || true;
+
+# create topic and sr subject
+system ok
+rpk topic create 'avro_alter_source_test'
+
+system ok
+echo '{"type":"record","name":"Root","fields":[{"name":"foo","type":"string"}]}' | jq '{"schema": tojson}' \\
+| curl -X POST -H 'content-type:application/json' -d @- '${RISEDEV_SCHEMA_REGISTRY_URL}/subjects/avro_alter_source_test-value/versions'
+
+statement ok
+create source s
+WITH (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'avro_alter_source_test'
+)
+FORMAT PLAIN ENCODE AVRO (
+    schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}'
+);
+
+# create a new version of schema and produce a message
+system ok
+echo '{"type":"record","name":"Root","fields":[{"name":"bar","type":"int","default":0},{"name":"foo","type":"string"}]}' | jq '{"schema": tojson}' \\
+| curl -X POST -H 'content-type:application/json' -d @- '${RISEDEV_SCHEMA_REGISTRY_URL}/subjects/avro_alter_source_test-value/versions'
+
+system ok
+echo '{"foo":"ABC", "bar":1}' | rpk topic produce --schema-id=topic avro_alter_source_test
+
+query ?
+select * from s
+----
+ABC
+
+statement error
+alter source s format plain encode json;
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Feature is not yet implemented: the original definition is FORMAT Plain ENCODE Avro, and altering them is not supported yet
+No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+
+
+statement ok
+alter source s format plain encode avro (schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}');
+
+
+query ?
+explain (verbose, trace) select * from s;
+----
+Begin:
+(empty)
+LogicalProject { exprs: [foo, bar] }
+└─LogicalSource { source: s, columns: [foo, _rw_kafka_timestamp, _row_id, bar] }
+(empty)
+Rewrite Source For Batch:
+(empty)
+apply SourceToKafkaScanRule 1 time(s)
+(empty)
+LogicalProject { exprs: [foo, bar] }
+└─LogicalKafkaScan { source: s, columns: [foo, _rw_kafka_timestamp, _row_id, bar], time_range: (Unbounded, Unbounded) }
+(empty)
+Predicate Push Down:
+(empty)
+LogicalProject { exprs: [foo, bar] }
+└─LogicalKafkaScan { source: s, columns: [foo, _rw_kafka_timestamp, _row_id, bar], time_range: (Unbounded, Unbounded) }
+(empty)
+Prune Columns:
+(empty)
+LogicalProject { exprs: [foo, bar] }
+└─LogicalProject { exprs: [foo, bar] }
+  └─LogicalKafkaScan { source: s, columns: [foo, _rw_kafka_timestamp, _row_id, bar], time_range: (Unbounded, Unbounded) }
+(empty)
+Project Remove:
+(empty)
+apply ProjectMergeRule 1 time(s)
+(empty)
+LogicalProject { exprs: [foo, bar] }
+└─LogicalKafkaScan { source: s, columns: [foo, _rw_kafka_timestamp, _row_id, bar], time_range: (Unbounded, Unbounded) }
+(empty)
+Const eval exprs:
+(empty)
+LogicalProject { exprs: [foo, bar] }
+└─LogicalKafkaScan { source: s, columns: [foo, _rw_kafka_timestamp, _row_id, bar], time_range: (Unbounded, Unbounded) }
+(empty)
+To Batch Plan:
+(empty)
+BatchProject { exprs: [foo, bar] }
+└─BatchKafkaScan { source: s, columns: [foo, _rw_kafka_timestamp, _row_id, bar], filter: (None, None) }
+(empty)
+Inline Session Timezone:
+(empty)
+BatchProject { exprs: [foo, bar] }
+└─BatchKafkaScan { source: s, columns: [foo, _rw_kafka_timestamp, _row_id, bar], filter: (None, None) }
+(empty)
+To Batch Physical Plan:
+(empty)
+BatchProject { exprs: [foo, bar] }
+└─BatchKafkaScan { source: s, columns: [foo, _rw_kafka_timestamp, _row_id, bar], filter: (None, None) }
+(empty)
+To Batch Distributed Plan:
+(empty)
+BatchExchange { order: [], dist: Single }
+└─BatchProject { exprs: [foo, bar] }
+  └─BatchKafkaScan { source: s, columns: [foo, _rw_kafka_timestamp, _row_id, bar], filter: (None, None) }
+(empty)
+
+# query error
+# select * from s
+# ----
+# db error: ERROR: Panicked when handling the request: assertion `left == right` failed
+#   left: [Varchar, Varchar]
+#  right: [Varchar, Int32]
+# This is a bug. We would appreciate a bug report at:
+#   https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Fbug&template=bug_report.yml
+
+statement ok
+create materialized view mv as select * from s;
+
+
+# statement ok
+# drop source s;
