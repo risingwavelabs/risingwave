@@ -2378,19 +2378,18 @@ mod tests {
             )
             .unwrap();
 
-            assert_eq!(config.storage.object_store.set_atomic_write_dir, true);
+            assert!(config.storage.object_store.set_atomic_write_dir);
             assert_eq!(config.storage.object_store.s3.keepalive_ms, Some(1));
             assert_eq!(config.storage.object_store.s3.send_buffer_size, Some(1));
             assert_eq!(config.storage.object_store.s3.recv_buffer_size, Some(1));
             assert_eq!(config.storage.object_store.s3.nodelay, Some(false));
-            assert_eq!(
+            assert!(
                 config
                     .storage
                     .object_store
                     .s3
                     .developer
-                    .retry_unknown_service_error,
-                true
+                    .retry_unknown_service_error
             );
             assert_eq!(
                 config
@@ -2425,19 +2424,18 @@ mod tests {
             )
             .unwrap();
 
-            assert_eq!(config.storage.object_store.set_atomic_write_dir, true);
+            assert!(config.storage.object_store.set_atomic_write_dir);
             assert_eq!(config.storage.object_store.s3.keepalive_ms, Some(1));
             assert_eq!(config.storage.object_store.s3.send_buffer_size, Some(1));
             assert_eq!(config.storage.object_store.s3.recv_buffer_size, Some(1));
             assert_eq!(config.storage.object_store.s3.nodelay, Some(false));
-            assert_eq!(
+            assert!(
                 config
                     .storage
                     .object_store
                     .s3
                     .developer
-                    .retry_unknown_service_error,
-                true
+                    .retry_unknown_service_error
             );
             assert_eq!(
                 config
