@@ -150,6 +150,11 @@ impl ObjectStore for OpendalObjectStore {
             ObjectError::internal("opendal streaming read error")
         ));
         let range: Range<u64> = (range.start as u64)..(range.end as u64);
+
+        // The layer specified first will be executed first.
+        // `TimeoutLayer` must be specified before `RetryLayer`.
+        // Otherwise, it will lead to bad state inside OpenDAL and panic.
+        // See https://docs.rs/opendal/latest/opendal/layers/struct.RetryLayer.html#panics
         let reader = self
             .op
             .clone()
@@ -321,6 +326,11 @@ impl OpendalStreamingUploader {
         media_type: &'static str,
     ) -> ObjectResult<Self> {
         let monitored_execute = OpendalStreamingUploaderExecute::new(metrics, media_type);
+
+        // The layer specified first will be executed first.
+        // `TimeoutLayer` must be specified before `RetryLayer`.
+        // Otherwise, it will lead to bad state inside OpenDAL and panic.
+        // See https://docs.rs/opendal/latest/opendal/layers/struct.RetryLayer.html#panics
         let writer = op
             .clone()
             .layer(TimeoutLayer::new().with_io_timeout(Duration::from_millis(
