@@ -1045,6 +1045,14 @@ pub struct ObjectStoreConfig {
     /// Some special configuration of S3 Backend
     #[serde(default)]
     pub s3: S3ObjectStoreConfig,
+
+    // TODO: the following field will be deprecated after opendal is stablized
+    #[serde(default = "default::object_store_config::opendal_upload_concurrency")]
+    pub opendal_upload_concurrency: usize,
+
+    // TODO: the following field will be deprecated after opendal is stablized
+    #[serde(default)]
+    pub opendal_writer_abort_on_err: bool,
 }
 
 impl ObjectStoreConfig {
@@ -1106,14 +1114,6 @@ pub struct S3ObjectStoreDeveloperConfig {
     // TODO: the following field will be deprecated after opendal is stablized
     #[serde(default = "default::object_store_config::s3::developer::use_opendal")]
     pub use_opendal: bool,
-
-    // TODO: the following field will be deprecated after opendal is stablized
-    #[serde(default = "default::object_store_config::s3::developer::upload_concurrency")]
-    pub upload_concurrency: usize,
-
-    // TODO: the following field will be deprecated after opendal is stablized
-    #[serde(default)]
-    pub writer_abort_on_err: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
@@ -2013,6 +2013,10 @@ pub mod default {
             DEFAULT_REQ_MAX_RETRY_ATTEMPTS
         }
 
+        pub fn opendal_upload_concurrency() -> usize {
+            8
+        }
+
         pub mod s3 {
             const DEFAULT_IDENTITY_RESOLUTION_TIMEOUT_S: u64 = 5;
 
@@ -2057,10 +2061,6 @@ pub mod default {
                     // 1. Maintain compatibility so that there is no behavior change in cluster with RW_USE_OPENDAL_FOR_S3 set.
                     // 2. Change the default behavior to use opendal for s3 if RW_USE_OPENDAL_FOR_S3 is not set.
                     env_var_is_true_or(RW_USE_OPENDAL_FOR_S3, false)
-                }
-
-                pub fn upload_concurrency() -> usize {
-                    8
                 }
             }
         }

@@ -345,7 +345,7 @@ impl OpendalStreamingUploader {
                     .with_jitter(),
             )
             .writer_with(&path)
-            .concurrent(config.s3.developer.upload_concurrency)
+            .concurrent(config.opendal_upload_concurrency)
             .executor(Executor::with(monitored_execute))
             .await?;
         Ok(Self {
@@ -353,7 +353,7 @@ impl OpendalStreamingUploader {
             buf: vec![],
             not_uploaded_len: 0,
             is_valid: true,
-            abort_on_err: config.s3.developer.writer_abort_on_err,
+            abort_on_err: config.opendal_writer_abort_on_err,
         })
     }
 
