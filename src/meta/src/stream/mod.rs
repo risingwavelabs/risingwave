@@ -13,6 +13,7 @@
 // limitations under the License.
 
 mod scale;
+mod scale_prev;
 mod sink;
 mod source_manager;
 mod stream_graph;
@@ -20,7 +21,6 @@ mod stream_manager;
 #[cfg(test)]
 mod test_fragmenter;
 mod test_scale;
-mod scale_prev;
 
 use std::collections::HashMap;
 

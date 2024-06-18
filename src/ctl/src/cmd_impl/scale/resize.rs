@@ -360,13 +360,15 @@ pub async fn resize(ctl_ctx: &CtlContext, scale_ctx: ScaleCommandContext) -> any
             }
         }
 
-        let (success, next_revision) =
-            match meta_client.reschedule(reschedules, revision, false).await {
-                Ok(response) => response,
-                Err(e) => {
-                    fail!("Failed to execute plan: {}", e.as_report());
-                }
-            };
+        let (success, next_revision) = match meta_client
+            .reschedule(HashMap::new(), revision, false)
+            .await
+        {
+            Ok(response) => response,
+            Err(e) => {
+                fail!("Failed to execute plan: {}", e.as_report());
+            }
+        };
 
         if !success {
             fail!("Failed to execute plan, current revision is {}", revision);

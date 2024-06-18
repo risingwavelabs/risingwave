@@ -499,11 +499,17 @@ message Reschedule {
   repeated uint32 removed_parallel_units = 2;
 }
 
+message WorkerReschedule {
+  map<uint32, uint32> increased_actor_count = 1;
+  map<uint32, uint32> decreased_actor_count = 2;
+}
+
 message RescheduleRequest {
-  // reschedule plan for each fragment
-  map<uint32, Reschedule> reschedules = 1;
+  reserved "reschedules";
+  reserved 1;
   uint64 revision = 2;
   bool resolve_no_shuffle_upstream = 3;
+  map<uint32, WorkerReschedule> worker_reschedules = 4;
 }
 
 message RescheduleResponse {

@@ -20,16 +20,13 @@ use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::TableId;
-use risingwave_common::hash::{
-    ActorMapping, ParallelUnitId, ParallelUnitMapping, WorkerSlotId, WorkerSlotMapping,
-};
+use risingwave_common::hash::{ActorMapping, ParallelUnitId, WorkerSlotId, WorkerSlotMapping};
 use risingwave_common::util::stream_graph_visitor::{
     visit_stream_node, visit_stream_node_cont, visit_stream_node_cont_mut,
 };
 use risingwave_common::util::worker_util::WorkerNodeId;
 use risingwave_connector::source::SplitImpl;
 use risingwave_meta_model_v2::SourceId;
-use risingwave_pb::common::{PbParallelUnitMapping, PbWorkerSlotMapping};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::{ActorStatus, Fragment, State};
@@ -1415,23 +1412,6 @@ impl FragmentManager {
         }
 
         Ok(())
-    }
-
-    fn convert_mapping(
-        actor_status: &BTreeMap<ActorId, ActorStatus>,
-        vnode_mapping: &PbParallelUnitMapping,
-    ) -> PbWorkerSlotMapping {
-        let parallel_unit_to_worker = actor_status
-            .values()
-            .map(|actor_status| {
-                let parallel_unit = actor_status.get_parallel_unit().unwrap();
-                (parallel_unit.id, parallel_unit.worker_node_id)
-            })
-            .collect();
-
-        ParallelUnitMapping::from_protobuf(vnode_mapping)
-            .to_worker_slot(&parallel_unit_to_worker)
-            .to_protobuf()
     }
 
     pub async fn table_node_actors(

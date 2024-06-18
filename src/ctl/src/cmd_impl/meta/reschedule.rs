@@ -159,7 +159,7 @@ pub async fn reschedule(
     if !dry_run {
         println!("---------------------------");
         let (success, revision) = meta_client
-            .reschedule(reschedules, revision, resolve_no_shuffle)
+            .reschedule(HashMap::new(), revision, resolve_no_shuffle)
             .await?;
 
         if !success {

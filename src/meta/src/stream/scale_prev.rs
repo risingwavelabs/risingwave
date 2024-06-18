@@ -12,58 +12,37 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::{min, Ordering};
+use std::cmp::min;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::hash::{Hash, Hasher};
 use std::iter::repeat;
-use std::sync::Arc;
-use std::time::Duration;
 
 use anyhow::{anyhow, Context};
-use futures::future::{try_join_all, BoxFuture};
 use itertools::Itertools;
-use num_integer::Integer;
-use num_traits::abs;
 use risingwave_common::bail;
-use risingwave_common::buffer::{Bitmap, BitmapBuilder};
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::TableId;
-use risingwave_common::hash::{ActorMapping, ParallelUnitId, VirtualNode};
+use risingwave_common::hash::{ActorMapping, ParallelUnitId};
 use risingwave_common::util::iter_util::ZipEqDebug;
-use risingwave_meta_model_v2::StreamingParallelism;
-use risingwave_pb::common::{ActorInfo, Buffer, ParallelUnit, WorkerNode, WorkerType};
-use risingwave_pb::meta::get_reschedule_plan_request::{Policy, StableResizePolicy};
-use risingwave_pb::meta::subscribe_response::{Info, Operation};
+use risingwave_pb::common::{ActorInfo, ParallelUnit, WorkerNode};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
-use risingwave_pb::meta::table_fragments::fragment::{
-    FragmentDistributionType, PbFragmentDistributionType,
-};
-use risingwave_pb::meta::table_fragments::{self, ActorStatus, PbFragment, State};
-use risingwave_pb::meta::FragmentWorkerSlotMappings;
+use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
+use risingwave_pb::meta::table_fragments::{self, ActorStatus, State};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::{
-    Dispatcher, DispatcherType, FragmentTypeFlag, PbStreamActor, StreamNode,
-};
+use risingwave_pb::stream_plan::{DispatcherType, FragmentTypeFlag, PbStreamActor, StreamNode};
 use risingwave_pb::stream_service::build_actor_info::SubscriptionIds;
 use risingwave_pb::stream_service::BuildActorInfo;
-use thiserror_ext::AsReport;
-use tokio::sync::oneshot::Receiver;
-use tokio::sync::{oneshot, RwLock, RwLockReadGuard, RwLockWriteGuard};
-use tokio::task::JoinHandle;
-use tokio::time::{Instant, MissedTickBehavior};
 use tracing::warn;
 
-use crate::barrier::{Command, Reschedule, StreamRpcManager};
-use crate::manager::{
-    IdCategory, IdGenManagerImpl, LocalNotification, MetaSrvEnv, MetadataManager, WorkerId,
-};
+use crate::barrier::Reschedule;
+use crate::manager::{IdCategory, IdGenManagerImpl, MetadataManager, WorkerId};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments, TableParallelism};
-use crate::serving::{
-    to_deleted_fragment_worker_slot_mapping, to_fragment_worker_slot_mapping, ServingVnodeMapping,
+use crate::stream::{
+    rebalance_actor_vnode, CustomActorInfo, CustomFragmentInfo, RescheduleOptions, ScaleController,
+    TableResizePolicy,
 };
-use crate::storage::{MetaStore, MetaStoreError, MetaStoreRef, Transaction, DEFAULT_COLUMN_FAMILY};
-use crate::stream::{rebalance_actor_vnode, CustomActorInfo, CustomFragmentInfo, GlobalStreamManager, ScaleController, SourceManagerRef, RescheduleOptions, TableResizePolicy};
-use crate::{model, MetaError, MetaResult};
+use crate::MetaResult;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ParallelUnitReschedule {
@@ -1727,5 +1706,97 @@ impl ConsistentHashRing {
         }
 
         Ok(task_distribution)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const DEFAULT_SALT: u32 = 42;
+
+    #[test]
+    fn test_single_worker_capacity() {
+        let mut ch = ConsistentHashRing::new(DEFAULT_SALT);
+        ch.add_worker(1, 10);
+
+        let total_tasks = 5;
+        let task_distribution = ch.distribute_tasks(total_tasks).unwrap();
+
+        assert_eq!(task_distribution.get(&1).cloned().unwrap_or(0), 5);
+    }
+
+    #[test]
+    fn test_multiple_workers_even_distribution() {
+        let mut ch = ConsistentHashRing::new(DEFAULT_SALT);
+
+        ch.add_worker(1, 1);
+        ch.add_worker(2, 1);
+        ch.add_worker(3, 1);
+
+        let total_tasks = 3;
+        let task_distribution = ch.distribute_tasks(total_tasks).unwrap();
+
+        for id in 1..=3 {
+            assert_eq!(task_distribution.get(&id).cloned().unwrap_or(0), 1);
+        }
+    }
+
+    #[test]
+    fn test_weighted_distribution() {
+        let mut ch = ConsistentHashRing::new(DEFAULT_SALT);
+
+        ch.add_worker(1, 2);
+        ch.add_worker(2, 3);
+        ch.add_worker(3, 5);
+
+        let total_tasks = 10;
+        let task_distribution = ch.distribute_tasks(total_tasks).unwrap();
+
+        assert_eq!(task_distribution.get(&1).cloned().unwrap_or(0), 2);
+        assert_eq!(task_distribution.get(&2).cloned().unwrap_or(0), 3);
+        assert_eq!(task_distribution.get(&3).cloned().unwrap_or(0), 5);
+    }
+
+    #[test]
+    fn test_over_capacity() {
+        let mut ch = ConsistentHashRing::new(DEFAULT_SALT);
+
+        ch.add_worker(1, 1);
+        ch.add_worker(2, 2);
+        ch.add_worker(3, 3);
+
+        let total_tasks = 10; // More tasks than the total weight
+        let task_distribution = ch.distribute_tasks(total_tasks);
+
+        assert!(task_distribution.is_err());
+    }
+
+    #[test]
+    fn test_balance_distribution() {
+        for mut worker_capacity in 1..10 {
+            for workers in 3..10 {
+                let mut ring = ConsistentHashRing::new(DEFAULT_SALT);
+
+                for worker_id in 0..workers {
+                    ring.add_worker(worker_id, worker_capacity);
+                }
+
+                // Here we simulate a real situation where the actual parallelism cannot fill all the capacity.
+                // This is to ensure an average distribution, for example, when three workers with 6 parallelism are assigned 9 tasks,
+                // they should ideally get an exact distribution of 3, 3, 3 respectively.
+                if worker_capacity % 2 == 0 {
+                    worker_capacity /= 2;
+                }
+
+                let total_tasks = worker_capacity * workers;
+
+                let task_distribution = ring.distribute_tasks(total_tasks).unwrap();
+
+                for (_, v) in task_distribution {
+                    assert_eq!(v, worker_capacity);
+                }
+            }
+        }
     }
 }

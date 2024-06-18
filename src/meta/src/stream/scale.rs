@@ -51,7 +51,6 @@ use tokio::sync::oneshot::Receiver;
 use tokio::sync::{oneshot, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use tokio::task::JoinHandle;
 use tokio::time::{Instant, MissedTickBehavior};
-use tracing::warn;
 
 use crate::barrier::{Command, Reschedule, StreamRpcManager};
 use crate::manager::{
@@ -716,7 +715,7 @@ impl ScaleController {
                 .map(|a| actor_status.get(&a.actor_id).cloned().unwrap())
                 .collect::<HashSet<_>>();
 
-            for (removed, _) in decreased_actor_count {
+            for removed in decreased_actor_count.keys() {
                 if !current_worker_ids.contains(removed) {
                     bail!(
                         "no actor on the worker {} of fragment {}",
@@ -3250,97 +3249,5 @@ impl ConsistentHashRingV2 {
         }
 
         Ok(task_distribution)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    const DEFAULT_SALT: u32 = 42;
-
-    #[test]
-    fn test_single_worker_capacity() {
-        let mut ch = ConsistentHashRing::new(DEFAULT_SALT);
-        ch.add_worker(1, 10);
-
-        let total_tasks = 5;
-        let task_distribution = ch.distribute_tasks(total_tasks).unwrap();
-
-        assert_eq!(task_distribution.get(&1).cloned().unwrap_or(0), 5);
-    }
-
-    #[test]
-    fn test_multiple_workers_even_distribution() {
-        let mut ch = ConsistentHashRing::new(DEFAULT_SALT);
-
-        ch.add_worker(1, 1);
-        ch.add_worker(2, 1);
-        ch.add_worker(3, 1);
-
-        let total_tasks = 3;
-        let task_distribution = ch.distribute_tasks(total_tasks).unwrap();
-
-        for id in 1..=3 {
-            assert_eq!(task_distribution.get(&id).cloned().unwrap_or(0), 1);
-        }
-    }
-
-    #[test]
-    fn test_weighted_distribution() {
-        let mut ch = ConsistentHashRing::new(DEFAULT_SALT);
-
-        ch.add_worker(1, 2);
-        ch.add_worker(2, 3);
-        ch.add_worker(3, 5);
-
-        let total_tasks = 10;
-        let task_distribution = ch.distribute_tasks(total_tasks).unwrap();
-
-        assert_eq!(task_distribution.get(&1).cloned().unwrap_or(0), 2);
-        assert_eq!(task_distribution.get(&2).cloned().unwrap_or(0), 3);
-        assert_eq!(task_distribution.get(&3).cloned().unwrap_or(0), 5);
-    }
-
-    #[test]
-    fn test_over_capacity() {
-        let mut ch = ConsistentHashRing::new(DEFAULT_SALT);
-
-        ch.add_worker(1, 1);
-        ch.add_worker(2, 2);
-        ch.add_worker(3, 3);
-
-        let total_tasks = 10; // More tasks than the total weight
-        let task_distribution = ch.distribute_tasks(total_tasks);
-
-        assert!(task_distribution.is_err());
-    }
-
-    #[test]
-    fn test_balance_distribution() {
-        for mut worker_capacity in 1..10 {
-            for workers in 3..10 {
-                let mut ring = ConsistentHashRing::new(DEFAULT_SALT);
-
-                for worker_id in 0..workers {
-                    ring.add_worker(worker_id, worker_capacity);
-                }
-
-                // Here we simulate a real situation where the actual parallelism cannot fill all the capacity.
-                // This is to ensure an average distribution, for example, when three workers with 6 parallelism are assigned 9 tasks,
-                // they should ideally get an exact distribution of 3, 3, 3 respectively.
-                if worker_capacity % 2 == 0 {
-                    worker_capacity /= 2;
-                }
-
-                let total_tasks = worker_capacity * workers;
-
-                let task_distribution = ring.distribute_tasks(total_tasks).unwrap();
-
-                for (_, v) in task_distribution {
-                    assert_eq!(v, worker_capacity);
-                }
-            }
-        }
     }
 }

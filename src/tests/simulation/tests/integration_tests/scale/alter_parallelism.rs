@@ -48,7 +48,7 @@ async fn test_diamond_cascade_materialized_view_alter() -> Result<()> {
         ])
         .await?;
 
-    let id = fragment.id();
+    // let id = fragment.id();
 
     session.run("alter table t1 set parallelism = 1;").await?;
     sleep(Duration::from_secs(3)).await;
