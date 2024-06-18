@@ -826,6 +826,21 @@ StarrocksConfig:
     field_type: String
     comments: Enable partial update
     required: false
+  - name: starrocks.stream_load.delete_sign.field
+    field_type: String
+    comments: Specify the name of the `StarRocks` delete sign field used in upsert mode; defaults to `__op`.  this option is available only when the `StarRocks` table model is `Unique` or `Aggregation`.
+    required: false
+    default: STARROCKS_DELETE_SIGN . to_string ()
+  - name: starrocks.stream_load.delete_sign.upsert
+    field_type: String
+    comments: Specify the value that signifies the upsert operation; defaults to `0`.  this option is available only when the `StarRocks` table model is `Unique` or `Aggregation`.
+    required: false
+    default: STARROCKS_DELETE_SIGN_UPSERT . to_string ()
+  - name: starrocks.stream_load.delete_sign.delete
+    field_type: String
+    comments: Specify the value that signifies the delete operation; defaults to `1`.  this option is available only when the `StarRocks` table model is `Unique` or `Aggregation`.
+    required: false
+    default: STARROCKS_DELETE_SIGN_DELETE . to_string ()
   - name: r#type
     field_type: String
     required: true
