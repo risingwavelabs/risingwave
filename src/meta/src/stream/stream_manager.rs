@@ -479,6 +479,7 @@ impl GlobalStreamManager {
             .barrier_scheduler
             .run_command_until_collected(command)
             .await;
+        // TODO(kwannoel): Notify frontend of catalog here.
         let result: MetaResult<()> = try {
             let (_barrier_info, finish_rx) = collect_result?;
             finish_rx.await.ok().context("failed to finish command")??;
