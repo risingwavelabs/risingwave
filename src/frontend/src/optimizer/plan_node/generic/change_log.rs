@@ -23,6 +23,8 @@ use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::ColIndexMappingRewriteExt;
 use crate::OptimizerContextRef;
 
+pub const CHANGE_LOG_OP: &str = "change_log_op";
+pub const _CHANGE_LOG_ROW_ID: &str = "_change_log_row_id";
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ChangeLog<PlanRef> {
     pub input: PlanRef,
@@ -57,13 +59,13 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for ChangeLog<PlanRef> {
         if self.need_op {
             fields.push(Field::with_name(
                 risingwave_common::types::DataType::Int16,
-                "op",
+                CHANGE_LOG_OP,
             ));
         }
         if self.need_change_log_row_id {
             fields.push(Field::with_name(
                 risingwave_common::types::DataType::Serial,
-                "_change_log_row_id",
+                _CHANGE_LOG_ROW_ID,
             ));
         }
         Schema::new(fields)

@@ -25,11 +25,12 @@ use risingwave_sqlparser::ast::{
 
 use super::bind_context::{Clause, ColumnBinding};
 use super::statement::RewriteExprsRecursive;
-use super::UNNAMED_COLUMN;
+use super::{BoundShareInput, UNNAMED_COLUMN};
 use crate::binder::{Binder, Relation};
 use crate::catalog::check_valid_column_name;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{CorrelatedId, Depth, Expr as _, ExprImpl, ExprType, FunctionCall, InputRef};
+use crate::optimizer::plan_node::generic::CHANGE_LOG_OP;
 use crate::utils::group_by::GroupBy;
 
 #[derive(Debug, Clone)]
@@ -281,6 +282,17 @@ impl Binder {
                 Ok(Field::with_name(s.return_type(), name))
             })
             .collect::<Result<Vec<Field>>>()?;
+
+        if let Some(Relation::Share(bound)) = &from {
+            if matches!(bound.input, BoundShareInput::ChangeLog(_))
+                && fields.iter().filter(|&x| x.name.eq(CHANGE_LOG_OP)).count() > 1
+            {
+                return Err(ErrorCode::BindError(
+                    "The source table of changelog cannot have `change_log_op`, please rename it first".to_string()
+                )
+                .into());
+            }
+        }
 
         Ok(BoundSelect {
             distinct,

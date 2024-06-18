@@ -20,6 +20,7 @@ use crate::binder::bind_context::RecursiveUnion;
 use crate::binder::statement::RewriteExprsRecursive;
 use crate::binder::{BoundQuery, Relation, ShareId};
 use crate::error::{ErrorCode, Result};
+use crate::optimizer::plan_node::generic::{CHANGE_LOG_OP, _CHANGE_LOG_ROW_ID};
 
 /// Share a relation during binding and planning.
 /// It could be used to share a (recursive) CTE, a source, a view and so on.
@@ -73,14 +74,14 @@ impl BoundShareInput {
                             false,
                             Field::with_name(
                                 risingwave_common::types::DataType::Int16,
-                                "op".to_string(),
+                                CHANGE_LOG_OP.to_string(),
                             ),
                         ),
                         (
                             true,
                             Field::with_name(
                                 risingwave_common::types::DataType::Serial,
-                                "_changelog_row_id".to_string(),
+                                _CHANGE_LOG_ROW_ID.to_string(),
                             ),
                         ),
                     ])

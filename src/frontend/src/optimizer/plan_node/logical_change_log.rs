@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use super::expr_visitable::ExprVisitable;
-use super::generic::GenericPlanRef;
+use super::generic::{GenericPlanRef, CHANGE_LOG_OP, _CHANGE_LOG_ROW_ID};
 use super::utils::impl_distill_by_unit;
 use super::{
     gen_filter_and_pushdown, generic, ColPrunable, ColumnPruningContext, ExprRewritable, Logical,
@@ -101,10 +101,10 @@ impl ColPrunable for LogicalChangeLog {
             .iter()
             .filter_map(|a| {
                 if let Some(f) = fields.get(*a) {
-                    if f.name == "op" {
+                    if f.name == CHANGE_LOG_OP {
                         need_op = true;
                         None
-                    } else if f.name == "_change_log_row_id" {
+                    } else if f.name == _CHANGE_LOG_ROW_ID {
                         need_change_log_row_id = true;
                         None
                     } else {
