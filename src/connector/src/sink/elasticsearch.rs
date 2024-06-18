@@ -24,7 +24,7 @@ use risingwave_common::types::{JsonbVal, Scalar, ToText};
 use serde_json::Value;
 
 use super::encoder::{JsonEncoder, RowEncoder};
-use super::remote::ElasticSearchSink;
+use super::remote::{ElasticSearchSink, OpensearchSink};
 use crate::sink::{Result, Sink};
 pub const ES_OPTION_DELIMITER: &str = "delimiter";
 pub const ES_OPTION_INDEX_COLUMN: &str = "index_column";
@@ -40,7 +40,7 @@ impl StreamChunkConverter {
         pk_indices: &Vec<usize>,
         properties: &BTreeMap<String, String>,
     ) -> Result<Self> {
-        if sink_name == ElasticSearchSink::SINK_NAME {
+        if is_es_sink(sink_name) {
             let index_column = properties
                 .get(ES_OPTION_INDEX_COLUMN)
                 .cloned()
@@ -169,4 +169,8 @@ impl EsStreamChunkConverter {
     fn build_id(&self, row: RowRef<'_>) -> Result<String> {
         (self.fn_build_id)(row)
     }
+}
+
+pub fn is_es_sink(sink_name: &str) -> bool {
+    sink_name == ElasticSearchSink::SINK_NAME || sink_name == OpensearchSink::SINK_NAME
 }
