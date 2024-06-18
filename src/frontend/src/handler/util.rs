@@ -151,6 +151,7 @@ fn to_pg_rows(
     session_data: &StaticSessionData,
 ) -> RwResult<Vec<Row>> {
     assert_eq!(chunk.dimension(), column_types.len());
+    debug_assert_eq!(chunk.data_types(), column_types);
 
     chunk
         .rows()

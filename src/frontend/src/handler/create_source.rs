@@ -489,6 +489,28 @@ pub(crate) async fn bind_columns_from_source(
         }
     };
 
+    if cfg!(debug_assertions) {
+        // validate column ids
+        // Note: this just documents how it works currently. It doesn't mean whether it's reasonable.
+        if let Some(ref columns) = columns {
+            let mut i = 1;
+            fn check_col(col: &ColumnDesc, i: &mut usize, columns: &Vec<ColumnCatalog>) {
+                assert!(
+                    col.column_id.get_id() == *i as i32,
+                    "unexpected column id, col: {col:?}, i: {i}, columns: {columns:?}"
+                );
+                *i += 1;
+            }
+            for col in columns {
+                check_col(&col.column_desc, &mut i, columns);
+                for nested_col in &col.column_desc.field_descs {
+                    // What's the usage of struct fields' column IDs?
+                    check_col(nested_col, &mut i, columns);
+                }
+            }
+        }
+    }
+
     if !format_encode_options_to_consume.is_empty() {
         let err_string = format!(
             "Get unknown format_encode_options for {:?} {:?}: {}",

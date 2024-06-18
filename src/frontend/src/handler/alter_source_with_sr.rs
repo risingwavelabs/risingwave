@@ -28,6 +28,7 @@ use risingwave_sqlparser::ast::{
 };
 use risingwave_sqlparser::parser::Parser;
 
+use super::alter_source_column::max_column_id;
 use super::alter_table_column::schema_has_schema_registry;
 use super::create_source::{bind_columns_from_source, validate_compatibility};
 use super::util::SourceSchemaCompatExt;
@@ -162,7 +163,13 @@ pub async fn refresh_sr_and_get_columns_diff(
         unreachable!("source without schema registry is rejected")
     };
 
-    let added_columns = columns_minus(&columns_from_resolve_source, &original_source.columns);
+    let mut added_columns = columns_minus(&columns_from_resolve_source, &original_source.columns);
+    // The newly resolved columns' column IDs also starts from 0. They cannot be used directly.
+    let mut next_col_id = max_column_id(&original_source.columns).next();
+    for col in &mut added_columns {
+        col.column_desc.column_id = next_col_id;
+        next_col_id = next_col_id.next();
+    }
     let dropped_columns = columns_minus(&original_source.columns, &columns_from_resolve_source);
 
     Ok((source_info, added_columns, dropped_columns))

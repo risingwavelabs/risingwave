@@ -51,79 +51,21 @@ No tracking issue yet. Feel free to submit a feature request at https://github.c
 statement ok
 alter source s format plain encode avro (schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}');
 
-
-query ?
-explain (verbose, trace) select * from s;
+query ??
+select * from s
 ----
-Begin:
-(empty)
-LogicalProject { exprs: [foo, bar] }
-└─LogicalSource { source: s, columns: [foo, _rw_kafka_timestamp, _row_id, bar] }
-(empty)
-Rewrite Source For Batch:
-(empty)
-apply SourceToKafkaScanRule 1 time(s)
-(empty)
-LogicalProject { exprs: [foo, bar] }
-└─LogicalKafkaScan { source: s, columns: [foo, _rw_kafka_timestamp, _row_id, bar], time_range: (Unbounded, Unbounded) }
-(empty)
-Predicate Push Down:
-(empty)
-LogicalProject { exprs: [foo, bar] }
-└─LogicalKafkaScan { source: s, columns: [foo, _rw_kafka_timestamp, _row_id, bar], time_range: (Unbounded, Unbounded) }
-(empty)
-Prune Columns:
-(empty)
-LogicalProject { exprs: [foo, bar] }
-└─LogicalProject { exprs: [foo, bar] }
-  └─LogicalKafkaScan { source: s, columns: [foo, _rw_kafka_timestamp, _row_id, bar], time_range: (Unbounded, Unbounded) }
-(empty)
-Project Remove:
-(empty)
-apply ProjectMergeRule 1 time(s)
-(empty)
-LogicalProject { exprs: [foo, bar] }
-└─LogicalKafkaScan { source: s, columns: [foo, _rw_kafka_timestamp, _row_id, bar], time_range: (Unbounded, Unbounded) }
-(empty)
-Const eval exprs:
-(empty)
-LogicalProject { exprs: [foo, bar] }
-└─LogicalKafkaScan { source: s, columns: [foo, _rw_kafka_timestamp, _row_id, bar], time_range: (Unbounded, Unbounded) }
-(empty)
-To Batch Plan:
-(empty)
-BatchProject { exprs: [foo, bar] }
-└─BatchKafkaScan { source: s, columns: [foo, _rw_kafka_timestamp, _row_id, bar], filter: (None, None) }
-(empty)
-Inline Session Timezone:
-(empty)
-BatchProject { exprs: [foo, bar] }
-└─BatchKafkaScan { source: s, columns: [foo, _rw_kafka_timestamp, _row_id, bar], filter: (None, None) }
-(empty)
-To Batch Physical Plan:
-(empty)
-BatchProject { exprs: [foo, bar] }
-└─BatchKafkaScan { source: s, columns: [foo, _rw_kafka_timestamp, _row_id, bar], filter: (None, None) }
-(empty)
-To Batch Distributed Plan:
-(empty)
-BatchExchange { order: [], dist: Single }
-└─BatchProject { exprs: [foo, bar] }
-  └─BatchKafkaScan { source: s, columns: [foo, _rw_kafka_timestamp, _row_id, bar], filter: (None, None) }
-(empty)
-
-# query error
-# select * from s
-# ----
-# db error: ERROR: Panicked when handling the request: assertion `left == right` failed
-#   left: [Varchar, Varchar]
-#  right: [Varchar, Int32]
-# This is a bug. We would appreciate a bug report at:
-#   https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Fbug&template=bug_report.yml
+ABC	1
 
 statement ok
 create materialized view mv as select * from s;
 
 
-# statement ok
-# drop source s;
+sleep 2s
+
+query ??
+select * from mv
+----
+ABC	1
+
+statement ok
+drop source s;

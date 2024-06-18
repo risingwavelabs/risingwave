@@ -221,6 +221,19 @@ impl Binder {
         source_catalog: &SourceCatalog,
         as_of: Option<AsOf>,
     ) -> (Relation, Vec<(bool, Field)>) {
+        if cfg!(debug_assertions) {
+            let columns = &source_catalog.columns;
+            assert!(
+                columns
+                    .iter()
+                    .map(|c| c.column_id())
+                    .duplicates()
+                    .next()
+                    .is_none(),
+                "duplicate ColumnId found in source catalog. Columns: {:?}",
+                columns
+            );
+        }
         self.included_relations.insert(source_catalog.id.into());
         (
             Relation::Source(Box::new(BoundSource {
