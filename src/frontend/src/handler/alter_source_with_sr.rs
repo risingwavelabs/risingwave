@@ -164,7 +164,7 @@ pub async fn refresh_sr_and_get_columns_diff(
     };
 
     let mut added_columns = columns_minus(&columns_from_resolve_source, &original_source.columns);
-    // The newly resolved columns' column IDs also starts from 0. They cannot be used directly.
+    // The newly resolved columns' column IDs also starts from 1. They cannot be used directly.
     let mut next_col_id = max_column_id(&original_source.columns).next();
     for col in &mut added_columns {
         col.column_desc.column_id = next_col_id;

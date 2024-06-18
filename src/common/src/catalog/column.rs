@@ -430,15 +430,16 @@ pub fn columns_extend(preserved_columns: &mut Vec<ColumnCatalog>, columns: Vec<C
     preserved_columns.extend(columns);
 }
 
-pub fn is_column_ids_distinct(columns: &[ColumnCatalog]) -> bool {
-    let mut column_ids = columns
-        .iter()
-        .map(|column| column.column_id().get_id())
-        .collect_vec();
-    column_ids.sort();
-    let original_len = column_ids.len();
-    column_ids.dedup();
-    column_ids.len() == original_len
+pub fn debug_assert_column_ids_distinct(columns: &[ColumnCatalog]) {
+    debug_assert!(
+        columns
+            .iter()
+            .map(|c| c.column_id())
+            .duplicates()
+            .next()
+            .is_none(),
+        "duplicate ColumnId found in source catalog. Columns: {columns:#?}"
+    );
 }
 
 #[cfg(test)]

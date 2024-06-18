@@ -24,7 +24,7 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::array::arrow::{FromArrow, IcebergArrowConvert};
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{
-    is_column_ids_distinct, ColumnCatalog, ColumnDesc, ColumnId, Schema, TableId,
+    debug_assert_column_ids_distinct, ColumnCatalog, ColumnDesc, ColumnId, Schema, TableId,
     INITIAL_SOURCE_VERSION_ID, KAFKA_TIMESTAMP_COLUMN_NAME,
 };
 use risingwave_common::types::DataType;
@@ -1417,7 +1417,7 @@ pub async fn bind_create_source(
     for c in &mut columns {
         c.column_desc.column_id = col_id_gen.generate(c.name())
     }
-    debug_assert!(is_column_ids_distinct(&columns));
+    debug_assert_column_ids_distinct(&columns);
 
     let must_need_pk = if is_create_source {
         with_properties.connector_need_pk()
