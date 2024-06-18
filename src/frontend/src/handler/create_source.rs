@@ -24,7 +24,7 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::array::arrow::{FromArrow, IcebergArrowConvert};
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{
-    is_column_ids_dedup, ColumnCatalog, ColumnDesc, ColumnId, Schema, TableId,
+    is_column_ids_distinct, ColumnCatalog, ColumnDesc, ColumnId, Schema, TableId,
     INITIAL_SOURCE_VERSION_ID, KAFKA_TIMESTAMP_COLUMN_NAME,
 };
 use risingwave_common::types::DataType;
@@ -73,8 +73,8 @@ use crate::error::ErrorCode::{self, Deprecated, InvalidInputSyntax, NotSupported
 use crate::error::{Result, RwError};
 use crate::expr::Expr;
 use crate::handler::create_table::{
-    bind_pk_on_relation, bind_sql_column_constraints, bind_sql_columns, bind_sql_pk_names,
-    ensure_table_constraints_supported, ColumnIdGenerator,
+    bind_pk_and_row_id_on_relation, bind_sql_column_constraints, bind_sql_columns,
+    bind_sql_pk_names, ensure_table_constraints_supported, ColumnIdGenerator,
 };
 use crate::handler::util::SourceSchemaCompatExt;
 use crate::handler::HandlerArgs;
@@ -289,8 +289,11 @@ fn get_name_strategy_or_default(name_strategy: Option<AstString>) -> Result<Opti
     }
 }
 
-/// resolve the schema of the source from external schema file, return the relation's columns. see <https://www.risingwave.dev/docs/current/sql-create-source> for more information.
-/// return `(columns, source info)`
+/// Resolves the schema of the source from external schema file.
+/// See <https://www.risingwave.dev/docs/current/sql-create-source> for more information.
+///
+/// Note: the returned schema strictly corresponds to the schema.
+/// Other special columns like additional columns (`INCLUDE`), and `row_id` column are not included.
 pub(crate) async fn bind_columns_from_source(
     session: &SessionImpl,
     source_schema: &ConnectorSchema,
@@ -1409,10 +1412,12 @@ pub async fn bind_create_source(
         .into());
     }
 
+    // XXX: why do we use col_id_gen here? It doesn't seem to be very necessary.
+    // XXX: should we also chenge the col id for struct fields?
     for c in &mut columns {
         c.column_desc.column_id = col_id_gen.generate(c.name())
     }
-    debug_assert!(is_column_ids_dedup(&columns));
+    debug_assert!(is_column_ids_distinct(&columns));
 
     let must_need_pk = if is_create_source {
         with_properties.connector_need_pk()
@@ -1425,7 +1430,7 @@ pub async fn bind_create_source(
     };
 
     let (mut columns, pk_col_ids, row_id_index) =
-        bind_pk_on_relation(columns, pk_names, must_need_pk)?;
+        bind_pk_and_row_id_on_relation(columns, pk_names, must_need_pk)?;
 
     let watermark_descs =
         bind_source_watermark(session, source_name.clone(), source_watermarks, &columns)?;

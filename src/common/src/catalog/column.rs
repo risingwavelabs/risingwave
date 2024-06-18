@@ -430,7 +430,7 @@ pub fn columns_extend(preserved_columns: &mut Vec<ColumnCatalog>, columns: Vec<C
     preserved_columns.extend(columns);
 }
 
-pub fn is_column_ids_dedup(columns: &[ColumnCatalog]) -> bool {
+pub fn is_column_ids_distinct(columns: &[ColumnCatalog]) -> bool {
     let mut column_ids = columns
         .iter()
         .map(|column| column.column_id().get_id())

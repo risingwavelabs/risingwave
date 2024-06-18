@@ -66,14 +66,11 @@ async fn do_handle_explain(
                 wildcard_idx,
                 ..
             } => {
-                let col_id_gen = ColumnIdGenerator::new_initial();
-
                 let source_schema = source_schema.map(|s| s.into_v2_with_warning());
 
                 let (plan, _source, _table, _job_type) = handle_create_table_plan(
                     handler_args,
                     explain_options,
-                    col_id_gen,
                     source_schema,
                     cdc_table_info,
                     name.clone(),

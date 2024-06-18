@@ -404,7 +404,7 @@ fn multiple_pk_definition_err() -> RwError {
 ///
 /// It returns the columns together with `pk_column_ids`, and an optional row id column index if
 /// added.
-pub fn bind_pk_on_relation(
+pub fn bind_pk_and_row_id_on_relation(
     mut columns: Vec<ColumnCatalog>,
     pk_names: Vec<String>,
     must_need_pk: bool,
@@ -570,7 +570,8 @@ pub(crate) fn gen_create_table_plan_without_source(
 ) -> Result<(PlanRef, PbTable)> {
     ensure_table_constraints_supported(&constraints)?;
     let pk_names = bind_sql_pk_names(&column_defs, &constraints)?;
-    let (mut columns, pk_column_ids, row_id_index) = bind_pk_on_relation(columns, pk_names, true)?;
+    let (mut columns, pk_column_ids, row_id_index) =
+        bind_pk_and_row_id_on_relation(columns, pk_names, true)?;
 
     let watermark_descs: Vec<WatermarkDesc> = bind_source_watermark(
         context.session_ctx(),
@@ -762,7 +763,8 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
         c.column_desc.column_id = col_id_gen.generate(c.name())
     }
 
-    let (columns, pk_column_ids, _row_id_index) = bind_pk_on_relation(columns, pk_names, true)?;
+    let (columns, pk_column_ids, _row_id_index) =
+        bind_pk_and_row_id_on_relation(columns, pk_names, true)?;
 
     let definition = context.normalized_sql().to_owned();
 
@@ -881,7 +883,6 @@ fn derive_connect_properties(
 pub(super) async fn handle_create_table_plan(
     handler_args: HandlerArgs,
     explain_options: ExplainOptions,
-    col_id_gen: ColumnIdGenerator,
     source_schema: Option<ConnectorSchema>,
     cdc_table_info: Option<CdcTableInfo>,
     table_name: ObjectName,
@@ -894,6 +895,7 @@ pub(super) async fn handle_create_table_plan(
     with_version_column: Option<String>,
     include_column_options: IncludeOption,
 ) -> Result<(PlanRef, Option<PbSource>, PbTable, TableJobType)> {
+    let col_id_gen = ColumnIdGenerator::new_initial();
     let source_schema = check_create_table_with_source(
         &handler_args.with_options,
         source_schema,
@@ -1148,11 +1150,9 @@ pub async fn handle_create_table(
     }
 
     let (graph, source, table, job_type) = {
-        let col_id_gen = ColumnIdGenerator::new_initial();
         let (plan, source, table, job_type) = handle_create_table_plan(
             handler_args,
             ExplainOptions::default(),
-            col_id_gen,
             source_schema,
             cdc_table_info,
             table_name.clone(),
@@ -1435,7 +1435,8 @@ mod tests {
                 }
                 ensure_table_constraints_supported(&constraints)?;
                 let pk_names = bind_sql_pk_names(&column_defs, &constraints)?;
-                let (_, pk_column_ids, _) = bind_pk_on_relation(columns, pk_names, true)?;
+                let (_, pk_column_ids, _) =
+                    bind_pk_and_row_id_on_relation(columns, pk_names, true)?;
                 Ok(pk_column_ids)
             })();
             match (expected, actual) {

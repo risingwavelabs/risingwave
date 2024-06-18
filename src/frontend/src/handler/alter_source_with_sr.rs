@@ -171,6 +171,12 @@ pub async fn refresh_sr_and_get_columns_diff(
         next_col_id = next_col_id.next();
     }
     let dropped_columns = columns_minus(&original_source.columns, &columns_from_resolve_source);
+    tracing::debug!(
+        added_columns = ?added_columns,
+        dropped_columns = ?dropped_columns,
+        columns_from_resolve_source = ?columns_from_resolve_source,
+        original_source = ?original_source.columns
+    );
 
     Ok((source_info, added_columns, dropped_columns))
 }
