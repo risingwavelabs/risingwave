@@ -396,18 +396,9 @@ impl HummockEventHandler {
 
 // Handler for different events
 impl HummockEventHandler {
-    fn handle_epoch_synced(&mut self, epoch: HummockEpoch, data: SyncedData) {
-        debug!("epoch has been synced: {}.", epoch);
-        let SyncedData {
-            newly_upload_ssts: newly_uploaded_sstables,
-            ..
-        } = data;
+    fn handle_epoch_synced(&mut self, newly_uploaded_sstables: Arc<[Arc<StagingSstableInfo>]>) {
         {
-            let newly_uploaded_sstables = newly_uploaded_sstables
-                .into_iter()
-                .map(Arc::new)
-                .collect_vec();
-            if !newly_uploaded_sstables.is_empty() {
+            {
                 let related_instance_ids: HashSet<_> = newly_uploaded_sstables
                     .iter()
                     .flat_map(|sst| sst.imm_ids().keys().cloned())
@@ -427,7 +418,7 @@ impl HummockEventHandler {
                         });
                 });
             }
-        };
+        }
     }
 
     /// This function will be performed under the protection of the `read_version_mapping` read
@@ -488,8 +479,7 @@ impl HummockEventHandler {
         }
     }
 
-    fn handle_data_spilled(&mut self, staging_sstable_info: StagingSstableInfo) {
-        let staging_sstable_info = Arc::new(staging_sstable_info);
+    fn handle_data_spilled(&mut self, staging_sstable_info: Arc<StagingSstableInfo>) {
         trace!("data_spilled. SST size {}", staging_sstable_info.imm_size());
         self.for_each_read_version(
             staging_sstable_info.imm_ids().keys().cloned(),
@@ -504,7 +494,7 @@ impl HummockEventHandler {
     fn handle_sync_epoch(
         &mut self,
         new_sync_epoch: HummockEpoch,
-        sync_result_sender: oneshot::Sender<HummockResult<SyncResult>>,
+        sync_result_sender: oneshot::Sender<HummockResult<SyncedData>>,
     ) {
         debug!(
             "awaiting for epoch to be synced: {}, max_synced_epoch: {}",
@@ -750,12 +740,12 @@ impl HummockEventHandler {
 
     fn handle_uploader_event(&mut self, event: UploaderEvent) {
         match event {
-            UploaderEvent::SyncFinish(epoch, data) => {
+            UploaderEvent::SyncFinish(data) => {
                 let _timer = self
                     .metrics
                     .event_handler_on_sync_finish_latency
                     .start_timer();
-                self.handle_epoch_synced(epoch, data);
+                self.handle_epoch_synced(data);
             }
 
             UploaderEvent::DataSpilled(staging_sstable_info) => {
@@ -925,37 +915,42 @@ impl HummockEventHandler {
 }
 
 pub(super) fn send_sync_result(
-    sender: oneshot::Sender<HummockResult<SyncResult>>,
-    result: HummockResult<&SyncedData>,
+    sender: oneshot::Sender<HummockResult<SyncedData>>,
+    result: HummockResult<SyncedData>,
 ) {
-    let result = result.map(
-        |SyncedData {
-             newly_upload_ssts,
-             uploaded_ssts,
-             table_watermarks,
-         }| {
-            let mut sync_size = 0;
-            let mut uncommitted_ssts = Vec::new();
-            let mut old_value_ssts = Vec::new();
-            // The newly uploaded `sstable_infos` contains newer data. Therefore,
-            // `newly_upload_ssts` at the front
-            for sst in newly_upload_ssts.iter().chain(uploaded_ssts.iter()) {
-                sync_size += sst.imm_size();
-                uncommitted_ssts.extend(sst.sstable_infos().iter().cloned());
-                old_value_ssts.extend(sst.old_value_sstable_infos().iter().cloned());
-            }
-            SyncResult {
-                sync_size,
-                uncommitted_ssts,
-                table_watermarks: table_watermarks.clone(),
-                old_value_ssts,
-            }
-        },
-    );
-
     let _ = sender.send(result).inspect_err(|e| {
         error!("unable to send sync result. Err: {:?}", e);
     });
+}
+
+impl SyncedData {
+    pub fn into_sync_result(self) -> SyncResult {
+        let SyncedData {
+            newly_upload_ssts,
+            uploaded_ssts,
+            table_watermarks,
+        } = self;
+        let mut sync_size = 0;
+        let mut uncommitted_ssts = Vec::new();
+        let mut old_value_ssts = Vec::new();
+        // The newly uploaded `sstable_infos` contains newer data. Therefore,
+        // `newly_upload_ssts` at the front
+        for sst in newly_upload_ssts
+            .iter()
+            .flat_map(|ssts| ssts.iter())
+            .chain(uploaded_ssts.iter())
+        {
+            sync_size += sst.imm_size();
+            uncommitted_ssts.extend(sst.sstable_infos().iter().cloned());
+            old_value_ssts.extend(sst.old_value_sstable_infos().iter().cloned());
+        }
+        SyncResult {
+            sync_size,
+            uncommitted_ssts,
+            table_watermarks: table_watermarks.clone(),
+            old_value_ssts,
+        }
+    }
 }
 
 #[cfg(test)]
