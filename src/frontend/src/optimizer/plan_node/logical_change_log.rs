@@ -149,6 +149,7 @@ impl ToStream for LogicalChangeLog {
         &self,
         ctx: &mut RewriteStreamContext,
     ) -> Result<(PlanRef, ColIndexMapping)> {
+        ctx.set_with_stream_key(false);
         let (input, input_col_change) = self.input().logical_rewrite_for_stream(ctx)?;
         let (change_log, out_col_change) = self.rewrite_with_input(input, input_col_change);
         Ok((change_log.into(), out_col_change))
