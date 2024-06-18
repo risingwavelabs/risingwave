@@ -61,7 +61,7 @@ impl MigrationTrait for Migration {
     }
 
     async fn down(&self, _manager: &SchemaManager) -> Result<(), DbErr> {
-        // DO nothing, the operations in `up` are idempotent and required to fix the column type mismatch.
+        // DO nothing, the operations in `up` are idempotent(except SQLite) and required to fix the column type mismatch.
         Ok(())
     }
 }
