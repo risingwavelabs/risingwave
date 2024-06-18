@@ -638,7 +638,7 @@ impl StateStore for HummockStorage {
 }
 
 #[cfg(any(test, feature = "test"))]
-use risingwave_hummock_sdk::version::HummockVersion;
+use risingwave_hummock_sdk::{version::HummockVersion, SyncResult};
 
 #[cfg(any(test, feature = "test"))]
 impl HummockStorage {
