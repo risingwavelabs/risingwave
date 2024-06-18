@@ -43,7 +43,7 @@ use crate::hummock::compactor::{await_tree_key, compact, CompactorContext};
 use crate::hummock::conflict_detector::ConflictDetector;
 use crate::hummock::event_handler::refiller::{CacheRefillerEvent, SpawnRefillTask};
 use crate::hummock::event_handler::uploader::{
-    HummockUploader, SpawnUploadTask, SyncedData, UploadTaskInfo, UploadTaskOutput, UploaderEvent,
+    HummockUploader, SpawnUploadTask, SyncedData, UploadTaskInfo, UploadTaskOutput,
 };
 use crate::hummock::event_handler::{
     HummockEvent, HummockReadVersionRef, HummockVersionUpdate, ReadOnlyReadVersionMapping,
@@ -450,8 +450,8 @@ impl HummockEventHandler {
         }
     }
 
-    fn handle_data_spilled(&mut self, staging_sstable_info: Arc<StagingSstableInfo>) {
-        trace!("data_spilled. SST size {}", staging_sstable_info.imm_size());
+    fn handle_uploaded_sst_inner(&mut self, staging_sstable_info: Arc<StagingSstableInfo>) {
+        trace!("data_flushed. SST size {}", staging_sstable_info.imm_size());
         self.for_each_read_version(
             staging_sstable_info.imm_ids().keys().cloned(),
             |_, read_version| {
@@ -676,8 +676,8 @@ impl HummockEventHandler {
     pub async fn start_hummock_event_handler_worker(mut self) {
         loop {
             tokio::select! {
-                event = self.uploader.next_event() => {
-                    self.handle_uploader_event(event);
+                sst = self.uploader.next_uploaded_sst() => {
+                    self.handle_uploaded_sst(sst);
                 }
                 event = self.refiller.next_event() => {
                     let CacheRefillerEvent {pinned_version, new_pinned_version } = event;
@@ -709,16 +709,12 @@ impl HummockEventHandler {
         }
     }
 
-    fn handle_uploader_event(&mut self, event: UploaderEvent) {
-        match event {
-            UploaderEvent::DataUploaded(staging_sstable_info) => {
-                let _timer = self
-                    .metrics
-                    .event_handler_on_upload_finish_latency
-                    .start_timer();
-                self.handle_data_spilled(staging_sstable_info);
-            }
-        }
+    fn handle_uploaded_sst(&mut self, sst: Arc<StagingSstableInfo>) {
+        let _timer = self
+            .metrics
+            .event_handler_on_upload_finish_latency
+            .start_timer();
+        self.handle_uploaded_sst_inner(sst);
     }
 
     /// Gracefully shutdown if returns `true`.

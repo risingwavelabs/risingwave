@@ -1341,12 +1341,10 @@ impl UploaderData {
     }
 }
 
-pub(super) enum UploaderEvent {
-    DataUploaded(Arc<StagingSstableInfo>),
-}
-
 impl HummockUploader {
-    pub(super) fn next_event(&mut self) -> impl Future<Output = UploaderEvent> + '_ {
+    pub(super) fn next_uploaded_sst(
+        &mut self,
+    ) -> impl Future<Output = Arc<StagingSstableInfo>> + '_ {
         poll_fn(|cx| {
             let UploaderState::Working(data) = &mut self.state else {
                 return Poll::Pending;
@@ -1365,7 +1363,7 @@ impl HummockUploader {
             {
                 match result {
                     Ok(data) => {
-                        return Poll::Ready(UploaderEvent::DataUploaded(data));
+                        return Poll::Ready(data);
                     }
                     Err(e) => {
                         let failed_epoch = e.failed_epoch;
@@ -1386,7 +1384,7 @@ impl HummockUploader {
             }
 
             if let Some(sstable_info) = ready!(data.poll_spill_task(cx)) {
-                return Poll::Ready(UploaderEvent::DataUploaded(sstable_info));
+                return Poll::Ready(sstable_info);
             }
 
             Poll::Pending
@@ -1426,8 +1424,7 @@ pub(crate) mod tests {
     use crate::hummock::event_handler::uploader::uploader_imm::UploaderImm;
     use crate::hummock::event_handler::uploader::{
         get_payload_imm_ids, HummockUploader, SyncedData, UploadTaskInfo, UploadTaskOutput,
-        UploadTaskPayload, UploaderContext, UploaderData, UploaderEvent, UploaderState,
-        UploadingTask,
+        UploadTaskPayload, UploaderContext, UploaderData, UploaderState, UploadingTask,
     };
     use crate::hummock::event_handler::{LocalInstanceId, TEST_LOCAL_INSTANCE_ID};
     use crate::hummock::local_version::pinned_version::PinnedVersion;
@@ -1691,19 +1688,16 @@ pub(crate) mod tests {
         assert!(syncing_data.uploaded.is_empty());
         assert!(!syncing_data.uploading_tasks.is_empty());
 
-        match uploader.next_event().await {
-            UploaderEvent::DataUploaded(staging_sst) => {
-                assert_eq!(&vec![epoch1], staging_sst.epochs());
-                assert_eq!(
-                    &HashMap::from_iter([(TEST_LOCAL_INSTANCE_ID, vec![imm.batch_id()])]),
-                    staging_sst.imm_ids()
-                );
-                assert_eq!(
-                    &dummy_success_upload_output().new_value_ssts,
-                    staging_sst.sstable_infos()
-                );
-            }
-        };
+        let staging_sst = uploader.next_uploaded_sst().await;
+        assert_eq!(&vec![epoch1], staging_sst.epochs());
+        assert_eq!(
+            &HashMap::from_iter([(TEST_LOCAL_INSTANCE_ID, vec![imm.batch_id()])]),
+            staging_sst.imm_ids()
+        );
+        assert_eq!(
+            &dummy_success_upload_output().new_value_ssts,
+            staging_sst.sstable_infos()
+        );
 
         match sync_rx.await {
             Ok(Ok(data)) => {
@@ -1846,11 +1840,8 @@ pub(crate) mod tests {
         assert_eq!(epoch4, uploader.max_synced_epoch);
         assert_eq!(epoch6, uploader.max_syncing_epoch);
 
-        match uploader.next_event().await {
-            UploaderEvent::DataUploaded(sst) => {
-                assert_eq!(&get_imm_ids([&imm]), sst.imm_ids());
-            }
-        }
+        let sst = uploader.next_uploaded_sst().await;
+        assert_eq!(&get_imm_ids([&imm]), sst.imm_ids());
 
         match sync_rx.await {
             Ok(Ok(data)) => {
@@ -1936,7 +1927,7 @@ pub(crate) mod tests {
             yield_now().await;
         }
         assert!(
-            poll_fn(|cx| Poll::Ready(uploader.next_event().poll_unpin(cx)))
+            poll_fn(|cx| Poll::Ready(uploader.next_uploaded_sst().poll_unpin(cx)))
                 .await
                 .is_pending()
         )
@@ -1989,17 +1980,13 @@ pub(crate) mod tests {
         assert_uploader_pending(&mut uploader).await;
 
         finish_tx1.send(()).unwrap();
-        let UploaderEvent::DataUploaded(sst) = uploader.next_event().await;
-        {
-            assert_eq!(&get_payload_imm_ids(&epoch1_spill_payload12), sst.imm_ids());
-            assert_eq!(&vec![epoch1], sst.epochs());
-        }
+        let sst = uploader.next_uploaded_sst().await;
+        assert_eq!(&get_payload_imm_ids(&epoch1_spill_payload12), sst.imm_ids());
+        assert_eq!(&vec![epoch1], sst.epochs());
 
-        let UploaderEvent::DataUploaded(sst) = uploader.next_event().await;
-        {
-            assert_eq!(&get_payload_imm_ids(&epoch2_spill_payload), sst.imm_ids());
-            assert_eq!(&vec![epoch2], sst.epochs());
-        }
+        let sst = uploader.next_uploaded_sst().await;
+        assert_eq!(&get_payload_imm_ids(&epoch2_spill_payload), sst.imm_ids());
+        assert_eq!(&vec![epoch2], sst.epochs());
 
         let imm1_3 = gen_imm_with_limiter(epoch1, memory_limiter).await;
         uploader.add_imm(instance_id1, imm1_3.clone());
@@ -2067,17 +2054,13 @@ pub(crate) mod tests {
         assert_uploader_pending(&mut uploader).await;
         finish_tx1_3.send(()).unwrap();
 
-        let UploaderEvent::DataUploaded(sst) = uploader.next_event().await;
-        {
-            assert_eq!(&get_payload_imm_ids(&epoch1_spill_payload3), sst.imm_ids());
-        }
+        let sst = uploader.next_uploaded_sst().await;
+        assert_eq!(&get_payload_imm_ids(&epoch1_spill_payload3), sst.imm_ids());
 
         assert!(poll_fn(|cx| Poll::Ready(sync_rx1.poll_unpin(cx).is_pending())).await);
 
-        let UploaderEvent::DataUploaded(sst) = uploader.next_event().await;
-        {
-            assert_eq!(&get_payload_imm_ids(&epoch1_sync_payload), sst.imm_ids());
-        }
+        let sst = uploader.next_uploaded_sst().await;
+        assert_eq!(&get_payload_imm_ids(&epoch1_sync_payload), sst.imm_ids());
 
         if let Ok(Ok(data)) = sync_rx1.await {
             assert_eq!(3, data.uploaded_ssts.len());
@@ -2107,10 +2090,9 @@ pub(crate) mod tests {
         let (sync_tx2, sync_rx2) = oneshot::channel();
         uploader.start_sync_epoch(epoch2, sync_tx2);
         uploader.local_seal_epoch_for_test(instance_id2, epoch3);
-        let UploaderEvent::DataUploaded(sst) = uploader.next_event().await;
-        {
-            assert_eq!(&get_payload_imm_ids(&epoch3_spill_payload1), sst.imm_ids());
-        }
+        let sst = uploader.next_uploaded_sst().await;
+        assert_eq!(&get_payload_imm_ids(&epoch3_spill_payload1), sst.imm_ids());
+
         if let Ok(Ok(data)) = sync_rx2.await {
             assert_eq!(data.uploaded_ssts.len(), 1);
             assert_eq!(
@@ -2148,18 +2130,14 @@ pub(crate) mod tests {
         assert_uploader_pending(&mut uploader).await;
 
         finish_tx3_2.send(()).unwrap();
-        let UploaderEvent::DataUploaded(sst) = uploader.next_event().await;
-        {
-            assert_eq!(&get_payload_imm_ids(&epoch3_spill_payload2), sst.imm_ids());
-        }
+        let sst = uploader.next_uploaded_sst().await;
+        assert_eq!(&get_payload_imm_ids(&epoch3_spill_payload2), sst.imm_ids());
 
         finish_tx4_with_3_3.send(()).unwrap();
         assert!(poll_fn(|cx| Poll::Ready(sync_rx4.poll_unpin(cx).is_pending())).await);
 
-        let UploaderEvent::DataUploaded(sst) = uploader.next_event().await;
-        {
-            assert_eq!(&get_payload_imm_ids(&epoch4_sync_payload), sst.imm_ids());
-        }
+        let sst = uploader.next_uploaded_sst().await;
+        assert_eq!(&get_payload_imm_ids(&epoch4_sync_payload), sst.imm_ids());
 
         if let Ok(Ok(data)) = sync_rx4.await {
             assert_eq!(3, data.uploaded_ssts.len());
