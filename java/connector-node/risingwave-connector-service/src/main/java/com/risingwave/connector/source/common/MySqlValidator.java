@@ -193,12 +193,12 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
             var pkFields = new HashSet<String>();
             var res = stmt.executeQuery();
             while (res.next()) {
-                var fieldName = res.getString(1).toLowerCase();
+                var field = res.getString(1);
                 var dataType = res.getString(2);
                 var key = res.getString(3);
-                upstreamSchema.put(fieldName, dataType);
+                upstreamSchema.put(field.toLowerCase(), dataType);
                 if (key.equalsIgnoreCase("PRI")) {
-                    pkFields.add(fieldName);
+                    pkFields.add(field.toLowerCase());
                 }
             }
 
