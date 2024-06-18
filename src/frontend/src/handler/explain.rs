@@ -22,7 +22,6 @@ use thiserror_ext::AsReport;
 use super::create_index::{gen_create_index_plan, resolve_index_schema};
 use super::create_mv::gen_create_mv_plan;
 use super::create_sink::{gen_sink_plan, get_partition_compute_info};
-use super::create_table::ColumnIdGenerator;
 use super::query::gen_batch_plan_by_statement;
 use super::util::SourceSchemaCompatExt;
 use super::{RwPgResponse, RwPgResponseBuilderExt};

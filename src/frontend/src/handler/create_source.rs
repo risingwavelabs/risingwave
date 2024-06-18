@@ -498,17 +498,17 @@ pub(crate) async fn bind_columns_from_source(
         if let Some(ref columns) = columns {
             let mut i = 1;
             fn check_col(col: &ColumnDesc, i: &mut usize, columns: &Vec<ColumnCatalog>) {
+                for nested_col in &col.field_descs {
+                    // What's the usage of struct fields' column IDs?
+                    check_col(nested_col, i, columns);
+                }
                 assert!(
                     col.column_id.get_id() == *i as i32,
-                    "unexpected column id, col: {col:?}, i: {i}, columns: {columns:?}"
+                    "unexpected column id\ncol: {col:?}\ni: {i}\ncolumns: {columns:#?}"
                 );
                 *i += 1;
             }
             for col in columns {
-                for nested_col in &col.column_desc.field_descs {
-                    // What's the usage of struct fields' column IDs?
-                    check_col(nested_col, &mut i, columns);
-                }
                 check_col(&col.column_desc, &mut i, columns);
             }
         }
