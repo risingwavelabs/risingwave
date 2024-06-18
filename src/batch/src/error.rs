@@ -116,7 +116,7 @@ pub enum BatchError {
     Iceberg(
         #[from]
         #[backtrace]
-        icelake::Error,
+        iceberg::Error,
     ),
 
     // Make the ref-counted type to be a variant for easier code structuring.
