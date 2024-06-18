@@ -93,6 +93,7 @@ macro_rules! for_all_sinks {
                 { Nats, $crate::sink::nats::NatsSink },
                 { Jdbc, $crate::sink::remote::JdbcSink },
                 { ElasticSearch, $crate::sink::remote::ElasticSearchSink },
+                { Opensearch, $crate::sink::remote::OpensearchSink },
                 { Cassandra, $crate::sink::remote::CassandraSink },
                 { HttpJava, $crate::sink::remote::HttpJavaSink },
                 { Doris, $crate::sink::doris::DorisSink },
@@ -386,7 +387,7 @@ impl<R: LogReader> SinkLogReader for R {
 
 #[async_trait]
 pub trait LogSinker: 'static {
-    async fn consume_log_and_sink(self, log_reader: &mut impl SinkLogReader) -> Result<()>;
+    async fn consume_log_and_sink(self, log_reader: &mut impl SinkLogReader) -> Result<!>;
 }
 
 #[async_trait]
@@ -442,6 +443,10 @@ impl SinkImpl {
 
     pub fn is_sink_into_table(&self) -> bool {
         matches!(self, SinkImpl::Table(_))
+    }
+
+    pub fn is_blackhole(&self) -> bool {
+        matches!(self, SinkImpl::BlackHole(_))
     }
 }
 

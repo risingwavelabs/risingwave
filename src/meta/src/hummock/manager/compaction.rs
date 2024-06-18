@@ -207,6 +207,7 @@ impl<'a> HummockVersionTransaction<'a> {
                             StateTableInfoDelta {
                                 committed_epoch: info.committed_epoch,
                                 safe_epoch: new_safe_epoch,
+                                compaction_group_id: info.compaction_group_id,
                             },
                         );
                     }
@@ -310,11 +311,11 @@ impl HummockManager {
 
                     match compact_ret {
                         Ok((compact_tasks, unschedule_groups)) => {
+                            no_task_groups.extend(unschedule_groups);
                             if compact_tasks.is_empty() {
                                 break;
                             }
                             generated_task_count += compact_tasks.len();
-                            no_task_groups.extend(unschedule_groups);
                             for task in compact_tasks {
                                 let task_id = task.task_id;
                                 if let Err(e) =
@@ -733,11 +734,13 @@ impl HummockManager {
                 || matches!(selector.task_type(), TaskType::Emergency);
 
             let mut stats = LocalSelectorStatistic::default();
-            let member_table_ids = version
+            let member_table_ids: Vec<_> = version
                 .latest_version()
-                .get_compaction_group_levels(compaction_group_id)
-                .member_table_ids
-                .clone();
+                .state_table_info
+                .compaction_group_member_table_ids(compaction_group_id)
+                .iter()
+                .map(|table_id| table_id.table_id)
+                .collect();
 
             let mut table_id_to_option: HashMap<u32, _> = HashMap::default();
 
@@ -751,6 +754,10 @@ impl HummockManager {
                 version
                     .latest_version()
                     .get_compaction_group_levels(compaction_group_id),
+                version
+                    .latest_version()
+                    .state_table_info
+                    .compaction_group_member_table_ids(compaction_group_id),
                 task_id as HummockCompactionTaskId,
                 &group_config,
                 &mut stats,

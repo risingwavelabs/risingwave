@@ -191,7 +191,9 @@ recent_filter_layers = 6
 recent_filter_rotate_interval_ms = 10000
 
 [storage.object_store]
-object_store_set_atomic_write_dir = false
+set_atomic_write_dir = false
+opendal_upload_concurrency = 8
+opendal_writer_abort_on_err = false
 
 [storage.object_store.retry]
 req_backoff_interval_ms = 1000
@@ -215,15 +217,15 @@ list_attempt_timeout_ms = 600000
 list_retry_attempts = 3
 
 [storage.object_store.s3]
-object_store_keepalive_ms = 600000
-object_store_recv_buffer_size = 2097152
-object_store_nodelay = true
+keepalive_ms = 600000
+recv_buffer_size = 2097152
+nodelay = true
 retry_unknown_service_error = false
 identity_resolution_timeout_s = 5
 
 [storage.object_store.s3.developer]
-object_store_retry_unknown_service_error = false
-object_store_retryable_service_error_codes = ["SlowDown", "TooManyRequests"]
+retry_unknown_service_error = false
+retryable_service_error_codes = ["SlowDown", "TooManyRequests"]
 use_opendal = false
 
 [system]

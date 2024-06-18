@@ -86,19 +86,35 @@ pub fn make_storage_table<S: StateStore>(
     ))
 }
 
-pub async fn scan(context: &CtlContext, mv_name: String, data_dir: Option<String>) -> Result<()> {
+pub async fn scan(
+    context: &CtlContext,
+    mv_name: String,
+    data_dir: Option<String>,
+    use_new_object_prefix_strategy: bool,
+) -> Result<()> {
     let meta_client = context.meta_client().await?;
     let hummock = context
-        .hummock_store(HummockServiceOpts::from_env(data_dir)?)
+        .hummock_store(HummockServiceOpts::from_env(
+            data_dir,
+            use_new_object_prefix_strategy,
+        )?)
         .await?;
     let table = get_table_catalog(meta_client, mv_name).await?;
     do_scan(table, hummock).await
 }
 
-pub async fn scan_id(context: &CtlContext, table_id: u32, data_dir: Option<String>) -> Result<()> {
+pub async fn scan_id(
+    context: &CtlContext,
+    table_id: u32,
+    data_dir: Option<String>,
+    use_new_object_prefix_strategy: bool,
+) -> Result<()> {
     let meta_client = context.meta_client().await?;
     let hummock = context
-        .hummock_store(HummockServiceOpts::from_env(data_dir)?)
+        .hummock_store(HummockServiceOpts::from_env(
+            data_dir,
+            use_new_object_prefix_strategy,
+        )?)
         .await?;
     let table = get_table_catalog_by_id(meta_client, table_id).await?;
     do_scan(table, hummock).await
