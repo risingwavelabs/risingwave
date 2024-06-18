@@ -8,7 +8,9 @@ system ok
 python3 e2e_test/schema_registry/pb.py "${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}" "${RISEDEV_SCHEMA_REGISTRY_URL}" "sr_pb_test" 20 user
 
 statement ok
-CREATE SOURCE src_user WITH (
+CREATE SOURCE src_user
+INCLUDE timestamp
+WITH (
     ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
     topic = 'sr_pb_test',
     scan.startup.mode = 'earliest'
