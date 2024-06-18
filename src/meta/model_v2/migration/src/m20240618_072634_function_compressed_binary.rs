@@ -33,6 +33,7 @@ impl MigrationTrait for Migration {
             }
             DbBackend::Sqlite => {
                 // Sqlite does not support modifying column type, so we need to do data migration and column renaming.
+                // Note that: all these DDLs are not transactional, so if some of them fail, we need to manually run it again.
                 let conn = manager.get_connection();
                 conn.execute(Statement::from_string(
                     DatabaseBackend::Sqlite,
@@ -61,7 +62,7 @@ impl MigrationTrait for Migration {
     }
 
     async fn down(&self, _manager: &SchemaManager) -> Result<(), DbErr> {
-        // DO nothing, the operations in `up` are idempotent(except SQLite) and required to fix the column type mismatch.
+        // DO nothing, the operations in `up` are idempotent and required to fix the column type mismatch.
         Ok(())
     }
 }
