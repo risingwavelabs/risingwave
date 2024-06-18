@@ -62,7 +62,8 @@ impl SinkWriter for OpenDalSinkWriter {
         }
     }
 
-    async fn begin_epoch(&mut self, _epoch: u64) -> Result<()> {
+    async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
+        self.epoch = Some(epoch);
         Ok(())
     }
 
@@ -110,7 +111,8 @@ impl OpenDalSinkWriter {
     }
 
     async fn create_sink_writer(&mut self, epoch: u64) -> Result<()> {
-        let object_name = format!("{}/{}.parquet", self.write_path, epoch.to_string());
+        println!("这里epoch = {:?}", epoch.to_string());
+        let object_name = format!("{}/epoch_{}.parquet", self.write_path, epoch.to_string());
         let object_store_writer = self
             .operator
             .writer_with(&object_name)
@@ -142,7 +144,7 @@ impl OpenDalSinkWriter {
         let filters =
             chunk.visibility() & ops.iter().map(|op| *op == Op::Insert).collect::<Bitmap>();
         chunk.set_visibility(filters);
-
+        println!("schema是{:?}", self.schema.clone());
         let batch = to_record_batch_with_schema(self.schema.clone(), &chunk.compact())?;
 
         self.sink_writer
