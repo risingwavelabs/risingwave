@@ -974,12 +974,14 @@ impl UploaderData {
     }
 }
 
+struct ErrState {
+    failed_epoch: HummockEpoch,
+    reason: String,
+}
+
 enum UploaderState {
     Working(UploaderData),
-    Err {
-        failed_epoch: HummockEpoch,
-        reason: String,
-    },
+    Err(ErrState),
 }
 
 /// An uploader for hummock data.
@@ -1090,10 +1092,10 @@ impl HummockUploader {
     ) {
         let data = match &mut self.state {
             UploaderState::Working(data) => data,
-            UploaderState::Err {
+            UploaderState::Err(ErrState {
                 failed_epoch,
                 reason,
-            } => {
+            }) => {
                 let result = Err(HummockError::other(format!(
                     "previous epoch {} failed due to [{}]",
                     failed_epoch, reason
@@ -1136,6 +1138,26 @@ impl HummockUploader {
             .stats
             .uploader_syncing_epoch_count
             .set(data.syncing_data.len() as _);
+    }
+
+    fn set_max_synced_epoch(
+        max_synced_epoch: &mut HummockEpoch,
+        max_syncing_epoch: HummockEpoch,
+        epoch: HummockEpoch,
+    ) {
+        assert!(
+            epoch <= max_syncing_epoch,
+            "epoch {} that has been synced has not started syncing yet.  previous max syncing epoch {}",
+            epoch,
+            max_syncing_epoch
+        );
+        assert!(
+            epoch > *max_synced_epoch,
+            "epoch {} has been synced. previous max synced epoch: {}",
+            epoch,
+            max_synced_epoch
+        );
+        *max_synced_epoch = epoch;
     }
 
     pub(crate) fn update_pinned_version(&mut self, pinned_version: PinnedVersion) {
@@ -1227,6 +1249,82 @@ impl HummockUploader {
 }
 
 impl UploaderData {
+    /// Poll the syncing task of the syncing data of the oldest epoch. Return `Poll::Ready(None)` if
+    /// there is no syncing data.
+    fn poll_syncing_task(
+        &mut self,
+        cx: &mut Context<'_>,
+        context: &UploaderContext,
+        mut set_max_synced_epoch: impl FnMut(u64),
+    ) -> Poll<Option<Result<Arc<StagingSstableInfo>, ErrState>>> {
+        while let Some(syncing_data) = self.syncing_data.back_mut() {
+            let sstable_info = if let Some(task) = syncing_data.uploading_tasks.back_mut() {
+                let result = ready!(task.poll_result(cx));
+                let _task = syncing_data.uploading_tasks.pop_back().expect("non-empty");
+                let sstable_info = match result {
+                    Ok(sstable_info) => sstable_info,
+                    Err(e) => {
+                        let SyncingData {
+                            sync_epoch,
+                            uploading_tasks,
+                            sync_result_sender,
+                            ..
+                        } = self.syncing_data.pop_back().expect("non-empty");
+                        for task in uploading_tasks {
+                            task.join_handle.abort();
+                        }
+                        send_sync_result(
+                            sync_result_sender,
+                            Err(HummockError::other(format!(
+                                "failed sync task: {:?}",
+                                e.as_report()
+                            ))),
+                        );
+
+                        return Poll::Ready(Some(Err(ErrState {
+                            failed_epoch: sync_epoch,
+                            reason: format!("{:?}", e.as_report()),
+                        })));
+                    }
+                };
+                syncing_data.uploaded.push_front(sstable_info.clone());
+                self.unsync_data.ack_flushed(&sstable_info);
+                Some(sstable_info)
+            } else {
+                None
+            };
+
+            if syncing_data.uploading_tasks.is_empty() {
+                let syncing_data = self.syncing_data.pop_back().expect("non-empty");
+                let SyncingData {
+                    sync_epoch,
+                    uploading_tasks,
+                    uploaded,
+                    table_watermarks,
+                    sync_result_sender,
+                } = syncing_data;
+                assert!(uploading_tasks.is_empty());
+                context
+                    .stats
+                    .uploader_syncing_epoch_count
+                    .set(self.syncing_data.len() as _);
+                set_max_synced_epoch(sync_epoch);
+                send_sync_result(
+                    sync_result_sender,
+                    Ok(SyncedData {
+                        uploaded_ssts: uploaded,
+                        table_watermarks,
+                    }),
+                )
+            }
+
+            if let Some(sstable_info) = sstable_info {
+                return Poll::Ready(Some(Ok(sstable_info)));
+            }
+        }
+        Poll::Ready(None)
+    }
+
     /// Poll the success of the oldest spilled task of unsync spill data. Return `Poll::Ready(None)` if
     /// there is no spilling task.
     fn poll_spill_task(&mut self, cx: &mut Context<'_>) -> Poll<Option<Arc<StagingSstableInfo>>> {
@@ -1253,87 +1351,37 @@ impl HummockUploader {
             let UploaderState::Working(data) = &mut self.state else {
                 return Poll::Pending;
             };
-            while let Some(syncing_data) = data.syncing_data.back_mut() {
-                let sstable_info = if let Some(task) = syncing_data.uploading_tasks.back_mut() {
-                    let result = ready!(task.poll_result(cx));
-                    let _task = syncing_data.uploading_tasks.pop_back().expect("non-empty");
-                    let sstable_info = match result {
-                        Ok(sstable_info) => sstable_info,
-                        Err(e) => {
-                            let SyncingData {
-                                sync_epoch,
-                                uploading_tasks,
-                                sync_result_sender,
-                                ..
-                            } = data.syncing_data.pop_back().expect("non-empty");
-                            for task in uploading_tasks {
-                                task.join_handle.abort();
-                            }
-                            send_sync_result(
-                                sync_result_sender,
-                                Err(HummockError::other(format!(
-                                    "failed sync task: {:?}",
-                                    e.as_report()
-                                ))),
-                            );
-                            let data = must_match!(replace(
-                                &mut self.state,
-                                UploaderState::Err {
-                                    failed_epoch: sync_epoch,
-                                    reason: format!("{:?}", e.as_report()),
-                                },
-                            ), UploaderState::Working(data) => data);
 
-                            data.abort(|| {
-                                HummockError::other(format!(
-                                    "previous epoch {} failed to sync",
-                                    sync_epoch
-                                ))
-                            });
-                            return Poll::Pending;
-                        }
-                    };
-                    syncing_data.uploaded.push_front(sstable_info.clone());
-                    data.unsync_data.ack_flushed(&sstable_info);
-                    Some(sstable_info)
-                } else {
-                    None
-                };
+            if let Some(result) =
+                ready!(
+                    data.poll_syncing_task(cx, &self.context, |new_synced_epoch| {
+                        Self::set_max_synced_epoch(
+                            &mut self.max_synced_epoch,
+                            self.max_syncing_epoch,
+                            new_synced_epoch,
+                        )
+                    })
+                )
+            {
+                match result {
+                    Ok(data) => {
+                        return Poll::Ready(UploaderEvent::DataUploaded(data));
+                    }
+                    Err(e) => {
+                        let failed_epoch = e.failed_epoch;
+                        let data = must_match!(replace(
+                            &mut self.state,
+                            UploaderState::Err(e),
+                        ), UploaderState::Working(data) => data);
 
-                if syncing_data.uploading_tasks.is_empty() {
-                    let syncing_data = data.syncing_data.pop_back().expect("non-empty");
-                    let SyncingData {
-                        sync_epoch: epoch,
-                        uploading_tasks,
-                        uploaded,
-                        table_watermarks,
-                        sync_result_sender,
-                    } = syncing_data;
-                    assert!(uploading_tasks.is_empty());
-                    assert!(
-                        epoch <= self.max_syncing_epoch,
-                        "epoch {} that has been synced has not started syncing yet.  previous max syncing epoch {}",
-                        epoch,
-                        self.max_syncing_epoch
-                    );
-                    assert!(
-                        epoch > self.max_synced_epoch,
-                        "epoch {} has been synced. previous max synced epoch: {}",
-                        epoch,
-                        self.max_synced_epoch
-                    );
-                    self.max_synced_epoch = epoch;
-                    send_sync_result(
-                        sync_result_sender,
-                        Ok(SyncedData {
-                            uploaded_ssts: uploaded,
-                            table_watermarks,
-                        }),
-                    )
-                }
-
-                if let Some(sstable_info) = sstable_info {
-                    return Poll::Ready(UploaderEvent::DataUploaded(sstable_info));
+                        data.abort(|| {
+                            HummockError::other(format!(
+                                "previous epoch {} failed to sync",
+                                failed_epoch
+                            ))
+                        });
+                        return Poll::Pending;
+                    }
                 }
             }
 
@@ -1752,6 +1800,11 @@ pub(crate) mod tests {
     async fn test_uploader_poll_empty() {
         let mut uploader = test_uploader(dummy_success_upload_future);
         let data = must_match!(&mut uploader.state, UploaderState::Working(data) => data);
+        assert!(
+            poll_fn(|cx| data.poll_syncing_task(cx, &uploader.context, |_| unreachable!()))
+                .await
+                .is_none()
+        );
         assert!(poll_fn(|cx| data.poll_spill_task(cx)).await.is_none());
     }
 
