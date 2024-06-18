@@ -60,7 +60,7 @@ mod private {
 
 /// Compress the value if it's larger then the threshold to avoid hitting the limit of etcd.
 ///
-/// By default, the maximum size of any request to etcd is 1.5 MiB. So we use a slightly
+/// By default, the maximum size of any request to etcd is 1.5 MB. So we use a slightly
 /// smaller value here. However, note that this is still a best-effort approach, as the
 /// compressed size may still exceed the limit, in which case we should set the parameter
 /// `--max-request-bytes` of etcd to a larger value.
@@ -698,7 +698,6 @@ impl<'a, K: Ord, V: PartialEq + Transactional<TXN>, TXN> ValTransaction<TXN>
 
 #[cfg(test)]
 mod tests {
-
     use itertools::Itertools;
 
     use super::*;
@@ -748,7 +747,7 @@ mod tests {
             {
                 let encoded_len = model.encoded_len();
                 // Showing that the encoded length is larger than the original length.
-                // So that a len greater than the threshold will heat the compression branch.
+                // So that a len greater than the threshold will hit the compression branch.
                 assert!(encoded_len >= len, "encoded_len: {encoded_len}, len: {len}");
             }
             model.insert(&store).await.unwrap();
