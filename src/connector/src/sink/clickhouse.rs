@@ -106,8 +106,8 @@ impl ClickHouseEngine {
 
     pub fn get_delete_col(&self) -> Option<String> {
         match self {
-            ClickHouseEngine::ReplacingMergeTree(delete_col) => delete_col.clone(),
-            ClickHouseEngine::ReplicatedReplacingMergeTree(delete_col) => delete_col.clone(),
+            ClickHouseEngine::ReplacingMergeTree(Some(delete_col)) => Some(delete_col.to_string()),
+            ClickHouseEngine::ReplicatedReplacingMergeTree(Some(delete_col)) => Some(delete_col.to_string()),
             _ => None,
         }
     }
@@ -601,12 +601,12 @@ impl ClickHouseSinkWriter {
             }
             match op {
                 Op::Insert | Op::UpdateInsert => {
-                    if self.clickhouse_engine.get_sign_name().is_some() {
+                    if self.clickhouse_engine.is_collapsing_engine() {
                         clickhouse_filed_vec.push(ClickHouseFieldWithNull::WithoutSome(
                             ClickHouseField::Int8(1),
                         ));
                     }
-                    if self.clickhouse_engine.get_delete_col().is_some() {
+                    if self.clickhouse_engine.is_delete_replacing_engine() {
                         clickhouse_filed_vec.push(ClickHouseFieldWithNull::WithoutSome(
                             ClickHouseField::Int8(0),
                         ))
@@ -620,12 +620,12 @@ impl ClickHouseSinkWriter {
                             "Clickhouse engine don't support upsert".to_string(),
                         ));
                     }
-                    if self.clickhouse_engine.get_sign_name().is_some() {
+                    if self.clickhouse_engine.is_collapsing_engine() {
                         clickhouse_filed_vec.push(ClickHouseFieldWithNull::WithoutSome(
                             ClickHouseField::Int8(-1),
                         ));
                     }
-                    if self.clickhouse_engine.get_delete_col().is_some() {
+                    if self.clickhouse_engine.is_delete_replacing_engine() {
                         clickhouse_filed_vec.push(ClickHouseFieldWithNull::WithoutSome(
                             ClickHouseField::Int8(1),
                         ))
