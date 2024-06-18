@@ -19,7 +19,7 @@ use std::mem::swap;
 use anyhow::Context;
 use itertools::Itertools;
 use risingwave_common::bail;
-use risingwave_common::hash::ParallelUnitMapping;
+use risingwave_common::hash::{ParallelUnitId, ParallelUnitMapping};
 use risingwave_common::util::stream_graph_visitor::visit_stream_node;
 use risingwave_meta_model_v2::actor::ActorStatus;
 use risingwave_meta_model_v2::prelude::{Actor, ActorDispatcher, Fragment, Sink, StreamingJob};
@@ -79,19 +79,12 @@ impl CatalogControllerInner {
 
         let parallel_unit_to_worker = get_parallel_unit_to_worker_map(&txn).await?;
 
-        Ok(fragment_mappings
-            .into_iter()
-            .map(move |(fragment_id, mapping)| {
-                let worker_slot_mapping =
-                    ParallelUnitMapping::from_protobuf(&mapping.to_protobuf())
-                        .to_worker_slot(&parallel_unit_to_worker)
-                        .to_protobuf();
+        let mappings = CatalogController::convert_fragment_mappings(
+            fragment_mappings,
+            &parallel_unit_to_worker,
+        )?;
 
-                FragmentWorkerSlotMapping {
-                    fragment_id: fragment_id as _,
-                    mapping: Some(worker_slot_mapping),
-                }
-            }))
+        Ok(mappings.into_iter())
     }
 }
 
@@ -960,25 +953,35 @@ impl CatalogController {
 
         let parallel_unit_to_worker = get_parallel_unit_to_worker_map(&txn).await?;
 
+        let fragment_worker_slot_mapping =
+            Self::convert_fragment_mappings(fragment_mapping, &parallel_unit_to_worker)?;
+
         txn.commit().await?;
 
-        self.notify_fragment_mapping(
-            NotificationOperation::Update,
-            fragment_mapping
-                .into_iter()
-                .map(|(fragment_id, mapping)| PbFragmentWorkerSlotMapping {
-                    fragment_id: fragment_id as _,
-                    mapping: Some(
-                        ParallelUnitMapping::from_protobuf(&mapping.to_protobuf())
-                            .to_worker_slot(&parallel_unit_to_worker)
-                            .to_protobuf(),
-                    ),
-                })
-                .collect(),
-        )
-        .await;
+        self.notify_fragment_mapping(NotificationOperation::Update, fragment_worker_slot_mapping)
+            .await;
 
         Ok(())
+    }
+
+    pub(crate) fn convert_fragment_mappings(
+        fragment_mappings: Vec<(FragmentId, FragmentVnodeMapping)>,
+        parallel_unit_to_worker: &HashMap<u32, u32>,
+    ) -> MetaResult<Vec<PbFragmentWorkerSlotMapping>> {
+        let mut result = vec![];
+
+        for (fragment_id, mapping) in fragment_mappings {
+            result.push(PbFragmentWorkerSlotMapping {
+                fragment_id: fragment_id as _,
+                mapping: Some(
+                    ParallelUnitMapping::from_protobuf(&mapping.to_protobuf())
+                        .to_worker_slot(&parallel_unit_to_worker)?
+                        .to_protobuf(),
+                ),
+            })
+        }
+
+        Ok(result)
     }
 
     pub async fn all_inuse_parallel_units(&self) -> MetaResult<Vec<i32>> {

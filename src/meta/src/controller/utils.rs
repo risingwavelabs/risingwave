@@ -43,6 +43,7 @@ use sea_orm::{
     Order, PaginatorTrait, QueryFilter, QuerySelect, RelationTrait, Statement,
 };
 
+use crate::controller::catalog::CatalogController;
 use crate::{MetaError, MetaResult};
 
 /// This function will construct a query using recursive cte to find all objects[(id, `obj_type`)] that are used by the given object.
@@ -852,17 +853,7 @@ where
         .all(db)
         .await?;
 
-    Ok(fragment_mappings
-        .into_iter()
-        .map(|(fragment_id, mapping)| PbFragmentWorkerSlotMapping {
-            fragment_id: fragment_id as _,
-            mapping: Some(
-                ParallelUnitMapping::from_protobuf(&mapping.to_protobuf())
-                    .to_worker_slot(&parallel_unit_to_worker)
-                    .to_protobuf(),
-            ),
-        })
-        .collect())
+    CatalogController::convert_fragment_mappings(fragment_mappings, &parallel_unit_to_worker)
 }
 
 /// `get_fragment_mappings_by_jobs` returns the fragment vnode mappings of the given job list.

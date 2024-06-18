@@ -281,8 +281,6 @@ impl CatalogController {
             .all(&txn)
             .await?;
 
-        let parallel_unit_to_worker = get_parallel_unit_to_worker_map(&txn).await?;
-
         let fragment_mappings = get_fragment_mappings_by_jobs(&txn, streaming_jobs.clone()).await?;
 
         let fragment_mappings = fragment_mappings
@@ -296,7 +294,7 @@ impl CatalogController {
                         fragment_id,
                         mapping: Some(
                             ParallelUnitMapping::from_protobuf(&mapping.unwrap())
-                                .to_worker_slot(&parallel_unit_to_worker)
+                                .as_delete_worker_slot_mapping()
                                 .to_protobuf(),
                         ),
                     }
@@ -2111,8 +2109,6 @@ impl CatalogController {
         }
         let user_infos = list_user_info_by_ids(to_update_user_ids, &txn).await?;
 
-        let parallel_unit_to_worker = get_parallel_unit_to_worker_map(&txn).await?;
-
         txn.commit().await?;
 
         // notify about them.
@@ -2199,7 +2195,7 @@ impl CatalogController {
                         fragment_id,
                         mapping: Some(
                             ParallelUnitMapping::from_protobuf(&mapping.unwrap())
-                                .to_worker_slot(&parallel_unit_to_worker)
+                                .as_delete_worker_slot_mapping()
                                 .to_protobuf(),
                         ),
                     }
