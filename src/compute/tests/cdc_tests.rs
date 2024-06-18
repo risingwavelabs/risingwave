@@ -33,8 +33,9 @@ use risingwave_common::types::{Datum, JsonbVal};
 use risingwave_common::util::epoch::{test_epoch, EpochExt};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_connector::source::cdc::external::mock_external_table::MockExternalTableReader;
+use risingwave_connector::source::cdc::external::mysql::MySqlOffset;
 use risingwave_connector::source::cdc::external::{
-    DebeziumOffset, DebeziumSourceOffset, ExternalTableReaderImpl, MySqlOffset, SchemaTableName,
+    DebeziumOffset, DebeziumSourceOffset, ExternalTableReaderImpl, SchemaTableName,
 };
 use risingwave_connector::source::cdc::DebeziumCdcSplit;
 use risingwave_connector::source::SplitImpl;
@@ -169,7 +170,10 @@ async fn test_cdc_backfill() -> StreamResult<()> {
         MySqlOffset::new(binlog_file.clone(), 10),
     ];
 
-    let table_name = SchemaTableName::new("mock_table".to_string(), "public".to_string());
+    let table_name = SchemaTableName {
+        schema_name: "public".to_string(),
+        table_name: "mock_table".to_string(),
+    };
     let table_schema = Schema::new(vec![
         Field::with_name(DataType::Int64, "id"), // primary key
         Field::with_name(DataType::Float64, "price"),
@@ -179,11 +183,11 @@ async fn test_cdc_backfill() -> StreamResult<()> {
     let external_table = ExternalStorageTable::new(
         TableId::new(1234),
         table_name,
+        "mydb".to_string(),
         ExternalTableReaderImpl::Mock(MockExternalTableReader::new(binlog_watermarks)),
         table_schema.clone(),
         table_pk_order_types,
         table_pk_indices.clone(),
-        vec![0, 1],
     );
 
     let actor_id = 0x1a;
@@ -214,6 +218,11 @@ async fn test_cdc_backfill() -> StreamResult<()> {
     )
     .await;
 
+    let output_columns = vec![
+        ColumnDesc::named("id", ColumnId::new(1), DataType::Int64), // primary key
+        ColumnDesc::named("price", ColumnId::new(2), DataType::Float64),
+    ];
+
     let cdc_backfill = StreamExecutor::new(
         ExecutorInfo {
             schema: table_schema.clone(),
@@ -225,6 +234,7 @@ async fn test_cdc_backfill() -> StreamResult<()> {
             external_table,
             mock_offset_executor,
             vec![0, 1],
+            output_columns,
             None,
             Arc::new(StreamingMetrics::unused()),
             state_table,

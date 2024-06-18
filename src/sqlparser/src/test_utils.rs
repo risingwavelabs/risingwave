@@ -31,11 +31,11 @@ use crate::tokenizer::Tokenizer;
 
 pub fn run_parser_method<F, T: Debug + PartialEq>(sql: &str, f: F) -> T
 where
-    F: Fn(&mut Parser) -> T,
+    F: Fn(&mut Parser<'_>) -> T,
 {
     let mut tokenizer = Tokenizer::new(sql);
     let tokens = tokenizer.tokenize_with_location().unwrap();
-    f(&mut Parser::new(tokens))
+    f(&mut Parser(&tokens))
 }
 
 pub fn parse_sql_statements(sql: &str) -> Result<Vec<Statement>, ParserError> {

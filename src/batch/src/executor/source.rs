@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use futures::StreamExt;
@@ -65,8 +64,7 @@ impl BoxedExecutorBuilder for SourceExecutor {
         )?;
 
         // prepare connector source
-        let source_props: HashMap<String, String> =
-            HashMap::from_iter(source_node.with_properties.clone());
+        let source_props = source_node.with_properties.clone();
         let config =
             ConnectorProperties::extract(source_props, false).map_err(BatchError::connector)?;
 
@@ -176,7 +174,7 @@ impl SourceExecutor {
         ));
         let stream = self
             .source
-            .to_stream(Some(self.split_list), self.column_ids, source_ctx)
+            .build_stream(Some(self.split_list), self.column_ids, source_ctx)
             .await?;
 
         #[for_await]

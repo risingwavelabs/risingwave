@@ -11,13 +11,13 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use anyhow::Context;
 use bytes::Bytes;
 use reqwest::Url;
 use risingwave_common::bail;
-use risingwave_common::types::Datum;
+use risingwave_common::types::{Datum, DatumCow, DatumRef};
 use risingwave_pb::data::DataType as PbDataType;
 
 use crate::aws_utils::load_file_descriptor_from_s3;
@@ -38,9 +38,14 @@ macro_rules! log_error {
     };
 }
 pub(crate) use log_error;
+use risingwave_pb::plan_common::additional_column;
+use risingwave_pb::plan_common::additional_column::ColumnType;
+
+use crate::parser::{AccessError, AccessResult};
+use crate::source::cdc::DebeziumCdcMeta;
 
 /// get kafka topic name
-pub(super) fn get_kafka_topic(props: &HashMap<String, String>) -> ConnectorResult<&String> {
+pub(super) fn get_kafka_topic(props: &BTreeMap<String, String>) -> ConnectorResult<&String> {
     const KAFKA_TOPIC_KEY1: &str = "kafka.topic";
     const KAFKA_TOPIC_KEY2: &str = "topic";
 
@@ -127,10 +132,26 @@ pub(super) async fn bytes_from_url(
     }
 }
 
-pub fn extreact_timestamp_from_meta(meta: &SourceMeta) -> Option<Datum> {
+pub fn extreact_timestamp_from_meta(meta: &SourceMeta) -> Option<DatumRef<'_>> {
     match meta {
         SourceMeta::Kafka(kafka_meta) => kafka_meta.extract_timestamp(),
+        SourceMeta::DebeziumCdc(cdc_meta) => Some(cdc_meta.extract_timestamp()),
         _ => None,
+    }
+}
+
+pub fn extract_cdc_meta_column<'a>(
+    cdc_meta: &'a DebeziumCdcMeta,
+    column_type: &additional_column::ColumnType,
+    column_name: &str,
+) -> AccessResult<DatumRef<'a>> {
+    match column_type {
+        ColumnType::Timestamp(_) => Ok(cdc_meta.extract_timestamp()),
+        ColumnType::DatabaseName(_) => Ok(cdc_meta.extract_database_name()),
+        ColumnType::TableName(_) => Ok(cdc_meta.extract_table_name()),
+        _ => Err(AccessError::UnsupportedAdditionalColumn {
+            name: column_name.to_string(),
+        }),
     }
 }
 
@@ -141,11 +162,11 @@ pub fn extract_headers_from_meta(meta: &SourceMeta) -> Option<Datum> {
     }
 }
 
-pub fn extract_header_inner_from_meta(
-    meta: &SourceMeta,
+pub fn extract_header_inner_from_meta<'a>(
+    meta: &'a SourceMeta,
     inner_field: &str,
     data_type: Option<&PbDataType>,
-) -> Option<Datum> {
+) -> Option<DatumCow<'a>> {
     match meta {
         SourceMeta::Kafka(kafka_meta) => kafka_meta.extract_header_inner(inner_field, data_type), /* expect output of type `bytea` or `varchar` */
         _ => None,

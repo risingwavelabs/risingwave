@@ -2,6 +2,9 @@ statement ok
 set rw_implicit_flush=true;
 
 statement ok
+set sink_decouple = false;
+
+statement ok
 create table t_kafka (
     id integer primary key,
     v_varchar varchar,

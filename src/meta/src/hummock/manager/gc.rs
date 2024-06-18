@@ -29,11 +29,10 @@ use risingwave_pb::hummock::subscribe_compaction_event_response::Event as Respon
 use risingwave_pb::hummock::FullScanTask;
 
 use crate::hummock::error::{Error, Result};
-use crate::hummock::manager::{commit_multi_var, create_trx_wrapper};
+use crate::hummock::manager::commit_multi_var;
 use crate::hummock::HummockManager;
 use crate::manager::MetadataManager;
-use crate::model::{BTreeMapTransaction, BTreeMapTransactionWrapper, ValTransaction};
-use crate::storage::MetaStore;
+use crate::model::BTreeMapTransaction;
 
 #[derive(Default)]
 pub(super) struct DeleteObjectTracker {
@@ -105,11 +104,8 @@ impl HummockManager {
         if !context_info.version_safe_points.is_empty() {
             return Ok((0, deltas_to_delete.len()));
         }
-        let mut hummock_version_deltas = create_trx_wrapper!(
-            self.meta_store_ref(),
-            BTreeMapTransactionWrapper,
-            BTreeMapTransaction::new(&mut versioning.hummock_version_deltas,)
-        );
+        let mut hummock_version_deltas =
+            BTreeMapTransaction::new(&mut versioning.hummock_version_deltas);
         let batch = deltas_to_delete
             .iter()
             .take(batch_size)
@@ -177,7 +173,7 @@ impl HummockManager {
     /// Starts a full GC.
     /// 1. Meta node sends a `FullScanTask` to a compactor in this method.
     /// 2. The compactor returns scan result of object store to meta node. See
-    /// `HummockManager::full_scan_inner` in storage crate.
+    ///    `HummockManager::full_scan_inner` in storage crate.
     /// 3. Meta node decides which SSTs to delete. See `HummockManager::complete_full_gc`.
     ///
     /// Returns Ok(false) if there is no worker available.
@@ -321,7 +317,7 @@ mod tests {
     use itertools::Itertools;
     use risingwave_hummock_sdk::HummockSstableObjectId;
 
-    use crate::hummock::manager::ResponseEvent;
+    use super::ResponseEvent;
     use crate::hummock::test_utils::{add_test_tables, setup_compute_env};
     use crate::MetaOpts;
 

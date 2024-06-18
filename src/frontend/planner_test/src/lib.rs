@@ -21,7 +21,7 @@ risingwave_expr_impl::enable!();
 
 mod resolve_id;
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -568,9 +568,15 @@ impl TestCase {
                 Statement::CreateSchema {
                     schema_name,
                     if_not_exists,
+                    user_specified,
                 } => {
-                    create_schema::handle_create_schema(handler_args, schema_name, if_not_exists)
-                        .await?;
+                    create_schema::handle_create_schema(
+                        handler_args,
+                        schema_name,
+                        if_not_exists,
+                        user_specified,
+                    )
+                    .await?;
                 }
                 _ => return Err(anyhow!("Unsupported statement type")),
             }
@@ -827,7 +833,7 @@ impl TestCase {
             if self.expected_outputs.contains(&TestType::SinkPlan) {
                 let mut plan_root = plan_root.clone();
                 let sink_name = "sink_test";
-                let mut options = HashMap::new();
+                let mut options = BTreeMap::new();
                 options.insert("connector".to_string(), "blackhole".to_string());
                 options.insert("type".to_string(), "append-only".to_string());
                 let options = WithOptions::new(options);

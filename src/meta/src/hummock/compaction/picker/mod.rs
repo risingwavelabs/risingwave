@@ -43,8 +43,6 @@ pub use ttl_reclaim_compaction_picker::{TtlPickerState, TtlReclaimCompactionPick
 
 use crate::hummock::level_handler::LevelHandler;
 
-pub const MAX_COMPACT_LEVEL_COUNT: usize = 42;
-
 #[derive(Default, Debug)]
 pub struct LocalPickerStatistic {
     pub skip_by_write_amp_limit: u64,
@@ -96,19 +94,4 @@ pub trait CompactionPicker {
         level_handlers: &[LevelHandler],
         stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput>;
-}
-
-#[derive(Default, Clone, Debug)]
-pub struct PartitionLevelInfo {
-    pub level_id: u32,
-    pub sub_level_id: u64,
-    pub left_idx: usize,
-    pub right_idx: usize,
-    pub total_file_size: u64,
-}
-
-#[derive(Default, Clone, Debug)]
-pub struct LevelPartition {
-    pub sub_levels: Vec<PartitionLevelInfo>,
-    pub total_file_size: u64,
 }

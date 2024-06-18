@@ -21,8 +21,8 @@ use risingwave_common::session_config::{SearchPath, USER_NAME_WILD_CARD};
 use risingwave_common::types::DataType;
 use risingwave_connector::sink::catalog::SinkCatalog;
 use risingwave_pb::catalog::{
-    PbConnection, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbSubscription,
-    PbTable, PbView,
+    PbConnection, PbDatabase, PbFunction, PbIndex, PbSchema, PbSecret, PbSink, PbSource,
+    PbSubscription, PbTable, PbView,
 };
 use risingwave_pb::hummock::HummockVersionStats;
 
@@ -30,10 +30,13 @@ use super::function_catalog::FunctionCatalog;
 use super::source_catalog::SourceCatalog;
 use super::subscription_catalog::SubscriptionCatalog;
 use super::view_catalog::ViewCatalog;
-use super::{CatalogError, CatalogResult, ConnectionId, SinkId, SourceId, SubscriptionId, ViewId};
+use super::{
+    CatalogError, CatalogResult, ConnectionId, SecretId, SinkId, SourceId, SubscriptionId, ViewId,
+};
 use crate::catalog::connection_catalog::ConnectionCatalog;
 use crate::catalog::database_catalog::DatabaseCatalog;
 use crate::catalog::schema_catalog::SchemaCatalog;
+use crate::catalog::secret_catalog::SecretCatalog;
 use crate::catalog::system_catalog::{
     get_sys_tables_in_schema, get_sys_views_in_schema, SystemTableCatalog,
 };
@@ -201,6 +204,14 @@ impl Catalog {
             .create_subscription(proto);
     }
 
+    pub fn create_secret(&mut self, proto: &PbSecret) {
+        self.get_database_mut(proto.database_id)
+            .unwrap()
+            .get_schema_mut(proto.schema_id)
+            .unwrap()
+            .create_secret(proto);
+    }
+
     pub fn create_view(&mut self, proto: &PbView) {
         self.get_database_mut(proto.database_id)
             .unwrap()
@@ -254,6 +265,25 @@ impl Catalog {
                 })
                 .unwrap()
                 .drop_connection(proto.id);
+        }
+    }
+
+    pub fn update_secret(&mut self, proto: &PbSecret) {
+        let database = self.get_database_mut(proto.database_id).unwrap();
+        let schema = database.get_schema_mut(proto.schema_id).unwrap();
+        let secret_id = SecretId::new(proto.id);
+        if schema.get_secret_by_id(&secret_id).is_some() {
+            schema.update_secret(proto);
+        } else {
+            // Enter this branch when schema is changed by `ALTER ... SET SCHEMA ...` statement.
+            schema.create_secret(proto);
+            database
+                .iter_schemas_mut()
+                .find(|schema| {
+                    schema.id() != proto.schema_id && schema.get_secret_by_id(&secret_id).is_some()
+                })
+                .unwrap()
+                .drop_secret(secret_id);
         }
     }
 
@@ -375,6 +405,14 @@ impl Catalog {
             .get_schema_mut(schema_id)
             .unwrap()
             .drop_sink(sink_id);
+    }
+
+    pub fn drop_secret(&mut self, db_id: DatabaseId, schema_id: SchemaId, secret_id: SecretId) {
+        self.get_database_mut(db_id)
+            .unwrap()
+            .get_schema_mut(schema_id)
+            .unwrap()
+            .drop_secret(secret_id);
     }
 
     pub fn update_sink(&mut self, proto: &PbSink) {
@@ -793,6 +831,21 @@ impl Catalog {
         Err(CatalogError::NotFound("view", view_id.to_string()))
     }
 
+    pub fn get_secret_by_name<'a>(
+        &self,
+        db_name: &str,
+        schema_path: SchemaPath<'a>,
+        secret_name: &str,
+    ) -> CatalogResult<(&Arc<SecretCatalog>, &'a str)> {
+        schema_path
+            .try_find(|schema_name| {
+                Ok(self
+                    .get_schema_by_name(db_name, schema_name)?
+                    .get_secret_by_name(secret_name))
+            })?
+            .ok_or_else(|| CatalogError::NotFound("secret", secret_name.to_string()))
+    }
+
     pub fn get_connection_by_name<'a>(
         &self,
         db_name: &str,
@@ -953,6 +1006,21 @@ impl Catalog {
                 "connection",
                 connection_name.to_string(),
             ))
+        } else {
+            Ok(())
+        }
+    }
+
+    pub fn check_secret_name_duplicated(
+        &self,
+        db_name: &str,
+        schema_name: &str,
+        secret_name: &str,
+    ) -> CatalogResult<()> {
+        let schema = self.get_schema_by_name(db_name, schema_name)?;
+
+        if schema.get_secret_by_name(secret_name).is_some() {
+            Err(CatalogError::Duplicated("secret", secret_name.to_string()))
         } else {
             Ok(())
         }

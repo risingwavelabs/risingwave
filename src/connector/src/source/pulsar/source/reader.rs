@@ -38,8 +38,8 @@ use crate::parser::ParserConfig;
 use crate::source::pulsar::split::PulsarSplit;
 use crate::source::pulsar::{PulsarEnumeratorOffset, PulsarProperties};
 use crate::source::{
-    into_chunk_stream, BoxChunkSourceStream, Column, CommonSplitReader, SourceContextRef,
-    SourceMessage, SplitId, SplitMetaData, SplitReader,
+    into_chunk_stream, BoxChunkSourceStream, Column, SourceContextRef, SourceMessage, SplitId,
+    SplitMetaData, SplitReader,
 };
 
 pub enum PulsarSplitReader {
@@ -89,7 +89,11 @@ impl SplitReader for PulsarSplitReader {
             Self::Broker(reader) => {
                 let (parser_config, source_context) =
                     (reader.parser_config.clone(), reader.source_ctx.clone());
-                Box::pin(into_chunk_stream(reader, parser_config, source_context))
+                Box::pin(into_chunk_stream(
+                    reader.into_data_stream(),
+                    parser_config,
+                    source_context,
+                ))
             }
             Self::Iceberg(reader) => Box::pin(reader.into_stream()),
         }
@@ -98,10 +102,12 @@ impl SplitReader for PulsarSplitReader {
 
 /// This reader reads from pulsar broker
 pub struct PulsarBrokerReader {
+    #[expect(dead_code)]
     pulsar: Pulsar<TokioExecutor>,
     consumer: Consumer<Vec<u8>, TokioExecutor>,
+    #[expect(dead_code)]
     split: PulsarSplit,
-
+    #[expect(dead_code)]
     split_id: SplitId,
     parser_config: ParserConfig,
     source_ctx: SourceContextRef,
@@ -181,12 +187,16 @@ impl SplitReader for PulsarBrokerReader {
                     )
                 } else {
                     builder.with_options(
-                        ConsumerOptions::default().with_initial_position(InitialPosition::Earliest),
+                        ConsumerOptions::default()
+                            .with_initial_position(InitialPosition::Earliest)
+                            .durable(false),
                     )
                 }
             }
             PulsarEnumeratorOffset::Latest => builder.with_options(
-                ConsumerOptions::default().with_initial_position(InitialPosition::Latest),
+                ConsumerOptions::default()
+                    .with_initial_position(InitialPosition::Latest)
+                    .durable(false),
             ),
             PulsarEnumeratorOffset::MessageId(m) => {
                 if topic.starts_with("non-persistent://") {
@@ -227,11 +237,11 @@ impl SplitReader for PulsarBrokerReader {
     fn into_stream(self) -> BoxChunkSourceStream {
         let parser_config = self.parser_config.clone();
         let source_context = self.source_ctx.clone();
-        into_chunk_stream(self, parser_config, source_context)
+        into_chunk_stream(self.into_data_stream(), parser_config, source_context)
     }
 }
 
-impl CommonSplitReader for PulsarBrokerReader {
+impl PulsarBrokerReader {
     #[try_stream(ok = Vec<SourceMessage>, error = crate::error::ConnectorError)]
     async fn into_data_stream(self) {
         let max_chunk_size = self.source_ctx.source_ctrl_opts.chunk_size;
@@ -247,7 +257,9 @@ impl CommonSplitReader for PulsarBrokerReader {
     }
 }
 
+#[expect(dead_code)]
 const META_COLUMN_TOPIC: &str = "__topic";
+#[expect(dead_code)]
 const META_COLUMN_KEY: &str = "__key";
 const META_COLUMN_LEDGER_ID: &str = "__ledgerId";
 const META_COLUMN_ENTRY_ID: &str = "__entryId";

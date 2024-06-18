@@ -70,9 +70,19 @@ where
     !too_left && !too_right
 }
 
-pub fn validate_safe_epoch(safe_epoch: u64, epoch: u64) -> HummockResult<()> {
-    if epoch < safe_epoch {
-        return Err(HummockError::expired_epoch(safe_epoch, epoch));
+pub fn validate_safe_epoch(
+    version: &HummockVersion,
+    table_id: TableId,
+    epoch: u64,
+) -> HummockResult<()> {
+    if let Some(info) = version.state_table_info.info().get(&table_id)
+        && epoch < info.safe_epoch
+    {
+        return Err(HummockError::expired_epoch(
+            table_id,
+            info.safe_epoch,
+            epoch,
+        ));
     }
 
     Ok(())
@@ -389,7 +399,18 @@ pub fn check_subset_preserve_order<T: Eq>(
     true
 }
 
-pub(crate) const ENABLE_SANITY_CHECK: bool = cfg!(debug_assertions);
+static SANITY_CHECK_ENABLED: AtomicBool = AtomicBool::new(cfg!(debug_assertions));
+
+/// This function is intended to be called during compute node initialization if the storage
+/// sanity check is not desired. This controls a global flag so only need to be called once
+/// if need to disable the sanity check.
+pub fn disable_sanity_check() {
+    SANITY_CHECK_ENABLED.store(false, AtomicOrdering::Release);
+}
+
+pub(crate) fn sanity_check_enabled() -> bool {
+    SANITY_CHECK_ENABLED.load(AtomicOrdering::Acquire)
+}
 
 /// Make sure the key to insert should not exist in storage.
 pub(crate) async fn do_insert_sanity_check(

@@ -39,6 +39,13 @@ macro_rules! register_guarded_histogram_vec_with_registry {
             $REGISTRY
         }
     }};
+    ($NAME:expr, $HELP:expr, $LABELS_NAMES:expr, $BUCKETS:expr, $REGISTRY:expr $(,)?) => {{
+        $crate::register_guarded_histogram_vec_with_registry! {
+            {prometheus::histogram_opts!($NAME, $HELP, $BUCKETS)},
+            $LABELS_NAMES,
+            $REGISTRY
+        }
+    }};
     ($HOPTS:expr, $LABELS_NAMES:expr, $REGISTRY:expr $(,)?) => {{
         let inner = prometheus::HistogramVec::new($HOPTS, $LABELS_NAMES);
         inner.and_then(|inner| {
@@ -330,7 +337,7 @@ pub struct LabelGuardedMetric<T, const N: usize> {
     _guard: Arc<LabelGuard<N>>,
 }
 
-impl<T: MetricVecBuilder, const N: usize> Debug for LabelGuardedMetric<T, N> {
+impl<T, const N: usize> Debug for LabelGuardedMetric<T, N> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LabelGuardedMetric").finish()
     }

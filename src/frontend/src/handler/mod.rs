@@ -53,12 +53,14 @@ pub mod alter_user;
 pub mod cancel_job;
 pub mod close_cursor;
 mod comment;
+pub mod create_aggregate;
 pub mod create_connection;
 mod create_database;
 pub mod create_function;
 pub mod create_index;
 pub mod create_mv;
 pub mod create_schema;
+pub mod create_secret;
 pub mod create_sink;
 pub mod create_source;
 pub mod create_sql_function;
@@ -76,6 +78,7 @@ pub mod drop_function;
 mod drop_index;
 pub mod drop_mv;
 mod drop_schema;
+pub mod drop_secret;
 pub mod drop_sink;
 pub mod drop_source;
 pub mod drop_subscription;
@@ -256,6 +259,9 @@ pub async fn handle(
         Statement::CreateConnection { stmt } => {
             create_connection::handle_create_connection(handler_args, stmt).await
         }
+        Statement::CreateSecret { stmt } => {
+            create_secret::handle_create_secret(handler_args, stmt).await
+        }
         Statement::CreateFunction {
             or_replace,
             temporary,
@@ -275,7 +281,6 @@ pub async fn handle(
                     .real_value()
                     .eq_ignore_ascii_case("sql")
             {
-                // User defined function with external source (e.g., language [ python / java ])
                 create_function::handle_create_function(
                     handler_args,
                     or_replace,
@@ -299,6 +304,24 @@ pub async fn handle(
                 )
                 .await
             }
+        }
+        Statement::CreateAggregate {
+            or_replace,
+            name,
+            args,
+            returns,
+            params,
+            ..
+        } => {
+            create_aggregate::handle_create_aggregate(
+                handler_args,
+                or_replace,
+                name,
+                args,
+                returns,
+                params,
+            )
+            .await
         }
         Statement::CreateTable {
             name,
@@ -363,7 +386,16 @@ pub async fn handle(
         Statement::CreateSchema {
             schema_name,
             if_not_exists,
-        } => create_schema::handle_create_schema(handler_args, schema_name, if_not_exists).await,
+            user_specified,
+        } => {
+            create_schema::handle_create_schema(
+                handler_args,
+                schema_name,
+                if_not_exists,
+                user_specified,
+            )
+            .await
+        }
         Statement::CreateUser(stmt) => create_user::handle_create_user(handler_args, stmt).await,
         Statement::DeclareCursor { stmt } => {
             declare_cursor::handle_declare_cursor(handler_args, stmt).await
@@ -414,7 +446,8 @@ pub async fn handle(
                     ObjectType::Schema
                     | ObjectType::Database
                     | ObjectType::User
-                    | ObjectType::Connection => {
+                    | ObjectType::Connection
+                    | ObjectType::Secret => {
                         bail_not_implemented!("DROP CASCADE");
                     }
                 };
@@ -481,6 +514,9 @@ pub async fn handle(
                     drop_connection::handle_drop_connection(handler_args, object_name, if_exists)
                         .await
                 }
+                ObjectType::Secret => {
+                    drop_secret::handle_drop_secret(handler_args, object_name, if_exists).await
+                }
             }
         }
         // XXX: should we reuse Statement::Drop for DROP FUNCTION?
@@ -488,7 +524,18 @@ pub async fn handle(
             if_exists,
             func_desc,
             option,
-        } => drop_function::handle_drop_function(handler_args, if_exists, func_desc, option).await,
+        } => {
+            drop_function::handle_drop_function(handler_args, if_exists, func_desc, option, false)
+                .await
+        }
+        Statement::DropAggregate {
+            if_exists,
+            func_desc,
+            option,
+        } => {
+            drop_function::handle_drop_function(handler_args, if_exists, func_desc, option, true)
+                .await
+        }
         Statement::Query(_)
         | Statement::Insert { .. }
         | Statement::Delete { .. }

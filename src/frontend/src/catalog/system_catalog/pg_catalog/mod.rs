@@ -29,7 +29,6 @@ mod pg_extension;
 mod pg_index;
 mod pg_indexes;
 mod pg_inherits;
-mod pg_keywords;
 mod pg_language;
 mod pg_locks;
 mod pg_matviews;
@@ -52,5 +51,3 @@ mod pg_trigger;
 mod pg_type;
 mod pg_user;
 mod pg_views;
-
-pub use pg_keywords::*;

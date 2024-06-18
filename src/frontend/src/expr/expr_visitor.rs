@@ -12,10 +12,48 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::util::recursive::{tracker, Recurse};
+
 use super::{
     AggCall, CorrelatedInputRef, ExprImpl, FunctionCall, FunctionCallWithLambda, InputRef, Literal,
     Now, Parameter, Subquery, TableFunction, UserDefinedFunction, WindowFunction,
+    EXPR_DEPTH_THRESHOLD, EXPR_TOO_DEEP_NOTICE,
 };
+use crate::session::current::notice_to_user;
+
+/// The default implementation of [`ExprVisitor::visit_expr`] that simply dispatches to other
+/// methods based on the type of the expression.
+///
+/// You can use this function as a helper to reduce boilerplate code when implementing the trait.
+// TODO: This is essentially a mimic of `super` pattern from OO languages. Ideally, we should
+// adopt the style proposed in https://github.com/risingwavelabs/risingwave/issues/13477.
+pub fn default_visit_expr<V: ExprVisitor + ?Sized>(visitor: &mut V, expr: &ExprImpl) {
+    // TODO: Implementors may choose to not use this function at all, in which case we will fail
+    // to track the recursion and grow the stack as necessary. The current approach is only a
+    // best-effort attempt to prevent stack overflow.
+    tracker!().recurse(|t| {
+        if t.depth_reaches(EXPR_DEPTH_THRESHOLD) {
+            notice_to_user(EXPR_TOO_DEEP_NOTICE);
+        }
+
+        match expr {
+            ExprImpl::InputRef(inner) => visitor.visit_input_ref(inner),
+            ExprImpl::Literal(inner) => visitor.visit_literal(inner),
+            ExprImpl::FunctionCall(inner) => visitor.visit_function_call(inner),
+            ExprImpl::FunctionCallWithLambda(inner) => {
+                visitor.visit_function_call_with_lambda(inner)
+            }
+            ExprImpl::AggCall(inner) => visitor.visit_agg_call(inner),
+            ExprImpl::Subquery(inner) => visitor.visit_subquery(inner),
+            ExprImpl::CorrelatedInputRef(inner) => visitor.visit_correlated_input_ref(inner),
+            ExprImpl::TableFunction(inner) => visitor.visit_table_function(inner),
+            ExprImpl::WindowFunction(inner) => visitor.visit_window_function(inner),
+            ExprImpl::UserDefinedFunction(inner) => visitor.visit_user_defined_function(inner),
+            ExprImpl::Parameter(inner) => visitor.visit_parameter(inner),
+            ExprImpl::Now(inner) => visitor.visit_now(inner),
+        }
+    })
+}
 
 /// Traverse an expression tree.
 ///
@@ -27,20 +65,7 @@ use super::{
 /// subqueries are not traversed.
 pub trait ExprVisitor {
     fn visit_expr(&mut self, expr: &ExprImpl) {
-        match expr {
-            ExprImpl::InputRef(inner) => self.visit_input_ref(inner),
-            ExprImpl::Literal(inner) => self.visit_literal(inner),
-            ExprImpl::FunctionCall(inner) => self.visit_function_call(inner),
-            ExprImpl::FunctionCallWithLambda(inner) => self.visit_function_call_with_lambda(inner),
-            ExprImpl::AggCall(inner) => self.visit_agg_call(inner),
-            ExprImpl::Subquery(inner) => self.visit_subquery(inner),
-            ExprImpl::CorrelatedInputRef(inner) => self.visit_correlated_input_ref(inner),
-            ExprImpl::TableFunction(inner) => self.visit_table_function(inner),
-            ExprImpl::WindowFunction(inner) => self.visit_window_function(inner),
-            ExprImpl::UserDefinedFunction(inner) => self.visit_user_defined_function(inner),
-            ExprImpl::Parameter(inner) => self.visit_parameter(inner),
-            ExprImpl::Now(inner) => self.visit_now(inner),
-        }
+        default_visit_expr(self, expr)
     }
     fn visit_function_call(&mut self, func_call: &FunctionCall) {
         func_call

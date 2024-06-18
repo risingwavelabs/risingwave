@@ -1,7 +1,7 @@
 #![allow(clippy::enum_variant_names)]
 
 pub use sea_orm_migration::prelude::*;
-
+pub use sea_orm_migration::MigrationStatus;
 mod m20230908_072257_init;
 mod m20231008_020431_hummock;
 mod m20240304_074901_subscription;
@@ -10,6 +10,8 @@ mod m20240410_154406_session_params;
 mod m20240417_062305_subscription_internal_table_name;
 mod m20240418_142249_function_runtime;
 mod m20240506_112555_subscription_partial_ckpt;
+mod m20240525_090457_secret;
+mod m20240617_070131_index_column_properties;
 
 pub struct Migrator;
 
@@ -25,6 +27,8 @@ impl MigratorTrait for Migrator {
             Box::new(m20240417_062305_subscription_internal_table_name::Migration),
             Box::new(m20240418_142249_function_runtime::Migration),
             Box::new(m20240506_112555_subscription_partial_ckpt::Migration),
+            Box::new(m20240525_090457_secret::Migration),
+            Box::new(m20240617_070131_index_column_properties::Migration),
         ]
     }
 }

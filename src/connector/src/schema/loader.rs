@@ -19,13 +19,10 @@ use risingwave_pb::catalog::PbSchemaRegistryNameStrategy;
 use super::schema_registry::{
     get_subject_by_strategy, handle_sr_list, name_strategy_from_str, Client, Subject,
 };
-use super::{invalid_option_error, InvalidOptionError, SchemaFetchError};
-
-const MESSAGE_NAME_KEY: &str = "message";
-const KEY_MESSAGE_NAME_KEY: &str = "key.message";
-const SCHEMA_LOCATION_KEY: &str = "schema.location";
-const SCHEMA_REGISTRY_KEY: &str = "schema.registry";
-const NAME_STRATEGY_KEY: &str = "schema.registry.name.strategy";
+use super::{
+    invalid_option_error, InvalidOptionError, SchemaFetchError, KEY_MESSAGE_NAME_KEY,
+    MESSAGE_NAME_KEY, NAME_STRATEGY_KEY, SCHEMA_REGISTRY_KEY,
+};
 
 pub struct SchemaLoader {
     pub client: Client,

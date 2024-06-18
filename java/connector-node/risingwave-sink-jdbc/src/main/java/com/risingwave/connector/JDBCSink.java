@@ -89,6 +89,8 @@ public class JDBCSink implements SinkWriter {
                     "JDBC connection: autoCommit = {}, trxn = {}",
                     conn.getAutoCommit(),
                     conn.getTransactionIsolation());
+            // Commit the `getTransactionIsolation`
+            conn.commit();
 
             jdbcStatements = new JdbcStatements(conn);
         } catch (SQLException e) {
@@ -252,10 +254,7 @@ public class JDBCSink implements SinkWriter {
                         break;
                     case UPDATE_INSERT:
                         if (!updateFlag) {
-                            throw Status.FAILED_PRECONDITION
-                                    .withDescription(
-                                            "an UPDATE_DELETE should precede an UPDATE_INSERT")
-                                    .asRuntimeException();
+                            LOG.warn("Missing an UPDATE_DELETE precede an UPDATE_INSERT");
                         }
                         jdbcDialect.bindUpsertStatement(upsertStatement, conn, tableSchema, row);
                         updateFlag = false;
@@ -362,10 +361,7 @@ public class JDBCSink implements SinkWriter {
     @Override
     public Optional<ConnectorServiceProto.SinkMetadata> barrier(boolean isCheckpoint) {
         if (updateFlag) {
-            throw Status.FAILED_PRECONDITION
-                    .withDescription(
-                            "expected UPDATE_INSERT to complete an UPDATE operation, got `sync`")
-                    .asRuntimeException();
+            LOG.warn("expect an UPDATE_INSERT to complete an UPDATE operation, got `sync`");
         }
         return Optional.empty();
     }

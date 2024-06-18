@@ -23,25 +23,26 @@ use risingwave_common::array::ListValue;
 use risingwave_common::catalog::{INFORMATION_SCHEMA_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
 use risingwave_common::types::{data_types, DataType, ScalarImpl, Timestamptz};
-use risingwave_common::{bail_not_implemented, current_cluster_version, no_function};
+use risingwave_common::{bail_not_implemented, current_cluster_version, must_match, no_function};
 use risingwave_expr::aggregate::{agg_kinds, AggKind};
 use risingwave_expr::window_function::{
     Frame, FrameBound, FrameBounds, FrameExclusion, RangeFrameBounds, RangeFrameOffset,
-    RowsFrameBounds, WindowFuncKind,
+    RowsFrameBounds, SessionFrameBounds, SessionFrameGap, WindowFuncKind,
 };
 use risingwave_sqlparser::ast::{
-    self, Function, FunctionArg, FunctionArgExpr, Ident, WindowFrameBound, WindowFrameExclusion,
-    WindowFrameUnits, WindowSpec,
+    self, Function, FunctionArg, FunctionArgExpr, Ident, WindowFrameBound, WindowFrameBounds,
+    WindowFrameExclusion, WindowFrameUnits, WindowSpec,
 };
 use risingwave_sqlparser::parser::ParserError;
 use thiserror_ext::AsReport;
 
 use crate::binder::bind_context::Clause;
 use crate::binder::{Binder, UdfContext};
+use crate::catalog::function_catalog::FunctionCatalog;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{
-    AggCall, Expr, ExprImpl, ExprType, FunctionCall, FunctionCallWithLambda, Literal, Now, OrderBy,
-    TableFunction, TableFunctionType, UserDefinedFunction, WindowFunction,
+    AggCall, CastContext, Expr, ExprImpl, ExprType, FunctionCall, FunctionCallWithLambda, Literal,
+    Now, OrderBy, TableFunction, TableFunctionType, UserDefinedFunction, WindowFunction,
 };
 use crate::utils::Condition;
 
@@ -95,21 +96,6 @@ impl Binder {
             _ => bail_not_implemented!(issue = 112, "qualified function {}", f.name),
         };
 
-        // agg calls
-        if f.over.is_none()
-            && let Ok(kind) = function_name.parse()
-        {
-            return self.bind_agg(f, kind);
-        }
-
-        if f.distinct || !f.order_by.is_empty() || f.filter.is_some() {
-            return Err(ErrorCode::InvalidInputSyntax(format!(
-                    "DISTINCT, ORDER BY or FILTER is only allowed in aggregation functions, but `{}` is not an aggregation function", function_name
-                )
-                )
-                .into());
-        }
-
         // FIXME: This is a hack to support [Bytebase queries](https://github.com/TennyZhuang/bytebase/blob/4a26f7c62b80e86e58ad2f77063138dc2f420623/backend/plugin/db/pg/sync.go#L549).
         // Bytebase widely used the pattern like `obj_description(format('%s.%s',
         // quote_ident(idx.schemaname), quote_ident(idx.indexname))::regclass) AS comment` to
@@ -119,46 +105,17 @@ impl Binder {
         if function_name == "obj_description" || function_name == "col_description" {
             return Ok(ExprImpl::literal_varchar("".to_string()));
         }
-
         if function_name == "array_transform" {
             // For type inference, we need to bind the array type first.
             return self.bind_array_transform(f);
         }
 
-        // Used later in sql udf expression evaluation
-        let args = f.args.clone();
-
-        let mut inputs = f
+        let mut inputs: Vec<_> = f
             .args
-            .into_iter()
-            .map(|arg| self.bind_function_arg(arg))
+            .iter()
+            .map(|arg| self.bind_function_arg(arg.clone()))
             .flatten_ok()
             .try_collect()?;
-
-        // window function
-        let window_func_kind = WindowFuncKind::from_str(function_name.as_str());
-        if let Ok(kind) = window_func_kind {
-            if let Some(window_spec) = f.over {
-                return self.bind_window_function(kind, inputs, window_spec);
-            }
-            return Err(ErrorCode::InvalidInputSyntax(format!(
-                "Window function `{}` must have OVER clause",
-                function_name
-            ))
-            .into());
-        } else if f.over.is_some() {
-            bail_not_implemented!(
-                issue = 8961,
-                "Unrecognized window function: {}",
-                function_name
-            );
-        }
-
-        // table function
-        if let Ok(function_type) = TableFunctionType::from_str(function_name.as_str()) {
-            self.ensure_table_function_allowed()?;
-            return Ok(TableFunction::new(function_type, inputs)?.into());
-        }
 
         // user defined function
         // TODO: resolve schema name https://github.com/risingwavelabs/risingwave/issues/12422
@@ -200,7 +157,7 @@ impl Binder {
 
                 // The actual inline logic for sql udf
                 // Note that we will always create new udf context for each sql udf
-                let Ok(context) = UdfContext::create_udf_context(&args, &Arc::clone(func)) else {
+                let Ok(context) = UdfContext::create_udf_context(&f.args, &Arc::clone(func)) else {
                     return Err(ErrorCode::InvalidInputSyntax(
                         "failed to create the `udf_context`, please recheck your function definition and syntax".to_string()
                     )
@@ -268,9 +225,51 @@ impl Binder {
                         self.ensure_table_function_allowed()?;
                         return Ok(TableFunction::new_user_defined(func.clone(), inputs).into());
                     }
-                    Aggregate => todo!("support UDAF"),
+                    Aggregate => {
+                        return self.bind_agg(f, AggKind::UserDefined, Some(func.clone()));
+                    }
                 }
             }
+        }
+
+        // agg calls
+        if f.over.is_none()
+            && let Ok(kind) = function_name.parse()
+        {
+            return self.bind_agg(f, kind, None);
+        }
+
+        if f.distinct || !f.order_by.is_empty() || f.filter.is_some() {
+            return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "DISTINCT, ORDER BY or FILTER is only allowed in aggregation functions, but `{}` is not an aggregation function", function_name
+                )
+                )
+                .into());
+        }
+
+        // window function
+        let window_func_kind = WindowFuncKind::from_str(function_name.as_str());
+        if let Ok(kind) = window_func_kind {
+            if let Some(window_spec) = f.over {
+                return self.bind_window_function(kind, inputs, window_spec);
+            }
+            return Err(ErrorCode::InvalidInputSyntax(format!(
+                "Window function `{}` must have OVER clause",
+                function_name
+            ))
+            .into());
+        } else if f.over.is_some() {
+            bail_not_implemented!(
+                issue = 8961,
+                "Unrecognized window function: {}",
+                function_name
+            );
+        }
+
+        // table function
+        if let Ok(function_type) = TableFunctionType::from_str(function_name.as_str()) {
+            self.ensure_table_function_allowed()?;
+            return Ok(TableFunction::new(function_type, inputs)?.into());
         }
 
         self.bind_builtin_scalar_function(function_name.as_str(), inputs, f.variadic)
@@ -351,7 +350,12 @@ impl Binder {
         Ok(body)
     }
 
-    pub(super) fn bind_agg(&mut self, f: Function, kind: AggKind) -> Result<ExprImpl> {
+    pub(super) fn bind_agg(
+        &mut self,
+        f: Function,
+        kind: AggKind,
+        user_defined: Option<Arc<FunctionCatalog>>,
+    ) -> Result<ExprImpl> {
         self.ensure_aggregate_allowed()?;
 
         let distinct = f.distinct;
@@ -385,14 +389,26 @@ impl Binder {
             None => Condition::true_cond(),
         };
 
-        Ok(ExprImpl::AggCall(Box::new(AggCall::new(
-            kind,
-            args,
-            distinct,
-            order_by,
-            filter,
-            direct_args,
-        )?)))
+        if let Some(user_defined) = user_defined {
+            Ok(AggCall::new_user_defined(
+                args,
+                distinct,
+                order_by,
+                filter,
+                direct_args,
+                user_defined,
+            )?
+            .into())
+        } else {
+            Ok(ExprImpl::AggCall(Box::new(AggCall::new(
+                kind,
+                args,
+                distinct,
+                order_by,
+                filter,
+                direct_args,
+            )?)))
+        }
     }
 
     fn bind_ordered_set_agg(
@@ -614,34 +630,35 @@ impl Binder {
             };
             let bounds = match frame.units {
                 WindowFrameUnits::Rows => {
-                    let (start, end) =
-                        self.bind_window_frame_usize_bounds(frame.start_bound, frame.end_bound)?;
+                    let (start, end) = must_match!(frame.bounds, WindowFrameBounds::Bounds { start, end } => (start, end));
+                    let (start, end) = self.bind_window_frame_usize_bounds(start, end)?;
                     FrameBounds::Rows(RowsFrameBounds { start, end })
                 }
-                WindowFrameUnits::Range => {
+                unit @ (WindowFrameUnits::Range | WindowFrameUnits::Session) => {
                     let order_by_expr = order_by
                         .sort_exprs
                         .iter()
-                        // for `RANGE` frame, there should be exactly one `ORDER BY` column
+                        // for `RANGE | SESSION` frame, there should be exactly one `ORDER BY` column
                         .exactly_one()
                         .map_err(|_| {
-                            ErrorCode::InvalidInputSyntax(
-                                "there should be exactly one ordering column for `RANGE` frame"
-                                    .to_string(),
-                            )
+                            ErrorCode::InvalidInputSyntax(format!(
+                                "there should be exactly one ordering column for `{}` frame",
+                                unit
+                            ))
                         })?;
                     let order_data_type = order_by_expr.expr.return_type();
                     let order_type = order_by_expr.order_type;
 
                     let offset_data_type = match &order_data_type {
-                        // for numeric ordering columns, `offset` should be the same type
+                        // for numeric ordering columns, `offset`/`gap` should be the same type
                         // NOTE: actually in PG it can be a larger type, but we don't support this here
                         t @ data_types::range_frame_numeric!() => t.clone(),
-                        // for datetime ordering columns, `offset` should be interval
+                        // for datetime ordering columns, `offset`/`gap` should be interval
                         t @ data_types::range_frame_datetime!() => {
                             if matches!(t, DataType::Date | DataType::Time) {
                                 bail_not_implemented!(
-                                    "`RANGE` frame with offset of type `{}` is not implemented yet, please manually cast the `ORDER BY` column to `timestamp`",
+                                    "`{}` frame with offset of type `{}` is not implemented yet, please manually cast the `ORDER BY` column to `timestamp`",
+                                    unit,
                                     t
                                 );
                             }
@@ -651,8 +668,8 @@ impl Binder {
                         t => {
                             return Err(ErrorCode::NotSupported(
                                 format!(
-                                    "`RANGE` frame with offset of type `{}` is not supported",
-                                    t
+                                    "`{}` frame with offset of type `{}` is not supported",
+                                    unit, t
                                 ),
                                 "Please re-consider the `ORDER BY` column".to_string(),
                             )
@@ -660,18 +677,31 @@ impl Binder {
                         }
                     };
 
-                    let (start, end) = self.bind_window_frame_scalar_impl_bounds(
-                        frame.start_bound,
-                        frame.end_bound,
-                        &offset_data_type,
-                    )?;
-                    FrameBounds::Range(RangeFrameBounds {
-                        order_data_type,
-                        order_type,
-                        offset_data_type,
-                        start: start.map(RangeFrameOffset::new),
-                        end: end.map(RangeFrameOffset::new),
-                    })
+                    if unit == WindowFrameUnits::Range {
+                        let (start, end) = must_match!(frame.bounds, WindowFrameBounds::Bounds { start, end } => (start, end));
+                        let (start, end) = self.bind_window_frame_scalar_impl_bounds(
+                            start,
+                            end,
+                            &offset_data_type,
+                        )?;
+                        FrameBounds::Range(RangeFrameBounds {
+                            order_data_type,
+                            order_type,
+                            offset_data_type,
+                            start: start.map(RangeFrameOffset::new),
+                            end: end.map(RangeFrameOffset::new),
+                        })
+                    } else {
+                        let gap = must_match!(frame.bounds, WindowFrameBounds::Gap(gap) => gap);
+                        let gap_value =
+                            self.bind_window_frame_bound_offset(*gap, offset_data_type.clone())?;
+                        FrameBounds::Session(SessionFrameBounds {
+                            order_data_type,
+                            order_type,
+                            gap_data_type: offset_data_type,
+                            gap: SessionFrameGap::new(gap_value),
+                        })
+                    }
                 }
                 WindowFrameUnits::Groups => {
                     bail_not_implemented!(
@@ -766,13 +796,13 @@ impl Binder {
         let mut offset = self.bind_expr(offset)?;
         if !offset.is_const() {
             return Err(ErrorCode::InvalidInputSyntax(
-                "offset in window frame bounds must be constant".to_string(),
+                "offset/gap in window frame bounds must be constant".to_string(),
             )
             .into());
         }
         if offset.cast_implicit_mut(cast_to.clone()).is_err() {
             return Err(ErrorCode::InvalidInputSyntax(format!(
-                "offset in window frame bounds must be castable to {}",
+                "offset/gap in window frame bounds must be castable to {}",
                 cast_to
             ))
             .into());
@@ -780,7 +810,7 @@ impl Binder {
         let offset = offset.fold_const()?;
         let Some(offset) = offset else {
             return Err(ErrorCode::InvalidInputSyntax(
-                "offset in window frame bounds must not be NULL".to_string(),
+                "offset/gap in window frame bounds must not be NULL".to_string(),
             )
             .into());
         };
@@ -1012,6 +1042,22 @@ impl Binder {
                 ("to_ascii", raw_call(ExprType::ToAscii)),
                 ("to_hex", raw_call(ExprType::ToHex)),
                 ("quote_ident", raw_call(ExprType::QuoteIdent)),
+                ("quote_literal", guard_by_len(1, raw(|_binder, mut inputs| {
+                    if inputs[0].return_type() != DataType::Varchar {
+                        // Support `quote_literal(any)` by converting it to `quote_literal(any::text)`
+                        // Ref. https://github.com/postgres/postgres/blob/REL_16_1/src/include/catalog/pg_proc.dat#L4641
+                        FunctionCall::cast_mut(&mut inputs[0], DataType::Varchar, CastContext::Explicit)?;
+                    }
+                    Ok(FunctionCall::new_unchecked(ExprType::QuoteLiteral, inputs, DataType::Varchar).into())
+                }))),
+                ("quote_nullable", guard_by_len(1, raw(|_binder, mut inputs| {
+                    if inputs[0].return_type() != DataType::Varchar {
+                        // Support `quote_nullable(any)` by converting it to `quote_nullable(any::text)`
+                        // Ref. https://github.com/postgres/postgres/blob/REL_16_1/src/include/catalog/pg_proc.dat#L4650
+                        FunctionCall::cast_mut(&mut inputs[0], DataType::Varchar, CastContext::Explicit)?;
+                    }
+                    Ok(FunctionCall::new_unchecked(ExprType::QuoteNullable, inputs, DataType::Varchar).into())
+                }))),
                 ("string_to_array", raw_call(ExprType::StringToArray)),
                 ("encode", raw_call(ExprType::Encode)),
                 ("decode", raw_call(ExprType::Decode)),
@@ -1128,6 +1174,7 @@ impl Binder {
                 ("jsonb_path_exists", raw_call(ExprType::JsonbPathExists)),
                 ("jsonb_path_query_array", raw_call(ExprType::JsonbPathQueryArray)),
                 ("jsonb_path_query_first", raw_call(ExprType::JsonbPathQueryFirst)),
+                ("jsonb_set", raw_call(ExprType::JsonbSet)),
                 // Functions that return a constant value
                 ("pi", pi()),
                 // greatest and least
@@ -1209,6 +1256,7 @@ impl Binder {
                 ("pg_get_userbyid", raw_call(ExprType::PgGetUserbyid)),
                 ("pg_get_indexdef", raw_call(ExprType::PgGetIndexdef)),
                 ("pg_get_viewdef", raw_call(ExprType::PgGetViewdef)),
+                ("pg_index_column_has_property", raw_call(ExprType::PgIndexColumnHasProperty)),
                 ("pg_relation_size", raw(|_binder, mut inputs|{
                     if inputs.is_empty() {
                         return Err(ErrorCode::ExprError(

@@ -16,58 +16,36 @@ use std::cmp;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use itertools::Itertools;
-use risingwave_common::util::epoch::INVALID_EPOCH;
+use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
-    build_initial_compaction_group_levels, get_compaction_group_ids, BranchedSstInfo,
+    get_compaction_group_ids, get_table_compaction_group_id_mapping, BranchedSstInfo,
 };
-use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
+use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::table_stats::add_prost_table_stats_map;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{
-    CompactionGroupId, HummockContextId, HummockSstableObjectId, HummockVersionId, FIRST_VERSION_ID,
+    CompactionGroupId, HummockContextId, HummockEpoch, HummockSstableObjectId, HummockVersionId,
 };
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
-    CompactionConfig, HummockPinnedSnapshot, HummockPinnedVersion, HummockVersionStats,
-    SstableInfo, TableStats,
+    HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersionStats, SstableInfo,
+    TableStats,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 
 use super::check_cg_write_limit;
 use crate::hummock::error::Result;
 use crate::hummock::manager::checkpoint::HummockVersionCheckpoint;
+use crate::hummock::manager::commit_multi_var;
 use crate::hummock::manager::context::ContextInfo;
 use crate::hummock::manager::gc::DeleteObjectTracker;
-use crate::hummock::manager::worker::{HummockManagerEvent, HummockManagerEventSender};
-use crate::hummock::manager::{commit_multi_var, create_trx_wrapper};
-use crate::hummock::metrics_utils::{
-    trigger_safepoint_stat, trigger_write_stop_stats, LocalTableMetrics,
-};
+use crate::hummock::manager::transaction::HummockVersionTransaction;
+use crate::hummock::metrics_utils::{trigger_write_stop_stats, LocalTableMetrics};
 use crate::hummock::model::CompactionGroup;
 use crate::hummock::HummockManager;
-use crate::model::{VarTransaction, VarTransactionWrapper};
-use crate::storage::MetaStore;
+use crate::model::VarTransaction;
 use crate::MetaResult;
-
-/// `HummockVersionSafePoint` prevents hummock versions GE than it from being GC.
-/// It's used by meta node itself to temporarily pin versions.
-pub struct HummockVersionSafePoint {
-    pub id: HummockVersionId,
-    event_sender: HummockManagerEventSender,
-}
-
-impl Drop for HummockVersionSafePoint {
-    fn drop(&mut self) {
-        if self
-            .event_sender
-            .send(HummockManagerEvent::DropSafePoint(self.id))
-            .is_err()
-        {
-            tracing::debug!("failed to drop hummock version safe point {}", self.id);
-        }
-    }
-}
 
 #[derive(Default)]
 pub struct Versioning {
@@ -157,29 +135,51 @@ impl HummockManager {
         Ok(workers)
     }
 
+    /// Gets current version without pinning it.
+    /// Should not be called inside [`HummockManager`], because it requests locks internally.
+    ///
+    /// Note: this method can hurt performance because it will clone a large object.
+    pub async fn get_current_version(&self) -> HummockVersion {
+        self.versioning.read().await.current_version.clone()
+    }
+
+    pub async fn get_current_max_committed_epoch(&self) -> HummockEpoch {
+        self.versioning
+            .read()
+            .await
+            .current_version
+            .max_committed_epoch
+    }
+
+    /// Gets the mapping from table id to compaction group id
+    pub async fn get_table_compaction_group_id_mapping(
+        &self,
+    ) -> HashMap<StateTableId, CompactionGroupId> {
+        get_table_compaction_group_id_mapping(&self.versioning.read().await.current_version)
+    }
+
+    /// Get version deltas from meta store
+    #[cfg_attr(coverage, coverage(off))]
+    pub async fn list_version_deltas(
+        &self,
+        start_id: u64,
+        num_limit: u32,
+        committed_epoch_limit: HummockEpoch,
+    ) -> Result<Vec<HummockVersionDelta>> {
+        let versioning = self.versioning.read().await;
+        let version_deltas = versioning
+            .hummock_version_deltas
+            .range(start_id..)
+            .map(|(_id, delta)| delta)
+            .filter(|delta| delta.max_committed_epoch <= committed_epoch_limit)
+            .take(num_limit as _)
+            .cloned()
+            .collect();
+        Ok(version_deltas)
+    }
+
     pub async fn get_version_stats(&self) -> HummockVersionStats {
         self.versioning.read().await.version_stats.clone()
-    }
-
-    pub async fn register_safe_point(&self) -> HummockVersionSafePoint {
-        let versioning = self.versioning.read().await;
-        let mut wl = self.context_info.write().await;
-        let safe_point = HummockVersionSafePoint {
-            id: versioning.current_version.id,
-            event_sender: self.event_sender.clone(),
-        };
-        wl.version_safe_points.push(safe_point.id);
-        trigger_safepoint_stat(&self.metrics, &wl.version_safe_points);
-        safe_point
-    }
-
-    pub async fn unregister_safe_point(&self, safe_point: HummockVersionId) {
-        let mut wl = self.context_info.write().await;
-        let version_safe_points = &mut wl.version_safe_points;
-        if let Some(pos) = version_safe_points.iter().position(|sp| *sp == safe_point) {
-            version_safe_points.remove(pos);
-        }
-        trigger_safepoint_stat(&self.metrics, &wl.version_safe_points);
     }
 
     /// Updates write limits for `target_groups` and sends notification.
@@ -237,18 +237,76 @@ impl HummockManager {
     }
 
     pub async fn rebuild_table_stats(&self) -> Result<()> {
-        use crate::model::ValTransaction;
         let mut versioning = self.versioning.write().await;
         let new_stats = rebuild_table_stats(&versioning.current_version);
-        let mut version_stats = create_trx_wrapper!(
-            self.meta_store_ref(),
-            VarTransactionWrapper,
-            VarTransaction::new(&mut versioning.version_stats)
-        );
+        let mut version_stats = VarTransaction::new(&mut versioning.version_stats);
         // version_stats.hummock_version_id is always 0 in meta store.
         version_stats.table_stats = new_stats.table_stats;
         commit_multi_var!(self.meta_store_ref(), version_stats)?;
         Ok(())
+    }
+
+    pub async fn may_fill_backward_state_table_info(&self) -> Result<()> {
+        let mut versioning = self.versioning.write().await;
+        if versioning
+            .current_version
+            .need_fill_backward_compatible_state_table_info_delta()
+        {
+            let versioning: &mut Versioning = &mut versioning;
+            let mut version = HummockVersionTransaction::new(
+                &mut versioning.current_version,
+                &mut versioning.hummock_version_deltas,
+                self.env.notification_manager(),
+                &self.metrics,
+            );
+            let mut new_version_delta = version.new_delta();
+            new_version_delta.with_latest_version(|version, delta| {
+                version.may_fill_backward_compatible_state_table_info_delta(delta)
+            });
+            new_version_delta.pre_apply();
+            commit_multi_var!(self.meta_store_ref(), version)?;
+        }
+        Ok(())
+    }
+
+    pub fn latest_snapshot(&self) -> HummockSnapshot {
+        let snapshot = self.latest_snapshot.load();
+        HummockSnapshot::clone(&snapshot)
+    }
+
+    /// We don't commit an epoch without checkpoint. We will only update the `max_current_epoch`.
+    pub fn update_current_epoch(&self, max_current_epoch: HummockEpoch) -> HummockSnapshot {
+        // We only update `max_current_epoch`!
+        let prev_snapshot = self.latest_snapshot.rcu(|snapshot| HummockSnapshot {
+            committed_epoch: snapshot.committed_epoch,
+            current_epoch: max_current_epoch,
+        });
+        assert!(prev_snapshot.current_epoch < max_current_epoch);
+
+        tracing::trace!("new current epoch {}", max_current_epoch);
+        HummockSnapshot {
+            committed_epoch: prev_snapshot.committed_epoch,
+            current_epoch: max_current_epoch,
+        }
+    }
+
+    pub async fn list_change_log_epochs(
+        &self,
+        table_id: u32,
+        min_epoch: u64,
+        max_count: u32,
+    ) -> Vec<u64> {
+        let versioning = self.versioning.read().await;
+        if let Some(table_change_log) = versioning
+            .current_version
+            .table_change_log
+            .get(&TableId::new(table_id))
+        {
+            let table_change_log = table_change_log.clone();
+            table_change_log.get_epochs(min_epoch, max_count as usize)
+        } else {
+            vec![]
+        }
     }
 }
 
@@ -274,7 +332,12 @@ pub(super) fn calc_new_write_limits(
             new_write_limits.insert(
                 *id,
                 WriteLimit {
-                    table_ids: levels.member_table_ids.clone(),
+                    table_ids: version
+                        .state_table_info
+                        .compaction_group_member_table_ids(*id)
+                        .iter()
+                        .map(|table_id| table_id.table_id)
+                        .collect(),
                     reason: write_limit_type.as_str(),
                 },
             );
@@ -284,27 +347,6 @@ pub(super) fn calc_new_write_limits(
         new_write_limits.remove(id);
     }
     new_write_limits
-}
-
-pub(super) fn create_init_version(default_compaction_config: CompactionConfig) -> HummockVersion {
-    let mut init_version = HummockVersion {
-        id: FIRST_VERSION_ID,
-        levels: Default::default(),
-        max_committed_epoch: INVALID_EPOCH,
-        safe_epoch: INVALID_EPOCH,
-        table_watermarks: HashMap::new(),
-        table_change_log: HashMap::new(),
-    };
-    for group_id in [
-        StaticCompactionGroupId::StateDefault as CompactionGroupId,
-        StaticCompactionGroupId::MaterializedView as CompactionGroupId,
-    ] {
-        init_version.levels.insert(
-            group_id,
-            build_initial_compaction_group_levels(group_id, &default_compaction_config),
-        );
-    }
-    init_version
 }
 
 /// Rebuilds table stats from the given version.
@@ -511,14 +553,9 @@ mod tests {
             );
         }
 
-        let mut version = HummockVersion {
-            id: 123,
-            levels: Default::default(),
-            max_committed_epoch: 0,
-            safe_epoch: 0,
-            table_watermarks: HashMap::new(),
-            table_change_log: HashMap::new(),
-        };
+        let mut version = HummockVersion::default();
+        version.id = 123;
+
         for cg in 1..3 {
             version.levels.insert(
                 cg,

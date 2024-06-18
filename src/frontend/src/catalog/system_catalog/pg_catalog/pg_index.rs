@@ -39,7 +39,34 @@ use risingwave_frontend_macro::system_catalog;
         true AS indisready,
         true AS indislive,
         false AS indisreplident
-    FROM rw_catalog.rw_indexes"
+    FROM rw_catalog.rw_indexes
+    UNION ALL
+    SELECT c.relation_id AS indexrelid,
+        c.relation_id AS indrelid,
+        COUNT(*)::smallint AS indnatts,
+        COUNT(*)::smallint AS indnkeyatts,
+        true AS indisunique,
+        ARRAY_AGG(c.position)::smallint[] AS indkey,
+        ARRAY[]::smallint[] as indoption,
+        NULL AS indexprs,
+        NULL AS indpred,
+        TRUE AS indisprimary,
+        ARRAY[]::int[] AS indclass,
+        false AS indisexclusion,
+        true AS indimmediate,
+        false AS indisclustered,
+        true AS indisvalid,
+        false AS indcheckxmin,
+        true AS indisready,
+        true AS indislive,
+        false AS indisreplident
+    FROM rw_catalog.rw_columns c
+    WHERE c.is_primary_key = true AND c.is_hidden = false
+    AND c.relation_id IN (
+        SELECT id
+        FROM rw_catalog.rw_tables
+    )
+    GROUP BY c.relation_id"
 )]
 #[derive(Fields)]
 struct PgIndex {

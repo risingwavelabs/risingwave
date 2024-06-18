@@ -78,7 +78,7 @@
             └─BatchScan { table: t2, columns: [t2.a, t2.b, t2.c], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [a, b, c], stream_key: [a, b, c], pk_columns: [a, b, c], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [t1.a, t1.b, t1.c] }
+    └─StreamProject { exprs: [t1.a, t1.b, t1.c], noop_update_hint: true }
       └─StreamHashAgg { group_key: [t1.a, t1.b, t1.c], aggs: [count] }
         └─StreamExchange { dist: HashShard(t1.a, t1.b, t1.c) }
           └─StreamUnion { all: true }
@@ -92,7 +92,7 @@
     Fragment 0
     StreamMaterialize { columns: [a, b, c], stream_key: [a, b, c], pk_columns: [a, b, c], pk_conflict: NoCheck }
     ├── tables: [ Materialize: 4294967294 ]
-    └── StreamProject { exprs: [t1.a, t1.b, t1.c] }
+    └── StreamProject { exprs: [t1.a, t1.b, t1.c], noop_update_hint: true }
         └── StreamHashAgg { group_key: [t1.a, t1.b, t1.c], aggs: [count] } { tables: [ HashAggState: 0 ] }
             └── StreamExchange Hash([0, 1, 2]) from 1
 
@@ -155,7 +155,7 @@
             └─BatchScan { table: t2, columns: [t2.a, t2.b, t2.c], distribution: UpstreamHashShard(t2.a) }
   stream_plan: |-
     StreamMaterialize { columns: [a, b, c], stream_key: [a, b, c], pk_columns: [a, b, c], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [t1.a, t1.b, t1.c] }
+    └─StreamProject { exprs: [t1.a, t1.b, t1.c], noop_update_hint: true }
       └─StreamHashAgg { group_key: [t1.a, t1.b, t1.c], aggs: [count] }
         └─StreamExchange { dist: HashShard(t1.a, t1.b, t1.c) }
           └─StreamUnion { all: true }
@@ -169,7 +169,7 @@
     Fragment 0
     StreamMaterialize { columns: [a, b, c], stream_key: [a, b, c], pk_columns: [a, b, c], pk_conflict: NoCheck }
     ├── tables: [ Materialize: 4294967294 ]
-    └── StreamProject { exprs: [t1.a, t1.b, t1.c] }
+    └── StreamProject { exprs: [t1.a, t1.b, t1.c], noop_update_hint: true }
         └── StreamHashAgg { group_key: [t1.a, t1.b, t1.c], aggs: [count] } { tables: [ HashAggState: 0 ] }
             └── StreamExchange Hash([0, 1, 2]) from 1
 

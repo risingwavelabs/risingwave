@@ -83,11 +83,10 @@ use crate::filter_key_extractor::{
 use crate::hummock::compactor::compaction_utils::calculate_task_parallelism;
 use crate::hummock::compactor::compactor_runner::{compact_and_build_sst, compact_done};
 use crate::hummock::iterator::{Forward, HummockIterator};
-use crate::hummock::multi_builder::SplitTableOutput;
 use crate::hummock::vacuum::Vacuum;
 use crate::hummock::{
-    validate_ssts, BlockedXor16FilterBuilder, FilterBuilder, HummockError,
-    SharedComapctorObjectIdManager, SstableWriterFactory, UnifiedSstableWriterFactory,
+    validate_ssts, BlockedXor16FilterBuilder, FilterBuilder, SharedComapctorObjectIdManager,
+    SstableWriterFactory, UnifiedSstableWriterFactory,
 };
 use crate::monitor::CompactorMetrics;
 
@@ -175,20 +174,19 @@ impl Compactor {
 
         compact_timer.observe_duration();
 
-        let ssts = Self::report_progress(
+        Self::report_progress(
             self.context.compactor_metrics.clone(),
             task_progress,
-            split_table_outputs,
+            &split_table_outputs,
             self.context.is_share_buffer_compact,
-        )
-        .await?;
+        );
 
         self.context
             .compactor_metrics
             .get_table_id_total_time_duration
             .observe(self.get_id_time.load(Ordering::Relaxed) as f64 / 1000.0 / 1000.0);
 
-        debug_assert!(ssts
+        debug_assert!(split_table_outputs
             .iter()
             .all(|table_info| table_info.sst_info.get_table_ids().is_sorted()));
 
@@ -198,33 +196,20 @@ impl Compactor {
                 "Finish Task {:?} split_index {:?} sst count {}",
                 task_id,
                 split_index,
-                ssts.len()
+                split_table_outputs.len()
             );
         }
-        Ok((ssts, table_stats_map))
+        Ok((split_table_outputs, table_stats_map))
     }
 
-    pub async fn report_progress(
+    pub fn report_progress(
         metrics: Arc<CompactorMetrics>,
         task_progress: Option<Arc<TaskProgress>>,
-        split_table_outputs: Vec<SplitTableOutput>,
+        ssts: &Vec<LocalSstableInfo>,
         is_share_buffer_compact: bool,
-    ) -> HummockResult<Vec<LocalSstableInfo>> {
-        let mut ssts = Vec::with_capacity(split_table_outputs.len());
-        let mut rets = vec![];
-
-        for SplitTableOutput {
-            sst_info,
-            upload_join_handle,
-        } in split_table_outputs
-        {
+    ) {
+        for sst_info in ssts {
             let sst_size = sst_info.file_size();
-            ssts.push(sst_info);
-            let ret = upload_join_handle
-                .verbose_instrument_await("upload")
-                .await
-                .map_err(HummockError::sstable_upload_error);
-            rets.push(ret);
             if let Some(tracker) = &task_progress {
                 tracker.inc_ssts_uploaded();
                 tracker.dec_num_pending_write_io();
@@ -235,10 +220,6 @@ impl Compactor {
                 metrics.compaction_upload_sst_counts.inc();
             }
         }
-        for ret in rets {
-            ret??;
-        }
-        Ok(ssts)
     }
 
     async fn compact_key_range_impl<F: SstableWriterFactory, B: FilterBuilder>(
@@ -249,7 +230,7 @@ impl Compactor {
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
         task_progress: Option<Arc<TaskProgress>>,
         object_id_getter: Box<dyn GetObjectId>,
-    ) -> HummockResult<(Vec<SplitTableOutput>, CompactionStatistics)> {
+    ) -> HummockResult<(Vec<LocalSstableInfo>, CompactionStatistics)> {
         let builder_factory = RemoteBuilderFactory::<F, B> {
             object_id_getter,
             limiter: self.context.memory_limiter.clone(),
@@ -266,6 +247,9 @@ impl Compactor {
             self.context.compactor_metrics.clone(),
             task_progress.clone(),
             self.task_config.table_vnode_partition.clone(),
+            self.context
+                .storage_opts
+                .compactor_concurrent_uploading_sst_count,
         );
         let compaction_statistics = compact_and_build_sst(
             &mut sst_builder,
@@ -393,7 +377,7 @@ pub fn start_compactor(
                         let mut pending_pull_task_count = 0;
                         if pull_task_ack {
                             // TODO: Compute parallelism on meta side
-                            pending_pull_task_count = (max_task_parallelism - running_task_parallelism.load(Ordering::SeqCst)).max(max_pull_task_count);
+                            pending_pull_task_count = (max_task_parallelism - running_task_parallelism.load(Ordering::SeqCst)).min(max_pull_task_count);
 
                             if pending_pull_task_count > 0 {
                                 if let Err(e) = request_sender.send(SubscribeCompactionEventRequest {

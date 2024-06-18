@@ -163,8 +163,6 @@ impl KafkaProperties {
     pub fn set_client(&self, c: &mut rdkafka::ClientConfig) {
         self.rdkafka_properties_common.set_client(c);
         self.rdkafka_properties_consumer.set_client(c);
-
-        tracing::info!("kafka client starts with: {:?}", c);
     }
 }
 
@@ -195,13 +193,15 @@ impl RdKafkaPropertiesConsumer {
 
 #[cfg(test)]
 mod test {
-    use maplit::hashmap;
+    use std::collections::BTreeMap;
+
+    use maplit::btreemap;
 
     use super::*;
 
     #[test]
     fn test_parse_config_consumer_common() {
-        let config: HashMap<String, String> = hashmap! {
+        let config: BTreeMap<String, String> = btreemap! {
             // common
             "properties.bootstrap.server".to_string() => "127.0.0.1:9092".to_string(),
             "topic".to_string() => "test".to_string(),
@@ -257,7 +257,7 @@ mod test {
             props.rdkafka_properties_consumer.fetch_queue_backoff_ms,
             Some(114514)
         );
-        let hashmap: HashMap<String, String> = hashmap! {
+        let hashmap: BTreeMap<String, String> = btreemap! {
             "broker1".to_string() => "10.0.0.1:8001".to_string()
         };
         assert_eq!(props.privatelink_common.broker_rewrite_map, Some(hashmap));

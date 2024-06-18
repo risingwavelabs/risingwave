@@ -14,7 +14,7 @@
 
 use core::mem;
 use core::time::Duration;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use anyhow::anyhow;
@@ -139,7 +139,7 @@ pub struct BigQueryConfig {
     pub r#type: String, // accept "append-only" or "upsert"
 }
 impl BigQueryConfig {
-    pub fn from_hashmap(properties: HashMap<String, String>) -> Result<Self> {
+    pub fn from_btreemap(properties: BTreeMap<String, String>) -> Result<Self> {
         let config =
             serde_json::from_value::<BigQueryConfig>(serde_json::to_value(properties).unwrap())
                 .map_err(|e| SinkError::Config(anyhow!(e)))?;
@@ -311,12 +311,15 @@ impl Sink for BigQuerySink {
 
 pub struct BigQuerySinkWriter {
     pub config: BigQueryConfig,
+    #[expect(dead_code)]
     schema: Schema,
+    #[expect(dead_code)]
     pk_indices: Vec<usize>,
     client: StorageWriterClient,
     is_append_only: bool,
     row_encoder: ProtoEncoder,
     writer_pb_schema: ProtoSchema,
+    #[expect(dead_code)]
     message_descriptor: MessageDescriptor,
     write_stream: String,
     proto_field: Option<FieldDescriptor>,
@@ -329,7 +332,7 @@ impl TryFrom<SinkParam> for BigQuerySink {
 
     fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
         let schema = param.schema();
-        let config = BigQueryConfig::from_hashmap(param.properties)?;
+        let config = BigQueryConfig::from_btreemap(param.properties)?;
         BigQuerySink::new(
             config,
             schema,
@@ -520,6 +523,7 @@ impl SinkWriter for BigQuerySinkWriter {
 
 struct StorageWriterClient {
     client: StreamingWriteClient,
+    #[expect(dead_code)]
     environment: Environment,
 }
 impl StorageWriterClient {

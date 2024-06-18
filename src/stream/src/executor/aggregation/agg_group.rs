@@ -365,10 +365,11 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
 
     /// Reset all in-memory states to their initial state, i.e. to reset all agg state structs to
     /// the status as if they are just created, no input applied and no row in state table.
-    fn reset(&mut self, funcs: &[BoxedAggregateFunction]) {
+    fn reset(&mut self, funcs: &[BoxedAggregateFunction]) -> StreamExecutorResult<()> {
         for (state, func) in self.states.iter_mut().zip_eq_fast(funcs) {
-            state.reset(func);
+            state.reset(func)?;
         }
+        Ok(())
     }
 
     /// Encode intermediate states.
@@ -409,7 +410,7 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
             // they should output NULL, for some other calls (e.g. `sum0`), they should output 0.
             // FIXME(rc): Deciding whether to reset states according to `row_count` is not precisely
             // correct, see https://github.com/risingwavelabs/risingwave/issues/7412 for bug description.
-            self.reset(funcs);
+            self.reset(funcs)?;
         }
         futures::future::try_join_all(
             self.states

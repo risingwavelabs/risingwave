@@ -25,7 +25,7 @@ use risingwave_pb::catalog::connection::private_link_service::{
 };
 use risingwave_pb::catalog::connection::PbPrivateLinkService;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
-use risingwave_pb::catalog::{connection, Comment, Connection, CreateType};
+use risingwave_pb::catalog::{connection, Comment, Connection, CreateType, Secret};
 use risingwave_pb::ddl_service::ddl_service_server::DdlService;
 use risingwave_pb::ddl_service::drop_table_request::PbSourceId;
 use risingwave_pb::ddl_service::*;
@@ -146,6 +146,41 @@ impl DdlService for DdlServiceImpl {
             status: None,
             version,
         }))
+    }
+
+    async fn create_secret(
+        &self,
+        request: Request<CreateSecretRequest>,
+    ) -> Result<Response<CreateSecretResponse>, Status> {
+        let req = request.into_inner();
+        let pb_secret = Secret {
+            id: 0,
+            name: req.get_name().clone(),
+            database_id: req.get_database_id(),
+            value: req.get_value().clone(),
+            owner: req.get_owner_id(),
+            schema_id: req.get_schema_id(),
+        };
+        let version = self
+            .ddl_controller
+            .run_command(DdlCommand::CreateSecret(pb_secret))
+            .await?;
+
+        Ok(Response::new(CreateSecretResponse { version }))
+    }
+
+    async fn drop_secret(
+        &self,
+        request: Request<DropSecretRequest>,
+    ) -> Result<Response<DropSecretResponse>, Status> {
+        let req = request.into_inner();
+        let secret_id = req.get_secret_id();
+        let version = self
+            .ddl_controller
+            .run_command(DdlCommand::DropSecret(secret_id))
+            .await?;
+
+        Ok(Response::new(DropSecretResponse { version }))
     }
 
     async fn create_schema(

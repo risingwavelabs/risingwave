@@ -20,6 +20,7 @@ use risingwave_common::config::{
 };
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsReader;
+use risingwave_meta_model_migration::{MigrationStatus, Migrator, MigratorTrait};
 use risingwave_meta_model_v2::prelude::Cluster;
 use risingwave_pb::meta::SystemParams;
 use risingwave_rpc_client::{StreamClientPool, StreamClientPoolRef};
@@ -192,7 +193,7 @@ pub struct MetaOpts {
     /// The Dashboard service uses this in the following ways:
     /// 1. Query Prometheus for relevant metrics to find Stream Graph Bottleneck, and display it.
     /// 2. Provide cluster diagnostics, at `/api/monitor/diagnose` to troubleshoot cluster.
-    /// These are just examples which show how the Meta Dashboard Service queries Prometheus.
+    ///    These are just examples which show how the Meta Dashboard Service queries Prometheus.
     pub prometheus_endpoint: Option<String>,
 
     /// The additional selector used when querying Prometheus.
@@ -247,12 +248,12 @@ pub struct MetaOpts {
 
     /// hybird compaction group config
     ///
-    /// `hybird_partition_vnode_count` determines the granularity of vnodes in the hybrid compaction group for SST alignment.
-    /// When `hybird_partition_vnode_count` > 0, in hybrid compaction group
+    /// `hybrid_partition_vnode_count` determines the granularity of vnodes in the hybrid compaction group for SST alignment.
+    /// When `hybrid_partition_vnode_count` > 0, in hybrid compaction group
     /// - Tables with high write throughput will be split at vnode granularity
     /// - Tables with high size tables will be split by table granularity
-    /// When `hybird_partition_vnode_count` = 0,no longer be special alignment operations for the hybird compaction group
-    pub hybird_partition_vnode_count: u32,
+    ///   When `hybrid_partition_vnode_count` = 0,no longer be special alignment operations for the hybird compaction group
+    pub hybrid_partition_node_count: u32,
 
     pub event_log_enabled: bool,
     pub event_log_channel_max_size: u32,
@@ -277,6 +278,12 @@ pub struct MetaOpts {
 
     /// The maximum number of times to probe for `PullTaskEvent`
     pub max_get_task_probe_times: usize,
+
+    pub compact_task_table_size_partition_threshold_low: u64,
+    pub compact_task_table_size_partition_threshold_high: u64,
+
+    // The private key for the secret store, used when the secret is stored in the meta.
+    pub secret_store_private_key: Vec<u8>,
 }
 
 impl MetaOpts {
@@ -315,6 +322,8 @@ impl MetaOpts {
             periodic_split_compact_group_interval_sec: 60,
             split_group_size_limit: 5 * 1024 * 1024 * 1024,
             min_table_split_size: 2 * 1024 * 1024 * 1024,
+            compact_task_table_size_partition_threshold_low: 128 * 1024 * 1024,
+            compact_task_table_size_partition_threshold_high: 512 * 1024 * 1024,
             table_write_throughput_threshold: 128 * 1024 * 1024,
             min_table_split_write_throughput: 64 * 1024 * 1024,
             do_not_config_object_storage_lifecycle: true,
@@ -323,7 +332,7 @@ impl MetaOpts {
             compaction_task_max_progress_interval_secs: 1,
             compaction_config: None,
             cut_table_size_limit: 1024 * 1024 * 1024,
-            hybird_partition_vnode_count: 4,
+            hybrid_partition_node_count: 4,
             event_log_enabled: false,
             event_log_channel_max_size: 1,
             advertise_addr: "".to_string(),
@@ -335,19 +344,37 @@ impl MetaOpts {
             object_store_config: ObjectStoreConfig::default(),
             max_trivial_move_task_count_per_loop: 256,
             max_get_task_probe_times: 5,
+            secret_store_private_key: "demo-secret-private-key".as_bytes().to_vec(),
         }
     }
+}
+
+/// This function `is_first_launch_for_sql_backend_cluster` is used to check whether the cluster, which uses SQL as the backend, is a new cluster.
+/// It determines this by inspecting the applied migrations. If the migration `m20230908_072257_init` has been applied,
+/// then it is considered an old cluster.
+///
+/// Note: this check should be performed before `Migrator::up()`.
+pub async fn is_first_launch_for_sql_backend_cluster(
+    sql_meta_store: &SqlMetaStore,
+) -> MetaResult<bool> {
+    let migrations = Migrator::get_applied_migrations(&sql_meta_store.conn).await?;
+    for migration in migrations {
+        if migration.name() == "m20230908_072257_init"
+            && migration.status() == MigrationStatus::Applied
+        {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 impl MetaSrvEnv {
     pub async fn new(
         opts: MetaOpts,
-        init_system_params: SystemParams,
+        mut init_system_params: SystemParams,
         init_session_config: SessionConfig,
         meta_store_impl: MetaStoreImpl,
     ) -> MetaResult<Self> {
-        let notification_manager =
-            Arc::new(NotificationManager::new(meta_store_impl.clone()).await);
         let idle_manager = Arc::new(IdleManager::new(opts.max_idle_ms));
         let stream_client_pool = Arc::new(StreamClientPool::default());
         let event_log_manager = Arc::new(start_event_log_manager(
@@ -357,6 +384,8 @@ impl MetaSrvEnv {
 
         let env = match &meta_store_impl {
             MetaStoreImpl::Kv(meta_store) => {
+                let notification_manager =
+                    Arc::new(NotificationManager::new(meta_store_impl.clone()).await);
                 let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
                 let (cluster_id, cluster_first_launch) =
                     if let Some(id) = ClusterId::from_meta_store(meta_store).await? {
@@ -364,6 +393,11 @@ impl MetaSrvEnv {
                     } else {
                         (ClusterId::new(), true)
                     };
+
+                // For new clusters, the name of the object store needs to be prefixed according to the object id.
+                // For old clusters, the prefix is ​​not divided for the sake of compatibility.
+
+                init_system_params.use_new_object_prefix_strategy = Some(cluster_first_launch);
                 let system_params_manager = Arc::new(
                     SystemParamsManager::new(
                         meta_store.clone(),
@@ -406,11 +440,24 @@ impl MetaSrvEnv {
                 }
             }
             MetaStoreImpl::Sql(sql_meta_store) => {
+                let is_sql_backend_cluster_first_launch =
+                    is_first_launch_for_sql_backend_cluster(sql_meta_store).await?;
+                // Try to upgrade if any new model changes are added.
+                Migrator::up(&sql_meta_store.conn, None)
+                    .await
+                    .expect("Failed to upgrade models in meta store");
+
+                let notification_manager =
+                    Arc::new(NotificationManager::new(meta_store_impl.clone()).await);
                 let cluster_id = Cluster::find()
                     .one(&sql_meta_store.conn)
                     .await?
                     .map(|c| c.cluster_id.to_string().into())
                     .unwrap();
+                init_system_params.use_new_object_prefix_strategy =
+                    Some(is_sql_backend_cluster_first_launch);
+                // For new clusters, the name of the object store needs to be prefixed according to the object id.
+                // For old clusters, the prefix is ​​not divided for the sake of compatibility.
                 let system_param_controller = Arc::new(
                     SystemParamsController::new(
                         sql_meta_store.clone(),
@@ -453,11 +500,11 @@ impl MetaSrvEnv {
         Ok(env)
     }
 
-    pub fn meta_store_ref(&self) -> MetaStoreImpl {
+    pub fn meta_store(&self) -> MetaStoreImpl {
         self.meta_store_impl.clone()
     }
 
-    pub fn meta_store(&self) -> &MetaStoreImpl {
+    pub fn meta_store_ref(&self) -> &MetaStoreImpl {
         &self.meta_store_impl
     }
 
