@@ -132,6 +132,7 @@ pub async fn prepare_start_parameters(
             storage_opts.data_directory.to_string(),
             0,
             meta_cache_capacity_bytes,
+            system_params_reader.use_new_object_prefix_strategy(),
         )
         .await
         // FIXME(MrCroxx): Handle this error.

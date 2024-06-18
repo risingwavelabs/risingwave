@@ -1256,6 +1256,7 @@ impl Binder {
                 ("pg_get_userbyid", raw_call(ExprType::PgGetUserbyid)),
                 ("pg_get_indexdef", raw_call(ExprType::PgGetIndexdef)),
                 ("pg_get_viewdef", raw_call(ExprType::PgGetViewdef)),
+                ("pg_index_column_has_property", raw_call(ExprType::PgIndexColumnHasProperty)),
                 ("pg_relation_size", raw(|_binder, mut inputs|{
                     if inputs.is_empty() {
                         return Err(ErrorCode::ExprError(

@@ -380,7 +380,7 @@ pub async fn compact(
             .storage_opts
             .object_store_config
             .s3
-            .object_store_recv_buffer_size
+            .recv_buffer_size
             .unwrap_or(6 * 1024 * 1024) as u64,
         capacity as u64,
     ) * compact_task.splits.len() as u64;
