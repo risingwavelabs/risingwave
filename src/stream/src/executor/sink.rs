@@ -183,6 +183,8 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         let re_construct_with_sink_pk = need_advance_delete
             && self.sink_param.sink_type == SinkType::Upsert
             && !self.sink_param.downstream_pk.is_empty();
+        // Don't compact chunk for blackhole sink for better benchmark performance.
+        let compact_chunk = !self.sink.is_blackhole();
         let processed_input = Self::process_msg(
             input,
             self.sink_param.sink_type,
@@ -193,6 +195,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             self.input_data_types,
             self.sink_param.downstream_pk.clone(),
             metrics.sink_chunk_buffer_size,
+            compact_chunk,
         );
 
         if self.sink.is_sink_into_table() {
@@ -298,6 +301,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         input_data_types: Vec<DataType>,
         down_stream_pk: Vec<usize>,
         sink_chunk_buffer_size_metrics: LabelGuardedIntGauge<3>,
+        compact_chunk: bool,
     ) {
         // need to buffer chunks during one barrier
         if need_advance_delete || re_construct_with_sink_pk {
@@ -362,10 +366,12 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             for msg in input {
                 match msg? {
                     Message::Watermark(w) => yield Message::Watermark(w),
-                    Message::Chunk(chunk) => {
+                    Message::Chunk(mut chunk) => {
                         // Compact the chunk to eliminate any useless intermediate result (e.g. UPDATE
                         // V->V).
-                        let chunk = merge_chunk_row(chunk, &stream_key);
+                        if compact_chunk {
+                            chunk = merge_chunk_row(chunk, &stream_key);
+                        }
                         match sink_type {
                             SinkType::AppendOnly => yield Message::Chunk(chunk),
                             SinkType::ForceAppendOnly => {
