@@ -696,8 +696,10 @@ impl dyn PlanNode {
     }
 }
 
-const PLAN_DEPTH_THRESHOLD: usize = 30;
-const PLAN_TOO_DEEP_NOTICE: &str = "The plan is too deep. \
+/// Recursion depth threshold for plan node visitor to send notice to user.
+pub const PLAN_DEPTH_THRESHOLD: usize = 30;
+/// Notice message for plan node visitor to send to user when the depth threshold is reached.
+pub const PLAN_TOO_DEEP_NOTICE: &str = "The plan is too deep. \
 Consider simplifying or splitting the query if you encounter any issues.";
 
 impl dyn PlanNode {
