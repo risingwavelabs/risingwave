@@ -24,7 +24,6 @@ use {
 
 use crate::array::{Array, ArrayError, DataChunk, DecimalArray};
 
-#[expect(clippy::duplicate_mod)]
 #[path = "./arrow_impl_52.rs"]
 mod arrow_impl;
 
