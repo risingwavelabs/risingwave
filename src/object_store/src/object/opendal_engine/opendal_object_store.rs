@@ -442,13 +442,21 @@ mod tests {
         let bytes = store.read("/abc", 4..6).await.unwrap();
         assert_eq!(String::from_utf8(bytes.to_vec()).unwrap(), "56".to_string());
 
-        // Overflow.
-        store.read("/abc", 4..44).await.unwrap_err();
-
         store.delete("/abc").await.unwrap();
 
         // No such object.
         store.read("/abc", 0..3).await.unwrap_err();
+    }
+
+    #[tokio::test]
+    #[should_panic]
+    async fn test_memory_read_overflow() {
+        let block = Bytes::from("123456");
+        let store = OpendalObjectStore::test_new_memory_engine().unwrap();
+        store.upload("/abc", block).await.unwrap();
+
+        // Overflow.
+        store.read("/abc", 4..44).await.unwrap_err();
     }
 
     #[tokio::test]
