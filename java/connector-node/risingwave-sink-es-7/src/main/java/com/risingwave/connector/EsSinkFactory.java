@@ -87,7 +87,7 @@ public class EsSinkFactory implements SinkFactory {
             if (config.getConnector().equals("elasticsearch")) {
                 ElasticRestHighLevelClientAdapter esClient =
                         new ElasticRestHighLevelClientAdapter(host, config);
-                if (esClient.ping(org.elasticsearch.client.RequestOptions.DEFAULT)) {
+                if (!esClient.ping(org.elasticsearch.client.RequestOptions.DEFAULT)) {
                     throw Status.INVALID_ARGUMENT
                             .withDescription("Cannot connect to " + config.getUrl())
                             .asRuntimeException();
@@ -96,7 +96,7 @@ public class EsSinkFactory implements SinkFactory {
             } else if (config.getConnector().equals("opensearch")) {
                 OpensearchRestHighLevelClientAdapter opensearchClient =
                         new OpensearchRestHighLevelClientAdapter(host, config);
-                if (opensearchClient.ping(org.opensearch.client.RequestOptions.DEFAULT)) {
+                if (!opensearchClient.ping(org.opensearch.client.RequestOptions.DEFAULT)) {
                     throw Status.INVALID_ARGUMENT
                             .withDescription("Cannot connect to " + config.getUrl())
                             .asRuntimeException();
