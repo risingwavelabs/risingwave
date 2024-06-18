@@ -444,6 +444,10 @@ impl SinkImpl {
     pub fn is_sink_into_table(&self) -> bool {
         matches!(self, SinkImpl::Table(_))
     }
+
+    pub fn is_blackhole(&self) -> bool {
+        matches!(self, SinkImpl::BlackHole(_))
+    }
 }
 
 pub fn build_sink(param: SinkParam) -> Result<SinkImpl> {

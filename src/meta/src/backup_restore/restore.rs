@@ -246,6 +246,7 @@ mod tests {
         SystemParams {
             state_store: Some("state_store".into()),
             data_directory: Some("data_directory".into()),
+            use_new_object_prefix_strategy: Some(true),
             backup_storage_url: Some("backup_storage_url".into()),
             backup_storage_directory: Some("backup_storage_directory".into()),
             ..SystemConfig::default().into_init_system_params()
