@@ -74,7 +74,7 @@
         <commons.io.version>2.11.0</commons.io.version>
         <commons.text.version>1.10.0</commons.text.version>
         <commons.lang3.version>3.12.0</commons.lang3.version>
-        <debezium.version>2.6.2.Final</debezium.version>
+        <debezium.version>2.4.2.Final</debezium.version>
         <jackson.version>2.13.5</jackson.version>
         <spark_sql.version>3.3.1</spark_sql.version>
         <hadoop.version>3.4.0</hadoop.version>
@@ -88,6 +88,9 @@
         <sqlite.version>3.45.0.0</sqlite.version>
         <aws.version>2.21.42</aws.version>
         <hive.version>4.0.0</hive.version>
+        <jetty.version>12.0.10</jetty.version>
+        <snappy.version>1.1.10.5</snappy.version>
+        <compress.version>1.26.2</compress.version>
     </properties>
 
     <dependencyManagement>
@@ -378,6 +381,31 @@
                 <artifactId>hadoop-mapreduce-client-jobclient</artifactId>
                 <version>${hadoop.version}</version>
             </dependency>
+            <dependency>
+                <groupId>org.eclipse.jetty</groupId>
+                <artifactId>jetty-client</artifactId>
+                <version>${jetty.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.eclipse.jetty</groupId>
+                <artifactId>jetty-util</artifactId>
+                <version>${jetty.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.eclipse.jetty</groupId>
+                <artifactId>jetty-http</artifactId>
+                <version>${jetty.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.xerial.snappy</groupId>
+                <artifactId>snappy-java</artifactId>
+                <version>${snappy.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.commons</groupId>
+                <artifactId>commons-compress</artifactId>
+                <version>${compress.version}</version>
+            </dependency>            
             <dependency>
                 <groupId>org.apache.spark</groupId>
                 <artifactId>spark-sql_2.12</artifactId>
