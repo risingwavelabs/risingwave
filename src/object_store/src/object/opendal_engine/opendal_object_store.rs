@@ -386,7 +386,7 @@ impl StreamingUploader for OpendalStreamingUploader {
         Ok(())
     }
 
-    async fn finish(mut self: Self) -> ObjectResult<()> {
+    async fn finish(mut self) -> ObjectResult<()> {
         assert!(self.is_valid);
         if self.not_uploaded_len > 0 {
             self.flush().await?;
@@ -416,6 +416,8 @@ impl StreamingUploader for OpendalStreamingUploader {
 
 #[cfg(test)]
 mod tests {
+    use stream::TryStreamExt;
+
     use super::*;
 
     async fn list_all(prefix: &str, store: &OpendalObjectStore) -> Vec<ObjectMetadata> {
