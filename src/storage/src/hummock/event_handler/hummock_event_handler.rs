@@ -184,8 +184,7 @@ impl HummockEventReceiver {
 }
 
 struct HummockEventHandlerMetrics {
-    event_handler_on_sync_finish_latency: Histogram,
-    event_handler_on_spilled_latency: Histogram,
+    event_handler_on_upload_finish_latency: Histogram,
     event_handler_on_apply_version_update: Histogram,
     event_handler_on_recv_version_update: Histogram,
 }
@@ -329,12 +328,9 @@ impl HummockEventHandler {
         let write_conflict_detector = ConflictDetector::new_from_config(storage_opts);
 
         let metrics = HummockEventHandlerMetrics {
-            event_handler_on_sync_finish_latency: state_store_metrics
+            event_handler_on_upload_finish_latency: state_store_metrics
                 .event_handler_latency
-                .with_label_values(&["on_sync_finish"]),
-            event_handler_on_spilled_latency: state_store_metrics
-                .event_handler_latency
-                .with_label_values(&["on_spilled"]),
+                .with_label_values(&["on_upload_finish"]),
             event_handler_on_apply_version_update: state_store_metrics
                 .event_handler_latency
                 .with_label_values(&["apply_version"]),
@@ -396,31 +392,6 @@ impl HummockEventHandler {
 
 // Handler for different events
 impl HummockEventHandler {
-    fn handle_epoch_synced(&mut self, newly_uploaded_sstables: Arc<[Arc<StagingSstableInfo>]>) {
-        {
-            {
-                let related_instance_ids: HashSet<_> = newly_uploaded_sstables
-                    .iter()
-                    .flat_map(|sst| sst.imm_ids().keys().cloned())
-                    .collect();
-                self.for_each_read_version(related_instance_ids, |instance_id, read_version| {
-                    newly_uploaded_sstables
-                        .iter()
-                        // Take rev because newer data come first in `newly_uploaded_sstables` but we apply
-                        // older data first
-                        .rev()
-                        .for_each(|staging_sstable_info| {
-                            if staging_sstable_info.imm_ids().contains_key(&instance_id) {
-                                read_version.update(VersionUpdate::Staging(StagingData::Sst(
-                                    staging_sstable_info.clone(),
-                                )));
-                            }
-                        });
-                });
-            }
-        }
-    }
-
     /// This function will be performed under the protection of the `read_version_mapping` read
     /// lock, and add write lock on each `read_version` operation
     fn for_each_read_version(
@@ -740,16 +711,11 @@ impl HummockEventHandler {
 
     fn handle_uploader_event(&mut self, event: UploaderEvent) {
         match event {
-            UploaderEvent::SyncFinish(data) => {
+            UploaderEvent::DataUploaded(staging_sstable_info) => {
                 let _timer = self
                     .metrics
-                    .event_handler_on_sync_finish_latency
+                    .event_handler_on_upload_finish_latency
                     .start_timer();
-                self.handle_epoch_synced(data);
-            }
-
-            UploaderEvent::DataSpilled(staging_sstable_info) => {
-                let _timer = self.metrics.event_handler_on_spilled_latency.start_timer();
                 self.handle_data_spilled(staging_sstable_info);
             }
         }
@@ -925,30 +891,27 @@ pub(super) fn send_sync_result(
 
 impl SyncedData {
     pub fn into_sync_result(self) -> SyncResult {
-        let SyncedData {
-            newly_upload_ssts,
-            uploaded_ssts,
-            table_watermarks,
-        } = self;
-        let mut sync_size = 0;
-        let mut uncommitted_ssts = Vec::new();
-        let mut old_value_ssts = Vec::new();
-        // The newly uploaded `sstable_infos` contains newer data. Therefore,
-        // `newly_upload_ssts` at the front
-        for sst in newly_upload_ssts
-            .iter()
-            .flat_map(|ssts| ssts.iter())
-            .chain(uploaded_ssts.iter())
         {
-            sync_size += sst.imm_size();
-            uncommitted_ssts.extend(sst.sstable_infos().iter().cloned());
-            old_value_ssts.extend(sst.old_value_sstable_infos().iter().cloned());
-        }
-        SyncResult {
-            sync_size,
-            uncommitted_ssts,
-            table_watermarks: table_watermarks.clone(),
-            old_value_ssts,
+            let SyncedData {
+                uploaded_ssts,
+                table_watermarks,
+            } = self;
+            let mut sync_size = 0;
+            let mut uncommitted_ssts = Vec::new();
+            let mut old_value_ssts = Vec::new();
+            // The newly uploaded `sstable_infos` contains newer data. Therefore,
+            // `newly_upload_ssts` at the front
+            for sst in uploaded_ssts {
+                sync_size += sst.imm_size();
+                uncommitted_ssts.extend(sst.sstable_infos().iter().cloned());
+                old_value_ssts.extend(sst.old_value_sstable_infos().iter().cloned());
+            }
+            SyncResult {
+                sync_size,
+                uncommitted_ssts,
+                table_watermarks: table_watermarks.clone(),
+                old_value_ssts,
+            }
         }
     }
 }
