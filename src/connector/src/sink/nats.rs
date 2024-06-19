@@ -159,6 +159,9 @@ impl NatsSinkWriter {
                         .publish(self.config.common.subject.clone(), item.into())
                         .await
                         .context("nats sink error")
+                        .map_err(SinkError::Nats)?
+                        .await
+                        .context("nats sink error")
                         .map_err(SinkError::Nats)?;
                 }
                 Ok::<_, SinkError>(())
