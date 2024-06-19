@@ -6,6 +6,7 @@ CREATE TABLE t (v int);
 
 # This query used to overflow the stack during optimization as it generated a left-deep tree
 # of `OR xx IS NOT NULL` expression in the filter after each full outer join.
+skipif madsim
 statement ok
 CREATE MATERIALIZED VIEW mv AS
 SELECT
