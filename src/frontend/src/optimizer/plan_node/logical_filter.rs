@@ -25,8 +25,7 @@ use super::{
 };
 use crate::error::Result;
 use crate::expr::{
-    assert_input_ref, merge_expr_by_logical_binary, ExprImpl, ExprRewriter, ExprType, ExprVisitor,
-    FunctionCall, InputRef,
+    assert_input_ref, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef,
 };
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
@@ -68,18 +67,14 @@ impl LogicalFilter {
     /// Create a `LogicalFilter` to filter out rows where all keys are null.
     pub fn filter_out_all_null_keys(input: PlanRef, key: &[usize]) -> PlanRef {
         let schema = input.schema();
-        let cond = merge_expr_by_logical_binary(
-            key.iter().unique().map(|&i| {
-                FunctionCall::new_unchecked(
-                    ExprType::IsNotNull,
-                    vec![InputRef::new(i, schema.fields()[i].data_type.clone()).into()],
-                    DataType::Boolean,
-                )
-                .into()
-            }),
-            ExprType::Or,
-            ExprImpl::literal_bool(false),
-        );
+        let cond = ExprImpl::or(key.iter().unique().map(|&i| {
+            FunctionCall::new_unchecked(
+                ExprType::IsNotNull,
+                vec![InputRef::new(i, schema.fields()[i].data_type.clone()).into()],
+                DataType::Boolean,
+            )
+            .into()
+        }));
         LogicalFilter::create_with_expr(input, cond)
     }
 

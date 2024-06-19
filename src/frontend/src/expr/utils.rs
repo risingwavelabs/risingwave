@@ -33,10 +33,10 @@ fn split_expr_by(expr: ExprImpl, op: ExprType, rets: &mut Vec<ExprImpl>) {
     }
 }
 
-/// Merge the given expressions by the given logical operation.
+/// Merge the given expressions by the a logical operation.
 ///
 /// The `op` must be commutative and associative, typically `And` or `Or`.
-pub fn merge_expr_by_logical_binary<I>(exprs: I, op: ExprType, identity_elem: ExprImpl) -> ExprImpl
+pub(super) fn merge_expr_by_logical<I>(exprs: I, op: ExprType, identity_elem: ExprImpl) -> ExprImpl
 where
     I: IntoIterator<Item = ExprImpl>,
 {
@@ -397,16 +397,10 @@ pub fn factorization_expr(expr: ExprImpl) -> Vec<ExprImpl> {
         disjunction.retain(|factor| !greatest_common_divider.contains(factor));
     }
     // now disjunctions == [[A, B], [B], [E]]
-    let remaining = merge_expr_by_logical_binary(
-        disjunctions.into_iter().map(|conjunction| {
-            merge_expr_by_logical_binary(
-                conjunction,
-                ExprType::And,
-                ExprImpl::literal_bool(true),
-            )
-        }),
-        ExprType::Or,
-        ExprImpl::literal_bool(false),
+    let remaining = ExprImpl::or(
+        disjunctions
+            .into_iter()
+            .map(|conjunction| ExprImpl::and(conjunction)),
     );
     // now remaining is (A & B) | (B) | (E)
     // the result is C & D & ((A & B) | (B) | (E))
