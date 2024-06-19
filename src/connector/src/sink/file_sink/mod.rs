@@ -14,6 +14,7 @@
 
 pub mod fs;
 pub mod gcs;
+pub mod opendal_sink;
 pub mod s3;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -118,7 +119,7 @@ impl OpenDalSinkWriter {
         })
     }
 
-    async fn create_object_writer(&mut self, epoch: u64) -> Result<(OpendalWriter)> {
+    async fn create_object_writer(&mut self, epoch: u64) -> Result<OpendalWriter> {
         let suffix = match self.encode_type {
             SinkEncode::Json => "json",
             SinkEncode::Parquet => "parquet",

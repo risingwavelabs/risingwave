@@ -22,13 +22,10 @@ use serde::Deserialize;
 use serde_with::serde_as;
 use with_options::WithOptions;
 
-use crate::sink::opendal_sink::OpenDalSinkWriter;
-use crate::sink::writer::{LogSinkerOf, SinkWriterExt};
-use crate::sink::{
-    DummySinkCommitCoordinator, Result, Sink, SinkError, SinkFormatDesc, SinkParam,
-    SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
-};
-
+use super::opendal_sink::FileSink;
+use crate::sink::file_sink::opendal_sink::OpendalSinkBackend;
+use crate::sink::file_sink::OpenDalSinkWriter;
+use crate::sink::{Result, SinkError, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT};
 #[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct S3Common {
     #[serde(rename = "s3.region_name")]
@@ -58,32 +55,7 @@ pub struct S3Config {
 
 pub const S3_SINK: &str = "s3";
 
-impl S3Config {
-    pub fn from_hashmap(properties: HashMap<String, String>) -> Result<Self> {
-        let config = serde_json::from_value::<S3Config>(serde_json::to_value(properties).unwrap())
-            .map_err(|e| SinkError::Config(anyhow!(e)))?;
-        if config.r#type != SINK_TYPE_APPEND_ONLY && config.r#type != SINK_TYPE_UPSERT {
-            return Err(SinkError::Config(anyhow!(
-                "`{}` must be {}, or {}",
-                SINK_TYPE_OPTION,
-                SINK_TYPE_APPEND_ONLY,
-                SINK_TYPE_UPSERT
-            )));
-        }
-        Ok(config)
-    }
-}
-
-#[derive(Debug)]
-pub struct S3Sink {
-    pub config: S3Config,
-    schema: Schema,
-    is_append_only: bool,
-    pk_indices: Vec<usize>,
-    format_desc: SinkFormatDesc,
-}
-
-impl S3Sink {
+impl<S: OpendalSinkBackend> FileSink<S> {
     pub fn new_s3_sink(config: S3Config) -> Result<Operator> {
         // Create s3 builder.
         let mut builder = S3::default();
@@ -125,50 +97,33 @@ impl S3Sink {
     }
 }
 
-impl Sink for S3Sink {
-    type Coordinator = DummySinkCommitCoordinator;
-    type LogSinker = LogSinkerOf<OpenDalSinkWriter>;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct S3Sink;
+
+impl OpendalSinkBackend for S3Sink {
+    type Properties = S3Config;
 
     const SINK_NAME: &'static str = S3_SINK;
 
-    async fn validate(&self) -> Result<()> {
-        let _op = Self::new_s3_sink(self.config.clone())?;
-        Ok(())
+    fn from_hashmap(hash_map: HashMap<String, String>) -> Result<Self::Properties> {
+        let config = serde_json::from_value::<S3Config>(serde_json::to_value(hash_map).unwrap())
+            .map_err(|e| SinkError::Config(anyhow!(e)))?;
+        if config.r#type != SINK_TYPE_APPEND_ONLY && config.r#type != SINK_TYPE_UPSERT {
+            return Err(SinkError::Config(anyhow!(
+                "`{}` must be {}, or {}",
+                SINK_TYPE_OPTION,
+                SINK_TYPE_APPEND_ONLY,
+                SINK_TYPE_UPSERT
+            )));
+        }
+        Ok(config)
     }
 
-    async fn new_log_sinker(
-        &self,
-        writer_param: crate::sink::SinkWriterParam,
-    ) -> Result<Self::LogSinker> {
-        let op = Self::new_s3_sink(self.config.clone())?;
-        let path = self.config.common.path.as_ref();
-        Ok(OpenDalSinkWriter::new(
-            op,
-            path,
-            self.schema.clone(),
-            self.pk_indices.clone(),
-            self.is_append_only,
-            writer_param.executor_id,
-            self.format_desc.encode.clone(),
-        )?
-        .into_log_sinker(writer_param.sink_metrics))
+    fn new_operator(properties: S3Config) -> Result<Operator> {
+        FileSink::<S3Sink>::new_s3_sink(properties)
     }
-}
 
-impl TryFrom<SinkParam> for S3Sink {
-    type Error = SinkError;
-
-    fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
-        let schema = param.schema();
-        let config = S3Config::from_hashmap(param.properties)?;
-        Ok(Self {
-            config,
-            schema,
-            is_append_only: param.sink_type.is_append_only(),
-            pk_indices: param.downstream_pk,
-            format_desc: param
-                .format_desc
-                .ok_or_else(|| SinkError::Config(anyhow!("missing FORMAT ... ENCODE ...")))?,
-        })
+    fn get_path(properties: &Self::Properties) -> String {
+        (*properties.common.path).to_string()
     }
 }

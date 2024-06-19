@@ -22,12 +22,10 @@ use serde::Deserialize;
 use serde_with::serde_as;
 use with_options::WithOptions;
 
-use crate::sink::opendal_sink::OpenDalSinkWriter;
+use super::opendal_sink::FileSink;
+use crate::sink::file_sink::opendal_sink::OpendalSinkBackend;
 use crate::sink::writer::{LogSinkerOf, SinkWriterExt};
-use crate::sink::{
-    DummySinkCommitCoordinator, Result, Sink, SinkError, SinkFormatDesc, SinkParam,
-    SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
-};
+use crate::sink::{Result, SinkError, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT};
 
 const GCS_WRITE_BUFFER_SIZE: usize = 16 * 1024 * 1024;
 #[derive(Deserialize, Debug, Clone, WithOptions)]
@@ -61,32 +59,7 @@ pub struct GcsConfig {
 
 pub const GCS_SINK: &str = "gcs";
 
-impl GcsConfig {
-    pub fn from_hashmap(properties: HashMap<String, String>) -> Result<Self> {
-        let config = serde_json::from_value::<GcsConfig>(serde_json::to_value(properties).unwrap())
-            .map_err(|e| SinkError::Config(anyhow!(e)))?;
-        if config.r#type != SINK_TYPE_APPEND_ONLY && config.r#type != SINK_TYPE_UPSERT {
-            return Err(SinkError::Config(anyhow!(
-                "`{}` must be {}, or {}",
-                SINK_TYPE_OPTION,
-                SINK_TYPE_APPEND_ONLY,
-                SINK_TYPE_UPSERT
-            )));
-        }
-        Ok(config)
-    }
-}
-
-#[derive(Debug)]
-pub struct GcsSink {
-    pub config: GcsConfig,
-    schema: Schema,
-    pk_indices: Vec<usize>,
-    is_append_only: bool,
-    format_desc: SinkFormatDesc,
-}
-
-impl GcsSink {
+impl<S: OpendalSinkBackend> FileSink<S> {
     pub fn new_gcs_sink(config: GcsConfig) -> Result<Operator> {
         // Create gcs builder.
         let mut builder = Gcs::default();
@@ -114,50 +87,33 @@ impl GcsSink {
     }
 }
 
-impl Sink for GcsSink {
-    type Coordinator = DummySinkCommitCoordinator;
-    type LogSinker = LogSinkerOf<OpenDalSinkWriter>;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GcsSink;
+
+impl OpendalSinkBackend for GcsSink {
+    type Properties = GcsConfig;
 
     const SINK_NAME: &'static str = GCS_SINK;
 
-    async fn validate(&self) -> Result<()> {
-        let _op = Self::new_gcs_sink(self.config.clone())?;
-        Ok(())
+    fn from_hashmap(hash_map: HashMap<String, String>) -> Result<Self::Properties> {
+        let config = serde_json::from_value::<GcsConfig>(serde_json::to_value(hash_map).unwrap())
+            .map_err(|e| SinkError::Config(anyhow!(e)))?;
+        if config.r#type != SINK_TYPE_APPEND_ONLY && config.r#type != SINK_TYPE_UPSERT {
+            return Err(SinkError::Config(anyhow!(
+                "`{}` must be {}, or {}",
+                SINK_TYPE_OPTION,
+                SINK_TYPE_APPEND_ONLY,
+                SINK_TYPE_UPSERT
+            )));
+        }
+        Ok(config)
     }
 
-    async fn new_log_sinker(
-        &self,
-        writer_param: crate::sink::SinkWriterParam,
-    ) -> Result<Self::LogSinker> {
-        let op = Self::new_gcs_sink(self.config.clone())?;
-        let path = self.config.common.path.as_ref();
-        Ok(OpenDalSinkWriter::new(
-            op,
-            path,
-            self.schema.clone(),
-            self.pk_indices.clone(),
-            self.is_append_only,
-            writer_param.executor_id,
-            self.format_desc.encode.clone(),
-        )?
-        .into_log_sinker(writer_param.sink_metrics))
+    fn new_operator(properties: GcsConfig) -> Result<Operator> {
+        FileSink::<GcsSink>::new_gcs_sink(properties)
     }
-}
 
-impl TryFrom<SinkParam> for GcsSink {
-    type Error = SinkError;
-
-    fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
-        let schema = param.schema();
-        let config = GcsConfig::from_hashmap(param.properties)?;
-        Ok(Self {
-            config,
-            schema,
-            is_append_only: param.sink_type.is_append_only(),
-            pk_indices: param.downstream_pk,
-            format_desc: param
-                .format_desc
-                .ok_or_else(|| SinkError::Config(anyhow!("missing FORMAT ... ENCODE ...")))?,
-        })
+    fn get_path(properties: &Self::Properties) -> String {
+        (*properties.common.path).to_string()
     }
 }

@@ -11,7 +11,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
 pub mod big_query;
 pub mod boxed;
 pub mod catalog;
@@ -22,6 +21,7 @@ pub mod doris;
 pub mod doris_starrocks_connector;
 pub mod elasticsearch;
 pub mod encoder;
+pub mod file_sink;
 pub mod formatter;
 pub mod iceberg;
 pub mod kafka;
@@ -29,7 +29,6 @@ pub mod kinesis;
 pub mod log_store;
 pub mod mock_coordination_client;
 pub mod nats;
-pub mod opendal_sink;
 pub mod pulsar;
 pub mod redis;
 pub mod remote;
@@ -67,10 +66,11 @@ use self::mock_coordination_client::{MockMetaClient, SinkCoordinationRpcClientEn
 use crate::error::ConnectorError;
 use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::catalog::{SinkCatalog, SinkId};
+use crate::sink::file_sink::gcs::GcsSink;
+use crate::sink::file_sink::s3::S3Sink;
 use crate::sink::log_store::{LogReader, LogStoreReadItem, LogStoreResult, TruncateOffset};
 use crate::sink::writer::SinkWriter;
 use crate::ConnectorParams;
-
 const BOUNDED_CHANNEL_SIZE: usize = 16;
 #[macro_export]
 macro_rules! for_all_sinks {
@@ -91,8 +91,8 @@ macro_rules! for_all_sinks {
                 { HttpJava, $crate::sink::remote::HttpJavaSink },
                 { Doris, $crate::sink::doris::DorisSink },
                 { Starrocks, $crate::sink::starrocks::StarrocksSink },
-                { S3, $crate::sink::opendal_sink::s3::S3Sink },
-                { Gcs, $crate::sink::opendal_sink::gcs::GcsSink },
+                { S3, $crate::sink::file_sink::opendal_sink::FileSink<S3Sink> },
+                { Gcs, $crate::sink::file_sink::opendal_sink::FileSink<GcsSink>  },
                 { DeltaLake, $crate::sink::deltalake::DeltaLakeSink },
                 { BigQuery, $crate::sink::big_query::BigQuerySink },
                 { Test, $crate::sink::test_sink::TestSink },
