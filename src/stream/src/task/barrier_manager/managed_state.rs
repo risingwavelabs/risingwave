@@ -547,9 +547,9 @@ mod tests {
         let actor_ids_to_collect1 = HashSet::from([1, 2]);
         let actor_ids_to_collect2 = HashSet::from([1, 2]);
         let actor_ids_to_collect3 = HashSet::from([1, 2, 3]);
-        managed_barrier_state.transform_to_issued(&barrier1, actor_ids_to_collect1);
-        managed_barrier_state.transform_to_issued(&barrier2, actor_ids_to_collect2);
-        managed_barrier_state.transform_to_issued(&barrier3, actor_ids_to_collect3);
+        managed_barrier_state.transform_to_issued(&barrier1, actor_ids_to_collect1, HashSet::new());
+        managed_barrier_state.transform_to_issued(&barrier2, actor_ids_to_collect2, HashSet::new());
+        managed_barrier_state.transform_to_issued(&barrier3, actor_ids_to_collect3, HashSet::new());
         managed_barrier_state.collect(1, &barrier1);
         managed_barrier_state.collect(2, &barrier1);
         assert_eq!(
@@ -597,9 +597,9 @@ mod tests {
         let actor_ids_to_collect1 = HashSet::from([1, 2, 3, 4]);
         let actor_ids_to_collect2 = HashSet::from([1, 2, 3]);
         let actor_ids_to_collect3 = HashSet::from([1, 2]);
-        managed_barrier_state.transform_to_issued(&barrier1, actor_ids_to_collect1);
-        managed_barrier_state.transform_to_issued(&barrier2, actor_ids_to_collect2);
-        managed_barrier_state.transform_to_issued(&barrier3, actor_ids_to_collect3);
+        managed_barrier_state.transform_to_issued(&barrier1, actor_ids_to_collect1, HashSet::new());
+        managed_barrier_state.transform_to_issued(&barrier2, actor_ids_to_collect2, HashSet::new());
+        managed_barrier_state.transform_to_issued(&barrier3, actor_ids_to_collect3, HashSet::new());
 
         managed_barrier_state.collect(1, &barrier1);
         managed_barrier_state.collect(1, &barrier2);

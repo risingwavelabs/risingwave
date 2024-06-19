@@ -146,7 +146,7 @@ mock! {
     }
     #[async_trait::async_trait]
     impl ReplayStateStore for GlobalReplayInterface{
-        async fn sync(&self, id: u64) -> Result<usize>;
+        async fn sync(&self, id: u64, table_ids: Vec<u32>) -> Result<usize>;
         fn seal_epoch(&self, epoch_id: u64, is_checkpoint: bool);
         async fn notify_hummock(&self, info: Info, op: RespOperation, version: u64,
         ) -> Result<u64>;

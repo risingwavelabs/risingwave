@@ -463,7 +463,7 @@ impl LocalBarrierWorker {
                     req.actor_ids_to_collect.into_iter().collect(),
                     req.table_ids_to_sync
                         .into_iter()
-                        .map(|t| TableId::new(t))
+                        .map(TableId::new)
                         .collect(),
                 )?;
                 Ok(())

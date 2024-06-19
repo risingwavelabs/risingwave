@@ -1396,7 +1396,7 @@ impl HummockUploader {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use std::collections::{HashMap, VecDeque};
+    use std::collections::{HashMap, HashSet, VecDeque};
     use std::future::{poll_fn, Future};
     use std::ops::Deref;
     use std::sync::atomic::AtomicUsize;
@@ -1454,7 +1454,11 @@ pub(crate) mod tests {
         }
 
         fn start_sync_epoch_for_test(&mut self, epoch: HummockEpoch) {
-            self.start_sync_epoch(epoch, oneshot::channel().0)
+            self.start_sync_epoch(
+                epoch,
+                oneshot::channel().0,
+                HashSet::from_iter([TEST_TABLE_ID]),
+            )
         }
     }
 

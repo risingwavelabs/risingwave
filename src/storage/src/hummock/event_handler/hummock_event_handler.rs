@@ -962,6 +962,7 @@ pub(super) fn send_sync_result(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
     use std::future::{poll_fn, Future};
     use std::sync::Arc;
     use std::task::Poll;
@@ -1233,12 +1234,14 @@ mod tests {
         send_event(HummockEvent::SyncEpoch {
             new_sync_epoch: epoch1,
             sync_result_sender: tx1,
+            table_ids: HashSet::from_iter([TEST_TABLE_ID]),
         });
         assert!(poll_fn(|cx| Poll::Ready(rx1.poll_unpin(cx).is_pending())).await);
         let (tx2, mut rx2) = oneshot::channel();
         send_event(HummockEvent::SyncEpoch {
             new_sync_epoch: epoch2,
             sync_result_sender: tx2,
+            table_ids: HashSet::from_iter([TEST_TABLE_ID]),
         });
         assert!(poll_fn(|cx| Poll::Ready(rx2.poll_unpin(cx).is_pending())).await);
 
