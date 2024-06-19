@@ -284,11 +284,7 @@ mod tests {
                 "commit_ts",
                 ColumnId::new(6),
                 DataType::Timestamptz,
-                AdditionalColumn {
-                    column_type: Some(additional_column::ColumnType::Timestamp(
-                        AdditionalColumnTimestamp {},
-                    )),
-                },
+                additional_column::ColumnType::Timestamp(AdditionalColumnTimestamp {}),
             ),
         ];
 
