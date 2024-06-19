@@ -5,7 +5,7 @@ rpk topic delete sr_pb_test || true; \\
 (rpk sr subject delete 'sr_pb_test-value' && rpk sr subject delete 'sr_pb_test-value' --permanent) || true;
 
 system ok
-python3 e2e_test/schema_registry/pb.py "${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}" "${RISEDEV_SCHEMA_REGISTRY_URL}" "sr_pb_test" 20 user
+python3 e2e_test/source_inline/kafka/protobuf/pb.py "${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}" "${RISEDEV_SCHEMA_REGISTRY_URL}" "sr_pb_test" 20 user
 
 statement ok
 CREATE SOURCE src_user
@@ -42,7 +42,7 @@ SELECT age FROM t_user;
 
 # Push more events with extended fields
 system ok
-python3 e2e_test/schema_registry/pb.py "${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}" "${RISEDEV_SCHEMA_REGISTRY_URL}" "sr_pb_test" 5 user_with_more_fields
+python3 e2e_test/source_inline/kafka/protobuf/pb.py "${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}" "${RISEDEV_SCHEMA_REGISTRY_URL}" "sr_pb_test" 5 user_with_more_fields
 
 sleep 5s
 
@@ -69,7 +69,7 @@ SELECT COUNT(*), MAX(age), MIN(age), SUM(age) FROM t_user;
 
 # Push more events with extended fields
 system ok
-python3 e2e_test/schema_registry/pb.py "${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}" "${RISEDEV_SCHEMA_REGISTRY_URL}" "sr_pb_test" 5 user_with_more_fields
+python3 e2e_test/source_inline/kafka/protobuf/pb.py "${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}" "${RISEDEV_SCHEMA_REGISTRY_URL}" "sr_pb_test" 5 user_with_more_fields
 
 sleep 5s
 
