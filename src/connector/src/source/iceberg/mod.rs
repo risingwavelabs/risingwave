@@ -190,7 +190,7 @@ impl IcebergSplitEnumerator {
                             Some(snapshot) => snapshot.snapshot_id,
                             None => {
                                 // convert unix time to human readable time
-                                let time = chrono::NaiveDateTime::from_timestamp_millis(timestamp);
+                                let time = chrono::DateTime::from_timestamp_millis(timestamp);
                                 if time.is_some() {
                                     bail!("Cannot find a snapshot older than {}", time.unwrap());
                                 } else {

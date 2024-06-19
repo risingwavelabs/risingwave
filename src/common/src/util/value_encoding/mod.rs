@@ -214,9 +214,11 @@ fn serialize_scalar(value: ScalarRefImpl<'_>, buf: &mut impl BufMut) {
         ScalarRefImpl::Decimal(v) => serialize_decimal(&v, buf),
         ScalarRefImpl::Interval(v) => serialize_interval(&v, buf),
         ScalarRefImpl::Date(v) => serialize_date(v.0.num_days_from_ce(), buf),
-        ScalarRefImpl::Timestamp(v) => {
-            serialize_timestamp(v.0.timestamp(), v.0.timestamp_subsec_nanos(), buf)
-        }
+        ScalarRefImpl::Timestamp(v) => serialize_timestamp(
+            v.0.and_utc().timestamp(),
+            v.0.and_utc().timestamp_subsec_nanos(),
+            buf,
+        ),
         ScalarRefImpl::Timestamptz(v) => buf.put_i64_le(v.timestamp_micros()),
         ScalarRefImpl::Time(v) => {
             serialize_time(v.0.num_seconds_from_midnight(), v.0.nanosecond(), buf)
