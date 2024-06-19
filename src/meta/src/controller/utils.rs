@@ -934,15 +934,19 @@ pub fn find_stream_source(stream_node: &PbStreamNode) -> Option<&StreamSource> {
 pub async fn resolve_source_register_info_for_jobs<C>(
     db: &C,
     streaming_jobs: Vec<ObjectId>,
-) -> MetaResult<(HashMap<SourceId, BTreeSet<FragmentId>>, HashSet<ActorId>)>
+) -> MetaResult<(
+    HashMap<SourceId, BTreeSet<FragmentId>>,
+    HashSet<ActorId>,
+    HashSet<FragmentId>,
+)>
 where
     C: ConnectionTrait,
 {
     if streaming_jobs.is_empty() {
-        return Ok((HashMap::default(), HashSet::default()));
+        return Ok((HashMap::default(), HashSet::default(), HashSet::default()));
     }
 
-    let mut fragments: Vec<(FragmentId, i32, StreamNode)> = Fragment::find()
+    let fragments: Vec<(FragmentId, i32, StreamNode)> = Fragment::find()
         .select_only()
         .columns([
             fragment::Column::FragmentId,
@@ -963,10 +967,16 @@ where
         .all(db)
         .await?;
 
-    fragments.retain(|(_, mask, _)| *mask & PbFragmentTypeFlag::Source as i32 != 0);
+    let removed_fragments = fragments
+        .iter()
+        .map(|(fragment_id, _, _)| *fragment_id)
+        .collect();
 
     let mut source_fragment_ids = HashMap::new();
-    for (fragment_id, _, stream_node) in fragments {
+    for (fragment_id, mask, stream_node) in fragments {
+        if mask & PbFragmentTypeFlag::Source as i32 == 0 {
+            continue;
+        }
         if let Some(source) = find_stream_source(&stream_node.to_protobuf()) {
             source_fragment_ids
                 .entry(source.source_id as SourceId)
@@ -975,7 +985,11 @@ where
         }
     }
 
-    Ok((source_fragment_ids, actors.into_iter().collect()))
+    Ok((
+        source_fragment_ids,
+        actors.into_iter().collect(),
+        removed_fragments,
+    ))
 }
 
 pub(crate) async fn get_parallel_unit_to_worker_map<C>(db: &C) -> MetaResult<HashMap<u32, u32>>

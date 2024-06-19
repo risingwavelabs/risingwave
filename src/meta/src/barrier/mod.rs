@@ -900,10 +900,7 @@ impl GlobalBarrierManagerContext {
                     BarrierKind::Initial => {}
                     BarrierKind::Checkpoint(epochs) => {
                         let commit_info = collect_commit_epoch_info(resps, command_ctx, epochs);
-                        new_snapshot = self
-                            .hummock_manager
-                            .commit_epoch(command_ctx.prev_epoch.value().0, commit_info)
-                            .await?;
+                        new_snapshot = self.hummock_manager.commit_epoch(commit_info).await?;
                     }
                     BarrierKind::Barrier => {
                         new_snapshot = Some(self.hummock_manager.update_current_epoch(prev_epoch));
@@ -1205,6 +1202,8 @@ fn collect_commit_epoch_info(
             }),
     );
 
+    let epoch = command_ctx.prev_epoch.value().0;
+
     CommitEpochInfo::new(
         synced_ssts,
         merge_multiple_new_table_watermarks(
@@ -1226,5 +1225,7 @@ fn collect_commit_epoch_info(
         sst_to_worker,
         new_table_fragment_info,
         table_new_change_log,
+        BTreeMap::from_iter([(epoch, command_ctx.info.existing_table_ids())]),
+        epoch,
     )
 }

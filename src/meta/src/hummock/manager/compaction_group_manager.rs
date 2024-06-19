@@ -19,7 +19,7 @@ use std::sync::Arc;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
-    get_compaction_group_ids, get_member_table_ids, TableGroupInfo,
+    get_compaction_group_ids, TableGroupInfo,
 };
 use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGroupId};
 use risingwave_hummock_sdk::CompactionGroupId;
@@ -152,10 +152,9 @@ impl HummockManager {
         table_fragments: &[crate::model::TableFragments],
     ) {
         self.unregister_table_ids(
-            &table_fragments
+            table_fragments
                 .iter()
-                .flat_map(|t| t.all_table_ids())
-                .collect_vec(),
+                .flat_map(|t| t.all_table_ids().map(TableId::new)),
         )
         .await
         .unwrap();
@@ -164,16 +163,21 @@ impl HummockManager {
     /// Unregisters stale members and groups
     /// The caller should ensure `table_fragments_list` remain unchanged during `purge`.
     /// Currently `purge` is only called during meta service start ups.
-    pub async fn purge(&self, valid_ids: &[u32]) -> Result<()> {
-        let registered_members =
-            get_member_table_ids(&self.versioning.read().await.current_version);
-        let to_unregister = registered_members
-            .into_iter()
+    pub async fn purge(&self, valid_ids: &HashSet<TableId>) -> Result<()> {
+        let to_unregister = self
+            .versioning
+            .read()
+            .await
+            .current_version
+            .state_table_info
+            .info()
+            .keys()
+            .cloned()
             .filter(|table_id| !valid_ids.contains(table_id))
             .collect_vec();
         // As we have released versioning lock, the version that `to_unregister` is calculated from
         // may not be the same as the one used in unregister_table_ids. It is OK.
-        self.unregister_table_ids(&to_unregister).await
+        self.unregister_table_ids(to_unregister).await
     }
 
     /// The implementation acquires `versioning` lock.
@@ -275,8 +279,12 @@ impl HummockManager {
         Ok(())
     }
 
-    pub async fn unregister_table_ids(&self, table_ids: &[StateTableId]) -> Result<()> {
-        if table_ids.is_empty() {
+    pub async fn unregister_table_ids(
+        &self,
+        table_ids: impl IntoIterator<Item = TableId> + Send,
+    ) -> Result<()> {
+        let mut table_ids = table_ids.into_iter().peekable();
+        if table_ids.peek().is_none() {
             return Ok(());
         }
         let mut versioning_guard = self.versioning.write().await;
@@ -291,13 +299,9 @@ impl HummockManager {
         let mut modified_groups: HashMap<CompactionGroupId, /* #member table */ u64> =
             HashMap::new();
         // Remove member tables
-        for table_id in table_ids.iter().unique() {
+        for table_id in table_ids.unique() {
             let version = new_version_delta.latest_version();
-            let Some(info) = version
-                .state_table_info
-                .info()
-                .get(&TableId::new(*table_id))
-            else {
+            let Some(info) = version.state_table_info.info().get(&table_id) else {
                 continue;
             };
 
@@ -313,9 +317,7 @@ impl HummockManager {
                         .len() as u64
                         - 1,
                 );
-            new_version_delta
-                .removed_table_ids
-                .insert(TableId::new(*table_id));
+            new_version_delta.removed_table_ids.insert(table_id);
         }
 
         let groups_to_remove = modified_groups
@@ -844,9 +846,8 @@ impl<'a> CompactionGroupTransaction<'a> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, HashSet};
 
-    use itertools::Itertools;
     use risingwave_common::catalog::TableId;
     use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
     use risingwave_pb::meta::table_fragments::Fragment;
@@ -986,11 +987,14 @@ mod tests {
 
         // Test purge_stale_members: table fragments
         compaction_group_manager
-            .purge(&table_fragment_2.all_table_ids().collect_vec())
+            .purge(&table_fragment_2.all_table_ids().map(TableId::new).collect())
             .await
             .unwrap();
         assert_eq!(registered_number().await, 4);
-        compaction_group_manager.purge(&[]).await.unwrap();
+        compaction_group_manager
+            .purge(&HashSet::new())
+            .await
+            .unwrap();
         assert_eq!(registered_number().await, 0);
 
         assert_eq!(group_number().await, 2);
