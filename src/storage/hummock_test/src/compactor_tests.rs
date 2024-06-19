@@ -722,6 +722,10 @@ pub(crate) mod tests {
         )
         .await;
 
+        global_storage
+            .wait_version(hummock_manager_ref.get_current_version().await)
+            .await;
+
         let vnode = VirtualNode::from_index(1);
         for index in 0..kv_count {
             epoch.inc_epoch();
