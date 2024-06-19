@@ -6,6 +6,7 @@ import "common.proto";
 import "data.proto";
 import "expr.proto";
 import "plan_common.proto";
+import "secret.proto";
 
 option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
@@ -83,8 +84,8 @@ message StreamSourceInfo {
   // Options specified by user in the FORMAT ENCODE clause.
   map<string, string> format_encode_options = 14;
 
-  // Handle the source relies on any sceret. The key is the propertity name and the value is the secret id.
-  map<string, uint32> secret_ref = 16;
+  // Handle the source relies on any sceret. The key is the propertity name and the value is the secret id and type.
+  map<string, secret.SecretRef> secret_ref = 16;
 }
 
 message Source {
@@ -180,8 +181,8 @@ message Sink {
   // Whether it should use background ddl or block until backfill finishes.
   CreateType create_type = 24;
 
-  // Handle the sink relies on any sceret. The key is the propertity name and the value is the secret id.
-  map<string, uint32> secret_ref = 25;
+  // Handle the sink relies on any sceret. The key is the propertity name and the value is the secret id and type.
+  map<string, secret.SecretRef> secret_ref = 25;
 }
 
 message Subscription {
