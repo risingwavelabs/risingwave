@@ -24,7 +24,7 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{
     CdcTableDesc, ColumnCatalog, ColumnDesc, TableId, TableVersionId, DEFAULT_SCHEMA_NAME,
-    INITIAL_TABLE_VERSION_ID, USER_COLUMN_ID_OFFSET,
+    INITIAL_TABLE_VERSION_ID,
 };
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
@@ -110,7 +110,7 @@ impl ColumnIdGenerator {
     pub fn new_initial() -> Self {
         Self {
             existing: HashMap::new(),
-            next_column_id: ColumnId::from(USER_COLUMN_ID_OFFSET),
+            next_column_id: ColumnId::first_user_column(),
             version_id: INITIAL_TABLE_VERSION_ID,
         }
     }

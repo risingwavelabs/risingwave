@@ -155,7 +155,7 @@ pub fn max_column_id(columns: &Vec<ColumnCatalog>) -> ColumnId {
     // XXX: should we check the column IDs of struct fields here?
     columns
         .iter()
-        .fold(ColumnId::new(i32::MIN), |a, b| a.max(b.column_id()))
+        .fold(ColumnId::first_user_column(), |a, b| a.max(b.column_id()))
 }
 
 #[cfg(test)]

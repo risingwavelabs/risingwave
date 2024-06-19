@@ -21,7 +21,7 @@ use risingwave_pb::plan_common::{
     AdditionalColumn, ColumnDescVersion, PbColumnCatalog, PbColumnDesc,
 };
 
-use super::row_id_column_desc;
+use super::{row_id_column_desc, USER_COLUMN_ID_OFFSET};
 use crate::catalog::{cdc_table_name_column_desc, offset_column_desc, Field, ROW_ID_COLUMN_ID};
 use crate::types::DataType;
 
@@ -44,6 +44,10 @@ impl ColumnId {
     /// Sometimes the id field is filled later, we use this value for better debugging.
     pub const fn placeholder() -> Self {
         Self(i32::MAX - 1)
+    }
+
+    pub const fn first_user_column() -> Self {
+        Self(USER_COLUMN_ID_OFFSET)
     }
 }
 
