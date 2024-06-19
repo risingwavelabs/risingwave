@@ -16,7 +16,6 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 
 use anyhow::anyhow;
 use itertools::Itertools;
-use risingwave_common::hash::ParallelUnitMapping;
 use risingwave_meta_model_migration::WithQuery;
 use risingwave_meta_model_v2::actor::ActorStatus;
 use risingwave_meta_model_v2::fragment::DistributionType;

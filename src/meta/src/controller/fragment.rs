@@ -19,7 +19,7 @@ use std::mem::swap;
 use anyhow::Context;
 use itertools::Itertools;
 use risingwave_common::bail;
-use risingwave_common::hash::{ParallelUnitId, ParallelUnitMapping};
+use risingwave_common::hash::ParallelUnitMapping;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node;
 use risingwave_meta_model_v2::actor::ActorStatus;
 use risingwave_meta_model_v2::prelude::{Actor, ActorDispatcher, Fragment, Sink, StreamingJob};
@@ -975,7 +975,7 @@ impl CatalogController {
                 fragment_id: fragment_id as _,
                 mapping: Some(
                     ParallelUnitMapping::from_protobuf(&mapping.to_protobuf())
-                        .to_worker_slot(&parallel_unit_to_worker)?
+                        .to_worker_slot(parallel_unit_to_worker)?
                         .to_protobuf(),
                 ),
             })

@@ -219,11 +219,7 @@ impl FragmentManager {
             let fragment_mapping = if let Operation::Delete = operation {
                 FragmentWorkerSlotMapping {
                     fragment_id: fragment.fragment_id,
-                    mapping: Some(
-                        ParallelUnitMapping::from_protobuf(vnode_mapping)
-                            .as_delete_worker_slot_mapping()
-                            .to_protobuf(),
-                    ),
+                    mapping: None,
                 }
             } else {
                 FragmentWorkerSlotMapping {
