@@ -127,9 +127,6 @@ pub const OFFSET_COLUMN_NAME: &str = "_rw_offset";
 pub const CDC_SOURCE_COLUMN_NUM: u32 = 3;
 pub const TABLE_NAME_COLUMN_NAME: &str = "_rw_table_name";
 
-pub fn is_offset_column_name(name: &str) -> bool {
-    name.starts_with(OFFSET_COLUMN_NAME)
-}
 /// Creates a offset column for storing upstream offset
 /// Used in cdc source currently
 pub fn offset_column_desc() -> ColumnDesc {

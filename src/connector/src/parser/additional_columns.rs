@@ -160,9 +160,7 @@ pub fn build_additional_column_catalog(
                 column_name,
                 column_id,
                 DataType::Bytea,
-                AdditionalColumn {
-                    column_type: Some(AdditionalColumnType::Key(AdditionalColumnKey {})),
-                },
+                AdditionalColumnType::Key(AdditionalColumnKey {}),
             ),
             is_hidden: false,
         },
@@ -171,11 +169,7 @@ pub fn build_additional_column_catalog(
                 column_name,
                 column_id,
                 DataType::Timestamptz,
-                AdditionalColumn {
-                    column_type: Some(AdditionalColumnType::Timestamp(
-                        AdditionalColumnTimestamp {},
-                    )),
-                },
+                AdditionalColumnType::Timestamp(AdditionalColumnTimestamp {}),
             ),
             is_hidden: false,
         },
@@ -184,11 +178,7 @@ pub fn build_additional_column_catalog(
                 column_name,
                 column_id,
                 DataType::Varchar,
-                AdditionalColumn {
-                    column_type: Some(AdditionalColumnType::Partition(
-                        AdditionalColumnPartition {},
-                    )),
-                },
+                AdditionalColumnType::Partition(AdditionalColumnPartition {}),
             ),
             is_hidden: false,
         },
@@ -197,9 +187,7 @@ pub fn build_additional_column_catalog(
                 column_name,
                 column_id,
                 DataType::Varchar,
-                AdditionalColumn {
-                    column_type: Some(AdditionalColumnType::Offset(AdditionalColumnOffset {})),
-                },
+                AdditionalColumnType::Offset(AdditionalColumnOffset {}),
             ),
             is_hidden: false,
         },
@@ -208,9 +196,7 @@ pub fn build_additional_column_catalog(
                 column_name,
                 column_id,
                 DataType::Varchar,
-                AdditionalColumn {
-                    column_type: Some(AdditionalColumnType::Filename(AdditionalColumnFilename {})),
-                },
+                AdditionalColumnType::Filename(AdditionalColumnFilename {}),
             ),
             is_hidden: false,
         },
@@ -220,11 +206,7 @@ pub fn build_additional_column_catalog(
                 column_name,
                 column_id,
                 DataType::Varchar,
-                AdditionalColumn {
-                    column_type: Some(AdditionalColumnType::DatabaseName(
-                        AdditionalDatabaseName {},
-                    )),
-                },
+                AdditionalColumnType::DatabaseName(AdditionalDatabaseName {}),
             ),
             is_hidden: false,
         },
@@ -233,9 +215,7 @@ pub fn build_additional_column_catalog(
                 column_name,
                 column_id,
                 DataType::Varchar,
-                AdditionalColumn {
-                    column_type: Some(AdditionalColumnType::SchemaName(AdditionalSchemaName {})),
-                },
+                AdditionalColumnType::SchemaName(AdditionalSchemaName {}),
             ),
             is_hidden: false,
         },
@@ -245,9 +225,7 @@ pub fn build_additional_column_catalog(
                 column_name,
                 column_id,
                 DataType::Varchar,
-                AdditionalColumn {
-                    column_type: Some(AdditionalColumnType::TableName(AdditionalTableName {})),
-                },
+                AdditionalColumnType::TableName(AdditionalTableName {}),
             ),
             is_hidden: false,
         },
@@ -256,11 +234,7 @@ pub fn build_additional_column_catalog(
                 column_name,
                 column_id,
                 DataType::Varchar,
-                AdditionalColumn {
-                    column_type: Some(AdditionalColumnType::CollectionName(
-                        AdditionalCollectionName {},
-                    )),
-                },
+                AdditionalColumnType::CollectionName(AdditionalCollectionName {}),
             ),
             is_hidden: false,
         },
@@ -390,12 +364,10 @@ fn build_header_catalog(
                 col_name,
                 column_id,
                 data_type,
-                AdditionalColumn {
-                    column_type: Some(AdditionalColumnType::HeaderInner(AdditionalColumnHeader {
-                        inner_field: inner.to_string(),
-                        data_type: Some(pb_data_type),
-                    })),
-                },
+                AdditionalColumnType::HeaderInner(AdditionalColumnHeader {
+                    inner_field: inner.to_string(),
+                    data_type: Some(pb_data_type),
+                }),
             ),
             is_hidden: false,
         }
@@ -405,9 +377,7 @@ fn build_header_catalog(
                 col_name,
                 column_id,
                 DataType::List(get_kafka_header_item_datatype().into()),
-                AdditionalColumn {
-                    column_type: Some(AdditionalColumnType::Headers(AdditionalColumnHeaders {})),
-                },
+                AdditionalColumnType::Headers(AdditionalColumnHeaders {}),
             ),
             is_hidden: false,
         }
