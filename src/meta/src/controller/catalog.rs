@@ -19,7 +19,6 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::catalog::{TableOption, DEFAULT_SCHEMA_NAME, SYSTEM_SCHEMAS};
-use risingwave_common::hash::ParallelUnitMapping;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont_mut;
 use risingwave_common::{bail, current_cluster_version};
 use risingwave_connector::source::UPSTREAM_SOURCE_KEY;
@@ -281,19 +280,13 @@ impl CatalogController {
             .all(&txn)
             .await?;
 
-        let fragment_mappings = get_fragment_mappings_by_jobs(&txn, streaming_jobs.clone()).await?;
-
-        let fragment_mappings = fragment_mappings
+        let fragment_mappings = get_fragment_mappings_by_jobs(&txn, streaming_jobs.clone())
+            .await?
             .into_iter()
             .map(
-                |FragmentParallelUnitMapping {
-                     fragment_id,
-                     mapping,
-                 }| {
-                    PbFragmentWorkerSlotMapping {
-                        fragment_id,
-                        mapping: None,
-                    }
+                |FragmentParallelUnitMapping { fragment_id, .. }| PbFragmentWorkerSlotMapping {
+                    fragment_id,
+                    mapping: None,
                 },
             )
             .collect();
@@ -2183,14 +2176,9 @@ impl CatalogController {
         let fragment_mappings = fragment_mappings
             .into_iter()
             .map(
-                |FragmentParallelUnitMapping {
-                     fragment_id,
-                     mapping,
-                 }| {
-                    PbFragmentWorkerSlotMapping {
-                        fragment_id,
-                        mapping: None,
-                    }
+                |FragmentParallelUnitMapping { fragment_id, .. }| PbFragmentWorkerSlotMapping {
+                    fragment_id,
+                    mapping: None,
                 },
             )
             .collect();
