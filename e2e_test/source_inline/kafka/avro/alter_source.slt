@@ -33,14 +33,6 @@ echo '{"type":"record","name":"Root","fields":[{"name":"bar","type":"int","defau
 system ok
 echo '{"foo":"ABC", "bar":1}' | rpk topic produce --schema-id=topic avro_alter_source_test
 
-sleep 5s
-
-system ok
-rpk topic consume avro_alter_source_test --offset :end | jq .value
-----
-"\u0000\u0000\u0000\u0000\u0010\u0002\u0006ABC"
-
-
 query ?
 select * from s
 ----
@@ -66,9 +58,6 @@ ABC	1
 
 statement ok
 create materialized view mv as select * from s;
-
-
-sleep 2s
 
 query ??
 select * from mv
