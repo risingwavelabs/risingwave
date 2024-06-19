@@ -6,6 +6,7 @@ import "common.proto";
 import "data.proto";
 import "expr.proto";
 import "plan_common.proto";
+import "secret.proto";
 
 option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
@@ -84,7 +85,7 @@ message StreamSourceInfo {
   map<string, string> format_encode_options = 14;
 
   // Handle the source relies on any sceret. The key is the propertity name and the value is the secret id and type.
-  map<string, SecretRef> secret_ref = 16;
+  map<string, secret.SecretRef> secret_ref = 16;
 }
 
 message Source {
@@ -181,7 +182,7 @@ message Sink {
   CreateType create_type = 24;
 
   // Handle the sink relies on any sceret. The key is the propertity name and the value is the secret id and type.
-  map<string, SecretRef> secret_ref = 25;
+  map<string, secret.SecretRef> secret_ref = 25;
 }
 
 message Subscription {
@@ -440,15 +441,4 @@ message Secret {
   bytes value = 4;
   uint32 owner = 5;
   uint32 schema_id = 6;
-}
-
-message SecretRef {
-  enum RefAsType {
-    UNSPECIFIED = 0;
-    TEXT = 1;
-    // AS FILE
-    FILE = 2;
-  }
-  uint32 secret_id = 1;
-  RefAsType ref_as = 2;
 }
