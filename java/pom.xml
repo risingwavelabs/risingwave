@@ -79,12 +79,8 @@
         <spark_sql.version>3.3.1</spark_sql.version>
         <hadoop.version>3.4.0</hadoop.version>
         <elasticsearch.version>7.17.19</elasticsearch.version>
-<<<<<<< HEAD
-        <datastax.version>4.17.0</datastax.version>
-=======
         <opensearch.version>2.11.1</opensearch.version>
         <datastax.version>4.15.0</datastax.version>
->>>>>>> upstream/main
         <flink.version>1.18.0</flink.version>
         <testcontainers.version>1.17.6</testcontainers.version>
         <postgresql.version>42.5.5</postgresql.version>
