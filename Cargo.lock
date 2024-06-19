@@ -10824,7 +10824,7 @@ dependencies = [
  "google-cloud-pubsub",
  "http 0.2.9",
  "icelake",
- "indexmap 1.9.3",
+ "indexmap 2.2.6",
  "itertools 0.12.1",
  "jni",
  "jsonbb",
