@@ -348,23 +348,29 @@ impl Sink for StarrocksSink {
             // if the `StarRocks` table is PRIMARY KEY, we cannot allow users specify the options related to delete sign, instead,
             // these options must remain at their default values, which align the upsert rules in `StarRocks`.
             // see https://docs.starrocks.io/docs/loading/Load_to_Primary_Key_tables/#upsert-and-delete
-            if read_model == STARROCKS_MODEL_PRIMARY_KEY
-                && (self.config.delete_sign_field != STARROCKS_DELETE_SIGN
+            if read_model == STARROCKS_MODEL_PRIMARY_KEY {
+                if self.config.delete_sign_field != STARROCKS_DELETE_SIGN
                     || self.config.delete_sign_upsert != STARROCKS_DELETE_SIGN_UPSERT
-                    || self.config.delete_sign_delete != STARROCKS_DELETE_SIGN_DELETE)
-            {
-                return Err(SinkError::Config(anyhow!(
-                    "options related to delete sign cannot be specified when the starrocks table model is PRIMARY KEY",
-                )));
-            }
-
-            if read_model != STARROCKS_MODEL_PRIMARY_KEY
-                && !starrocks_columns_desc.contains_key(&self.config.delete_sign_field)
-            {
-                return Err(SinkError::Config(anyhow!(
-                    "delete sign field {} not found in starrocks table",
-                    self.config.delete_sign_field
-                )));
+                    || self.config.delete_sign_delete != STARROCKS_DELETE_SIGN_DELETE
+                {
+                    return Err(SinkError::Config(anyhow!(
+                        "options related to delete sign cannot be specified when the starrocks table model is PRIMARY KEY",
+                    )));
+                }
+            } else {
+                let delete_sign_field_type = starrocks_columns_desc
+                    .get(&self.config.delete_sign_field)
+                    .ok_or_else(|| {
+                        SinkError::Starrocks(format!(
+                            "delete sign field {} not found in starrocks table",
+                            self.config.delete_sign_field
+                        ))
+                    })?;
+                if !delete_sign_field_type.contains("varchar") {
+                    return Err(SinkError::Config(anyhow!(
+                        "the type of delete sign field must be varchar",
+                    )));
+                }
             }
         }
 
