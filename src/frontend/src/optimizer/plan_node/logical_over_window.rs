@@ -694,6 +694,17 @@ impl ToStream for LogicalOverWindow {
         } else {
             // General (Emit-On-Update) case
 
+            if self
+                .window_functions()
+                .iter()
+                .any(|f| f.frame.bounds.is_session())
+            {
+                bail_not_implemented!(
+                    "Session frame is not yet supported in general streaming mode. \
+                    Please consider using Emit-On-Window-Close mode."
+                );
+            }
+
             // TODO(rc): Let's not introduce too many cases at once. Later we may decide to support
             // empty PARTITION BY by simply removing the following check.
             let partition_key_indices = self.window_functions()[0]

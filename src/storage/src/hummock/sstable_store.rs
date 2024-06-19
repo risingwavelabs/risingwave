@@ -128,6 +128,7 @@ pub struct SstableStoreConfig {
     pub max_prefetch_block_number: usize,
     pub recent_filter: Option<Arc<RecentFilter<(HummockSstableObjectId, usize)>>>,
     pub state_store_metrics: Arc<HummockStateStoreMetrics>,
+    pub use_new_object_prefix_strategy: bool,
 
     pub meta_cache: HybridCache<HummockSstableObjectId, Box<Sstable>>,
     pub block_cache: HybridCache<SstableBlockIndex, Box<Block>>,
@@ -155,7 +156,15 @@ pub struct SstableStore {
     prefetch_buffer_usage: Arc<AtomicUsize>,
     prefetch_buffer_capacity: usize,
     max_prefetch_block_number: usize,
-
+    /// Whether the object store is divided into prefixes depends on two factors:
+    ///   1. The specific object store type.
+    ///   2. Whether the existing cluster is a new cluster.
+    ///
+    /// The value of `use_new_object_prefix_strategy` is determined by the `use_new_object_prefix_strategy` field in the system parameters.
+    /// For a new cluster, `use_new_object_prefix_strategy` is set to True.
+    /// For an old cluster, `use_new_object_prefix_strategy` is set to False.
+    /// The final decision of whether to divide prefixes is based on this field and the specific object store type, this approach is implemented to ensure backward compatibility.
+    use_new_object_prefix_strategy: bool,
     fetch_unit: usize,
     #[expect(clippy::type_complexity)]
     fetch_waiters: Arc<Vec<Mutex<HashMap<SstableBlockIndex, Vec<FetchBlockWaiter>>>>>,
@@ -177,13 +186,13 @@ impl SstableStore {
             prefetch_buffer_usage: Arc::new(AtomicUsize::new(0)),
             prefetch_buffer_capacity: config.prefetch_buffer_capacity,
             max_prefetch_block_number: config.max_prefetch_block_number,
-
             fetch_unit: config.fetch_unit,
             fetch_waiters: Arc::new(
                 std::iter::repeat_with(|| Mutex::new(HashMap::default()))
                     .take(config.fetch_waiter_shards)
                     .collect_vec(),
             ),
+            use_new_object_prefix_strategy: config.use_new_object_prefix_strategy,
         }
     }
 
@@ -195,6 +204,7 @@ impl SstableStore {
         path: String,
         block_cache_capacity: usize,
         meta_cache_capacity: usize,
+        use_new_object_prefix_strategy: bool,
     ) -> HummockResult<Self> {
         let meta_cache = HybridCacheBuilder::new()
             .memory(meta_cache_capacity)
@@ -227,6 +237,7 @@ impl SstableStore {
             prefetch_buffer_capacity: block_cache_capacity,
             max_prefetch_block_number: 16, /* compactor won't use this parameter, so just assign a default value. */
             recent_filter: None,
+            use_new_object_prefix_strategy,
 
             meta_cache,
             block_cache,
@@ -515,7 +526,9 @@ impl SstableStore {
     }
 
     pub fn get_sst_data_path(&self, object_id: HummockSstableObjectId) -> String {
-        let obj_prefix = self.store.get_object_prefix(object_id);
+        let obj_prefix = self
+            .store
+            .get_object_prefix(object_id, self.use_new_object_prefix_strategy);
         format!(
             "{}/{}{}.{}",
             self.path, obj_prefix, object_id, OBJECT_SUFFIX

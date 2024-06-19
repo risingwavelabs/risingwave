@@ -617,6 +617,7 @@ impl StateStoreImpl {
         storage_metrics: Arc<MonitoredStorageMetrics>,
         compactor_metrics: Arc<CompactorMetrics>,
         await_tree_config: Option<await_tree::Config>,
+        use_new_object_prefix_strategy: bool,
     ) -> StorageResult<Self> {
         const MB: usize = 1 << 20;
 
@@ -752,6 +753,7 @@ impl StateStoreImpl {
                     max_prefetch_block_number: opts.max_prefetch_block_number,
                     recent_filter,
                     state_store_metrics: state_store_metrics.clone(),
+                    use_new_object_prefix_strategy,
 
                     meta_cache,
                     block_cache,

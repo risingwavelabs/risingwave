@@ -106,6 +106,7 @@ pub(crate) async fn new_hummock_java_binding_iter(
             state_store_metrics: Arc::new(global_hummock_state_store_metrics(
                 MetricLevel::Disabled,
             )),
+            use_new_object_prefix_strategy: read_plan.use_new_object_prefix_strategy,
             meta_cache,
             block_cache,
             fetch_unit: 1,

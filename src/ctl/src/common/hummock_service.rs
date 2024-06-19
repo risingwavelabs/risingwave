@@ -36,6 +36,8 @@ pub struct HummockServiceOpts {
     pub hummock_url: String,
     pub data_dir: Option<String>,
 
+    use_new_object_prefix_strategy: bool,
+
     heartbeat_handle: Option<JoinHandle<()>>,
     heartbeat_shutdown_sender: Option<Sender<()>>,
 }
@@ -55,7 +57,10 @@ impl HummockServiceOpts {
     /// Currently, we will read these variables for meta:
     ///
     /// * `RW_HUMMOCK_URL`: hummock store address
-    pub fn from_env(data_dir: Option<String>) -> Result<Self> {
+    pub fn from_env(
+        data_dir: Option<String>,
+        use_new_object_prefix_strategy: bool,
+    ) -> Result<Self> {
         let hummock_url = match env::var("RW_HUMMOCK_URL") {
             Ok(url) => {
                 if !url.starts_with("hummock+") {
@@ -80,11 +85,13 @@ impl HummockServiceOpts {
                 bail!(MESSAGE);
             }
         };
+
         Ok(Self {
             hummock_url,
             data_dir,
             heartbeat_handle: None,
             heartbeat_shutdown_sender: None,
+            use_new_object_prefix_strategy,
         })
     }
 
@@ -142,6 +149,7 @@ impl HummockServiceOpts {
             metrics.storage_metrics.clone(),
             metrics.compactor_metrics.clone(),
             None,
+            self.use_new_object_prefix_strategy,
         )
         .await?;
 
@@ -157,7 +165,10 @@ impl HummockServiceOpts {
         }
     }
 
-    pub async fn create_sstable_store(&self) -> Result<Arc<SstableStore>> {
+    pub async fn create_sstable_store(
+        &self,
+        use_new_object_prefix_strategy: bool,
+    ) -> Result<Arc<SstableStore>> {
         let object_store = build_remote_object_store(
             self.hummock_url.strip_prefix("hummock+").unwrap(),
             Arc::new(ObjectStoreMetrics::unused()),
@@ -190,6 +201,7 @@ impl HummockServiceOpts {
             state_store_metrics: Arc::new(global_hummock_state_store_metrics(
                 MetricLevel::Disabled,
             )),
+            use_new_object_prefix_strategy,
             meta_cache,
             block_cache,
             fetch_unit: 1,

@@ -27,7 +27,7 @@
 // limitations under the License.
 
 use std::cmp::min;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::sync::{Arc, LazyLock};
 use std::time::{Instant, SystemTime};
 
@@ -42,6 +42,7 @@ use rand::seq::SliceRandom;
 use rand::thread_rng;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockLevelsExt;
+use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::table_stats::{
     add_prost_table_stats_map, purge_prost_table_stats, PbTableStatsMap,
 };
@@ -206,6 +207,7 @@ impl<'a> HummockVersionTransaction<'a> {
                             StateTableInfoDelta {
                                 committed_epoch: info.committed_epoch,
                                 safe_epoch: new_safe_epoch,
+                                compaction_group_id: info.compaction_group_id,
                             },
                         );
                     }
@@ -309,11 +311,11 @@ impl HummockManager {
 
                     match compact_ret {
                         Ok((compact_tasks, unschedule_groups)) => {
+                            no_task_groups.extend(unschedule_groups);
                             if compact_tasks.is_empty() {
                                 break;
                             }
                             generated_task_count += compact_tasks.len();
-                            no_task_groups.extend(unschedule_groups);
                             for task in compact_tasks {
                                 let task_id = task.task_id;
                                 if let Err(e) =
@@ -732,11 +734,13 @@ impl HummockManager {
                 || matches!(selector.task_type(), TaskType::Emergency);
 
             let mut stats = LocalSelectorStatistic::default();
-            let member_table_ids = version
+            let member_table_ids: Vec<_> = version
                 .latest_version()
-                .get_compaction_group_levels(compaction_group_id)
-                .member_table_ids
-                .clone();
+                .state_table_info
+                .compaction_group_member_table_ids(compaction_group_id)
+                .iter()
+                .map(|table_id| table_id.table_id)
+                .collect();
 
             let mut table_id_to_option: HashMap<u32, _> = HashMap::default();
 
@@ -750,6 +754,10 @@ impl HummockManager {
                 version
                     .latest_version()
                     .get_compaction_group_levels(compaction_group_id),
+                version
+                    .latest_version()
+                    .state_table_info
+                    .compaction_group_member_table_ids(compaction_group_id),
                 task_id as HummockCompactionTaskId,
                 &group_config,
                 &mut stats,
@@ -1548,6 +1556,80 @@ impl HummockManager {
             compact_task
                 .table_vnode_partition
                 .retain(|table_id, _| compact_task.existing_table_ids.contains(table_id));
+        }
+    }
+
+    pub async fn try_move_table_to_dedicated_cg(
+        &self,
+        table_write_throughput: &HashMap<u32, VecDeque<u64>>,
+        table_id: &u32,
+        table_size: &u64,
+        is_creating_table: bool,
+        checkpoint_secs: u64,
+        parent_group_id: u64,
+        group_size: u64,
+    ) {
+        let default_group_id: CompactionGroupId = StaticCompactionGroupId::StateDefault.into();
+        let mv_group_id: CompactionGroupId = StaticCompactionGroupId::MaterializedView.into();
+        let partition_vnode_count = self.env.opts.partition_vnode_count;
+        let window_size =
+            self.env.opts.table_info_statistic_history_times / (checkpoint_secs as usize);
+
+        let mut is_high_write_throughput = false;
+        let mut is_low_write_throughput = true;
+        if let Some(history) = table_write_throughput.get(table_id) {
+            if history.len() >= window_size {
+                is_high_write_throughput = history.iter().all(|throughput| {
+                    *throughput / checkpoint_secs > self.env.opts.table_write_throughput_threshold
+                });
+                is_low_write_throughput = history.iter().any(|throughput| {
+                    *throughput / checkpoint_secs < self.env.opts.min_table_split_write_throughput
+                });
+            }
+        }
+
+        let state_table_size = *table_size;
+
+        // 1. Avoid splitting a creating table
+        // 2. Avoid splitting a is_low_write_throughput creating table
+        // 3. Avoid splitting a non-high throughput medium-sized table
+        if is_creating_table
+            || (is_low_write_throughput)
+            || (state_table_size < self.env.opts.min_table_split_size && !is_high_write_throughput)
+        {
+            return;
+        }
+
+        // do not split a large table and a small table because it would increase IOPS
+        // of small table.
+        if parent_group_id != default_group_id && parent_group_id != mv_group_id {
+            let rest_group_size = group_size - state_table_size;
+            if rest_group_size < state_table_size
+                && rest_group_size < self.env.opts.min_table_split_size
+            {
+                return;
+            }
+        }
+
+        let ret = self
+            .move_state_table_to_compaction_group(
+                parent_group_id,
+                &[*table_id],
+                partition_vnode_count,
+            )
+            .await;
+        match ret {
+            Ok(new_group_id) => {
+                tracing::info!("move state table [{}] from group-{} to group-{} success table_vnode_partition_count {:?}", table_id, parent_group_id, new_group_id, partition_vnode_count);
+            }
+            Err(e) => {
+                tracing::info!(
+                    error = %e.as_report(),
+                    "failed to move state table [{}] from group-{}",
+                    table_id,
+                    parent_group_id,
+                )
+            }
         }
     }
 }

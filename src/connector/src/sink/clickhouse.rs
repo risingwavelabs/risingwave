@@ -262,7 +262,7 @@ impl ClickHouseSink {
             .collect();
 
         if rw_fields_name.len().gt(&clickhouse_columns_desc.len()) {
-            return Err(SinkError::ClickHouse("The nums of the RisingWave column must be greater than/equal to the length of the Clickhouse column".to_string()));
+            return Err(SinkError::ClickHouse("The columns of the sink must be equal to or a superset of the target table's columns.".to_string()));
         }
 
         for i in rw_fields_name {
@@ -379,11 +379,10 @@ impl Sink for ClickHouseSink {
 
     const SINK_NAME: &'static str = CLICKHOUSE_SINK;
 
-    fn is_sink_decouple(desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
+    fn is_sink_decouple(_desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
         match user_specified {
-            SinkDecouple::Default => Ok(desc.sink_type.is_append_only()),
+            SinkDecouple::Default | SinkDecouple::Enable => Ok(true),
             SinkDecouple::Disable => Ok(false),
-            SinkDecouple::Enable => Ok(true),
         }
     }
 

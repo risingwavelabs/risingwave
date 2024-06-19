@@ -14,16 +14,20 @@
  * limitations under the License.
  */
 
-package com.risingwave.connector;
+package com.risingwave.connector.api;
 
-import java.util.function.BiConsumer;
-import org.elasticsearch.action.ActionListener;
-import org.elasticsearch.action.bulk.BulkRequest;
-import org.elasticsearch.action.bulk.BulkResponse;
+import java.lang.management.ManagementFactory;
+import java.lang.management.ThreadInfo;
+import java.lang.management.ThreadMXBean;
 
-/**
- * {@link BulkRequestConsumerFactory} is used to bridge incompatible Elasticsearch Java API calls
- * across different Elasticsearch versions.
- */
-interface BulkRequestConsumerFactory
-        extends BiConsumer<BulkRequest, ActionListener<BulkResponse>> {}
+public class Monitor {
+
+    public static String dumpStackTrace() {
+        StringBuilder builder = new StringBuilder();
+        ThreadMXBean threadMxBean = ManagementFactory.getThreadMXBean();
+        for (ThreadInfo ti : threadMxBean.dumpAllThreads(true, true)) {
+            builder.append(ti.toString());
+        }
+        return builder.toString();
+    }
+}
