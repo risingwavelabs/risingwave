@@ -99,6 +99,8 @@ services:
       - doris-server
       - starrocks-fe-server
       - starrocks-be-server
+      - mongodb
+      - mongodb-setup
       - sqlserver-server
     volumes:
       - ..:/risingwave
