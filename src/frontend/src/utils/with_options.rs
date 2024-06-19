@@ -19,7 +19,7 @@ use risingwave_connector::source::kafka::private_link::{
     insert_privatelink_broker_rewrite_map, CONNECTION_NAME_KEY, PRIVATELINK_ENDPOINT_KEY,
 };
 use risingwave_connector::WithPropertiesExt;
-use risingwave_pb::catalog::PbSecretRef;
+use risingwave_pb::secret::PbSecretRef;
 use risingwave_sqlparser::ast::{
     CreateConnectionStatement, CreateSinkStatement, CreateSourceStatement,
     CreateSubscriptionStatement, SqlOption, Statement, Value,

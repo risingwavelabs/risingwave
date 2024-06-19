@@ -19,7 +19,7 @@ use risingwave_common::catalog::{
     ColumnCatalog, ConnectionId, CreateType, DatabaseId, SchemaId, TableId, UserId,
 };
 use risingwave_common::util::sort_util::ColumnOrder;
-use risingwave_pb::catalog::PbSecretRef;
+use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::stream_plan::PbSinkDesc;
 
 use super::{SinkCatalog, SinkFormatDesc, SinkId, SinkType};
