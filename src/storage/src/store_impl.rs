@@ -1161,7 +1161,11 @@ pub mod boxed_state_store {
     pub trait DynamicDispatchedStateStoreExt: StaticSendSync {
         async fn try_wait_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()>;
 
-        fn sync(&self, epoch: u64, table_ids: HashSet<TableId>) -> BoxFuture<'static, StorageResult<SyncResult>>;
+        fn sync(
+            &self,
+            epoch: u64,
+            table_ids: HashSet<TableId>,
+        ) -> BoxFuture<'static, StorageResult<SyncResult>>;
 
         fn seal_epoch(&self, epoch: u64, is_checkpoint: bool);
 
