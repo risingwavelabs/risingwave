@@ -617,19 +617,19 @@ impl S3ObjectStore {
         let mut http = hyper::client::HttpConnector::new();
 
         // connection config
-        if let Some(keepalive_ms) = config.s3.object_store_keepalive_ms.as_ref() {
+        if let Some(keepalive_ms) = config.s3.keepalive_ms.as_ref() {
             http.set_keepalive(Some(Duration::from_millis(*keepalive_ms)));
         }
 
-        if let Some(nodelay) = config.s3.object_store_nodelay.as_ref() {
+        if let Some(nodelay) = config.s3.nodelay.as_ref() {
             http.set_nodelay(*nodelay);
         }
 
-        if let Some(recv_buffer_size) = config.s3.object_store_recv_buffer_size.as_ref() {
+        if let Some(recv_buffer_size) = config.s3.recv_buffer_size.as_ref() {
             http.set_recv_buffer_size(Some(*recv_buffer_size));
         }
 
-        if let Some(send_buffer_size) = config.s3.object_store_send_buffer_size.as_ref() {
+        if let Some(send_buffer_size) = config.s3.send_buffer_size.as_ref() {
             http.set_send_buffer_size(Some(*send_buffer_size));
         }
 
@@ -1042,7 +1042,7 @@ where
                 Some(SdkError::ServiceError(e)) => {
                     let retry = match e.err().code() {
                         None => {
-                            if config.s3.developer.object_store_retry_unknown_service_error
+                            if config.s3.developer.retry_unknown_service_error
                                 || config.s3.retry_unknown_service_error
                             {
                                 tracing::warn!(target: "unknown_service_error", "{e:?} occurs, retry S3 get_object request.");
@@ -1055,7 +1055,7 @@ where
                             if config
                                 .s3
                                 .developer
-                                .object_store_retryable_service_error_codes
+                                .retryable_service_error_codes
                                 .iter()
                                 .any(|s| s.as_str().eq_ignore_ascii_case(code))
                             {
