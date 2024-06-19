@@ -324,7 +324,8 @@ fn task_main(
                     task.execute(&mut ctx)?;
                 } else {
                     // When starting a MySQL container, the MySQL process is set as the main process.
-                    // Since the first process in a container always gets PID 1, the MySQL log shows "starting as process 1".
+                    // Since the first process in a container always gets PID 1, the MySQL log always shows
+                    // "starting as process 1".
                     let mut task = risedev::LogReadyCheckTask::new("starting as process 1")?;
                     task.execute(&mut ctx)?;
                 }
