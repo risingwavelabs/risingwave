@@ -1040,8 +1040,8 @@ impl ExprImpl {
 
 impl From<Condition> for ExprImpl {
     fn from(c: Condition) -> Self {
-        merge_expr_by_binary(
-            c.conjunctions.into_iter(),
+        merge_expr_by_logical_binary(
+            c.conjunctions,
             ExprType::And,
             ExprImpl::literal_bool(true),
         )

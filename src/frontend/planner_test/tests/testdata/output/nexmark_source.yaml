@@ -116,13 +116,13 @@
   sql: SELECT auction, price FROM bid WHERE auction = 1007 OR auction = 1020 OR auction = 2001 OR auction = 2019 OR auction = 2087;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchFilter { predicate: (((((auction = 1007:Int32) OR (auction = 1020:Int32)) OR (auction = 2001:Int32)) OR (auction = 2019:Int32)) OR (auction = 2087:Int32)) }
+    └─BatchFilter { predicate: (((auction = 1007:Int32) OR (auction = 1020:Int32)) OR ((auction = 2001:Int32) OR ((auction = 2019:Int32) OR (auction = 2087:Int32)))) }
       └─BatchProject { exprs: [auction, price] }
         └─BatchSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id] }
   stream_plan: |-
     StreamMaterialize { columns: [auction, price, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck }
     └─StreamProject { exprs: [auction, price, _row_id] }
-      └─StreamFilter { predicate: (((((auction = 1007:Int32) OR (auction = 1020:Int32)) OR (auction = 2001:Int32)) OR (auction = 2019:Int32)) OR (auction = 2087:Int32)) }
+      └─StreamFilter { predicate: (((auction = 1007:Int32) OR (auction = 1020:Int32)) OR ((auction = 2001:Int32) OR ((auction = 2019:Int32) OR (auction = 2087:Int32)))) }
         └─StreamRowIdGen { row_id_index: 7 }
           └─StreamSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id] }
   stream_dist_plan: |+
@@ -130,7 +130,7 @@
     StreamMaterialize { columns: [auction, price, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck }
     ├── tables: [ Materialize: 4294967294 ]
     └── StreamProject { exprs: [auction, price, _row_id] }
-        └── StreamFilter { predicate: (((((auction = 1007:Int32) OR (auction = 1020:Int32)) OR (auction = 2001:Int32)) OR (auction = 2019:Int32)) OR (auction = 2087:Int32)) }
+        └── StreamFilter { predicate: (((auction = 1007:Int32) OR (auction = 1020:Int32)) OR ((auction = 2001:Int32) OR ((auction = 2019:Int32) OR (auction = 2087:Int32)))) }
             └── StreamRowIdGen { row_id_index: 7 }
                 └── StreamSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id] } { tables: [ Source: 0 ] }
 
@@ -156,7 +156,7 @@
       │   └─BatchProject { exprs: [id, seller, category] }
       │     └─BatchSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, extra, _row_id] }
       └─BatchExchange { order: [], dist: HashShard(id) }
-        └─BatchFilter { predicate: (((state = 'or':Varchar) OR (state = 'id':Varchar)) OR (state = 'ca':Varchar)) }
+        └─BatchFilter { predicate: ((state = 'ca':Varchar) OR ((state = 'or':Varchar) OR (state = 'id':Varchar))) }
           └─BatchProject { exprs: [id, name, city, state] }
             └─BatchSource { source: person, columns: [id, name, email_address, credit_card, city, state, date_time, extra, _row_id] }
   stream_plan: |-
@@ -168,7 +168,7 @@
         │   └─StreamRowIdGen { row_id_index: 10 }
         │     └─StreamSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, extra, _row_id] }
         └─StreamExchange { dist: HashShard(id) }
-          └─StreamFilter { predicate: (((state = 'or':Varchar) OR (state = 'id':Varchar)) OR (state = 'ca':Varchar)) }
+          └─StreamFilter { predicate: ((state = 'id':Varchar) OR ((state = 'ca':Varchar) OR (state = 'or':Varchar))) }
             └─StreamRowIdGen { row_id_index: 8 }
               └─StreamSource { source: person, columns: [id, name, email_address, credit_card, city, state, date_time, extra, _row_id] }
   stream_dist_plan: |+
@@ -189,7 +189,7 @@
         └── StreamSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, extra, _row_id] } { tables: [ Source: 4 ] }
 
     Fragment 3
-    StreamFilter { predicate: (((state = 'or':Varchar) OR (state = 'id':Varchar)) OR (state = 'ca':Varchar)) }
+    StreamFilter { predicate: ((state = 'id':Varchar) OR ((state = 'ca':Varchar) OR (state = 'or':Varchar))) }
     └── StreamRowIdGen { row_id_index: 8 }
         └── StreamSource { source: person, columns: [id, name, email_address, credit_card, city, state, date_time, extra, _row_id] } { tables: [ Source: 5 ] }
 

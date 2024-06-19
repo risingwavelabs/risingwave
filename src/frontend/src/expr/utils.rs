@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::VecDeque;
+
 use fixedbitset::FixedBitSet;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_pb::expr::expr_node::Type;
@@ -31,19 +33,21 @@ fn split_expr_by(expr: ExprImpl, op: ExprType, rets: &mut Vec<ExprImpl>) {
     }
 }
 
-pub fn merge_expr_by_binary<I>(mut exprs: I, op: ExprType, identity_elem: ExprImpl) -> ExprImpl
+/// Merge the given expressions by the given logical operation.
+///
+/// The `op` must be commutative and associative, typically `And` or `Or`.
+pub fn merge_expr_by_logical_binary<I>(exprs: I, op: ExprType, identity_elem: ExprImpl) -> ExprImpl
 where
-    I: Iterator<Item = ExprImpl>,
+    I: IntoIterator<Item = ExprImpl>,
 {
-    if let Some(e) = exprs.next() {
-        let mut ret = e;
-        for expr in exprs {
-            ret = FunctionCall::new(op, vec![ret, expr]).unwrap().into();
-        }
-        ret
-    } else {
-        identity_elem
+    let mut exprs: VecDeque<_> = exprs.into_iter().collect();
+    while exprs.len() > 1 {
+        let lhs = exprs.pop_front().unwrap();
+        let rhs = exprs.pop_front().unwrap();
+        let new_expr = FunctionCall::new(op, vec![lhs, rhs]).unwrap().into();
+        exprs.push_back(new_expr);
     }
+    exprs.pop_front().unwrap_or(identity_elem)
 }
 
 /// Transform a bool expression to Conjunctive form. e.g. given expression is
@@ -393,10 +397,10 @@ pub fn factorization_expr(expr: ExprImpl) -> Vec<ExprImpl> {
         disjunction.retain(|factor| !greatest_common_divider.contains(factor));
     }
     // now disjunctions == [[A, B], [B], [E]]
-    let remaining = merge_expr_by_binary(
+    let remaining = merge_expr_by_logical_binary(
         disjunctions.into_iter().map(|conjunction| {
-            merge_expr_by_binary(
-                conjunction.into_iter(),
+            merge_expr_by_logical_binary(
+                conjunction,
                 ExprType::And,
                 ExprImpl::literal_bool(true),
             )
