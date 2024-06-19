@@ -183,6 +183,9 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         let re_construct_with_sink_pk = need_advance_delete
             && self.sink_param.sink_type == SinkType::Upsert
             && !self.sink_param.downstream_pk.is_empty();
+        tracing::info!("Sink info: sink_id: {} actor_id: {}, need_advance_delete: {}, re_construct_with_sink_pk: {}",
+                        sink_id, actor_id, need_advance_delete, re_construct_with_sink_pk);
+
         let processed_input = Self::process_msg(
             input,
             self.sink_param.sink_type,
