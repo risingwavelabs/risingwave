@@ -214,6 +214,12 @@ pub struct HummockTestEnv {
 }
 
 impl HummockTestEnv {
+    async fn wait_version_sync(&self) {
+        self.storage
+            .wait_version(self.manager.get_current_version().await)
+            .await
+    }
+
     pub async fn register_table_id(&self, table_id: TableId) {
         register_tables_with_id_for_test(
             self.storage.filter_key_extractor_manager(),
@@ -221,6 +227,7 @@ impl HummockTestEnv {
             &[table_id.table_id()],
         )
         .await;
+        self.wait_version_sync().await;
     }
 
     pub async fn register_table(&self, table: PbTable) {
@@ -230,6 +237,7 @@ impl HummockTestEnv {
             &[table],
         )
         .await;
+        self.wait_version_sync().await;
     }
 
     // Seal, sync and commit a epoch.
