@@ -1028,6 +1028,7 @@ pub mod test_utils {
     }
 }
 
+/// Note: this is created in `SourceReader::build_stream`
 #[derive(Debug, Clone, Default)]
 pub struct ParserConfig {
     pub common: CommonParserConfig,
