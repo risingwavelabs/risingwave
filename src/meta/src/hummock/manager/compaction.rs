@@ -491,12 +491,14 @@ impl HummockManager {
                                     // Forcefully cancel the task so that it terminates
                                     // early on the compactor
                                     // node.
-                                    let _ = compactor.cancel_tasks(&cancel_tasks);
-                                    tracing::info!(
-                                        "CancelTask operation for task_id {:?} has been sent to node with context_id {}",
-                                        cancel_tasks,
-                                        context_id
-                                    );
+                                    if !cancel_tasks.is_empty() {
+                                        let _ = compactor.cancel_tasks(&cancel_tasks);
+                                        tracing::info!(
+                                            "CancelTask operation for task_id {:?} has been sent to node with context_id {}",
+                                            cancel_tasks,
+                                            context_id
+                                        );
+                                    }
                                 } else {
                                     // Determine the validity of the compactor streaming rpc. When the compactor no longer exists in the manager, the stream will be removed.
                                     // Tip: Connectivity to the compactor will be determined through the `send_event` operation. When send fails, it will be removed from the manager
