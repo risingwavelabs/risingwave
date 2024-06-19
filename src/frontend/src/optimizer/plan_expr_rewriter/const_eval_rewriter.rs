@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use crate::error::RwError;
-use crate::expr::{Expr, ExprImpl, ExprRewriter, Literal};
+use crate::expr::{default_rewrite_expr, Expr, ExprImpl, ExprRewriter, Literal};
 
 pub(crate) struct ConstEvalRewriter {
     pub(crate) error: Option<RwError>,
@@ -31,21 +31,10 @@ impl ExprRewriter for ConstEvalRewriter {
                     expr
                 }
             }
+        } else if let ExprImpl::Parameter(_) = expr {
+            unreachable!("Parameter should not appear here. It will be replaced by a literal before this step.")
         } else {
-            match expr {
-                ExprImpl::InputRef(inner) => self.rewrite_input_ref(*inner),
-                ExprImpl::Literal(inner) => self.rewrite_literal(*inner),
-                ExprImpl::FunctionCall(inner) => self.rewrite_function_call(*inner),
-                ExprImpl::FunctionCallWithLambda(inner) => self.rewrite_function_call_with_lambda(*inner),
-                ExprImpl::AggCall(inner) => self.rewrite_agg_call(*inner),
-                ExprImpl::Subquery(inner) => self.rewrite_subquery(*inner),
-                ExprImpl::CorrelatedInputRef(inner) => self.rewrite_correlated_input_ref(*inner),
-                ExprImpl::TableFunction(inner) => self.rewrite_table_function(*inner),
-                ExprImpl::WindowFunction(inner) => self.rewrite_window_function(*inner),
-                ExprImpl::UserDefinedFunction(inner) => self.rewrite_user_defined_function(*inner),
-                ExprImpl::Parameter(_) => unreachable!("Parameter should not appear here. It will be replaced by a literal before this step."),
-                ExprImpl::Now(inner) => self.rewrite_now(*inner),
-            }
+            default_rewrite_expr(self, expr)
         }
     }
 }

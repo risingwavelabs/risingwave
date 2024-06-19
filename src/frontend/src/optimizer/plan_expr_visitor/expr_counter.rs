@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 
-use crate::expr::{ExprImpl, ExprType, ExprVisitor, FunctionCall};
+use crate::expr::{default_visit_expr, ExprImpl, ExprType, ExprVisitor, FunctionCall};
 
 /// `ExprCounter` is used by `CseRewriter`.
 #[derive(Default)]
@@ -35,20 +35,7 @@ impl ExprVisitor for CseExprCounter {
             return;
         }
 
-        match expr {
-            ExprImpl::InputRef(inner) => self.visit_input_ref(inner),
-            ExprImpl::Literal(inner) => self.visit_literal(inner),
-            ExprImpl::FunctionCall(inner) => self.visit_function_call(inner),
-            ExprImpl::FunctionCallWithLambda(inner) => self.visit_function_call_with_lambda(inner),
-            ExprImpl::AggCall(inner) => self.visit_agg_call(inner),
-            ExprImpl::Subquery(inner) => self.visit_subquery(inner),
-            ExprImpl::CorrelatedInputRef(inner) => self.visit_correlated_input_ref(inner),
-            ExprImpl::TableFunction(inner) => self.visit_table_function(inner),
-            ExprImpl::WindowFunction(inner) => self.visit_window_function(inner),
-            ExprImpl::UserDefinedFunction(inner) => self.visit_user_defined_function(inner),
-            ExprImpl::Parameter(inner) => self.visit_parameter(inner),
-            ExprImpl::Now(inner) => self.visit_now(inner),
-        }
+        default_visit_expr(self, expr);
     }
 
     fn visit_function_call(&mut self, func_call: &FunctionCall) {

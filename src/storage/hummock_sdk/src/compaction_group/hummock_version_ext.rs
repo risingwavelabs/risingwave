@@ -987,16 +987,6 @@ pub fn get_compaction_group_ids(
     version.levels.keys().cloned()
 }
 
-/// Gets all member table ids.
-pub fn get_member_table_ids(version: &HummockVersion) -> HashSet<StateTableId> {
-    version
-        .state_table_info
-        .info()
-        .keys()
-        .map(|table_id| table_id.table_id)
-        .collect()
-}
-
 pub fn get_table_compaction_group_id_mapping(
     version: &HummockVersion,
 ) -> HashMap<StateTableId, CompactionGroupId> {

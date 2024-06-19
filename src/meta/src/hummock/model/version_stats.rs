@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use prost::Message;
 use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_pb::hummock::HummockVersionStats;
 
@@ -31,10 +30,6 @@ impl MetadataModel for HummockVersionStats {
 
     fn to_protobuf(&self) -> Self::PbType {
         self.clone()
-    }
-
-    fn to_protobuf_encoded_vec(&self) -> Vec<u8> {
-        self.encode_to_vec()
     }
 
     fn from_protobuf(prost: Self::PbType) -> Self {

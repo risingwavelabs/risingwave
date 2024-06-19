@@ -100,6 +100,8 @@ pub struct ReleaseContext {
     pub(crate) source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
     /// Dropped actors.
     pub(crate) removed_actors: HashSet<ActorId>,
+
+    pub(crate) removed_fragments: HashSet<FragmentId>,
 }
 
 impl CatalogController {
@@ -228,7 +230,7 @@ impl CatalogController {
             .all(&txn)
             .await?;
 
-        let (source_fragments, removed_actors) =
+        let (source_fragments, removed_actors, removed_fragments) =
             resolve_source_register_info_for_jobs(&txn, streaming_jobs.clone()).await?;
 
         let state_table_ids: Vec<TableId> = Table::find()
@@ -332,6 +334,7 @@ impl CatalogController {
                 connections,
                 source_fragments,
                 removed_actors,
+                removed_fragments,
             },
             version,
         ))
@@ -2079,7 +2082,7 @@ impl CatalogController {
             to_drop_objects.extend(to_drop_internal_table_objs);
         }
 
-        let (source_fragments, removed_actors) =
+        let (source_fragments, removed_actors, removed_fragments) =
             resolve_source_register_info_for_jobs(&txn, to_drop_streaming_jobs.clone()).await?;
 
         let fragment_mappings =
@@ -2215,6 +2218,7 @@ impl CatalogController {
                 connections: vec![],
                 source_fragments,
                 removed_actors,
+                removed_fragments,
             },
             version,
         ))

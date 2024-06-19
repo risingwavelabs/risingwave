@@ -27,6 +27,7 @@ use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::catalog::{
     PbCreateType, PbSink, PbSinkFormatDesc, PbSinkType, PbStreamJobStatus,
 };
+use risingwave_pb::secret::PbSecretRef;
 
 use super::{
     SinkError, CONNECTOR_TYPE_KEY, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION,
@@ -339,7 +340,7 @@ pub struct SinkCatalog {
     pub create_type: CreateType,
 
     /// The secret reference for the sink, mapping from property name to secret id.
-    pub secret_ref: BTreeMap<String, u32>,
+    pub secret_ref: BTreeMap<String, PbSecretRef>,
 }
 
 impl SinkCatalog {
