@@ -113,7 +113,7 @@ FULL OUTER JOIN t t98 USING (v)
 ;
 
 statement ok
-DROP MATERIALIZED VIEW mv CASCADE;
+DROP TABLE t CASCADE;
 
 statement ok
 SET streaming_parallelism TO DEFAULT;
