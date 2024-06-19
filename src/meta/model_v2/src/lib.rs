@@ -14,8 +14,9 @@
 
 use std::collections::BTreeMap;
 
-use risingwave_pb::catalog::{PbCreateType, PbSecretRef, PbStreamJobStatus};
+use risingwave_pb::catalog::{PbCreateType, PbStreamJobStatus};
 use risingwave_pb::meta::table_fragments::PbState as PbStreamJobState;
+use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::stream_plan::PbStreamNode;
 use sea_orm::entity::prelude::*;
 use sea_orm::{DeriveActiveEnum, EnumIter, FromJsonQueryResult};

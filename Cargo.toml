@@ -319,8 +319,6 @@ tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev =
 futures-timer = { git = "https://github.com/madsim-rs/futures-timer.git", rev = "05b33b4" }
 # patch: unlimit 4MB message size for grpc client
 etcd-client = { git = "https://github.com/risingwavelabs/etcd-client.git", rev = "4e84d40" }
-# todo(wcy-fdu): remove this patch fork after opendal release a new version to apply azure workload identity change.
-reqsign = { git = "https://github.com/wcy-fdu/reqsign.git", rev = "c7dd668" }
 # patch to remove preserve_order from serde_json
 deno_core = { git = "https://github.com/bakjos/deno_core", rev = "9b241c6" }
 # patch to user reqwest 0.12.2
@@ -330,6 +328,8 @@ deno_net = { git = "https://github.com/bakjos/deno", rev = "787a232" }
 deno_tls = { git = "https://github.com/bakjos/deno", rev = "787a232" }
 deno_web = { git = "https://github.com/bakjos/deno", rev = "787a232" }
 deno_websocket = { git = "https://github.com/bakjos/deno", rev = "787a232" }
+# patch to remove preserve_order from serde_json
+bson = { git = "https://github.com/risingwavelabs/bson-rust", rev = "e5175ec" }
 
 [workspace.metadata.dylint]
 libraries = [{ path = "./lints" }]
