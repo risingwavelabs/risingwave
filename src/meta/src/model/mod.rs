@@ -24,14 +24,15 @@ use std::collections::btree_map::{Entry, VacantEntry};
 use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::marker::PhantomData;
+use std::io::{Read, Write};
 use std::ops::{Deref, DerefMut};
 
+use anyhow::Context as _;
 use async_trait::async_trait;
 pub use cluster::*;
 pub use error::*;
 pub use migration_plan::*;
 pub use notification::*;
-use prost::Message;
 pub use stream::*;
 
 use crate::hummock::model::ext::Transaction as TransactionV2;
@@ -59,13 +60,23 @@ mod private {
     pub trait MetadataModelMarker {}
 }
 
+/// Compress the value if it's larger then the threshold to avoid hitting the limit of etcd.
+///
+/// By default, the maximum size of any request to etcd is 1.5 MB. So we use a slightly
+/// smaller value here. However, note that this is still a best-effort approach, as the
+/// compressed size may still exceed the limit, in which case we should set the parameter
+/// `--max-request-bytes` of etcd to a larger value.
+const MODEL_COMPRESSION_THRESHOLD: usize = 1 << 20;
+
 /// `MetadataModel` defines basic model operations in CRUD.
+// TODO: better to move the methods that we don't want implementors to override to a separate
+// extension trait.
 #[async_trait]
 pub trait MetadataModel: std::fmt::Debug + Sized + private::MetadataModelMarker {
     /// Serialized prost message type.
-    type PbType: Message + Default;
+    type PbType: prost::Message + Default;
     /// Serialized key type.
-    type KeyType: Message;
+    type KeyType: prost::Message;
 
     /// Column family for this model.
     fn cf_name() -> String;
@@ -73,16 +84,58 @@ pub trait MetadataModel: std::fmt::Debug + Sized + private::MetadataModelMarker 
     /// Serialize to protobuf.
     fn to_protobuf(&self) -> Self::PbType;
 
-    /// Serialize to protobuf encoded byte vector.
-    fn to_protobuf_encoded_vec(&self) -> Vec<u8> {
-        self.to_protobuf().encode_to_vec()
-    }
-
     /// Deserialize from protobuf.
     fn from_protobuf(prost: Self::PbType) -> Self;
 
     /// Current record key.
     fn key(&self) -> MetadataModelResult<Self::KeyType>;
+
+    /// Encode key to bytes. Should not be overridden.
+    fn encode_key(key: &Self::KeyType) -> Vec<u8> {
+        use prost::Message;
+        key.encode_to_vec()
+    }
+
+    /// Encode value to bytes. Should not be overridden.
+    fn encode_value(value: &Self::PbType) -> Vec<u8> {
+        use flate2::write::GzEncoder;
+        use flate2::Compression;
+        use prost::Message;
+
+        let pb_encoded = value.encode_to_vec();
+
+        // Compress the value if it's larger then the threshold to avoid hitting the limit of etcd.
+        if pb_encoded.len() > MODEL_COMPRESSION_THRESHOLD {
+            let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+            encoder.write_all(&pb_encoded).unwrap();
+            encoder.finish().unwrap()
+        } else {
+            pb_encoded
+        }
+    }
+
+    /// Decode value from bytes. Should not be overridden.
+    fn decode_value(value: &[u8]) -> MetadataModelResult<Self::PbType> {
+        use flate2::bufread::GzDecoder;
+        use prost::Message;
+
+        let mut decoder = GzDecoder::new(value);
+        let mut buf = Vec::new();
+
+        // If the value is compressed, decode it.
+        // This works because a protobuf-encoded message is never a valid gzip stream.
+        // https://stackoverflow.com/questions/63621784/can-a-protobuf-message-begin-with-a-gzip-magic-number
+        let value = if decoder.header().is_some() {
+            decoder
+                .read_to_end(&mut buf)
+                .context("failed to decode gzipped value")?;
+            buf.as_slice()
+        } else {
+            value
+        };
+
+        Self::PbType::decode(value).map_err(Into::into)
+    }
 
     /// `list` returns all records in this model.
     async fn list<S>(store: &S) -> MetadataModelResult<Vec<Self>>
@@ -92,11 +145,7 @@ pub trait MetadataModel: std::fmt::Debug + Sized + private::MetadataModelMarker 
         let bytes_vec = store.list_cf(&Self::cf_name()).await?;
         bytes_vec
             .iter()
-            .map(|(_k, v)| {
-                Self::PbType::decode(v.as_slice())
-                    .map(Self::from_protobuf)
-                    .map_err(Into::into)
-            })
+            .map(|(_k, v)| Self::decode_value(v.as_slice()).map(Self::from_protobuf))
             .collect()
     }
 
@@ -107,11 +156,7 @@ pub trait MetadataModel: std::fmt::Debug + Sized + private::MetadataModelMarker 
         let bytes_vec = snapshot.list_cf(&Self::cf_name()).await?;
         bytes_vec
             .iter()
-            .map(|(_k, v)| {
-                Self::PbType::decode(v.as_slice())
-                    .map(Self::from_protobuf)
-                    .map_err(Into::into)
-            })
+            .map(|(_k, v)| Self::decode_value(v.as_slice()).map(Self::from_protobuf))
             .collect()
     }
 
@@ -123,8 +168,8 @@ pub trait MetadataModel: std::fmt::Debug + Sized + private::MetadataModelMarker 
         store
             .put_cf(
                 &Self::cf_name(),
-                self.key()?.encode_to_vec(),
-                self.to_protobuf().encode_to_vec(),
+                Self::encode_key(&self.key()?),
+                Self::encode_value(&self.to_protobuf()),
             )
             .await
             .map_err(Into::into)
@@ -136,7 +181,7 @@ pub trait MetadataModel: std::fmt::Debug + Sized + private::MetadataModelMarker 
         S: MetaStore,
     {
         store
-            .delete_cf(&Self::cf_name(), &key.encode_to_vec())
+            .delete_cf(&Self::cf_name(), &Self::encode_key(key))
             .await
             .map_err(Into::into)
     }
@@ -146,7 +191,7 @@ pub trait MetadataModel: std::fmt::Debug + Sized + private::MetadataModelMarker 
     where
         S: MetaStore,
     {
-        let byte_vec = match store.get_cf(&Self::cf_name(), &key.encode_to_vec()).await {
+        let byte_vec = match store.get_cf(&Self::cf_name(), &Self::encode_key(key)).await {
             Ok(byte_vec) => byte_vec,
             Err(err) => {
                 if !matches!(err, MetaStoreError::ItemNotFound(_)) {
@@ -155,7 +200,7 @@ pub trait MetadataModel: std::fmt::Debug + Sized + private::MetadataModelMarker 
                 return Ok(None);
             }
         };
-        let model = Self::from_protobuf(Self::PbType::decode(byte_vec.as_slice())?);
+        let model = Self::from_protobuf(Self::decode_value(byte_vec.as_slice())?);
         Ok(Some(model))
     }
 }
@@ -210,14 +255,14 @@ where
     async fn upsert_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()> {
         trx.put(
             Self::cf_name(),
-            self.key()?.encode_to_vec(),
-            self.to_protobuf_encoded_vec(),
+            Self::encode_key(&self.key()?),
+            Self::encode_value(&self.to_protobuf()),
         );
         Ok(())
     }
 
     async fn delete_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()> {
-        trx.delete(Self::cf_name(), self.key()?.encode_to_vec());
+        trx.delete(Self::cf_name(), Self::encode_key(&self.key()?));
         Ok(())
     }
 }
@@ -930,6 +975,8 @@ impl<'a, T: Transactional<Transaction> + Transactional<TransactionV2> + Clone> D
 
 #[cfg(test)]
 mod tests {
+    use itertools::Itertools;
+
     use super::*;
     use crate::storage::Operation;
 
@@ -956,6 +1003,53 @@ mod tests {
             trx.delete(TEST_CF.to_string(), self.key.as_bytes().into());
             Ok(())
         }
+    }
+
+    #[tokio::test]
+    async fn test_compress_decompress() {
+        use prost::Message;
+        use risingwave_pb::catalog::Database;
+
+        use crate::storage::MemStore;
+
+        async fn do_test(len: usize) {
+            // Use `Database` as a test model.
+            type Model = Database;
+
+            let store = MemStore::new();
+            let model = Model {
+                name: "t".repeat(len),
+                ..Default::default()
+            };
+            {
+                let encoded_len = model.encoded_len();
+                // Showing that the encoded length is larger than the original length.
+                // So that a len greater than the threshold will hit the compression branch.
+                assert!(encoded_len >= len, "encoded_len: {encoded_len}, len: {len}");
+            }
+            model.insert(&store).await.unwrap();
+
+            // Test `list`
+            let decoded = Model::list(&store)
+                .await
+                .unwrap()
+                .into_iter()
+                .exactly_one()
+                .unwrap();
+            assert_eq!(model, decoded);
+
+            // Test `select`
+            let decoded = Model::select(&store, &model.key().unwrap())
+                .await
+                .unwrap()
+                .into_iter()
+                .exactly_one()
+                .unwrap();
+            assert_eq!(model, decoded);
+        }
+
+        do_test(1).await;
+        do_test(MODEL_COMPRESSION_THRESHOLD + 1).await;
     }
 
     #[tokio::test]
