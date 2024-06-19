@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::pin::pin;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::Relaxed;
@@ -403,7 +403,7 @@ impl HummockEventHandler {
             #[cfg(debug_assertions)]
             {
                 // check duplication on debug_mode
-                let mut id_set = HashSet::new();
+                let mut id_set = std::collections::HashSet::new();
                 for instance in instances {
                     assert!(id_set.insert(instance));
                 }
