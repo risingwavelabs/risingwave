@@ -350,6 +350,11 @@ impl ColumnCatalog {
         self.column_desc.is_default()
     }
 
+    /// If the columns is an `INCLUDE ... AS ...` connector column.
+    pub fn is_connector_additional_column(&self) -> bool {
+        self.column_desc.additional_column.column_type.is_some()
+    }
+
     /// Get a reference to the column desc's data type.
     pub fn data_type(&self) -> &DataType {
         &self.column_desc.data_type

@@ -59,6 +59,8 @@ ABC	1
 statement ok
 create materialized view mv as select * from s;
 
+sleep 2s
+
 query ??
 select * from mv
 ----
