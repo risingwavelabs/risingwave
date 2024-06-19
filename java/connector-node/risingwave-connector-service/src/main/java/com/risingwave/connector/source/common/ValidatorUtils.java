@@ -66,6 +66,9 @@ public final class ValidatorUtils {
             case POSTGRES:
             case CITUS:
                 return String.format("jdbc:postgresql://%s:%s/%s", host, port, database);
+            case SQL_SERVER:
+                return String.format(
+                        "jdbc:sqlserver://%s:%s;databaseName=%s", host, port, database);
             default:
                 throw ValidatorUtils.invalidArgument("Unknown source type: " + sourceType);
         }

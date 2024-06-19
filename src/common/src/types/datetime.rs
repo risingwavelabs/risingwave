@@ -24,7 +24,7 @@ use bytes::{Bytes, BytesMut};
 use chrono::{
     DateTime, Datelike, Days, Duration, NaiveDate, NaiveDateTime, NaiveTime, Timelike, Weekday,
 };
-use postgres_types::{accepts, to_sql_checked, FromSql, IsNull, ToSql, Type};
+use postgres_types::{accepts, to_sql_checked, IsNull, Type};
 use risingwave_common_estimate_size::ZeroHeapSize;
 use thiserror::Error;
 
@@ -40,7 +40,7 @@ const LEAP_DAYS: &[i32] = &[0, 31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 const NORMAL_DAYS: &[i32] = &[0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 
 macro_rules! impl_chrono_wrapper {
-    ($variant_name:ident, $chrono:ty) => {
+    ($variant_name:ident, $chrono:ty, $pg_type:ident) => {
         #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
         #[repr(transparent)]
         pub struct $variant_name(pub $chrono);
@@ -66,105 +66,75 @@ macro_rules! impl_chrono_wrapper {
         }
 
         impl ZeroHeapSize for $variant_name {}
+
+        impl postgres_types::ToSql for $variant_name {
+            accepts!($pg_type);
+
+            to_sql_checked!();
+
+            fn to_sql(
+                &self,
+                ty: &Type,
+                out: &mut BytesMut,
+            ) -> std::result::Result<IsNull, Box<dyn Error + Sync + Send>>
+            where
+                Self: Sized,
+            {
+                self.0.to_sql(ty, out)
+            }
+        }
+
+        impl<'a> postgres_types::FromSql<'a> for $variant_name {
+            fn from_sql(
+                ty: &Type,
+                raw: &'a [u8],
+            ) -> std::result::Result<Self, Box<dyn std::error::Error + Sync + Send>> {
+                let instant = <$chrono as postgres_types::FromSql>::from_sql(ty, raw)?;
+                Ok(Self::from(instant))
+            }
+
+            fn accepts(ty: &Type) -> bool {
+                matches!(*ty, Type::$pg_type)
+            }
+        }
+
+        impl<'a> tiberius::IntoSql<'a> for $variant_name {
+            fn into_sql(self) -> tiberius::ColumnData<'a> {
+                self.0.into_sql()
+            }
+        }
+
+        impl<'a> tiberius::FromSql<'a> for $variant_name {
+            fn from_sql(
+                value: &'a tiberius::ColumnData<'static>,
+            ) -> tiberius::Result<Option<Self>> {
+                let instant = <$chrono as tiberius::FromSql>::from_sql(value)?;
+                let time = instant.map($variant_name::from);
+                tiberius::Result::Ok(time)
+            }
+        }
+
+        impl ToBinary for $variant_name {
+            fn to_binary_with_type(
+                &self,
+                ty: &DataType,
+            ) -> super::to_binary::Result<Option<Bytes>> {
+                match ty {
+                    super::DataType::$variant_name => {
+                        let mut output = BytesMut::new();
+                        postgres_types::ToSql::to_sql(&self.0, &Type::ANY, &mut output).unwrap();
+                        Ok(Some(output.freeze()))
+                    }
+                    _ => unreachable!(),
+                }
+            }
+        }
     };
 }
 
-impl_chrono_wrapper!(Date, NaiveDate);
-impl_chrono_wrapper!(Timestamp, NaiveDateTime);
-impl_chrono_wrapper!(Time, NaiveTime);
-
-impl ToSql for Date {
-    accepts!(DATE);
-
-    to_sql_checked!();
-
-    fn to_sql(
-        &self,
-        ty: &Type,
-        out: &mut BytesMut,
-    ) -> std::result::Result<IsNull, Box<dyn Error + Sync + Send>>
-    where
-        Self: Sized,
-    {
-        self.0.to_sql(ty, out)
-    }
-}
-
-impl<'a> FromSql<'a> for Date {
-    fn from_sql(
-        ty: &Type,
-        raw: &'a [u8],
-    ) -> std::result::Result<Self, Box<dyn std::error::Error + Sync + Send>> {
-        let instant = NaiveDate::from_sql(ty, raw)?;
-        Ok(Self::from(instant))
-    }
-
-    fn accepts(ty: &Type) -> bool {
-        matches!(*ty, Type::DATE)
-    }
-}
-
-impl ToSql for Time {
-    accepts!(TIME);
-
-    to_sql_checked!();
-
-    fn to_sql(
-        &self,
-        ty: &Type,
-        out: &mut BytesMut,
-    ) -> std::result::Result<IsNull, Box<dyn Error + Sync + Send>>
-    where
-        Self: Sized,
-    {
-        self.0.to_sql(ty, out)
-    }
-}
-
-impl<'a> FromSql<'a> for Time {
-    fn from_sql(
-        ty: &Type,
-        raw: &'a [u8],
-    ) -> std::result::Result<Self, Box<dyn std::error::Error + Sync + Send>> {
-        let instant = NaiveTime::from_sql(ty, raw)?;
-        Ok(Self::from(instant))
-    }
-
-    fn accepts(ty: &Type) -> bool {
-        matches!(*ty, Type::TIME)
-    }
-}
-
-impl ToSql for Timestamp {
-    accepts!(TIMESTAMP);
-
-    to_sql_checked!();
-
-    fn to_sql(
-        &self,
-        ty: &Type,
-        out: &mut BytesMut,
-    ) -> std::result::Result<IsNull, Box<dyn Error + Sync + Send>>
-    where
-        Self: Sized,
-    {
-        self.0.to_sql(ty, out)
-    }
-}
-
-impl<'a> FromSql<'a> for Timestamp {
-    fn from_sql(
-        ty: &Type,
-        raw: &'a [u8],
-    ) -> std::result::Result<Self, Box<dyn std::error::Error + Sync + Send>> {
-        let instant = NaiveDateTime::from_sql(ty, raw)?;
-        Ok(Self::from(instant))
-    }
-
-    fn accepts(ty: &Type) -> bool {
-        matches!(*ty, Type::TIMESTAMP)
-    }
-}
+impl_chrono_wrapper!(Date, NaiveDate, DATE);
+impl_chrono_wrapper!(Timestamp, NaiveDateTime, TIMESTAMP);
+impl_chrono_wrapper!(Time, NaiveTime, TIME);
 
 /// Parse a date from varchar.
 ///
@@ -422,45 +392,6 @@ impl ToText for Timestamp {
     fn write_with_type<W: std::fmt::Write>(&self, ty: &DataType, f: &mut W) -> std::fmt::Result {
         match ty {
             super::DataType::Timestamp => self.write(f),
-            _ => unreachable!(),
-        }
-    }
-}
-
-impl ToBinary for Date {
-    fn to_binary_with_type(&self, ty: &DataType) -> super::to_binary::Result<Option<Bytes>> {
-        match ty {
-            super::DataType::Date => {
-                let mut output = BytesMut::new();
-                self.0.to_sql(&Type::ANY, &mut output).unwrap();
-                Ok(Some(output.freeze()))
-            }
-            _ => unreachable!(),
-        }
-    }
-}
-
-impl ToBinary for Time {
-    fn to_binary_with_type(&self, ty: &DataType) -> super::to_binary::Result<Option<Bytes>> {
-        match ty {
-            super::DataType::Time => {
-                let mut output = BytesMut::new();
-                self.0.to_sql(&Type::ANY, &mut output).unwrap();
-                Ok(Some(output.freeze()))
-            }
-            _ => unreachable!(),
-        }
-    }
-}
-
-impl ToBinary for Timestamp {
-    fn to_binary_with_type(&self, ty: &DataType) -> super::to_binary::Result<Option<Bytes>> {
-        match ty {
-            super::DataType::Timestamp => {
-                let mut output = BytesMut::new();
-                self.0.to_sql(&Type::ANY, &mut output).unwrap();
-                Ok(Some(output.freeze()))
-            }
             _ => unreachable!(),
         }
     }

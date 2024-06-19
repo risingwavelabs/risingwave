@@ -55,11 +55,15 @@ public class DbzConnectorConfig {
     public static final String PG_PUB_CREATE = "publication.create.enable";
     public static final String PG_SCHEMA_NAME = "schema.name";
 
+    /* Postgres configs */
+    public static final String SQL_SERVER_SCHEMA_NAME = "schema.name";
+
     /* RisingWave configs */
     private static final String DBZ_CONFIG_FILE = "debezium.properties";
     private static final String MYSQL_CONFIG_FILE = "mysql.properties";
     private static final String POSTGRES_CONFIG_FILE = "postgres.properties";
     private static final String MONGODB_CONFIG_FILE = "mongodb.properties";
+    private static final String SQL_SERVER_CONFIG_FILE = "sql_server.properties";
 
     private static final String DBZ_PROPERTY_PREFIX = "debezium.";
 
@@ -250,6 +254,34 @@ public class DbzConnectorConfig {
 
             dbzProps.putAll(mongodbProps);
 
+        } else if (source == SourceTypeE.SQL_SERVER) {
+            var sqlServerProps = initiateDbConfig(SQL_SERVER_CONFIG_FILE, substitutor);
+            if (isCdcBackfill) {
+                // skip the initial snapshot for cdc backfill
+                sqlServerProps.setProperty("snapshot.mode", "schema_only");
+
+                // if startOffset is specified, we should continue
+                // reading changes from the given offset
+                if (null != startOffset && !startOffset.isBlank()) {
+                    sqlServerProps.setProperty(
+                            ConfigurableOffsetBackingStore.OFFSET_STATE_VALUE, startOffset);
+                }
+            } else {
+                // if snapshot phase is finished and offset is specified, we will continue reading
+                // changes from the given offset
+                if (snapshotDone && null != startOffset && !startOffset.isBlank()) {
+                    sqlServerProps.setProperty("snapshot.mode", "schema_only");
+                    sqlServerProps.setProperty(
+                            ConfigurableOffsetBackingStore.OFFSET_STATE_VALUE, startOffset);
+                }
+            }
+            dbzProps.putAll(sqlServerProps);
+            if (isCdcSourceJob) {
+                // remove table filtering for the shared Postgres source, since we
+                // allow user to ingest tables in different schemas
+                LOG.info("Disable table filtering for the shared Postgres source");
+                dbzProps.remove("table.include.list");
+            }
         } else {
             throw new RuntimeException("unsupported source type: " + source);
         }

@@ -211,7 +211,10 @@ impl JsonParseOptions {
             got: value.value_type().to_string(),
             value: value.to_string(),
         };
-
+        println!(
+            "WKXLOG JsonParseOptions::parse before value: {:?}, type_expected: {:?}, value.value_type(): {:?}",
+            value, type_expected, value.value_type()
+        );
         let v: ScalarImpl = match (type_expected, value.value_type()) {
             (_, ValueType::Null) => return Ok(DatumCow::NULL),
             // ---- Boolean -----
@@ -624,6 +627,10 @@ impl JsonParseOptions {
 
             (_expected, _got) => Err(create_error())?,
         };
+        println!(
+            "WKXLOG JsonParseOptions::parse after  value: {:?}, type_expected: {:?}, value.value_type(): {:?}, ScalerImpl: {:?}",
+            value, type_expected, value.value_type(), v
+        );
         Ok(DatumCow::Owned(Some(v)))
     }
 }

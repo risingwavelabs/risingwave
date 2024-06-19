@@ -42,7 +42,7 @@ use risingwave_connector::sink::iceberg::IcebergConfig;
 use risingwave_connector::source::cdc::{
     CDC_SHARING_MODE_KEY, CDC_SNAPSHOT_BACKFILL, CDC_SNAPSHOT_MODE_KEY, CDC_TRANSACTIONAL_KEY,
     CDC_WAIT_FOR_STREAMING_START_TIMEOUT, CITUS_CDC_CONNECTOR, MONGODB_CDC_CONNECTOR,
-    MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR,
+    MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR, SQL_SERVER_CDC_CONNECTOR,
 };
 use risingwave_connector::source::datagen::DATAGEN_CONNECTOR;
 use risingwave_connector::source::iceberg::ICEBERG_CONNECTOR;
@@ -1052,7 +1052,12 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                 ),
                 ICEBERG_CONNECTOR => hashmap!(
                     Format::None => vec![Encode::None],
-                )
+                ),
+                SQL_SERVER_CDC_CONNECTOR => hashmap!(
+                    Format::Debezium => vec![Encode::Json],
+                    // support source stream job
+                    Format::Plain => vec![Encode::Json],
+                ),
         ))
     });
 
@@ -1131,6 +1136,13 @@ pub fn validate_compatibility(
         if !props.contains_key("publication.create.enable") {
             // Default auto create publication if doesn't exist
             props.insert("publication.create.enable".into(), "true".into());
+        }
+    }
+
+    if connector == SQL_SERVER_CDC_CONNECTOR {
+        if !props.contains_key("schema.name") {
+            // Default schema name is "dbo"
+            props.insert("schema.name".into(), "dbo".into());
         }
     }
     Ok(())
@@ -1330,6 +1342,7 @@ pub fn bind_connector_props(
                 .to_string(),
         );
     }
+    println!("WKXLOG with_properties: {:?}", with_properties);
     Ok(WithOptions::new(with_properties))
 }
 
