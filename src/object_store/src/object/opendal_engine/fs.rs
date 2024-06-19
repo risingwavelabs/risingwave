@@ -29,7 +29,7 @@ impl OpendalObjectStore {
         // Create fs backend builder.
         let mut builder = Fs::default();
         builder.root(&root);
-        if config.object_store_set_atomic_write_dir {
+        if config.set_atomic_write_dir {
             let atomic_write_dir = format!("{}/{}", root, ATOMIC_WRITE_DIR);
             builder.atomic_write_dir(&atomic_write_dir);
         }
