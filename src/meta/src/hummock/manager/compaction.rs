@@ -469,9 +469,9 @@ impl HummockManager {
                                 let cancel_tasks = compactor_manager.update_task_heartbeats(&progress).into_iter().map(|task|task.task_id).collect::<Vec<_>>();
                                 if !cancel_tasks.is_empty() {
                                     tracing::info!(
-                                        "Tasks cancel with task_ids {:?} with context_id {} has expired due to lack of visible progress",
-                                        cancel_tasks,
+                                        ?cancel_tasks,
                                         context_id,
+                                        "Tasks cancel has expired due to lack of visible progress",
                                     );
 
                                     if let Err(e) = hummock_manager
@@ -490,12 +490,14 @@ impl HummockManager {
                                     // Forcefully cancel the task so that it terminates
                                     // early on the compactor
                                     // node.
-                                    let _ = compactor.cancel_tasks(&cancel_tasks);
-                                    tracing::info!(
-                                        "CancelTask operation for task_id {:?} has been sent to node with context_id {}",
-                                        cancel_tasks,
-                                        context_id
-                                    );
+                                    if !cancel_tasks.is_empty() {
+                                        let _ = compactor.cancel_tasks(&cancel_tasks);
+                                        tracing::info!(
+                                            ?cancel_tasks,
+                                            context_id,
+                                            "CancelTask operation has been sent to compactor node",
+                                        );
+                                    }
                                 } else {
                                     // Determine the validity of the compactor streaming rpc. When the compactor no longer exists in the manager, the stream will be removed.
                                     // Tip: Connectivity to the compactor will be determined through the `send_event` operation. When send fails, it will be removed from the manager
@@ -515,7 +517,7 @@ impl HummockManager {
                         if compactor_alive {
                             push_stream(context_id, stream, &mut compactor_request_streams);
                         } else {
-                            tracing::warn!("compactor stream {} error, send stream may be destroyed", context_id);
+                            tracing::warn!(context_id, "compactor stream error, send stream may be destroyed");
                         }
                     },
                 }
