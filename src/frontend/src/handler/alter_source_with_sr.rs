@@ -19,6 +19,7 @@ use itertools::Itertools;
 use pgwire::pg_response::StatementType;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::ColumnCatalog;
+use risingwave_connector::parser::max_column_id;
 use risingwave_connector::WithPropertiesExt;
 use risingwave_pb::catalog::StreamSourceInfo;
 use risingwave_pb::plan_common::{EncodeType, FormatType};
@@ -28,7 +29,6 @@ use risingwave_sqlparser::ast::{
 };
 use risingwave_sqlparser::parser::Parser;
 
-use super::alter_source_column::max_column_id;
 use super::alter_table_column::schema_has_schema_registry;
 use super::create_source::{bind_columns_from_source, validate_compatibility};
 use super::util::SourceSchemaCompatExt;

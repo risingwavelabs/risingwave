@@ -88,6 +88,7 @@ mod util;
 pub use debezium::DEBEZIUM_IGNORE_KEY;
 use risingwave_common::buffer::BitmapBuilder;
 pub use unified::{AccessError, AccessResult};
+pub use util::max_column_id;
 
 /// A builder for building a [`StreamChunk`] from [`SourceColumnDesc`].
 pub struct SourceStreamChunkBuilder {
