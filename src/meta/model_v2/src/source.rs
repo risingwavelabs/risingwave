@@ -19,8 +19,8 @@ use sea_orm::ActiveValue::Set;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    ColumnCatalogArray, ConnectionId, I32Array, Property, SourceId, StreamSourceInfo, TableId,
-    WatermarkDescArray,
+    ColumnCatalogArray, ConnectionId, I32Array, Property, SecretRef, SourceId, StreamSourceInfo,
+    TableId, WatermarkDescArray,
 };
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize)]
@@ -39,6 +39,8 @@ pub struct Model {
     pub optional_associated_table_id: Option<TableId>,
     pub connection_id: Option<ConnectionId>,
     pub version: i64,
+    // `secret_ref` stores the mapping info mapping from property name to secret id and type.
+    pub secret_ref: Option<SecretRef>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -101,6 +103,7 @@ impl From<PbSource> for ActiveModel {
             optional_associated_table_id: Set(optional_associated_table_id),
             connection_id: Set(source.connection_id.map(|id| id as _)),
             version: Set(source.version as _),
+            secret_ref: Set(None),
         }
     }
 }

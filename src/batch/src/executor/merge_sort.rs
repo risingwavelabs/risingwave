@@ -174,7 +174,7 @@ impl MergeSortExecutor {
 impl MergeSortExecutor {
     pub fn new(
         inputs: Vec<BoxedExecutor>,
-        column_orders: Vec<ColumnOrder>,
+        column_orders: Arc<Vec<ColumnOrder>>,
         schema: Schema,
         identity: String,
         chunk_size: usize,
@@ -183,7 +183,7 @@ impl MergeSortExecutor {
         let inputs_num = inputs.len();
         Self {
             inputs,
-            column_orders: Arc::new(column_orders),
+            column_orders,
             identity,
             schema,
             chunk_size,

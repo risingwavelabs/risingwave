@@ -90,6 +90,7 @@ pub async fn mock_sstable_store_with_object_store(store: ObjectStoreRef) -> Ssta
 
         recent_filter: None,
         state_store_metrics: Arc::new(global_hummock_state_store_metrics(MetricLevel::Disabled)),
+        use_new_object_prefix_strategy: true,
 
         meta_cache,
         block_cache,

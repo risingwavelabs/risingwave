@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use futures_async_stream::try_stream;
+use itertools::Itertools;
 use prost::Message;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
@@ -47,7 +48,7 @@ use crate::task::BatchTaskContext;
 /// 4. Build and yield data chunks according to the row order
 pub struct SortExecutor {
     child: BoxedExecutor,
-    column_orders: Vec<ColumnOrder>,
+    column_orders: Arc<Vec<ColumnOrder>>,
     identity: String,
     schema: Schema,
     chunk_size: usize,
@@ -87,12 +88,12 @@ impl BoxedExecutorBuilder for SortExecutor {
             .column_orders
             .iter()
             .map(ColumnOrder::from_protobuf)
-            .collect();
+            .collect_vec();
 
         let identity = source.plan_node().get_identity();
         Ok(Box::new(SortExecutor::new(
             child,
-            column_orders,
+            Arc::new(column_orders),
             identity.clone(),
             source.context.get_config().developer.chunk_size,
             source.context.create_executor_mem_context(identity),
@@ -192,6 +193,7 @@ impl SortExecutor {
 
             sort_spill_manager.close_writers().await?;
 
+
             let partition_num = sort_spill_manager.partition_num;
             // Merge sorted-partitions
             let mut sorted_inputs: Vec<BoxedExecutor> = Vec::with_capacity(partition_num);
@@ -251,7 +253,7 @@ impl SortExecutor {
 impl SortExecutor {
     pub fn new(
         child: BoxedExecutor,
-        column_orders: Vec<ColumnOrder>,
+        column_orders: Arc<Vec<ColumnOrder>>,
         identity: String,
         chunk_size: usize,
         mem_context: MemoryContext,
@@ -272,7 +274,7 @@ impl SortExecutor {
 
     fn new_inner(
         child: BoxedExecutor,
-        column_orders: Vec<ColumnOrder>,
+        column_orders: Arc<Vec<ColumnOrder>>,
         identity: String,
         chunk_size: usize,
         mem_context: MemoryContext,
@@ -454,11 +456,12 @@ mod tests {
 
         let order_by_executor = Box::new(SortExecutor::new(
             Box::new(mock_executor),
-            column_orders,
+            Arc::new(column_orders),
             "SortExecutor2".to_string(),
             CHUNK_SIZE,
             MemoryContext::none(),
             false,
+            BatchSpillMetrics::for_test(),
         ));
         let fields = &order_by_executor.schema().fields;
         assert_eq!(fields[0].data_type, DataType::Int32);
@@ -505,11 +508,12 @@ mod tests {
         ];
         let order_by_executor = Box::new(SortExecutor::new(
             Box::new(mock_executor),
-            column_orders,
+            Arc::new(column_orders),
             "SortExecutor2".to_string(),
             CHUNK_SIZE,
             MemoryContext::none(),
             false,
+            BatchSpillMetrics::for_test(),
         ));
         let fields = &order_by_executor.schema().fields;
         assert_eq!(fields[0].data_type, DataType::Float32);
@@ -556,11 +560,12 @@ mod tests {
         ];
         let order_by_executor = Box::new(SortExecutor::new(
             Box::new(mock_executor),
-            column_orders,
+            Arc::new(column_orders),
             "SortExecutor2".to_string(),
             CHUNK_SIZE,
             MemoryContext::none(),
             false,
+            BatchSpillMetrics::for_test(),
         ));
         let fields = &order_by_executor.schema().fields;
         assert_eq!(fields[0].data_type, DataType::Varchar);
@@ -632,11 +637,12 @@ mod tests {
         ];
         let order_by_executor = Box::new(SortExecutor::new(
             Box::new(mock_executor),
-            column_orders,
+            Arc::new(column_orders),
             "SortExecutor".to_string(),
             CHUNK_SIZE,
             MemoryContext::none(),
             false,
+            BatchSpillMetrics::for_test(),
         ));
 
         let mut stream = order_by_executor.execute();
@@ -713,7 +719,7 @@ mod tests {
         ];
         let order_by_executor = Box::new(SortExecutor::new(
             Box::new(mock_executor),
-            column_orders,
+            Arc::new(column_orders),
             "SortExecutor".to_string(),
             CHUNK_SIZE,
             MemoryContext::none(),
@@ -821,7 +827,7 @@ mod tests {
         ];
         let order_by_executor = Box::new(SortExecutor::new(
             Box::new(mock_executor),
-            column_orders,
+            column_orders.into(),
             "SortExecutor".to_string(),
             CHUNK_SIZE,
             MemoryContext::none(),
@@ -971,7 +977,7 @@ mod tests {
         ];
         let order_by_executor = Box::new(SortExecutor::new(
             Box::new(mock_executor),
-            column_orders,
+            Arc::new(column_orders),
             "SortExecutor".to_string(),
             CHUNK_SIZE,
             MemoryContext::none(),

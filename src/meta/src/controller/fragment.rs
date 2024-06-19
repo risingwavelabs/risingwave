@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::mem::swap;
 
@@ -54,8 +55,8 @@ use crate::controller::utils::{
     get_actor_dispatchers, get_parallel_unit_to_worker_map, FragmentDesc, PartialActorLocation,
     PartialFragmentStateTables,
 };
-use crate::manager::{ActorInfos, LocalNotification};
-use crate::model::TableParallelism;
+use crate::manager::{ActorInfos, InflightFragmentInfo, LocalNotification};
+use crate::model::{TableFragments, TableParallelism};
 use crate::stream::SplitAssignment;
 use crate::{MetaError, MetaResult};
 
@@ -779,16 +780,6 @@ impl CatalogController {
         Ok(table_fragments)
     }
 
-    /// Check if the fragment type mask is injectable.
-    fn is_injectable(fragment_type_mask: u32) -> bool {
-        (fragment_type_mask
-            & (PbFragmentTypeFlag::Source as u32
-                | PbFragmentTypeFlag::Now as u32
-                | PbFragmentTypeFlag::Values as u32
-                | PbFragmentTypeFlag::BarrierRecv as u32))
-            != 0
-    }
-
     pub async fn list_actor_locations(&self) -> MetaResult<Vec<PartialActorLocation>> {
         let inner = self.inner.read().await;
         let actor_locations: Vec<PartialActorLocation> =
@@ -873,37 +864,54 @@ impl CatalogController {
     /// collected
     pub async fn load_all_actors(&self) -> MetaResult<ActorInfos> {
         let inner = self.inner.read().await;
-        let actor_info: Vec<(ActorId, WorkerId, i32)> = Actor::find()
+        let actor_info: Vec<(ActorId, WorkerId, FragmentId, i32, I32Array)> = Actor::find()
             .select_only()
             .column(actor::Column::ActorId)
             .column(actor::Column::WorkerId)
+            .column(fragment::Column::FragmentId)
             .column(fragment::Column::FragmentTypeMask)
+            .column(fragment::Column::StateTableIds)
             .join(JoinType::InnerJoin, actor::Relation::Fragment.def())
             .filter(actor::Column::Status.eq(ActorStatus::Running))
             .into_tuple()
             .all(&inner.db)
             .await?;
 
-        let mut actor_maps = HashMap::new();
-        let mut barrier_inject_actor_maps = HashMap::new();
+        let mut fragment_infos = HashMap::new();
 
-        for (actor_id, worker_id, type_mask) in actor_info {
-            actor_maps
-                .entry(worker_id as _)
-                .or_insert_with(Vec::new)
-                .push(actor_id as _);
-            if Self::is_injectable(type_mask as _) {
-                barrier_inject_actor_maps
-                    .entry(worker_id as _)
-                    .or_insert_with(Vec::new)
-                    .push(actor_id as _);
+        for (actor_id, worker_id, fragment_id, type_mask, state_table_ids) in actor_info {
+            let state_table_ids = state_table_ids.into_inner();
+            match fragment_infos.entry(fragment_id as crate::model::FragmentId) {
+                Entry::Occupied(mut entry) => {
+                    let info: &mut InflightFragmentInfo = entry.get_mut();
+                    debug_assert_eq!(
+                        info.state_table_ids,
+                        state_table_ids
+                            .into_iter()
+                            .map(|table_id| risingwave_common::catalog::TableId::new(table_id as _))
+                            .collect()
+                    );
+                    assert!(info.actors.insert(actor_id as _, worker_id as _).is_none());
+                    assert_eq!(
+                        info.is_injectable,
+                        TableFragments::is_injectable(type_mask as _)
+                    );
+                }
+                Entry::Vacant(entry) => {
+                    let state_table_ids = state_table_ids
+                        .into_iter()
+                        .map(|table_id| risingwave_common::catalog::TableId::new(table_id as _))
+                        .collect();
+                    entry.insert(InflightFragmentInfo {
+                        actors: HashMap::from_iter([(actor_id as _, worker_id as _)]),
+                        state_table_ids,
+                        is_injectable: TableFragments::is_injectable(type_mask as _),
+                    });
+                }
             }
         }
 
-        Ok(ActorInfos {
-            actor_maps,
-            barrier_inject_actor_maps,
-        })
+        Ok(ActorInfos::new(fragment_infos))
     }
 
     pub async fn migrate_actors(&self, plan: HashMap<i32, PbParallelUnit>) -> MetaResult<()> {

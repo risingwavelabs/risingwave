@@ -744,3 +744,24 @@ pub(crate) fn load_private_key(
         .ok_or_else(|| anyhow!("No private key found"))?;
     Ok(cert?.into())
 }
+
+#[serde_as]
+#[derive(Deserialize, Debug, Clone, WithOptions)]
+pub struct MongodbCommon {
+    /// The URL of MongoDB
+    #[serde(rename = "mongodb.url")]
+    pub connect_uri: String,
+    /// The collection name where data should be written to or read from. For sinks, the format is
+    /// `db_name.collection_name`. Data can also be written to dynamic collections, see `collection.name.field`
+    /// for more information.
+    #[serde(rename = "collection.name")]
+    pub collection_name: String,
+}
+
+impl MongodbCommon {
+    pub(crate) async fn build_client(&self) -> ConnectorResult<mongodb::Client> {
+        let client = mongodb::Client::with_uri_str(&self.connect_uri).await?;
+
+        Ok(client)
+    }
+}

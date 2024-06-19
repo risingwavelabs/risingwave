@@ -61,6 +61,7 @@ pub use join::*;
 pub use limit::*;
 pub use managed::*;
 pub use max_one_row::*;
+pub use merge_sort::*;
 pub use merge_sort_exchange::*;
 pub use order_by::*;
 pub use project::*;
