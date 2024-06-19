@@ -981,8 +981,10 @@ pub struct StreamingDeveloperConfig {
 
     #[serde(default = "default::developer::stream_enable_arrangement_backfill")]
     /// Enable arrangement backfill
-    /// If true, the arrangement backfill will be disabled,
+    /// If false, the arrangement backfill will be disabled,
     /// even if session variable set.
+    /// If true, it will be enabled by default, but session variable
+    /// can override it.
     pub enable_arrangement_backfill: bool,
 
     #[serde(default = "default::developer::stream_high_join_amplification_threshold")]
