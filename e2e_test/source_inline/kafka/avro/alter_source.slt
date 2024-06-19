@@ -35,6 +35,12 @@ echo '{"foo":"ABC", "bar":1}' | rpk topic produce --schema-id=topic avro_alter_s
 
 sleep 5s
 
+system ok
+rpk topic consume avro_alter_source_test --offset :end | jq .value
+----
+"\u0000\u0000\u0000\u0000\u0010\u0002\u0006ABC"
+
+
 query ?
 select * from s
 ----
@@ -70,4 +76,4 @@ select * from mv
 ABC	1
 
 statement ok
-drop source s;
+drop source s cascade;
