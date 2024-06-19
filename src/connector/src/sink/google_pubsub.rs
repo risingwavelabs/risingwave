@@ -15,6 +15,8 @@
 use std::collections::BTreeMap;
 
 use anyhow::{anyhow, Context};
+use futures::prelude::future::FutureExt;
+use futures::prelude::TryFuture;
 use google_cloud_gax::conn::Environment;
 use google_cloud_googleapis::pubsub::v1::PubsubMessage;
 use google_cloud_pubsub::apiv1;
@@ -22,7 +24,7 @@ use google_cloud_pubsub::client::google_cloud_auth::credentials::CredentialsFile
 use google_cloud_pubsub::client::google_cloud_auth::project;
 use google_cloud_pubsub::client::google_cloud_auth::token::DefaultTokenSourceProvider;
 use google_cloud_pubsub::client::{Client, ClientConfig};
-use google_cloud_pubsub::publisher::Publisher;
+use google_cloud_pubsub::publisher::{Awaiter, Publisher};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::session_config::sink_decouple::SinkDecouple;
@@ -42,6 +44,15 @@ use super::{DummySinkCommitCoordinator, Result, Sink, SinkError, SinkParam, Sink
 use crate::dispatch_sink_formatter_str_key_impl;
 
 pub const PUBSUB_SINK: &str = "google_pubsub";
+
+fn may_delivery_future(awaiter: Awaiter) -> GooglePubSubSinkDeliveryFuture {
+    Box::pin(awaiter.get().map(|result| {
+        result
+            .context("Google Pub/Sub sink error")
+            .map_err(SinkError::GooglePubSub)
+            .map(|_| ())
+    }))
+}
 
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, WithOptions)]
@@ -157,9 +168,13 @@ impl TryFrom<SinkParam> for GooglePubSubSink {
     }
 }
 
-struct GooglePubSubPayloadWriter {
-    publisher: Publisher,
+struct GooglePubSubPayloadWriter<'w> {
+    publisher: &'w mut Publisher,
+    add_future: DeliveryFutureManagerAddFuture<'w, GooglePubSubSinkDeliveryFuture>,
 }
+
+pub type GooglePubSubSinkDeliveryFuture =
+    impl TryFuture<Ok = (), Error = SinkError> + Unpin + 'static;
 
 impl GooglePubSubSinkWriter {
     pub async fn new(
@@ -231,35 +246,38 @@ impl GooglePubSubSinkWriter {
         .await?;
 
         let publisher = topic.new_publisher(None);
-        let payload_writer = GooglePubSubPayloadWriter { publisher };
 
         Ok(Self {
-            payload_writer,
             formatter,
+            publisher,
         })
     }
 }
 
 pub struct GooglePubSubSinkWriter {
-    payload_writer: GooglePubSubPayloadWriter,
     formatter: SinkFormatterImpl,
+    publisher: Publisher,
 }
 
 impl AsyncTruncateSinkWriter for GooglePubSubSinkWriter {
+    type DeliveryFuture = GooglePubSubSinkDeliveryFuture;
+
     async fn write_chunk<'a>(
         &'a mut self,
         chunk: StreamChunk,
-        _add_future: DeliveryFutureManagerAddFuture<'a, Self::DeliveryFuture>,
+        add_future: DeliveryFutureManagerAddFuture<'a, Self::DeliveryFuture>,
     ) -> Result<()> {
-        dispatch_sink_formatter_str_key_impl!(
-            &self.formatter,
-            formatter,
-            self.payload_writer.write_chunk(chunk, formatter).await
-        )
+        dispatch_sink_formatter_str_key_impl!(&self.formatter, formatter, {
+            let mut payload_writer = GooglePubSubPayloadWriter {
+                publisher: &mut self.publisher,
+                add_future,
+            };
+            payload_writer.write_chunk(chunk, formatter).await
+        })
     }
 }
 
-impl FormattedSink for GooglePubSubPayloadWriter {
+impl<'w> FormattedSink for GooglePubSubPayloadWriter<'w> {
     type K = String;
     type V = Vec<u8>;
 
@@ -273,12 +291,10 @@ impl FormattedSink for GooglePubSubPayloadWriter {
                     ..Default::default()
                 };
                 let awaiter = self.publisher.publish(msg).await;
-                awaiter
-                    .get()
-                    .await
-                    .context("Google Pub/Sub sink error")
-                    .map_err(SinkError::GooglePubSub)
-                    .map(|_| ())
+                self.add_future
+                    .add_future_may_await(may_delivery_future(awaiter))
+                    .await?;
+                Ok(())
             }
             None => Err(SinkError::GooglePubSub(anyhow!(
                 "Google Pub/Sub sink error: missing value to publish"
