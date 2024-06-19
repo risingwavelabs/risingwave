@@ -204,7 +204,7 @@
     StreamMaterialize { columns: [x, i.t._row_id(hidden), i.t._row_id#1(hidden), i.x(hidden), i.t._row_id#2(hidden), i.t._row_id#3(hidden), i.x#1(hidden)], stream_key: [i.t._row_id, i.t._row_id#1, i.x, i.t._row_id#2, i.t._row_id#3, i.x#1], pk_columns: [i.t._row_id, i.t._row_id#1, i.x, i.t._row_id#2, i.t._row_id#3, i.x#1], pk_conflict: NoCheck }
     └─StreamExchange { dist: HashShard(i.t._row_id, i.t._row_id, i.x, i.t._row_id, i.t._row_id, i.x) }
       └─StreamProject { exprs: [Coalesce(i.x, i.x) as $expr1, i.t._row_id, i.t._row_id, i.x, i.t._row_id, i.t._row_id, i.x] }
-        └─StreamFilter { predicate: ((IsNotNull(i.t._row_id) OR IsNotNull(i.t._row_id)) OR ((IsNotNull(i.x) OR IsNotNull(i.t._row_id)) OR (IsNotNull(i.t._row_id) OR IsNotNull(i.x)))) }
+        └─StreamFilter { predicate: (((IsNotNull(i.t._row_id) OR IsNotNull(i.t._row_id)) OR (IsNotNull(i.x) OR IsNotNull(i.t._row_id))) OR (IsNotNull(i.t._row_id) OR IsNotNull(i.x))) }
           └─StreamHashJoin { type: FullOuter, predicate: i.x = i.x, output: [i.x, i.x, i.t._row_id, i.t._row_id, i.t._row_id, i.t._row_id] }
             ├─StreamShare { id: 4 }
             │ └─StreamHashJoin { type: Inner, predicate: i.x = i.x, output: [i.x, i.t._row_id, i.t._row_id] }

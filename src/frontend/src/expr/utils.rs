@@ -40,14 +40,23 @@ pub(super) fn merge_expr_by_logical<I>(exprs: I, op: ExprType, identity_elem: Ex
 where
     I: IntoIterator<Item = ExprImpl>,
 {
-    let mut exprs: VecDeque<_> = exprs.into_iter().collect();
+    let mut exprs: VecDeque<_> = exprs.into_iter().map(|e| (0usize, e)).collect();
+
     while exprs.len() > 1 {
-        let lhs = exprs.pop_front().unwrap();
-        let rhs = exprs.pop_front().unwrap();
-        let new_expr = FunctionCall::new(op, vec![lhs, rhs]).unwrap().into();
-        exprs.push_back(new_expr);
+        let (level, lhs) = exprs.pop_front().unwrap();
+        let rhs_level = exprs.front().unwrap().0;
+
+        // If there's one element left in the current level, move it to the end of the next level.
+        if level < rhs_level {
+            exprs.push_back((level, lhs));
+        } else {
+            let rhs = exprs.pop_front().unwrap().1;
+            let new_expr = FunctionCall::new(op, vec![lhs, rhs]).unwrap().into();
+            exprs.push_back((level + 1, new_expr));
+        }
     }
-    exprs.pop_front().unwrap_or(identity_elem)
+
+    exprs.pop_front().map(|(_, e)| e).unwrap_or(identity_elem)
 }
 
 /// Transform a bool expression to Conjunctive form. e.g. given expression is
@@ -397,11 +406,7 @@ pub fn factorization_expr(expr: ExprImpl) -> Vec<ExprImpl> {
         disjunction.retain(|factor| !greatest_common_divider.contains(factor));
     }
     // now disjunctions == [[A, B], [B], [E]]
-    let remaining = ExprImpl::or(
-        disjunctions
-            .into_iter()
-            .map(|conjunction| ExprImpl::and(conjunction)),
-    );
+    let remaining = ExprImpl::or(disjunctions.into_iter().map(ExprImpl::and));
     // now remaining is (A & B) | (B) | (E)
     // the result is C & D & ((A & B) | (B) | (E))
     greatest_common_divider

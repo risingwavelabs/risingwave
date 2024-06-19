@@ -306,7 +306,7 @@
     select * from t1 where p = 1 or (a = 2 and b = 3 and c = 4)
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchLookupJoin { type: Inner, predicate: idx2.t1._row_id IS NOT DISTINCT FROM t1._row_id AND ((t1.p = 1:Int32) OR ((t1.b = 3:Decimal) AND ((t1.c = 4:Int32) AND (t1.a = 2:Int32)))), output: [t1.a, t1.b, t1.c, t1.p], lookup table: t1 }
+    └─BatchLookupJoin { type: Inner, predicate: idx2.t1._row_id IS NOT DISTINCT FROM t1._row_id AND ((t1.p = 1:Int32) OR (((t1.a = 2:Int32) AND (t1.b = 3:Decimal)) AND (t1.c = 4:Int32))), output: [t1.a, t1.b, t1.c, t1.p], lookup table: t1 }
       └─BatchExchange { order: [], dist: UpstreamHashShard(idx2.t1._row_id) }
         └─BatchHashAgg { group_key: [idx2.t1._row_id], aggs: [] }
           └─BatchExchange { order: [], dist: HashShard(idx2.t1._row_id) }
@@ -316,7 +316,7 @@
               └─BatchExchange { order: [], dist: Single }
                 └─BatchScan { table: idx4, columns: [idx4.t1._row_id], scan_ranges: [idx4.p = Int32(1)], distribution: SomeShard }
   batch_local_plan: |-
-    BatchLookupJoin { type: Inner, predicate: idx2.t1._row_id IS NOT DISTINCT FROM t1._row_id AND ((t1.p = 1:Int32) OR ((t1.b = 3:Decimal) AND ((t1.c = 4:Int32) AND (t1.a = 2:Int32)))), output: [t1.a, t1.b, t1.c, t1.p], lookup table: t1 }
+    BatchLookupJoin { type: Inner, predicate: idx2.t1._row_id IS NOT DISTINCT FROM t1._row_id AND ((t1.p = 1:Int32) OR (((t1.a = 2:Int32) AND (t1.b = 3:Decimal)) AND (t1.c = 4:Int32))), output: [t1.a, t1.b, t1.c, t1.p], lookup table: t1 }
     └─BatchHashAgg { group_key: [idx2.t1._row_id], aggs: [] }
       └─BatchUnion { all: true }
         ├─BatchExchange { order: [], dist: Single }
@@ -332,13 +332,13 @@
     select * from t1 where a = 1 or b = 2 or c = 3 or p = 4 or a = 5
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchLookupJoin { type: Inner, predicate: idx1.t1._row_id IS NOT DISTINCT FROM t1._row_id AND (((t1.a = 5:Int32) OR (t1.a = 1:Int32)) OR ((t1.b = 2:Decimal) OR ((t1.c = 3:Int32) OR (t1.p = 4:Int32)))), output: [t1.a, t1.b, t1.c, t1.p], lookup table: t1 }
+    └─BatchLookupJoin { type: Inner, predicate: idx1.t1._row_id IS NOT DISTINCT FROM t1._row_id AND ((((t1.a = 1:Int32) OR (t1.b = 2:Decimal)) OR ((t1.c = 3:Int32) OR (t1.p = 4:Int32))) OR (t1.a = 5:Int32)), output: [t1.a, t1.b, t1.c, t1.p], lookup table: t1 }
       └─BatchExchange { order: [], dist: UpstreamHashShard(idx1.t1._row_id) }
         └─BatchHashAgg { group_key: [idx1.t1._row_id], aggs: [] }
           └─BatchExchange { order: [], dist: HashShard(idx1.t1._row_id) }
             └─BatchUnion { all: true }
               ├─BatchExchange { order: [], dist: Single }
-              │ └─BatchScan { table: idx1, columns: [idx1.t1._row_id], scan_ranges: [idx1.a = Int32(1), idx1.a = Int32(5)], distribution: SomeShard }
+              │ └─BatchScan { table: idx1, columns: [idx1.t1._row_id], scan_ranges: [idx1.a = Int32(5), idx1.a = Int32(1)], distribution: SomeShard }
               ├─BatchExchange { order: [], dist: Single }
               │ └─BatchScan { table: idx2, columns: [idx2.t1._row_id], scan_ranges: [idx2.b = Decimal(Normalized(2))], distribution: SomeShard }
               ├─BatchExchange { order: [], dist: Single }
@@ -346,11 +346,11 @@
               └─BatchExchange { order: [], dist: Single }
                 └─BatchScan { table: idx4, columns: [idx4.t1._row_id], scan_ranges: [idx4.p = Int32(4)], distribution: SomeShard }
   batch_local_plan: |-
-    BatchLookupJoin { type: Inner, predicate: idx1.t1._row_id IS NOT DISTINCT FROM t1._row_id AND (((t1.a = 5:Int32) OR (t1.a = 1:Int32)) OR ((t1.b = 2:Decimal) OR ((t1.c = 3:Int32) OR (t1.p = 4:Int32)))), output: [t1.a, t1.b, t1.c, t1.p], lookup table: t1 }
+    BatchLookupJoin { type: Inner, predicate: idx1.t1._row_id IS NOT DISTINCT FROM t1._row_id AND ((((t1.a = 1:Int32) OR (t1.b = 2:Decimal)) OR ((t1.c = 3:Int32) OR (t1.p = 4:Int32))) OR (t1.a = 5:Int32)), output: [t1.a, t1.b, t1.c, t1.p], lookup table: t1 }
     └─BatchHashAgg { group_key: [idx1.t1._row_id], aggs: [] }
       └─BatchUnion { all: true }
         ├─BatchExchange { order: [], dist: Single }
-        │ └─BatchScan { table: idx1, columns: [idx1.t1._row_id], scan_ranges: [idx1.a = Int32(1), idx1.a = Int32(5)], distribution: SomeShard }
+        │ └─BatchScan { table: idx1, columns: [idx1.t1._row_id], scan_ranges: [idx1.a = Int32(5), idx1.a = Int32(1)], distribution: SomeShard }
         ├─BatchExchange { order: [], dist: Single }
         │ └─BatchScan { table: idx2, columns: [idx2.t1._row_id], scan_ranges: [idx2.b = Decimal(Normalized(2))], distribution: SomeShard }
         ├─BatchExchange { order: [], dist: Single }
@@ -475,11 +475,11 @@
     select * from t1 where a > 1 or c > 1 or b > 1
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchFilter { predicate: ((t1.b > 1:Decimal) OR ((t1.a > 1:Int32) OR (t1.c > 1:Int32))) }
+    └─BatchFilter { predicate: (((t1.a > 1:Int32) OR (t1.c > 1:Int32)) OR (t1.b > 1:Decimal)) }
       └─BatchScan { table: t1, columns: [t1.a, t1.b, t1.c, t1.p], distribution: SomeShard }
   batch_local_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchFilter { predicate: ((t1.b > 1:Decimal) OR ((t1.a > 1:Int32) OR (t1.c > 1:Int32))) }
+    └─BatchFilter { predicate: (((t1.a > 1:Int32) OR (t1.c > 1:Int32)) OR (t1.b > 1:Decimal)) }
       └─BatchScan { table: t1, columns: [t1.a, t1.b, t1.c, t1.p], distribution: SomeShard }
 - sql: |
     create table t1 (a int, b numeric, c bigint, p int);
@@ -490,11 +490,11 @@
     select * from t1 where a between 1 and 8 or b between 1 and 8 or c between 1 and 8;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchFilter { predicate: (((t1.c >= 1:Int32) AND (t1.c <= 8:Int32)) OR (((t1.a >= 1:Int32) AND (t1.a <= 8:Int32)) OR ((t1.b >= 1:Decimal) AND (t1.b <= 8:Decimal)))) }
+    └─BatchFilter { predicate: ((((t1.a >= 1:Int32) AND (t1.a <= 8:Int32)) OR ((t1.b >= 1:Decimal) AND (t1.b <= 8:Decimal))) OR ((t1.c >= 1:Int32) AND (t1.c <= 8:Int32))) }
       └─BatchScan { table: t1, columns: [t1.a, t1.b, t1.c, t1.p], distribution: SomeShard }
   batch_local_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchFilter { predicate: (((t1.c >= 1:Int32) AND (t1.c <= 8:Int32)) OR (((t1.a >= 1:Int32) AND (t1.a <= 8:Int32)) OR ((t1.b >= 1:Decimal) AND (t1.b <= 8:Decimal)))) }
+    └─BatchFilter { predicate: ((((t1.a >= 1:Int32) AND (t1.a <= 8:Int32)) OR ((t1.b >= 1:Decimal) AND (t1.b <= 8:Decimal))) OR ((t1.c >= 1:Int32) AND (t1.c <= 8:Int32))) }
       └─BatchScan { table: t1, columns: [t1.a, t1.b, t1.c, t1.p], distribution: SomeShard }
 - sql: |
     create table t1 (a int, b numeric, c bigint, p int);

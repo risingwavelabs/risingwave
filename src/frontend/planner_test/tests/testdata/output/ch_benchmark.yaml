@@ -2841,20 +2841,20 @@
     LogicalProject { exprs: [sum(order_line.ol_amount)] }
     └─LogicalAgg { aggs: [sum(order_line.ol_amount)] }
       └─LogicalProject { exprs: [order_line.ol_amount] }
-        └─LogicalFilter { predicate: (order_line.ol_i_id = item.i_id) AND (order_line.ol_quantity >= 1:Int32) AND (order_line.ol_quantity <= 10:Int32) AND (item.i_price >= 1:Int32::Decimal) AND (item.i_price <= 400000:Int32::Decimal) AND ((Like(item.i_data, '%c':Varchar) AND In(order_line.ol_w_id, 1:Int32, 5:Int32, 3:Int32)) OR ((Like(item.i_data, '%a':Varchar) AND In(order_line.ol_w_id, 1:Int32, 2:Int32, 3:Int32)) OR (Like(item.i_data, '%b':Varchar) AND In(order_line.ol_w_id, 1:Int32, 2:Int32, 4:Int32)))) }
+        └─LogicalFilter { predicate: (order_line.ol_i_id = item.i_id) AND (order_line.ol_quantity >= 1:Int32) AND (order_line.ol_quantity <= 10:Int32) AND (item.i_price >= 1:Int32::Decimal) AND (item.i_price <= 400000:Int32::Decimal) AND (((Like(item.i_data, '%a':Varchar) AND In(order_line.ol_w_id, 1:Int32, 2:Int32, 3:Int32)) OR (Like(item.i_data, '%b':Varchar) AND In(order_line.ol_w_id, 1:Int32, 2:Int32, 4:Int32))) OR (Like(item.i_data, '%c':Varchar) AND In(order_line.ol_w_id, 1:Int32, 5:Int32, 3:Int32))) }
           └─LogicalJoin { type: Inner, on: true, output: all }
             ├─LogicalScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_number, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_delivery_d, order_line.ol_quantity, order_line.ol_amount, order_line.ol_dist_info] }
             └─LogicalScan { table: item, columns: [item.i_id, item.i_im_id, item.i_name, item.i_price, item.i_data] }
   optimized_logical_plan_for_batch: |-
     LogicalAgg { aggs: [sum(order_line.ol_amount)] }
-    └─LogicalJoin { type: Inner, on: (order_line.ol_i_id = item.i_id) AND ((Like(item.i_data, '%a':Varchar) AND In(order_line.ol_w_id, 1:Int32, 2:Int32, 3:Int32)) OR ((Like(item.i_data, '%b':Varchar) AND In(order_line.ol_w_id, 1:Int32, 2:Int32, 4:Int32)) OR (Like(item.i_data, '%c':Varchar) AND In(order_line.ol_w_id, 1:Int32, 5:Int32, 3:Int32)))), output: [order_line.ol_amount] }
+    └─LogicalJoin { type: Inner, on: (order_line.ol_i_id = item.i_id) AND (((Like(item.i_data, '%a':Varchar) AND In(order_line.ol_w_id, 1:Int32, 2:Int32, 3:Int32)) OR (Like(item.i_data, '%b':Varchar) AND In(order_line.ol_w_id, 1:Int32, 2:Int32, 4:Int32))) OR (Like(item.i_data, '%c':Varchar) AND In(order_line.ol_w_id, 1:Int32, 5:Int32, 3:Int32))), output: [order_line.ol_amount] }
       ├─LogicalScan { table: order_line, output_columns: [order_line.ol_w_id, order_line.ol_i_id, order_line.ol_amount], required_columns: [order_line.ol_w_id, order_line.ol_i_id, order_line.ol_amount, order_line.ol_quantity], predicate: (order_line.ol_quantity >= 1:Int32) AND (order_line.ol_quantity <= 10:Int32) }
       └─LogicalScan { table: item, output_columns: [item.i_id, item.i_data], required_columns: [item.i_id, item.i_data, item.i_price], predicate: (item.i_price >= 1:Int32::Decimal) AND (item.i_price <= 400000:Int32::Decimal) }
   batch_plan: |-
     BatchSimpleAgg { aggs: [sum(sum(order_line.ol_amount))] }
     └─BatchExchange { order: [], dist: Single }
       └─BatchSimpleAgg { aggs: [sum(order_line.ol_amount)] }
-        └─BatchLookupJoin { type: Inner, predicate: order_line.ol_i_id = item.i_id AND ((Like(item.i_data, '%c':Varchar) AND In(order_line.ol_w_id, 1:Int32, 5:Int32, 3:Int32)) OR ((Like(item.i_data, '%a':Varchar) AND In(order_line.ol_w_id, 1:Int32, 2:Int32, 3:Int32)) OR (Like(item.i_data, '%b':Varchar) AND In(order_line.ol_w_id, 1:Int32, 2:Int32, 4:Int32)))) AND (item.i_price >= 1:Decimal) AND (item.i_price <= 400000:Decimal), output: [order_line.ol_amount], lookup table: item }
+        └─BatchLookupJoin { type: Inner, predicate: order_line.ol_i_id = item.i_id AND (((Like(item.i_data, '%a':Varchar) AND In(order_line.ol_w_id, 1:Int32, 2:Int32, 3:Int32)) OR (Like(item.i_data, '%b':Varchar) AND In(order_line.ol_w_id, 1:Int32, 2:Int32, 4:Int32))) OR (Like(item.i_data, '%c':Varchar) AND In(order_line.ol_w_id, 1:Int32, 5:Int32, 3:Int32))) AND (item.i_price >= 1:Decimal) AND (item.i_price <= 400000:Decimal), output: [order_line.ol_amount], lookup table: item }
           └─BatchExchange { order: [], dist: UpstreamHashShard(order_line.ol_i_id) }
             └─BatchProject { exprs: [order_line.ol_w_id, order_line.ol_i_id, order_line.ol_amount] }
               └─BatchFilter { predicate: (order_line.ol_quantity >= 1:Int32) AND (order_line.ol_quantity <= 10:Int32) }
@@ -2866,7 +2866,7 @@
         └─StreamExchange { dist: Single }
           └─StreamStatelessSimpleAgg { aggs: [sum(order_line.ol_amount)] }
             └─StreamProject { exprs: [order_line.ol_amount, order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number, order_line.ol_i_id, item.i_id] }
-              └─StreamFilter { predicate: ((Like(item.i_data, '%b':Varchar) AND In(order_line.ol_w_id, 1:Int32, 2:Int32, 4:Int32)) OR ((Like(item.i_data, '%c':Varchar) AND In(order_line.ol_w_id, 1:Int32, 5:Int32, 3:Int32)) OR (Like(item.i_data, '%a':Varchar) AND In(order_line.ol_w_id, 1:Int32, 2:Int32, 3:Int32)))) }
+              └─StreamFilter { predicate: (((Like(item.i_data, '%a':Varchar) AND In(order_line.ol_w_id, 1:Int32, 2:Int32, 3:Int32)) OR (Like(item.i_data, '%b':Varchar) AND In(order_line.ol_w_id, 1:Int32, 2:Int32, 4:Int32))) OR (Like(item.i_data, '%c':Varchar) AND In(order_line.ol_w_id, 1:Int32, 5:Int32, 3:Int32))) }
                 └─StreamHashJoin { type: Inner, predicate: order_line.ol_i_id = item.i_id, output: all }
                   ├─StreamExchange { dist: HashShard(order_line.ol_i_id) }
                   │ └─StreamProject { exprs: [order_line.ol_w_id, order_line.ol_i_id, order_line.ol_amount, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number] }
@@ -2888,7 +2888,7 @@
     Fragment 1
     StreamStatelessSimpleAgg { aggs: [sum(order_line.ol_amount)] }
     └── StreamProject { exprs: [order_line.ol_amount, order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number, order_line.ol_i_id, item.i_id] }
-        └── StreamFilter { predicate: ((Like(item.i_data, '%b':Varchar) AND In(order_line.ol_w_id, 1:Int32, 2:Int32, 4:Int32)) OR ((Like(item.i_data, '%c':Varchar) AND In(order_line.ol_w_id, 1:Int32, 5:Int32, 3:Int32)) OR (Like(item.i_data, '%a':Varchar) AND In(order_line.ol_w_id, 1:Int32, 2:Int32, 3:Int32)))) }
+        └── StreamFilter { predicate: (((Like(item.i_data, '%a':Varchar) AND In(order_line.ol_w_id, 1:Int32, 2:Int32, 3:Int32)) OR (Like(item.i_data, '%b':Varchar) AND In(order_line.ol_w_id, 1:Int32, 2:Int32, 4:Int32))) OR (Like(item.i_data, '%c':Varchar) AND In(order_line.ol_w_id, 1:Int32, 5:Int32, 3:Int32))) }
             └── StreamHashJoin { type: Inner, predicate: order_line.ol_i_id = item.i_id, output: all } { tables: [ HashJoinLeft: 1, HashJoinDegreeLeft: 2, HashJoinRight: 3, HashJoinDegreeRight: 4 ] }
                 ├── StreamExchange Hash([1]) from 2
                 └── StreamExchange Hash([0]) from 3
