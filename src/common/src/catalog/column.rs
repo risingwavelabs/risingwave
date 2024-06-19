@@ -18,7 +18,7 @@ use itertools::Itertools;
 use risingwave_pb::expr::ExprNode;
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::{
-    AdditionalColumn, ColumnDescVersion, PbColumnCatalog, PbColumnDesc,
+    additional_column, AdditionalColumn, ColumnDescVersion, PbColumnCatalog, PbColumnDesc,
 };
 
 use super::{row_id_column_desc, USER_COLUMN_ID_OFFSET};
@@ -107,23 +107,16 @@ pub struct ColumnDesc {
     pub type_name: String,
     pub generated_or_default_column: Option<GeneratedOrDefaultColumn>,
     pub description: Option<String>,
+    /// Note: perhaps `additional_column` and `generated_or_default_column` should be represented in one `enum`,
+    /// but we used a separated type and field for convenience.
     pub additional_column: AdditionalColumn,
     pub version: ColumnDescVersion,
+    _private_field_to_prevent_direct_construction: (),
 }
 
 impl ColumnDesc {
     pub fn unnamed(column_id: ColumnId, data_type: DataType) -> ColumnDesc {
-        ColumnDesc {
-            data_type,
-            column_id,
-            name: String::new(),
-            field_descs: vec![],
-            type_name: String::new(),
-            generated_or_default_column: None,
-            description: None,
-            additional_column: AdditionalColumn { column_type: None },
-            version: ColumnDescVersion::Pr13707,
-        }
+        Self::named("", column_id, data_type)
     }
 
     pub fn named(name: impl Into<String>, column_id: ColumnId, data_type: DataType) -> ColumnDesc {
@@ -137,6 +130,7 @@ impl ColumnDesc {
             description: None,
             additional_column: AdditionalColumn { column_type: None },
             version: ColumnDescVersion::Pr13707,
+            _private_field_to_prevent_direct_construction: (),
         }
     }
 
@@ -144,7 +138,7 @@ impl ColumnDesc {
         name: impl Into<String>,
         column_id: ColumnId,
         data_type: DataType,
-        additional_column_type: AdditionalColumn,
+        additional_column_type: additional_column::ColumnType,
     ) -> ColumnDesc {
         ColumnDesc {
             data_type,
@@ -154,8 +148,11 @@ impl ColumnDesc {
             type_name: String::new(),
             generated_or_default_column: None,
             description: None,
-            additional_column: additional_column_type,
+            additional_column: AdditionalColumn {
+                column_type: Some(additional_column_type),
+            },
             version: ColumnDescVersion::Pr13707,
+            _private_field_to_prevent_direct_construction: (),
         }
     }
 
@@ -194,18 +191,11 @@ impl ColumnDesc {
         descs
     }
 
+    /// TODO: Perhaps we should only use `new_atomic`, instead of `named`.
     pub fn new_atomic(data_type: DataType, name: &str, column_id: i32) -> Self {
-        Self {
-            data_type,
-            column_id: ColumnId::new(column_id),
-            name: name.to_string(),
-            field_descs: vec![],
-            type_name: "".to_string(),
-            generated_or_default_column: None,
-            description: None,
-            additional_column: AdditionalColumn { column_type: None },
-            version: ColumnDescVersion::Pr13707,
-        }
+        // Perhapts we should call it non_struct instead of atomic, because of List...
+        debug_assert!(!matches!(data_type, DataType::Struct(_)));
+        Self::named(name, ColumnId::new(column_id), data_type)
     }
 
     pub fn new_struct(
@@ -228,6 +218,7 @@ impl ColumnDesc {
             description: None,
             additional_column: AdditionalColumn { column_type: None },
             version: ColumnDescVersion::Pr13707,
+            _private_field_to_prevent_direct_construction: (),
         }
     }
 
@@ -246,6 +237,7 @@ impl ColumnDesc {
             generated_or_default_column: None,
             additional_column: AdditionalColumn { column_type: None },
             version: ColumnDescVersion::Pr13707,
+            _private_field_to_prevent_direct_construction: (),
         }
     }
 
@@ -324,7 +316,7 @@ pub struct ColumnCatalog {
 }
 
 impl ColumnCatalog {
-    /// Get the column catalog's is hidden.
+    /// If the column is a hidden column
     pub fn is_hidden(&self) -> bool {
         self.is_hidden
     }
@@ -334,7 +326,7 @@ impl ColumnCatalog {
         self.column_desc.is_generated()
     }
 
-    /// If the column is a generated column
+    /// If the column is a generated column, returns the corresponding expr.
     pub fn generated_expr(&self) -> Option<&ExprNode> {
         if let Some(GeneratedOrDefaultColumn::GeneratedColumn(desc)) =
             &self.column_desc.generated_or_default_column
@@ -418,25 +410,6 @@ impl ColumnCatalog {
             Cow::Borrowed(&self.column_desc.name)
         }
     }
-}
-
-pub fn columns_extend(preserved_columns: &mut Vec<ColumnCatalog>, columns: Vec<ColumnCatalog>) {
-    debug_assert_eq!(ROW_ID_COLUMN_ID.get_id(), 0);
-    let mut max_incoming_column_id = ROW_ID_COLUMN_ID.get_id();
-    columns.iter().for_each(|column| {
-        let column_id = column.column_id().get_id();
-        if column_id > max_incoming_column_id {
-            max_incoming_column_id = column_id;
-        }
-    });
-    preserved_columns.iter_mut().for_each(|column| {
-        column
-            .column_desc
-            .column_id
-            .apply_delta_if_not_row_id(max_incoming_column_id)
-    });
-
-    preserved_columns.extend(columns);
 }
 
 pub fn debug_assert_column_ids_distinct(columns: &[ColumnCatalog]) {
