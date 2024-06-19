@@ -9,7 +9,7 @@ CREATE SOURCE src_user WITH (
     scan.startup.mode = 'earliest'
 )
 FORMAT PLAIN ENCODE PROTOBUF(
-    schema.registry = 'http://message_queue:8081',
+    schema.registry = 'http://schemaregistry:8082',
     message = 'test.User'
 );
 
@@ -24,7 +24,7 @@ CREATE TABLE t_user WITH (
     scan.startup.mode = 'earliest'
 )
 FORMAT PLAIN ENCODE PROTOBUF(
-    schema.registry = 'http://message_queue:8081',
+    schema.registry = 'http://schemaregistry:8082',
     message = 'test.User'
 );
 
@@ -36,7 +36,7 @@ SELECT age FROM t_user;
 
 # Push more events with extended fields
 system ok
-python3 e2e_test/schema_registry/pb.py "message_queue:29092" "http://message_queue:8081" "sr_pb_test" 5 user_with_more_fields
+python3 e2e_test/schema_registry/pb.py "message_queue:29092" "http://schemaregistry:8082" "sr_pb_test" 5 user_with_more_fields
 
 sleep 5s
 
@@ -58,7 +58,7 @@ SELECT COUNT(*), MAX(age), MIN(age), SUM(age) FROM mv_user_more;
 
 # Push more events with extended fields
 system ok
-python3 e2e_test/schema_registry/pb.py "message_queue:29092" "http://message_queue:8081" "sr_pb_test" 5 user_with_more_fields
+python3 e2e_test/schema_registry/pb.py "message_queue:29092" "http://schemaregistry:8082" "sr_pb_test" 5 user_with_more_fields
 
 sleep 5s
 

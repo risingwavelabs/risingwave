@@ -33,19 +33,23 @@ use crate::parser::ParserConfig;
 use crate::source::base::SourceMessage;
 use crate::source::cdc::{CdcProperties, CdcSourceType, CdcSourceTypeTrait, DebeziumCdcSplit};
 use crate::source::{
-    into_chunk_stream, BoxChunkSourceStream, Column, CommonSplitReader, SourceContextRef, SplitId,
-    SplitMetaData, SplitReader,
+    into_chunk_stream, BoxChunkSourceStream, Column, SourceContextRef, SplitId, SplitMetaData,
+    SplitReader,
 };
 
 pub struct CdcSplitReader<T: CdcSourceTypeTrait> {
     source_id: u64,
+    #[expect(dead_code)]
     start_offset: Option<String>,
     // host address of worker node for a Citus cluster
+    #[expect(dead_code)]
     server_addr: Option<String>,
+    #[expect(dead_code)]
     conn_props: CdcProperties<T>,
-
+    #[expect(dead_code)]
     split_id: SplitId,
     // whether the full snapshot phase is done
+    #[expect(dead_code)]
     snapshot_done: bool,
     parser_config: ParserConfig,
     source_ctx: SourceContextRef,
@@ -190,11 +194,11 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
     fn into_stream(self) -> BoxChunkSourceStream {
         let parser_config = self.parser_config.clone();
         let source_context = self.source_ctx.clone();
-        into_chunk_stream(self, parser_config, source_context)
+        into_chunk_stream(self.into_data_stream(), parser_config, source_context)
     }
 }
 
-impl<T: CdcSourceTypeTrait> CommonSplitReader for CdcSplitReader<T> {
+impl<T: CdcSourceTypeTrait> CdcSplitReader<T> {
     #[try_stream(ok = Vec<SourceMessage>, error = ConnectorError)]
     async fn into_data_stream(self) {
         let source_type = T::source_type();

@@ -44,6 +44,8 @@ CASES_MAP = {
     'presto-trino': ['json'],
     'client-library': ['none'],
     'kafka-cdc': ['json'],
+    'pubsub': ['json'],
+    'dynamodb': ['json'],
 }
 
 def gen_pipeline_steps():

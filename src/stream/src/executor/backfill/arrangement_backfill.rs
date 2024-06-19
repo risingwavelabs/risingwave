@@ -99,7 +99,7 @@ where
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
-        tracing::debug!("Arrangement Backfill Executor started");
+        tracing::debug!("backfill executor started");
         // The primary key columns, in the output columns of the upstream_table scan.
         // Table scan scans a subset of the columns of the upstream table.
         let pk_in_output_indices = self.upstream_table.pk_in_output_indices().unwrap();
@@ -207,21 +207,9 @@ where
 
             let mut rate_limiter = rate_limit.and_then(create_limiter);
 
-            let backfill_snapshot_read_row_count_metric = self
+            let metrics = self
                 .metrics
-                .backfill_snapshot_read_row_count
-                .with_guarded_label_values(&[
-                    upstream_table_id.to_string().as_str(),
-                    self.actor_id.to_string().as_str(),
-                ]);
-
-            let backfill_upstream_output_row_count_metric = self
-                .metrics
-                .backfill_upstream_output_row_count
-                .with_guarded_label_values(&[
-                    upstream_table_id.to_string().as_str(),
-                    self.actor_id.to_string().as_str(),
-                ]);
+                .new_backfill_metrics(upstream_table_id, self.actor_id);
 
             'backfill_loop: loop {
                 let mut cur_barrier_snapshot_processed_rows: u64 = 0;
@@ -313,9 +301,11 @@ where
                                                 &self.output_indices,
                                             ));
                                         }
-                                        backfill_snapshot_read_row_count_metric
+                                        metrics
+                                            .backfill_snapshot_read_row_count
                                             .inc_by(cur_barrier_snapshot_processed_rows);
-                                        backfill_upstream_output_row_count_metric
+                                        metrics
+                                            .backfill_upstream_output_row_count
                                             .inc_by(cur_barrier_upstream_processed_rows);
                                         break 'backfill_loop;
                                     }
@@ -445,6 +435,7 @@ where
                                 &chunk,
                                 &backfill_state,
                                 &pk_in_output_indices,
+                                &upstream_table,
                                 &pk_order,
                             )?,
                             &self.output_indices,
@@ -457,8 +448,11 @@ where
 
                 upstream_table.commit(barrier.epoch).await?;
 
-                backfill_snapshot_read_row_count_metric.inc_by(cur_barrier_snapshot_processed_rows);
-                backfill_upstream_output_row_count_metric
+                metrics
+                    .backfill_snapshot_read_row_count
+                    .inc_by(cur_barrier_snapshot_processed_rows);
+                metrics
+                    .backfill_upstream_output_row_count
                     .inc_by(cur_barrier_upstream_processed_rows);
 
                 // Update snapshot read epoch.
@@ -485,7 +479,6 @@ where
                 .await?;
 
                 tracing::trace!(
-                    actor = self.actor_id,
                     barrier = ?barrier,
                     "barrier persisted"
                 );
@@ -507,9 +500,8 @@ where
                                 if new_rate_limit != rate_limit {
                                     rate_limit = new_rate_limit;
                                     tracing::info!(
-                                        id = self.actor_id,
                                         new_rate_limit = ?rate_limit,
-                                        "actor rate limit changed",
+                                        "rate limit changed",
                                     );
                                     // The builder is emptied above via `DataChunkBuilder::consume_all`.
                                     for (_, builder) in builders {
@@ -548,10 +540,7 @@ where
             }
         }
 
-        tracing::trace!(
-            actor = self.actor_id,
-            "Arrangement Backfill has finished and forward messages directly to the downstream"
-        );
+        tracing::debug!("snapshot read finished, wait to commit state on next barrier");
 
         // Update our progress as finished in state table.
 
@@ -559,15 +548,11 @@ where
         // So we can update our progress + persist the status.
         while let Some(Ok(msg)) = upstream.next().await {
             if let Some(msg) = mapping_message(msg, &self.output_indices) {
-                tracing::trace!(
-                    actor = self.actor_id,
-                    message = ?msg,
-                    "backfill_finished_wait_for_barrier"
-                );
                 // If not finished then we need to update state, otherwise no need.
                 if let Message::Barrier(barrier) = &msg {
                     if is_completely_finished {
-                        // If already finished, no need to persist any state.
+                        // If already finished, no need to persist any state. But we need to advance the epoch anyway
+                        self.state_table.commit(barrier.epoch).await?;
                     } else {
                         // If snapshot was empty, we do not need to backfill,
                         // but we still need to persist the finished state.
@@ -593,10 +578,6 @@ where
 
                     self.progress
                         .finish(barrier.epoch.curr, total_snapshot_processed_rows);
-                    tracing::trace!(
-                        epoch = ?barrier.epoch,
-                        "Updated CreateMaterializedTracker"
-                    );
                     yield msg;
                     break;
                 }
@@ -607,9 +588,7 @@ where
             }
         }
 
-        tracing::trace!(
-            "Arrangement Backfill has already finished and forward messages directly to the downstream"
-        );
+        tracing::debug!("backfill finished");
 
         // After progress finished + state persisted,
         // we can forward messages directly to the downstream,
@@ -617,6 +596,10 @@ where
         #[for_await]
         for msg in upstream {
             if let Some(msg) = mapping_message(msg?, &self.output_indices) {
+                if let Message::Barrier(barrier) = &msg {
+                    // If already finished, no need persist any state, but we need to advance the epoch of the state table anyway.
+                    self.state_table.commit(barrier.epoch).await?;
+                }
                 yield msg;
             }
         }

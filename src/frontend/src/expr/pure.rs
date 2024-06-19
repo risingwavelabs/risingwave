@@ -209,6 +209,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::JsonbPathMatch
             | Type::JsonbPathQueryArray
             | Type::JsonbPathQueryFirst
+            | Type::JsonbSet
             | Type::IsJson
             | Type::ToJsonb
             | Type::Sind
@@ -245,7 +246,9 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::ConvertTo
             | Type::IcebergTransform
             | Type::InetNtoa
-            | Type::InetAton =>
+            | Type::InetAton
+            | Type::QuoteLiteral
+            | Type::QuoteNullable =>
             // expression output is deterministic(same result for the same input)
             {
                 func_call
@@ -267,6 +270,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::PgIndexesSize
             | Type::PgRelationSize
             | Type::PgGetSerialSequence
+            | Type::PgIndexColumnHasProperty
             | Type::HasTablePrivilege
             | Type::HasAnyColumnPrivilege
             | Type::HasSchemaPrivilege

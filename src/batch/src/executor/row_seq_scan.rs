@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use std::ops::{Bound, Deref, RangeBounds};
+use std::ops::{Bound, Deref};
 use std::sync::Arc;
 
 use futures::{pin_mut, StreamExt};
@@ -31,7 +31,7 @@ use risingwave_pb::common::BatchQueryEpoch;
 use risingwave_pb::plan_common::StorageTableDesc;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
-use risingwave_storage::table::{collect_data_chunk, TableDistribution};
+use risingwave_storage::table::TableDistribution;
 use risingwave_storage::{dispatch_state_store, StateStore};
 
 use crate::error::{BatchError, Result};
@@ -67,11 +67,6 @@ pub struct ScanRange {
 }
 
 impl ScanRange {
-    fn is_full_range<T>(bounds: &impl RangeBounds<T>) -> bool {
-        matches!(bounds.start_bound(), Bound::Unbounded)
-            && matches!(bounds.end_bound(), Bound::Unbounded)
-    }
-
     /// Create a scan range from the prost representation.
     pub fn new(
         scan_range: PbScanRange,
@@ -392,7 +387,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         // Range Scan.
         assert!(pk_prefix.len() < table.pk_indices().len());
         let iter = table
-            .batch_iter_with_pk_bounds(
+            .batch_chunk_iter_with_pk_bounds(
                 epoch.into(),
                 &pk_prefix,
                 (
@@ -424,6 +419,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
                     },
                 ),
                 ordered,
+                chunk_size,
                 PrefetchOptions::new(limit.is_none(), true),
             )
             .await?;
@@ -432,9 +428,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         loop {
             let timer = histogram.as_ref().map(|histogram| histogram.start_timer());
 
-            let chunk = collect_data_chunk(&mut iter, table.schema(), Some(chunk_size))
-                .await
-                .map_err(BatchError::from)?;
+            let chunk = iter.next().await.transpose().map_err(BatchError::from)?;
 
             if let Some(timer) = timer {
                 timer.observe_duration()

@@ -219,9 +219,10 @@ fn main() -> Result<()> {
                 volumes.insert(c.id.clone(), ComposeVolume::default());
                 (c.address.clone(), c.compose(&compose_config)?)
             }
-            ServiceConfig::Redis(_) | ServiceConfig::MySql(_) | ServiceConfig::Postgres(_) => {
-                return Err(anyhow!("not supported"))
-            }
+            ServiceConfig::Redis(_)
+            | ServiceConfig::MySql(_)
+            | ServiceConfig::Postgres(_)
+            | ServiceConfig::SchemaRegistry(_) => return Err(anyhow!("not supported")),
         };
         compose.container_name = service.id().to_string();
         if opts.deploy {
@@ -244,7 +245,6 @@ fn main() -> Result<()> {
                 }
             });
             let compose_file = ComposeFile {
-                version: "3".into(),
                 services: services.clone(),
                 volumes: node_volumes,
                 name: format!("risingwave-{}", opts.profile),
@@ -302,7 +302,6 @@ fn main() -> Result<()> {
             }
         }
         let compose_file = ComposeFile {
-            version: "3".into(),
             services,
             volumes,
             name: format!("risingwave-{}", opts.profile),

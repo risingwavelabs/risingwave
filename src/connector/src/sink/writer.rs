@@ -126,7 +126,7 @@ impl<W> LogSinkerOf<W> {
 
 #[async_trait]
 impl<W: SinkWriter<CommitMetadata = ()>> LogSinker for LogSinkerOf<W> {
-    async fn consume_log_and_sink(self, log_reader: &mut impl SinkLogReader) -> Result<()> {
+    async fn consume_log_and_sink(self, log_reader: &mut impl SinkLogReader) -> Result<!> {
         let mut sink_writer = self.writer;
         let sink_metrics = self.sink_metrics;
         #[derive(Debug)]
@@ -242,7 +242,7 @@ impl<W: AsyncTruncateSinkWriter> AsyncTruncateLogSinkerOf<W> {
 
 #[async_trait]
 impl<W: AsyncTruncateSinkWriter> LogSinker for AsyncTruncateLogSinkerOf<W> {
-    async fn consume_log_and_sink(mut self, log_reader: &mut impl SinkLogReader) -> Result<()> {
+    async fn consume_log_and_sink(mut self, log_reader: &mut impl SinkLogReader) -> Result<!> {
         loop {
             let select_result = drop_either_future(
                 select(

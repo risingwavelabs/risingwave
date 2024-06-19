@@ -30,7 +30,7 @@ use tracing::Instrument;
 use super::{Locations, RescheduleOptions, ScaleControllerRef, TableResizePolicy};
 use crate::barrier::{BarrierScheduler, Command, ReplaceTablePlan, StreamRpcManager};
 use crate::manager::{DdlType, MetaSrvEnv, MetadataManager, StreamingJob};
-use crate::model::{ActorId, MetadataModel, TableFragments, TableParallelism};
+use crate::model::{ActorId, FragmentId, MetadataModel, TableFragments, TableParallelism};
 use crate::stream::{to_build_actor_info, SourceManagerRef};
 use crate::{MetaError, MetaResult};
 
@@ -219,9 +219,9 @@ impl GlobalStreamManager {
     /// Create streaming job, it works as follows:
     ///
     /// 1. Broadcast the actor info based on the scheduling result in the context, build the hanging
-    /// channels in upstream worker nodes.
+    ///    channels in upstream worker nodes.
     /// 2. (optional) Get the split information of the `StreamSource` via source manager and patch
-    /// actors.
+    ///    actors.
     /// 3. Notify related worker nodes to update and build the actors.
     /// 4. Store related meta data.
     pub async fn create_streaming_job(
@@ -550,6 +550,7 @@ impl GlobalStreamManager {
         removed_actors: Vec<ActorId>,
         streaming_job_ids: Vec<ObjectId>,
         state_table_ids: Vec<risingwave_meta_model_v2::TableId>,
+        fragment_ids: HashSet<FragmentId>,
     ) {
         if !removed_actors.is_empty()
             || !streaming_job_ids.is_empty()
@@ -559,14 +560,11 @@ impl GlobalStreamManager {
                 .barrier_scheduler
                 .run_command(Command::DropStreamingJobs {
                     actors: removed_actors,
-                    unregistered_table_fragment_ids: streaming_job_ids
-                        .into_iter()
-                        .map(|job_id| TableId::new(job_id as _))
-                        .collect(),
                     unregistered_state_table_ids: state_table_ids
                         .into_iter()
                         .map(|table_id| TableId::new(table_id as _))
                         .collect(),
+                    unregistered_fragment_ids: fragment_ids,
                 })
                 .await
                 .inspect_err(|err| {
@@ -601,10 +599,13 @@ impl GlobalStreamManager {
             .barrier_scheduler
             .run_command(Command::DropStreamingJobs {
                 actors: dropped_actors,
-                unregistered_table_fragment_ids: table_ids.into_iter().collect(),
                 unregistered_state_table_ids: unregister_table_ids
                     .into_iter()
                     .map(TableId::new)
+                    .collect(),
+                unregistered_fragment_ids: table_fragments_vec
+                    .iter()
+                    .flat_map(|fragments| fragments.fragments.keys().cloned())
                     .collect(),
             })
             .await
@@ -815,7 +816,6 @@ mod tests {
         CatalogManager, CatalogManagerRef, ClusterManager, FragmentManager, FragmentManagerRef,
         RelationIdEnum, StreamingClusterInfo,
     };
-    use crate::model::FragmentId;
     use crate::rpc::ddl_controller::DropMode;
     use crate::rpc::metrics::MetaMetrics;
     use crate::stream::{ScaleController, SourceManager};

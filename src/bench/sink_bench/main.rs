@@ -17,7 +17,7 @@
 #![feature(let_chains)]
 
 use core::str::FromStr;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use anyhow::anyhow;
 use clap::Parser;
@@ -357,9 +357,9 @@ fn read_table_schema_from_yml(path: &str) -> TableSchemaFromYml {
     table
 }
 
-fn read_sink_option_from_yml(path: &str) -> HashMap<String, HashMap<String, String>> {
+fn read_sink_option_from_yml(path: &str) -> HashMap<String, BTreeMap<String, String>> {
     let data = std::fs::read_to_string(path).unwrap();
-    let sink_option: HashMap<String, HashMap<String, String>> =
+    let sink_option: HashMap<String, BTreeMap<String, String>> =
         serde_yaml::from_str(&data).unwrap();
     sink_option
 }

@@ -13,11 +13,10 @@
 // limitations under the License.
 
 mod jni_catalog;
-mod log_sink;
 mod mock_catalog;
 mod prometheus;
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt::Debug;
 use std::num::NonZeroU64;
 use std::ops::Deref;
@@ -54,11 +53,11 @@ use thiserror_ext::AsReport;
 use url::Url;
 use with_options::WithOptions;
 
-use self::log_sink::IcebergLogSinkerOf;
 use self::mock_catalog::MockCatalog;
 use self::prometheus::monitored_base_file_writer::MonitoredBaseFileWriterBuilder;
 use self::prometheus::monitored_position_delete_writer::MonitoredPositionDeleteWriterBuilder;
 use super::catalog::desc::SinkDesc;
+use super::decouple_checkpoint_log_sink::DecoupleCheckpointLogSinkerOf;
 use super::{
     Sink, SinkError, SinkWriterParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
 };
@@ -135,7 +134,7 @@ pub struct IcebergConfig {
 }
 
 impl IcebergConfig {
-    pub fn from_hashmap(values: HashMap<String, String>) -> Result<Self> {
+    pub fn from_btreemap(values: BTreeMap<String, String>) -> Result<Self> {
         let mut config =
             serde_json::from_value::<IcebergConfig>(serde_json::to_value(&values).unwrap())
                 .map_err(|e| SinkError::Config(anyhow!(e)))?;
@@ -444,7 +443,7 @@ impl TryFrom<SinkParam> for IcebergSink {
     type Error = SinkError;
 
     fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
-        let config = IcebergConfig::from_hashmap(param.properties.clone())?;
+        let config = IcebergConfig::from_btreemap(param.properties.clone())?;
         IcebergSink::new(config, param)
     }
 }
@@ -516,7 +515,7 @@ impl IcebergSink {
 
 impl Sink for IcebergSink {
     type Coordinator = IcebergSinkCommitter;
-    type LogSinker = IcebergLogSinkerOf<CoordinatedSinkWriter<IcebergWriter>>;
+    type LogSinker = DecoupleCheckpointLogSinkerOf<CoordinatedSinkWriter<IcebergWriter>>;
 
     const SINK_NAME: &'static str = ICEBERG_SINK;
 
@@ -577,7 +576,7 @@ impl Sink for IcebergSink {
                 "commit_checkpoint_interval should be greater than 0, and it should be checked in config validation",
             );
 
-        Ok(IcebergLogSinkerOf::new(
+        Ok(DecoupleCheckpointLogSinkerOf::new(
             writer,
             writer_param.sink_metrics,
             commit_checkpoint_interval,
@@ -1049,7 +1048,7 @@ pub fn try_matches_arrow_schema(
 
 #[cfg(test)]
 mod test {
-    use std::collections::HashMap;
+    use std::collections::BTreeMap;
 
     use risingwave_common::catalog::Field;
 
@@ -1112,7 +1111,7 @@ mod test {
         .map(|(k, v)| (k.to_string(), v.to_string()))
         .collect();
 
-        let iceberg_config = IcebergConfig::from_hashmap(values).unwrap();
+        let iceberg_config = IcebergConfig::from_btreemap(values).unwrap();
 
         let expected_iceberg_config = IcebergConfig {
             connector: "iceberg".to_string(),
@@ -1144,8 +1143,8 @@ mod test {
         );
     }
 
-    async fn test_create_catalog(configs: HashMap<String, String>) {
-        let iceberg_config = IcebergConfig::from_hashmap(configs).unwrap();
+    async fn test_create_catalog(configs: BTreeMap<String, String>) {
+        let iceberg_config = IcebergConfig::from_btreemap(configs).unwrap();
 
         let table = iceberg_config.load_table().await.unwrap();
 

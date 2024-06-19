@@ -519,8 +519,16 @@ impl LogicalAggBuilder {
     /// Return an `InputRef` to that agg call.
     /// For existing agg calls, return an `InputRef` to the existing one.
     fn push_agg_call(&mut self, agg_call: AggCall) -> Result<InputRef> {
-        let return_type = agg_call.return_type();
-        let (kind, args, distinct, order_by, filter, direct_args) = agg_call.decompose();
+        let AggCall {
+            agg_kind,
+            return_type,
+            args,
+            distinct,
+            order_by,
+            filter,
+            direct_args,
+            user_defined,
+        } = agg_call;
 
         self.is_in_filter_clause = true;
         // filter expr is not added to `input_proj_builder` as a whole. Special exprs incl
@@ -550,13 +558,14 @@ impl LogicalAggBuilder {
             })?;
 
         let plan_agg_call = PlanAggCall {
-            agg_kind: kind,
+            agg_kind,
             return_type: return_type.clone(),
             inputs: args,
             distinct,
             order_by,
             filter,
             direct_args,
+            user_defined,
         };
 
         if let Some((pos, existing)) = self
@@ -1131,10 +1140,16 @@ impl ToStream for LogicalAgg {
             Ok(plan)
         } else {
             // a `count(*)` is appended, should project the output
+            assert_eq!(self.agg_calls().len() + 1, n_final_agg_calls);
             Ok(StreamProject::new(generic::Project::with_out_col_idx(
                 plan,
                 0..self.schema().len(),
             ))
+            // If there's no agg call, then `count(*)` will be the only column in the output besides keys.
+            // Since it'll be pruned immediately in `StreamProject`, the update records are likely to be
+            // no-op. So we set the hint to instruct the executor to eliminate them.
+            // See https://github.com/risingwavelabs/risingwave/issues/17030.
+            .with_noop_update_hint(self.agg_calls().is_empty())
             .into())
         }
     }
@@ -1327,6 +1342,7 @@ mod tests {
             order_by: vec![],
             filter: Condition::true_cond(),
             direct_args: vec![],
+            user_defined: None,
         };
         Agg::new(vec![agg_call], vec![1].into(), values.into()).into()
     }
@@ -1447,6 +1463,7 @@ mod tests {
             order_by: vec![],
             filter: Condition::true_cond(),
             direct_args: vec![],
+            user_defined: None,
         };
         let agg: PlanRef = Agg::new(vec![agg_call], vec![1].into(), values.into()).into();
 
@@ -1511,6 +1528,7 @@ mod tests {
                 order_by: vec![],
                 filter: Condition::true_cond(),
                 direct_args: vec![],
+                user_defined: None,
             },
             PlanAggCall {
                 agg_kind: AggKind::Max,
@@ -1520,6 +1538,7 @@ mod tests {
                 order_by: vec![],
                 filter: Condition::true_cond(),
                 direct_args: vec![],
+                user_defined: None,
             },
         ];
         let agg: PlanRef = Agg::new(agg_calls, vec![1, 2].into(), values.into()).into();

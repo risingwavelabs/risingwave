@@ -93,12 +93,10 @@ mod consistency {
     /// Check if strict consistency is required.
     pub(crate) fn enable_strict_consistency() -> bool {
         let res = crate::CONFIG.try_with(|config| config.unsafe_enable_strict_consistency);
-        if cfg!(test) {
-            // use default value in tests
-            res.unwrap_or_else(|_| default::streaming::unsafe_enable_strict_consistency())
-        } else {
-            res.expect("streaming CONFIG is not set, which is highly probably a bug")
+        if res.is_err() && cfg!(not(test)) {
+            tracing::warn!("streaming CONFIG is not set, which is probably a bug");
         }
+        res.unwrap_or_else(|_| default::streaming::unsafe_enable_strict_consistency())
     }
 
     /// Log an error message for breaking consistency. Must only be called in non-strict mode.

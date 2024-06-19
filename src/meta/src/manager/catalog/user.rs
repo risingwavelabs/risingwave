@@ -155,7 +155,7 @@ mod tests {
 
     use super::*;
     use crate::manager::{commit_meta, CatalogManager};
-    use crate::model::{BTreeMapTransaction, ValTransaction};
+    use crate::model::BTreeMapTransaction;
     use crate::storage::Transaction;
 
     fn make_test_user(id: u32, name: &str) -> UserInfo {

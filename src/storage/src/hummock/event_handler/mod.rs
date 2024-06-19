@@ -22,7 +22,7 @@ use risingwave_hummock_sdk::{HummockEpoch, SyncResult};
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot;
 
-use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
+use crate::hummock::shared_buffer::shared_buffer_batch::{SharedBufferBatch, SharedBufferBatchId};
 use crate::hummock::HummockResult;
 use crate::mem_table::ImmutableMemtable;
 use crate::store::SealCurrentEpochOptions;
@@ -47,7 +47,7 @@ pub struct BufferWriteRequest {
 #[derive(Debug)]
 pub enum HummockVersionUpdate {
     VersionDeltas(Vec<HummockVersionDelta>),
-    PinnedVersion(HummockVersion),
+    PinnedVersion(Box<HummockVersion>),
 }
 
 pub enum HummockEvent {
@@ -57,7 +57,7 @@ pub enum HummockEvent {
     /// An epoch is going to be synced. Once the event is processed, there will be no more flush
     /// task on this epoch. Previous concurrent flush task join handle will be returned by the join
     /// handle sender.
-    AwaitSyncEpoch {
+    SyncEpoch {
         new_sync_epoch: HummockEpoch,
         sync_result_sender: oneshot::Sender<HummockResult<SyncResult>>,
     },
@@ -67,17 +67,19 @@ pub enum HummockEvent {
 
     Shutdown,
 
-    ImmToUploader(ImmutableMemtable),
+    ImmToUploader {
+        instance_id: SharedBufferBatchId,
+        imm: ImmutableMemtable,
+    },
 
-    SealEpoch {
-        epoch: HummockEpoch,
-        is_checkpoint: bool,
+    InitEpoch {
+        instance_id: LocalInstanceId,
+        init_epoch: HummockEpoch,
     },
 
     LocalSealEpoch {
         instance_id: LocalInstanceId,
-        table_id: TableId,
-        epoch: HummockEpoch,
+        next_epoch: HummockEpoch,
         opts: SealCurrentEpochOptions,
     },
 
@@ -94,7 +96,6 @@ pub enum HummockEvent {
     },
 
     DestroyReadVersion {
-        table_id: TableId,
         instance_id: LocalInstanceId,
     },
 }
@@ -104,7 +105,7 @@ impl HummockEvent {
         match self {
             HummockEvent::BufferMayFlush => "BufferMayFlush".to_string(),
 
-            HummockEvent::AwaitSyncEpoch {
+            HummockEvent::SyncEpoch {
                 new_sync_epoch,
                 sync_result_sender: _,
             } => format!("AwaitSyncEpoch epoch {} ", new_sync_epoch),
@@ -113,27 +114,25 @@ impl HummockEvent {
 
             HummockEvent::Shutdown => "Shutdown".to_string(),
 
-            HummockEvent::ImmToUploader(imm) => {
-                format!("ImmToUploader {:?}", imm)
+            HummockEvent::InitEpoch {
+                instance_id,
+                init_epoch,
+            } => {
+                format!("InitEpoch {} {}", instance_id, init_epoch)
             }
 
-            HummockEvent::SealEpoch {
-                epoch,
-                is_checkpoint,
-            } => format!(
-                "SealEpoch epoch {:?} is_checkpoint {:?}",
-                epoch, is_checkpoint
-            ),
+            HummockEvent::ImmToUploader { instance_id, imm } => {
+                format!("ImmToUploader {} {}", instance_id, imm.batch_id())
+            }
 
             HummockEvent::LocalSealEpoch {
-                epoch,
                 instance_id,
-                table_id,
+                next_epoch,
                 opts,
             } => {
                 format!(
-                    "LocalSealEpoch epoch: {}, table_id: {}, instance_id: {}, opts: {:?}",
-                    epoch, table_id.table_id, instance_id, opts
+                    "LocalSealEpoch next_epoch: {}, instance_id: {}, opts: {:?}",
+                    next_epoch, instance_id, opts
                 )
             }
 
@@ -147,13 +146,9 @@ impl HummockEvent {
                 table_id, is_replicated
             ),
 
-            HummockEvent::DestroyReadVersion {
-                table_id,
-                instance_id,
-            } => format!(
-                "DestroyReadVersion table_id {:?} instance_id {:?}",
-                table_id, instance_id
-            ),
+            HummockEvent::DestroyReadVersion { instance_id } => {
+                format!("DestroyReadVersion instance_id {:?}", instance_id)
+            }
 
             #[cfg(any(test, feature = "test"))]
             HummockEvent::FlushEvent(_) => "FlushEvent".to_string(),
@@ -207,7 +202,6 @@ impl Drop for LocalInstanceGuard {
             // need to handle failure
             sender
                 .send(HummockEvent::DestroyReadVersion {
-                    table_id: self.table_id,
                     instance_id: self.instance_id,
                 })
                 .unwrap_or_else(|err| {

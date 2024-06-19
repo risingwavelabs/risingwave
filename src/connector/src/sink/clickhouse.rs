@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use core::fmt::Debug;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use anyhow::anyhow;
 use clickhouse::insert::Insert;
@@ -48,7 +48,6 @@ const QUERY_ENGINE: &str =
 const QUERY_COLUMN: &str =
     "select distinct ?fields from system.columns where database = ? and table = ? order by ?";
 pub const CLICKHOUSE_SINK: &str = "clickhouse";
-const BUFFER_SIZE: usize = 1024;
 
 #[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct ClickHouseCommon {
@@ -78,7 +77,9 @@ enum ClickHouseEngine {
     ReplicatedReplacingMergeTree,
     ReplicatedSummingMergeTree,
     ReplicatedAggregatingMergeTree,
+    #[expect(dead_code)]
     ReplicatedCollapsingMergeTree(String),
+    #[expect(dead_code)]
     ReplicatedVersionedCollapsingMergeTree(String),
     ReplicatedGraphiteMergeTree,
 }
@@ -220,7 +221,7 @@ pub struct ClickHouseSink {
 }
 
 impl ClickHouseConfig {
-    pub fn from_hashmap(properties: HashMap<String, String>) -> Result<Self> {
+    pub fn from_btreemap(properties: BTreeMap<String, String>) -> Result<Self> {
         let config =
             serde_json::from_value::<ClickHouseConfig>(serde_json::to_value(properties).unwrap())
                 .map_err(|e| SinkError::Config(anyhow!(e)))?;
@@ -241,7 +242,7 @@ impl TryFrom<SinkParam> for ClickHouseSink {
 
     fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
         let schema = param.schema();
-        let config = ClickHouseConfig::from_hashmap(param.properties)?;
+        let config = ClickHouseConfig::from_btreemap(param.properties)?;
         Ok(Self {
             config,
             schema,
@@ -261,7 +262,7 @@ impl ClickHouseSink {
             .collect();
 
         if rw_fields_name.len().gt(&clickhouse_columns_desc.len()) {
-            return Err(SinkError::ClickHouse("The nums of the RisingWave column must be greater than/equal to the length of the Clickhouse column".to_string()));
+            return Err(SinkError::ClickHouse("The columns of the sink must be equal to or a superset of the target table's columns.".to_string()));
         }
 
         for i in rw_fields_name {
@@ -378,11 +379,10 @@ impl Sink for ClickHouseSink {
 
     const SINK_NAME: &'static str = CLICKHOUSE_SINK;
 
-    fn is_sink_decouple(desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
+    fn is_sink_decouple(_desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
         match user_specified {
-            SinkDecouple::Default => Ok(desc.sink_type.is_append_only()),
+            SinkDecouple::Default | SinkDecouple::Enable => Ok(true),
             SinkDecouple::Disable => Ok(false),
-            SinkDecouple::Enable => Ok(true),
         }
     }
 
@@ -424,9 +424,12 @@ impl Sink for ClickHouseSink {
 }
 pub struct ClickHouseSinkWriter {
     pub config: ClickHouseConfig,
+    #[expect(dead_code)]
     schema: Schema,
+    #[expect(dead_code)]
     pk_indices: Vec<usize>,
     client: ClickHouseClient,
+    #[expect(dead_code)]
     is_append_only: bool,
     // Save some features of the clickhouse column type
     column_correct_vec: Vec<ClickHouseSchemaFeature>,
@@ -617,6 +620,7 @@ struct SystemColumn {
 
 #[derive(ClickHouseRow, Deserialize)]
 struct ClickhouseQueryEngine {
+    #[expect(dead_code)]
     name: String,
     engine: String,
     create_table_query: String,

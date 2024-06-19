@@ -104,7 +104,7 @@ impl LogicalProjectSet {
                         args,
                         return_type,
                         function_type,
-                        udtf_catalog,
+                        user_defined,
                     } = table_func;
                     let args = args
                         .into_iter()
@@ -116,7 +116,7 @@ impl LogicalProjectSet {
                         args,
                         return_type,
                         function_type,
-                        udtf_catalog,
+                        user_defined,
                     }
                     .into()
                 } else {

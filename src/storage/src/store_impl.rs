@@ -13,13 +13,13 @@
 // limitations under the License.
 
 use std::fmt::Debug;
+use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
 
 use enum_as_inner::EnumAsInner;
 use foyer::{
-    set_metrics_registry, FsDeviceConfigBuilder, HybridCacheBuilder, RatedTicketAdmissionPolicy,
-    RuntimeConfigBuilder,
+    DirectFsDeviceOptionsBuilder, HybridCacheBuilder, RateLimitPicker, RuntimeConfigBuilder,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common_service::observer_manager::RpcNotificationClient;
@@ -30,8 +30,8 @@ use crate::error::StorageResult;
 use crate::filter_key_extractor::{RemoteTableAccessor, RpcFilterKeyExtractorManager};
 use crate::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use crate::hummock::{
-    Block, HummockError, HummockStorage, RecentFilter, Sstable, SstableBlockIndex, SstableStore,
-    SstableStoreConfig,
+    Block, BlockCacheEventListener, HummockError, HummockStorage, RecentFilter, Sstable,
+    SstableBlockIndex, SstableStore, SstableStoreConfig,
 };
 use crate::memory::sled::SledStateStore;
 use crate::memory::MemoryStateStore;
@@ -215,7 +215,7 @@ pub mod verify {
     use bytes::Bytes;
     use risingwave_common::buffer::Bitmap;
     use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
-    use risingwave_hummock_sdk::{HummockReadEpoch, SyncResult};
+    use risingwave_hummock_sdk::HummockReadEpoch;
     use tracing::log::warn;
 
     use crate::error::StorageResult;
@@ -258,6 +258,7 @@ pub mod verify {
     impl<A: StateStoreRead, E: StateStoreRead> StateStoreRead for VerifyStateStore<A, E> {
         type ChangeLogIter = impl StateStoreReadChangeLogIter;
         type Iter = impl StateStoreReadIter;
+        type RevIter = impl StateStoreReadIter;
 
         async fn get(
             &self,
@@ -292,6 +293,28 @@ pub mod verify {
                     .await?;
                 let expected = if let Some(expected) = &self.expected {
                     Some(expected.iter(key_range, epoch, read_options).await?)
+                } else {
+                    None
+                };
+
+                Ok(verify_iter::<StateStoreIterItem>(actual, expected))
+            }
+        }
+
+        #[allow(clippy::manual_async_fn)]
+        fn rev_iter(
+            &self,
+            key_range: TableKeyRange,
+            epoch: u64,
+            read_options: ReadOptions,
+        ) -> impl Future<Output = StorageResult<Self::RevIter>> + '_ {
+            async move {
+                let actual = self
+                    .actual
+                    .rev_iter(key_range.clone(), epoch, read_options.clone())
+                    .await?;
+                let expected = if let Some(expected) = &self.expected {
+                    Some(expected.rev_iter(key_range, epoch, read_options).await?)
                 } else {
                     None
                 };
@@ -381,6 +404,7 @@ pub mod verify {
 
     impl<A: LocalStateStore, E: LocalStateStore> LocalStateStore for VerifyStateStore<A, E> {
         type Iter<'a> = impl StateStoreIter + 'a;
+        type RevIter<'a> = impl StateStoreIter + 'a;
 
         // We don't verify `may_exist` across different state stores because
         // the return value of `may_exist` is implementation specific and may not
@@ -419,6 +443,27 @@ pub mod verify {
                     .await?;
                 let expected = if let Some(expected) = &self.expected {
                     Some(expected.iter(key_range, read_options).await?)
+                } else {
+                    None
+                };
+
+                Ok(verify_iter::<StateStoreIterItem>(actual, expected))
+            }
+        }
+
+        #[allow(clippy::manual_async_fn)]
+        fn rev_iter(
+            &self,
+            key_range: TableKeyRange,
+            read_options: ReadOptions,
+        ) -> impl Future<Output = StorageResult<Self::RevIter<'_>>> + Send + '_ {
+            async move {
+                let actual = self
+                    .actual
+                    .rev_iter(key_range.clone(), read_options.clone())
+                    .await?;
+                let expected = if let Some(expected) = &self.expected {
+                    Some(expected.rev_iter(key_range, read_options).await?)
                 } else {
                     None
                 };
@@ -513,11 +558,15 @@ pub mod verify {
             self.actual.try_wait_epoch(epoch)
         }
 
-        async fn sync(&self, epoch: u64) -> StorageResult<SyncResult> {
-            if let Some(expected) = &self.expected {
-                let _ = expected.sync(epoch).await;
+        fn sync(&self, epoch: u64) -> impl SyncFuture {
+            let expected_future = self.expected.as_ref().map(|expected| expected.sync(epoch));
+            let actual_future = self.actual.sync(epoch);
+            async move {
+                if let Some(expected_future) = expected_future {
+                    expected_future.await?;
+                }
+                actual_future.await
             }
-            self.actual.sync(epoch).await
         }
 
         fn seal_epoch(&self, epoch: u64, is_checkpoint: bool) {
@@ -568,13 +617,19 @@ impl StateStoreImpl {
         storage_metrics: Arc<MonitoredStorageMetrics>,
         compactor_metrics: Arc<CompactorMetrics>,
         await_tree_config: Option<await_tree::Config>,
+        use_new_object_prefix_strategy: bool,
     ) -> StorageResult<Self> {
         const MB: usize = 1 << 20;
 
-        set_metrics_registry(GLOBAL_METRICS_REGISTRY.clone());
+        if cfg!(not(madsim)) {
+            metrics_prometheus::Recorder::builder()
+                .with_registry(GLOBAL_METRICS_REGISTRY.deref().clone())
+                .build_and_install();
+        }
 
-        let meta_cache_v2 = {
+        let meta_cache = {
             let mut builder = HybridCacheBuilder::new()
+                .with_name("foyer.meta")
                 .memory(opts.meta_cache_capacity_mb * MB)
                 .with_shards(opts.meta_cache_shard_num)
                 .with_eviction_config(opts.meta_cache_eviction_config.clone())
@@ -586,19 +641,13 @@ impl StateStoreImpl {
 
             if !opts.meta_file_cache_dir.is_empty() {
                 builder = builder
-                    .with_name("foyer.meta")
                     .with_device_config(
-                        FsDeviceConfigBuilder::new(&opts.meta_file_cache_dir)
+                        DirectFsDeviceOptionsBuilder::new(&opts.meta_file_cache_dir)
                             .with_capacity(opts.meta_file_cache_capacity_mb * MB)
                             .with_file_size(opts.meta_file_cache_file_capacity_mb * MB)
-                            .with_align(opts.meta_file_cache_device_align)
-                            .with_io_size(opts.meta_file_cache_device_io_size)
                             .build(),
                     )
-                    .with_catalog_shards(64)
-                    .with_admission_policy(Arc::new(RatedTicketAdmissionPolicy::new(
-                        opts.meta_file_cache_insert_rate_limit_mb * MB,
-                    )))
+                    .with_indexer_shards(opts.meta_file_cache_indexer_shards)
                     .with_flushers(opts.meta_file_cache_flushers)
                     .with_reclaimers(opts.meta_file_cache_reclaimers)
                     .with_clean_region_threshold(
@@ -615,15 +664,23 @@ impl StateStoreImpl {
                         RuntimeConfigBuilder::new()
                             .with_thread_name("foyer.meta.runtime")
                             .build(),
-                    )
-                    .with_lazy(true);
+                    );
+                if opts.meta_file_cache_insert_rate_limit_mb > 0 {
+                    builder = builder.with_admission_picker(Arc::new(RateLimitPicker::new(
+                        opts.meta_file_cache_insert_rate_limit_mb * MB,
+                    )));
+                }
             }
 
             builder.build().await.map_err(HummockError::foyer_error)?
         };
 
-        let block_cache_v2 = {
+        let block_cache = {
             let mut builder = HybridCacheBuilder::new()
+                .with_name("foyer.data")
+                .with_event_listener(Arc::new(BlockCacheEventListener::new(
+                    state_store_metrics.clone(),
+                )))
                 .memory(opts.block_cache_capacity_mb * MB)
                 .with_shards(opts.block_cache_shard_num)
                 .with_eviction_config(opts.block_cache_eviction_config.clone())
@@ -634,21 +691,15 @@ impl StateStoreImpl {
                 })
                 .storage();
 
-            if !opts.meta_file_cache_dir.is_empty() {
+            if !opts.data_file_cache_dir.is_empty() {
                 builder = builder
-                    .with_name("foyer.block")
                     .with_device_config(
-                        FsDeviceConfigBuilder::new(&opts.data_file_cache_dir)
+                        DirectFsDeviceOptionsBuilder::new(&opts.data_file_cache_dir)
                             .with_capacity(opts.data_file_cache_capacity_mb * MB)
                             .with_file_size(opts.data_file_cache_file_capacity_mb * MB)
-                            .with_align(opts.data_file_cache_device_align)
-                            .with_io_size(opts.data_file_cache_device_io_size)
                             .build(),
                     )
-                    .with_catalog_shards(64)
-                    .with_admission_policy(Arc::new(RatedTicketAdmissionPolicy::new(
-                        opts.data_file_cache_insert_rate_limit_mb * MB,
-                    )))
+                    .with_indexer_shards(opts.data_file_cache_indexer_shards)
                     .with_flushers(opts.data_file_cache_flushers)
                     .with_reclaimers(opts.data_file_cache_reclaimers)
                     .with_clean_region_threshold(
@@ -663,10 +714,14 @@ impl StateStoreImpl {
                     )
                     .with_runtime_config(
                         RuntimeConfigBuilder::new()
-                            .with_thread_name("foyer.block.runtime")
+                            .with_thread_name("foyer.data.runtime")
                             .build(),
-                    )
-                    .with_lazy(true);
+                    );
+                if opts.data_file_cache_insert_rate_limit_mb > 0 {
+                    builder = builder.with_admission_picker(Arc::new(RateLimitPicker::new(
+                        opts.data_file_cache_insert_rate_limit_mb * MB,
+                    )));
+                }
             }
 
             builder.build().await.map_err(HummockError::foyer_error)?
@@ -698,9 +753,10 @@ impl StateStoreImpl {
                     max_prefetch_block_number: opts.max_prefetch_block_number,
                     recent_filter,
                     state_store_metrics: state_store_metrics.clone(),
+                    use_new_object_prefix_strategy,
 
-                    meta_cache_v2,
-                    block_cache_v2,
+                    meta_cache,
+                    block_cache,
                 }));
                 let notification_client =
                     RpcNotificationClient::new(hummock_meta_client.get_inner().clone());
@@ -770,6 +826,8 @@ pub mod boxed_state_store {
 
     use bytes::Bytes;
     use dyn_clone::{clone_trait_object, DynClone};
+    use futures::future::BoxFuture;
+    use futures::FutureExt;
     use risingwave_common::buffer::Bitmap;
     use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
     use risingwave_hummock_sdk::{HummockReadEpoch, SyncResult};
@@ -821,6 +879,13 @@ pub mod boxed_state_store {
             read_options: ReadOptions,
         ) -> StorageResult<BoxStateStoreReadIter>;
 
+        async fn rev_iter(
+            &self,
+            key_range: TableKeyRange,
+            epoch: u64,
+            read_options: ReadOptions,
+        ) -> StorageResult<BoxStateStoreReadIter>;
+
         async fn iter_log(
             &self,
             epoch_range: (u64, u64),
@@ -847,6 +912,17 @@ pub mod boxed_state_store {
             read_options: ReadOptions,
         ) -> StorageResult<BoxStateStoreReadIter> {
             Ok(Box::new(self.iter(key_range, epoch, read_options).await?))
+        }
+
+        async fn rev_iter(
+            &self,
+            key_range: TableKeyRange,
+            epoch: u64,
+            read_options: ReadOptions,
+        ) -> StorageResult<BoxStateStoreReadIter> {
+            Ok(Box::new(
+                self.rev_iter(key_range, epoch, read_options).await?,
+            ))
         }
 
         async fn iter_log(
@@ -878,6 +954,12 @@ pub mod boxed_state_store {
         ) -> StorageResult<Option<Bytes>>;
 
         async fn iter(
+            &self,
+            key_range: TableKeyRange,
+            read_options: ReadOptions,
+        ) -> StorageResult<BoxLocalStateStoreIterStream<'_>>;
+
+        async fn rev_iter(
             &self,
             key_range: TableKeyRange,
             read_options: ReadOptions,
@@ -933,6 +1015,14 @@ pub mod boxed_state_store {
             Ok(Box::new(self.iter(key_range, read_options).await?))
         }
 
+        async fn rev_iter(
+            &self,
+            key_range: TableKeyRange,
+            read_options: ReadOptions,
+        ) -> StorageResult<BoxLocalStateStoreIterStream<'_>> {
+            Ok(Box::new(self.rev_iter(key_range, read_options).await?))
+        }
+
         fn insert(
             &mut self,
             key: TableKey<Bytes>,
@@ -979,6 +1069,7 @@ pub mod boxed_state_store {
 
     impl LocalStateStore for BoxDynamicDispatchedLocalStateStore {
         type Iter<'a> = BoxLocalStateStoreIterStream<'a>;
+        type RevIter<'a> = BoxLocalStateStoreIterStream<'a>;
 
         fn may_exist(
             &self,
@@ -1002,6 +1093,14 @@ pub mod boxed_state_store {
             read_options: ReadOptions,
         ) -> impl Future<Output = StorageResult<Self::Iter<'_>>> + Send + '_ {
             self.deref().iter(key_range, read_options)
+        }
+
+        fn rev_iter(
+            &self,
+            key_range: TableKeyRange,
+            read_options: ReadOptions,
+        ) -> impl Future<Output = StorageResult<Self::RevIter<'_>>> + Send + '_ {
+            self.deref().rev_iter(key_range, read_options)
         }
 
         fn insert(
@@ -1055,7 +1154,7 @@ pub mod boxed_state_store {
     pub trait DynamicDispatchedStateStoreExt: StaticSendSync {
         async fn try_wait_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()>;
 
-        async fn sync(&self, epoch: u64) -> StorageResult<SyncResult>;
+        fn sync(&self, epoch: u64) -> BoxFuture<'static, StorageResult<SyncResult>>;
 
         fn seal_epoch(&self, epoch: u64, is_checkpoint: bool);
 
@@ -1072,8 +1171,8 @@ pub mod boxed_state_store {
             self.try_wait_epoch(epoch).await
         }
 
-        async fn sync(&self, epoch: u64) -> StorageResult<SyncResult> {
-            self.sync(epoch).await
+        fn sync(&self, epoch: u64) -> BoxFuture<'static, StorageResult<SyncResult>> {
+            self.sync(epoch).boxed()
         }
 
         fn seal_epoch(&self, epoch: u64, is_checkpoint: bool) {
@@ -1098,6 +1197,7 @@ pub mod boxed_state_store {
     impl StateStoreRead for BoxDynamicDispatchedStateStore {
         type ChangeLogIter = BoxStateStoreReadChangeLogIter;
         type Iter = BoxStateStoreReadIter;
+        type RevIter = BoxStateStoreReadIter;
 
         fn get(
             &self,
@@ -1115,6 +1215,15 @@ pub mod boxed_state_store {
             read_options: ReadOptions,
         ) -> impl Future<Output = StorageResult<Self::Iter>> + '_ {
             self.deref().iter(key_range, epoch, read_options)
+        }
+
+        fn rev_iter(
+            &self,
+            key_range: TableKeyRange,
+            epoch: u64,
+            read_options: ReadOptions,
+        ) -> impl Future<Output = StorageResult<Self::RevIter>> + '_ {
+            self.deref().rev_iter(key_range, epoch, read_options)
         }
 
         fn iter_log(
@@ -1156,7 +1265,10 @@ pub mod boxed_state_store {
             self.deref().try_wait_epoch(epoch)
         }
 
-        fn sync(&self, epoch: u64) -> impl Future<Output = StorageResult<SyncResult>> + Send + '_ {
+        fn sync(
+            &self,
+            epoch: u64,
+        ) -> impl Future<Output = StorageResult<SyncResult>> + Send + 'static {
             self.deref().sync(epoch)
         }
 
