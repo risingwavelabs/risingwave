@@ -758,6 +758,7 @@ fn bind_sink_format_desc(value: ConnectorSchema) -> Result<SinkFormatDesc> {
 
 static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, Vec<Encode>>>> =
     LazyLock::new(|| {
+        use risingwave_connector::sink::file_sink::fs::FsSink;
         use risingwave_connector::sink::file_sink::gcs::GcsSink;
         use risingwave_connector::sink::file_sink::opendal_sink::FileSink;
         use risingwave_connector::sink::file_sink::s3::S3Sink;
@@ -777,6 +778,9 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                     Format::Plain => vec![Encode::Json, Encode::Parquet],
                 ),
                 FileSink::<GcsSink>::SINK_NAME => hashmap!(
+                    Format::Plain => vec![Encode::Json, Encode::Parquet],
+                ),
+                FileSink::<FsSink>::SINK_NAME => hashmap!(
                     Format::Plain => vec![Encode::Json, Encode::Parquet],
                 ),
                 KinesisSink::SINK_NAME => hashmap!(

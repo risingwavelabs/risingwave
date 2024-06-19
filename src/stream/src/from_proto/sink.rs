@@ -19,6 +19,7 @@ use risingwave_common::catalog::{ColumnCatalog, Schema};
 use risingwave_common::types::DataType;
 use risingwave_connector::match_sink_name_str;
 use risingwave_connector::sink::catalog::{SinkFormatDesc, SinkType};
+use risingwave_connector::sink::file_sink::fs::FsSink;
 use risingwave_connector::sink::file_sink::gcs::GcsSink;
 use risingwave_connector::sink::file_sink::s3::S3Sink;
 use risingwave_connector::sink::{

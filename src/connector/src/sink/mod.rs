@@ -66,6 +66,7 @@ use self::mock_coordination_client::{MockMetaClient, SinkCoordinationRpcClientEn
 use crate::error::ConnectorError;
 use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::catalog::{SinkCatalog, SinkId};
+use crate::sink::file_sink::fs::FsSink;
 use crate::sink::file_sink::gcs::GcsSink;
 use crate::sink::file_sink::s3::S3Sink;
 use crate::sink::log_store::{LogReader, LogStoreReadItem, LogStoreResult, TruncateOffset};
@@ -93,6 +94,7 @@ macro_rules! for_all_sinks {
                 { Starrocks, $crate::sink::starrocks::StarrocksSink },
                 { S3, $crate::sink::file_sink::opendal_sink::FileSink<S3Sink> },
                 { Gcs, $crate::sink::file_sink::opendal_sink::FileSink<GcsSink>  },
+                { Fs, $crate::sink::file_sink::opendal_sink::FileSink<FsSink>  },
                 { DeltaLake, $crate::sink::deltalake::DeltaLakeSink },
                 { BigQuery, $crate::sink::big_query::BigQuerySink },
                 { Test, $crate::sink::test_sink::TestSink },

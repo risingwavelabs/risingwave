@@ -30,6 +30,7 @@ use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_connector::match_sink_name_str;
 use risingwave_connector::sink::catalog::desc::SinkDesc;
 use risingwave_connector::sink::catalog::{SinkFormat, SinkFormatDesc, SinkId, SinkType};
+use risingwave_connector::sink::file_sink::fs::FsSink;
 use risingwave_connector::sink::file_sink::gcs::GcsSink;
 use risingwave_connector::sink::file_sink::s3::S3Sink;
 use risingwave_connector::sink::iceberg::ICEBERG_SINK;
