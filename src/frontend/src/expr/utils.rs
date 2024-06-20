@@ -33,7 +33,7 @@ fn split_expr_by(expr: ExprImpl, op: ExprType, rets: &mut Vec<ExprImpl>) {
     }
 }
 
-/// Merge the given expressions by the a logical operation.
+/// Merge the given expressions by the logical operation.
 ///
 /// The `op` must be commutative and associative, typically `And` or `Or`.
 pub(super) fn merge_expr_by_logical<I>(exprs: I, op: ExprType, identity_elem: ExprImpl) -> ExprImpl
