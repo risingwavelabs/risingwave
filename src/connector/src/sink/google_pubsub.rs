@@ -44,6 +44,7 @@ use super::{DummySinkCommitCoordinator, Result, Sink, SinkError, SinkParam, Sink
 use crate::dispatch_sink_formatter_str_key_impl;
 
 pub const PUBSUB_SINK: &str = "google_pubsub";
+const PUBSUB_SEND_FUTURE_BUFFER_MAX_SIZE: usize = 65536;
 
 fn may_delivery_future(awaiter: Awaiter) -> GooglePubSubSinkDeliveryFuture {
     Box::pin(awaiter.get().map(|result| {
@@ -141,7 +142,7 @@ impl Sink for GooglePubSubSink {
             self.sink_from_name.clone(),
         )
         .await?
-        .into_log_sinker(usize::MAX))
+        .into_log_sinker(PUBSUB_SEND_FUTURE_BUFFER_MAX_SIZE))
     }
 }
 

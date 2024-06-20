@@ -41,6 +41,7 @@ use crate::sink::writer::{
 use crate::sink::{Result, Sink, SinkError, SinkParam, SINK_TYPE_APPEND_ONLY};
 
 pub const NATS_SINK: &str = "nats";
+const NATS_SEND_FUTURE_BUFFER_MAX_SIZE: usize = 65536;
 
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, WithOptions)]
@@ -127,7 +128,7 @@ impl Sink for NatsSink {
         Ok(
             NatsSinkWriter::new(self.config.clone(), self.schema.clone())
                 .await?
-                .into_log_sinker(usize::MAX),
+                .into_log_sinker(NATS_SEND_FUTURE_BUFFER_MAX_SIZE),
         )
     }
 }
