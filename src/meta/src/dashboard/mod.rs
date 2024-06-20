@@ -174,8 +174,6 @@ pub(super) mod handlers {
             MetadataManager::V2(mgr) => mgr.catalog_controller.list_sinks().await.map_err(err)?,
         };
 
-        println!("sinks {:#?}", sinks);
-
         Ok(Json(sinks))
     }
 

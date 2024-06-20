@@ -1268,6 +1268,9 @@ impl DdlController {
                                     if let Some(sink_id) = sink_id {
                                         merge_stream_node.identity =
                                             format!("MergeExecutor(from sink {})", sink_id);
+
+                                        input_project_node.identity =
+                                            format!("ProjectExecutor(from sink {})", sink_id);
                                     }
 
                                     *merge_node = MergeNode {
