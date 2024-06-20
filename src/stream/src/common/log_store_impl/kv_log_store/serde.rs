@@ -412,7 +412,6 @@ impl LogStoreRowSerde {
         );
         pin_mut!(stream);
         while let Some((epoch, op, row_size)) = stream.try_next().await? {
-            read_info.read_one_row(row_size);
             match (epoch, op) {
                 (epoch, LogStoreOp::Row { op, row }) => {
                     if epoch != expected_epoch {
@@ -422,6 +421,7 @@ impl LogStoreRowSerde {
                             expected_epoch
                         ));
                     }
+                    read_info.read_one_row(row_size);
                     ops.push(op);
                     if ops.len() > size_bound {
                         return Err(anyhow!(
@@ -446,6 +446,7 @@ impl LogStoreRowSerde {
                             expected_epoch
                         ));
                     }
+                    read_info.read_update(row_size);
                     ops.push(Op::UpdateDelete);
                     ops.push(Op::UpdateInsert);
                     if ops.len() > size_bound {
