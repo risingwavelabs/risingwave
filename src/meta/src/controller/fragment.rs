@@ -864,7 +864,7 @@ impl CatalogController {
     /// collected
     pub async fn load_all_actors(&self) -> MetaResult<ActorInfos> {
         let inner = self.inner.read().await;
-        let actor_info: Vec<(ActorId, WorkerId, FragmentId, i32, Vec<i32>)> = Actor::find()
+        let actor_info: Vec<(ActorId, WorkerId, FragmentId, i32, I32Array)> = Actor::find()
             .select_only()
             .column(actor::Column::ActorId)
             .column(actor::Column::WorkerId)
@@ -880,6 +880,7 @@ impl CatalogController {
         let mut fragment_infos = HashMap::new();
 
         for (actor_id, worker_id, fragment_id, type_mask, state_table_ids) in actor_info {
+            let state_table_ids = state_table_ids.into_inner();
             match fragment_infos.entry(fragment_id as crate::model::FragmentId) {
                 Entry::Occupied(mut entry) => {
                     let info: &mut InflightFragmentInfo = entry.get_mut();

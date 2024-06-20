@@ -555,12 +555,12 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
                     *id = *connection_rewrite.get(id).unwrap();
                 }
                 for secret_id in s.secret_ref.values_mut() {
-                    *secret_id = *secret_rewrite.get(secret_id).unwrap();
+                    secret_id.secret_id = *secret_rewrite.get(&secret_id.secret_id).unwrap();
                 }
                 object_dependencies.extend(s.secret_ref.values().map(|id| {
                     object_dependency::ActiveModel {
                         id: NotSet,
-                        oid: Set(*id as _),
+                        oid: Set(id.secret_id as _),
                         used_by: Set(s.id as _),
                     }
                 }));

@@ -16,6 +16,7 @@ use std::collections::BTreeMap;
 
 use risingwave_pb::catalog::{PbCreateType, PbStreamJobStatus};
 use risingwave_pb::meta::table_fragments::PbState as PbStreamJobState;
+use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::stream_plan::PbStreamNode;
 use sea_orm::entity::prelude::*;
 use sea_orm::{DeriveActiveEnum, EnumIter, FromJsonQueryResult};
@@ -258,6 +259,55 @@ macro_rules! derive_array_from_blob {
     };
 }
 
+macro_rules! derive_btreemap_from_blob {
+    ($struct_name:ident, $key_type:ty, $value_type:ty, $field_type:ident) => {
+        #[derive(Clone, PartialEq, Eq, DeriveValueType, serde::Deserialize, serde::Serialize)]
+        pub struct $struct_name(#[sea_orm] Vec<u8>);
+
+        #[derive(Clone, PartialEq, ::prost::Message)]
+        pub struct $field_type {
+            #[prost(btree_map = "string, message")]
+            inner: BTreeMap<$key_type, $value_type>,
+        }
+        impl Eq for $field_type {}
+
+        impl $struct_name {
+            pub fn to_protobuf(&self) -> BTreeMap<$key_type, $value_type> {
+                let data: $field_type = prost::Message::decode(self.0.as_slice()).unwrap();
+                data.inner
+            }
+
+            fn from_protobuf(val: BTreeMap<$key_type, $value_type>) -> Self {
+                Self(prost::Message::encode_to_vec(&$field_type { inner: val }))
+            }
+        }
+
+        impl From<BTreeMap<$key_type, $value_type>> for $struct_name {
+            fn from(value: BTreeMap<$key_type, $value_type>) -> Self {
+                Self::from_protobuf(value)
+            }
+        }
+
+        impl std::fmt::Debug for $struct_name {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                self.to_protobuf().fmt(f)
+            }
+        }
+
+        impl Default for $struct_name {
+            fn default() -> Self {
+                Self(vec![])
+            }
+        }
+
+        impl sea_orm::sea_query::Nullable for $struct_name {
+            fn null() -> Value {
+                Value::Bytes(None)
+            }
+        }
+    };
+}
+
 pub(crate) use {derive_array_from_blob, derive_from_blob};
 
 derive_from_json_struct!(I32Array, Vec<i32>);
@@ -286,7 +336,7 @@ impl From<BTreeMap<u32, Vec<u32>>> for ActorUpstreamActors {
     }
 }
 
-derive_from_json_struct!(SecretRef, BTreeMap<String, u32>);
+derive_btreemap_from_blob!(SecretRef, String, PbSecretRef, PbSecretRefMap);
 
 derive_from_blob!(StreamNode, PbStreamNode);
 derive_from_blob!(DataType, risingwave_pb::data::PbDataType);

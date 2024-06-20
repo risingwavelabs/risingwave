@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::ops::Bound::{self, Excluded, Included, Unbounded};
-use std::ops::{Index, RangeBounds};
+use std::ops::RangeBounds;
 use std::sync::Arc;
 
 use auto_enums::auto_enum;
@@ -30,6 +30,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId, TableOption};
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{self, OwnedRow, Row, RowExt};
+use risingwave_common::types::ToOwnedDatum;
 use risingwave_common::util::row_serde::*;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
@@ -82,7 +83,8 @@ pub struct StorageTableInner<S: StateStore, SD: ValueRowSerde> {
     /// Mapping from column id to column index for deserializing the row.
     mapping: Arc<ColumnMapping>,
 
-    /// Row deserializer to deserialize the whole value in storage to a row.
+    /// Row deserializer to deserialize the value in storage to a row.
+    /// The row can be either complete or partial, depending on whether the row encoding is versioned.
     row_serde: Arc<SD>,
 
     /// Indices of primary key.
@@ -247,29 +249,45 @@ impl<S: StateStore> StorageTableInner<S, EitherSerde> {
             }
         }
 
-        let output_row_in_value_indices = value_output_indices
-            .iter()
-            .map(|&di| value_indices.iter().position(|&pi| di == pi).unwrap())
-            .collect_vec();
         let output_row_in_key_indices = key_output_indices
             .iter()
             .map(|&di| pk_indices.iter().position(|&pi| di == pi).unwrap())
             .collect_vec();
         let schema = Schema::new(output_columns.iter().map(Into::into).collect());
 
-        let mapping = ColumnMapping::new(output_row_in_value_indices);
-
         let pk_data_types = pk_indices
             .iter()
             .map(|i| table_columns[*i].data_type.clone())
             .collect();
         let pk_serializer = OrderedRowSerde::new(pk_data_types, order_types);
-
-        let row_serde = {
+        let (row_serde, mapping) = {
             if versioned {
-                ColumnAwareSerde::new(value_indices.into(), table_columns.into()).into()
+                let value_output_indices_dedup = value_output_indices
+                    .iter()
+                    .unique()
+                    .copied()
+                    .collect::<Vec<_>>();
+                let output_row_in_value_output_indices_dedup = value_output_indices
+                    .iter()
+                    .map(|&di| {
+                        value_output_indices_dedup
+                            .iter()
+                            .position(|&pi| di == pi)
+                            .unwrap()
+                    })
+                    .collect_vec();
+                let mapping = ColumnMapping::new(output_row_in_value_output_indices_dedup);
+                let serde =
+                    ColumnAwareSerde::new(value_output_indices_dedup.into(), table_columns.into());
+                (serde.into(), mapping)
             } else {
-                BasicSerde::new(value_indices.into(), table_columns.into()).into()
+                let output_row_in_value_indices = value_output_indices
+                    .iter()
+                    .map(|&di| value_indices.iter().position(|&pi| di == pi).unwrap())
+                    .collect_vec();
+                let mapping = ColumnMapping::new(output_row_in_value_indices);
+                let serde = BasicSerde::new(value_indices.into(), table_columns.into());
+                (serde.into(), mapping)
             }
         };
 
@@ -367,11 +385,10 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         if let Some(value) = self.store.get(serialized_pk, epoch, read_options).await? {
             // Refer to [`StorageTableInnerIterInner::new`] for necessity of `validate_read_epoch`.
             self.store.validate_read_epoch(wait_epoch)?;
-            let full_row = self.row_serde.deserialize(&value)?;
-            let result_row_in_value = self
-                .mapping
-                .project(OwnedRow::new(full_row))
-                .into_owned_row();
+
+            let row = self.row_serde.deserialize(&value)?;
+            let result_row_in_value = self.mapping.project(OwnedRow::new(row));
+
             match &self.key_output_indices {
                 Some(key_output_indices) => {
                     let result_row_in_key =
@@ -386,20 +403,23 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
                                 .unwrap();
                             result_row_vec.push(
                                 result_row_in_value
-                                    .index(*item_position_in_value_indices)
-                                    .clone(),
+                                    .datum_at(*item_position_in_value_indices)
+                                    .to_owned_datum(),
                             );
                         } else {
                             let item_position_in_pk_indices =
                                 key_output_indices.iter().position(|p| idx == p).unwrap();
-                            result_row_vec
-                                .push(result_row_in_key.index(item_position_in_pk_indices).clone());
+                            result_row_vec.push(
+                                result_row_in_key
+                                    .datum_at(item_position_in_pk_indices)
+                                    .to_owned_datum(),
+                            );
                         }
                     }
                     let result_row = OwnedRow::new(result_row_vec);
                     Ok(Some(result_row))
                 }
-                None => Ok(Some(result_row_in_value)),
+                None => Ok(Some(result_row_in_value.into_owned_row())),
             }
         } else {
             Ok(None)
@@ -875,11 +895,8 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterInner<S, SD> {
             .await?
         {
             let (table_key, value) = (k.user_key.table_key, v);
-            let full_row = self.row_deserializer.deserialize(value)?;
-            let result_row_in_value = self
-                .mapping
-                .project(OwnedRow::new(full_row))
-                .into_owned_row();
+            let row = self.row_deserializer.deserialize(value)?;
+            let result_row_in_value = self.mapping.project(OwnedRow::new(row));
             match &self.key_output_indices {
                 Some(key_output_indices) => {
                     let result_row_in_key = match self.pk_serializer.clone() {
@@ -901,14 +918,17 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterInner<S, SD> {
                                 .unwrap();
                             result_row_vec.push(
                                 result_row_in_value
-                                    .index(*item_position_in_value_indices)
-                                    .clone(),
+                                    .datum_at(*item_position_in_value_indices)
+                                    .to_owned_datum(),
                             );
                         } else {
                             let item_position_in_pk_indices =
                                 key_output_indices.iter().position(|p| idx == p).unwrap();
-                            result_row_vec
-                                .push(result_row_in_key.index(item_position_in_pk_indices).clone());
+                            result_row_vec.push(
+                                result_row_in_key
+                                    .datum_at(item_position_in_pk_indices)
+                                    .to_owned_datum(),
+                            );
                         }
                     }
                     let row = OwnedRow::new(result_row_vec);
@@ -922,7 +942,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterInner<S, SD> {
                 None => {
                     yield KeyedRow {
                         vnode_prefixed_key: table_key.copy_into(),
-                        row: result_row_in_value,
+                        row: result_row_in_value.into_owned_row(),
                     }
                 }
             }
