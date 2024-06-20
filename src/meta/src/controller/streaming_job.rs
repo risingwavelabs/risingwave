@@ -1443,7 +1443,7 @@ impl CatalogController {
             fragment.update(&txn).await?;
 
             let worker_slot_mapping = ParallelUnitMapping::from_protobuf(&vnode_mapping)
-                .to_worker_slot(&parallel_unit_to_worker)
+                .to_worker_slot(&parallel_unit_to_worker)?
                 .to_protobuf();
 
             fragment_mapping_to_notify.push(FragmentWorkerSlotMapping {
