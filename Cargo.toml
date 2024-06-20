@@ -238,7 +238,7 @@ async_fn_in_trait = "allow"
 unexpected_cfgs = { level = "warn", check-cfg = [
     'cfg(madsim)',
     'cfg(coverage)',
-    'cfg(dashboard_built)'
+    'cfg(dashboard_built)',
 ] }
 
 [workspace.lints.clippy]
