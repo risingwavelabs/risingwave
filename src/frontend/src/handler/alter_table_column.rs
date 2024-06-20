@@ -19,6 +19,7 @@ use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::ColumnCatalog;
+use risingwave_common::range::RangeBoundsExt;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_sqlparser::ast::{
     AlterTableOperation, ColumnOption, ConnectorSchema, Encode, ObjectName, Statement,
@@ -179,8 +180,10 @@ pub async fn handle_alter_table_column(
                 ))?
             }
 
-            // Add the new column to the table definition.
-            columns.push(new_column.clone());
+            // Add the new column to the table definition if it is not created by `create table (*)` syntax.
+            if !columns.is_empty() {
+                columns.push(new_column.clone());
+            }
             columns_altered.extend(bind_sql_columns(vec![new_column].as_slice())?)
         }
 
@@ -225,7 +228,6 @@ pub async fn handle_alter_table_column(
         _ => unreachable!(),
     };
 
-    // Siyuan: 上面是把新增的column添加到column list里
     replace_table_with_definition(
         &session,
         table_name,

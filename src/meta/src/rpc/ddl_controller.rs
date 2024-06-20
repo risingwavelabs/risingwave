@@ -2018,6 +2018,7 @@ impl DdlController {
                 )
             })?;
 
+        // build complete graph based on the table job type
         let complete_graph = match table_job_type {
             TableJobType::General => CompleteStreamFragmentGraph::with_downstreams(
                 fragment_graph,
@@ -2027,7 +2028,7 @@ impl DdlController {
             )?,
 
             TableJobType::SharedCdcSource => {
-                // get the upstream fragment
+                // get the upstream fragment which should be the cdc source
                 let upstream_root_fragments = self
                     .metadata_manager
                     .get_upstream_root_fragments(fragment_graph.dependent_table_ids())
@@ -2063,7 +2064,6 @@ impl DdlController {
         } = actor_graph_builder
             .generate_graph(&self.env, stream_job, expr_context)
             .await?;
-        assert!(dispatchers.is_empty());
 
         // 3. Build the table fragments structure that will be persisted in the stream manager, and
         // the context that contains all information needed for building the actors on the compute

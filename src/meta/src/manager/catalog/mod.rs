@@ -3338,8 +3338,6 @@ impl CatalogManager {
         database_core.ensure_database_id(table.database_id)?;
         database_core.ensure_schema_id(table.schema_id)?;
 
-        assert!(table.dependent_relations.is_empty());
-
         let key = (table.database_id, table.schema_id, table.name.clone());
         let original_table = database_core
             .get_table(table.id)

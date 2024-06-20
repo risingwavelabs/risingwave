@@ -730,6 +730,9 @@ fn gen_table_plan_inner(
     Ok((materialize.into(), table))
 }
 
+/// Generate stream plan for cdc table based on shared source.
+/// In replace workflow, the `table_id` is the id of the table to be replaced
+/// in create table workflow, the `table_id` is a placeholder will be filled in the Meta
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn gen_create_table_plan_for_cdc_table(
     handler_args: HandlerArgs,
@@ -746,6 +749,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
     resolved_table_name: String,
     database_id: DatabaseId,
     schema_id: SchemaId,
+    table_id: TableId,
 ) -> Result<(PlanRef, PbTable)> {
     let context: OptimizerContextRef = OptimizerContext::new(handler_args, explain_options).into();
     let session = context.session_ctx().clone();
@@ -783,8 +787,8 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
         .collect();
 
     let cdc_table_desc = CdcTableDesc {
-        table_id: TableId::placeholder(), // will be filled in meta node
-        source_id: source.id.into(),      // id of cdc source streaming job
+        table_id,
+        source_id: source.id.into(), // id of cdc source streaming job
         external_table_name: external_table_name.clone(),
         pk: table_pk,
         columns: columns.iter().map(|c| c.column_desc.clone()).collect(),
@@ -999,6 +1003,7 @@ pub(super) async fn handle_create_table_plan(
                     resolved_table_name,
                     database_id,
                     schema_id,
+                    TableId::placeholder(),
                 )?;
 
                 ((plan, None, table), TableJobType::SharedCdcSource)
@@ -1323,6 +1328,7 @@ pub async fn generate_stream_graph_for_table(
                     resolved_table_name,
                     database_id,
                     schema_id,
+                    original_catalog.id(),
                 )?;
 
                 ((plan, None, table), TableJobType::SharedCdcSource)
