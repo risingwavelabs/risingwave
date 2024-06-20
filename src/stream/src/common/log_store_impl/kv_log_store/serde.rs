@@ -408,7 +408,7 @@ impl LogStoreRowSerde {
         let stream = select_all(
             iters
                 .into_iter()
-                .map(|iter| deserialize_stream(iter, self.clone()).boxed()),
+                .map(|iter| deserialize_stream(iter, self.clone())),
         );
         pin_mut!(stream);
         while let Some((epoch, op, row_size)) = stream.try_next().await? {
@@ -502,18 +502,18 @@ pub(crate) enum KvLogStoreItem {
     Barrier { is_checkpoint: bool },
 }
 
-type BoxPeekableLogStoreItemStream<S> = Pin<Box<Peekable<LogStoreItemStream<S>>>>;
+type PeekableLogStoreItemStream<S> = Peekable<LogStoreItemStream<S>>;
 
 struct LogStoreRowOpStream<S: StateStoreReadIter> {
     serde: LogStoreRowSerde,
 
     /// Streams that have not reached a barrier
-    row_streams: FuturesUnordered<StreamFuture<BoxPeekableLogStoreItemStream<S>>>,
+    row_streams: FuturesUnordered<StreamFuture<PeekableLogStoreItemStream<S>>>,
 
     /// Streams that have reached a barrier
-    barrier_streams: Vec<BoxPeekableLogStoreItemStream<S>>,
+    barrier_streams: Vec<PeekableLogStoreItemStream<S>>,
 
-    not_started_streams: Vec<(u64, BoxPeekableLogStoreItemStream<S>)>,
+    not_started_streams: Vec<(u64, PeekableLogStoreItemStream<S>)>,
 
     stream_state: StreamState,
 
@@ -531,7 +531,7 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
             serde: serde.clone(),
             barrier_streams: iters
                 .into_iter()
-                .map(|s| Box::pin(deserialize_stream(s, serde.clone()).peekable()))
+                .map(|s| deserialize_stream(s, serde.clone()).peekable())
                 .collect(),
             row_streams: FuturesUnordered::new(),
             not_started_streams: Vec::new(),
@@ -645,7 +645,7 @@ pub(crate) fn merge_log_store_item_stream<S: StateStoreReadIter>(
 mod stream_de {
     use super::*;
     pub(super) type LogStoreItemStream<S: StateStoreReadIter> =
-        impl Stream<Item = LogStoreResult<(u64, LogStoreOp, usize)>> + Send;
+        impl Stream<Item = LogStoreResult<(u64, LogStoreOp, usize)>> + Send + Unpin;
 
     pub(super) fn deserialize_stream<S: StateStoreReadIter>(
         iter: S,
@@ -661,6 +661,9 @@ mod stream_de {
             )
             .map_err(Into::into),
         )
+        .boxed()
+        // The `boxed` call was unnecessary in usual build. But when doing cargo doc,
+        // rustc will panic in auto_trait.rs. May remove it when using future version of tool chain.
     }
 
     #[try_stream(ok = (u64, LogStoreOp, usize), error = anyhow::Error)]
@@ -758,11 +761,11 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
         assert!(!self.barrier_streams.is_empty());
 
         for mut stream in self.barrier_streams.drain(..) {
-            match stream.as_mut().peek().await {
+            match Pin::new(&mut stream).peek().await {
                 Some(Ok((epoch, _, _))) => {
                     self.not_started_streams.push((*epoch, stream));
                 }
-                Some(Err(_)) => match stream.next().await {
+                Some(Err(_)) => match Pin::new(&mut stream).next().await {
                     Some(Err(e)) => {
                         return Err(e);
                     }
