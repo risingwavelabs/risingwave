@@ -15,14 +15,15 @@
 pub mod utils;
 
 use std::sync::Arc;
+
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use risingwave_batch::executor::{BoxedExecutor, SortExecutor};
+use risingwave_batch::monitor::BatchSpillMetrics;
 use risingwave_common::enable_jemalloc;
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use tokio::runtime::Runtime;
-use risingwave_batch::monitor::BatchSpillMetrics;
 use utils::{create_input, execute_executor};
 
 enable_jemalloc!();
