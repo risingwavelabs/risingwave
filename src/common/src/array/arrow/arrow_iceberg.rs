@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+// http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,13 +15,74 @@
 use std::ops::{Div, Mul};
 use std::sync::Arc;
 
-use arrow_array::ArrayRef;
+use arrow_array_iceberg::{self as arrow_array, ArrayRef};
 use num_traits::abs;
+use {
+    arrow_buffer_iceberg as arrow_buffer, arrow_cast_iceberg as arrow_cast,
+    arrow_schema_iceberg as arrow_schema,
+};
 
-use super::{FromArrow, ToArrow};
-use crate::array::{Array, ArrayError, DecimalArray};
+use crate::array::{Array, ArrayError, ArrayImpl, DataChunk, DataType, DecimalArray};
+use crate::types::StructType;
+
+#[path = "./arrow_impl_52.rs"]
+mod arrow_impl;
+
+use arrow_impl::{FromArrow, ToArrow};
 
 pub struct IcebergArrowConvert;
+
+impl IcebergArrowConvert {
+    pub fn to_record_batch(
+        &self,
+        schema: arrow_schema::SchemaRef,
+        chunk: &DataChunk,
+    ) -> Result<arrow_array::RecordBatch, ArrayError> {
+        ToArrow::to_record_batch(self, schema, chunk)
+    }
+
+    pub fn chunk_from_record_batch(
+        &self,
+        batch: &arrow_array::RecordBatch,
+    ) -> Result<DataChunk, ArrayError> {
+        FromArrow::from_record_batch(self, batch)
+    }
+
+    pub fn to_arrow_field(
+        &self,
+        name: &str,
+        data_type: &DataType,
+    ) -> Result<arrow_schema::Field, ArrayError> {
+        ToArrow::to_arrow_field(self, name, data_type)
+    }
+
+    pub fn type_from_field(&self, field: &arrow_schema::Field) -> Result<DataType, ArrayError> {
+        FromArrow::from_field(self, field)
+    }
+
+    pub fn struct_from_fields(
+        &self,
+        fields: &arrow_schema::Fields,
+    ) -> Result<StructType, ArrayError> {
+        FromArrow::from_fields(self, fields)
+    }
+
+    pub fn to_arrow_array(
+        &self,
+        data_type: &arrow_schema::DataType,
+        array: &ArrayImpl,
+    ) -> Result<arrow_array::ArrayRef, ArrayError> {
+        ToArrow::to_array(self, data_type, array)
+    }
+
+    pub fn array_from_arrow_array(
+        &self,
+        field: &arrow_schema::Field,
+        array: &arrow_array::ArrayRef,
+    ) -> Result<ArrayImpl, ArrayError> {
+        FromArrow::from_array(self, field, array)
+    }
+}
 
 impl ToArrow for IcebergArrowConvert {
     #[inline]
@@ -88,10 +149,11 @@ impl FromArrow for IcebergArrowConvert {}
 mod test {
     use std::sync::Arc;
 
-    use arrow_array::ArrayRef;
+    use arrow_array_iceberg::{ArrayRef, Decimal128Array};
+    use arrow_schema_iceberg::DataType;
 
-    use crate::array::arrow::arrow_iceberg::IcebergArrowConvert;
-    use crate::array::arrow::ToArrow;
+    use super::arrow_impl::ToArrow;
+    use super::IcebergArrowConvert;
     use crate::array::{Decimal, DecimalArray};
 
     #[test]
@@ -104,10 +166,10 @@ mod test {
             Some(Decimal::Normalized("123.4".parse().unwrap())),
             Some(Decimal::Normalized("123.456".parse().unwrap())),
         ]);
-        let ty = arrow_schema::DataType::Decimal128(6, 3);
+        let ty = DataType::Decimal128(6, 3);
         let arrow_array = IcebergArrowConvert.decimal_to_arrow(&ty, &array).unwrap();
         let expect_array = Arc::new(
-            arrow_array::Decimal128Array::from(vec![
+            Decimal128Array::from(vec![
                 None,
                 None,
                 Some(999999),

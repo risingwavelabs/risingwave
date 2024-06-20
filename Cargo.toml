@@ -125,9 +125,13 @@ tonic = { package = "madsim-tonic", version = "0.4.1" }
 tonic-build = { package = "madsim-tonic-build", version = "0.4.2" }
 otlp-embedded = { git = "https://github.com/risingwavelabs/otlp-embedded", rev = "492c244e0be91feb659c0cd48a624bbd96045a33" }
 prost = { version = "0.12" }
-icelake = { git = "https://github.com/icelake-io/icelake", rev = "54fd72fbd1dd8c592f05eeeb79223c8a6a33c297", features = [
+icelake = { git = "https://github.com/icelake-io/icelake", rev = "07d53893d7788b4e41fc11efad8a6be828405c31", features = [
     "prometheus",
 ] }
+arrow-array-iceberg = { package = "arrow-array", version = "52" }
+arrow-schema-iceberg = { package = "arrow-schema", version = "52" }
+arrow-buffer-iceberg = { package = "arrow-buffer", version = "52" }
+arrow-cast-iceberg = { package = "arrow-cast", version = "52" }
 arrow-array = "50"
 arrow-arith = "50"
 arrow-cast = "50"
