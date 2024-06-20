@@ -50,7 +50,7 @@ risingwave_sqlsmith = { workspace = true }
 serde = "1.0.188"
 serde_derive = "1.0.188"
 serde_json = "1.0.107"
-sqllogictest = "0.20"
+sqllogictest = { git = "https://github.com/risinglightdb/sqllogictest-rs", rev = "91ee11fd9e3c20f62fc54034dc36abff9c92c934" }
 tempfile = "3"
 tikv-jemallocator = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio" }
