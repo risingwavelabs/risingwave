@@ -241,7 +241,7 @@ dependencies = [
 [[package]]
 name = "apache-avro"
 version = "0.16.0"
-source = "git+https://github.com/risingwavelabs/avro?rev=5349b0c7b35940d117397edbd314ca9087cdb892#5349b0c7b35940d117397edbd314ca9087cdb892"
+source = "git+https://github.com/risingwavelabs/avro?rev=25113ba88234a9ae23296e981d8302c290fdaa4b#25113ba88234a9ae23296e981d8302c290fdaa4b"
 dependencies = [
  "bzip2",
  "crc32fast",
