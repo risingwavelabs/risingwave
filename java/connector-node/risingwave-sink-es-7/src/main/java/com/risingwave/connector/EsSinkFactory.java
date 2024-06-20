@@ -1,16 +1,18 @@
-// Copyright 2024 RisingWave Labs
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+/*
+ * Copyright 2024 RisingWave Labs
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 
 package com.risingwave.connector;
 
@@ -23,17 +25,8 @@ import com.risingwave.connector.api.sink.SinkWriterV1;
 import com.risingwave.proto.Catalog;
 import com.risingwave.proto.Data;
 import io.grpc.Status;
-import java.io.IOException;
 import java.util.Map;
 import org.apache.http.HttpHost;
-import org.apache.http.auth.AuthScope;
-import org.apache.http.auth.UsernamePasswordCredentials;
-import org.apache.http.client.CredentialsProvider;
-import org.apache.http.impl.client.BasicCredentialsProvider;
-import org.elasticsearch.client.RequestOptions;
-import org.elasticsearch.client.RestClient;
-import org.elasticsearch.client.RestClientBuilder;
-import org.elasticsearch.client.RestHighLevelClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -90,33 +83,29 @@ public class EsSinkFactory implements SinkFactory {
         }
 
         // 2. check connection
-        RestClientBuilder builder = RestClient.builder(host);
-        if (config.getPassword() != null && config.getUsername() != null) {
-            final CredentialsProvider credentialsProvider = new BasicCredentialsProvider();
-            credentialsProvider.setCredentials(
-                    AuthScope.ANY,
-                    new UsernamePasswordCredentials(config.getUsername(), config.getPassword()));
-            builder.setHttpClientConfigCallback(
-                    httpClientBuilder ->
-                            httpClientBuilder.setDefaultCredentialsProvider(credentialsProvider));
-        }
-        RestHighLevelClient client = new RestHighLevelClient(builder);
-        // Test connection
         try {
-            boolean isConnected = client.ping(RequestOptions.DEFAULT);
-            if (!isConnected) {
-                throw Status.INVALID_ARGUMENT
-                        .withDescription("Cannot connect to " + config.getUrl())
-                        .asRuntimeException();
+            if (config.getConnector().equals("elasticsearch")) {
+                ElasticRestHighLevelClientAdapter esClient =
+                        new ElasticRestHighLevelClientAdapter(host, config);
+                if (!esClient.ping(org.elasticsearch.client.RequestOptions.DEFAULT)) {
+                    throw Status.INVALID_ARGUMENT
+                            .withDescription("Cannot connect to " + config.getUrl())
+                            .asRuntimeException();
+                }
+                esClient.close();
+            } else if (config.getConnector().equals("opensearch")) {
+                OpensearchRestHighLevelClientAdapter opensearchClient =
+                        new OpensearchRestHighLevelClientAdapter(host, config);
+                if (!opensearchClient.ping(org.opensearch.client.RequestOptions.DEFAULT)) {
+                    throw Status.INVALID_ARGUMENT
+                            .withDescription("Cannot connect to " + config.getUrl())
+                            .asRuntimeException();
+                }
+                opensearchClient.close();
+            } else {
+                throw new RuntimeException("Sink type must be elasticsearch or opensearch");
             }
         } catch (Exception e) {
-            throw Status.INTERNAL.withDescription(e.getMessage()).asRuntimeException();
-        }
-
-        // 3. close client
-        try {
-            client.close();
-        } catch (IOException e) {
             throw Status.INTERNAL.withDescription(e.getMessage()).asRuntimeException();
         }
     }

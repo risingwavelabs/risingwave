@@ -225,8 +225,11 @@ impl ExternalTableConfig {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SslMode {
+    #[serde(alias = "disable")]
     Disabled,
+    #[serde(alias = "prefer")]
     Preferred,
+    #[serde(alias = "require")]
     Required,
 }
 

@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt::{Debug, Display, Formatter};
 use std::hash::Hash;
-use std::ops::Index;
+use std::ops::{Index, Sub};
 
 use educe::Educe;
 use itertools::Itertools;
@@ -362,6 +362,36 @@ impl ActorMapping {
     }
 }
 
+#[derive(thiserror::Error, Debug)]
+pub enum ParallelUnitError {
+    #[error("parallel units {0:?} are not covered by the worker slot mapping")]
+    NotCovered(HashSet<ParallelUnitId>),
+}
+
+impl WorkerSlotMapping {
+    /// Create a uniform worker mapping from the given worker ids
+    pub fn build_from_ids(worker_slot_ids: &[WorkerSlotId]) -> Self {
+        Self::new_uniform(worker_slot_ids.iter().cloned())
+    }
+
+    /// Create a worker mapping from the protobuf representation.
+    pub fn from_protobuf(proto: &PbWorkerSlotMapping) -> Self {
+        assert_eq!(proto.original_indices.len(), proto.data.len());
+        Self {
+            original_indices: proto.original_indices.clone(),
+            data: proto.data.iter().map(|&id| WorkerSlotId(id)).collect(),
+        }
+    }
+
+    /// Convert this worker mapping to the protobuf representation.
+    pub fn to_protobuf(&self) -> PbWorkerSlotMapping {
+        PbWorkerSlotMapping {
+            original_indices: self.original_indices.clone(),
+            data: self.data.iter().map(|id| id.0).collect(),
+        }
+    }
+}
+
 impl ParallelUnitMapping {
     /// Create a uniform parallel unit mapping from the given parallel units, essentially
     /// `new_uniform`.
@@ -379,8 +409,11 @@ impl ParallelUnitMapping {
         self.transform(to_map)
     }
 
-    /// Transform this parallel unit mapping to an worker mapping, essentially `transform`.
-    pub fn to_worker_slot(&self, to_map: &HashMap<ParallelUnitId, u32>) -> WorkerSlotMapping {
+    /// Transform this parallel unit mapping to a worker slot mapping, essentially `transform`.
+    pub fn to_worker_slot(
+        &self,
+        to_map: &HashMap<ParallelUnitId, u32>,
+    ) -> Result<WorkerSlotMapping, ParallelUnitError> {
         let mut worker_to_parallel_units = HashMap::<_, BTreeSet<_>>::new();
         for (parallel_unit_id, worker_id) in to_map {
             worker_to_parallel_units
@@ -398,7 +431,17 @@ impl ParallelUnitMapping {
             }
         }
 
-        self.transform(&parallel_unit_to_worker_slot)
+        let available_parallel_unit_ids: HashSet<_> =
+            parallel_unit_to_worker_slot.keys().copied().collect();
+
+        let parallel_unit_ids: HashSet<_> = self.data.iter().copied().collect();
+
+        let sub_set = parallel_unit_ids.sub(&available_parallel_unit_ids);
+        if sub_set.is_empty() {
+            Ok(self.transform(&parallel_unit_to_worker_slot))
+        } else {
+            Err(ParallelUnitError::NotCovered(sub_set))
+        }
     }
 
     /// Create a parallel unit mapping from the protobuf representation.
@@ -415,30 +458,6 @@ impl ParallelUnitMapping {
         ParallelUnitMappingProto {
             original_indices: self.original_indices.clone(),
             data: self.data.clone(),
-        }
-    }
-}
-
-impl WorkerSlotMapping {
-    /// Create a uniform worker mapping from the given worker ids
-    pub fn build_from_ids(worker_slot_ids: &[WorkerSlotId]) -> Self {
-        Self::new_uniform(worker_slot_ids.iter().cloned())
-    }
-
-    /// Create a worker slot mapping from the protobuf representation.
-    pub fn from_protobuf(proto: &PbWorkerSlotMapping) -> Self {
-        assert_eq!(proto.original_indices.len(), proto.data.len());
-        Self {
-            original_indices: proto.original_indices.clone(),
-            data: proto.data.iter().map(|&id| WorkerSlotId(id)).collect(),
-        }
-    }
-
-    /// Convert this worker slot mapping to the protobuf representation.
-    pub fn to_protobuf(&self) -> PbWorkerSlotMapping {
-        PbWorkerSlotMapping {
-            original_indices: self.original_indices.clone(),
-            data: self.data.iter().map(|id| id.0).collect(),
         }
     }
 }
