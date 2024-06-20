@@ -161,9 +161,9 @@ pub async fn handle_alter_table_column(
             // Duplicated names can actually be checked by `StreamMaterialize`. We do here for
             // better error reporting.
             let new_column_name = new_column.name.real_value();
-            if columns
+            if columns_altered
                 .iter()
-                .any(|c| c.name.real_value() == new_column_name)
+                .any(|c| c.name() == new_column_name.as_str())
             {
                 Err(ErrorCode::InvalidInputSyntax(format!(
                     "column \"{new_column_name}\" of table \"{table_name}\" already exists"
@@ -198,18 +198,20 @@ pub async fn handle_alter_table_column(
 
             // Locate the column by name and remove it.
             let column_name = column_name.real_value();
-            let removed_column = columns
-                .extract_if(|c| c.name.real_value() == column_name)
+            let removed_column = columns_altered
+                .extract_if(|c| c.name() == column_name.as_str())
                 .at_most_one()
                 .ok()
                 .unwrap();
 
             if removed_column.is_some() {
                 // PASS
-                // retain untouch columns
-                columns_altered.retain(|col| {
-                    !(col.name() == removed_column.as_ref().unwrap().name.real_value().as_str())
-                })
+                // remove from table definition
+                columns
+                    .extract_if(|c| c.name.real_value() == column_name)
+                    .at_most_one()
+                    .ok()
+                    .unwrap();
             } else if if_exists {
                 return Ok(PgResponse::builder(StatementType::ALTER_TABLE)
                     .notice(format!(
