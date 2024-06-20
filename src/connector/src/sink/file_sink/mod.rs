@@ -22,10 +22,9 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use arrow_schema::{DataType as ArrowDataType, Field as ArrowField, SchemaRef};
 use async_trait::async_trait;
-use icelake::config::ParquetWriterConfig;
 use opendal::{Operator, Writer as OpendalWriter};
 use parquet::arrow::AsyncArrowWriter;
-use parquet::file::properties::{WriterProperties, WriterVersion};
+use parquet::file::properties::WriterProperties;
 use risingwave_common::array::{to_record_batch_with_schema, Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
@@ -159,17 +158,7 @@ impl OpenDalSinkWriter {
         let object_writer = self.create_object_writer(epoch).await?;
         match self.encode_type {
             SinkEncode::Parquet => {
-                let parquet_config = ParquetWriterConfig::default();
-                let mut props = WriterProperties::builder()
-                    .set_writer_version(WriterVersion::PARQUET_1_0)
-                    .set_bloom_filter_enabled(parquet_config.enable_bloom_filter)
-                    .set_compression(parquet_config.compression)
-                    .set_max_row_group_size(parquet_config.max_row_group_size)
-                    .set_write_batch_size(parquet_config.write_batch_size)
-                    .set_data_page_size_limit(parquet_config.data_page_size);
-                if let Some(created_by) = parquet_config.created_by.as_ref() {
-                    props = props.set_created_by(created_by.to_string());
-                }
+                let props = WriterProperties::builder();
                 self.sink_writer = Some(FileWriterEnum::ParquetFileWriter(
                     AsyncArrowWriter::try_new(
                         object_writer,
