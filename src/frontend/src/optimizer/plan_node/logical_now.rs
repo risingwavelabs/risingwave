@@ -14,10 +14,8 @@
 
 use pretty_xmlish::XmlNode;
 use risingwave_common::bail;
-use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::types::DataType;
 
-use super::generic::GenericPlanRef;
+use super::generic::{self, GenericPlanRef};
 use super::utils::{childless_record, Distill};
 use super::{
     ColPrunable, ColumnPruningContext, ExprRewritable, Logical, LogicalFilter, PlanBase, PlanRef,
@@ -26,30 +24,18 @@ use super::{
 use crate::error::Result;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::column_names_pretty;
-use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::ColIndexMapping;
-use crate::OptimizerContextRef;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalNow {
     pub base: PlanBase<Logical>,
+    core: generic::Now,
 }
 
 impl LogicalNow {
-    pub fn new(ctx: OptimizerContextRef) -> Self {
-        let schema = Schema::new(vec![Field {
-            data_type: DataType::Timestamptz,
-            name: String::from("now"),
-            sub_fields: vec![],
-            type_name: String::default(),
-        }]);
-        let base = PlanBase::new_logical(
-            ctx,
-            schema,
-            Some(vec![]),
-            FunctionalDependencySet::default(),
-        );
-        Self { base }
+    pub fn new(core: generic::Now) -> Self {
+        let base = PlanBase::new_logical_with_core(&core);
+        Self { base, core }
     }
 }
 
@@ -91,7 +77,7 @@ impl ToStream for LogicalNow {
 
     /// `to_stream` is equivalent to `to_stream_with_dist_required(RequiredDist::Any)`
     fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
-        Ok(StreamNow::new(self.clone(), self.ctx()).into())
+        Ok(StreamNow::new(self.core.clone()).into())
     }
 }
 

@@ -18,11 +18,11 @@ use std::ops::Bound::Unbounded;
 use itertools::Itertools;
 use risingwave_common::array::Op;
 use risingwave_common::row;
-use risingwave_common::types::test_utils::IntervalTestExt;
 use risingwave_common::types::{DefaultOrdered, Interval, Timestamptz, ToDatumRef};
 use risingwave_expr::capture_context;
 use risingwave_expr::expr::{
-    build_func, BoxedExpression, ExpressionBoxExt, InputRefExpression, LiteralExpression,
+    build_func_non_strict, EvalErrorReport, ExpressionBoxExt, InputRefExpression,
+    LiteralExpression, NonStrictExpression,
 };
 use risingwave_expr::expr_context::TIME_ZONE;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -33,7 +33,7 @@ use crate::executor::prelude::*;
 pub struct NowExecutor<S: StateStore> {
     data_types: Vec<DataType>,
 
-    mode: Mode,
+    mode: NowMode,
     max_chunk_size: usize,
 
     /// Receiver of barrier channel.
@@ -42,14 +42,14 @@ pub struct NowExecutor<S: StateStore> {
     state_table: StateTable<S>,
 }
 
-enum Mode {
+pub enum NowMode {
     /// Emit current timestamp on startup, update it on barrier.
     UpdateCurrent,
     /// Generate a series of timestamps starting from `start_timestamp` with `interval`.
     /// Keep generating new timestamps on barrier.
     GenerateSeries {
         start_timestamp: Timestamptz,
-        add_interval_expr: BoxedExpression,
+        add_interval_expr: NonStrictExpression,
     },
 }
 
@@ -61,16 +61,13 @@ enum ModeVars {
 impl<S: StateStore> NowExecutor<S> {
     pub fn new(
         data_types: Vec<DataType>,
+        mode: NowMode,
         barrier_receiver: UnboundedReceiver<Barrier>,
         state_table: StateTable<S>,
     ) -> Self {
         Self {
             data_types,
-            // TODO(): only for dev
-            mode: Mode::GenerateSeries {
-                start_timestamp: Timestamptz::from_secs(1617235190).unwrap(), /* 2021-03-31 23:59:50 UTC */
-                add_interval_expr: build_add_expr_captured(Interval::from_millis(1000)).unwrap(),
-            },
+            mode,
             max_chunk_size: 1024,
             barrier_receiver,
             state_table,
@@ -93,8 +90,8 @@ impl<S: StateStore> NowExecutor<S> {
         let mut last_timestamp: Datum = None;
 
         let mut mode_vars = match &mode {
-            Mode::UpdateCurrent => ModeVars::UpdateCurrent,
-            Mode::GenerateSeries { .. } => {
+            NowMode::UpdateCurrent => ModeVars::UpdateCurrent,
+            NowMode::GenerateSeries { .. } => {
                 // in most cases there won't be more than one row except for the first time
                 let chunk_builder = StreamChunkBuilder::unlimited(data_types.clone(), Some(1));
                 ModeVars::GenerateSeries { chunk_builder }
@@ -158,7 +155,7 @@ impl<S: StateStore> NowExecutor<S> {
             }
 
             match (&mode, &mut mode_vars) {
-                (Mode::UpdateCurrent, ModeVars::UpdateCurrent) => {
+                (NowMode::UpdateCurrent, ModeVars::UpdateCurrent) => {
                     let chunk = if last_timestamp.is_some() {
                         let last_row = row::once(&last_timestamp);
                         let row = row::once(&curr_timestamp);
@@ -176,10 +173,10 @@ impl<S: StateStore> NowExecutor<S> {
                     };
 
                     yield Message::Chunk(chunk);
-                    last_timestamp = curr_timestamp.clone();
+                    last_timestamp.clone_from(&curr_timestamp);
                 }
                 (
-                    Mode::GenerateSeries {
+                    NowMode::GenerateSeries {
                         start_timestamp,
                         add_interval_expr,
                     },
@@ -187,7 +184,7 @@ impl<S: StateStore> NowExecutor<S> {
                 ) => {
                     if last_timestamp.is_none() {
                         // We haven't emit any timestamp yet. Let's emit the first one and populate the state table.
-                        let first = Some(start_timestamp.clone().into());
+                        let first = Some((*start_timestamp).into());
                         let first_row = row::once(&first);
                         let _ = chunk_builder.append_row(Op::Insert, first_row);
                         state_table.insert(first_row);
@@ -209,7 +206,7 @@ impl<S: StateStore> NowExecutor<S> {
                             }
                         }
 
-                        let next = add_interval_expr.eval_row(&last_row).await?;
+                        let next = add_interval_expr.eval_row_infallible(&last_row).await;
                         if DefaultOrdered(next.to_datum_ref())
                             > DefaultOrdered(curr_timestamp.to_datum_ref())
                         {
@@ -254,13 +251,17 @@ impl<S: StateStore> Execute for NowExecutor<S> {
 }
 
 #[capture_context(TIME_ZONE)]
-fn build_add_expr(time_zone: &str, interval: Interval) -> risingwave_expr::Result<BoxedExpression> {
+pub fn build_add_interval_expr(
+    time_zone: &str,
+    interval: Interval,
+    eval_error_report: impl EvalErrorReport + 'static,
+) -> risingwave_expr::Result<NonStrictExpression> {
     let timestamptz_input = InputRefExpression::new(DataType::Timestamptz, 0);
     let interval = LiteralExpression::new(DataType::Interval, Some(interval.into()));
     let time_zone = LiteralExpression::new(DataType::Varchar, Some(time_zone.into()));
 
     use risingwave_pb::expr::expr_node::PbType as PbExprType;
-    build_func(
+    build_func_non_strict(
         PbExprType::AddWithTimeZone,
         DataType::Timestamptz,
         vec![
@@ -268,31 +269,27 @@ fn build_add_expr(time_zone: &str, interval: Interval) -> risingwave_expr::Resul
             interval.boxed(),
             time_zone.boxed(),
         ],
+        eval_error_report,
     )
 }
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
     use risingwave_common::test_prelude::StreamChunkTestExt;
-    use risingwave_common::types::{DataType, ScalarImpl};
+    use risingwave_common::types::test_utils::IntervalTestExt;
     use risingwave_common::util::epoch::test_epoch;
-    use risingwave_expr::expr_context::TIME_ZONE;
     use risingwave_storage::memory::MemoryStateStore;
     use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 
-    use super::NowExecutor;
-    use crate::common::table::state_table::StateTable;
+    use super::*;
     use crate::executor::test_utils::StreamExecutorTestExt;
-    use crate::executor::{
-        Barrier, BoxedMessageStream, Execute, Mutation, StreamExecutorResult, Watermark,
-    };
+    use crate::task::ActorEvalErrorReport;
 
     #[tokio::test]
     async fn test_now() -> StreamExecutorResult<()> {
         let state_store = create_state_store();
-        let (tx, mut now_executor) = create_executor(&state_store).await;
+        let (tx, mut now_executor) = create_executor(NowMode::UpdateCurrent, &state_store).await;
 
         // Init barrier
         tx.send(Barrier::with_prev_epoch_for_test(1 << 16, 1))
@@ -359,7 +356,7 @@ mod tests {
 
         // Recovery
         drop((tx, now_executor));
-        let (tx, mut now_executor) = create_executor(&state_store).await;
+        let (tx, mut now_executor) = create_executor(NowMode::UpdateCurrent, &state_store).await;
         tx.send(Barrier::with_prev_epoch_for_test(3 << 16, 1 << 16))
             .unwrap();
 
@@ -391,7 +388,7 @@ mod tests {
 
         // Recovery with paused
         drop((tx, now_executor));
-        let (tx, mut now_executor) = create_executor(&state_store).await;
+        let (tx, mut now_executor) = create_executor(NowMode::UpdateCurrent, &state_store).await;
         tx.send(Barrier::new_test_barrier(4 << 16).with_mutation(Mutation::Pause))
             .unwrap();
 
@@ -439,7 +436,7 @@ mod tests {
     #[tokio::test]
     async fn test_now_start_with_paused() -> StreamExecutorResult<()> {
         let state_store = create_state_store();
-        let (tx, mut now_executor) = create_executor(&state_store).await;
+        let (tx, mut now_executor) = create_executor(NowMode::UpdateCurrent, &state_store).await;
 
         // Init barrier
         tx.send(Barrier::with_prev_epoch_for_test(1 << 16, 1).with_mutation(Mutation::Pause))
@@ -495,8 +492,19 @@ mod tests {
     }
 
     async fn test_now_generate_series_inner() -> StreamExecutorResult<()> {
+        let eval_error_report = ActorEvalErrorReport {
+            actor_context: ActorContext::for_test(123),
+            identity: "NowExecutor".into(),
+        };
+
         let state_store = create_state_store();
-        let (tx, mut now) = create_executor(&state_store).await;
+        let (tx, mut now) = create_executor(
+            NowMode::GenerateSeries {
+                start_timestamp: Timestamptz::from_secs(1617235190).unwrap(), /* 2021-03-31 23:59:50 UTC */
+                add_interval_expr: build_add_interval_expr_captured(Interval::from_millis(1000), eval_error_report).unwrap(), // 1s interval
+            },
+            &state_store
+        ).await;
 
         // Init barrier
         tx.send(Barrier::new_initial_for_test(test_epoch(1000)))
@@ -551,6 +559,7 @@ mod tests {
     }
 
     async fn create_executor(
+        mode: NowMode,
         state_store: &MemoryStateStore,
     ) -> (UnboundedSender<Barrier>, BoxedMessageStream) {
         let table_id = TableId::new(1);
@@ -566,8 +575,12 @@ mod tests {
 
         let (sender, barrier_receiver) = unbounded_channel();
 
-        let now_executor =
-            NowExecutor::new(vec![DataType::Timestamptz], barrier_receiver, state_table);
+        let now_executor = NowExecutor::new(
+            vec![DataType::Timestamptz],
+            mode,
+            barrier_receiver,
+            state_table,
+        );
         (sender, now_executor.boxed().execute())
     }
 }
