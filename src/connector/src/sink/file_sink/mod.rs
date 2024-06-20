@@ -47,8 +47,21 @@ pub struct OpenDalSinkWriter {
     encode_type: SinkEncode,
 }
 
+/// The `FileWriterEnum` enum represents different types of file writers used for various sink
+/// implementations.
+///
+/// # Variants
+///
+/// - `ParquetFileWriter`: Represents a Parquet file writer using the `AsyncArrowWriter<W>`
+/// for writing data to a Parquet file. It accepts an implementation of W: `AsyncWrite` + `Unpin` + `Send`
+/// as the underlying writer. In this case, the `OpendalWriter` serves as the underlying writer.
+///
+/// - `FileWriter`: Represents a file writer for sinks other than Parquet. It uses the `OpendalWriter`
+/// directly for writing data to the file.
+///
+/// The choice of writer used during the actual writing process depends on the encode type of the sink.
 enum FileWriterEnum {
-    ParquetWriter(AsyncArrowWriter<OpendalWriter>),
+    ParquetFileWriter(AsyncArrowWriter<OpendalWriter>),
     FileWriter(OpendalWriter),
 }
 
@@ -77,10 +90,13 @@ impl SinkWriter for OpenDalSinkWriter {
         Ok(())
     }
 
+    /// For the file sink, currently, the sink decoupling feature is not enabled.
+    /// When a checkpoint arrives, the force commit is performed to write the data to the file.
+    /// In the future if flush and checkpoint is decoupled, we should enable sink decouple accordingly.
     async fn barrier(&mut self, is_checkpoint: bool) -> Result<()> {
         if is_checkpoint && let Some(sink_writer) = self.sink_writer.take() {
             match sink_writer {
-                FileWriterEnum::ParquetWriter(mut w) => {
+                FileWriterEnum::ParquetFileWriter(w) => {
                     let _ = w.close().await?;
                 }
                 FileWriterEnum::FileWriter(mut w) => w.close().await?,
@@ -120,17 +136,16 @@ impl OpenDalSinkWriter {
     }
 
     async fn create_object_writer(&mut self, epoch: u64) -> Result<OpendalWriter> {
+        // todo: specify more file suffixes based on encode_type.
         let suffix = match self.encode_type {
             SinkEncode::Json => "json",
             SinkEncode::Parquet => "parquet",
             _ => unimplemented!(),
         };
+
         let object_name = format!(
             "{}/epoch_{}_executor_{}.{}",
-            self.write_path,
-            epoch.to_string(),
-            self.executor_id.to_string(),
-            suffix.to_string(),
+            self.write_path, epoch, self.executor_id, suffix,
         );
         Ok(self
             .operator
@@ -155,12 +170,14 @@ impl OpenDalSinkWriter {
                 if let Some(created_by) = parquet_config.created_by.as_ref() {
                     props = props.set_created_by(created_by.to_string());
                 }
-                self.sink_writer = Some(FileWriterEnum::ParquetWriter(AsyncArrowWriter::try_new(
-                    object_writer,
-                    self.schema.clone(),
-                    SINK_WRITE_BUFFER_SIZE,
-                    Some(props.build()),
-                )?));
+                self.sink_writer = Some(FileWriterEnum::ParquetFileWriter(
+                    AsyncArrowWriter::try_new(
+                        object_writer,
+                        self.schema.clone(),
+                        SINK_WRITE_BUFFER_SIZE,
+                        Some(props.build()),
+                    )?,
+                ));
             }
             SinkEncode::Json => {
                 self.sink_writer = Some(FileWriterEnum::FileWriter(object_writer));
@@ -182,7 +199,7 @@ impl OpenDalSinkWriter {
             .as_mut()
             .ok_or_else(|| SinkError::Opendal("Sink writer is not created.".to_string()))?
         {
-            FileWriterEnum::ParquetWriter(w) => {
+            FileWriterEnum::ParquetFileWriter(w) => {
                 let batch = to_record_batch_with_schema(self.schema.clone(), &chunk.compact())?;
                 w.write(&batch).await?;
             }

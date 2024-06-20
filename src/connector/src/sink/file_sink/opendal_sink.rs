@@ -23,18 +23,44 @@ use crate::sink::file_sink::OpenDalSinkWriter;
 use crate::sink::writer::{LogSinkerOf, SinkWriterExt};
 use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkError, SinkFormatDesc, SinkParam};
 
+/// The `FileSink` struct represents a file sink that uses the `OpendalSinkBackend` trait
+/// for its backend implementation.
+///
+/// # Type Parameters
+///
+/// - S: The type parameter S represents the concrete implementation of the `OpendalSinkBackend`
+/// trait used by this file sink.
 #[derive(Debug, Clone)]
 pub struct FileSink<S: OpendalSinkBackend> {
     pub(crate) op: Operator,
+    /// The path to the file where the sink writes data.
     pub(crate) path: String,
-    // prefix is used to reduce the number of objects to be listed
+    /// The schema describing the structure of the data being written to the file sink.
     pub(crate) schema: Schema,
     pub(crate) is_append_only: bool,
+    ///  A vector of indices representing the primary key columns in the schema.
     pub(crate) pk_indices: Vec<usize>,
+    /// The description of the sink's format.
     pub(crate) format_desc: SinkFormatDesc,
     pub(crate) marker: PhantomData<S>,
 }
 
+/// The `OpendalSinkBackend` trait unifies the behavior of various sink backends
+/// implemented through OpenDAL(https://github.com/apache/opendal).
+///
+/// # Type Parameters
+///
+/// - Properties: Represents the necessary parameters for establishing a backend.
+///
+/// # Constants
+///
+/// - `SINK_NAME`: A static string representing the name of the sink.
+///
+/// # Functions
+///
+/// - `from_hashmap`: Automatically parse the required parameters from the input create sink statement.
+/// - `new_operator`: Creates a new operator using the provided backend properties.
+/// - `get_path`: Returns the path of the sink file specified by the user's create sink statement.
 pub trait OpendalSinkBackend: Send + Sync + 'static + Clone + PartialEq {
     type Properties: Send + Sync;
     const SINK_NAME: &'static str;

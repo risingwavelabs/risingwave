@@ -17,14 +17,12 @@ use anyhow::anyhow;
 use opendal::layers::{LoggingLayer, RetryLayer};
 use opendal::services::S3;
 use opendal::Operator;
-use risingwave_common::catalog::Schema;
 use serde::Deserialize;
 use serde_with::serde_as;
 use with_options::WithOptions;
 
 use super::opendal_sink::FileSink;
 use crate::sink::file_sink::opendal_sink::OpendalSinkBackend;
-use crate::sink::file_sink::OpenDalSinkWriter;
 use crate::sink::{Result, SinkError, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT};
 #[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct S3Common {
@@ -32,6 +30,7 @@ pub struct S3Common {
     pub region_name: String,
     #[serde(rename = "s3.bucket_name")]
     pub bucket_name: String,
+    /// The directory where the sink file is located.
     #[serde(rename = "s3.path", default)]
     pub path: String,
     #[serde(rename = "s3.credentials.access", default)]

@@ -17,18 +17,16 @@ use anyhow::anyhow;
 use opendal::layers::{LoggingLayer, RetryLayer};
 use opendal::services::Fs;
 use opendal::Operator;
-use risingwave_common::catalog::Schema;
 use serde::Deserialize;
 use serde_with::serde_as;
 use with_options::WithOptions;
 
 use crate::sink::file_sink::opendal_sink::{FileSink, OpendalSinkBackend};
-use crate::sink::file_sink::OpenDalSinkWriter;
-use crate::sink::writer::{LogSinkerOf, SinkWriterExt};
 use crate::sink::{Result, SinkError, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT};
 
 #[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct FsCommon {
+    /// The directory where the sink file is located.
     #[serde(rename = "fs.path", default)]
     pub path: String,
 }

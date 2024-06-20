@@ -17,14 +17,12 @@ use anyhow::anyhow;
 use opendal::layers::{LoggingLayer, RetryLayer};
 use opendal::services::Gcs;
 use opendal::Operator;
-use risingwave_common::catalog::Schema;
 use serde::Deserialize;
 use serde_with::serde_as;
 use with_options::WithOptions;
 
 use super::opendal_sink::FileSink;
 use crate::sink::file_sink::opendal_sink::OpendalSinkBackend;
-use crate::sink::writer::{LogSinkerOf, SinkWriterExt};
 use crate::sink::{Result, SinkError, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT};
 
 const GCS_WRITE_BUFFER_SIZE: usize = 16 * 1024 * 1024;
@@ -41,6 +39,7 @@ pub struct GcsCommon {
     #[serde(rename = "gcs.service_account", default)]
     pub service_account: Option<String>,
 
+    /// The directory where the sink file is located
     #[serde(rename = "gcs.path", default)]
     pub path: String,
 
