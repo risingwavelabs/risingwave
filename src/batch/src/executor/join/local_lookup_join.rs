@@ -488,6 +488,7 @@ impl HashKeyDispatcher for LocalLookupJoinExecutorArgs {
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
+
     use risingwave_common::array::{DataChunk, DataChunkTestExt};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::hash::HashKeyDispatcher;

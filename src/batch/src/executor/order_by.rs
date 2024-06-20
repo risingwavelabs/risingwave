@@ -193,7 +193,6 @@ impl SortExecutor {
 
             sort_spill_manager.close_writers().await?;
 
-
             let partition_num = sort_spill_manager.partition_num;
             // Merge sorted-partitions
             let mut sorted_inputs: Vec<BoxedExecutor> = Vec::with_capacity(partition_num);
