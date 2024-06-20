@@ -536,9 +536,9 @@ impl ToStream for LogicalScan {
 
     fn logical_rewrite_for_stream(
         &self,
-        ctx: &mut RewriteStreamContext,
+        _ctx: &mut RewriteStreamContext,
     ) -> Result<(PlanRef, ColIndexMapping)> {
-        match self.base.stream_key().is_none() && ctx.get_with_stream_key() {
+        match self.base.stream_key().is_none() {
             true => {
                 let mut col_ids = HashSet::new();
 

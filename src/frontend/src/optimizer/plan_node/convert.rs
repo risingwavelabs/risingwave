@@ -94,19 +94,9 @@ pub fn stream_enforce_eowc_requirement(
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct RewriteStreamContext {
     share_rewrite_map: HashMap<PlanNodeId, (PlanRef, ColIndexMapping)>,
-    with_stream_key: bool,
-}
-
-impl Default for RewriteStreamContext {
-    fn default() -> Self {
-        Self {
-            share_rewrite_map: HashMap::default(),
-            with_stream_key: true,
-        }
-    }
 }
 
 impl RewriteStreamContext {
@@ -127,14 +117,6 @@ impl RewriteStreamContext {
         plan_node_id: PlanNodeId,
     ) -> Option<&(PlanRef, ColIndexMapping)> {
         self.share_rewrite_map.get(&plan_node_id)
-    }
-
-    pub fn set_with_stream_key(&mut self, with_stream_key: bool) {
-        self.with_stream_key = with_stream_key;
-    }
-
-    pub fn get_with_stream_key(&self) -> bool {
-        self.with_stream_key
     }
 }
 

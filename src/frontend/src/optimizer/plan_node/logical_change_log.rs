@@ -12,16 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
+
 use super::expr_visitable::ExprVisitable;
 use super::generic::{GenericPlanRef, CHANGE_LOG_OP, _CHANGE_LOG_ROW_ID};
 use super::utils::impl_distill_by_unit;
 use super::{
     gen_filter_and_pushdown, generic, ColPrunable, ColumnPruningContext, ExprRewritable, Logical,
-    PlanBase, PlanTreeNodeUnary, PredicatePushdown, RewriteStreamContext, StreamChangeLog,
-    StreamRowIdGen, ToBatch, ToStream, ToStreamContext,
+    LogicalProject, PlanBase, PlanTreeNodeUnary, PredicatePushdown, RewriteStreamContext,
+    StreamChangeLog, StreamRowIdGen, ToBatch, ToStream, ToStreamContext,
 };
 use crate::error::ErrorCode::BindError;
 use crate::error::Result;
+use crate::expr::{ExprImpl, InputRef};
 use crate::optimizer::property::Distribution;
 use crate::utils::{ColIndexMapping, Condition};
 use crate::PlanRef;
@@ -149,9 +152,22 @@ impl ToStream for LogicalChangeLog {
         &self,
         ctx: &mut RewriteStreamContext,
     ) -> Result<(PlanRef, ColIndexMapping)> {
-        ctx.set_with_stream_key(false);
+        let original_schema = self.input().schema().clone();
         let (input, input_col_change) = self.input().logical_rewrite_for_stream(ctx)?;
-        let (change_log, out_col_change) = self.rewrite_with_input(input, input_col_change);
+        let exprs = (0..original_schema.len())
+            .map(|x| {
+                ExprImpl::InputRef(
+                    InputRef::new(
+                        input_col_change.map(x),
+                        original_schema.fields[x].data_type.clone(),
+                    )
+                    .into(),
+                )
+            })
+            .collect_vec();
+        let project = LogicalProject::new(input.clone(), exprs);
+        let (project, out_col_change) = project.rewrite_with_input(input, input_col_change);
+        let (change_log, out_col_change) = self.rewrite_with_input(project.into(), out_col_change);
         Ok((change_log.into(), out_col_change))
     }
 }
