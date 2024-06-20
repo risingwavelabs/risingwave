@@ -1243,7 +1243,7 @@ pub async fn extract_iceberg_columns(
             .map(|(i, field)| {
                 let column_desc = ColumnDesc::named(
                     field.name(),
-                    ColumnId::new((i as u32).try_into().unwrap()),
+                    ColumnId::new((i + 1).try_into().unwrap()),
                     IcebergArrowConvert.type_from_field(field).unwrap(),
                 );
                 ColumnCatalog {
