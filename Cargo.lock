@@ -4435,9 +4435,9 @@ checksum = "56ce8c6da7551ec6c462cbaf3bfbc75131ebbfa1c944aeaa9dab51ca1c5f0c3b"
 
 [[package]]
 name = "duration-str"
-version = "0.10.0"
+version = "0.11.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7c1a2e028bbf7921549873b291ddc0cfe08b673d9489da81ac28898cd5a0e6e0"
+checksum = "709d653e7c92498eb29fb86a2a6f0f3502b97530f33aedb32ef848d4d28b31a3"
 dependencies = [
  "chrono",
  "rust_decimal",
@@ -6378,7 +6378,7 @@ dependencies = [
  "log",
  "murmur3",
  "once_cell",
- "opendal 0.45.1",
+ "opendal 0.47.0",
  "ordered-float 3.9.1",
  "parquet 50.0.0",
  "prometheus",
@@ -8126,7 +8126,6 @@ dependencies = [
  "md-5",
  "once_cell",
  "percent-encoding",
- "prometheus",
  "quick-xml 0.31.0",
  "reqsign 0.14.9",
  "reqwest 0.11.20",
@@ -8158,6 +8157,7 @@ dependencies = [
  "md-5",
  "once_cell",
  "percent-encoding",
+ "prometheus",
  "quick-xml 0.31.0",
  "reqsign 0.15.2",
  "reqwest 0.12.4",
