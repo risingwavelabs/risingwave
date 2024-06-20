@@ -388,13 +388,6 @@ impl ParallelUnitMapping {
         self.transform(to_map)
     }
 
-    pub fn as_delete_worker_slot_mapping(&self) -> WorkerSlotMapping {
-        VnodeMapping {
-            original_indices: self.original_indices.clone(),
-            data: self.data.iter().map(|_| WorkerSlotId(u64::MAX)).collect(),
-        }
-    }
-
     /// Transform this parallel unit mapping to a worker slot mapping, essentially `transform`.
     pub fn to_worker_slot(
         &self,
