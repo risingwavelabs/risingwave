@@ -128,27 +128,8 @@ impl StreamProject {
         &self.core.exprs
     }
 
-    pub fn watermark_derivations(&self) -> &[(usize, usize)] {
-        &self.watermark_derivations
-    }
-
     pub fn noop_update_hint(&self) -> bool {
         self.noop_update_hint
-    }
-
-    pub fn to_stream_prost_body_inner(&self) -> PbNodeBody {
-        let (watermark_input_cols, watermark_output_cols) = self
-            .watermark_derivations
-            .iter()
-            .map(|(i, o)| (*i as u32, *o as u32))
-            .unzip();
-        PbNodeBody::Project(ProjectNode {
-            select_list: self.core.exprs.iter().map(|x| x.to_expr_proto()).collect(),
-            watermark_input_cols,
-            watermark_output_cols,
-            nondecreasing_exprs: self.nondecreasing_exprs.iter().map(|i| *i as _).collect(),
-            noop_update_hint: self.noop_update_hint,
-        })
     }
 }
 
@@ -167,7 +148,18 @@ impl_plan_tree_node_for_unary! {StreamProject}
 
 impl StreamNode for StreamProject {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
-        self.to_stream_prost_body_inner()
+        let (watermark_input_cols, watermark_output_cols) = self
+            .watermark_derivations
+            .iter()
+            .map(|(i, o)| (*i as u32, *o as u32))
+            .unzip();
+        PbNodeBody::Project(ProjectNode {
+            select_list: self.core.exprs.iter().map(|x| x.to_expr_proto()).collect(),
+            watermark_input_cols,
+            watermark_output_cols,
+            nondecreasing_exprs: self.nondecreasing_exprs.iter().map(|i| *i as _).collect(),
+            noop_update_hint: self.noop_update_hint,
+        })
     }
 }
 

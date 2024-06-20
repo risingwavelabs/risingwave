@@ -3459,6 +3459,7 @@ impl CatalogManager {
         dropping_sink_id: Option<SinkId>,
         updated_sink_ids: Vec<SinkId>,
     ) -> MetaResult<NotificationVersion> {
+        println!("updated {:?}", updated_sink_ids);
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
@@ -3476,11 +3477,10 @@ impl CatalogManager {
         let original_table = tables.get(&table.id).unwrap();
         let mut updated_sinks = vec![];
         for sink_id in updated_sink_ids {
-            let mut sink = sinks.get_mut(sink_id).unwrap().clone();
+            let mut sink = sinks.get_mut(sink_id).unwrap();
             sink.original_target_columns
                 .clone_from(&original_table.columns);
-            sinks.insert(sink.id, sink.clone());
-            updated_sinks.push(sink);
+            updated_sinks.push(sink.clone());
         }
 
         if let Some(source) = source {
@@ -3540,7 +3540,7 @@ impl CatalogManager {
 
         tables.insert(table.id, table.clone());
 
-        commit_meta!(self, tables, indexes, sources)?;
+        commit_meta!(self, tables, indexes, sources, sinks)?;
 
         // Group notification
         let version = self
@@ -3916,12 +3916,6 @@ impl CatalogManager {
         let mut sinks = vec![];
         let guard = self.core.lock().await;
         for sink_id in sink_ids {
-            // if let Some(table) = guard.database.in_progress_creating_tables.get(table_id) {
-            //     sinks.push(table.clone());
-            // } else if let Some(table) = guard.database.tables.get(table_id) {
-            //     sinks.push(table.clone());
-            // }
-
             if let Some(sink) = guard.database.sinks.get(sink_id) {
                 sinks.push(sink.clone());
             }

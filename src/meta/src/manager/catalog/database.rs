@@ -418,6 +418,7 @@ impl DatabaseManager {
     }
 
     pub fn list_sinks(&self) -> Vec<Sink> {
+        println!("sinks {:#?}", self.sinks);
         self.sinks.values().cloned().collect_vec()
     }
 
