@@ -2,7 +2,7 @@
 
 ## Published images
 
-- `latest` on GHCR (latest nightly build): `ghcr.io/risingwavelabs/risingwave:latest`
+- `latest` on GHCR (latest nightly build): `docker.risingwave.com/risingwavelabs/risingwave:latest`
 - `latest` on Docker Hub (latest release): `risingwavelabs/risingwave:latest`
 - Other tags available on both GHCR and Docker Hub:
   - `nightly-yyyyMMdd`, e.g., `nightly-20230108`
@@ -34,7 +34,7 @@ To ensure you are using the latest version of RisingWave image,
 
 ```
 # Ensure risingwave image is of latest version
-docker pull ghcr.io/risingwavelabs/risingwave:latest
+docker pull docker.risingwave.com/risingwavelabs/risingwave:latest
 ```
 
 ### playground
@@ -42,7 +42,7 @@ To start a RisingWave playground, run
 
 ```
 # Start playground
-docker run -it --pull=always -p 4566:4566 -p 5691:5691 ghcr.io/risingwavelabs/risingwave:latest playground
+docker run -it --pull=always -p 4566:4566 -p 5691:5691 docker.risingwave.com/risingwavelabs/risingwave:latest playground
 ```
 
 ### standalone minio
