@@ -39,6 +39,9 @@ pub struct StorageOpts {
     /// The shared buffer will start flushing data to object when the ratio of memory usage to the
     /// shared buffer capacity exceed such ratio.
     pub shared_buffer_flush_ratio: f32,
+    /// The minimum total flush size of shared buffer spill. When a shared buffer spill is trigger,
+    /// the total flush size across multiple epochs should be at least higher than this size.
+    pub shared_buffer_min_batch_flush_size_mb: usize,
     /// Remote directory for storing data and metadata objects.
     pub data_directory: String,
     /// Whether to enable write conflict detection
@@ -158,6 +161,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
                 .share_buffer_compaction_worker_threads_number,
             shared_buffer_capacity_mb: s.shared_buffer_capacity_mb,
             shared_buffer_flush_ratio: c.storage.shared_buffer_flush_ratio,
+            shared_buffer_min_batch_flush_size_mb: c.storage.shared_buffer_min_batch_flush_size_mb,
             data_directory: p.data_directory().to_string(),
             write_conflict_detection_enabled: c.storage.write_conflict_detection_enabled,
             block_cache_capacity_mb: s.block_cache_capacity_mb,
