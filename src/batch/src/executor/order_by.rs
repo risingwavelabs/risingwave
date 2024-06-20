@@ -136,26 +136,24 @@ impl SortExecutor {
         let mut encoded_rows =
             Vec::with_capacity_in(chunks.len(), self.mem_context.global_allocator());
 
-        if !need_to_spill {
-            for chunk in &chunks {
-                let encoded_chunk = encode_chunk(chunk, &self.column_orders)?;
-                let chunk_estimated_heap_size = encoded_chunk
-                    .iter()
-                    .map(|x| x.estimated_heap_size())
-                    .sum::<usize>();
-                encoded_rows.extend(
-                    encoded_chunk
-                        .into_iter()
-                        .enumerate()
-                        .map(|(row_id, row)| (chunk.row_at_unchecked_vis(row_id), row)),
-                );
-                if !self.mem_context.add(chunk_estimated_heap_size as i64) && check_memory {
-                    if self.enable_spill {
-                        need_to_spill = true;
-                        break;
-                    } else {
-                        Err(BatchError::OutOfMemory(self.mem_context.mem_limit()))?;
-                    }
+        for chunk in &chunks {
+            let encoded_chunk = encode_chunk(chunk, &self.column_orders)?;
+            let chunk_estimated_heap_size = encoded_chunk
+                .iter()
+                .map(|x| x.estimated_heap_size())
+                .sum::<usize>();
+            encoded_rows.extend(
+                encoded_chunk
+                    .into_iter()
+                    .enumerate()
+                    .map(|(row_id, row)| (chunk.row_at_unchecked_vis(row_id), row)),
+            );
+            if !self.mem_context.add(chunk_estimated_heap_size as i64) && check_memory {
+                if self.enable_spill {
+                    need_to_spill = true;
+                    break;
+                } else {
+                    Err(BatchError::OutOfMemory(self.mem_context.mem_limit()))?;
                 }
             }
         }
@@ -167,6 +165,7 @@ impl SortExecutor {
             // Finally, we would get e.g. 20 partitions. Each partition should contain a portion of the original input data.
             // A sub SortExecutor would be used to sort each partition respectively and then a MergeSortExecutor would be used to merge all sorted partitions.
             // If memory is still not enough in the sub SortExecutor, it will spill its inputs recursively.
+            info!("batch sort executor {} starts to spill out", &self.identity);
             let mut sort_spill_manager = SortSpillManager::new(
                 &self.identity,
                 DEFAULT_SPILL_PARTITION_NUM,

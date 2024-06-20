@@ -548,6 +548,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
             // Finally, we would get e.g. 20 partitions. Each partition should contain a portion of the original build side input and probr side input data.
             // A sub HashJoinExecutor would be used to consume each partition one by one.
             // If memory is still not enough in the sub HashJoinExecutor, it will spill its inputs recursively.
+            info!("batch hash join executor {} starts to spill out", &self.identity);
             let mut join_spill_manager = JoinSpillManager::new(
                 &self.identity,
                 DEFAULT_SPILL_PARTITION_NUM,
