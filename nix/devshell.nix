@@ -32,9 +32,12 @@
 
           gnumake
           cmake
+          maven
+          jdk17_headless
 
           tmux
           postgresql
+          patchelf
         ]);
         env = [
           {
