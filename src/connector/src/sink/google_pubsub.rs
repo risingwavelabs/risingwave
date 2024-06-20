@@ -171,6 +171,7 @@ impl TryFrom<SinkParam> for GooglePubSubSink {
 
 struct GooglePubSubPayloadWriter<'w> {
     publisher: &'w mut Publisher,
+    message_vec: Vec<PubsubMessage>,
     add_future: DeliveryFutureManagerAddFuture<'w, GooglePubSubSinkDeliveryFuture>,
 }
 
@@ -268,13 +269,28 @@ impl AsyncTruncateSinkWriter for GooglePubSubSinkWriter {
         chunk: StreamChunk,
         add_future: DeliveryFutureManagerAddFuture<'a, Self::DeliveryFuture>,
     ) -> Result<()> {
+        let mut payload_writer = GooglePubSubPayloadWriter {
+            publisher: &mut self.publisher,
+            message_vec: Vec::new(),
+            add_future,
+        };
         dispatch_sink_formatter_str_key_impl!(&self.formatter, formatter, {
-            let mut payload_writer = GooglePubSubPayloadWriter {
-                publisher: &mut self.publisher,
-                add_future,
-            };
             payload_writer.write_chunk(chunk, formatter).await
-        })
+        })?;
+        payload_writer.finish().await
+    }
+}
+
+impl<'w> GooglePubSubPayloadWriter<'w> {
+    pub async fn finish(&mut self) -> Result<()> {
+        let message_vec = std::mem::take(&mut self.message_vec);
+        let awaiters = self.publisher.publish_bulk(message_vec).await;
+        for awaiter in awaiters {
+            self.add_future
+                .add_future_may_await(may_delivery_future(awaiter))
+                .await?;
+        }
+        Ok(())
     }
 }
 
@@ -291,10 +307,7 @@ impl<'w> FormattedSink for GooglePubSubPayloadWriter<'w> {
                     ordering_key,
                     ..Default::default()
                 };
-                let awaiter = self.publisher.publish(msg).await;
-                self.add_future
-                    .add_future_may_await(may_delivery_future(awaiter))
-                    .await?;
+                self.message_vec.push(msg);
                 Ok(())
             }
             None => Err(SinkError::GooglePubSub(anyhow!(

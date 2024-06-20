@@ -181,8 +181,8 @@ impl AsyncTruncateSinkWriter for NatsSinkWriter {
             .map_err(SinkError::Nats)?;
             let future = publish_ack_future.into_future().map(|result| {
                 result
-                    .context("Google Pub/Sub sink error")
-                    .map_err(SinkError::GooglePubSub)
+                    .context("Nats sink error")
+                    .map_err(SinkError::Nats)
                     .map(|_| ())
             });
             add_future.add_future_may_await(future).await?;
