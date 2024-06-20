@@ -1324,7 +1324,7 @@ pub async fn generate_stream_graph_for_table(
                     col_id_gen,
                     on_conflict,
                     with_version_column,
-                    vec![],
+                    vec![], // empty include options
                     resolved_table_name,
                     database_id,
                     schema_id,

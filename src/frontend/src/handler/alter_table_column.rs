@@ -47,7 +47,6 @@ pub async fn replace_table_with_definition(
     // Create handler args as if we're creating a new table with the altered definition.
     let handler_args = HandlerArgs::new(session.clone(), &definition, Arc::from(""))?;
     let col_id_gen = ColumnIdGenerator::new_alter(original_catalog);
-    // TODO: We need to handle cdc table info here
     let Statement::CreateTable {
         columns,
         constraints,
@@ -98,7 +97,6 @@ pub async fn replace_table_with_definition(
 
     let catalog_writer = session.catalog_writer()?;
 
-    // TODO: pass job_type to DdlService
     catalog_writer
         .replace_table(source, table, graph, col_index_mapping, job_type)
         .await?;
