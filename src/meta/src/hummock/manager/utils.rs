@@ -52,13 +52,9 @@ macro_rules! commit_multi_var {
         }
     };
 }
-use std::collections::HashMap;
 
 pub(crate) use commit_multi_var;
-use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::{CompactionGroupId, SstObjectIdRange};
-use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::SstableInfo;
+use risingwave_hummock_sdk::SstObjectIdRange;
 
 use crate::hummock::error::Result;
 use crate::hummock::sequence::next_sstable_object_id;
@@ -123,22 +119,5 @@ impl HummockManager {
     pub async fn get_new_sst_ids(&self, number: u32) -> Result<SstObjectIdRange> {
         let start_id = next_sstable_object_id(&self.env, number).await?;
         Ok(SstObjectIdRange::new(start_id, start_id + number as u64))
-    }
-}
-
-pub fn is_sst_belong_to_group(
-    sst: &SstableInfo,
-    levels: &HashMap<CompactionGroupId, Levels>,
-    compaction_group_id: CompactionGroupId,
-    table_compaction_group_mapping: &HashMap<TableId, CompactionGroupId>,
-) -> bool {
-    match levels.get(&compaction_group_id) {
-        Some(_compaction_group) => sst.table_ids.iter().all(|t| {
-            table_compaction_group_mapping
-                .get(&TableId::new(*t))
-                .map(|table_cg_id| *table_cg_id == compaction_group_id)
-                .unwrap_or(false)
-        }),
-        None => false,
     }
 }

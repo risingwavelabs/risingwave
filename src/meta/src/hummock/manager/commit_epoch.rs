@@ -14,22 +14,22 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::split_sst;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::table_stats::{
-    add_prost_table_stats_map, purge_prost_table_stats, PbTableStatsMap,
+    add_prost_table_stats_map, purge_prost_table_stats, to_prost_table_stats_map, PbTableStatsMap,
 };
 use risingwave_hummock_sdk::table_watermark::TableWatermarks;
 use risingwave_hummock_sdk::{
-    CompactionGroupId, ExtendedSstableInfo, HummockContextId, HummockEpoch, HummockSstableObjectId,
+    CompactionGroupId, HummockContextId, HummockEpoch, HummockSstableObjectId, LocalSstableInfo,
 };
 use risingwave_pb::hummock::compact_task::{self};
 use risingwave_pb::hummock::group_delta::DeltaType;
-use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::hummock_version_delta::ChangeLogDelta;
-use risingwave_pb::hummock::{GroupDelta, HummockSnapshot, IntraLevelDelta, StateTableInfoDelta};
+use risingwave_pb::hummock::{
+    GroupDelta, HummockSnapshot, IntraLevelDelta, SstableInfo, StateTableInfoDelta,
+};
 
 use super::transaction::SingleDeltaTransaction;
 use crate::hummock::error::{Error, Result};
@@ -42,9 +42,7 @@ use crate::hummock::metrics_utils::{
     get_or_create_local_table_stat, trigger_local_table_stat, trigger_sst_stat,
 };
 use crate::hummock::sequence::next_sstable_object_id;
-use crate::hummock::{
-    commit_multi_var, is_sst_belong_to_group, start_measure_real_process_timer, HummockManager,
-};
+use crate::hummock::{commit_multi_var, start_measure_real_process_timer, HummockManager};
 
 #[derive(Debug, Clone)]
 pub struct NewTableFragmentInfo {
@@ -54,7 +52,7 @@ pub struct NewTableFragmentInfo {
 }
 
 pub struct CommitEpochInfo {
-    pub sstables: Vec<ExtendedSstableInfo>,
+    pub sstables: Vec<LocalSstableInfo>,
     pub new_table_watermarks: HashMap<TableId, TableWatermarks>,
     pub sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
     pub new_table_fragment_info: Option<NewTableFragmentInfo>,
@@ -65,7 +63,7 @@ pub struct CommitEpochInfo {
 
 impl CommitEpochInfo {
     pub fn new(
-        sstables: Vec<ExtendedSstableInfo>,
+        sstables: Vec<LocalSstableInfo>,
         new_table_watermarks: HashMap<TableId, TableWatermarks>,
         sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
         new_table_fragment_info: Option<NewTableFragmentInfo>,
@@ -90,7 +88,7 @@ impl HummockManager {
     pub async fn commit_epoch_for_test(
         &self,
         epoch: HummockEpoch,
-        sstables: Vec<impl Into<ExtendedSstableInfo>>,
+        sstables: Vec<impl Into<LocalSstableInfo>>,
         sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
     ) -> Result<()> {
         let tables = self
@@ -149,7 +147,10 @@ impl HummockManager {
         // Consume and aggregate table stats.
         let mut table_stats_change = PbTableStatsMap::default();
         for s in &mut sstables {
-            add_prost_table_stats_map(&mut table_stats_change, &std::mem::take(&mut s.table_stats));
+            add_prost_table_stats_map(
+                &mut table_stats_change,
+                &to_prost_table_stats_map(std::mem::take(&mut s.table_stats)),
+            );
         }
 
         let mut version = HummockVersionTransaction::new(
@@ -197,11 +198,7 @@ impl HummockManager {
 
         let mut modified_compaction_groups = vec![];
         let commit_sstables = self
-            .correct_commit_ssts(
-                sstables,
-                &new_version_delta.latest_version().levels,
-                &table_compaction_group_mapping,
-            )
+            .correct_commit_ssts(sstables, &table_compaction_group_mapping)
             .await?;
 
         self.pre_commit_ssts_to_delta(
@@ -351,84 +348,46 @@ impl HummockManager {
 
     async fn correct_commit_ssts(
         &self,
-        sstables: Vec<ExtendedSstableInfo>,
-        levels: &HashMap<CompactionGroupId, Levels>,
+        sstables: Vec<LocalSstableInfo>,
         table_compaction_group_mapping: &HashMap<TableId, CompactionGroupId>,
-    ) -> Result<Vec<(CompactionGroupId, Vec<ExtendedSstableInfo>)>> {
+    ) -> Result<BTreeMap<u64, Vec<SstableInfo>>> {
         let mut new_sst_id_number = 0;
         let mut sst_to_cg_vec = Vec::with_capacity(sstables.len());
         for commit_sst in sstables {
-            let is_sst_belong_to_group_declared = is_sst_belong_to_group(
-                &commit_sst.sst_info,
-                levels,
-                commit_sst.compaction_group_id,
-                table_compaction_group_mapping,
-            );
-
-            let mut group_table_ids = None;
-            if !is_sst_belong_to_group_declared {
-                let group_table_ids: &mut BTreeMap<u64, Vec<u32>> =
-                    group_table_ids.insert(BTreeMap::new());
-                for table_id in commit_sst.sst_info.get_table_ids() {
-                    match table_compaction_group_mapping.get(&TableId::new(*table_id)) {
-                        Some(cg_id_from_meta) => {
-                            group_table_ids
-                                .entry(*cg_id_from_meta)
-                                .or_default()
-                                .push(*table_id);
-                        }
-                        None => {
-                            tracing::warn!(
-                                "table {} in SST {} doesn't belong to any compaction group",
-                                table_id,
-                                commit_sst.sst_info.get_object_id(),
-                            );
-                        }
+            let mut group_table_ids: BTreeMap<u64, Vec<u32>> = BTreeMap::new();
+            for table_id in commit_sst.sst_info.get_table_ids() {
+                match table_compaction_group_mapping.get(&TableId::new(*table_id)) {
+                    Some(cg_id_from_meta) => {
+                        group_table_ids
+                            .entry(*cg_id_from_meta)
+                            .or_default()
+                            .push(*table_id);
+                    }
+                    None => {
+                        tracing::warn!(
+                            "table {} in SST {} doesn't belong to any compaction group",
+                            table_id,
+                            commit_sst.sst_info.get_object_id(),
+                        );
                     }
                 }
-
-                new_sst_id_number += group_table_ids.len();
             }
 
+            new_sst_id_number += group_table_ids.len();
             sst_to_cg_vec.push((commit_sst, group_table_ids));
         }
         let mut new_sst_id = next_sstable_object_id(&self.env, new_sst_id_number).await?;
-        let mut commit_sstables = Vec::with_capacity(sst_to_cg_vec.len() + new_sst_id_number);
+        let mut commit_sstables: BTreeMap<u64, Vec<SstableInfo>> = BTreeMap::new();
 
         for (mut sst, group_table_ids) in sst_to_cg_vec {
-            if let Some(group_table_ids) = group_table_ids {
-                for (group_id, _match_ids) in group_table_ids {
-                    let branch_sst = split_sst(&mut sst.sst_info, &mut new_sst_id);
-                    commit_sstables.push(ExtendedSstableInfo::with_compaction_group(
-                        group_id, branch_sst,
-                    ));
-                }
-            } else {
-                commit_sstables.push(sst);
+            for (group_id, _match_ids) in group_table_ids {
+                let branch_sst = split_sst(&mut sst.sst_info, &mut new_sst_id);
+                commit_sstables
+                    .entry(group_id)
+                    .or_default()
+                    .push(branch_sst);
             }
         }
-
-        let commit_sstables = commit_sstables
-            .into_iter()
-            // the sort is stable sort, and will not change the order within compaction group.
-            // Do a sort so that sst in the same compaction group can be consecutive
-            .sorted_by_key(
-                |ExtendedSstableInfo {
-                     compaction_group_id,
-                     ..
-                 }| *compaction_group_id,
-            )
-            .group_by(
-                |ExtendedSstableInfo {
-                     compaction_group_id,
-                     ..
-                 }| *compaction_group_id,
-            )
-            .into_iter()
-            .map(|(compaction_group_id, sstables)| {
-                (compaction_group_id, sstables.into_iter().collect_vec())
-            })
-            .collect_vec();
 
         Ok(commit_sstables)
     }
@@ -436,19 +395,14 @@ impl HummockManager {
     fn pre_commit_ssts_to_delta(
         &self,
         epoch: HummockEpoch,
-        commit_sstables: Vec<(CompactionGroupId, Vec<ExtendedSstableInfo>)>,
+        commit_sstables: BTreeMap<CompactionGroupId, Vec<SstableInfo>>,
         new_table_ids: HashMap<TableId, CompactionGroupId>,
         new_version_delta: &mut SingleDeltaTransaction<'_, '_>,
         modified_compaction_groups: &mut Vec<CompactionGroupId>,
     ) {
         // Append SSTs to a new version.
-        for (compaction_group_id, sstables) in commit_sstables {
+        for (compaction_group_id, inserted_table_infos) in commit_sstables {
             modified_compaction_groups.push(compaction_group_id);
-            let group_sstables = sstables
-                .into_iter()
-                .map(|ExtendedSstableInfo { sst_info, .. }| sst_info)
-                .collect_vec();
-
             let group_deltas = &mut new_version_delta
                 .group_deltas
                 .entry(compaction_group_id)
@@ -458,7 +412,7 @@ impl HummockManager {
             let group_delta = GroupDelta {
                 delta_type: Some(DeltaType::IntraLevel(IntraLevelDelta {
                     level_idx: 0,
-                    inserted_table_infos: group_sstables,
+                    inserted_table_infos,
                     l0_sub_level_id,
                     ..Default::default()
                 })),

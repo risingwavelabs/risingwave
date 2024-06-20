@@ -70,7 +70,7 @@ message BarrierCompleteResponse {
   common.Status status = 2;
   repeated CreateMviewProgress create_mview_progress = 3;
   message GroupedSstableInfo {
-    uint64 compaction_group_id = 1;
+    uint64 compaction_group_id = 1 [deprecated = true];
     hummock.SstableInfo sst = 2;
     map<uint32, hummock.TableStats> table_stats_map = 3;
   }
