@@ -17,7 +17,6 @@ use anyhow::Context;
 use bytes::Bytes;
 use reqwest::Url;
 use risingwave_common::bail;
-use risingwave_common::catalog::{ColumnCatalog, ColumnId};
 use risingwave_common::types::{Datum, DatumCow, DatumRef};
 use risingwave_pb::data::DataType as PbDataType;
 
@@ -172,18 +171,4 @@ pub fn extract_header_inner_from_meta<'a>(
         SourceMeta::Kafka(kafka_meta) => kafka_meta.extract_header_inner(inner_field, data_type), /* expect output of type `bytea` or `varchar` */
         _ => None,
     }
-}
-
-/// FIXME: perhapts we should use sth like `ColumnIdGenerator::new_alter`,
-/// However, the `SourceVersion` is problematic: It doesn't contain `next_col_id`.
-/// (But for now this isn't a large problem, since drop column is not allowed for source yet..)
-///
-/// Besides, the logic of column id handling is a mess.
-/// In some places, we use `ColumnId::placeholder()`, and use `col_id_gen` to fill it at the end;
-/// In other places, we create column id ad-hoc.
-pub fn max_column_id(columns: &[ColumnCatalog]) -> ColumnId {
-    // XXX: should we check the column IDs of struct fields here?
-    columns
-        .iter()
-        .fold(ColumnId::new(i32::MIN), |a, b| a.max(b.column_id()))
 }

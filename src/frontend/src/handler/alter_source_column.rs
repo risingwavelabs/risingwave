@@ -14,7 +14,7 @@
 
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_connector::parser::max_column_id;
+use risingwave_common::catalog::max_column_id;
 use risingwave_connector::source::{extract_source_struct, SourceEncode, SourceStruct};
 use risingwave_sqlparser::ast::{
     AlterSourceOperation, ColumnDef, CreateSourceStatement, ObjectName, Statement,

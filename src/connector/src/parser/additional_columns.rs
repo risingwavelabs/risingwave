@@ -16,7 +16,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
 
 use risingwave_common::bail;
-use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId};
+use risingwave_common::catalog::{max_column_id, ColumnCatalog, ColumnDesc, ColumnId};
 use risingwave_common::types::{DataType, StructType};
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType as PbDataType;
@@ -29,7 +29,6 @@ use risingwave_pb::plan_common::{
 };
 
 use crate::error::ConnectorResult;
-use crate::parser::max_column_id;
 use crate::source::cdc::MONGODB_CDC_CONNECTOR;
 use crate::source::{
     GCS_CONNECTOR, KAFKA_CONNECTOR, KINESIS_CONNECTOR, OPENDAL_S3_CONNECTOR, PULSAR_CONNECTOR,
@@ -281,11 +280,6 @@ pub fn source_add_partition_offset_cols(
     connector_name: &str,
 ) -> ([bool; 2], [ColumnCatalog; 2]) {
     let mut columns_exist = [false; 2];
-    // let mut last_column_id = columns
-    //     .iter()
-    //     .map(|c| c.column_desc.column_id)
-    //     .max()
-    //     .unwrap_or(ColumnId::placeholder());
     let mut last_column_id = max_column_id(columns);
 
     let additional_columns: Vec<_> = {
