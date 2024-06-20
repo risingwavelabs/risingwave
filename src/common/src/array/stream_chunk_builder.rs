@@ -104,6 +104,11 @@ impl StreamChunkBuilder {
         }
     }
 
+    /// Get the current number of rows in the builder.
+    pub fn size(&self) -> usize {
+        self.size
+    }
+
     /// Append an iterator of output index and datum to the builder, return a chunk if the builder
     /// is full.
     ///
