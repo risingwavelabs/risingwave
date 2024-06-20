@@ -155,8 +155,14 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         // Don't compact chunk for blackhole sink for better benchmark performance.
         let compact_chunk = !sink.is_blackhole();
 
-        tracing::info!("Sink info: sink_id: {} actor_id: {}, need_advance_delete: {}, re_construct_with_sink_pk: {}, compact_chunk: {}",
-        sink_param.sink_id, actor_context.id, need_advance_delete, re_construct_with_sink_pk,compact_chunk);
+        tracing::info!(
+            sink_id = sink_param.sink_id.sink_id,
+            actor_id = actor_context.id,
+            need_advance_delete,
+            re_construct_with_sink_pk,
+            compact_chunk,
+            "Sink executor info"
+        );
 
         Ok(Self {
             actor_context,
