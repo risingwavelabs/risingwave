@@ -78,13 +78,9 @@ pub fn generate_risedev_env(services: &Vec<ServiceConfig>) -> String {
                 writeln!(env, r#"RPK_BROKERS="{brokers}""#).unwrap();
             }
             ServiceConfig::SchemaRegistry(c) => {
-                let address = &c.address;
-                let port = &c.port;
-                writeln!(
-                    env,
-                    r#"RISEDEV_SCHEMA_REGISTRY_URL="http://{address}:{port}""#,
-                )
-                .unwrap();
+                let url = format!("http://{}:{}", c.address, c.port);
+                writeln!(env, r#"RISEDEV_SCHEMA_REGISTRY_URL="{url}""#,).unwrap();
+                writeln!(env, r#"RPK_REGISTRY_HOSTS="{url}""#).unwrap();
             }
             ServiceConfig::MySql(c) if c.application != Application::Metastore => {
                 let host = &c.address;
