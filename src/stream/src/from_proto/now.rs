@@ -70,6 +70,7 @@ impl ExecutorBuilder for NowExecutorBuilder {
                 }
             }
         } else {
+            // default to `UpdateCurrent` for backward-compatibility
             NowMode::UpdateCurrent
         };
 
