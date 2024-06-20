@@ -205,7 +205,7 @@ impl MetadataModel for TableFragments {
                             risingwave_common::hash::ParallelUnitMapping::from_protobuf(
                                 &vnode_mapping,
                             )
-                            .to_worker_slot(&parallel_unit_to_worker)
+                            .to_worker_slot(&parallel_unit_to_worker).unwrap()
                             .to_protobuf()
                         })
                     });
