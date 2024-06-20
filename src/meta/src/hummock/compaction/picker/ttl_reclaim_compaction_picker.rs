@@ -64,7 +64,7 @@ pub struct TtlReclaimCompactionPicker {
 }
 
 impl TtlReclaimCompactionPicker {
-    pub fn new(table_id_to_options: HashMap<StateTableId, TableOption>) -> Self {
+    pub fn new(table_id_to_options: &HashMap<StateTableId, TableOption>) -> Self {
         let table_id_to_ttl: HashMap<u32, u32> = table_id_to_options
             .iter()
             .filter(|id_to_option| {

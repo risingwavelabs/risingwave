@@ -16,10 +16,8 @@
 // This source code is licensed under both the GPLv2 (found in the
 // COPYING file in the root directory) and Apache 2.0 License
 // (found in the LICENSE.Apache file in the root directory).
-use std::collections::HashMap;
 use std::sync::Arc;
 
-use risingwave_common::catalog::TableOption;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockLevelsExt;
 use risingwave_hummock_sdk::HummockCompactionTaskId;
 use risingwave_pb::hummock::hummock_version::Levels;
@@ -33,11 +31,11 @@ use crate::hummock::compaction::picker::{
     CompactionPicker, CompactionTaskValidator, IntraCompactionPicker, LocalPickerStatistic,
     MinOverlappingPicker,
 };
+use crate::hummock::compaction::selector::CompactionSelectorContext;
 use crate::hummock::compaction::{
-    create_overlap_strategy, CompactionDeveloperConfig, CompactionTask, LocalSelectorStatistic,
+    create_overlap_strategy, CompactionDeveloperConfig, CompactionTask,
 };
 use crate::hummock::level_handler::LevelHandler;
-use crate::hummock::model::CompactionGroup;
 
 pub const SCORE_BASE: u64 = 100;
 
@@ -420,14 +418,16 @@ impl CompactionSelector for DynamicLevelSelector {
     fn pick_compaction(
         &mut self,
         task_id: HummockCompactionTaskId,
-        compaction_group: &CompactionGroup,
-        levels: &Levels,
-        _member_table_ids: &std::collections::BTreeSet<risingwave_common::catalog::TableId>,
-        level_handlers: &mut [LevelHandler],
-        selector_stats: &mut LocalSelectorStatistic,
-        _table_id_to_options: HashMap<u32, TableOption>,
-        developer_config: Arc<CompactionDeveloperConfig>,
+        context: CompactionSelectorContext<'_>,
     ) -> Option<CompactionTask> {
+        let CompactionSelectorContext {
+            group: compaction_group,
+            levels,
+            level_handlers,
+            selector_stats,
+            developer_config,
+            ..
+        } = context;
         let dynamic_level_core = DynamicLevelSelectorCore::new(
             compaction_group.compaction_config.clone(),
             developer_config,

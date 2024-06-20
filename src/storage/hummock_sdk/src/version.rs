@@ -39,7 +39,7 @@ use crate::{CompactionGroupId, HummockSstableObjectId, HummockVersionId, FIRST_V
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct HummockVersionStateTableInfo {
-    state_table_info: HashMap<TableId, PbStateTableInfo>,
+    pub state_table_info: HashMap<TableId, PbStateTableInfo>,
 
     // in memory index
     compaction_group_member_tables: HashMap<CompactionGroupId, BTreeSet<TableId>>,

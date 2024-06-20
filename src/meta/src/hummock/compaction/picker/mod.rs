@@ -24,6 +24,7 @@ mod trivial_move_compaction_picker;
 mod ttl_reclaim_compaction_picker;
 
 mod compaction_task_validator;
+mod vnode_watermark_picker;
 
 pub use base_level_compaction_picker::LevelCompactionPicker;
 pub use compaction_task_validator::{CompactionTaskValidator, ValidationRuleType};
@@ -40,6 +41,7 @@ pub use tombstone_reclaim_compaction_picker::{
 };
 pub use trivial_move_compaction_picker::TrivialMovePicker;
 pub use ttl_reclaim_compaction_picker::{TtlPickerState, TtlReclaimCompactionPicker};
+pub use vnode_watermark_picker::VnodeWatermarkCompactionPicker;
 
 use crate::hummock::level_handler::LevelHandler;
 
