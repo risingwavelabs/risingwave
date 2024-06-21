@@ -22,8 +22,10 @@ apache-avro = { git = "https://github.com/risingwavelabs/avro", rev = "25113ba88
     "xz",
 ] }
 arrow-array = { workspace = true }
+arrow-array-iceberg = { workspace = true }
 arrow-row = { workspace = true }
 arrow-schema = { workspace = true }
+arrow-schema-iceberg = { workspace = true }
 arrow-select = { workspace = true }
 assert_matches = "1"
 async-nats = "0.35"
@@ -67,6 +69,8 @@ google-cloud-gax = "0.17.0"
 google-cloud-googleapis = { version = "0.13", features = ["pubsub", "bigquery"] }
 google-cloud-pubsub = "0.25"
 http = "0.2"
+# TODO: remove this once the opendal version is updated to 0.47
+iceberg_opendal = { package = "opendal", version = "0.47" }
 icelake = { workspace = true }
 indexmap = { version = "2.2.6", features = ["serde"] }
 itertools = { workspace = true }

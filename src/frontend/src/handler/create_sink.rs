@@ -17,12 +17,12 @@ use std::rc::Rc;
 use std::sync::{Arc, LazyLock};
 
 use anyhow::Context;
-use arrow_schema::DataType as ArrowDataType;
+use arrow_schema_iceberg::DataType as ArrowDataType;
 use either::Either;
 use itertools::Itertools;
 use maplit::{convert_args, hashmap};
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::array::arrow::{FromArrow, IcebergArrowConvert};
+use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::catalog::{ConnectionId, DatabaseId, Schema, SchemaId, TableId, UserId};
 use risingwave_common::types::DataType;
 use risingwave_common::{bail, catalog};
@@ -390,7 +390,7 @@ async fn get_partition_compute_info_for_iceberg(
     };
 
     Ok(Some(PartitionComputeInfo::Iceberg(IcebergPartitionInfo {
-        partition_type: IcebergArrowConvert.from_fields(&partition_type)?,
+        partition_type: IcebergArrowConvert.struct_from_fields(&partition_type)?,
         partition_fields,
     })))
 }
