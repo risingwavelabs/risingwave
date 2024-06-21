@@ -22,7 +22,7 @@ use super::{
     LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamProjectSet,
     ToBatch, ToStream,
 };
-use crate::error::Result;
+use crate::error::{ErrorCode, Result};
 use crate::expr::{
     collect_input_refs, Expr, ExprImpl, ExprRewriter, ExprVisitor, FunctionCall, InputRef,
     TableFunction,
@@ -400,6 +400,17 @@ impl ToStream for LogicalProjectSet {
     // TODO: implement to_stream_with_dist_required like LogicalProject
 
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
+        if self.select_list().iter().any(|item| item.has_now()) {
+            // User may use `now()` in table function in a wrong way, because we allow `now()` in `FROM` clause.
+            return Err(ErrorCode::NotSupported(
+                "General `now()` function".to_string(),
+                "If you are trying to use `generate_series` with `now()`, please kindly check \
+                whether you are using it in a correct way."
+                    .to_string(),
+            )
+            .into());
+        }
+
         let new_input = self.input().to_stream(ctx)?;
         let mut new_logical = self.core.clone();
         new_logical.input = new_input;
