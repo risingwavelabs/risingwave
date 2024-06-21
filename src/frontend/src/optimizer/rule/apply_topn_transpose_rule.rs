@@ -49,7 +49,8 @@ impl Rule for ApplyTopNTransposeRule {
             apply.clone().decompose();
         assert_eq!(join_type, JoinType::Inner);
         let topn: &LogicalTopN = right.as_logical_top_n()?;
-        let (topn_input, limit, offset, with_ties, mut order, mut group_key) = topn.clone().decompose();
+        let (topn_input, limit, offset, with_ties, mut order, mut group_key) =
+            topn.clone().decompose();
 
         let apply_left_len = left.schema().len();
 
