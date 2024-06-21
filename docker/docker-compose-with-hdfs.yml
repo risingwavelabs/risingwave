@@ -231,6 +231,7 @@ services:
       - "<HADOOP_HOME>:/opt/hadoop"
     environment:
       - HADOOP_HOME=/opt/hadoop/
+      - RW_TELEMETRY_TYPE: "docker-compose"
     container_name: meta-node-0
     healthcheck:
       test:

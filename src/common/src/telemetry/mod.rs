@@ -29,11 +29,12 @@ use crate::util::resource_util::memory::{system_memory_available_bytes, total_me
 use crate::RW_VERSION;
 
 pub const TELEMETRY_CLUSTER_TYPE: &str = "RW_TELEMETRY_TYPE";
-const TELEMETRY_CLUSTER_TYPE_HOSTED: &str = "hosted"; // hosted on RisingWave Cloud
-const TELEMETRY_CLUSTER_TYPE_TEST: &str = "test"; // test environment, eg. CI & Risedev
-const TELEMETRY_CLUSTER_TYPE_KUBERNETES: &str = "kubernetes";
-const TELEMETRY_CLUSTER_TYPE_SINGLE_NODE: &str = "single-node";
-const TELEMETRY_CLUSTER_TYPE_DOCKER_COMPOSE: &str = "docker-compose";
+pub const TELEMETRY_CLUSTER_TYPE_HOSTED: &str = "hosted"; // hosted on RisingWave Cloud
+pub const TELEMETRY_CLUSTER_TYPE_TEST: &str = "test"; // test environment, eg. CI & Risedev
+pub const TELEMETRY_CLUSTER_TYPE_KUBERNETES: &str = "kubernetes";
+pub const TELEMETRY_CLUSTER_TYPE_SINGLE_NODE: &str = "single-node";
+pub const TELEMETRY_CLUSTER_TYPE_DOCKER_COMPOSE: &str = "docker-compose";
+pub const TELEMETRY_CLUSTER_TYPE_STANDALONE: &str = "standalone";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TelemetryClusterType {
@@ -42,6 +43,7 @@ pub enum TelemetryClusterType {
     DockerCompose,
     Kubernetes,
     SingleNode,
+    Standalone,
     Unspecified,
 }
 
@@ -57,6 +59,7 @@ impl TelemetryClusterType {
             TELEMETRY_CLUSTER_TYPE_DOCKER_COMPOSE => Self::DockerCompose,
             TELEMETRY_CLUSTER_TYPE_KUBERNETES => Self::Kubernetes,
             TELEMETRY_CLUSTER_TYPE_SINGLE_NODE => Self::SingleNode,
+            TELEMETRY_CLUSTER_TYPE_STANDALONE => Self::Standalone,
             _ => Self::Unspecified,
         }
     }
@@ -68,6 +71,7 @@ impl TelemetryClusterType {
             Self::DockerCompose => risingwave_pb::telemetry::PbTelemetryClusterType::DockerCompose,
             Self::Kubernetes => risingwave_pb::telemetry::PbTelemetryClusterType::Kubernetes,
             Self::SingleNode => risingwave_pb::telemetry::PbTelemetryClusterType::SingleNode,
+            Self::Standalone => risingwave_pb::telemetry::PbTelemetryClusterType::Standalone,
             Self::Unspecified => risingwave_pb::telemetry::PbTelemetryClusterType::Unspecified,
         }
     }
@@ -247,7 +251,10 @@ mod tests {
         assert!(!report_scarf_enabled());
 
         // setting env var to `DockerCompose` should enable scarf
-        std::env::set_var(TELEMETRY_CLUSTER_TYPE, TELEMETRY_CLUSTER_TYPE_DOCKER_COMPOSE);
+        std::env::set_var(
+            TELEMETRY_CLUSTER_TYPE,
+            TELEMETRY_CLUSTER_TYPE_DOCKER_COMPOSE,
+        );
         assert!(report_scarf_enabled());
     }
 

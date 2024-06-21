@@ -210,6 +210,7 @@ services:
       RUST_BACKTRACE: "1"
       # If ENABLE_TELEMETRY is not set, telemetry will start by default
       ENABLE_TELEMETRY: ${ENABLE_TELEMETRY:-true}
+      RW_TELEMETRY_TYPE: "docker-compose"
     container_name: meta-node-0
     healthcheck:
       test:
