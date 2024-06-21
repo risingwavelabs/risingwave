@@ -88,9 +88,20 @@ def section_cluster_node(outer_panels):
                             "cpu usage (total) - {{%s}} @ {{%s}}"
                             % (COMPONENT_LABEL, NODE_LABEL),
                         ),
-                        panels.target(
+                        panels.target( 
                             f"sum(rate({metric('process_cpu_seconds_total')}[$__rate_interval])) by ({COMPONENT_LABEL}, {NODE_LABEL}) / avg({metric('process_cpu_core_num')}) by ({COMPONENT_LABEL}, {NODE_LABEL}) > 0",
                             "cpu usage (avg per core) - {{%s}} @ {{%s}}"
+                            % (COMPONENT_LABEL, NODE_LABEL),
+                        ),
+                    ],
+                ),
+                panels.timeseries_cpu(
+                    "Node CPU relative",
+                    "CPU usage relative to resource limit of container",
+                    [
+                        panels.target(
+                            "(sum(rate(container_cpu_usage_seconds_total{namespace=~\"$namespace\",container=~\"$component\",pod=~\"$pod\"}[$__rate_interval])) by (namespace, pod)) / (sum(kube_pod_container_resource_limits{namespace=~\"$namespace\",pod=~\"$pod\",container=~\"$component\", resource=\"cpu\"}) by (namespace, pod))", 
+                            "cpu usage @ {{%s}} @ {{%s}}"
                             % (COMPONENT_LABEL, NODE_LABEL),
                         ),
                     ],

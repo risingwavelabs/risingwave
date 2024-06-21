@@ -26,6 +26,9 @@ And don't forget to include the generated `risingwave-<xxx>-dashboard.json` in t
 ## Update without Restarting Grafana
 
 ```bash
+./risedev configure # make sure that grafana is turned on
+./risedev dev full
+
 ./update.sh
 ```
 
