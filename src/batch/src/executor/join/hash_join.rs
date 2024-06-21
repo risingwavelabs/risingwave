@@ -44,7 +44,7 @@ use crate::executor::{
 use crate::monitor::BatchSpillMetrics;
 use crate::risingwave_common::hash::NullBitmap;
 use crate::spill::spill_op::{
-    SpillBuildHasher, SpillOp, DEFAULT_SPILL_PARTITION_NUM, SPILL_AT_LEAST_MEMORY,
+    SpillBuildHasher, SpillOp, SpillType, DEFAULT_SPILL_PARTITION_NUM, SPILL_AT_LEAST_MEMORY,
 };
 use crate::task::{BatchTaskContext, ShutdownToken};
 
@@ -273,7 +273,7 @@ impl JoinSpillManager {
     ) -> Result<Self> {
         let suffix_uuid = uuid::Uuid::new_v4();
         let dir = format!("/{}-{}/", join_identity, suffix_uuid);
-        let op = SpillOp::create(dir)?;
+        let op = SpillOp::create(dir, SpillType::Disk)?;
         let probe_side_writers = Vec::with_capacity(partition_num);
         let build_side_writers = Vec::with_capacity(partition_num);
         let probe_side_chunk_builders = Vec::with_capacity(partition_num);
