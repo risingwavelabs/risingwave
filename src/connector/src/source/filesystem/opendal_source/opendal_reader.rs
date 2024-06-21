@@ -94,7 +94,7 @@ impl<Src: OpendalSource> OpendalReader<Src> {
                 .into_future() // Unlike `rustc`, `try_stream` seems require manual `into_future`.
                 .await?;
             // If the format is "parquet", there is no need to read it as bytes and parse it into a chunk using a parser.
-            // Instead, the Parquet file can be directly read as a RecordBatch and converted into a chunk.
+            // Instead, the Parquet file can be directly read as a `RecordBatch`` and converted into a chunk.
             // For other formats, the corresponding parser will still be used for parsing.
             if let EncodingProperties::Parquet = &self.parser_config.specific.encoding_config {
                 let record_batch_stream = Box::pin(
@@ -107,6 +107,7 @@ impl<Src: OpendalSource> OpendalReader<Src> {
                 #[for_await]
                 for record_batch in record_batch_stream {
                     let record_batch: RecordBatch = record_batch?;
+                    // Convert each record batch into a stream chunk according to user defined schema.
                     let chunk: StreamChunk = convert_record_batch_to_stream_chunk(
                         record_batch,
                         self.columns.clone(),
@@ -241,6 +242,11 @@ impl<Src: OpendalSource> OpendalReader<Src> {
 /// # Returns
 ///
 /// A `StreamChunk` containing the converted data from the `RecordBatch`.
+
+// The hidden columns that must be included here are _rw_file and _rw_offset.
+// Depending on whether the user specifies a primary key (pk), there may be an additional hidden column row_id.
+// Therefore, the maximum number of hidden columns is three.
+const MAX_HIDDEN_COLUMN_NUMS: usize = 3;
 fn convert_record_batch_to_stream_chunk(
     record_batch: RecordBatch,
     source_columns: Option<Vec<Column>>,
@@ -249,7 +255,8 @@ fn convert_record_batch_to_stream_chunk(
     match source_columns {
         Some(source_columns) => {
             let size = source_columns.len();
-            let mut chunk_columns = Vec::with_capacity(source_columns.len() + 3);
+            let mut chunk_columns =
+                Vec::with_capacity(source_columns.len() + MAX_HIDDEN_COLUMN_NUMS);
             for source_column in source_columns {
                 if let Some(parquet_column) = record_batch.column_by_name(&source_column.name) {
                     let converted_arrow_data_type =
@@ -275,12 +282,14 @@ fn convert_record_batch_to_stream_chunk(
                     // - The `_rw_offset` column is filled with the offset.
                     let mut array_builder =
                         ArrayBuilderImpl::with_type(size, source_column.data_type);
+                    // Hidden column naming rules refer to https://github.com/risingwavelabs/risingwave/blob/3736982d6fe648ad32b50e1d3ce97119edcab1a6/src/connector/src/parser/additional_columns.rs#L289
                     let datum: Datum = if source_column.name.ends_with("file") {
                         Some(ScalarImpl::Utf8(file_name.clone().into()))
                     } else if source_column.name.ends_with("offset") {
+                        // `_rw_offset` is not used.
                         Some(ScalarImpl::Utf8("0".into()))
                     } else {
-                        // row_id column
+                        // row_id column.
                         None
                     };
 
