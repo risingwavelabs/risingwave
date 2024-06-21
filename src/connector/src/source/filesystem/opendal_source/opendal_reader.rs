@@ -109,7 +109,7 @@ impl<Src: OpendalSource> OpendalReader<Src> {
         let object_name = split.name.clone();
 
         let reader = op
-            .read_with(&object_name)
+            .reader_with(&object_name)
             .range(split.offset as u64..)
             .into_future() // Unlike `rustc`, `try_stream` seems require manual `into_future`.
             .await?;
