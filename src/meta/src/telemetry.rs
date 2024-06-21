@@ -17,7 +17,8 @@ use risingwave_common::config::MetaBackend;
 use risingwave_common::telemetry::pb_compatible::TelemetryToProtobuf;
 use risingwave_common::telemetry::report::{TelemetryInfoFetcher, TelemetryReportCreator};
 use risingwave_common::telemetry::{
-    current_timestamp, SystemData, TelemetryNodeType, TelemetryReportBase, TelemetryResult,
+    current_timestamp, SystemData, TelemetryClusterType, TelemetryNodeType, TelemetryReportBase,
+    TelemetryResult,
 };
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_pb::common::WorkerType;
@@ -66,6 +67,9 @@ pub struct MetaTelemetryReport {
     meta_backend: MetaBackend,
     rw_version: RwVersion,
     job_desc: Vec<MetaTelemetryJobDesc>,
+
+    // Get the ENV from key `TELEMETRY_CLUSTER_TYPE`
+    cluster_type: TelemetryClusterType,
 }
 
 impl From<MetaTelemetryJobDesc> for risingwave_pb::telemetry::StreamJobDesc {
@@ -108,6 +112,7 @@ impl TelemetryToProtobuf for MetaTelemetryReport {
             }),
             stream_job_count: self.streaming_job_count as u32,
             stream_jobs: self.job_desc.into_iter().map(|job| job.into()).collect(),
+            cluster_type: self.cluster_type.to_prost() as i32,
         };
         pb_report.encode_to_vec()
     }
@@ -194,6 +199,7 @@ impl TelemetryReportCreator for MetaReportCreator {
             streaming_job_count,
             meta_backend: self.meta_backend,
             job_desc: stream_job_desc,
+            cluster_type: TelemetryClusterType::from_env_var(),
         })
     }
 

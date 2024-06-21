@@ -31,6 +31,47 @@ use crate::RW_VERSION;
 pub const TELEMETRY_CLUSTER_TYPE: &str = "RW_TELEMETRY_TYPE";
 const TELEMETRY_CLUSTER_TYPE_HOSTED: &str = "hosted"; // hosted on RisingWave Cloud
 const TELEMETRY_CLUSTER_TYPE_TEST: &str = "test"; // test environment, eg. CI & Risedev
+const TELEMETRY_CLUSTER_TYPE_KUBERNETES: &str = "kubernetes";
+const TELEMETRY_CLUSTER_TYPE_SINGLE_NODE: &str = "single-node";
+const TELEMETRY_CLUSTER_TYPE_DOCKER_COMPOSE: &str = "docker-compose";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum TelemetryClusterType {
+    Hosted,
+    Test,
+    DockerCompose,
+    Kubernetes,
+    SingleNode,
+    Unspecified,
+}
+
+impl TelemetryClusterType {
+    pub fn from_env_var() -> Self {
+        let cluster_type = match env::var(TELEMETRY_CLUSTER_TYPE) {
+            Ok(cluster_type) => cluster_type,
+            Err(_) => return Self::Unspecified,
+        };
+        match cluster_type.as_str() {
+            TELEMETRY_CLUSTER_TYPE_HOSTED => Self::Hosted,
+            TELEMETRY_CLUSTER_TYPE_TEST => Self::Test,
+            TELEMETRY_CLUSTER_TYPE_DOCKER_COMPOSE => Self::DockerCompose,
+            TELEMETRY_CLUSTER_TYPE_KUBERNETES => Self::Kubernetes,
+            TELEMETRY_CLUSTER_TYPE_SINGLE_NODE => Self::SingleNode,
+            _ => Self::Unspecified,
+        }
+    }
+
+    pub fn to_prost(&self) -> risingwave_pb::telemetry::PbTelemetryClusterType {
+        match self {
+            Self::Hosted => risingwave_pb::telemetry::PbTelemetryClusterType::Hosted,
+            Self::Test => risingwave_pb::telemetry::PbTelemetryClusterType::Test,
+            Self::DockerCompose => risingwave_pb::telemetry::PbTelemetryClusterType::DockerCompose,
+            Self::Kubernetes => risingwave_pb::telemetry::PbTelemetryClusterType::Kubernetes,
+            Self::SingleNode => risingwave_pb::telemetry::PbTelemetryClusterType::SingleNode,
+            Self::Unspecified => risingwave_pb::telemetry::PbTelemetryClusterType::Unspecified,
+        }
+    }
+}
 
 /// Url of telemetry backend
 pub const TELEMETRY_REPORT_URL: &str = "https://telemetry.risingwave.dev/api/v2/report";
@@ -166,12 +207,10 @@ pub fn current_timestamp() -> u64 {
 }
 
 pub fn report_scarf_enabled() -> bool {
-    env::var(TELEMETRY_CLUSTER_TYPE)
-        .map(|deploy_type| {
-            !(deploy_type.eq_ignore_ascii_case(TELEMETRY_CLUSTER_TYPE_HOSTED)
-                || deploy_type.eq_ignore_ascii_case(TELEMETRY_CLUSTER_TYPE_TEST))
-        })
-        .unwrap_or(true)
+    !matches!(
+        TelemetryClusterType::from_env_var(),
+        TelemetryClusterType::Hosted | TelemetryClusterType::Test
+    )
 }
 
 // impl logic to report to Scarf service, containing RW version and deployment platform
