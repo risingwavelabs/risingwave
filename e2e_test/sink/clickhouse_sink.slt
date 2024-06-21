@@ -5,22 +5,65 @@ statement ok
 CREATE TABLE t6 (v1 int primary key, v2 bigint, v3 varchar, v4 smallint, v5 decimal);
 
 statement ok
-CREATE MATERIALIZED VIEW mv6 AS SELECT * FROM t6;
+CREATE TABLE t7 (v1 int primary key, v2 bigint, v3 varchar,ver timestamptz);
 
 statement ok
-CREATE SINK s6 AS select mv6.v1 as v1, mv6.v2 as v2, mv6.v3 as v3, mv6.v4 as v4, mv6.v5 as v5 from mv6 WITH (
+CREATE TABLE t8 (v1 int primary key, v2 bigint, v3 varchar);
+
+
+statement ok
+CREATE SINK s6 from t6 WITH (
     connector = 'clickhouse',
     type = 'append-only',
     force_append_only='true',
-    clickhouse.url = 'http://clickhouse-server:8123',
+    clickhouse.url = 'http://127.0.0.1:8123',
     clickhouse.user = 'default',
     clickhouse.password = '',
     clickhouse.database = 'default',
-    clickhouse.table='demo_test',
+    clickhouse.table='demo_test_append_only',
 );
 
 statement ok
 INSERT INTO t6 VALUES (1, 50, '1-50', 1, 1.1), (2, 2, '2-2', 2, 2.2), (3, 2, '3-2', 1, 3.3), (5, 2, '5-2', 2, 4.4), (8, 2, '8-2', 1, 'inf'), (13, 2, '13-2', 2, '-inf'), (21, 2, '21-2', 1, 'nan');
+
+
+statement ok
+CREATE SINK s7 from t7 WITH (
+    connector = 'clickhouse',
+    type = 'upsert',
+    primary_key = 'v1',
+    clickhouse.url = 'http://127.0.0.1:8123',
+    clickhouse.user = 'default',
+    clickhouse.password = '',
+    clickhouse.database = 'default',
+    clickhouse.table='demo_test_upsert1',
+    clickhouse.delete.column = 'del'
+);
+
+statement ok
+INSERT INTO t7 VALUES (1, 50, '1-50', '2013-01-01 01:01:02+01:00'), (2, 2, '2-2', '2013-01-02 01:01:02+01:00'),  (3, 2, '3-2','2013-01-03 01:01:02+01:00');
+
+statement ok
+delete from t7 where v1 = 1;
+
+statement ok
+CREATE SINK s8 from t8 WITH (
+    connector = 'clickhouse',
+    type = 'upsert',
+    primary_key = 'v1',
+    clickhouse.url = 'http://127.0.0.1:8123',
+    clickhouse.user = 'default',
+    clickhouse.password = '',
+    clickhouse.database = 'default',
+    clickhouse.table='demo_test_upsert2',
+    clickhouse.delete.column = 'del'
+);
+
+statement ok
+INSERT INTO t8 VALUES (1, 50, '1-50'), (2, 2, '2-2'), (3, 2, '3-2');
+
+statement ok
+delete from t8 where v1 = 1;
 
 statement ok
 FLUSH;
@@ -29,7 +72,16 @@ statement ok
 DROP SINK s6;
 
 statement ok
-DROP MATERIALIZED VIEW mv6;
+DROP TABLE t6;
 
 statement ok
-DROP TABLE t6;
+DROP SINK s7;
+
+statement ok
+DROP TABLE t7;
+
+statement ok
+DROP SINK s8;
+
+statement ok
+DROP TABLE t8;

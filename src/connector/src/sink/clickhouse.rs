@@ -104,16 +104,6 @@ impl ClickHouseEngine {
         }
     }
 
-    pub fn get_delete_col(&self) -> Option<String> {
-        match self {
-            ClickHouseEngine::ReplacingMergeTree(Some(delete_col)) => Some(delete_col.to_string()),
-            ClickHouseEngine::ReplicatedReplacingMergeTree(Some(delete_col)) => {
-                Some(delete_col.to_string())
-            }
-            _ => None,
-        }
-    }
-
     pub fn get_sign_name(&self) -> Option<String> {
         match self {
             ClickHouseEngine::CollapsingMergeTree(sign_name) => Some(sign_name.to_string()),
@@ -125,6 +115,10 @@ impl ClickHouseEngine {
             }
             ClickHouseEngine::ReplicatedVersionedCollapsingMergeTree(sign_name) => {
                 Some(sign_name.to_string())
+            }
+            ClickHouseEngine::ReplacingMergeTree(Some(delete_col)) => Some(delete_col.to_string()),
+            ClickHouseEngine::ReplicatedReplacingMergeTree(Some(delete_col)) => {
+                Some(delete_col.to_string())
             }
             _ => None,
         }
@@ -144,30 +138,42 @@ impl ClickHouseEngine {
             "AggregatingMergeTree" => Ok(ClickHouseEngine::AggregatingMergeTree),
             // VersionedCollapsingMergeTree(sign_name,"a")
             "VersionedCollapsingMergeTree" => {
-                let sign_name = engine_name
-                    .create_table_query
-                    .split("VersionedCollapsingMergeTree(")
-                    .last()
-                    .ok_or_else(|| SinkError::ClickHouse("must have last".to_string()))?
-                    .split(',')
-                    .next()
-                    .ok_or_else(|| SinkError::ClickHouse("must have next".to_string()))?
-                    .trim()
-                    .to_string();
+                let sign_name = match config.common.delete_column.clone() {
+                    Some(sign) => sign,
+                    None => {
+                        warn!("If you use `upsert`, it is recommended to fill in `delete_column`, otherwise we will use string matching to get it, which may have some problems");
+                        engine_name
+                            .create_table_query
+                            .split("VersionedCollapsingMergeTree(")
+                            .last()
+                            .ok_or_else(|| SinkError::ClickHouse("must have last".to_string()))?
+                            .split(',')
+                            .next()
+                            .ok_or_else(|| SinkError::ClickHouse("must have next".to_string()))?
+                            .trim()
+                            .to_string()
+                    }
+                };
                 Ok(ClickHouseEngine::VersionedCollapsingMergeTree(sign_name))
             }
             // CollapsingMergeTree(sign_name)
             "CollapsingMergeTree" => {
-                let sign_name = engine_name
-                    .create_table_query
-                    .split("CollapsingMergeTree(")
-                    .last()
-                    .ok_or_else(|| SinkError::ClickHouse("must have last".to_string()))?
-                    .split(')')
-                    .next()
-                    .ok_or_else(|| SinkError::ClickHouse("must have next".to_string()))?
-                    .trim()
-                    .to_string();
+                let sign_name = match config.common.delete_column.clone() {
+                    Some(sign) => sign,
+                    None => {
+                        warn!("If you use `upsert`, it is recommended to fill in `delete_column`, otherwise we will use string matching to get it, which may have some problems");
+                        engine_name
+                            .create_table_query
+                            .split("CollapsingMergeTree(")
+                            .last()
+                            .ok_or_else(|| SinkError::ClickHouse("must have last".to_string()))?
+                            .split(')')
+                            .next()
+                            .ok_or_else(|| SinkError::ClickHouse("must have next".to_string()))?
+                            .trim()
+                            .to_string()
+                    }
+                };
                 Ok(ClickHouseEngine::CollapsingMergeTree(sign_name))
             }
             "GraphiteMergeTree" => Ok(ClickHouseEngine::GraphiteMergeTree),
@@ -184,34 +190,46 @@ impl ClickHouseEngine {
             }
             // ReplicatedVersionedCollapsingMergeTree("a","b",sign_name,"c")
             "ReplicatedVersionedCollapsingMergeTree" => {
-                let sign_name = engine_name
-                    .create_table_query
-                    .split("ReplicatedVersionedCollapsingMergeTree(")
-                    .last()
-                    .ok_or_else(|| SinkError::ClickHouse("must have last".to_string()))?
-                    .split(',')
-                    .rev()
-                    .nth(1)
-                    .ok_or_else(|| SinkError::ClickHouse("must have index 1".to_string()))?
-                    .trim()
-                    .to_string();
+                let sign_name = match config.common.delete_column.clone() {
+                    Some(sign) => sign,
+                    None => {
+                        warn!("If you use `upsert`, it is recommended to fill in `delete_column`, otherwise we will use string matching to get it, which may have some problems");
+                        engine_name
+                            .create_table_query
+                            .split("ReplicatedVersionedCollapsingMergeTree(")
+                            .last()
+                            .ok_or_else(|| SinkError::ClickHouse("must have last".to_string()))?
+                            .split(',')
+                            .rev()
+                            .nth(1)
+                            .ok_or_else(|| SinkError::ClickHouse("must have index 1".to_string()))?
+                            .trim()
+                            .to_string()
+                    }
+                };
                 Ok(ClickHouseEngine::VersionedCollapsingMergeTree(sign_name))
             }
             // ReplicatedCollapsingMergeTree("a","b",sign_name)
             "ReplicatedCollapsingMergeTree" => {
-                let sign_name = engine_name
-                    .create_table_query
-                    .split("ReplicatedCollapsingMergeTree(")
-                    .last()
-                    .ok_or_else(|| SinkError::ClickHouse("must have last".to_string()))?
-                    .split(')')
-                    .next()
-                    .ok_or_else(|| SinkError::ClickHouse("must have next".to_string()))?
-                    .split(',')
-                    .last()
-                    .ok_or_else(|| SinkError::ClickHouse("must have last".to_string()))?
-                    .trim()
-                    .to_string();
+                let sign_name = match config.common.delete_column.clone() {
+                    Some(sign) => sign,
+                    None => {
+                        warn!("If you use `upsert`, it is recommended to fill in `delete_column`, otherwise we will use string matching to get it, which may have some problems");
+                        engine_name
+                            .create_table_query
+                            .split("ReplicatedCollapsingMergeTree(")
+                            .last()
+                            .ok_or_else(|| SinkError::ClickHouse("must have last".to_string()))?
+                            .split(')')
+                            .next()
+                            .ok_or_else(|| SinkError::ClickHouse("must have next".to_string()))?
+                            .split(',')
+                            .last()
+                            .ok_or_else(|| SinkError::ClickHouse("must have last".to_string()))?
+                            .trim()
+                            .to_string()
+                    }
+                };
                 Ok(ClickHouseEngine::CollapsingMergeTree(sign_name))
             }
             "ReplicatedGraphiteMergeTree" => Ok(ClickHouseEngine::ReplicatedGraphiteMergeTree),
@@ -508,9 +526,6 @@ impl ClickHouseSinkWriter {
         if let Some(sign) = clickhouse_engine.get_sign_name() {
             rw_fields_name_after_calibration.push(sign);
         }
-        if let Some(delete_col) = clickhouse_engine.get_delete_col() {
-            rw_fields_name_after_calibration.push(delete_col);
-        }
         Ok(Self {
             config,
             schema,
@@ -713,10 +728,6 @@ async fn query_column_engine_from_ck(
 
     if let Some(sign) = &clickhouse_engine.get_sign_name() {
         clickhouse_column.retain(|a| sign.ne(&a.name))
-    }
-
-    if let Some(delete_col) = &clickhouse_engine.get_delete_col() {
-        clickhouse_column.retain(|a| delete_col.ne(&a.name))
     }
 
     Ok((clickhouse_column, clickhouse_engine))
