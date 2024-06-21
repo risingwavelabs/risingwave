@@ -39,3 +39,6 @@ doc-valid-idents = [
 avoid-breaking-exported-api = false
 upper-case-acronyms-aggressive = true
 too-many-arguments-threshold = 10
+ignore-interior-mutability = [
+    "risingwave_frontend::expr::ExprImpl" # XXX: Where does ExprImpl have interior mutability?
+]

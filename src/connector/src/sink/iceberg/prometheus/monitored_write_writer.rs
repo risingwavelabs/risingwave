@@ -28,7 +28,6 @@ pub struct MonitoredWriteWriterBuilder<B: IcebergWriterBuilder> {
 
 impl<B: IcebergWriterBuilder> MonitoredWriteWriterBuilder<B> {
     /// Create writer context.
-    #[expect(dead_code)]
     pub fn new(
         inner: B,
         write_qps: LabelGuardedIntCounter<2>,

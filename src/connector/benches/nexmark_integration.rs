@@ -18,8 +18,6 @@
 //! `ByteStreamSourceParserImpl::create` based on the given configuration, rather
 //! than depending on a specific internal implementation.
 
-#![feature(lazy_cell)]
-
 use std::sync::LazyLock;
 
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion};

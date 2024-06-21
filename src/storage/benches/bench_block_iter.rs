@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(lazy_cell)]
 use std::sync::LazyLock;
 
 use bytes::{BufMut, Bytes, BytesMut};
