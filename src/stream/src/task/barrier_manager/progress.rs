@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt::{Display, Formatter};
+
 use super::LocalBarrierManager;
 use crate::task::barrier_manager::LocalBarrierEvent::ReportCreateProgress;
 use crate::task::barrier_manager::LocalBarrierWorker;
@@ -24,6 +26,17 @@ type ConsumedRows = u64;
 pub(crate) enum BackfillState {
     ConsumingUpstream(ConsumedEpoch, ConsumedRows),
     Done(ConsumedRows),
+}
+
+impl Display for BackfillState {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BackfillState::ConsumingUpstream(epoch, rows) => {
+                write!(f, "ConsumingUpstream(epoch: {}, rows: {})", epoch, rows)
+            }
+            BackfillState::Done(rows) => write!(f, "Done(rows: {})", rows),
+        }
+    }
 }
 
 impl LocalBarrierWorker {

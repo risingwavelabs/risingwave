@@ -15,11 +15,11 @@
 use std::hash::{DefaultHasher, Hash, Hasher};
 
 use anyhow::anyhow;
-use arrow_array::RecordBatch;
+use arrow_array_iceberg::RecordBatch;
 use futures_async_stream::try_stream;
 use futures_util::stream::StreamExt;
 use icelake::io::{FileScan, TableScan};
-use risingwave_common::array::arrow::{FromArrow, IcebergArrowConvert};
+use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::catalog::Schema;
 use risingwave_connector::sink::iceberg::IcebergConfig;
 
@@ -150,7 +150,7 @@ impl IcebergScanExecutor {
     }
 
     fn record_batch_to_chunk(record_batch: RecordBatch) -> Result<DataChunk, BatchError> {
-        Ok(IcebergArrowConvert.from_record_batch(&record_batch)?)
+        Ok(IcebergArrowConvert.chunk_from_record_batch(&record_batch)?)
     }
 }
 

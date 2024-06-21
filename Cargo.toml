@@ -125,9 +125,13 @@ tonic = { package = "madsim-tonic", version = "0.4.1" }
 tonic-build = { package = "madsim-tonic-build", version = "0.4.2" }
 otlp-embedded = { git = "https://github.com/risingwavelabs/otlp-embedded", rev = "492c244e0be91feb659c0cd48a624bbd96045a33" }
 prost = { version = "0.12" }
-icelake = { git = "https://github.com/icelake-io/icelake", rev = "54fd72fbd1dd8c592f05eeeb79223c8a6a33c297", features = [
+icelake = { git = "https://github.com/icelake-io/icelake", rev = "07d53893d7788b4e41fc11efad8a6be828405c31", features = [
     "prometheus",
 ] }
+arrow-array-iceberg = { package = "arrow-array", version = "52" }
+arrow-schema-iceberg = { package = "arrow-schema", version = "52" }
+arrow-buffer-iceberg = { package = "arrow-buffer", version = "52" }
+arrow-cast-iceberg = { package = "arrow-cast", version = "52" }
 arrow-array = "50"
 arrow-arith = "50"
 arrow-cast = "50"
@@ -319,8 +323,6 @@ tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev =
 futures-timer = { git = "https://github.com/madsim-rs/futures-timer.git", rev = "05b33b4" }
 # patch: unlimit 4MB message size for grpc client
 etcd-client = { git = "https://github.com/risingwavelabs/etcd-client.git", rev = "4e84d40" }
-# todo(wcy-fdu): remove this patch fork after opendal release a new version to apply azure workload identity change.
-reqsign = { git = "https://github.com/wcy-fdu/reqsign.git", rev = "c7dd668" }
 # patch to remove preserve_order from serde_json
 deno_core = { git = "https://github.com/bakjos/deno_core", rev = "9b241c6" }
 # patch to user reqwest 0.12.2
@@ -330,6 +332,8 @@ deno_net = { git = "https://github.com/bakjos/deno", rev = "787a232" }
 deno_tls = { git = "https://github.com/bakjos/deno", rev = "787a232" }
 deno_web = { git = "https://github.com/bakjos/deno", rev = "787a232" }
 deno_websocket = { git = "https://github.com/bakjos/deno", rev = "787a232" }
+# patch to remove preserve_order from serde_json
+bson = { git = "https://github.com/risingwavelabs/bson-rust", rev = "e5175ec" }
 
 [workspace.metadata.dylint]
 libraries = [{ path = "./lints" }]

@@ -21,7 +21,7 @@ use risingwave_pb::plan_common::{
     AdditionalColumn, ColumnDescVersion, PbColumnCatalog, PbColumnDesc,
 };
 
-use super::row_id_column_desc;
+use super::{row_id_column_desc, USER_COLUMN_ID_OFFSET};
 use crate::catalog::{cdc_table_name_column_desc, offset_column_desc, Field, ROW_ID_COLUMN_ID};
 use crate::types::DataType;
 
@@ -44,6 +44,10 @@ impl ColumnId {
     /// Sometimes the id field is filled later, we use this value for better debugging.
     pub const fn placeholder() -> Self {
         Self(i32::MAX - 1)
+    }
+
+    pub const fn first_user_column() -> Self {
+        Self(USER_COLUMN_ID_OFFSET)
     }
 }
 
@@ -346,6 +350,11 @@ impl ColumnCatalog {
         self.column_desc.is_default()
     }
 
+    /// If the columns is an `INCLUDE ... AS ...` connector column.
+    pub fn is_connector_additional_column(&self) -> bool {
+        self.column_desc.additional_column.column_type.is_some()
+    }
+
     /// Get a reference to the column desc's data type.
     pub fn data_type(&self) -> &DataType {
         &self.column_desc.data_type
@@ -430,15 +439,30 @@ pub fn columns_extend(preserved_columns: &mut Vec<ColumnCatalog>, columns: Vec<C
     preserved_columns.extend(columns);
 }
 
-pub fn is_column_ids_dedup(columns: &[ColumnCatalog]) -> bool {
-    let mut column_ids = columns
+pub fn debug_assert_column_ids_distinct(columns: &[ColumnCatalog]) {
+    debug_assert!(
+        columns
+            .iter()
+            .map(|c| c.column_id())
+            .duplicates()
+            .next()
+            .is_none(),
+        "duplicate ColumnId found in source catalog. Columns: {columns:#?}"
+    );
+}
+
+/// FIXME: perhapts we should use sth like `ColumnIdGenerator::new_alter`,
+/// However, the `SourceVersion` is problematic: It doesn't contain `next_col_id`.
+/// (But for now this isn't a large problem, since drop column is not allowed for source yet..)
+///
+/// Besides, the logic of column id handling is a mess.
+/// In some places, we use `ColumnId::placeholder()`, and use `col_id_gen` to fill it at the end;
+/// In other places, we create column id ad-hoc.
+pub fn max_column_id(columns: &[ColumnCatalog]) -> ColumnId {
+    // XXX: should we check the column IDs of struct fields here?
+    columns
         .iter()
-        .map(|column| column.column_id().get_id())
-        .collect_vec();
-    column_ids.sort();
-    let original_len = column_ids.len();
-    column_ids.dedup();
-    column_ids.len() == original_len
+        .fold(ColumnId::first_user_column(), |a, b| a.max(b.column_id()))
 }
 
 #[cfg(test)]

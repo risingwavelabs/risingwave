@@ -16,14 +16,14 @@
 
 package com.risingwave.connector;
 
-import java.util.function.BiConsumer;
-import org.elasticsearch.action.ActionListener;
-import org.elasticsearch.action.bulk.BulkRequest;
-import org.elasticsearch.action.bulk.BulkResponse;
+import java.util.concurrent.TimeUnit;
 
-/**
- * {@link BulkRequestConsumerFactory} is used to bridge incompatible Elasticsearch Java API calls
- * across different Elasticsearch versions.
- */
-interface BulkRequestConsumerFactory
-        extends BiConsumer<BulkRequest, ActionListener<BulkResponse>> {}
+public interface BulkProcessorAdapter {
+    public void addRow(String index, String key, String doc);
+
+    public void deleteRow(String index, String key);
+
+    public void flush();
+
+    public void awaitClose(long timeout, TimeUnit unit) throws InterruptedException;
+}

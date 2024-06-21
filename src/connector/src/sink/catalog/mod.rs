@@ -25,8 +25,9 @@ use risingwave_common::catalog::{
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::catalog::{
-    PbCreateType, PbSecretRef, PbSink, PbSinkFormatDesc, PbSinkType, PbStreamJobStatus,
+    PbCreateType, PbSink, PbSinkFormatDesc, PbSinkType, PbStreamJobStatus,
 };
+use risingwave_pb::secret::PbSecretRef;
 
 use super::{
     SinkError, CONNECTOR_TYPE_KEY, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION,

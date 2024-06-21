@@ -14,7 +14,7 @@ path = "ui/format_error.rs"
 # See `README.md` before bumping the version.
 # Remember to update the version in `ci/Dockerfile` as well.
 [dependencies]
-clippy_utils = { git = "https://github.com/rust-lang/rust-clippy", rev = "9d6f41691ed9dbfaec2a2df2661c42451f2fe0d3" }
+clippy_utils = { git = "https://github.com/rust-lang/rust-clippy", rev = "fca4e16ffb8c07186ee23becd44cd5c9fb51896c" }
 dylint_linting = "3.1.0"
 itertools = "0.12"
 

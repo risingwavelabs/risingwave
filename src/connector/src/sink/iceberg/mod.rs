@@ -23,7 +23,7 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
-use arrow_schema::{
+use arrow_schema_iceberg::{
     DataType as ArrowDataType, Field as ArrowField, Fields, Schema as ArrowSchema, SchemaRef,
 };
 use async_trait::async_trait;
@@ -40,7 +40,7 @@ use icelake::transaction::Transaction;
 use icelake::types::{data_file_from_json, data_file_to_json, Any, DataFile};
 use icelake::{Table, TableIdentifier};
 use itertools::Itertools;
-use risingwave_common::array::arrow::{IcebergArrowConvert, ToArrow};
+use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
@@ -1057,7 +1057,7 @@ mod test {
 
     #[test]
     fn test_compatible_arrow_schema() {
-        use arrow_schema::{DataType as ArrowDataType, Field as ArrowField};
+        use arrow_schema_iceberg::{DataType as ArrowDataType, Field as ArrowField};
 
         use super::*;
         let risingwave_schema = Schema::new(vec![

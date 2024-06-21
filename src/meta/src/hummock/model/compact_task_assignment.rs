@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use prost::Message;
 use risingwave_hummock_sdk::HummockCompactionTaskId;
 use risingwave_pb::hummock::CompactTaskAssignment;
 
@@ -30,10 +29,6 @@ impl MetadataModel for CompactTaskAssignment {
 
     fn to_protobuf(&self) -> Self::PbType {
         self.clone()
-    }
-
-    fn to_protobuf_encoded_vec(&self) -> Vec<u8> {
-        self.encode_to_vec()
     }
 
     fn from_protobuf(prost: Self::PbType) -> Self {

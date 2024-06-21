@@ -755,6 +755,10 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::compactor_iter_max_io_retry_times")]
     pub compactor_iter_max_io_retry_times: usize,
 
+    /// The window size of table info statistic history.
+    #[serde(default = "default::storage::table_info_statistic_history_times")]
+    pub table_info_statistic_history_times: usize,
+
     #[serde(default, flatten)]
     #[config_doc(omitted)]
     pub unrecognized: Unrecognized<Self>,
@@ -977,8 +981,10 @@ pub struct StreamingDeveloperConfig {
 
     #[serde(default = "default::developer::stream_enable_arrangement_backfill")]
     /// Enable arrangement backfill
-    /// If true, the arrangement backfill will be disabled,
+    /// If false, the arrangement backfill will be disabled,
     /// even if session variable set.
+    /// If true, it will be enabled by default, but session variable
+    /// can override it.
     pub enable_arrangement_backfill: bool,
 
     #[serde(default = "default::developer::stream_high_join_amplification_threshold")]
@@ -1045,6 +1051,14 @@ pub struct ObjectStoreConfig {
     /// Some special configuration of S3 Backend
     #[serde(default)]
     pub s3: S3ObjectStoreConfig,
+
+    // TODO: the following field will be deprecated after opendal is stablized
+    #[serde(default = "default::object_store_config::opendal_upload_concurrency")]
+    pub opendal_upload_concurrency: usize,
+
+    // TODO: the following field will be deprecated after opendal is stablized
+    #[serde(default)]
+    pub opendal_writer_abort_on_err: bool,
 }
 
 impl ObjectStoreConfig {
@@ -1103,6 +1117,7 @@ pub struct S3ObjectStoreDeveloperConfig {
     )]
     pub retryable_service_error_codes: Vec<String>,
 
+    // TODO: the following field will be deprecated after opendal is stablized
     #[serde(default = "default::object_store_config::s3::developer::use_opendal")]
     pub use_opendal: bool,
 }
@@ -1565,6 +1580,10 @@ pub mod default {
         pub fn compactor_concurrent_uploading_sst_count() -> Option<usize> {
             None
         }
+
+        pub fn table_info_statistic_history_times() -> usize {
+            240
+        }
     }
 
     pub mod streaming {
@@ -2002,6 +2021,10 @@ pub mod default {
 
         pub fn object_store_list_retry_attempts() -> usize {
             DEFAULT_REQ_MAX_RETRY_ATTEMPTS
+        }
+
+        pub fn opendal_upload_concurrency() -> usize {
+            8
         }
 
         pub mod s3 {
