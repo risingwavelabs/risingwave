@@ -28,14 +28,12 @@ use risingwave_pb::meta::{PausedReason, Recovery};
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::AddMutation;
 use thiserror_ext::AsReport;
-use tokio::sync::oneshot;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tracing::{debug, warn, Instrument};
 
 use super::TracedEpoch;
 use crate::barrier::command::CommandContext;
 use crate::barrier::info::InflightActorInfo;
-use crate::barrier::notifier::Notifier;
 use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::rpc::ControlStreamManager;
 use crate::barrier::schedule::ScheduledBarriers;
@@ -43,7 +41,7 @@ use crate::barrier::state::BarrierManagerState;
 use crate::barrier::{BarrierKind, Command, GlobalBarrierManager, GlobalBarrierManagerContext};
 use crate::controller::catalog::ReleaseContext;
 use crate::manager::{ActiveStreamingWorkerNodes, MetadataManager, WorkerId};
-use crate::model::{MetadataModel, MigrationPlan, TableFragments, TableParallelism};
+use crate::model::{MigrationPlan, TableParallelism};
 use crate::stream::{build_actor_connector_splits, RescheduleOptions, TableResizePolicy};
 use crate::{model, MetaResult};
 
@@ -121,106 +119,32 @@ impl GlobalBarrierManagerContext {
     }
 
     async fn recover_background_mv_progress(&self) -> MetaResult<()> {
-        match &self.metadata_manager {
-            MetadataManager::V1(_) => {
-                let (table_map, upstream_mv_counts, mview_definitions, senders, table_fragment_map) =
+        let (table_map, upstream_mv_counts, mview_definitions, senders, table_fragment_map) =
+            match &self.metadata_manager {
+                MetadataManager::V1(_) => {
                     self.stream_manager
                         .recover_background_mv_progress_v1()
-                        .await?;
-                let version_stats = self.hummock_manager.get_version_stats().await;
-                // If failed, enter recovery mode.
-                {
-                    let mut tracker = self.tracker.lock().await;
-                    *tracker = CreateMviewProgressTracker::recover(
-                        table_map,
-                        upstream_mv_counts,
-                        mview_definitions,
-                        version_stats,
-                        senders,
-                        table_fragment_map,
-                        self.metadata_manager.clone(),
-                    );
+                        .await?
                 }
-                Ok(())
-            }
-            MetadataManager::V2(_) => self.recover_background_mv_progress_v2().await,
-        }
-    }
-
-    async fn recover_background_mv_progress_v2(&self) -> MetaResult<()> {
-        let mgr = self.metadata_manager.as_v2_ref();
-        let mviews = mgr
-            .catalog_controller
-            .list_background_creating_mviews()
-            .await?;
-
-        let mut senders = HashMap::new();
-        let mut receivers = Vec::new();
-        let mut table_fragment_map = HashMap::new();
-        let mut mview_definitions = HashMap::new();
-        let mut table_map = HashMap::new();
-        let mut upstream_mv_counts = HashMap::new();
-        for mview in &mviews {
-            let (finished_tx, finished_rx) = oneshot::channel();
-            let table_id = TableId::new(mview.table_id as _);
-            senders.insert(
-                table_id,
-                Notifier {
-                    finished: Some(finished_tx),
-                    ..Default::default()
-                },
-            );
-
-            let table_fragments = mgr
-                .catalog_controller
-                .get_job_fragments_by_id(mview.table_id)
-                .await?;
-            let table_fragments = TableFragments::from_protobuf(table_fragments);
-            upstream_mv_counts.insert(table_id, table_fragments.dependent_table_ids());
-            table_map.insert(table_id, table_fragments.backfill_actor_ids());
-            table_fragment_map.insert(table_id, table_fragments);
-            mview_definitions.insert(table_id, mview.definition.clone());
-            receivers.push((mview.table_id, finished_rx));
-        }
-
+                MetadataManager::V2(_) => {
+                    self.stream_manager
+                        .recover_background_mv_progress_v2()
+                        .await?
+                }
+            };
         let version_stats = self.hummock_manager.get_version_stats().await;
-        // If failed, enter recovery mode.
         {
             let mut tracker = self.tracker.lock().await;
             *tracker = CreateMviewProgressTracker::recover(
-                table_map.into(),
-                upstream_mv_counts.into(),
-                mview_definitions.into(),
+                table_map,
+                upstream_mv_counts,
+                mview_definitions,
                 version_stats,
-                senders.into(),
-                table_fragment_map.into(),
+                senders,
+                table_fragment_map,
                 self.metadata_manager.clone(),
             );
         }
-        for (id, finished) in receivers {
-            let catalog_controller = mgr.catalog_controller.clone();
-            tokio::spawn(async move {
-                let res: MetaResult<()> = try {
-                    tracing::debug!("recovering stream job {}", id);
-                    finished.await.ok().context("failed to finish command")??;
-                    tracing::debug!(id, "finished stream job");
-                    catalog_controller.finish_streaming_job(id, None).await?;
-                };
-                if let Err(e) = &res {
-                    tracing::error!(
-                        id,
-                        error = %e.as_report(),
-                        "stream job interrupted, will retry after recovery",
-                    );
-                    // NOTE(kwannoel): We should not cleanup stream jobs,
-                    // we don't know if it's just due to CN killed,
-                    // or the job has actually failed.
-                    // Users have to manually cancel the stream jobs,
-                    // if they want to clean it.
-                }
-            });
-        }
-
         Ok(())
     }
 
