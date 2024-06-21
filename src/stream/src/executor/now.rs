@@ -29,12 +29,13 @@ use tokio::sync::mpsc::UnboundedReceiver;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use crate::executor::prelude::*;
+use crate::task::ActorEvalErrorReport;
 
 pub struct NowExecutor<S: StateStore> {
     data_types: Vec<DataType>,
 
     mode: NowMode,
-    max_chunk_size: usize,
+    eval_error_report: ActorEvalErrorReport,
 
     /// Receiver of barrier channel.
     barrier_receiver: UnboundedReceiver<Barrier>,
@@ -49,26 +50,30 @@ pub enum NowMode {
     /// Keep generating new timestamps on barrier.
     GenerateSeries {
         start_timestamp: Timestamptz,
-        add_interval_expr: NonStrictExpression,
+        interval: Interval,
     },
 }
 
 enum ModeVars {
     UpdateCurrent,
-    GenerateSeries { chunk_builder: StreamChunkBuilder },
+    GenerateSeries {
+        chunk_builder: StreamChunkBuilder,
+        add_interval_expr: NonStrictExpression,
+    },
 }
 
 impl<S: StateStore> NowExecutor<S> {
     pub fn new(
         data_types: Vec<DataType>,
         mode: NowMode,
+        eval_error_report: ActorEvalErrorReport,
         barrier_receiver: UnboundedReceiver<Barrier>,
         state_table: StateTable<S>,
     ) -> Self {
         Self {
             data_types,
             mode,
-            max_chunk_size: 1024,
+            eval_error_report,
             barrier_receiver,
             state_table,
         }
@@ -79,22 +84,32 @@ impl<S: StateStore> NowExecutor<S> {
         let Self {
             data_types,
             mode,
-            max_chunk_size,
+            eval_error_report,
             barrier_receiver,
             mut state_table,
         } = self;
+
+        let max_chunk_size = crate::config::chunk_size();
 
         // Whether the executor is paused.
         let mut paused = false;
         // The last timestamp **sent** to the downstream.
         let mut last_timestamp: Datum = None;
 
+        // Whether the first barrier is handled and `last_timestamp` is initialized.
+        let mut initialized = false;
+
         let mut mode_vars = match &mode {
             NowMode::UpdateCurrent => ModeVars::UpdateCurrent,
-            NowMode::GenerateSeries { .. } => {
+            NowMode::GenerateSeries { interval, .. } => {
                 // in most cases there won't be more than one row except for the first time
                 let chunk_builder = StreamChunkBuilder::unlimited(data_types.clone(), Some(1));
-                ModeVars::GenerateSeries { chunk_builder }
+                let add_interval_expr =
+                    build_add_interval_expr_captured(*interval, eval_error_report)?;
+                ModeVars::GenerateSeries {
+                    chunk_builder,
+                    add_interval_expr,
+                }
             }
         };
 
@@ -112,7 +127,7 @@ impl<S: StateStore> NowExecutor<S> {
                 );
             }
             for barrier in barriers {
-                if barrier.kind.is_initial() {
+                if !initialized {
                     // Handle the initial barrier.
                     state_table.init_epoch(barrier.epoch);
                     let state_row = {
@@ -130,6 +145,7 @@ impl<S: StateStore> NowExecutor<S> {
                     };
                     last_timestamp = state_row.and_then(|row| row[0].clone());
                     paused = barrier.is_pause_on_startup();
+                    initialized = true;
                 } else {
                     state_table.commit(barrier.epoch).await?;
                 }
@@ -173,14 +189,16 @@ impl<S: StateStore> NowExecutor<S> {
                     };
 
                     yield Message::Chunk(chunk);
-                    last_timestamp.clone_from(&curr_timestamp);
+                    last_timestamp = curr_timestamp.clone();
                 }
                 (
                     NowMode::GenerateSeries {
-                        start_timestamp,
-                        add_interval_expr,
+                        start_timestamp, ..
                     },
-                    ModeVars::GenerateSeries { chunk_builder },
+                    ModeVars::GenerateSeries {
+                        chunk_builder,
+                        ref add_interval_expr,
+                    },
                 ) => {
                     if last_timestamp.is_none() {
                         // We haven't emit any timestamp yet. Let's emit the first one and populate the state table.
@@ -492,16 +510,11 @@ mod tests {
     }
 
     async fn test_now_generate_series_inner() -> StreamExecutorResult<()> {
-        let eval_error_report = ActorEvalErrorReport {
-            actor_context: ActorContext::for_test(123),
-            identity: "NowExecutor".into(),
-        };
-
         let state_store = create_state_store();
         let (tx, mut now) = create_executor(
             NowMode::GenerateSeries {
                 start_timestamp: Timestamptz::from_secs(1617235190).unwrap(), /* 2021-03-31 23:59:50 UTC */
-                add_interval_expr: build_add_interval_expr_captured(Interval::from_millis(1000), eval_error_report).unwrap(), // 1s interval
+                interval: Interval::from_millis(1000), // 1s interval
             },
             &state_store
         ).await;
@@ -575,9 +588,14 @@ mod tests {
 
         let (sender, barrier_receiver) = unbounded_channel();
 
+        let eval_error_report = ActorEvalErrorReport {
+            actor_context: ActorContext::for_test(123),
+            identity: "NowExecutor".into(),
+        };
         let now_executor = NowExecutor::new(
             vec![DataType::Timestamptz],
             mode,
+            eval_error_report,
             barrier_receiver,
             state_table,
         );

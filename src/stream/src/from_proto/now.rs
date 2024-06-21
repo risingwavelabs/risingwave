@@ -23,7 +23,7 @@ use tokio::sync::mpsc::unbounded_channel;
 use super::ExecutorBuilder;
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
-use crate::executor::{build_add_interval_expr_captured, Executor, NowExecutor, NowMode};
+use crate::executor::{Executor, NowExecutor, NowMode};
 use crate::task::ExecutorParams;
 
 pub struct NowExecutorBuilder;
@@ -62,10 +62,7 @@ impl ExecutorBuilder for NowExecutorBuilder {
                             .into_interval();
                     NowMode::GenerateSeries {
                         start_timestamp,
-                        add_interval_expr: build_add_interval_expr_captured(
-                            interval,
-                            params.eval_error_report,
-                        )?,
+                        interval,
                     }
                 }
             }
@@ -80,6 +77,7 @@ impl ExecutorBuilder for NowExecutorBuilder {
         let exec = NowExecutor::new(
             params.info.schema.data_types(),
             mode,
+            params.eval_error_report,
             barrier_receiver,
             state_table,
         );
