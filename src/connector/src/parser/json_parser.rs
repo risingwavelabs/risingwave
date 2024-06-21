@@ -24,7 +24,7 @@
 use std::collections::BTreeMap;
 
 use anyhow::Context as _;
-use risingwave_connector_codec::decoder::json::json_schema_to_columns;
+use risingwave_connector_codec::JsonSchema;
 use risingwave_pb::plan_common::ColumnDesc;
 
 use super::util::{bytes_from_url, get_kafka_topic};
@@ -90,13 +90,13 @@ pub async fn fetch_json_schema_and_map_to_columns(
         let schema = client
             .get_schema_by_subject(&format!("{}-value", topic))
             .await?;
-        serde_json::from_str(&schema.content)?
+        JsonSchema::parse_str(&schema.content)?
     } else {
         let url = url.first().unwrap();
         let bytes = bytes_from_url(url, None).await?;
-        serde_json::from_slice(&bytes)?
+        JsonSchema::parse_bytes(&bytes)?
     };
-    json_schema_to_columns(&json_schema).map_err(Into::into)
+    json_schema.json_schema_to_columns().map_err(Into::into)
 }
 
 #[cfg(test)]

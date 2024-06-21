@@ -43,15 +43,21 @@
 /// The core API is [`decoder::Access`].
 pub mod decoder;
 
-pub use risingwave_pb::plan_common::ColumnDesc;
-pub type RisingWaveSchema = Vec<ColumnDesc>;
 pub use apache_avro::schema::Schema as AvroSchema;
+pub use risingwave_pb::plan_common::ColumnDesc;
 pub struct JsonSchema(pub serde_json::Value);
 impl JsonSchema {
     pub fn parse_str(schema: &str) -> anyhow::Result<Self> {
         use anyhow::Context;
 
         let value = serde_json::from_str(schema).context("failed to parse json schema")?;
+        Ok(Self(value))
+    }
+
+    pub fn parse_bytes(schema: &[u8]) -> anyhow::Result<Self> {
+        use anyhow::Context;
+
+        let value = serde_json::from_slice(schema).context("failed to parse json schema")?;
         Ok(Self(value))
     }
 }
