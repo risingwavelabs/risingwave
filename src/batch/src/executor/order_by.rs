@@ -36,9 +36,9 @@ use super::{
 use crate::error::{BatchError, Result};
 use crate::executor::merge_sort::MergeSortExecutor;
 use crate::monitor::BatchSpillMetrics;
-use crate::spill::spill_op::SpillType::Disk;
+use crate::spill::spill_op::SpillBackend::Disk;
 use crate::spill::spill_op::{
-    SpillOp, SpillType, DEFAULT_SPILL_PARTITION_NUM, SPILL_AT_LEAST_MEMORY,
+    SpillBackend, SpillOp, DEFAULT_SPILL_PARTITION_NUM, SPILL_AT_LEAST_MEMORY,
 };
 use crate::task::BatchTaskContext;
 
@@ -56,7 +56,7 @@ pub struct SortExecutor {
     schema: Schema,
     chunk_size: usize,
     mem_context: MemoryContext,
-    spill_type: Option<SpillType>,
+    spill_backend: Option<SpillBackend>,
     spill_metrics: Arc<BatchSpillMetrics>,
     /// The upper bound of memory usage for this executor.
     memory_upper_bound: Option<u64>,
@@ -131,7 +131,7 @@ impl SortExecutor {
             let chunk_estimated_heap_size = chunk.estimated_heap_size();
             chunks.push(chunk);
             if !self.mem_context.add(chunk_estimated_heap_size as i64) && check_memory {
-                if self.spill_type.is_some() {
+                if self.spill_backend.is_some() {
                     need_to_spill = true;
                     break;
                 } else {
@@ -156,7 +156,7 @@ impl SortExecutor {
                     .map(|(row_id, row)| (chunk.row_at_unchecked_vis(row_id), row)),
             );
             if !self.mem_context.add(chunk_estimated_heap_size as i64) && check_memory {
-                if self.spill_type.is_some() {
+                if self.spill_backend.is_some() {
                     need_to_spill = true;
                     break;
                 } else {
@@ -174,7 +174,7 @@ impl SortExecutor {
             // If memory is still not enough in the sub SortExecutor, it will spill its inputs recursively.
             info!("batch sort executor {} starts to spill out", &self.identity);
             let mut sort_spill_manager = SortSpillManager::new(
-                self.spill_type.clone().unwrap(),
+                self.spill_backend.clone().unwrap(),
                 &self.identity,
                 DEFAULT_SPILL_PARTITION_NUM,
                 child_schema.data_types(),
@@ -214,7 +214,7 @@ impl SortExecutor {
                     format!("{}-sub{}", self.identity.clone(), i),
                     self.chunk_size,
                     self.mem_context.clone(),
-                    self.spill_type.clone(),
+                    self.spill_backend.clone(),
                     self.spill_metrics.clone(),
                     Some(partition_size),
                 );
@@ -263,7 +263,7 @@ impl SortExecutor {
         identity: String,
         chunk_size: usize,
         mem_context: MemoryContext,
-        spill_type: Option<SpillType>,
+        spill_backend: Option<SpillBackend>,
         spill_metrics: Arc<BatchSpillMetrics>,
     ) -> Self {
         Self::new_inner(
@@ -272,7 +272,7 @@ impl SortExecutor {
             identity,
             chunk_size,
             mem_context,
-            spill_type,
+            spill_backend,
             spill_metrics,
             None,
         )
@@ -284,7 +284,7 @@ impl SortExecutor {
         identity: String,
         chunk_size: usize,
         mem_context: MemoryContext,
-        spill_type: Option<SpillType>,
+        spill_backend: Option<SpillBackend>,
         spill_metrics: Arc<BatchSpillMetrics>,
         memory_upper_bound: Option<u64>,
     ) -> Self {
@@ -296,7 +296,7 @@ impl SortExecutor {
             schema,
             chunk_size,
             mem_context,
-            spill_type,
+            spill_backend,
             spill_metrics,
             memory_upper_bound,
         }
@@ -330,7 +330,7 @@ struct SortSpillManager {
 
 impl SortSpillManager {
     fn new(
-        spill_type: SpillType,
+        spill_backend: SpillBackend,
         agg_identity: &String,
         partition_num: usize,
         child_data_types: Vec<DataType>,
@@ -339,7 +339,7 @@ impl SortSpillManager {
     ) -> Result<Self> {
         let suffix_uuid = uuid::Uuid::new_v4();
         let dir = format!("/{}-{}/", agg_identity, suffix_uuid);
-        let op = SpillOp::create(dir, spill_type)?;
+        let op = SpillOp::create(dir, spill_backend)?;
         let input_writers = Vec::with_capacity(partition_num);
         let input_chunk_builders = Vec::with_capacity(partition_num);
         Ok(Self {
@@ -1030,7 +1030,7 @@ mod tests {
             "SortExecutor2".to_string(),
             CHUNK_SIZE,
             MemoryContext::for_spill_test(),
-            Some(SpillType::Memory),
+            Some(SpillBackend::Memory),
             BatchSpillMetrics::for_test(),
         ));
         let fields = &order_by_executor.schema().fields;

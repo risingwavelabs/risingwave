@@ -40,8 +40,9 @@ const DEFAULT_IO_BUFFER_SIZE: usize = 256 * 1024;
 const DEFAULT_IO_CONCURRENT_TASK: usize = 8;
 
 #[derive(Clone)]
-pub enum SpillType {
+pub enum SpillBackend {
     Disk,
+    /// Only for testing purpose
     Memory,
 }
 
@@ -51,22 +52,22 @@ pub struct SpillOp {
 }
 
 impl SpillOp {
-    pub fn create(path: String, spill_type: SpillType) -> Result<SpillOp> {
+    pub fn create(path: String, spill_backend: SpillBackend) -> Result<SpillOp> {
         assert!(path.ends_with('/'));
 
         let spill_dir =
             std::env::var(RW_BATCH_SPILL_DIR_ENV).unwrap_or_else(|_| DEFAULT_SPILL_DIR.to_string());
         let root = format!("/{}/{}/{}/", spill_dir, RW_MANAGED_SPILL_DIR, path);
 
-        let op = match spill_type {
-            SpillType::Disk => {
+        let op = match spill_backend {
+            SpillBackend::Disk => {
                 let mut builder = Fs::default();
                 builder.root(&root);
                 Operator::new(builder)?
                     .layer(RetryLayer::default())
                     .finish()
             }
-            SpillType::Memory => {
+            SpillBackend::Memory => {
                 let mut builder = Memory::default();
                 builder.root(&root);
                 Operator::new(builder)?
