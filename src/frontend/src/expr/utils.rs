@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::VecDeque;
+
 use fixedbitset::FixedBitSet;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_pb::expr::expr_node::Type;
@@ -31,19 +33,30 @@ fn split_expr_by(expr: ExprImpl, op: ExprType, rets: &mut Vec<ExprImpl>) {
     }
 }
 
-pub fn merge_expr_by_binary<I>(mut exprs: I, op: ExprType, identity_elem: ExprImpl) -> ExprImpl
+/// Merge the given expressions by the logical operation.
+///
+/// The `op` must be commutative and associative, typically `And` or `Or`.
+pub(super) fn merge_expr_by_logical<I>(exprs: I, op: ExprType, identity_elem: ExprImpl) -> ExprImpl
 where
-    I: Iterator<Item = ExprImpl>,
+    I: IntoIterator<Item = ExprImpl>,
 {
-    if let Some(e) = exprs.next() {
-        let mut ret = e;
-        for expr in exprs {
-            ret = FunctionCall::new(op, vec![ret, expr]).unwrap().into();
+    let mut exprs: VecDeque<_> = exprs.into_iter().map(|e| (0usize, e)).collect();
+
+    while exprs.len() > 1 {
+        let (level, lhs) = exprs.pop_front().unwrap();
+        let rhs_level = exprs.front().unwrap().0;
+
+        // If there's one element left in the current level, move it to the end of the next level.
+        if level < rhs_level {
+            exprs.push_back((level, lhs));
+        } else {
+            let rhs = exprs.pop_front().unwrap().1;
+            let new_expr = FunctionCall::new(op, vec![lhs, rhs]).unwrap().into();
+            exprs.push_back((level + 1, new_expr));
         }
-        ret
-    } else {
-        identity_elem
     }
+
+    exprs.pop_front().map(|(_, e)| e).unwrap_or(identity_elem)
 }
 
 /// Transform a bool expression to Conjunctive form. e.g. given expression is
@@ -393,17 +406,7 @@ pub fn factorization_expr(expr: ExprImpl) -> Vec<ExprImpl> {
         disjunction.retain(|factor| !greatest_common_divider.contains(factor));
     }
     // now disjunctions == [[A, B], [B], [E]]
-    let remaining = merge_expr_by_binary(
-        disjunctions.into_iter().map(|conjunction| {
-            merge_expr_by_binary(
-                conjunction.into_iter(),
-                ExprType::And,
-                ExprImpl::literal_bool(true),
-            )
-        }),
-        ExprType::Or,
-        ExprImpl::literal_bool(false),
-    );
+    let remaining = ExprImpl::or(disjunctions.into_iter().map(ExprImpl::and));
     // now remaining is (A & B) | (B) | (E)
     // the result is C & D & ((A & B) | (B) | (E))
     greatest_common_divider
