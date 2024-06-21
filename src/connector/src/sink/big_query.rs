@@ -378,13 +378,17 @@ impl Sink for BigQuerySink {
                 .await
             {
                 Err(BQError::ResponseError { error: _ }) => {
-                    _ = self.create_table(
-                        &client,
-                        project_id,
-                        dataset_id,
-                        table_id,
-                        &self.schema.fields,
-                    );
+                    // early return: no need to query schema to check column and type
+                    return self
+                        .create_table(
+                            &client,
+                            project_id,
+                            dataset_id,
+                            table_id,
+                            &self.schema.fields,
+                        )
+                        .await
+                        .map(|_| ());
                 }
                 Err(e) => return Err(SinkError::BigQuery(e.into())),
                 _ => {}
