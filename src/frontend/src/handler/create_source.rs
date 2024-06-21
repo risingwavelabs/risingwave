@@ -750,6 +750,18 @@ pub(crate) fn bind_all_columns(
     }
 }
 
+fn hint_upsert(encode: &Encode) -> String {
+    return format!(
+        r#"Hint: For FORMAT UPSERT ENCODE {encode:}, INCLUDE KEY must be specified and the key column must be used as primary key.
+example:
+    CREATE TABLE <table_name> ( PRIMARY KEY ([rw_key | <key_name>]) )
+    INCLUDE KEY [AS <key_name>]
+    WITH (...)
+    FORMAT UPSERT ENCODE {encode:} (...)
+"#
+    );
+}
+
 /// Bind column from source. Add key column to table columns if necessary.
 /// Return `pk_names`.
 pub(crate) async fn bind_source_pk(
@@ -760,7 +772,7 @@ pub(crate) async fn bind_source_pk(
     with_properties: &WithOptions,
 ) -> Result<Vec<String>> {
     let sql_defined_pk = !sql_defined_pk_names.is_empty();
-    let key_column_name: Option<String> = {
+    let include_key_column_name: Option<String> = {
         // iter columns to check if contains additional columns from key part
         // return the key column names if exists
         columns.iter().find_map(|catalog| {
@@ -793,34 +805,36 @@ pub(crate) async fn bind_source_pk(
         // For all Upsert formats, we only accept one and only key column as primary key.
         // Additional KEY columns must be set in this case and must be primary key.
         (Format::Upsert, encode @ Encode::Json | encode @ Encode::Avro) => {
-            if let Some(ref key_column_name) = key_column_name
+            if let Some(ref key_column_name) = include_key_column_name
                 && sql_defined_pk
             {
-                if sql_defined_pk_names.len() != 1 {
-                    return Err(RwError::from(ProtocolError(format!(
-                        "upsert {:?} supports only one primary key column ({}).",
-                        encode, key_column_name
-                    ))));
-                }
+                // pk is set. check if it's valid
+
                 // the column name have been converted to real value in `handle_addition_columns`
                 // so we don't ignore ascii case here
-                if !key_column_name.eq(sql_defined_pk_names[0].as_str()) {
+                if sql_defined_pk_names.len() != 1
+                    || !key_column_name.eq(sql_defined_pk_names[0].as_str())
+                {
                     return Err(RwError::from(ProtocolError(format!(
-                        "upsert {}'s key column {} not match with sql defined primary key {}",
-                        encode, key_column_name, sql_defined_pk_names[0]
+                        "Only {} can be used as primary key\n\n{}",
+                        sql_defined_pk_names[0],
+                        hint_upsert(&encode)
                     ))));
                 }
                 sql_defined_pk_names
             } else {
-                return if key_column_name.is_none() {
+                // pk not set, or even key not included
+                return if include_key_column_name.is_none() {
                     Err(RwError::from(ProtocolError(format!(
-                        "INCLUDE KEY clause must be set for FORMAT UPSERT ENCODE {:?}",
-                        encode
+                        "INCLUDE KEY clause not set\n\n{}",
+                        hint_upsert(&encode)
                     ))))
                 } else {
                     Err(RwError::from(ProtocolError(format!(
-                        "Primary key must be specified to {} when creating source with FORMAT UPSERT ENCODE {:?}",
-                        key_column_name.unwrap(), encode))))
+                        "Primary key must be specified to {}\n\n{}",
+                        include_key_column_name.unwrap(),
+                        hint_upsert(&encode)
+                    ))))
                 };
             }
         }
@@ -1340,8 +1354,9 @@ pub fn bind_connector_props(
     }
     Ok(WithOptions::new(with_properties))
 }
+
 #[allow(clippy::too_many_arguments)]
-pub async fn bind_create_source(
+pub async fn bind_create_source_or_table_with_connector(
     handler_args: HandlerArgs,
     full_name: ObjectName,
     source_schema: ConnectorSchema,
@@ -1364,9 +1379,25 @@ pub async fn bind_create_source(
         session.get_database_and_schema_id_for_create(schema_name.clone())?;
 
     if !is_create_source && with_properties.is_iceberg_connector() {
-        return Err(
-            ErrorCode::BindError("can't create table with iceberg connector".to_string()).into(),
-        );
+        return Err(ErrorCode::BindError(
+            "can't CREATE TABLE with iceberg connector\n\nHint: use CREATE SOURCE instead"
+                .to_string(),
+        )
+        .into());
+    }
+    if is_create_source {
+        match source_schema.format {
+            Format::Upsert => {
+                return Err(ErrorCode::BindError(format!(
+                    "can't CREATE SOURCE with FORMAT UPSERT\n\nHint: use CREATE TABLE instead\n\n{}",
+                    hint_upsert(&source_schema.row_encode)
+                ))
+                .into());
+            }
+            _ => {
+                // TODO: enhance error message for other formats
+            }
+        }
     }
 
     ensure_table_constraints_supported(&constraints)?;
@@ -1522,7 +1553,7 @@ pub async fn handle_create_source(
     }
     let mut col_id_gen = ColumnIdGenerator::new_initial();
 
-    let (source_catalog, database_id, schema_id) = bind_create_source(
+    let (source_catalog, database_id, schema_id) = bind_create_source_or_table_with_connector(
         handler_args.clone(),
         stmt.source_name,
         source_schema,

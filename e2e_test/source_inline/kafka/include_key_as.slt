@@ -42,7 +42,16 @@ FORMAT UPSERT ENCODE JSON
 db error: ERROR: Failed to run the query
 
 Caused by:
-  Protocol error: INCLUDE KEY clause must be set for FORMAT UPSERT ENCODE Json
+  Bind error: can't CREATE SOURCE with FORMAT UPSERT
+
+Hint: use CREATE TABLE instead
+
+Hint: For FORMAT UPSERT ENCODE JSON, INCLUDE KEY must be specified and the key column must be used as primary key.
+example:
+    CREATE TABLE <table_name> ( PRIMARY KEY ([rw_key | <key_name>]) )
+    INCLUDE KEY [AS <key_name>]
+    WITH (...)
+    FORMAT UPSERT ENCODE JSON (...)
 
 
 # upsert format must have a pk
@@ -64,7 +73,14 @@ FORMAT UPSERT ENCODE JSON
 db error: ERROR: Failed to run the query
 
 Caused by:
-  Protocol error: Primary key must be specified to rw_key when creating source with FORMAT UPSERT ENCODE Json
+  Protocol error: Primary key must be specified to rw_key
+
+Hint: For FORMAT UPSERT ENCODE JSON, INCLUDE KEY must be specified and the key column must be used as primary key.
+example:
+    CREATE TABLE <table_name> ( PRIMARY KEY ([rw_key | <key_name>]) )
+    INCLUDE KEY [AS <key_name>]
+    WITH (...)
+    FORMAT UPSERT ENCODE JSON (...)
 
 
 # upsert format pk must be the key column
@@ -86,7 +102,14 @@ FORMAT UPSERT ENCODE JSON
 db error: ERROR: Failed to run the query
 
 Caused by:
-  Protocol error: upsert JSON's key column rw_key not match with sql defined primary key ID
+  Protocol error: Only ID can be used as primary key
+
+Hint: For FORMAT UPSERT ENCODE JSON, INCLUDE KEY must be specified and the key column must be used as primary key.
+example:
+    CREATE TABLE <table_name> ( PRIMARY KEY ([rw_key | <key_name>]) )
+    INCLUDE KEY [AS <key_name>]
+    WITH (...)
+    FORMAT UPSERT ENCODE JSON (...)
 
 
 statement error
@@ -108,7 +131,16 @@ FORMAT UPSERT ENCODE JSON
 db error: ERROR: Failed to run the query
 
 Caused by:
-  Invalid input syntax: Source does not support PRIMARY KEY constraint, please use "CREATE TABLE" instead
+  Bind error: can't CREATE SOURCE with FORMAT UPSERT
+
+Hint: use CREATE TABLE instead
+
+Hint: For FORMAT UPSERT ENCODE JSON, INCLUDE KEY must be specified and the key column must be used as primary key.
+example:
+    CREATE TABLE <table_name> ( PRIMARY KEY ([rw_key | <key_name>]) )
+    INCLUDE KEY [AS <key_name>]
+    WITH (...)
+    FORMAT UPSERT ENCODE JSON (...)
 
 
 statement ok

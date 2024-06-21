@@ -55,8 +55,8 @@ use crate::catalog::{check_valid_column_name, ColumnId, DatabaseId, SchemaId};
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, InlineNowProcTime};
 use crate::handler::create_source::{
-    bind_columns_from_source, bind_connector_props, bind_create_source, bind_source_watermark,
-    handle_addition_columns, UPSTREAM_SOURCE_KEY,
+    bind_columns_from_source, bind_connector_props, bind_create_source_or_table_with_connector,
+    bind_source_watermark, handle_addition_columns, UPSTREAM_SOURCE_KEY,
 };
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::generic::{CdcScanOptions, SourceNodeKind};
@@ -483,7 +483,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
     let (columns_from_resolve_source, source_info) =
         bind_columns_from_source(session, &source_schema, &with_properties).await?;
 
-    let (source_catalog, database_id, schema_id) = bind_create_source(
+    let (source_catalog, database_id, schema_id) = bind_create_source_or_table_with_connector(
         handler_args.clone(),
         table_name,
         source_schema,
