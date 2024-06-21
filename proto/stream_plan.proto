@@ -725,8 +725,7 @@ message RowIdGenNode {
   uint64 row_id_index = 1;
 }
 
-message NowModeUpdateCurrent {
-}
+message NowModeUpdateCurrent {}
 
 message NowModeGenerateSeries {
   data.Datum start_timestamp = 1;
