@@ -25,9 +25,29 @@ cat <<EOF | rpk topic produce 'test_include_key' -f "%k^%v\\n"
 {"ID": 8}^
 EOF
 
+statement error
+CREATE SOURCE upsert_students (
+    "ID" INT,
+    "firstName" VARCHAR,
+    "lastName" VARCHAR,
+    age INT,
+    height REAL,
+    weight REAL
+)
+WITH (
+	${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+	topic = 'test_include_key')
+FORMAT UPSERT ENCODE JSON
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Protocol error: INCLUDE KEY clause must be set for FORMAT UPSERT ENCODE Json
+
+
 # upsert format must have a pk
 statement error
-CREATE TABLE upsert_students_default_key (
+CREATE TABLE upsert_students (
     "ID" INT,
     "firstName" VARCHAR,
     "lastName" VARCHAR,
@@ -49,7 +69,7 @@ Caused by:
 
 # upsert format pk must be the key column
 statement error
-CREATE TABLE upsert_students_default_key (
+CREATE TABLE upsert_students (
     "ID" INT primary key,
     "firstName" VARCHAR,
     "lastName" VARCHAR,
@@ -69,8 +89,30 @@ Caused by:
   Protocol error: upsert JSON's key column rw_key not match with sql defined primary key ID
 
 
+statement error
+CREATE SOURCE upsert_students (
+    primary key (rw_key),
+    "ID" INT,
+    "firstName" VARCHAR,
+    "lastName" VARCHAR,
+    age INT,
+    height REAL,
+    weight REAL,
+)
+INCLUDE KEY AS rw_key
+WITH (
+	${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+	topic = 'test_include_key')
+FORMAT UPSERT ENCODE JSON
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Invalid input syntax: Source does not support PRIMARY KEY constraint, please use "CREATE TABLE" instead
+
+
 statement ok
-CREATE TABLE upsert_students_default_key (
+CREATE TABLE plain_students (
     "ID" INT,
     "firstName" VARCHAR,
     "lastName" VARCHAR,
@@ -83,6 +125,24 @@ WITH (
 	${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
 	topic = 'test_include_key')
 FORMAT PLAIN ENCODE JSON
+
+
+statement ok
+CREATE TABLE upsert_students (
+    primary key (rw_key),
+    "ID" INT,
+    "firstName" VARCHAR,
+    "lastName" VARCHAR,
+    age INT,
+    height REAL,
+    weight REAL,
+)
+INCLUDE KEY AS rw_key
+WITH (
+	${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+	topic = 'test_include_key')
+FORMAT UPSERT ENCODE JSON
+
 
 system ok
 rpk topic delete 'test_additional_columns' || true;
@@ -126,18 +186,18 @@ FORMAT PLAIN ENCODE JSON
 sleep 3s
 
 query ?
-select count(rw_key) from upsert_students_default_key
+select count(rw_key) from plain_students
 ----
 15
 
 query ???????
-select * from upsert_students_default_key order by "ID";
+select * from plain_students order by ("ID", "firstName");
 ----
+1	Ethan	Martinez	18	6.1	180	\x7b224944223a20317d
 1	John	Doe	18	5.1	150	\x7b224944223a20317d
 1	Olivia	Hernandez	22	5.6	125	\x7b224944223a20317d
-1	Ethan	Martinez	18	6.1	180	\x7b224944223a20317d
-2	Sarah	Smith	19	5.5	120	\x7b224944223a20327d
 2	Emily	Jackson	19	5.4	110	\x7b224944223a20327d
+2	Sarah	Smith	19	5.5	120	\x7b224944223a20327d
 3	Ben	Johnson	21	6	175	\x7b224944223a20337d
 3	Noah	Thompson	21	6.3	195	\x7b224944223a20337d
 4	Emma	Brown	20	5.3	130	\x7b224944223a20347d
@@ -150,7 +210,19 @@ NULL	NULL	NULL	NULL	NULL	NULL	\x7b224944223a20377d
 NULL	NULL	NULL	NULL	NULL	NULL	\x7b224944223a20387d
 
 
-query I
+query ???????
+select * from upsert_students order by "ID";
+----
+1	Ethan	Martinez	18	6.1	180	\x7b224944223a20317d
+2	Emily	Jackson	19	5.4	110	\x7b224944223a20327d
+3	Noah	Thompson	21	6.3	195	\x7b224944223a20337d
+4	Emma	Brown	20	5.3	130	\x7b224944223a20347d
+5	Michael	Williams	22	6.2	190	\x7b224944223a20357d
+6	Leah	Davis	18	5.7	140	\x7b224944223a20367d
+9	Jacob	Anderson	20	5.8	155	\x7b224944223a20397d
+
+
+query ?
 SELECT count(*)
 FROM   additional_columns
 WHERE  key_col IS NOT NULL
@@ -162,22 +234,19 @@ WHERE  key_col IS NOT NULL
 101
 
 
-query TT
+query ??
 SELECT (header_col[1]).key AS key, (header_col[1]).value::text AS value
 FROM   additional_columns limit 1;
 ----
-header1 \x7631
+header1	\x7631
 
-query TTTT
+query ????
 select header_col_1, header_col_2, header_col_3, header_col_4 from additional_columns_1 limit 1
 ----
-\x7631 \x7632 v2 NULL
+\x7631	\x7632	v2	NULL
 
 statement ok
-drop table upsert_students_default_key
+drop table upsert_students
 
 statement ok
-drop table additional_columns
-
-statement ok
-drop table additional_columns_1
+drop table plain_students
