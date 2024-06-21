@@ -245,9 +245,11 @@ impl<'a> MessageMeta<'a> {
 }
 
 trait OpAction {
-    fn output_for<'a>(datum: impl Into<DatumCow<'a>>) -> DatumCow<'a>;
+    type Output<'a>;
 
-    fn apply(builder: &mut ArrayBuilderImpl, output: DatumCow<'_>);
+    fn output_for<'a>(datum: impl Into<DatumCow<'a>>) -> Self::Output<'a>;
+
+    fn apply(builder: &mut ArrayBuilderImpl, output: Self::Output<'_>);
 
     fn rollback(builder: &mut ArrayBuilderImpl);
 
@@ -257,8 +259,10 @@ trait OpAction {
 struct OpActionInsert;
 
 impl OpAction for OpActionInsert {
+    type Output<'a> = DatumCow<'a>;
+
     #[inline(always)]
-    fn output_for<'a>(datum: impl Into<DatumCow<'a>>) -> DatumCow<'a> {
+    fn output_for<'a>(datum: impl Into<DatumCow<'a>>) -> Self::Output<'a> {
         datum.into()
     }
 
@@ -281,8 +285,10 @@ impl OpAction for OpActionInsert {
 struct OpActionDelete;
 
 impl OpAction for OpActionDelete {
+    type Output<'a> = DatumCow<'a>;
+
     #[inline(always)]
-    fn output_for<'a>(datum: impl Into<DatumCow<'a>>) -> DatumCow<'a> {
+    fn output_for<'a>(datum: impl Into<DatumCow<'a>>) -> Self::Output<'a> {
         datum.into()
     }
 
@@ -302,6 +308,36 @@ impl OpAction for OpActionDelete {
     }
 }
 
+struct OpActionUpdate;
+
+impl OpAction for OpActionUpdate {
+    type Output<'a> = (DatumCow<'a>, DatumCow<'a>);
+
+    #[inline(always)]
+    fn output_for<'a>(datum: impl Into<DatumCow<'a>>) -> Self::Output<'a> {
+        let datum = datum.into();
+        (datum.clone(), datum)
+    }
+
+    #[inline(always)]
+    fn apply(builder: &mut ArrayBuilderImpl, output: (DatumCow<'_>, DatumCow<'_>)) {
+        builder.append(output.0);
+        builder.append(output.1);
+    }
+
+    #[inline(always)]
+    fn rollback(builder: &mut ArrayBuilderImpl) {
+        builder.pop().unwrap();
+        builder.pop().unwrap();
+    }
+
+    #[inline(always)]
+    fn finish(writer: &mut SourceStreamChunkRowWriter<'_>) {
+        writer.append_op(Op::UpdateDelete);
+        writer.append_op(Op::UpdateInsert);
+    }
+}
+
 impl SourceStreamChunkRowWriter<'_> {
     fn append_op(&mut self, op: Op) {
         self.op_builder.push(op);
@@ -310,7 +346,7 @@ impl SourceStreamChunkRowWriter<'_> {
 
     fn do_action<'a, A: OpAction>(
         &'a mut self,
-        mut f: impl FnMut(&SourceColumnDesc) -> AccessResult<DatumCow<'a>>,
+        mut f: impl FnMut(&SourceColumnDesc) -> AccessResult<A::Output<'a>>,
     ) -> AccessResult<()> {
         let mut parse_field = |desc: &SourceColumnDesc| {
             match f(desc) {
@@ -506,6 +542,22 @@ impl SourceStreamChunkRowWriter<'_> {
         D: Into<DatumCow<'a>>,
     {
         self.do_action::<OpActionDelete>(|desc| f(desc).map(Into::into))
+    }
+
+    /// Write a `Update` record to the [`StreamChunk`], with the given fallible closure that
+    /// produces two [`Datum`]s as old and new value by corresponding [`SourceColumnDesc`].
+    ///
+    /// See the [struct-level documentation](SourceStreamChunkRowWriter) for more details.
+    #[inline(always)]
+    pub fn do_update<'a, D1, D2>(
+        &mut self,
+        mut f: impl FnMut(&SourceColumnDesc) -> AccessResult<(D1, D2)>,
+    ) -> AccessResult<()>
+    where
+        D1: Into<DatumCow<'a>>,
+        D2: Into<DatumCow<'a>>,
+    {
+        self.do_action::<OpActionUpdate>(|desc| f(desc).map(|(old, new)| (old.into(), new.into())))
     }
 }
 
