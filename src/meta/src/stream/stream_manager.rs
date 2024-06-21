@@ -1111,26 +1111,27 @@ mod tests {
                 env.clone(),
             ));
 
-            let barrier_manager = GlobalBarrierManager::new(
-                scheduled_barriers,
-                env.clone(),
-                metadata_manager.clone(),
-                hummock_manager,
-                source_manager.clone(),
-                sink_manager,
-                meta_metrics.clone(),
-                stream_rpc_manager.clone(),
-                scale_controller.clone(),
-            );
-
-            let stream_manager = GlobalStreamManager::new(
+            let stream_manager = Arc::new(GlobalStreamManager::new(
                 env.clone(),
                 metadata_manager,
                 barrier_scheduler.clone(),
                 source_manager.clone(),
                 stream_rpc_manager,
                 scale_controller.clone(),
-            )?;
+            ))?;
+
+            let barrier_manager = GlobalBarrierManager::new(
+                scheduled_barriers,
+                env.clone(),
+                metadata_manager.clone(),
+                hummock_manager,
+                source_manager.clone(),
+                stream_manager.clone(),
+                sink_manager,
+                meta_metrics.clone(),
+                stream_rpc_manager.clone(),
+                scale_controller.clone(),
+            );
 
             let (join_handle_2, shutdown_tx_2) = GlobalBarrierManager::start(barrier_manager);
 
@@ -1143,7 +1144,7 @@ mod tests {
             }
 
             Ok(Self {
-                global_stream_manager: Arc::new(stream_manager),
+                global_stream_manager: stream_manager.clone(),
                 catalog_manager,
                 fragment_manager,
                 state,

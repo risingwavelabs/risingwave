@@ -548,12 +548,24 @@ pub async fn start_service_as_election_leader(
         env.clone(),
     ));
 
+    let stream_manager = Arc::new(
+        GlobalStreamManager::new(
+            env.clone(),
+            metadata_manager.clone(),
+            barrier_scheduler.clone(),
+            source_manager.clone(),
+            stream_rpc_manager.clone(),
+            scale_controller.clone(),
+        )
+        .unwrap(),
+    );
     let barrier_manager = GlobalBarrierManager::new(
         scheduled_barriers,
         env.clone(),
         metadata_manager.clone(),
         hummock_manager.clone(),
         source_manager.clone(),
+        stream_manager.clone(),
         sink_manager.clone(),
         meta_metrics.clone(),
         stream_rpc_manager.clone(),
@@ -566,18 +578,6 @@ pub async fn start_service_as_election_leader(
             source_manager.run().await.unwrap();
         });
     }
-
-    let stream_manager = Arc::new(
-        GlobalStreamManager::new(
-            env.clone(),
-            metadata_manager.clone(),
-            barrier_scheduler.clone(),
-            source_manager.clone(),
-            stream_rpc_manager,
-            scale_controller.clone(),
-        )
-        .unwrap(),
-    );
 
     hummock_manager
         .may_fill_backward_state_table_info()

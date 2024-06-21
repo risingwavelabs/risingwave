@@ -64,7 +64,7 @@ use crate::manager::{
 };
 use crate::model::{ActorId, TableFragments};
 use crate::rpc::metrics::MetaMetrics;
-use crate::stream::{ScaleControllerRef, SourceManagerRef};
+use crate::stream::{GlobalStreamManagerRef, ScaleControllerRef, SourceManagerRef};
 use crate::{MetaError, MetaResult};
 
 mod command;
@@ -156,6 +156,8 @@ pub struct GlobalBarrierManagerContext {
     scale_controller: ScaleControllerRef,
 
     sink_manager: SinkCoordinatorManager,
+
+    stream_manager: GlobalStreamManagerRef,
 
     pub(super) metrics: Arc<MetaMetrics>,
 
@@ -439,6 +441,7 @@ impl GlobalBarrierManager {
         metadata_manager: MetadataManager,
         hummock_manager: HummockManagerRef,
         source_manager: SourceManagerRef,
+        stream_manager: GlobalStreamManagerRef,
         sink_manager: SinkCoordinatorManager,
         metrics: Arc<MetaMetrics>,
         stream_rpc_manager: StreamRpcManager,
@@ -463,6 +466,7 @@ impl GlobalBarrierManager {
             hummock_manager,
             source_manager,
             scale_controller,
+            stream_manager,
             sink_manager,
             metrics,
             tracker: Arc::new(Mutex::new(tracker)),
