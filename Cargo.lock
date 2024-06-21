@@ -11022,7 +11022,6 @@ dependencies = [
  "mysql_common",
  "nexmark",
  "num-bigint",
- "opendal 0.45.1",
  "opendal 0.47.0",
  "openssl",
  "parking_lot 0.12.1",

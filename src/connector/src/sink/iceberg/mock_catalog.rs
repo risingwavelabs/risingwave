@@ -16,8 +16,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use iceberg_opendal::services::Memory;
-use iceberg_opendal::Operator;
+use opendal::services::Memory;
+use opendal::Operator;
 use icelake::catalog::{Catalog, UpdateTable};
 use icelake::types::{Field, PartitionField, Schema, Struct, TableMetadata};
 use icelake::{Table, TableIdentifier};
