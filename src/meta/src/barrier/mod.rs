@@ -69,7 +69,7 @@ use crate::{MetaError, MetaResult};
 
 mod command;
 mod info;
-mod notifier;
+pub mod notifier;
 mod progress;
 mod recovery;
 mod rpc;
