@@ -18,6 +18,7 @@ use fixedbitset::FixedBitSet;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_pb::expr::expr_node::Type;
 
+use super::now::RewriteNowToProcTime;
 use super::{Expr, ExprImpl, ExprRewriter, ExprVisitor, FunctionCall, InputRef};
 use crate::expr::ExprType;
 
@@ -500,6 +501,11 @@ impl ExprVisitor for CountNow {
     fn visit_now(&mut self, _: &super::Now) {
         self.count += 1;
     }
+}
+
+pub fn rewrite_now_to_proctime(expr: ExprImpl) -> ExprImpl {
+    let mut r = RewriteNowToProcTime;
+    r.rewrite_expr(expr)
 }
 
 /// analyze if the expression can derive a watermark from some input watermark. If it can

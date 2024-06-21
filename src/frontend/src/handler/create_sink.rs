@@ -50,7 +50,7 @@ use crate::catalog::catalog_service::CatalogReadGuard;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::view_catalog::ViewCatalog;
 use crate::error::{ErrorCode, Result, RwError};
-use crate::expr::{ExprImpl, InputRef};
+use crate::expr::{rewrite_now_to_proctime, ExprImpl, InputRef};
 use crate::handler::alter_table_column::fetch_table_catalog_for_alter;
 use crate::handler::create_mv::parse_column_names;
 use crate::handler::create_table::{generate_stream_graph_for_table, ColumnIdGenerator};
@@ -723,7 +723,10 @@ fn derive_default_column_project_for_sink(
             continue;
         }
 
-        let default_col_expr = || -> ExprImpl { target_table_catalog.default_column_expr(idx) };
+        let default_col_expr = || -> ExprImpl {
+            rewrite_now_to_proctime(target_table_catalog.default_column_expr(idx))
+        };
+
         let sink_col_expr = |sink_col_idx: usize| -> Result<ExprImpl> {
             derive_sink_to_table_expr(sink_schema, sink_col_idx, table_column.data_type())
         };
