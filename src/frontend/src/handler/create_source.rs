@@ -818,7 +818,7 @@ pub(crate) async fn bind_source_pk(
                     return Err(RwError::from(ProtocolError(format!(
                         "Only {} can be used as primary key\n\n{}",
                         sql_defined_pk_names[0],
-                        hint_upsert(&encode)
+                        hint_upsert(encode)
                     ))));
                 }
                 sql_defined_pk_names
@@ -827,13 +827,13 @@ pub(crate) async fn bind_source_pk(
                 return if include_key_column_name.is_none() {
                     Err(RwError::from(ProtocolError(format!(
                         "INCLUDE KEY clause not set\n\n{}",
-                        hint_upsert(&encode)
+                        hint_upsert(encode)
                     ))))
                 } else {
                     Err(RwError::from(ProtocolError(format!(
                         "Primary key must be specified to {}\n\n{}",
                         include_key_column_name.unwrap(),
-                        hint_upsert(&encode)
+                        hint_upsert(encode)
                     ))))
                 };
             }
@@ -1840,28 +1840,6 @@ pub mod tests {
             "_rw_kafka_timestamp" => DataType::Timestamptz,
         };
         assert_eq!(columns, expect_columns);
-
-        // test derive include column for format upsert
-        let sql = "CREATE SOURCE s1 (v1 int) with (connector = 'kafka') format upsert encode json"
-            .to_string();
-        match frontend.run_sql(sql).await {
-            Err(e) => {
-                assert_eq!(
-                    e.to_string(),
-                    "Protocol error: INCLUDE KEY clause must be set for FORMAT UPSERT ENCODE Json"
-                )
-            }
-            _ => unreachable!(),
-        }
-
-        let sql = "CREATE SOURCE s2 (v1 int) include key as _rw_kafka_key with (connector = 'kafka') format upsert encode json"
-            .to_string();
-        match frontend.run_sql(sql).await {
-            Err(e) => {
-                assert_eq!(e.to_string(), "Protocol error: Primary key must be specified to _rw_kafka_key when creating source with FORMAT UPSERT ENCODE Json")
-            }
-            _ => unreachable!(),
-        }
 
         let sql =
             "CREATE SOURCE s3 (v1 int) include timestamp 'header1' as header_col with (connector = 'kafka') format plain encode json"

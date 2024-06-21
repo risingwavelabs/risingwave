@@ -198,6 +198,28 @@ WITH (
 FORMAT PLAIN ENCODE JSON
 
 # header with varchar type & non-exist header key
+statement error
+create table additional_columns_1 (a int)
+include key as key_col
+include partition as partition_col
+include offset as offset_col
+include timestamp 'header1' as timestamp_col
+include header 'header1' as header_col_1
+include header 'header2' as header_col_2
+include header 'header2' varchar as header_col_3
+include header 'header3' as header_col_4
+WITH (
+	${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+	topic = 'test_additional_columns')
+FORMAT PLAIN ENCODE JSON
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Protocol error: Only header column can have inner field, but got "timestamp"
+
+
+# header with varchar type & non-exist header key
 statement ok
 create table additional_columns_1 (a int)
 include key as key_col
