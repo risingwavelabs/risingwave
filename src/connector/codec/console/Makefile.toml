@@ -1,0 +1,29 @@
+[tasks.codec-console]
+private = true
+script = "cargo run"
+cwd = "./src/connector/codec/console/"
+
+[tasks.dev-codec-console]
+private = true
+script = "cargo watch"
+cwd = "./src/connector/codec/console/"
+
+[tasks.dev-web-codec-console]
+dependencies = ["install-trunk"]
+private = true
+cwd = "./src/connector/codec/console/"
+
+script = """
+rustup target add wasm32-unknown-unknown
+export RUSTFLAGS=--cfg=web_sys_unstable_apis
+cargo build --target wasm32-unknown-unknown
+# Trunk will rebuild automatically if you edit the project.
+trunk serve
+"""
+
+[tasks.install-trunk]
+private = true
+category = "RiseDev - Check"
+install_crate = { min_version = "0.20.2", crate_name = "trunk", binary = "trunk", test_arg = [
+    "--help",
+], install_command = "binstall" }
