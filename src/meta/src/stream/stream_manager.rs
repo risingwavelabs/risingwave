@@ -29,7 +29,10 @@ use tracing::Instrument;
 
 use super::{Locations, RescheduleOptions, ScaleControllerRef, TableResizePolicy};
 use crate::barrier::notifier::Notifier;
-use crate::barrier::{BarrierScheduler, Command, ReplaceTablePlan, StreamRpcManager};
+use crate::barrier::{
+    BarrierScheduler, Command, ReplaceTablePlan, StreamRpcManager, TableActorMap,
+    TableDefinitionMap, TableFragmentMap, TableNotifierMap, TableUpstreamMvCountMap,
+};
 use crate::manager::{DdlType, MetaSrvEnv, MetadataManager, StreamingJob};
 use crate::model::{ActorId, FragmentId, MetadataModel, TableFragments, TableParallelism};
 use crate::stream::{to_build_actor_info, SourceManagerRef};
@@ -777,7 +780,15 @@ impl GlobalStreamManager {
             });
     }
 
-    pub async fn recover_background_mv_progress_v1(&self) -> MetaResult<()> {
+    pub(crate) async fn recover_background_mv_progress_v1(
+        &self,
+    ) -> MetaResult<(
+        TableActorMap,
+        TableUpstreamMvCountMap,
+        TableDefinitionMap,
+        TableNotifierMap,
+        TableFragmentMap,
+    )> {
         let mgr = self.metadata_manager.as_v1_ref();
         let mviews = mgr.catalog_manager.list_creating_background_mvs().await;
 
@@ -828,8 +839,9 @@ impl GlobalStreamManager {
                     // Once notified that job is finished we need to notify frontend.
                     // and mark catalog as created and commit to meta.
                     // both of these are done by catalog manager.
+                    let stream_job = StreamingJob::MaterializedView(table.clone());
                     catalog_manager
-                        .finish_create_table_procedure(internal_tables, table.clone())
+                        .finish_stream_job(stream_job, internal_tables)
                         .await?;
                     tracing::debug!("notified frontend for stream job {}", table.id);
                 };
@@ -847,7 +859,13 @@ impl GlobalStreamManager {
                 }
             });
         }
-        Ok(())
+        Ok((
+            table_map.into(),
+            upstream_mv_counts.into(),
+            mview_definitions.into(),
+            senders.into(),
+            table_fragment_map.into(),
+        ))
     }
 }
 

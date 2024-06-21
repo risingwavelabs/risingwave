@@ -123,100 +123,28 @@ impl GlobalBarrierManagerContext {
     async fn recover_background_mv_progress(&self) -> MetaResult<()> {
         match &self.metadata_manager {
             MetadataManager::V1(_) => {
-                self.stream_manager
-                    .recover_background_mv_progress_v1()
-                    .await
+                let (table_map, upstream_mv_counts, mview_definitions, senders, table_fragment_map) =
+                    self.stream_manager
+                        .recover_background_mv_progress_v1()
+                        .await?;
+                let version_stats = self.hummock_manager.get_version_stats().await;
+                // If failed, enter recovery mode.
+                {
+                    let mut tracker = self.tracker.lock().await;
+                    *tracker = CreateMviewProgressTracker::recover(
+                        table_map,
+                        upstream_mv_counts,
+                        mview_definitions,
+                        version_stats,
+                        senders,
+                        table_fragment_map,
+                        self.metadata_manager.clone(),
+                    );
+                }
+                Ok(())
             }
             MetadataManager::V2(_) => self.recover_background_mv_progress_v2().await,
         }
-    }
-
-    async fn recover_background_mv_progress_v1(&self) -> MetaResult<()> {
-        let mgr = self.metadata_manager.as_v1_ref();
-        let mviews = mgr.catalog_manager.list_creating_background_mvs().await;
-
-        let mut mview_definitions = HashMap::new();
-        let mut table_map = HashMap::new();
-        let mut table_fragment_map = HashMap::new();
-        let mut upstream_mv_counts = HashMap::new();
-        let mut senders = HashMap::new();
-        let mut receivers = Vec::new();
-        for mview in mviews {
-            let table_id = TableId::new(mview.id);
-            let fragments = mgr
-                .fragment_manager
-                .select_table_fragments_by_table_id(&table_id)
-                .await?;
-            let internal_table_ids = fragments.internal_table_ids();
-            let internal_tables = mgr.catalog_manager.get_tables(&internal_table_ids).await;
-            if fragments.is_created() {
-                // If the mview is already created, we don't need to recover it.
-                mgr.catalog_manager
-                    .finish_create_table_procedure(internal_tables, mview)
-                    .await?;
-                tracing::debug!("notified frontend for stream job {}", table_id.table_id);
-            } else {
-                table_map.insert(table_id, fragments.backfill_actor_ids());
-                mview_definitions.insert(table_id, mview.definition.clone());
-                upstream_mv_counts.insert(table_id, fragments.dependent_table_ids());
-                table_fragment_map.insert(table_id, fragments);
-                let (finished_tx, finished_rx) = oneshot::channel();
-                senders.insert(
-                    table_id,
-                    Notifier {
-                        finished: Some(finished_tx),
-                        ..Default::default()
-                    },
-                );
-                receivers.push((mview, internal_tables, finished_rx));
-            }
-        }
-
-        let version_stats = self.hummock_manager.get_version_stats().await;
-        // If failed, enter recovery mode.
-        {
-            let mut tracker = self.tracker.lock().await;
-            *tracker = CreateMviewProgressTracker::recover(
-                table_map.into(),
-                upstream_mv_counts.into(),
-                mview_definitions.into(),
-                version_stats,
-                senders.into(),
-                table_fragment_map.into(),
-                self.metadata_manager.clone(),
-            );
-        }
-        for (table, internal_tables, finished) in receivers {
-            let catalog_manager = mgr.catalog_manager.clone();
-            tokio::spawn(async move {
-                let res: MetaResult<()> = try {
-                    tracing::debug!("recovering stream job {}", table.id);
-                    finished.await.ok().context("failed to finish command")??;
-
-                    tracing::debug!("finished stream job {}", table.id);
-                    // Once notified that job is finished we need to notify frontend.
-                    // and mark catalog as created and commit to meta.
-                    // both of these are done by catalog manager.
-                    catalog_manager
-                        .finish_create_table_procedure(internal_tables, table.clone())
-                        .await?;
-                    tracing::debug!("notified frontend for stream job {}", table.id);
-                };
-                if let Err(e) = res.as_ref() {
-                    tracing::error!(
-                        id = table.id,
-                        error = %e.as_report(),
-                        "stream job interrupted, will retry after recovery",
-                    );
-                    // NOTE(kwannoel): We should not cleanup stream jobs,
-                    // we don't know if it's just due to CN killed,
-                    // or the job has actually failed.
-                    // Users have to manually cancel the stream jobs,
-                    // if they want to clean it.
-                }
-            });
-        }
-        Ok(())
     }
 
     async fn recover_background_mv_progress_v2(&self) -> MetaResult<()> {
