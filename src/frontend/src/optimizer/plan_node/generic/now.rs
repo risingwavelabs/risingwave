@@ -64,7 +64,10 @@ impl GenericPlanNode for Now {
     }
 
     fn stream_key(&self) -> Option<Vec<usize>> {
-        Some(vec![])
+        match self.mode {
+            Mode::UpdateCurrent => Some(vec![]),
+            Mode::GenerateSeries { .. } => Some(vec![0]),
+        }
     }
 
     fn ctx(&self) -> OptimizerContextRef {

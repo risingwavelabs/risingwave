@@ -15,7 +15,7 @@
 use pretty_xmlish::XmlNode;
 use risingwave_common::bail;
 
-use super::generic::{self, GenericPlanRef};
+use super::generic::{self, GenericPlanRef, Mode};
 use super::utils::{childless_record, Distill};
 use super::{
     ColPrunable, ColumnPruningContext, ExprRewritable, Logical, LogicalFilter, PlanBase, PlanRef,
@@ -36,6 +36,13 @@ impl LogicalNow {
     pub fn new(core: generic::Now) -> Self {
         let base = PlanBase::new_logical_with_core(&core);
         Self { base, core }
+    }
+
+    pub fn max_one_row(&self) -> bool {
+        match self.core.mode {
+            Mode::UpdateCurrent => true,
+            Mode::GenerateSeries { .. } => false,
+        }
     }
 }
 
