@@ -121,7 +121,7 @@ impl EscapeChar {
 mod tests {
     use risingwave_expr::scalar::like::EscapeChar;
 
-    use super::{i_like_default, like, like_default, like_impl, like_impl_escape};
+    use super::{i_like_default, like, like_default};
 
     static CASES: &[(&str, &str, bool, bool)] = &[
         (r#"ABCDE"#, r#"%abcde%"#, false, false),
