@@ -16,6 +16,7 @@ use std::ops::{Div, Mul};
 use std::sync::Arc;
 
 use arrow_array_iceberg::{self as arrow_array, ArrayRef};
+use arrow_buffer_iceberg::IntervalMonthDayNano as ArrowIntervalType;
 use num_traits::abs;
 use {
     arrow_buffer_iceberg as arrow_buffer, arrow_cast_iceberg as arrow_cast,
@@ -23,12 +24,37 @@ use {
 };
 
 use crate::array::{Array, ArrayError, ArrayImpl, DataChunk, DataType, DecimalArray};
-use crate::types::StructType;
+use crate::types::{Interval, StructType};
 
-#[path = "./arrow_impl_52.rs"]
+impl ArrowIntervalTypeTrait for ArrowIntervalType {
+    fn to_interval(self) -> Interval {
+        // XXX: the arrow-rs decoding is incorrect
+        // let (months, days, ns) = arrow_array::types::IntervalMonthDayNanoType::to_parts(value);
+        Interval::from_month_day_usec(self.months, self.days, self.nanoseconds / 1000)
+    }
+
+    fn from_interval(value: Interval) -> Self {
+        // XXX: the arrow-rs encoding is incorrect
+        // arrow_array::types::IntervalMonthDayNanoType::make_value(
+        //     self.months(),
+        //     self.days(),
+        //     // TODO: this may overflow and we need `try_into`
+        //     self.usecs() * 1000,
+        // )
+        Self {
+            months: value.months(),
+            days: value.days(),
+            nanoseconds: value.usecs() * 1000,
+        }
+    }
+}
+
+#[path = "./arrow_impl.rs"]
 mod arrow_impl;
 
 use arrow_impl::{FromArrow, ToArrow};
+
+use crate::array::arrow::ArrowIntervalTypeTrait;
 
 pub struct IcebergArrowConvert;
 
