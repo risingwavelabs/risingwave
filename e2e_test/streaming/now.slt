@@ -1,0 +1,27 @@
+system ok
+psql -h $RISEDEV_RW_FRONTEND_LISTEN_ADDRESS -p $RISEDEV_RW_FRONTEND_PORT -U root -d dev -c "
+create materialized view mv as
+select * from generate_series(
+    to_timestamp($(date +%s) - 10),
+    now(),
+    interval '1 second'
+);
+"
+
+statement ok
+flush;
+
+query I
+select count(*) > 10 from mv;
+----
+t
+
+sleep 2s
+
+query I
+select count(*) > 12 from mv;
+----
+t
+
+statement ok
+drop materialized view mv;
