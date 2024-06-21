@@ -329,16 +329,6 @@ impl Barrier {
         }
     }
 
-    pub fn new_initial_for_test(epoch: u64) -> Self {
-        Self {
-            epoch: EpochPair::new_test_epoch(epoch),
-            kind: BarrierKind::Initial,
-            tracing_context: TracingContext::none(),
-            mutation: Default::default(),
-            passed_actors: Default::default(),
-        }
-    }
-
     #[must_use]
     pub fn with_mutation(self, mutation: Mutation) -> Self {
         Self {

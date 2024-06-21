@@ -189,7 +189,7 @@ impl<S: StateStore> NowExecutor<S> {
                     };
 
                     yield Message::Chunk(chunk);
-                    last_timestamp = curr_timestamp.clone();
+                    last_timestamp.clone_from(&curr_timestamp)
                 }
                 (
                     NowMode::GenerateSeries {
@@ -302,22 +302,20 @@ mod tests {
 
     use super::*;
     use crate::executor::test_utils::StreamExecutorTestExt;
-    use crate::task::ActorEvalErrorReport;
 
     #[tokio::test]
     async fn test_now() -> StreamExecutorResult<()> {
         let state_store = create_state_store();
-        let (tx, mut now_executor) = create_executor(NowMode::UpdateCurrent, &state_store).await;
+        let (tx, mut now) = create_executor(NowMode::UpdateCurrent, &state_store).await;
 
         // Init barrier
-        tx.send(Barrier::with_prev_epoch_for_test(1 << 16, 1))
-            .unwrap();
+        tx.send(Barrier::new_test_barrier(test_epoch(1))).unwrap();
 
         // Consume the barrier
-        now_executor.next_unwrap_ready_barrier()?;
+        now.next_unwrap_ready_barrier()?;
 
         // Consume the data chunk
-        let chunk_msg = now_executor.next_unwrap_ready_chunk()?;
+        let chunk_msg = now.next_unwrap_ready_chunk()?;
 
         assert_eq!(
             chunk_msg.compact(),
@@ -328,7 +326,7 @@ mod tests {
         );
 
         // Consume the watermark
-        let watermark = now_executor.next_unwrap_ready_watermark()?;
+        let watermark = now.next_unwrap_ready_watermark()?;
 
         assert_eq!(
             watermark,
@@ -339,14 +337,17 @@ mod tests {
             )
         );
 
-        tx.send(Barrier::with_prev_epoch_for_test(2 << 16, 1 << 16))
-            .unwrap();
+        tx.send(Barrier::with_prev_epoch_for_test(
+            test_epoch(2),
+            test_epoch(1),
+        ))
+        .unwrap();
 
         // Consume the barrier
-        now_executor.next_unwrap_ready_barrier()?;
+        now.next_unwrap_ready_barrier()?;
 
         // Consume the data chunk
-        let chunk_msg = now_executor.next_unwrap_ready_chunk()?;
+        let chunk_msg = now.next_unwrap_ready_chunk()?;
 
         assert_eq!(
             chunk_msg.compact(),
@@ -358,7 +359,7 @@ mod tests {
         );
 
         // Consume the watermark
-        let watermark = now_executor.next_unwrap_ready_watermark()?;
+        let watermark = now.next_unwrap_ready_watermark()?;
 
         assert_eq!(
             watermark,
@@ -370,21 +371,25 @@ mod tests {
         );
 
         // No more messages until the next barrier
-        now_executor.next_unwrap_pending();
+        now.next_unwrap_pending();
 
         // Recovery
-        drop((tx, now_executor));
-        let (tx, mut now_executor) = create_executor(NowMode::UpdateCurrent, &state_store).await;
-        tx.send(Barrier::with_prev_epoch_for_test(3 << 16, 1 << 16))
-            .unwrap();
+        drop((tx, now));
+        let (tx, mut now) = create_executor(NowMode::UpdateCurrent, &state_store).await;
+        tx.send(Barrier::with_prev_epoch_for_test(
+            test_epoch(3),
+            test_epoch(2),
+        ))
+        .unwrap();
 
         // Consume the barrier
-        now_executor.next_unwrap_ready_barrier()?;
+        now.next_unwrap_ready_barrier()?;
 
         // Consume the data chunk
-        let chunk_msg = now_executor.next_unwrap_ready_chunk()?;
+        let chunk_msg = now.next_unwrap_ready_chunk()?;
         assert_eq!(
             chunk_msg.compact(),
+            // the last chunk was not checkpointed so the deleted old value should be `001`
             StreamChunk::from_pretty(
                 " TZ
                 - 2021-04-01T00:00:00.001Z
@@ -393,7 +398,7 @@ mod tests {
         );
 
         // Consume the watermark
-        let watermark = now_executor.next_unwrap_ready_watermark()?;
+        let watermark = now.next_unwrap_ready_watermark()?;
 
         assert_eq!(
             watermark,
@@ -405,28 +410,32 @@ mod tests {
         );
 
         // Recovery with paused
-        drop((tx, now_executor));
-        let (tx, mut now_executor) = create_executor(NowMode::UpdateCurrent, &state_store).await;
-        tx.send(Barrier::new_test_barrier(4 << 16).with_mutation(Mutation::Pause))
-            .unwrap();
-
-        // Consume the barrier
-        now_executor.next_unwrap_ready_barrier()?;
-
-        // There should be no messages until `Resume`
-        now_executor.next_unwrap_pending();
-
-        // Resume barrier
+        drop((tx, now));
+        let (tx, mut now) = create_executor(NowMode::UpdateCurrent, &state_store).await;
         tx.send(
-            Barrier::with_prev_epoch_for_test(5 << 16, 4 << 16).with_mutation(Mutation::Resume),
+            Barrier::with_prev_epoch_for_test(test_epoch(4), test_epoch(3))
+                .with_mutation(Mutation::Pause),
         )
         .unwrap();
 
         // Consume the barrier
-        now_executor.next_unwrap_ready_barrier()?;
+        now.next_unwrap_ready_barrier()?;
+
+        // There should be no messages until `Resume`
+        now.next_unwrap_pending();
+
+        // Resume barrier
+        tx.send(
+            Barrier::with_prev_epoch_for_test(test_epoch(5), test_epoch(4))
+                .with_mutation(Mutation::Resume),
+        )
+        .unwrap();
+
+        // Consume the barrier
+        now.next_unwrap_ready_barrier()?;
 
         // Consume the data chunk
-        let chunk_msg = now_executor.next_unwrap_ready_chunk()?;
+        let chunk_msg = now.next_unwrap_ready_chunk()?;
         assert_eq!(
             chunk_msg.compact(),
             StreamChunk::from_pretty(
@@ -437,7 +446,7 @@ mod tests {
         );
 
         // Consume the watermark
-        let watermark = now_executor.next_unwrap_ready_watermark()?;
+        let watermark = now.next_unwrap_ready_watermark()?;
 
         assert_eq!(
             watermark,
@@ -454,29 +463,30 @@ mod tests {
     #[tokio::test]
     async fn test_now_start_with_paused() -> StreamExecutorResult<()> {
         let state_store = create_state_store();
-        let (tx, mut now_executor) = create_executor(NowMode::UpdateCurrent, &state_store).await;
+        let (tx, mut now) = create_executor(NowMode::UpdateCurrent, &state_store).await;
 
         // Init barrier
-        tx.send(Barrier::with_prev_epoch_for_test(1 << 16, 1).with_mutation(Mutation::Pause))
+        tx.send(Barrier::new_test_barrier(test_epoch(1)).with_mutation(Mutation::Pause))
             .unwrap();
 
         // Consume the barrier
-        now_executor.next_unwrap_ready_barrier()?;
+        now.next_unwrap_ready_barrier()?;
 
         // There should be no messages until `Resume`
-        now_executor.next_unwrap_pending();
+        now.next_unwrap_pending();
 
         // Resume barrier
         tx.send(
-            Barrier::with_prev_epoch_for_test(2 << 16, 1 << 16).with_mutation(Mutation::Resume),
+            Barrier::with_prev_epoch_for_test(test_epoch(2), test_epoch(1))
+                .with_mutation(Mutation::Resume),
         )
         .unwrap();
 
         // Consume the barrier
-        now_executor.next_unwrap_ready_barrier()?;
+        now.next_unwrap_ready_barrier()?;
 
         // Consume the data chunk
-        let chunk_msg = now_executor.next_unwrap_ready_chunk()?;
+        let chunk_msg = now.next_unwrap_ready_chunk()?;
 
         assert_eq!(
             chunk_msg.compact(),
@@ -487,7 +497,7 @@ mod tests {
         );
 
         // Consume the watermark
-        let watermark = now_executor.next_unwrap_ready_watermark()?;
+        let watermark = now.next_unwrap_ready_watermark()?;
 
         assert_eq!(
             watermark,
@@ -499,7 +509,7 @@ mod tests {
         );
 
         // No more messages until the next barrier
-        now_executor.next_unwrap_pending();
+        now.next_unwrap_pending();
 
         Ok(())
     }
@@ -510,17 +520,21 @@ mod tests {
     }
 
     async fn test_now_generate_series_inner() -> StreamExecutorResult<()> {
+        let start_timestamp = Timestamptz::from_secs(1617235190).unwrap(); // 2021-03-31 23:59:50 UTC
+        let interval = Interval::from_millis(1000); // 1s interval
+
         let state_store = create_state_store();
         let (tx, mut now) = create_executor(
             NowMode::GenerateSeries {
-                start_timestamp: Timestamptz::from_secs(1617235190).unwrap(), /* 2021-03-31 23:59:50 UTC */
-                interval: Interval::from_millis(1000), // 1s interval
+                start_timestamp,
+                interval,
             },
-            &state_store
-        ).await;
+            &state_store,
+        )
+        .await;
 
         // Init barrier
-        tx.send(Barrier::new_initial_for_test(test_epoch(1000)))
+        tx.send(Barrier::new_test_barrier(test_epoch(1000)))
             .unwrap();
         now.next_unwrap_ready_barrier()?;
 
@@ -552,7 +566,14 @@ mod tests {
         now.next_unwrap_ready_barrier()?;
 
         let chunk = now.next_unwrap_ready_chunk()?;
-        assert_eq!(chunk.cardinality(), 2); // seconds from 00:00:02 to 00:00:03 (inclusive)
+        assert_eq!(
+            chunk.compact(),
+            StreamChunk::from_pretty(
+                " TZ
+                + 2021-04-01T00:00:02.000Z
+                + 2021-04-01T00:00:03.000Z"
+            )
+        );
 
         let watermark = now.next_unwrap_ready_watermark()?;
         assert_eq!(
@@ -561,6 +582,46 @@ mod tests {
                 0,
                 DataType::Timestamptz,
                 ScalarImpl::Timestamptz("2021-04-01T00:00:03.000Z".parse().unwrap())
+            )
+        );
+
+        // Recovery
+        drop((tx, now));
+        let (tx, mut now) = create_executor(
+            NowMode::GenerateSeries {
+                start_timestamp,
+                interval,
+            },
+            &state_store,
+        )
+        .await;
+
+        tx.send(Barrier::with_prev_epoch_for_test(
+            test_epoch(4000),
+            test_epoch(3000),
+        ))
+        .unwrap();
+
+        now.next_unwrap_ready_barrier()?;
+
+        let chunk = now.next_unwrap_ready_chunk()?;
+        assert_eq!(
+            chunk.compact(),
+            StreamChunk::from_pretty(
+                " TZ
+                + 2021-04-01T00:00:02.000Z
+                + 2021-04-01T00:00:03.000Z
+                + 2021-04-01T00:00:04.000Z"
+            )
+        );
+
+        let watermark = now.next_unwrap_ready_watermark()?;
+        assert_eq!(
+            watermark,
+            Watermark::new(
+                0,
+                DataType::Timestamptz,
+                ScalarImpl::Timestamptz("2021-04-01T00:00:04.000Z".parse().unwrap())
             )
         );
 
