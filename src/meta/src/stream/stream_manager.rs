@@ -777,7 +777,7 @@ impl GlobalStreamManager {
             });
     }
 
-    async fn recover_background_mv_progress_v1(&self) -> MetaResult<()> {
+    pub async fn recover_background_mv_progress_v1(&self) -> MetaResult<()> {
         let mgr = self.metadata_manager.as_v1_ref();
         let mviews = mgr.catalog_manager.list_creating_background_mvs().await;
 

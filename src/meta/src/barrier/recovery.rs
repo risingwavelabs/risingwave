@@ -122,7 +122,11 @@ impl GlobalBarrierManagerContext {
 
     async fn recover_background_mv_progress(&self) -> MetaResult<()> {
         match &self.metadata_manager {
-            MetadataManager::V1(_) => self.recover_background_mv_progress_v1().await,
+            MetadataManager::V1(_) => {
+                self.stream_manager
+                    .recover_background_mv_progress_v1()
+                    .await
+            }
             MetadataManager::V2(_) => self.recover_background_mv_progress_v2().await,
         }
     }
