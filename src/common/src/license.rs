@@ -4,6 +4,7 @@ use jsonwebtoken::{Algorithm, DecodingKey, Validation};
 use serde::Deserialize;
 use thiserror::Error;
 
+// TODO: case
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
 pub enum Tier {
     Free,
@@ -20,6 +21,7 @@ impl Default for Tier {
     }
 }
 
+// TODO: case
 #[derive(Debug, Clone, Deserialize)]
 struct License {
     #[allow(dead_code)]
@@ -49,7 +51,7 @@ struct Inner {
     license: Result<License>,
 }
 
-pub struct LicenseManager {
+pub(crate) struct LicenseManager {
     inner: RwLock<Inner>,
 }
 
@@ -74,6 +76,7 @@ impl LicenseManager {
             return;
         }
 
+        // TODO: use asymmetric encryption
         let validation = Validation::new(Algorithm::HS256);
         let decoding_key = DecodingKey::from_secret(b"my-very-private-secret");
 

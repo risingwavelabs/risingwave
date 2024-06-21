@@ -14,6 +14,7 @@
 
 use super::diff::SystemParamsDiff;
 use super::reader::SystemParamsReader;
+use crate::license::LicenseManager;
 use crate::util::tracing::layer::toggle_otel_layer;
 
 /// Node-independent handler for system parameter changes.
@@ -33,7 +34,11 @@ impl CommonHandler {
     /// Handle the change of system parameters.
     pub fn handle_change(&self, diff: &SystemParamsDiff) {
         if let Some(enabled) = diff.enable_tracing {
-            toggle_otel_layer(enabled)
+            toggle_otel_layer(enabled);
+        }
+        if let Some(token) = diff.my_token.as_ref() {
+            LicenseManager::get().refresh(token);
+            tracing::debug!("token refreshed!");
         }
     }
 }

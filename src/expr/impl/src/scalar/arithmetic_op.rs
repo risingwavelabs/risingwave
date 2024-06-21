@@ -16,6 +16,7 @@ use std::fmt::Debug;
 
 use chrono::{Duration, NaiveDateTime};
 use num_traits::{CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Zero};
+use risingwave_common::license::Feature;
 use risingwave_common::types::{
     CheckedAdd, Date, Decimal, FloatExt, Interval, IsNegative, Time, Timestamp, F64,
 };
@@ -33,6 +34,9 @@ where
     T2: Into<T3> + Debug,
     T3: CheckedAdd<Output = T3>,
 {
+    Feature::MyAwesomeFeature
+        .check_available()
+        .map_err(anyhow::Error::from)?;
     general_atm(l, r, |a, b| {
         a.checked_add(b).ok_or(ExprError::NumericOutOfRange)
     })
@@ -49,6 +53,9 @@ where
     T2: Into<T3> + Debug,
     T3: CheckedSub,
 {
+    Feature::MyCommonFeature
+        .check_available()
+        .map_err(anyhow::Error::from)?;
     general_atm(l, r, |a, b| {
         a.checked_sub(&b).ok_or(ExprError::NumericOutOfRange)
     })
