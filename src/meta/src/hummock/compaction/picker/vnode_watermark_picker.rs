@@ -40,7 +40,7 @@ impl VnodeWatermarkCompactionPicker {
         let level = levels.levels.last()?;
         let mut select_input_ssts = vec![];
         for sst_info in &level.table_infos {
-            if !level_handlers[level.level_idx as usize + 1].is_pending_compact(&sst_info.sst_id)
+            if !level_handlers[level.level_idx as usize].is_pending_compact(&sst_info.sst_id)
                 && should_delete_sst_by_watermark(sst_info, table_watermarks)
             {
                 select_input_ssts.push(sst_info.clone());
