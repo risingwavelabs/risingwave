@@ -162,27 +162,25 @@ impl Display for ManagedBarrierStateDebugInfo<'_> {
                     let mut is_prev_epoch_issued = false;
                     if prev_epoch != 0 {
                         let bs = &self.epoch_barrier_state_map[&prev_epoch];
-                        match &bs.inner {
-                            ManagedBarrierStateInner::Issued(IssuedState {
-                                remaining_actors: remaining_actors_prev,
-                                ..
-                            }) => {
-                                // Only show the actors that are not in the previous epoch.
-                                is_prev_epoch_issued = true;
-                                let mut duplicates = 0usize;
-                                for actor_id in &state.remaining_actors {
-                                    if !remaining_actors_prev.contains(actor_id) {
-                                        write!(f, "{}, ", actor_id)?;
-                                    } else {
-                                        duplicates += 1;
-                                    }
-                                }
-                                if duplicates > 0 {
-                                    write!(f, "...and {} actors in prev epoch", duplicates)?;
+                        if let ManagedBarrierStateInner::Issued(IssuedState {
+                            remaining_actors: remaining_actors_prev,
+                            ..
+                        }) = &bs.inner
+                        {
+                            // Only show the actors that are not in the previous epoch.
+                            is_prev_epoch_issued = true;
+                            let mut duplicates = 0usize;
+                            for actor_id in &state.remaining_actors {
+                                if !remaining_actors_prev.contains(actor_id) {
+                                    write!(f, "{}, ", actor_id)?;
+                                } else {
+                                    duplicates += 1;
                                 }
                             }
-                            _ => {}
-                        };
+                            if duplicates > 0 {
+                                write!(f, "...and {} actors in prev epoch", duplicates)?;
+                            }
+                        }
                     }
                     if !is_prev_epoch_issued {
                         for actor_id in &state.remaining_actors {
