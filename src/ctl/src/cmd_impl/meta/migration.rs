@@ -156,18 +156,19 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
             .await?;
         if worker.worker_type() == WorkerType::ComputeNode {
             let pb_property = worker.worker_node.property.as_ref().unwrap();
-            let parallel_unit_ids = worker
-                .worker_node
-                .parallel_units
-                .iter()
-                .map(|pu| pu.id as i32)
-                .collect_vec();
+            // let parallel_unit_ids = worker
+            //     .worker_node
+            //     .parallel_units
+            //     .iter()
+            //     .map(|pu| pu.id as i32)
+            //     .collect_vec();
             let property = worker_property::ActiveModel {
                 worker_id: Set(worker.worker_id() as _),
-                parallel_unit_ids: Set(parallel_unit_ids.into()),
+                // parallel_unit_ids: Set(parallel_unit_ids.into()),
                 is_streaming: Set(pb_property.is_streaming),
                 is_serving: Set(pb_property.is_serving),
                 is_unschedulable: Set(pb_property.is_unschedulable),
+                parallel_unit_ids: Set(Default::default()),
             };
             WorkerProperty::insert(property)
                 .exec(&meta_store_sql.conn)

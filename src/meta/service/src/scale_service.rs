@@ -12,26 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
-
-use risingwave_common::catalog;
 use risingwave_meta::manager::MetadataManager;
-use risingwave_meta::model::TableParallelism;
-use risingwave_meta::stream::{ScaleControllerRef, TableRevision, WorkerReschedule};
-use risingwave_meta_model_v2::FragmentId;
+use risingwave_meta::stream::{ScaleControllerRef, TableRevision};
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::scale_service_server::ScaleService;
 use risingwave_pb::meta::{
     GetClusterInfoRequest, GetClusterInfoResponse, GetReschedulePlanRequest,
-    GetReschedulePlanResponse, PbWorkerReschedule, Reschedule, RescheduleRequest,
-    RescheduleResponse,
+    GetReschedulePlanResponse, RescheduleRequest, RescheduleResponse,
 };
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use tonic::{Request, Response, Status};
 
 use crate::barrier::BarrierManagerRef;
 use crate::model::MetadataModel;
-use crate::stream::{GlobalStreamManagerRef, RescheduleOptions, SourceManagerRef};
+use crate::stream::{GlobalStreamManagerRef, SourceManagerRef};
 
 pub struct ScaleServiceImpl {
     metadata_manager: MetadataManager,
@@ -133,100 +127,101 @@ impl ScaleService for ScaleServiceImpl {
         &self,
         request: Request<RescheduleRequest>,
     ) -> Result<Response<RescheduleResponse>, Status> {
-        self.barrier_manager.check_status_running()?;
-
-        let RescheduleRequest {
-            worker_reschedules,
-            revision,
-            resolve_no_shuffle_upstream,
-        } = request.into_inner();
-
-        let _reschedule_job_lock = self.stream_manager.reschedule_lock_write_guard().await;
-
-        let current_revision = self.get_revision().await;
-
-        if revision != current_revision.inner() {
-            return Ok(Response::new(RescheduleResponse {
-                success: false,
-                revision: current_revision.inner(),
-            }));
-        }
-
-        let table_parallelisms = {
-            match &self.metadata_manager {
-                MetadataManager::V1(mgr) => {
-                    let guard = mgr.fragment_manager.get_fragment_read_guard().await;
-
-                    let mut table_parallelisms = HashMap::new();
-                    for (table_id, table) in guard.table_fragments() {
-                        if table
-                            .fragment_ids()
-                            .any(|fragment_id| worker_reschedules.contains_key(&fragment_id))
-                        {
-                            table_parallelisms.insert(*table_id, TableParallelism::Custom);
-                        }
-                    }
-
-                    table_parallelisms
-                }
-                MetadataManager::V2(mgr) => {
-                    let streaming_job_ids = mgr
-                        .catalog_controller
-                        .get_fragment_job_id(
-                            worker_reschedules
-                                .keys()
-                                .map(|id| *id as FragmentId)
-                                .collect(),
-                        )
-                        .await?;
-
-                    streaming_job_ids
-                        .into_iter()
-                        .map(|id| (catalog::TableId::new(id as _), TableParallelism::Custom))
-                        .collect()
-                }
-            }
-        };
-
-        self.stream_manager
-            .reschedule_actors_v2(
-                worker_reschedules
-                    .into_iter()
-                    .map(|(fragment_id, reschedule)| {
-                        let PbWorkerReschedule {
-                            increased_actor_count,
-                            decreased_actor_count,
-                        } = reschedule;
-
-                        (
-                            fragment_id,
-                            WorkerReschedule {
-                                increased_actor_count: increased_actor_count
-                                    .into_iter()
-                                    .map(|(k, v)| (k as _, v as _))
-                                    .collect(),
-                                decreased_actor_count: decreased_actor_count
-                                    .into_iter()
-                                    .map(|(k, v)| (k as _, v as _))
-                                    .collect(),
-                            },
-                        )
-                    })
-                    .collect(),
-                RescheduleOptions {
-                    resolve_no_shuffle_upstream,
-                    skip_create_new_actors: false,
-                },
-                Some(table_parallelisms),
-            )
-            .await?;
-
-        let next_revision = self.get_revision().await;
-
-        Ok(Response::new(RescheduleResponse {
-            success: true,
-            revision: next_revision.into(),
-        }))
+        // self.barrier_manager.check_status_running()?;
+        //
+        // let RescheduleRequest {
+        //     worker_reschedules,
+        //     revision,
+        //     resolve_no_shuffle_upstream,
+        // } = request.into_inner();
+        //
+        // let _reschedule_job_lock = self.stream_manager.reschedule_lock_write_guard().await;
+        //
+        // let current_revision = self.get_revision().await;
+        //
+        // if revision != current_revision.inner() {
+        //     return Ok(Response::new(RescheduleResponse {
+        //         success: false,
+        //         revision: current_revision.inner(),
+        //     }));
+        // }
+        //
+        // let table_parallelisms = {
+        //     match &self.metadata_manager {
+        //         MetadataManager::V1(mgr) => {
+        //             let guard = mgr.fragment_manager.get_fragment_read_guard().await;
+        //
+        //             let mut table_parallelisms = HashMap::new();
+        //             for (table_id, table) in guard.table_fragments() {
+        //                 if table
+        //                     .fragment_ids()
+        //                     .any(|fragment_id| worker_reschedules.contains_key(&fragment_id))
+        //                 {
+        //                     table_parallelisms.insert(*table_id, TableParallelism::Custom);
+        //                 }
+        //             }
+        //
+        //             table_parallelisms
+        //         }
+        //         MetadataManager::V2(mgr) => {
+        //             let streaming_job_ids = mgr
+        //                 .catalog_controller
+        //                 .get_fragment_job_id(
+        //                     worker_reschedules
+        //                         .keys()
+        //                         .map(|id| *id as FragmentId)
+        //                         .collect(),
+        //                 )
+        //                 .await?;
+        //
+        //             streaming_job_ids
+        //                 .into_iter()
+        //                 .map(|id| (catalog::TableId::new(id as _), TableParallelism::Custom))
+        //                 .collect()
+        //         }
+        //     }
+        // };
+        //
+        // self.stream_manager
+        //     .reschedule_actors_v2(
+        //         worker_reschedules
+        //             .into_iter()
+        //             .map(|(fragment_id, reschedule)| {
+        //                 let PbWorkerReschedule {
+        //                     increased_actor_count,
+        //                     decreased_actor_count,
+        //                 } = reschedule;
+        //
+        //                 (
+        //                     fragment_id,
+        //                     WorkerReschedule {
+        //                         increased_actor_count: increased_actor_count
+        //                             .into_iter()
+        //                             .map(|(k, v)| (k as _, v as _))
+        //                             .collect(),
+        //                         decreased_actor_count: decreased_actor_count
+        //                             .into_iter()
+        //                             .map(|(k, v)| (k as _, v as _))
+        //                             .collect(),
+        //                     },
+        //                 )
+        //             })
+        //             .collect(),
+        //         RescheduleOptions {
+        //             resolve_no_shuffle_upstream,
+        //             skip_create_new_actors: false,
+        //         },
+        //         Some(table_parallelisms),
+        //     )
+        //     .await?;
+        //
+        // let next_revision = self.get_revision().await;
+        //
+        // Ok(Response::new(RescheduleResponse {
+        //     success: true,
+        //     revision: next_revision.into(),
+        // }))
+        todo!()
     }
 
     #[cfg_attr(coverage, coverage(off))]
@@ -234,56 +229,58 @@ impl ScaleService for ScaleServiceImpl {
         &self,
         request: Request<GetReschedulePlanRequest>,
     ) -> Result<Response<GetReschedulePlanResponse>, Status> {
-        self.barrier_manager.check_status_running()?;
+        // self.barrier_manager.check_status_running()?;
+        //
+        // let req = request.into_inner();
+        //
+        // let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
+        //
+        // let current_revision = self.get_revision().await;
+        //
+        // if req.revision != current_revision.inner() {
+        //     return Ok(Response::new(GetReschedulePlanResponse {
+        //         success: false,
+        //         revision: current_revision.inner(),
+        //         reschedules: Default::default(),
+        //     }));
+        // }
+        //
+        // let policy = req
+        //     .policy
+        //     .ok_or_else(|| Status::invalid_argument("policy is required"))?;
+        //
+        // let scale_controller = &self.scale_controller;
+        //
+        // let plan = scale_controller.get_reschedule_plan(policy).await?;
+        //
+        // let next_revision = self.get_revision().await;
+        //
+        // // generate reschedule plan will not change the revision
+        // assert_eq!(current_revision, next_revision);
+        //
+        // Ok(Response::new(GetReschedulePlanResponse {
+        //     success: true,
+        //     revision: next_revision.into(),
+        //     reschedules: plan
+        //         .into_iter()
+        //         .map(|(fragment_id, reschedule)| {
+        //             (
+        //                 fragment_id,
+        //                 Reschedule {
+        //                     added_parallel_units: reschedule
+        //                         .added_parallel_units
+        //                         .into_iter()
+        //                         .collect(),
+        //                     removed_parallel_units: reschedule
+        //                         .removed_parallel_units
+        //                         .into_iter()
+        //                         .collect(),
+        //                 },
+        //             )
+        //         })
+        //         .collect(),
+        // }))
 
-        let req = request.into_inner();
-
-        let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
-
-        let current_revision = self.get_revision().await;
-
-        if req.revision != current_revision.inner() {
-            return Ok(Response::new(GetReschedulePlanResponse {
-                success: false,
-                revision: current_revision.inner(),
-                reschedules: Default::default(),
-            }));
-        }
-
-        let policy = req
-            .policy
-            .ok_or_else(|| Status::invalid_argument("policy is required"))?;
-
-        let scale_controller = &self.scale_controller;
-
-        let plan = scale_controller.get_reschedule_plan(policy).await?;
-
-        let next_revision = self.get_revision().await;
-
-        // generate reschedule plan will not change the revision
-        assert_eq!(current_revision, next_revision);
-
-        Ok(Response::new(GetReschedulePlanResponse {
-            success: true,
-            revision: next_revision.into(),
-            reschedules: plan
-                .into_iter()
-                .map(|(fragment_id, reschedule)| {
-                    (
-                        fragment_id,
-                        Reschedule {
-                            added_parallel_units: reschedule
-                                .added_parallel_units
-                                .into_iter()
-                                .collect(),
-                            removed_parallel_units: reschedule
-                                .removed_parallel_units
-                                .into_iter()
-                                .collect(),
-                        },
-                    )
-                })
-                .collect(),
-        }))
+        todo!()
     }
 }

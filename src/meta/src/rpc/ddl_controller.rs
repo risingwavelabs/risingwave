@@ -1507,14 +1507,19 @@ impl DdlController {
     ) -> MetaResult<NonZeroUsize> {
         const MAX_PARALLELISM: NonZeroUsize = NonZeroUsize::new(VirtualNode::COUNT).unwrap();
 
-        if cluster_info.parallel_units.is_empty() {
+        let available_parallelism = cluster_info
+            .worker_nodes
+            .values()
+            .map(|worker| worker.parallelism as usize)
+            .sum::<usize>();
+
+        if available_parallelism == 0 {
             return Err(MetaError::unavailable(
                 "No available parallel units to schedule",
             ));
         }
 
-        let available_parallel_units =
-            NonZeroUsize::new(cluster_info.parallel_units.len()).unwrap();
+        let available_parallel_units = NonZeroUsize::new(available_parallelism).unwrap();
 
         // Use configured parallel units if no default parallelism is specified.
         let parallelism =

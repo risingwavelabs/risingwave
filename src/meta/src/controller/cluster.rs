@@ -30,8 +30,7 @@ use risingwave_meta_model_v2::worker::{WorkerStatus, WorkerType};
 use risingwave_meta_model_v2::{worker, worker_property, I32Array, TransactionId, WorkerId};
 use risingwave_pb::common::worker_node::{PbProperty, PbResource, PbState};
 use risingwave_pb::common::{
-    HostAddress, ParallelUnit, PbHostAddress, PbParallelUnit, PbWorkerNode, PbWorkerType,
-    WorkerNode,
+    HostAddress, ParallelUnit, PbHostAddress, PbWorkerNode, PbWorkerType, WorkerNode,
 };
 use risingwave_pb::meta::add_worker_node_request::Property as AddNodeProperty;
 use risingwave_pb::meta::heartbeat_request;
@@ -80,20 +79,11 @@ impl From<WorkerInfo> for PbWorkerNode {
                 port: info.0.port,
             }),
             state: PbState::from(info.0.status) as _,
-            parallel_units: info
+            parallelism: info
                 .1
                 .as_ref()
-                .map(|p| {
-                    p.parallel_unit_ids
-                        .0
-                        .iter()
-                        .map(|&id| PbParallelUnit {
-                            id: id as _,
-                            worker_node_id: info.0.worker_id as _,
-                        })
-                        .collect_vec()
-                })
-                .unwrap_or_default(),
+                .map(|p| p.parallel_unit_ids.inner_ref().len())
+                .unwrap_or_default() as u32,
             property: info.1.as_ref().map(|p| PbProperty {
                 is_streaming: p.is_streaming,
                 is_serving: p.is_serving,
@@ -466,7 +456,7 @@ fn meta_node_info(host: &str, started_at: Option<u64>) -> PbWorkerNode {
             .map(HostAddr::to_protobuf)
             .ok(),
         state: PbState::Running as _,
-        parallel_units: vec![],
+        parallelism: 0,
         property: None,
         transactional_id: None,
         resource: Some(risingwave_pb::common::worker_node::Resource {
@@ -889,32 +879,22 @@ impl ClusterControllerInner {
     pub async fn get_streaming_cluster_info(&self) -> MetaResult<StreamingClusterInfo> {
         let mut streaming_workers = self.list_active_streaming_workers().await?;
 
-        let unschedulable_worker_node = streaming_workers
+        let unschedulable_workers = streaming_workers
             .extract_if(|worker| {
                 worker
                     .property
                     .as_ref()
                     .map_or(false, |p| p.is_unschedulable)
             })
-            .collect_vec();
+            .map(|w| w.id)
+            .collect();
 
         let active_workers: HashMap<_, _> =
             streaming_workers.into_iter().map(|w| (w.id, w)).collect();
 
-        let active_parallel_units = active_workers
-            .values()
-            .flat_map(|worker| worker.parallel_units.iter().map(|p| (p.id, p.clone())))
-            .collect();
-
-        let unschedulable_parallel_units = unschedulable_worker_node
-            .iter()
-            .flat_map(|worker| worker.parallel_units.iter().map(|p| (p.id, p.clone())))
-            .collect();
-
         Ok(StreamingClusterInfo {
             worker_nodes: active_workers,
-            parallel_units: active_parallel_units,
-            unschedulable_parallel_units,
+            unschedulable_workers,
         })
     }
 

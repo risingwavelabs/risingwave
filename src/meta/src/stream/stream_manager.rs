@@ -1087,11 +1087,7 @@ mod tests {
         ) -> MetaResult<()> {
             // Create fake locations where all actors are scheduled to the same parallel unit.
             let locations = {
-                let StreamingClusterInfo {
-                    worker_nodes,
-                    parallel_units: _,
-                    unschedulable_parallel_units: _,
-                }: StreamingClusterInfo = self
+                let StreamingClusterInfo { worker_nodes, .. }: StreamingClusterInfo = self
                     .global_stream_manager
                     .metadata_manager
                     .get_streaming_cluster_info()
@@ -1202,7 +1198,7 @@ mod tests {
         let worker_slots = worker_nodes
             .iter()
             .flat_map(|(worker_id, worker)| {
-                (0..worker.get_parallel_units().len())
+                (0..worker.get_parallelism() as usize)
                     .map(|slot_id| WorkerSlotId::new(*worker_id, slot_id))
             })
             .collect_vec();

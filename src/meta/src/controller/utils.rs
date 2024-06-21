@@ -242,7 +242,7 @@ pub struct PartialFragmentStateTables {
 pub struct PartialActorLocation {
     pub actor_id: ActorId,
     pub fragment_id: FragmentId,
-    pub parallel_unit_id: i32,
+    pub worker_id: u32,
     pub status: ActorStatus,
 }
 

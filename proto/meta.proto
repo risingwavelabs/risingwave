@@ -246,8 +246,10 @@ message ListActorStatesResponse {
   message ActorState {
     uint32 actor_id = 1;
     uint32 fragment_id = 2;
-    uint32 parallel_unit_id = 3;
+    reserved 3;
+    reserved "parallel_unit_id";
     TableFragments.ActorStatus.ActorState state = 4;
+    uint32 worker_id = 5;
   }
   repeated ActorState states = 1;
 }

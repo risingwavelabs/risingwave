@@ -189,42 +189,43 @@ impl Fragment {
     }
 
     pub fn parallel_unit_usage(&self) -> (Vec<ParallelUnitId>, HashSet<ParallelUnitId>) {
-        let actor_to_parallel_unit: HashMap<_, _> = self
-            .r
-            .table_fragments
-            .iter()
-            .flat_map(|tf| {
-                tf.actor_status.iter().map(|(&actor_id, status)| {
-                    (
-                        actor_id,
-                        status.get_parallel_unit().unwrap().id as ParallelUnitId,
-                    )
-                })
-            })
-            .collect();
-
-        let all_parallel_units = self
-            .r
-            .worker_nodes
-            .iter()
-            .flat_map(|n| n.parallel_units.iter())
-            .map(|p| p.id as ParallelUnitId)
-            .collect_vec();
-        let current_parallel_units: HashSet<_> = self
-            .inner
-            .actors
-            .iter()
-            .map(|a| actor_to_parallel_unit[&a.actor_id] as ParallelUnitId)
-            .collect();
-
-        (all_parallel_units, current_parallel_units)
+        todo!()
+        // let actor_to_parallel_unit: HashMap<_, _> = self
+        //     .r
+        //     .table_fragments
+        //     .iter()
+        //     .flat_map(|tf| {
+        //         tf.actor_status.iter().map(|(&actor_id, status)| {
+        //             (
+        //                 actor_id,
+        //                 status.get_parallel_unit().unwrap().id as ParallelUnitId,
+        //             )
+        //         })
+        //     })
+        //     .collect();
+        //
+        // let all_parallel_units = self
+        //     .r
+        //     .worker_nodes
+        //     .iter()
+        //     .flat_map(|n| n.parallel_units.iter())
+        //     .map(|p| p.id as ParallelUnitId)
+        //     .collect_vec();
+        // let current_parallel_units: HashSet<_> = self
+        //     .inner
+        //     .actors
+        //     .iter()
+        //     .map(|a| actor_to_parallel_unit[&a.actor_id] as ParallelUnitId)
+        //     .collect();
+        //
+        // (all_parallel_units, current_parallel_units)
     }
 
     pub fn all_worker_slots(&self) -> HashMap<u32, usize> {
         self.r
             .worker_nodes
             .iter()
-            .map(|w| (w.id, w.parallel_units.len()))
+            .map(|w| (w.id, w.parallelism as usize))
             .collect()
     }
 
