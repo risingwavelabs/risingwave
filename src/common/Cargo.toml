@@ -57,6 +57,7 @@ hytra = { workspace = true }
 itertools = { workspace = true }
 itoa = "1.0"
 jsonbb = { workspace = true }
+jsonwebtoken = "9"
 lru = { workspace = true }
 memcomparable = { version = "0.2", features = ["decimal"] }
 num-integer = "0.1"

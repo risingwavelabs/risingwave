@@ -603,6 +603,7 @@ message SystemParams {
   optional string wasm_storage_url = 14 [deprecated = true];
   optional bool enable_tracing = 15;
   optional bool use_new_object_prefix_strategy = 16;
+  optional string my_token = 17;
 }
 
 message GetSystemParamsRequest {}

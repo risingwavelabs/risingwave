@@ -168,4 +168,12 @@ where
             .enable_tracing
             .unwrap_or_else(default::enable_tracing)
     }
+
+    fn my_token(&self) -> &str {
+        self.inner()
+            .my_token
+            .as_ref()
+            .map(|s| s.as_str())
+            .unwrap_or_default()
+    }
 }
