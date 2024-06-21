@@ -17,17 +17,19 @@ use risingwave_pb::plan_common::ColumnDesc;
 
 use super::avro::{avro_schema_to_column_descs, MapHandling};
 
-/// FIXME: when the JSON schema is invalid, it will panic.
-///
-/// ## Notes on type conversion
-/// Map will be used when an object doesn't have `properties` but has `additionalProperties`.
-/// When an object has `properties` and `additionalProperties`, the latter will be ignored.
-/// <https://github.com/mozilla/jsonschema-transpiler/blob/fb715c7147ebd52427e0aea09b2bba2d539850b1/src/jsonschema.rs#L228-L280>
-///
-/// TODO: examine other stuff like `oneOf`, `patternProperties`, etc.
-pub fn json_schema_to_columns(json_schema: &serde_json::Value) -> anyhow::Result<Vec<ColumnDesc>> {
-    let avro_schema = jst::convert_avro(json_schema, jst::Context::default()).to_string();
-    let schema =
-        apache_avro::Schema::parse_str(&avro_schema).context("failed to parse avro schema")?;
-    avro_schema_to_column_descs(&schema, Some(MapHandling::Jsonb)).map_err(Into::into)
+impl crate::JsonSchema {
+    /// FIXME: when the JSON schema is invalid, it will panic.
+    ///
+    /// ## Notes on type conversion
+    /// Map will be used when an object doesn't have `properties` but has `additionalProperties`.
+    /// When an object has `properties` and `additionalProperties`, the latter will be ignored.
+    /// <https://github.com/mozilla/jsonschema-transpiler/blob/fb715c7147ebd52427e0aea09b2bba2d539850b1/src/jsonschema.rs#L228-L280>
+    ///
+    /// TODO: examine other stuff like `oneOf`, `patternProperties`, etc.
+    pub fn json_schema_to_columns(&self) -> anyhow::Result<Vec<ColumnDesc>> {
+        let avro_schema = jst::convert_avro(&self.0, jst::Context::default()).to_string();
+        let schema =
+            apache_avro::Schema::parse_str(&avro_schema).context("failed to parse avro schema")?;
+        avro_schema_to_column_descs(&schema, Some(MapHandling::Jsonb)).map_err(Into::into)
+    }
 }
