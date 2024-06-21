@@ -1208,10 +1208,10 @@ mod tests {
 
             let stream_manager = Arc::new(GlobalStreamManager::new(
                 env.clone(),
-                metadata_manager,
+                metadata_manager.clone(),
                 barrier_scheduler.clone(),
                 source_manager.clone(),
-                stream_rpc_manager,
+                stream_rpc_manager.clone(),
                 scale_controller.clone(),
             )?);
 
