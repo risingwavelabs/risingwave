@@ -1213,7 +1213,7 @@ mod tests {
                 source_manager.clone(),
                 stream_rpc_manager,
                 scale_controller.clone(),
-            ))?;
+            )?);
 
             let barrier_manager = GlobalBarrierManager::new(
                 scheduled_barriers,
