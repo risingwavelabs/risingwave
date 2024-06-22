@@ -29,6 +29,7 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
 use sea_schema::mysql::def::{CharSet, Collation, ColumnKey, ColumnType, StorageEngine, TableInfo};
 use sea_schema::mysql::discovery::SchemaDiscovery;
+use sea_schema::sea_query::{Alias, IntoIden};
 use serde_derive::{Deserialize, Serialize};
 use sqlx::mysql::MySqlConnectOptions;
 use sqlx::MySqlPool;
@@ -89,22 +90,21 @@ impl MySqlExternalTable {
             });
 
         let connection = MySqlPool::connect_with(options).await?;
-        let schema_discovery = SchemaDiscovery::new(connection, config.database.as_str());
+        let mut schema_discovery = SchemaDiscovery::new(connection, config.database.as_str());
 
-        let table_schema = schema_discovery
-            .discover_table(TableInfo {
-                name: config.table.clone(),
-                engine: StorageEngine::InnoDb,
-                auto_increment: None,
-                char_set: CharSet::Utf8Mb4,
-                collation: Collation::Utf8Mb40900AiCi,
-                comment: "".to_string(),
-            })
+        // discover system version first
+        let system_info = schema_discovery.discover_system().await?;
+        schema_discovery.query.system = system_info.clone();
+
+        let schema = Alias::new(config.database.as_str()).into_iden();
+        let table = Alias::new(config.table.as_str()).into_iden();
+        let upstream_columns = schema_discovery
+            .discover_columns(schema, table, &system_info)
             .await?;
 
         let mut column_descs = vec![];
         let mut pk_names = vec![];
-        for col in &table_schema.columns {
+        for col in upstream_columns {
             let data_type = type_to_rw_type(&col.col_type)?;
             column_descs.push(ColumnDesc::named(
                 col.name.clone(),
@@ -114,6 +114,10 @@ impl MySqlExternalTable {
             if matches!(col.key, ColumnKey::Primary) {
                 pk_names.push(col.name.clone());
             }
+        }
+
+        if pk_names.is_empty() {
+            return Err(anyhow!("MySQL table doesn't define the primary key").into());
         }
 
         Ok(Self {
