@@ -29,6 +29,7 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
 use sea_schema::mysql::def::{ColumnKey, ColumnType};
 use sea_schema::mysql::discovery::SchemaDiscovery;
+use sea_schema::mysql::query::SchemaQueryBuilder;
 use sea_schema::sea_query::{Alias, IntoIden};
 use serde_derive::{Deserialize, Serialize};
 use sqlx::mysql::MySqlConnectOptions;
@@ -94,7 +95,7 @@ impl MySqlExternalTable {
 
         // discover system version first
         let system_info = schema_discovery.discover_system().await?;
-        schema_discovery.query.system = system_info.clone();
+        schema_discovery.query = SchemaQueryBuilder::new(system_info.clone());
 
         let schema = Alias::new(config.database.as_str()).into_iden();
         let table = Alias::new(config.table.as_str()).into_iden();
