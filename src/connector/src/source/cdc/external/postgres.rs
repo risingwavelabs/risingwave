@@ -28,7 +28,6 @@ use risingwave_common::types::{DataType, StructType};
 use risingwave_common::util::iter_util::ZipEqFast;
 use sea_schema::postgres::def::{ColumnType, TableInfo};
 use sea_schema::postgres::discovery::SchemaDiscovery;
-use sea_schema::sea_query::{Alias, IntoIden};
 use serde_derive::{Deserialize, Serialize};
 use sqlx::postgres::{PgConnectOptions, PgSslMode};
 use sqlx::PgPool;
