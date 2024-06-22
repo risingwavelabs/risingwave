@@ -21,3 +21,19 @@ query T
 select '2022-11-06 01:00:00'::timestamp AT TIME ZONE 'us/pacific';
 ----
 2022-11-06 09:00:00+00:00
+
+# non-literal zone
+statement ok
+create table t (local timestamp, tz varchar);
+
+statement ok
+insert into t values ('2024-06-10 12:00:00', 'US/Pacific'), ('2024-06-10 13:00:00', 'Asia/Singapore');
+
+query T
+select local AT TIME ZONE tz from t order by 1;
+----
+2024-06-10 05:00:00+00:00
+2024-06-10 19:00:00+00:00
+
+statement ok
+drop table t;

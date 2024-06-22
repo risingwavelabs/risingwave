@@ -273,7 +273,7 @@ create sink si_kafka_without_snapshot from t_kafka with (
     snapshot = 'false',
 );
 
-sleep 1s
+sleep 2s
 
 query T
 select rw_key from t_sink_text_id order by rw_key
