@@ -99,13 +99,13 @@ impl MySqlExternalTable {
 
         let schema = Alias::new(config.database.as_str()).into_iden();
         let table = Alias::new(config.table.as_str()).into_iden();
-        let upstream_columns = schema_discovery
+        let columns = schema_discovery
             .discover_columns(schema, table, &system_info)
             .await?;
 
         let mut column_descs = vec![];
         let mut pk_names = vec![];
-        for col in upstream_columns {
+        for col in columns {
             let data_type = type_to_rw_type(&col.col_type)?;
             column_descs.push(ColumnDesc::named(
                 col.name.clone(),
