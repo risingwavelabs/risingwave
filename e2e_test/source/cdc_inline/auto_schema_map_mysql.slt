@@ -12,7 +12,7 @@ mysql --protocol=tcp -u root mytest -e "
          modified DATETIME,
          custinfo JSON
     );
-    ALTER TABLE customers ADD INDEX zips( (CAST(custinfo->'$.zipcode' AS UNSIGNED ARRAY)) );
+    ALTER TABLE customers ADD INDEX zipsa( (CAST(custinfo->'zipcode' AS UNSIGNED ARRAY)) );
     CREATE TABLE IF NOT EXISTS mysql_types_test(
         c_boolean boolean,
         c_bit bit,
@@ -61,6 +61,9 @@ describe rw_customers;
 id bigint false NULL
 modified timestamp without time zone false NULL
 custinfo jsonb false NULL
+primary key id NULL NULL
+distribution key id NULL NULL
+table description rw_customers NULL NULL
 
 statement ok
 create table rw_mysql_types_test (*) from mysql_source table 'mytest.mysql_types_test';
