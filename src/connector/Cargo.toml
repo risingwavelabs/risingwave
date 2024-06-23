@@ -155,7 +155,7 @@ tiberius = { git = "https://github.com/risingwavelabs/tiberius.git", rev = "f834
     "rust_decimal",
     "bigdecimal",
     "tds73",
-    "time", 
+    "time",
 ] }
 time = "0.3.30"
 tokio = { version = "0.2", package = "madsim-tokio", features = [
