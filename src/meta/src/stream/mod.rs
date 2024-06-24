@@ -13,7 +13,6 @@
 // limitations under the License.
 
 mod scale;
-mod scale_prev;
 mod sink;
 mod source_manager;
 mod stream_graph;
@@ -29,7 +28,6 @@ use risingwave_pb::stream_plan::StreamActor;
 use risingwave_pb::stream_service::build_actor_info::SubscriptionIds;
 use risingwave_pb::stream_service::BuildActorInfo;
 pub use scale::*;
-pub use scale_prev::*;
 pub use sink::*;
 pub use source_manager::*;
 pub use stream_graph::*;

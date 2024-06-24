@@ -203,7 +203,7 @@ mod tests {
     use risingwave_pb::common::worker_node::Property;
     use risingwave_pb::common::WorkerNode;
 
-    use crate::hash::{VirtualNode};
+    use crate::hash::VirtualNode;
     use crate::vnode_mapping::vnode_placement::place_vnode;
     #[test]
     fn test_place_vnode() {
