@@ -44,7 +44,7 @@ use crate::executor::{
 };
 use crate::monitor::BatchSpillMetrics;
 use crate::spill::spill_op::{
-    SpillBuildHasher, SpillOp, DEFAULT_SPILL_PARTITION_NUM, SPILL_AT_LEAST_MEMORY,
+    SpillBackend, SpillBuildHasher, SpillOp, DEFAULT_SPILL_PARTITION_NUM, SPILL_AT_LEAST_MEMORY,
 };
 use crate::task::{BatchTaskContext, ShutdownToken, TaskId};
 
@@ -325,7 +325,7 @@ impl AggSpillManager {
     ) -> Result<Self> {
         let suffix_uuid = uuid::Uuid::new_v4();
         let dir = format!("/{}-{}/", agg_identity, suffix_uuid);
-        let op = SpillOp::create(dir)?;
+        let op = SpillOp::create(dir, SpillBackend::Disk)?;
         let agg_state_writers = Vec::with_capacity(partition_num);
         let agg_state_chunk_builder = Vec::with_capacity(partition_num);
         let input_writers = Vec::with_capacity(partition_num);

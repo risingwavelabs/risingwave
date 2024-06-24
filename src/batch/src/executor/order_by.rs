@@ -36,7 +36,10 @@ use super::{
 use crate::error::{BatchError, Result};
 use crate::executor::merge_sort::MergeSortExecutor;
 use crate::monitor::BatchSpillMetrics;
-use crate::spill::spill_op::{SpillOp, DEFAULT_SPILL_PARTITION_NUM, SPILL_AT_LEAST_MEMORY};
+use crate::spill::spill_op::SpillBackend::Disk;
+use crate::spill::spill_op::{
+    SpillBackend, SpillOp, DEFAULT_SPILL_PARTITION_NUM, SPILL_AT_LEAST_MEMORY,
+};
 use crate::task::BatchTaskContext;
 
 /// Sort Executor
@@ -53,7 +56,7 @@ pub struct SortExecutor {
     schema: Schema,
     chunk_size: usize,
     mem_context: MemoryContext,
-    enable_spill: bool,
+    spill_backend: Option<SpillBackend>,
     spill_metrics: Arc<BatchSpillMetrics>,
     /// The upper bound of memory usage for this executor.
     memory_upper_bound: Option<u64>,
@@ -97,7 +100,11 @@ impl BoxedExecutorBuilder for SortExecutor {
             identity.clone(),
             source.context.get_config().developer.chunk_size,
             source.context.create_executor_mem_context(identity),
-            source.context.get_config().enable_spill,
+            if source.context.get_config().enable_spill {
+                Some(Disk)
+            } else {
+                None
+            },
             source.context.spill_metrics(),
         )))
     }
@@ -124,7 +131,7 @@ impl SortExecutor {
             let chunk_estimated_heap_size = chunk.estimated_heap_size();
             chunks.push(chunk);
             if !self.mem_context.add(chunk_estimated_heap_size as i64) && check_memory {
-                if self.enable_spill {
+                if self.spill_backend.is_some() {
                     need_to_spill = true;
                     break;
                 } else {
@@ -149,7 +156,7 @@ impl SortExecutor {
                     .map(|(row_id, row)| (chunk.row_at_unchecked_vis(row_id), row)),
             );
             if !self.mem_context.add(chunk_estimated_heap_size as i64) && check_memory {
-                if self.enable_spill {
+                if self.spill_backend.is_some() {
                     need_to_spill = true;
                     break;
                 } else {
@@ -167,6 +174,7 @@ impl SortExecutor {
             // If memory is still not enough in the sub SortExecutor, it will spill its inputs recursively.
             info!("batch sort executor {} starts to spill out", &self.identity);
             let mut sort_spill_manager = SortSpillManager::new(
+                self.spill_backend.clone().unwrap(),
                 &self.identity,
                 DEFAULT_SPILL_PARTITION_NUM,
                 child_schema.data_types(),
@@ -206,7 +214,7 @@ impl SortExecutor {
                     format!("{}-sub{}", self.identity.clone(), i),
                     self.chunk_size,
                     self.mem_context.clone(),
-                    self.enable_spill,
+                    self.spill_backend.clone(),
                     self.spill_metrics.clone(),
                     Some(partition_size),
                 );
@@ -255,7 +263,7 @@ impl SortExecutor {
         identity: String,
         chunk_size: usize,
         mem_context: MemoryContext,
-        enable_spill: bool,
+        spill_backend: Option<SpillBackend>,
         spill_metrics: Arc<BatchSpillMetrics>,
     ) -> Self {
         Self::new_inner(
@@ -264,7 +272,7 @@ impl SortExecutor {
             identity,
             chunk_size,
             mem_context,
-            enable_spill,
+            spill_backend,
             spill_metrics,
             None,
         )
@@ -276,7 +284,7 @@ impl SortExecutor {
         identity: String,
         chunk_size: usize,
         mem_context: MemoryContext,
-        enable_spill: bool,
+        spill_backend: Option<SpillBackend>,
         spill_metrics: Arc<BatchSpillMetrics>,
         memory_upper_bound: Option<u64>,
     ) -> Self {
@@ -288,7 +296,7 @@ impl SortExecutor {
             schema,
             chunk_size,
             mem_context,
-            enable_spill,
+            spill_backend,
             spill_metrics,
             memory_upper_bound,
         }
@@ -322,6 +330,7 @@ struct SortSpillManager {
 
 impl SortSpillManager {
     fn new(
+        spill_backend: SpillBackend,
         agg_identity: &String,
         partition_num: usize,
         child_data_types: Vec<DataType>,
@@ -330,7 +339,7 @@ impl SortSpillManager {
     ) -> Result<Self> {
         let suffix_uuid = uuid::Uuid::new_v4();
         let dir = format!("/{}-{}/", agg_identity, suffix_uuid);
-        let op = SpillOp::create(dir)?;
+        let op = SpillOp::create(dir, spill_backend)?;
         let input_writers = Vec::with_capacity(partition_num);
         let input_chunk_builders = Vec::with_capacity(partition_num);
         Ok(Self {
@@ -458,7 +467,7 @@ mod tests {
             "SortExecutor2".to_string(),
             CHUNK_SIZE,
             MemoryContext::none(),
-            false,
+            None,
             BatchSpillMetrics::for_test(),
         ));
         let fields = &order_by_executor.schema().fields;
@@ -510,7 +519,7 @@ mod tests {
             "SortExecutor2".to_string(),
             CHUNK_SIZE,
             MemoryContext::none(),
-            false,
+            None,
             BatchSpillMetrics::for_test(),
         ));
         let fields = &order_by_executor.schema().fields;
@@ -562,7 +571,7 @@ mod tests {
             "SortExecutor2".to_string(),
             CHUNK_SIZE,
             MemoryContext::none(),
-            false,
+            None,
             BatchSpillMetrics::for_test(),
         ));
         let fields = &order_by_executor.schema().fields;
@@ -639,7 +648,7 @@ mod tests {
             "SortExecutor".to_string(),
             CHUNK_SIZE,
             MemoryContext::none(),
-            false,
+            None,
             BatchSpillMetrics::for_test(),
         ));
 
@@ -721,7 +730,7 @@ mod tests {
             "SortExecutor".to_string(),
             CHUNK_SIZE,
             MemoryContext::none(),
-            false,
+            None,
             BatchSpillMetrics::for_test(),
         ));
 
@@ -829,7 +838,7 @@ mod tests {
             "SortExecutor".to_string(),
             CHUNK_SIZE,
             MemoryContext::none(),
-            false,
+            None,
             BatchSpillMetrics::for_test(),
         ));
 
@@ -979,12 +988,66 @@ mod tests {
             "SortExecutor".to_string(),
             CHUNK_SIZE,
             MemoryContext::none(),
-            false,
+            None,
             BatchSpillMetrics::for_test(),
         ));
 
         let mut stream = order_by_executor.execute();
         let res = stream.next().await;
         assert_eq!(res.unwrap().unwrap(), output_chunk)
+    }
+
+    #[tokio::test]
+    async fn test_spill_out() {
+        let schema = Schema {
+            fields: vec![
+                Field::unnamed(DataType::Float32),
+                Field::unnamed(DataType::Float64),
+            ],
+        };
+        let mut mock_executor = MockExecutor::new(schema);
+        mock_executor.add(DataChunk::from_pretty(
+            " f    F
+             -2.2  3.3
+             -1.1  2.2
+              1.1  1.1
+              2.2 -1.1
+              3.3 -2.2",
+        ));
+        let column_orders = vec![
+            ColumnOrder {
+                column_index: 1,
+                order_type: OrderType::ascending(),
+            },
+            ColumnOrder {
+                column_index: 0,
+                order_type: OrderType::ascending(),
+            },
+        ];
+        let order_by_executor = Box::new(SortExecutor::new(
+            Box::new(mock_executor),
+            Arc::new(column_orders),
+            "SortExecutor2".to_string(),
+            CHUNK_SIZE,
+            MemoryContext::for_spill_test(),
+            Some(SpillBackend::Memory),
+            BatchSpillMetrics::for_test(),
+        ));
+        let fields = &order_by_executor.schema().fields;
+        assert_eq!(fields[0].data_type, DataType::Float32);
+        assert_eq!(fields[1].data_type, DataType::Float64);
+
+        let mut stream = order_by_executor.execute();
+        let res = stream.next().await;
+        assert!(res.is_some());
+        if let Some(res) = res {
+            let res = res.unwrap();
+            let col0 = res.column_at(0);
+            assert_eq!(col0.as_float32().value_at(0), Some(3.3.into()));
+            assert_eq!(col0.as_float32().value_at(1), Some(2.2.into()));
+            assert_eq!(col0.as_float32().value_at(2), Some(1.1.into()));
+            assert_eq!(col0.as_float32().value_at(3), Some((-1.1).into()));
+            assert_eq!(col0.as_float32().value_at(4), Some((-2.2).into()));
+        }
     }
 }
