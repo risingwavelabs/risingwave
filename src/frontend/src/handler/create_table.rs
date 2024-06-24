@@ -536,14 +536,12 @@ pub(crate) fn gen_create_table_plan(
     for c in &mut columns {
         c.column_desc.column_id = col_id_gen.generate(c.name())
     }
-    let with_properties = context.with_options().inner().clone();
     gen_create_table_plan_without_source(
         context,
         table_name,
         columns,
         column_defs,
         constraints,
-        with_properties,
         definition,
         source_watermarks,
         append_only,
@@ -560,7 +558,6 @@ pub(crate) fn gen_create_table_plan_without_source(
     columns: Vec<ColumnCatalog>,
     column_defs: Vec<ColumnDef>,
     constraints: Vec<TableConstraint>,
-    with_properties: BTreeMap<String, String>,
     definition: String,
     source_watermarks: Vec<SourceWatermark>,
     append_only: bool,
@@ -598,7 +595,6 @@ pub(crate) fn gen_create_table_plan_without_source(
         context.into(),
         name,
         columns,
-        with_properties,
         pk_column_ids,
         row_id_index,
         definition,
@@ -629,7 +625,6 @@ fn gen_table_plan_with_source(
         context,
         source_catalog.name,
         source_catalog.columns,
-        source_catalog.with_properties.clone(),
         source_catalog.pk_col_ids,
         source_catalog.row_id_index,
         source_catalog.definition,
@@ -649,7 +644,6 @@ fn gen_table_plan_inner(
     context: OptimizerContextRef,
     table_name: String,
     columns: Vec<ColumnCatalog>,
-    with_properties: BTreeMap<String, String>,
     pk_column_ids: Vec<ColumnId>,
     row_id_index: Option<usize>,
     definition: String,
@@ -664,8 +658,7 @@ fn gen_table_plan_inner(
     schema_id: SchemaId,
 ) -> Result<(PlanRef, PbTable)> {
     let session = context.session_ctx().clone();
-    let with_properties = WithOptions::new(with_properties);
-    let retention_seconds = with_properties.retention_seconds();
+    let retention_seconds = context.with_options().retention_seconds();
     let is_external_source = source_catalog.is_some();
     let source_node: PlanRef = LogicalSource::new(
         source_catalog.map(|source| Rc::new(source.clone())),

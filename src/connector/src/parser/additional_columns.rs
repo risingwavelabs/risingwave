@@ -114,7 +114,7 @@ pub fn gen_default_addition_col_name(
     })
 }
 
-pub fn build_additional_column_catalog(
+pub fn build_additional_column_desc(
     column_id: ColumnId,
     connector_name: &str,
     additional_col_type: &str,
@@ -123,7 +123,7 @@ pub fn build_additional_column_catalog(
     data_type: Option<&str>,
     reject_unknown_connector: bool,
     is_cdc_backfill_table: bool,
-) -> ConnectorResult<ColumnCatalog> {
+) -> ConnectorResult<ColumnDesc> {
     let compatible_columns = match (
         get_supported_additional_columns(connector_name, is_cdc_backfill_table),
         reject_unknown_connector,
@@ -154,120 +154,94 @@ pub fn build_additional_column_catalog(
         )
     });
 
-    let catalog = match additional_col_type {
-        "key" => ColumnCatalog {
-            column_desc: ColumnDesc::named_with_additional_column(
-                column_name,
-                column_id,
-                DataType::Bytea,
-                AdditionalColumn {
-                    column_type: Some(AdditionalColumnType::Key(AdditionalColumnKey {})),
-                },
-            ),
-            is_hidden: false,
-        },
-        "timestamp" => ColumnCatalog {
-            column_desc: ColumnDesc::named_with_additional_column(
-                column_name,
-                column_id,
-                DataType::Timestamptz,
-                AdditionalColumn {
-                    column_type: Some(AdditionalColumnType::Timestamp(
-                        AdditionalColumnTimestamp {},
-                    )),
-                },
-            ),
-            is_hidden: false,
-        },
-        "partition" => ColumnCatalog {
-            column_desc: ColumnDesc::named_with_additional_column(
-                column_name,
-                column_id,
-                DataType::Varchar,
-                AdditionalColumn {
-                    column_type: Some(AdditionalColumnType::Partition(
-                        AdditionalColumnPartition {},
-                    )),
-                },
-            ),
-            is_hidden: false,
-        },
-        "offset" => ColumnCatalog {
-            column_desc: ColumnDesc::named_with_additional_column(
-                column_name,
-                column_id,
-                DataType::Varchar,
-                AdditionalColumn {
-                    column_type: Some(AdditionalColumnType::Offset(AdditionalColumnOffset {})),
-                },
-            ),
-            is_hidden: false,
-        },
-        "file" => ColumnCatalog {
-            column_desc: ColumnDesc::named_with_additional_column(
-                column_name,
-                column_id,
-                DataType::Varchar,
-                AdditionalColumn {
-                    column_type: Some(AdditionalColumnType::Filename(AdditionalColumnFilename {})),
-                },
-            ),
-            is_hidden: false,
-        },
-        "header" => build_header_catalog(column_id, &column_name, inner_field_name, data_type),
-        "database_name" => ColumnCatalog {
-            column_desc: ColumnDesc::named_with_additional_column(
-                column_name,
-                column_id,
-                DataType::Varchar,
-                AdditionalColumn {
-                    column_type: Some(AdditionalColumnType::DatabaseName(
-                        AdditionalDatabaseName {},
-                    )),
-                },
-            ),
-            is_hidden: false,
-        },
-        "schema_name" => ColumnCatalog {
-            column_desc: ColumnDesc::named_with_additional_column(
-                column_name,
-                column_id,
-                DataType::Varchar,
-                AdditionalColumn {
-                    column_type: Some(AdditionalColumnType::SchemaName(AdditionalSchemaName {})),
-                },
-            ),
-            is_hidden: false,
-        },
+    let col_desc = match additional_col_type {
+        "key" => ColumnDesc::named_with_additional_column(
+            column_name,
+            column_id,
+            DataType::Bytea,
+            AdditionalColumn {
+                column_type: Some(AdditionalColumnType::Key(AdditionalColumnKey {})),
+            },
+        ),
 
-        "table_name" => ColumnCatalog {
-            column_desc: ColumnDesc::named_with_additional_column(
-                column_name,
-                column_id,
-                DataType::Varchar,
-                AdditionalColumn {
-                    column_type: Some(AdditionalColumnType::TableName(AdditionalTableName {})),
-                },
-            ),
-            is_hidden: false,
-        },
-        "collection_name" => ColumnCatalog {
-            column_desc: ColumnDesc::named_with_additional_column(
-                column_name,
-                column_id,
-                DataType::Varchar,
-                AdditionalColumn {
-                    column_type: Some(AdditionalColumnType::CollectionName(
-                        AdditionalCollectionName {},
-                    )),
-                },
-            ),
-            is_hidden: false,
-        },
+        "timestamp" => ColumnDesc::named_with_additional_column(
+            column_name,
+            column_id,
+            DataType::Timestamptz,
+            AdditionalColumn {
+                column_type: Some(AdditionalColumnType::Timestamp(
+                    AdditionalColumnTimestamp {},
+                )),
+            },
+        ),
+        "partition" => ColumnDesc::named_with_additional_column(
+            column_name,
+            column_id,
+            DataType::Varchar,
+            AdditionalColumn {
+                column_type: Some(AdditionalColumnType::Partition(
+                    AdditionalColumnPartition {},
+                )),
+            },
+        ),
+        "offset" => ColumnDesc::named_with_additional_column(
+            column_name,
+            column_id,
+            DataType::Varchar,
+            AdditionalColumn {
+                column_type: Some(AdditionalColumnType::Offset(AdditionalColumnOffset {})),
+            },
+        ),
+
+        "file" => ColumnDesc::named_with_additional_column(
+            column_name,
+            column_id,
+            DataType::Varchar,
+            AdditionalColumn {
+                column_type: Some(AdditionalColumnType::Filename(AdditionalColumnFilename {})),
+            },
+        ),
+        "header" => build_header_catalog(column_id, &column_name, inner_field_name, data_type),
+        "database_name" => ColumnDesc::named_with_additional_column(
+            column_name,
+            column_id,
+            DataType::Varchar,
+            AdditionalColumn {
+                column_type: Some(AdditionalColumnType::DatabaseName(
+                    AdditionalDatabaseName {},
+                )),
+            },
+        ),
+        "schema_name" => ColumnDesc::named_with_additional_column(
+            column_name,
+            column_id,
+            DataType::Varchar,
+            AdditionalColumn {
+                column_type: Some(AdditionalColumnType::SchemaName(AdditionalSchemaName {})),
+            },
+        ),
+        "table_name" => ColumnDesc::named_with_additional_column(
+            column_name,
+            column_id,
+            DataType::Varchar,
+            AdditionalColumn {
+                column_type: Some(AdditionalColumnType::TableName(AdditionalTableName {})),
+            },
+        ),
+        "collection_name" => ColumnDesc::named_with_additional_column(
+            column_name,
+            column_id,
+            DataType::Varchar,
+            AdditionalColumn {
+                column_type: Some(AdditionalColumnType::CollectionName(
+                    AdditionalCollectionName {},
+                )),
+            },
+        ),
         _ => unreachable!(),
     };
 
-    Ok(catalog)
+    Ok(col_desc)
 }
 
 /// Utility function for adding partition and offset columns to the columns, if not specified by the user.
@@ -278,7 +252,7 @@ pub fn build_additional_column_catalog(
 pub fn source_add_partition_offset_cols(
     columns: &[ColumnCatalog],
     connector_name: &str,
-) -> ([bool; 2], [ColumnCatalog; 2]) {
+) -> ([bool; 2], [ColumnDesc; 2]) {
     let mut columns_exist = [false; 2];
     let mut last_column_id = max_column_id(columns);
 
@@ -292,7 +266,7 @@ pub fn source_add_partition_offset_cols(
                 last_column_id = last_column_id.next();
                 if compat_col_types.contains(col_type) {
                     Some(
-                        build_additional_column_catalog(
+                        build_additional_column_desc(
                             last_column_id,
                             connector_name,
                             col_type,
@@ -313,13 +287,13 @@ pub fn source_add_partition_offset_cols(
     assert_eq!(additional_columns.len(), 2);
     use risingwave_pb::plan_common::additional_column::ColumnType;
     assert_matches::assert_matches!(
-        additional_columns[0].column_desc.additional_column,
+        additional_columns[0].additional_column,
         AdditionalColumn {
             column_type: Some(ColumnType::Partition(_) | ColumnType::Filename(_)),
         }
     );
     assert_matches::assert_matches!(
-        additional_columns[1].column_desc.additional_column,
+        additional_columns[1].additional_column,
         AdditionalColumn {
             column_type: Some(ColumnType::Offset(_)),
         }
@@ -350,7 +324,7 @@ fn build_header_catalog(
     col_name: &str,
     inner_field_name: Option<&str>,
     data_type: Option<&str>,
-) -> ColumnCatalog {
+) -> ColumnDesc {
     if let Some(inner) = inner_field_name {
         let (data_type, pb_data_type) = {
             if let Some(type_name) = data_type {
@@ -381,32 +355,26 @@ fn build_header_catalog(
                 )
             }
         };
-        ColumnCatalog {
-            column_desc: ColumnDesc::named_with_additional_column(
-                col_name,
-                column_id,
-                data_type,
-                AdditionalColumn {
-                    column_type: Some(AdditionalColumnType::HeaderInner(AdditionalColumnHeader {
-                        inner_field: inner.to_string(),
-                        data_type: Some(pb_data_type),
-                    })),
-                },
-            ),
-            is_hidden: false,
-        }
+        ColumnDesc::named_with_additional_column(
+            col_name,
+            column_id,
+            data_type,
+            AdditionalColumn {
+                column_type: Some(AdditionalColumnType::HeaderInner(AdditionalColumnHeader {
+                    inner_field: inner.to_string(),
+                    data_type: Some(pb_data_type),
+                })),
+            },
+        )
     } else {
-        ColumnCatalog {
-            column_desc: ColumnDesc::named_with_additional_column(
-                col_name,
-                column_id,
-                DataType::List(get_kafka_header_item_datatype().into()),
-                AdditionalColumn {
-                    column_type: Some(AdditionalColumnType::Headers(AdditionalColumnHeaders {})),
-                },
-            ),
-            is_hidden: false,
-        }
+        ColumnDesc::named_with_additional_column(
+            col_name,
+            column_id,
+            DataType::List(get_kafka_header_item_datatype().into()),
+            AdditionalColumn {
+                column_type: Some(AdditionalColumnType::Headers(AdditionalColumnHeaders {})),
+            },
+        )
     }
 }
 

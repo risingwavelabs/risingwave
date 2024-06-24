@@ -64,8 +64,6 @@ google-cloud-gax = "0.17.0"
 google-cloud-googleapis = { version = "0.13", features = ["pubsub", "bigquery"] }
 google-cloud-pubsub = "0.25"
 http = "0.2"
-# TODO: remove this once the opendal version is updated to 0.47
-iceberg_opendal = { package = "opendal", version = "0.47" }
 icelake = { workspace = true }
 indexmap = { version = "2.2.6", features = ["serde"] }
 itertools = { workspace = true }
@@ -83,7 +81,13 @@ mysql_common = { version = "0.32", default-features = false, features = [
 ] }
 nexmark = { version = "0.2", features = ["serde"] }
 num-bigint = "0.4"
-opendal = "0.45"
+opendal = { version = "0.47", features = [
+    "executors-tokio",
+    "services-fs",
+    "services-gcs",
+    "services-memory",
+    "services-s3",
+] }
 openssl = "0.10"
 parking_lot = { workspace = true }
 paste = "1"
