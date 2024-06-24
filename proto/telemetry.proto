@@ -19,7 +19,6 @@ enum TelemetryNodeType {
   TELEMETRY_NODE_TYPE_COMPACTOR = 4;
 }
 
-// Coo
 enum TelemetryClusterType {
   TELEMETRY_CLUSTER_TYPE_UNSPECIFIED = 0;
   TELEMETRY_CLUSTER_TYPE_SINGLE_NODE = 1;
