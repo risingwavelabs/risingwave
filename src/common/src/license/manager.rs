@@ -94,6 +94,11 @@ pub(crate) struct LicenseManager {
     inner: RwLock<Inner>,
 }
 
+static PUBLIC_KEY: LazyLock<DecodingKey> = LazyLock::new(|| {
+    DecodingKey::from_ed_pem(include_bytes!("public_key.pem"))
+        .expect("invalid public key for license validation")
+});
+
 impl LicenseManager {
     /// Get the singleton instance of the license manager.
     pub fn get() -> &'static Self {
@@ -116,11 +121,10 @@ impl LicenseManager {
             return;
         }
 
-        // TODO: use asymmetric encryption
-        let validation = Validation::new(Algorithm::HS256);
-        let decoding_key = DecodingKey::from_secret(b"my-very-private-secret");
+        // By default, `exp` is validated based on the current system time.
+        let validation = Validation::new(Algorithm::RS256);
 
-        inner.license = match jsonwebtoken::decode(license_key, &decoding_key, &validation) {
+        inner.license = match jsonwebtoken::decode(license_key, &PUBLIC_KEY, &validation) {
             Ok(data) => Ok(data.claims),
             Err(error) => Err(LicenseKeyError(error)),
         };
