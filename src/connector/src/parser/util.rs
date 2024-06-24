@@ -102,7 +102,7 @@ macro_rules! only_parse_payload {
 macro_rules! extract_key_config {
     ($props:ident) => {
         match $props.key_encoding_config {
-            Some(config) => (config, EncodingType::Value),
+            Some(_) => unreachable!(),
             None => ($props.encoding_config.clone(), EncodingType::Key),
         }
     };

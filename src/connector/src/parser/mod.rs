@@ -1048,7 +1048,7 @@ pub struct CommonParserConfig {
 
 #[derive(Debug, Clone, Default)]
 pub struct SpecificParserConfig {
-    pub key_encoding_config: Option<EncodingProperties>,
+    pub key_encoding_config: Option<()>,
     pub encoding_config: EncodingProperties,
     pub protocol_config: ProtocolProperties,
 }
