@@ -54,12 +54,16 @@ pub struct StorageOpts {
     pub block_cache_shard_num: usize,
     /// Eviction config for block cache.
     pub block_cache_eviction_config: EvictionConfig,
+    /// Capacity of block TLS cache.
+    pub block_cache_tls_capacity_mb: usize,
     /// Capacity of sstable meta cache.
     pub meta_cache_capacity_mb: usize,
     /// the number of meta-cache shard. Less shard means that more concurrent-conflict.
     pub meta_cache_shard_num: usize,
     /// Eviction config for meta cache.
     pub meta_cache_eviction_config: EvictionConfig,
+    /// Capacity of meta TLS cache.
+    pub meta_cache_tls_capacity_mb: usize,
     /// max memory usage for large query.
     pub prefetch_buffer_capacity_mb: usize,
 
@@ -162,9 +166,15 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             block_cache_capacity_mb: s.block_cache_capacity_mb,
             block_cache_shard_num: s.block_cache_shard_num,
             block_cache_eviction_config: s.block_cache_eviction_config.clone(),
+            block_cache_tls_capacity_mb: c
+                .storage
+                .cache
+                .block_cache_tls_capacity
+                .unwrap_or_default(),
             meta_cache_capacity_mb: s.meta_cache_capacity_mb,
             meta_cache_shard_num: s.meta_cache_shard_num,
             meta_cache_eviction_config: s.meta_cache_eviction_config.clone(),
+            meta_cache_tls_capacity_mb: c.storage.cache.meta_cache_tls_capacity.unwrap_or_default(),
             prefetch_buffer_capacity_mb: s.prefetch_buffer_capacity_mb,
             max_prefetch_block_number: c.storage.max_prefetch_block_number,
             disable_remote_compactor: c.storage.disable_remote_compactor,

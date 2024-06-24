@@ -589,6 +589,9 @@ pub struct CacheConfig {
     pub block_cache_eviction: CacheEvictionConfig,
 
     #[serde(default)]
+    pub block_cache_tls_capacity: Option<usize>,
+
+    #[serde(default)]
     pub meta_cache_capacity_mb: Option<usize>,
 
     #[serde(default)]
@@ -596,6 +599,9 @@ pub struct CacheConfig {
 
     #[serde(default)]
     pub meta_cache_eviction: CacheEvictionConfig,
+
+    #[serde(default)]
+    pub meta_cache_tls_capacity: Option<usize>,
 }
 
 /// the section `[storage.cache.eviction]` in `risingwave.toml`.
@@ -2112,11 +2118,15 @@ pub struct StorageMemoryConfig {
     pub prefetch_buffer_capacity_mb: usize,
     pub block_cache_eviction_config: EvictionConfig,
     pub meta_cache_eviction_config: EvictionConfig,
+    // pub block_cache_tls_capacity_mb: usize,
+    // pub meta_cache_tls_capacity_mb: usize,
 }
 
 pub const MAX_META_CACHE_SHARD_BITS: usize = 4;
 pub const MIN_BUFFER_SIZE_PER_SHARD: usize = 256;
 pub const MAX_BLOCK_CACHE_SHARD_BITS: usize = 6; // It means that there will be 64 shards lru-cache to avoid lock conflict.
+                                                 // /// TLS cache will be disabled if its capacity is smaller than this.
+                                                 // pub const TLS_CACHE_CAPACITY_THRESHOLD_MB: usize = 1;
 
 pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
     let block_cache_capacity_mb = s.storage.cache.block_cache_capacity_mb.unwrap_or(
@@ -2223,6 +2233,18 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
                 }
             });
 
+    // let block_cache_tls_capacity_mb =
+    //     match s.storage.cache.block_cache_tls_capacity.unwrap_or_default() {
+    //         v if v < TLS_CACHE_CAPACITY_THRESHOLD_MB => 0,
+    //         v => v,
+    //     };
+
+    // let meta_cache_tls_capacity_mb =
+    //     match s.storage.cache.meta_cache_tls_capacity.unwrap_or_default() {
+    //         v if v < TLS_CACHE_CAPACITY_THRESHOLD_MB => 0,
+    //         v => v,
+    //     };
+
     StorageMemoryConfig {
         block_cache_capacity_mb,
         block_cache_shard_num,
@@ -2233,6 +2255,8 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
         prefetch_buffer_capacity_mb,
         block_cache_eviction_config,
         meta_cache_eviction_config,
+        // block_cache_tls_capacity_mb,
+        // meta_cache_tls_capacity_mb,
     }
 }
 
