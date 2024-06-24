@@ -29,6 +29,7 @@ impl OpendalObjectStore {
         namenode: String,
         root: String,
         config: Arc<ObjectStoreConfig>,
+        metrics: Arc<ObjectStoreMetrics>,
     ) -> ObjectResult<Self> {
         // Create hdfs backend builder.
         let mut builder = Hdfs::default();
@@ -46,6 +47,7 @@ impl OpendalObjectStore {
             op,
             engine_type: EngineType::Hdfs,
             config,
+            metrics,
         })
     }
 }
