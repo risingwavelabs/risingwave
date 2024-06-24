@@ -19,6 +19,7 @@ pub mod report;
 use std::env;
 use std::time::SystemTime;
 
+use risingwave_pb::telemetry::PbTelemetryClusterType;
 use serde::{Deserialize, Serialize};
 use sysinfo::System;
 use thiserror_ext::AsReport;
@@ -30,45 +31,21 @@ use crate::RW_VERSION;
 
 pub const TELEMETRY_CLUSTER_TYPE: &str = "RW_TELEMETRY_TYPE";
 pub const TELEMETRY_CLUSTER_TYPE_HOSTED: &str = "hosted"; // hosted on RisingWave Cloud
-pub const TELEMETRY_CLUSTER_TYPE_TEST: &str = "test"; // test environment, eg. CI & Risedev
 pub const TELEMETRY_CLUSTER_TYPE_KUBERNETES: &str = "kubernetes";
 pub const TELEMETRY_CLUSTER_TYPE_SINGLE_NODE: &str = "single-node";
 pub const TELEMETRY_CLUSTER_TYPE_DOCKER_COMPOSE: &str = "docker-compose";
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum TelemetryClusterType {
-    Hosted,
-    Test,
-    DockerCompose,
-    Kubernetes,
-    SingleNode,
-    Unspecified,
-}
 
-impl TelemetryClusterType {
-    pub fn from_env_var() -> Self {
-        let cluster_type = match env::var(TELEMETRY_CLUSTER_TYPE) {
-            Ok(cluster_type) => cluster_type,
-            Err(_) => return Self::Unspecified,
-        };
-        match cluster_type.as_str() {
-            TELEMETRY_CLUSTER_TYPE_HOSTED => Self::Hosted,
-            TELEMETRY_CLUSTER_TYPE_DOCKER_COMPOSE => Self::DockerCompose,
-            TELEMETRY_CLUSTER_TYPE_KUBERNETES => Self::Kubernetes,
-            TELEMETRY_CLUSTER_TYPE_SINGLE_NODE => Self::SingleNode,
-            _ => Self::Unspecified,
-        }
-    }
-
-    pub fn to_prost(&self) -> risingwave_pb::telemetry::PbTelemetryClusterType {
-        match self {
-            Self::Hosted => risingwave_pb::telemetry::PbTelemetryClusterType::Hosted,
-            Self::DockerCompose => risingwave_pb::telemetry::PbTelemetryClusterType::DockerCompose,
-            Self::Kubernetes => risingwave_pb::telemetry::PbTelemetryClusterType::Kubernetes,
-            Self::SingleNode => risingwave_pb::telemetry::PbTelemetryClusterType::SingleNode,
-            Self::Unspecified | Self::Test => {
-                risingwave_pb::telemetry::PbTelemetryClusterType::Unspecified
-            }
-        }
+pub fn telemetry_cluster_type_from_env_var() -> PbTelemetryClusterType {
+    let cluster_type = match env::var(TELEMETRY_CLUSTER_TYPE) {
+        Ok(cluster_type) => cluster_type,
+        Err(_) => return PbTelemetryClusterType::Unspecified,
+    };
+    match cluster_type.as_str() {
+        TELEMETRY_CLUSTER_TYPE_HOSTED => PbTelemetryClusterType::CloudHosted,
+        TELEMETRY_CLUSTER_TYPE_DOCKER_COMPOSE => PbTelemetryClusterType::DockerCompose,
+        TELEMETRY_CLUSTER_TYPE_KUBERNETES => PbTelemetryClusterType::Kubernetes,
+        TELEMETRY_CLUSTER_TYPE_SINGLE_NODE => PbTelemetryClusterType::SingleNode,
+        _ => PbTelemetryClusterType::Unspecified,
     }
 }
 
@@ -208,8 +185,8 @@ pub fn current_timestamp() -> u64 {
 pub fn report_scarf_enabled() -> bool {
     telemetry_env_enabled()
         && !matches!(
-            TelemetryClusterType::from_env_var(),
-            TelemetryClusterType::Hosted
+            telemetry_cluster_type_from_env_var(),
+            PbTelemetryClusterType::CloudHosted
         )
 }
 
