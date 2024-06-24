@@ -77,6 +77,12 @@ repository = "https://github.com/risingwavelabs/risingwave"
 
 [workspace.dependencies]
 foyer = { version = "0.9.4", features = ["nightly"] }
+apache-avro = { git = "https://github.com/risingwavelabs/avro", rev = "25113ba88234a9ae23296e981d8302c290fdaa4b", features = [
+    "snappy",
+    "zstandard",
+    "bzip",
+    "xz",
+] }
 auto_enums = { version = "0.8", features = ["futures03", "tokio1"] }
 await-tree = "0.2.1"
 aws-config = { version = "1", default-features = false, features = [
@@ -125,9 +131,13 @@ tonic = { package = "madsim-tonic", version = "0.4.1" }
 tonic-build = { package = "madsim-tonic-build", version = "0.4.2" }
 otlp-embedded = { git = "https://github.com/risingwavelabs/otlp-embedded", rev = "492c244e0be91feb659c0cd48a624bbd96045a33" }
 prost = { version = "0.12" }
-icelake = { git = "https://github.com/icelake-io/icelake", rev = "54fd72fbd1dd8c592f05eeeb79223c8a6a33c297", features = [
+icelake = { git = "https://github.com/icelake-io/icelake", rev = "07d53893d7788b4e41fc11efad8a6be828405c31", features = [
     "prometheus",
 ] }
+arrow-array-iceberg = { package = "arrow-array", version = "52" }
+arrow-schema-iceberg = { package = "arrow-schema", version = "52" }
+arrow-buffer-iceberg = { package = "arrow-buffer", version = "52" }
+arrow-cast-iceberg = { package = "arrow-cast", version = "52" }
 arrow-array = "50"
 arrow-arith = "50"
 arrow-cast = "50"
@@ -328,6 +338,8 @@ deno_net = { git = "https://github.com/bakjos/deno", rev = "787a232" }
 deno_tls = { git = "https://github.com/bakjos/deno", rev = "787a232" }
 deno_web = { git = "https://github.com/bakjos/deno", rev = "787a232" }
 deno_websocket = { git = "https://github.com/bakjos/deno", rev = "787a232" }
+# patch to remove preserve_order from serde_json
+bson = { git = "https://github.com/risingwavelabs/bson-rust", rev = "e5175ec" }
 
 [workspace.metadata.dylint]
 libraries = [{ path = "./lints" }]

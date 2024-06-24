@@ -50,7 +50,7 @@ def execute_slt(args, slt):
     cmd = f"sqllogictest -p {rw_config['port']} -d {rw_config['db']} {slt}"
     print(f"Command line is [{cmd}]")
     subprocess.run(cmd, shell=True, check=True)
-    time.sleep(30)
+    time.sleep(15)
 
 
 def verify_result(args, verify_sql, verify_schema, verify_data):

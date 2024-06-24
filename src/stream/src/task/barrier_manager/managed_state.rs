@@ -15,7 +15,7 @@
 use std::assert_matches::assert_matches;
 use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::fmt::{Debug, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 use std::future::Future;
 use std::mem::replace;
 use std::sync::Arc;
@@ -122,11 +122,75 @@ fn sync_epoch<S: StateStore>(
 
 #[derive(Debug)]
 pub(super) struct ManagedBarrierStateDebugInfo<'a> {
-    #[expect(dead_code)]
     epoch_barrier_state_map: &'a BTreeMap<u64, BarrierState>,
 
-    #[expect(dead_code)]
     create_mview_progress: &'a HashMap<u64, HashMap<ActorId, BackfillState>>,
+}
+
+impl Display for ManagedBarrierStateDebugInfo<'_> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let mut prev_epoch = 0u64;
+        for (epoch, barrier_state) in self.epoch_barrier_state_map {
+            write!(f, "> Epoch {}: ", epoch)?;
+            match &barrier_state.inner {
+                ManagedBarrierStateInner::Stashed { .. } => {
+                    write!(f, "Stashed")?;
+                }
+                ManagedBarrierStateInner::Issued(state) => {
+                    write!(f, "Issued [{:?}]. Remaining actors: [", state.kind)?;
+                    let mut is_prev_epoch_issued = false;
+                    if prev_epoch != 0 {
+                        let bs = &self.epoch_barrier_state_map[&prev_epoch];
+                        if let ManagedBarrierStateInner::Issued(IssuedState {
+                            remaining_actors: remaining_actors_prev,
+                            ..
+                        }) = &bs.inner
+                        {
+                            // Only show the actors that are not in the previous epoch.
+                            is_prev_epoch_issued = true;
+                            let mut duplicates = 0usize;
+                            for actor_id in &state.remaining_actors {
+                                if !remaining_actors_prev.contains(actor_id) {
+                                    write!(f, "{}, ", actor_id)?;
+                                } else {
+                                    duplicates += 1;
+                                }
+                            }
+                            if duplicates > 0 {
+                                write!(f, "...and {} actors in prev epoch", duplicates)?;
+                            }
+                        }
+                    }
+                    if !is_prev_epoch_issued {
+                        for actor_id in &state.remaining_actors {
+                            write!(f, "{}, ", actor_id)?;
+                        }
+                    }
+                    write!(f, "]")?;
+                }
+                ManagedBarrierStateInner::AllCollected => {
+                    write!(f, "AllCollected")?;
+                }
+                ManagedBarrierStateInner::Completed(_) => {
+                    write!(f, "Completed")?;
+                }
+            }
+            prev_epoch = *epoch;
+            writeln!(f)?;
+        }
+
+        if !self.create_mview_progress.is_empty() {
+            writeln!(f, "Create MView Progress:")?;
+            for (epoch, progress) in self.create_mview_progress {
+                write!(f, "> Epoch {}:", epoch)?;
+                for (actor_id, state) in progress {
+                    write!(f, ">> Actor {}: {}, ", actor_id, state)?;
+                }
+            }
+        }
+
+        Ok(())
+    }
 }
 
 pub(super) struct ManagedBarrierState {

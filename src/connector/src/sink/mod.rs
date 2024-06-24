@@ -31,6 +31,7 @@ pub mod kafka;
 pub mod kinesis;
 pub mod log_store;
 pub mod mock_coordination_client;
+pub mod mongodb;
 pub mod mqtt;
 pub mod nats;
 pub mod pulsar;
@@ -102,6 +103,7 @@ macro_rules! for_all_sinks {
                 { DeltaLake, $crate::sink::deltalake::DeltaLakeSink },
                 { BigQuery, $crate::sink::big_query::BigQuerySink },
                 { DynamoDb, $crate::sink::dynamodb::DynamoDbSink },
+                { Mongodb, $crate::sink::mongodb::MongodbSink },
                 { SqlServer, $crate::sink::sqlserver::SqlServerSink },
                 { Test, $crate::sink::test_sink::TestSink },
                 { Table, $crate::sink::trivial::TableSink }
@@ -595,6 +597,12 @@ pub enum SinkError {
         #[from]
         #[backtrace]
         ConnectorError,
+    ),
+    #[error("Mongodb error: {0}")]
+    Mongodb(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
     ),
 }
 
