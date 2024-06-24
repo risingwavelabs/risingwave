@@ -32,6 +32,7 @@ use risingwave_common::catalog::Schema;
 use crate::sink::catalog::SinkEncode;
 use crate::sink::{Result, SinkError, SinkWriter};
 
+// Todo(wcy-fdu): upgrade to opendal 0.47.
 const SINK_WRITE_BUFFER_SIZE: usize = 16 * 1024 * 1024;
 
 pub struct OpenDalSinkWriter {
@@ -67,6 +68,8 @@ enum FileWriterEnum {
 #[async_trait]
 impl SinkWriter for OpenDalSinkWriter {
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
+        // Note: epoch is used to name the output files.
+        // Todo: after enabling sink decouple, use the new naming convention.
         let epoch = self.epoch.ok_or_else(|| {
             SinkError::Opendal("epoch has not been initialize, call `begin_epoch`".to_string())
         })?;
@@ -76,6 +79,7 @@ impl SinkWriter for OpenDalSinkWriter {
         if self.is_append_only {
             self.append_only(chunk).await
         } else {
+            // currently file sink only supports append only mode.
             unimplemented!()
         }
     }
@@ -135,13 +139,15 @@ impl OpenDalSinkWriter {
     }
 
     async fn create_object_writer(&mut self, epoch: u64) -> Result<OpendalWriter> {
-        // todo: specify more file suffixes based on encode_type.
+        // Todo: specify more file suffixes based on encode_type.
         let suffix = match self.encode_type {
             SinkEncode::Json => "json",
             SinkEncode::Parquet => "parquet",
             _ => unimplemented!(),
         };
 
+        // Note: sink decoupling is not currently supported, which means that output files will not be batched across checkpoints.
+        // The current implementation writes files every time a checkpoint arrives, so the naming convention is `epoch + executor_id + .suffix`.
         let object_name = format!(
             "{}/epoch_{}_executor_{}.{}",
             self.write_path, epoch, self.executor_id, suffix,
@@ -170,6 +176,7 @@ impl OpenDalSinkWriter {
             }
             SinkEncode::Json => {
                 self.sink_writer = Some(FileWriterEnum::FileWriter(object_writer));
+                unimplemented!();
             }
             _ => unimplemented!(),
         }
