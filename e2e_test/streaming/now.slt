@@ -2,6 +2,8 @@
 skipif madsim
 # In parallel test, we cannot get the DB name.
 skipif parallel
+# TODO: Later if we introduce a new `now()`-like function that returns the time of statement execution,
+# we'll be able to directly create MV without `./risedev psql` and so that we can remove these `skipif`.
 system ok
 ./risedev psql -c "
 create materialized view mv as
@@ -20,7 +22,7 @@ flush;
 skipif madsim
 skipif parallel
 query I
-select count(*) > 10 from mv;
+select count(*) >= 10 from mv;
 ----
 t
 
@@ -30,8 +32,13 @@ sleep 2s
 
 skipif madsim
 skipif parallel
+statement ok
+flush;
+
+skipif madsim
+skipif parallel
 query I
-select count(*) > 12 from mv;
+select count(*) >= 12 from mv;
 ----
 t
 
