@@ -37,6 +37,8 @@ pub enum Tier {
 
 impl Default for Tier {
     /// The default tier is `Free` in production, and `Paid` in debug mode for testing.
+    // TODO: shall we always use `Free` as the default tier here, but provide a test-only license
+    // key as the default value of the system parameter instead?
     fn default() -> Self {
         if cfg!(debug_assertions) {
             Self::Paid
@@ -122,6 +124,8 @@ impl LicenseManager {
         }
 
         // By default, `exp` is validated based on the current system time.
+        // TODO: shall we also validate `nbf`(Not Before)?
+        // TODO: shall we also validate `iss`(Issuer)?
         let validation = Validation::new(Algorithm::RS256);
 
         inner.license = match jsonwebtoken::decode(license_key, &PUBLIC_KEY, &validation) {
