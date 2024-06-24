@@ -21,7 +21,7 @@ use either::Either;
 use itertools::Itertools;
 use maplit::{convert_args, hashmap};
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::array::arrow::{FromArrow, IcebergArrowConvert};
+use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{
     debug_assert_column_ids_distinct, ColumnCatalog, ColumnDesc, ColumnId, Schema, TableId,
@@ -1230,7 +1230,7 @@ pub async fn extract_iceberg_columns(
     if let ConnectorProperties::Iceberg(properties) = props {
         let iceberg_config: IcebergConfig = properties.to_iceberg_config();
         let table = iceberg_config.load_table().await?;
-        let iceberg_schema: arrow_schema::Schema = table
+        let iceberg_schema: arrow_schema_iceberg::Schema = table
             .current_table_metadata()
             .current_schema()?
             .clone()
@@ -1243,8 +1243,8 @@ pub async fn extract_iceberg_columns(
             .map(|(i, field)| {
                 let column_desc = ColumnDesc::named(
                     field.name(),
-                    ColumnId::new((i as u32).try_into().unwrap()),
-                    IcebergArrowConvert.from_field(field).unwrap(),
+                    ColumnId::new((i + 1).try_into().unwrap()),
+                    IcebergArrowConvert.type_from_field(field).unwrap(),
                 );
                 ColumnCatalog {
                     column_desc,
@@ -1286,7 +1286,7 @@ pub async fn check_iceberg_source(
 
     let table = iceberg_config.load_table().await?;
 
-    let iceberg_schema: arrow_schema::Schema = table
+    let iceberg_schema: arrow_schema_iceberg::Schema = table
         .current_table_metadata()
         .current_schema()?
         .clone()
@@ -1307,7 +1307,7 @@ pub async fn check_iceberg_source(
         .filter(|f1| schema.fields.iter().any(|f2| f1.name() == &f2.name))
         .cloned()
         .collect::<Vec<_>>();
-    let new_iceberg_schema = arrow_schema::Schema::new(new_iceberg_field);
+    let new_iceberg_schema = arrow_schema_iceberg::Schema::new(new_iceberg_field);
 
     risingwave_connector::sink::iceberg::try_matches_arrow_schema(&schema, &new_iceberg_schema)?;
 
