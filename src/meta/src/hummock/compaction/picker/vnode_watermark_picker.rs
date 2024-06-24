@@ -151,9 +151,8 @@ mod tests {
             table_ids: vec![2],
             ..Default::default()
         };
-        assert_eq!(
-            should_delete_sst_by_watermark(&sst_info, &table_watermarks),
-            false,
+        assert!(
+            !should_delete_sst_by_watermark(&sst_info, &table_watermarks),
             "should fail because no matching watermark found"
         );
 
@@ -168,9 +167,8 @@ mod tests {
             table_ids: vec![1],
             ..Default::default()
         };
-        assert_eq!(
-            should_delete_sst_by_watermark(&sst_info, &table_watermarks),
-            false,
+        assert!(
+            !should_delete_sst_by_watermark(&sst_info, &table_watermarks),
             "should fail because no matching vnode found"
         );
 
@@ -185,9 +183,8 @@ mod tests {
             table_ids: vec![1],
             ..Default::default()
         };
-        assert_eq!(
-            should_delete_sst_by_watermark(&sst_info, &table_watermarks),
-            false,
+        assert!(
+            !should_delete_sst_by_watermark(&sst_info, &table_watermarks),
             "should fail because different vnodes found"
         );
 
@@ -202,9 +199,8 @@ mod tests {
             table_ids: vec![1],
             ..Default::default()
         };
-        assert_eq!(
-            should_delete_sst_by_watermark(&sst_info, &table_watermarks),
-            false,
+        assert!(
+            !should_delete_sst_by_watermark(&sst_info, &table_watermarks),
             "should fail because right key is greater than watermark"
         );
 
@@ -219,9 +215,6 @@ mod tests {
             table_ids: vec![1],
             ..Default::default()
         };
-        assert_eq!(
-            should_delete_sst_by_watermark(&sst_info, &table_watermarks),
-            true,
-        );
+        assert!(should_delete_sst_by_watermark(&sst_info, &table_watermarks));
     }
 }
