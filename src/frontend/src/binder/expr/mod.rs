@@ -175,7 +175,7 @@ impl Binder {
             Expr::AtTimeZone {
                 timestamp,
                 time_zone,
-            } => self.bind_at_time_zone(*timestamp, time_zone),
+            } => self.bind_at_time_zone(*timestamp, *time_zone),
             // special syntax for string
             Expr::Trim {
                 expr,
@@ -219,9 +219,9 @@ impl Binder {
         .into())
     }
 
-    pub(super) fn bind_at_time_zone(&mut self, input: Expr, time_zone: String) -> Result<ExprImpl> {
+    pub(super) fn bind_at_time_zone(&mut self, input: Expr, time_zone: Expr) -> Result<ExprImpl> {
         let input = self.bind_expr_inner(input)?;
-        let time_zone = self.bind_string(time_zone)?.into();
+        let time_zone = self.bind_expr_inner(time_zone)?;
         FunctionCall::new(ExprType::AtTimeZone, vec![input, time_zone]).map(Into::into)
     }
 
