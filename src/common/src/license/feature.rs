@@ -17,12 +17,13 @@ use thiserror::Error;
 use super::{License, LicenseKeyError, LicenseManager, Tier};
 
 /// Define all features that are available based on the tier of the license.
+///
+/// Check [`Tier`] for the available tiers.
 macro_rules! for_all_features {
     ($macro:ident) => {
         $macro! {
             // name                 min tier    doc
-            { MyCommonFeature,      Free,       "My common feature." },
-            { MyAwesomeFeature,     Paid,       "My awesome feature." },
+            { Test,                 Paid,       "A dummy feature to test the license manager." },
         }
     };
 }

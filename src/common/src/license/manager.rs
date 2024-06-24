@@ -19,10 +19,19 @@ use serde::Deserialize;
 use thiserror::Error;
 
 /// License tier.
+///
+/// Each enterprise [`Feature`](super::Feature) is available for a specific tier and above.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Tier {
+    /// Free tier.
+    ///
+    /// This is more like a placeholder. If a feature is available for the free tier, there's no
+    /// need to add it to the [`Feature`](super::Feature) enum at all.
     Free,
+
+    /// Paid tier.
+    // TODO: Add more tiers if needed.
     Paid,
 }
 
@@ -37,6 +46,10 @@ impl Default for Tier {
     }
 }
 
+/// The content of a license.
+///
+/// We use JSON Web Token (JWT) to represent the license. This struct is the payload.
+// TODO: Shall we add a version field?
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(super) struct License {
