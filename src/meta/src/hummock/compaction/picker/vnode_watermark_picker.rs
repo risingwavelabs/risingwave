@@ -80,6 +80,9 @@ fn should_delete_sst_by_watermark(
     if left_key.user_key.table_id != right_key.user_key.table_id {
         return false;
     }
+    if left_key.user_key.table_key.vnode_part() != right_key.user_key.table_key.vnode_part() {
+        return false;
+    }
     let Some(watermarks) = table_watermarks.get(&left_key.user_key.table_id) else {
         return false;
     };
@@ -103,4 +106,101 @@ fn should_delete_key_by_watermark(
         return false;
     };
     watermark.direction.filter_by_watermark(key, w)
+}
+
+#[cfg(test)]
+mod tests {
+    use bytes::{BufMut, Bytes, BytesMut};
+    use risingwave_common::hash::VirtualNode;
+    use risingwave_hummock_sdk::key::{FullKey, TableKey};
+    use risingwave_hummock_sdk::table_watermark::{ReadTableWatermark, WatermarkDirection};
+    use risingwave_pb::hummock::{KeyRange, SstableInfo};
+
+    use crate::hummock::compaction::picker::vnode_watermark_picker::should_delete_sst_by_watermark;
+
+    #[test]
+    fn test_should_delete_sst_by_watermark() {
+        let table_watermarks = maplit::btreemap! {
+            1.into() => ReadTableWatermark {
+                direction: WatermarkDirection::Ascending,
+                vnode_watermarks: maplit::btreemap! {
+                    VirtualNode::from_index(16) => "some_watermark_key_9".into(),
+                    VirtualNode::from_index(17) => "some_watermark_key_9".into(),
+                },
+            },
+        };
+        let table_key = |vnode_part: usize, key_part: &str| {
+            let mut builder = BytesMut::new();
+            builder.put_slice(&VirtualNode::from_index(vnode_part).to_be_bytes());
+            builder.put_slice(&Bytes::copy_from_slice(key_part.as_bytes()));
+            TableKey(builder.freeze())
+        };
+
+        let sst_info = SstableInfo {
+            object_id: 1,
+            sst_id: 1,
+            key_range: Some(KeyRange {
+                left: FullKey::new(2.into(), table_key(16, "some_watermark_key_1"), 0).encode(),
+                right: FullKey::new(2.into(), table_key(16, "some_watermark_key_2"), 0).encode(),
+                right_exclusive: true,
+            }),
+            table_ids: vec![2],
+            ..Default::default()
+        };
+        assert_eq!(
+            should_delete_sst_by_watermark(&sst_info, &table_watermarks),
+            false,
+            "should fail because no matching watermark found"
+        );
+
+        let sst_info = SstableInfo {
+            object_id: 1,
+            sst_id: 1,
+            key_range: Some(KeyRange {
+                left: FullKey::new(1.into(), table_key(13, "some_watermark_key_1"), 0).encode(),
+                right: FullKey::new(1.into(), table_key(14, "some_watermark_key_2"), 0).encode(),
+                right_exclusive: true,
+            }),
+            table_ids: vec![1],
+            ..Default::default()
+        };
+        assert_eq!(
+            should_delete_sst_by_watermark(&sst_info, &table_watermarks),
+            false,
+            "should fail because no matching vnode found"
+        );
+
+        let sst_info = SstableInfo {
+            object_id: 1,
+            sst_id: 1,
+            key_range: Some(KeyRange {
+                left: FullKey::new(1.into(), table_key(16, "some_watermark_key_1"), 0).encode(),
+                right: FullKey::new(1.into(), table_key(17, "some_watermark_key_2"), 0).encode(),
+                right_exclusive: true,
+            }),
+            table_ids: vec![1],
+            ..Default::default()
+        };
+        assert_eq!(
+            should_delete_sst_by_watermark(&sst_info, &table_watermarks),
+            false,
+            "should fail because different vnodes found"
+        );
+
+        let sst_info = SstableInfo {
+            object_id: 1,
+            sst_id: 1,
+            key_range: Some(KeyRange {
+                left: FullKey::new(1.into(), table_key(16, "some_watermark_key_1"), 0).encode(),
+                right: FullKey::new(1.into(), table_key(16, "some_watermark_key_2"), 0).encode(),
+                right_exclusive: true,
+            }),
+            table_ids: vec![1],
+            ..Default::default()
+        };
+        assert_eq!(
+            should_delete_sst_by_watermark(&sst_info, &table_watermarks),
+            true,
+        );
+    }
 }

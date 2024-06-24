@@ -32,13 +32,12 @@ use risingwave_hummock_sdk::{can_concat, CompactionGroupId, HummockCompactionTas
 use risingwave_pb::hummock::compaction_config::CompactionMode;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{CompactTask, CompactionConfig, LevelType};
-pub use selector::CompactionSelector;
+pub use selector::{CompactionSelector, CompactionSelectorContext};
 
 use self::selector::{EmergencySelector, LocalSelectorStatistic};
 use super::check_cg_write_limit;
 use crate::hummock::compaction::overlap_strategy::{OverlapStrategy, RangeOverlapStrategy};
 use crate::hummock::compaction::picker::CompactionInput;
-use crate::hummock::compaction::selector::CompactionSelectorContext;
 use crate::hummock::level_handler::LevelHandler;
 use crate::hummock::model::CompactionGroup;
 use crate::MetaOpts;
