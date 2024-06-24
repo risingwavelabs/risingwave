@@ -327,7 +327,7 @@ impl ColumnCatalog {
     pub fn visible(column_desc: ColumnDesc) -> Self {
         Self {
             column_desc,
-            is_hidden: true,
+            is_hidden: false,
         }
     }
 
