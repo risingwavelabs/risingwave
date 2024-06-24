@@ -1330,10 +1330,8 @@ impl DdlController {
         };
 
         tracing::debug!(id = job_id, "finishing stream job");
-        let version = mgr
-            .catalog_manager
-            .finish_stream_job(stream_job, internal_tables)
-            .await?;
+        // TODO(kwannoel): Poll the rx here.
+        let version = 0;
         tracing::debug!(id = job_id, "finished stream job");
 
         Ok(version)
@@ -1667,6 +1665,7 @@ impl DdlController {
             mv_table_id: stream_job.mv_table(),
             create_type: stream_job.create_type(),
             ddl_type: stream_job.into(),
+            streaming_job: stream_job.clone(),
             replace_table_job_info,
             option: CreateStreamingJobOption {},
         };
