@@ -13,7 +13,7 @@ CREATE TABLE orders (
   order_status SMALLINT
 ) WITH (
   connector = 'sqlserver-cdc',
-  hostname = '${MSSQL_HOST:localhost}',
+  hostname = '${MSSQL_HOST:sqlserver-server}',
   port = '${MSSQL_PORT:1433}',
   username = '${MSSQL_USER:$USER}',
   password = '${MSSQL_PASSWORD}',
@@ -28,7 +28,7 @@ CREATE TABLE single_type (
   PRIMARY KEY (id)
 )  WITH (
   connector = 'sqlserver-cdc',
-  hostname = '${MSSQL_HOST:localhost}',
+  hostname = '${MSSQL_HOST:sqlserver-server}',
   port = '${MSSQL_PORT:1433}',
   username = '${MSSQL_USER:$USER}',
   password = '${MSSQL_PASSWORD}',
@@ -55,7 +55,7 @@ CREATE TABLE sqlserver_all_data_types (
   c_datetimeoffset TIMESTAMPTZ
 ) WITH (
   connector = 'sqlserver-cdc',
-  hostname = '${MSSQL_HOST:localhost}',
+  hostname = '${MSSQL_HOST:sqlserver-server}',
   port = '${MSSQL_PORT:1433}',
   username = '${MSSQL_USER:$USER}',
   password = '${MSSQL_PASSWORD}',

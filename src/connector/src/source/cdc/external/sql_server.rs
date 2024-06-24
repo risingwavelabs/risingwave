@@ -31,7 +31,6 @@ use tokio_util::compat::{Compat, TokioAsyncWriteCompatExt};
 
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::sql_server_row_to_owned_row;
-#[cfg(not(madsim))]
 use crate::source::cdc::external::{
     CdcOffset, CdcOffsetParseFunc, DebeziumOffset, ExternalTableConfig, ExternalTableReader,
     SchemaTableName,
@@ -133,7 +132,7 @@ impl SqlServerExternalTable {
             while let Some(item) = stream.try_next().await? {
                 match item {
                     QueryItem::Metadata(meta) => {
-                        for col in meta.columns().iter() {
+                        for col in meta.columns() {
                             column_descs.push(ColumnDesc::named(
                                 col.name(),
                                 ColumnId::placeholder(),
@@ -236,7 +235,7 @@ impl ExternalTableReader for SqlServerExternalTableReader {
         let mut client = self.client.lock().await;
         // start a transaction to read max start_lsn.
         let row = client
-            .simple_query(format!("SELECT sys.fn_cdc_get_max_lsn()",))
+            .simple_query(String::from("SELECT sys.fn_cdc_get_max_lsn()"))
             .await?
             .into_row()
             .await?
@@ -388,16 +387,12 @@ impl SqlServerExternalTableReader {
         let mut client = self.client.lock().await;
 
         // FIXME(kexiang): Set session timezone to UTC
-
-        match start_pk_row {
-            Some(pk_row) => {
-                let params: Vec<Option<ScalarImpl>> = pk_row.into_iter().collect();
-                for param in params.into_iter() {
-                    // primary key should not be null, so it's safe to unwrap
-                    sql.bind(param.unwrap());
-                }
+        if let Some(pk_row) = start_pk_row {
+            let params: Vec<Option<ScalarImpl>> = pk_row.into_iter().collect();
+            for param in params {
+                // primary key should not be null, so it's safe to unwrap
+                sql.bind(param.unwrap());
             }
-            None => {}
         }
 
         let stream = sql.query(&mut client).await?.into_row_stream();

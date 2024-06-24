@@ -26,15 +26,6 @@ shift $((OPTIND -1))
 
 download_and_prepare_rw "$profile" source
 
-echo "--- Activate create an independent db in sql server"
-docker compose -f ci/docker-compose.yml exec sqlserver bash -c "/opt/mssql-tools/bin/sqlcmd -S localhost -U SA -P SomeTestOnly@SA -d master -Q 'create database mydb;'"
-echo "--- Activate sql agent in the sql server container"
-docker compose -f ci/docker-compose.yml exec sqlserver bash -c "/opt/mssql/bin/mssql-conf set sqlagent.enabled true"
-sleep 3
-echo "--- Restart sql server container"
-docker compose -f ci/docker-compose.yml stop sqlserver; docker compose -f ci/docker-compose.yml start sqlserver
-sleep 10
-
 echo "--- Download connector node package"
 buildkite-agent artifact download risingwave-connector.tar.gz ./
 mkdir ./connector-node
@@ -48,23 +39,27 @@ ACCEPT_EULA=Y DEBIAN_FRONTEND=noninteractive apt-get install -y mssql-tools unix
 export PATH="/opt/mssql-tools/bin/:$PATH"
 sleep 2
 
+echo "--- Activate create an independent db in sql server"
+export MSSQL_HOST=sqlserver-server MSSQL_PORT=1433 MSSQL_USER=SA MSSQL_PASSWORD=SomeTestOnly@SA
+sqlcmd -S $MSSQL_HOST -U $MSSQL_USER -P $MSSQL_PASSWORD -d master -Q 'create database mydb;'
+
 # import data to sql server
 export MSSQL_HOST=sqlserver-server MSSQL_PORT=1433 MSSQL_USER=SA MSSQL_PASSWORD=SomeTestOnly@SA MSSQL_DATABASE=mydb
-sqlcmd -S sqlserver-server -U $MSSQL_USER -P $MSSQL_PASSWORD -d $MSSQL_DATABASE -i ./e2e_test/source/cdc_paid/sql_server_cdc.sql
+sqlcmd -S $MSSQL_HOST -U $MSSQL_USER -P $MSSQL_PASSWORD -d $MSSQL_DATABASE -i ./e2e_test/source/cdc_paid/sql_server_cdc.sql
 
-echo "--- starting risingwave cluster"
+echo "--- Starting risingwave cluster"
 RUST_LOG="debug,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 risedev ci-start ci-1cn-1fe-with-recovery
 
-echo "--- sql server cdc validate test"
+echo "--- Sql Server cdc validate test"
 risedev slt './e2e_test/source/cdc_paid/cdc.validate.sql_server.slt'
 
-echo "--- cdc share source test"
+echo "--- Cdc share source test"
 # cdc share stream test cases
-export MSSQL_HOST=db MSSQL_PORT=1433 MSSQL_USER=sa MSSQL_PASSWORD=YourPassword123 MSSQL_DATABASE=mydb
+export MSSQL_HOST=sqlserver-server MSSQL_PORT=1433 MSSQL_USER=SA MSSQL_PASSWORD=SomeTestOnly@SA MSSQL_DATABASE=mydb
 risedev slt './e2e_test/source/cdc_paid/cdc.share_stream.slt'
 
-echo "--- sql server load and check"
+echo "--- Sql Server load and check"
 risedev slt './e2e_test/source/cdc_paid/cdc.load.slt'
 # wait for cdc loading
 sleep 10
@@ -76,8 +71,8 @@ echo "> cluster killed "
 
 
 # insert new rows
-export MSSQL_HOST=db MSSQL_PORT=1433 MSSQL_USER=sa MSSQL_PASSWORD=YourPassword123 MSSQL_DATABASE=mydb
-sqlcmd -S sqlserver-server -U $MSSQL_USER -P $MSSQL_PASSWORD -d $MSSQL_DATABASE -i ./e2e_test/source/cdc_paid/sql_server_cdc_insert.sql
+export MSSQL_HOST=sqlserver-server MSSQL_PORT=1433 MSSQL_USER=SA MSSQL_PASSWORD=SomeTestOnly@SA MSSQL_DATABASE=mydb
+sqlcmd -S $MSSQL_HOST -U $MSSQL_USER -P $MSSQL_PASSWORD -d $MSSQL_DATABASE -i ./e2e_test/source/cdc_paid/sql_server_cdc_insert.sql
 echo "> inserted new rows into sql server"
 
 # start cluster w/o clean-data

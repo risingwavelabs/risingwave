@@ -1139,12 +1139,11 @@ pub fn validate_compatibility(
         }
     }
 
-    if connector == SQL_SERVER_CDC_CONNECTOR {
-        if !props.contains_key("schema.name") {
-            // Default schema name is "dbo"
-            props.insert("schema.name".into(), "dbo".into());
-        }
+    if connector == SQL_SERVER_CDC_CONNECTOR && !props.contains_key("schema.name") {
+        // Default schema name is "dbo"
+        props.insert("schema.name".into(), "dbo".into());
     }
+
     Ok(())
 }
 

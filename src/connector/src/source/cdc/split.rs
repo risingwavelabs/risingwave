@@ -226,9 +226,7 @@ impl SqlServerCdcSplit {
             start_offset,
             snapshot_done: false,
         };
-        Self {
-            inner: split,
-        }
+        Self { inner: split }
     }
 }
 

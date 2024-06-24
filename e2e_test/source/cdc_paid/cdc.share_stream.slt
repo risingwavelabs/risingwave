@@ -4,7 +4,7 @@ control substitution on
 statement ok
 CREATE SOURCE mssql_source WITH (
     connector = 'sqlserver-cdc',
-    hostname = '${MSSQL_HOST:localhost}',
+    hostname = '${MSSQL_HOST:sqlserver-server}',
     port = '${MSSQL_PORT:1433}',
     username = '${MSSQL_USER:$USER}',
     password = '${MSSQL_PASSWORD}',

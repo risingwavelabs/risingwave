@@ -114,7 +114,7 @@ tiberius = { git = "https://github.com/risingwavelabs/tiberius.git", rev = "f834
     "rust_decimal",
     "bigdecimal",
     "tds73",
-    "time", 
+    "time",
 ] }
 tinyvec = { version = "1", features = ["rustc_1_55", "grab_spare_slice"] }
 tokio = { version = "0.2", package = "madsim-tokio", features = [

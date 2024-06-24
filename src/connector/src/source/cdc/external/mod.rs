@@ -87,8 +87,7 @@ impl CdcTableType {
                 PostgresExternalTableReader::new(config, schema, pk_indices, scan_limit).await?,
             )),
             Self::SqlServer => Ok(ExternalTableReaderImpl::SqlServer(
-                SqlServerExternalTableReader::new(config, schema, pk_indices, scan_limit)
-                    .await?,
+                SqlServerExternalTableReader::new(config, schema, pk_indices, scan_limit).await?,
             )),
             _ => bail!("invalid external table type: {:?}", *self),
         }
