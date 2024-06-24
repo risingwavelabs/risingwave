@@ -1048,7 +1048,6 @@ pub struct CommonParserConfig {
 
 #[derive(Debug, Clone, Default)]
 pub struct SpecificParserConfig {
-    pub key_encoding_config: Option<()>,
     pub encoding_config: EncodingProperties,
     pub protocol_config: ProtocolProperties,
 }
@@ -1056,7 +1055,6 @@ pub struct SpecificParserConfig {
 impl SpecificParserConfig {
     // for test only
     pub const DEFAULT_PLAIN_JSON: SpecificParserConfig = SpecificParserConfig {
-        key_encoding_config: None,
         encoding_config: EncodingProperties::Json(JsonProperties {
             use_schema_registry: false,
             timestamptz_handling: None,
@@ -1277,7 +1275,6 @@ impl SpecificParserConfig {
             }
         };
         Ok(Self {
-            key_encoding_config: None,
             encoding_config,
             protocol_config,
         })

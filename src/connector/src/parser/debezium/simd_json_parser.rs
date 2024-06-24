@@ -130,7 +130,6 @@ mod tests {
 
     async fn build_parser(rw_columns: Vec<SourceColumnDesc>) -> DebeziumParser {
         let props = SpecificParserConfig {
-            key_encoding_config: None,
             encoding_config: EncodingProperties::Json(JsonProperties {
                 use_schema_registry: false,
                 timestamptz_handling: None,

@@ -113,7 +113,6 @@ impl DebeziumParser {
         use crate::parser::JsonProperties;
 
         let props = SpecificParserConfig {
-            key_encoding_config: None,
             encoding_config: EncodingProperties::Json(JsonProperties {
                 use_schema_registry: false,
                 timestamptz_handling: None,
@@ -224,7 +223,6 @@ mod tests {
             .collect::<Vec<_>>();
 
         let props = SpecificParserConfig {
-            key_encoding_config: None,
             encoding_config: EncodingProperties::Json(JsonProperties {
                 use_schema_registry: false,
                 timestamptz_handling: None,
@@ -297,7 +295,6 @@ mod tests {
             .collect::<Vec<_>>();
 
         let props = SpecificParserConfig {
-            key_encoding_config: None,
             encoding_config: EncodingProperties::Json(JsonProperties {
                 use_schema_registry: false,
                 timestamptz_handling: None,
