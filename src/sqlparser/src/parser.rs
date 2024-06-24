@@ -167,6 +167,8 @@ pub enum Precedence {
     PlusMinus, // 30 in upstream
     MulDiv,    // 40 in upstream
     Exp,
+    At,
+    Collate,
     UnaryPosNeg,
     PostfixFactorial,
     Array,
@@ -1539,17 +1541,12 @@ impl Parser {
                 }
                 Keyword::AT => {
                     if self.parse_keywords(&[Keyword::TIME, Keyword::ZONE]) {
-                        let token = self.next_token();
-                        match token.token {
-                            Token::SingleQuotedString(time_zone) => Ok(Expr::AtTimeZone {
-                                timestamp: Box::new(expr),
-                                time_zone,
-                            }),
-                            unexpected => self.expected(
-                                "Expected Token::SingleQuotedString after AT TIME ZONE",
-                                unexpected.with_location(token.location),
-                            ),
-                        }
+                        assert_eq!(precedence, Precedence::At);
+                        let time_zone = Box::new(self.parse_subexpr(precedence)?);
+                        Ok(Expr::AtTimeZone {
+                            timestamp: Box::new(expr),
+                            time_zone,
+                        })
                     } else {
                         self.expected("Expected Token::Word after AT", tok)
                     }
@@ -1807,7 +1804,7 @@ impl Parser {
                     (Token::Word(w), Token::Word(w2))
                         if w.keyword == Keyword::TIME && w2.keyword == Keyword::ZONE =>
                     {
-                        Ok(P::Other)
+                        Ok(P::At)
                     }
                     _ => Ok(P::Zero),
                 }

@@ -416,7 +416,7 @@ pub enum Expr {
     /// explicitly specified zone
     AtTimeZone {
         timestamp: Box<Expr>,
-        time_zone: String,
+        time_zone: Box<Expr>,
     },
     /// `EXTRACT(DateTimeField FROM <expr>)`
     Extract {
@@ -666,7 +666,7 @@ impl fmt::Display for Expr {
             Expr::AtTimeZone {
                 timestamp,
                 time_zone,
-            } => write!(f, "{} AT TIME ZONE '{}'", timestamp, time_zone),
+            } => write!(f, "{} AT TIME ZONE {}", timestamp, time_zone),
             Expr::Extract { field, expr } => write!(f, "EXTRACT({} FROM {})", field, expr),
             Expr::Collate { expr, collation } => write!(f, "{} COLLATE {}", expr, collation),
             Expr::Nested(ast) => write!(f, "({})", ast),
