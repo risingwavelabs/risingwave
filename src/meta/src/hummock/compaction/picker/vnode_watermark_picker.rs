@@ -31,6 +31,8 @@ impl VnodeWatermarkCompactionPicker {
         Self {}
     }
 
+    /// The current implementation only picks trivial reclaim task for the bottommost level.
+    /// Must modify [`CompactStatus::is_trivial_reclaim`], if nontrivial reclaim is supported in the future.
     pub fn pick_compaction(
         &mut self,
         levels: &Levels,
@@ -75,6 +77,8 @@ fn should_delete_sst_by_watermark(
     sst_info: &SstableInfo,
     table_watermarks: &BTreeMap<TableId, ReadTableWatermark>,
 ) -> bool {
+    // Both table id and vnode must be identical for both the left and right keys in a SST.
+    // As more data is written to the bottommost level, they will eventually become identical.
     let left_key = FullKey::decode(&sst_info.key_range.as_ref().unwrap().left);
     let right_key = FullKey::decode(&sst_info.key_range.as_ref().unwrap().right);
     if left_key.user_key.table_id != right_key.user_key.table_id {
@@ -124,8 +128,8 @@ mod tests {
             1.into() => ReadTableWatermark {
                 direction: WatermarkDirection::Ascending,
                 vnode_watermarks: maplit::btreemap! {
-                    VirtualNode::from_index(16) => "some_watermark_key_9".into(),
-                    VirtualNode::from_index(17) => "some_watermark_key_9".into(),
+                    VirtualNode::from_index(16) => "some_watermark_key_8".into(),
+                    VirtualNode::from_index(17) => "some_watermark_key_8".into(),
                 },
             },
         };
@@ -185,6 +189,23 @@ mod tests {
             should_delete_sst_by_watermark(&sst_info, &table_watermarks),
             false,
             "should fail because different vnodes found"
+        );
+
+        let sst_info = SstableInfo {
+            object_id: 1,
+            sst_id: 1,
+            key_range: Some(KeyRange {
+                left: FullKey::new(1.into(), table_key(16, "some_watermark_key_1"), 0).encode(),
+                right: FullKey::new(1.into(), table_key(16, "some_watermark_key_9"), 0).encode(),
+                right_exclusive: true,
+            }),
+            table_ids: vec![1],
+            ..Default::default()
+        };
+        assert_eq!(
+            should_delete_sst_by_watermark(&sst_info, &table_watermarks),
+            false,
+            "should fail because right key is greater than watermark"
         );
 
         let sst_info = SstableInfo {
