@@ -403,10 +403,9 @@ impl ToStream for LogicalProjectSet {
         if self.select_list().iter().any(|item| item.has_now()) {
             // User may use `now()` in table function in a wrong way, because we allow `now()` in `FROM` clause.
             return Err(ErrorCode::NotSupported(
-                "General `now()` function".to_string(),
-                "If you are trying to use `generate_series` with `now()`, please kindly check \
-                whether you are using it in a correct way."
-                    .to_string(),
+                "General `now()` function in streaming queries".to_string(),
+                "Streaming `now()` is currently only supported in GenerateSeries and TemporalFilter patterns."
+                .to_string(),
             )
             .into());
         }

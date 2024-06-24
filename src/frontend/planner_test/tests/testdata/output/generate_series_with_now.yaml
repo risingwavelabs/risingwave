@@ -26,10 +26,10 @@
       interval '1 hour'
     );
   stream_error: |-
-    Not supported: General `now()` function
-    HINT: If you are trying to use `generate_series` with `now()`, please kindly check whether you are using it in a correct way.
+    Not supported: General `now()` function in streaming queries
+    HINT: Streaming `now()` is currently only supported in GenerateSeries and TemporalFilter patterns.
 - sql: |
     select * from unnest(array[now(), now()]);
   stream_error: |-
-    Not supported: General `now()` function
-    HINT: If you are trying to use `generate_series` with `now()`, please kindly check whether you are using it in a correct way.
+    Not supported: General `now()` function in streaming queries
+    HINT: Streaming `now()` is currently only supported in GenerateSeries and TemporalFilter patterns.
