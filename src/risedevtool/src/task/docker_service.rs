@@ -57,6 +57,12 @@ pub trait DockerServiceConfig: Send + 'static {
     fn data_path(&self) -> Option<String> {
         None
     }
+
+    /// `--network host`. Note that using this will make `-p <host_port>:<container_port>` not work.
+    /// Should change the container port instead.
+    fn use_host_network(&self) -> bool {
+        false
+    }
 }
 
 /// A service that runs a docker container with the given configuration.
@@ -107,8 +113,12 @@ where
         for (k, v) in self.config.envs() {
             cmd.arg("-e").arg(format!("{k}={v}"));
         }
-        for (container, host) in self.config.ports() {
-            cmd.arg("-p").arg(format!("{container}:{host}"));
+        if self.config.use_host_network() {
+            cmd.arg("--network").arg("host");
+        } else {
+            for (container, host) in self.config.ports() {
+                cmd.arg("-p").arg(format!("{container}:{host}"));
+            }
         }
 
         if let Some(data_path) = self.config.data_path() {
