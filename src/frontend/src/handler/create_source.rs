@@ -750,8 +750,9 @@ pub(crate) fn bind_all_columns(
     }
 }
 
+/// TODO: perhaps put the hint in notice is better. The error message format might be not that reliable.
 fn hint_upsert(encode: &Encode) -> String {
-    format_args!(
+    format!(
         r#"Hint: For FORMAT UPSERT ENCODE {encode:}, INCLUDE KEY must be specified and the key column must be used as primary key.
 example:
     CREATE TABLE <table_name> ( PRIMARY KEY ([rw_key | <key_name>]) )
@@ -824,15 +825,15 @@ pub(crate) async fn bind_source_pk(
                 sql_defined_pk_names
             } else {
                 // pk not set, or even key not included
-                return if include_key_column_name.is_none() {
+                return if let Some(include_key_column_name) = include_key_column_name {
                     Err(RwError::from(ProtocolError(format!(
-                        "INCLUDE KEY clause not set\n\n{}",
+                        "Primary key must be specified to {}\n\n{}",
+                        include_key_column_name,
                         hint_upsert(encode)
                     ))))
                 } else {
                     Err(RwError::from(ProtocolError(format!(
-                        "Primary key must be specified to {}\n\n{}",
-                        include_key_column_name.unwrap(),
+                        "INCLUDE KEY clause not set\n\n{}",
                         hint_upsert(encode)
                     ))))
                 };
