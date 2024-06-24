@@ -102,7 +102,7 @@ FORMAT UPSERT ENCODE JSON
 db error: ERROR: Failed to run the query
 
 Caused by:
-  Protocol error: Only ID can be used as primary key
+  Protocol error: Only "rw_key" can be used as primary key
 
 Hint: For FORMAT UPSERT ENCODE JSON, INCLUDE KEY must be specified and the key column must be used as primary key.
 example:

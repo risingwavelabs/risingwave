@@ -816,8 +816,8 @@ pub(crate) async fn bind_source_pk(
                     || !key_column_name.eq(sql_defined_pk_names[0].as_str())
                 {
                     return Err(RwError::from(ProtocolError(format!(
-                        "Only {} can be used as primary key\n\n{}",
-                        sql_defined_pk_names[0],
+                        "Only \"{}\" can be used as primary key\n\n{}",
+                        key_column_name,
                         hint_upsert(encode)
                     ))));
                 }
