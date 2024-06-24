@@ -29,7 +29,7 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::types::DataType;
 use risingwave_connector::parser::additional_columns::{
-    build_additional_column_catalog, get_supported_additional_columns,
+    build_additional_column_desc, get_supported_additional_columns,
 };
 use risingwave_connector::parser::{
     fetch_json_schema_and_map_to_columns, AvroParserConfig, DebeziumAvroParserConfig,
@@ -616,7 +616,7 @@ pub fn handle_addition_columns(
         let data_type_name: Option<String> = item
             .header_inner_expect_type
             .map(|dt| format!("{:?}", dt).to_lowercase());
-        columns.push(build_additional_column_catalog(
+        let col = build_additional_column_desc(
             latest_col_id.next(),
             connector_name.as_str(),
             item.column_type.real_value().as_str(),
@@ -625,7 +625,8 @@ pub fn handle_addition_columns(
             data_type_name.as_deref(),
             true,
             is_cdc_backfill_table,
-        )?);
+        )?;
+        columns.push(ColumnCatalog::visible(col));
     }
 
     Ok(())
@@ -945,7 +946,7 @@ fn check_and_add_timestamp_column(with_properties: &WithOptions, columns: &mut V
         }
 
         // add a hidden column `_rw_kafka_timestamp` to each message from Kafka source
-        let mut catalog = build_additional_column_catalog(
+        let col = build_additional_column_desc(
             ColumnId::placeholder(),
             KAFKA_CONNECTOR,
             "timestamp",
@@ -956,9 +957,7 @@ fn check_and_add_timestamp_column(with_properties: &WithOptions, columns: &mut V
             false,
         )
         .unwrap();
-        catalog.is_hidden = true;
-
-        columns.push(catalog);
+        columns.push(ColumnCatalog::hidden(col));
     }
 }
 
