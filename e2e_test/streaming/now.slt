@@ -1,3 +1,7 @@
+# In madsim test, we cannot spawn process.
+skipif madsim
+# In parallel test, we cannot get the DB name.
+skipif parallel
 system ok
 ./risedev psql -c "
 create materialized view mv as
@@ -8,20 +12,30 @@ select * from generate_series(
 );
 "
 
+skipif madsim
+skipif parallel
 statement ok
 flush;
 
+skipif madsim
+skipif parallel
 query I
 select count(*) > 10 from mv;
 ----
 t
 
+skipif madsim
+skipif parallel
 sleep 2s
 
+skipif madsim
+skipif parallel
 query I
 select count(*) > 12 from mv;
 ----
 t
 
+skipif madsim
+skipif parallel
 statement ok
 drop materialized view mv;
