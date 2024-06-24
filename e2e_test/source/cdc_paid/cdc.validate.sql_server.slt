@@ -1,0 +1,12 @@
+# CDC Postgres source validate test
+control substitution on
+
+# invalid username
+# invalid password
+# invalid table name
+# invalid primary key
+# column name mismatch
+# column data type mismatch
+# format & encode provided and match with debezium json, this is okay
+# format & encode provided but mismatch with debezium json, this is not allowed
+

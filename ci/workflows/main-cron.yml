@@ -176,6 +176,25 @@ steps:
     timeout_in_minutes: 15
     retry: *auto-retry
 
+  - label: "end-to-end paid source test (release)"
+    command: "ci/scripts/e2e-paid-source-test.sh -p ci-dev"
+    if: |
+      !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
+      || build.pull_request.labels includes "ci/run-e2e-source-tests"
+      || build.env("CI_STEPS") =~ /(^|,)e2e-source-tests?(,|$$)/
+    depends_on:
+      - "build"
+      - "build-other"
+    plugins:
+      - docker-compose#v5.1.0:
+          run: source-test-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+          upload-container-logs: always
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 18
+    retry: *auto-retry
+
   - label: "end-to-end sink test (release)"
     key: "e2e-test-release-sink"
     command: "ci/scripts/e2e-sink-test.sh -p ci-release"
