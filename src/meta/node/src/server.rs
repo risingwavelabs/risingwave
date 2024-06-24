@@ -36,7 +36,6 @@ use risingwave_meta::rpc::intercept::MetricsMiddlewareLayer;
 use risingwave_meta::rpc::ElectionClientRef;
 use risingwave_meta::stream::ScaleController;
 use risingwave_meta::MetaStoreBackend;
-use risingwave_meta_model_migration::{Migrator, MigratorTrait};
 use risingwave_meta_service::backup_service::BackupServiceImpl;
 use risingwave_meta_service::cloud_service::CloudServiceImpl;
 use risingwave_meta_service::cluster_service::ClusterServiceImpl;
@@ -408,13 +407,6 @@ pub async fn start_service_as_election_leader(
     mut svc_shutdown_rx: WatchReceiver<()>,
 ) -> MetaResult<()> {
     tracing::info!("Defining leader services");
-    if let MetaStoreImpl::Sql(sql_store) = &meta_store_impl {
-        // Try to upgrade if any new model changes are added.
-        Migrator::up(&sql_store.conn, None)
-            .await
-            .expect("Failed to upgrade models in meta store");
-    }
-
     let env = MetaSrvEnv::new(
         opts.clone(),
         init_system_params,
@@ -659,7 +651,7 @@ pub async fn start_service_as_election_leader(
     );
     let health_srv = HealthServiceImpl::new();
     let backup_srv = BackupServiceImpl::new(backup_manager);
-    let telemetry_srv = TelemetryInfoServiceImpl::new(env.meta_store_ref());
+    let telemetry_srv = TelemetryInfoServiceImpl::new(env.meta_store());
     let system_params_srv = SystemParamsServiceImpl::new(env.system_params_manager_impl_ref());
     let session_params_srv = SessionParamsServiceImpl::new(env.session_params_manager_impl_ref());
     let serving_srv =

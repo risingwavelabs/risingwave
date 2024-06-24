@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -22,8 +22,6 @@ use futures::{FutureExt, StreamExt};
 use itertools::Itertools;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::get_compaction_group_ids;
-use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_pb::hummock::compact_task::{self, TaskStatus};
 use risingwave_pb::hummock::level_handler::RunningCompactTask;
 use rw_futures_util::select_all;
@@ -33,7 +31,6 @@ use tokio::task::JoinHandle;
 use tokio_stream::wrappers::IntervalStream;
 use tracing::warn;
 
-use crate::hummock::manager::HISTORY_TABLE_INFO_STATISTIC_TIME;
 use crate::hummock::metrics_utils::{trigger_lsm_stat, trigger_mv_stat};
 use crate::hummock::{HummockManager, TASK_NORMAL};
 
@@ -257,16 +254,25 @@ impl HummockManager {
                                     // progress (meta + compactor)
                                     // 2. meta periodically scans the task and performs a cancel on
                                     // the meta side for tasks that are not updated by heartbeat
-                                    for task in compactor_manager.get_heartbeat_expired_tasks() {
+                                    let expired_tasks: Vec<u64> = compactor_manager
+                                        .get_heartbeat_expired_tasks()
+                                        .into_iter()
+                                        .map(|task| task.task_id)
+                                        .collect();
+                                    if !expired_tasks.is_empty() {
+                                        tracing::info!(
+                                            expired_tasks = ?expired_tasks,
+                                            "Heartbeat expired compaction tasks detected. Attempting to cancel tasks.",
+                                        );
                                         if let Err(e) = hummock_manager
-                                            .cancel_compact_task(
-                                                task.task_id,
+                                            .cancel_compact_tasks(
+                                                expired_tasks.clone(),
                                                 TaskStatus::HeartbeatCanceled,
                                             )
                                             .await
                                         {
                                             tracing::error!(
-                                                task_id = task.task_id,
+                                                expired_tasks = ?expired_tasks,
                                                 error = %e.as_report(),
                                                 "Attempt to remove compaction task due to elapsed heartbeat failed. We will continue to track its heartbeat
                                                 until we can successfully report its status",
@@ -459,7 +465,7 @@ impl HummockManager {
             }
 
             for (table_id, table_size) in &group.table_statistic {
-                self.calculate_table_align_rule(
+                self.try_move_table_to_dedicated_cg(
                     &table_write_throughput,
                     table_id,
                     table_size,
@@ -482,90 +488,6 @@ impl HummockManager {
                     task_type,
                     cg_id,
                 );
-            }
-        }
-    }
-
-    async fn calculate_table_align_rule(
-        &self,
-        table_write_throughput: &HashMap<u32, VecDeque<u64>>,
-        table_id: &u32,
-        table_size: &u64,
-        is_creating_table: bool,
-        checkpoint_secs: u64,
-        parent_group_id: u64,
-        group_size: u64,
-    ) {
-        let default_group_id: CompactionGroupId = StaticCompactionGroupId::StateDefault.into();
-        let mv_group_id: CompactionGroupId = StaticCompactionGroupId::MaterializedView.into();
-        let partition_vnode_count = self.env.opts.partition_vnode_count;
-        let window_size = HISTORY_TABLE_INFO_STATISTIC_TIME / (checkpoint_secs as usize);
-
-        let mut is_high_write_throughput = false;
-        let mut is_low_write_throughput = true;
-        if let Some(history) = table_write_throughput.get(table_id) {
-            if !is_creating_table {
-                if history.len() >= window_size {
-                    is_high_write_throughput = history.iter().all(|throughput| {
-                        *throughput / checkpoint_secs
-                            > self.env.opts.table_write_throughput_threshold
-                    });
-                    is_low_write_throughput = history.iter().any(|throughput| {
-                        *throughput / checkpoint_secs
-                            < self.env.opts.min_table_split_write_throughput
-                    });
-                }
-            } else {
-                // For creating table, relax the checking restrictions to make the data alignment behavior more sensitive.
-                let sum = history.iter().sum::<u64>();
-                is_low_write_throughput = sum
-                    < self.env.opts.min_table_split_write_throughput
-                        * history.len() as u64
-                        * checkpoint_secs;
-            }
-        }
-
-        let state_table_size = *table_size;
-
-        // 1. Avoid splitting a creating table
-        // 2. Avoid splitting a is_low_write_throughput creating table
-        // 3. Avoid splitting a non-high throughput medium-sized table
-        if is_creating_table
-            || (is_low_write_throughput)
-            || (state_table_size < self.env.opts.min_table_split_size && !is_high_write_throughput)
-        {
-            return;
-        }
-
-        // do not split a large table and a small table because it would increase IOPS
-        // of small table.
-        if parent_group_id != default_group_id && parent_group_id != mv_group_id {
-            let rest_group_size = group_size - state_table_size;
-            if rest_group_size < state_table_size
-                && rest_group_size < self.env.opts.min_table_split_size
-            {
-                return;
-            }
-        }
-
-        let ret = self
-            .move_state_table_to_compaction_group(
-                parent_group_id,
-                &[*table_id],
-                partition_vnode_count,
-            )
-            .await;
-        match ret {
-            Ok((new_group_id, table_vnode_partition_count)) => {
-                tracing::info!("move state table [{}] from group-{} to group-{} success table_vnode_partition_count {:?}", table_id, parent_group_id, new_group_id, table_vnode_partition_count);
-            }
-            Err(e) => {
-                tracing::info!(
-                    error = %e.as_report(),
-                    "failed to move state table [{}] from group-{}",
-                    table_id,
-                    parent_group_id,
-                )
             }
         }
     }

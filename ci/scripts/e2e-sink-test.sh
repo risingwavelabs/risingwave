@@ -45,7 +45,7 @@ mysql --host=mysql --port=3306 -u root -p123456 test < ./e2e_test/sink/remote/my
 echo "--- preparing postgresql"
 
 # set up PG sink destination
-apt-get -y install postgresql-client
+apt-get -y install postgresql-client jq
 export PGPASSWORD=postgres
 psql -h db -U postgres -c "CREATE ROLE test LOGIN SUPERUSER PASSWORD 'connector';"
 createdb -h db -U postgres test

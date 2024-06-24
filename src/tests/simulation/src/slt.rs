@@ -208,6 +208,7 @@ pub async fn run_slt_task(
         // use a session per file
         let mut tester =
             sqllogictest::Runner::new(|| RisingWave::connect("frontend".into(), "dev".into()));
+        tester.add_label("madsim");
 
         let file = file.unwrap();
         let path = file.as_path();
@@ -461,6 +462,8 @@ pub async fn run_slt_task(
 pub async fn run_parallel_slt_task(glob: &str, jobs: usize) -> Result<(), ParallelTestError> {
     let mut tester =
         sqllogictest::Runner::new(|| RisingWave::connect("frontend".into(), "dev".into()));
+    tester.add_label("madsim");
+
     tester
         .run_parallel_async(
             glob,

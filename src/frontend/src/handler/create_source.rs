@@ -21,10 +21,10 @@ use either::Either;
 use itertools::Itertools;
 use maplit::{convert_args, hashmap};
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::array::arrow::{FromArrow, IcebergArrowConvert};
+use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{
-    is_column_ids_dedup, ColumnCatalog, ColumnDesc, ColumnId, Schema, TableId,
+    debug_assert_column_ids_distinct, ColumnCatalog, ColumnDesc, ColumnId, Schema, TableId,
     INITIAL_SOURCE_VERSION_ID, KAFKA_TIMESTAMP_COLUMN_NAME,
 };
 use risingwave_common::types::DataType;
@@ -32,8 +32,8 @@ use risingwave_connector::parser::additional_columns::{
     build_additional_column_catalog, get_supported_additional_columns,
 };
 use risingwave_connector::parser::{
-    schema_to_columns, AvroParserConfig, DebeziumAvroParserConfig, ProtobufParserConfig,
-    SpecificParserConfig, TimestamptzHandling, DEBEZIUM_IGNORE_KEY,
+    fetch_json_schema_and_map_to_columns, AvroParserConfig, DebeziumAvroParserConfig,
+    ProtobufParserConfig, SpecificParserConfig, TimestamptzHandling, DEBEZIUM_IGNORE_KEY,
 };
 use risingwave_connector::schema::schema_registry::{
     name_strategy_from_str, SchemaRegistryAuth, SCHEMA_REGISTRY_PASSWORD, SCHEMA_REGISTRY_USERNAME,
@@ -73,8 +73,8 @@ use crate::error::ErrorCode::{self, Deprecated, InvalidInputSyntax, NotSupported
 use crate::error::{Result, RwError};
 use crate::expr::Expr;
 use crate::handler::create_table::{
-    bind_pk_on_relation, bind_sql_column_constraints, bind_sql_columns, bind_sql_pk_names,
-    ensure_table_constraints_supported, ColumnIdGenerator,
+    bind_pk_and_row_id_on_relation, bind_sql_column_constraints, bind_sql_columns,
+    bind_sql_pk_names, ensure_table_constraints_supported, ColumnIdGenerator,
 };
 use crate::handler::util::SourceSchemaCompatExt;
 use crate::handler::HandlerArgs;
@@ -102,14 +102,18 @@ async fn extract_json_table_schema(
                 auth
             });
             Ok(Some(
-                schema_to_columns(&schema_location.0, schema_registry_auth, with_properties)
-                    .await?
-                    .into_iter()
-                    .map(|col| ColumnCatalog {
-                        column_desc: col.into(),
-                        is_hidden: false,
-                    })
-                    .collect_vec(),
+                fetch_json_schema_and_map_to_columns(
+                    &schema_location.0,
+                    schema_registry_auth,
+                    with_properties,
+                )
+                .await?
+                .into_iter()
+                .map(|col| ColumnCatalog {
+                    column_desc: col.into(),
+                    is_hidden: false,
+                })
+                .collect_vec(),
             ))
         }
     }
@@ -285,8 +289,11 @@ fn get_name_strategy_or_default(name_strategy: Option<AstString>) -> Result<Opti
     }
 }
 
-/// resolve the schema of the source from external schema file, return the relation's columns. see <https://www.risingwave.dev/docs/current/sql-create-source> for more information.
-/// return `(columns, source info)`
+/// Resolves the schema of the source from external schema file.
+/// See <https://www.risingwave.dev/docs/current/sql-create-source> for more information.
+///
+/// Note: the returned schema strictly corresponds to the schema.
+/// Other special columns like additional columns (`INCLUDE`), and `row_id` column are not included.
 pub(crate) async fn bind_columns_from_source(
     session: &SessionImpl,
     source_schema: &ConnectorSchema,
@@ -484,6 +491,28 @@ pub(crate) async fn bind_columns_from_source(
             ))));
         }
     };
+
+    if cfg!(debug_assertions) {
+        // validate column ids
+        // Note: this just documents how it works currently. It doesn't mean whether it's reasonable.
+        if let Some(ref columns) = columns {
+            let mut i = 1;
+            fn check_col(col: &ColumnDesc, i: &mut usize, columns: &Vec<ColumnCatalog>) {
+                for nested_col in &col.field_descs {
+                    // What's the usage of struct fields' column IDs?
+                    check_col(nested_col, i, columns);
+                }
+                assert!(
+                    col.column_id.get_id() == *i as i32,
+                    "unexpected column id\ncol: {col:?}\ni: {i}\ncolumns: {columns:#?}"
+                );
+                *i += 1;
+            }
+            for col in columns {
+                check_col(&col.column_desc, &mut i, columns);
+            }
+        }
+    }
 
     if !format_encode_options_to_consume.is_empty() {
         let err_string = format!(
@@ -1201,7 +1230,7 @@ pub async fn extract_iceberg_columns(
     if let ConnectorProperties::Iceberg(properties) = props {
         let iceberg_config: IcebergConfig = properties.to_iceberg_config();
         let table = iceberg_config.load_table().await?;
-        let iceberg_schema: arrow_schema::Schema = table
+        let iceberg_schema: arrow_schema_iceberg::Schema = table
             .current_table_metadata()
             .current_schema()?
             .clone()
@@ -1214,8 +1243,8 @@ pub async fn extract_iceberg_columns(
             .map(|(i, field)| {
                 let column_desc = ColumnDesc::named(
                     field.name(),
-                    ColumnId::new((i as u32).try_into().unwrap()),
-                    IcebergArrowConvert.from_field(field).unwrap(),
+                    ColumnId::new((i + 1).try_into().unwrap()),
+                    IcebergArrowConvert.type_from_field(field).unwrap(),
                 );
                 ColumnCatalog {
                     column_desc,
@@ -1257,7 +1286,7 @@ pub async fn check_iceberg_source(
 
     let table = iceberg_config.load_table().await?;
 
-    let iceberg_schema: arrow_schema::Schema = table
+    let iceberg_schema: arrow_schema_iceberg::Schema = table
         .current_table_metadata()
         .current_schema()?
         .clone()
@@ -1278,7 +1307,7 @@ pub async fn check_iceberg_source(
         .filter(|f1| schema.fields.iter().any(|f2| f1.name() == &f2.name))
         .cloned()
         .collect::<Vec<_>>();
-    let new_iceberg_schema = arrow_schema::Schema::new(new_iceberg_field);
+    let new_iceberg_schema = arrow_schema_iceberg::Schema::new(new_iceberg_field);
 
     risingwave_connector::sink::iceberg::try_matches_arrow_schema(&schema, &new_iceberg_schema)?;
 
@@ -1383,10 +1412,12 @@ pub async fn bind_create_source(
         .into());
     }
 
+    // XXX: why do we use col_id_gen here? It doesn't seem to be very necessary.
+    // XXX: should we also chenge the col id for struct fields?
     for c in &mut columns {
         c.column_desc.column_id = col_id_gen.generate(c.name())
     }
-    debug_assert!(is_column_ids_dedup(&columns));
+    debug_assert_column_ids_distinct(&columns);
 
     let must_need_pk = if is_create_source {
         with_properties.connector_need_pk()
@@ -1399,7 +1430,7 @@ pub async fn bind_create_source(
     };
 
     let (mut columns, pk_col_ids, row_id_index) =
-        bind_pk_on_relation(columns, pk_names, must_need_pk)?;
+        bind_pk_and_row_id_on_relation(columns, pk_names, must_need_pk)?;
 
     let watermark_descs =
         bind_source_watermark(session, source_name.clone(), source_watermarks, &columns)?;

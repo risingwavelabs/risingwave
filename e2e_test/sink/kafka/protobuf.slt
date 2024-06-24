@@ -1,4 +1,7 @@
 statement ok
+set sink_decouple = false;
+
+statement ok
 create table from_kafka with (
   connector = 'kafka',
   topic = 'test-rw-sink-append-only-protobuf',

@@ -19,12 +19,13 @@ use anyhow::Context;
 use apache_avro::types::Value;
 use apache_avro::{from_avro_datum, Reader, Schema};
 use risingwave_common::{bail, try_match_expand};
+use risingwave_connector_codec::decoder::avro::{
+    avro_schema_to_column_descs, AvroAccess, AvroParseOptions, ResolvedAvroSchema,
+};
 use risingwave_pb::plan_common::ColumnDesc;
 
-use super::schema_resolver::ConfluentSchemaCache;
-use super::util::{avro_schema_to_column_descs, ResolvedAvroSchema};
+use super::ConfluentSchemaCache;
 use crate::error::ConnectorResult;
-use crate::parser::unified::avro::{AvroAccess, AvroParseOptions};
 use crate::parser::unified::AccessImpl;
 use crate::parser::util::bytes_from_url;
 use crate::parser::{AccessBuilder, AvroProperties, EncodingProperties, EncodingType, MapHandling};
@@ -42,7 +43,7 @@ pub struct AvroAccessBuilder {
 }
 
 impl AccessBuilder for AvroAccessBuilder {
-    async fn generate_accessor(&mut self, payload: Vec<u8>) -> ConnectorResult<AccessImpl<'_, '_>> {
+    async fn generate_accessor(&mut self, payload: Vec<u8>) -> ConnectorResult<AccessImpl<'_>> {
         self.value = self.parse_avro_value(&payload).await?;
         Ok(AccessImpl::Avro(AvroAccess::new(
             self.value.as_ref().unwrap(),
@@ -373,12 +374,14 @@ mod test {
             }
             Schema::TimestampMillis => {
                 let datetime = Date::from_ymd_uncheck(1970, 1, 1).and_hms_uncheck(0, 0, 0);
-                let timestamp_mills = Value::TimestampMillis(datetime.0.timestamp() * 1_000);
+                let timestamp_mills =
+                    Value::TimestampMillis(datetime.0.and_utc().timestamp() * 1_000);
                 Some(timestamp_mills)
             }
             Schema::TimestampMicros => {
                 let datetime = Date::from_ymd_uncheck(1970, 1, 1).and_hms_uncheck(0, 0, 0);
-                let timestamp_micros = Value::TimestampMicros(datetime.0.timestamp() * 1_000_000);
+                let timestamp_micros =
+                    Value::TimestampMicros(datetime.0.and_utc().timestamp() * 1_000_000);
                 Some(timestamp_micros)
             }
             Schema::Duration => {

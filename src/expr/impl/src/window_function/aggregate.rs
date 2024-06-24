@@ -31,7 +31,7 @@ use risingwave_expr::window_function::{
 use risingwave_expr::Result;
 use smallvec::SmallVec;
 
-use super::buffer::{RangeWindow, RowsWindow, WindowBuffer, WindowImpl};
+use super::buffer::{RangeWindow, RowsWindow, SessionWindow, WindowBuffer, WindowImpl};
 
 type StateValue = SmallVec<[Datum; 2]>;
 
@@ -94,6 +94,17 @@ pub(super) fn new(call: &WindowFuncCall) -> Result<BoxedWindowState> {
             arg_data_types,
             buffer: WindowBuffer::<RangeWindow<StateValue>>::new(
                 RangeWindow::new(frame_bounds.clone()),
+                call.frame.exclusion,
+                enable_delta,
+            ),
+            buffer_heap_size: KvSize::new(),
+        }) as BoxedWindowState,
+        FrameBounds::Session(frame_bounds) => Box::new(AggregateState {
+            agg_func,
+            agg_impl,
+            arg_data_types,
+            buffer: WindowBuffer::<SessionWindow<StateValue>>::new(
+                SessionWindow::new(frame_bounds.clone()),
                 call.frame.exclusion,
                 enable_delta,
             ),
