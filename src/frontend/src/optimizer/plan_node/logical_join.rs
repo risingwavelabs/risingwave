@@ -1451,7 +1451,7 @@ impl ToStream for LogicalJoin {
                 )
                 .collect_vec();
             let plan: PlanRef = join_with_pk.into();
-            LogicalFilter::filter_if_keys_all_null(plan, &left_right_stream_keys)
+            LogicalFilter::filter_out_all_null_keys(plan, &left_right_stream_keys)
         } else {
             join_with_pk.into()
         };

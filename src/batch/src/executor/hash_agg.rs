@@ -44,7 +44,7 @@ use crate::executor::{
 };
 use crate::monitor::BatchSpillMetrics;
 use crate::spill::spill_op::{
-    SpillBuildHasher, SpillOp, DEFAULT_SPILL_PARTITION_NUM, SPILL_AT_LEAST_MEMORY,
+    SpillBackend, SpillBuildHasher, SpillOp, DEFAULT_SPILL_PARTITION_NUM, SPILL_AT_LEAST_MEMORY,
 };
 use crate::task::{BatchTaskContext, ShutdownToken, TaskId};
 
@@ -325,7 +325,7 @@ impl AggSpillManager {
     ) -> Result<Self> {
         let suffix_uuid = uuid::Uuid::new_v4();
         let dir = format!("/{}-{}/", agg_identity, suffix_uuid);
-        let op = SpillOp::create(dir)?;
+        let op = SpillOp::create(dir, SpillBackend::Disk)?;
         let agg_state_writers = Vec::with_capacity(partition_num);
         let agg_state_chunk_builder = Vec::with_capacity(partition_num);
         let input_writers = Vec::with_capacity(partition_num);
@@ -589,6 +589,10 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
             // Finally, we would get e.g. 20 partitions. Each partition should contain a portion of the original hash table and input data.
             // A sub HashAggExecutor would be used to consume each partition one by one.
             // If memory is still not enough in the sub HashAggExecutor, it will spill its hash table and input recursively.
+            info!(
+                "batch hash agg executor {} starts to spill out",
+                &self.identity
+            );
             let mut agg_spill_manager = AggSpillManager::new(
                 &self.identity,
                 DEFAULT_SPILL_PARTITION_NUM,

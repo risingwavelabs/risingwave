@@ -18,15 +18,15 @@ use std::sync::Arc;
 use apache_avro::types::Value;
 use apache_avro::{from_avro_datum, Schema};
 use risingwave_common::try_match_expand;
+use risingwave_connector_codec::decoder::avro::{
+    avro_extract_field_schema, avro_schema_skip_union, avro_schema_to_column_descs, AvroAccess,
+    AvroParseOptions, ResolvedAvroSchema,
+};
 use risingwave_pb::catalog::PbSchemaRegistryNameStrategy;
 use risingwave_pb::plan_common::ColumnDesc;
 
 use crate::error::ConnectorResult;
-use crate::parser::avro::schema_resolver::ConfluentSchemaCache;
-use crate::parser::avro::util::{avro_schema_to_column_descs, ResolvedAvroSchema};
-use crate::parser::unified::avro::{
-    avro_extract_field_schema, avro_schema_skip_union, AvroAccess, AvroParseOptions,
-};
+use crate::parser::avro::ConfluentSchemaCache;
 use crate::parser::unified::AccessImpl;
 use crate::parser::{AccessBuilder, EncodingProperties, EncodingType};
 use crate::schema::schema_registry::{
