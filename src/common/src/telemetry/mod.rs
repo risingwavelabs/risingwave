@@ -34,8 +34,6 @@ pub const TELEMETRY_CLUSTER_TYPE_TEST: &str = "test"; // test environment, eg. C
 pub const TELEMETRY_CLUSTER_TYPE_KUBERNETES: &str = "kubernetes";
 pub const TELEMETRY_CLUSTER_TYPE_SINGLE_NODE: &str = "single-node";
 pub const TELEMETRY_CLUSTER_TYPE_DOCKER_COMPOSE: &str = "docker-compose";
-pub const TELEMETRY_CLUSTER_TYPE_STANDALONE: &str = "standalone";
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TelemetryClusterType {
     Hosted,
@@ -43,7 +41,6 @@ pub enum TelemetryClusterType {
     DockerCompose,
     Kubernetes,
     SingleNode,
-    Standalone,
     Unspecified,
 }
 
@@ -55,11 +52,9 @@ impl TelemetryClusterType {
         };
         match cluster_type.as_str() {
             TELEMETRY_CLUSTER_TYPE_HOSTED => Self::Hosted,
-            TELEMETRY_CLUSTER_TYPE_TEST => Self::Test,
             TELEMETRY_CLUSTER_TYPE_DOCKER_COMPOSE => Self::DockerCompose,
             TELEMETRY_CLUSTER_TYPE_KUBERNETES => Self::Kubernetes,
             TELEMETRY_CLUSTER_TYPE_SINGLE_NODE => Self::SingleNode,
-            TELEMETRY_CLUSTER_TYPE_STANDALONE => Self::Standalone,
             _ => Self::Unspecified,
         }
     }
@@ -67,12 +62,12 @@ impl TelemetryClusterType {
     pub fn to_prost(&self) -> risingwave_pb::telemetry::PbTelemetryClusterType {
         match self {
             Self::Hosted => risingwave_pb::telemetry::PbTelemetryClusterType::Hosted,
-            Self::Test => risingwave_pb::telemetry::PbTelemetryClusterType::Test,
             Self::DockerCompose => risingwave_pb::telemetry::PbTelemetryClusterType::DockerCompose,
             Self::Kubernetes => risingwave_pb::telemetry::PbTelemetryClusterType::Kubernetes,
             Self::SingleNode => risingwave_pb::telemetry::PbTelemetryClusterType::SingleNode,
-            Self::Standalone => risingwave_pb::telemetry::PbTelemetryClusterType::Standalone,
-            Self::Unspecified => risingwave_pb::telemetry::PbTelemetryClusterType::Unspecified,
+            Self::Unspecified | Self::Test => {
+                risingwave_pb::telemetry::PbTelemetryClusterType::Unspecified
+            }
         }
     }
 }
@@ -211,10 +206,11 @@ pub fn current_timestamp() -> u64 {
 }
 
 pub fn report_scarf_enabled() -> bool {
-    !matches!(
-        TelemetryClusterType::from_env_var(),
-        TelemetryClusterType::Hosted | TelemetryClusterType::Test
-    )
+    telemetry_env_enabled()
+        && !matches!(
+            TelemetryClusterType::from_env_var(),
+            TelemetryClusterType::Hosted | TelemetryClusterType::Test
+        )
 }
 
 // impl logic to report to Scarf service, containing RW version and deployment platform
@@ -242,6 +238,8 @@ mod tests {
 
     #[test]
     fn test_enable_scarf() {
+        std::env::set_var(TELEMETRY_ENV_ENABLE, "true");
+
         // setting env var to `Hosted` should disable scarf
         std::env::set_var(TELEMETRY_CLUSTER_TYPE, TELEMETRY_CLUSTER_TYPE_HOSTED);
         assert!(!report_scarf_enabled());

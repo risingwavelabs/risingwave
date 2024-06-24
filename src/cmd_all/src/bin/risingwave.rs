@@ -24,9 +24,7 @@ use clap::{command, ArgMatches, Args, Command, CommandFactory, FromArgMatches};
 use risingwave_cmd::{compactor, compute, ctl, frontend, meta};
 use risingwave_cmd_all::{SingleNodeOpts, StandaloneOpts};
 use risingwave_common::git_sha;
-use risingwave_common::telemetry::{
-    TELEMETRY_CLUSTER_TYPE, TELEMETRY_CLUSTER_TYPE_SINGLE_NODE, TELEMETRY_CLUSTER_TYPE_STANDALONE,
-};
+use risingwave_common::telemetry::{TELEMETRY_CLUSTER_TYPE, TELEMETRY_CLUSTER_TYPE_SINGLE_NODE};
 use risingwave_compactor::CompactorOpts;
 use risingwave_compute::ComputeNodeOpts;
 use risingwave_ctl::CliOpts as CtlOpts;
@@ -227,9 +225,6 @@ fn main() {
 }
 
 fn standalone(opts: StandaloneOpts) {
-    if env::var(TELEMETRY_CLUSTER_TYPE).is_err() {
-        env::set_var(TELEMETRY_CLUSTER_TYPE, TELEMETRY_CLUSTER_TYPE_STANDALONE);
-    }
     let opts = risingwave_cmd_all::parse_standalone_opt_args(&opts);
     let settings = risingwave_rt::LoggerSettings::from_opts(&opts)
         .with_target("risingwave_storage", Level::WARN)
