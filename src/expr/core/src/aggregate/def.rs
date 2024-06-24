@@ -314,6 +314,9 @@ pub mod agg_kinds {
                     | PbAggKind::VarPop
                     | PbAggKind::VarSamp
                     | PbAggKind::Grouping,
+                    // ApproxPercentile always uses custom agg executors,
+                    // rather than an aggregation operator
+                    | PbAggKind::ApproxPercentile
             )
         };
     }
