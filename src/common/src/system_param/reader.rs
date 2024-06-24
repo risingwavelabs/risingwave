@@ -169,9 +169,9 @@ where
             .unwrap_or_else(default::enable_tracing)
     }
 
-    fn my_token(&self) -> &str {
+    fn license_key(&self) -> &str {
         self.inner()
-            .my_token
+            .license_key
             .as_ref()
             .map(|s| s.as_str())
             .unwrap_or_default()

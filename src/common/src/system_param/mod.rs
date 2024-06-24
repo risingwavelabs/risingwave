@@ -88,9 +88,8 @@ macro_rules! for_all_params {
             { pause_on_next_bootstrap,                  bool,   Some(false),                                true,   "Whether to pause all data sources on next bootstrap.", },
             { enable_tracing,                           bool,   Some(false),                                true,   "Whether to enable distributed tracing.", },
             { use_new_object_prefix_strategy,           bool,   None,                                       false,  "Whether to split object prefix.", },
-            // TODO: a more serious name
             // TODO: initialize with configuration file or env var
-            { my_token,                                 String, Some("".to_owned()),                        true,   "My interesting Token.", },
+            { license_key,                              String, Some("".to_owned()),                        true,   "The license key to activate enterprise features.", },
         }
     };
 }

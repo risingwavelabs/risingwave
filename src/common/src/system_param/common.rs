@@ -36,8 +36,8 @@ impl CommonHandler {
         if let Some(enabled) = diff.enable_tracing {
             toggle_otel_layer(enabled);
         }
-        if let Some(token) = diff.my_token.as_ref() {
-            LicenseManager::get().refresh(token);
+        if let Some(key) = diff.license_key.as_ref() {
+            LicenseManager::get().refresh(key);
             tracing::debug!("token refreshed!");
         }
     }
