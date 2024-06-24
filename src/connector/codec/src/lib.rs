@@ -44,6 +44,7 @@
 pub mod decoder;
 
 pub use apache_avro::schema::Schema as AvroSchema;
+pub use apache_avro::types::{Value as AvroValue, ValueKind as AvroValueKind};
 pub use risingwave_pb::plan_common::ColumnDesc;
 pub struct JsonSchema(pub serde_json::Value);
 impl JsonSchema {

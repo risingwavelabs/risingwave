@@ -11275,6 +11275,8 @@ dependencies = [
  "apache-avro 0.16.0",
  "chrono",
  "easy-ext",
+ "expect-test",
+ "hex",
  "itertools 0.12.1",
  "jsonbb",
  "jsonschema-transpiler",
