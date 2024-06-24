@@ -395,6 +395,20 @@ pub async fn compute_node_serve(
         tracing::info!("Telemetry didn't start due to config");
     }
 
+    let service = format!("compute-{worker_id}");
+    if let Ok(agent) = config.server.tracing.jaeger.parse() {
+        let reporter = minitrace_jaeger::JaegerReporter::new(agent, &service).unwrap();
+        minitrace::set_reporter(
+            reporter,
+            minitrace::collector::Config::default().report_interval(Duration::from_millis(
+                config.server.tracing.report_interval_ms,
+            )),
+        );
+        tracing::info!("Jaeger exporter for {service} is set at {agent:?}.");
+    } else {
+        tracing::info!("Jaeger exporter for {service} is disabled.")
+    }
+
     // Clean up the spill directory.
     #[cfg(not(madsim))]
     SpillOp::clean_spill_directory().await.unwrap();

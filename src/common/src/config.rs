@@ -487,6 +487,9 @@ pub struct ServerConfig {
     #[serde(default = "default::server::grpc_max_reset_stream_size")]
     pub grpc_max_reset_stream: u32,
 
+    #[serde(default)]
+    pub tracing: TracingConfig,
+
     #[serde(default, flatten)]
     #[config_doc(omitted)]
     pub unrecognized: Unrecognized<Self>,
@@ -1244,6 +1247,20 @@ impl SystemConfig {
         }
         system_params
     }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
+pub struct TracingConfig {
+    /// Url of jaeger for tracing data collection.
+    ///
+    /// Tracing will be disabled if no valid jaeger url is set.
+    ///
+    /// Example: "127.0.0.1:6831".
+    #[serde(default = "default::tracing_config::jaeger")]
+    pub jaeger: String,
+    /// Interval for minitrace reporter reports in ms.
+    #[serde(default = "default::tracing_config::report_interval_ms")]
+    pub report_interval_ms: u64,
 }
 
 pub mod default {
@@ -2073,6 +2090,16 @@ pub mod default {
                     env_var_is_true_or(RW_USE_OPENDAL_FOR_S3, false)
                 }
             }
+        }
+    }
+
+    pub mod tracing_config {
+        pub fn jaeger() -> String {
+            "".to_string()
+        }
+
+        pub fn report_interval_ms() -> u64 {
+            10
         }
     }
 }

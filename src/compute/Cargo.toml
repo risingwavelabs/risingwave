@@ -26,6 +26,8 @@ futures-async-stream = { workspace = true }
 hyper = "0.14" # required by tonic
 itertools = { workspace = true }
 maplit = "1.0.2"
+minitrace = "0.6.7"
+minitrace-jaeger = "0.6.7"
 pprof = { version = "0.13", features = ["flamegraph"] }
 prometheus = { version = "0.13" }
 prost = { workspace = true }
