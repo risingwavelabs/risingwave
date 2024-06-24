@@ -179,22 +179,29 @@ impl TrackingJob {
     }
 
     pub(crate) async fn pre_finish(&self) -> MetaResult<()> {
-        let table_fragments = match &self {
+        let metadata = match &self {
             TrackingJob::New(command) => match &command.context.command {
                 Command::CreateStreamingJob {
-                    table_fragments, ..
-                } => Some(table_fragments),
+                    table_fragments,
+                    streaming_job,
+                    internal_tables,
+                    ..
+                } => Some((table_fragments, streaming_job, internal_tables)),
                 _ => None,
             },
-            TrackingJob::Recovered(recovered) => Some(&recovered.fragments),
+            _ => todo!(),
+            // TrackingJob::Recovered(recovered) => Some((&recovered.fragments, todo!(), todo!())),
         };
         // Update the state of the table fragments from `Creating` to `Created`, so that the
         // fragments can be scaled.
-        if let Some(table_fragments) = table_fragments {
+        if let Some((table_fragments, stream_job, internal_tables)) = metadata {
             match self.metadata_manager() {
                 MetadataManager::V1(mgr) => {
                     mgr.fragment_manager
                         .mark_table_fragments_created(table_fragments.table_id())
+                        .await?;
+                    mgr.catalog_manager
+                        .finish_stream_job(stream_job.clone(), internal_tables.clone())
                         .await?;
                 }
                 MetadataManager::V2(_) => {}

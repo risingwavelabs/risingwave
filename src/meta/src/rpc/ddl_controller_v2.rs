@@ -204,7 +204,7 @@ impl DdlController {
 
         // create streaming jobs.
         let stream_job_id = streaming_job.id();
-        match (streaming_job.create_type(), streaming_job) {
+        match (streaming_job.create_type(), &streaming_job) {
             (CreateType::Unspecified, _)
             | (CreateType::Foreground, _)
             // FIXME(kwannoel): Unify background stream's creation path with MV below.

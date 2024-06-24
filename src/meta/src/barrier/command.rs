@@ -24,7 +24,7 @@ use risingwave_common::types::Timestamptz;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_connector::source::SplitImpl;
 use risingwave_hummock_sdk::HummockEpoch;
-use risingwave_pb::catalog::CreateType;
+use risingwave_pb::catalog::{CreateType, Table};
 use risingwave_pb::meta::table_fragments::PbActorStatus;
 use risingwave_pb::meta::PausedReason;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
@@ -44,7 +44,7 @@ use tracing::warn;
 use super::info::{CommandActorChanges, CommandFragmentChanges, InflightActorInfo};
 use super::trace::TracedEpoch;
 use crate::barrier::GlobalBarrierManagerContext;
-use crate::manager::{DdlType, MetadataManager, WorkerId};
+use crate::manager::{DdlType, MetadataManager, StreamingJob, WorkerId};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments, TableParallelism};
 use crate::stream::{build_actor_connector_splits, SplitAssignment, ThrottleConfig};
 use crate::MetaResult;
@@ -183,6 +183,8 @@ pub enum Command {
     /// for a while** until the `finish` channel is signaled, then the state of `TableFragments`
     /// will be set to `Created`.
     CreateStreamingJob {
+        streaming_job: StreamingJob,
+        internal_tables: Vec<Table>,
         table_fragments: TableFragments,
         /// Refer to the doc on [`MetadataManager::get_upstream_root_fragments`] for the meaning of "root".
         upstream_root_actors: HashMap<TableId, Vec<ActorId>>,

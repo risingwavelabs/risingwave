@@ -76,6 +76,8 @@ pub struct CreateStreamingJobContext {
     pub replace_table_job_info: Option<(StreamingJob, ReplaceTableContext, TableFragments)>,
 
     pub option: CreateStreamingJobOption,
+
+    pub streaming_job: StreamingJob,
 }
 
 impl CreateStreamingJobContext {
@@ -237,7 +239,7 @@ impl GlobalStreamManager {
         let stream_manager = self.clone();
         let fut = async move {
             let res = stream_manager
-                .create_streaming_job_impl( table_fragments, ctx)
+                .create_streaming_job_impl(table_fragments, ctx)
                 .await;
             match res {
                 Ok(_) => {
@@ -392,6 +394,7 @@ impl GlobalStreamManager {
         &self,
         table_fragments: TableFragments,
         CreateStreamingJobContext {
+            streaming_job,
             dispatchers,
             upstream_root_actors,
             building_locations,
@@ -400,6 +403,7 @@ impl GlobalStreamManager {
             create_type,
             ddl_type,
             replace_table_job_info,
+            internal_tables,
             ..
         }: CreateStreamingJobContext,
     ) -> MetaResult<()> {
@@ -469,6 +473,8 @@ impl GlobalStreamManager {
             dispatchers,
             init_split_assignment,
             definition: definition.to_string(),
+            streaming_job,
+            internal_tables: internal_tables.into_values().collect_vec(),
             ddl_type,
             replace_table: replace_table_command,
             create_type,
@@ -1115,6 +1121,7 @@ mod tests {
                 id: table_id.table_id(),
                 ..Default::default()
             };
+            let streaming_job = StreamingJob::MaterializedView(table.clone());
             let table_fragments = TableFragments::new(
                 table_id,
                 fragments,
