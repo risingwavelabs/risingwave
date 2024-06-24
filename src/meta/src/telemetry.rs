@@ -212,7 +212,7 @@ impl TelemetryReportCreator for MetaReportCreator {
 mod test {
     use risingwave_common::config::MetaBackend;
     use risingwave_common::telemetry::{
-        current_timestamp, SystemData, TelemetryNodeType, TelemetryReportBase,
+        current_timestamp, SystemData, TelemetryClusterType, TelemetryNodeType, TelemetryReportBase,
     };
 
     use crate::telemetry::{MetaTelemetryReport, NodeCount, RwVersion};
@@ -249,6 +249,7 @@ mod test {
                 git_sha: "git_sha".to_owned(),
             },
             job_desc: vec![],
+            cluster_type: TelemetryClusterType::Test,
         };
 
         let pb_bytes = report.to_pb_bytes();
