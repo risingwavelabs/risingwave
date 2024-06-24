@@ -611,27 +611,26 @@ impl ClusterControllerInner {
             return if worker.worker_type == WorkerType::ComputeNode {
                 let property = property.unwrap();
                 let txn_id = worker.transaction_id.unwrap();
-                let mut current_parallelism = property.parallel_unit_ids.0.clone();
+                let mut current_parallelism = property.parallelism as usize;
                 let new_parallelism = add_property.worker_node_parallelism as usize;
-
-                match new_parallelism.cmp(&current_parallelism.len()) {
+                match new_parallelism.cmp(&current_parallelism) {
                     Ordering::Less => {
                         if !self.disable_automatic_parallelism_control {
                             // Handing over to the subsequent recovery loop for a forced reschedule.
                             tracing::info!(
                                 "worker {} parallelism reduced from {} to {}",
                                 worker.worker_id,
-                                current_parallelism.len(),
+                                current_parallelism,
                                 new_parallelism
                             );
-                            current_parallelism.truncate(new_parallelism);
+                            current_parallelism = new_parallelism;
                         } else {
                             // Warn and keep the original parallelism if the worker registered with a
                             // smaller parallelism.
                             tracing::warn!(
                                 "worker {} parallelism is less than current, current is {}, but received {}",
                                 worker.worker_id,
-                                current_parallelism.len(),
+                                current_parallelism,
                                 new_parallelism
                             );
                         }
@@ -640,14 +639,10 @@ impl ClusterControllerInner {
                         tracing::info!(
                             "worker {} parallelism updated from {} to {}",
                             worker.worker_id,
-                            current_parallelism.len(),
+                            current_parallelism,
                             new_parallelism
                         );
-                        current_parallelism.extend(derive_parallel_units(
-                            txn_id,
-                            current_parallelism.len() as _,
-                            new_parallelism as _,
-                        ));
+                        current_parallelism = new_parallelism;
                     }
                     Ordering::Equal => {}
                 }
@@ -656,7 +651,8 @@ impl ClusterControllerInner {
                 // keep `is_unschedulable` unchanged.
                 property.is_streaming = Set(add_property.is_streaming);
                 property.is_serving = Set(add_property.is_serving);
-                property.parallel_unit_ids = Set(I32Array(current_parallelism));
+                property.parallel_unit_ids = Set(I32Array(vec![]));
+                property.parallelism = Set(current_parallelism as _);
 
                 WorkerProperty::update(property).exec(&txn).await?;
                 txn.commit().await?;
@@ -684,11 +680,11 @@ impl ClusterControllerInner {
         if r#type == PbWorkerType::ComputeNode {
             let property = worker_property::ActiveModel {
                 worker_id: Set(worker_id),
-                parallel_unit_ids: Set(I32Array(derive_parallel_units(
-                    *txn_id.as_ref().unwrap(),
-                    0,
-                    add_property.worker_node_parallelism as _,
-                ))),
+                parallel_unit_ids: Set(I32Array(vec![])),
+                parallelism: Set(add_property
+                    .worker_node_parallelism
+                    .try_into()
+                    .expect("invalid parallelism")),
                 is_streaming: Set(add_property.is_streaming),
                 is_serving: Set(add_property.is_serving),
                 is_unschedulable: Set(add_property.is_unschedulable),

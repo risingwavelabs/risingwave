@@ -23,6 +23,7 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub worker_id: WorkerId,
     pub parallel_unit_ids: I32Array,
+    pub parallelism: i32,
     pub is_streaming: bool,
     pub is_serving: bool,
     pub is_unschedulable: bool,

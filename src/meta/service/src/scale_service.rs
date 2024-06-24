@@ -17,8 +17,7 @@ use risingwave_meta::stream::{ScaleControllerRef, TableRevision};
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::scale_service_server::ScaleService;
 use risingwave_pb::meta::{
-    GetClusterInfoRequest, GetClusterInfoResponse, GetReschedulePlanRequest,
-    GetReschedulePlanResponse, RescheduleRequest, RescheduleResponse,
+    GetClusterInfoRequest, GetClusterInfoResponse, RescheduleRequest, RescheduleResponse,
 };
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use tonic::{Request, Response, Status};
@@ -221,66 +220,6 @@ impl ScaleService for ScaleServiceImpl {
         //     success: true,
         //     revision: next_revision.into(),
         // }))
-        todo!()
-    }
-
-    #[cfg_attr(coverage, coverage(off))]
-    async fn get_reschedule_plan(
-        &self,
-        request: Request<GetReschedulePlanRequest>,
-    ) -> Result<Response<GetReschedulePlanResponse>, Status> {
-        // self.barrier_manager.check_status_running()?;
-        //
-        // let req = request.into_inner();
-        //
-        // let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
-        //
-        // let current_revision = self.get_revision().await;
-        //
-        // if req.revision != current_revision.inner() {
-        //     return Ok(Response::new(GetReschedulePlanResponse {
-        //         success: false,
-        //         revision: current_revision.inner(),
-        //         reschedules: Default::default(),
-        //     }));
-        // }
-        //
-        // let policy = req
-        //     .policy
-        //     .ok_or_else(|| Status::invalid_argument("policy is required"))?;
-        //
-        // let scale_controller = &self.scale_controller;
-        //
-        // let plan = scale_controller.get_reschedule_plan(policy).await?;
-        //
-        // let next_revision = self.get_revision().await;
-        //
-        // // generate reschedule plan will not change the revision
-        // assert_eq!(current_revision, next_revision);
-        //
-        // Ok(Response::new(GetReschedulePlanResponse {
-        //     success: true,
-        //     revision: next_revision.into(),
-        //     reschedules: plan
-        //         .into_iter()
-        //         .map(|(fragment_id, reschedule)| {
-        //             (
-        //                 fragment_id,
-        //                 Reschedule {
-        //                     added_parallel_units: reschedule
-        //                         .added_parallel_units
-        //                         .into_iter()
-        //                         .collect(),
-        //                     removed_parallel_units: reschedule
-        //                         .removed_parallel_units
-        //                         .into_iter()
-        //                         .collect(),
-        //                 },
-        //             )
-        //         })
-        //         .collect(),
-        // }))
-
         todo!()
     }
 }

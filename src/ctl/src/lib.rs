@@ -348,92 +348,8 @@ enum TableCommands {
     List,
 }
 
-#[derive(clap::Args, Debug, Clone)]
-pub struct ScaleHorizonCommands {
-    /// The worker that needs to be excluded during scheduling, `worker_id` and `worker_host:worker_port` are both
-    /// supported
-    #[clap(
-        long,
-        value_delimiter = ',',
-        value_name = "worker_id or worker_host:worker_port, ..."
-    )]
-    exclude_workers: Option<Vec<String>>,
-
-    /// The worker that needs to be included during scheduling, `worker_id` and `worker_host:worker_port` are both
-    /// supported
-    #[clap(
-        long,
-        value_delimiter = ',',
-        value_name = "all or worker_id or worker_host:worker_port, ..."
-    )]
-    include_workers: Option<Vec<String>>,
-
-    /// The target parallelism, currently, it is used to limit the target parallelism and only
-    /// takes effect when the actual parallelism exceeds this value. Can be used in conjunction
-    /// with `exclude/include_workers`.
-    #[clap(long)]
-    target_parallelism: Option<u32>,
-
-    #[command(flatten)]
-    common: ScaleCommon,
-}
-
-#[derive(clap::Args, Debug, Clone)]
-pub struct ScaleCommon {
-    /// Will generate a plan supported by the `reschedule` command and save it to the provided path
-    /// by the `--output`.
-    #[clap(long, default_value_t = false)]
-    generate: bool,
-
-    /// The output file to write the generated plan to, standard output by default
-    #[clap(long)]
-    output: Option<String>,
-
-    /// Automatic yes to prompts
-    #[clap(short = 'y', long, default_value_t = false)]
-    yes: bool,
-
-    /// Specify the fragment ids that need to be scheduled.
-    /// empty by default, which means all fragments will be scheduled
-    #[clap(long, value_delimiter = ',')]
-    fragments: Option<Vec<u32>>,
-}
-
-#[derive(clap::Args, Debug, Clone)]
-pub struct ScaleVerticalCommands {
-    #[command(flatten)]
-    common: ScaleCommon,
-
-    /// The worker that needs to be scheduled, `worker_id` and `worker_host:worker_port` are both
-    /// supported
-    #[clap(
-        long,
-        required = true,
-        value_delimiter = ',',
-        value_name = "all or worker_id or worker_host:worker_port, ..."
-    )]
-    workers: Option<Vec<String>>,
-
-    /// The target parallelism per worker, requires `workers` to be set.
-    #[clap(long, required = true)]
-    target_parallelism_per_worker: Option<u32>,
-
-    /// It will exclude all other workers to maintain the target parallelism only for the target workers.
-    #[clap(long, default_value_t = false)]
-    exclusive: bool,
-}
-
 #[derive(Subcommand, Debug)]
 enum ScaleCommands {
-    /// Scale the compute nodes horizontally, alias of `horizon`
-    Resize(ScaleHorizonCommands),
-
-    /// Scale the compute nodes horizontally
-    Horizon(ScaleHorizonCommands),
-
-    /// Scale the compute nodes vertically
-    Vertical(ScaleVerticalCommands),
-
     /// Mark a compute node as unschedulable
     #[clap(verbatim_doc_comment)]
     Cordon {
@@ -907,13 +823,6 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         }
         Commands::Profile(ProfileCommands::Heap { dir }) => {
             cmd_impl::profile::heap_profile(context, dir).await?
-        }
-        Commands::Scale(ScaleCommands::Horizon(resize))
-        | Commands::Scale(ScaleCommands::Resize(resize)) => {
-            cmd_impl::scale::resize(context, resize.into()).await?
-        }
-        Commands::Scale(ScaleCommands::Vertical(resize)) => {
-            cmd_impl::scale::resize(context, resize.into()).await?
         }
         Commands::Scale(ScaleCommands::Cordon { workers }) => {
             cmd_impl::scale::update_schedulability(context, workers, Schedulability::Unschedulable)

@@ -625,7 +625,7 @@ impl GlobalBarrierManagerContext {
         //         .await;
         //     warn!(?changed, "get worker changed. Retry migrate");
         // }
-        //
+        // //
         // mgr.catalog_controller.migrate_actors(plan).await?;
         //
         // debug!("migrate actors succeed.");
