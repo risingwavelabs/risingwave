@@ -7,6 +7,12 @@ create table t (v1 int, v2 varchar) APPEND ONLY with (
   retention_seconds = 5
 ) FORMAT PLAIN ENCODE JSON;
 
+statement ok
+flush;
+
+# Wait enough time to ensure SourceExecutor consumes all Kafka data.
+sleep 1s
+
 query IT rowsort
 select * from t
 ----
