@@ -1,0 +1,19 @@
+# Set the license key to a free tier key that never expires.
+# Using this key is meaningless in production.
+statement ok
+ALTER SYSTEM SET license_key TO 'eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJydy10ZXN0LWZyZWUiLCJ0aWVyIjoiZnJlZSIsImV4cCI6OTk5OTk5OTk5OX0.OQLvY44xbX19kepxV8MgGAqMjXa6v3-ILAtigSTgMJU4F9pJjxcG8enyy4yk8PgUP5AvFRub_qqXM3mRhmRQPx87Bqbc2EqyxYU3Mb6yUp4Q1FRxkfHKasdiOfwnc0WeC-sdIu6Gr6m_GTmDEkT0VH-OyMn-OvYN5wAPdFjTFNgZWWrOpmr6WJ38MuOMKJZNnTmNx9hvS8yZJwyTFrzKKLAb_7VHhFUVO1Z8K-x-XEnpudv5-w-wJVAPa8nRtv-aSgNTfg14xTMmHTczzXHiiFSIPRQ4GfXpdoHDkOi38AdP_Dt0d4mQkD66A7LOevrRzkTPXbtEfqeqgyscuzqRMw';
+
+query error
+SELECT rw_test_paid_tier();
+----
+db error: ERROR:  Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: Expr error
+  2: error while evaluating expression `test_paid_tier()`
+  3: feature TestPaid is only available for tier Paid and above, while the current tier is Free
+
+HINT: You may want to set a license key with `ALTER SYSTEM SET license_key = '...';` command.
+
+statement ok
+ALTER SYSTEM SET license_key TO DEFAULT;

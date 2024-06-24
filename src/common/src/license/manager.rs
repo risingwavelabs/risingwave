@@ -95,7 +95,7 @@ pub(crate) struct LicenseManager {
 }
 
 static PUBLIC_KEY: LazyLock<DecodingKey> = LazyLock::new(|| {
-    DecodingKey::from_ed_pem(include_bytes!("public_key.pem"))
+    DecodingKey::from_rsa_pem(include_bytes!("public_key.pem"))
         .expect("invalid public key for license validation")
 });
 

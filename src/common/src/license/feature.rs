@@ -23,7 +23,7 @@ macro_rules! for_all_features {
     ($macro:ident) => {
         $macro! {
             // name                 min tier    doc
-            { Test,                 Paid,       "A dummy feature to test the license manager." },
+            { TestPaid,             Paid,       "A dummy feature that's only available on paid tier to test the license manager." },
         }
     };
 }
@@ -58,8 +58,8 @@ for_all_features!(def_feature);
 #[derive(Debug, Error)]
 pub enum FeatureNotAvailable {
     #[error(
-        "feature {:?} is only available for tier {:?} and above, while the current tier is {:?}\n\n \
-        HINT: You may want to set a valid license key with `ALTER SYSTEM SET license_key = '...';` command.",
+        "feature {:?} is only available for tier {:?} and above, while the current tier is {:?}\n\n\
+        Hint: You may want to set a license key with `ALTER SYSTEM SET license_key = '...';` command.",
         feature, feature.min_tier(), current_tier,
     )]
     InsufficientTier {
