@@ -1,8 +1,8 @@
 system ok
-psql -h $RISEDEV_RW_FRONTEND_LISTEN_ADDRESS -p $RISEDEV_RW_FRONTEND_PORT -U root -d dev -c "
+./risedev psql -c "
 create materialized view mv as
 select * from generate_series(
-    to_timestamp($(date +%s) - 10),
+    to_timestamp($(date +%s)) - interval '10 second',
     now(),
     interval '1 second'
 );
