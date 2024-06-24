@@ -209,7 +209,7 @@ pub fn report_scarf_enabled() -> bool {
     telemetry_env_enabled()
         && !matches!(
             TelemetryClusterType::from_env_var(),
-            TelemetryClusterType::Hosted | TelemetryClusterType::Test
+            TelemetryClusterType::Hosted
         )
 }
 
@@ -242,10 +242,6 @@ mod tests {
 
         // setting env var to `Hosted` should disable scarf
         std::env::set_var(TELEMETRY_CLUSTER_TYPE, TELEMETRY_CLUSTER_TYPE_HOSTED);
-        assert!(!report_scarf_enabled());
-
-        // setting env var to `Test` should disable scarf
-        std::env::set_var(TELEMETRY_CLUSTER_TYPE, TELEMETRY_CLUSTER_TYPE_TEST);
         assert!(!report_scarf_enabled());
 
         // setting env var to `DockerCompose` should enable scarf
