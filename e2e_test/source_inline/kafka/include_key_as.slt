@@ -182,8 +182,9 @@ rpk topic delete 'test_additional_columns' || true;
 system ok
 rpk topic create 'test_additional_columns'
 
+# Note: `sh` doesn't have {..} brace expansion
 system ok
-for i in {0..100}; do echo "key\$i:{\\"a\\": \$i}" | rpk topic produce 'test_additional_columns' -f "%k:%v\\n" -H "header1=v1" -H "header2=v2"; done
+bash -c 'for i in {0..100}; do echo "key\$i:{\\"a\\": \$i}" | rpk topic produce test_additional_columns -f "%k:%v\\n" -H "header1=v1" -H "header2=v2"; done'
 
 statement ok
 create table additional_columns (a int)
