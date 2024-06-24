@@ -13,6 +13,7 @@
 // limitations under the License.
 
 pub mod avro;
+pub mod json;
 pub mod utils;
 
 use risingwave_common::types::{DataType, Datum, DatumCow, ToOwnedDatum};
