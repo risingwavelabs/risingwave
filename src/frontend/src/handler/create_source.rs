@@ -751,7 +751,7 @@ pub(crate) fn bind_all_columns(
 }
 
 fn hint_upsert(encode: &Encode) -> String {
-    format!(
+    format_args!(
         r#"Hint: For FORMAT UPSERT ENCODE {encode:}, INCLUDE KEY must be specified and the key column must be used as primary key.
 example:
     CREATE TABLE <table_name> ( PRIMARY KEY ([rw_key | <key_name>]) )
