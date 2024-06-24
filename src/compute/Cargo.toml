@@ -58,6 +58,8 @@ tokio-stream = "0.1"
 tonic = { workspace = true }
 tower = { version = "0.4", features = ["util", "load-shed"] }
 tracing = "0.1"
+minitrace = "0.6.7"
+minitrace-jaeger = "0.6.7"
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
