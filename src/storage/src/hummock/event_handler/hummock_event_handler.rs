@@ -638,8 +638,11 @@ impl HummockEventHandler {
                     assert_eq!(version_to_apply.id, version_delta.prev_id);
                     if version_to_apply.max_committed_epoch == version_delta.max_committed_epoch {
                         if let Some(sst_delta_infos) = &mut sst_delta_infos {
-                            **sst_delta_infos =
-                                version_to_apply.build_sst_delta_infos(version_delta);
+                            sst_delta_infos.extend(
+                                version_to_apply
+                                    .build_sst_delta_infos(version_delta)
+                                    .into_iter(),
+                            );
                         }
                     }
                     version_to_apply.apply_version_delta(version_delta);
