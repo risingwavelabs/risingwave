@@ -1978,6 +1978,8 @@ impl DdlController {
             dispatchers,
             building_locations,
             existing_locations,
+            streaming_job: stream_job.clone(),
+            dummy_id: dummy_table_id,
         };
 
         Ok((ctx, table_fragments))
