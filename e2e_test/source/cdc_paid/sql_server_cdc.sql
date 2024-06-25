@@ -17,7 +17,7 @@ EXEC sys.sp_cdc_enable_table
 
 INSERT INTO
   orders (
-    order_id,s
+    order_id,
     order_date,
     customer_name,
     price,
