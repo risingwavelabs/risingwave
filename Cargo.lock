@@ -5358,7 +5358,7 @@ dependencies = [
 [[package]]
 name = "foyer"
 version = "0.9.4"
-source = "git+https://github.com/MrCroxx/foyer?rev=f85e50b#f85e50bfa0d37b4540d402273d817dc52fa9fda5"
+source = "git+https://github.com/MrCroxx/foyer?rev=2146ab6#2146ab650d0e05ed24bdcfe14cf83c9efeee2899"
 dependencies = [
  "ahash 0.8.11",
  "anyhow",
@@ -5373,7 +5373,7 @@ dependencies = [
 [[package]]
 name = "foyer-common"
 version = "0.7.3"
-source = "git+https://github.com/MrCroxx/foyer?rev=f85e50b#f85e50bfa0d37b4540d402273d817dc52fa9fda5"
+source = "git+https://github.com/MrCroxx/foyer?rev=2146ab6#2146ab650d0e05ed24bdcfe14cf83c9efeee2899"
 dependencies = [
  "bytes",
  "cfg-if",
@@ -5394,7 +5394,7 @@ dependencies = [
 [[package]]
 name = "foyer-intrusive"
 version = "0.7.2"
-source = "git+https://github.com/MrCroxx/foyer?rev=f85e50b#f85e50bfa0d37b4540d402273d817dc52fa9fda5"
+source = "git+https://github.com/MrCroxx/foyer?rev=2146ab6#2146ab650d0e05ed24bdcfe14cf83c9efeee2899"
 dependencies = [
  "foyer-common",
  "itertools 0.13.0",
@@ -5403,7 +5403,7 @@ dependencies = [
 [[package]]
 name = "foyer-memory"
 version = "0.5.2"
-source = "git+https://github.com/MrCroxx/foyer?rev=f85e50b#f85e50bfa0d37b4540d402273d817dc52fa9fda5"
+source = "git+https://github.com/MrCroxx/foyer?rev=2146ab6#2146ab650d0e05ed24bdcfe14cf83c9efeee2899"
 dependencies = [
  "ahash 0.8.11",
  "bitflags 2.5.0",
@@ -5424,7 +5424,7 @@ dependencies = [
 [[package]]
 name = "foyer-storage"
 version = "0.8.5"
-source = "git+https://github.com/MrCroxx/foyer?rev=f85e50b#f85e50bfa0d37b4540d402273d817dc52fa9fda5"
+source = "git+https://github.com/MrCroxx/foyer?rev=2146ab6#2146ab650d0e05ed24bdcfe14cf83c9efeee2899"
 dependencies = [
  "ahash 0.8.11",
  "allocator-api2",
