@@ -223,11 +223,7 @@ impl DdlController {
                     .create_streaming_job(table_fragments, ctx)
                     .await?;
 
-                let version = mgr
-                    .catalog_controller
-                    .finish_streaming_job(stream_job_id as _, replace_table_job_info)
-                    .await?;
-
+                let version = self.wait_streaming_job_finished_v2(stream_job_id as _).await?;
                 Ok(version)
             }
             (CreateType::Background, _) => {
