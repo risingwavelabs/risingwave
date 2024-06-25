@@ -29,6 +29,7 @@
           lld
           protobuf
           pkg-config
+          cyrus_sasl.out
 
           gnumake
           cmake
@@ -54,6 +55,7 @@
             value = lib.makeLibraryPath (with pkgs; [
               openssl
               libgcc.lib
+              cyrus_sasl.out
             ]);
           }
         ];
