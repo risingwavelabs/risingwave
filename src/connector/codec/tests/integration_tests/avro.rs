@@ -44,6 +44,14 @@ struct Config {
     data_encoding: TestDataEncoding,
 }
 
+/// Data driven testing for converting Avro Schema to RisingWave Schema, and then converting Avro data into RisingWave data.
+///
+/// The expected results can be automatically updated. To run and update the tests:
+/// ```bash
+/// UPDATE_EXPECT=1 cargo test -p risingwave_connector_codec
+/// ```
+/// Or use Rust Analyzer. Refer to <https://github.com/rust-analyzer/expect-test>.
+///
 /// ## Arguments
 /// - `avro_schema`: Avro schema in JSON format.
 /// - `avro_data`: list of Avro data. Refer to [`TestDataEncoding`] for the format.
