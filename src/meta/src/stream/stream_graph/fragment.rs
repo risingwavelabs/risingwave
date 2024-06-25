@@ -997,8 +997,6 @@ impl CompleteStreamFragmentGraph {
             fragment_type_mask: inner.fragment_type_mask,
             distribution_type,
             actors,
-            vnode_mapping: None,
-            vnode_mapping_v2: Some(distribution.into_mapping().to_protobuf()),
             state_table_ids,
             upstream_fragment_ids,
         }

@@ -27,7 +27,6 @@ pub struct Model {
     pub fragment_type_mask: i32,
     pub distribution_type: DistributionType,
     pub stream_node: StreamNode,
-    pub vnode_mapping: FragmentVnodeMapping,
     pub state_table_ids: I32Array,
     pub upstream_fragment_id: I32Array,
 }

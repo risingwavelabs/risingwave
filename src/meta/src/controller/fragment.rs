@@ -183,7 +183,6 @@ impl CatalogController {
             fragment_type_mask: pb_fragment_type_mask,
             distribution_type: pb_distribution_type,
             actors: pb_actors,
-            vnode_mapping: pb_vnode_mapping,
             state_table_ids: pb_state_table_ids,
             upstream_fragment_ids: pb_upstream_fragment_ids,
             ..
@@ -287,11 +286,6 @@ impl CatalogController {
 
         let upstream_fragment_id = pb_upstream_fragment_ids.into();
 
-        let vnode_mapping = pb_vnode_mapping
-            .as_ref()
-            .map(FragmentVnodeMapping::from)
-            .unwrap();
-
         let stream_node = StreamNode::from(&stream_node);
 
         let distribution_type = PbFragmentDistributionType::try_from(pb_distribution_type)
@@ -304,7 +298,6 @@ impl CatalogController {
             fragment_type_mask: pb_fragment_type_mask as _,
             distribution_type,
             stream_node,
-            vnode_mapping,
             state_table_ids,
             upstream_fragment_id,
         };
@@ -374,7 +367,6 @@ impl CatalogController {
             fragment_type_mask,
             distribution_type,
             stream_node,
-            vnode_mapping,
             state_table_ids,
             upstream_fragment_id,
         } = fragment;
@@ -470,7 +462,6 @@ impl CatalogController {
         }
 
         let pb_upstream_fragment_ids = upstream_fragment_id.into_u32_array();
-        let pb_vnode_mapping = vnode_mapping.to_protobuf();
         let pb_state_table_ids = state_table_ids.into_u32_array();
         let pb_distribution_type = PbFragmentDistributionType::from(distribution_type) as _;
         let pb_fragment = PbFragment {
@@ -478,8 +469,6 @@ impl CatalogController {
             fragment_type_mask: fragment_type_mask as _,
             distribution_type: pb_distribution_type,
             actors: pb_actors,
-            vnode_mapping: Some(pb_vnode_mapping),
-            vnode_mapping_v2: None,
             state_table_ids: pb_state_table_ids,
             upstream_fragment_ids: pb_upstream_fragment_ids,
         };
@@ -927,43 +916,44 @@ impl CatalogController {
                 .await?;
         }
 
-        let fragment_mapping: Vec<(FragmentId, FragmentVnodeMapping)> = Fragment::find()
-            .select_only()
-            .columns([fragment::Column::FragmentId, fragment::Column::VnodeMapping])
-            .join(JoinType::InnerJoin, fragment::Relation::Actor.def())
-            .filter(actor::Column::ParallelUnitId.is_in(plan.keys().cloned().collect::<Vec<_>>()))
-            .into_tuple()
-            .all(&txn)
-            .await?;
-        // TODO: we'd better not store vnode mapping in fragment table and derive it from actors.
+        todo!()
+        //
+        // let fragment_mapping: Vec<(FragmentId, FragmentVnodeMapping)> = Fragment::find()
+        //     .select_only()
+        //     .columns([fragment::Column::FragmentId, fragment::Column::VnodeMapping])
+        //     .join(JoinType::InnerJoin, fragment::Relation::Actor.def())
+        //     .filter(actor::Column::ParallelUnitId.is_in(plan.keys().cloned().collect::<Vec<_>>()))
+        //     .into_tuple()
+        //     .all(&txn)
+        //     .await?;
+        // // TODO: we'd better not store vnode mapping in fragment table and derive it from actors.
+        //
+        // for (fragment_id, vnode_mapping) in &fragment_mapping {
+        //     let mut pb_vnode_mapping = vnode_mapping.to_protobuf();
+        //     pb_vnode_mapping.data.iter_mut().for_each(|id| {
+        //         if let Some(new_id) = plan.get(&(*id as i32)) {
+        //             *id = new_id.id;
+        //         }
+        //     });
+        //     fragment::ActiveModel {
+        //         fragment_id: Set(*fragment_id),
+        //         ..Default::default()
+        //     }
+        //     .update(&txn)
+        //     .await?;
+        // }
 
-        for (fragment_id, vnode_mapping) in &fragment_mapping {
-            let mut pb_vnode_mapping = vnode_mapping.to_protobuf();
-            pb_vnode_mapping.data.iter_mut().for_each(|id| {
-                if let Some(new_id) = plan.get(&(*id as i32)) {
-                    *id = new_id.id;
-                }
-            });
-            fragment::ActiveModel {
-                fragment_id: Set(*fragment_id),
-                vnode_mapping: Set(FragmentVnodeMapping::from(&pb_vnode_mapping)),
-                ..Default::default()
-            }
-            .update(&txn)
-            .await?;
-        }
+        // let parallel_unit_to_worker = get_parallel_unit_to_worker_map(&txn).await?;
+        //
+        // let fragment_worker_slot_mapping =
+        //     Self::convert_fragment_mappings(fragment_mapping, &parallel_unit_to_worker)?;
 
-        let parallel_unit_to_worker = get_parallel_unit_to_worker_map(&txn).await?;
-
-        let fragment_worker_slot_mapping =
-            Self::convert_fragment_mappings(fragment_mapping, &parallel_unit_to_worker)?;
-
-        txn.commit().await?;
-
-        self.notify_fragment_mapping(NotificationOperation::Update, fragment_worker_slot_mapping)
-            .await;
-
-        Ok(())
+        // txn.commit().await?;
+        //
+        // self.notify_fragment_mapping(NotificationOperation::Update, fragment_worker_slot_mapping)
+        //     .await;
+        //
+        // Ok(())
     }
 
     pub(crate) fn convert_fragment_mappings(
@@ -1514,8 +1504,9 @@ mod tests {
             fragment_type_mask: PbFragmentTypeFlag::Source as _,
             distribution_type: PbFragmentDistributionType::Hash as _,
             actors: pb_actors.clone(),
-            vnode_mapping: Some(parallel_unit_mapping.to_protobuf()),
-            vnode_mapping_v2: None,
+            // vnode_mapping: Some(parallel_unit_mapping.to_protobuf()),
+            // vnode_mapping: None,
+            // vnode_mapping_v2: None,
             state_table_ids: vec![TEST_STATE_TABLE_ID as _],
             upstream_fragment_ids: upstream_actor_ids
                 .values()
@@ -1782,8 +1773,6 @@ mod tests {
             fragment_type_mask,
             distribution_type: pb_distribution_type,
             actors: _,
-            vnode_mapping: pb_vnode_mapping,
-            vnode_mapping_v2,
             state_table_ids: pb_state_table_ids,
             upstream_fragment_ids: pb_upstream_fragment_ids,
         } = pb_fragment;
@@ -1793,10 +1782,6 @@ mod tests {
         assert_eq!(
             pb_distribution_type,
             PbFragmentDistributionType::from(fragment.distribution_type) as i32
-        );
-        assert_eq!(
-            pb_vnode_mapping.unwrap(),
-            fragment.vnode_mapping.to_protobuf()
         );
 
         assert_eq!(

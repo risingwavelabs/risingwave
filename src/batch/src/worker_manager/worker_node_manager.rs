@@ -165,7 +165,11 @@ impl WorkerNodeManager {
             })
             .collect();
 
+        println!("workers {:#?}", guard.worker_nodes);
+
         let mut workers = Vec::with_capacity(worker_slot_ids.len());
+
+        println!("wsi {:#?}", worker_slot_index);
 
         for worker_slot_id in worker_slot_ids {
             match worker_slot_index.get(worker_slot_id) {

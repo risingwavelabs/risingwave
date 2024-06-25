@@ -333,19 +333,40 @@ impl ActorMapping {
 
     /// Transform the actor mapping to the worker slot mapping. Note that the parameter is a mapping from actor to worker.
     pub fn to_worker_slot(&self, actor_to_worker: &HashMap<ActorId, u32>) -> WorkerSlotMapping {
-        let actor_location: HashMap<_, _> = self
-            .iter()
-            .map(|actor_id| (actor_to_worker.get(&actor_id).cloned().unwrap(), actor_id))
-            .into_group_map()
-            .into_iter()
-            .flat_map(|(worker_id, mut actors)| {
-                actors.sort();
-                actors
-                    .into_iter()
-                    .enumerate()
-                    .map(move |(slot, actor_id)| (actor_id, WorkerSlotId::new(worker_id, slot)))
-            })
-            .collect();
+        println!("ac {:#?}", actor_to_worker);
+
+        // let actor_location: HashMap<_, _> = self
+        //     .iter()
+        //     .map(|actor_id| (actor_to_worker.get(&actor_id).cloned().unwrap(), actor_id))
+        //     .into_group_map()
+        //     .into_iter()
+        //     .flat_map(|(worker_id, mut actors)| {
+        //         actors.sort();
+        //         actors
+        //             .into_iter()
+        //             .enumerate()
+        //             .map(move |(slot, actor_id)| {
+        //                 println!("slot {} actor {}", slot, actor_id);
+        //
+        //                 (actor_id, WorkerSlotId::new(worker_id, slot))
+        //             })
+        //     })
+        //     .collect();
+
+        let mut worker_actors = HashMap::new();
+        for (actor_id, worker_id) in actor_to_worker {
+            worker_actors
+                .entry(worker_id)
+                .or_insert(BTreeSet::new())
+                .insert(actor_id);
+        }
+
+        let mut actor_location = HashMap::new();
+        for (worker, actors) in worker_actors {
+            for (idx, &actor) in actors.iter().enumerate() {
+                actor_location.insert(*actor, WorkerSlotId::new(*worker, idx));
+            }
+        }
 
         self.transform(&actor_location)
     }

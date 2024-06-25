@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Duration;
@@ -25,7 +25,7 @@ use anyhow::Context;
 use itertools::Itertools;
 use rand::{Rng, RngCore};
 use risingwave_common::config::DefaultParallelism;
-use risingwave_common::hash::{ActorId, VirtualNode, WorkerSlotId, WorkerSlotMapping};
+use risingwave_common::hash::VirtualNode;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::epoch::Epoch;
@@ -1190,38 +1190,37 @@ impl DdlController {
             .collect_vec();
 
         let dist_key_indices = table.distribution_key.iter().map(|i| *i as _).collect_vec();
-
-        let mapping: HashMap<_, _> = downstream_actor_ids
-            .iter()
-            .map(|id| {
-                let actor_status = table_fragments.actor_status.get(id).unwrap();
-                let worker_id = actor_status.parallel_unit.as_ref().unwrap().worker_node_id;
-                (worker_id, *id)
-            })
-            .fold(
-                HashMap::<u32, BTreeSet<_>>::new(),
-                |mut acc: HashMap<u32, BTreeSet<_>>, (worker_id, actor_id)| {
-                    acc.entry(worker_id).or_default().insert(actor_id);
-                    acc
-                },
-            )
-            .into_iter()
-            .flat_map(|(worker_id, actor_ids)| {
-                actor_ids
-                    .into_iter()
-                    .enumerate()
-                    .map(move |(slot_id, actor_id)| {
-                        (
-                            WorkerSlotId::new(worker_id, slot_id as _),
-                            actor_id as ActorId,
-                        )
-                    })
-            })
-            .collect();
-
-        let worker_slot_mapping =
-            WorkerSlotMapping::from_protobuf(union_fragment.vnode_mapping_v2.as_ref().unwrap());
-        let actor_mapping = worker_slot_mapping.to_actor(&mapping);
+        // let mapping: HashMap<_, _> = downstream_actor_ids
+        //     .iter()
+        //     .map(|id| {
+        //         let actor_status = table_fragments.actor_status.get(id).unwrap();
+        //         let worker_id = actor_status.parallel_unit.as_ref().unwrap().worker_node_id;
+        //         (worker_id, *id)
+        //     })
+        //     .fold(
+        //         HashMap::<u32, BTreeSet<_>>::new(),
+        //         |mut acc: HashMap<u32, BTreeSet<_>>, (worker_id, actor_id)| {
+        //             acc.entry(worker_id).or_default().insert(actor_id);
+        //             acc
+        //         },
+        //     )
+        //     .into_iter()
+        //     .flat_map(|(worker_id, actor_ids)| {
+        //         actor_ids
+        //             .into_iter()
+        //             .enumerate()
+        //             .map(move |(slot_id, actor_id)| {
+        //                 (
+        //                     WorkerSlotId::new(worker_id, slot_id as _),
+        //                     actor_id as ActorId,
+        //                 )
+        //             })
+        //     })
+        //     .collect();
+        //
+        // let worker_slot_mapping =
+        //     WorkerSlotMapping::from_protobuf(union_fragment.vnode_mapping_v2.as_ref().unwrap());
+        // let actor_mapping = worker_slot_mapping.to_actor(&mapping);
 
         let upstream_actors = sink_fragment.get_actors();
 
@@ -1232,7 +1231,7 @@ impl DdlController {
                     r#type: DispatcherType::Hash as _,
                     dist_key_indices: dist_key_indices.clone(),
                     output_indices: output_indices.clone(),
-                    hash_mapping: Some(actor_mapping.to_protobuf()),
+                    hash_mapping: None, // TODO
                     dispatcher_id: union_fragment.fragment_id as _,
                     downstream_actor_id: downstream_actor_ids.clone(),
                 }],

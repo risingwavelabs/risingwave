@@ -176,14 +176,14 @@ impl MetadataModel for TableFragments {
 
         let state = prost.state();
 
-        let parallel_unit_to_worker = prost
-            .actor_status
-            .values()
-            .map(|actor_status| {
-                let parallel_unit = actor_status.get_parallel_unit().unwrap();
-                (parallel_unit.id, parallel_unit.worker_node_id)
-            })
-            .collect();
+        // let parallel_unit_to_worker = prost
+        //     .actor_status
+        //     .values()
+        //     .map(|actor_status| {
+        //         let parallel_unit = actor_status.get_parallel_unit().unwrap();
+        //         (parallel_unit.id, parallel_unit.worker_node_id)
+        //     })
+        //     .collect();
 
         // rewrite fragments
         let fragments = prost
@@ -195,21 +195,21 @@ impl MetadataModel for TableFragments {
                      fragment_type_mask,
                      distribution_type,
                      actors,
-                     vnode_mapping,
-                     vnode_mapping_v2,
+                     // vnode_mapping,
+                     // vnode_mapping_v2,
                      state_table_ids,
                      upstream_fragment_ids,
                  }| {
-                    let vnode_mapping_v2 = vnode_mapping_v2.or_else(|| {
-                        vnode_mapping.map(|vnode_mapping| {
-                            risingwave_common::hash::ParallelUnitMapping::from_protobuf(
-                                &vnode_mapping,
-                            )
-                            .to_worker_slot(&parallel_unit_to_worker)
-                            .unwrap()
-                            .to_protobuf()
-                        })
-                    });
+                    // let vnode_mapping_v2 = vnode_mapping_v2.or_else(|| {
+                    //     vnode_mapping.map(|vnode_mapping| {
+                    //         risingwave_common::hash::ParallelUnitMapping::from_protobuf(
+                    //             &vnode_mapping,
+                    //         )
+                    //         .to_worker_slot(&parallel_unit_to_worker)
+                    //         .unwrap()
+                    //         .to_protobuf()
+                    //     })
+                    // });
                     (
                         fragment_id,
                         PbFragment {
@@ -217,8 +217,10 @@ impl MetadataModel for TableFragments {
                             fragment_type_mask,
                             distribution_type,
                             actors,
-                            vnode_mapping: None,
-                            vnode_mapping_v2,
+                            //                            vnode_mapping: None,
+                            // vnode_mapping_v2,
+                            // vnode_mapping: None,
+                            // vnode_mapping_v2: None,
                             state_table_ids,
                             upstream_fragment_ids,
                         },
@@ -580,15 +582,15 @@ impl TableFragments {
     }
 
     pub fn update_vnode_mapping(&mut self, migrate_map: &HashMap<ParallelUnitId, ParallelUnit>) {
-        for fragment in self.fragments.values_mut() {
-            if let Some(mapping) = &mut fragment.vnode_mapping {
-                mapping.data.iter_mut().for_each(|id| {
-                    if migrate_map.contains_key(id) {
-                        *id = migrate_map.get(id).unwrap().id;
-                    }
-                });
-            }
-        }
+        // for fragment in self.fragments.values_mut() {
+        //     if let Some(mapping) = &mut fragment.vnode_mapping {
+        //         mapping.data.iter_mut().for_each(|id| {
+        //             if migrate_map.contains_key(id) {
+        //                 *id = migrate_map.get(id).unwrap().id;
+        //             }
+        //         });
+        //     }
+        // }
     }
 
     /// Returns the status of actors group by worker id.

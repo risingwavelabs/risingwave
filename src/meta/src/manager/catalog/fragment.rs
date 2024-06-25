@@ -29,6 +29,7 @@ use risingwave_connector::source::SplitImpl;
 use risingwave_meta_model_v2::SourceId;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
+use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::{ActorStatus, Fragment, State};
 use risingwave_pb::meta::FragmentWorkerSlotMapping;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -60,18 +61,73 @@ impl FragmentManagerCore {
     pub fn all_running_fragment_mappings(
         &self,
     ) -> impl Iterator<Item = FragmentWorkerSlotMapping> + '_ {
-        self.table_fragments
+        let mut result = vec![];
+
+        for table_fragment in self
+            .table_fragments
             .values()
             .filter(|tf| tf.state() != State::Initial)
-            .flat_map(|table_fragments| {
-                table_fragments
-                    .fragments
-                    .values()
-                    .map(move |fragment| FragmentWorkerSlotMapping {
+        {
+            let vec1 = Self::extract_fragment_mapping(table_fragment);
+
+            println!("vec {:#?}", vec1);
+            result.extend(vec1.into_iter());
+        }
+
+        result.into_iter()
+    }
+
+    fn extract_fragment_mapping(table_fragment: &TableFragments) -> Vec<FragmentWorkerSlotMapping> {
+        let mut result = Vec::with_capacity(table_fragment.fragments.len());
+        for fragment in table_fragment.fragments.values() {
+            match fragment.get_distribution_type().unwrap() {
+                FragmentDistributionType::Unspecified => unreachable!(),
+                FragmentDistributionType::Single => {
+                    let actor = fragment
+                        .get_actors()
+                        .iter()
+                        .exactly_one()
+                        .expect("single actor");
+                    let status = table_fragment.actor_status.get(&actor.actor_id).unwrap();
+                    let worker_id = status.get_parallel_unit().unwrap().get_worker_node_id();
+                    result.push(FragmentWorkerSlotMapping {
                         fragment_id: fragment.fragment_id,
-                        mapping: fragment.vnode_mapping_v2.clone(),
-                    })
-            })
+                        mapping: Some(
+                            WorkerSlotMapping::new_single(WorkerSlotId::new(worker_id, 0))
+                                .to_protobuf(),
+                        ),
+                    });
+                }
+                FragmentDistributionType::Hash => {
+                    let mut actor_bitmaps = HashMap::new();
+                    let mut actor_to_workers = HashMap::new();
+
+                    for actor in &fragment.actors {
+                        let status = table_fragment.actor_status.get(&actor.actor_id).unwrap();
+
+                        let worker_id = status.get_parallel_unit().unwrap().get_worker_node_id();
+                        actor_bitmaps.insert(
+                            actor.actor_id as ActorId,
+                            Bitmap::from(actor.vnode_bitmap.as_ref().unwrap()),
+                        );
+
+                        actor_to_workers.insert(actor.actor_id, worker_id);
+                    }
+
+                    let actor_mapping = ActorMapping::from_bitmaps(&actor_bitmaps);
+
+
+                    let mapping = actor_mapping.to_worker_slot(&actor_to_workers);
+
+                    result.push(FragmentWorkerSlotMapping {
+                        fragment_id: fragment.fragment_id,
+                        mapping: Some(mapping.to_protobuf()),
+                    });
+                }
+            }
+        }
+
+        result
     }
 
     fn running_fragment_parallelisms(
@@ -88,16 +144,13 @@ impl FragmentManagerCore {
                     {
                         return None;
                     }
-                    let parallelism = match fragment.vnode_mapping_v2.as_ref() {
-                        None => {
-                            tracing::warn!(
-                                "vnode mapping for fragment {} not found",
-                                fragment.fragment_id
-                            );
-                            1
-                        }
-                        Some(m) => WorkerSlotMapping::from_protobuf(m).iter_unique().count(),
+
+                    let parallelism = match fragment.get_distribution_type().unwrap() {
+                        FragmentDistributionType::Unspecified => unreachable!(),
+                        FragmentDistributionType::Single => 1,
+                        FragmentDistributionType::Hash => fragment.get_actors().len(),
                     };
+
                     Some((fragment.fragment_id, parallelism))
                 })
             })
@@ -202,19 +255,10 @@ impl FragmentManager {
     }
 
     async fn notify_fragment_mapping(&self, table_fragment: &TableFragments, operation: Operation) {
-        // Notify all fragment mapping to frontend nodes
-        for fragment in table_fragment.fragments.values() {
-            let fragment_mapping = FragmentWorkerSlotMapping {
-                fragment_id: fragment.fragment_id,
-                mapping: fragment.vnode_mapping_v2.clone(),
-            };
-
+        for mapping in FragmentManagerCore::extract_fragment_mapping(table_fragment) {
             self.env
                 .notification_manager()
-                .notify_frontend(
-                    operation,
-                    Info::StreamingWorkerSlotMapping(fragment_mapping),
-                )
+                .notify_frontend(operation, Info::StreamingWorkerSlotMapping(mapping))
                 .await;
         }
 
@@ -1278,9 +1322,6 @@ impl FragmentManager {
                         .to_worker_slot(&actor_to_worker)
                 }
                 .to_protobuf();
-
-                assert!(fragment.vnode_mapping.is_none());
-                *fragment.vnode_mapping_v2.as_mut().unwrap() = vnode_mapping.clone();
 
                 // Notify fragment mapping to frontend nodes.
                 let fragment_mapping = FragmentWorkerSlotMapping {

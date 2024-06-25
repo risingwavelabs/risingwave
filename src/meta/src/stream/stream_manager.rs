@@ -1195,16 +1195,6 @@ mod tests {
             .get_streaming_cluster_info()
             .await?;
 
-        let worker_slots = worker_nodes
-            .iter()
-            .flat_map(|(worker_id, worker)| {
-                (0..worker.get_parallelism() as usize)
-                    .map(|slot_id| WorkerSlotId::new(*worker_id, slot_id))
-            })
-            .collect_vec();
-
-        let worker_slot_mapping = WorkerSlotMapping::new_uniform(worker_slots.into_iter());
-
         let mut fragments = BTreeMap::default();
 
         fragments.insert(
@@ -1215,11 +1205,10 @@ mod tests {
                 distribution_type: FragmentDistributionType::Hash as i32,
                 actors: actors.clone(),
                 state_table_ids: vec![0],
-                vnode_mapping: None,
-                vnode_mapping_v2: Some(worker_slot_mapping.to_protobuf()),
                 ..Default::default()
             },
         );
+
         services
             .create_materialized_view(table_id, fragments)
             .await?;
@@ -1274,9 +1263,6 @@ mod tests {
                 distribution_type: FragmentDistributionType::Hash as i32,
                 actors: actors.clone(),
                 state_table_ids: vec![0],
-                vnode_mapping: Some(
-                    risingwave_common::hash::ParallelUnitMapping::new_single(0).to_protobuf(),
-                ),
                 ..Default::default()
             },
         );
