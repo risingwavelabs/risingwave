@@ -61,7 +61,7 @@ use sea_orm::{
     TransactionTrait,
 };
 
-use crate::barrier::Reschedule;
+use crate::barrier::{ReplaceTablePlan, Reschedule};
 use crate::controller::catalog::CatalogController;
 use crate::controller::rename::ReplaceTableExprRewriter;
 use crate::controller::utils::{
@@ -625,7 +625,7 @@ impl CatalogController {
     pub async fn finish_streaming_job(
         &self,
         job_id: ObjectId,
-        replace_table_job_info: Option<(crate::manager::StreamingJob, Vec<MergeUpdate>, u32)>,
+        replace_table_job_info: Option<ReplaceTablePlan>,
     ) -> MetaResult<NotificationVersion> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
@@ -756,7 +756,12 @@ impl CatalogController {
         let fragment_mapping = get_fragment_mappings(&txn, job_id).await?;
 
         let replace_table_mapping_update = match replace_table_job_info {
-            Some((streaming_job, merge_updates, dummy_id)) => {
+            Some(ReplaceTablePlan {
+                streaming_job,
+                merge_updates,
+                dummy_id,
+                ..
+            }) => {
                 let incoming_sink_id = job_id;
 
                 let (relations, fragment_mapping) = Self::finish_replace_streaming_job_inner(

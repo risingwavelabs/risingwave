@@ -176,6 +176,10 @@ pub struct ReplaceTableContext {
 
     /// The locations of the existing actors, essentially the downstream chain actors to update.
     pub existing_locations: Locations,
+
+    pub streaming_job: StreamingJob,
+
+    pub dummy_id: u32,
 }
 
 /// `GlobalStreamManager` manages all the streams in the system.
@@ -443,15 +447,17 @@ impl GlobalStreamManager {
             let init_split_assignment =
                 self.source_manager.allocate_splits(&dummy_table_id).await?;
 
+            replace_table_id = Some(dummy_table_id);
+
             replace_table_command = Some(ReplaceTablePlan {
                 old_table_fragments: context.old_table_fragments,
                 new_table_fragments: table_fragments,
                 merge_updates: context.merge_updates,
                 dispatchers: context.dispatchers,
                 init_split_assignment,
+                streaming_job,
+                dummy_id: dummy_table_id.table_id,
             });
-
-            replace_table_id = Some(dummy_table_id);
         }
 
         let table_id = table_fragments.table_id();
@@ -508,6 +514,8 @@ impl GlobalStreamManager {
             dispatchers,
             building_locations,
             existing_locations,
+            dummy_id,
+            streaming_job,
         }: ReplaceTableContext,
     ) -> MetaResult<()> {
         self.build_actors(&table_fragments, &building_locations, &existing_locations)
@@ -524,6 +532,8 @@ impl GlobalStreamManager {
                 merge_updates,
                 dispatchers,
                 init_split_assignment,
+                dummy_id,
+                streaming_job,
             }))
             .await
             && let MetadataManager::V1(mgr) = &self.metadata_manager

@@ -182,36 +182,37 @@ impl TrackingJob {
     }
 
     pub(crate) async fn pre_finish(&self) -> MetaResult<()> {
-        let metadata = match &self {
+        match &self {
             TrackingJob::New(command) => match &command.context.command {
                 Command::CreateStreamingJob {
                     table_fragments,
                     streaming_job,
                     internal_tables,
+                    replace_table,
                     ..
-                } => Some((table_fragments, streaming_job, internal_tables)),
-                _ => None,
+                } => match self.metadata_manager() {
+                    MetadataManager::V1(mgr) => {
+                        mgr.fragment_manager
+                            .mark_table_fragments_created(table_fragments.table_id())
+                            .await?;
+                        mgr.catalog_manager
+                            .finish_stream_job(streaming_job.clone(), internal_tables.clone())
+                            .await?;
+                        Ok(())
+                    }
+                    MetadataManager::V2(mgr) => {
+                        mgr.catalog_controller.finish_streaming_job(
+                            streaming_job.id() as i32,
+                            replace_table.clone(),
+                        ).await?;
+                        Ok(())
+                    }
+                },
+                _ => Ok(()),
             },
             _ => todo!(),
             // TrackingJob::Recovered(recovered) => Some((&recovered.fragments, todo!(), todo!())),
-        };
-        // Update the state of the table fragments from `Creating` to `Created`, so that the
-        // fragments can be scaled.
-        if let Some((table_fragments, stream_job, internal_tables)) = metadata {
-            match self.metadata_manager() {
-                MetadataManager::V1(mgr) => {
-                    mgr.fragment_manager
-                        .mark_table_fragments_created(table_fragments.table_id())
-                        .await?;
-                    mgr.catalog_manager
-                        .finish_stream_job(stream_job.clone(), internal_tables.clone())
-                        .await?;
-                }
-                _ => todo!(),
-                // MetadataManager::V2(mgr) => mgr.catalog_controller.finish_streaming_job(job_id),
-            }
         }
-        Ok(())
     }
 
     pub(crate) fn table_to_create(&self) -> Option<TableId> {
@@ -310,7 +311,12 @@ impl CreateMviewProgressTracker {
                 states.insert(actor, BackfillState::ConsumingUpstream(Epoch(0), 0));
             }
 
-            let progress = Self::recover_progress(creating_table_id, &mut upstream_mv_counts, &mut definitions, &version_stats);
+            let progress = Self::recover_progress(
+                creating_table_id,
+                &mut upstream_mv_counts,
+                &mut definitions,
+                &version_stats,
+            );
             let internal_tables = table_internal_table_map.remove(&creating_table_id).unwrap();
             let streaming_job = table_stream_job_map.remove(&creating_table_id).unwrap();
             let tracking_job = TrackingJob::RecoveredV1(RecoveredTrackingJobV1 {
@@ -345,7 +351,12 @@ impl CreateMviewProgressTracker {
                 states.insert(actor, BackfillState::ConsumingUpstream(Epoch(0), 0));
             }
 
-            let progress = Self::recover_progress(creating_table_id, &mut upstream_mv_counts, &mut definitions, &version_stats);
+            let progress = Self::recover_progress(
+                creating_table_id,
+                &mut upstream_mv_counts,
+                &mut definitions,
+                &version_stats,
+            );
             let tracking_job = TrackingJob::RecoveredV2(RecoveredTrackingJobV2 {
                 id: creating_table_id.table_id as i32,
                 metadata_manager: metadata_manager.clone(),
@@ -359,7 +370,12 @@ impl CreateMviewProgressTracker {
         }
     }
 
-    pub fn recover_progress(creating_table_id: TableId, upstream_mv_counts: &mut TableUpstreamMvCountMap, definitions: &mut TableDefinitionMap, version_stats: &HummockVersionStats) -> Progress {
+    pub fn recover_progress(
+        creating_table_id: TableId,
+        upstream_mv_counts: &mut TableUpstreamMvCountMap,
+        definitions: &mut TableDefinitionMap,
+        version_stats: &HummockVersionStats,
+    ) -> Progress {
         let mut states = HashMap::new();
         let upstream_mv_count = upstream_mv_counts.remove(&creating_table_id).unwrap();
         let upstream_total_key_count = upstream_mv_count
@@ -367,9 +383,9 @@ impl CreateMviewProgressTracker {
             .map(|(upstream_mv, count)| {
                 *count as u64
                     * version_stats
-                    .table_stats
-                    .get(&upstream_mv.table_id)
-                    .map_or(0, |stat| stat.total_key_count as u64)
+                        .table_stats
+                        .get(&upstream_mv.table_id)
+                        .map_or(0, |stat| stat.total_key_count as u64)
             })
             .sum();
         let definition = definitions.remove(&creating_table_id).unwrap();

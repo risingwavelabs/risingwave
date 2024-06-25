@@ -97,6 +97,8 @@ pub struct ReplaceTablePlan {
     /// Note that there's no `SourceBackfillExecutor` involved for table with connector, so we don't need to worry about
     /// `backfill_splits`.
     pub init_split_assignment: SplitAssignment,
+    pub streaming_job: StreamingJob,
+    pub dummy_id: u32,
 }
 
 impl ReplaceTablePlan {
@@ -553,6 +555,7 @@ impl CommandContext {
                         merge_updates,
                         dispatchers,
                         init_split_assignment,
+                        ..
                     }) = replace_table
                     {
                         // TODO: support in v2.
@@ -1021,6 +1024,7 @@ impl CommandContext {
                             merge_updates,
                             dispatchers,
                             init_split_assignment,
+                            ..
                         }) = replace_table
                         {
                             self.clean_up(old_table_fragments.actor_ids()).await?;
@@ -1106,6 +1110,7 @@ impl CommandContext {
                 merge_updates,
                 dispatchers,
                 init_split_assignment,
+                ..
             }) => {
                 self.clean_up(old_table_fragments.actor_ids()).await?;
 
