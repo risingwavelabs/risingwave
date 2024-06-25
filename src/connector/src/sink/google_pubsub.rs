@@ -15,8 +15,10 @@
 use std::collections::BTreeMap;
 
 use anyhow::{anyhow, Context};
+use futures::future::try_join_all;
 use futures::prelude::future::FutureExt;
 use futures::prelude::TryFuture;
+use futures::TryFutureExt;
 use google_cloud_gax::conn::Environment;
 use google_cloud_googleapis::pubsub::v1::PubsubMessage;
 use google_cloud_pubsub::apiv1;
@@ -46,13 +48,17 @@ use crate::dispatch_sink_formatter_str_key_impl;
 pub const PUBSUB_SINK: &str = "google_pubsub";
 const PUBSUB_SEND_FUTURE_BUFFER_MAX_SIZE: usize = 65536;
 
-fn may_delivery_future(awaiter: Awaiter) -> GooglePubSubSinkDeliveryFuture {
-    Box::pin(awaiter.get().map(|result| {
-        result
-            .context("Google Pub/Sub sink error")
-            .map_err(SinkError::GooglePubSub)
-            .map(|_| ())
+fn may_delivery_future(awaiter: Vec<Awaiter>) -> GooglePubSubSinkDeliveryFuture {
+    try_join_all(awaiter.into_iter().map(|awaiter| {
+        awaiter.get().map(|result| {
+            result
+                .context("Google Pub/Sub sink error")
+                .map_err(SinkError::GooglePubSub)
+                .map(|_| ())
+        })
     }))
+    .map_ok(|_: Vec<()>| ())
+    .boxed()
 }
 
 #[serde_as]
@@ -271,7 +277,7 @@ impl AsyncTruncateSinkWriter for GooglePubSubSinkWriter {
     ) -> Result<()> {
         let mut payload_writer = GooglePubSubPayloadWriter {
             publisher: &mut self.publisher,
-            message_vec: Vec::new(),
+            message_vec: Vec::with_capacity(chunk.cardinality()),
             add_future,
         };
         dispatch_sink_formatter_str_key_impl!(&self.formatter, formatter, {
@@ -285,11 +291,9 @@ impl<'w> GooglePubSubPayloadWriter<'w> {
     pub async fn finish(&mut self) -> Result<()> {
         let message_vec = std::mem::take(&mut self.message_vec);
         let awaiters = self.publisher.publish_bulk(message_vec).await;
-        for awaiter in awaiters {
-            self.add_future
-                .add_future_may_await(may_delivery_future(awaiter))
-                .await?;
-        }
+        self.add_future
+            .add_future_may_await(may_delivery_future(awaiters))
+            .await?;
         Ok(())
     }
 }
