@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_license::LicenseManager;
+
 use super::diff::SystemParamsDiff;
 use super::reader::SystemParamsReader;
-use crate::license::LicenseManager;
 use crate::util::tracing::layer::toggle_otel_layer;
 
 /// Node-independent handler for system parameter changes.

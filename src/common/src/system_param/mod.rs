@@ -30,10 +30,10 @@ use std::ops::RangeBounds;
 use std::str::FromStr;
 
 use paste::paste;
+use risingwave_license::TEST_PAID_LICENSE_KEY;
 use risingwave_pb::meta::PbSystemParams;
 
 use self::diff::SystemParamsDiff;
-use crate::license::TEST_PAID_LICENSE_KEY;
 
 pub type SystemParamsError = String;
 

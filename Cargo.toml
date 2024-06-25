@@ -25,6 +25,7 @@ members = [
     "src/frontend/planner_test",
     "src/java_binding",
     "src/jni_core",
+    "src/license",
     "src/meta",
     "src/meta/dashboard",
     "src/meta/model_v2",
@@ -203,6 +204,7 @@ risingwave_frontend = { path = "./src/frontend" }
 risingwave_hummock_sdk = { path = "./src/storage/hummock_sdk" }
 risingwave_hummock_test = { path = "./src/storage/hummock_test" }
 risingwave_hummock_trace = { path = "./src/storage/hummock_trace" }
+risingwave_license = { path = "./src/license" }
 risingwave_mem_table_spill_test = { path = "./src/stream/spill_test" }
 risingwave_meta = { path = "./src/meta" }
 risingwave_meta_dashboard = { path = "./src/meta/dashboard" }

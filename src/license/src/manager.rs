@@ -103,7 +103,7 @@ struct Inner {
 }
 
 /// The singleton license manager.
-pub(crate) struct LicenseManager {
+pub struct LicenseManager {
     inner: RwLock<Inner>,
 }
 
