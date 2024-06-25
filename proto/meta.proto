@@ -454,10 +454,6 @@ message SubscribeResponse {
   // catalog version
   uint64 version = 3;
   
-  // holds all MVs which have completed their backfill operations
-  // contains IDs from catalog.Table.id
-  repeated uint32 mv_backfills_completed = 30; 
-  
   oneof info {
     catalog.Database database = 4;
     catalog.Schema schema = 5;
@@ -487,6 +483,20 @@ message SubscribeResponse {
 
 service NotificationService {
   rpc Subscribe(SubscribeRequest) returns (stream SubscribeResponse);
+}
+
+message BackfillResponse {
+   // holds all MVs which have completed their backfill operations
+   // contains IDs from catalog.Table.id
+   repeated uint32 mv_backfills_completed = 30;
+}
+
+message BackfillRequest {
+   requestId string = 1; // UUID so meta can drop duplicate requests 
+}
+
+service BackfillService {
+   rpc GetBackfill(BackfillRequest) returns (BackfillResponse);
 }
 
 message GetClusterInfoRequest {}
