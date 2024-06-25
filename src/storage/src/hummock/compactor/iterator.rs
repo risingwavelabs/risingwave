@@ -444,12 +444,18 @@ impl ConcatSstableIterator {
                 break;
             }
 
-            start_index = start_index
-                + block_metas[(start_index + 1)..=end_index]
-                    .partition_point(|block_meta| {
-                        block_meta.table_id().table_id() > start_block_table_id
-                    })
-                    .saturating_sub(1);
+            // skip this table_id
+            let old_start_index = start_index;
+            let block_metas_to_search = &block_metas[start_index..=end_index];
+
+            start_index += block_metas_to_search.partition_point(|block_meta| {
+                block_meta.table_id().table_id() == start_block_table_id
+            });
+
+            if old_start_index == start_index {
+                // no more blocks with the same table_id
+                break;
+            }
         }
 
         if end_index != 0 {
@@ -459,12 +465,20 @@ impl ConcatSstableIterator {
                     break;
                 }
 
+                let old_end_index = end_index;
+                let block_metas_to_search = &block_metas[start_index..=end_index];
+
                 end_index = start_index
-                    + block_metas[start_index..end_index]
+                    + block_metas_to_search
                         .partition_point(|block_meta| {
                             block_meta.table_id().table_id() < end_block_table_id
                         })
                         .saturating_sub(1);
+
+                if end_index == old_end_index {
+                    // no more blocks with the same table_id
+                    break;
+                }
             }
         }
 
