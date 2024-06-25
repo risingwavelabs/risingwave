@@ -58,7 +58,8 @@ use sea_orm::{
     IntoActiveModel, JoinType, PaginatorTrait, QueryFilter, QuerySelect, RelationTrait,
     TransactionTrait, Value,
 };
-use tokio::sync::{RwLock, RwLockReadGuard};
+use tokio::sync::oneshot::Sender;
+use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use super::utils::check_subscription_name_duplicate;
 use crate::controller::rename::{alter_relation_rename, alter_relation_rename_refs};
@@ -110,7 +111,7 @@ impl CatalogController {
             env,
             inner: RwLock::new(CatalogControllerInner {
                 db: meta_store.conn,
-                table_id_to_rx: HashMap::new(),
+                table_id_to_tx: HashMap::new(),
             }),
         }
     }
@@ -120,11 +121,15 @@ impl CatalogController {
     pub async fn get_inner_read_guard(&self) -> RwLockReadGuard<'_, CatalogControllerInner> {
         self.inner.read().await
     }
+
+    pub async fn get_inner_write_guard(&self) -> RwLockWriteGuard<'_, CatalogControllerInner> {
+        self.inner.write().await
+    }
 }
 
 pub struct CatalogControllerInner {
     pub(crate) db: DatabaseConnection,
-    pub table_id_to_rx: HashMap<TableId, tokio::sync::watch::Receiver<PbTable>>,
+    pub table_id_to_tx: HashMap<TableId, Sender<MetaResult<NotificationVersion>>>,
 }
 
 impl CatalogController {
@@ -3124,6 +3129,14 @@ impl CatalogControllerInner {
             .into_iter()
             .map(|(func, obj)| ObjectModel(func, obj.unwrap()).into())
             .collect())
+    }
+
+    pub(crate) fn register_finish_notifier(
+        &mut self,
+        id: TableId,
+        sender: Sender<MetaResult<NotificationVersion>>,
+    ) {
+        self.table_id_to_tx.insert(id, sender);
     }
 }
 
