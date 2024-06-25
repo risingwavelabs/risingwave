@@ -1288,7 +1288,7 @@ impl DdlController {
         let job_id = stream_job.id();
         tracing::debug!(id = job_id, "creating stream job");
 
-        let result: MetaResult<()> = try {
+        let result: MetaResult<NotificationVersion> = try {
             // Add table fragments to meta store with state: `State::Initial`.
             mgr.fragment_manager
                 .start_create_table_fragments(table_fragments.clone())
@@ -1296,46 +1296,47 @@ impl DdlController {
 
             self.stream_manager
                 .create_streaming_job(table_fragments, ctx)
+                .await?;
+
+            self.wait_streaming_job_finished_v1(mgr, stream_job.id())
                 .await?
         };
 
-        if let Err(e) = result {
-            match stream_job.create_type() {
-                CreateType::Background => {
-                    tracing::error!(id = job_id, error = %e.as_report(), "finish stream job failed");
-                    let should_cancel = match mgr
-                        .fragment_manager
-                        .select_table_fragments_by_table_id(&job_id.into())
-                        .await
-                    {
-                        Err(err) => err.is_fragment_not_found(),
-                        Ok(table_fragments) => table_fragments.is_initial(),
-                    };
-                    if should_cancel {
-                        // If the table fragments are not found or in initial state, it means that the stream job has not been created.
-                        // We need to cancel the stream job.
+        match result {
+            Err(e) => {
+                match stream_job.create_type() {
+                    CreateType::Background => {
+                        tracing::error!(id = job_id, error = %e.as_report(), "finish stream job failed");
+                        let should_cancel = match mgr
+                            .fragment_manager
+                            .select_table_fragments_by_table_id(&job_id.into())
+                            .await
+                        {
+                            Err(err) => err.is_fragment_not_found(),
+                            Ok(table_fragments) => table_fragments.is_initial(),
+                        };
+                        if should_cancel {
+                            // If the table fragments are not found or in initial state, it means that the stream job has not been created.
+                            // We need to cancel the stream job.
+                            self.cancel_stream_job(&stream_job, internal_tables, Some(&e))
+                                .await?;
+                        } else {
+                            // NOTE: This assumes that we will trigger recovery,
+                            // and recover stream job progress.
+                        }
+                    }
+                    _ => {
                         self.cancel_stream_job(&stream_job, internal_tables, Some(&e))
                             .await?;
-                    } else {
-                        // NOTE: This assumes that we will trigger recovery,
-                        // and recover stream job progress.
                     }
                 }
-                _ => {
-                    self.cancel_stream_job(&stream_job, internal_tables, Some(&e))
-                        .await?;
-                }
+                Err(e)
             }
-            return Err(e);
-        };
-
-        tracing::debug!(id = job_id, "finishing stream job");
-        let version = self
-            .wait_streaming_job_finished_v1(mgr, stream_job.id())
-            .await?;
-        tracing::debug!(id = job_id, "finished stream job");
-
-        Ok(version)
+            Ok(version) => {
+                tracing::info!(id = job_id, "finish stream job succeeded");
+                Ok(version)
+            }
+        }
     }
 
     async fn drop_streaming_job(
@@ -2197,16 +2198,6 @@ impl DdlController {
         match &self.metadata_manager {
             MetadataManager::V1(mgr) => mgr.catalog_manager.comment_on(comment).await,
             MetadataManager::V2(mgr) => mgr.catalog_controller.comment_on(comment).await,
-        }
-    }
-
-    async fn wait_streaming_job_finished(&self, id: TableId) -> MetaResult<NotificationVersion> {
-        match &self.metadata_manager {
-            MetadataManager::V1(metadata_manager) => {
-                self.wait_streaming_job_finished_v1(metadata_manager, id)
-                    .await
-            }
-            MetadataManager::V2(_) => self.wait_streaming_job_finished_v2(id).await,
         }
     }
 
