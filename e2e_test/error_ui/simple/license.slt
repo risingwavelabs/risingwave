@@ -32,6 +32,23 @@ Caused by these errors (recent errors listed first):
   5: InvalidToken
 
 
+# Set the license key to empty. This demonstrates the default behavior in production, i.e., free tier.
+statement ok
+ALTER SYSTEM SET license_key TO '';
+
+query error
+SELECT rw_test_paid_tier();
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: Expr error
+  2: error while evaluating expression `test_paid_tier()`
+  3: feature TestPaid is only available for tier Paid and above, while the current tier is Free
+
+Hint: You may want to set a license key with `ALTER SYSTEM SET license_key = '...';` command.
+
+
 # Set the license key to default. In debug mode, this will set the license key to a paid tier key.
 statement ok
 ALTER SYSTEM SET license_key TO DEFAULT;
