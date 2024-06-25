@@ -171,6 +171,14 @@ impl CatalogManagerCore {
             table_id_to_tx,
         })
     }
+
+    pub(crate) fn register_finish_notifier(
+        &mut self,
+        id: TableId,
+        sender: Sender<MetaResult<NotificationVersion>>,
+    ) {
+        self.table_id_to_tx.insert(id, sender);
+    }
 }
 
 impl CatalogManager {
