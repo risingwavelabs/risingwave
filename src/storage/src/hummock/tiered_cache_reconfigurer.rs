@@ -29,6 +29,16 @@ pub struct TieredCacheReconfigurer {
 }
 
 impl TieredCacheReconfigurer {
+    pub fn new(
+        meta_cache: HybridCache<HummockSstableObjectId, Box<Sstable>>,
+        block_cache: HybridCache<SstableBlockIndex, Box<Block>>,
+    ) -> Self {
+        Self {
+            meta_cache,
+            block_cache,
+        }
+    }
+
     pub async fn run(self, mut rx: watch::Receiver<SystemParamsReaderRef>) {
         loop {
             if let Err(e) = rx.changed().await {
