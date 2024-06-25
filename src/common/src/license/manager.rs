@@ -35,19 +35,6 @@ pub enum Tier {
     Paid,
 }
 
-impl Default for Tier {
-    /// The default tier is `Free` in production, and `Paid` in debug mode for testing.
-    // TODO: shall we always use `Free` as the default tier here, but provide a test-only license
-    // key as the default value of the system parameter instead?
-    fn default() -> Self {
-        if cfg!(debug_assertions) {
-            Self::Paid
-        } else {
-            Self::Free
-        }
-    }
-}
-
 /// The content of a license.
 ///
 /// We use JSON Web Token (JWT) to represent the license. This struct is the payload.
@@ -69,14 +56,13 @@ pub(super) struct License {
 }
 
 impl Default for License {
-    /// The default license is a free license in production, and a paid license in debug mode for
-    /// testing. The default license never expires.
+    /// The default license is a free license that never expires.
     ///
     /// Used when `license_key` is unset or invalid.
     fn default() -> Self {
         Self {
             sub: "default".to_owned(),
-            tier: Tier::default(),
+            tier: Tier::Free,
             exp: u64::MAX,
         }
     }
@@ -123,10 +109,15 @@ impl LicenseManager {
             return;
         }
 
-        // By default, `exp` is validated based on the current system time.
         // TODO: shall we also validate `nbf`(Not Before)?
-        // TODO: shall we also validate `iss`(Issuer)?
-        let validation = Validation::new(Algorithm::RS256);
+        let mut validation = Validation::new(Algorithm::RS512);
+        // Only accept `prod` issuer in production, so that we can use license keys issued by
+        // the `test` issuer in development without leaking them to production.
+        validation.set_issuer(&[
+            "prod.risingwave.com",
+            #[cfg(debug_assertions)]
+            "test.risingwave.com",
+        ]);
 
         inner.license = match jsonwebtoken::decode(license_key, &PUBLIC_KEY, &validation) {
             Ok(data) => Ok(data.claims),
@@ -150,3 +141,9 @@ impl LicenseManager {
         Ok(license)
     }
 }
+
+/// A license key with the paid tier that only works in tests.
+pub const TEST_PAID_LICENSE_KEY: &str =
+ "eyJhbGciOiJSUzUxMiIsInR5cCI6IkpXVCJ9.\
+  eyJzdWIiOiJydy10ZXN0IiwidGllciI6InBhaWQiLCJpc3MiOiJ0ZXN0LnJpc2luZ3dhdmUuY29tIiwiZXhwIjo5OTk5OTk5OTk5fQ.\
+  c6Gmb6xh3dBDYX_4cOnHUbwRXJbUCM7W3mrJA77nLC5FkoOLpGstzvQ7qfnPVBu412MFtKRDvh-Lk8JwG7pVa0WLw16DeHTtVHxZukMTZ1Q_ciZ1xKeUx_pwUldkVzv6c9j99gNqPSyTjzOXTdKlidBRLer2zP0v3Lf-ZxnMG0tEcIbTinTb3BNCtAQ8bwBSRP-X48cVTWafjaZxv_zGiJT28uV3bR6jwrorjVB4VGvqhsJi6Fd074XOmUlnOleoAtyzKvjmGC5_FvnL0ztIe_I0z_pyCMfWpyJ_J4C7rCP1aVWUImyoowLmVDA-IKjclzOW5Fvi0wjXsc6OckOc_A";
