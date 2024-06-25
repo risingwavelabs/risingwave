@@ -21,7 +21,7 @@ use std::time::Duration;
 use aes_siv::aead::generic_array::GenericArray;
 use aes_siv::aead::Aead;
 use aes_siv::{Aes128SivAead, KeyInit};
-use anyhow::{anyhow, Context};
+use anyhow::Context;
 use itertools::Itertools;
 use rand::{Rng, RngCore};
 use risingwave_common::config::DefaultParallelism;

@@ -19,7 +19,6 @@ use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::ColumnCatalog;
-use risingwave_common::range::RangeBoundsExt;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_sqlparser::ast::{
     AlterTableOperation, ColumnOption, ConnectorSchema, Encode, ObjectName, Statement,
