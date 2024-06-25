@@ -175,7 +175,6 @@ impl GlobalBarrierManagerContext {
                 upstream_mv_counts.into(),
                 mview_definitions.into(),
                 version_stats,
-                senders.into(),
                 table_fragment_map.into(),
                 self.metadata_manager.clone(),
             );
@@ -190,21 +189,12 @@ impl GlobalBarrierManagerContext {
             .list_background_creating_mviews()
             .await?;
 
-        let mut senders = HashMap::new();
-        let mut receivers = Vec::new();
         let mut table_fragment_map = HashMap::new();
         let mut mview_definitions = HashMap::new();
         let mut table_map = HashMap::new();
         let mut upstream_mv_counts = HashMap::new();
         for mview in &mviews {
             let table_id = TableId::new(mview.table_id as _);
-            senders.insert(
-                table_id,
-                Notifier {
-                    ..Default::default()
-                },
-            );
-
             let table_fragments = mgr
                 .catalog_controller
                 .get_job_fragments_by_id(mview.table_id)
@@ -214,7 +204,6 @@ impl GlobalBarrierManagerContext {
             table_map.insert(table_id, table_fragments.backfill_actor_ids());
             table_fragment_map.insert(table_id, table_fragments);
             mview_definitions.insert(table_id, mview.definition.clone());
-            receivers.push(mview.table_id);
         }
 
         let version_stats = self.hummock_manager.get_version_stats().await;
@@ -226,7 +215,6 @@ impl GlobalBarrierManagerContext {
                 upstream_mv_counts.into(),
                 mview_definitions.into(),
                 version_stats,
-                senders.into(),
                 table_fragment_map.into(),
                 self.metadata_manager.clone(),
             );
