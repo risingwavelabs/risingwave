@@ -3491,8 +3491,6 @@ impl CatalogManager {
         let database_core = &mut core.database;
         let key = (table.database_id, table.schema_id, table.name.clone());
 
-        assert!(table.dependent_relations.is_empty());
-
         assert!(
             database_core.tables.contains_key(&table.id)
                 && database_core.has_in_progress_creation(&key),
