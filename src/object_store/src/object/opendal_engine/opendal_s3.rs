@@ -22,16 +22,11 @@ use opendal::Operator;
 use risingwave_common::config::ObjectStoreConfig;
 
 use super::{EngineType, OpendalObjectStore};
-use crate::object::object_metrics::ObjectStoreMetrics;
 use crate::object::ObjectResult;
 
 impl OpendalObjectStore {
     /// create opendal s3 engine.
-    pub fn new_s3_engine(
-        bucket: String,
-        config: Arc<ObjectStoreConfig>,
-        metrics: Arc<ObjectStoreMetrics>,
-    ) -> ObjectResult<Self> {
+    pub fn new_s3_engine(bucket: String, config: Arc<ObjectStoreConfig>) -> ObjectResult<Self> {
         // Create s3 builder.
         let mut builder = S3::default();
         builder.bucket(&bucket);
@@ -55,16 +50,11 @@ impl OpendalObjectStore {
             op,
             engine_type: EngineType::S3,
             config,
-            metrics,
         })
     }
 
     /// Creates a minio client. The server should be like `minio://key:secret@address:port/bucket`.
-    pub fn new_minio_engine(
-        server: &str,
-        config: Arc<ObjectStoreConfig>,
-        metrics: Arc<ObjectStoreMetrics>,
-    ) -> ObjectResult<Self> {
+    pub fn new_minio_engine(server: &str, config: Arc<ObjectStoreConfig>) -> ObjectResult<Self> {
         let server = server.strip_prefix("minio://").unwrap();
         let (access_key_id, rest) = server.split_once(':').unwrap();
         let (secret_access_key, mut rest) = rest.split_once('@').unwrap();
@@ -99,7 +89,6 @@ impl OpendalObjectStore {
             op,
             engine_type: EngineType::Minio,
             config,
-            metrics,
         })
     }
 
@@ -122,7 +111,6 @@ impl OpendalObjectStore {
     pub fn new_s3_engine_with_credentials(
         bucket: &str,
         config: Arc<ObjectStoreConfig>,
-        metrics: Arc<ObjectStoreMetrics>,
         aws_access_key_id: &str,
         aws_secret_access_key: &str,
         aws_region: &str,
@@ -147,7 +135,6 @@ impl OpendalObjectStore {
             op,
             engine_type: EngineType::S3,
             config,
-            metrics,
         })
     }
 }
