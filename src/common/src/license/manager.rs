@@ -56,7 +56,7 @@ impl Default for Tier {
 #[serde(rename_all = "snake_case")]
 pub(super) struct License {
     /// Subject of the license.
-    /// See https://tools.ietf.org/html/rfc7519#section-4.1.2
+    /// See <https://tools.ietf.org/html/rfc7519#section-4.1.2>.
     #[allow(dead_code)]
     pub sub: String,
 
@@ -64,7 +64,7 @@ pub(super) struct License {
     pub tier: Tier,
 
     /// Expiration time in seconds since UNIX epoch.
-    /// See https://tools.ietf.org/html/rfc7519#section-4.1.4
+    /// See <https://tools.ietf.org/html/rfc7519#section-4.1.4>.
     pub exp: u64,
 }
 

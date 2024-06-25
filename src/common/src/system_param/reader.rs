@@ -170,10 +170,6 @@ where
     }
 
     fn license_key(&self) -> &str {
-        self.inner()
-            .license_key
-            .as_ref()
-            .map(|s| s.as_str())
-            .unwrap_or_default()
+        self.inner().license_key.as_deref().unwrap_or_default()
     }
 }

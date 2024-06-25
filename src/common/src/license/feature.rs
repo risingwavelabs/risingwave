@@ -18,12 +18,32 @@ use super::{License, LicenseKeyError, LicenseManager, Tier};
 
 /// Define all features that are available based on the tier of the license.
 ///
-/// Check [`Tier`] for the available tiers.
+/// # Define a new feature
+///
+/// To add a new feature, add a new entry below following the same pattern as the existing ones.
+///
+/// Check the definition of [`Tier`] for all available tiers. Note that normally there's no need to
+/// add a feature with the minimum tier of `Free`, as you can directly write the code without
+/// gating it with a feature check.
+///
+/// # Check the availability of a feature
+///
+/// To check the availability of a feature during runtime, call the method
+/// [`check_available`](Feature::check_available) on the feature. If the feature is not available,
+/// an error of type [`FeatureNotAvailable`] will be returned and you should handle it properly,
+/// generally by returning an error to the user.
+///
+/// # Feature availability in tests
+///
+/// In tests with `debug_assertions` enabled, a license key of the paid (maximum) tier is set by
+/// default. As a result, all features are available in tests. To test the behavior when a feature
+/// is not available, you can manually set a license key with a lower tier. Check the e2e test cases
+/// under `error_ui` for examples.
 macro_rules! for_all_features {
     ($macro:ident) => {
         $macro! {
             // name                 min tier    doc
-            { TestPaid,             Paid,       "A dummy feature that's only available on paid tier to test the license manager." },
+            { TestPaid,             Paid,       "A dummy feature that's only available on paid tier for testing purposes." },
         }
     };
 }
@@ -31,6 +51,8 @@ macro_rules! for_all_features {
 macro_rules! def_feature {
     ($({ $name:ident, $min_tier:ident, $doc:literal },)*) => {
         /// A set of features that are available based on the tier of the license.
+        ///
+        /// To define a new feature, add a new entry in the macro [`for_all_features`].
         #[derive(Clone, Copy, Debug)]
         pub enum Feature {
             $(
