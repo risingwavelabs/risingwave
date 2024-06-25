@@ -187,7 +187,7 @@ system ok
 bash -c 'for i in {0..100}; do echo "key\$i:{\\"a\\": \$i}" | rpk topic produce test_additional_columns -f "%k:%v\\n" -H "header1=v1" -H "header2=v2"; done'
 
 statement ok
-create table additional_columns (a int)
+create table additional_columns_single_header_col (a int)
 include key as key_col
 include partition as partition_col
 include offset as offset_col
@@ -200,7 +200,7 @@ FORMAT PLAIN ENCODE JSON
 
 # header with varchar type & non-exist header key
 statement error
-create table additional_columns_1 (a int)
+create table additional_columns_single_header_col_multiple_header_col (a int)
 include key as key_col
 include partition as partition_col
 include offset as offset_col
@@ -222,7 +222,7 @@ Caused by:
 
 # header with varchar type & non-exist header key
 statement ok
-create table additional_columns_1 (a int)
+create table additional_columns_single_header_col_multiple_header_col (a int)
 include key as key_col
 include partition as partition_col
 include offset as offset_col
@@ -279,7 +279,7 @@ select * from upsert_students order by "ID";
 
 query ?
 SELECT count(*)
-FROM   additional_columns
+FROM   additional_columns_single_header_col
 WHERE  key_col IS NOT NULL
        AND partition_col IS NOT NULL
        AND offset_col IS NOT NULL
@@ -290,13 +290,14 @@ WHERE  key_col IS NOT NULL
 
 
 query ??
-SELECT (header_col[1]).key AS key, (header_col[1]).value::text AS value
-FROM   additional_columns limit 1;
+WITH arr AS (SELECT header_col FROM additional_columns_single_header_col limit 1)
+SELECT unnest(header_col) FROM arr ORDER BY 1;
 ----
 header1	\x7631
+header2 \x7632
 
 query ????
-select header_col_1, header_col_2, header_col_3, header_col_4 from additional_columns_1 limit 1
+select header_col_1, header_col_2, header_col_3, header_col_4 from additional_columns_single_header_col_multiple_header_col limit 1
 ----
 \x7631	\x7632	v2	NULL
 
