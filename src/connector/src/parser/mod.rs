@@ -1043,6 +1043,7 @@ impl ParserConfig {
 
 #[derive(Debug, Clone, Default)]
 pub struct CommonParserConfig {
+    /// Note: this is created by `SourceDescBuilder::builder`
     pub rw_columns: Vec<SourceColumnDesc>,
 }
 

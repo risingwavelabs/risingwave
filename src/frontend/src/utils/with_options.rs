@@ -82,7 +82,10 @@ impl WithOptions {
     pub fn into_connector_props(self) -> BTreeMap<String, String> {
         self.inner
             .into_iter()
-            .filter(|(key, _)| key != OverwriteOptions::STREAMING_RATE_LIMIT_KEY)
+            .filter(|(key, _)| {
+                key != OverwriteOptions::STREAMING_RATE_LIMIT_KEY
+                    && key != options::RETENTION_SECONDS
+            })
             .collect()
     }
 
