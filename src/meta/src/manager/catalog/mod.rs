@@ -174,6 +174,10 @@ impl CatalogManagerCore {
     ) {
         self.table_id_to_tx.insert(id, sender);
     }
+
+    pub(crate) async fn table_is_finished(&mut self, id: TableId) -> Option<NotificationVersion> {
+        todo!()
+    }
 }
 
 impl CatalogManager {
