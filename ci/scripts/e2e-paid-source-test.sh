@@ -39,13 +39,13 @@ ACCEPT_EULA=Y DEBIAN_FRONTEND=noninteractive apt-get install -y mssql-tools unix
 export PATH="/opt/mssql-tools/bin/:$PATH"
 sleep 2
 
-echo "--- Activate create an independent db in sql server"
+echo "--- Create an independent db in sql server"
 export MSSQL_HOST=sqlserver-server MSSQL_PORT=1433 MSSQL_USER=SA MSSQL_PASSWORD=SomeTestOnly@SA
-sqlcmd -S $MSSQL_HOST -U $MSSQL_USER -P $MSSQL_PASSWORD -d master -Q 'create database mydb;'
+sqlcmd -S $MSSQL_HOST -U $MSSQL_USER -P $MSSQL_PASSWORD -d master -Q 'create database mydb;' -b
 
-# import data to sql server
+echo "--- Import data to sql server"
 export MSSQL_HOST=sqlserver-server MSSQL_PORT=1433 MSSQL_USER=SA MSSQL_PASSWORD=SomeTestOnly@SA MSSQL_DATABASE=mydb
-sqlcmd -S $MSSQL_HOST -U $MSSQL_USER -P $MSSQL_PASSWORD -d $MSSQL_DATABASE -i ./e2e_test/source/cdc_paid/sql_server_cdc.sql
+sqlcmd -S $MSSQL_HOST -U $MSSQL_USER -P $MSSQL_PASSWORD -d $MSSQL_DATABASE -i ./e2e_test/source/cdc_paid/sql_server_cdc.sql -b
 
 echo "--- Starting risingwave cluster"
 RUST_LOG="debug,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
@@ -72,7 +72,7 @@ echo "> cluster killed "
 
 # insert new rows
 export MSSQL_HOST=sqlserver-server MSSQL_PORT=1433 MSSQL_USER=SA MSSQL_PASSWORD=SomeTestOnly@SA MSSQL_DATABASE=mydb
-sqlcmd -S $MSSQL_HOST -U $MSSQL_USER -P $MSSQL_PASSWORD -d $MSSQL_DATABASE -i ./e2e_test/source/cdc_paid/sql_server_cdc_insert.sql
+sqlcmd -S $MSSQL_HOST -U $MSSQL_USER -P $MSSQL_PASSWORD -d $MSSQL_DATABASE -i ./e2e_test/source/cdc_paid/sql_server_cdc_insert.sql -b
 echo "> inserted new rows into sql server"
 
 # start cluster w/o clean-data
