@@ -870,21 +870,15 @@ mod tests {
         {
             let block_metas = vec![
                 BlockMeta {
-                    smallest_key: FullKey::for_test(TableId::new(1), Vec::default(), 0)
-                        .encode()
-                        .into(),
+                    smallest_key: FullKey::for_test(TableId::new(1), Vec::default(), 0).encode(),
                     ..Default::default()
                 },
                 BlockMeta {
-                    smallest_key: FullKey::for_test(TableId::new(2), Vec::default(), 0)
-                        .encode()
-                        .into(),
+                    smallest_key: FullKey::for_test(TableId::new(2), Vec::default(), 0).encode(),
                     ..Default::default()
                 },
                 BlockMeta {
-                    smallest_key: FullKey::for_test(TableId::new(3), Vec::default(), 0)
-                        .encode()
-                        .into(),
+                    smallest_key: FullKey::for_test(TableId::new(3), Vec::default(), 0).encode(),
                     ..Default::default()
                 },
             ];
@@ -904,21 +898,15 @@ mod tests {
         {
             let block_metas = vec![
                 BlockMeta {
-                    smallest_key: FullKey::for_test(TableId::new(1), Vec::default(), 0)
-                        .encode()
-                        .into(),
+                    smallest_key: FullKey::for_test(TableId::new(1), Vec::default(), 0).encode(),
                     ..Default::default()
                 },
                 BlockMeta {
-                    smallest_key: FullKey::for_test(TableId::new(2), Vec::default(), 0)
-                        .encode()
-                        .into(),
+                    smallest_key: FullKey::for_test(TableId::new(2), Vec::default(), 0).encode(),
                     ..Default::default()
                 },
                 BlockMeta {
-                    smallest_key: FullKey::for_test(TableId::new(3), Vec::default(), 0)
-                        .encode()
-                        .into(),
+                    smallest_key: FullKey::for_test(TableId::new(3), Vec::default(), 0).encode(),
                     ..Default::default()
                 },
             ];
@@ -938,21 +926,15 @@ mod tests {
         {
             let block_metas = vec![
                 BlockMeta {
-                    smallest_key: FullKey::for_test(TableId::new(1), Vec::default(), 0)
-                        .encode()
-                        .into(),
+                    smallest_key: FullKey::for_test(TableId::new(1), Vec::default(), 0).encode(),
                     ..Default::default()
                 },
                 BlockMeta {
-                    smallest_key: FullKey::for_test(TableId::new(2), Vec::default(), 0)
-                        .encode()
-                        .into(),
+                    smallest_key: FullKey::for_test(TableId::new(2), Vec::default(), 0).encode(),
                     ..Default::default()
                 },
                 BlockMeta {
-                    smallest_key: FullKey::for_test(TableId::new(3), Vec::default(), 0)
-                        .encode()
-                        .into(),
+                    smallest_key: FullKey::for_test(TableId::new(3), Vec::default(), 0).encode(),
                     ..Default::default()
                 },
             ];
@@ -972,21 +954,15 @@ mod tests {
         {
             let block_metas = vec![
                 BlockMeta {
-                    smallest_key: FullKey::for_test(TableId::new(1), Vec::default(), 0)
-                        .encode()
-                        .into(),
+                    smallest_key: FullKey::for_test(TableId::new(1), Vec::default(), 0).encode(),
                     ..Default::default()
                 },
                 BlockMeta {
-                    smallest_key: FullKey::for_test(TableId::new(2), Vec::default(), 0)
-                        .encode()
-                        .into(),
+                    smallest_key: FullKey::for_test(TableId::new(2), Vec::default(), 0).encode(),
                     ..Default::default()
                 },
                 BlockMeta {
-                    smallest_key: FullKey::for_test(TableId::new(3), Vec::default(), 0)
-                        .encode()
-                        .into(),
+                    smallest_key: FullKey::for_test(TableId::new(3), Vec::default(), 0).encode(),
                     ..Default::default()
                 },
             ];
@@ -1006,33 +982,23 @@ mod tests {
         {
             let block_metas = vec![
                 BlockMeta {
-                    smallest_key: FullKey::for_test(TableId::new(1), Vec::default(), 0)
-                        .encode()
-                        .into(),
+                    smallest_key: FullKey::for_test(TableId::new(1), Vec::default(), 0).encode(),
                     ..Default::default()
                 },
                 BlockMeta {
-                    smallest_key: FullKey::for_test(TableId::new(1), Vec::default(), 0)
-                        .encode()
-                        .into(),
+                    smallest_key: FullKey::for_test(TableId::new(1), Vec::default(), 0).encode(),
                     ..Default::default()
                 },
                 BlockMeta {
-                    smallest_key: FullKey::for_test(TableId::new(1), Vec::default(), 0)
-                        .encode()
-                        .into(),
+                    smallest_key: FullKey::for_test(TableId::new(1), Vec::default(), 0).encode(),
                     ..Default::default()
                 },
                 BlockMeta {
-                    smallest_key: FullKey::for_test(TableId::new(2), Vec::default(), 0)
-                        .encode()
-                        .into(),
+                    smallest_key: FullKey::for_test(TableId::new(2), Vec::default(), 0).encode(),
                     ..Default::default()
                 },
                 BlockMeta {
-                    smallest_key: FullKey::for_test(TableId::new(3), Vec::default(), 0)
-                        .encode()
-                        .into(),
+                    smallest_key: FullKey::for_test(TableId::new(3), Vec::default(), 0).encode(),
                     ..Default::default()
                 },
             ];
@@ -1046,39 +1012,29 @@ mod tests {
             );
 
             assert_eq!(3, start_index);
-            assert_eq!(4, end_index);
+            assert_eq!(3, end_index);
         }
 
         {
             let block_metas = vec![
                 BlockMeta {
-                    smallest_key: FullKey::for_test(TableId::new(1), Vec::default(), 0)
-                        .encode()
-                        .into(),
+                    smallest_key: FullKey::for_test(TableId::new(1), Vec::default(), 0).encode(),
                     ..Default::default()
                 },
                 BlockMeta {
-                    smallest_key: FullKey::for_test(TableId::new(2), Vec::default(), 0)
-                        .encode()
-                        .into(),
+                    smallest_key: FullKey::for_test(TableId::new(2), Vec::default(), 0).encode(),
                     ..Default::default()
                 },
                 BlockMeta {
-                    smallest_key: FullKey::for_test(TableId::new(3), Vec::default(), 0)
-                        .encode()
-                        .into(),
+                    smallest_key: FullKey::for_test(TableId::new(3), Vec::default(), 0).encode(),
                     ..Default::default()
                 },
                 BlockMeta {
-                    smallest_key: FullKey::for_test(TableId::new(3), Vec::default(), 0)
-                        .encode()
-                        .into(),
+                    smallest_key: FullKey::for_test(TableId::new(3), Vec::default(), 0).encode(),
                     ..Default::default()
                 },
                 BlockMeta {
-                    smallest_key: FullKey::for_test(TableId::new(3), Vec::default(), 0)
-                        .encode()
-                        .into(),
+                    smallest_key: FullKey::for_test(TableId::new(3), Vec::default(), 0).encode(),
                     ..Default::default()
                 },
             ];
