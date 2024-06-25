@@ -156,15 +156,13 @@ impl GlobalBarrierManagerContext {
                 mview_definitions.insert(table_id, mview.definition.clone());
                 upstream_mv_counts.insert(table_id, fragments.dependent_table_ids());
                 table_fragment_map.insert(table_id, fragments);
-                let (finished_tx, finished_rx) = oneshot::channel();
                 senders.insert(
                     table_id,
                     Notifier {
-                        finished: Some(finished_tx),
                         ..Default::default()
                     },
                 );
-                receivers.push((mview, internal_tables, finished_rx));
+                receivers.push((mview, internal_tables));
             }
         }
 
@@ -199,12 +197,10 @@ impl GlobalBarrierManagerContext {
         let mut table_map = HashMap::new();
         let mut upstream_mv_counts = HashMap::new();
         for mview in &mviews {
-            let (finished_tx, finished_rx) = oneshot::channel();
             let table_id = TableId::new(mview.table_id as _);
             senders.insert(
                 table_id,
                 Notifier {
-                    finished: Some(finished_tx),
                     ..Default::default()
                 },
             );
@@ -218,7 +214,7 @@ impl GlobalBarrierManagerContext {
             table_map.insert(table_id, table_fragments.backfill_actor_ids());
             table_fragment_map.insert(table_id, table_fragments);
             mview_definitions.insert(table_id, mview.definition.clone());
-            receivers.push((mview.table_id, finished_rx));
+            receivers.push(mview.table_id);
         }
 
         let version_stats = self.hummock_manager.get_version_stats().await;

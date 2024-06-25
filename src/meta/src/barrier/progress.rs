@@ -210,34 +210,6 @@ impl TrackingJob {
         Ok(())
     }
 
-    pub(crate) fn notify_finished(self) {
-        match self {
-            TrackingJob::New(command) => {
-                command
-                    .notifiers
-                    .into_iter()
-                    .for_each(Notifier::notify_finished);
-            }
-            TrackingJob::Recovered(recovered) => {
-                recovered.finished.notify_finished();
-            }
-        }
-    }
-
-    pub(crate) fn notify_finish_failed(self, err: MetaError) {
-        match self {
-            TrackingJob::New(command) => {
-                command
-                    .notifiers
-                    .into_iter()
-                    .for_each(|n| n.notify_finish_failed(err.clone()));
-            }
-            TrackingJob::Recovered(recovered) => {
-                recovered.finished.notify_finish_failed(err);
-            }
-        }
-    }
-
     pub(crate) fn table_to_create(&self) -> Option<TableId> {
         match self {
             TrackingJob::New(command) => command.context.table_to_create(),
@@ -280,9 +252,6 @@ pub(super) struct TrackingCommand {
     pub notifiers: Vec<Notifier>,
 }
 
-/// Track the progress of all creating mviews. When creation is done, `notify_finished` will be
-/// called on registered notifiers.
-///
 /// Tracking is done as follows:
 /// 1. We identify a `StreamJob` by its `TableId` of its `Materialized` table.
 /// 2. For each stream job, there are several actors which run its tasks.
@@ -401,7 +370,6 @@ impl CreateMviewProgressTracker {
         {
             // The command is ready to finish. We can now call `pre_finish`.
             job.pre_finish().await?;
-            job.notify_finished();
         }
         Ok(!self.finished_jobs.is_empty())
     }
@@ -416,12 +384,6 @@ impl CreateMviewProgressTracker {
     /// Notify all tracked commands that error encountered and clear them.
     pub fn abort_all(&mut self, err: &MetaError) {
         self.actor_map.clear();
-        self.finished_jobs.drain(..).for_each(|job| {
-            job.notify_finish_failed(err.clone());
-        });
-        self.progress_map
-            .drain()
-            .for_each(|(_, (_, job))| job.notify_finish_failed(err.clone()));
     }
 
     /// Add a new create-mview DDL command to track.
