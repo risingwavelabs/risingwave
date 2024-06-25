@@ -212,3 +212,13 @@ select order_id, product_id, shipment_id from enriched_orders order by order_id;
 10001  102   1001
 10002  105   1002
 10003  106   1003
+
+statement ok
+drop materialized view enriched_orders;
+
+statement ok
+drop source mysql_source cascade;
+
+statement ok
+drop source pg_source cascade;
+
