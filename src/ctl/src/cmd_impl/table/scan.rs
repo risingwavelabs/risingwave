@@ -165,14 +165,21 @@ async fn do_scan(
     if !silent {
         println!("Rows:");
     }
+    let chunk_size = std::env::var("RW_CTL_COL_ITER_CHUNK_SIZE")
+        .unwrap_or("256".into())
+        .parse()
+        .unwrap();
     let read_epoch = hummock.inner().get_pinned_version().max_committed_epoch();
     let storage_table = make_storage_table(hummock, table, output_columns_ids, vnodes)?;
     for _ in 0..count {
         let instant = Instant::now();
         let stream = storage_table
-            .batch_iter(
+            .batch_chunk_iter_with_pk_bounds(
                 HummockReadEpoch::Committed(read_epoch),
+                risingwave_common::row::empty(),
+                ..,
                 true,
+                chunk_size,
                 PrefetchOptions::prefetch_for_large_range_scan(),
             )
             .await?;
@@ -180,9 +187,9 @@ async fn do_scan(
         let mut counter = 0;
         pin_mut!(stream);
         while let Some(item) = stream.next().await {
-            if !silent {
-                println!("{:?}", item?.into_owned_row());
-            }
+            // if !silent {
+            //     println!("{:?}", item?.into_owned_row());
+            // }
             counter += 1;
         }
         let scan_duration = instant.elapsed();
