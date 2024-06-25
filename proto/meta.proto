@@ -492,7 +492,7 @@ message BackfillResponse {
 }
 
 message BackfillRequest {
-   requestId string = 1; // UUID so meta can drop duplicate requests 
+   string requestId = 1; // UUID so meta can drop duplicate requests 
 }
 
 service BackfillService {
