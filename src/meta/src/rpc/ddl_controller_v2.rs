@@ -514,4 +514,20 @@ impl DdlController {
             }
         }
     }
+
+    pub(crate) async fn wait_streaming_job_finished_v2(
+        &self,
+        id: u32,
+    ) -> MetaResult<NotificationVersion> {
+        // let mgr = self.catalog_manager.lock();
+        // if mgr.is_finished(id).await {
+        //     return;
+        // }
+        // let (tx, rx) = oneshot::channel(); <---- Finished Catalog committed here
+        //
+        // mgr.register_finish_notifier(id, tx);
+        // drop(mgr);
+        // rx.await;
+        Ok(1)
+    }
 }

@@ -21,7 +21,7 @@ use std::time::Duration;
 use aes_siv::aead::generic_array::GenericArray;
 use aes_siv::aead::Aead;
 use aes_siv::{Aes128SivAead, KeyInit};
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use itertools::Itertools;
 use rand::{Rng, RngCore};
 use risingwave_common::config::DefaultParallelism;
@@ -63,7 +63,7 @@ use risingwave_pb::stream_plan::{
 };
 use serde::{Deserialize, Serialize};
 use thiserror_ext::AsReport;
-use tokio::sync::Semaphore;
+use tokio::sync::{oneshot, Semaphore};
 use tokio::time::sleep;
 use tracing::log::warn;
 use tracing::Instrument;
@@ -2205,6 +2205,35 @@ impl DdlController {
             MetadataManager::V1(mgr) => mgr.catalog_manager.comment_on(comment).await,
             MetadataManager::V2(mgr) => mgr.catalog_controller.comment_on(comment).await,
         }
+    }
+
+    async fn wait_streaming_job_finished(&self, id: TableId) -> MetaResult<NotificationVersion> {
+        match &self.metadata_manager {
+            MetadataManager::V1(metadata_manager) => {
+                self.wait_streaming_job_finished_v1(metadata_manager, id)
+                    .await
+            }
+            MetadataManager::V2(_) => self.wait_streaming_job_finished_v2(id).await,
+        }
+    }
+
+    async fn wait_streaming_job_finished_v1(
+        &self,
+        metadata_manager: &MetadataManagerV1,
+        id: TableId,
+    ) -> MetaResult<NotificationVersion> {
+        let mut mgr = metadata_manager
+            .catalog_manager
+            .get_catalog_core_guard()
+            .await;
+        if let Some(version) = mgr.table_is_finished(id).await {
+            return Ok(version);
+        }
+        let (tx, rx) = oneshot::channel();
+
+        mgr.register_finish_notifier(id, tx);
+        drop(mgr);
+        rx.await.map_err(|e| anyhow!(e))?
     }
 }
 
