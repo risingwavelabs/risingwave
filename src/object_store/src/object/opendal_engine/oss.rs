@@ -20,7 +20,6 @@ use opendal::Operator;
 use risingwave_common::config::ObjectStoreConfig;
 
 use super::{EngineType, OpendalObjectStore};
-use crate::object::object_metrics::ObjectStoreMetrics;
 use crate::object::ObjectResult;
 
 impl OpendalObjectStore {
@@ -29,7 +28,6 @@ impl OpendalObjectStore {
         bucket: String,
         root: String,
         config: Arc<ObjectStoreConfig>,
-        metrics: Arc<ObjectStoreMetrics>,
     ) -> ObjectResult<Self> {
         // Create oss backend builder.
         let mut builder = Oss::default();
@@ -57,7 +55,6 @@ impl OpendalObjectStore {
             op,
             engine_type: EngineType::Oss,
             config,
-            metrics,
         })
     }
 }

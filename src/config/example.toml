@@ -191,8 +191,6 @@ recent_filter_rotate_interval_ms = 10000
 
 [storage.object_store]
 set_atomic_write_dir = false
-opendal_upload_concurrency = 8
-opendal_writer_abort_on_err = false
 
 [storage.object_store.retry]
 req_backoff_interval_ms = 1000
