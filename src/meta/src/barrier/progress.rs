@@ -30,7 +30,7 @@ use crate::barrier::{
     Command, TableActorMap, TableDefinitionMap, TableFragmentMap, TableInternalTableMap,
     TableNotifierMap, TableStreamJobMap, TableUpstreamMvCountMap,
 };
-use crate::manager::{DdlType, MetadataManager, StreamingJob};
+use crate::manager::{DdlType, MetadataManager, MetadataManagerV1, MetadataManagerV2, StreamingJob};
 use crate::model::{ActorId, TableFragments};
 use crate::{MetaError, MetaResult};
 
@@ -161,14 +161,6 @@ pub enum TrackingJob {
 }
 
 impl TrackingJob {
-    fn metadata_manager(&self) -> &MetadataManager {
-        match self {
-            TrackingJob::New(command) => command.context.metadata_manager(),
-            TrackingJob::RecoveredV1(recovered) => &recovered.metadata_manager,
-            TrackingJob::RecoveredV2(recovered) => &recovered.metadata_manager,
-        }
-    }
-
     /// Returns whether the `TrackingJob` requires a checkpoint to complete.
     pub(crate) fn is_checkpoint_required(&self) -> bool {
         match self {
@@ -190,7 +182,7 @@ impl TrackingJob {
                     internal_tables,
                     replace_table,
                     ..
-                } => match self.metadata_manager() {
+                } => match command.context.metadata_manager() {
                     MetadataManager::V1(mgr) => {
                         mgr.fragment_manager
                             .mark_table_fragments_created(table_fragments.table_id())
@@ -210,8 +202,24 @@ impl TrackingJob {
                 },
                 _ => Ok(()),
             },
-            _ => todo!(),
-            // TrackingJob::Recovered(recovered) => Some((&recovered.fragments, todo!(), todo!())),
+            TrackingJob::RecoveredV1(recovered) => {
+                let manager = &recovered.metadata_manager;
+                manager.fragment_manager
+                    .mark_table_fragments_created(recovered.fragments.table_id())
+                    .await?;
+                manager.catalog_manager.finish_stream_job(
+                    recovered.streaming_job.clone(),
+                    recovered.internal_tables.clone(),
+                ).await?;
+                Ok(())
+            },
+            TrackingJob::RecoveredV2(recovered) => {
+                recovered.metadata_manager
+                    .catalog_controller
+                    .finish_streaming_job(recovered.id, None)
+                    .await?;
+                Ok(())
+            }
         }
     }
 
@@ -250,12 +258,12 @@ pub struct RecoveredTrackingJobV1 {
     pub fragments: TableFragments,
     pub streaming_job: StreamingJob,
     pub internal_tables: Vec<Table>,
-    pub metadata_manager: MetadataManager,
+    pub metadata_manager: MetadataManagerV1,
 }
 
 pub struct RecoveredTrackingJobV2 {
     pub id: ObjectId,
-    pub metadata_manager: MetadataManager,
+    pub metadata_manager: MetadataManagerV2,
 }
 
 /// The command tracking by the [`CreateMviewProgressTracker`].
@@ -299,7 +307,7 @@ impl CreateMviewProgressTracker {
         mut table_fragment_map: TableFragmentMap,
         mut table_internal_table_map: TableInternalTableMap,
         mut table_stream_job_map: TableStreamJobMap,
-        metadata_manager: MetadataManager,
+        metadata_manager: MetadataManagerV1,
     ) -> Self {
         let mut actor_map = HashMap::new();
         let mut progress_map = HashMap::new();
@@ -339,7 +347,7 @@ impl CreateMviewProgressTracker {
         mut upstream_mv_counts: TableUpstreamMvCountMap,
         mut definitions: TableDefinitionMap,
         version_stats: HummockVersionStats,
-        metadata_manager: MetadataManager,
+        metadata_manager: MetadataManagerV2,
     ) -> Self {
         let mut actor_map = HashMap::new();
         let mut progress_map = HashMap::new();

@@ -177,7 +177,7 @@ impl GlobalBarrierManagerContext {
                 table_fragment_map.into(),
                 table_internal_table_map.into(),
                 table_stream_job_map.into(),
-                self.metadata_manager.clone(),
+                mgr.clone()
             );
         }
         Ok(())
@@ -216,7 +216,7 @@ impl GlobalBarrierManagerContext {
                 upstream_mv_counts.into(),
                 mview_definitions.into(),
                 version_stats,
-                self.metadata_manager.clone(),
+                mgr.clone(),
             );
         }
         Ok(())
