@@ -31,6 +31,7 @@ use thiserror_ext::AsReport;
 use tokio::sync::oneshot;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tracing::{debug, warn, Instrument};
+use risingwave_pb::catalog::Table;
 
 use super::TracedEpoch;
 use crate::barrier::command::CommandContext;
@@ -42,7 +43,7 @@ use crate::barrier::schedule::ScheduledBarriers;
 use crate::barrier::state::BarrierManagerState;
 use crate::barrier::{BarrierKind, Command, GlobalBarrierManager, GlobalBarrierManagerContext};
 use crate::controller::catalog::ReleaseContext;
-use crate::manager::{ActiveStreamingWorkerNodes, MetadataManager, WorkerId};
+use crate::manager::{ActiveStreamingWorkerNodes, MetadataManager, StreamingJob, WorkerId};
 use crate::model::{MetadataModel, MigrationPlan, TableFragments, TableParallelism};
 use crate::stream::{build_actor_connector_splits, RescheduleOptions, TableResizePolicy};
 use crate::{model, MetaResult};
@@ -131,12 +132,14 @@ impl GlobalBarrierManagerContext {
         let mgr = self.metadata_manager.as_v1_ref();
         let mviews = mgr.catalog_manager.list_creating_background_mvs().await;
 
+        // TODO: Since we already have streaming job which contains definitions,
+        // perhaps we can just remove this.
         let mut mview_definitions = HashMap::new();
         let mut table_map = HashMap::new();
         let mut table_fragment_map = HashMap::new();
         let mut upstream_mv_counts = HashMap::new();
-        let mut senders = HashMap::new();
-        let mut receivers = Vec::new();
+        let mut table_internal_table_map: HashMap<TableId, Vec<Table>> = HashMap::new();
+        let mut table_stream_job_map = HashMap::new();
         for mview in mviews {
             let table_id = TableId::new(mview.id);
             let fragments = mgr
@@ -145,6 +148,7 @@ impl GlobalBarrierManagerContext {
                 .await?;
             let internal_table_ids = fragments.internal_table_ids();
             let internal_tables = mgr.catalog_manager.get_tables(&internal_table_ids).await;
+            let stream_job = StreamingJob::MaterializedView(mview.clone());
             if fragments.is_created() {
                 // If the mview is already created, we don't need to recover it.
                 mgr.catalog_manager
@@ -156,13 +160,8 @@ impl GlobalBarrierManagerContext {
                 mview_definitions.insert(table_id, mview.definition.clone());
                 upstream_mv_counts.insert(table_id, fragments.dependent_table_ids());
                 table_fragment_map.insert(table_id, fragments);
-                senders.insert(
-                    table_id,
-                    Notifier {
-                        ..Default::default()
-                    },
-                );
-                receivers.push((mview, internal_tables));
+                table_internal_table_map.insert(table_id, internal_tables);
+                table_stream_job_map.insert(table_id, stream_job);
             }
         }
 
@@ -170,12 +169,14 @@ impl GlobalBarrierManagerContext {
         // If failed, enter recovery mode.
         {
             let mut tracker = self.tracker.lock().await;
-            *tracker = CreateMviewProgressTracker::recover(
+            *tracker = CreateMviewProgressTracker::recover_v1(
                 table_map.into(),
                 upstream_mv_counts.into(),
                 mview_definitions.into(),
                 version_stats,
                 table_fragment_map.into(),
+                table_internal_table_map.into(),
+                table_stream_job_map.into(),
                 self.metadata_manager.clone(),
             );
         }
@@ -210,12 +211,11 @@ impl GlobalBarrierManagerContext {
         // If failed, enter recovery mode.
         {
             let mut tracker = self.tracker.lock().await;
-            *tracker = CreateMviewProgressTracker::recover(
+            *tracker = CreateMviewProgressTracker::recover_v2(
                 table_map.into(),
                 upstream_mv_counts.into(),
                 mview_definitions.into(),
                 version_stats,
-                table_fragment_map.into(),
                 self.metadata_manager.clone(),
             );
         }
