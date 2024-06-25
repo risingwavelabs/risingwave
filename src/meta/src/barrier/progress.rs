@@ -18,7 +18,8 @@ use std::sync::Arc;
 
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::Epoch;
-use risingwave_pb::catalog::CreateType;
+use risingwave_meta_model_v2::ObjectId;
+use risingwave_pb::catalog::{CreateType, Table};
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
@@ -26,10 +27,10 @@ use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgres
 use super::command::CommandContext;
 use super::notifier::Notifier;
 use crate::barrier::{
-    Command, TableActorMap, TableDefinitionMap, TableFragmentMap, TableNotifierMap,
-    TableUpstreamMvCountMap,
+    Command, TableActorMap, TableDefinitionMap, TableFragmentMap, TableInternalTableMap,
+    TableNotifierMap, TableStreamJobMap, TableUpstreamMvCountMap,
 };
-use crate::manager::{DdlType, MetadataManager};
+use crate::manager::{DdlType, MetadataManager, StreamingJob};
 use crate::model::{ActorId, TableFragments};
 use crate::{MetaError, MetaResult};
 
@@ -155,14 +156,16 @@ impl Progress {
 ///    On recovery, the barrier manager will recover and start managing the job.
 pub enum TrackingJob {
     New(TrackingCommand),
-    Recovered(RecoveredTrackingJob),
+    RecoveredV1(RecoveredTrackingJobV1),
+    RecoveredV2(RecoveredTrackingJobV2),
 }
 
 impl TrackingJob {
     fn metadata_manager(&self) -> &MetadataManager {
         match self {
             TrackingJob::New(command) => command.context.metadata_manager(),
-            TrackingJob::Recovered(recovered) => &recovered.metadata_manager,
+            TrackingJob::RecoveredV1(recovered) => &recovered.metadata_manager,
+            TrackingJob::RecoveredV2(recovered) => &recovered.metadata_manager,
         }
     }
 
@@ -171,7 +174,7 @@ impl TrackingJob {
         match self {
             // Recovered tracking job is always a streaming job,
             // It requires a checkpoint to complete.
-            TrackingJob::Recovered(_) => true,
+            TrackingJob::RecoveredV1(_) | TrackingJob::RecoveredV2(_) => true,
             TrackingJob::New(command) => {
                 command.context.kind.is_initial() || command.context.kind.is_checkpoint()
             }
@@ -204,7 +207,8 @@ impl TrackingJob {
                         .finish_stream_job(stream_job.clone(), internal_tables.clone())
                         .await?;
                 }
-                MetadataManager::V2(_) => {}
+                _ => todo!(),
+                // MetadataManager::V2(mgr) => mgr.catalog_controller.finish_streaming_job(job_id),
             }
         }
         Ok(())
@@ -213,7 +217,8 @@ impl TrackingJob {
     pub(crate) fn table_to_create(&self) -> Option<TableId> {
         match self {
             TrackingJob::New(command) => command.context.table_to_create(),
-            TrackingJob::Recovered(recovered) => Some(recovered.fragments.table_id()),
+            TrackingJob::RecoveredV1(recovered) => Some(recovered.fragments.table_id()),
+            TrackingJob::RecoveredV2(recovered) => Some((recovered.id as u32).into()),
         }
     }
 }
@@ -226,19 +231,29 @@ impl std::fmt::Debug for TrackingJob {
                 "TrackingJob::New({:?})",
                 command.context.table_to_create()
             ),
-            TrackingJob::Recovered(recovered) => {
+            TrackingJob::RecoveredV1(recovered) => {
                 write!(
                     f,
-                    "TrackingJob::Recovered({:?})",
+                    "TrackingJob::RecoveredV1({:?})",
                     recovered.fragments.table_id()
                 )
+            }
+            TrackingJob::RecoveredV2(recovered) => {
+                write!(f, "TrackingJob::RecoveredV2({:?})", recovered.id)
             }
         }
     }
 }
 
-pub struct RecoveredTrackingJob {
+pub struct RecoveredTrackingJobV1 {
     pub fragments: TableFragments,
+    pub streaming_job: StreamingJob,
+    pub internal_tables: Vec<Table>,
+    pub metadata_manager: MetadataManager,
+}
+
+pub struct RecoveredTrackingJobV2 {
+    pub id: ObjectId,
     pub metadata_manager: MetadataManager,
 }
 
@@ -275,46 +290,64 @@ impl CreateMviewProgressTracker {
     /// Other state are persisted by the `BackfillExecutor`, such as:
     /// 1. `CreateMviewProgress`.
     /// 2. `Backfill` position.
-    pub fn recover(
+    pub fn recover_v1(
         table_map: TableActorMap,
         mut upstream_mv_counts: TableUpstreamMvCountMap,
         mut definitions: TableDefinitionMap,
         version_stats: HummockVersionStats,
         mut table_fragment_map: TableFragmentMap,
+        mut table_internal_table_map: TableInternalTableMap,
+        mut table_stream_job_map: TableStreamJobMap,
         metadata_manager: MetadataManager,
     ) -> Self {
         let mut actor_map = HashMap::new();
         let mut progress_map = HashMap::new();
         let table_map: HashMap<_, HashSet<ActorId>> = table_map.into();
         for (creating_table_id, actors) in table_map {
-            // 1. Recover `BackfillState` in the tracker.
             let mut states = HashMap::new();
             for actor in actors {
                 actor_map.insert(actor, creating_table_id);
                 states.insert(actor, BackfillState::ConsumingUpstream(Epoch(0), 0));
             }
-            let upstream_mv_count = upstream_mv_counts.remove(&creating_table_id).unwrap();
-            let upstream_total_key_count = upstream_mv_count
-                .iter()
-                .map(|(upstream_mv, count)| {
-                    *count as u64
-                        * version_stats
-                            .table_stats
-                            .get(&upstream_mv.table_id)
-                            .map_or(0, |stat| stat.total_key_count as u64)
-                })
-                .sum();
-            let definition = definitions.remove(&creating_table_id).unwrap();
-            let progress = Progress {
-                states,
-                done_count: 0, // Fill only after first barrier pass
-                upstream_mv_count,
-                upstream_total_key_count,
-                consumed_rows: 0, // Fill only after first barrier pass
-                definition,
-            };
-            let tracking_job = TrackingJob::Recovered(RecoveredTrackingJob {
+
+            let progress = Self::recover_progress(creating_table_id, &mut upstream_mv_counts, &mut definitions, &version_stats);
+            let internal_tables = table_internal_table_map.remove(&creating_table_id).unwrap();
+            let streaming_job = table_stream_job_map.remove(&creating_table_id).unwrap();
+            let tracking_job = TrackingJob::RecoveredV1(RecoveredTrackingJobV1 {
                 fragments: table_fragment_map.remove(&creating_table_id).unwrap(),
+                metadata_manager: metadata_manager.clone(),
+                internal_tables,
+                streaming_job,
+            });
+            progress_map.insert(creating_table_id, (progress, tracking_job));
+        }
+        Self {
+            progress_map,
+            actor_map,
+            finished_jobs: Vec::new(),
+        }
+    }
+
+    pub fn recover_v2(
+        table_map: TableActorMap,
+        mut upstream_mv_counts: TableUpstreamMvCountMap,
+        mut definitions: TableDefinitionMap,
+        version_stats: HummockVersionStats,
+        metadata_manager: MetadataManager,
+    ) -> Self {
+        let mut actor_map = HashMap::new();
+        let mut progress_map = HashMap::new();
+        let table_map: HashMap<_, HashSet<ActorId>> = table_map.into();
+        for (creating_table_id, actors) in table_map {
+            let mut states = HashMap::new();
+            for actor in actors {
+                actor_map.insert(actor, creating_table_id);
+                states.insert(actor, BackfillState::ConsumingUpstream(Epoch(0), 0));
+            }
+
+            let progress = Self::recover_progress(creating_table_id, &mut upstream_mv_counts, &mut definitions, &version_stats);
+            let tracking_job = TrackingJob::RecoveredV2(RecoveredTrackingJobV2 {
+                id: creating_table_id.table_id as i32,
                 metadata_manager: metadata_manager.clone(),
             });
             progress_map.insert(creating_table_id, (progress, tracking_job));
@@ -323,6 +356,30 @@ impl CreateMviewProgressTracker {
             progress_map,
             actor_map,
             finished_jobs: Vec::new(),
+        }
+    }
+
+    pub fn recover_progress(creating_table_id: TableId, upstream_mv_counts: &mut TableUpstreamMvCountMap, definitions: &mut TableDefinitionMap, version_stats: &HummockVersionStats) -> Progress {
+        let mut states = HashMap::new();
+        let upstream_mv_count = upstream_mv_counts.remove(&creating_table_id).unwrap();
+        let upstream_total_key_count = upstream_mv_count
+            .iter()
+            .map(|(upstream_mv, count)| {
+                *count as u64
+                    * version_stats
+                    .table_stats
+                    .get(&upstream_mv.table_id)
+                    .map_or(0, |stat| stat.total_key_count as u64)
+            })
+            .sum();
+        let definition = definitions.remove(&creating_table_id).unwrap();
+        Progress {
+            states,
+            done_count: 0, // Fill only after first barrier pass
+            upstream_mv_count,
+            upstream_total_key_count,
+            consumed_rows: 0, // Fill only after first barrier pass
+            definition,
         }
     }
 
