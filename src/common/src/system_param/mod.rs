@@ -457,6 +457,7 @@ mod tests {
             (PAUSE_ON_NEXT_BOOTSTRAP_KEY, "false"),
             (ENABLE_TRACING_KEY, "true"),
             (USE_NEW_OBJECT_PREFIX_STRATEGY_KEY, "false"),
+            (LICENSE_KEY_KEY, "foo"),
             ("a_deprecated_param", "foo"),
         ];
 
