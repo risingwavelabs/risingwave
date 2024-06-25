@@ -15,7 +15,7 @@
 mod schema;
 use std::sync::LazyLock;
 
-use apache_avro::schema::{DecimalSchema, RecordSchema};
+use apache_avro::schema::{DecimalSchema, RecordSchema, UnionSchema};
 use apache_avro::types::{Value, ValueKind};
 use apache_avro::{Decimal as AvroDecimal, Schema};
 use chrono::Datelike;
@@ -338,18 +338,35 @@ pub(crate) fn avro_decimal_to_rust_decimal(
     ))
 }
 
-pub fn avro_schema_skip_union(schema: &Schema) -> anyhow::Result<&Schema> {
+/// If the union schema is `[null, T]` or `[T, null]`, returns `Some(T)`; otherwise returns `None`.
+fn get_nullable_union_inner(union_schema: &UnionSchema) -> Option<&'_ Schema> {
+    let variants = union_schema.variants();
+    if variants.len() == 2
+        || variants
+            .iter()
+            .filter(|s| matches!(s, &&Schema::Null))
+            .count()
+            == 1
+    {
+        let inner_schema = variants
+            .iter()
+            .find(|s| !matches!(s, &&Schema::Null))
+            .unwrap();
+        Some(inner_schema)
+    } else {
+        None
+    }
+}
+
+pub fn avro_schema_skip_nullable_union(schema: &Schema) -> anyhow::Result<&Schema> {
     match schema {
-        Schema::Union(union_schema) => {
-            let inner_schema = union_schema
-                .variants()
-                .iter()
-                .find(|s| !matches!(s, &&Schema::Null))
-                .ok_or_else(|| {
-                    anyhow::format_err!("illegal avro record schema {:?}", union_schema)
-                })?;
-            Ok(inner_schema)
-        }
+        Schema::Union(union_schema) => match get_nullable_union_inner(union_schema) {
+            Some(s) => Ok(s),
+            None => Err(anyhow::format_err!(
+                "illegal avro union schema, expected [null, T], got {:?}",
+                union_schema
+            )),
+        },
         other => Ok(other),
     }
 }
@@ -372,7 +389,7 @@ pub fn avro_extract_field_schema<'a>(
             Ok(&field.schema)
         }
         Schema::Array(schema) => Ok(schema),
-        Schema::Union(_) => avro_schema_skip_union(schema),
+        Schema::Union(_) => avro_schema_skip_nullable_union(schema),
         Schema::Map(schema) => Ok(schema),
         _ => bail!("avro schema does not have inner item, schema: {:?}", schema),
     }
@@ -477,9 +494,48 @@ mod tests {
     use std::str::FromStr;
 
     use apache_avro::Decimal as AvroDecimal;
+    use expect_test::expect;
     use risingwave_common::types::{Datum, Decimal};
 
     use super::*;
+
+    /// Test the behavior of the Rust Avro lib for handling union with logical type.
+    #[test]
+    fn test_union_logical_type() {
+        let s = Schema::parse_str(r#"["null", {"type":"string","logicalType":"uuid"}]"#).unwrap();
+        expect![[r#"
+            Union(
+                UnionSchema {
+                    schemas: [
+                        Null,
+                        Uuid,
+                    ],
+                    variant_index: {
+                        Null: 0,
+                        Uuid: 1,
+                    },
+                },
+            )
+        "#]]
+        .assert_debug_eq(&s);
+
+        let s = Schema::parse_str(r#"["string", {"type":"string","logicalType":"uuid"}]"#).unwrap();
+        expect![[r#"
+            Union(
+                UnionSchema {
+                    schemas: [
+                        String,
+                        Uuid,
+                    ],
+                    variant_index: {
+                        String: 0,
+                        Uuid: 1,
+                    },
+                },
+            )
+        "#]]
+        .assert_debug_eq(&s);
+    }
 
     #[test]
     fn test_convert_decimal() {

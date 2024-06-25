@@ -14,6 +14,7 @@
 
 use std::sync::{Arc, LazyLock};
 
+use anyhow::Context;
 use apache_avro::schema::{DecimalSchema, RecordSchema, ResolvedSchema, Schema};
 use apache_avro::AvroResult;
 use itertools::Itertools;
@@ -21,6 +22,8 @@ use risingwave_common::bail;
 use risingwave_common::log::LogSuppresser;
 use risingwave_common::types::{DataType, Decimal};
 use risingwave_pb::plan_common::{AdditionalColumn, ColumnDesc, ColumnDescVersion};
+
+use super::get_nullable_union_inner;
 
 /// Avro schema with `Ref` inlined. The newtype is used to indicate whether the schema is resolved.
 ///
@@ -198,20 +201,84 @@ fn avro_type_mapping(
             DataType::List(Box::new(item_type))
         }
         Schema::Union(union_schema) => {
+            // Unions may not contain more than one schema with the same type, except for the named types record, fixed and enum.
+            // https://avro.apache.org/docs/1.11.1/specification/_print/#unions
+            debug_assert!(
+                union_schema
+                    .variants()
+                    .iter()
+                    .map(Schema::canonical_form) // Schema doesn't implement Eq, but only PartialEq.
+                    .duplicates()
+                    .next()
+                    .is_none(),
+                "Union contains duplicate types: {union_schema:?}",
+            );
             // We only support using union to represent nullable fields, not general unions.
-            let variants = union_schema.variants();
-            if variants.len() != 2 || !variants.contains(&Schema::Null) {
-                bail!(
-                    "unsupported Avro type, only unions like [null, T] is supported: {:?}",
-                    schema
-                );
-            }
-            let nested_schema = variants
-                .iter()
-                .find_or_first(|s| !matches!(s, Schema::Null))
-                .unwrap();
+            match get_nullable_union_inner(union_schema) {
+                Some(inner) => avro_type_mapping(inner, map_handling)?,
+                None => {
+                    // Convert the union to a struct, each field of the struct represents a variant of the union.
+                    // Refer to https://github.com/risingwavelabs/risingwave/issues/16273#issuecomment-2179761345 to see why it's not perfect.
+                    // Note: Avro union's variant tag is type name, not field name (unlike Rust enum, or Protobuf oneof).
 
-            avro_type_mapping(nested_schema, map_handling)?
+                    // XXX: do we need to introduce union.handling.mode?
+
+                    let (fields, field_names) = union_schema
+                        .variants()
+                        .iter()
+                        .filter(|variant| !matches!(variant, &&Schema::Null))
+                        .map(|variant| {
+                            avro_type_mapping(variant, map_handling).map(|t| {
+                                let name = match variant {
+                                    Schema::Null => unreachable!(),
+                                    Schema::Boolean => "boolean".to_string(),
+                                    Schema::Int => "integer".to_string(),
+                                    Schema::Long => "bigint".to_string(),
+                                    Schema::Float => "real".to_string(),
+                                    Schema::Double => "double precision".to_string(),
+                                    Schema::Bytes => "bytea".to_string(),
+                                    Schema::String => "text".to_string(),
+                                    Schema::Array(_) => "array".to_string(),
+                                    Schema::Map(_) =>"map".to_string(),
+                                    Schema::Union(_) => "union".to_string(),
+                                    // For logical types, should we use the real type or the logical type as the field name?
+                                    //
+                                    // Example about the representation:
+                                    // schema: ["null", {"type":"string","logicalType":"uuid"}]
+                                    // data: {"string": "67e55044-10b1-426f-9247-bb680e5fe0c8"}
+                                    //
+                                    // Note: for union with logical type AND the real type, e.g., ["string", {"type":"string","logicalType":"uuid"}]
+                                    // In this case, the uuid cannot be constructed. Some library
+                                    // https://issues.apache.org/jira/browse/AVRO-2380
+                                    Schema::Uuid => "uuid".to_string(),
+                                    Schema::Decimal(_) => todo!(),
+                                    Schema::Date => "date".to_string(),
+                                    Schema::TimeMillis => "time without time zone".to_string(),
+                                    Schema::TimeMicros => "time without time zone".to_string(),
+                                    Schema::TimestampMillis => "timestamp without time zone".to_string(),
+                                    Schema::TimestampMicros => "timestamp without time zone".to_string(),
+                                    Schema::LocalTimestampMillis => "timestamp without time zone".to_string(),
+                                    Schema::LocalTimestampMicros => "timestamp without time zone".to_string(),
+                                    Schema::Duration => "interval".to_string(),
+                                    Schema::Enum(_)
+                                    | Schema::Ref { name: _ }
+                                    | Schema::Fixed(_) => todo!(),
+                                    | Schema::Record(_) => variant.name().unwrap().fullname(None), // XXX: Is the namespace correct here?
+                                };
+                                (t, name)
+                            })
+                        })
+                        .process_results(|it| it.unzip::<_, _, Vec<_>, Vec<_>>())
+                        .context("failed to convert Avro union to struct")?;
+
+                    DataType::new_struct(fields, field_names);
+
+                    bail!(
+                        "unsupported Avro type, only unions like [null, T] is supported: {:?}",
+                        schema
+                    );
+                }
+            }
         }
         Schema::Ref { name } => {
             if name.name == DBZ_VARIABLE_SCALE_DECIMAL_NAME
@@ -236,6 +303,10 @@ fn avro_type_mapping(
                     }
                 }
                 None => {
+                    // We require it to be specified, because we don't want to have a bad default behavior.
+                    // But perhaps changing the default behavior won't be a breaking change,
+                    // because it affects only on creation time, what the result ColumnDesc will be, and the ColumnDesc will be persisted.
+                    // This is unlike timestamp.handing.mode, which affects parser's behavior on the runtime.
                     bail!("`map.handling.mode` not specified in ENCODE AVRO (...). Currently supported modes: `jsonb`")
                 }
             }
