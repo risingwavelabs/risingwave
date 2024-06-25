@@ -242,3 +242,6 @@ bloom_false_positive = 0.001
 max_concurrent_creating_streaming_jobs = 1
 pause_on_next_bootstrap = false
 enable_tracing = false
+minitrace = false
+minitrace_tiered_cache_read_ms = 1000
+minitrace_tiered_cache_write_ms = 1000

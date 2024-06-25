@@ -168,4 +168,16 @@ where
             .enable_tracing
             .unwrap_or_else(default::enable_tracing)
     }
+
+    fn minitrace(&self) -> bool {
+        self.inner().minitrace.unwrap_or(false)
+    }
+
+    fn minitrace_tiered_cache_read_ms(&self) -> u32 {
+        self.inner().minitrace_tiered_cache_read_ms.unwrap_or(1000)
+    }
+
+    fn minitrace_tiered_cache_write_ms(&self) -> u32 {
+        self.inner().minitrace_tiered_cache_write_ms.unwrap_or(1000)
+    }
 }
