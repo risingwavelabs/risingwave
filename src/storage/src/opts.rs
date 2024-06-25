@@ -169,12 +169,12 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             block_cache_tls_capacity_mb: c
                 .storage
                 .cache
-                .block_cache_tls_capacity
+                .block_cache_tls_capacity_mb
                 .unwrap_or_default(),
             meta_cache_capacity_mb: s.meta_cache_capacity_mb,
             meta_cache_shard_num: s.meta_cache_shard_num,
             meta_cache_eviction_config: s.meta_cache_eviction_config.clone(),
-            meta_cache_tls_capacity_mb: c.storage.cache.meta_cache_tls_capacity.unwrap_or_default(),
+            meta_cache_tls_capacity_mb: c.storage.cache.meta_cache_tls_capacity_mb.unwrap_or_default(),
             prefetch_buffer_capacity_mb: s.prefetch_buffer_capacity_mb,
             max_prefetch_block_number: c.storage.max_prefetch_block_number,
             disable_remote_compactor: c.storage.disable_remote_compactor,

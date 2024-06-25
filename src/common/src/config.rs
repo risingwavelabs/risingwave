@@ -589,7 +589,7 @@ pub struct CacheConfig {
     pub block_cache_eviction: CacheEvictionConfig,
 
     #[serde(default)]
-    pub block_cache_tls_capacity: Option<usize>,
+    pub block_cache_tls_capacity_mb: Option<usize>,
 
     #[serde(default)]
     pub meta_cache_capacity_mb: Option<usize>,
@@ -601,7 +601,7 @@ pub struct CacheConfig {
     pub meta_cache_eviction: CacheEvictionConfig,
 
     #[serde(default)]
-    pub meta_cache_tls_capacity: Option<usize>,
+    pub meta_cache_tls_capacity_mb: Option<usize>,
 }
 
 /// the section `[storage.cache.eviction]` in `risingwave.toml`.
