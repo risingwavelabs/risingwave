@@ -1317,8 +1317,9 @@ impl DdlController {
         };
 
         tracing::debug!(id = job_id, "finishing stream job");
-        // TODO(kwannoel): Poll the rx here.
-        let version = 0;
+        let version = self
+            .wait_streaming_job_finished_v1(mgr, stream_job.id())
+            .await?;
         tracing::debug!(id = job_id, "finished stream job");
 
         Ok(version)
