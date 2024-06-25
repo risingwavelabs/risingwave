@@ -32,7 +32,7 @@ pub enum Tier {
     Free,
 
     /// Paid tier.
-    // TODO: Add more tiers if needed.
+    // TODO(license): Add more tiers if needed.
     Paid,
 }
 
@@ -55,7 +55,7 @@ pub enum Issuer {
 /// The content of a license.
 ///
 /// We use JSON Web Token (JWT) to represent the license. This struct is the payload.
-// TODO: Shall we add a version field?
+// TODO(license): Shall we add a version field?
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(super) struct License {
@@ -139,7 +139,7 @@ impl LicenseManager {
             return;
         }
 
-        // TODO: shall we also validate `nbf`(Not Before)?
+        // TODO(license): shall we also validate `nbf`(Not Before)?
         let mut validation = Validation::new(Algorithm::RS512);
         // Only accept `prod` issuer in production, so that we can use license keys issued by
         // the `test` issuer in development without leaking them to production.
