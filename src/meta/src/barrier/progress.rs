@@ -239,7 +239,6 @@ impl std::fmt::Debug for TrackingJob {
 
 pub struct RecoveredTrackingJob {
     pub fragments: TableFragments,
-    pub finished: Notifier,
     pub metadata_manager: MetadataManager,
 }
 
@@ -281,7 +280,6 @@ impl CreateMviewProgressTracker {
         mut upstream_mv_counts: TableUpstreamMvCountMap,
         mut definitions: TableDefinitionMap,
         version_stats: HummockVersionStats,
-        mut finished_notifiers: TableNotifierMap,
         mut table_fragment_map: TableFragmentMap,
         metadata_manager: MetadataManager,
     ) -> Self {
@@ -317,7 +315,6 @@ impl CreateMviewProgressTracker {
             };
             let tracking_job = TrackingJob::Recovered(RecoveredTrackingJob {
                 fragments: table_fragment_map.remove(&creating_table_id).unwrap(),
-                finished: finished_notifiers.remove(&creating_table_id).unwrap(),
                 metadata_manager: metadata_manager.clone(),
             });
             progress_map.insert(creating_table_id, (progress, tracking_job));
