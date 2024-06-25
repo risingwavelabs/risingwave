@@ -36,6 +36,9 @@ python3 -m pip install --break-system-packages requests protobuf fastavro conflu
 
 echo "--- e2e, inline test"
 RUST_LOG="debug,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
+export PGHOST=db PGPORT=5432 PGUSER=postgres PGPASSWORD=postgres PGDATABASE=cdc_test
+export MYSQL_HOST=mysql MYSQL_TCP_PORT=3306 MYSQL_PWD=123456
+createdb
 risedev ci-start ci-inline-source-test
 risedev slt './e2e_test/source_inline/**/*.slt'
 echo "--- Kill cluster"
@@ -54,8 +57,6 @@ echo "--- e2e, ci-1cn-1fe, mysql & postgres cdc"
 mysql --host=mysql --port=3306 -u root -p123456 < ./e2e_test/source/cdc/mysql_cdc.sql
 
 # import data to postgres
-export PGHOST=db PGPORT=5432 PGUSER=postgres PGPASSWORD=postgres PGDATABASE=cdc_test
-createdb
 psql < ./e2e_test/source/cdc/postgres_cdc.sql
 
 echo "--- starting risingwave cluster"
