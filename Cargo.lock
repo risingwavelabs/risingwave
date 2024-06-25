@@ -11370,6 +11370,7 @@ dependencies = [
  "serde",
  "thiserror",
  "thiserror-ext",
+ "tracing",
 ]
 
 [[package]]

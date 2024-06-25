@@ -17,6 +17,7 @@ use std::sync::{LazyLock, RwLock};
 use jsonwebtoken::{Algorithm, DecodingKey, Validation};
 use serde::Deserialize;
 use thiserror::Error;
+use thiserror_ext::AsReport;
 
 /// License tier.
 ///
@@ -152,6 +153,11 @@ impl LicenseManager {
             Ok(data) => Ok(data.claims),
             Err(error) => Err(LicenseKeyError(error)),
         };
+
+        match &inner.license {
+            Ok(license) => tracing::info!(?license, "license refreshed"),
+            Err(error) => tracing::warn!(error = %error.as_report(), "invalid license key"),
+        }
     }
 
     /// Get the current license if it is valid.
@@ -182,7 +188,6 @@ pub const TEST_PAID_LICENSE_KEY: &str =
 #[cfg(test)]
 mod tests {
     use expect_test::expect;
-    use thiserror_ext::AsReport;
 
     use super::*;
 

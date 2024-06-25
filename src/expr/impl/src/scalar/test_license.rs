@@ -17,7 +17,7 @@ use risingwave_expr::{function, ExprError, Result};
 
 /// A function that checks if the `TestPaid` feature is available.
 ///
-/// It's for testing purposes only and will not be user-facing.
+/// It's mainly for testing purposes only.
 #[function("test_paid_tier() -> boolean")]
 pub fn test_paid_tier() -> Result<bool> {
     Feature::TestPaid

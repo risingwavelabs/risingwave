@@ -39,7 +39,6 @@ impl CommonHandler {
         }
         if let Some(key) = diff.license_key.as_ref() {
             LicenseManager::get().refresh(key);
-            tracing::debug!("token refreshed!");
         }
     }
 }

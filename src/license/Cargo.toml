@@ -19,6 +19,7 @@ jsonwebtoken = "9"
 serde = { version = "1", features = ["derive"] }
 thiserror = "1"
 thiserror-ext = { workspace = true }
+tracing = "0.1"
 
 [dev-dependencies]
 expect-test = "1"

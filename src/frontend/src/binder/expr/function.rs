@@ -1426,8 +1426,7 @@ impl Binder {
                 ("pg_is_in_recovery", raw_literal(ExprImpl::literal_bool(false))),
                 // internal
                 ("rw_vnode", raw_call(ExprType::Vnode)),
-                #[cfg(debug_assertions)] // only available for testing purposes
-                ("rw_test_paid_tier", raw_call(ExprType::TestPaidTier)),
+                ("rw_test_paid_tier", raw_call(ExprType::TestPaidTier)), // for testing purposes
                 // TODO: choose which pg version we should return.
                 ("version", raw_literal(ExprImpl::literal_varchar(current_cluster_version()))),
                 // non-deterministic
