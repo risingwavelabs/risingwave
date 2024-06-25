@@ -36,6 +36,7 @@ use risingwave_hummock_sdk::table_watermark::{
 };
 use risingwave_hummock_sdk::{ExtendedSstableInfo, HummockSstableObjectId};
 use risingwave_pb::catalog::table::TableType;
+use risingwave_pb::catalog::Table;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::PausedReason;
@@ -60,7 +61,7 @@ use crate::hummock::{CommitEpochInfo, HummockManagerRef, NewTableFragmentInfo};
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{
     ActiveStreamingWorkerChange, ActiveStreamingWorkerNodes, LocalNotification, MetaSrvEnv,
-    MetadataManager, SystemParamsManagerImpl, WorkerId,
+    MetadataManager, StreamingJob, SystemParamsManagerImpl, WorkerId,
 };
 use crate::model::{ActorId, TableFragments};
 use crate::rpc::metrics::MetaMetrics;
@@ -110,6 +111,8 @@ pub(crate) type TableUpstreamMvCountMap = TableMap<HashMap<TableId, usize>>;
 pub(crate) type TableDefinitionMap = TableMap<String>;
 pub(crate) type TableNotifierMap = TableMap<Notifier>;
 pub(crate) type TableFragmentMap = TableMap<TableFragments>;
+pub(crate) type TableStreamJobMap = TableMap<StreamingJob>;
+pub(crate) type TableInternalTableMap = TableMap<Vec<Table>>;
 
 /// The reason why the cluster is recovering.
 enum RecoveryReason {
