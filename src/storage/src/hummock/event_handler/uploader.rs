@@ -14,12 +14,13 @@
 
 use std::cmp::Ordering;
 use std::collections::btree_map::Entry;
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::fmt::{Debug, Display, Formatter};
 use std::future::{poll_fn, Future};
 use std::mem::{replace, swap, take};
-use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering::Relaxed;
+use std::sync::{Arc, LazyLock};
 use std::task::{ready, Context, Poll};
 
 use futures::FutureExt;
@@ -161,9 +162,13 @@ mod uploader_imm {
     }
 }
 
+#[derive(PartialEq, Eq, Hash, PartialOrd, Ord, Copy, Clone, Debug)]
+struct UploadingTaskId(usize);
+
 /// A wrapper for a uploading task that compacts and uploads the imm payload. Task context are
 /// stored so that when the task fails, it can be re-tried.
 struct UploadingTask {
+    task_id: UploadingTaskId,
     // newer data at the front
     input: UploadTaskInput,
     join_handle: JoinHandle<HummockResult<UploadTaskOutput>>,
@@ -253,7 +258,9 @@ impl UploadingTask {
         }
         let join_handle = (context.spawn_upload_task)(payload, task_info.clone());
         context.stats.uploader_uploading_task_count.inc();
+        static NEXT_TASK_ID: LazyLock<AtomicUsize> = LazyLock::new(|| AtomicUsize::new(0));
         Self {
+            task_id: UploadingTaskId(NEXT_TASK_ID.fetch_add(1, Relaxed)),
             input,
             join_handle,
             task_info,
@@ -324,80 +331,156 @@ impl UploadingTask {
     }
 }
 
-impl Future for UploadingTask {
-    type Output = HummockResult<Arc<StagingSstableInfo>>;
+mod task_manager {
+    use super::*;
 
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        self.poll_result(cx)
-    }
-}
-
-#[derive(Default, Debug)]
-/// Manage the spilled data. Task and uploaded data at the front is newer data. Task data are
-/// always newer than uploaded data. Task holding oldest data is always collected first.
-struct SpilledData {
-    // ordered spilling tasks. Task at the back is spilling older data.
-    uploading_tasks: VecDeque<UploadingTask>,
-    // ordered spilled data. Data at the back is older.
-    uploaded_data: VecDeque<Arc<StagingSstableInfo>>,
-}
-
-impl SpilledData {
-    fn add_task(&mut self, task: UploadingTask) {
-        self.uploading_tasks.push_front(task);
+    #[derive(Debug)]
+    pub(super) enum UploadingTaskStatus {
+        Spilling,
+        Sync(HummockEpoch),
     }
 
-    /// Poll the successful spill of the oldest uploading task. Return `Poll::Ready(None)` is there
-    /// is no uploading task
-    fn poll_success_spill(
-        &mut self,
-        cx: &mut Context<'_>,
-    ) -> Poll<Option<Arc<StagingSstableInfo>>> {
-        // only poll the oldest uploading task if there is any
-        if let Some(task) = self.uploading_tasks.back_mut() {
-            let staging_sstable_info = ready!(task.poll_ok_with_retry(cx));
-            self.uploaded_data.push_front(staging_sstable_info.clone());
-            self.uploading_tasks.pop_back();
-            Poll::Ready(Some(staging_sstable_info))
-        } else {
-            Poll::Ready(None)
+    #[derive(Debug)]
+    enum TaskStatus {
+        Uploading(UploadingTaskStatus),
+        Spilled(Arc<StagingSstableInfo>),
+    }
+
+    #[derive(Default, Debug)]
+    pub(super) struct TaskManager {
+        // newer task at the front
+        uploading_tasks: VecDeque<UploadingTask>,
+        task_status: HashMap<UploadingTaskId, TaskStatus>,
+    }
+
+    impl TaskManager {
+        fn add_task(&mut self, task: UploadingTask, status: UploadingTaskStatus) {
+            self.task_status
+                .insert(task.task_id, TaskStatus::Uploading(status));
+            self.uploading_tasks.push_front(task);
         }
-    }
 
-    fn abort(self) {
-        for task in self.uploading_tasks {
-            task.join_handle.abort();
+        #[expect(clippy::type_complexity)]
+        pub(super) fn poll_task_result(
+            &mut self,
+            cx: &mut Context<'_>,
+            _context: &UploaderContext,
+        ) -> Poll<
+            Option<
+                Result<
+                    (
+                        UploadingTaskId,
+                        UploadingTaskStatus,
+                        Arc<StagingSstableInfo>,
+                    ),
+                    ErrState,
+                >,
+            >,
+        > {
+            if let Some(task) = self.uploading_tasks.back_mut() {
+                let result = match self.task_status.get(&task.task_id).expect("should exist") {
+                    TaskStatus::Uploading(UploadingTaskStatus::Spilling) => {
+                        let sst = ready!(task.poll_ok_with_retry(cx));
+                        self.task_status
+                            .insert(task.task_id, TaskStatus::Spilled(sst.clone()));
+                        Ok((task.task_id, UploadingTaskStatus::Spilling, sst))
+                    }
+                    TaskStatus::Uploading(UploadingTaskStatus::Sync(epoch)) => {
+                        let epoch = *epoch;
+                        let result = ready!(task.poll_result(cx));
+                        let _status = self.task_status.remove(&task.task_id);
+                        result
+                            .map(|sst| (task.task_id, UploadingTaskStatus::Sync(epoch), sst))
+                            .map_err(|e| ErrState {
+                                failed_epoch: epoch,
+                                reason: e.as_report().to_string(),
+                            })
+                    }
+                    TaskStatus::Spilled(_) => {
+                        unreachable!("should be uploading task")
+                    }
+                };
+
+                let _task = self.uploading_tasks.pop_back().expect("non-empty");
+                Poll::Ready(Some(result))
+            } else {
+                Poll::Ready(None)
+            }
         }
-    }
-}
 
-#[derive(Default, Debug)]
-struct EpochData {
-    spilled_data: SpilledData,
-}
+        pub(super) fn abort(self) {
+            for task in self.uploading_tasks {
+                task.join_handle.abort();
+            }
+        }
 
-impl EpochData {
-    fn flush(
-        &mut self,
-        context: &UploaderContext,
-        imms: HashMap<LocalInstanceId, Vec<UploaderImm>>,
-    ) -> usize {
-        if !imms.is_empty() {
+        pub(super) fn spill(
+            &mut self,
+            context: &UploaderContext,
+            imms: HashMap<LocalInstanceId, Vec<UploaderImm>>,
+        ) -> (UploadingTaskId, usize) {
+            assert!(!imms.is_empty());
             let task = UploadingTask::new(imms, context);
             context.stats.spill_task_counts_from_unsealed.inc();
             context
                 .stats
                 .spill_task_size_from_unsealed
                 .inc_by(task.task_info.task_size as u64);
-            info!("Spill unsealed data. Task: {}", task.get_task_info());
+            info!("Spill data. Task: {}", task.get_task_info());
             let size = task.task_info.task_size;
-            self.spilled_data.add_task(task);
-            size
-        } else {
-            0
+            let id = task.task_id;
+            self.add_task(task, UploadingTaskStatus::Spilling);
+            (id, size)
+        }
+
+        pub(super) fn sync(
+            &mut self,
+            context: &UploaderContext,
+            epoch: HummockEpoch,
+            spilled_task: BTreeSet<UploadingTaskId>,
+            unflushed_payload: UploadTaskInput,
+        ) -> (HashSet<UploadingTaskId>, VecDeque<Arc<StagingSstableInfo>>) {
+            let mut remaining_tasks = HashSet::new();
+            let total_task_count = if unflushed_payload.is_empty() {
+                spilled_task.len()
+            } else {
+                let task = UploadingTask::new(unflushed_payload, context);
+                remaining_tasks.insert(task.task_id);
+                self.task_status.insert(
+                    task.task_id,
+                    TaskStatus::Uploading(UploadingTaskStatus::Sync(epoch)),
+                );
+                self.add_task(task, UploadingTaskStatus::Sync(epoch));
+                spilled_task.len() + 1
+            };
+            let mut uploaded = VecDeque::with_capacity(total_task_count);
+
+            // iterate from small task id to large, which means from old data to new data
+            for task_id in spilled_task {
+                let status = self.task_status.remove(&task_id).expect("should exist");
+                match status {
+                    TaskStatus::Uploading(UploadingTaskStatus::Spilling) => {
+                        self.task_status.insert(
+                            task_id,
+                            TaskStatus::Uploading(UploadingTaskStatus::Sync(epoch)),
+                        );
+                        remaining_tasks.insert(task_id);
+                    }
+                    TaskStatus::Uploading(UploadingTaskStatus::Sync(_)) => {
+                        unreachable!("cannot be synced again")
+                    }
+                    TaskStatus::Spilled(sst) => {
+                        self.task_status.remove(&task_id);
+                        uploaded.push_front(sst);
+                    }
+                }
+            }
+            (remaining_tasks, uploaded)
         }
     }
 }
+
+use task_manager::{TaskManager, UploadingTaskStatus};
 
 impl TableUnsyncData {
     fn add_table_watermarks(
@@ -455,68 +538,14 @@ impl TableUnsyncData {
 
 #[derive(Default)]
 struct SyncDataBuilder {
-    // newer epochs come first
-    epochs: VecDeque<HummockEpoch>,
-
-    spilled_data: SpilledData,
-
     table_watermarks: HashMap<TableId, TableWatermarks>,
+    remaining_uploading_tasks: HashSet<UploadingTaskId>,
+    uploaded: VecDeque<Arc<StagingSstableInfo>>,
 }
 
 impl SyncDataBuilder {
-    /// Add the data of a new epoch.
-    ///
-    /// Note: it may happen that, for example, currently we hold `imms` and `spilled_data` of epoch
-    /// 3,  and after we add the spilled data of epoch 4, both `imms` and `spilled_data` hold data
-    /// of both epoch 3 and 4, which seems breaking the rules that data in `imms` are
-    /// always newer than data in `spilled_data`, because epoch 3 data of `imms`
-    /// seems older than epoch 4 data of `spilled_data`. However, if this happens, the epoch 3
-    /// data of `imms` must not overlap with the epoch 4 data of `spilled_data`. The explanation is
-    /// as followed:
-    ///
-    /// First, unsync data has 3 stages, from earlier to later, imms, uploading task, and
-    /// uploaded. When we try to spill unsync data, we first pick the imms of older epoch until
-    /// the imms of older epoch are all picked. When we try to poll the uploading tasks of unsync
-    /// data, we first poll the task of older epoch, until there is no uploading task in older
-    /// epoch. Therefore, we can reach that, if two data are in the same stage, but
-    /// different epochs, data in the older epoch will always enter the next stage earlier than data
-    /// in the newer epoch.
-    ///
-    /// Second, we have an assumption that, if a key has been written in a newer epoch, e.g. epoch4,
-    /// it will no longer be written in an older epoch, e.g. epoch3, and then, if two data of the
-    /// same key are at the imm stage, the data of older epoch must appear earlier than the data
-    /// of newer epoch.
-    ///
-    /// Based on the two points above, we can reach that, if two data of a same key appear in
-    /// different epochs, the data of older epoch will not appear at a later stage than the data
-    /// of newer epoch. Therefore, we can safely merge the data of each stage when we seal an epoch.
-    fn add_new_epoch(&mut self, epoch: HummockEpoch, mut unseal_epoch_data: EpochData) {
-        if let Some(prev_max_epoch) = self.epochs.front() {
-            assert!(
-                epoch > *prev_max_epoch,
-                "epoch {} to seal not greater than prev max epoch {}",
-                epoch,
-                prev_max_epoch
-            );
-        }
-
-        self.epochs.push_front(epoch);
-        // for each local instance, earlier data must be spilled at earlier epoch. Therefore, since we add spill data from old epoch
-        // to new epoch,
-        unseal_epoch_data
-            .spilled_data
-            .uploading_tasks
-            .append(&mut self.spilled_data.uploading_tasks);
-        unseal_epoch_data
-            .spilled_data
-            .uploaded_data
-            .append(&mut self.spilled_data.uploaded_data);
-        self.spilled_data.uploading_tasks = unseal_epoch_data.spilled_data.uploading_tasks;
-        self.spilled_data.uploaded_data = unseal_epoch_data.spilled_data.uploaded_data;
-    }
-
     fn add_table_watermarks(
-        &mut self,
+        all_table_watermarks: &mut HashMap<TableId, TableWatermarks>,
         table_id: TableId,
         direction: WatermarkDirection,
         watermarks: impl Iterator<Item = (HummockEpoch, Vec<VnodeWatermark>)>,
@@ -538,17 +567,9 @@ impl SyncDataBuilder {
             }
         }
         if let Some(table_watermarks) = table_watermarks {
-            assert!(self
-                .table_watermarks
+            assert!(all_table_watermarks
                 .insert(table_id, table_watermarks)
                 .is_none());
-        }
-    }
-
-    fn flush(&mut self, context: &UploaderContext, payload: UploadTaskInput) {
-        if !payload.is_empty() {
-            let task = UploadingTask::new(payload, context);
-            self.spilled_data.add_task(task);
         }
     }
 }
@@ -740,6 +761,7 @@ struct TableUnsyncData {
         WatermarkDirection,
         BTreeMap<HummockEpoch, (Vec<VnodeWatermark>, BitmapBuilder)>,
     )>,
+    spill_tasks: BTreeMap<HummockEpoch, VecDeque<UploadingTaskId>>,
 }
 
 impl TableUnsyncData {
@@ -748,6 +770,7 @@ impl TableUnsyncData {
             table_id,
             instance_data: Default::default(),
             table_watermarks: None,
+            spill_tasks: Default::default(),
         }
     }
 
@@ -760,6 +783,7 @@ impl TableUnsyncData {
             WatermarkDirection,
             impl Iterator<Item = (HummockEpoch, Vec<VnodeWatermark>)>,
         )>,
+        impl Iterator<Item = UploadingTaskId>,
     ) {
         (
             self.instance_data
@@ -776,6 +800,9 @@ impl TableUnsyncData {
                             .map(|(epoch, (watermarks, _))| (epoch, watermarks)),
                     )
                 }),
+            take_before_epoch(&mut self.spill_tasks, epoch)
+                .into_values()
+                .flat_map(|tasks| tasks.into_iter()),
         )
     }
 }
@@ -789,7 +816,7 @@ struct UnsyncData {
     table_data: HashMap<TableId, TableUnsyncData>,
     // An index as a mapping from instance id to its table id
     instance_table_id: HashMap<LocalInstanceId, TableId>,
-    epoch_data: BTreeMap<HummockEpoch, EpochData>,
+    epochs: BTreeMap<HummockEpoch, ()>,
 }
 
 impl UnsyncData {
@@ -818,7 +845,7 @@ impl UnsyncData {
             .instance_table_id
             .insert(instance_id, table_id)
             .is_none());
-        self.epoch_data.entry(init_epoch).or_default();
+        self.epochs.insert(init_epoch, ());
     }
 
     fn instance_data(
@@ -857,7 +884,7 @@ impl UnsyncData {
             .get_mut(&instance_id)
             .expect("should exist");
         let epoch = instance_data.local_seal_epoch(next_epoch);
-        self.epoch_data.entry(next_epoch).or_default();
+        self.epochs.insert(next_epoch, ());
         if let Some((direction, table_watermarks)) = opts.table_watermarks {
             table_data.add_table_watermarks(epoch, table_watermarks, direction);
         }
@@ -874,28 +901,47 @@ impl UnsyncData {
         }
     }
 
-    fn sync(&mut self, epoch: HummockEpoch, context: &UploaderContext) -> SyncDataBuilder {
-        let sync_epoch_data = take_before_epoch(&mut self.epoch_data, epoch);
+    fn sync(
+        &mut self,
+        epoch: HummockEpoch,
+        context: &UploaderContext,
+        task_manager: &mut TaskManager,
+    ) -> SyncDataBuilder {
+        // clean old epochs
+        let _epochs = take_before_epoch(&mut self.epochs, epoch);
 
-        let mut sync_data = SyncDataBuilder::default();
-        for (epoch, epoch_data) in sync_epoch_data {
-            sync_data.add_new_epoch(epoch, epoch_data);
-        }
+        let mut all_table_watermarks = HashMap::new();
+        let mut spill_tasks = BTreeSet::new();
 
         let mut flush_payload = HashMap::new();
         for (table_id, table_data) in &mut self.table_data {
-            let (unflushed_payload, table_watermarks) = table_data.sync(epoch);
+            let (unflushed_payload, table_watermarks, task_ids) = table_data.sync(epoch);
             for (instance_id, payload) in unflushed_payload {
                 if !payload.is_empty() {
                     flush_payload.insert(instance_id, payload);
                 }
             }
             if let Some((direction, watermarks)) = table_watermarks {
-                sync_data.add_table_watermarks(*table_id, direction, watermarks);
+                SyncDataBuilder::add_table_watermarks(
+                    &mut all_table_watermarks,
+                    *table_id,
+                    direction,
+                    watermarks,
+                );
+            }
+            for task_id in task_ids {
+                spill_tasks.insert(task_id);
             }
         }
-        sync_data.flush(context, flush_payload);
-        sync_data
+
+        let (remaining_uploading_tasks, uploaded) =
+            task_manager.sync(context, epoch, spill_tasks, flush_payload);
+
+        SyncDataBuilder {
+            table_watermarks: all_table_watermarks,
+            remaining_uploading_tasks,
+            uploaded,
+        }
     }
 
     fn ack_flushed(&mut self, sstable_info: &StagingSstableInfo) {
@@ -910,8 +956,7 @@ impl UnsyncData {
 
 struct SyncingData {
     sync_epoch: HummockEpoch,
-    // task of newer data at the front
-    uploading_tasks: VecDeque<UploadingTask>,
+    remaining_uploading_tasks: HashSet<UploadingTaskId>,
     // newer data at the front
     uploaded: VecDeque<Arc<StagingSstableInfo>>,
     table_watermarks: HashMap<TableId, TableWatermarks>,
@@ -957,18 +1002,15 @@ struct UploaderData {
     /// Data that has started syncing but not synced yet. `epoch` satisfies
     /// `max_synced_epoch < epoch <= max_syncing_epoch`.
     /// Newer epoch at the front
-    syncing_data: VecDeque<SyncingData>,
+    syncing_data: BTreeMap<HummockEpoch, SyncingData>,
+
+    task_manager: TaskManager,
 }
 
 impl UploaderData {
     fn abort(self, err: impl Fn() -> HummockError) {
-        for (_, epoch_data) in self.unsync_data.epoch_data {
-            epoch_data.spilled_data.abort();
-        }
-        for syncing_data in self.syncing_data {
-            for task in syncing_data.uploading_tasks {
-                task.join_handle.abort();
-            }
+        self.task_manager.abort();
+        for syncing_data in self.syncing_data.into_values() {
             send_sync_result(syncing_data.sync_result_sender, Err(err()));
         }
     }
@@ -1019,10 +1061,7 @@ impl HummockUploader {
         Self {
             max_syncing_epoch: initial_epoch,
             max_synced_epoch: initial_epoch,
-            state: UploaderState::Working(UploaderData {
-                unsync_data: Default::default(),
-                syncing_data: Default::default(),
-            }),
+            state: UploaderState::Working(UploaderData::default()),
             context: UploaderContext::new(
                 pinned_version,
                 spawn_upload_task,
@@ -1114,24 +1153,37 @@ impl HummockUploader {
 
         self.max_syncing_epoch = epoch;
 
-        let sync_data = data.unsync_data.sync(epoch, &self.context);
+        let sync_data = data
+            .unsync_data
+            .sync(epoch, &self.context, &mut data.task_manager);
 
         let SyncDataBuilder {
-            spilled_data:
-                SpilledData {
-                    uploading_tasks,
-                    uploaded_data,
-                },
             table_watermarks,
-            ..
+            remaining_uploading_tasks,
+            uploaded,
         } = sync_data;
 
-        data.syncing_data.push_front(SyncingData {
-            sync_epoch: epoch,
-            uploading_tasks,
-            uploaded: uploaded_data,
-            table_watermarks,
-            sync_result_sender,
+        if let Some((prev_max_epoch, _)) = data.syncing_data.last_key_value() {
+            assert_gt!(epoch, *prev_max_epoch);
+        }
+
+        data.syncing_data.insert(
+            epoch,
+            SyncingData {
+                sync_epoch: epoch,
+                remaining_uploading_tasks,
+                uploaded,
+                table_watermarks,
+                sync_result_sender,
+            },
+        );
+
+        data.may_notify_sync_task(&self.context, |new_synced_epoch| {
+            Self::set_max_synced_epoch(
+                &mut self.max_synced_epoch,
+                self.max_syncing_epoch,
+                new_synced_epoch,
+            )
         });
 
         self.context
@@ -1196,7 +1248,7 @@ impl HummockUploader {
         if self.context.buffer_tracker.need_flush() {
             let mut curr_batch_flush_size = 0;
             // iterate from older epoch to newer epoch
-            for (epoch, epoch_data) in &mut data.unsync_data.epoch_data {
+            for epoch in &mut data.unsync_data.epochs.keys() {
                 if !self
                     .context
                     .buffer_tracker
@@ -1204,19 +1256,31 @@ impl HummockUploader {
                 {
                     break;
                 }
+                let mut spilled_table_ids = HashSet::new();
                 let mut payload = HashMap::new();
-                for (instance_id, instance_data) in data
-                    .unsync_data
-                    .table_data
-                    .values_mut()
-                    .flat_map(|data| data.instance_data.iter_mut())
-                {
-                    let instance_payload = instance_data.spill(*epoch);
-                    if !instance_payload.is_empty() {
-                        payload.insert(*instance_id, instance_payload);
+                for (table_id, table_data) in &mut data.unsync_data.table_data {
+                    for (instance_id, instance_data) in &mut table_data.instance_data {
+                        let instance_payload = instance_data.spill(*epoch);
+                        if !instance_payload.is_empty() {
+                            payload.insert(*instance_id, instance_payload);
+                            spilled_table_ids.insert(*table_id);
+                        }
                     }
                 }
-                curr_batch_flush_size += epoch_data.flush(&self.context, payload);
+                if !payload.is_empty() {
+                    let (task_id, task_size) = data.task_manager.spill(&self.context, payload);
+                    for table_id in spilled_table_ids {
+                        data.unsync_data
+                            .table_data
+                            .get_mut(&table_id)
+                            .expect("should exist")
+                            .spill_tasks
+                            .entry(*epoch)
+                            .or_default()
+                            .push_front(task_id);
+                    }
+                    curr_batch_flush_size += task_size;
+                }
             }
             curr_batch_flush_size > 0
         } else {
@@ -1251,93 +1315,35 @@ impl HummockUploader {
 impl UploaderData {
     /// Poll the syncing task of the syncing data of the oldest epoch. Return `Poll::Ready(None)` if
     /// there is no syncing data.
-    fn poll_syncing_task(
+    fn may_notify_sync_task(
         &mut self,
-        cx: &mut Context<'_>,
         context: &UploaderContext,
         mut set_max_synced_epoch: impl FnMut(u64),
-    ) -> Poll<Option<Result<Arc<StagingSstableInfo>, ErrState>>> {
-        while let Some(syncing_data) = self.syncing_data.back_mut() {
-            let sstable_info = if let Some(task) = syncing_data.uploading_tasks.back_mut() {
-                let result = ready!(task.poll_result(cx));
-                let _task = syncing_data.uploading_tasks.pop_back().expect("non-empty");
-                let sstable_info = match result {
-                    Ok(sstable_info) => sstable_info,
-                    Err(e) => {
-                        let SyncingData {
-                            sync_epoch,
-                            uploading_tasks,
-                            sync_result_sender,
-                            ..
-                        } = self.syncing_data.pop_back().expect("non-empty");
-                        for task in uploading_tasks {
-                            task.join_handle.abort();
-                        }
-                        send_sync_result(
-                            sync_result_sender,
-                            Err(HummockError::other(format!(
-                                "failed sync task: {:?}",
-                                e.as_report()
-                            ))),
-                        );
-
-                        return Poll::Ready(Some(Err(ErrState {
-                            failed_epoch: sync_epoch,
-                            reason: format!("{:?}", e.as_report()),
-                        })));
-                    }
-                };
-                syncing_data.uploaded.push_front(sstable_info.clone());
-                self.unsync_data.ack_flushed(&sstable_info);
-                Some(sstable_info)
-            } else {
-                None
-            };
-
-            if syncing_data.uploading_tasks.is_empty() {
-                let syncing_data = self.syncing_data.pop_back().expect("non-empty");
-                let SyncingData {
-                    sync_epoch,
-                    uploading_tasks,
-                    uploaded,
+    ) {
+        while let Some((_, syncing_data)) = self.syncing_data.first_key_value()
+            && syncing_data.remaining_uploading_tasks.is_empty()
+        {
+            let (_, syncing_data) = self.syncing_data.pop_first().expect("non-empty");
+            let SyncingData {
+                sync_epoch,
+                remaining_uploading_tasks: _,
+                uploaded,
+                table_watermarks,
+                sync_result_sender,
+            } = syncing_data;
+            context
+                .stats
+                .uploader_syncing_epoch_count
+                .set(self.syncing_data.len() as _);
+            set_max_synced_epoch(sync_epoch);
+            send_sync_result(
+                sync_result_sender,
+                Ok(SyncedData {
+                    uploaded_ssts: uploaded,
                     table_watermarks,
-                    sync_result_sender,
-                } = syncing_data;
-                assert!(uploading_tasks.is_empty());
-                context
-                    .stats
-                    .uploader_syncing_epoch_count
-                    .set(self.syncing_data.len() as _);
-                set_max_synced_epoch(sync_epoch);
-                send_sync_result(
-                    sync_result_sender,
-                    Ok(SyncedData {
-                        uploaded_ssts: uploaded,
-                        table_watermarks,
-                    }),
-                )
-            }
-
-            if let Some(sstable_info) = sstable_info {
-                return Poll::Ready(Some(Ok(sstable_info)));
-            }
+                }),
+            )
         }
-        Poll::Ready(None)
-    }
-
-    /// Poll the success of the oldest spilled task of unsync spill data. Return `Poll::Ready(None)` if
-    /// there is no spilling task.
-    fn poll_spill_task(&mut self, cx: &mut Context<'_>) -> Poll<Option<Arc<StagingSstableInfo>>> {
-        // iterator from older epoch to new epoch so that the spill task are finished in epoch order
-        for epoch_data in self.unsync_data.epoch_data.values_mut() {
-            // if None, there is no spilling task. Search for the unsync data of the next epoch in
-            // the next iteration.
-            if let Some(sstable_info) = ready!(epoch_data.spilled_data.poll_success_spill(cx)) {
-                self.unsync_data.ack_flushed(&sstable_info);
-                return Poll::Ready(Some(sstable_info));
-            }
-        }
-        Poll::Ready(None)
     }
 }
 
@@ -1350,20 +1356,27 @@ impl HummockUploader {
                 return Poll::Pending;
             };
 
-            if let Some(result) =
-                ready!(
-                    data.poll_syncing_task(cx, &self.context, |new_synced_epoch| {
-                        Self::set_max_synced_epoch(
-                            &mut self.max_synced_epoch,
-                            self.max_syncing_epoch,
-                            new_synced_epoch,
-                        )
-                    })
-                )
-            {
+            if let Some(result) = ready!(data.task_manager.poll_task_result(cx, &self.context)) {
                 match result {
-                    Ok(data) => {
-                        return Poll::Ready(data);
+                    Ok((task_id, status, sst)) => {
+                        data.unsync_data.ack_flushed(&sst);
+
+                        if let UploadingTaskStatus::Sync(sync_epoch) = status {
+                            let syncing_data = data
+                                .syncing_data
+                                .get_mut(&sync_epoch)
+                                .expect("should exist");
+                            syncing_data.uploaded.push_front(sst.clone());
+                            assert!(syncing_data.remaining_uploading_tasks.remove(&task_id));
+                            data.may_notify_sync_task(&self.context, |new_synced_epoch| {
+                                Self::set_max_synced_epoch(
+                                    &mut self.max_synced_epoch,
+                                    self.max_syncing_epoch,
+                                    new_synced_epoch,
+                                )
+                            });
+                        }
+                        return Poll::Ready(sst);
                     }
                     Err(e) => {
                         let failed_epoch = e.failed_epoch;
@@ -1383,10 +1396,6 @@ impl HummockUploader {
                 }
             }
 
-            if let Some(sstable_info) = ready!(data.poll_spill_task(cx)) {
-                return Poll::Ready(sstable_info);
-            }
-
             Poll::Pending
         })
     }
@@ -1397,6 +1406,7 @@ pub(crate) mod tests {
     use std::collections::{HashMap, VecDeque};
     use std::future::{poll_fn, Future};
     use std::ops::Deref;
+    use std::pin::pin;
     use std::sync::atomic::AtomicUsize;
     use std::sync::atomic::Ordering::SeqCst;
     use std::sync::Arc;
@@ -1606,11 +1616,11 @@ pub(crate) mod tests {
         let imm = gen_imm(INITIAL_EPOCH).await;
         let imm_size = imm.size();
         let imm_ids = get_imm_ids(vec![&imm]);
-        let task = UploadingTask::from_vec(vec![imm], &uploader_context);
+        let mut task = UploadingTask::from_vec(vec![imm], &uploader_context);
         assert_eq!(imm_size, task.task_info.task_size);
         assert_eq!(imm_ids, task.task_info.imm_ids);
         assert_eq!(vec![INITIAL_EPOCH], task.task_info.epochs);
-        let output = task.await.unwrap();
+        let output = poll_fn(|cx| task.poll_result(cx)).await.unwrap();
         assert_eq!(
             output.sstable_infos(),
             &dummy_success_upload_output().new_value_ssts
@@ -1621,8 +1631,8 @@ pub(crate) mod tests {
 
         let uploader_context = test_uploader_context(dummy_fail_upload_future);
         let imm = gen_imm(INITIAL_EPOCH).await;
-        let task = UploadingTask::from_vec(vec![imm], &uploader_context);
-        let _ = task.await.unwrap_err();
+        let mut task = UploadingTask::from_vec(vec![imm], &uploader_context);
+        let _ = poll_fn(|cx| task.poll_result(cx)).await.unwrap_err();
     }
 
     #[tokio::test]
@@ -1683,10 +1693,10 @@ pub(crate) mod tests {
         uploader.start_sync_epoch(epoch1, sync_tx);
         assert_eq!(epoch1 as HummockEpoch, uploader.max_syncing_epoch);
         assert_eq!(1, uploader.data().syncing_data.len());
-        let syncing_data = uploader.data().syncing_data.front().unwrap();
+        let (_, syncing_data) = uploader.data().syncing_data.first_key_value().unwrap();
         assert_eq!(epoch1 as HummockEpoch, syncing_data.sync_epoch);
         assert!(syncing_data.uploaded.is_empty());
-        assert!(!syncing_data.uploading_tasks.is_empty());
+        assert!(!syncing_data.remaining_uploading_tasks.is_empty());
 
         let staging_sst = uploader.next_uploaded_sst().await;
         assert_eq!(&vec![epoch1], staging_sst.epochs());
@@ -1793,13 +1803,9 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn test_uploader_poll_empty() {
         let mut uploader = test_uploader(dummy_success_upload_future);
-        let data = must_match!(&mut uploader.state, UploaderState::Working(data) => data);
-        assert!(
-            poll_fn(|cx| data.poll_syncing_task(cx, &uploader.context, |_| unreachable!()))
-                .await
-                .is_none()
-        );
-        assert!(poll_fn(|cx| data.poll_spill_task(cx)).await.is_none());
+        let fut = uploader.next_uploaded_sst();
+        let mut fut = pin!(fut);
+        assert!(poll_fn(|cx| Poll::Ready(fut.as_mut().poll(cx).is_pending())).await);
     }
 
     #[tokio::test]
