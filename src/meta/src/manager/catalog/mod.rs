@@ -43,6 +43,7 @@ use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::user::grant_privilege::{Action, ActionWithGrantOption, Object};
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::{GrantPrivilege, UserInfo};
+use tokio::sync::oneshot::Sender;
 use tokio::sync::{Mutex, MutexGuard};
 use user::*;
 
@@ -156,13 +157,19 @@ pub struct CatalogManager {
 pub struct CatalogManagerCore {
     pub database: DatabaseManager,
     pub user: UserManager,
+    pub table_id_to_tx: HashMap<TableId, Sender<MetaResult<NotificationVersion>>>,
 }
 
 impl CatalogManagerCore {
     async fn new(env: MetaSrvEnv) -> MetaResult<Self> {
         let database = DatabaseManager::new(env.clone()).await?;
         let user = UserManager::new(env.clone(), &database).await?;
-        Ok(Self { database, user })
+        let table_id_to_tx = HashMap::new();
+        Ok(Self {
+            database,
+            user,
+            table_id_to_tx,
+        })
     }
 }
 
