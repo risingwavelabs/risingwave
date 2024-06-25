@@ -3024,6 +3024,68 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_streaming_hash_full_outer_join_update() -> StreamExecutorResult<()> {
+        let (mut tx_l, mut tx_r, mut hash_join) =
+            create_classical_executor::<{ JoinType::FullOuter }>(false, false, None).await;
+
+        // push the init barrier for left and right
+        tx_l.push_barrier(test_epoch(1), false);
+        tx_r.push_barrier(test_epoch(1), false);
+        hash_join.next_unwrap_ready_barrier()?;
+
+        tx_l.push_chunk(StreamChunk::from_pretty(
+            "  I I
+             + 1 1
+            ",
+        ));
+        let chunk = hash_join.next_unwrap_ready_chunk()?;
+        assert_eq!(
+            chunk,
+            StreamChunk::from_pretty(
+                " I I I I
+                + 1 1 . ."
+            )
+        );
+
+        tx_r.push_chunk(StreamChunk::from_pretty(
+            "  I I
+             + 1 1
+            ",
+        ));
+        let chunk = hash_join.next_unwrap_ready_chunk()?;
+
+        assert_eq!(
+            chunk,
+            StreamChunk::from_pretty(
+                " I I I I
+                U- 1 1 . .
+                U+ 1 1 1 1"
+            )
+        );
+
+        tx_l.push_chunk(StreamChunk::from_pretty(
+            "   I I
+              - 1 1
+              + 1 2
+            ",
+        ));
+        let chunk = hash_join.next_unwrap_ready_chunk()?;
+        assert_eq!(
+            chunk,
+            StreamChunk::from_pretty(
+                "  I I I I
+                U- 1 1 1 1
+                U+ . . 1 1
+                U- . . 1 1
+                U+ 1 2 1 1
+                "
+            )
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn test_streaming_hash_full_outer_join_with_nonequi_condition() -> StreamExecutorResult<()>
     {
         let chunk_l1 = StreamChunk::from_pretty(
