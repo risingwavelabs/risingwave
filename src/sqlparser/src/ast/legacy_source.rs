@@ -398,9 +398,10 @@ pub struct CsvInfo {
 pub fn get_delimiter(chars: &str) -> Result<u8, StrError> {
     match chars {
         "," => Ok(b','),   // comma
+        ";" => Ok(b';'),   // semicolon
         "\t" => Ok(b'\t'), // tab
         other => Err(StrError(format!(
-            "The delimiter should be one of ',', E'\\t', but got {other:?}",
+            "The delimiter should be one of ',', ';', E'\\t', but got {other:?}",
         ))),
     }
 }

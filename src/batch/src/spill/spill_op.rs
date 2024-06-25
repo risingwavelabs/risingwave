@@ -20,7 +20,7 @@ use anyhow::anyhow;
 use futures_async_stream::try_stream;
 use futures_util::AsyncReadExt;
 use opendal::layers::RetryLayer;
-use opendal::services::Fs;
+use opendal::services::{Fs, Memory};
 use opendal::Operator;
 use prost::Message;
 use risingwave_common::array::DataChunk;
@@ -39,25 +39,42 @@ const RW_MANAGED_SPILL_DIR: &str = "/rw_batch_spill/";
 const DEFAULT_IO_BUFFER_SIZE: usize = 256 * 1024;
 const DEFAULT_IO_CONCURRENT_TASK: usize = 8;
 
+#[derive(Clone)]
+pub enum SpillBackend {
+    Disk,
+    /// Only for testing purpose
+    Memory,
+}
+
 /// `SpillOp` is used to manage the spill directory of the spilling executor and it will drop the directory with a RAII style.
 pub struct SpillOp {
     pub op: Operator,
 }
 
 impl SpillOp {
-    pub fn create(path: String) -> Result<SpillOp> {
+    pub fn create(path: String, spill_backend: SpillBackend) -> Result<SpillOp> {
         assert!(path.ends_with('/'));
 
         let spill_dir =
             std::env::var(RW_BATCH_SPILL_DIR_ENV).unwrap_or_else(|_| DEFAULT_SPILL_DIR.to_string());
         let root = format!("/{}/{}/{}/", spill_dir, RW_MANAGED_SPILL_DIR, path);
 
-        let mut builder = Fs::default();
-        builder.root(&root);
-
-        let op: Operator = Operator::new(builder)?
-            .layer(RetryLayer::default())
-            .finish();
+        let op = match spill_backend {
+            SpillBackend::Disk => {
+                let mut builder = Fs::default();
+                builder.root(&root);
+                Operator::new(builder)?
+                    .layer(RetryLayer::default())
+                    .finish()
+            }
+            SpillBackend::Memory => {
+                let mut builder = Memory::default();
+                builder.root(&root);
+                Operator::new(builder)?
+                    .layer(RetryLayer::default())
+                    .finish()
+            }
+        };
         Ok(SpillOp { op })
     }
 

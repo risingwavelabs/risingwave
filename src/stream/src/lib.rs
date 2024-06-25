@@ -40,6 +40,7 @@
 #![feature(btree_cursors)]
 #![feature(assert_matches)]
 #![feature(try_blocks)]
+#![feature(result_flattening)] // required by `capture_context`
 
 use std::sync::Arc;
 
