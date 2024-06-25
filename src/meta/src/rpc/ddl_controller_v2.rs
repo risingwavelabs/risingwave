@@ -237,12 +237,9 @@ impl DdlController {
                             tracing::error!(id = stream_job_id, error = ?err.as_report(), "failed to create background streaming job");
                         });
                     if result.is_ok() {
-                        let _ = mgr
-                            .catalog_controller
-                            .finish_streaming_job(stream_job_id as _, None)
-                            .await.inspect_err(|err| {
-                                tracing::error!(id = stream_job_id, error = ?err.as_report(), "failed to finish background streaming job");
-                            });
+                        let _ = ctrl.wait_streaming_job_finished_v2(stream_job_id as _).await.inspect_err(|err| {
+                            tracing::error!(id = stream_job_id, error = ?err.as_report(), "failed to finish background streaming job");
+                        });
                     }
                 };
                 tokio::spawn(fut);
