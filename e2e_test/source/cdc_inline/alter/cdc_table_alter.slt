@@ -63,16 +63,16 @@ create table orders_1 (*) from mysql_source table 'testdb1.orders';
 
 system ok
 psql -c "
-  DROP TABLE IF EXISTS shipments;
-  CREATE TABLE shipments (
+  DROP TABLE IF EXISTS shipments1;
+  CREATE TABLE shipments1 (
     shipment_id SERIAL NOT NULL PRIMARY KEY,
     order_id SERIAL NOT NULL,
     origin VARCHAR(255) NOT NULL,
     destination VARCHAR(255) NOT NULL,
     is_arrived BOOLEAN NOT NULL
   );
-  ALTER SEQUENCE public.shipments_shipment_id_seq RESTART WITH 1001;
-  INSERT INTO shipments
+  ALTER SEQUENCE public.shipments1_shipment_id_seq RESTART WITH 1001;
+  INSERT INTO shipments1
   VALUES (default,10001,'Beijing','Shanghai',false),
          (default,10002,'Hangzhou','Shanghai',false),
          (default,10003,'Shanghai','Hangzhou',false);
@@ -97,7 +97,7 @@ create table shipments_1 (
   destination STRING,
   is_arrived boolean,
  PRIMARY KEY (shipment_id)
-) from pg_source table 'public.shipments';
+) from pg_source table 'public.shipments1';
 
 # Create a mview join orders, products and shipments
 statement ok
@@ -196,7 +196,7 @@ table description products_1 NULL NULL
 # alter pg table
 system ok
 psql -c "
-  ALTER TABLE shipments DROP COLUMN destination;
+  ALTER TABLE shipments1 DROP COLUMN destination;
 "
 
 statement error
@@ -221,4 +221,3 @@ drop source mysql_source cascade;
 
 statement ok
 drop source pg_source cascade;
-
