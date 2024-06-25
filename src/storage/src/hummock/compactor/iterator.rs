@@ -788,4 +788,206 @@ mod tests {
         assert!(iter.is_valid());
         assert_eq!(iter.key(), block_1_second_key.to_ref());
     }
+
+    #[tokio::test]
+    async fn test_filter_block_metas() {
+        {
+            let block_metas = Vec::default();
+            let seek_key = None;
+
+            let (start_index, end_index) = ConcatSstableIterator::filter_block_metas(
+                &block_metas,
+                seek_key,
+                &HashSet::default(),
+                &KeyRange::default(),
+            );
+
+            assert_eq!(usize::MAX, start_index);
+            assert_eq!(0, end_index);
+        }
+
+        {
+            let block_metas = vec![
+                BlockMeta {
+                    smallest_key: FullKey::for_test(TableId::new(1), Vec::default(), 0).encode(),
+                    ..Default::default()
+                },
+                BlockMeta {
+                    smallest_key: FullKey::for_test(TableId::new(2), Vec::default(), 0).encode(),
+                    ..Default::default()
+                },
+                BlockMeta {
+                    smallest_key: FullKey::for_test(TableId::new(3), Vec::default(), 0).encode(),
+                    ..Default::default()
+                },
+            ];
+            let seek_key = None;
+
+            let (start_index, end_index) = ConcatSstableIterator::filter_block_metas(
+                &block_metas,
+                seek_key,
+                &HashSet::from_iter(vec![1_u32, 2, 3].into_iter()),
+                &KeyRange::default(),
+            );
+
+            assert_eq!(0, start_index);
+            assert_eq!(2, end_index);
+        }
+
+        {
+            let block_metas = vec![
+                BlockMeta {
+                    smallest_key: FullKey::for_test(TableId::new(1), Vec::default(), 0).encode(),
+                    ..Default::default()
+                },
+                BlockMeta {
+                    smallest_key: FullKey::for_test(TableId::new(2), Vec::default(), 0).encode(),
+                    ..Default::default()
+                },
+                BlockMeta {
+                    smallest_key: FullKey::for_test(TableId::new(3), Vec::default(), 0).encode(),
+                    ..Default::default()
+                },
+            ];
+            let seek_key = None;
+
+            let (start_index, end_index) = ConcatSstableIterator::filter_block_metas(
+                &block_metas,
+                seek_key,
+                &HashSet::from_iter(vec![2_u32, 3].into_iter()),
+                &KeyRange::default(),
+            );
+
+            assert_eq!(1, start_index);
+            assert_eq!(2, end_index);
+        }
+
+        {
+            let block_metas = vec![
+                BlockMeta {
+                    smallest_key: FullKey::for_test(TableId::new(1), Vec::default(), 0).encode(),
+                    ..Default::default()
+                },
+                BlockMeta {
+                    smallest_key: FullKey::for_test(TableId::new(2), Vec::default(), 0).encode(),
+                    ..Default::default()
+                },
+                BlockMeta {
+                    smallest_key: FullKey::for_test(TableId::new(3), Vec::default(), 0).encode(),
+                    ..Default::default()
+                },
+            ];
+            let seek_key = None;
+
+            let (start_index, end_index) = ConcatSstableIterator::filter_block_metas(
+                &block_metas,
+                seek_key,
+                &HashSet::from_iter(vec![1_u32, 2_u32].into_iter()),
+                &KeyRange::default(),
+            );
+
+            assert_eq!(0, start_index);
+            assert_eq!(1, end_index);
+        }
+
+        {
+            let block_metas = vec![
+                BlockMeta {
+                    smallest_key: FullKey::for_test(TableId::new(1), Vec::default(), 0).encode(),
+                    ..Default::default()
+                },
+                BlockMeta {
+                    smallest_key: FullKey::for_test(TableId::new(2), Vec::default(), 0).encode(),
+                    ..Default::default()
+                },
+                BlockMeta {
+                    smallest_key: FullKey::for_test(TableId::new(3), Vec::default(), 0).encode(),
+                    ..Default::default()
+                },
+            ];
+            let seek_key = None;
+
+            let (start_index, end_index) = ConcatSstableIterator::filter_block_metas(
+                &block_metas,
+                seek_key,
+                &HashSet::from_iter(vec![2_u32].into_iter()),
+                &KeyRange::default(),
+            );
+
+            assert_eq!(1, start_index);
+            assert_eq!(1, end_index);
+        }
+
+        {
+            let block_metas = vec![
+                BlockMeta {
+                    smallest_key: FullKey::for_test(TableId::new(1), Vec::default(), 0).encode(),
+                    ..Default::default()
+                },
+                BlockMeta {
+                    smallest_key: FullKey::for_test(TableId::new(1), Vec::default(), 0).encode(),
+                    ..Default::default()
+                },
+                BlockMeta {
+                    smallest_key: FullKey::for_test(TableId::new(1), Vec::default(), 0).encode(),
+                    ..Default::default()
+                },
+                BlockMeta {
+                    smallest_key: FullKey::for_test(TableId::new(2), Vec::default(), 0).encode(),
+                    ..Default::default()
+                },
+                BlockMeta {
+                    smallest_key: FullKey::for_test(TableId::new(3), Vec::default(), 0).encode(),
+                    ..Default::default()
+                },
+            ];
+            let seek_key = None;
+
+            let (start_index, end_index) = ConcatSstableIterator::filter_block_metas(
+                &block_metas,
+                seek_key,
+                &HashSet::from_iter(vec![2_u32].into_iter()),
+                &KeyRange::default(),
+            );
+
+            assert_eq!(3, start_index);
+            assert_eq!(3, end_index);
+        }
+
+        {
+            let block_metas = vec![
+                BlockMeta {
+                    smallest_key: FullKey::for_test(TableId::new(1), Vec::default(), 0).encode(),
+                    ..Default::default()
+                },
+                BlockMeta {
+                    smallest_key: FullKey::for_test(TableId::new(2), Vec::default(), 0).encode(),
+                    ..Default::default()
+                },
+                BlockMeta {
+                    smallest_key: FullKey::for_test(TableId::new(3), Vec::default(), 0).encode(),
+                    ..Default::default()
+                },
+                BlockMeta {
+                    smallest_key: FullKey::for_test(TableId::new(3), Vec::default(), 0).encode(),
+                    ..Default::default()
+                },
+                BlockMeta {
+                    smallest_key: FullKey::for_test(TableId::new(3), Vec::default(), 0).encode(),
+                    ..Default::default()
+                },
+            ];
+            let seek_key = None;
+
+            let (start_index, end_index) = ConcatSstableIterator::filter_block_metas(
+                &block_metas,
+                seek_key,
+                &HashSet::from_iter(vec![2_u32].into_iter()),
+                &KeyRange::default(),
+            );
+
+            assert_eq!(1, start_index);
+            assert_eq!(1, end_index);
+        }
+    }
 }
