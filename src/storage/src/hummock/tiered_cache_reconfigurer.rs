@@ -13,12 +13,10 @@
 // limitations under the License.
 
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
 
-use arc_swap::Guard;
 use foyer::HybridCache;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
-use risingwave_common::system_param::reader::{SystemParamsRead, SystemParamsReader};
+use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use tokio::sync::watch;
 
