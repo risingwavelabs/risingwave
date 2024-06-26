@@ -8061,9 +8061,8 @@ dependencies = [
 
 [[package]]
 name = "opendal"
-version = "0.47.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5c3ba698f2258bebdf7a3a38862bb6ef1f96d351627002686dacc228f805bdd6"
+version = "0.47.1"
+source = "git+https://github.com/apache/opendal.git?rev=d58dfb75476e11aef0306a57f77ec64de26fba6b#d58dfb75476e11aef0306a57f77ec64de26fba6b"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -11487,7 +11486,7 @@ dependencies = [
  "madsim",
  "madsim-aws-sdk-s3",
  "madsim-tokio",
- "opendal 0.47.0",
+ "opendal 0.47.1",
  "prometheus",
  "reqwest 0.12.4",
  "risingwave_common",
