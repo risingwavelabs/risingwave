@@ -19,7 +19,6 @@ use risingwave_common::bail;
 use super::simd_json_parser::DebeziumJsonAccessBuilder;
 use super::{DebeziumAvroAccessBuilder, DebeziumAvroParserConfig};
 use crate::error::ConnectorResult;
-use crate::extract_key_config;
 use crate::parser::unified::debezium::DebeziumChangeEvent;
 use crate::parser::unified::json::TimestamptzHandling;
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
@@ -89,8 +88,8 @@ impl DebeziumParser {
         rw_columns: Vec<SourceColumnDesc>,
         source_ctx: SourceContextRef,
     ) -> ConnectorResult<Self> {
-        let (key_config, key_type) = extract_key_config!(props);
-        let key_builder = build_accessor_builder(key_config, key_type).await?;
+        let key_builder =
+            build_accessor_builder(props.encoding_config.clone(), EncodingType::Key).await?;
         let payload_builder =
             build_accessor_builder(props.encoding_config, EncodingType::Value).await?;
         let debezium_props = if let ProtocolProperties::Debezium(props) = props.protocol_config {
@@ -114,7 +113,6 @@ impl DebeziumParser {
         use crate::parser::JsonProperties;
 
         let props = SpecificParserConfig {
-            key_encoding_config: None,
             encoding_config: EncodingProperties::Json(JsonProperties {
                 use_schema_registry: false,
                 timestamptz_handling: None,
@@ -225,7 +223,6 @@ mod tests {
             .collect::<Vec<_>>();
 
         let props = SpecificParserConfig {
-            key_encoding_config: None,
             encoding_config: EncodingProperties::Json(JsonProperties {
                 use_schema_registry: false,
                 timestamptz_handling: None,
@@ -298,7 +295,6 @@ mod tests {
             .collect::<Vec<_>>();
 
         let props = SpecificParserConfig {
-            key_encoding_config: None,
             encoding_config: EncodingProperties::Json(JsonProperties {
                 use_schema_registry: false,
                 timestamptz_handling: None,
