@@ -132,11 +132,11 @@ pub struct CatalogControllerInner {
     pub(crate) db: DatabaseConnection,
     /// `DdlController` will update this map, and pass the `tx` side to `CatalogController`.
     /// On notifying, we can remove the entry from this map.
-    pub table_id_to_tx: HashMap<TableId, Sender<MetaResult<NotificationVersion>>>,
+    pub table_id_to_tx: HashMap<ObjectId, Sender<MetaResult<NotificationVersion>>>,
     /// Catalogs which were marked as finished and committed.
     /// But the `DdlController` has not instantiated notification channel.
     /// Once notified, we can remove the entry from this map.
-    pub table_id_to_version: HashMap<TableId, MetaResult<NotificationVersion>>,
+    pub table_id_to_version: HashMap<ObjectId, MetaResult<NotificationVersion>>,
 }
 
 impl CatalogController {
@@ -3141,10 +3141,14 @@ impl CatalogControllerInner {
 
     pub(crate) fn register_finish_notifier(
         &mut self,
-        id: TableId,
+        id: i32,
         sender: Sender<MetaResult<NotificationVersion>>,
     ) {
         self.table_id_to_tx.insert(id, sender);
+    }
+
+    pub(crate) fn table_is_finished(&mut self, id: i32) -> Option<MetaResult<NotificationVersion>> {
+        self.table_id_to_version.remove(&id)
     }
 }
 
