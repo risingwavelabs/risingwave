@@ -146,7 +146,7 @@ pub enum Operation {
     IterNext(RecordId),
 
     /// Sync operation of Hummock.
-    Sync(u64),
+    Sync(u64, Vec<u32>),
 
     /// Seal operation of Hummock.
     Seal(u64, bool),
