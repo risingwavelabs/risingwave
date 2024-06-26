@@ -1560,7 +1560,7 @@ dependencies = [
  "aws-smithy-types",
  "bytes",
  "http 0.2.9",
- "http 1.0.0",
+ "http 1.1.0",
  "pin-project-lite",
  "tokio",
  "tracing",
@@ -1663,7 +1663,7 @@ dependencies = [
  "axum-core 0.4.3",
  "bytes",
  "futures-util",
- "http 1.0.0",
+ "http 1.1.0",
  "http-body 1.0.0",
  "http-body-util",
  "hyper 1.1.0",
@@ -1713,7 +1713,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "futures-util",
- "http 1.0.0",
+ "http 1.1.0",
  "http-body 1.0.0",
  "http-body-util",
  "mime",
@@ -1733,7 +1733,7 @@ checksum = "077959a7f8cf438676af90b483304528eb7e16eadadb7f44e9ada4f9dceb9e62"
 dependencies = [
  "axum-core 0.4.3",
  "chrono",
- "http 1.0.0",
+ "http 1.1.0",
  "mime_guess",
  "rust-embed",
  "tower-service",
@@ -2971,9 +2971,9 @@ checksum = "338089f42c427b86394a5ee60ff321da23a5c89c9d89514c829687b26359fcff"
 
 [[package]]
 name = "crc32c"
-version = "0.6.5"
+version = "0.6.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "89254598aa9b9fa608de44b3ae54c810f0f06d755e24c50177f1f8f31ff50ce2"
+checksum = "0227b9f93e535d49bc7ce914c066243424ce85ed90864cebd0874b184e9b6947"
 dependencies = [
  "rustc_version 0.4.0",
 ]
@@ -3890,7 +3890,7 @@ dependencies = [
  "deno_core",
  "deno_tls",
  "dyn-clone",
- "http 1.0.0",
+ "http 1.1.0",
  "pin-project",
  "reqwest 0.12.4",
  "serde",
@@ -3914,7 +3914,7 @@ dependencies = [
  "deno_net",
  "deno_websocket",
  "flate2",
- "http 1.0.0",
+ "http 1.1.0",
  "httparse",
  "hyper 0.14.27",
  "hyper 1.1.0",
@@ -4092,7 +4092,7 @@ dependencies = [
  "deno_tls",
  "fastwebsockets",
  "h2 0.4.4",
- "http 1.0.0",
+ "http 1.1.0",
  "http-body-util",
  "hyper 1.1.0",
  "hyper-util",
@@ -5884,7 +5884,7 @@ dependencies = [
  "futures-core",
  "futures-sink",
  "futures-util",
- "http 1.0.0",
+ "http 1.1.0",
  "indexmap 2.0.0",
  "slab",
  "tokio",
@@ -6076,9 +6076,9 @@ dependencies = [
 
 [[package]]
 name = "http"
-version = "1.0.0"
+version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b32afd38673a8016f7c9ae69e5af41a58f81b1d31689040f2f1959594ce194ea"
+checksum = "21b9ddb458710bc376481b842f5da65cdf31522de232c1ca8146abce2a358258"
 dependencies = [
  "bytes",
  "fnv",
@@ -6103,7 +6103,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1cac85db508abc24a2e48553ba12a996e87244a0395ce011e62b37158745d643"
 dependencies = [
  "bytes",
- "http 1.0.0",
+ "http 1.1.0",
 ]
 
 [[package]]
@@ -6114,7 +6114,7 @@ checksum = "0475f8b2ac86659c21b64320d5d653f9efe42acd2a4e560073ec61a155a34f1d"
 dependencies = [
  "bytes",
  "futures-core",
- "http 1.0.0",
+ "http 1.1.0",
  "http-body 1.0.0",
  "pin-project-lite",
 ]
@@ -6177,7 +6177,7 @@ dependencies = [
  "futures-channel",
  "futures-util",
  "h2 0.4.4",
- "http 1.0.0",
+ "http 1.1.0",
  "http-body 1.0.0",
  "httparse",
  "httpdate",
@@ -6211,7 +6211,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a0bea761b46ae2b24eb4aef630d8d1c398157b6fc29e6350ecf090a0b70c952c"
 dependencies = [
  "futures-util",
- "http 1.0.0",
+ "http 1.1.0",
  "hyper 1.1.0",
  "hyper-util",
  "rustls 0.22.4",
@@ -6271,7 +6271,7 @@ dependencies = [
  "bytes",
  "futures-channel",
  "futures-util",
- "http 1.0.0",
+ "http 1.1.0",
  "http-body 1.0.0",
  "hyper 1.1.0",
  "pin-project-lite",
@@ -6347,7 +6347,7 @@ dependencies = [
  "log",
  "murmur3",
  "once_cell",
- "opendal",
+ "opendal 0.45.1",
  "ordered-float 3.9.1",
  "parquet 50.0.0",
  "prometheus",
@@ -7167,7 +7167,7 @@ dependencies = [
  "aws-smithy-types",
  "aws-types",
  "bytes",
- "http 1.0.0",
+ "http 1.1.0",
  "madsim",
  "spin 0.9.8",
  "tracing",
@@ -8050,8 +8050,39 @@ dependencies = [
  "percent-encoding",
  "prometheus",
  "quick-xml 0.31.0",
- "reqsign",
+ "reqsign 0.14.9",
  "reqwest 0.11.20",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "opendal"
+version = "0.47.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c3ba698f2258bebdf7a3a38862bb6ef1f96d351627002686dacc228f805bdd6"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "backon",
+ "base64 0.22.0",
+ "bytes",
+ "chrono",
+ "crc32c",
+ "flagset",
+ "futures",
+ "getrandom",
+ "http 1.1.0",
+ "log",
+ "md-5",
+ "once_cell",
+ "percent-encoding",
+ "quick-xml 0.31.0",
+ "reqsign 0.15.2",
+ "reqwest 0.12.4",
  "serde",
  "serde_json",
  "sha2",
@@ -9883,11 +9914,12 @@ dependencies = [
 [[package]]
 name = "reqsign"
 version = "0.14.9"
-source = "git+https://github.com/wcy-fdu/reqsign.git?rev=dffdacb#dffdacb739a49a5d94039636793e0d01c97b1924"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "43e319d9de9ff4d941abf4ac718897118b0fe04577ea3f8e0f5788971784eef5"
 dependencies = [
  "anyhow",
  "async-trait",
- "base64 0.22.0",
+ "base64 0.21.7",
  "chrono",
  "form_urlencoded",
  "getrandom",
@@ -9903,7 +9935,38 @@ dependencies = [
  "rand",
  "reqwest 0.11.20",
  "rsa",
- "rust-ini",
+ "rust-ini 0.20.0",
+ "serde",
+ "serde_json",
+ "sha1",
+ "sha2",
+]
+
+[[package]]
+name = "reqsign"
+version = "0.15.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "70fe66d4cd0b5ed9b1abbfe639bf6baeaaf509f7da2d51b31111ba945be59286"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "base64 0.22.0",
+ "chrono",
+ "form_urlencoded",
+ "getrandom",
+ "hex",
+ "hmac",
+ "home",
+ "http 1.1.0",
+ "jsonwebtoken",
+ "log",
+ "once_cell",
+ "percent-encoding",
+ "quick-xml 0.31.0",
+ "rand",
+ "reqwest 0.12.4",
+ "rsa",
+ "rust-ini 0.21.0",
  "serde",
  "serde_json",
  "sha1",
@@ -9969,7 +10032,7 @@ dependencies = [
  "futures-core",
  "futures-util",
  "h2 0.4.4",
- "http 1.0.0",
+ "http 1.1.0",
  "http-body 1.0.0",
  "http-body-util",
  "hyper 1.1.0",
@@ -10016,7 +10079,7 @@ checksum = "a45d100244a467870f6cb763c4484d010a6bed6bd610b3676e3825d93fb4cfbd"
 dependencies = [
  "anyhow",
  "async-trait",
- "http 1.0.0",
+ "http 1.1.0",
  "reqwest 0.12.4",
  "serde",
  "thiserror",
@@ -10199,7 +10262,7 @@ dependencies = [
  "madsim-tokio",
  "madsim-tonic",
  "memcomparable",
- "opendal",
+ "opendal 0.45.1",
  "parking_lot 0.12.1",
  "paste",
  "prometheus",
@@ -10695,7 +10758,7 @@ dependencies = [
  "mysql_common",
  "nexmark",
  "num-bigint",
- "opendal",
+ "opendal 0.45.1",
  "openssl",
  "parking_lot 0.12.1",
  "paste",
@@ -11424,9 +11487,9 @@ dependencies = [
  "madsim",
  "madsim-aws-sdk-s3",
  "madsim-tokio",
- "opendal",
+ "opendal 0.47.0",
  "prometheus",
- "reqwest 0.11.20",
+ "reqwest 0.12.4",
  "risingwave_common",
  "rustls 0.23.5",
  "spin 0.9.8",
@@ -11998,6 +12061,17 @@ checksum = "3e0698206bcb8882bf2a9ecb4c1e7785db57ff052297085a6efd4fe42302068a"
 dependencies = [
  "cfg-if",
  "ordered-multimap",
+]
+
+[[package]]
+name = "rust-ini"
+version = "0.21.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0d625ed57d8f49af6cfa514c42e1a71fadcff60eb0b1c517ff82fe41aa025b41"
+dependencies = [
+ "cfg-if",
+ "ordered-multimap",
+ "trim-in-place",
 ]
 
 [[package]]
@@ -14893,7 +14967,7 @@ dependencies = [
  "bytes",
  "futures-core",
  "futures-util",
- "http 1.0.0",
+ "http 1.1.0",
  "http-body 1.0.0",
  "http-body-util",
  "http-range-header",
@@ -15061,6 +15135,12 @@ dependencies = [
  "quote",
  "syn 1.0.109",
 ]
+
+[[package]]
+name = "trim-in-place"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "343e926fc669bc8cde4fa3129ab681c63671bae288b1f1081ceee6d9d37904fc"
 
 [[package]]
 name = "triomphe"
