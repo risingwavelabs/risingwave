@@ -76,6 +76,7 @@ impl ChangeLogExecutor {
                     };
                     yield Message::Chunk(new_chunk);
                 }
+                Message::Watermark(_w) => {}
                 m => yield m,
             }
         }
