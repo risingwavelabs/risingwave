@@ -184,7 +184,7 @@ rpk topic create 'test_additional_columns'
 
 # Note: `sh` doesn't have {..} brace expansion
 system ok
-bash -c 'for i in {0..100}; do echo "key\$i:{\\"a\\": \$i}" | rpk topic produce test_additional_columns -f "%k:%v\\n" -H "header1=v1" -H "header2=v2"; done'
+bash -c 'for i in {0..10}; do echo "key\$i:{\\"a\\": \$i}" | rpk topic produce test_additional_columns -f "%k:%v\\n" -H "header1=v1" -H "header2=v2"; done'
 
 
 statement error
@@ -273,15 +273,16 @@ WHERE  key_col IS NOT NULL
        AND timestamp_col IS NOT NULL
        AND header_col_combined IS NOT NULL
 ----
-101
+11
 
 
 query ??
-WITH arr AS (SELECT header_col_combined FROM additional_columns limit 1)
-SELECT unnest(header_col_combined) FROM arr ORDER BY 1;
+WITH arr AS (SELECT header_col_combined FROM additional_columns),
+unnested AS (SELECT unnest(header_col_combined) FROM arr)
+select *, count(*) from unnested group by 1 order by 1;
 ----
-(header1,"\\x7631")
-(header2,"\\x7632")
+(header1,"\\x7631") 11
+(header2,"\\x7632") 11
 
 query ????
 select header_col_1, header_col_2, header_col_3, header_col_4 from additional_columns limit 1
