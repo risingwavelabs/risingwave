@@ -41,8 +41,9 @@ impl TieredCacheReconfigurer {
 
     pub async fn run(self, mut rx: watch::Receiver<SystemParamsReaderRef>) {
         loop {
-            if let Err(e) = rx.changed().await {
-                tracing::error!("Tiered cache reconfigurer exit with error: {}", e);
+            if let Err(_) = rx.changed().await {
+                tracing::warn!("Tiered cache reconfigurer get updates error.");
+                continue;
             }
 
             let p = rx.borrow().load();
