@@ -277,8 +277,8 @@ WHERE  key_col IS NOT NULL
 
 
 query ??
-WITH arr AS (SELECT header_col_combined FROM additional_columns limit 1)
-SELECT unnest(header_col_combined) FROM arr ORDER BY 1;
+WITH arr AS (SELECT header_col_combined FROM additional_columns order by 1 limit 1)
+SELECT unnest(header_col_combined) FROM arr;
 ----
 (header1,"\\x7631")
 (header2,"\\x7632")
