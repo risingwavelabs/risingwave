@@ -57,7 +57,8 @@ use crate::manager::{
 };
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments, TableParallelism};
 use crate::serving::{
-    to_deleted_fragment_worker_slot_mapping, to_fragment_worker_slot_mapping, ServingVnodeMapping,
+    to_deleted_fragment_worker_slot_mapping, to_fragment_worker_slot_mapping,
+    ServingWorkerSlotMapping,
 };
 use crate::storage::{MetaStore, MetaStoreError, MetaStoreRef, Transaction, DEFAULT_COLUMN_FAMILY};
 use crate::stream::{GlobalStreamManager, SourceManagerRef};
@@ -1749,8 +1750,9 @@ impl ScaleController {
                 .metadata_manager
                 .running_fragment_parallelisms(Some(reschedules.keys().cloned().collect()))
                 .await?;
-            let serving_vnode_mapping = Arc::new(ServingVnodeMapping::default());
-            let (upserted, failed) = serving_vnode_mapping.upsert(streaming_parallelisms, &workers);
+            let serving_worker_slot_mapping = Arc::new(ServingWorkerSlotMapping::default());
+            let (upserted, failed) =
+                serving_worker_slot_mapping.upsert(streaming_parallelisms, &workers);
             if !upserted.is_empty() {
                 tracing::debug!(
                     "Update serving vnode mapping for fragments {:?}.",

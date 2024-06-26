@@ -43,7 +43,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
     PbDispatchStrategy, PbFragmentTypeFlag, PbStreamActor, PbStreamContext,
 };
-use sea_orm::sea_query::{Expr, Value};
+use sea_orm::sea_query::Expr;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, JoinType, ModelTrait, PaginatorTrait, QueryFilter,
@@ -52,8 +52,7 @@ use sea_orm::{
 
 use crate::controller::catalog::{CatalogController, CatalogControllerInner};
 use crate::controller::utils::{
-    get_actor_dispatchers, FragmentDesc, PartialActorLocation,
-    PartialFragmentStateTables,
+    get_actor_dispatchers, FragmentDesc, PartialActorLocation, PartialFragmentStateTables,
 };
 use crate::manager::{ActorInfos, InflightFragmentInfo, LocalNotification};
 use crate::model::{TableFragments, TableParallelism};
@@ -272,7 +271,7 @@ impl CatalogController {
                 fragment_id: fragment_id as _,
                 status: status.get_state().unwrap().into(),
                 splits,
-                parallel_unit_id,
+                // parallel_unit_id,
                 worker_id,
                 upstream_actor_ids: upstream_actors.into(),
                 vnode_bitmap: pb_vnode_bitmap.as_ref().map(VnodeBitmap::from),
@@ -395,7 +394,7 @@ impl CatalogController {
                 actor_id,
                 fragment_id,
                 status,
-                parallel_unit_id,
+                //                parallel_unit_id,
                 worker_id,
                 splits,
                 upstream_actor_ids,
@@ -441,7 +440,7 @@ impl CatalogController {
                 actor_id as _,
                 PbActorStatus {
                     parallel_unit: Some(PbParallelUnit {
-                        id: parallel_unit_id as _,
+                        id: u32::MAX,
                         worker_node_id: worker_id as _,
                     }),
                     state: PbActorState::from(status) as _,
@@ -902,22 +901,22 @@ impl CatalogController {
     }
 
     pub async fn migrate_actors(&self, plan: HashMap<i32, PbParallelUnit>) -> MetaResult<()> {
-        let inner = self.inner.read().await;
-        let txn = inner.db.begin().await?;
-        for (from_pu_id, to_pu_id) in &plan {
-            Actor::update_many()
-                .col_expr(
-                    actor::Column::ParallelUnitId,
-                    Expr::value(Value::Int(Some(to_pu_id.id as i32))),
-                )
-                .col_expr(
-                    actor::Column::WorkerId,
-                    Expr::value(Value::Int(Some(to_pu_id.worker_node_id as WorkerId))),
-                )
-                .filter(actor::Column::ParallelUnitId.eq(*from_pu_id))
-                .exec(&txn)
-                .await?;
-        }
+        // let inner = self.inner.read().await;
+        // let txn = inner.db.begin().await?;
+        // for (from_pu_id, to_pu_id) in &plan {
+        //     Actor::update_many()
+        //         .col_expr(
+        //             actor::Column::ParallelUnitId,
+        //             Expr::value(Value::Int(Some(to_pu_id.id as i32))),
+        //         )
+        //         .col_expr(
+        //             actor::Column::WorkerId,
+        //             Expr::value(Value::Int(Some(to_pu_id.worker_node_id as WorkerId))),
+        //         )
+        //         .filter(actor::Column::ParallelUnitId.eq(*from_pu_id))
+        //         .exec(&txn)
+        //         .await?;
+        //        }
 
         todo!()
         // let fragment_mapping: Vec<(FragmentId, FragmentVnodeMapping)> = Fragment::find()
@@ -979,15 +978,17 @@ impl CatalogController {
     }
 
     pub async fn all_inuse_parallel_units(&self) -> MetaResult<Vec<i32>> {
-        let inner = self.inner.read().await;
-        let parallel_units: Vec<i32> = Actor::find()
-            .select_only()
-            .column(actor::Column::ParallelUnitId)
-            .distinct()
-            .into_tuple()
-            .all(&inner.db)
-            .await?;
-        Ok(parallel_units)
+        // let inner = self.inner.read().await;
+        // let parallel_units: Vec<i32> = Actor::find()
+        //     .select_only()
+        //     .column(actor::Column::ParallelUnitId)
+        //     .distinct()
+        //     .into_tuple()
+        //     .all(&inner.db)
+        //     .await?;
+        // Ok(parallel_units)
+
+        todo!()
     }
 
     pub async fn all_node_actors(
@@ -1380,8 +1381,7 @@ mod tests {
     use risingwave_meta_model_v2::fragment::DistributionType;
     use risingwave_meta_model_v2::{
         actor, actor_dispatcher, fragment, ActorId, ActorUpstreamActors, ConnectorSplits,
-        ExprContext, FragmentId, I32Array, ObjectId, StreamNode, TableId,
-        VnodeBitmap,
+        ExprContext, FragmentId, I32Array, ObjectId, StreamNode, TableId, VnodeBitmap,
     };
     use risingwave_pb::common::ParallelUnit;
     use risingwave_pb::meta::table_fragments::actor_status::PbActorState;
@@ -1612,7 +1612,7 @@ mod tests {
                     fragment_id: TEST_FRAGMENT_ID,
                     status: ActorStatus::Running,
                     splits: actor_splits,
-                    parallel_unit_id: parallel_unit_id as i32,
+                    //                    parallel_unit_id: parallel_unit_id as i32,
                     worker_id: 0,
                     upstream_actor_ids: ActorUpstreamActors(actor_upstream_actor_ids),
                     vnode_bitmap,
@@ -1699,7 +1699,7 @@ mod tests {
                 fragment_id,
                 status,
                 splits,
-                parallel_unit_id,
+                // parallel_unit_id,
                 worker_id: _,
                 upstream_actor_ids,
                 vnode_bitmap,
@@ -1719,7 +1719,7 @@ mod tests {
         {
             assert_eq!(actor_id, pb_actor_id as ActorId);
             assert_eq!(fragment_id, pb_fragment_id as FragmentId);
-            assert_eq!(parallel_unit_id, pb_actor_id as i32);
+            // assert_eq!(parallel_unit_id, pb_actor_id as i32);
             let upstream_actor_ids = upstream_actor_ids.into_inner();
 
             assert_eq!(

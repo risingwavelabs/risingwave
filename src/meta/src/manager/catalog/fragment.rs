@@ -827,7 +827,6 @@ impl FragmentManager {
                 status.parallel_unit = Some(migration_plan.parallel_unit_plan[&pu.id].clone());
             }
         }
-        table_fragment.update_vnode_mapping(&migration_plan.parallel_unit_plan);
         let table_fragment = table_fragment.clone();
         let next_revision = current_revision.next();
 
@@ -1303,7 +1302,7 @@ impl FragmentManager {
                     }
                 }
 
-                let vnode_mapping = if actor_to_vnode_bitmap.is_empty() {
+                let worker_slot_mapping = if actor_to_vnode_bitmap.is_empty() {
                     // If there's no `vnode_bitmap`, then the fragment must be a singleton fragment.
                     // We directly use the single parallel unit to construct the mapping.
                     // TODO: also fill `vnode_bitmap` for the actor of singleton fragment so that we
@@ -1322,7 +1321,7 @@ impl FragmentManager {
                 // Notify fragment mapping to frontend nodes.
                 let fragment_mapping = FragmentWorkerSlotMapping {
                     fragment_id: *fragment_id as FragmentId,
-                    mapping: Some(vnode_mapping),
+                    mapping: Some(worker_slot_mapping),
                 };
 
                 fragment_mapping_to_notify.push(fragment_mapping);

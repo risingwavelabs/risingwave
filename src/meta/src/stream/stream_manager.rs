@@ -785,7 +785,7 @@ mod tests {
     use std::time::Duration;
 
     use futures::{Stream, TryStreamExt};
-    use risingwave_common::hash::{WorkerSlotId};
+    use risingwave_common::hash::WorkerSlotId;
     use risingwave_common::system_param::reader::SystemParamsRead;
     use risingwave_pb::common::{HostAddress, WorkerType};
     use risingwave_pb::meta::add_worker_node_request::Property;
@@ -1189,7 +1189,7 @@ mod tests {
         let table_id = TableId::new(0);
         let actors = make_mview_stream_actors(&table_id, 4);
 
-        let StreamingClusterInfo {  .. } = services
+        let StreamingClusterInfo { .. } = services
             .global_stream_manager
             .metadata_manager
             .get_streaming_cluster_info()

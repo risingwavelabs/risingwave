@@ -24,15 +24,16 @@ use aes_siv::{Aes128SivAead, KeyInit};
 use anyhow::Context;
 use itertools::Itertools;
 use rand::{Rng, RngCore};
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::config::DefaultParallelism;
-use risingwave_common::hash::VirtualNode;
+use risingwave_common::hash::{ActorId, ActorMapping, VirtualNode};
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::stream_graph_visitor::{
     visit_fragment, visit_stream_node, visit_stream_node_cont_mut,
 };
-use risingwave_common::{bail, current_cluster_version};
+use risingwave_common::{bail, current_cluster_version, hash};
 use risingwave_connector::dispatch_source_prop;
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::source::cdc::CdcSourceType;
@@ -54,6 +55,7 @@ use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::{
     alter_name_request, alter_set_schema_request, DdlProgress, TableJobType,
 };
+use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::PbFragment;
 use risingwave_pb::meta::PbTableParallelism;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -1190,37 +1192,41 @@ impl DdlController {
             .collect_vec();
 
         let dist_key_indices = table.distribution_key.iter().map(|i| *i as _).collect_vec();
-        // let mapping: HashMap<_, _> = downstream_actor_ids
-        //     .iter()
-        //     .map(|id| {
-        //         let actor_status = table_fragments.actor_status.get(id).unwrap();
-        //         let worker_id = actor_status.parallel_unit.as_ref().unwrap().worker_node_id;
-        //         (worker_id, *id)
-        //     })
-        //     .fold(
-        //         HashMap::<u32, BTreeSet<_>>::new(),
-        //         |mut acc: HashMap<u32, BTreeSet<_>>, (worker_id, actor_id)| {
-        //             acc.entry(worker_id).or_default().insert(actor_id);
-        //             acc
-        //         },
-        //     )
-        //     .into_iter()
-        //     .flat_map(|(worker_id, actor_ids)| {
-        //         actor_ids
-        //             .into_iter()
-        //             .enumerate()
-        //             .map(move |(slot_id, actor_id)| {
-        //                 (
-        //                     WorkerSlotId::new(worker_id, slot_id as _),
-        //                     actor_id as ActorId,
-        //                 )
-        //             })
-        //     })
-        //     .collect();
-        //
-        // let worker_slot_mapping =
-        //     WorkerSlotMapping::from_protobuf(union_fragment.vnode_mapping_v2.as_ref().unwrap());
-        // let actor_mapping = worker_slot_mapping.to_actor(&mapping);
+
+        let mut actor_location = HashMap::new();
+
+        for actor in union_fragment.get_actors() {
+            let worker_id = table_fragments
+                .actor_status
+                .get(&actor.actor_id)
+                .expect("actor status not found")
+                .parallel_unit
+                .as_ref()
+                .expect("parallel unit not found")
+                .worker_node_id;
+
+            actor_location.insert(actor.actor_id as ActorId, worker_id);
+        }
+
+        let mapping = match union_fragment.get_distribution_type().unwrap() {
+            FragmentDistributionType::Unspecified => unreachable!(),
+            FragmentDistributionType::Single => None,
+            FragmentDistributionType::Hash => {
+                let actor_bitmaps: HashMap<_, _> = union_fragment
+                    .actors
+                    .iter()
+                    .map(|actor| {
+                        (
+                            actor.actor_id as hash::ActorId,
+                            Bitmap::from(actor.vnode_bitmap.as_ref().unwrap()),
+                        )
+                    })
+                    .collect();
+
+                let actor_mapping = ActorMapping::from_bitmaps(&actor_bitmaps);
+                Some(actor_mapping)
+            }
+        };
 
         let upstream_actors = sink_fragment.get_actors();
 
@@ -1231,7 +1237,7 @@ impl DdlController {
                     r#type: DispatcherType::Hash as _,
                     dist_key_indices: dist_key_indices.clone(),
                     output_indices: output_indices.clone(),
-                    hash_mapping: None, // TODO
+                    hash_mapping: mapping.as_ref().map(|m| m.to_protobuf()),
                     dispatcher_id: union_fragment.fragment_id as _,
                     downstream_actor_id: downstream_actor_ids.clone(),
                 }],

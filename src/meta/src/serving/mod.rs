@@ -27,16 +27,16 @@ use tokio::task::JoinHandle;
 use crate::manager::{LocalNotification, MetadataManager, NotificationManagerRef};
 use crate::model::FragmentId;
 
-pub type ServingVnodeMappingRef = Arc<ServingVnodeMapping>;
+pub type ServingVnodeMappingRef = Arc<ServingWorkerSlotMapping>;
 
 #[derive(Default)]
-pub struct ServingVnodeMapping {
-    serving_vnode_mappings: RwLock<HashMap<FragmentId, WorkerSlotMapping>>,
+pub struct ServingWorkerSlotMapping {
+    serving_worker_slot_mappings: RwLock<HashMap<FragmentId, WorkerSlotMapping>>,
 }
 
-impl ServingVnodeMapping {
+impl ServingWorkerSlotMapping {
     pub fn all(&self) -> HashMap<FragmentId, WorkerSlotMapping> {
-        self.serving_vnode_mappings.read().clone()
+        self.serving_worker_slot_mappings.read().clone()
     }
 
     /// Upsert mapping for given fragments according to the latest `workers`.
@@ -46,7 +46,7 @@ impl ServingVnodeMapping {
         streaming_parallelisms: HashMap<FragmentId, usize>,
         workers: &[WorkerNode],
     ) -> (HashMap<FragmentId, WorkerSlotMapping>, Vec<FragmentId>) {
-        let mut serving_vnode_mappings = self.serving_vnode_mappings.write();
+        let mut serving_vnode_mappings = self.serving_worker_slot_mappings.write();
         let mut upserted: HashMap<FragmentId, WorkerSlotMapping> = HashMap::default();
         let mut failed: Vec<FragmentId> = vec![];
         for (fragment_id, streaming_parallelism) in streaming_parallelisms {
@@ -74,7 +74,7 @@ impl ServingVnodeMapping {
     }
 
     fn remove(&self, fragment_ids: &[FragmentId]) {
-        let mut mappings = self.serving_vnode_mappings.write();
+        let mut mappings = self.serving_worker_slot_mappings.write();
         for fragment_id in fragment_ids {
             mappings.remove(fragment_id);
         }

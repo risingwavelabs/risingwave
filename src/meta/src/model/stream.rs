@@ -195,21 +195,9 @@ impl MetadataModel for TableFragments {
                      fragment_type_mask,
                      distribution_type,
                      actors,
-                     // vnode_mapping,
-                     // vnode_mapping_v2,
                      state_table_ids,
                      upstream_fragment_ids,
                  }| {
-                    // let vnode_mapping_v2 = vnode_mapping_v2.or_else(|| {
-                    //     vnode_mapping.map(|vnode_mapping| {
-                    //         risingwave_common::hash::ParallelUnitMapping::from_protobuf(
-                    //             &vnode_mapping,
-                    //         )
-                    //         .to_worker_slot(&parallel_unit_to_worker)
-                    //         .unwrap()
-                    //         .to_protobuf()
-                    //     })
-                    // });
                     (
                         fragment_id,
                         PbFragment {
@@ -217,10 +205,6 @@ impl MetadataModel for TableFragments {
                             fragment_type_mask,
                             distribution_type,
                             actors,
-                            //                            vnode_mapping: None,
-                            // vnode_mapping_v2,
-                            // vnode_mapping: None,
-                            // vnode_mapping_v2: None,
                             state_table_ids,
                             upstream_fragment_ids,
                         },
@@ -338,24 +322,6 @@ impl TableFragments {
     pub fn set_state(&mut self, state: State) {
         self.state = state;
     }
-
-    /// Returns mview fragment vnode mapping.
-    /// Note that: the sink fragment is also stored as `TableFragments`, it's possible that
-    /// there's no fragment with `FragmentTypeFlag::Mview` exists.
-    // pub fn mview_vnode_mapping(&self) -> Option<(FragmentId, ParallelUnitMapping)> {
-    //     self.fragments
-    //         .values()
-    //         .find(|fragment| {
-    //             (fragment.get_fragment_type_mask() & FragmentTypeFlag::Mview as u32) != 0
-    //         })
-    //         .map(|fragment| {
-    //             (
-    //                 fragment.fragment_id,
-    //                 // vnode mapping is always `Some`, even for singletons.
-    //                 fragment.vnode_mapping.clone().unwrap(),
-    //             )
-    //         })
-    // }
 
     /// Update state of all actors
     pub fn update_actors_state(&mut self, state: ActorState) {
@@ -579,18 +545,6 @@ impl TableFragments {
                 .insert(actor_status.get_parallel_unit().unwrap().id);
         }
         map
-    }
-
-    pub fn update_vnode_mapping(&mut self, migrate_map: &HashMap<ParallelUnitId, ParallelUnit>) {
-        // for fragment in self.fragments.values_mut() {
-        //     if let Some(mapping) = &mut fragment.vnode_mapping {
-        //         mapping.data.iter_mut().for_each(|id| {
-        //             if migrate_map.contains_key(id) {
-        //                 *id = migrate_map.get(id).unwrap().id;
-        //             }
-        //         });
-        //     }
-        // }
     }
 
     /// Returns the status of actors group by worker id.

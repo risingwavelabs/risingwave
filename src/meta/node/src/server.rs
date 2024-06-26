@@ -100,7 +100,7 @@ use crate::rpc::election::sql::{
 use crate::rpc::metrics::{
     start_fragment_info_monitor, start_worker_info_monitor, GLOBAL_META_METRICS,
 };
-use crate::serving::ServingVnodeMapping;
+use crate::serving::ServingWorkerSlotMapping;
 use crate::storage::{EtcdMetaStore, MemStore, MetaStoreBoxExt, WrappedEtcdClient as EtcdClient};
 use crate::stream::{GlobalStreamManager, SourceManager};
 use crate::telemetry::{MetaReportCreator, MetaTelemetryInfoFetcher};
@@ -448,7 +448,7 @@ pub async fn start_service_as_election_leader(
         }
     };
 
-    let serving_vnode_mapping = Arc::new(ServingVnodeMapping::default());
+    let serving_vnode_mapping = Arc::new(ServingWorkerSlotMapping::default());
     serving::on_meta_start(
         env.notification_manager_ref(),
         &metadata_manager,
