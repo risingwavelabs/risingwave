@@ -63,7 +63,6 @@ mod tests {
     async fn test_bytes_parser(get_payload: fn() -> Vec<Vec<u8>>) {
         let descs = vec![SourceColumnDesc::simple("id", DataType::Bytea, 0.into())];
         let props = SpecificParserConfig {
-            key_encoding_config: None,
             encoding_config: EncodingProperties::Bytes(BytesProperties { column_name: None }),
             protocol_config: ProtocolProperties::Plain,
         };

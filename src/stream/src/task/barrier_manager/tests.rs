@@ -87,6 +87,7 @@ async fn test_managed_barrier_collection() -> StreamResult<()> {
                     barrier: Some(barrier.to_protobuf()),
                     actor_ids_to_send: actor_ids.clone(),
                     actor_ids_to_collect: actor_ids,
+                    table_ids_to_sync: vec![],
                 },
             )),
         }))
@@ -193,6 +194,7 @@ async fn test_managed_barrier_collection_separately() -> StreamResult<()> {
                     barrier: Some(barrier.to_protobuf()),
                     actor_ids_to_send,
                     actor_ids_to_collect,
+                    table_ids_to_sync: vec![],
                 },
             )),
         }))

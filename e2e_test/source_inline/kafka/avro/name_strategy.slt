@@ -27,7 +27,6 @@ create source s1 () with (
 system ok
 python3 scripts/source/schema_registry_producer.py  "${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}" "${RISEDEV_SCHEMA_REGISTRY_URL}" e2e_test/source_inline/kafka/avro/upsert_avro_json "topic" "avro"
 
-# If we cannot extract key schema, use message key as varchar primary key
 statement ok
 CREATE TABLE t_topic ( primary key (rw_key) )
 INCLUDE KEY AS rw_key
