@@ -125,6 +125,30 @@ impl DebeziumAvroParserConfig {
     }
 
     pub fn map_to_columns(&self) -> ConnectorResult<Vec<ColumnDesc>> {
+        // Refer to debezium_avro_msg_schema.avsc for how the schema looks like:
+
+        // "fields": [
+        // {
+        //     "name": "before",
+        //     "type": [
+        //         "null",
+        //         {
+        //             "type": "record",
+        //             "name": "Value",
+        //             "fields": [...],
+        //         }
+        //     ],
+        //     "default": null
+        // },
+        // {
+        //     "name": "after",
+        //     "type": [
+        //         "null",
+        //         "Value"
+        //     ],
+        //     "default": null
+        // },
+        // ...]
         avro_schema_to_column_descs(
             avro_schema_skip_nullable_union(avro_extract_field_schema(
                 // FIXME: use resolved schema here.
