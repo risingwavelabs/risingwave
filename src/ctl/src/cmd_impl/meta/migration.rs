@@ -161,7 +161,6 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
                 is_streaming: Set(pb_property.is_streaming),
                 is_serving: Set(pb_property.is_serving),
                 is_unschedulable: Set(pb_property.is_unschedulable),
-                parallel_unit_ids: Set(Default::default()),
                 parallelism: Set(worker.worker_node.parallelism as _),
             };
             WorkerProperty::insert(property)

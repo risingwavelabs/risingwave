@@ -79,11 +79,7 @@ impl From<WorkerInfo> for PbWorkerNode {
                 port: info.0.port,
             }),
             state: PbState::from(info.0.status) as _,
-            parallelism: info
-                .1
-                .as_ref()
-                .map(|p| p.parallel_unit_ids.inner_ref().len())
-                .unwrap_or_default() as u32,
+            parallelism: info.1.as_ref().map(|p| p.parallelism).unwrap_or_default() as u32,
             property: info.1.as_ref().map(|p| PbProperty {
                 is_streaming: p.is_streaming,
                 is_serving: p.is_serving,
@@ -651,7 +647,6 @@ impl ClusterControllerInner {
                 // keep `is_unschedulable` unchanged.
                 property.is_streaming = Set(add_property.is_streaming);
                 property.is_serving = Set(add_property.is_serving);
-                property.parallel_unit_ids = Set(I32Array(vec![]));
                 property.parallelism = Set(current_parallelism as _);
 
                 WorkerProperty::update(property).exec(&txn).await?;
@@ -680,7 +675,6 @@ impl ClusterControllerInner {
         if r#type == PbWorkerType::ComputeNode {
             let property = worker_property::ActiveModel {
                 worker_id: Set(worker_id),
-                parallel_unit_ids: Set(I32Array(vec![])),
                 parallelism: Set(add_property
                     .worker_node_parallelism
                     .try_into()
@@ -830,24 +824,7 @@ impl ClusterControllerInner {
     }
 
     pub async fn list_active_parallel_units(&self) -> MetaResult<Vec<ParallelUnit>> {
-        let parallel_units: Vec<(WorkerId, I32Array)> = WorkerProperty::find()
-            .select_only()
-            .column(worker_property::Column::WorkerId)
-            .column(worker_property::Column::ParallelUnitIds)
-            .inner_join(Worker)
-            .filter(worker::Column::Status.eq(WorkerStatus::Running))
-            .into_tuple()
-            .all(&self.db)
-            .await?;
-        Ok(parallel_units
-            .into_iter()
-            .flat_map(|(id, pu)| {
-                pu.0.into_iter().map(move |parallel_unit_id| ParallelUnit {
-                    id: parallel_unit_id as _,
-                    worker_node_id: id as _,
-                })
-            })
-            .collect_vec())
+        todo!()
     }
 
     pub async fn list_active_serving_workers(&self) -> MetaResult<Vec<PbWorkerNode>> {

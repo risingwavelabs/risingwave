@@ -549,11 +549,11 @@ impl MetadataManager {
                     .get_downstream_fragments(job_id.into())
                     .await
             }
-            MetadataManager::V2(_mgr) => {
-                todo!()
+            MetadataManager::V2(mgr) => {
                 // mgr.catalog_controller
                 //     .get_downstream_chain_fragments(job_id as _)
                 //     .await
+                todo!()
             }
         }
     }
