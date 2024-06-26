@@ -163,7 +163,7 @@ pub struct CatalogManagerCore {
     /// Catalogs which were marked as finished and committed.
     /// But the `DdlController` has not instantiated notification channel.
     /// Once notified, we can remove the entry from this map.
-    pub table_id_to_version: HashMap<TableId, NotificationVersion>,
+    pub table_id_to_version: HashMap<TableId, MetaResult<NotificationVersion>>,
 }
 
 impl CatalogManagerCore {
@@ -1110,14 +1110,14 @@ impl CatalogManager {
         &self,
         mut stream_job: StreamingJob,
         internal_tables: Vec<Table>,
-    ) -> MetaResult<u64> {
+    ) -> MetaResult<()> {
         // 1. finish procedure.
         let mut creating_internal_table_ids = internal_tables.iter().map(|t| t.id).collect_vec();
 
         // Update the corresponding 'created_at' field.
         stream_job.mark_created();
 
-        let version = match stream_job {
+        match stream_job {
             StreamingJob::MaterializedView(table) => {
                 creating_internal_table_ids.push(table.id);
                 self.finish_create_table_procedure(internal_tables, table)
@@ -1126,36 +1126,32 @@ impl CatalogManager {
             StreamingJob::Sink(sink, target_table) => {
                 let sink_id = sink.id;
 
-                let mut version = self
-                    .finish_create_sink_procedure(internal_tables, sink)
+                self.finish_create_sink_procedure(internal_tables, sink)
                     .await?;
 
                 if let Some((table, source)) = target_table {
-                    version = self
-                        .finish_replace_table_procedure(&source, &table, None, Some(sink_id), None)
+                    self.finish_replace_table_procedure(&source, &table, None, Some(sink_id), None)
                         .await?;
                 }
-
-                version
             }
             StreamingJob::Table(source, table, ..) => {
                 creating_internal_table_ids.push(table.id);
                 if let Some(source) = source {
                     self.finish_create_table_procedure_with_source(source, table, internal_tables)
-                        .await?
+                        .await?;
                 } else {
                     self.finish_create_table_procedure(internal_tables, table)
-                        .await?
+                        .await?;
                 }
             }
             StreamingJob::Index(index, table) => {
                 creating_internal_table_ids.push(table.id);
                 self.finish_create_index_procedure(internal_tables, index, table)
-                    .await?
+                    .await?;
             }
             StreamingJob::Source(source) => {
                 self.finish_create_source_procedure(source, internal_tables)
-                    .await?
+                    .await?;
             }
         };
 
@@ -1163,7 +1159,7 @@ impl CatalogManager {
         self.unmark_creating_tables(&creating_internal_table_ids, false)
             .await;
 
-        Ok(version)
+        Ok(())
     }
 
     /// This is used for both `CREATE TABLE` and `CREATE MATERIALIZED VIEW`.
@@ -1171,41 +1167,49 @@ impl CatalogManager {
         &self,
         mut internal_tables: Vec<Table>,
         mut table: Table,
-    ) -> MetaResult<NotificationVersion> {
+    ) -> MetaResult<()> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         let tables = &mut database_core.tables;
-        if cfg!(not(test)) {
-            Self::check_table_creating(tables, &table)?;
-        }
-        let mut tables = BTreeMapTransaction::new(tables);
+        let version = try {
+            if cfg!(not(test)) {
+                Self::check_table_creating(tables, &table)?;
+            }
+            let mut tables = BTreeMapTransaction::new(tables);
 
-        table.stream_job_status = PbStreamJobStatus::Created.into();
-        tables.insert(table.id, table.clone());
-        for table in &mut internal_tables {
             table.stream_job_status = PbStreamJobStatus::Created.into();
             tables.insert(table.id, table.clone());
+            for table in &mut internal_tables {
+                table.stream_job_status = PbStreamJobStatus::Created.into();
+                tables.insert(table.id, table.clone());
+            }
+            commit_meta!(self, tables)?;
+
+            tracing::debug!(id = ?table.id, "notifying frontend");
+            let version = self
+                .notify_frontend(
+                    Operation::Add,
+                    Info::RelationGroup(RelationGroup {
+                        relations: vec![Relation {
+                            relation_info: RelationInfo::Table(table.to_owned()).into(),
+                        }]
+                        .into_iter()
+                        .chain(internal_tables.into_iter().map(|internal_table| Relation {
+                            relation_info: RelationInfo::Table(internal_table).into(),
+                        }))
+                        .collect_vec(),
+                    }),
+                )
+                .await;
+            version
+        };
+        if let Some(tx) = core.table_id_to_tx.remove(&table.id) {
+            tx.send(version).unwrap();
+        } else {
+            core.table_id_to_version.insert(table.id, version);
         }
-        commit_meta!(self, tables)?;
 
-        tracing::debug!(id = ?table.id, "notifying frontend");
-        let version = self
-            .notify_frontend(
-                Operation::Add,
-                Info::RelationGroup(RelationGroup {
-                    relations: vec![Relation {
-                        relation_info: RelationInfo::Table(table.to_owned()).into(),
-                    }]
-                    .into_iter()
-                    .chain(internal_tables.into_iter().map(|internal_table| Relation {
-                        relation_info: RelationInfo::Table(internal_table).into(),
-                    }))
-                    .collect_vec(),
-                }),
-            )
-            .await;
-
-        Ok(version)
+        Ok(())
     }
 
     /// Used to cleanup states in stream manager.
