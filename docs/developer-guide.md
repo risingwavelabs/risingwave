@@ -78,6 +78,7 @@ RiseDev is the development mode of RisingWave. To develop RisingWave, you need t
 * LLVM 16 (For macOS only, to workaround some bugs in macOS toolchain. See https://github.com/risingwavelabs/risingwave/issues/6205)
 * Python (>= 3.12) (Optional, only required by `embedded-python-udf` feature)
 
+### macOS
 To install the dependencies on macOS, run:
 
 ```shell
@@ -85,12 +86,28 @@ brew install postgresql cmake protobuf tmux cyrus-sasl llvm openssl@3
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
+### Debian-based Linux
 To install the dependencies on Debian-based Linux systems, run:
 
 ```shell
 sudo apt install make build-essential cmake protobuf-compiler curl postgresql-client tmux lld pkg-config libssl-dev libsasl2-dev
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
+
+### nix shell
+If you use nix, you can also enter the nix shell via:
+
+```shell
+nix develop ./nix.
+```
+
+All dependencies will be automatically downloaded and configured.
+You can also use [direnv](https://github.com/direnv/direnv) to automatically enter the nix shell:
+
+```shell
+direnv allow
+```
+
 
 Then you'll be able to compile and start RiseDev!
 
