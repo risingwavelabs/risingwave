@@ -313,6 +313,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7b3d0060af21e8d11a926981cc00c6c1541aa91dd64b9f881985c3da1094425f"
 
 [[package]]
+name = "array-init"
+version = "2.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3d62b7694a562cdf5a74227903507c56ab2cc8bdd1f781ed5cb4cf9c9f810bfc"
+
+[[package]]
 name = "array-util"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -874,6 +880,23 @@ dependencies = [
  "arrow-data 50.0.0",
  "arrow-schema 50.0.0",
  "arrow-select 50.0.0",
+ "num",
+ "regex",
+ "regex-syntax 0.8.2",
+]
+
+[[package]]
+name = "arrow-string"
+version = "52.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e435ada8409bcafc910bc3e0077f532a4daa20e99060a496685c0e3e53cc2597"
+dependencies = [
+ "arrow-array 52.0.0",
+ "arrow-buffer 52.0.0",
+ "arrow-data 52.0.0",
+ "arrow-schema 52.0.0",
+ "arrow-select 52.0.0",
+ "memchr",
  "num",
  "regex",
  "regex-syntax 0.8.2",
@@ -2036,6 +2059,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "bimap"
+version = "0.6.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "230c5f1ca6a325a32553f8640d31ac9b49f2411e901e427570154868b46da4f7"
+
+[[package]]
 name = "bincode"
 version = "1.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3151,9 +3180,9 @@ checksum = "338089f42c427b86394a5ee60ff321da23a5c89c9d89514c829687b26359fcff"
 
 [[package]]
 name = "crc32c"
-version = "0.6.7"
+version = "0.6.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0227b9f93e535d49bc7ce914c066243424ce85ed90864cebd0874b184e9b6947"
+checksum = "3a47af21622d091a8f0fb295b88bc886ac74efcc613efc19f5d0b21de5c89e47"
 dependencies = [
  "rustc_version 0.4.0",
 ]
@@ -6526,6 +6555,72 @@ dependencies = [
 ]
 
 [[package]]
+name = "iceberg"
+version = "0.2.0"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=0c6e133e6f4655ff9ce4ad57b577dc7f692dd902#0c6e133e6f4655ff9ce4ad57b577dc7f692dd902"
+dependencies = [
+ "anyhow",
+ "apache-avro 0.17.0",
+ "array-init",
+ "arrow-arith 52.0.0",
+ "arrow-array 52.0.0",
+ "arrow-ord 52.0.0",
+ "arrow-schema 52.0.0",
+ "arrow-select 52.0.0",
+ "arrow-string 52.0.0",
+ "async-stream",
+ "async-trait",
+ "bimap",
+ "bitvec",
+ "bytes",
+ "chrono",
+ "derive_builder 0.20.0",
+ "either",
+ "fnv",
+ "futures",
+ "itertools 0.13.0",
+ "lazy_static",
+ "log",
+ "murmur3",
+ "once_cell",
+ "opendal 0.47.0",
+ "ordered-float 4.1.1",
+ "parquet 52.0.0",
+ "reqwest 0.12.4",
+ "rust_decimal",
+ "serde",
+ "serde_bytes",
+ "serde_derive",
+ "serde_json",
+ "serde_repr",
+ "serde_with 3.8.0",
+ "tokio",
+ "typed-builder 0.18.2",
+ "url",
+ "urlencoding",
+ "uuid",
+]
+
+[[package]]
+name = "iceberg-catalog-rest"
+version = "0.2.0"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=0c6e133e6f4655ff9ce4ad57b577dc7f692dd902#0c6e133e6f4655ff9ce4ad57b577dc7f692dd902"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "iceberg",
+ "itertools 0.13.0",
+ "log",
+ "reqwest 0.12.4",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "typed-builder 0.18.2",
+ "urlencoding",
+ "uuid",
+]
+
+[[package]]
 name = "icelake"
 version = "0.0.10"
 source = "git+https://github.com/icelake-io/icelake?rev=07d53893d7788b4e41fc11efad8a6be828405c31#07d53893d7788b4e41fc11efad8a6be828405c31"
@@ -8753,6 +8848,38 @@ dependencies = [
  "snap",
  "thrift",
  "tokio",
+ "twox-hash",
+ "zstd 0.13.0",
+]
+
+[[package]]
+name = "parquet"
+version = "50.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "547b92ebf0c1177e3892f44c8f79757ee62e678d564a9834189725f2c5b7a750"
+dependencies = [
+ "ahash 0.8.11",
+ "arrow-array 50.0.0",
+ "arrow-buffer 50.0.0",
+ "arrow-cast 50.0.0",
+ "arrow-data 50.0.0",
+ "arrow-ipc 50.0.0",
+ "arrow-schema 50.0.0",
+ "arrow-select 50.0.0",
+ "base64 0.21.7",
+ "brotli 3.5.0",
+ "bytes",
+ "chrono",
+ "flate2",
+ "half 2.3.1",
+ "hashbrown 0.14.3",
+ "lz4_flex",
+ "num",
+ "num-bigint",
+ "paste",
+ "seq-macro",
+ "snap",
+ "thrift",
  "twox-hash",
  "zstd 0.13.0",
 ]
@@ -11005,6 +11132,8 @@ dependencies = [
  "google-cloud-googleapis",
  "google-cloud-pubsub",
  "http 0.2.9",
+ "iceberg",
+ "iceberg-catalog-rest",
  "icelake",
  "indexmap 2.2.6",
  "itertools 0.12.1",
@@ -11024,6 +11153,7 @@ dependencies = [
  "opendal 0.47.0",
  "openssl",
  "parking_lot 0.12.1",
+ "parquet 50.0.0",
  "paste",
  "pg_bigdecimal",
  "postgres-openssl",
@@ -11077,6 +11207,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "tracing-test",
+ "typed-builder 0.18.2",
  "url",
  "urlencoding",
  "uuid",

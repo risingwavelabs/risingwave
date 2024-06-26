@@ -603,6 +603,17 @@ impl LocalInstanceUnsyncData {
         }
         ret
     }
+
+    fn assert_after_epoch(&self, epoch: HummockEpoch) {
+        if let Some(oldest_sealed_data) = self.sealed_data.back() {
+            assert!(!oldest_sealed_data.imms.is_empty());
+            assert_gt!(oldest_sealed_data.epoch, epoch);
+        } else if let Some(current_data) = &self.current_epoch_data {
+            if current_data.epoch <= epoch {
+                assert!(current_data.imms.is_empty() && !current_data.has_spilled);
+            }
+        }
+    }
 }
 
 struct TableUnsyncData {
@@ -656,6 +667,17 @@ impl TableUnsyncData {
                 .into_values()
                 .flat_map(|tasks| tasks.into_iter()),
         )
+    }
+
+    fn assert_after_epoch(&self, epoch: HummockEpoch) {
+        self.instance_data
+            .values()
+            .for_each(|instance_data| instance_data.assert_after_epoch(epoch));
+        if let Some((_, watermarks)) = &self.table_watermarks
+            && let Some((oldest_epoch, _)) = watermarks.first_key_value()
+        {
+            assert_gt!(*oldest_epoch, epoch);
+        }
     }
 }
 
@@ -757,6 +779,7 @@ impl UnsyncData {
         &mut self,
         epoch: HummockEpoch,
         context: &UploaderContext,
+        table_ids: HashSet<TableId>,
         task_manager: &mut TaskManager,
     ) -> SyncDataBuilder {
         // clean old epochs
@@ -767,6 +790,10 @@ impl UnsyncData {
 
         let mut flush_payload = HashMap::new();
         for (table_id, table_data) in &mut self.table_data {
+            if !table_ids.contains(table_id) {
+                table_data.assert_after_epoch(epoch);
+                continue;
+            }
             let (unflushed_payload, table_watermarks, task_ids) = table_data.sync(epoch);
             for (instance_id, payload) in unflushed_payload {
                 if !payload.is_empty() {
@@ -980,6 +1007,7 @@ impl HummockUploader {
         &mut self,
         epoch: HummockEpoch,
         sync_result_sender: oneshot::Sender<HummockResult<SyncedData>>,
+        table_ids: HashSet<TableId>,
     ) {
         let data = match &mut self.state {
             UploaderState::Working(data) => data,
@@ -1005,9 +1033,9 @@ impl HummockUploader {
 
         self.max_syncing_epoch = epoch;
 
-        let sync_data = data
-            .unsync_data
-            .sync(epoch, &self.context, &mut data.task_manager);
+        let sync_data =
+            data.unsync_data
+                .sync(epoch, &self.context, table_ids, &mut data.task_manager);
 
         let SyncDataBuilder {
             table_watermarks,
@@ -1255,7 +1283,7 @@ impl HummockUploader {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use std::collections::{HashMap, VecDeque};
+    use std::collections::{HashMap, HashSet, VecDeque};
     use std::future::{poll_fn, Future};
     use std::ops::Deref;
     use std::pin::pin;
@@ -1542,7 +1570,7 @@ pub(crate) mod tests {
         uploader.local_seal_epoch_for_test(TEST_LOCAL_INSTANCE_ID, epoch1);
 
         let (sync_tx, sync_rx) = oneshot::channel();
-        uploader.start_sync_epoch(epoch1, sync_tx);
+        uploader.start_sync_epoch(epoch1, sync_tx, HashSet::from_iter([TEST_TABLE_ID]));
         assert_eq!(epoch1 as HummockEpoch, uploader.max_syncing_epoch);
         assert_eq!(1, uploader.data().syncing_data.len());
         let (_, syncing_data) = uploader.data().syncing_data.first_key_value().unwrap();
@@ -1598,7 +1626,7 @@ pub(crate) mod tests {
         let epoch1 = INITIAL_EPOCH.next_epoch();
 
         let (sync_tx, sync_rx) = oneshot::channel();
-        uploader.start_sync_epoch(epoch1, sync_tx);
+        uploader.start_sync_epoch(epoch1, sync_tx, HashSet::from_iter([TEST_TABLE_ID]));
         assert_eq!(epoch1, uploader.max_syncing_epoch);
 
         assert_uploader_pending(&mut uploader).await;
@@ -1631,7 +1659,7 @@ pub(crate) mod tests {
         uploader.add_imm(TEST_LOCAL_INSTANCE_ID, imm);
 
         let (sync_tx, sync_rx) = oneshot::channel();
-        uploader.start_sync_epoch(epoch1, sync_tx);
+        uploader.start_sync_epoch(epoch1, sync_tx, HashSet::from_iter([TEST_TABLE_ID]));
         assert_eq!(epoch1, uploader.max_syncing_epoch);
 
         assert_uploader_pending(&mut uploader).await;
@@ -1692,7 +1720,7 @@ pub(crate) mod tests {
         assert_eq!(epoch3, uploader.max_syncing_epoch);
 
         let (sync_tx, sync_rx) = oneshot::channel();
-        uploader.start_sync_epoch(epoch6, sync_tx);
+        uploader.start_sync_epoch(epoch6, sync_tx, HashSet::from_iter([TEST_TABLE_ID]));
         assert_eq!(epoch6, uploader.max_syncing_epoch);
         uploader.update_pinned_version(version4);
         assert_eq!(epoch4, uploader.max_synced_epoch);
@@ -1860,7 +1888,7 @@ pub(crate) mod tests {
             new_task_notifier(get_payload_imm_ids(&epoch1_sync_payload));
         uploader.local_seal_epoch_for_test(instance_id1, epoch1);
         let (sync_tx1, mut sync_rx1) = oneshot::channel();
-        uploader.start_sync_epoch(epoch1, sync_tx1);
+        uploader.start_sync_epoch(epoch1, sync_tx1, HashSet::from_iter([TEST_TABLE_ID]));
         await_start1_4.await;
         let epoch3 = epoch2.next_epoch();
 
@@ -1946,7 +1974,7 @@ pub(crate) mod tests {
         // synced: epoch1: sst([imm1_4]), sst([imm1_3]), sst([imm1_2, imm1_1])
 
         let (sync_tx2, sync_rx2) = oneshot::channel();
-        uploader.start_sync_epoch(epoch2, sync_tx2);
+        uploader.start_sync_epoch(epoch2, sync_tx2, HashSet::from_iter([TEST_TABLE_ID]));
         uploader.local_seal_epoch_for_test(instance_id2, epoch3);
         let sst = uploader.next_uploaded_sst().await;
         assert_eq!(&get_payload_imm_ids(&epoch3_spill_payload1), sst.imm_ids());
@@ -1975,7 +2003,7 @@ pub(crate) mod tests {
         let (await_start4_with_3_3, finish_tx4_with_3_3) =
             new_task_notifier(get_payload_imm_ids(&epoch4_sync_payload));
         let (sync_tx4, mut sync_rx4) = oneshot::channel();
-        uploader.start_sync_epoch(epoch4, sync_tx4);
+        uploader.start_sync_epoch(epoch4, sync_tx4, HashSet::from_iter([TEST_TABLE_ID]));
         await_start4_with_3_3.await;
 
         // current uploader state:

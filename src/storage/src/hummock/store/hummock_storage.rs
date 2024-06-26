@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
 use std::future::Future;
 use std::ops::{Bound, Deref};
 use std::sync::atomic::{AtomicU64, Ordering as MemOrdering};
@@ -562,12 +563,13 @@ impl StateStore for HummockStorage {
         wait_for_epoch(&self.version_update_notifier_tx, wait_epoch).await
     }
 
-    fn sync(&self, epoch: u64) -> impl SyncFuture {
+    fn sync(&self, epoch: u64, table_ids: HashSet<TableId>) -> impl SyncFuture {
         let (tx, rx) = oneshot::channel();
         self.hummock_event_sender
             .send(HummockEvent::SyncEpoch {
                 new_sync_epoch: epoch,
                 sync_result_sender: tx,
+                table_ids,
             })
             .expect("should send success");
         rx.map(|recv_result| {
@@ -651,7 +653,16 @@ impl HummockStorage {
         epoch: u64,
     ) -> StorageResult<risingwave_hummock_sdk::SyncResult> {
         self.seal_epoch(epoch, true);
-        self.sync(epoch).await
+        let table_ids = self
+            .pinned_version
+            .load()
+            .version()
+            .state_table_info
+            .info()
+            .keys()
+            .cloned()
+            .collect();
+        self.sync(epoch, table_ids).await
     }
 
     /// Used in the compaction test tool
