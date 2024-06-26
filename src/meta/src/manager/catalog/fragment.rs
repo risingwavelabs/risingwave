@@ -68,10 +68,7 @@ impl FragmentManagerCore {
             .values()
             .filter(|tf| tf.state() != State::Initial)
         {
-            let vec1 = Self::extract_fragment_mapping(table_fragment);
-
-            println!("vec {:#?}", vec1);
-            result.extend(vec1.into_iter());
+            result.extend(Self::extract_fragment_mapping(table_fragment).into_iter());
         }
 
         result.into_iter()
@@ -115,7 +112,6 @@ impl FragmentManagerCore {
                     }
 
                     let actor_mapping = ActorMapping::from_bitmaps(&actor_bitmaps);
-
 
                     let mapping = actor_mapping.to_worker_slot(&actor_to_workers);
 

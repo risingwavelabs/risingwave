@@ -24,7 +24,7 @@ use risingwave_common::util::stream_graph_visitor::visit_stream_node;
 use risingwave_meta_model_v2::actor::ActorStatus;
 use risingwave_meta_model_v2::prelude::{Actor, ActorDispatcher, Fragment, Sink, StreamingJob};
 use risingwave_meta_model_v2::{
-    actor, actor_dispatcher, fragment, object, sink, streaming_job, ActorId, ActorUpstreamActors,
+    actor, actor_dispatcher, fragment, sink, streaming_job, ActorId, ActorUpstreamActors,
     ConnectorSplits, ExprContext, FragmentId, FragmentVnodeMapping, I32Array, JobStatus, ObjectId,
     SinkId, SourceId, StreamNode, StreamingParallelism, TableId, VnodeBitmap, WorkerId,
 };
@@ -52,7 +52,7 @@ use sea_orm::{
 
 use crate::controller::catalog::{CatalogController, CatalogControllerInner};
 use crate::controller::utils::{
-    get_actor_dispatchers, get_parallel_unit_to_worker_map, FragmentDesc, PartialActorLocation,
+    get_actor_dispatchers, FragmentDesc, PartialActorLocation,
     PartialFragmentStateTables,
 };
 use crate::manager::{ActorInfos, InflightFragmentInfo, LocalNotification};
@@ -65,26 +65,29 @@ impl CatalogControllerInner {
     pub async fn all_running_fragment_mappings(
         &self,
     ) -> MetaResult<impl Iterator<Item = FragmentWorkerSlotMapping> + '_> {
-        let txn = self.db.begin().await?;
+        // let txn = self.db.begin().await?;
+        //
+        // let fragment_mappings: Vec<(FragmentId, FragmentVnodeMapping)> = Fragment::find()
+        //     .join(JoinType::InnerJoin, fragment::Relation::Object.def())
+        //     .join(JoinType::InnerJoin, object::Relation::StreamingJob.def())
+        //     .select_only()
+        //     .columns([fragment::Column::FragmentId, fragment::Column::VnodeMapping])
+        //     .filter(streaming_job::Column::JobStatus.eq(JobStatus::Created))
+        //     .into_tuple()
+        //     .all(&txn)
+        //     .await?;
+        //
+        // let parallel_unit_to_worker = get_parallel_unit_to_worker_map(&txn).await?;
+        //
+        // let mappings = CatalogController::convert_fragment_mappings(
+        //     fragment_mappings,
+        //     &parallel_unit_to_worker,
+        // )?;
+        //
+        // Ok(mappings.into_iter())
+        // todo!()
 
-        let fragment_mappings: Vec<(FragmentId, FragmentVnodeMapping)> = Fragment::find()
-            .join(JoinType::InnerJoin, fragment::Relation::Object.def())
-            .join(JoinType::InnerJoin, object::Relation::StreamingJob.def())
-            .select_only()
-            .columns([fragment::Column::FragmentId, fragment::Column::VnodeMapping])
-            .filter(streaming_job::Column::JobStatus.eq(JobStatus::Created))
-            .into_tuple()
-            .all(&txn)
-            .await?;
-
-        let parallel_unit_to_worker = get_parallel_unit_to_worker_map(&txn).await?;
-
-        let mappings = CatalogController::convert_fragment_mappings(
-            fragment_mappings,
-            &parallel_unit_to_worker,
-        )?;
-
-        Ok(mappings.into_iter())
+        Ok(Vec::<FragmentWorkerSlotMapping>::default().into_iter())
     }
 }
 
@@ -917,7 +920,6 @@ impl CatalogController {
         }
 
         todo!()
-        //
         // let fragment_mapping: Vec<(FragmentId, FragmentVnodeMapping)> = Fragment::find()
         //     .select_only()
         //     .columns([fragment::Column::FragmentId, fragment::Column::VnodeMapping])
@@ -1378,7 +1380,7 @@ mod tests {
     use risingwave_meta_model_v2::fragment::DistributionType;
     use risingwave_meta_model_v2::{
         actor, actor_dispatcher, fragment, ActorId, ActorUpstreamActors, ConnectorSplits,
-        ExprContext, FragmentId, FragmentVnodeMapping, I32Array, ObjectId, StreamNode, TableId,
+        ExprContext, FragmentId, I32Array, ObjectId, StreamNode, TableId,
         VnodeBitmap,
     };
     use risingwave_pb::common::ParallelUnit;
@@ -1653,7 +1655,7 @@ mod tests {
             fragment_type_mask: 0,
             distribution_type: DistributionType::Hash,
             stream_node: StreamNode::from(&stream_node),
-            vnode_mapping: FragmentVnodeMapping::from(&parallel_unit_mapping.to_protobuf()),
+            //            vnode_mapping: FragmentVnodeMapping::from(&parallel_unit_mapping.to_protobuf()),
             state_table_ids: I32Array(vec![TEST_STATE_TABLE_ID]),
             upstream_fragment_id: I32Array::default(),
         };

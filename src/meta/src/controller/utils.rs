@@ -24,7 +24,7 @@ use risingwave_meta_model_v2::prelude::*;
 use risingwave_meta_model_v2::{
     actor, actor_dispatcher, connection, database, fragment, function, index, object,
     object_dependency, schema, secret, sink, source, subscription, table, user, user_privilege,
-    view, worker_property, ActorId, DataTypeArray, DatabaseId, FragmentId, FragmentVnodeMapping,
+    view, worker_property, ActorId, DataTypeArray, DatabaseId, FragmentId,
     I32Array, ObjectId, PrivilegeId, SchemaId, SourceId, StreamNode, UserId, WorkerId,
 };
 use risingwave_pb::catalog::{PbConnection, PbFunction, PbSecret, PbSubscription};
@@ -42,7 +42,6 @@ use sea_orm::{
     Order, PaginatorTrait, QueryFilter, QuerySelect, RelationTrait, Statement,
 };
 
-use crate::controller::catalog::CatalogController;
 use crate::{MetaError, MetaResult};
 
 /// This function will construct a query using recursive cte to find all objects[(id, `obj_type`)] that are used by the given object.
@@ -842,17 +841,19 @@ pub async fn get_fragment_mappings<C>(
 where
     C: ConnectionTrait,
 {
-    let parallel_unit_to_worker = get_parallel_unit_to_worker_map(db).await?;
+    // let parallel_unit_to_worker = get_parallel_unit_to_worker_map(db).await?;
+    //
+    // let fragment_mappings: Vec<(FragmentId, FragmentVnodeMapping)> = Fragment::find()
+    //     .select_only()
+    //     .columns([fragment::Column::FragmentId, fragment::Column::VnodeMapping])
+    //     .filter(fragment::Column::JobId.eq(job_id))
+    //     .into_tuple()
+    //     .all(db)
+    //     .await?;
+    //
+    // CatalogController::convert_fragment_mappings(fragment_mappings, &parallel_unit_to_worker)
 
-    let fragment_mappings: Vec<(FragmentId, FragmentVnodeMapping)> = Fragment::find()
-        .select_only()
-        .columns([fragment::Column::FragmentId, fragment::Column::VnodeMapping])
-        .filter(fragment::Column::JobId.eq(job_id))
-        .into_tuple()
-        .all(db)
-        .await?;
-
-    CatalogController::convert_fragment_mappings(fragment_mappings, &parallel_unit_to_worker)
+    todo!()
 }
 
 /// `get_fragment_mappings_by_jobs` returns the fragment vnode mappings of the given job list.
@@ -863,25 +864,26 @@ pub async fn get_fragment_mappings_by_jobs<C>(
 where
     C: ConnectionTrait,
 {
-    if job_ids.is_empty() {
-        return Ok(vec![]);
-    }
-
-    let fragment_mappings: Vec<(FragmentId, FragmentVnodeMapping)> = Fragment::find()
-        .select_only()
-        .columns([fragment::Column::FragmentId, fragment::Column::VnodeMapping])
-        .filter(fragment::Column::JobId.is_in(job_ids))
-        .into_tuple()
-        .all(db)
-        .await?;
-
-    Ok(fragment_mappings
-        .into_iter()
-        .map(|(fragment_id, mapping)| PbFragmentParallelUnitMapping {
-            fragment_id: fragment_id as _,
-            mapping: Some(mapping.to_protobuf()),
-        })
-        .collect())
+    // if job_ids.is_empty() {
+    //     return Ok(vec![]);
+    // }
+    //
+    // let fragment_mappings: Vec<(FragmentId, FragmentVnodeMapping)> = Fragment::find()
+    //     .select_only()
+    //     .columns([fragment::Column::FragmentId, fragment::Column::VnodeMapping])
+    //     .filter(fragment::Column::JobId.is_in(job_ids))
+    //     .into_tuple()
+    //     .all(db)
+    //     .await?;
+    //
+    // Ok(fragment_mappings
+    //     .into_iter()
+    //     .map(|(fragment_id, mapping)| PbFragmentParallelUnitMapping {
+    //         fragment_id: fragment_id as _,
+    //         mapping: Some(mapping.to_protobuf()),
+    //     })
+    //     .collect())
+    todo!()
 }
 
 /// `get_fragment_actor_ids` returns the fragment actor ids of the given fragments.

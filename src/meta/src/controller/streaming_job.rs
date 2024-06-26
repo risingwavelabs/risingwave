@@ -1438,9 +1438,9 @@ impl CatalogController {
             }
             .to_protobuf();
 
-            let mut fragment = fragment.into_active_model();
-            fragment.vnode_mapping = Set((&vnode_mapping).into());
-            fragment.update(&txn).await?;
+            // let mut fragment = fragment.into_active_model();
+            // fragment.vnode_mapping = Set((&vnode_mapping).into());
+            // fragment.update(&txn).await?;
 
             let worker_slot_mapping = ParallelUnitMapping::from_protobuf(&vnode_mapping)
                 .to_worker_slot(&parallel_unit_to_worker)?
