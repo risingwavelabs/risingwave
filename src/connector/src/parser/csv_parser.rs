@@ -31,6 +31,20 @@ macro_rules! parse {
     };
 }
 
+/// Parse a string into a boolean value, following Go's `strconv.ParseBool`.
+fn parse_boolean(s: &str) -> AccessResult<bool> {
+    let s_trimmed = s.trim();
+    match s_trimmed {
+        "1" | "t" | "T" | "true" | "TRUE" | "True" => Ok(true),
+        "0" | "f" | "F" | "false" | "FALSE" | "False" => Ok(false),
+        _ => Err(AccessError::TypeError {
+            expected: "boolean".to_owned(),
+            got: "string".to_owned(),
+            value: s.to_owned(),
+        }),
+    }
+}
+
 /// Parser for CSV format
 #[derive(Debug)]
 pub struct CsvParser {
@@ -76,7 +90,7 @@ impl CsvParser {
     fn parse_string(dtype: &DataType, v: String) -> AccessResult {
         let v = match dtype {
             // mysql use tinyint to represent boolean
-            DataType::Boolean => (parse!(v, i16)? != 0).into(),
+            DataType::Boolean => parse_boolean(&v)?.into(),
             DataType::Int16 => parse!(v, i16)?.into(),
             DataType::Int32 => parse!(v, i32)?.into(),
             DataType::Int64 => parse!(v, i64)?.into(),
@@ -376,5 +390,28 @@ mod tests {
                 (Some(ScalarImpl::Int32(0)))
             );
         }
+    }
+
+    #[test]
+    fn test_parse_boolean() {
+        assert_eq!(parse_boolean("1").unwrap(), true);
+        assert_eq!(parse_boolean("t").unwrap(), true);
+        assert_eq!(parse_boolean("T").unwrap(), true);
+        assert_eq!(parse_boolean("true").unwrap(), true);
+        assert_eq!(parse_boolean("TRUE").unwrap(), true);
+        assert_eq!(parse_boolean("True").unwrap(), true);
+
+        assert_eq!(parse_boolean("0").unwrap(), false);
+        assert_eq!(parse_boolean("f").unwrap(), false);
+        assert_eq!(parse_boolean("F").unwrap(), false);
+        assert_eq!(parse_boolean("false").unwrap(), false);
+        assert_eq!(parse_boolean("FALSE").unwrap(), false);
+        assert_eq!(parse_boolean("False").unwrap(), false);
+
+        assert!(parse_boolean("2").is_err());
+        assert!(parse_boolean("t1").is_err());
+        assert!(parse_boolean("f1").is_err());
+        assert!(parse_boolean("false1").is_err());
+        assert!(parse_boolean("TRUE1").is_err());
     }
 }
