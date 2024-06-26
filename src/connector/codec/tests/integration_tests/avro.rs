@@ -554,3 +554,268 @@ fn test_1() {
             Owned(Float64(OrderedFloat(NaN)))"#]],
     );
 }
+
+#[test]
+fn test_union() {
+    check(
+        r#"
+{
+  "type": "record",
+  "name": "Root",
+  "fields": [
+    {
+      "name": "unionType",
+      "type": ["int", "string"]
+    },
+    {
+      "name": "unionTypeComplex",
+      "type": [
+        "null",
+        {"type": "record", "name": "Email","fields": [{"name":"inner","type":"string"}]},
+        {"type": "record", "name": "Fax","fields": [{"name":"inner","type":"int"}]},
+        {"type": "record", "name": "Sms","fields": [{"name":"inner","type":"int"}]}
+      ]
+    },
+    {
+      "name": "nullableString",
+      "type": ["null", "string"]
+    }
+  ]
+}
+    "#,
+        &[
+            // {
+            //   "unionType": {"int": 114514},
+            //   "unionTypeComplex": {"Sms": {"inner":6}},
+            //   "nullableString": null
+            // }
+            "00a4fd0d060c00",
+            // {
+            //   "unionType": {"int": 114514},
+            //   "unionTypeComplex": {"Fax": {"inner":6}},
+            //   "nullableString": null
+            // }
+            "00a4fd0d040c00",
+            // {
+            //   "unionType": {"string": "oops"},
+            //   "unionTypeComplex": null,
+            //   "nullableString": {"string": "hello"}
+            // }
+            "02086f6f707300020a68656c6c6f",
+            // {
+            //   "unionType": {"string": "oops"},
+            //   "unionTypeComplex": {"Email": {"inner":"a@b.c"}},
+            //   "nullableString": null
+            // }
+            "02086f6f7073020a6140622e6300",
+        ],
+        Config {
+            map_handling: None,
+            data_encoding: TestDataEncoding::HexBinary,
+        },
+        // FIXME: why the struct type doesn't have field_descs?
+        expect![[r#"
+            [
+                unionType(#1): Struct {
+                    int: Int32,
+                    string: Varchar,
+                },
+                unionTypeComplex(#2): Struct {
+                    Email: Struct { inner: Varchar },
+                    Fax: Struct { inner: Int32 },
+                    Sms: Struct { inner: Int32 },
+                },
+                nullableString(#3): Varchar,
+            ]"#]],
+        expect![[r#"
+            Owned(StructValue(
+                Int32(114514),
+                null,
+            ))
+            Owned(StructValue(
+                null,
+                null,
+                StructValue(Int32(6)),
+            ))
+            Owned(null)
+            ----
+            Owned(StructValue(
+                Int32(114514),
+                null,
+            ))
+            Owned(StructValue(
+                null,
+                StructValue(Int32(6)),
+                null,
+            ))
+            Owned(null)
+            ----
+            Owned(StructValue(
+                null,
+                Utf8("oops"),
+            ))
+            Owned(null)
+            Borrowed(Utf8("hello"))
+            ----
+            Owned(StructValue(
+                null,
+                Utf8("oops"),
+            ))
+            Owned(StructValue(
+                StructValue(Utf8("a@b.c")),
+                null,
+                null,
+            ))
+            Owned(null)"#]],
+    );
+
+    check(
+        r#"
+{
+  "namespace": "com.abc.efg.mqtt",
+  "name": "also.DataMessage",
+  "type": "record",
+  "fields": [
+      {
+          "name": "metrics",
+          "type": {
+              "type": "array",
+              "items": {
+                  "name": "also_data_metric",
+                  "type": "record",
+                  "fields": [
+                      {
+                          "name": "id",
+                          "type": "string"
+                      },
+                      {
+                          "name": "name",
+                          "type": "string"
+                      },
+                      {
+                          "name": "norm_name",
+                          "type": [
+                              "null",
+                              "string"
+                          ],
+                          "default": null
+                      },
+                      {
+                          "name": "uom",
+                          "type": [
+                              "null",
+                              "string"
+                          ],
+                          "default": null
+                      },
+                      {
+                          "name": "data",
+                          "type": {
+                              "type": "array",
+                              "items": {
+                                  "name": "dataItem",
+                                  "type": "record",
+                                  "fields": [
+                                      {
+                                          "name": "ts",
+                                          "type": "string",
+                                          "doc": "Timestamp of the metric."
+                                      },
+                                      {
+                                          "name": "value",
+                                          "type": [
+                                              "null",
+                                              "boolean",
+                                              "double",
+                                              "string"
+                                          ],
+                                          "doc": "Value of the metric."
+                                      }
+                                  ]
+                              }
+                          },
+                          "doc": "The data message"
+                      }
+                  ],
+                  "doc": "A metric object"
+              }
+          },
+          "doc": "A list of metrics."
+      }
+  ]
+}
+          "#,
+        &[
+            // {
+            //   "metrics": [
+            //     {"id":"foo", "name":"a", "data": [] }
+            //   ]
+            // }
+            "0206666f6f026100000000",
+            // {
+            //   "metrics": [
+            //     {"id":"foo", "name":"a", "norm_name": null, "uom": {"string":"c"}, "data": [{"ts":"1", "value":null}, {"ts":"2", "value": {"boolean": true }}] }
+            //   ]
+            // }
+            "0206666f6f02610002026304023100023202010000",
+        ],
+        Config {
+            map_handling: None,
+            data_encoding: TestDataEncoding::HexBinary,
+        },
+        expect![[r#"
+            [
+                metrics(#1): List(
+                    Struct {
+                        id: Varchar,
+                        name: Varchar,
+                        norm_name: Varchar,
+                        uom: Varchar,
+                        data: List(
+                            Struct {
+                                ts: Varchar,
+                                value: Struct {
+                                    boolean: Boolean,
+                                    double: Float64,
+                                    string: Varchar,
+                                },
+                            },
+                        ),
+                    },
+                ),
+            ]"#]],
+        expect![[r#"
+            Owned([
+                StructValue(
+                    Utf8("foo"),
+                    Utf8("a"),
+                    null,
+                    null,
+                    [],
+                ),
+            ])
+            ----
+            Owned([
+                StructValue(
+                    Utf8("foo"),
+                    Utf8("a"),
+                    null,
+                    Utf8("c"),
+                    [
+                        StructValue(
+                            Utf8("1"),
+                            null,
+                        ),
+                        StructValue(
+                            Utf8("2"),
+                            StructValue(
+                                Bool(true),
+                                null,
+                                null,
+                            ),
+                        ),
+                    ],
+                ),
+            ])"#]],
+    );
+}
