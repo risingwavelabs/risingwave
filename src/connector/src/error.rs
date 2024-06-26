@@ -59,6 +59,7 @@ def_anyhow_newtype! {
     icelake::Error => "Iceberg error",
     redis::RedisError => "Redis error",
     arrow_schema::ArrowError => "Arrow error",
+    arrow_schema_iceberg::ArrowError => "Arrow error",
     google_cloud_pubsub::client::google_cloud_auth::error::Error => "Google Cloud error",
     rumqttc::tokio_rustls::rustls::Error => "TLS error",
     rumqttc::v5::ClientError => "MQTT error",
