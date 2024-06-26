@@ -50,7 +50,7 @@ def execute_slt(args, slt):
     cmd = f"sqllogictest -p {rw_config['port']} -d {rw_config['db']} {slt}"
     print(f"Command line is [{cmd}]")
     subprocess.run(cmd, shell=True, check=True)
-    time.sleep(30)
+    time.sleep(15)
 
 
 def verify_result(args, verify_sql, verify_schema, verify_data):
@@ -129,6 +129,7 @@ if __name__ == "__main__":
         verify_sql = test_case.get("verify_sql")
         print(f"verify_sql:{verify_sql}")
         verify_data = test_case.get("verify_data")
+        verify_slt = test_case.get("verify_slt")
         cmp_sqls = test_case.get("cmp_sqls")
         drop_sqls = test_case["drop_sqls"]
         config = configparser.ConfigParser()
@@ -146,6 +147,8 @@ if __name__ == "__main__":
             verify_result(config, verify_sql, verify_schema, verify_data)
         if cmp_sqls is not None and cmp_sqls != "" and len(cmp_sqls) == 2:
             compare_sql(config, cmp_sqls)
+        if verify_slt is not None and verify_slt != "":
+            execute_slt(config, verify_slt)
         if drop_sqls is not None and drop_sqls != "":
             drop_table(config, drop_sqls)
 

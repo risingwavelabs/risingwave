@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
+use std::fmt::Display;
 use std::future::pending;
 use std::sync::Arc;
 use std::time::Duration;
@@ -305,14 +306,42 @@ pub(crate) struct StreamActorManager {
     pub(super) runtime: BackgroundShutdownRuntime,
 }
 
-#[derive(Debug)]
-#[expect(dead_code)]
 pub(super) struct LocalBarrierWorkerDebugInfo<'a> {
     actor_to_send: BTreeSet<ActorId>,
     running_actors: BTreeSet<ActorId>,
     creating_actors: Vec<BTreeSet<ActorId>>,
     managed_barrier_state: ManagedBarrierStateDebugInfo<'a>,
     has_control_stream_connected: bool,
+}
+
+impl Display for LocalBarrierWorkerDebugInfo<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "running_actors: ")?;
+        for actor_id in &self.running_actors {
+            write!(f, "{}, ", actor_id)?;
+        }
+
+        write!(f, "\nactor_to_send: ")?;
+        for actor_id in &self.actor_to_send {
+            write!(f, "{}, ", actor_id)?;
+        }
+
+        write!(f, "\ncreating_actors: ")?;
+        for actors in &self.creating_actors {
+            for actor_id in actors {
+                write!(f, "{}, ", actor_id)?;
+            }
+        }
+
+        writeln!(
+            f,
+            "\nhas_control_stream_connected: {}",
+            self.has_control_stream_connected
+        )?;
+
+        writeln!(f, "managed_barrier_state:\n{}", self.managed_barrier_state)?;
+        Ok(())
+    }
 }
 
 /// [`LocalBarrierWorker`] manages barrier control flow, used by local stream manager.
@@ -538,7 +567,8 @@ impl LocalBarrierWorker {
                 let _ = result_sender.send(());
             }
             LocalActorOperation::InspectState { result_sender } => {
-                let _ = result_sender.send(format!("{:#?}", self.to_debug_info()));
+                let debug_info = self.to_debug_info();
+                let _ = result_sender.send(debug_info.to_string());
             }
         }
     }

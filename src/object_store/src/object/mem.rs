@@ -101,7 +101,7 @@ pub struct InMemObjectStore {
 impl ObjectStore for InMemObjectStore {
     type StreamingUploader = InMemStreamingUploader;
 
-    fn get_object_prefix(&self, _obj_id: u64) -> String {
+    fn get_object_prefix(&self, _obj_id: u64, _use_new_object_prefix_strategy: bool) -> String {
         String::default()
     }
 

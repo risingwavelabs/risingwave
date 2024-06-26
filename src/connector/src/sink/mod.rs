@@ -31,6 +31,7 @@ pub mod kafka;
 pub mod kinesis;
 pub mod log_store;
 pub mod mock_coordination_client;
+pub mod mongodb;
 pub mod mqtt;
 pub mod nats;
 pub mod pulsar;
@@ -93,6 +94,7 @@ macro_rules! for_all_sinks {
                 { Nats, $crate::sink::nats::NatsSink },
                 { Jdbc, $crate::sink::remote::JdbcSink },
                 { ElasticSearch, $crate::sink::remote::ElasticSearchSink },
+                { Opensearch, $crate::sink::remote::OpensearchSink },
                 { Cassandra, $crate::sink::remote::CassandraSink },
                 { HttpJava, $crate::sink::remote::HttpJavaSink },
                 { Doris, $crate::sink::doris::DorisSink },
@@ -101,6 +103,7 @@ macro_rules! for_all_sinks {
                 { DeltaLake, $crate::sink::deltalake::DeltaLakeSink },
                 { BigQuery, $crate::sink::big_query::BigQuerySink },
                 { DynamoDb, $crate::sink::dynamodb::DynamoDbSink },
+                { Mongodb, $crate::sink::mongodb::MongodbSink },
                 { SqlServer, $crate::sink::sqlserver::SqlServerSink },
                 { Test, $crate::sink::test_sink::TestSink },
                 { Table, $crate::sink::trivial::TableSink }
@@ -443,6 +446,10 @@ impl SinkImpl {
     pub fn is_sink_into_table(&self) -> bool {
         matches!(self, SinkImpl::Table(_))
     }
+
+    pub fn is_blackhole(&self) -> bool {
+        matches!(self, SinkImpl::BlackHole(_))
+    }
 }
 
 pub fn build_sink(param: SinkParam) -> Result<SinkImpl> {
@@ -590,6 +597,12 @@ pub enum SinkError {
         #[from]
         #[backtrace]
         ConnectorError,
+    ),
+    #[error("Mongodb error: {0}")]
+    Mongodb(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
     ),
 }
 

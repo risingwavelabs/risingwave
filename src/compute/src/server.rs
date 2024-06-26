@@ -91,7 +91,6 @@ pub async fn compute_node_serve(
 ) -> (Vec<JoinHandle<()>>, Sender<()>) {
     // Load the configuration.
     let config = load_config(&opts.config_path, &opts);
-
     info!("Starting compute node",);
     info!("> config: {:?}", config);
     info!(
@@ -211,6 +210,7 @@ pub async fn compute_node_serve(
         storage_metrics.clone(),
         compactor_metrics.clone(),
         await_tree_config.clone(),
+        system_params.use_new_object_prefix_strategy(),
     )
     .await
     .unwrap();

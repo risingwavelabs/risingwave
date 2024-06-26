@@ -72,7 +72,7 @@ pub struct Model {
     pub sink_from_name: String,
     pub sink_format_desc: Option<SinkFormatDesc>,
     pub target_table: Option<TableId>,
-    // `secret_ref` stores a json string, mapping from property name to secret id.
+    // `secret_ref` stores the mapping info mapping from property name to secret id and type.
     pub secret_ref: Option<SecretRef>,
 }
 

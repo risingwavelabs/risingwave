@@ -18,7 +18,7 @@ use anyhow::Context;
 use itertools::Itertools;
 use pgwire::pg_response::StatementType;
 use risingwave_common::bail_not_implemented;
-use risingwave_common::catalog::ColumnCatalog;
+use risingwave_common::catalog::{max_column_id, ColumnCatalog};
 use risingwave_connector::WithPropertiesExt;
 use risingwave_pb::catalog::StreamSourceInfo;
 use risingwave_pb::plan_common::{EncodeType, FormatType};
@@ -68,14 +68,19 @@ fn encode_type_to_encode(from: EncodeType) -> Option<Encode> {
     })
 }
 
-/// Returns the columns in `columns_a` but not in `columns_b`,
-/// where the comparison is done by name and data type,
-/// and hidden columns are ignored.
+/// Returns the columns in `columns_a` but not in `columns_b`.
+///
+/// Note:
+/// - The comparison is done by name and data type, without checking `ColumnId`.
+/// - Hidden columns and `INCLUDE ... AS ...` columns are ignored. Because it's only for the special handling of alter sr.
+///   For the newly resolved `columns_from_resolve_source` (created by [`bind_columns_from_source`]), it doesn't contain hidden columns (`_row_id`) and `INCLUDE ... AS ...` columns.
+///   This is fragile and we should really refactor it later.
 fn columns_minus(columns_a: &[ColumnCatalog], columns_b: &[ColumnCatalog]) -> Vec<ColumnCatalog> {
     columns_a
         .iter()
         .filter(|col_a| {
             !col_a.is_hidden()
+                && !col_a.is_connector_additional_column()
                 && !columns_b.iter().any(|col_b| {
                     col_a.name() == col_b.name() && col_a.data_type() == col_b.data_type()
                 })
@@ -162,8 +167,20 @@ pub async fn refresh_sr_and_get_columns_diff(
         unreachable!("source without schema registry is rejected")
     };
 
-    let added_columns = columns_minus(&columns_from_resolve_source, &original_source.columns);
+    let mut added_columns = columns_minus(&columns_from_resolve_source, &original_source.columns);
+    // The newly resolved columns' column IDs also starts from 1. They cannot be used directly.
+    let mut next_col_id = max_column_id(&original_source.columns).next();
+    for col in &mut added_columns {
+        col.column_desc.column_id = next_col_id;
+        next_col_id = next_col_id.next();
+    }
     let dropped_columns = columns_minus(&original_source.columns, &columns_from_resolve_source);
+    tracing::debug!(
+        ?added_columns,
+        ?dropped_columns,
+        ?columns_from_resolve_source,
+        original_source = ?original_source.columns
+    );
 
     Ok((source_info, added_columns, dropped_columns))
 }

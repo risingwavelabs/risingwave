@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
@@ -34,7 +34,6 @@ use crate::hummock::manager::transaction::{
     HummockVersionStatsTransaction, HummockVersionTransaction,
 };
 use crate::hummock::manager::versioning::Versioning;
-use crate::hummock::manager::HISTORY_TABLE_INFO_STATISTIC_TIME;
 use crate::hummock::metrics_utils::{
     get_or_create_local_table_stat, trigger_local_table_stat, trigger_sst_stat,
 };
@@ -54,6 +53,8 @@ pub struct CommitEpochInfo {
     pub sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
     pub new_table_fragment_info: Option<NewTableFragmentInfo>,
     pub change_log_delta: HashMap<TableId, ChangeLogDelta>,
+    pub table_committed_epoch: BTreeMap<HummockEpoch, HashSet<TableId>>,
+    pub max_committed_epoch: HummockEpoch,
 }
 
 impl CommitEpochInfo {
@@ -63,6 +64,8 @@ impl CommitEpochInfo {
         sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
         new_table_fragment_info: Option<NewTableFragmentInfo>,
         change_log_delta: HashMap<TableId, ChangeLogDelta>,
+        table_committed_epoch: BTreeMap<HummockEpoch, HashSet<TableId>>,
+        max_committed_epoch: HummockEpoch,
     ) -> Self {
         Self {
             sstables,
@@ -70,29 +73,46 @@ impl CommitEpochInfo {
             sst_to_context,
             new_table_fragment_info,
             change_log_delta,
+            table_committed_epoch,
+            max_committed_epoch,
         }
     }
+}
 
+impl HummockManager {
     #[cfg(any(test, feature = "test"))]
-    pub(crate) fn for_test(
+    pub async fn commit_epoch_for_test(
+        &self,
+        epoch: HummockEpoch,
         sstables: Vec<impl Into<ExtendedSstableInfo>>,
         sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
-    ) -> Self {
-        Self::new(
+    ) -> Result<()> {
+        let tables = self
+            .versioning
+            .read()
+            .await
+            .current_version
+            .state_table_info
+            .info()
+            .keys()
+            .cloned()
+            .collect();
+        let info = CommitEpochInfo::new(
             sstables.into_iter().map(Into::into).collect(),
             HashMap::new(),
             sst_to_context,
             None,
             HashMap::new(),
-        )
+            BTreeMap::from_iter([(epoch, tables)]),
+            epoch,
+        );
+        self.commit_epoch(info).await?;
+        Ok(())
     }
-}
 
-impl HummockManager {
     /// Caller should ensure `epoch` > `max_committed_epoch`
     pub async fn commit_epoch(
         &self,
-        epoch: HummockEpoch,
         commit_info: CommitEpochInfo,
     ) -> Result<Option<HummockSnapshot>> {
         let CommitEpochInfo {
@@ -101,6 +121,8 @@ impl HummockManager {
             sst_to_context,
             new_table_fragment_info,
             change_log_delta,
+            table_committed_epoch,
+            max_committed_epoch: epoch,
         } = commit_info;
         let mut versioning_guard = self.versioning.write().await;
         let _timer = start_measure_real_process_timer!(self, "commit_epoch");
@@ -341,6 +363,22 @@ impl HummockManager {
 
         new_version_delta.pre_apply();
 
+        // TODO: remove the sanity check when supporting partial checkpoint
+        assert_eq!(1, table_committed_epoch.len());
+        assert_eq!(
+            table_committed_epoch.iter().next().expect("non-empty"),
+            (
+                &epoch,
+                &version
+                    .latest_version()
+                    .state_table_info
+                    .info()
+                    .keys()
+                    .cloned()
+                    .collect()
+            )
+        );
+
         // Apply stats changes.
         let mut version_stats = HummockVersionStatsTransaction::new(
             &mut versioning.version_stats,
@@ -443,7 +481,7 @@ impl HummockManager {
             let throughput = (stat.total_value_size + stat.total_key_size) as u64;
             let entry = table_infos.entry(table_id).or_default();
             entry.push_back(throughput);
-            if entry.len() > HISTORY_TABLE_INFO_STATISTIC_TIME {
+            if entry.len() > self.env.opts.table_info_statistic_history_times {
                 entry.pop_front();
             }
         }

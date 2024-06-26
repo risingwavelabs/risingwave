@@ -26,6 +26,7 @@ use {
     arrow_array_deltalake as arrow_array, arrow_buffer_deltalake as arrow_buffer,
     arrow_cast_deltalake as arrow_cast, arrow_schema_deltalake as arrow_schema,
 };
+type ArrowIntervalType = i128;
 
 use self::arrow_impl::ToArrow;
 use crate::array::{Array, ArrayError, DataChunk, Decimal, DecimalArray};
