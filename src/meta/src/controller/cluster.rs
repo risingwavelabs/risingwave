@@ -27,7 +27,7 @@ use risingwave_common::RW_VERSION;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_meta_model_v2::prelude::{Worker, WorkerProperty};
 use risingwave_meta_model_v2::worker::{WorkerStatus, WorkerType};
-use risingwave_meta_model_v2::{worker, worker_property, I32Array, TransactionId, WorkerId};
+use risingwave_meta_model_v2::{worker, worker_property, TransactionId, WorkerId};
 use risingwave_pb::common::worker_node::{PbProperty, PbResource, PbState};
 use risingwave_pb::common::{
     HostAddress, ParallelUnit, PbHostAddress, PbWorkerNode, PbWorkerType, WorkerNode,

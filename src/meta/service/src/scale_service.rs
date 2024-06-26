@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 
-use risingwave_meta::controller::catalog;
+use risingwave_common::catalog::TableId;
 use risingwave_meta::manager::MetadataManager;
 use risingwave_meta::model::TableParallelism;
 use risingwave_meta::stream::{
@@ -29,7 +29,6 @@ use risingwave_pb::meta::{
 };
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use tonic::{Request, Response, Status};
-use risingwave_common::catalog::TableId;
 
 use crate::barrier::BarrierManagerRef;
 use crate::model::MetadataModel;

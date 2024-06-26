@@ -479,18 +479,19 @@ async fn test_compatibility_with_low_level() -> Result<()> {
         ])
         .await?;
 
-    let (mut all_parallel_units, _) = table_mat_fragment.parallel_unit_usage();
+    let mut all_workers = table_mat_fragment
+        .all_worker_slots()
+        .into_keys()
+        .collect_vec();
 
-    let chosen_parallel_unit_a = all_parallel_units.pop().unwrap();
-    let chosen_parallel_unit_b = all_parallel_units.pop().unwrap();
+    let chosen_worker_a = all_workers.pop().unwrap();
+    let chosen_worker_b = all_workers.pop().unwrap();
 
     let table_mat_fragment_id = table_mat_fragment.id();
 
     // manual scale in table materialize fragment
     cluster
-        .reschedule(format!(
-            "{table_mat_fragment_id}-[{chosen_parallel_unit_a}]",
-        ))
+        .reschedule(format!("{table_mat_fragment_id}-[{chosen_worker_a}:1]",))
         .await?;
 
     session
@@ -514,9 +515,7 @@ async fn test_compatibility_with_low_level() -> Result<()> {
 
     // manual scale in m_simple materialize fragment
     cluster
-        .reschedule_resolve_no_shuffle(format!(
-            "{simple_mv_fragment_id}-[{chosen_parallel_unit_b}]",
-        ))
+        .reschedule_resolve_no_shuffle(format!("{simple_mv_fragment_id}-[{chosen_worker_b}:1]",))
         .await?;
 
     // Since `m_simple` only has 1 fragment, and this fragment is a downstream of NO_SHUFFLE relation,
@@ -541,9 +540,7 @@ async fn test_compatibility_with_low_level() -> Result<()> {
 
     // manual scale in m_join materialize fragment
     cluster
-        .reschedule_resolve_no_shuffle(format!(
-            "{hash_join_fragment_id}-[{chosen_parallel_unit_a}]"
-        ))
+        .reschedule_resolve_no_shuffle(format!("{hash_join_fragment_id}-[{chosen_worker_a}:1]"))
         .await?;
 
     session
@@ -616,18 +613,19 @@ async fn test_compatibility_with_low_level_and_arrangement_backfill() -> Result<
         ])
         .await?;
 
-    let (mut all_parallel_units, _) = table_mat_fragment.parallel_unit_usage();
+    let mut all_workers = table_mat_fragment
+        .all_worker_slots()
+        .into_keys()
+        .collect_vec();
 
-    let chosen_parallel_unit_a = all_parallel_units.pop().unwrap();
-    let chosen_parallel_unit_b = all_parallel_units.pop().unwrap();
+    let chosen_worker_a = all_workers.pop().unwrap();
+    let chosen_worker_b = all_workers.pop().unwrap();
 
     let table_mat_fragment_id = table_mat_fragment.id();
 
     // manual scale in table materialize fragment
     cluster
-        .reschedule(format!(
-            "{table_mat_fragment_id}-[{chosen_parallel_unit_a}]",
-        ))
+        .reschedule(format!("{table_mat_fragment_id}-[{chosen_worker_a}:1]",))
         .await?;
 
     session
@@ -653,9 +651,7 @@ async fn test_compatibility_with_low_level_and_arrangement_backfill() -> Result<
 
     // manual scale in m_simple materialize fragment
     cluster
-        .reschedule_resolve_no_shuffle(format!(
-            "{simple_mv_fragment_id}-[{chosen_parallel_unit_b}]",
-        ))
+        .reschedule_resolve_no_shuffle(format!("{simple_mv_fragment_id}-[{chosen_worker_b}:1]",))
         .await?;
 
     // The downstream table fragment should be separate from the upstream table fragment.

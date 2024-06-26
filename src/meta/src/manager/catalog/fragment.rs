@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
@@ -20,13 +20,14 @@ use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::TableId;
-use risingwave_common::hash::{ActorMapping, ParallelUnitId, WorkerSlotId, WorkerSlotMapping};
+use risingwave_common::hash::{ActorMapping, WorkerSlotId, WorkerSlotMapping};
 use risingwave_common::util::stream_graph_visitor::{
     visit_stream_node, visit_stream_node_cont, visit_stream_node_cont_mut,
 };
 use risingwave_common::util::worker_util::WorkerNodeId;
 use risingwave_connector::source::SplitImpl;
 use risingwave_meta_model_v2::SourceId;
+use risingwave_pb::common::ParallelUnit;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
@@ -820,13 +821,48 @@ impl FragmentManager {
             .get_mut(table_id)
             .with_context(|| format!("table_fragment not exist: id={}", table_id))?;
 
-        for status in table_fragment.actor_status.values_mut() {
-            if let Some(pu) = &status.parallel_unit
-                && migration_plan.parallel_unit_plan.contains_key(&pu.id)
-            {
-                status.parallel_unit = Some(migration_plan.parallel_unit_plan[&pu.id].clone());
+        let mut worker_fragment_map = HashMap::new();
+        for fragment in table_fragment.fragments() {
+            for actor in fragment.get_actors() {
+                let worker = table_fragment
+                    .actor_status
+                    .get(&actor.actor_id)
+                    .unwrap()
+                    .get_parallel_unit()
+                    .unwrap()
+                    .get_worker_node_id();
+
+                let fragment_ref = worker_fragment_map.entry(worker).or_insert(HashMap::new());
+                fragment_ref
+                    .entry(fragment.fragment_id)
+                    .or_insert(BTreeSet::new())
+                    .insert(actor.actor_id);
             }
         }
+
+        let mut rebuilt_actor_to_worker_slots = HashMap::new();
+
+        for (worker, fragment_map) in worker_fragment_map {
+            for (_, actors) in fragment_map {
+                for (idx, actor) in actors.into_iter().enumerate() {
+                    rebuilt_actor_to_worker_slots.insert(actor, WorkerSlotId::new(worker, idx));
+                }
+            }
+        }
+
+        for (actor, location) in rebuilt_actor_to_worker_slots {
+            if let Some(target) = migration_plan.worker_slot_plan.get(&location) {
+                let status = table_fragment
+                    .actor_status
+                    .get_mut(&actor)
+                    .expect("should exist");
+                status.parallel_unit = Some(ParallelUnit {
+                    id: u32::MAX,
+                    worker_node_id: target.worker_id(),
+                })
+            }
+        }
+
         let table_fragment = table_fragment.clone();
         let next_revision = current_revision.next();
 
@@ -844,6 +880,12 @@ impl FragmentManager {
     /// Used in [`crate::barrier::GlobalBarrierManager`]
     /// migrate actors and update fragments one by one according to the migration plan.
     pub async fn migrate_fragment_actors(&self, migration_plan: &MigrationPlan) -> MetaResult<()> {
+        let expired_workers: HashSet<_> = migration_plan
+            .worker_slot_plan
+            .keys()
+            .map(|w| w.worker_id())
+            .collect();
+
         let to_migrate_table_fragments = self
             .core
             .read()
@@ -852,8 +894,8 @@ impl FragmentManager {
             .values()
             .filter(|tf| {
                 for status in tf.actor_status.values() {
-                    if let Some(pu) = &status.parallel_unit
-                        && migration_plan.parallel_unit_plan.contains_key(&pu.id)
+                    if expired_workers
+                        .contains(&status.get_parallel_unit().unwrap().get_worker_node_id())
                     {
                         return true;
                     }
@@ -871,21 +913,41 @@ impl FragmentManager {
         Ok(())
     }
 
-    pub async fn all_worker_parallel_units(&self) -> HashMap<WorkerId, HashSet<ParallelUnitId>> {
-        let mut all_worker_parallel_units = HashMap::new();
+    pub async fn all_worker_slots(&self) -> HashMap<WorkerId, HashSet<WorkerSlotId>> {
+        let mut all_worker_slots = HashMap::new();
         let map = &self.core.read().await.table_fragments;
+
+        let mut worker_fragment_map = HashMap::new();
+
         for table_fragment in map.values() {
-            table_fragment.worker_parallel_units().into_iter().for_each(
-                |(worker_id, parallel_units)| {
-                    all_worker_parallel_units
-                        .entry(worker_id)
-                        .or_insert_with(HashSet::new)
-                        .extend(parallel_units);
-                },
+            for fragment in table_fragment.fragments() {
+                for actor in fragment.get_actors() {
+                    let worker = table_fragment
+                        .actor_status
+                        .get(&actor.actor_id)
+                        .unwrap()
+                        .get_parallel_unit()
+                        .unwrap()
+                        .get_worker_node_id();
+
+                    let fragment_ref = worker_fragment_map.entry(worker).or_insert(HashMap::new());
+                    *fragment_ref.entry(fragment.fragment_id).or_insert(0) += 1;
+                }
+            }
+        }
+
+        for (worker, fragment_map) in worker_fragment_map {
+            let max_fragment = fragment_map.values().copied().max().unwrap();
+
+            all_worker_slots.insert(
+                worker,
+                (0..max_fragment)
+                    .map(|idx| WorkerSlotId::new(worker, idx as _))
+                    .collect(),
             );
         }
 
-        all_worker_parallel_units
+        all_worker_slots
     }
 
     pub async fn all_node_actors(

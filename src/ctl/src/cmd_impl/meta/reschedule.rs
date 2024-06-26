@@ -18,6 +18,7 @@ use std::process::exit;
 use anyhow::{anyhow, Result};
 use inquire::Confirm;
 use itertools::Itertools;
+use regex::{Match, Regex};
 use risingwave_meta::manager::WorkerId;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::meta::table_fragments::ActorStatus;
@@ -91,38 +92,10 @@ impl From<PbWorkerReschedule> for WorkerReschedulePlan {
     }
 }
 
-const RESCHEDULE_MATCH_REGEXP: &str =
-    r"^(?P<fragment>\d+)(?:-\[(?P<removed>\d+(?:,\d+)*)])?(?:\+\[(?P<added>\d+(?:,\d+)*)])?$";
+const RESCHEDULE_MATCH_REGEXP: &str = r"^(?P<fragment>\d+)(?:-\[(?P<decreased>(?:\d+:\d+,?)+)])?(?:\+\[(?P<increased>(?:\d+:\d+,?)+)])?$";
 const RESCHEDULE_FRAGMENT_KEY: &str = "fragment";
-const RESCHEDULE_REMOVED_KEY: &str = "removed";
-const RESCHEDULE_ADDED_KEY: &str = "added";
-
-// For plan `100-[1,2,3]+[4,5];101-[1];102+[3]`, the following reschedule request will be generated
-// {
-//     100: Reschedule {
-//         added_parallel_units: [
-//             4,
-//             5,
-//         ],
-//         removed_parallel_units: [
-//             1,
-//             2,
-//             3,
-//         ],
-//     },
-//     101: Reschedule {
-//         added_parallel_units: [],
-//         removed_parallel_units: [
-//             1,
-//         ],
-//     },
-//     102: Reschedule {
-//         added_parallel_units: [
-//             3,
-//         ],
-//         removed_parallel_units: [],
-//     },
-// }
+const RESCHEDULE_DECREASED_KEY: &str = "decreased";
+const RESCHEDULE_INCREASED_KEY: &str = "increased";
 pub async fn reschedule(
     context: &CtlContext,
     plan: Option<String>,
@@ -157,11 +130,11 @@ pub async fn reschedule(
     for (fragment_id, reschedule) in &reschedules {
         println!("For fragment #{}", fragment_id);
         if !reschedule.decreased_actor_count.is_empty() {
-            println!("\tRemove: {:?}", reschedule.decreased_actor_count);
+            println!("\tDecreased: {:?}", reschedule.decreased_actor_count);
         }
 
         if !reschedule.increased_actor_count.is_empty() {
-            println!("\tAdd:    {:?}", reschedule.increased_actor_count);
+            println!("\tIncreased: {:?}", reschedule.increased_actor_count);
         }
 
         println!();
@@ -170,7 +143,7 @@ pub async fn reschedule(
     if !dry_run {
         println!("---------------------------");
         let (success, revision) = meta_client
-            .reschedule(HashMap::new(), revision, resolve_no_shuffle)
+            .reschedule(reschedules, revision, resolve_no_shuffle)
             .await?;
 
         if !success {
@@ -189,51 +162,63 @@ pub async fn reschedule(
 }
 
 fn parse_plan(plan: String) -> Result<HashMap<u32, PbWorkerReschedule>> {
-    let reschedules = HashMap::new();
+    let mut reschedules = HashMap::new();
 
-    // let regex = Regex::new(RESCHEDULE_MATCH_REGEXP)?;
-    //
-    // plan.retain(|c| !c.is_whitespace());
-    //
-    // for fragment_reschedule_plan in plan.split(';') {
-    //     let captures = regex
-    //         .captures(fragment_reschedule_plan)
-    //         .ok_or_else(|| anyhow!("plan \"{}\" format illegal", fragment_reschedule_plan))?;
-    //
-    //     let fragment_id = captures
-    //         .name(RESCHEDULE_FRAGMENT_KEY)
-    //         .and_then(|mat| mat.as_str().parse::<u32>().ok())
-    //         .ok_or_else(|| anyhow!("plan \"{}\" does not have a valid fragment id", plan))?;
-    //
-    //     let split_fn = |mat: Match<'_>| {
-    //         mat.as_str()
-    //             .split(',')
-    //             .map(|id_str| id_str.parse::<u32>().map_err(Error::msg))
-    //             .collect::<Result<Vec<_>>>()
-    //     };
-    //
-    //     let removed_parallel_units = captures
-    //         .name(RESCHEDULE_REMOVED_KEY)
-    //         .map(split_fn)
-    //         .transpose()?
-    //         .unwrap_or_default();
-    //     let added_parallel_units = captures
-    //         .name(RESCHEDULE_ADDED_KEY)
-    //         .map(split_fn)
-    //         .transpose()?
-    //         .unwrap_or_default();
-    //
-    //     if !(removed_parallel_units.is_empty() && added_parallel_units.is_empty()) {
-    //         reschedules.insert(
-    //             fragment_id,
-    //             Reschedule {
-    //                 added_parallel_units,
-    //                 removed_parallel_units,
-    //             },
-    //         );
-    //     }
-    // }
+    let regex = Regex::new(RESCHEDULE_MATCH_REGEXP)?;
 
+    let mut plan = plan;
+
+    plan.retain(|c| !c.is_whitespace());
+
+    for fragment_reschedule_plan in plan.split(';') {
+        let captures = regex
+            .captures(fragment_reschedule_plan)
+            .ok_or_else(|| anyhow!("plan \"{}\" format illegal", fragment_reschedule_plan))?;
+
+        let fragment_id = captures
+            .name(RESCHEDULE_FRAGMENT_KEY)
+            .and_then(|mat| mat.as_str().parse::<u32>().ok())
+            .ok_or_else(|| anyhow!("plan \"{}\" does not have a valid fragment id", plan))?;
+
+        let split_fn = |mat: Match<'_>| {
+            let mut result = HashMap::new();
+            for id_str in mat.as_str().split(',') {
+                let (worker_id, count) = id_str
+                    .split(':')
+                    .map(|v| v.parse::<u32>().unwrap())
+                    .collect_tuple::<(_, _)>()
+                    .unwrap();
+
+                if let Some(dup_count) = result.insert(worker_id, count) {
+                    println!(
+                        "duplicate worker id {} in plan, prev {} -> {}",
+                        worker_id, worker_id, dup_count
+                    );
+                    exit(1);
+                }
+            }
+
+            result
+        };
+
+        let decreased_actor_count = captures
+            .name(RESCHEDULE_DECREASED_KEY)
+            .map(split_fn)
+            .unwrap_or_default();
+        let increased_actor_count = captures
+            .name(RESCHEDULE_INCREASED_KEY)
+            .map(split_fn)
+            .unwrap_or_default();
+        if !(decreased_actor_count.is_empty() && increased_actor_count.is_empty()) {
+            reschedules.insert(
+                fragment_id,
+                PbWorkerReschedule {
+                    increased_actor_count,
+                    decreased_actor_count,
+                },
+            );
+        }
+    }
     Ok(reschedules)
 }
 

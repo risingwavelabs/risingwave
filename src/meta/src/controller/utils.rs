@@ -24,8 +24,8 @@ use risingwave_meta_model_v2::prelude::*;
 use risingwave_meta_model_v2::{
     actor, actor_dispatcher, connection, database, fragment, function, index, object,
     object_dependency, schema, secret, sink, source, subscription, table, user, user_privilege,
-    view, worker_property, ActorId, DataTypeArray, DatabaseId, FragmentId, I32Array, ObjectId,
-    PrivilegeId, SchemaId, SourceId, StreamNode, UserId, WorkerId,
+    view, ActorId, DataTypeArray, DatabaseId, FragmentId, I32Array, ObjectId, PrivilegeId,
+    SchemaId, SourceId, StreamNode, UserId, VnodeBitmap,
 };
 use risingwave_pb::catalog::{PbConnection, PbFunction, PbSecret, PbSubscription};
 use risingwave_pb::meta::{PbFragmentParallelUnitMapping, PbFragmentWorkerSlotMapping};
@@ -38,8 +38,8 @@ use sea_orm::sea_query::{
     WithClause,
 };
 use sea_orm::{
-    ColumnTrait, ConnectionTrait, DerivePartialModel, EntityTrait, FromQueryResult, JoinType,
-    Order, PaginatorTrait, QueryFilter, QuerySelect, RelationTrait, Statement,
+    ColumnTrait, ConnectionTrait, DerivePartialModel, EntityOrSelect, EntityTrait, FromQueryResult,
+    JoinType, Order, PaginatorTrait, QueryFilter, QuerySelect, RelationTrait, Statement,
 };
 
 use crate::{MetaError, MetaResult};
@@ -841,17 +841,15 @@ pub async fn get_fragment_mappings<C>(
 where
     C: ConnectionTrait,
 {
-    // let parallel_unit_to_worker = get_parallel_unit_to_worker_map(db).await?;
-    //
-    // let fragment_mappings: Vec<(FragmentId, FragmentVnodeMapping)> = Fragment::find()
-    //     .select_only()
-    //     .columns([fragment::Column::FragmentId, fragment::Column::VnodeMapping])
-    //     .filter(fragment::Column::JobId.eq(job_id))
-    //     .into_tuple()
-    //     .all(db)
-    //     .await?;
-    //
-    // CatalogController::convert_fragment_mappings(fragment_mappings, &parallel_unit_to_worker)
+    let job_actors: Vec<(ObjectId, ActorId, Option<VnodeBitmap>)> = Actor::find()
+        .select_only()
+        .column(fragment::Column::JobId)
+        .columns(vec![actor::Column::ActorId, actor::Column::VnodeBitmap])
+        .join(JoinType::InnerJoin, actor::Relation::Fragment.def())
+        .filter(fragment::Column::JobId.eq(job_id))
+        .into_tuple()
+        .all(db)
+        .await?;
 
     todo!()
 }

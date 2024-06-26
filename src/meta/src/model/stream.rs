@@ -17,11 +17,11 @@ use std::ops::AddAssign;
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::hash::{ParallelUnitId, WorkerSlotId};
+use risingwave_common::hash::{WorkerSlotId};
 use risingwave_connector::source::SplitImpl;
 use risingwave_pb::common::ParallelUnit;
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
-use risingwave_pb::meta::table_fragments::{ActorStatus, Fragment, PbFragment, State};
+use risingwave_pb::meta::table_fragments::{ActorStatus, Fragment, State};
 use risingwave_pb::meta::table_parallelism::{
     FixedParallelism, Parallelism, PbAdaptiveParallelism, PbCustomParallelism, PbFixedParallelism,
     PbParallelism,
@@ -496,16 +496,6 @@ impl TableFragments {
         for (&actor_id, actor_status) in &self.actor_status {
             let node_id = actor_status.get_parallel_unit().unwrap().worker_node_id as WorkerId;
             map.entry(node_id).or_insert_with(Vec::new).push(actor_id);
-        }
-        map
-    }
-
-    pub fn worker_parallel_units(&self) -> HashMap<WorkerId, HashSet<ParallelUnitId>> {
-        let mut map = HashMap::new();
-        for actor_status in self.actor_status.values() {
-            map.entry(actor_status.get_parallel_unit().unwrap().worker_node_id)
-                .or_insert_with(HashSet::new)
-                .insert(actor_status.get_parallel_unit().unwrap().id);
         }
         map
     }

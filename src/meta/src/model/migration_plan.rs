@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap};
 
 use prost::Message;
+use risingwave_common::hash::WorkerSlotId;
 use risingwave_pb::common::ParallelUnit;
 use risingwave_pb::meta::PbMigrationPlan;
 
@@ -30,6 +31,7 @@ type ParallelUnitId = u32;
 #[derive(Debug, Default, Clone)]
 pub struct MigrationPlan {
     pub parallel_unit_plan: HashMap<ParallelUnitId, ParallelUnit>,
+    pub worker_slot_plan: HashMap<WorkerSlotId, WorkerSlotId>,
 }
 
 impl MigrationPlan {
@@ -76,6 +78,11 @@ impl From<PbMigrationPlan> for MigrationPlan {
     fn from(plan: PbMigrationPlan) -> Self {
         MigrationPlan {
             parallel_unit_plan: plan.parallel_unit_migration_plan,
+            worker_slot_plan: plan
+                .worker_slot_migration_plan
+                .into_iter()
+                .map(|(k, v)| (WorkerSlotId::from(k), WorkerSlotId::from(v)))
+                .collect(),
         }
     }
 }
@@ -84,6 +91,11 @@ impl From<MigrationPlan> for PbMigrationPlan {
     fn from(plan: MigrationPlan) -> Self {
         PbMigrationPlan {
             parallel_unit_migration_plan: plan.parallel_unit_plan,
+            worker_slot_migration_plan: plan
+                .worker_slot_plan
+                .into_iter()
+                .map(|(k, v)| (k.into(), v.into()))
+                .collect(),
         }
     }
 }

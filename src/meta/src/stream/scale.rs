@@ -57,8 +57,7 @@ use crate::manager::{
 };
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments, TableParallelism};
 use crate::serving::{
-    to_deleted_fragment_worker_slot_mapping, to_fragment_worker_slot_mapping,
-    ServingVnodeMapping,
+    to_deleted_fragment_worker_slot_mapping, to_fragment_worker_slot_mapping, ServingVnodeMapping,
 };
 use crate::storage::{MetaStore, MetaStoreError, MetaStoreRef, Transaction, DEFAULT_COLUMN_FAMILY};
 use crate::stream::{GlobalStreamManager, SourceManagerRef};

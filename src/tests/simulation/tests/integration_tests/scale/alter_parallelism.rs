@@ -15,8 +15,10 @@
 use std::time::Duration;
 
 use anyhow::Result;
+use itertools::Itertools;
 use risingwave_simulation::cluster::{Cluster, Configuration};
 use risingwave_simulation::ctl_ext::predicate::{identity_contains, no_identity_contains};
+use risingwave_simulation::utils::AssertResult;
 use tokio::time::sleep;
 
 #[tokio::test]
@@ -48,51 +50,51 @@ async fn test_diamond_cascade_materialized_view_alter() -> Result<()> {
         ])
         .await?;
 
-    // let id = fragment.id();
+    let id = fragment.id();
 
     session.run("alter table t1 set parallelism = 1;").await?;
     sleep(Duration::from_secs(3)).await;
-    // let fragment = cluster.locate_fragment_by_id(id).await?;
-    // assert_eq!(fragment.inner.actors.len(), 1);
-    //
-    // session
-    //     .run(&format!(
-    //         "insert into t1 values {}",
-    //         (1..=10).map(|x| format!("({x})")).join(",")
-    //     ))
-    //     .await?;
-    //
-    // session.run("flush").await?;
-    // session
-    //     .run("select count(*) from m5")
-    //     .await?
-    //     .assert_result_eq("0");
-    //
-    // session
-    //     .run("alter table t1 set parallelism = adaptive;")
-    //     .await?;
-    // sleep(Duration::from_secs(3)).await;
-    //
-    // let fragment = cluster.locate_fragment_by_id(id).await?;
-    // assert_eq!(fragment.inner.actors.len(), 6);
-    //
-    // session
-    //     .run("select count(*) from m5")
-    //     .await?
-    //     .assert_result_eq("0");
-    //
-    // session
-    //     .run(&format!(
-    //         "insert into t1 values {}",
-    //         (11..=20).map(|x| format!("({x})")).join(",")
-    //     ))
-    //     .await?;
-    //
-    // session.run("flush").await?;
-    // session
-    //     .run("select count(*) from m5")
-    //     .await?
-    //     .assert_result_eq("4");
+    let fragment = cluster.locate_fragment_by_id(id).await?;
+    assert_eq!(fragment.inner.actors.len(), 1);
+
+    session
+        .run(&format!(
+            "insert into t1 values {}",
+            (1..=10).map(|x| format!("({x})")).join(",")
+        ))
+        .await?;
+
+    session.run("flush").await?;
+    session
+        .run("select count(*) from m5")
+        .await?
+        .assert_result_eq("0");
+
+    session
+        .run("alter table t1 set parallelism = adaptive;")
+        .await?;
+    sleep(Duration::from_secs(3)).await;
+
+    let fragment = cluster.locate_fragment_by_id(id).await?;
+    assert_eq!(fragment.inner.actors.len(), 6);
+
+    session
+        .run("select count(*) from m5")
+        .await?
+        .assert_result_eq("0");
+
+    session
+        .run(&format!(
+            "insert into t1 values {}",
+            (11..=20).map(|x| format!("({x})")).join(",")
+        ))
+        .await?;
+
+    session.run("flush").await?;
+    session
+        .run("select count(*) from m5")
+        .await?
+        .assert_result_eq("4");
 
     Ok(())
 }
