@@ -136,7 +136,7 @@ pub struct CatalogControllerInner {
     /// Catalogs which were marked as finished and committed.
     /// But the `DdlController` has not instantiated notification channel.
     /// Once notified, we can remove the entry from this map.
-    pub table_id_to_version: HashMap<TableId, NotificationVersion>,
+    pub table_id_to_version: HashMap<TableId, MetaResult<NotificationVersion>>,
 }
 
 impl CatalogController {
