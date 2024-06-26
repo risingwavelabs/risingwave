@@ -394,19 +394,19 @@ mod tests {
 
     #[test]
     fn test_parse_boolean() {
-        assert_eq!(parse_boolean("1").unwrap(), true);
-        assert_eq!(parse_boolean("t").unwrap(), true);
-        assert_eq!(parse_boolean("T").unwrap(), true);
-        assert_eq!(parse_boolean("true").unwrap(), true);
-        assert_eq!(parse_boolean("TRUE").unwrap(), true);
-        assert_eq!(parse_boolean("True").unwrap(), true);
+        assert!(parse_boolean("1").unwrap());
+        assert!(parse_boolean("t").unwrap());
+        assert!(parse_boolean("T").unwrap());
+        assert!(parse_boolean("true").unwrap());
+        assert!(parse_boolean("TRUE").unwrap());
+        assert!(parse_boolean("True").unwrap());
 
-        assert_eq!(parse_boolean("0").unwrap(), false);
-        assert_eq!(parse_boolean("f").unwrap(), false);
-        assert_eq!(parse_boolean("F").unwrap(), false);
-        assert_eq!(parse_boolean("false").unwrap(), false);
-        assert_eq!(parse_boolean("FALSE").unwrap(), false);
-        assert_eq!(parse_boolean("False").unwrap(), false);
+        assert!(!parse_boolean("0").unwrap());
+        assert!(!parse_boolean("f").unwrap());
+        assert!(!parse_boolean("F").unwrap());
+        assert!(!parse_boolean("false").unwrap());
+        assert!(!parse_boolean("FALSE").unwrap());
+        assert!(!parse_boolean("False").unwrap());
 
         assert!(parse_boolean("2").is_err());
         assert!(parse_boolean("t1").is_err());
