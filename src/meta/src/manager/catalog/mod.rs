@@ -2904,29 +2904,29 @@ impl CatalogManager {
         &self,
         mut source: Source,
         mut internal_tables: Vec<Table>,
-    ) -> MetaResult<NotificationVersion> {
+    ) -> MetaResult<()> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
-        let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
-        let mut sources = BTreeMapTransaction::new(&mut database_core.sources);
-        let key = (source.database_id, source.schema_id, source.name.clone());
-        assert!(
-            !sources.contains_key(&source.id)
-                && database_core.in_progress_creation_tracker.contains(&key),
-            "source must be in creating procedure"
-        );
-        database_core.in_progress_creation_tracker.remove(&key);
+        let version = try {
+            let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
+            let mut sources = BTreeMapTransaction::new(&mut database_core.sources);
+            let key = (source.database_id, source.schema_id, source.name.clone());
+            assert!(
+                !sources.contains_key(&source.id)
+                    && database_core.in_progress_creation_tracker.contains(&key),
+                "source must be in creating procedure"
+            );
+            database_core.in_progress_creation_tracker.remove(&key);
 
-        source.created_at_epoch = Some(Epoch::now().0);
-        sources.insert(source.id, source.clone());
-        for table in &mut internal_tables {
-            table.stream_job_status = PbStreamJobStatus::Created.into();
-            tables.insert(table.id, table.clone());
-        }
-        commit_meta!(self, sources, tables)?;
+            source.created_at_epoch = Some(Epoch::now().0);
+            sources.insert(source.id, source.clone());
+            for table in &mut internal_tables {
+                table.stream_job_status = PbStreamJobStatus::Created.into();
+                tables.insert(table.id, table.clone());
+            }
+            commit_meta!(self, sources, tables)?;
 
-        let version = self
-            .notify_frontend(
+            self.notify_frontend(
                 Operation::Add,
                 Info::RelationGroup(RelationGroup {
                     relations: std::iter::once(Relation {
@@ -2938,9 +2938,15 @@ impl CatalogManager {
                     .collect_vec(),
                 }),
             )
-            .await;
+            .await
+        };
 
-        Ok(version)
+        if let Some(tx) = core.table_id_to_tx.remove(&source.id) {
+            tx.send(version).unwrap();
+        } else {
+            core.table_id_to_version.insert(source.id, version);
+        }
+        Ok(())
     }
 
     pub async fn cancel_create_source_procedure(&self, source: &Source) -> MetaResult<()> {
