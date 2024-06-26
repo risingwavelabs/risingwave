@@ -193,13 +193,13 @@ impl ThroughputMetric {
             println!("Throughput Sink: Don't get Throughput, please check");
             return;
         }
-        let avg = throughput_sum_vec.iter().sum::<u64>() / throughput_sum_vec.len() as u64;
         #[allow(clippy::disallowed_methods)]
         let throughput_vec = throughput_sum_vec
             .iter()
             .zip(throughput_sum_vec.iter().skip(1))
             .map(|(current, next)| (next - current) * 1000 / THROUGHPUT_METRIC_RECORD_INTERVAL)
             .collect_vec();
+        let avg = throughput_vec.iter().sum::<u64>() / throughput_vec.len() as u64;
         let throughput_vec_sorted = throughput_vec.iter().sorted().collect_vec();
         let p90 = throughput_vec_sorted[throughput_vec_sorted.len() * 90 / 100];
         let p95 = throughput_vec_sorted[throughput_vec_sorted.len() * 95 / 100];
