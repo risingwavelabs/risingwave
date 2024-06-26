@@ -85,6 +85,7 @@ RiseDev is the development mode of RisingWave. To develop RisingWave, you need t
 * Python (>= 3.12) (Optional, only required by `embedded-python-udf` feature)
 
 ### macOS
+
 To install the dependencies on macOS, run:
 
 ```shell
@@ -93,6 +94,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
 ### Debian-based Linux
+
 To install the dependencies on Debian-based Linux systems, run:
 
 ```shell
@@ -101,6 +103,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
 ### nix shell
+
 If you use nix, you can also enter the nix shell via:
 
 ```shell
@@ -108,12 +111,12 @@ nix develop ./nix.
 ```
 
 All dependencies will be automatically downloaded and configured.
+
 You can also use [direnv](https://github.com/direnv/direnv) to automatically enter the nix shell:
 
 ```shell
 direnv allow
 ```
-
 
 Then you'll be able to compile and start RiseDev!
 
