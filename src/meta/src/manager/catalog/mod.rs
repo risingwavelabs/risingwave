@@ -157,7 +157,13 @@ pub struct CatalogManager {
 pub struct CatalogManagerCore {
     pub database: DatabaseManager,
     pub user: UserManager,
+    /// `DdlController` will update this map, and pass the `tx` side to `CatalogController`.
+    /// On notifying, we can remove the entry from this map.
     pub table_id_to_tx: HashMap<TableId, Sender<MetaResult<NotificationVersion>>>,
+    /// Catalogs which were marked as finished and committed.
+    /// But the `DdlController` has not instantiated notification channel.
+    /// Once notified, we can remove the entry from this map.
+    pub table_id_to_version: HashMap<TableId, NotificationVersion>,
 }
 
 impl CatalogManagerCore {
@@ -165,10 +171,12 @@ impl CatalogManagerCore {
         let database = DatabaseManager::new(env.clone()).await?;
         let user = UserManager::new(env.clone(), &database).await?;
         let table_id_to_tx = HashMap::new();
+        let table_id_to_version = HashMap::new();
         Ok(Self {
             database,
             user,
             table_id_to_tx,
+            table_id_to_version,
         })
     }
 

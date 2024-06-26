@@ -112,6 +112,7 @@ impl CatalogController {
             inner: RwLock::new(CatalogControllerInner {
                 db: meta_store.conn,
                 table_id_to_tx: HashMap::new(),
+                table_id_to_version: HashMap::new(),
             }),
         }
     }
@@ -129,7 +130,13 @@ impl CatalogController {
 
 pub struct CatalogControllerInner {
     pub(crate) db: DatabaseConnection,
+    /// `DdlController` will update this map, and pass the `tx` side to `CatalogController`.
+    /// On notifying, we can remove the entry from this map.
     pub table_id_to_tx: HashMap<TableId, Sender<MetaResult<NotificationVersion>>>,
+    /// Catalogs which were marked as finished and committed.
+    /// But the `DdlController` has not instantiated notification channel.
+    /// Once notified, we can remove the entry from this map.
+    pub table_id_to_version: HashMap<TableId, NotificationVersion>,
 }
 
 impl CatalogController {
