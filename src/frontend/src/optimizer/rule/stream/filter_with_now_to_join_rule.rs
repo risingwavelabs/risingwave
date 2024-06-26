@@ -18,7 +18,7 @@ use risingwave_pb::plan_common::JoinType;
 use crate::expr::{
     try_derive_watermark, ExprRewriter, FunctionCall, InputRef, WatermarkDerivation,
 };
-use crate::optimizer::plan_node::generic::GenericPlanRef;
+use crate::optimizer::plan_node::generic::{self, GenericPlanRef};
 use crate::optimizer::plan_node::{LogicalFilter, LogicalJoin, LogicalNow};
 use crate::optimizer::rule::{BoxedRule, Rule};
 use crate::optimizer::PlanRef;
@@ -63,7 +63,7 @@ impl Rule for FilterWithNowToJoinRule {
         for now_filter in now_filters {
             new_plan = LogicalJoin::new(
                 new_plan,
-                LogicalNow::new(plan.ctx()).into(),
+                LogicalNow::new(generic::Now::update_current(plan.ctx())).into(),
                 JoinType::LeftSemi,
                 Condition {
                     conjunctions: vec![now_filter.into()],
