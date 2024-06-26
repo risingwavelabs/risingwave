@@ -431,7 +431,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
             std::process::id()
         );
 
-        let otel_tracer = {
+        let (otel_tracer, exporter) = {
             let runtime = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
                 .thread_name("rw-otel")
@@ -443,7 +443,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
             // Installing the exporter requires a tokio runtime.
             let _entered = runtime.enter();
 
-            opentelemetry_otlp::new_pipeline()
+            let otel_tracer = opentelemetry_otlp::new_pipeline()
                 .tracing()
                 .with_exporter(
                     opentelemetry_otlp::new_exporter()
@@ -462,7 +462,19 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
                     KeyValue::new(resource::PROCESS_PID, std::process::id().to_string()),
                 ])))
                 .install_batch(sdk::runtime::Tokio)
-                .unwrap()
+                .unwrap();
+
+            let exporter = opentelemetry_otlp::new_exporter()
+                .tonic()
+                .with_endpoint(&endpoint)
+                .with_protocol(opentelemetry_otlp::Protocol::Grpc)
+                .with_timeout(Duration::from_secs(
+                    opentelemetry_otlp::OTEL_EXPORTER_OTLP_TIMEOUT_DEFAULT,
+                ))
+                .build_span_exporter()
+                .unwrap();
+
+            (otel_tracer, exporter)
         };
 
         // Disable by filtering out all events or spans by default.
@@ -499,42 +511,17 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
 
         layers.push(layer.boxed());
 
-        if let Ok(exporter) = opentelemetry_otlp::new_exporter()
-            .tonic()
-            .with_endpoint(&endpoint)
-            .with_protocol(opentelemetry_otlp::Protocol::Grpc)
-            .with_timeout(Duration::from_secs(
-                opentelemetry_otlp::OTEL_EXPORTER_OTLP_TIMEOUT_DEFAULT,
-            ))
-            .build_span_exporter()
-        {
-            let reporter = OpenTelemetryReporter::new(
-                exporter,
-                SpanKind::Server,
-                Cow::Owned(Resource::new([KeyValue::new(
-                    resource::SERVICE_NAME,
-                    format!("minitrace-{id}"),
-                )])),
-                InstrumentationLibrary::builder("opentelemetry-instrumentation-foyer").build(),
-            );
-            minitrace::set_reporter(reporter, minitrace::collector::Config::default());
-            tracing::info!("opentelemetry exporter for minitrace is set at {endpoint}");
-        } else {
-            tracing::error!("failed to create opentelemetry exporter for minitrace");
-        };
-
-        // if let Ok(agent) = config.server.tracing.jaeger.parse() {
-        //     let reporter = minitrace_jaeger::JaegerReporter::new(agent, &service).unwrap();
-        //     minitrace::set_reporter(
-        //         reporter,
-        //         minitrace::collector::Config::default().report_interval(Duration::from_millis(
-        //             config.server.tracing.report_interval_ms,
-        //         )),
-        //     );
-        //     tracing::info!("Jaeger exporter for {service} is set at {agent:?}.");
-        // } else {
-        //     tracing::info!("Jaeger exporter for {service} is disabled.")
-        // }
+        let reporter = OpenTelemetryReporter::new(
+            exporter,
+            SpanKind::Server,
+            Cow::Owned(Resource::new([KeyValue::new(
+                resource::SERVICE_NAME,
+                format!("minitrace-{id}"),
+            )])),
+            InstrumentationLibrary::builder("opentelemetry-instrumentation-foyer").build(),
+        );
+        minitrace::set_reporter(reporter, minitrace::collector::Config::default());
+        tracing::info!("opentelemetry exporter for minitrace is set at {endpoint}");
     }
 
     // Metrics layer
