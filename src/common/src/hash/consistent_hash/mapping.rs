@@ -474,20 +474,6 @@ impl WorkerSlotMapping {
     pub fn to_actor(&self, to_map: &HashMap<WorkerSlotId, ActorId>) -> ActorMapping {
         self.transform(to_map)
     }
-
-    pub fn to_fake_mapping(&self) -> ParallelUnitMapping {
-        let map: HashMap<_, _> = self
-            .iter()
-            .map(|worker_slot_id: WorkerSlotId| {
-                (
-                    worker_slot_id,
-                    worker_slot_id.worker_id() << 10 | worker_slot_id.slot_idx() as ParallelUnitId,
-                )
-            })
-            .collect();
-
-        self.transform(&map)
-    }
 }
 
 #[cfg(test)]

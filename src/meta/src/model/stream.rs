@@ -176,47 +176,10 @@ impl MetadataModel for TableFragments {
 
         let state = prost.state();
 
-        // let parallel_unit_to_worker = prost
-        //     .actor_status
-        //     .values()
-        //     .map(|actor_status| {
-        //         let parallel_unit = actor_status.get_parallel_unit().unwrap();
-        //         (parallel_unit.id, parallel_unit.worker_node_id)
-        //     })
-        //     .collect();
-
-        // rewrite fragments
-        let fragments = prost
-            .fragments
-            .into_values()
-            .map(
-                |Fragment {
-                     fragment_id,
-                     fragment_type_mask,
-                     distribution_type,
-                     actors,
-                     state_table_ids,
-                     upstream_fragment_ids,
-                 }| {
-                    (
-                        fragment_id,
-                        PbFragment {
-                            fragment_id,
-                            fragment_type_mask,
-                            distribution_type,
-                            actors,
-                            state_table_ids,
-                            upstream_fragment_ids,
-                        },
-                    )
-                },
-            )
-            .collect();
-
         Self {
             table_id: TableId::new(prost.table_id),
             state,
-            fragments,
+            fragments: prost.fragments.into_iter().collect(),
             actor_status: prost.actor_status.into_iter().collect(),
             actor_splits: build_actor_split_impls(&prost.actor_splits),
             ctx,

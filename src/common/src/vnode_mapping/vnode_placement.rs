@@ -230,7 +230,6 @@ mod tests {
 
         let worker_1 = WorkerNode {
             id: 1,
-            // parallel_units: gen_pus_for_worker(1, 1, &mut pu_to_worker),
             parallelism: 1,
             property: Some(serving_property.clone()),
             ..Default::default()
@@ -246,7 +245,6 @@ mod tests {
 
         let worker_2 = WorkerNode {
             id: 2,
-            // parallel_units: gen_pus_for_worker(2, 50, &mut pu_to_worker),
             parallelism: 50,
             property: Some(serving_property.clone()),
             ..Default::default()
@@ -266,7 +264,6 @@ mod tests {
 
         let worker_3 = WorkerNode {
             id: 3,
-            // parallel_units: gen_pus_for_worker(3, 60, &mut pu_to_worker),
             parallelism: 60,
             property: Some(serving_property),
             ..Default::default()
