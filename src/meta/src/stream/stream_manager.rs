@@ -272,6 +272,8 @@ impl GlobalStreamManager {
                 match state {
                     CreatingState::Failed { reason } => {
                         tracing::debug!(id=?table_id, "stream job failed");
+                        // FIXME(kwannoel): For creating stream jobs
+                        // we need to clean up the resources in the stream manager.
                         self.creating_job_info.delete_job(table_id).await;
                         return Err(reason);
                     }

@@ -2223,7 +2223,7 @@ impl DdlController {
             .get_catalog_core_guard()
             .await;
         if let Some(version) = mgr.table_is_finished(id).await {
-            return Ok(version);
+            return version;
         }
         let (tx, rx) = oneshot::channel();
 

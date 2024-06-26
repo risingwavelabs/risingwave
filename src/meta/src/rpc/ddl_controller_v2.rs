@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::stream_graph_visitor::visit_fragment;
@@ -23,6 +24,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::update_mutation::PbMergeUpdate;
 use risingwave_pb::stream_plan::StreamFragmentGraph as StreamFragmentGraphProto;
 use thiserror_ext::AsReport;
+use tokio::sync::oneshot;
 
 use crate::controller::catalog::ReleaseContext;
 use crate::manager::{
@@ -223,7 +225,7 @@ impl DdlController {
                     .create_streaming_job(table_fragments, ctx)
                     .await?;
 
-                let version = self.wait_streaming_job_finished_v2(stream_job_id as _).await?;
+                let version = self.wait_streaming_job_finished_v2(mgr, stream_job_id as _).await?;
                 Ok(version)
             }
             (CreateType::Background, _) => {
@@ -237,7 +239,7 @@ impl DdlController {
                             tracing::error!(id = stream_job_id, error = ?err.as_report(), "failed to create background streaming job");
                         });
                     if result.is_ok() {
-                        let _ = ctrl.wait_streaming_job_finished_v2(stream_job_id as _).await.inspect_err(|err| {
+                        let _ = ctrl.wait_streaming_job_finished_v2(&mgr, stream_job_id as _).await.inspect_err(|err| {
                             tracing::error!(id = stream_job_id, error = ?err.as_report(), "failed to finish background streaming job");
                         });
                     }
@@ -510,17 +512,20 @@ impl DdlController {
 
     pub(crate) async fn wait_streaming_job_finished_v2(
         &self,
-        id: u32,
+        metadata_manager: &MetadataManagerV2,
+        id: ObjectId,
     ) -> MetaResult<NotificationVersion> {
-        // let mgr = self.catalog_manager.lock();
-        // if mgr.is_finished(id).await {
-        //     return;
-        // }
-        // let (tx, rx) = oneshot::channel(); <---- Finished Catalog committed here
-        //
-        // mgr.register_finish_notifier(id, tx);
-        // drop(mgr);
-        // rx.await;
-        Ok(1)
+        let mut mgr = metadata_manager
+            .catalog_controller
+            .get_inner_write_guard()
+            .await;
+        if let Some(version) = mgr.table_is_finished(id) {
+            return version;
+        }
+        let (tx, rx) = oneshot::channel();
+
+        mgr.register_finish_notifier(id, tx);
+        drop(mgr);
+        rx.await.map_err(|e| anyhow!(e))?
     }
 }
