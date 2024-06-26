@@ -4001,9 +4001,9 @@ impl Parser<'_> {
             self.expect_token(&Token::RParen)?;
             Ok(CteInner::Query(query))
         } else {
-            let change_log = self.parse_identifier_non_reserved()?;
-            if change_log.to_string().to_lowercase() != "changelog" {
-                parser_err!("Expected 'changelog' but found '{}'", change_log);
+            let changelog = self.parse_identifier_non_reserved()?;
+            if changelog.to_string().to_lowercase() != "changelog" {
+                parser_err!("Expected 'changelog' but found '{}'", changelog);
             }
             self.expect_keyword(Keyword::FROM)?;
             Ok(CteInner::ChangeLog(self.parse_identifier()?))

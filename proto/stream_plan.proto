@@ -828,7 +828,7 @@ message StreamNode {
     StreamCdcScanNode stream_cdc_scan = 139;
     CdcFilterNode cdc_filter = 140;
     SourceBackfillNode source_backfill = 142;
-    ChangeLogNode change_log = 143;
+    ChangeLogNode changelog = 143;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.

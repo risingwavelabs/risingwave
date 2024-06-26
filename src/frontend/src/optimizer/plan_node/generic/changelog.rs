@@ -23,15 +23,15 @@ use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::ColIndexMappingRewriteExt;
 use crate::OptimizerContextRef;
 
-pub const CHANGE_LOG_OP: &str = "change_log_op";
-pub const _CHANGE_LOG_ROW_ID: &str = "_change_log_row_id";
+pub const CHANGELOG_OP: &str = "changelog_op";
+pub const _CHANGELOG_ROW_ID: &str = "_changelog_row_id";
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ChangeLog<PlanRef> {
     pub input: PlanRef,
     // If there is no op in the output result, it is false, example 'create materialized view mv1 as with sub as changelog from t1 select v1 from sub;'
     pub need_op: bool,
     // False before rewrite, true after rewrite
-    pub need_change_log_row_id: bool,
+    pub need_changelog_row_id: bool,
 }
 impl<PlanRef: GenericPlanRef> DistillUnit for ChangeLog<PlanRef> {
     fn distill_with_name<'a>(&self, name: impl Into<Str<'a>>) -> XmlNode<'a> {
@@ -39,11 +39,11 @@ impl<PlanRef: GenericPlanRef> DistillUnit for ChangeLog<PlanRef> {
     }
 }
 impl<PlanRef: GenericPlanRef> ChangeLog<PlanRef> {
-    pub fn new(input: PlanRef, need_op: bool, need_change_log_row_id: bool) -> Self {
+    pub fn new(input: PlanRef, need_op: bool, need_changelog_row_id: bool) -> Self {
         ChangeLog {
             input,
             need_op,
-            need_change_log_row_id,
+            need_changelog_row_id,
         }
     }
 
@@ -59,20 +59,20 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for ChangeLog<PlanRef> {
         if self.need_op {
             fields.push(Field::with_name(
                 risingwave_common::types::DataType::Int16,
-                CHANGE_LOG_OP,
+                CHANGELOG_OP,
             ));
         }
-        if self.need_change_log_row_id {
+        if self.need_changelog_row_id {
             fields.push(Field::with_name(
                 risingwave_common::types::DataType::Serial,
-                _CHANGE_LOG_ROW_ID,
+                _CHANGELOG_ROW_ID,
             ));
         }
         Schema::new(fields)
     }
 
     fn stream_key(&self) -> Option<Vec<usize>> {
-        if self.need_change_log_row_id {
+        if self.need_changelog_row_id {
             let keys = vec![self.schema().len() - 1];
             Some(keys)
         } else {

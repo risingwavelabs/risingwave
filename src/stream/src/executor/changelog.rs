@@ -60,7 +60,7 @@ impl ChangeLogExecutor {
                     let (ops, mut columns, bitmap) = chunk.into_inner();
                     let new_ops = vec![Op::Insert; ops.len()];
                     // They are all 0, will be add in row id gen executor.
-                    let change_log_row_id_array = Arc::new(ArrayImpl::Serial(
+                    let changelog_row_id_array = Arc::new(ArrayImpl::Serial(
                         SerialArray::from_iter(repeat(None).take(ops.len())),
                     ));
                     let new_chunk = if self.need_op {
@@ -68,10 +68,10 @@ impl ChangeLogExecutor {
                             ops.iter().map(|op| Some(op.to_i16())).collect();
                         let ops_array = Arc::new(ArrayImpl::Int16(I16Array::from_iter(ops)));
                         columns.push(ops_array);
-                        columns.push(change_log_row_id_array);
+                        columns.push(changelog_row_id_array);
                         StreamChunk::with_visibility(new_ops, columns, bitmap)
                     } else {
-                        columns.push(change_log_row_id_array);
+                        columns.push(changelog_row_id_array);
                         StreamChunk::with_visibility(new_ops, columns, bitmap)
                     };
                     yield Message::Chunk(new_chunk);

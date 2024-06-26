@@ -30,7 +30,7 @@ use crate::binder::{Binder, Relation};
 use crate::catalog::check_valid_column_name;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{CorrelatedId, Depth, Expr as _, ExprImpl, ExprType, FunctionCall, InputRef};
-use crate::optimizer::plan_node::generic::CHANGE_LOG_OP;
+use crate::optimizer::plan_node::generic::CHANGELOG_OP;
 use crate::utils::group_by::GroupBy;
 
 #[derive(Debug, Clone)]
@@ -285,10 +285,10 @@ impl Binder {
 
         if let Some(Relation::Share(bound)) = &from {
             if matches!(bound.input, BoundShareInput::ChangeLog(_))
-                && fields.iter().filter(|&x| x.name.eq(CHANGE_LOG_OP)).count() > 1
+                && fields.iter().filter(|&x| x.name.eq(CHANGELOG_OP)).count() > 1
             {
                 return Err(ErrorCode::BindError(
-                    "The source table of changelog cannot have `change_log_op`, please rename it first".to_string()
+                    "The source table of changelog cannot have `changelog_op`, please rename it first".to_string()
                 )
                 .into());
             }

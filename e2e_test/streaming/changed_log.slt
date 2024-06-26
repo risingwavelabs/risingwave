@@ -25,7 +25,7 @@ select sub1.v1 as v11, sub1.v2 as v12, sub2.v1 as v21, sub2.v2 as v22 from sub1 
 
 statement ok
 create materialized view mv5 as with sub1 as changelog from t1, sub2 as changelog from t2
-select sub1.v1 as v11, sub1.v2 as v12, sub2.v1 as v21, sub2.v2 as v22, sub1.change_log_op as op1, sub2.change_log_op as op2 from sub1 inner join sub2 on sub1.v1 = sub2.v1;
+select sub1.v1 as v11, sub1.v2 as v12, sub2.v1 as v21, sub2.v2 as v22, sub1.changelog_op as op1, sub2.changelog_op as op2 from sub1 inner join sub2 on sub1.v1 = sub2.v1;
 
 statement ok
 create materialized view mv6 as with sub as changelog from t3 select * from sub;

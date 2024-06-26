@@ -68,7 +68,7 @@ impl_distill_by_unit!(StreamChangeLog, core, "StreamChangeLog");
 
 impl StreamNode for StreamChangeLog {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
-        PbNodeBody::ChangeLog(ChangeLogNode {
+        PbNodeBody::Changelog(ChangeLogNode {
             need_op: self.core.need_op,
         })
     }

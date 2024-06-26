@@ -17,7 +17,7 @@ use crate::optimizer::plan_node::LogicalChangeLog;
 use crate::{PlanRef, Planner};
 
 impl Planner {
-    pub(super) fn plan_change_log(&mut self, relation: Relation) -> Result<PlanRef> {
+    pub(super) fn plan_changelog(&mut self, relation: Relation) -> Result<PlanRef> {
         let root = self.plan_relation(relation)?;
         let plan = LogicalChangeLog::create(root);
         Ok(plan)

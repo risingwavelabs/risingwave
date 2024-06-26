@@ -15,7 +15,7 @@
 use itertools::Itertools;
 
 use super::expr_visitable::ExprVisitable;
-use super::generic::{GenericPlanRef, CHANGE_LOG_OP, _CHANGE_LOG_ROW_ID};
+use super::generic::{GenericPlanRef, CHANGELOG_OP, _CHANGELOG_ROW_ID};
 use super::utils::impl_distill_by_unit;
 use super::{
     gen_filter_and_pushdown, generic, ColPrunable, ColumnPruningContext, ExprRewritable, Logical,
@@ -40,8 +40,8 @@ impl LogicalChangeLog {
         Self::new(input, true, true).into()
     }
 
-    pub fn new(input: PlanRef, need_op: bool, need_change_log_row_id: bool) -> Self {
-        let core = generic::ChangeLog::new(input, need_op, need_change_log_row_id);
+    pub fn new(input: PlanRef, need_op: bool, need_changelog_row_id: bool) -> Self {
+        let core = generic::ChangeLog::new(input, need_op, need_changelog_row_id);
         Self::with_core(core)
     }
 
@@ -57,7 +57,7 @@ impl PlanTreeNodeUnary for LogicalChangeLog {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(input, self.core.need_op, self.core.need_change_log_row_id)
+        Self::new(input, self.core.need_op, self.core.need_changelog_row_id)
     }
 
     fn rewrite_with_input(
@@ -65,15 +65,15 @@ impl PlanTreeNodeUnary for LogicalChangeLog {
         input: PlanRef,
         input_col_change: ColIndexMapping,
     ) -> (Self, ColIndexMapping) {
-        let change_log = Self::new(input, self.core.need_op, true);
+        let changelog = Self::new(input, self.core.need_op, true);
         if self.core.need_op {
             let mut output_vec = input_col_change.to_parts().0.to_vec();
             let len = input_col_change.to_parts().1;
             output_vec.push(Some(len));
             let out_col_change = ColIndexMapping::new(output_vec, len + 1);
-            (change_log, out_col_change)
+            (changelog, out_col_change)
         } else {
-            (change_log, input_col_change)
+            (changelog, input_col_change)
         }
     }
 }
@@ -99,16 +99,16 @@ impl ColPrunable for LogicalChangeLog {
     fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
         let fields = self.schema().fields();
         let mut need_op = false;
-        let mut need_change_log_row_id = false;
+        let mut need_changelog_row_id = false;
         let new_required_cols: Vec<_> = required_cols
             .iter()
             .filter_map(|a| {
                 if let Some(f) = fields.get(*a) {
-                    if f.name == CHANGE_LOG_OP {
+                    if f.name == CHANGELOG_OP {
                         need_op = true;
                         None
-                    } else if f.name == _CHANGE_LOG_ROW_ID {
-                        need_change_log_row_id = true;
+                    } else if f.name == _CHANGELOG_ROW_ID {
+                        need_changelog_row_id = true;
                         None
                     } else {
                         Some(*a)
@@ -120,7 +120,7 @@ impl ColPrunable for LogicalChangeLog {
             .collect();
 
         let new_input = self.input().prune_col(&new_required_cols, ctx);
-        Self::new(new_input, need_op, need_change_log_row_id).into()
+        Self::new(new_input, need_op, need_changelog_row_id).into()
     }
 }
 
@@ -167,7 +167,7 @@ impl ToStream for LogicalChangeLog {
             .collect_vec();
         let project = LogicalProject::new(input.clone(), exprs);
         let (project, out_col_change) = project.rewrite_with_input(input, input_col_change);
-        let (change_log, out_col_change) = self.rewrite_with_input(project.into(), out_col_change);
-        Ok((change_log.into(), out_col_change))
+        let (changelog, out_col_change) = self.rewrite_with_input(project.into(), out_col_change);
+        Ok((changelog.into(), out_col_change))
     }
 }
