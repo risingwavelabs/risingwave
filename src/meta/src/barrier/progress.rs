@@ -30,7 +30,9 @@ use crate::barrier::{
     Command, TableActorMap, TableDefinitionMap, TableFragmentMap, TableInternalTableMap,
     TableNotifierMap, TableStreamJobMap, TableUpstreamMvCountMap,
 };
-use crate::manager::{DdlType, MetadataManager, MetadataManagerV1, MetadataManagerV2, StreamingJob};
+use crate::manager::{
+    DdlType, MetadataManager, MetadataManagerV1, MetadataManagerV2, StreamingJob,
+};
 use crate::model::{ActorId, TableFragments};
 use crate::{MetaError, MetaResult};
 
@@ -193,10 +195,9 @@ impl TrackingJob {
                         Ok(())
                     }
                     MetadataManager::V2(mgr) => {
-                        mgr.catalog_controller.finish_streaming_job(
-                            streaming_job.id() as i32,
-                            replace_table.clone(),
-                        ).await?;
+                        mgr.catalog_controller
+                            .finish_streaming_job(streaming_job.id() as i32, replace_table.clone())
+                            .await?;
                         Ok(())
                     }
                 },
@@ -204,17 +205,22 @@ impl TrackingJob {
             },
             TrackingJob::RecoveredV1(recovered) => {
                 let manager = &recovered.metadata_manager;
-                manager.fragment_manager
+                manager
+                    .fragment_manager
                     .mark_table_fragments_created(recovered.fragments.table_id())
                     .await?;
-                manager.catalog_manager.finish_stream_job(
-                    recovered.streaming_job.clone(),
-                    recovered.internal_tables.clone(),
-                ).await?;
+                manager
+                    .catalog_manager
+                    .finish_stream_job(
+                        recovered.streaming_job.clone(),
+                        recovered.internal_tables.clone(),
+                    )
+                    .await?;
                 Ok(())
-            },
+            }
             TrackingJob::RecoveredV2(recovered) => {
-                recovered.metadata_manager
+                recovered
+                    .metadata_manager
                     .catalog_controller
                     .finish_streaming_job(recovered.id, None)
                     .await?;
