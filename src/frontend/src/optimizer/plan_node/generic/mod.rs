@@ -78,6 +78,8 @@ mod cte_ref;
 pub use cte_ref::*;
 mod recursive_union;
 pub use recursive_union::*;
+mod changelog;
+pub use changelog::*;
 
 pub trait DistillUnit {
     fn distill_with_name<'a>(&self, name: impl Into<Cow<'a, str>>) -> XmlNode<'a>;
