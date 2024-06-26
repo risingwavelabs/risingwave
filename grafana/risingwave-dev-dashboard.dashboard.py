@@ -1305,14 +1305,14 @@ def section_streaming_actors(outer_panels):
                     "The number of matched rows on the opposite side",
                     [
                         *quantile(
-                            lambda quantile, legend: panels.target(
+                            lambda quantile, legend: panels.target_hidden(
                                 f"histogram_quantile({quantile}, sum(rate({metric('stream_join_matched_join_keys_bucket')}[$__rate_interval])) by (le, fragment_id, table_id, {COMPONENT_LABEL}))",
                                 f"p{legend} - fragment {{{{fragment_id}}}} table_id {{{{table_id}}}} - {{{{{COMPONENT_LABEL}}}}}",
                             ),
                             [90, 99, "max"],
                         ),
                         panels.target(
-                            f"sum by(le, job, actor_id, table_id) (rate({metric('stream_join_matched_join_keys_sum')}[$__rate_interval])) / sum by(le, {COMPONENT_LABEL}, fragment_id, table_id) (rate({table_metric('stream_join_matched_join_keys_count')}[$__rate_interval])) >= 0",
+                            f"sum by(le, {COMPONENT_LABEL}, fragment_id, table_id) (rate({metric('stream_join_matched_join_keys_sum')}[$__rate_interval])) / sum by(le, {COMPONENT_LABEL}, fragment_id, table_id) (rate({table_metric('stream_join_matched_join_keys_count')}[$__rate_interval])) >= 0",
                             "avg - fragment {{fragment_id}} table_id {{table_id}} - {{%s}}"
                             % COMPONENT_LABEL,
                         ),

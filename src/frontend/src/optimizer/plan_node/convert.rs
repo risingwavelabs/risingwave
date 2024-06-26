@@ -84,11 +84,6 @@ pub fn stream_enforce_eowc_requirement(
             }
             Ok(StreamEowcSort::new(plan, watermark_col_idx).into())
         }
-    } else if !emit_on_window_close && plan.emit_on_window_close() {
-        Err(ErrorCode::InternalError(
-            "Some bad thing happened, the generated plan is not correct.".to_string(),
-        )
-        .into())
     } else {
         Ok(plan)
     }
