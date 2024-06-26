@@ -85,7 +85,8 @@ message StreamSourceInfo {
   map<string, string> format_encode_options = 14;
 
   // Handle the source relies on any sceret. The key is the propertity name and the value is the secret id and type.
-  map<string, secret.SecretRef> secret_ref = 16;
+  // For format and encode options.
+  map<string, secret.SecretRef> format_encode_secret_refs = 16;
 }
 
 message Source {
@@ -123,6 +124,8 @@ message Source {
   // Cluster version (tracked by git commit) when initialized/created
   optional string initialized_at_cluster_version = 17;
   optional string created_at_cluster_version = 18;
+  // Handle the source relies on any sceret. The key is the propertity name and the value is the secret id.
+  map<string, secret.SecretRef> secret_refs = 19;
 
   // Per-source catalog version, used by schema change.
   uint64 version = 100;
@@ -141,6 +144,7 @@ message SinkFormatDesc {
   plan_common.EncodeType encode = 2;
   map<string, string> options = 3;
   optional plan_common.EncodeType key_encode = 4;
+  map<string, secret.SecretRef> secret_refs = 5;
 }
 
 // the catalog of the sink. There are two kind of schema here. The full schema is all columns
@@ -182,7 +186,7 @@ message Sink {
   CreateType create_type = 24;
 
   // Handle the sink relies on any sceret. The key is the propertity name and the value is the secret id and type.
-  map<string, secret.SecretRef> secret_ref = 25;
+  map<string, secret.SecretRef> secret_refs = 25;
 }
 
 message Subscription {

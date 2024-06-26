@@ -112,7 +112,7 @@ impl DatabaseManager {
 
         let mut relation_ref_count = HashMap::new();
         let mut connection_ref_count = HashMap::new();
-        let mut _secret_ref_count = HashMap::new();
+        let mut secret_ref_count = HashMap::new();
 
         let databases = BTreeMap::from_iter(
             databases
@@ -126,12 +126,28 @@ impl DatabaseManager {
             }
             (source.id, source)
         }));
+        for source in sources.values() {
+            for secret_ref in source.get_secret_refs().values() {
+                *secret_ref_count.entry(secret_ref.secret_id).or_default() += 1;
+            }
+            for secret_ref in source.get_info()?.get_format_encode_secret_refs().values() {
+                *secret_ref_count.entry(secret_ref.secret_id).or_default() += 1;
+            }
+        }
         let sinks = BTreeMap::from_iter(sinks.into_iter().map(|sink| {
             for depend_relation_id in &sink.dependent_relations {
                 *relation_ref_count.entry(*depend_relation_id).or_default() += 1;
             }
             if let Some(connection_id) = sink.connection_id {
                 *connection_ref_count.entry(connection_id).or_default() += 1;
+            }
+            for secret_ref in sink.get_secret_refs().values() {
+                *secret_ref_count.entry(secret_ref.secret_id).or_default() += 1;
+            }
+            if let Some(format_desc) = &sink.format_desc {
+                for secret_ref in format_desc.get_secret_refs().values() {
+                    *secret_ref_count.entry(secret_ref.secret_id).or_default() += 1;
+                }
             }
             (sink.id, sink)
         }));
@@ -174,7 +190,7 @@ impl DatabaseManager {
             relation_ref_count,
             connection_ref_count,
             secrets,
-            secret_ref_count: _secret_ref_count,
+            secret_ref_count,
             in_progress_creation_tracker: HashSet::default(),
             in_progress_creation_streaming_job: HashMap::default(),
             in_progress_creating_tables: HashMap::default(),
@@ -351,6 +367,10 @@ impl DatabaseManager {
 
     pub fn list_tables(&self) -> Vec<Table> {
         self.tables.values().cloned().collect_vec()
+    }
+
+    pub fn list_secrets(&self) -> Vec<Secret> {
+        self.secrets.values().cloned().collect_vec()
     }
 
     pub fn get_table(&self, table_id: TableId) -> Option<&Table> {
