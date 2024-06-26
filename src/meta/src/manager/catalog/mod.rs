@@ -3142,46 +3142,46 @@ impl CatalogManager {
         source: Source,
         mut mview: Table,
         mut internal_tables: Vec<Table>,
-    ) -> MetaResult<NotificationVersion> {
+    ) -> MetaResult<()> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
-        let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
-        let mut sources = BTreeMapTransaction::new(&mut database_core.sources);
+        let version = try {
+            let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
+            let mut sources = BTreeMapTransaction::new(&mut database_core.sources);
 
-        let source_key = (source.database_id, source.schema_id, source.name.clone());
-        let mview_key = (mview.database_id, mview.schema_id, mview.name.clone());
-        assert!(
-            !sources.contains_key(&source.id)
-                && !tables.contains_key(&mview.id)
-                && database_core
-                    .in_progress_creation_tracker
-                    .contains(&source_key)
-                && database_core
-                    .in_progress_creation_tracker
-                    .contains(&mview_key),
-            "table and source must be in creating procedure"
-        );
-        database_core
-            .in_progress_creation_tracker
-            .remove(&source_key);
-        database_core
-            .in_progress_creation_tracker
-            .remove(&mview_key);
-        database_core
-            .in_progress_creation_streaming_job
-            .remove(&mview.id);
+            let source_key = (source.database_id, source.schema_id, source.name.clone());
+            let mview_key = (mview.database_id, mview.schema_id, mview.name.clone());
+            assert!(
+                !sources.contains_key(&source.id)
+                    && !tables.contains_key(&mview.id)
+                    && database_core
+                        .in_progress_creation_tracker
+                        .contains(&source_key)
+                    && database_core
+                        .in_progress_creation_tracker
+                        .contains(&mview_key),
+                "table and source must be in creating procedure"
+            );
+            database_core
+                .in_progress_creation_tracker
+                .remove(&source_key);
+            database_core
+                .in_progress_creation_tracker
+                .remove(&mview_key);
+            database_core
+                .in_progress_creation_streaming_job
+                .remove(&mview.id);
 
-        sources.insert(source.id, source.clone());
-        mview.stream_job_status = PbStreamJobStatus::Created.into();
-        tables.insert(mview.id, mview.clone());
-        for table in &mut internal_tables {
-            table.stream_job_status = PbStreamJobStatus::Created.into();
-            tables.insert(table.id, table.clone());
-        }
-        commit_meta!(self, sources, tables)?;
+            sources.insert(source.id, source.clone());
+            mview.stream_job_status = PbStreamJobStatus::Created.into();
+            tables.insert(mview.id, mview.clone());
+            for table in &mut internal_tables {
+                table.stream_job_status = PbStreamJobStatus::Created.into();
+                tables.insert(table.id, table.clone());
+            }
+            commit_meta!(self, sources, tables)?;
 
-        let version = self
-            .notify_frontend(
+            self.notify_frontend(
                 Operation::Add,
                 Info::RelationGroup(RelationGroup {
                     relations: vec![
@@ -3199,9 +3199,16 @@ impl CatalogManager {
                     .collect_vec(),
                 }),
             )
-            .await;
+            .await
+        };
+        // TODO(kwannoel): Is the streaming job id the mview's id or source?
+        if let Some(tx) = core.table_id_to_tx.remove(&mview.id) {
+            tx.send(version).unwrap();
+        } else {
+            core.table_id_to_version.insert(mview.id, version);
+        }
 
-        Ok(version)
+        Ok(())
     }
 
     pub async fn cancel_create_table_procedure_with_source(
