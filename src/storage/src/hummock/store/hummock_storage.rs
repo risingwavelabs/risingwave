@@ -572,7 +572,11 @@ impl StateStore for HummockStorage {
                 table_ids,
             })
             .expect("should send success");
-        rx.map(|recv_result| Ok(recv_result.expect("should wait success")?))
+        rx.map(|recv_result| {
+            Ok(recv_result
+                .expect("should wait success")?
+                .into_sync_result())
+        })
     }
 
     fn seal_epoch(&self, epoch: u64, is_checkpoint: bool) {

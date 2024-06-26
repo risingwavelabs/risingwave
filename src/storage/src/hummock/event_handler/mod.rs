@@ -18,7 +18,7 @@ use std::sync::Arc;
 use parking_lot::{RwLock, RwLockReadGuard};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::{HummockEpoch, SyncResult};
+use risingwave_hummock_sdk::HummockEpoch;
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot;
 
@@ -36,6 +36,7 @@ use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 
 use super::store::version::HummockReadVersion;
 use crate::hummock::event_handler::hummock_event_handler::HummockEventSender;
+use crate::hummock::event_handler::uploader::SyncedData;
 
 #[derive(Debug)]
 pub struct BufferWriteRequest {
@@ -59,7 +60,7 @@ pub enum HummockEvent {
     /// handle sender.
     SyncEpoch {
         new_sync_epoch: HummockEpoch,
-        sync_result_sender: oneshot::Sender<HummockResult<SyncResult>>,
+        sync_result_sender: oneshot::Sender<HummockResult<SyncedData>>,
         table_ids: HashSet<TableId>,
     },
 
