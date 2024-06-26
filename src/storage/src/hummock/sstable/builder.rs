@@ -527,7 +527,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
 
         let writer_output = self.writer.finish(meta).await?;
         Ok(SstableBuilderOutput::<W::Output> {
-            sst_info: LocalSstableInfo::with_stats(sst_info, self.table_stats),
+            sst_info: LocalSstableInfo::new(sst_info, self.table_stats),
             bloom_filter_size,
             writer_output,
             avg_key_size,

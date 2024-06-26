@@ -33,9 +33,8 @@ use risingwave_common::util::epoch::EPOCH_SPILL_TIME_MASK;
 use risingwave_pb::common::{batch_query_epoch, BatchQueryEpoch};
 use risingwave_pb::hummock::SstableInfo;
 
-use crate::compaction_group::StaticCompactionGroupId;
 use crate::key_range::KeyRangeCommon;
-use crate::table_stats::{to_prost_table_stats_map, PbTableStatsMap, TableStatsMap};
+use crate::table_stats::TableStatsMap;
 
 pub mod change_log;
 pub mod compact;
@@ -106,42 +105,20 @@ pub struct SyncResult {
 
 #[derive(Debug, Clone)]
 pub struct LocalSstableInfo {
-    pub compaction_group_id: CompactionGroupId,
     pub sst_info: SstableInfo,
     pub table_stats: TableStatsMap,
 }
 
 impl LocalSstableInfo {
-    pub fn new(
-        compaction_group_id: CompactionGroupId,
-        sst_info: SstableInfo,
-        table_stats: TableStatsMap,
-    ) -> Self {
+    pub fn new(sst_info: SstableInfo, table_stats: TableStatsMap) -> Self {
         Self {
-            compaction_group_id,
             sst_info,
             table_stats,
         }
     }
 
-    pub fn with_compaction_group(
-        compaction_group_id: CompactionGroupId,
-        sst_info: SstableInfo,
-    ) -> Self {
-        Self::new(compaction_group_id, sst_info, TableStatsMap::default())
-    }
-
-    pub fn with_stats(sst_info: SstableInfo, table_stats: TableStatsMap) -> Self {
-        Self::new(
-            StaticCompactionGroupId::StateDefault as CompactionGroupId,
-            sst_info,
-            table_stats,
-        )
-    }
-
     pub fn for_test(sst_info: SstableInfo) -> Self {
         Self {
-            compaction_group_id: StaticCompactionGroupId::StateDefault as CompactionGroupId,
             sst_info,
             table_stats: Default::default(),
         }
@@ -152,47 +129,9 @@ impl LocalSstableInfo {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct ExtendedSstableInfo {
-    pub compaction_group_id: CompactionGroupId,
-    pub sst_info: SstableInfo,
-    pub table_stats: PbTableStatsMap,
-}
-
-impl ExtendedSstableInfo {
-    pub fn new(
-        compaction_group_id: CompactionGroupId,
-        sst_info: SstableInfo,
-        table_stats: PbTableStatsMap,
-    ) -> Self {
-        Self {
-            compaction_group_id,
-            sst_info,
-            table_stats,
-        }
-    }
-
-    pub fn with_compaction_group(
-        compaction_group_id: CompactionGroupId,
-        sst_info: SstableInfo,
-    ) -> Self {
-        Self::new(compaction_group_id, sst_info, PbTableStatsMap::default())
-    }
-}
-
-impl From<LocalSstableInfo> for ExtendedSstableInfo {
-    fn from(value: LocalSstableInfo) -> Self {
-        Self {
-            compaction_group_id: value.compaction_group_id,
-            sst_info: value.sst_info,
-            table_stats: to_prost_table_stats_map(value.table_stats),
-        }
-    }
-}
-
 impl PartialEq for LocalSstableInfo {
     fn eq(&self, other: &Self) -> bool {
-        self.compaction_group_id == other.compaction_group_id && self.sst_info == other.sst_info
+        self.sst_info == other.sst_info
     }
 }
 

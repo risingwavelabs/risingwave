@@ -18,17 +18,14 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::{Arc, LazyLock};
 
-use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use foyer::CacheContext;
-use futures::future::{try_join, try_join_all};
-use futures::{stream, FutureExt, StreamExt, TryFutureExt};
+use futures::{stream, FutureExt, StreamExt};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::{FullKey, FullKeyTracker, UserKey, EPOCH_LEN};
 use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::{CompactionGroupId, EpochWithGap, LocalSstableInfo};
+use risingwave_hummock_sdk::{EpochWithGap, LocalSstableInfo};
 use risingwave_pb::hummock::compact_task;
 use thiserror_ext::AsReport;
 use tracing::{error, warn};
@@ -59,75 +56,33 @@ pub async fn compact(
     context: CompactorContext,
     sstable_object_id_manager: SstableObjectIdManagerRef,
     payload: Vec<ImmutableMemtable>,
-    compaction_group_index: Arc<HashMap<TableId, CompactionGroupId>>,
     filter_key_extractor_manager: FilterKeyExtractorManager,
 ) -> HummockResult<UploadTaskOutput> {
-    let mut grouped_payload: HashMap<CompactionGroupId, Vec<ImmutableMemtable>> = HashMap::new();
-    for imm in &payload {
-        let compaction_group_id = match compaction_group_index.get(&imm.table_id) {
-            // compaction group id is used only as a hint for grouping different data.
-            // If the compaction group id is not found for the table id, we can assign a
-            // default compaction group id for the batch.
-            //
-            // On meta side, when we commit a new epoch, it is acceptable that the
-            // compaction group id provided from CN does not match the latest compaction
-            // group config.
-            None => StaticCompactionGroupId::StateDefault as CompactionGroupId,
-            Some(group_id) => *group_id,
-        };
-        grouped_payload
-            .entry(compaction_group_id)
-            .or_default()
-            .push(imm.clone());
-    }
-
-    let mut new_value_futures = vec![];
-    for (id, group_payload) in grouped_payload {
-        let id_copy = id;
-        new_value_futures.push(
-            compact_shared_buffer::<true>(
-                context.clone(),
-                sstable_object_id_manager.clone(),
-                filter_key_extractor_manager.clone(),
-                group_payload,
-            )
-            .map_ok(move |results| {
-                results
-                    .into_iter()
-                    .map(move |mut result| {
-                        result.compaction_group_id = id_copy;
-                        result
-                    })
-                    .collect_vec()
-            })
-            .instrument_await(format!("shared_buffer_compact_compaction_group {}", id)),
-        );
-    }
+    let new_value_ssts = compact_shared_buffer::<true>(
+        context.clone(),
+        sstable_object_id_manager.clone(),
+        filter_key_extractor_manager.clone(),
+        payload.clone(),
+    )
+    .await?;
 
     let old_value_payload = payload
         .into_iter()
         .filter(|imm| imm.has_old_value())
         .collect_vec();
 
-    let old_value_future = async {
-        if old_value_payload.is_empty() {
-            Ok(vec![])
-        } else {
-            compact_shared_buffer::<false>(
-                context.clone(),
-                sstable_object_id_manager,
-                filter_key_extractor_manager,
-                old_value_payload,
-            )
-            .await
-        }
+    let old_value_ssts = if old_value_payload.is_empty() {
+        vec![]
+    } else {
+        compact_shared_buffer::<false>(
+            context.clone(),
+            sstable_object_id_manager,
+            filter_key_extractor_manager,
+            old_value_payload,
+        )
+        .await?
     };
 
-    // Note that the output is reordered compared with input `payload`.
-    let (grouped_new_value_ssts, old_value_ssts) =
-        try_join(try_join_all(new_value_futures), old_value_future).await?;
-
-    let new_value_ssts = grouped_new_value_ssts.into_iter().flatten().collect_vec();
     Ok(UploadTaskOutput {
         new_value_ssts,
         old_value_ssts,
@@ -149,7 +104,6 @@ async fn compact_shared_buffer<const IS_NEW_VALUE: bool>(
         assert!(payload.iter().all(|imm| imm.has_old_value()));
     }
     // Local memory compaction looks at all key ranges.
-
     let mut existing_table_ids: HashSet<u32> = payload
         .iter()
         .map(|imm| imm.table_id.table_id)

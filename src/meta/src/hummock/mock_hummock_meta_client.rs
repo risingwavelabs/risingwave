@@ -180,11 +180,7 @@ impl HummockMetaClient for MockHummockMetaClient {
         );
         self.hummock_manager
             .commit_epoch(CommitEpochInfo::new(
-                sync_result
-                    .uncommitted_ssts
-                    .into_iter()
-                    .map(|sst| sst.into())
-                    .collect(),
+                sync_result.uncommitted_ssts,
                 new_table_watermark,
                 sst_to_worker,
                 None,

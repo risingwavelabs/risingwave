@@ -52,6 +52,7 @@ macro_rules! commit_multi_var {
         }
     };
 }
+
 pub(crate) use commit_multi_var;
 use risingwave_hummock_sdk::SstObjectIdRange;
 
