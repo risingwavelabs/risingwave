@@ -20,6 +20,7 @@ use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 
+use anyhow::anyhow;
 use bytes::Bytes;
 use either::Either;
 use parking_lot::{Mutex, RwLock, RwLockReadGuard};
@@ -34,6 +35,8 @@ use pgwire::pg_server::{
 };
 use pgwire::types::{Format, FormatIterator};
 use rand::RngCore;
+use risingwave_batch::monitor::{BatchSpillMetrics, GLOBAL_BATCH_SPILL_METRICS};
+use risingwave_batch::spill::spill_op::SpillOp;
 use risingwave_batch::task::{ShutdownSender, ShutdownToken};
 use risingwave_batch::worker_manager::worker_node_manager::{
     WorkerNodeManager, WorkerNodeManagerRef,
@@ -145,6 +148,9 @@ pub struct FrontendEnv {
 
     source_metrics: Arc<SourceMetrics>,
 
+    /// Batch spill metrics
+    spill_metrics: Arc<BatchSpillMetrics>,
+
     batch_config: BatchConfig,
     meta_config: MetaConfig,
     streaming_config: StreamingConfig,
@@ -224,6 +230,7 @@ impl FrontendEnv {
             meta_config: MetaConfig::default(),
             streaming_config: StreamingConfig::default(),
             source_metrics: Arc::new(SourceMetrics::default()),
+            spill_metrics: BatchSpillMetrics::for_test(),
             creating_streaming_job_tracker: Arc::new(creating_streaming_tracker),
             compute_runtime,
             mem_context: MemoryContext::none(),
@@ -336,6 +343,7 @@ impl FrontendEnv {
 
         let frontend_metrics = Arc::new(GLOBAL_FRONTEND_METRICS.clone());
         let source_metrics = Arc::new(GLOBAL_SOURCE_METRICS.clone());
+        let spill_metrics = Arc::new(GLOBAL_BATCH_SPILL_METRICS.clone());
 
         if config.server.metrics_level > MetricLevel::Disabled {
             MetricsManager::boot_metrics_service(opts.prometheus_listener_addr.clone());
@@ -401,6 +409,12 @@ impl FrontendEnv {
         });
         join_handles.push(join_handle);
 
+        // Clean up the spill directory.
+        #[cfg(not(madsim))]
+        SpillOp::clean_spill_directory()
+            .await
+            .map_err(|err| anyhow!(err))?;
+
         let total_memory_bytes = resource_util::memory::system_memory_available_bytes();
         let heap_profiler =
             HeapProfiler::new(total_memory_bytes, config.server.heap_profiling.clone());
@@ -427,6 +441,7 @@ impl FrontendEnv {
                 server_addr: frontend_address,
                 client_pool,
                 frontend_metrics,
+                spill_metrics,
                 sessions_map,
                 batch_config,
                 meta_config,
@@ -521,6 +536,10 @@ impl FrontendEnv {
 
     pub fn source_metrics(&self) -> Arc<SourceMetrics> {
         self.source_metrics.clone()
+    }
+
+    pub fn spill_metrics(&self) -> Arc<BatchSpillMetrics> {
+        self.spill_metrics.clone()
     }
 
     pub fn creating_streaming_job_tracker(&self) -> &StreamingJobTrackerRef {

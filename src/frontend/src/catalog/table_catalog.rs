@@ -60,7 +60,7 @@ use crate::user::UserId;
 /// - **Order Key**: the primary key for storage, used to sort and access data.
 ///
 ///   For an MV, the columns in `ORDER BY` clause will be put at the beginning of the order key. And
-/// the remaining columns in pk will follow behind.
+///   the remaining columns in pk will follow behind.
 ///
 ///   If there's no `ORDER BY` clause, the order key will be the same as pk.
 ///
@@ -210,7 +210,7 @@ impl TableType {
     }
 }
 
-/// The version of a table, used by schema change. See [`PbTableVersion`].
+/// The version of a table, used by schema change. See [`PbTableVersion`] for more details.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct TableVersion {
     pub version_id: TableVersionId,

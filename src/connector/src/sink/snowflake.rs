@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt::Write;
 use std::sync::Arc;
 
@@ -107,7 +107,7 @@ pub struct SnowflakeConfig {
 }
 
 impl SnowflakeConfig {
-    pub fn from_hashmap(properties: HashMap<String, String>) -> Result<Self> {
+    pub fn from_btreemap(properties: BTreeMap<String, String>) -> Result<Self> {
         let config =
             serde_json::from_value::<SnowflakeConfig>(serde_json::to_value(properties).unwrap())
                 .map_err(|e| SinkError::Config(anyhow!(e)))?;
@@ -154,7 +154,7 @@ impl TryFrom<SinkParam> for SnowflakeSink {
 
     fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
         let schema = param.schema();
-        let config = SnowflakeConfig::from_hashmap(param.properties)?;
+        let config = SnowflakeConfig::from_btreemap(param.properties)?;
         Ok(SnowflakeSink {
             config,
             schema,

@@ -65,6 +65,7 @@ impl ExecutorBuilder for ProjectSetExecutorBuilder {
             chunk_size,
             watermark_derivations,
             nondecreasing_expr_indices,
+            params.eval_error_report,
         );
         Ok((params.info, exec).into())
     }

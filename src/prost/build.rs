@@ -66,6 +66,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ".plan_common.ExternalTableDesc",
         ".hummock.CompactTask",
         ".catalog.StreamSourceInfo",
+        ".catalog.SecretRef",
+        ".catalog.Source",
+        ".catalog.Sink",
+        ".catalog.View",
+        ".connector_service.ValidateSourceRequest",
+        ".connector_service.GetEventStreamRequest",
+        ".connector_service.SinkParam",
+        ".stream_plan.SinkDesc",
+        ".stream_plan.StreamFsFetch",
+        ".stream_plan.SourceBackfillNode",
+        ".stream_plan.StreamSource",
+        ".batch_plan.SourceNode",
     ];
 
     // Build protobuf structs.
@@ -100,6 +112,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // The requirement is from Source node -> SourceCatalog -> WatermarkDesc -> expr
         .type_attribute("catalog.WatermarkDesc", "#[derive(Eq, Hash)]")
         .type_attribute("catalog.StreamSourceInfo", "#[derive(Eq, Hash)]")
+        .type_attribute("secret.SecretRef", "#[derive(Eq, Hash)]")
+        .type_attribute("catalog.IndexColumnProperties", "#[derive(Eq, Hash)]")
         .type_attribute("expr.ExprNode", "#[derive(Eq, Hash)]")
         .type_attribute("data.DataType", "#[derive(Eq, Hash)]")
         .type_attribute("expr.ExprNode.rex_node", "#[derive(Eq, Hash)]")

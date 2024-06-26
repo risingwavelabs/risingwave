@@ -12,9 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use core::mem;
 use core::time::Duration;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use anyhow::anyhow;
@@ -81,10 +80,17 @@ pub struct BigQueryCommon {
     #[serde(rename = "bigquery.max_batch_rows", default = "default_max_batch_rows")]
     #[serde_as(as = "DisplayFromStr")]
     pub max_batch_rows: usize,
+    #[serde(rename = "bigquery.retry_times", default = "default_retry_times")]
+    #[serde_as(as = "DisplayFromStr")]
+    pub retry_times: usize,
 }
 
 fn default_max_batch_rows() -> usize {
     1024
+}
+
+fn default_retry_times() -> usize {
+    5
 }
 
 impl BigQueryCommon {
@@ -139,7 +145,7 @@ pub struct BigQueryConfig {
     pub r#type: String, // accept "append-only" or "upsert"
 }
 impl BigQueryConfig {
-    pub fn from_hashmap(properties: HashMap<String, String>) -> Result<Self> {
+    pub fn from_btreemap(properties: BTreeMap<String, String>) -> Result<Self> {
         let config =
             serde_json::from_value::<BigQueryConfig>(serde_json::to_value(properties).unwrap())
                 .map_err(|e| SinkError::Config(anyhow!(e)))?;
@@ -332,7 +338,7 @@ impl TryFrom<SinkParam> for BigQuerySink {
 
     fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
         let schema = param.schema();
-        let config = BigQueryConfig::from_hashmap(param.properties)?;
+        let config = BigQueryConfig::from_btreemap(param.properties)?;
         BigQuerySink::new(
             config,
             schema,
@@ -469,12 +475,25 @@ impl BigQuerySinkWriter {
         if self.write_rows.is_empty() {
             return Ok(());
         }
-        let rows = mem::take(&mut self.write_rows);
-        self.write_rows_count = 0;
-        self.client
-            .append_rows(rows, self.write_stream.clone())
-            .await?;
-        Ok(())
+        let mut errs = Vec::with_capacity(self.config.common.retry_times);
+        for _ in 0..self.config.common.retry_times {
+            match self
+                .client
+                .append_rows(self.write_rows.clone(), self.write_stream.clone())
+                .await
+            {
+                Ok(_) => {
+                    self.write_rows_count = 0;
+                    self.write_rows.clear();
+                    return Ok(());
+                }
+                Err(e) => errs.push(e),
+            }
+        }
+        Err(SinkError::BigQuery(anyhow::anyhow!(
+            "Insert error {:?}",
+            errs
+        )))
     }
 }
 

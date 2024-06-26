@@ -206,6 +206,7 @@ macro_rules! dispatch_state_store {
 
 #[cfg(any(debug_assertions, test, feature = "test"))]
 pub mod verify {
+    use std::collections::HashSet;
     use std::fmt::Debug;
     use std::future::Future;
     use std::marker::PhantomData;
@@ -214,8 +215,9 @@ pub mod verify {
 
     use bytes::Bytes;
     use risingwave_common::buffer::Bitmap;
+    use risingwave_common::catalog::TableId;
     use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
-    use risingwave_hummock_sdk::{HummockReadEpoch, SyncResult};
+    use risingwave_hummock_sdk::HummockReadEpoch;
     use tracing::log::warn;
 
     use crate::error::StorageResult;
@@ -558,11 +560,18 @@ pub mod verify {
             self.actual.try_wait_epoch(epoch)
         }
 
-        async fn sync(&self, epoch: u64) -> StorageResult<SyncResult> {
-            if let Some(expected) = &self.expected {
-                let _ = expected.sync(epoch).await;
+        fn sync(&self, epoch: u64, table_ids: HashSet<TableId>) -> impl SyncFuture {
+            let expected_future = self
+                .expected
+                .as_ref()
+                .map(|expected| expected.sync(epoch, table_ids.clone()));
+            let actual_future = self.actual.sync(epoch, table_ids);
+            async move {
+                if let Some(expected_future) = expected_future {
+                    expected_future.await?;
+                }
+                actual_future.await
             }
-            self.actual.sync(epoch).await
         }
 
         fn seal_epoch(&self, epoch: u64, is_checkpoint: bool) {
@@ -613,6 +622,7 @@ impl StateStoreImpl {
         storage_metrics: Arc<MonitoredStorageMetrics>,
         compactor_metrics: Arc<CompactorMetrics>,
         await_tree_config: Option<await_tree::Config>,
+        use_new_object_prefix_strategy: bool,
     ) -> StorageResult<Self> {
         const MB: usize = 1 << 20;
 
@@ -622,7 +632,7 @@ impl StateStoreImpl {
                 .build_and_install();
         }
 
-        let meta_cache_v2 = {
+        let meta_cache = {
             let mut builder = HybridCacheBuilder::new()
                 .with_name("foyer.meta")
                 .memory(opts.meta_cache_capacity_mb * MB)
@@ -670,7 +680,7 @@ impl StateStoreImpl {
             builder.build().await.map_err(HummockError::foyer_error)?
         };
 
-        let block_cache_v2 = {
+        let block_cache = {
             let mut builder = HybridCacheBuilder::new()
                 .with_name("foyer.data")
                 .with_event_listener(Arc::new(BlockCacheEventListener::new(
@@ -748,9 +758,10 @@ impl StateStoreImpl {
                     max_prefetch_block_number: opts.max_prefetch_block_number,
                     recent_filter,
                     state_store_metrics: state_store_metrics.clone(),
+                    use_new_object_prefix_strategy,
 
-                    meta_cache_v2,
-                    block_cache_v2,
+                    meta_cache,
+                    block_cache,
                 }));
                 let notification_client =
                     RpcNotificationClient::new(hummock_meta_client.get_inner().clone());
@@ -814,13 +825,17 @@ impl AsHummock for SledStateStore {
 
 #[cfg(debug_assertions)]
 pub mod boxed_state_store {
+    use std::collections::HashSet;
     use std::future::Future;
     use std::ops::{Deref, DerefMut};
     use std::sync::Arc;
 
     use bytes::Bytes;
     use dyn_clone::{clone_trait_object, DynClone};
+    use futures::future::BoxFuture;
+    use futures::FutureExt;
     use risingwave_common::buffer::Bitmap;
+    use risingwave_common::catalog::TableId;
     use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
     use risingwave_hummock_sdk::{HummockReadEpoch, SyncResult};
 
@@ -1146,7 +1161,11 @@ pub mod boxed_state_store {
     pub trait DynamicDispatchedStateStoreExt: StaticSendSync {
         async fn try_wait_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()>;
 
-        async fn sync(&self, epoch: u64) -> StorageResult<SyncResult>;
+        fn sync(
+            &self,
+            epoch: u64,
+            table_ids: HashSet<TableId>,
+        ) -> BoxFuture<'static, StorageResult<SyncResult>>;
 
         fn seal_epoch(&self, epoch: u64, is_checkpoint: bool);
 
@@ -1163,8 +1182,12 @@ pub mod boxed_state_store {
             self.try_wait_epoch(epoch).await
         }
 
-        async fn sync(&self, epoch: u64) -> StorageResult<SyncResult> {
-            self.sync(epoch).await
+        fn sync(
+            &self,
+            epoch: u64,
+            table_ids: HashSet<TableId>,
+        ) -> BoxFuture<'static, StorageResult<SyncResult>> {
+            self.sync(epoch, table_ids).boxed()
         }
 
         fn seal_epoch(&self, epoch: u64, is_checkpoint: bool) {
@@ -1257,8 +1280,12 @@ pub mod boxed_state_store {
             self.deref().try_wait_epoch(epoch)
         }
 
-        fn sync(&self, epoch: u64) -> impl Future<Output = StorageResult<SyncResult>> + Send + '_ {
-            self.deref().sync(epoch)
+        fn sync(
+            &self,
+            epoch: u64,
+            table_ids: HashSet<TableId>,
+        ) -> impl Future<Output = StorageResult<SyncResult>> + Send + 'static {
+            self.deref().sync(epoch, table_ids)
         }
 
         fn clear_shared_buffer(&self, prev_epoch: u64) -> impl Future<Output = ()> + Send + '_ {

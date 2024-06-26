@@ -45,6 +45,7 @@ use crate::{
     for_all_scalar_variants, for_all_type_pairs,
 };
 
+mod cow;
 mod datetime;
 mod decimal;
 mod fields;
@@ -72,6 +73,7 @@ mod with_data_type;
 pub use fields::Fields;
 pub use risingwave_fields_derive::Fields;
 
+pub use self::cow::DatumCow;
 pub use self::datetime::{Date, Time, Timestamp};
 pub use self::decimal::{Decimal, PowError as DecimalPowError};
 pub use self::interval::{test_utils, DateTimeField, Interval, IntervalDisplay};
@@ -999,8 +1001,8 @@ impl ScalarRefImpl<'_> {
             Self::Interval(v) => v.serialize(ser)?,
             Self::Date(v) => v.0.num_days_from_ce().serialize(ser)?,
             Self::Timestamp(v) => {
-                v.0.timestamp().serialize(&mut *ser)?;
-                v.0.timestamp_subsec_nanos().serialize(ser)?;
+                v.0.and_utc().timestamp().serialize(&mut *ser)?;
+                v.0.and_utc().timestamp_subsec_nanos().serialize(ser)?;
             }
             Self::Timestamptz(v) => v.serialize(ser)?,
             Self::Time(v) => {

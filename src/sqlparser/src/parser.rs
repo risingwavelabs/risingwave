@@ -185,6 +185,8 @@ pub enum Precedence {
     PlusMinus, // 30 in upstream
     MulDiv,    // 40 in upstream
     Exp,
+    At,
+    Collate,
     UnaryPosNeg,
     PostfixFactorial,
     Array,
@@ -820,7 +822,7 @@ impl Parser<'_> {
         let distinct = self.parse_all_or_distinct()?;
         let (args, order_by, variadic) = self.parse_optional_args()?;
         let over = if self.parse_keyword(Keyword::OVER) {
-            // TBD: support window names (`OVER mywin`) in place of inline specification
+            // TODO: support window names (`OVER mywin`) in place of inline specification
             self.expect_token(&Token::LParen)?;
             let partition_by = if self.parse_keywords(&[Keyword::PARTITION, Keyword::BY]) {
                 // a list of possibly-qualified column names
@@ -887,6 +889,7 @@ impl Parser<'_> {
             Keyword::ROWS => keyword.value(WindowFrameUnits::Rows),
             Keyword::RANGE => keyword.value(WindowFrameUnits::Range),
             Keyword::GROUPS => keyword.value(WindowFrameUnits::Groups),
+            Keyword::SESSION => keyword.value(WindowFrameUnits::Session),
             _ => fail,
         }
         .expect("ROWS, RANGE, or GROUPS")
@@ -895,13 +898,21 @@ impl Parser<'_> {
 
     pub fn parse_window_frame(&mut self) -> PResult<WindowFrame> {
         let units = self.parse_window_frame_units()?;
-        let (start_bound, end_bound) = if self.parse_keyword(Keyword::BETWEEN) {
-            let start_bound = self.parse_window_frame_bound()?;
+        let bounds = if self.parse_keyword(Keyword::BETWEEN) {
+            // `BETWEEN <frame_start> AND <frame_end>`
+            let start = self.parse_window_frame_bound()?;
             self.expect_keyword(Keyword::AND)?;
-            let end_bound = Some(self.parse_window_frame_bound()?);
-            (start_bound, end_bound)
+            let end = Some(self.parse_window_frame_bound()?);
+            WindowFrameBounds::Bounds { start, end }
+        } else if self.parse_keywords(&[Keyword::WITH, Keyword::GAP]) {
+            // `WITH GAP <gap>`, only for session frames
+            WindowFrameBounds::Gap(Box::new(self.parse_expr()?))
         } else {
-            (self.parse_window_frame_bound()?, None)
+            // `<frame_start>`
+            WindowFrameBounds::Bounds {
+                start: self.parse_window_frame_bound()?,
+                end: None,
+            }
         };
         let exclusion = if self.parse_keyword(Keyword::EXCLUDE) {
             Some(self.parse_window_frame_exclusion()?)
@@ -910,8 +921,7 @@ impl Parser<'_> {
         };
         Ok(WindowFrame {
             units,
-            start_bound,
-            end_bound,
+            bounds,
             exclusion,
         })
     }
@@ -1388,11 +1398,14 @@ impl Parser<'_> {
                     }
                 }
                 Keyword::AT => {
-                    let time_zone = preceded(
-                        (Keyword::TIME, Keyword::ZONE),
-                        cut_err(Self::parse_literal_string),
-                    )
-                    .parse_next(self)?;
+                    assert_eq!(precedence, Precedence::At);
+                    let time_zone = Box::new(
+                        preceded(
+                            (Keyword::TIME, Keyword::ZONE),
+                            cut_err(|p: &mut Self| p.parse_subexpr(precedence)),
+                        )
+                        .parse_next(self)?,
+                    );
                     Ok(Expr::AtTimeZone {
                         timestamp: Box::new(expr),
                         time_zone,
@@ -1649,7 +1662,7 @@ impl Parser<'_> {
                     (Token::Word(w), Token::Word(w2))
                         if w.keyword == Keyword::TIME && w2.keyword == Keyword::ZONE =>
                     {
-                        Ok(P::Other)
+                        Ok(P::At)
                     }
                     _ => Ok(P::Zero),
                 }

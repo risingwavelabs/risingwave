@@ -11,13 +11,16 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use futures::Future;
+use futures::{Future, FutureExt};
 use risingwave_common::buffer::Bitmap;
+use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
-use risingwave_hummock_sdk::{HummockReadEpoch, SyncResult};
+use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_hummock_trace::{
     init_collector, should_use_trace, ConcurrentId, MayTraceSpan, OperationResult, StorageType,
     TraceResult, TraceSpan, TracedBytes, TracedSealCurrentEpochOptions, LOCAL_ID,
@@ -252,15 +255,17 @@ impl<S: StateStore> StateStore for TracedStateStore<S> {
         res
     }
 
-    async fn sync(&self, epoch: u64) -> StorageResult<SyncResult> {
-        let span: MayTraceSpan = TraceSpan::new_sync_span(epoch, self.storage_type);
+    fn sync(&self, epoch: u64, table_ids: HashSet<TableId>) -> impl SyncFuture {
+        let span: MayTraceSpan = TraceSpan::new_sync_span(epoch, &table_ids, self.storage_type);
 
-        let sync_result = self.inner.sync(epoch).await;
+        let future = self.inner.sync(epoch, table_ids);
 
-        span.may_send_result(OperationResult::Sync(
-            sync_result.as_ref().map(|res| res.sync_size).into(),
-        ));
-        sync_result
+        future.map(move |sync_result| {
+            span.may_send_result(OperationResult::Sync(
+                sync_result.as_ref().map(|res| res.sync_size).into(),
+            ));
+            sync_result
+        })
     }
 
     fn seal_epoch(&self, epoch: u64, is_checkpoint: bool) {

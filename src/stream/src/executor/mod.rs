@@ -131,7 +131,7 @@ pub use lookup_union::LookupUnionExecutor;
 pub use merge::MergeExecutor;
 pub use mview::*;
 pub use no_op::NoOpExecutor;
-pub use now::NowExecutor;
+pub use now::*;
 pub use over_window::*;
 pub use project::ProjectExecutor;
 pub use project_set::*;

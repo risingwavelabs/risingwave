@@ -12,12 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use itertools::Itertools;
 use risingwave_common::bail;
-use risingwave_common::catalog::{ColumnCatalog, ColumnDesc};
+use risingwave_common::catalog::ColumnCatalog;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::catalog::PbStreamSourceInfo;
 use risingwave_pb::plan_common::PbColumnCatalog;
@@ -53,28 +52,27 @@ pub struct FsSourceDesc {
 
 #[derive(Clone)]
 pub struct SourceDescBuilder {
-    columns: Vec<PbColumnCatalog>,
+    columns: Vec<ColumnCatalog>,
     metrics: Arc<SourceMetrics>,
     row_id_index: Option<usize>,
-    with_properties: HashMap<String, String>,
+    with_properties: BTreeMap<String, String>,
     source_info: PbStreamSourceInfo,
     connector_message_buffer_size: usize,
     pk_indices: Vec<usize>,
 }
 
 impl SourceDescBuilder {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         columns: Vec<PbColumnCatalog>,
         metrics: Arc<SourceMetrics>,
         row_id_index: Option<usize>,
-        with_properties: HashMap<String, String>,
+        with_properties: BTreeMap<String, String>,
         source_info: PbStreamSourceInfo,
         connector_message_buffer_size: usize,
         pk_indices: Vec<usize>,
     ) -> Self {
         Self {
-            columns,
+            columns: columns.into_iter().map(ColumnCatalog::from).collect(),
             metrics,
             row_id_index,
             with_properties,
@@ -92,25 +90,18 @@ impl SourceDescBuilder {
             .get(UPSTREAM_SOURCE_KEY)
             .map(|s| s.to_lowercase())
             .unwrap();
-        let columns = self
-            .columns
-            .iter()
-            .map(|c| ColumnCatalog::from(c.clone()))
-            .collect_vec();
         let (columns_exist, additional_columns) =
-            source_add_partition_offset_cols(&columns, &connector_name);
+            source_add_partition_offset_cols(&self.columns, &connector_name);
 
         let mut columns: Vec<_> = self
             .columns
             .iter()
-            .map(|c| SourceColumnDesc::from(&ColumnDesc::from(c.column_desc.as_ref().unwrap())))
+            .map(|c| SourceColumnDesc::from(&c.column_desc))
             .collect();
 
         for (existed, c) in columns_exist.iter().zip_eq_fast(&additional_columns) {
             if !existed {
-                columns.push(SourceColumnDesc::hidden_addition_col_from_column_desc(
-                    &c.column_desc,
-                ));
+                columns.push(SourceColumnDesc::hidden_addition_col_from_column_desc(c));
             }
         }
 
@@ -182,11 +173,10 @@ impl SourceDescBuilder {
 }
 
 pub mod test_utils {
-    use std::collections::HashMap;
+    use std::collections::BTreeMap;
 
-    use risingwave_common::catalog::{ColumnDesc, Schema};
+    use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, Schema};
     use risingwave_pb::catalog::StreamSourceInfo;
-    use risingwave_pb::plan_common::ColumnCatalog;
 
     use super::{SourceDescBuilder, DEFAULT_CONNECTOR_MESSAGE_BUFFER_SIZE};
 
@@ -194,23 +184,19 @@ pub mod test_utils {
         schema: &Schema,
         row_id_index: Option<usize>,
         source_info: StreamSourceInfo,
-        with_properties: HashMap<String, String>,
+        with_properties: BTreeMap<String, String>,
         pk_indices: Vec<usize>,
     ) -> SourceDescBuilder {
         let columns = schema
             .fields
             .iter()
             .enumerate()
-            .map(|(i, f)| ColumnCatalog {
-                column_desc: Some(
-                    ColumnDesc::named(
-                        f.name.clone(),
-                        (i as i32).into(), // use column index as column id
-                        f.data_type.clone(),
-                    )
-                    .to_protobuf(),
-                ),
-                is_hidden: false,
+            .map(|(i, f)| {
+                ColumnCatalog::visible(ColumnDesc::named(
+                    f.name.clone(),
+                    (i as i32).into(), // use column index as column id
+                    f.data_type.clone(),
+                ))
             })
             .collect();
         SourceDescBuilder {

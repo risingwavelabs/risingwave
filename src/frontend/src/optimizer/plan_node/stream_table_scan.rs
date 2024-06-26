@@ -147,6 +147,7 @@ impl StreamTableScan {
     ///        | 1002 | Int64(1) | t                   | 10          |
     ///        | 1003 | Int64(1) | t                   | 10          |
     ///        | 1003 | Int64(1) | t                   | 10          |
+    ///
     /// Eventually we should track progress per vnode, to support scaling with both mview and
     /// the corresponding `no_shuffle_backfill`.
     /// However this is not high priority, since we are working on supporting arrangement backfill,

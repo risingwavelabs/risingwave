@@ -187,6 +187,7 @@ impl CatalogManager {
     /// We identify a 'legacy' source based on two conditions:
     /// 1. The `format_encode_options` in `source_info` is empty.
     /// 2. Keys with certain prefixes belonging to `format_encode_options` exist in `with_properties` instead.
+    ///
     /// And if the source is identified as 'legacy', we copy the misplaced keys from `with_properties` to `format_encode_options`.
     async fn source_backward_compat_check(&self) -> MetaResult<()> {
         let core = &mut *self.core.lock().await;
@@ -897,6 +898,7 @@ impl CatalogManager {
     ///    with:
     ///    1. `stream_job_status` = CREATING
     ///    2. Not belonging to a background stream job.
+    ///
     ///    Clean up these hanging tables by the id.
     pub async fn clean_dirty_tables(&self, fragment_manager: FragmentManagerRef) -> MetaResult<()> {
         let core = &mut *self.core.lock().await;
@@ -1069,6 +1071,67 @@ impl CatalogManager {
             }
         }
         Ok(())
+    }
+
+    /// `finish_stream_job` finishes a stream job and clean some states.
+    pub async fn finish_stream_job(
+        &self,
+        mut stream_job: StreamingJob,
+        internal_tables: Vec<Table>,
+    ) -> MetaResult<u64> {
+        // 1. finish procedure.
+        let mut creating_internal_table_ids = internal_tables.iter().map(|t| t.id).collect_vec();
+
+        // Update the corresponding 'created_at' field.
+        stream_job.mark_created();
+
+        let version = match stream_job {
+            StreamingJob::MaterializedView(table) => {
+                creating_internal_table_ids.push(table.id);
+                self.finish_create_table_procedure(internal_tables, table)
+                    .await?
+            }
+            StreamingJob::Sink(sink, target_table) => {
+                let sink_id = sink.id;
+
+                let mut version = self
+                    .finish_create_sink_procedure(internal_tables, sink)
+                    .await?;
+
+                if let Some((table, source)) = target_table {
+                    version = self
+                        .finish_replace_table_procedure(&source, &table, None, Some(sink_id), None)
+                        .await?;
+                }
+
+                version
+            }
+            StreamingJob::Table(source, table, ..) => {
+                creating_internal_table_ids.push(table.id);
+                if let Some(source) = source {
+                    self.finish_create_table_procedure_with_source(source, table, internal_tables)
+                        .await?
+                } else {
+                    self.finish_create_table_procedure(internal_tables, table)
+                        .await?
+                }
+            }
+            StreamingJob::Index(index, table) => {
+                creating_internal_table_ids.push(table.id);
+                self.finish_create_index_procedure(internal_tables, index, table)
+                    .await?
+            }
+            StreamingJob::Source(source) => {
+                self.finish_create_source_procedure(source, internal_tables)
+                    .await?
+            }
+        };
+
+        // 2. unmark creating tables.
+        self.unmark_creating_tables(&creating_internal_table_ids, false)
+            .await;
+
+        Ok(version)
     }
 
     /// This is used for both `CREATE TABLE` and `CREATE MATERIALIZED VIEW`.

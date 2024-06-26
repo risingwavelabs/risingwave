@@ -18,9 +18,9 @@ use std::ops::Range;
 use educe::Educe;
 use risingwave_common::array::Op;
 use risingwave_common::types::Sentinelled;
-use risingwave_common::util::memcmp_encoding;
+use risingwave_common::util::memcmp_encoding::{self, MemcmpEncoded};
 use risingwave_expr::window_function::{
-    FrameExclusion, RangeFrameBounds, RowsFrameBounds, StateKey,
+    FrameExclusion, RangeFrameBounds, RowsFrameBounds, SessionFrameBounds, StateKey,
 };
 
 use super::range_utils::{range_diff, range_except};
@@ -148,7 +148,7 @@ impl<W: WindowImpl> WindowBuffer<W> {
         let old_outer = self.curr_window_outer();
 
         self.buffer.push_back(Entry { key, value });
-        self.recalculate_left_right();
+        self.recalculate_left_right(RecalculateHint::Append);
 
         if self.curr_delta.is_some() {
             self.maintain_delta(old_outer, self.curr_window_outer());
@@ -161,7 +161,7 @@ impl<W: WindowImpl> WindowBuffer<W> {
         let old_outer = self.curr_window_outer();
 
         self.curr_idx += 1;
-        self.recalculate_left_right();
+        self.recalculate_left_right(RecalculateHint::Slide);
 
         if self.curr_delta.is_some() {
             self.maintain_delta(old_outer, self.curr_window_outer());
@@ -171,6 +171,9 @@ impl<W: WindowImpl> WindowBuffer<W> {
         self.curr_idx -= min_needed_idx;
         self.left_idx -= min_needed_idx;
         self.right_excl_idx -= min_needed_idx;
+
+        self.window_impl.shift_indices(min_needed_idx);
+
         self.buffer
             .drain(0..min_needed_idx)
             .map(|Entry { key, value }| (key, value))
@@ -189,14 +192,14 @@ impl<W: WindowImpl> WindowBuffer<W> {
         }
     }
 
-    fn recalculate_left_right(&mut self) {
+    fn recalculate_left_right(&mut self, hint: RecalculateHint) {
         let window = BufferRefMut {
             buffer: &self.buffer,
             curr_idx: &mut self.curr_idx,
             left_idx: &mut self.left_idx,
             right_excl_idx: &mut self.right_excl_idx,
         };
-        self.window_impl.recalculate_left_right(window);
+        self.window_impl.recalculate_left_right(window, hint);
     }
 }
 
@@ -218,6 +221,12 @@ pub(super) struct BufferRefMut<'a, K: Ord, V: Clone> {
     right_excl_idx: &'a mut usize,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum RecalculateHint {
+    Append,
+    Slide,
+}
+
 /// A trait for sliding window implementations. This trait is used by [`WindowBuffer`] to
 /// determine the status of current window and how to slide the window.
 pub(super) trait WindowImpl {
@@ -233,8 +242,16 @@ pub(super) trait WindowImpl {
     fn following_saturated(&self, window: BufferRef<'_, Self::Key, Self::Value>) -> bool;
 
     /// Recalculate the left and right indices of the current window, according to the latest
-    /// `curr_idx`. The indices are indices in the buffer vector.
-    fn recalculate_left_right(&self, window: BufferRefMut<'_, Self::Key, Self::Value>);
+    /// `curr_idx` and the hint.
+    fn recalculate_left_right(
+        &mut self,
+        window: BufferRefMut<'_, Self::Key, Self::Value>,
+        hint: RecalculateHint,
+    );
+
+    /// Shift the indices stored by the [`WindowImpl`] by `n` positions. This should be called
+    /// after evicting rows from the buffer.
+    fn shift_indices(&mut self, n: usize);
 }
 
 /// The sliding window implementation for `ROWS` frames.
@@ -301,7 +318,11 @@ impl<K: Ord, V: Clone> WindowImpl for RowsWindow<K, V> {
         }
     }
 
-    fn recalculate_left_right(&self, window: BufferRefMut<'_, Self::Key, Self::Value>) {
+    fn recalculate_left_right(
+        &mut self,
+        window: BufferRefMut<'_, Self::Key, Self::Value>,
+        _hint: RecalculateHint,
+    ) {
         if window.buffer.is_empty() {
             *window.left_idx = 0;
             *window.right_excl_idx = 0;
@@ -333,6 +354,8 @@ impl<K: Ord, V: Clone> WindowImpl for RowsWindow<K, V> {
             *window.right_excl_idx = window.buffer.len();
         }
     }
+
+    fn shift_indices(&mut self, _n: usize) {}
 }
 
 /// The sliding window implementation for `RANGE` frames.
@@ -377,7 +400,11 @@ impl<V: Clone> WindowImpl for RangeWindow<V> {
             }
     }
 
-    fn recalculate_left_right(&self, window: BufferRefMut<'_, Self::Key, Self::Value>) {
+    fn recalculate_left_right(
+        &mut self,
+        window: BufferRefMut<'_, Self::Key, Self::Value>,
+        _hint: RecalculateHint,
+    ) {
         if window.buffer.is_empty() {
             *window.left_idx = 0;
             *window.right_excl_idx = 0;
@@ -433,14 +460,199 @@ impl<V: Clone> WindowImpl for RangeWindow<V> {
             Sentinelled::Smallest => unreachable!("frame end never be UNBOUNDED PRECEDING"),
         }
     }
+
+    fn shift_indices(&mut self, _n: usize) {}
+}
+
+pub(super) struct SessionWindow<V: Clone> {
+    frame_bounds: SessionFrameBounds,
+    /// The latest session is the rightmost session in the buffer, which is updated during appending.
+    latest_session: Option<LatestSession>,
+    /// The sizes of recognized but not consumed sessions in the buffer. It's updated during appending.
+    /// The first element, if any, should be the size of the "current session window". When sliding,
+    /// the front should be popped.
+    recognized_session_sizes: VecDeque<usize>,
+    _phantom: std::marker::PhantomData<V>,
+}
+
+#[derive(Debug)]
+struct LatestSession {
+    /// The starting index of the latest session.
+    start_idx: usize,
+
+    /// Minimal next start means the minimal order value that can start a new session.
+    /// If a row has an order value less than this, it should be in the current session.
+    minimal_next_start: MemcmpEncoded,
+}
+
+impl<V: Clone> SessionWindow<V> {
+    pub fn new(frame_bounds: SessionFrameBounds) -> Self {
+        Self {
+            frame_bounds,
+            latest_session: None,
+            recognized_session_sizes: Default::default(),
+            _phantom: std::marker::PhantomData,
+        }
+    }
+}
+
+impl<V: Clone> WindowImpl for SessionWindow<V> {
+    type Key = StateKey;
+    type Value = V;
+
+    fn preceding_saturated(&self, window: BufferRef<'_, Self::Key, Self::Value>) -> bool {
+        window.curr_idx < window.buffer.len() && {
+            // XXX(rc): It seems that preceding saturation is not important, may remove later.
+            true
+        }
+    }
+
+    fn following_saturated(&self, window: BufferRef<'_, Self::Key, Self::Value>) -> bool {
+        window.curr_idx < window.buffer.len() && {
+            // For session window, `left_idx` is always smaller than `right_excl_idx`.
+            assert!(window.left_idx <= window.curr_idx);
+            assert!(window.curr_idx < window.right_excl_idx);
+
+            // The following expression checks whether the current window is the latest session.
+            // If it is, we don't think it's saturated because the next row may be still in the
+            // same session. Otherwise, we can safely say it's saturated.
+            self.latest_session
+                .as_ref()
+                .map_or(false, |LatestSession { start_idx, .. }| {
+                    window.left_idx < *start_idx
+                })
+        }
+    }
+
+    fn recalculate_left_right(
+        &mut self,
+        window: BufferRefMut<'_, Self::Key, Self::Value>,
+        hint: RecalculateHint,
+    ) {
+        // Terms:
+        // - Session: A continuous range of rows among any two of which the difference of order values
+        //   is less than the session gap. This is a concept on the whole stream. Sessions are recognized
+        //   during appending.
+        // - Current window: The range of rows that are represented by the indices in `window`. It is a
+        //   status of the `WindowBuffer`. If the current window happens to be the last session in the
+        //   buffer, it will be updated during appending. Otherwise it will only be updated during sliding.
+
+        match hint {
+            RecalculateHint::Append => {
+                assert!(!window.buffer.is_empty()); // because we just appended a row
+                let appended_idx = window.buffer.len() - 1;
+                let appended_key = &window.buffer[appended_idx].key;
+
+                let minimal_next_start_of_appended = self.frame_bounds.minimal_next_start_of(
+                    memcmp_encoding::decode_value(
+                        &self.frame_bounds.order_data_type,
+                        &appended_key.order_key,
+                        self.frame_bounds.order_type,
+                    )
+                    .expect("no reason to fail here because we just encoded it in memory"),
+                );
+                let minimal_next_start_enc_of_appended = memcmp_encoding::encode_value(
+                    minimal_next_start_of_appended,
+                    self.frame_bounds.order_type,
+                )
+                .expect("no reason to fail here");
+
+                if let Some(LatestSession {
+                    ref start_idx,
+                    minimal_next_start,
+                }) = self.latest_session.as_mut()
+                {
+                    if &appended_key.order_key >= minimal_next_start {
+                        // the appended row starts a new session
+                        self.recognized_session_sizes
+                            .push_back(appended_idx - start_idx);
+                        self.latest_session = Some(LatestSession {
+                            start_idx: appended_idx,
+                            minimal_next_start: minimal_next_start_enc_of_appended,
+                        });
+                        // no need to update the current window because it's now corresponding
+                        // to some previous session
+                    } else {
+                        // the appended row belongs to the latest session
+                        *minimal_next_start = minimal_next_start_enc_of_appended;
+
+                        if *start_idx == *window.left_idx {
+                            // the current window is the latest session, we should extend it
+                            *window.right_excl_idx = appended_idx + 1;
+                        }
+                    }
+                } else {
+                    // no session yet, the current window should be empty
+                    let left_idx = *window.left_idx;
+                    let curr_idx = *window.curr_idx;
+                    let old_right_excl_idx = *window.right_excl_idx;
+                    assert_eq!(left_idx, curr_idx);
+                    assert_eq!(left_idx, old_right_excl_idx);
+                    assert_eq!(old_right_excl_idx, window.buffer.len() - 1);
+
+                    // now we put the first row into the current window
+                    *window.right_excl_idx = window.buffer.len();
+
+                    // and start to recognize the latest session
+                    self.latest_session = Some(LatestSession {
+                        start_idx: left_idx,
+                        minimal_next_start: minimal_next_start_enc_of_appended,
+                    });
+                }
+            }
+            RecalculateHint::Slide => {
+                let old_left_idx = *window.left_idx;
+                let new_curr_idx = *window.curr_idx;
+                let old_right_excl_idx = *window.right_excl_idx;
+
+                if new_curr_idx < old_right_excl_idx {
+                    // the current row is still in the current session window, no need to slide
+                } else {
+                    let old_session_size = self.recognized_session_sizes.pop_front();
+                    let next_session_size = self.recognized_session_sizes.front().copied();
+
+                    if let Some(old_session_size) = old_session_size {
+                        assert_eq!(old_session_size, old_right_excl_idx - old_left_idx);
+
+                        // slide the window to the next session
+                        if let Some(next_session_size) = next_session_size {
+                            // the next session is fully recognized, so we know the ending index
+                            *window.left_idx = old_right_excl_idx;
+                            *window.right_excl_idx = old_right_excl_idx + next_session_size;
+                        } else {
+                            // the next session is still in recognition, so we end the window at the end of buffer
+                            *window.left_idx = old_right_excl_idx;
+                            *window.right_excl_idx = window.buffer.len();
+                        }
+                    } else {
+                        // no recognized session yet, meaning the current window is the last session in the buffer
+                        assert_eq!(old_right_excl_idx, window.buffer.len());
+                        *window.left_idx = old_right_excl_idx;
+                        *window.right_excl_idx = old_right_excl_idx;
+                        self.latest_session = None;
+                    }
+                }
+            }
+        }
+    }
+
+    fn shift_indices(&mut self, n: usize) {
+        if let Some(LatestSession { start_idx, .. }) = self.latest_session.as_mut() {
+            *start_idx -= n;
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use itertools::Itertools;
+    use risingwave_common::row::OwnedRow;
+    use risingwave_common::types::{DataType, ScalarImpl};
+    use risingwave_common::util::sort_util::OrderType;
     use risingwave_expr::window_function::FrameBound::{
         CurrentRow, Following, Preceding, UnboundedFollowing, UnboundedPreceding,
     };
+    use risingwave_expr::window_function::SessionFrameGap;
 
     use super::*;
 
@@ -733,5 +945,115 @@ mod tests {
             buffer.curr_window_values().cloned().collect_vec(),
             vec!["hello"]
         );
+    }
+
+    #[test]
+    fn test_session_frame() {
+        let order_data_type = DataType::Int64;
+        let order_type = OrderType::ascending();
+        let gap_data_type = DataType::Int64;
+
+        let mut buffer = WindowBuffer::<SessionWindow<_>>::new(
+            SessionWindow::new(SessionFrameBounds {
+                order_data_type: order_data_type.clone(),
+                order_type,
+                gap_data_type: gap_data_type.clone(),
+                gap: SessionFrameGap::new_for_test(
+                    ScalarImpl::Int64(5),
+                    &order_data_type,
+                    &gap_data_type,
+                ),
+            }),
+            FrameExclusion::NoOthers,
+            true,
+        );
+
+        let key = |key: i64| -> StateKey {
+            StateKey {
+                order_key: memcmp_encoding::encode_value(&Some(ScalarImpl::from(key)), order_type)
+                    .unwrap(),
+                pk: OwnedRow::empty().into(),
+            }
+        };
+
+        assert!(buffer.curr_key().is_none());
+
+        buffer.append(key(1), "hello");
+        buffer.append(key(3), "session");
+        let window = buffer.curr_window();
+        assert_eq!(window.key, Some(&key(1)));
+        assert!(window.preceding_saturated);
+        assert!(!window.following_saturated);
+        assert_eq!(
+            buffer.curr_window_values().cloned().collect_vec(),
+            vec!["hello", "session"]
+        );
+
+        buffer.append(key(8), "window"); // start a new session
+        let window = buffer.curr_window();
+        assert!(window.following_saturated);
+        assert_eq!(
+            buffer.curr_window_values().cloned().collect_vec(),
+            vec!["hello", "session"]
+        );
+
+        buffer.append(key(15), "and");
+        buffer.append(key(16), "world");
+        assert_eq!(
+            buffer.curr_window_values().cloned().collect_vec(),
+            vec!["hello", "session"]
+        );
+
+        let removed_keys = buffer.slide().map(|(k, _)| k).collect_vec();
+        assert!(removed_keys.is_empty());
+        let window = buffer.curr_window();
+        assert_eq!(window.key, Some(&key(3)));
+        assert!(window.preceding_saturated);
+        assert!(window.following_saturated);
+        assert_eq!(
+            buffer.curr_window_values().cloned().collect_vec(),
+            vec!["hello", "session"]
+        );
+
+        let removed_keys = buffer.slide().map(|(k, _)| k).collect_vec();
+        assert_eq!(removed_keys, vec![key(1), key(3)]);
+        assert_eq!(buffer.smallest_key(), Some(&key(8)));
+        let window = buffer.curr_window();
+        assert_eq!(window.key, Some(&key(8)));
+        assert!(window.preceding_saturated);
+        assert!(window.following_saturated);
+        assert_eq!(
+            buffer.curr_window_values().cloned().collect_vec(),
+            vec!["window"]
+        );
+
+        let removed_keys = buffer.slide().map(|(k, _)| k).collect_vec();
+        assert_eq!(removed_keys, vec![key(8)]);
+        assert_eq!(buffer.smallest_key(), Some(&key(15)));
+        let window = buffer.curr_window();
+        assert_eq!(window.key, Some(&key(15)));
+        assert!(window.preceding_saturated);
+        assert!(!window.following_saturated);
+        assert_eq!(
+            buffer.curr_window_values().cloned().collect_vec(),
+            vec!["and", "world"]
+        );
+
+        let removed_keys = buffer.slide().map(|(k, _)| k).collect_vec();
+        assert!(removed_keys.is_empty());
+        assert_eq!(buffer.curr_key(), Some(&key(16)));
+        assert_eq!(
+            buffer.curr_window_values().cloned().collect_vec(),
+            vec!["and", "world"]
+        );
+
+        let removed_keys = buffer.slide().map(|(k, _)| k).collect_vec();
+        assert_eq!(removed_keys, vec![key(15), key(16)]);
+        assert!(buffer.curr_key().is_none());
+        assert!(buffer
+            .curr_window_values()
+            .cloned()
+            .collect_vec()
+            .is_empty());
     }
 }

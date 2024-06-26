@@ -80,6 +80,8 @@ mod recursive_union;
 pub use recursive_union::*;
 mod change_log;
 pub use change_log::*;
+mod now;
+pub use now::*;
 
 pub trait DistillUnit {
     fn distill_with_name<'a>(&self, name: impl Into<Cow<'a, str>>) -> XmlNode<'a>;

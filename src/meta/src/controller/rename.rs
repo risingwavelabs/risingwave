@@ -175,7 +175,7 @@ impl QueryRewriter<'_> {
     ///
     /// So that we DON'T have to:
     /// 1. rewrite the select and expr part like `schema.table.column`, `table.column`,
-    /// `alias.column` etc.
+    ///    `alias.column` etc.
     /// 2. handle the case that the old name is used as alias.
     /// 3. handle the case that the new name is used as alias.
     fn visit_table_factor(&self, table_factor: &mut TableFactor) {

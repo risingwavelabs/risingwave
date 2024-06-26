@@ -72,7 +72,6 @@ pub use compaction::{check_cg_write_limit, WriteLimitType};
 pub(crate) use utils::*;
 
 type Snapshot = ArcSwap<HummockSnapshot>;
-const HISTORY_TABLE_INFO_STATISTIC_TIME: usize = 240;
 
 // Update to states are performed as follow:
 // - Initialize ValTransaction for the meta state to update
@@ -297,7 +296,7 @@ impl HummockManager {
         Ok(instance)
     }
 
-    fn meta_store_ref(&self) -> MetaStoreImpl {
+    fn meta_store_ref(&self) -> &MetaStoreImpl {
         self.env.meta_store_ref()
     }
 
@@ -392,7 +391,7 @@ impl HummockManager {
                 .read()
                 .await
                 .default_compaction_config();
-            let checkpoint_version = create_init_version(default_compaction_config);
+            let checkpoint_version = HummockVersion::create_init_version(default_compaction_config);
             tracing::info!("init hummock version checkpoint");
             versioning_guard.checkpoint = HummockVersionCheckpoint {
                 version: checkpoint_version.clone(),
@@ -495,21 +494,21 @@ impl HummockManager {
             );
         }
 
+        let mut compaction_group_manager = self.compaction_group_manager.write().await;
+        let mut compaction_groups_txn = compaction_group_manager.start_compaction_groups_txn();
         for group in &compaction_groups {
             let mut pairs = vec![];
             for table_id in group.member_table_ids.clone() {
                 pairs.push((table_id as StateTableId, group.id));
             }
             let group_config = group.compaction_config.clone().unwrap();
-            self.compaction_group_manager
-                .write()
-                .await
-                .init_compaction_config_for_replay(group.id, group_config)
-                .await
-                .unwrap();
+            compaction_groups_txn.create_compaction_groups(group.id, Arc::new(group_config));
+
             self.register_table_ids_for_test(&pairs).await?;
             tracing::info!("Registered table ids {:?}", pairs);
         }
+
+        commit_multi_var!(self.meta_store_ref(), compaction_groups_txn)?;
 
         // Notify that tables have created
         for table in table_catalogs {
