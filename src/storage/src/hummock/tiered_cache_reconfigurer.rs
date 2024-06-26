@@ -46,7 +46,7 @@ impl TieredCacheReconfigurer {
             }
 
             let p = rx.borrow().load();
-            if p.minitrace() {
+            if p.enable_tracing() {
                 self.meta_cache.enable_tracing();
                 self.block_cache.enable_tracing();
                 tracing::info!("Enable minitrace for tiered cache.");
@@ -55,13 +55,13 @@ impl TieredCacheReconfigurer {
                 self.block_cache.disable_tracing();
                 tracing::info!("Disable minitrace for tiered cache.");
             }
-            let minitrace_tiered_cache_read_ms = p.minitrace_tiered_cache_read_ms();
-            let minitrace_tiered_cache_write_ms = p.minitrace_tiered_cache_write_ms();
+            let read = p.tracing_threshold_tiered_cache_read_ms();
+            let write = p.tracing_threshold_tiered_cache_write_ms();
 
             tracing::info!(
                 "Tiered cache trace record threshold: [read = {:?}] [write = {:?}]",
-                minitrace_tiered_cache_read_ms,
-                minitrace_tiered_cache_write_ms
+                read,
+                write
             );
 
             let meta_cache_trace_config = self.meta_cache.trace_config();
@@ -69,67 +69,37 @@ impl TieredCacheReconfigurer {
 
             meta_cache_trace_config
                 .record_hybrid_get_threshold_us
-                .store(
-                    minitrace_tiered_cache_read_ms as usize * 1000,
-                    Ordering::Relaxed,
-                );
+                .store(read as usize * 1000, Ordering::Relaxed);
             meta_cache_trace_config
                 .record_hybrid_obtain_threshold_us
-                .store(
-                    minitrace_tiered_cache_read_ms as usize * 1000,
-                    Ordering::Relaxed,
-                );
+                .store(read as usize * 1000, Ordering::Relaxed);
             meta_cache_trace_config
                 .record_hybrid_fetch_threshold_us
-                .store(
-                    minitrace_tiered_cache_read_ms as usize * 1000,
-                    Ordering::Relaxed,
-                );
+                .store(read as usize * 1000, Ordering::Relaxed);
 
             meta_cache_trace_config
                 .record_hybrid_insert_threshold_us
-                .store(
-                    minitrace_tiered_cache_write_ms as usize * 1000,
-                    Ordering::Relaxed,
-                );
+                .store(write as usize * 1000, Ordering::Relaxed);
             meta_cache_trace_config
                 .record_hybrid_remove_threshold_us
-                .store(
-                    minitrace_tiered_cache_write_ms as usize * 1000,
-                    Ordering::Relaxed,
-                );
+                .store(write as usize * 1000, Ordering::Relaxed);
 
             block_cache_trace_config
                 .record_hybrid_get_threshold_us
-                .store(
-                    minitrace_tiered_cache_read_ms as usize * 1000,
-                    Ordering::Relaxed,
-                );
+                .store(read as usize * 1000, Ordering::Relaxed);
             block_cache_trace_config
                 .record_hybrid_obtain_threshold_us
-                .store(
-                    minitrace_tiered_cache_read_ms as usize * 1000,
-                    Ordering::Relaxed,
-                );
+                .store(read as usize * 1000, Ordering::Relaxed);
             block_cache_trace_config
                 .record_hybrid_fetch_threshold_us
-                .store(
-                    minitrace_tiered_cache_read_ms as usize * 1000,
-                    Ordering::Relaxed,
-                );
+                .store(read as usize * 1000, Ordering::Relaxed);
 
             block_cache_trace_config
                 .record_hybrid_insert_threshold_us
-                .store(
-                    minitrace_tiered_cache_write_ms as usize * 1000,
-                    Ordering::Relaxed,
-                );
+                .store(write as usize * 1000, Ordering::Relaxed);
             block_cache_trace_config
                 .record_hybrid_remove_threshold_us
-                .store(
-                    minitrace_tiered_cache_write_ms as usize * 1000,
-                    Ordering::Relaxed,
-                );
+                .store(write as usize * 1000, Ordering::Relaxed);
         }
     }
 }

@@ -88,9 +88,8 @@ macro_rules! for_all_params {
             { pause_on_next_bootstrap,                  bool,   Some(false),                                true,   "Whether to pause all data sources on next bootstrap.", },
             { enable_tracing,                           bool,   Some(false),                                true,   "Whether to enable distributed tracing.", },
             { use_new_object_prefix_strategy,           bool,   None,                                       false,  "Whether to split object prefix.", },
-            { minitrace,                                bool,   Some(false),                                true,   "Whether to enable minitrace tracing.", },
-            { minitrace_tiered_cache_read_ms,           u32,    Some(1000),                                 true,   "Threshold to record tiered cache read with minitrace.", },
-            { minitrace_tiered_cache_write_ms,          u32,    Some(1000),                                 true,   "Threshold to record tiered cache write with minitrace.", },
+            { tracing_threshold_tiered_cache_read_ms,           u32,    Some(1000),                                 true,   "Threshold to record tiered cache read with minitrace.", },
+            { tracing_threshold_tiered_cache_write_ms,          u32,    Some(1000),                                 true,   "Threshold to record tiered cache write with minitrace.", },
         }
     };
 }
@@ -447,9 +446,8 @@ mod tests {
             (PAUSE_ON_NEXT_BOOTSTRAP_KEY, "false"),
             (ENABLE_TRACING_KEY, "true"),
             (USE_NEW_OBJECT_PREFIX_STRATEGY_KEY, "false"),
-            (MINITRACE_KEY, "false"),
-            (MINITRACE_TIERED_CACHE_READ_MS_KEY, "1000"),
-            (MINITRACE_TIERED_CACHE_WRITE_MS_KEY, "1000"),
+            (TRACING_THRESHOLD_TIERED_CACHE_READ_MS_KEY, "1000"),
+            (TRACING_THRESHOLD_TIERED_CACHE_WRITE_MS_KEY, "1000"),
             ("a_deprecated_param", "foo"),
         ];
 
