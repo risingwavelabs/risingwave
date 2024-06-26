@@ -47,6 +47,7 @@ mod progress;
 mod tests;
 
 pub use progress::CreateMviewProgress;
+use risingwave_common::catalog::TableId;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
 use risingwave_hummock_sdk::{LocalSstableInfo, SyncResult};
@@ -489,6 +490,10 @@ impl LocalBarrierWorker {
                     &barrier,
                     req.actor_ids_to_send.into_iter().collect(),
                     req.actor_ids_to_collect.into_iter().collect(),
+                    req.table_ids_to_sync
+                        .into_iter()
+                        .map(TableId::new)
+                        .collect(),
                 )?;
                 Ok(())
             }
@@ -666,6 +671,7 @@ impl LocalBarrierWorker {
         barrier: &Barrier,
         to_send: HashSet<ActorId>,
         to_collect: HashSet<ActorId>,
+        table_ids: HashSet<TableId>,
     ) -> StreamResult<()> {
         #[cfg(not(test))]
         {
@@ -713,7 +719,8 @@ impl LocalBarrierWorker {
             }
         }
 
-        self.state.transform_to_issued(barrier, to_collect);
+        self.state
+            .transform_to_issued(barrier, to_collect, table_ids);
 
         for actor_id in to_send {
             match self.barrier_senders.get(&actor_id) {
