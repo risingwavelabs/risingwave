@@ -19,6 +19,7 @@ use risingwave_common::catalog::{
     ColumnCatalog, ConnectionId, CreateType, DatabaseId, SchemaId, TableId, UserId,
 };
 use risingwave_common::util::sort_util::ColumnOrder;
+use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::stream_plan::PbSinkDesc;
 
 use super::{SinkCatalog, SinkFormatDesc, SinkId, SinkType};
@@ -83,7 +84,7 @@ impl SinkDesc {
         owner: UserId,
         connection_id: Option<ConnectionId>,
         dependent_relations: Vec<TableId>,
-        secret_ref: BTreeMap<String, u32>,
+        secret_ref: BTreeMap<String, PbSecretRef>,
     ) -> SinkCatalog {
         SinkCatalog {
             id: self.id,

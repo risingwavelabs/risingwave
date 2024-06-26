@@ -1028,6 +1028,7 @@ pub mod test_utils {
     }
 }
 
+/// Note: this is created in `SourceReader::build_stream`
 #[derive(Debug, Clone, Default)]
 pub struct ParserConfig {
     pub common: CommonParserConfig,
@@ -1042,6 +1043,7 @@ impl ParserConfig {
 
 #[derive(Debug, Clone, Default)]
 pub struct CommonParserConfig {
+    /// Note: this is created by `SourceDescBuilder::builder`
     pub rw_columns: Vec<SourceColumnDesc>,
 }
 

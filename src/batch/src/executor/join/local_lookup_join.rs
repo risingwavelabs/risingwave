@@ -487,6 +487,8 @@ impl HashKeyDispatcher for LocalLookupJoinExecutorArgs {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use risingwave_common::array::{DataChunk, DataChunkTestExt};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::hash::HashKeyDispatcher;
@@ -502,6 +504,7 @@ mod tests {
         diff_executor_output, FakeInnerSideExecutorBuilder, MockExecutor,
     };
     use crate::executor::{BoxedExecutor, SortExecutor};
+    use crate::monitor::BatchSpillMetrics;
     use crate::task::ShutdownToken;
 
     const CHUNK_SIZE: usize = 1024;
@@ -594,10 +597,12 @@ mod tests {
 
         Box::new(SortExecutor::new(
             child,
-            column_orders,
+            Arc::new(column_orders),
             "SortExecutor".into(),
             CHUNK_SIZE,
             MemoryContext::none(),
+            None,
+            BatchSpillMetrics::for_test(),
         ))
     }
 

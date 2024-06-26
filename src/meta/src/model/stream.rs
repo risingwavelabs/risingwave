@@ -345,11 +345,6 @@ impl TableFragments {
             .collect()
     }
 
-    /// Returns barrier inject actor ids.
-    pub fn barrier_inject_actor_ids(&self) -> Vec<ActorId> {
-        Self::filter_actor_ids(self, Self::is_injectable)
-    }
-
     /// Check if the fragment type mask is injectable.
     pub fn is_injectable(fragment_type_mask: u32) -> bool {
         (fragment_type_mask
@@ -559,20 +554,6 @@ impl TableFragments {
             }
         }
         actors
-    }
-
-    pub fn worker_barrier_inject_actor_states(
-        &self,
-    ) -> BTreeMap<WorkerId, Vec<(ActorId, ActorState)>> {
-        let mut map = BTreeMap::default();
-        let barrier_inject_actor_ids = self.barrier_inject_actor_ids();
-        for &actor_id in &barrier_inject_actor_ids {
-            let actor_status = &self.actor_status[&actor_id];
-            map.entry(actor_status.get_parallel_unit().unwrap().worker_node_id as WorkerId)
-                .or_insert_with(Vec::new)
-                .push((actor_id, actor_status.state()));
-        }
-        map
     }
 
     /// Returns actor map: `actor_id` => `StreamActor`.

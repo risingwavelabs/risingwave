@@ -72,7 +72,6 @@ pub use compaction::{check_cg_write_limit, WriteLimitType};
 pub(crate) use utils::*;
 
 type Snapshot = ArcSwap<HummockSnapshot>;
-const HISTORY_TABLE_INFO_STATISTIC_TIME: usize = 240;
 
 // Update to states are performed as follow:
 // - Initialize ValTransaction for the meta state to update

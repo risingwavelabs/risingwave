@@ -94,11 +94,16 @@ pub struct CreateSourceStatement {
     pub include_column_options: IncludeOption,
 }
 
+/// FORMAT means how to get the operation(Insert/Delete) from the input.
+///
+/// Check `CONNECTORS_COMPATIBLE_FORMATS` for what `FORMAT ... ENCODE ...` combinations are allowed.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Format {
+    /// The format is the same with RisingWave's internal representation.
+    /// Used internally for schema change
     Native,
-    // Keyword::NONE
+    /// for self-explanatory sources like iceberg, they have their own format, and should not be specified by user.
     None,
     // Keyword::DEBEZIUM
     Debezium,
@@ -143,8 +148,8 @@ impl Format {
             "CANAL" => Format::Canal,
             "PLAIN" => Format::Plain,
             "UPSERT" => Format::Upsert,
-            "NATIVE" => Format::Native, // used internally for schema change
-            "NONE" => Format::None,     // used by iceberg
+            "NATIVE" => Format::Native,
+            "NONE" => Format::None,
             _ => parser_err!(
                 "expected CANAL | PROTOBUF | DEBEZIUM | MAXWELL | PLAIN | NATIVE | NONE after FORMAT"
             ),
@@ -152,6 +157,7 @@ impl Format {
     }
 }
 
+/// Check `CONNECTORS_COMPATIBLE_FORMATS` for what `FORMAT ... ENCODE ...` combinations are allowed.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Encode {
@@ -160,8 +166,11 @@ pub enum Encode {
     Protobuf, // Keyword::PROTOBUF
     Json,     // Keyword::JSON
     Bytes,    // Keyword::BYTES
-    None,     // Keyword::None
-    Text,     // Keyword::TEXT
+    /// for self-explanatory sources like iceberg, they have their own format, and should not be specified by user.
+    None,
+    Text, // Keyword::TEXT
+    /// The encode is the same with RisingWave's internal representation.
+    /// Used internally for schema change
     Native,
     Template,
 }
@@ -197,8 +206,8 @@ impl Encode {
             "PROTOBUF" => Encode::Protobuf,
             "JSON" => Encode::Json,
             "TEMPLATE" => Encode::Template,
-            "NATIVE" => Encode::Native, // used internally for schema change
-            "NONE" => Encode::None, // used by iceberg
+            "NATIVE" => Encode::Native,
+            "NONE" => Encode::None,
             _ => parser_err!(
                 "expected AVRO | BYTES | CSV | PROTOBUF | JSON | NATIVE | TEMPLATE | NONE after Encode"
             ),

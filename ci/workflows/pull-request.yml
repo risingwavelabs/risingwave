@@ -423,6 +423,21 @@ steps:
     timeout_in_minutes: 10
     retry: *auto-retry
 
+  - label: "end-to-end mongodb sink test"
+    if: build.pull_request.labels includes "ci/run-e2e-mongodb-sink-tests" || build.env("CI_STEPS") =~ /(^|,) e2e-mongodb-sink-tests?(,|$$)/
+    command: "ci/scripts/e2e-mongodb-sink-test.sh -p ci-dev"
+    depends_on:
+      - "build"
+      - "build-other"
+    plugins:
+      - docker-compose#v5.1.0:
+          run: sink-test-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 10
+    retry: *auto-retry
+
   - label: "e2e java-binding test"
     if: build.pull_request.labels includes "ci/run-java-binding-tests" || build.env("CI_STEPS") =~ /(^|,)java-binding-tests?(,|$$)/
     command: "ci/scripts/java-binding-test.sh -p ci-dev"

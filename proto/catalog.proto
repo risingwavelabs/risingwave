@@ -6,6 +6,7 @@ import "common.proto";
 import "data.proto";
 import "expr.proto";
 import "plan_common.proto";
+import "secret.proto";
 
 option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
@@ -83,8 +84,8 @@ message StreamSourceInfo {
   // Options specified by user in the FORMAT ENCODE clause.
   map<string, string> format_encode_options = 14;
 
-  // Handle the source relies on any sceret. The key is the propertity name and the value is the secret id.
-  map<string, uint32> secret_ref = 16;
+  // Handle the source relies on any sceret. The key is the propertity name and the value is the secret id and type.
+  map<string, secret.SecretRef> secret_ref = 16;
 }
 
 message Source {
@@ -180,8 +181,8 @@ message Sink {
   // Whether it should use background ddl or block until backfill finishes.
   CreateType create_type = 24;
 
-  // Handle the sink relies on any sceret. The key is the propertity name and the value is the secret id.
-  map<string, uint32> secret_ref = 25;
+  // Handle the sink relies on any sceret. The key is the propertity name and the value is the secret id and type.
+  map<string, secret.SecretRef> secret_ref = 25;
 }
 
 message Subscription {
@@ -241,6 +242,7 @@ message Index {
   // Only `InputRef` type index is supported Now.
   // The index of `InputRef` is the column index of the primary table.
   repeated expr.ExprNode index_item = 8;
+  repeated IndexColumnProperties index_column_properties = 16;
   reserved 9; // Deprecated repeated int32 original_columns = 9;
 
   optional uint64 initialized_at_epoch = 10;
@@ -253,6 +255,14 @@ message Index {
   // Cluster version (tracked by git commit) when initialized/created
   optional string initialized_at_cluster_version = 14;
   optional string created_at_cluster_version = 15;
+}
+
+// https://www.postgresql.org/docs/current/functions-info.html#FUNCTIONS-INFO-INDEX-COLUMN-PROPS
+message IndexColumnProperties {
+  // Whether the column sort in ascending(false) or descending(true) order on a forward scan.
+  bool is_desc = 1;
+  // Does the column sort with nulls first on a forward scan?
+  bool nulls_first = 2;
 }
 
 message Function {

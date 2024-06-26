@@ -19,6 +19,7 @@ use risingwave_connector::source::kafka::private_link::{
     insert_privatelink_broker_rewrite_map, CONNECTION_NAME_KEY, PRIVATELINK_ENDPOINT_KEY,
 };
 use risingwave_connector::WithPropertiesExt;
+use risingwave_pb::secret::PbSecretRef;
 use risingwave_sqlparser::ast::{
     CreateConnectionStatement, CreateSinkStatement, CreateSourceStatement,
     CreateSubscriptionStatement, SqlOption, Statement, Value,
@@ -81,7 +82,10 @@ impl WithOptions {
     pub fn into_connector_props(self) -> BTreeMap<String, String> {
         self.inner
             .into_iter()
-            .filter(|(key, _)| key != OverwriteOptions::STREAMING_RATE_LIMIT_KEY)
+            .filter(|(key, _)| {
+                key != OverwriteOptions::STREAMING_RATE_LIMIT_KEY
+                    && key != options::RETENTION_SECONDS
+            })
             .collect()
     }
 
@@ -119,7 +123,7 @@ impl WithOptions {
 pub(crate) fn resolve_secret_in_with_options(
     _with_options: &mut WithOptions,
     _session: &SessionImpl,
-) -> RwResult<BTreeMap<String, u32>> {
+) -> RwResult<BTreeMap<String, PbSecretRef>> {
     // todo: implement the function and take `resolve_privatelink_in_with_option` as reference
 
     Ok(BTreeMap::new())
