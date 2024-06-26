@@ -162,14 +162,16 @@ impl ThroughputMetric {
         tokio::spawn(async move {
             let mut chunk_size_list = vec![];
             loop {
-                sleep(tokio::time::Duration::from_millis(
-                    THROUGHPUT_METRIC_RECORD_INTERVAL,
-                ))
-                .await;
-                chunk_size_list.push(accumulate_chunk_size_clone.load(Ordering::Relaxed));
-                if stop_rx.try_recv().unwrap().is_some() {
-                    vec_tx.send(chunk_size_list).unwrap();
-                    break;
+                tokio::select! {
+                    _ = sleep(tokio::time::Duration::from_millis(
+                        THROUGHPUT_METRIC_RECORD_INTERVAL,
+                    )) => {
+                        chunk_size_list.push(accumulate_chunk_size_clone.load(Ordering::Relaxed));
+                    }
+                    _ = &mut stop_rx => {
+                        vec_tx.send(chunk_size_list).unwrap();
+                        break;
+                    }
                 }
             }
         });
@@ -189,16 +191,16 @@ impl ThroughputMetric {
     pub async fn print_throughput(self) {
         self.stop_tx.send(()).unwrap();
         let throughput_sum_vec = self.vec_rx.await.unwrap();
-        if throughput_sum_vec.is_empty() {
-            println!("Throughput Sink: Don't get Throughput, please check");
-            return;
-        }
         #[allow(clippy::disallowed_methods)]
         let throughput_vec = throughput_sum_vec
             .iter()
             .zip(throughput_sum_vec.iter().skip(1))
             .map(|(current, next)| (next - current) * 1000 / THROUGHPUT_METRIC_RECORD_INTERVAL)
             .collect_vec();
+        if throughput_vec.is_empty() {
+            println!("Throughput Sink: Don't get Throughput, please check");
+            return;
+        }
         let avg = throughput_vec.iter().sum::<u64>() / throughput_vec.len() as u64;
         let throughput_vec_sorted = throughput_vec.iter().sorted().collect_vec();
         let p90 = throughput_vec_sorted[throughput_vec_sorted.len() * 90 / 100];
