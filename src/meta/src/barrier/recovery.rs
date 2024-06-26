@@ -177,7 +177,7 @@ impl GlobalBarrierManagerContext {
                 table_fragment_map.into(),
                 table_internal_table_map.into(),
                 table_stream_job_map.into(),
-                mgr.clone()
+                mgr.clone(),
             );
         }
         Ok(())
