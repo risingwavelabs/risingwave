@@ -277,11 +277,12 @@ WHERE  key_col IS NOT NULL
 
 
 query ??
-WITH arr AS (SELECT header_col_combined FROM additional_columns order by 1 limit 1)
-SELECT unnest(header_col_combined) FROM arr;
+WITH arr AS (SELECT header_col_combined FROM additional_columns),
+unnested AS (SELECT unnest(header_col_combined) FROM arr)
+select *, count(*) from unnested group by 1;
 ----
-(header1,"\\x7631")
-(header2,"\\x7632")
+(header1,"\\x7631") 101
+(header2,"\\x7632") 101
 
 query ????
 select header_col_1, header_col_2, header_col_3, header_col_4 from additional_columns limit 1
