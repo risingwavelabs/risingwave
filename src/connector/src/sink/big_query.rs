@@ -46,6 +46,7 @@ use risingwave_common::types::DataType;
 use serde_derive::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
 use simd_json::prelude::ArrayTrait;
+use thiserror_ext::AsReport;
 use tokio::sync::{broadcast, mpsc};
 use url::Url;
 use uuid::Uuid;
