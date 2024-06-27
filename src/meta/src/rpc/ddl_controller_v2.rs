@@ -221,28 +221,21 @@ impl DdlController {
                     },
                 );
 
-                self.stream_manager
+                let version = self.stream_manager
                     .create_streaming_job(table_fragments, ctx)
                     .await?;
-
-                let version = self.wait_streaming_job_finished_v2(mgr, stream_job_id as _).await?;
                 Ok(version)
             }
             (CreateType::Background, _) => {
                 let ctrl = self.clone();
                 let mgr = mgr.clone();
                 let fut = async move {
-                    let result = ctrl
+                    let _ = ctrl
                         .stream_manager
                         .create_streaming_job(table_fragments, ctx)
                         .await.inspect_err(|err| {
                             tracing::error!(id = stream_job_id, error = ?err.as_report(), "failed to create background streaming job");
                         });
-                    if result.is_ok() {
-                        let _ = ctrl.wait_streaming_job_finished_v2(&mgr, stream_job_id as _).await.inspect_err(|err| {
-                            tracing::error!(id = stream_job_id, error = ?err.as_report(), "failed to finish background streaming job");
-                        });
-                    }
                 };
                 tokio::spawn(fut);
                 Ok(IGNORED_NOTIFICATION_VERSION)
@@ -508,24 +501,5 @@ impl DdlController {
                 Err(err)
             }
         }
-    }
-
-    pub(crate) async fn wait_streaming_job_finished_v2(
-        &self,
-        metadata_manager: &MetadataManagerV2,
-        id: ObjectId,
-    ) -> MetaResult<NotificationVersion> {
-        let mut mgr = metadata_manager
-            .catalog_controller
-            .get_inner_write_guard()
-            .await;
-        if let Some(version) = mgr.table_is_finished(id) {
-            return version;
-        }
-        let (tx, rx) = oneshot::channel();
-
-        mgr.register_finish_notifier(id, tx);
-        drop(mgr);
-        rx.await.map_err(|e| anyhow!(e))?
     }
 }

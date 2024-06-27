@@ -487,7 +487,7 @@ impl DdlController {
                 mgr.catalog_manager
                     .finish_create_source_procedure(source, vec![])
                     .await?;
-                self.wait_streaming_job_finished_v1(mgr, source_id).await
+                mgr.wait_streaming_job_finished(source_id).await
             }
             MetadataManager::V2(mgr) => {
                 mgr.catalog_controller
@@ -1298,9 +1298,6 @@ impl DdlController {
 
             self.stream_manager
                 .create_streaming_job(table_fragments, ctx)
-                .await?;
-
-            self.wait_streaming_job_finished_v1(mgr, stream_job.id())
                 .await?
         };
 
@@ -2203,25 +2200,6 @@ impl DdlController {
             MetadataManager::V1(mgr) => mgr.catalog_manager.comment_on(comment).await,
             MetadataManager::V2(mgr) => mgr.catalog_controller.comment_on(comment).await,
         }
-    }
-
-    async fn wait_streaming_job_finished_v1(
-        &self,
-        metadata_manager: &MetadataManagerV1,
-        id: TableId,
-    ) -> MetaResult<NotificationVersion> {
-        let mut mgr = metadata_manager
-            .catalog_manager
-            .get_catalog_core_guard()
-            .await;
-        if let Some(version) = mgr.table_is_finished(id).await {
-            return version;
-        }
-        let (tx, rx) = oneshot::channel();
-
-        mgr.register_finish_notifier(id, tx);
-        drop(mgr);
-        rx.await.map_err(|e| anyhow!(e))?
     }
 }
 
