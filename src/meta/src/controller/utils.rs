@@ -31,9 +31,7 @@ use risingwave_meta_model_v2::{
     SchemaId, SourceId, StreamNode, UserId, VnodeBitmap, WorkerId,
 };
 use risingwave_pb::catalog::{PbConnection, PbFunction, PbSecret, PbSubscription};
-use risingwave_pb::meta::{
-    FragmentWorkerSlotMapping, PbFragmentParallelUnitMapping, PbFragmentWorkerSlotMapping,
-};
+use risingwave_pb::meta::PbFragmentWorkerSlotMapping;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{PbFragmentTypeFlag, PbStreamNode, StreamSource};
 use risingwave_pb::user::grant_privilege::{PbAction, PbActionWithGrantOption, PbObject};
@@ -937,7 +935,7 @@ pub async fn get_fragment_ids_by_jobs<C>(
 where
     C: ConnectionTrait,
 {
-    let fragment_ids: Vec<(FragmentId)> = Fragment::find()
+    let fragment_ids: Vec<FragmentId> = Fragment::find()
         .select_only()
         .column(fragment::Column::FragmentId)
         .filter(fragment::Column::JobId.is_in(job_ids))

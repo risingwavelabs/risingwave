@@ -19,14 +19,13 @@ use std::mem::swap;
 use anyhow::Context;
 use itertools::Itertools;
 use risingwave_common::bail;
-use risingwave_common::hash::ParallelUnitMapping;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node;
 use risingwave_meta_model_v2::actor::ActorStatus;
 use risingwave_meta_model_v2::prelude::{Actor, ActorDispatcher, Fragment, Sink, StreamingJob};
 use risingwave_meta_model_v2::{
     actor, actor_dispatcher, fragment, sink, streaming_job, ActorId, ActorUpstreamActors,
-    ConnectorSplits, ExprContext, FragmentId, FragmentVnodeMapping, I32Array, JobStatus, ObjectId,
-    SinkId, SourceId, StreamNode, StreamingParallelism, TableId, VnodeBitmap, WorkerId,
+    ConnectorSplits, ExprContext, FragmentId, I32Array, JobStatus, ObjectId, SinkId, SourceId,
+    StreamNode, StreamingParallelism, TableId, VnodeBitmap, WorkerId,
 };
 use risingwave_pb::common::PbParallelUnit;
 use risingwave_pb::meta::subscribe_response::{
@@ -52,7 +51,8 @@ use sea_orm::{
 
 use crate::controller::catalog::{CatalogController, CatalogControllerInner};
 use crate::controller::utils::{
-    get_actor_dispatchers, FragmentDesc, PartialActorLocation, PartialFragmentStateTables,
+    get_actor_dispatchers, get_fragment_mappings, FragmentDesc, PartialActorLocation,
+    PartialFragmentStateTables,
 };
 use crate::manager::{ActorInfos, InflightFragmentInfo, LocalNotification};
 use crate::model::{TableFragments, TableParallelism};
@@ -64,29 +64,24 @@ impl CatalogControllerInner {
     pub async fn all_running_fragment_mappings(
         &self,
     ) -> MetaResult<impl Iterator<Item = FragmentWorkerSlotMapping> + '_> {
-        // let txn = self.db.begin().await?;
-        //
-        // let fragment_mappings: Vec<(FragmentId, FragmentVnodeMapping)> = Fragment::find()
-        //     .join(JoinType::InnerJoin, fragment::Relation::Object.def())
-        //     .join(JoinType::InnerJoin, object::Relation::StreamingJob.def())
-        //     .select_only()
-        //     .columns([fragment::Column::FragmentId, fragment::Column::VnodeMapping])
-        //     .filter(streaming_job::Column::JobStatus.eq(JobStatus::Created))
-        //     .into_tuple()
-        //     .all(&txn)
-        //     .await?;
-        //
-        // let parallel_unit_to_worker = get_parallel_unit_to_worker_map(&txn).await?;
-        //
-        // let mappings = CatalogController::convert_fragment_mappings(
-        //     fragment_mappings,
-        //     &parallel_unit_to_worker,
-        // )?;
-        //
-        // Ok(mappings.into_iter())
-        // todo!()
+        let txn = self.db.begin().await?;
 
-        Ok(Vec::<FragmentWorkerSlotMapping>::default().into_iter())
+        let job_ids: Vec<i32> = StreamingJob::find()
+            .select_only()
+            .column(streaming_job::Column::JobId)
+            .filter(streaming_job::Column::JobStatus.eq(JobStatus::Created))
+            .into_tuple()
+            .all(&txn)
+            .await?;
+
+        let mut result = vec![];
+        for job_id in job_ids {
+            let mappings = get_fragment_mappings(&txn, job_id as ObjectId).await?;
+
+            result.extend(mappings.into_iter());
+        }
+
+        Ok(result.into_iter())
     }
 }
 
@@ -955,40 +950,6 @@ impl CatalogController {
         //     .await;
         //
         // Ok(())
-    }
-
-    pub(crate) fn convert_fragment_mappings(
-        fragment_mappings: Vec<(FragmentId, FragmentVnodeMapping)>,
-        parallel_unit_to_worker: &HashMap<u32, u32>,
-    ) -> MetaResult<Vec<PbFragmentWorkerSlotMapping>> {
-        let mut result = vec![];
-
-        for (fragment_id, mapping) in fragment_mappings {
-            result.push(PbFragmentWorkerSlotMapping {
-                fragment_id: fragment_id as _,
-                mapping: Some(
-                    ParallelUnitMapping::from_protobuf(&mapping.to_protobuf())
-                        .to_worker_slot(parallel_unit_to_worker)?
-                        .to_protobuf(),
-                ),
-            })
-        }
-
-        Ok(result)
-    }
-
-    pub async fn all_inuse_parallel_units(&self) -> MetaResult<Vec<i32>> {
-        // let inner = self.inner.read().await;
-        // let parallel_units: Vec<i32> = Actor::find()
-        //     .select_only()
-        //     .column(actor::Column::ParallelUnitId)
-        //     .distinct()
-        //     .into_tuple()
-        //     .all(&inner.db)
-        //     .await?;
-        // Ok(parallel_units)
-
-        todo!()
     }
 
     pub async fn all_node_actors(

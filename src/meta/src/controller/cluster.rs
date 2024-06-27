@@ -20,6 +20,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use itertools::Itertools;
+use risingwave_common::hash::WorkerSlotId;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::resource_util::cpu::total_cpu_available;
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
@@ -29,9 +30,7 @@ use risingwave_meta_model_v2::prelude::{Worker, WorkerProperty};
 use risingwave_meta_model_v2::worker::{WorkerStatus, WorkerType};
 use risingwave_meta_model_v2::{worker, worker_property, TransactionId, WorkerId};
 use risingwave_pb::common::worker_node::{PbProperty, PbResource, PbState};
-use risingwave_pb::common::{
-    HostAddress, ParallelUnit, PbHostAddress, PbWorkerNode, PbWorkerType, WorkerNode,
-};
+use risingwave_pb::common::{HostAddress, PbHostAddress, PbWorkerNode, PbWorkerType, WorkerNode};
 use risingwave_pb::meta::add_worker_node_request::Property as AddNodeProperty;
 use risingwave_pb::meta::heartbeat_request;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
@@ -353,8 +352,8 @@ impl ClusterController {
             .await
     }
 
-    pub async fn list_active_parallel_units(&self) -> MetaResult<Vec<ParallelUnit>> {
-        self.inner.read().await.list_active_parallel_units().await
+    pub async fn list_active_worker_slots(&self) -> MetaResult<Vec<WorkerSlotId>> {
+        self.inner.read().await.list_active_worker_slots().await
     }
 
     /// Get the cluster info used for scheduling a streaming job, containing all nodes that are
@@ -585,13 +584,6 @@ impl ClusterControllerInner {
     ) -> MetaResult<WorkerId> {
         let txn = self.db.begin().await?;
 
-        // TODO: remove this workaround when we deprecate parallel unit ids.
-        let derive_parallel_units = |txn_id: TransactionId, start: i32, end: i32| {
-            (start..end)
-                .map(|idx| (idx << Self::MAX_WORKER_REUSABLE_ID_BITS) + txn_id)
-                .collect_vec()
-        };
-
         let worker = Worker::find()
             .filter(
                 worker::Column::Host
@@ -606,7 +598,6 @@ impl ClusterControllerInner {
             assert_eq!(worker.worker_type, r#type.into());
             return if worker.worker_type == WorkerType::ComputeNode {
                 let property = property.unwrap();
-                let txn_id = worker.transaction_id.unwrap();
                 let mut current_parallelism = property.parallelism as usize;
                 let new_parallelism = add_property.worker_node_parallelism as usize;
                 match new_parallelism.cmp(&current_parallelism) {
@@ -823,8 +814,22 @@ impl ClusterControllerInner {
             .collect_vec())
     }
 
-    pub async fn list_active_parallel_units(&self) -> MetaResult<Vec<ParallelUnit>> {
-        todo!()
+    pub async fn list_active_worker_slots(&self) -> MetaResult<Vec<WorkerSlotId>> {
+        let worker_parallelisms: Vec<(WorkerId, i32)> = WorkerProperty::find()
+            .select_only()
+            .column(worker_property::Column::WorkerId)
+            .column(worker_property::Column::Parallelism)
+            .inner_join(Worker)
+            .filter(worker::Column::Status.eq(WorkerStatus::Running))
+            .into_tuple()
+            .all(&self.db)
+            .await?;
+        Ok(worker_parallelisms
+            .into_iter()
+            .flat_map(|(worker_id, parallelism)| {
+                (0..parallelism).map(move |idx| WorkerSlotId::new(worker_id as u32, idx as usize))
+            })
+            .collect_vec())
     }
 
     pub async fn list_active_serving_workers(&self) -> MetaResult<Vec<PbWorkerNode>> {
@@ -931,7 +936,7 @@ mod tests {
         }
 
         // Since no worker is active, the parallel unit count should be 0.
-        assert_eq!(cluster_ctl.list_active_parallel_units().await?.len(), 0);
+        assert_eq!(cluster_ctl.list_active_worker_slots().await?.len(), 0);
 
         for id in &worker_ids {
             cluster_ctl.activate_worker(*id).await?;
@@ -950,7 +955,7 @@ mod tests {
             worker_count
         );
         assert_eq!(
-            cluster_ctl.list_active_parallel_units().await?.len(),
+            cluster_ctl.list_active_worker_slots().await?.len(),
             parallelism_num * worker_count
         );
 
@@ -975,9 +980,9 @@ mod tests {
             cluster_ctl.list_active_serving_workers().await?.len(),
             worker_count - 1
         );
-        let parallel_units = cluster_ctl.list_active_parallel_units().await?;
-        assert!(parallel_units.iter().map(|pu| pu.id).all_unique());
-        assert_eq!(parallel_units.len(), parallelism_num * (worker_count + 1));
+        let worker_slots = cluster_ctl.list_active_worker_slots().await?;
+        assert!(worker_slots.iter().all_unique());
+        assert_eq!(worker_slots.len(), parallelism_num * (worker_count + 1));
 
         // delete workers.
         for host in hosts {
@@ -985,7 +990,7 @@ mod tests {
         }
         assert_eq!(cluster_ctl.list_active_streaming_workers().await?.len(), 0);
         assert_eq!(cluster_ctl.list_active_serving_workers().await?.len(), 0);
-        assert_eq!(cluster_ctl.list_active_parallel_units().await?.len(), 0);
+        assert_eq!(cluster_ctl.list_active_worker_slots().await?.len(), 0);
 
         Ok(())
     }

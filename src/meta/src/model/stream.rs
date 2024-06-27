@@ -17,7 +17,7 @@ use std::ops::AddAssign;
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::hash::{WorkerSlotId};
+use risingwave_common::hash::WorkerSlotId;
 use risingwave_connector::source::SplitImpl;
 use risingwave_pb::common::ParallelUnit;
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;

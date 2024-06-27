@@ -151,19 +151,6 @@ impl Distribution {
         }
     }
 
-    /// Convert the distribution to a [`WorkerSlotMapping`].
-    ///
-    /// - For singleton distribution, all of the virtual nodes are mapped to the same worker slot.
-    /// - For hash distribution, the mapping is returned as is.
-    pub fn into_mapping(self) -> WorkerSlotMapping {
-        match self {
-            Distribution::Singleton(worker_slot_id) => {
-                WorkerSlotMapping::new_single(worker_slot_id)
-            }
-            Distribution::Hash(mapping) => mapping,
-        }
-    }
-
     /// Create a distribution from a persisted protobuf `Fragment`.
     pub fn from_fragment(
         fragment: &risingwave_pb::meta::table_fragments::Fragment,

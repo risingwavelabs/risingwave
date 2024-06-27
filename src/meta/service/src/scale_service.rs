@@ -39,7 +39,6 @@ pub struct ScaleServiceImpl {
     source_manager: SourceManagerRef,
     stream_manager: GlobalStreamManagerRef,
     barrier_manager: BarrierManagerRef,
-    scale_controller: ScaleControllerRef,
 }
 
 impl ScaleServiceImpl {
@@ -48,14 +47,13 @@ impl ScaleServiceImpl {
         source_manager: SourceManagerRef,
         stream_manager: GlobalStreamManagerRef,
         barrier_manager: BarrierManagerRef,
-        scale_controller: ScaleControllerRef,
+        _scale_controller: ScaleControllerRef,
     ) -> Self {
         Self {
             metadata_manager,
             source_manager,
             stream_manager,
             barrier_manager,
-            scale_controller,
         }
     }
 
