@@ -81,7 +81,7 @@ impl<Src: OpendalSource> OpendalReader<Src> {
                 self.connector.op.clone(),
                 split,
                 self.source_ctx.clone(),
-                self.connector.decompression_format.clone(),
+                self.connector.compression_format.clone(),
             );
 
             let data_stream = if need_nd_streaming(&self.parser_config.specific.encoding_config) {
@@ -108,7 +108,7 @@ impl<Src: OpendalSource> OpendalReader<Src> {
         op: Operator,
         split: OpendalFsSplit<Src>,
         source_ctx: SourceContextRef,
-        decompression_format: Option<DecompressionFormat>,
+        compression_format: Option<DecompressionFormat>,
     ) {
         let actor_id = source_ctx.actor_id.to_string();
         let fragment_id = source_ctx.fragment_id.to_string();
@@ -120,7 +120,7 @@ impl<Src: OpendalSource> OpendalReader<Src> {
         let object_name = split.name.clone();
 
         let reader = op
-            .reader_with(&object_name)
+            .read_with(&object_name)
             .range(split.offset as u64..)
             .into_future() // Unlike `rustc`, `try_stream` seems require manual `into_future`.
             .await?;
@@ -129,7 +129,7 @@ impl<Src: OpendalSource> OpendalReader<Src> {
             reader.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)),
         );
 
-        let buf_reader: Pin<Box<dyn AsyncRead + Send>> = match decompression_format {
+        let buf_reader: Pin<Box<dyn AsyncRead + Send>> = match compression_format {
             Some(DecompressionFormat::Gzip) => {
                 let gzip_decoder = GzipDecoder::new(stream_reader);
                 Box::pin(BufReader::new(gzip_decoder)) as Pin<Box<dyn AsyncRead + Send>>
@@ -144,7 +144,7 @@ impl<Src: OpendalSource> OpendalReader<Src> {
                 }
             }
             Some(format) => {
-                let error_message = format!("The input decompression format '{}' is not supported. Currently, only gzip format decompression is supported.", format);
+                let error_message = format!("The input compression format '{}' is not supported. Currently, only gzip format compression is supported.", format);
                 return Err(io::Error::new(io::ErrorKind::InvalidInput, error_message).into());
             }
         };

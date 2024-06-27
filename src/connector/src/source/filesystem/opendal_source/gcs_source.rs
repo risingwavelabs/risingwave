@@ -59,14 +59,14 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
             (None, None)
         };
 
-        let decompression_format = gcs_properties.decompression_format;
+        let compression_format = gcs_properties.compression_format;
 
         Ok(Self {
             op,
             prefix,
             matcher,
             marker: PhantomData,
-            decompression_format,
+            compression_format,
         })
     }
 }

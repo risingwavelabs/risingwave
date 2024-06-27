@@ -24,7 +24,7 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{
     CdcTableDesc, ColumnCatalog, ColumnDesc, TableId, TableVersionId, DEFAULT_SCHEMA_NAME,
-    INITIAL_TABLE_VERSION_ID, USER_COLUMN_ID_OFFSET,
+    INITIAL_TABLE_VERSION_ID,
 };
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
@@ -55,8 +55,8 @@ use crate::catalog::{check_valid_column_name, ColumnId, DatabaseId, SchemaId};
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, InlineNowProcTime};
 use crate::handler::create_source::{
-    bind_columns_from_source, bind_connector_props, bind_create_source, bind_source_watermark,
-    handle_addition_columns, UPSTREAM_SOURCE_KEY,
+    bind_columns_from_source, bind_connector_props, bind_create_source_or_table_with_connector,
+    bind_source_watermark, handle_addition_columns, UPSTREAM_SOURCE_KEY,
 };
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::generic::{CdcScanOptions, SourceNodeKind};
@@ -110,7 +110,7 @@ impl ColumnIdGenerator {
     pub fn new_initial() -> Self {
         Self {
             existing: HashMap::new(),
-            next_column_id: ColumnId::from(USER_COLUMN_ID_OFFSET),
+            next_column_id: ColumnId::first_user_column(),
             version_id: INITIAL_TABLE_VERSION_ID,
         }
     }
@@ -404,7 +404,7 @@ fn multiple_pk_definition_err() -> RwError {
 ///
 /// It returns the columns together with `pk_column_ids`, and an optional row id column index if
 /// added.
-pub fn bind_pk_on_relation(
+pub fn bind_pk_and_row_id_on_relation(
     mut columns: Vec<ColumnCatalog>,
     pk_names: Vec<String>,
     must_need_pk: bool,
@@ -483,7 +483,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
     let (columns_from_resolve_source, source_info) =
         bind_columns_from_source(session, &source_schema, &with_properties).await?;
 
-    let (source_catalog, database_id, schema_id) = bind_create_source(
+    let (source_catalog, database_id, schema_id) = bind_create_source_or_table_with_connector(
         handler_args.clone(),
         table_name,
         source_schema,
@@ -536,14 +536,12 @@ pub(crate) fn gen_create_table_plan(
     for c in &mut columns {
         c.column_desc.column_id = col_id_gen.generate(c.name())
     }
-    let with_properties = context.with_options().inner().clone();
     gen_create_table_plan_without_source(
         context,
         table_name,
         columns,
         column_defs,
         constraints,
-        with_properties,
         definition,
         source_watermarks,
         append_only,
@@ -560,7 +558,6 @@ pub(crate) fn gen_create_table_plan_without_source(
     columns: Vec<ColumnCatalog>,
     column_defs: Vec<ColumnDef>,
     constraints: Vec<TableConstraint>,
-    with_properties: BTreeMap<String, String>,
     definition: String,
     source_watermarks: Vec<SourceWatermark>,
     append_only: bool,
@@ -570,7 +567,8 @@ pub(crate) fn gen_create_table_plan_without_source(
 ) -> Result<(PlanRef, PbTable)> {
     ensure_table_constraints_supported(&constraints)?;
     let pk_names = bind_sql_pk_names(&column_defs, &constraints)?;
-    let (mut columns, pk_column_ids, row_id_index) = bind_pk_on_relation(columns, pk_names, true)?;
+    let (mut columns, pk_column_ids, row_id_index) =
+        bind_pk_and_row_id_on_relation(columns, pk_names, true)?;
 
     let watermark_descs: Vec<WatermarkDesc> = bind_source_watermark(
         context.session_ctx(),
@@ -597,7 +595,6 @@ pub(crate) fn gen_create_table_plan_without_source(
         context.into(),
         name,
         columns,
-        with_properties,
         pk_column_ids,
         row_id_index,
         definition,
@@ -628,7 +625,6 @@ fn gen_table_plan_with_source(
         context,
         source_catalog.name,
         source_catalog.columns,
-        source_catalog.with_properties.clone(),
         source_catalog.pk_col_ids,
         source_catalog.row_id_index,
         source_catalog.definition,
@@ -648,7 +644,6 @@ fn gen_table_plan_inner(
     context: OptimizerContextRef,
     table_name: String,
     columns: Vec<ColumnCatalog>,
-    with_properties: BTreeMap<String, String>,
     pk_column_ids: Vec<ColumnId>,
     row_id_index: Option<usize>,
     definition: String,
@@ -663,8 +658,7 @@ fn gen_table_plan_inner(
     schema_id: SchemaId,
 ) -> Result<(PlanRef, PbTable)> {
     let session = context.session_ctx().clone();
-    let with_properties = WithOptions::new(with_properties);
-    let retention_seconds = with_properties.retention_seconds();
+    let retention_seconds = context.with_options().retention_seconds();
     let is_external_source = source_catalog.is_some();
     let source_node: PlanRef = LogicalSource::new(
         source_catalog.map(|source| Rc::new(source.clone())),
@@ -762,7 +756,8 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
         c.column_desc.column_id = col_id_gen.generate(c.name())
     }
 
-    let (columns, pk_column_ids, _row_id_index) = bind_pk_on_relation(columns, pk_names, true)?;
+    let (columns, pk_column_ids, _row_id_index) =
+        bind_pk_and_row_id_on_relation(columns, pk_names, true)?;
 
     let definition = context.normalized_sql().to_owned();
 
@@ -881,7 +876,6 @@ fn derive_connect_properties(
 pub(super) async fn handle_create_table_plan(
     handler_args: HandlerArgs,
     explain_options: ExplainOptions,
-    col_id_gen: ColumnIdGenerator,
     source_schema: Option<ConnectorSchema>,
     cdc_table_info: Option<CdcTableInfo>,
     table_name: ObjectName,
@@ -894,6 +888,7 @@ pub(super) async fn handle_create_table_plan(
     with_version_column: Option<String>,
     include_column_options: IncludeOption,
 ) -> Result<(PlanRef, Option<PbSource>, PbTable, TableJobType)> {
+    let col_id_gen = ColumnIdGenerator::new_initial();
     let source_schema = check_create_table_with_source(
         &handler_args.with_options,
         source_schema,
@@ -1148,11 +1143,9 @@ pub async fn handle_create_table(
     }
 
     let (graph, source, table, job_type) = {
-        let col_id_gen = ColumnIdGenerator::new_initial();
         let (plan, source, table, job_type) = handle_create_table_plan(
             handler_args,
             ExplainOptions::default(),
-            col_id_gen,
             source_schema,
             cdc_table_info,
             table_name.clone(),
@@ -1435,7 +1428,8 @@ mod tests {
                 }
                 ensure_table_constraints_supported(&constraints)?;
                 let pk_names = bind_sql_pk_names(&column_defs, &constraints)?;
-                let (_, pk_column_ids, _) = bind_pk_on_relation(columns, pk_names, true)?;
+                let (_, pk_column_ids, _) =
+                    bind_pk_and_row_id_on_relation(columns, pk_names, true)?;
                 Ok(pk_column_ids)
             })();
             match (expected, actual) {

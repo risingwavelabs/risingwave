@@ -227,6 +227,7 @@ async fn compaction_test(
         max_prefetch_block_number: storage_opts.max_prefetch_block_number,
         recent_filter: None,
         state_store_metrics: state_store_metrics.clone(),
+        use_new_object_prefix_strategy: system_params.use_new_object_prefix_strategy(),
         meta_cache,
         block_cache,
     }));

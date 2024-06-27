@@ -20,6 +20,7 @@ use opendal::Operator;
 use risingwave_common::config::ObjectStoreConfig;
 
 use super::{EngineType, OpendalObjectStore};
+use crate::object::object_metrics::ObjectStoreMetrics;
 use crate::object::opendal_engine::ATOMIC_WRITE_DIR;
 use crate::object::ObjectResult;
 
@@ -29,6 +30,7 @@ impl OpendalObjectStore {
         endpoint: String,
         root: String,
         config: Arc<ObjectStoreConfig>,
+        metrics: Arc<ObjectStoreMetrics>,
     ) -> ObjectResult<Self> {
         // Create webhdfs backend builder.
         let mut builder = Webhdfs::default();
@@ -47,6 +49,7 @@ impl OpendalObjectStore {
             op,
             engine_type: EngineType::Webhdfs,
             config,
+            metrics,
         })
     }
 }

@@ -49,13 +49,13 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
         } else {
             (None, None)
         };
-        let decompression_format = posix_fs_properties.decompression_format;
+        let compression_format = posix_fs_properties.compression_format;
         Ok(Self {
             op,
             prefix,
             matcher,
             marker: PhantomData,
-            decompression_format,
+            compression_format,
         })
     }
 }

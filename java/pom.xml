@@ -64,7 +64,7 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <protobuf.version>3.21.1</protobuf.version>
-        <grpc.version>1.53.0</grpc.version>
+        <grpc.version>1.64.0</grpc.version>
         <gson.version>2.10</gson.version>
         <module.version>0.1.0-SNAPSHOT</module.version>
         <spotless.version>2.43.0</spotless.version>
@@ -75,10 +75,11 @@
         <commons.text.version>1.10.0</commons.text.version>
         <commons.lang3.version>3.12.0</commons.lang3.version>
         <debezium.version>2.4.2.Final</debezium.version>
-        <jackson.version>2.13.5</jackson.version>
+        <jackson.version>2.15.0</jackson.version>
         <spark_sql.version>3.3.1</spark_sql.version>
-        <hadoop.version>3.3.3</hadoop.version>
+        <hadoop.version>3.4.0</hadoop.version>
         <elasticsearch.version>7.17.19</elasticsearch.version>
+        <opensearch.version>2.11.1</opensearch.version>
         <datastax.version>4.15.0</datastax.version>
         <flink.version>1.18.0</flink.version>
         <testcontainers.version>1.17.6</testcontainers.version>
@@ -88,6 +89,8 @@
         <sqlite.version>3.45.0.0</sqlite.version>
         <aws.version>2.21.42</aws.version>
         <hive.version>3.1.3</hive.version>
+        <jetty.version>12.0.10</jetty.version>
+        <snappy.version>1.1.10.5</snappy.version>
     </properties>
 
     <dependencyManagement>
@@ -194,6 +197,22 @@
                 <groupId>org.elasticsearch.client</groupId>
                 <artifactId>elasticsearch-rest-high-level-client</artifactId>
                 <version>${elasticsearch.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.opensearch</groupId>
+                <artifactId>opensearch</artifactId>
+                <version>${opensearch.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.opensearch.client</groupId>
+                <artifactId>opensearch-rest-high-level-client</artifactId>
+                <version>${opensearch.version}</version>
+                <exclusions>
+                    <exclusion>
+                        <groupId>org.apache.httpcomponents</groupId>
+                        <artifactId>httpcore-nio</artifactId>
+                    </exclusion>
+                </exclusions>
             </dependency>
             <dependency>
                 <groupId>io.grpc</groupId>
@@ -359,6 +378,11 @@
                 <version>${aws.version}</version>
             </dependency>
             <dependency>
+                <groupId>software.amazon.awssdk</groupId>
+                <artifactId>glue</artifactId>
+                <version>${aws.version}</version>
+            </dependency>
+            <dependency>
                 <groupId>org.apache.hive</groupId>
                 <artifactId>hive-metastore</artifactId>
                 <version>${hive.version}</version>
@@ -377,6 +401,26 @@
                 <groupId>org.apache.hadoop</groupId>
                 <artifactId>hadoop-mapreduce-client-jobclient</artifactId>
                 <version>${hadoop.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.eclipse.jetty</groupId>
+                <artifactId>jetty-client</artifactId>
+                <version>${jetty.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.eclipse.jetty</groupId>
+                <artifactId>jetty-util</artifactId>
+                <version>${jetty.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.eclipse.jetty</groupId>
+                <artifactId>jetty-http</artifactId>
+                <version>${jetty.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.xerial.snappy</groupId>
+                <artifactId>snappy-java</artifactId>
+                <version>${snappy.version}</version>
             </dependency>
             <dependency>
                 <groupId>org.apache.spark</groupId>

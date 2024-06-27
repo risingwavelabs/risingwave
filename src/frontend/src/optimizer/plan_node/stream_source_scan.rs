@@ -17,7 +17,7 @@ use std::rc::Rc;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::catalog::Field;
+use risingwave_common::catalog::{ColumnCatalog, Field};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::OrderType;
@@ -62,10 +62,9 @@ impl StreamSourceScan {
                 &core.column_catalog,
                 &source_catalog.connector_name(),
             );
-            for (existed, mut c) in columns_exist.into_iter().zip_eq_fast(additional_columns) {
-                c.is_hidden = true;
+            for (existed, c) in columns_exist.into_iter().zip_eq_fast(additional_columns) {
                 if !existed {
-                    core.column_catalog.push(c);
+                    core.column_catalog.push(ColumnCatalog::hidden(c));
                 }
             }
         }

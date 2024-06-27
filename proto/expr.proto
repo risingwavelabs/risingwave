@@ -286,6 +286,7 @@ message ExprNode {
     // ------------------------
     // Internal functions
     VNODE = 1101;
+    TEST_PAID_TIER = 1102;
     // Non-deterministic functions
     PROCTIME = 2023;
     PG_SLEEP = 2024;
@@ -302,6 +303,7 @@ message ExprNode {
     PG_INDEXES_SIZE = 2404;
     PG_RELATION_SIZE = 2405;
     PG_GET_SERIAL_SEQUENCE = 2406;
+    PG_INDEX_COLUMN_HAS_PROPERTY = 2410;
     HAS_TABLE_PRIVILEGE = 2407;
     HAS_ANY_COLUMN_PRIVILEGE = 2408;
     HAS_SCHEMA_PRIVILEGE = 2409;

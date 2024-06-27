@@ -168,7 +168,7 @@ fn check_fmt_arg_in_anyhow_context(cx: &LateContext<'_>, arg_expr: &Expr<'_>) {
     );
 }
 
-fn check_fmt_arg_with_help(cx: &LateContext<'_>, arg_expr: &Expr<'_>, help: impl Help) {
+fn check_fmt_arg_with_help(cx: &LateContext<'_>, arg_expr: &Expr<'_>, help: impl Help + 'static) {
     check_arg(cx, arg_expr, arg_expr.span, help);
 }
 
@@ -181,7 +181,7 @@ fn check_to_string_call(cx: &LateContext<'_>, receiver: &Expr<'_>, to_string_spa
     );
 }
 
-fn check_arg(cx: &LateContext<'_>, arg_expr: &Expr<'_>, span: Span, help: impl Help) {
+fn check_arg(cx: &LateContext<'_>, arg_expr: &Expr<'_>, span: Span, help: impl Help + 'static) {
     let Some(error_trait_id) = cx.tcx.get_diagnostic_item(sym::Error) else {
         return;
     };
@@ -218,31 +218,31 @@ fn check_arg(cx: &LateContext<'_>, arg_expr: &Expr<'_>, span: Span, help: impl H
 }
 
 trait Help {
-    fn normal_help(&self) -> &str;
-    fn anyhow_help(&self) -> &str {
+    fn normal_help(&self) -> &'static str;
+    fn anyhow_help(&self) -> &'static str {
         self.normal_help()
     }
-    fn report_help(&self) -> Option<&str> {
+    fn report_help(&self) -> Option<&'static str> {
         None
     }
 }
 
-impl Help for &str {
-    fn normal_help(&self) -> &str {
+impl Help for &'static str {
+    fn normal_help(&self) -> &'static str {
         self
     }
 }
 
-impl Help for (&str, &str, &str) {
-    fn normal_help(&self) -> &str {
+impl Help for (&'static str, &'static str, &'static str) {
+    fn normal_help(&self) -> &'static str {
         self.0
     }
 
-    fn anyhow_help(&self) -> &str {
+    fn anyhow_help(&self) -> &'static str {
         self.1
     }
 
-    fn report_help(&self) -> Option<&str> {
+    fn report_help(&self) -> Option<&'static str> {
         Some(self.2)
     }
 }

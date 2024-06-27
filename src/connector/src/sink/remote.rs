@@ -58,7 +58,7 @@ use tokio::task::spawn_blocking;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::warn;
 
-use super::elasticsearch::{StreamChunkConverter, ES_OPTION_DELIMITER};
+use super::elasticsearch::{is_es_sink, StreamChunkConverter, ES_OPTION_DELIMITER};
 use crate::error::ConnectorResult;
 use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::coordinate::CoordinatedSinkWriter;
@@ -73,6 +73,7 @@ macro_rules! def_remote_sink {
     () => {
         def_remote_sink! {
             { ElasticSearch, ElasticSearchSink, "elasticsearch" }
+            { Opensearch, OpensearchSink, "opensearch"}
             { Cassandra, CassandraSink, "cassandra" }
             { Jdbc, JdbcSink, "jdbc", |desc| {
                 desc.sink_type.is_append_only()
@@ -164,7 +165,7 @@ impl<R: RemoteSinkTrait> Sink for RemoteSink<R> {
 }
 
 async fn validate_remote_sink(param: &SinkParam, sink_name: &str) -> ConnectorResult<()> {
-    if sink_name == ElasticSearchSink::SINK_NAME
+    if is_es_sink(sink_name)
         && param.downstream_pk.len() > 1
         && !param.properties.contains_key(ES_OPTION_DELIMITER)
     {
@@ -189,7 +190,7 @@ async fn validate_remote_sink(param: &SinkParam, sink_name: &str) -> ConnectorRe
                     | DataType::Jsonb
                     | DataType::Bytea => Ok(()),
             DataType::List(list) => {
-                if (sink_name==ElasticSearchSink::SINK_NAME) | matches!(list.as_ref(), DataType::Int16 | DataType::Int32 | DataType::Int64 | DataType::Float32 | DataType::Float64 | DataType::Varchar){
+                if is_es_sink(sink_name) || matches!(list.as_ref(), DataType::Int16 | DataType::Int32 | DataType::Int64 | DataType::Float32 | DataType::Float64 | DataType::Varchar){
                     Ok(())
                 } else{
                     Err(SinkError::Remote(anyhow!(
@@ -200,7 +201,7 @@ async fn validate_remote_sink(param: &SinkParam, sink_name: &str) -> ConnectorRe
                 }
             },
             DataType::Struct(_) => {
-                if sink_name==ElasticSearchSink::SINK_NAME{
+                if is_es_sink(sink_name){
                     Ok(())
                 }else{
                     Err(SinkError::Remote(anyhow!(
@@ -263,7 +264,7 @@ impl RemoteLogSinker {
         sink_name: &str,
     ) -> Result<Self> {
         let sink_proto = sink_param.to_proto();
-        let payload_schema = if sink_name == ElasticSearchSink::SINK_NAME {
+        let payload_schema = if is_es_sink(sink_name) {
             let columns = vec![
                 ColumnDesc::unnamed(ColumnId::from(0), DataType::Varchar).to_protobuf(),
                 ColumnDesc::unnamed(ColumnId::from(1), DataType::Varchar).to_protobuf(),

@@ -33,7 +33,7 @@ GcsProperties:
     field_type: String
     required: false
     default: Default::default
-  - name: decompression_format
+  - name: compression_format
     field_type: String
     required: false
 IcebergProperties:
@@ -47,15 +47,12 @@ IcebergProperties:
   - name: s3.endpoint
     field_type: String
     required: false
-    default: Default::default
   - name: s3.access.key
     field_type: String
-    required: false
-    default: Default::default
+    required: true
   - name: s3.secret.key
     field_type: String
-    required: false
-    default: Default::default
+    required: true
   - name: warehouse.path
     field_type: String
     required: true
@@ -317,6 +314,16 @@ KinesisProperties:
     required: false
     alias:
     - kinesis.assumerole.external_id
+MongodbCommon:
+  fields:
+  - name: mongodb.url
+    field_type: String
+    comments: The URL of MongoDB
+    required: true
+  - name: collection.name
+    field_type: String
+    comments: The collection name where data should be written to or read from. For sinks, the format is  `db_name.collection_name`. Data can also be written to dynamic collections, see `collection.name.field`  for more information.
+    required: true
 MqttProperties:
   fields:
   - name: url
@@ -612,7 +619,7 @@ OpendalS3Properties:
   - name: s3.endpoint_url
     field_type: String
     required: false
-  - name: decompression_format
+  - name: compression_format
     field_type: String
     required: false
   - name: s3.assume_role
@@ -631,7 +638,7 @@ PosixFsProperties:
     comments: The regex pattern to match files under root directory.
     required: false
     default: Default::default
-  - name: decompression_format
+  - name: compression_format
     field_type: String
     required: false
 PubsubProperties:
@@ -771,7 +778,7 @@ S3Properties:
   - name: s3.endpoint_url
     field_type: String
     required: false
-  - name: decompression_format
+  - name: compression_format
     field_type: String
     required: false
 TestSourceProperties:

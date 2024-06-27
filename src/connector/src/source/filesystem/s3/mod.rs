@@ -42,8 +42,8 @@ pub struct S3PropertiesCommon {
     pub secret: Option<String>,
     #[serde(rename = "s3.endpoint_url")]
     pub endpoint_url: Option<String>,
-    #[serde(rename = "decompression_format")]
-    pub decompression_format: Option<DecompressionFormat>,
+    #[serde(rename = "compression_format")]
+    pub compression_format: Option<DecompressionFormat>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, with_options::WithOptions)]

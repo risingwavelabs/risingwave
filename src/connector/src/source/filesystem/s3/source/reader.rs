@@ -266,7 +266,7 @@ mod tests {
             access: None,
             secret: None,
             endpoint_url: None,
-            decompression_format: None,
+            compression_format: None,
         }
         .into();
         let mut enumerator =
@@ -290,7 +290,6 @@ mod tests {
         let config = ParserConfig {
             common: CommonParserConfig { rw_columns: descs },
             specific: SpecificParserConfig {
-                key_encoding_config: None,
                 encoding_config: EncodingProperties::Csv(csv_config),
                 protocol_config: ProtocolProperties::Plain,
             },
