@@ -21,6 +21,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::WorkerSlotId;
+use risingwave_common::range::RangeBoundsExt;
 use risingwave_meta_model_v2::StreamingParallelism;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
@@ -542,63 +543,67 @@ impl GlobalBarrierManagerContext {
         &self,
         active_nodes: &mut ActiveStreamingWorkerNodes,
     ) -> MetaResult<InflightActorInfo> {
-        // let mgr = self.metadata_manager.as_v2_ref();
-        //
-        // let all_inuse_parallel_units: HashSet<_> = mgr
-        //     .catalog_controller
-        //     .all_inuse_parallel_units()
-        //     .await?
-        //     .into_iter()
-        //     .collect();
-        //
-        // let active_parallel_units: HashSet<_> = active_nodes
-        //     .current()
-        //     .values()
-        //     .flat_map(|node| node.parallel_units.iter().map(|pu| pu.id as i32))
-        //     .collect();
-        //
-        // let expired_parallel_units: BTreeSet<_> = all_inuse_parallel_units
-        //     .difference(&active_parallel_units)
-        //     .cloned()
-        //     .collect();
-        // if expired_parallel_units.is_empty() {
-        //     debug!("no expired parallel units, skipping.");
-        //     return self.resolve_actor_info(active_nodes).await;
-        // }
-        //
-        // debug!("start migrate actors.");
-        // let mut to_migrate_parallel_units = expired_parallel_units.into_iter().rev().collect_vec();
-        // debug!(
-        //     "got to migrate parallel units {:#?}",
-        //     to_migrate_parallel_units
-        // );
-        // let mut inuse_parallel_units: HashSet<_> = all_inuse_parallel_units
-        //     .intersection(&active_parallel_units)
+        let mgr = self.metadata_manager.as_v2_ref();
+
+        let all_inuse_worker_slots: HashSet<_> = mgr
+            .catalog_controller
+            .all_inuse_worker_slots()
+            .await?
+            .into_iter()
+            .collect();
+
+        let active_worker_slots: HashSet<_> = active_nodes
+            .current()
+            .values()
+            .flat_map(|node| {
+                (0..node.parallelism).map(|idx| WorkerSlotId::new(node.id, idx as usize))
+            })
+            .collect();
+
+        let expired_worker_slots: BTreeSet<_> = all_inuse_worker_slots
+            .difference(&active_worker_slots)
+            .cloned()
+            .collect();
+
+        if expired_worker_slots.is_empty() {
+            debug!("no expired parallel units, skipping.");
+            return self.resolve_actor_info(active_nodes).await;
+        }
+
+        debug!("start migrate actors.");
+        let mut to_migrate_worker_slots = expired_worker_slots.into_iter().rev().collect_vec();
+        debug!(
+            "got to migrate parallel units {:#?}",
+            to_migrate_worker_slots
+        );
+
+        // let mut inuse_worker_slots: HashSet<_> = all_inuse_worker_slots
+        //     .intersection(&active_worker_slots)
         //     .cloned()
         //     .collect();
         //
         // let start = Instant::now();
         // let mut plan = HashMap::new();
-        // 'discovery: while !to_migrate_parallel_units.is_empty() {
+        // 'discovery: while !to_migrate_worker_slots.is_empty() {
         //     let new_parallel_units = active_nodes
         //         .current()
         //         .values()
         //         .flat_map(|node| {
         //             node.parallel_units
         //                 .iter()
-        //                 .filter(|pu| !inuse_parallel_units.contains(&(pu.id as _)))
+        //                 .filter(|pu| !inuse_worker_slots.contains(&(pu.id as _)))
         //         })
         //         .cloned()
         //         .collect_vec();
         //     if !new_parallel_units.is_empty() {
         //         debug!("new parallel units found: {:#?}", new_parallel_units);
         //         for target_parallel_unit in new_parallel_units {
-        //             if let Some(from) = to_migrate_parallel_units.pop() {
+        //             if let Some(from) = to_migrate_worker_slots.pop() {
         //                 debug!(
         //                     "plan to migrate from parallel unit {} to {}",
         //                     from, target_parallel_unit.id
         //                 );
-        //                 inuse_parallel_units.insert(target_parallel_unit.id as i32);
+        //                 inuse_worker_slots.insert(target_parallel_unit.id as i32);
         //                 plan.insert(from, target_parallel_unit);
         //             } else {
         //                 break 'discovery;
@@ -606,7 +611,7 @@ impl GlobalBarrierManagerContext {
         //         }
         //     }
         //
-        //     if to_migrate_parallel_units.is_empty() {
+        //     if to_migrate_worker_slots.is_empty() {
         //         break;
         //     }
         //
@@ -627,13 +632,12 @@ impl GlobalBarrierManagerContext {
         //         .await;
         //     warn!(?changed, "get worker changed. Retry migrate");
         // }
-        // //
-        // mgr.catalog_controller.migrate_actors(plan).await?;
         //
-        // debug!("migrate actors succeed.");
-        //
-        // self.resolve_actor_info(active_nodes).await
-        todo!()
+       // mgr.catalog_controller.migrate_actors(plan).await?;
+
+        debug!("migrate actors succeed.");
+
+        self.resolve_actor_info(active_nodes).await
     }
 
     /// Migrate actors in expired CNs to newly joined ones, return true if any actor is migrated.
@@ -971,9 +975,9 @@ impl GlobalBarrierManagerContext {
         let mgr = self.metadata_manager.as_v1_ref();
         let mut cached_plan = MigrationPlan::get(self.env.meta_store().as_kv()).await?;
 
-        let all_worker_parallel_units = mgr.fragment_manager.all_worker_slots().await;
+        let all_worker_slots = mgr.fragment_manager.all_worker_slots().await;
 
-        let (expired_inuse_workers, inuse_workers): (Vec<_>, Vec<_>) = all_worker_parallel_units
+        let (expired_inuse_workers, inuse_workers): (Vec<_>, Vec<_>) = all_worker_slots
             .into_iter()
             .partition(|(worker, _)| expired_workers.contains(worker));
 

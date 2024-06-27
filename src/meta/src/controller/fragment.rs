@@ -19,8 +19,10 @@ use std::mem::swap;
 use anyhow::Context;
 use itertools::Itertools;
 use risingwave_common::bail;
+use risingwave_common::hash::WorkerSlotId;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node;
 use risingwave_meta_model_v2::actor::ActorStatus;
+use risingwave_meta_model_v2::fragment::DistributionType;
 use risingwave_meta_model_v2::prelude::{Actor, ActorDispatcher, Fragment, Sink, StreamingJob};
 use risingwave_meta_model_v2::{
     actor, actor_dispatcher, fragment, sink, streaming_job, ActorId, ActorUpstreamActors,
@@ -950,6 +952,40 @@ impl CatalogController {
         //     .await;
         //
         // Ok(())
+    }
+
+    pub async fn all_inuse_worker_slots(&self) -> MetaResult<HashSet<WorkerSlotId>> {
+        let inner = self.inner.read().await;
+
+        let actors: Vec<(FragmentId, ActorId, WorkerId)> = Actor::find()
+            .select_only()
+            .columns([fragment::Column::FragmentId])
+            .columns([actor::Column::ActorId, actor::Column::WorkerId])
+            .join(JoinType::InnerJoin, actor::Relation::Fragment.def())
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+
+        let mut actor_locations = HashMap::new();
+
+        for (fragment_id, actor_id, worker_id) in actors {
+            *actor_locations
+                .entry(worker_id)
+                .or_insert(HashMap::new())
+                .entry(fragment_id)
+                .or_insert(0 as usize) += 1;
+        }
+
+        let mut result = HashSet::new();
+        for (worker_id, mapping) in actor_locations {
+            let max_fragment_len = mapping.values().max().unwrap();
+
+            result.extend(
+                (0..*max_fragment_len).map(|idx| WorkerSlotId::new(worker_id as u32, idx as usize)),
+            )
+        }
+
+        Ok(result)
     }
 
     pub async fn all_node_actors(
