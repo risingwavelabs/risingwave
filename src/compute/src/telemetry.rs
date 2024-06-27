@@ -46,12 +46,12 @@ pub(crate) fn get_compute_telemetry_tracking_id_and_session_id() -> (Option<Stri
     )
 }
 
-pub(crate) async fn report_event(
+pub(crate) fn report_event(
     event_stage: PbTelemetryEventStage,
     feature_name: String,
     catalog_id: i64,
     connector_name: Option<String>,
-    attributes: String, // any json string
+    attributes: Option<String>, // any json string
 ) {
     report_event_common(
         Box::new(get_compute_telemetry_tracking_id_and_session_id),
@@ -61,8 +61,7 @@ pub(crate) async fn report_event(
         connector_name,
         attributes,
         TELEMETRY_COMPUTE_REPORT_TYPE.to_string(),
-    )
-    .await;
+    );
 }
 
 #[derive(Clone, Copy)]

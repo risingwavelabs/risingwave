@@ -119,13 +119,13 @@ where
     (join_handle, shutdown_tx)
 }
 
-pub async fn report_event_common(
-    mut get_tracking_id_and_session_id: Box<dyn FnMut() -> (Option<String>, Option<String>)>,
+pub fn report_event_common(
+    get_tracking_id_and_session_id: Box<dyn Fn() -> (Option<String>, Option<String>) + Send + Sync>,
     event_stage: PbTelemetryEventStage,
     feature_name: String,
     catalog_id: i64,
     connector_name: Option<String>,
-    attributes: String, // any json string
+    attributes: Option<String>, // any json string
     node: String,
 ) {
     // if disabled the telemetry, tracking_id and session_id will be None, so the event will not be reported
@@ -155,4 +155,8 @@ pub async fn report_event_common(
         node,
     };
     let _report_bytes = event.encode_to_vec();
+
+    tokio::spawn(async move {
+        // send report
+    });
 }

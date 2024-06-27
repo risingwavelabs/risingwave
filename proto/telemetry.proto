@@ -118,6 +118,7 @@ enum TelemetryEventStage {
   Telemetry_Event_Stage_UpdateStreamJob = 2;
   Telemetry_Event_Stage_DropStreamJob = 3;
   Telemetry_Event_Stage_Query = 4;
+  Telemetry_Event_Stage_Recovery = 5;
 }
 
 message EventMessage {
@@ -136,7 +137,7 @@ message EventMessage {
   // catalog_id is the id of the catalog involves (table_id/source_id/...)
   int64 catalog_id = 7;
   // attributes is the additional information of the event: json format ser to string
-  string attributes = 8;
+  optional string attributes = 8;
   // node is the node that creates the event
   string node = 9;
 }
