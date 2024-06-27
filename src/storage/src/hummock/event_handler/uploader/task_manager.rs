@@ -16,89 +16,93 @@ use super::*;
 
 #[derive(Debug)]
 pub(super) enum UploadingTaskStatus {
-    Spilling,
+    Spilling(HashSet<TableId>),
     Sync(HummockEpoch),
 }
 
 #[derive(Debug)]
-enum TaskStatus {
-    Uploading(UploadingTaskStatus),
-    Spilled(Arc<StagingSstableInfo>),
+struct TaskEntry {
+    task: UploadingTask,
+    status: UploadingTaskStatus,
 }
 
 #[derive(Default, Debug)]
 pub(super) struct TaskManager {
+    tasks: HashMap<UploadingTaskId, TaskEntry>,
     // newer task at the front
-    uploading_tasks: VecDeque<UploadingTask>,
-    task_status: HashMap<UploadingTaskId, TaskStatus>,
+    task_order: VecDeque<UploadingTaskId>,
 }
 
 impl TaskManager {
-    fn add_task(&mut self, task: UploadingTask, status: UploadingTaskStatus) {
-        self.task_status
-            .insert(task.task_id, TaskStatus::Uploading(status));
-        self.uploading_tasks.push_front(task);
+    fn add_task(
+        &mut self,
+        task: UploadingTask,
+        status: UploadingTaskStatus,
+    ) -> &UploadingTaskStatus {
+        let task_id = task.task_id;
+        self.task_order.push_front(task.task_id);
+        self.tasks.insert(task.task_id, TaskEntry { task, status });
+        &self.tasks.get(&task_id).expect("should exist").status
+    }
+
+    fn poll_task(
+        &mut self,
+        cx: &mut Context<'_>,
+        task_id: UploadingTaskId,
+    ) -> Poll<Result<Arc<StagingSstableInfo>, ErrState>> {
+        let entry = self.tasks.get_mut(&task_id).expect("should exist");
+        let result = match &entry.status {
+            UploadingTaskStatus::Spilling(_) => {
+                let sst = ready!(entry.task.poll_ok_with_retry(cx));
+                Ok(sst)
+            }
+            UploadingTaskStatus::Sync(epoch) => {
+                let epoch = *epoch;
+                let result = ready!(entry.task.poll_result(cx));
+                result.map_err(|e| ErrState {
+                    failed_epoch: epoch,
+                    reason: e.as_report().to_string(),
+                })
+            }
+        };
+        Poll::Ready(result)
     }
 
     #[expect(clippy::type_complexity)]
     pub(super) fn poll_task_result(
         &mut self,
         cx: &mut Context<'_>,
-        _context: &UploaderContext,
     ) -> Poll<
-        Option<
-            Result<
-                (
-                    UploadingTaskId,
-                    UploadingTaskStatus,
-                    Arc<StagingSstableInfo>,
-                ),
-                ErrState,
-            >,
-        >,
+        Option<(
+            UploadingTaskId,
+            UploadingTaskStatus,
+            Result<Arc<StagingSstableInfo>, ErrState>,
+        )>,
     > {
-        if let Some(task) = self.uploading_tasks.back_mut() {
-            let result = match self.task_status.get(&task.task_id).expect("should exist") {
-                TaskStatus::Uploading(UploadingTaskStatus::Spilling) => {
-                    let sst = ready!(task.poll_ok_with_retry(cx));
-                    self.task_status
-                        .insert(task.task_id, TaskStatus::Spilled(sst.clone()));
-                    Ok((task.task_id, UploadingTaskStatus::Spilling, sst))
-                }
-                TaskStatus::Uploading(UploadingTaskStatus::Sync(epoch)) => {
-                    let epoch = *epoch;
-                    let result = ready!(task.poll_result(cx));
-                    let _status = self.task_status.remove(&task.task_id);
-                    result
-                        .map(|sst| (task.task_id, UploadingTaskStatus::Sync(epoch), sst))
-                        .map_err(|e| ErrState {
-                            failed_epoch: epoch,
-                            reason: e.as_report().to_string(),
-                        })
-                }
-                TaskStatus::Spilled(_) => {
-                    unreachable!("should be uploading task")
-                }
-            };
+        if let Some(task_id) = self.task_order.back() {
+            let task_id = *task_id;
+            let result = ready!(self.poll_task(cx, task_id));
+            self.task_order.pop_back();
+            let entry = self.tasks.remove(&task_id).expect("should exist");
 
-            let _task = self.uploading_tasks.pop_back().expect("non-empty");
-            Poll::Ready(Some(result))
+            Poll::Ready(Some((task_id, entry.status, result)))
         } else {
             Poll::Ready(None)
         }
     }
 
     pub(super) fn abort(self) {
-        for task in self.uploading_tasks {
-            task.join_handle.abort();
+        for task in self.tasks.into_values() {
+            task.task.join_handle.abort();
         }
     }
 
     pub(super) fn spill(
         &mut self,
         context: &UploaderContext,
+        table_ids: HashSet<TableId>,
         imms: HashMap<LocalInstanceId, Vec<UploaderImm>>,
-    ) -> (UploadingTaskId, usize) {
+    ) -> (UploadingTaskId, usize, &HashSet<TableId>) {
         assert!(!imms.is_empty());
         let task = UploadingTask::new(imms, context);
         context.stats.spill_task_counts_from_unsealed.inc();
@@ -109,52 +113,70 @@ impl TaskManager {
         info!("Spill data. Task: {}", task.get_task_info());
         let size = task.task_info.task_size;
         let id = task.task_id;
-        self.add_task(task, UploadingTaskStatus::Spilling);
-        (id, size)
+        let status = self.add_task(task, UploadingTaskStatus::Spilling(table_ids));
+        (
+            id,
+            size,
+            must_match!(status, UploadingTaskStatus::Spilling(table_ids) => table_ids),
+        )
+    }
+
+    pub(super) fn remove_table_spill_tasks(
+        &mut self,
+        table_id: TableId,
+        task_ids: impl Iterator<Item = UploadingTaskId>,
+    ) {
+        for task_id in task_ids {
+            let entry = self.tasks.get_mut(&task_id).expect("should exist");
+            let empty = must_match!(&mut entry.status, UploadingTaskStatus::Spilling(table_ids) => {
+                assert!(table_ids.remove(&table_id));
+                table_ids.is_empty()
+            });
+            if empty {
+                let task = self.tasks.remove(&task_id).expect("should exist").task;
+                task.join_handle.abort();
+            }
+        }
     }
 
     pub(super) fn sync(
         &mut self,
         context: &UploaderContext,
         epoch: HummockEpoch,
-        spilled_task: BTreeSet<UploadingTaskId>,
         unflushed_payload: UploadTaskInput,
-    ) -> (HashSet<UploadingTaskId>, VecDeque<Arc<StagingSstableInfo>>) {
-        let mut remaining_tasks = HashSet::new();
-        let total_task_count = if unflushed_payload.is_empty() {
-            spilled_task.len()
+        spill_task_ids: impl Iterator<Item = UploadingTaskId>,
+        sync_table_ids: &HashSet<TableId>,
+    ) -> Option<UploadingTaskId> {
+        let task = if unflushed_payload.is_empty() {
+            None
         } else {
-            let task = UploadingTask::new(unflushed_payload, context);
-            remaining_tasks.insert(task.task_id);
-            self.task_status.insert(
-                task.task_id,
-                TaskStatus::Uploading(UploadingTaskStatus::Sync(epoch)),
-            );
-            self.add_task(task, UploadingTaskStatus::Sync(epoch));
-            spilled_task.len() + 1
+            Some(UploadingTask::new(unflushed_payload, context))
         };
-        let mut uploaded = VecDeque::with_capacity(total_task_count);
 
-        // iterate from small task id to large, which means from old data to new data
-        for task_id in spilled_task {
-            let status = self.task_status.remove(&task_id).expect("should exist");
-            match status {
-                TaskStatus::Uploading(UploadingTaskStatus::Spilling) => {
-                    self.task_status.insert(
-                        task_id,
-                        TaskStatus::Uploading(UploadingTaskStatus::Sync(epoch)),
-                    );
-                    remaining_tasks.insert(task_id);
-                }
-                TaskStatus::Uploading(UploadingTaskStatus::Sync(_)) => {
-                    unreachable!("cannot be synced again")
-                }
-                TaskStatus::Spilled(sst) => {
-                    self.task_status.remove(&task_id);
-                    uploaded.push_front(sst);
-                }
-            }
+        for task_id in spill_task_ids {
+            let entry = self.tasks.get_mut(&task_id).expect("should exist");
+            must_match!(&entry.status, UploadingTaskStatus::Spilling(table_ids) => {
+                assert!(table_ids.is_subset(sync_table_ids), "spill table_ids: {table_ids:?}, sync_table_ids: {sync_table_ids:?}");
+            });
+            entry.status = UploadingTaskStatus::Sync(epoch);
         }
-        (remaining_tasks, uploaded)
+
+        task.map(|task| {
+            let id = task.task_id;
+            self.add_task(task, UploadingTaskStatus::Sync(epoch));
+            id
+        })
+    }
+
+    #[cfg(debug_assertions)]
+    pub(super) fn spilling_task(
+        &self,
+    ) -> impl Iterator<Item = (UploadingTaskId, &HashSet<TableId>)> {
+        self.tasks
+            .iter()
+            .filter_map(|(task_id, entry)| match &entry.status {
+                UploadingTaskStatus::Spilling(table_ids) => Some((*task_id, table_ids)),
+                UploadingTaskStatus::Sync(_) => None,
+            })
     }
 }

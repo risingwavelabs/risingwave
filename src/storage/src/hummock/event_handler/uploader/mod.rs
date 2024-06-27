@@ -690,6 +690,8 @@ struct UnsyncData {
     table_data: HashMap<TableId, TableUnsyncData>,
     // An index as a mapping from instance id to its table id
     instance_table_id: HashMap<LocalInstanceId, TableId>,
+    // TODO: this is only used in spill to get existing epochs and can be removed
+    // when we support spill not based on epoch
     epochs: BTreeMap<HummockEpoch, ()>,
 }
 
@@ -764,32 +766,38 @@ impl UnsyncData {
         }
     }
 
-    fn may_destroy_instance(&mut self, instance_id: LocalInstanceId) {
+    fn may_destroy_instance(&mut self, instance_id: LocalInstanceId) -> Option<TableUnsyncData> {
         if let Some(table_id) = self.instance_table_id.remove(&instance_id) {
             debug!(instance_id, "destroy instance");
             let table_data = self.table_data.get_mut(&table_id).expect("should exist");
             assert!(table_data.instance_data.remove(&instance_id).is_some());
             if table_data.instance_data.is_empty() {
-                self.table_data.remove(&table_id);
+                Some(self.table_data.remove(&table_id).expect("should exist"))
+            } else {
+                None
             }
+        } else {
+            None
         }
     }
+}
 
+impl UploaderData {
     fn sync(
         &mut self,
         epoch: HummockEpoch,
         context: &UploaderContext,
         table_ids: HashSet<TableId>,
-        task_manager: &mut TaskManager,
     ) -> SyncDataBuilder {
         // clean old epochs
-        let _epochs = take_before_epoch(&mut self.epochs, epoch);
+        let _epochs = take_before_epoch(&mut self.unsync_data.epochs, epoch);
 
         let mut all_table_watermarks = HashMap::new();
-        let mut spill_tasks = BTreeSet::new();
+        let mut spilling_tasks = HashSet::new();
+        let mut spilled_tasks = BTreeSet::new();
 
         let mut flush_payload = HashMap::new();
-        for (table_id, table_data) in &mut self.table_data {
+        for (table_id, table_data) in &mut self.unsync_data.table_data {
             if !table_ids.contains(table_id) {
                 table_data.assert_after_epoch(epoch);
                 continue;
@@ -809,20 +817,50 @@ impl UnsyncData {
                 );
             }
             for task_id in task_ids {
-                spill_tasks.insert(task_id);
+                if self.spilled_data.contains_key(&task_id) {
+                    spilled_tasks.insert(task_id);
+                } else {
+                    spilling_tasks.insert(task_id);
+                }
             }
         }
 
-        let (remaining_uploading_tasks, uploaded) =
-            task_manager.sync(context, epoch, spill_tasks, flush_payload);
+        if let Some(extra_flush_task_id) = self.task_manager.sync(
+            context,
+            epoch,
+            flush_payload,
+            spilling_tasks.iter().cloned(),
+            &table_ids,
+        ) {
+            spilling_tasks.insert(extra_flush_task_id);
+        }
+
+        // iter from large task_id to small one so that newer data at the front
+        let uploaded = spilled_tasks
+            .iter()
+            .rev()
+            .map(|task_id| {
+                let (sst, spill_table_ids) =
+                    self.spilled_data.remove(task_id).expect("should exist");
+                assert!(
+                    spill_table_ids.is_subset(&table_ids),
+                    "spill_table_ids: {spill_table_ids:?}, table_ids: {table_ids:?}"
+                );
+                sst
+            })
+            .collect();
+
+        self.check_spill_task_consistency();
 
         SyncDataBuilder {
             table_watermarks: all_table_watermarks,
-            remaining_uploading_tasks,
+            remaining_uploading_tasks: spilling_tasks,
             uploaded,
         }
     }
+}
 
+impl UnsyncData {
     fn ack_flushed(&mut self, sstable_info: &StagingSstableInfo) {
         for (instance_id, imm_ids) in sstable_info.imm_ids() {
             if let Some(instance_data) = self.instance_data(*instance_id) {
@@ -884,6 +922,7 @@ struct UploaderData {
     syncing_data: BTreeMap<HummockEpoch, SyncingData>,
 
     task_manager: TaskManager,
+    spilled_data: HashMap<UploadingTaskId, (Arc<StagingSstableInfo>, HashSet<TableId>)>,
 }
 
 impl UploaderData {
@@ -1033,9 +1072,7 @@ impl HummockUploader {
 
         self.max_syncing_epoch = epoch;
 
-        let sync_data =
-            data.unsync_data
-                .sync(epoch, &self.context, table_ids, &mut data.task_manager);
+        let sync_data = data.sync(epoch, &self.context, table_ids);
 
         let SyncDataBuilder {
             table_watermarks,
@@ -1148,11 +1185,13 @@ impl HummockUploader {
                     }
                 }
                 if !payload.is_empty() {
-                    let (task_id, task_size) = data.task_manager.spill(&self.context, payload);
+                    let (task_id, task_size, spilled_table_ids) =
+                        data.task_manager
+                            .spill(&self.context, spilled_table_ids, payload);
                     for table_id in spilled_table_ids {
                         data.unsync_data
                             .table_data
-                            .get_mut(&table_id)
+                            .get_mut(table_id)
                             .expect("should exist")
                             .spill_tasks
                             .entry(*epoch)
@@ -1162,6 +1201,7 @@ impl HummockUploader {
                     curr_batch_flush_size += task_size;
                 }
             }
+            data.check_spill_task_consistency();
             curr_batch_flush_size > 0
         } else {
             false
@@ -1188,7 +1228,27 @@ impl HummockUploader {
         let UploaderState::Working(data) = &mut self.state else {
             return;
         };
-        data.unsync_data.may_destroy_instance(instance_id);
+        if let Some(removed_table_data) = data.unsync_data.may_destroy_instance(instance_id) {
+            data.task_manager.remove_table_spill_tasks(
+                removed_table_data.table_id,
+                removed_table_data
+                    .spill_tasks
+                    .into_values()
+                    .flat_map(|task_ids| task_ids.into_iter())
+                    .filter(|task_id| {
+                        if let Some((_, table_ids)) = data.spilled_data.get_mut(task_id) {
+                            assert!(table_ids.remove(&removed_table_data.table_id));
+                            if table_ids.is_empty() {
+                                data.spilled_data.remove(task_id);
+                            }
+                            false
+                        } else {
+                            true
+                        }
+                    }),
+            )
+        }
+        data.check_spill_task_consistency();
     }
 }
 
@@ -1225,6 +1285,38 @@ impl UploaderData {
             )
         }
     }
+
+    fn check_spill_task_consistency(&self) {
+        #[cfg(debug_assertions)]
+        {
+            let mut spill_task_table_id_from_data: HashMap<_, HashSet<_>> = HashMap::new();
+            for table_data in self.unsync_data.table_data.values() {
+                for task_id in table_data
+                    .spill_tasks
+                    .iter()
+                    .flat_map(|(_, tasks)| tasks.iter())
+                {
+                    assert!(spill_task_table_id_from_data
+                        .entry(*task_id)
+                        .or_default()
+                        .insert(table_data.table_id));
+                }
+            }
+            let mut spill_task_table_id_from_manager: HashMap<_, HashSet<_>> = HashMap::new();
+            for (task_id, (_, table_ids)) in &self.spilled_data {
+                spill_task_table_id_from_manager.insert(*task_id, table_ids.clone());
+            }
+            for (task_id, table_ids) in self.task_manager.spilling_task() {
+                assert!(spill_task_table_id_from_manager
+                    .insert(task_id, table_ids.clone())
+                    .is_none());
+            }
+            assert_eq!(
+                spill_task_table_id_from_data,
+                spill_task_table_id_from_manager
+            );
+        }
+    }
 }
 
 impl HummockUploader {
@@ -1236,27 +1328,33 @@ impl HummockUploader {
                 return Poll::Pending;
             };
 
-            if let Some(result) = ready!(data.task_manager.poll_task_result(cx, &self.context)) {
+            if let Some((task_id, status, result)) = ready!(data.task_manager.poll_task_result(cx))
+            {
                 match result {
-                    Ok((task_id, status, sst)) => {
+                    Ok(sst) => {
                         data.unsync_data.ack_flushed(&sst);
-
-                        if let UploadingTaskStatus::Sync(sync_epoch) = status {
-                            let syncing_data = data
-                                .syncing_data
-                                .get_mut(&sync_epoch)
-                                .expect("should exist");
-                            syncing_data.uploaded.push_front(sst.clone());
-                            assert!(syncing_data.remaining_uploading_tasks.remove(&task_id));
-                            data.may_notify_sync_task(&self.context, |new_synced_epoch| {
-                                Self::set_max_synced_epoch(
-                                    &mut self.max_synced_epoch,
-                                    self.max_syncing_epoch,
-                                    new_synced_epoch,
-                                )
-                            });
+                        match status {
+                            UploadingTaskStatus::Sync(sync_epoch) => {
+                                let syncing_data = data
+                                    .syncing_data
+                                    .get_mut(&sync_epoch)
+                                    .expect("should exist");
+                                syncing_data.uploaded.push_front(sst.clone());
+                                assert!(syncing_data.remaining_uploading_tasks.remove(&task_id));
+                                data.may_notify_sync_task(&self.context, |new_synced_epoch| {
+                                    Self::set_max_synced_epoch(
+                                        &mut self.max_synced_epoch,
+                                        self.max_syncing_epoch,
+                                        new_synced_epoch,
+                                    )
+                                });
+                            }
+                            UploadingTaskStatus::Spilling(table_ids) => {
+                                data.spilled_data.insert(task_id, (sst.clone(), table_ids));
+                            }
                         }
-                        return Poll::Ready(sst);
+                        data.check_spill_task_consistency();
+                        Poll::Ready(sst)
                     }
                     Err(e) => {
                         let failed_epoch = e.failed_epoch;
@@ -1271,12 +1369,12 @@ impl HummockUploader {
                                 failed_epoch
                             ))
                         });
-                        return Poll::Pending;
+                        Poll::Pending
                     }
                 }
+            } else {
+                Poll::Pending
             }
-
-            Poll::Pending
         })
     }
 }
