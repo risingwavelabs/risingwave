@@ -88,8 +88,8 @@ pub struct BigQueryCommon {
     #[serde(rename = "bigquery.retry_times", default = "default_retry_times")]
     #[serde_as(as = "DisplayFromStr")]
     pub retry_times: usize,
-    #[serde(rename = "bigquery.auto_create_table", default)] // default false
-    pub auto_create_table: bool,
+    #[serde(default)] // default false
+    pub auto_create: bool,
 }
 
 fn default_max_batch_rows() -> usize {
@@ -371,7 +371,7 @@ impl Sink for BigQuerySink {
             ..
         } = &self.config.common;
 
-        if self.config.common.auto_create_table {
+        if self.config.common.auto_create {
             match client
                 .table()
                 .get(project_id, dataset_id, table_id, None)
