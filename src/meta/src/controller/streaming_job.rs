@@ -176,7 +176,7 @@ impl CatalogController {
                 Table::insert(table_model).exec(&txn).await?;
                 let _version = self
                     .notify_frontend(
-                        Operation::Delete,
+                        Operation::Add,
                         Info::RelationGroup(RelationGroup {
                             relations: vec![Relation {
                                 relation_info: Some(RelationInfo::Table(table.to_owned())),
