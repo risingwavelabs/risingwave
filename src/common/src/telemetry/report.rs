@@ -49,14 +49,13 @@ pub trait TelemetryReportCreator {
 pub async fn start_telemetry_reporting<F, I>(
     info_fetcher: Arc<I>,
     report_creator: Arc<F>,
-    set_tracking_id_and_session_id: Arc<dyn FnMut(String, String) + Send>,
+    set_tracking_id_and_session_id: Arc<dyn Fn(String, String) + Send + Sync>,
 ) -> (JoinHandle<()>, Sender<()>)
 where
     F: TelemetryReportCreator + Send + Sync + 'static,
     I: TelemetryInfoFetcher + Send + Sync + 'static,
 {
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
-    let x = set_tracking_id_and_session_id.clone();
 
     let join_handle = tokio::spawn(async move {
         tracing::info!("start telemetry reporting");
@@ -80,7 +79,7 @@ where
                 return;
             }
         };
-        x(tracking_id.clone(), session_id.clone());
+        set_tracking_id_and_session_id(tracking_id.clone(), session_id.clone());
 
         loop {
             tokio::select! {

@@ -29,7 +29,7 @@ where
 
     // This is a function that sets the tracking_id and session_id in different nodes
     // Tracking_id and Session_id are also used to collect events
-    set_func_tracking_id_and_session_id: Arc<dyn FnMut(String, String) + Send>,
+    set_func_tracking_id_and_session_id: Arc<dyn Fn(String, String) + Send + Sync>,
 }
 
 impl<F, I> TelemetryManager<F, I>
@@ -40,7 +40,7 @@ where
     pub fn new(
         info_fetcher: Arc<I>,
         report_creator: Arc<F>,
-        set_func_tracking_id_and_session_id: Arc<dyn FnMut(String, String) + Send>,
+        set_func_tracking_id_and_session_id: Arc<dyn Fn(String, String) + Send + Sync>,
     ) -> Self {
         Self {
             info_fetcher,
