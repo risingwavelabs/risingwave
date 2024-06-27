@@ -18,7 +18,9 @@
           "${inputs.devshell}/extra/language/rust.nix"
         ];
         language.rust.enableDefaultToolchain = false;
-        packages = rust-toolchain ++ (with pkgs; [
+        packages = rust-toolchain
+          # See the dependencies list in docs/developer-guide.md
+          ++ (with pkgs; [
           gcc
           lld
           protobuf
