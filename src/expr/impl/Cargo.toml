@@ -72,7 +72,7 @@ sql-json-path = { version = "0.1", features = ["jsonbb"] }
 thiserror = "1"
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = ["time"] }
-tonic = { version = "0.10", optional = true }
+tonic = { workspace = true, optional = true }
 tracing = "0.1"
 zstd = { version = "0.13", default-features = false, optional = true }
 
