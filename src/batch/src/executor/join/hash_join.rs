@@ -2406,7 +2406,6 @@ mod tests {
     use risingwave_common::hash::Key32;
     use risingwave_common::memory::MemoryContext;
     use risingwave_common::metrics::LabelGuardedIntGauge;
-    use risingwave_common::range::RangeBoundsExt;
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::types::DataType;
     use risingwave_common::util::iter_util::ZipEqDebug;
