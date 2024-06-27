@@ -1171,7 +1171,7 @@ impl CatalogManager {
         Ok(version)
     }
 
-    /// This is used for both `CREATE TABLE` and `CREATE MATERIALIZED VIEW`.
+    /// This is used for `CREATE TABLE`.
     pub async fn finish_create_table_procedure(
         &self,
         mut internal_tables: Vec<Table>,
@@ -1207,11 +1207,11 @@ impl CatalogManager {
                     relations: vec![Relation {
                         relation_info: RelationInfo::Table(table.to_owned()).into(),
                     }]
-                        .into_iter()
-                        .chain(internal_tables.into_iter().map(|internal_table| Relation {
-                            relation_info: RelationInfo::Table(internal_table).into(),
-                        }))
-                        .collect_vec(),
+                    .into_iter()
+                    .chain(internal_tables.into_iter().map(|internal_table| Relation {
+                        relation_info: RelationInfo::Table(internal_table).into(),
+                    }))
+                    .collect_vec(),
                 }),
             )
             .await;
@@ -1219,7 +1219,7 @@ impl CatalogManager {
         Ok(version)
     }
 
-    /// This is used for both `CREATE TABLE` and `CREATE MATERIALIZED VIEW`.
+    /// This is used for `CREATE MATERIALIZED VIEW`.
     pub async fn finish_create_materialized_view_procedure(
         &self,
         mut internal_tables: Vec<Table>,
@@ -1261,13 +1261,13 @@ impl CatalogManager {
         Ok(version)
     }
 
-    /// Used to cleanup states in stream manager.
+    /// Used to cleanup `CREATE MATERIALIZED VIEW` state in stream manager.
     /// It is required because failure may not necessarily happen in barrier,
     /// e.g. when cordon nodes.
     /// and we still need some way to cleanup the state.
     ///
     /// Returns false if `table_id` is not found.
-    pub async fn cancel_create_table_procedure(
+    pub async fn cancel_create_materialized_view_procedure(
         &self,
         table_id: TableId,
         internal_table_ids: Vec<TableId>,
@@ -1326,6 +1326,25 @@ impl CatalogManager {
         }
 
         Ok(true)
+    }
+
+    /// Used to cleanup `CREATE TABLE` state in stream manager.
+    pub async fn cancel_create_table_procedure(&self, table: &Table) {
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        let user_core = &mut core.user;
+        let key = (table.database_id, table.schema_id, table.name.clone());
+        assert!(
+            !database_core.tables.contains_key(&table.id)
+                && database_core.has_in_progress_creation(&key),
+            "table must be in creating procedure"
+        );
+        database_core.unmark_creating(&key);
+        database_core.unmark_creating_streaming_job(table.id);
+        for &dependent_relation_id in &table.dependent_relations {
+            database_core.decrease_relation_ref_count(dependent_relation_id);
+        }
+        user_core.decrease_ref(table.owner);
     }
 
     /// return id of streaming jobs in the database which need to be dropped by stream manager.

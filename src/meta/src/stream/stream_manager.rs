@@ -656,7 +656,7 @@ impl GlobalStreamManager {
                     )))?;
                 }
                 if let MetadataManager::V1(mgr) = &self.metadata_manager {
-                    mgr.catalog_manager.cancel_create_table_procedure(id.into(), fragment.internal_table_ids()).await?;
+                    mgr.catalog_manager.cancel_create_materialized_view_procedure(id.into(), fragment.internal_table_ids()).await?;
                 }
 
                 self.barrier_scheduler
