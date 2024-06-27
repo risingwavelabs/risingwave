@@ -13,6 +13,8 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::catalog::StreamJobStatus;
+use risingwave_pb::meta::cancel_creating_jobs_request::{CreatingJobIds, PbJobs};
 use risingwave_sqlparser::ast::ObjectName;
 
 use super::RwPgResponse;
@@ -37,7 +39,7 @@ pub async fn handle_drop_mv(
 
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
-    let table_id = {
+    let (table_id, status) = {
         let reader = session.env().catalog_reader().read_guard();
         let (table, schema_name) =
             match reader.get_table_by_name(session.database(), schema_path, &table_name) {
@@ -68,13 +70,27 @@ pub async fn handle_drop_mv(
             _ => return Err(table.bad_drop_error()),
         }
 
-        table.id()
+        (table.id(), table.stream_job_status)
     };
 
-    let catalog_writer = session.catalog_writer()?;
-    catalog_writer
-        .drop_materialized_view(table_id, cascade)
-        .await?;
+    match status {
+        StreamJobStatus::Created => {
+            let catalog_writer = session.catalog_writer()?;
+            catalog_writer
+                .drop_materialized_view(table_id, cascade)
+                .await?;
+        }
+        StreamJobStatus::Creating => {
+            let canceled_jobs = session
+                .env()
+                .meta_client()
+                .cancel_creating_jobs(PbJobs::Ids(CreatingJobIds {
+                    job_ids: vec![table_id.table_id],
+                }))
+                .await?;
+            tracing::info!("canceled jobs: {:?}", canceled_jobs);
+        }
+    }
 
     Ok(PgResponse::empty_result(
         StatementType::DROP_MATERIALIZED_VIEW,

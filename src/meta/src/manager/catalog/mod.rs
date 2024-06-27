@@ -1331,6 +1331,8 @@ impl CatalogManager {
             }
         }
 
+        // Notify fe.
+
         Ok(true)
     }
 
