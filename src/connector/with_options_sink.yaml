@@ -25,7 +25,7 @@ BigQueryConfig:
     field_type: usize
     required: false
     default: '5'
-  - name: bigquery.auto_create_table
+  - name: auto_create
     field_type: bool
     required: false
     default: Default::default
