@@ -23,6 +23,10 @@
 # (https://direnv.net/). Then run `echo 'use flake ./develop/nix' >> .envrc` at
 # the root of the RisingWave repo. Finally, run `direnv allow` to allow the
 # contents of '.envrc' to run every time you enter this directory. Voilà!
+#
+# note: If you don't want to see git untracked .envrc files bother you,
+# you can run `echo '.envrc' >> .git/info/exclude` in the root of project
+# to make it ignored locally.
 
 {
   description = ''
