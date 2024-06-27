@@ -14,7 +14,7 @@
 # `nix develop ./develop/nix`.
 #
 # You should now be dropped into a new shell with all programs and dependencies
-# availabile to you!
+# available to you!
 #
 # You can exit the development shell by typing `exit`, or using Ctrl-D.
 #
