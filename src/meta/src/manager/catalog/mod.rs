@@ -766,7 +766,7 @@ impl CatalogManager {
     ) -> MetaResult<()> {
         match stream_job {
             StreamingJob::MaterializedView(table) => {
-                self.start_create_table_procedure(table, internal_tables)
+                self.start_create_materialized_view_procedure(table, internal_tables)
                     .await
             }
             StreamingJob::Sink(sink, _) => self.start_create_sink_procedure(sink).await,
@@ -778,8 +778,7 @@ impl CatalogManager {
                     self.start_create_table_procedure_with_source(source, table)
                         .await
                 } else {
-                    self.start_create_table_procedure(table, internal_tables)
-                        .await
+                    self.start_create_table_procedure(table).await
                 }
             }
             StreamingJob::Source(source) => self.start_create_source_procedure(source).await,
@@ -833,7 +832,30 @@ impl CatalogManager {
     }
 
     /// This is used for both `CREATE TABLE` and `CREATE MATERIALIZED VIEW`.
-    pub async fn start_create_table_procedure(
+    pub async fn start_create_table_procedure(&self, table: &Table) -> MetaResult<()> {
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        let user_core = &mut core.user;
+        database_core.ensure_database_id(table.database_id)?;
+        database_core.ensure_schema_id(table.schema_id)?;
+        for dependent_id in &table.dependent_relations {
+            database_core.ensure_table_view_or_source_id(dependent_id)?;
+        }
+        #[cfg(not(test))]
+        user_core.ensure_user_id(table.owner)?;
+        let key = (table.database_id, table.schema_id, table.name.clone());
+
+        database_core.check_relation_name_duplicated(&key)?;
+
+        for &dependent_relation_id in &table.dependent_relations {
+            database_core.increase_relation_ref_count(dependent_relation_id);
+        }
+        user_core.increase_ref(table.owner);
+        Ok(())
+    }
+
+    /// This is used for both `CREATE TABLE` and `CREATE MATERIALIZED VIEW`.
+    pub async fn start_create_materialized_view_procedure(
         &self,
         table: &Table,
         internal_tables: Vec<Table>,
@@ -857,8 +879,8 @@ impl CatalogManager {
             !tables.contains_key(&table.id),
             "table must not already exist in meta"
         );
-        for table in internal_tables {
-            tables.insert(table.id, table);
+        for table in &internal_tables {
+            tables.insert(table.id, table.clone());
         }
         tables.insert(table.id, table.clone());
         commit_meta!(self, tables)?;
@@ -867,6 +889,21 @@ impl CatalogManager {
             database_core.increase_relation_ref_count(dependent_relation_id);
         }
         user_core.increase_ref(table.owner);
+        let _version = self
+            .notify_frontend(
+                Operation::Add,
+                Info::RelationGroup(RelationGroup {
+                    relations: vec![Relation {
+                        relation_info: RelationInfo::Table(table.to_owned()).into(),
+                    }]
+                    .into_iter()
+                    .chain(internal_tables.into_iter().map(|internal_table| Relation {
+                        relation_info: RelationInfo::Table(internal_table).into(),
+                    }))
+                    .collect_vec(),
+                }),
+            )
+            .await;
         Ok(())
     }
 
