@@ -21,7 +21,7 @@ use std::time::Duration;
 use aes_siv::aead::generic_array::GenericArray;
 use aes_siv::aead::Aead;
 use aes_siv::{Aes128SivAead, KeyInit};
-use anyhow::{anyhow, Context};
+use anyhow::Context;
 use itertools::Itertools;
 use rand::{Rng, RngCore};
 use risingwave_common::config::DefaultParallelism;
@@ -63,7 +63,7 @@ use risingwave_pb::stream_plan::{
 };
 use serde::{Deserialize, Serialize};
 use thiserror_ext::AsReport;
-use tokio::sync::{oneshot, Semaphore};
+use tokio::sync::Semaphore;
 use tokio::time::sleep;
 use tracing::log::warn;
 use tracing::Instrument;

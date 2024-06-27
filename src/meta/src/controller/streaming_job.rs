@@ -49,7 +49,7 @@ use risingwave_pb::meta::{
 use risingwave_pb::source::{PbConnectorSplit, PbConnectorSplits};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
-use risingwave_pb::stream_plan::update_mutation::{MergeUpdate, PbMergeUpdate};
+use risingwave_pb::stream_plan::update_mutation::PbMergeUpdate;
 use risingwave_pb::stream_plan::{
     PbDispatcher, PbDispatcherType, PbFragmentTypeFlag, PbStreamActor,
 };

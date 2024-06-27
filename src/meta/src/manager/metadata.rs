@@ -42,7 +42,7 @@ use crate::manager::{
 use crate::model::{ActorId, FragmentId, MetadataModel, TableFragments, TableParallelism};
 use crate::stream::{to_build_actor_info, SplitAssignment};
 use crate::telemetry::MetaTelemetryJobDesc;
-use crate::MetaResult;
+use crate::{MetaError, MetaResult};
 
 #[derive(Clone)]
 pub enum MetadataManager {
@@ -860,6 +860,11 @@ impl MetadataManagerV2 {
         drop(mgr);
         rx.await.map_err(|e| anyhow!(e))?
     }
+
+    pub(crate) async fn notify_finish_failed(&self, id: u32, err: MetaError) {
+        let mut mgr = self.catalog_controller.get_inner_write_guard().await;
+        mgr.notify_finish_failed(id as _, err);
+    }
 }
 
 impl MetadataManagerV1 {
@@ -876,5 +881,10 @@ impl MetadataManagerV1 {
         mgr.register_finish_notifier(id, tx);
         drop(mgr);
         rx.await.map_err(|e| anyhow!(e))?
+    }
+
+    pub(crate) async fn notify_finish_failed(&self, id: u32, err: MetaError) {
+        let mut mgr = self.catalog_manager.get_catalog_core_guard().await;
+        mgr.notify_finish_failed(id, err);
     }
 }
