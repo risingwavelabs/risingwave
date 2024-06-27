@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::str::FromStr;
-
 use risingwave_common::cast::str_to_bool;
 use risingwave_common::types::{Date, Decimal, ScalarImpl, Time, Timestamp, Timestamptz};
 
@@ -32,22 +30,6 @@ macro_rules! parse {
             value: $v.to_string(),
         })
     };
-}
-
-struct BooleanParser(bool);
-
-impl FromStr for BooleanParser {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        str_to_bool(s).map(Self)
-    }
-}
-
-impl From<BooleanParser> for ScalarImpl {
-    fn from(value: BooleanParser) -> Self {
-        ScalarImpl::Bool(value.0)
-    }
 }
 
 /// Parser for CSV format
@@ -95,7 +77,15 @@ impl CsvParser {
     fn parse_string(dtype: &DataType, v: String) -> AccessResult {
         let v = match dtype {
             // mysql use tinyint to represent boolean
-            DataType::Boolean => parse!(v, BooleanParser)?.into(),
+            DataType::Boolean => {
+                str_to_bool(&v)
+                    .map(ScalarImpl::Bool)
+                    .map_err(|_| AccessError::TypeError {
+                        expected: "boolean".to_owned(),
+                        got: "string".to_owned(),
+                        value: v,
+                    })?
+            }
             DataType::Int16 => parse!(v, i16)?.into(),
             DataType::Int32 => parse!(v, i32)?.into(),
             DataType::Int64 => parse!(v, i64)?.into(),
