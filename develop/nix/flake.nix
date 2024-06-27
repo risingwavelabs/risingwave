@@ -21,7 +21,7 @@
 # If you would like this development environment to activate automatically
 # upon entering this directory in your terminal, first install `direnv`
 # (https://direnv.net/). Then run `echo 'use flake ./develop/nix' >> .envrc` at
-# the root of the Synapse repo. Finally, run `direnv allow` to allow the
+# the root of the RisingWave repo. Finally, run `direnv allow` to allow the
 # contents of '.envrc' to run every time you enter this directory. Voilà!
 
 {
