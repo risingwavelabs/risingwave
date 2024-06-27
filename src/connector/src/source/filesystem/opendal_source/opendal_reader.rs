@@ -29,6 +29,7 @@ use super::opendal_enumerator::OpendalEnumerator;
 use super::OpendalSource;
 use crate::error::ConnectorResult;
 use crate::parser::ParserConfig;
+use crate::source::filesystem::file_common::DecompressionFormat;
 use crate::source::filesystem::nd_streaming::need_nd_streaming;
 use crate::source::filesystem::{nd_streaming, OpendalFsSplit};
 use crate::source::{
@@ -108,7 +109,7 @@ impl<Src: OpendalSource> OpendalReader<Src> {
         op: Operator,
         split: OpendalFsSplit<Src>,
         source_ctx: SourceContextRef,
-        decompression_format: Option<String>,
+        decompression_format: Option<DecompressionFormat>,
     ) {
         let actor_id = source_ctx.actor_id.to_string();
         let fragment_id = source_ctx.fragment_id.to_string();
@@ -130,7 +131,7 @@ impl<Src: OpendalSource> OpendalReader<Src> {
         );
 
         let buf_reader: Pin<Box<dyn AsyncRead + Send>> = match decompression_format {
-            Some(format) if format == *"gzip" => {
+            Some(DecompressionFormat::Gzip) => {
                 let gzip_decoder = GzipDecoder::new(stream_reader);
                 Box::pin(BufReader::new(gzip_decoder)) as Pin<Box<dyn AsyncRead + Send>>
             }

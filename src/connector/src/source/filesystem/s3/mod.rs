@@ -12,10 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 pub mod enumerator;
-
 use std::collections::HashMap;
 
 pub use enumerator::S3SplitEnumerator;
+
+use crate::source::filesystem::file_common::DecompressionFormat;
 mod source;
 use serde::Deserialize;
 pub use source::S3FileReader;
@@ -42,7 +43,7 @@ pub struct S3PropertiesCommon {
     #[serde(rename = "s3.endpoint_url")]
     pub endpoint_url: Option<String>,
     #[serde(rename = "decompression_format")]
-    pub decompression_format: Option<String>,
+    pub decompression_format: Option<DecompressionFormat>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, with_options::WithOptions)]
