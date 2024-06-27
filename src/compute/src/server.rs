@@ -80,7 +80,7 @@ use crate::rpc::service::exchange_service::ExchangeServiceImpl;
 use crate::rpc::service::health_service::HealthServiceImpl;
 use crate::rpc::service::monitor_service::{AwaitTreeMiddlewareLayer, MonitorServiceImpl};
 use crate::rpc::service::stream_service::StreamServiceImpl;
-use crate::telemetry::ComputeTelemetryCreator;
+use crate::telemetry::{set_compute_telemetry_tracking_id_and_session_id, ComputeTelemetryCreator};
 use crate::ComputeNodeOpts;
 
 /// Bootstraps the compute-node.
@@ -385,6 +385,7 @@ pub async fn compute_node_serve(
     let telemetry_manager = TelemetryManager::new(
         Arc::new(meta_client.clone()),
         Arc::new(ComputeTelemetryCreator::new()),
+        Arc::new(set_compute_telemetry_tracking_id_and_session_id),
     );
 
     // if the toml config file or env variable disables telemetry, do not watch system params change

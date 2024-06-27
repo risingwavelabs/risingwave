@@ -12,15 +12,58 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::OnceLock;
+
 use prost::Message;
 use risingwave_common::telemetry::pb_compatible::TelemetryToProtobuf;
-use risingwave_common::telemetry::report::TelemetryReportCreator;
+use risingwave_common::telemetry::report::{
+    report_event_common, TelemetryInfoFetcher, TelemetryReportCreator,
+};
 use risingwave_common::telemetry::{
     current_timestamp, SystemData, TelemetryNodeType, TelemetryReportBase, TelemetryResult,
 };
+use risingwave_pb::telemetry::TelemetryEventStage as PbTelemetryEventStage;
 use serde::{Deserialize, Serialize};
 
 const TELEMETRY_COMPUTE_REPORT_TYPE: &str = "compute";
+
+static COMPUTE_TELEMETRY_SESSION_ID: OnceLock<String> = OnceLock::new();
+static COMPUTE_TELEMETRY_TRACKING_ID: OnceLock<String> = OnceLock::new();
+
+pub(crate) fn set_compute_telemetry_tracking_id_and_session_id(
+    tracking_id: String,
+    session_id: String,
+) {
+    COMPUTE_TELEMETRY_TRACKING_ID.set(tracking_id).unwrap();
+    COMPUTE_TELEMETRY_SESSION_ID.set(session_id).unwrap();
+}
+
+pub(crate) fn get_compute_telemetry_tracking_id_and_session_id() -> (Option<String>, Option<String>)
+{
+    (
+        COMPUTE_TELEMETRY_TRACKING_ID.get().cloned(),
+        COMPUTE_TELEMETRY_SESSION_ID.get().cloned(),
+    )
+}
+
+pub(crate) async fn report_event(
+    event_stage: PbTelemetryEventStage,
+    feature_name: String,
+    catalog_id: i64,
+    connector_name: Option<String>,
+    attributes: String, // any json string
+) {
+    report_event_common(
+        Box::new(get_compute_telemetry_tracking_id_and_session_id),
+        event_stage,
+        feature_name,
+        catalog_id,
+        connector_name,
+        attributes,
+        TELEMETRY_COMPUTE_REPORT_TYPE.to_string(),
+    )
+    .await;
+}
 
 #[derive(Clone, Copy)]
 pub(crate) struct ComputeTelemetryCreator {}

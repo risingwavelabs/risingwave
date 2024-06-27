@@ -14,12 +14,16 @@
 
 use std::sync::Arc;
 
+use prost::Message;
+use risingwave_pb::telemetry::{
+    EventMessage as PbEventMessage, TelemetryEventStage as PbTelemetryEventStage,
+};
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 use tokio::time::{interval, Duration};
 use uuid::Uuid;
 
-use super::{Result, TELEMETRY_REPORT_INTERVAL, TELEMETRY_REPORT_URL};
+use super::{current_timestamp, Result, TELEMETRY_REPORT_INTERVAL, TELEMETRY_REPORT_URL};
 use crate::telemetry::pb_compatible::TelemetryToProtobuf;
 use crate::telemetry::post_telemetry_report_pb;
 
@@ -45,12 +49,14 @@ pub trait TelemetryReportCreator {
 pub async fn start_telemetry_reporting<F, I>(
     info_fetcher: Arc<I>,
     report_creator: Arc<F>,
+    set_tracking_id_and_session_id: Arc<dyn FnMut(String, String) + Send>,
 ) -> (JoinHandle<()>, Sender<()>)
 where
     F: TelemetryReportCreator + Send + Sync + 'static,
     I: TelemetryInfoFetcher + Send + Sync + 'static,
 {
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
+    let x = set_tracking_id_and_session_id.clone();
 
     let join_handle = tokio::spawn(async move {
         tracing::info!("start telemetry reporting");
@@ -74,6 +80,7 @@ where
                 return;
             }
         };
+        x(tracking_id.clone(), session_id.clone());
 
         loop {
             tokio::select! {
@@ -111,4 +118,42 @@ where
         }
     });
     (join_handle, shutdown_tx)
+}
+
+pub async fn report_event_common(
+    mut get_tracking_id_and_session_id: Box<dyn FnMut() -> (Option<String>, Option<String>)>,
+    event_stage: PbTelemetryEventStage,
+    feature_name: String,
+    catalog_id: i64,
+    connector_name: Option<String>,
+    attributes: String, // any json string
+    node: String,
+) {
+    // if disabled the telemetry, tracking_id and session_id will be None, so the event will not be reported
+    let event_tracking_id: String;
+    let event_session_id: String;
+    let (tracking_id, session_id) = get_tracking_id_and_session_id();
+    if let Some(tracing_id) = tracking_id
+        && let Some(session_id) = session_id
+    {
+        event_session_id = session_id;
+        event_tracking_id = tracing_id;
+    } else {
+        tracing::info!(
+            "got empty tracking_id or session_id, Telemetry is disabled or not initialized"
+        );
+        return;
+    }
+    let event = PbEventMessage {
+        tracking_id: event_tracking_id,
+        session_id: event_session_id,
+        event_time: current_timestamp(),
+        event_stage: event_stage as i32,
+        feature_name,
+        connector_name,
+        catalog_id,
+        attributes,
+        node,
+    };
+    let _report_bytes = event.encode_to_vec();
 }

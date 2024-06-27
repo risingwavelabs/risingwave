@@ -111,3 +111,32 @@ message FrontendReport {
 message CompactorReport {
   ReportBase base = 1;
 }
+
+enum TelemetryEventStage {
+  Telemetry_Event_Stage_UNSPECIFIED = 0;
+  Telemetry_Event_Stage_CreateStreamJob = 1;
+  Telemetry_Event_Stage_UpdateStreamJob = 2;
+  Telemetry_Event_Stage_DropStreamJob = 3;
+  Telemetry_Event_Stage_Query = 4;
+}
+
+message EventMessage {
+  // tracking_id is persistent in meta data
+  string tracking_id = 1;
+  // session_id is reset every time node restarts
+  string session_id = 2;
+  // event_time is when the event is created
+  uint64 event_time = 3;
+  // event_stage describes in which process the event happens
+  TelemetryEventStage event_stage = 4;
+  // feature_name is the name of the feature triggered the event
+  string feature_name = 5;
+  // connector_name is the name of the connector involves
+  optional string connector_name = 6;
+  // catalog_id is the id of the catalog involves (table_id/source_id/...)
+  int64 catalog_id = 7;
+  // attributes is the additional information of the event: json format ser to string
+  string attributes = 8;
+  // node is the node that creates the event
+  string node = 9;
+}

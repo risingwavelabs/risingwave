@@ -10951,6 +10951,7 @@ dependencies = [
  "tokio-stream",
  "tower",
  "tracing",
+ "uuid",
  "workspace-hack",
 ]
 
