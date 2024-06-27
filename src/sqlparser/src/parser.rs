@@ -3567,11 +3567,6 @@ impl Parser<'_> {
         let checkpoint = *self;
         let token = self.next_token();
         match token.token {
-            Token::Word(Word {
-                value,
-                keyword: Keyword::NoKeyword,
-                ..
-            }) => Ok(value),
             Token::SingleQuotedString(s) => Ok(s),
             _ => self.expected_at(checkpoint, "literal string"),
         }
