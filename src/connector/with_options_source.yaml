@@ -34,7 +34,7 @@ GcsProperties:
     required: false
     default: Default::default
   - name: compression_format
-    field_type: String
+    field_type: DecompressionFormat
     required: false
 IcebergProperties:
   fields:
@@ -620,7 +620,7 @@ OpendalS3Properties:
     field_type: String
     required: false
   - name: compression_format
-    field_type: String
+    field_type: DecompressionFormat
     required: false
   - name: s3.assume_role
     field_type: String
@@ -639,7 +639,7 @@ PosixFsProperties:
     required: false
     default: Default::default
   - name: compression_format
-    field_type: String
+    field_type: DecompressionFormat
     required: false
 PubsubProperties:
   fields:
@@ -779,7 +779,7 @@ S3Properties:
     field_type: String
     required: false
   - name: compression_format
-    field_type: String
+    field_type: DecompressionFormat
     required: false
 TestSourceProperties:
   fields:
