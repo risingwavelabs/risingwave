@@ -10526,7 +10526,6 @@ dependencies = [
  "itertools 0.12.1",
  "itoa",
  "jsonbb",
- "jsonwebtoken",
  "libc",
  "lru 0.7.6",
  "mach2",
