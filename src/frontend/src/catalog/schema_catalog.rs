@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{valid_table_name, FunctionId, IndexId, TableId};
+use risingwave_common::catalog::{valid_table_name, FunctionId, IndexId, StreamJobStatus, TableId};
 use risingwave_common::types::DataType;
 use risingwave_connector::sink::catalog::SinkCatalog;
 pub use risingwave_expr::sig::*;
@@ -602,11 +602,15 @@ impl SchemaCatalog {
     }
 
     pub fn get_table_by_name(&self, table_name: &str) -> Option<&Arc<TableCatalog>> {
-        self.table_by_name.get(table_name)
+        self.table_by_name
+            .get(table_name)
+            .filter(|&table| table.stream_job_status != StreamJobStatus::Creating)
     }
 
     pub fn get_table_by_id(&self, table_id: &TableId) -> Option<&Arc<TableCatalog>> {
-        self.table_by_id.get(table_id)
+        self.table_by_id
+            .get(table_id)
+            .filter(|&table| table.stream_job_status != StreamJobStatus::Creating)
     }
 
     pub fn get_view_by_name(&self, view_name: &str) -> Option<&Arc<ViewCatalog>> {
