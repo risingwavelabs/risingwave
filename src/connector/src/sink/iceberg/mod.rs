@@ -390,6 +390,8 @@ impl IcebergConfig {
                     "client.credentials-provider".to_string(),
                     "com.risingwave.connector.catalog.GlueCredentialProvider".to_string(),
                 );
+                // Use S3 ak/sk and region as glue ak/sk and region by default.
+                // TODO: use different ak/sk and region for s3 and glue.
                 java_catalog_configs.insert(
                     "client.credentials-provider.glue.access-key-id".to_string(),
                     self.access_key.clone().to_string(),

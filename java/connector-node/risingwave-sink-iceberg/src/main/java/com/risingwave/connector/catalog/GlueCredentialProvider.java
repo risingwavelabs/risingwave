@@ -6,6 +6,7 @@ import software.amazon.awssdk.auth.credentials.AwsCredentials;
 import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
 import software.amazon.awssdk.utils.Validate;
 
+/** This class is used to provide a credential to glue catalog */
 public class GlueCredentialProvider implements AwsCredentialsProvider {
     private final AwsCredentials credentials;
 
