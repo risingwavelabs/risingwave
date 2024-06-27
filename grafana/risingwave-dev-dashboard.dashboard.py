@@ -95,6 +95,17 @@ def section_cluster_node(outer_panels):
                         ),
                     ],
                 ),
+                panels.timeseries_cpu(
+                    "Node CPU relative",
+                    "CPU usage relative to k8s resource limit of container",
+                    [
+                        panels.target(
+                            "(sum(rate(container_cpu_usage_seconds_total{namespace=~\"$namespace\",container=~\"$component\",pod=~\"$pod\"}[$__rate_interval])) by (namespace, pod)) / (sum(kube_pod_container_resource_limits{namespace=~\"$namespace\",pod=~\"$pod\",container=~\"$component\", resource=\"cpu\"}) by (namespace, pod))",
+                            "cpu usage @ {{%s}} @ {{%s}}"
+                            % (COMPONENT_LABEL, NODE_LABEL),
+                        ),
+                    ],
+                ),
                 panels.timeseries_count(
                     "Meta Cluster",
                     "RW cluster can configure multiple meta nodes to achieve high availability. One is the leader and the "
