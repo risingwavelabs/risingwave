@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,21 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
-use risingwave_common::error::Result;
+use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::TableFunctionNode;
 
+use super::batch::prelude::*;
+use super::utils::{childless_record, Distill};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeLeaf, ToBatchPb, ToDistributedBatch};
-use crate::expr::ExprRewriter;
+use crate::error::Result;
+use crate::expr::{ExprRewriter, ExprVisitor};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::logical_table_function::LogicalTableFunction;
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, Order};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchTableFunction {
-    pub base: PlanBase,
+    pub base: PlanBase<Batch>,
     logical: LogicalTableFunction,
 }
 
@@ -39,7 +41,7 @@ impl BatchTableFunction {
     }
 
     pub fn with_dist(logical: LogicalTableFunction, dist: Distribution) -> Self {
-        let ctx = logical.base.ctx.clone();
+        let ctx = logical.base.ctx().clone();
         let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any());
         BatchTableFunction { base, logical }
     }
@@ -50,13 +52,10 @@ impl BatchTableFunction {
     }
 }
 
-impl fmt::Display for BatchTableFunction {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "BatchTableFunction {{ {:?} }}",
-            self.logical.table_function
-        )
+impl Distill for BatchTableFunction {
+    fn distill<'a>(&self) -> XmlNode<'a> {
+        let data = Pretty::debug(&self.logical.table_function);
+        childless_record("BatchTableFunction", vec![("table_function", data)])
     }
 }
 
@@ -94,5 +93,15 @@ impl ExprRewritable for BatchTableFunction {
                 .clone(),
         )
         .into()
+    }
+}
+
+impl ExprVisitable for BatchTableFunction {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.logical
+            .table_function
+            .args
+            .iter()
+            .for_each(|e| v.visit_expr(e));
     }
 }

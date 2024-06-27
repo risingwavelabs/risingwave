@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ use std::collections::{HashMap, HashSet};
 use itertools::Itertools;
 
 use crate::catalog::SourceId;
+use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{
     LogicalShare, LogicalSource, PlanNodeId, PlanTreeNode, StreamShare,
 };
@@ -109,8 +110,10 @@ impl PlanRewriter for ShareSourceRewriter {
     }
 }
 
-impl PlanVisitor<()> for SourceCounter {
-    type DefaultBehavior = impl DefaultBehavior<()>;
+impl PlanVisitor for SourceCounter {
+    type Result = ();
+
+    type DefaultBehavior = impl DefaultBehavior<Self::Result>;
 
     fn default_behavior() -> Self::DefaultBehavior {
         DefaultValue

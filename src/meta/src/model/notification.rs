@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,6 +11,8 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
+use thiserror_ext::AsReport;
 
 use crate::storage::{MetaStore, MetaStoreError, DEFAULT_COLUMN_FAMILY};
 
@@ -31,7 +33,7 @@ impl NotificationVersion {
         {
             Ok(byte_vec) => memcomparable::from_slice(&byte_vec).unwrap(),
             Err(MetaStoreError::ItemNotFound(_)) => 0,
-            Err(e) => panic!("{:?}", e),
+            Err(e) => panic!("{}", e.as_report()),
         };
         Self(version)
     }

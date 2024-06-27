@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,6 @@
 
 use std::sync::atomic::{self, AtomicI64};
 
-use anyhow;
 use async_trait::async_trait;
 use etcd_client::{Compare, CompareOp, Error as EtcdError, GetOptions, Txn, TxnOp};
 use futures::Future;

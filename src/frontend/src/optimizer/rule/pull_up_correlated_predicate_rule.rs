@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,8 +18,8 @@ use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use super::super::plan_node::*;
 use super::{BoxedRule, Rule};
 use crate::expr::{CorrelatedId, CorrelatedInputRef, Expr, ExprImpl, ExprRewriter, InputRef};
+use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_visitor::{PlanCorrelatedIdFinder, PlanVisitor};
-use crate::optimizer::PlanRef;
 use crate::utils::Condition;
 
 /// This rule is for pattern: Apply->Project->Filter.

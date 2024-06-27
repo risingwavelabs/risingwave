@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -34,7 +34,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     /// Generates query expression and returns its
     /// query schema as well.
     pub(crate) fn gen_query(&mut self) -> (Query, Vec<Column>) {
-        if self.can_recurse() {
+        if self.rng.gen_bool(0.3) {
             self.gen_complex_query()
         } else {
             self.gen_simple_query()
@@ -62,7 +62,9 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         )
     }
 
-    /// Generates a simple query which will not recurse.
+    /// This query can still recurse, but it is "simpler"
+    /// does not have "with" clause, "order by".
+    /// Which makes it more unlikely to recurse.
     fn gen_simple_query(&mut self) -> (Query, Vec<Column>) {
         let num_select_items = self.rng.gen_range(1..=4);
         let with_tables = vec![];
@@ -72,7 +74,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                 with: None,
                 body: query,
                 order_by: vec![],
-                limit: None,
+                limit: self.gen_limit(false),
                 offset: None,
                 fetch: None,
             },
@@ -116,7 +118,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     fn gen_with(&mut self) -> (Option<With>, Vec<Table>) {
-        match self.rng.gen_bool(0.4) {
+        match self.can_recurse() {
             true => (None, vec![]),
             false => {
                 let (with, tables) = self.gen_with_inner();
@@ -128,17 +130,12 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     fn gen_with_inner(&mut self) -> (With, Vec<Table>) {
         let alias = self.gen_table_alias_with_prefix("with");
         let (query, query_schema) = self.gen_local_query();
-        let from = None;
         let cte = Cte {
             alias: alias.clone(),
-            query,
-            from,
+            cte_inner: risingwave_sqlparser::ast::CteInner::Query(query),
         };
 
-        let with_tables = vec![Table {
-            name: alias.name.real_value(),
-            columns: query_schema,
-        }];
+        let with_tables = vec![Table::new(alias.name.real_value(), query_schema)];
         (
             With {
                 recursive: false,
@@ -164,8 +161,9 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     fn gen_limit(&mut self, has_order_by: bool) -> Option<String> {
-        if (!self.is_mview || has_order_by) && self.rng.gen_bool(0.2) {
-            Some(self.rng.gen_range(0..=100).to_string())
+        if (!self.is_mview || has_order_by) && self.flip_coin() {
+            let start = if self.is_mview { 1 } else { 0 };
+            Some(self.rng.gen_range(start..=100).to_string())
         } else {
             None
         }
@@ -231,7 +229,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         };
 
         // We short-circuit here for mview to avoid streaming nested loop join,
-        // since CROSS JOIN below maybe correlated.
+        // since CROSS JOIN below could be correlated.
         if self.is_mview {
             assert!(!self.tables.is_empty());
             return from;
@@ -239,7 +237,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
         // Generate one cross join at most.
         let mut lateral_contexts = vec![];
-        if self.flip_coin() {
+        if self.rng.gen_bool(0.1) {
             let (table_with_join, mut table) = self.gen_from_relation();
             from.push(table_with_join);
             lateral_contexts.append(&mut table);
@@ -259,17 +257,61 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
     /// GROUP BY will constrain the generated columns.
     fn gen_group_by(&mut self) -> Vec<Expr> {
+        // 90% generate simple group by.
+        // 10% generate grouping sets.
+        match self.rng.gen_range(0..=9) {
+            0..=8 => {
+                let group_by_cols = self.gen_random_bound_columns();
+                self.bound_columns.clone_from(&group_by_cols);
+                group_by_cols
+                    .into_iter()
+                    .map(|c| Expr::Identifier(Ident::new_unchecked(c.name)))
+                    .collect_vec()
+            }
+            9 => self.gen_grouping_sets(),
+            _ => unreachable!(),
+        }
+    }
+
+    #[allow(dead_code)]
+    /// GROUPING SETS will constrain the generated columns.
+    fn gen_grouping_sets(&mut self) -> Vec<Expr> {
+        let grouping_num = self.rng.gen_range(0..=5);
+        let mut grouping_sets = vec![];
+        let mut new_bound_columns = vec![];
+        for _i in 0..grouping_num {
+            let group_by_cols = self.gen_random_bound_columns();
+            grouping_sets.push(
+                group_by_cols
+                    .iter()
+                    .map(|c| Expr::Identifier(Ident::new_unchecked(c.name.clone())))
+                    .collect_vec(),
+            );
+            new_bound_columns.extend(group_by_cols);
+        }
+        if grouping_sets.is_empty() {
+            self.bound_columns = vec![];
+            vec![]
+        } else {
+            let grouping_sets = Expr::GroupingSets(grouping_sets);
+            self.bound_columns = new_bound_columns
+                .into_iter()
+                .sorted_by(|a, b| Ord::cmp(&a.name, &b.name))
+                .dedup_by(|a, b| a.name == b.name)
+                .collect();
+
+            // Currently, grouping sets only support one set.
+            vec![grouping_sets]
+        }
+    }
+
+    fn gen_random_bound_columns(&mut self) -> Vec<Column> {
         let mut available = self.bound_columns.clone();
         if !available.is_empty() {
             available.shuffle(self.rng);
             let upper_bound = (available.len() + 1) / 2;
             let n = self.rng.gen_range(1..=upper_bound);
-            let group_by_cols = available.drain(..n).collect_vec();
-            self.bound_columns = group_by_cols.clone();
-            group_by_cols
-                .into_iter()
-                .map(|c| Expr::Identifier(Ident::new_unchecked(c.name)))
-                .collect_vec()
+            available.drain(..n).collect_vec()
         } else {
             vec![]
         }

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,7 +13,7 @@
 // limitations under the License.
 
 mod parser;
-pub mod schema_resolver;
-pub mod util;
+mod schema_resolver;
 
-pub use parser::*;
+pub use parser::{AvroAccessBuilder, AvroParserConfig};
+pub use schema_resolver::ConfluentSchemaCache;

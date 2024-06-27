@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,9 +17,9 @@ use crate::storage::{ColumnFamily, Key, Value};
 /// A `Transaction` executes several writes(aka. operations) to meta store atomically with optional
 /// preconditions checked. It executes as follow:
 /// 1. If all `preconditions` are valid, all `operations` are executed; Otherwise no operation
-/// is executed.
+///    is executed.
 /// 2. Upon `commit` the transaction, the `TransactionAbort` error will be returned if
-/// any precondition was not met in previous step.
+///    any precondition was not met in previous step.
 #[derive(Default)]
 pub struct Transaction {
     preconditions: Vec<Precondition>,

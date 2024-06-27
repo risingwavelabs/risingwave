@@ -1,30 +1,17 @@
 ---
-version: "3"
 services:
-  compactor-0:
+  risingwave-standalone:
     extends:
       file: ../../docker/docker-compose.yml
-      service: compactor-0
-  compute-node-0:
+      service: risingwave-standalone
+  postgres-0:
     extends:
       file: ../../docker/docker-compose.yml
-      service: compute-node-0
-  etcd-0:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: etcd-0
-  frontend-node-0:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: frontend-node-0
+      service: postgres-0
   grafana-0:
     extends:
       file: ../../docker/docker-compose.yml
       service: grafana-0
-  meta-node-0:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: meta-node-0
   minio-0:
     extends:
       file: ../../docker/docker-compose.yml
@@ -36,7 +23,7 @@ services:
   mysql:
     image: mysql:8.0
     ports:
-      - "3306:3306"
+      - "8306:3306"
     environment:
       - MYSQL_ROOT_PASSWORD=123456
       - MYSQL_USER=mysqluser
@@ -48,26 +35,41 @@ services:
       timeout: 5s
       retries: 5
     container_name: mysql
-  connector-node:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: connector-node
-  datagen:
+  mysql_prepare:
     image: mysql:8.0
-    depends_on: 
-      - mysql
+    depends_on:
+      mysql:
+        condition: service_healthy
+    volumes:
+      - "./compatibility-mysql.sql:/compatibility-mysql.sql"
     command:
       - /bin/sh
       - -c
-      - "mysql -p123456 -h mysql mydb < mysql_prepare.sql"
+      - "mysql -h mysql -u root -P 3306 mydb --password=123456 -A < /compatibility-mysql.sql"
+  rw_prepare:
+    image: postgres
+    depends_on:
+      mysql_prepare:
+        condition: service_completed_successfully
+      risingwave-standalone:
+        condition: service_healthy
     volumes:
-      - "./mysql_prepare.sql:/mysql_prepare.sql"      
-    container_name: datagen
+      - "./compatibility-rw.sql:/compatibility-rw.sql"
+    command:
+      - /bin/sh
+      - -c
+      - "psql postgresql://root:@risingwave-standalone:4566/dev < /compatibility-rw.sql"
+  datagen_tpch:
+    image: ghcr.io/risingwavelabs/go-tpc:v0.1
+    depends_on:
+      - mysql
+    command: tpch prepare --sf 1 --threads 4 -H mysql -U root -p '123456' -D mydb -P 3306
+    container_name: datagen_tpch
     restart: on-failure
 volumes:
-  compute-node-0:
+  risingwave-standalone:
     external: false
-  etcd-0:
+  postgres-0:
     external: false
   grafana-0:
     external: false

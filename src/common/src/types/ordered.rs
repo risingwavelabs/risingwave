@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,25 +14,25 @@
 
 //! `ScalarImpl` and `Datum` wrappers that implement `PartialOrd` and `Ord` with default order type.
 
-use std::cmp::{Ord, Ordering};
+use std::cmp::Ordering;
 use std::ops::Deref;
 
-use crate::estimate_size::EstimateSize;
-use crate::for_all_scalar_variants;
+use risingwave_common_estimate_size::EstimateSize;
+
+use crate::dispatch_scalar_ref_variants;
 use crate::types::{Datum, DatumRef, ScalarImpl, ScalarRefImpl};
 use crate::util::sort_util::{cmp_datum, partial_cmp_datum, OrderType};
 
-macro_rules! gen_default_partial_cmp_scalar_ref_impl {
-    ($( { $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
-        pub fn default_partial_cmp_scalar_ref_impl(lhs: ScalarRefImpl<'_>, rhs: ScalarRefImpl<'_>) -> Option<Ordering> {
-            match (lhs, rhs) {
-                $((ScalarRefImpl::$variant_name(lhs_inner), ScalarRefImpl::$variant_name(ref rhs_inner)) => Some(lhs_inner.cmp(rhs_inner)),)*
-                _ => None,
-            }
-        }
-    };
+pub fn default_partial_cmp_scalar_ref_impl(
+    lhs: ScalarRefImpl<'_>,
+    rhs: ScalarRefImpl<'_>,
+) -> Option<Ordering> {
+    dispatch_scalar_ref_variants!(lhs, lhs, [S = ScalarRef], {
+        let rhs: S<'_> = rhs.try_into().ok()?;
+        #[allow(clippy::needless_borrow)] // false positive
+        Some(lhs.cmp(&rhs))
+    })
 }
-for_all_scalar_variants!(gen_default_partial_cmp_scalar_ref_impl);
 
 pub trait DefaultPartialOrd: PartialEq {
     fn default_partial_cmp(&self, other: &Self) -> Option<Ordering>;
@@ -133,6 +133,7 @@ impl<T: DefaultOrd> From<T> for DefaultOrdered<T> {
     }
 }
 
+#[allow(clippy::non_canonical_partial_ord_impl)]
 impl<T: DefaultOrd> PartialOrd for DefaultOrdered<T> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         self.0.default_partial_cmp(other.as_inner())

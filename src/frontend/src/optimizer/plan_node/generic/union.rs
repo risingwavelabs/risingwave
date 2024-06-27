@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,11 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
+use pretty_xmlish::{Pretty, StrAssocArr};
 use risingwave_common::catalog::Schema;
 
-use super::{GenericPlanNode, GenericPlanRef};
+use super::{impl_distill_unit_from_fields, GenericPlanNode, GenericPlanRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::property::FunctionalDependencySet;
 
@@ -34,14 +33,20 @@ pub struct Union<PlanRef> {
 
 impl<PlanRef: GenericPlanRef> GenericPlanNode for Union<PlanRef> {
     fn schema(&self) -> Schema {
-        self.inputs[0].schema().clone()
+        let mut schema = self.inputs[0].schema().clone();
+        if let Some(source_col) = self.source_col {
+            schema.fields[source_col].name = "$src".to_string();
+            schema
+        } else {
+            schema
+        }
     }
 
-    fn logical_pk(&self) -> Option<Vec<usize>> {
+    fn stream_key(&self) -> Option<Vec<usize>> {
         // Union all its inputs pks + source_col if exists
         let mut pk_indices = vec![];
         for input in &self.inputs {
-            for pk in input.logical_pk() {
+            for pk in input.stream_key()? {
                 if !pk_indices.contains(pk) {
                     pk_indices.push(*pk);
                 }
@@ -63,13 +68,8 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Union<PlanRef> {
 }
 
 impl<PlanRef: GenericPlanRef> Union<PlanRef> {
-    pub fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        let mut builder = f.debug_struct(name);
-        self.fmt_fields_with_builder(&mut builder);
-        builder.finish()
-    }
-
-    pub fn fmt_fields_with_builder(&self, builder: &mut fmt::DebugStruct<'_, '_>) {
-        builder.field("all", &self.all);
+    pub fn fields_pretty<'a>(&self) -> StrAssocArr<'a> {
+        vec![("all", Pretty::debug(&self.all))]
     }
 }
+impl_distill_unit_from_fields!(Union, GenericPlanRef);

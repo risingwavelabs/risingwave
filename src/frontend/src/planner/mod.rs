@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,14 +14,15 @@
 
 use std::collections::HashMap;
 
-use risingwave_common::error::Result;
-
 use crate::binder::{BoundStatement, ShareId};
+use crate::error::Result;
 use crate::optimizer::{OptimizerContextRef, PlanRoot};
 
+mod changelog;
 mod delete;
 mod insert;
 mod query;
+mod recursive_union;
 mod relation;
 mod select;
 mod set_expr;

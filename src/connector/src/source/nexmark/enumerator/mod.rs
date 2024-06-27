@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,9 +14,10 @@
 
 use async_trait::async_trait;
 
+use crate::error::ConnectorResult;
 use crate::source::nexmark::split::NexmarkSplit;
 use crate::source::nexmark::NexmarkProperties;
-use crate::source::SplitEnumerator;
+use crate::source::{SourceEnumeratorContextRef, SplitEnumerator};
 
 pub struct NexmarkSplitEnumerator {
     split_num: i32,
@@ -29,12 +30,15 @@ impl SplitEnumerator for NexmarkSplitEnumerator {
     type Properties = NexmarkProperties;
     type Split = NexmarkSplit;
 
-    async fn new(properties: NexmarkProperties) -> anyhow::Result<NexmarkSplitEnumerator> {
+    async fn new(
+        properties: NexmarkProperties,
+        _context: SourceEnumeratorContextRef,
+    ) -> ConnectorResult<NexmarkSplitEnumerator> {
         let split_num = properties.split_num;
         Ok(Self { split_num })
     }
 
-    async fn list_splits(&mut self) -> anyhow::Result<Vec<NexmarkSplit>> {
+    async fn list_splits(&mut self) -> ConnectorResult<Vec<NexmarkSplit>> {
         let mut splits = vec![];
         for i in 0..self.split_num {
             splits.push(NexmarkSplit {
@@ -49,9 +53,8 @@ impl SplitEnumerator for NexmarkSplitEnumerator {
 
 #[cfg(test)]
 mod tests {
-    use anyhow::Result;
-
     use super::*;
+    use crate::error::ConnectorResult as Result;
     use crate::source::SplitMetaData;
 
     #[tokio::test]

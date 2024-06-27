@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ use std::process::Command;
 
 use anyhow::Result;
 use console::style;
+use thiserror_ext::AsReport;
 
 fn preflight_check_proxy() -> Result<()> {
     if env::var("http_proxy").is_ok()
@@ -26,7 +27,10 @@ fn preflight_check_proxy() -> Result<()> {
         || env::var("all_proxy").is_ok()
         || env::var("ALL_PROXY").is_ok()
     {
-        if let Ok(x) = env::var("no_proxy") && x.contains("127.0.0.1") && x.contains("::1") {
+        if let Ok(x) = env::var("no_proxy")
+            && x.contains("127.0.0.1")
+            && x.contains("::1")
+        {
             println!(
                 "[{}] {} - You are using proxies for all RisingWave components. Please make sure that `no_proxy` is set for all worker nodes within the cluster.",
                 style("risedev-preflight-check").bold(),
@@ -69,7 +73,7 @@ pub fn preflight_check() -> Result<()> {
             "[{}] {} - failed to run proxy preflight check: {}",
             style("risedev-preflight-check").bold(),
             style("WARN").yellow().bold(),
-            e
+            e.as_report()
         );
     }
 
@@ -78,7 +82,7 @@ pub fn preflight_check() -> Result<()> {
             "[{}] {} - failed to run ulimit preflight check: {}",
             style("risedev-preflight-check").bold(),
             style("WARN").yellow().bold(),
-            e
+            e.as_report()
         );
     }
 

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,8 +22,8 @@ use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Format;
 use postgres_types::FromSql;
+use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::session_config::QueryMode;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_sqlparser::ast::{SetExpr, Statement};
@@ -32,6 +32,7 @@ use super::extended_handle::{PortalResult, PrepareStatement, PreparedResult};
 use super::{PgResponseStream, RwPgResponse};
 use crate::binder::{Binder, BoundStatement};
 use crate::catalog::TableId;
+use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::flush::do_flush;
 use crate::handler::privilege::resolve_privileges;
 use crate::handler::util::{to_pg_field, DataChunkToRowSetAdapter};
@@ -43,10 +44,9 @@ use crate::optimizer::{
 };
 use crate::planner::Planner;
 use crate::scheduler::plan_fragmenter::Query;
-use crate::scheduler::worker_node_manager::WorkerNodeSelector;
 use crate::scheduler::{
     BatchPlanFragmenter, DistributedQueryStream, ExecutionContext, ExecutionContextRef,
-    LocalQueryExecution, LocalQueryStream, PinnedHummockSnapshot,
+    LocalQueryExecution, LocalQueryStream,
 };
 use crate::session::SessionImpl;
 use crate::PlanRef;
@@ -69,7 +69,7 @@ pub async fn handle_query(
 pub fn handle_parse(
     handler_args: HandlerArgs,
     statement: Statement,
-    specific_param_types: Vec<DataType>,
+    specific_param_types: Vec<Option<DataType>>,
 ) -> Result<PrepareStatement> {
     let session = handler_args.session;
     let bound_result = gen_bound(&session, statement.clone(), specific_param_types)?;
@@ -122,7 +122,7 @@ pub struct BoundResult {
 fn gen_bound(
     session: &SessionImpl,
     stmt: Statement,
-    specific_param_types: Vec<DataType>,
+    specific_param_types: Vec<Option<DataType>>,
 ) -> Result<BoundResult> {
     let stmt_type = StatementType::infer_from_statement(&stmt)
         .map_err(|err| RwError::from(ErrorCode::InvalidInputSyntax(err)))?;
@@ -188,7 +188,7 @@ fn gen_batch_query_plan(
         }
         (true, false) => QueryMode::Distributed,
         (false, true) => QueryMode::Local,
-        (false, false) => match session.config().get_query_mode() {
+        (false, false) => match session.config().query_mode() {
             QueryMode::Auto => determine_query_mode(batch_plan.clone()),
             QueryMode::Local => QueryMode::Local,
             QueryMode::Distributed => QueryMode::Distributed,
@@ -197,8 +197,8 @@ fn gen_batch_query_plan(
 
     let physical = match query_mode {
         QueryMode::Auto => unreachable!(),
-        QueryMode::Local => logical.gen_batch_local_plan(batch_plan)?,
-        QueryMode::Distributed => logical.gen_batch_distributed_plan(batch_plan)?,
+        QueryMode::Local => logical.gen_batch_local_plan()?,
+        QueryMode::Distributed => logical.gen_batch_distributed_plan()?,
     };
 
     Ok(BatchQueryPlanResult {
@@ -253,7 +253,7 @@ fn determine_query_mode(batch_plan: PlanRef) -> QueryMode {
     }
 }
 
-struct BatchPlanFragmenterResult {
+pub struct BatchPlanFragmenterResult {
     pub(crate) plan_fragmenter: BatchPlanFragmenter,
     pub(crate) query_mode: QueryMode,
     pub(crate) schema: Schema,
@@ -261,7 +261,7 @@ struct BatchPlanFragmenterResult {
     pub(crate) _dependent_relations: Vec<TableId>,
 }
 
-fn gen_batch_plan_fragmenter(
+pub fn gen_batch_plan_fragmenter(
     session: &SessionImpl,
     plan_result: BatchQueryPlanResult,
 ) -> Result<BatchPlanFragmenterResult> {
@@ -275,17 +275,17 @@ fn gen_batch_plan_fragmenter(
 
     tracing::trace!(
         "Generated query plan: {:?}, query_mode:{:?}",
-        plan.explain_to_string()?,
+        plan.explain_to_string(),
         query_mode
     );
     let worker_node_manager_reader = WorkerNodeSelector::new(
         session.env().worker_node_manager_ref(),
-        !session.config().only_checkpoint_visible(),
+        session.is_barrier_read(),
     );
     let plan_fragmenter = BatchPlanFragmenter::new(
         worker_node_manager_reader,
         session.env().catalog_reader().clone(),
-        session.config().get_batch_parallelism(),
+        session.config().batch_parallelism().0,
         plan,
     )?;
 
@@ -298,11 +298,11 @@ fn gen_batch_plan_fragmenter(
     })
 }
 
-async fn execute(
+pub async fn create_stream(
     session: Arc<SessionImpl>,
     plan_fragmenter_result: BatchPlanFragmenterResult,
     formats: Vec<Format>,
-) -> Result<RwPgResponse> {
+) -> Result<(PgResponseStream, Vec<PgFieldDescriptor>)> {
     let BatchPlanFragmenterResult {
         plan_fragmenter,
         query_mode,
@@ -311,8 +311,21 @@ async fn execute(
         ..
     } = plan_fragmenter_result;
 
-    let only_checkpoint_visible = session.config().only_checkpoint_visible();
-    let query_start_time = Instant::now();
+    let mut can_timeout_cancel = true;
+    // Acquire the write guard for DML statements.
+    match stmt_type {
+        StatementType::INSERT
+        | StatementType::INSERT_RETURNING
+        | StatementType::DELETE
+        | StatementType::DELETE_RETURNING
+        | StatementType::UPDATE
+        | StatementType::UPDATE_RETURNING => {
+            session.txn_write_guard()?;
+            can_timeout_cancel = false;
+        }
+        _ => {}
+    }
+
     let query = plan_fragmenter.generate_complete_query().await?;
     tracing::trace!("Generated query after plan fragmenter: {:?}", &query);
 
@@ -323,42 +336,43 @@ async fn execute(
         .collect::<Vec<PgFieldDescriptor>>();
     let column_types = schema.fields().iter().map(|f| f.data_type()).collect_vec();
 
-    // Used in counting row count.
-    let first_field_format = formats.first().copied().unwrap_or(Format::Text);
-
-    let mut row_stream = {
-        let query_epoch = session.config().get_query_epoch();
-        let query_snapshot = if let Some(query_epoch) = query_epoch {
-            PinnedHummockSnapshot::Other(query_epoch)
-        } else {
-            // Acquire hummock snapshot for execution.
-            // TODO: if there's no table scan, we don't need to acquire snapshot.
-            let hummock_snapshot_manager = session.env().hummock_snapshot_manager();
-            let query_id = query.query_id().clone();
-            let pinned_snapshot = hummock_snapshot_manager.acquire(&query_id).await?;
-            PinnedHummockSnapshot::FrontendPinned(pinned_snapshot, only_checkpoint_visible)
-        };
-        match query_mode {
-            QueryMode::Auto => unreachable!(),
-            QueryMode::Local => PgResponseStream::LocalQuery(DataChunkToRowSetAdapter::new(
-                local_execute(session.clone(), query, query_snapshot).await?,
+    let row_stream = match query_mode {
+        QueryMode::Auto => unreachable!(),
+        QueryMode::Local => PgResponseStream::LocalQuery(DataChunkToRowSetAdapter::new(
+            local_execute(session.clone(), query, can_timeout_cancel).await?,
+            column_types,
+            formats,
+            session.clone(),
+        )),
+        // Local mode do not support cancel tasks.
+        QueryMode::Distributed => {
+            PgResponseStream::DistributedQuery(DataChunkToRowSetAdapter::new(
+                distribute_execute(session.clone(), query, can_timeout_cancel).await?,
                 column_types,
                 formats,
                 session.clone(),
-            )),
-            // Local mode do not support cancel tasks.
-            QueryMode::Distributed => {
-                PgResponseStream::DistributedQuery(DataChunkToRowSetAdapter::new(
-                    distribute_execute(session.clone(), query, query_snapshot).await?,
-                    column_types,
-                    formats,
-                    session.clone(),
-                ))
-            }
+            ))
         }
     };
 
-    let rows_count: Option<i32> = match stmt_type {
+    Ok((row_stream, pg_descs))
+}
+
+async fn execute(
+    session: Arc<SessionImpl>,
+    plan_fragmenter_result: BatchPlanFragmenterResult,
+    formats: Vec<Format>,
+) -> Result<RwPgResponse> {
+    // Used in counting row count.
+    let first_field_format = formats.first().copied().unwrap_or(Format::Text);
+    let query_mode = plan_fragmenter_result.query_mode;
+    let stmt_type = plan_fragmenter_result.stmt_type;
+
+    let query_start_time = Instant::now();
+    let (mut row_stream, pg_descs) =
+        create_stream(session.clone(), plan_fragmenter_result, formats).await?;
+
+    let row_cnt: Option<i32> = match stmt_type {
         StatementType::SELECT
         | StatementType::INSERT_RETURNING
         | StatementType::DELETE_RETURNING
@@ -372,9 +386,7 @@ async fn execute(
                         "no affected rows in output".to_string(),
                     )))
                 }
-                Some(row) => {
-                    row.map_err(|err| RwError::from(ErrorCode::InternalError(format!("{}", err))))?
-                }
+                Some(row) => row?,
             };
             let affected_rows_str = first_row_set[0].values()[0]
                 .as_ref()
@@ -384,7 +396,7 @@ async fn execute(
                     i64::from_sql(&postgres_types::Type::INT8, affected_rows_str)
                         .unwrap()
                         .try_into()
-                        .expect("affected rows count large than i32"),
+                        .expect("affected rows count large than i64"),
                 )
             } else {
                 Some(
@@ -402,7 +414,7 @@ async fn execute(
     // it sent. This is achieved by the `callback` in `PgResponse`.
     let callback = async move {
         // Implicitly flush the writes.
-        if session.config().get_implicit_flush() && stmt_type.is_dml() {
+        if session.config().implicit_flush() && stmt_type.is_dml() {
             do_flush(&session).await?;
         }
 
@@ -442,25 +454,31 @@ async fn execute(
         Ok(())
     };
 
-    Ok(PgResponse::new_for_stream_extra(
-        stmt_type,
-        rows_count,
-        row_stream,
-        pg_descs,
-        vec![],
-        callback,
-    ))
+    Ok(PgResponse::builder(stmt_type)
+        .row_cnt_opt(row_cnt)
+        .values(row_stream, pg_descs)
+        .callback(callback)
+        .into())
 }
 
 async fn distribute_execute(
     session: Arc<SessionImpl>,
     query: Query,
-    pinned_snapshot: PinnedHummockSnapshot,
+    can_timeout_cancel: bool,
 ) -> Result<DistributedQueryStream> {
-    let execution_context: ExecutionContextRef = ExecutionContext::new(session.clone()).into();
+    let timeout = if cfg!(madsim) {
+        None
+    } else if can_timeout_cancel {
+        Some(session.statement_timeout())
+    } else {
+        None
+    };
+    let execution_context: ExecutionContextRef =
+        ExecutionContext::new(session.clone(), timeout).into();
     let query_manager = session.env().query_manager().clone();
+
     query_manager
-        .schedule(execution_context, query, pinned_snapshot)
+        .schedule(execution_context, query)
         .await
         .map_err(|err| err.into())
 }
@@ -469,19 +487,23 @@ async fn distribute_execute(
 async fn local_execute(
     session: Arc<SessionImpl>,
     query: Query,
-    pinned_snapshot: PinnedHummockSnapshot,
+    can_timeout_cancel: bool,
 ) -> Result<LocalQueryStream> {
+    let timeout = if cfg!(madsim) {
+        None
+    } else if can_timeout_cancel {
+        Some(session.statement_timeout())
+    } else {
+        None
+    };
     let front_env = session.env();
 
+    // TODO: if there's no table scan, we don't need to acquire snapshot.
+    let snapshot = session.pinned_snapshot();
+
     // TODO: Passing sql here
-    let execution = LocalQueryExecution::new(
-        query,
-        front_env.clone(),
-        "",
-        pinned_snapshot,
-        session.auth_context(),
-        session.reset_cancel_query_flag(),
-    );
+    let execution =
+        LocalQueryExecution::new(query, front_env.clone(), "", snapshot, session, timeout);
 
     Ok(execution.stream_rows())
 }

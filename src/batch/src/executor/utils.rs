@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,31 +17,14 @@ use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::{ErrorCode, Result, RwError};
-use tokio::sync::watch::Receiver;
 
+use crate::error::{BatchError, Result};
 use crate::executor::{BoxedDataChunkStream, Executor};
-use crate::task::ShutdownMsg;
 
 pub type BoxedDataChunkListStream = BoxStream<'static, Result<Vec<DataChunk>>>;
 
-pub fn check_shutdown(shutdown_rx: &Option<Receiver<ShutdownMsg>>) -> Result<()> {
-    if let Some(rx) = shutdown_rx.as_ref() {
-        if rx
-            .has_changed()
-            .map_err(|_| ErrorCode::BatchError("Shutdown rx has been closed".into()))?
-        {
-            Err(ErrorCode::BatchError("Receive shutdown msg".into()).into())
-        } else {
-            Ok(())
-        }
-    } else {
-        Ok(())
-    }
-}
-
 /// Read at least `rows` rows.
-#[try_stream(boxed, ok = Vec<DataChunk>, error = RwError)]
+#[try_stream(boxed, ok = Vec<DataChunk>, error = BatchError)]
 pub async fn batch_read(mut stream: BoxedDataChunkStream, rows: usize) {
     let mut cnt = 0;
     let mut chunk_list = vec![];
@@ -86,7 +69,7 @@ impl BufferChunkExecutor {
         Self { schema, chunk_list }
     }
 
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_execute(self) {
         for chunk in self.chunk_list {
             yield chunk
@@ -113,6 +96,31 @@ impl Executor for DummyExecutor {
 }
 
 impl DummyExecutor {
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_nothing() {}
+}
+
+pub struct WrapStreamExecutor {
+    schema: Schema,
+    stream: BoxedDataChunkStream,
+}
+
+impl WrapStreamExecutor {
+    pub fn new(schema: Schema, stream: BoxedDataChunkStream) -> Self {
+        Self { schema, stream }
+    }
+}
+
+impl Executor for WrapStreamExecutor {
+    fn schema(&self) -> &Schema {
+        &self.schema
+    }
+
+    fn identity(&self) -> &str {
+        "WrapStreamExecutor"
+    }
+
+    fn execute(self: Box<Self>) -> BoxedDataChunkStream {
+        self.stream
+    }
 }

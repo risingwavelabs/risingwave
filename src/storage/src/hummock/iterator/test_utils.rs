@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,30 +12,34 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::iter::Iterator;
 use std::sync::Arc;
 
 use bytes::Bytes;
+use foyer::HybridCacheBuilder;
 use itertools::Itertools;
-use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::key::{FullKey, UserKey};
-use risingwave_hummock_sdk::{HummockEpoch, HummockSstableObjectId};
+use risingwave_common::config::{MetricLevel, ObjectStoreConfig};
+use risingwave_common::hash::VirtualNode;
+use risingwave_common::util::epoch::test_epoch;
+use risingwave_hummock_sdk::key::{prefix_slice_with_vnode, FullKey, TableKey, UserKey};
+use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch, HummockSstableObjectId};
 use risingwave_object_store::object::{
     InMemObjectStore, ObjectStore, ObjectStoreImpl, ObjectStoreRef,
 };
+use risingwave_pb::hummock::SstableInfo;
 
+use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferValue;
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::SstableStore;
 pub use crate::hummock::test_utils::default_builder_opt_for_test;
 use crate::hummock::test_utils::{
-    create_small_table_cache, gen_test_sstable, gen_test_sstable_with_range_tombstone,
+    gen_test_sstable, gen_test_sstable_info, gen_test_sstable_with_range_tombstone,
 };
 use crate::hummock::{
-    DeleteRangeTombstone, HummockValue, Sstable, SstableBuilderOptions, SstableIterator,
-    SstableIteratorType, SstableStoreRef, TieredCache,
+    HummockValue, SstableBuilderOptions, SstableIterator, SstableIteratorType, SstableStoreConfig,
+    SstableStoreRef, TableHolder,
 };
-use crate::monitor::ObjectStoreMetrics;
+use crate::monitor::{global_hummock_state_store_metrics, ObjectStoreMetrics};
 
 /// `assert_eq` two `Vec<u8>` with human-readable format.
 #[macro_export]
@@ -51,31 +55,51 @@ macro_rules! assert_bytes_eq {
 
 pub const TEST_KEYS_COUNT: usize = 10;
 
-pub fn mock_sstable_store() -> SstableStoreRef {
-    mock_sstable_store_with_object_store(Arc::new(ObjectStoreImpl::Hybrid {
-        local: Box::new(ObjectStoreImpl::InMem(
-            InMemObjectStore::new().monitored(Arc::new(ObjectStoreMetrics::unused())),
-        )),
-        remote: Box::new(ObjectStoreImpl::InMem(
-            InMemObjectStore::new().monitored(Arc::new(ObjectStoreMetrics::unused())),
-        )),
+pub async fn mock_sstable_store() -> SstableStoreRef {
+    mock_sstable_store_with_object_store(Arc::new(ObjectStoreImpl::InMem(
+        InMemObjectStore::new().monitored(
+            Arc::new(ObjectStoreMetrics::unused()),
+            Arc::new(ObjectStoreConfig::default()),
+        ),
+    )))
+    .await
+}
+
+pub async fn mock_sstable_store_with_object_store(store: ObjectStoreRef) -> SstableStoreRef {
+    let path = "test".to_string();
+    let meta_cache = HybridCacheBuilder::new()
+        .memory(64 << 20)
+        .with_shards(2)
+        .storage()
+        .build()
+        .await
+        .unwrap();
+    let block_cache = HybridCacheBuilder::new()
+        .memory(64 << 20)
+        .with_shards(2)
+        .storage()
+        .build()
+        .await
+        .unwrap();
+    Arc::new(SstableStore::new(SstableStoreConfig {
+        store,
+        path,
+
+        prefetch_buffer_capacity: 64 << 20,
+        max_prefetch_block_number: 16,
+
+        recent_filter: None,
+        state_store_metrics: Arc::new(global_hummock_state_store_metrics(MetricLevel::Disabled)),
+        use_new_object_prefix_strategy: true,
+
+        meta_cache,
+        block_cache,
     }))
 }
 
-pub fn mock_sstable_store_with_object_store(store: ObjectStoreRef) -> SstableStoreRef {
-    let path = "test".to_string();
-    Arc::new(SstableStore::new(
-        store,
-        path,
-        64 << 20,
-        64 << 20,
-        0,
-        TieredCache::none(),
-    ))
-}
-
+// Generate test table key with vnode 0
 pub fn iterator_test_table_key_of(idx: usize) -> Vec<u8> {
-    format!("key_test_{:05}", idx).as_bytes().to_vec()
+    prefix_slice_with_vnode(VirtualNode::ZERO, format!("key_test_{:05}", idx).as_bytes()).to_vec()
 }
 
 pub fn iterator_test_user_key_of(idx: usize) -> UserKey<Vec<u8>> {
@@ -93,7 +117,7 @@ pub fn iterator_test_bytes_user_key_of(idx: usize) -> UserKey<Bytes> {
 pub fn iterator_test_key_of(idx: usize) -> FullKey<Vec<u8>> {
     FullKey {
         user_key: iterator_test_user_key_of(idx),
-        epoch: 233,
+        epoch_with_gap: EpochWithGap::new_from_epoch(test_epoch(233)),
     }
 }
 
@@ -106,13 +130,13 @@ pub fn iterator_test_bytes_key_of(idx: usize) -> FullKey<Bytes> {
 pub fn iterator_test_key_of_epoch(idx: usize, epoch: HummockEpoch) -> FullKey<Vec<u8>> {
     FullKey {
         user_key: iterator_test_user_key_of(idx),
-        epoch,
+        epoch_with_gap: EpochWithGap::new_from_epoch(epoch),
     }
 }
 
 /// Generates keys like `{table_id=0}key_test_00002` with epoch `epoch` .
 pub fn iterator_test_bytes_key_of_epoch(idx: usize, epoch: HummockEpoch) -> FullKey<Bytes> {
-    iterator_test_key_of_epoch(idx, epoch).into_bytes()
+    iterator_test_key_of_epoch(idx, test_epoch(epoch)).into_bytes()
 }
 
 /// The value of an index, like `value_test_00002` without value meta
@@ -121,12 +145,36 @@ pub fn iterator_test_value_of(idx: usize) -> Vec<u8> {
 }
 
 pub fn transform_shared_buffer(
-    batches: Vec<(Vec<u8>, HummockValue<Bytes>)>,
-) -> Vec<(Bytes, HummockValue<Bytes>)> {
+    batches: Vec<(Vec<u8>, SharedBufferValue<Bytes>)>,
+) -> Vec<(TableKey<Bytes>, SharedBufferValue<Bytes>)> {
     batches
         .into_iter()
-        .map(|(k, v)| (k.into(), v))
+        .map(|(k, v)| (TableKey(k.into()), v))
         .collect_vec()
+}
+
+/// Generates a test table used in almost all table-related tests. Developers may verify the
+/// correctness of their implementations by comparing the got value and the expected value
+/// generated by `test_key_of` and `test_value_of`.
+pub async fn gen_iterator_test_sstable_info(
+    object_id: HummockSstableObjectId,
+    opts: SstableBuilderOptions,
+    idx_mapping: impl Fn(usize) -> usize,
+    sstable_store: SstableStoreRef,
+    total: usize,
+) -> SstableInfo {
+    gen_test_sstable_info(
+        opts,
+        object_id,
+        (0..total).map(|i| {
+            (
+                iterator_test_key_of(idx_mapping(i)),
+                HummockValue::put(iterator_test_value_of(idx_mapping(i))),
+            )
+        }),
+        sstable_store,
+    )
+    .await
 }
 
 /// Generates a test table used in almost all table-related tests. Developers may verify the
@@ -138,7 +186,7 @@ pub async fn gen_iterator_test_sstable_base(
     idx_mapping: impl Fn(usize) -> usize,
     sstable_store: SstableStoreRef,
     total: usize,
-) -> Sstable {
+) -> TableHolder {
     gen_test_sstable(
         opts,
         object_id,
@@ -158,13 +206,13 @@ pub async fn gen_iterator_test_sstable_from_kv_pair(
     object_id: HummockSstableObjectId,
     kv_pairs: Vec<(usize, u64, HummockValue<Vec<u8>>)>,
     sstable_store: SstableStoreRef,
-) -> Sstable {
+) -> TableHolder {
     gen_test_sstable(
         default_builder_opt_for_test(),
         object_id,
         kv_pairs
             .into_iter()
-            .map(|kv| (iterator_test_key_of_epoch(kv.0, kv.1), kv.2)),
+            .map(|kv| (iterator_test_key_of_epoch(kv.0, test_epoch(kv.1)), kv.2)),
         sstable_store,
     )
     .await
@@ -174,29 +222,14 @@ pub async fn gen_iterator_test_sstable_from_kv_pair(
 pub async fn gen_iterator_test_sstable_with_range_tombstones(
     object_id: HummockSstableObjectId,
     kv_pairs: Vec<(usize, u64, HummockValue<Vec<u8>>)>,
-    delete_ranges: Vec<(usize, usize, u64)>,
     sstable_store: SstableStoreRef,
-) -> Sstable {
-    let range_tombstones = delete_ranges
-        .into_iter()
-        .map(|(start, end, epoch)| {
-            DeleteRangeTombstone::new(
-                TableId::default(),
-                iterator_test_table_key_of(start),
-                false,
-                iterator_test_table_key_of(end),
-                false,
-                epoch,
-            )
-        })
-        .collect_vec();
+) -> SstableInfo {
     gen_test_sstable_with_range_tombstone(
         default_builder_opt_for_test(),
         object_id,
         kv_pairs
             .into_iter()
-            .map(|kv| (iterator_test_key_of_epoch(kv.0, kv.1), kv.2)),
-        range_tombstones,
+            .map(|kv| (iterator_test_key_of_epoch(kv.0, test_epoch(kv.1)), kv.2)),
         sstable_store,
     )
     .await
@@ -206,8 +239,7 @@ pub async fn gen_merge_iterator_interleave_test_sstable_iters(
     key_count: usize,
     count: usize,
 ) -> Vec<SstableIterator> {
-    let sstable_store = mock_sstable_store();
-    let cache = create_small_table_cache();
+    let sstable_store = mock_sstable_store().await;
     let mut result = vec![];
     for i in 0..count {
         let table = gen_iterator_test_sstable_base(
@@ -218,9 +250,8 @@ pub async fn gen_merge_iterator_interleave_test_sstable_iters(
             key_count,
         )
         .await;
-        let handle = cache.insert(table.id, table.id, 1, Box::new(table), CachePriority::High);
         result.push(SstableIterator::create(
-            handle,
+            table,
             sstable_store.clone(),
             Arc::new(SstableIteratorReadOptions::default()),
         ));
@@ -235,13 +266,13 @@ pub async fn gen_iterator_test_sstable_with_incr_epoch(
     sstable_store: SstableStoreRef,
     total: usize,
     epoch_base: u64,
-) -> Sstable {
+) -> TableHolder {
     gen_test_sstable(
         opts,
         object_id,
         (0..total).map(|i| {
             (
-                iterator_test_key_of_epoch(idx_mapping(i), epoch_base + i as u64),
+                iterator_test_key_of_epoch(idx_mapping(i), test_epoch(epoch_base + i as u64)),
                 HummockValue::put(iterator_test_value_of(idx_mapping(i))),
             )
         }),

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,12 +13,12 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::{DropMode, ObjectName};
 
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::CatalogError;
+use crate::error::{ErrorCode, Result};
 use crate::handler::HandlerArgs;
 
 pub async fn handle_drop_user(
@@ -34,21 +34,20 @@ pub async fn handle_drop_user(
 
     let user_name = Binder::resolve_user_name(user_name)?;
     let user_info_reader = session.env().user_info_reader();
-    let user = user_info_reader
+    let user_id = user_info_reader
         .read_guard()
         .get_user_by_name(&user_name)
-        .cloned();
-    match user {
-        Some(user) => {
-            let user_info_writer = session.env().user_info_writer();
-            user_info_writer.drop_user(user.id).await?;
+        .map(|u| u.id);
+    match user_id {
+        Some(user_id) => {
+            let user_info_writer = session.user_info_writer()?;
+            user_info_writer.drop_user(user_id).await?;
         }
         None => {
             return if if_exists {
-                Ok(PgResponse::empty_result_with_notice(
-                    StatementType::DROP_USER,
-                    format!("user \"{}\" does not exist, skipping", user_name),
-                ))
+                Ok(PgResponse::builder(StatementType::DROP_USER)
+                    .notice(format!("user \"{}\" does not exist, skipping", user_name))
+                    .into())
             } else {
                 Err(CatalogError::NotFound("user", user_name).into())
             };

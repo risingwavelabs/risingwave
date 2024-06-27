@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,14 +15,17 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use anyhow::Context;
 use etcd_client::ConnectOptions;
-use risingwave_backup::error::BackupResult;
+use risingwave_backup::error::{BackupError, BackupResult};
 use risingwave_backup::storage::{MetaSnapshotStorageRef, ObjectStoreMetaSnapshotStorage};
-use risingwave_common::config::MetaBackend;
+use risingwave_common::config::{MetaBackend, ObjectStoreConfig};
+use risingwave_object_store::object::build_remote_object_store;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
-use risingwave_object_store::object::parse_remote_object_store;
+use sea_orm::DbBackend;
 
 use crate::backup_restore::RestoreOpts;
+use crate::controller::SqlMetaStore;
 use crate::storage::{EtcdMetaStore, MemStore, WrappedEtcdClient as EtcdClient};
 use crate::MetaStoreBackend;
 
@@ -30,6 +33,7 @@ use crate::MetaStoreBackend;
 pub enum MetaStoreBackendImpl {
     Etcd(EtcdMetaStore),
     Mem(MemStore),
+    Sql(SqlMetaStore),
 }
 
 #[macro_export]
@@ -38,6 +42,7 @@ macro_rules! dispatch_meta_store {
         match $impl {
             MetaStoreBackendImpl::Etcd($store) => $body,
             MetaStoreBackendImpl::Mem($store) => $body,
+            MetaStoreBackendImpl::Sql(_) => panic!("not supported"),
         }
     }};
 }
@@ -57,6 +62,9 @@ pub async fn get_meta_store(opts: RestoreOpts) -> BackupResult<MetaStoreBackendI
             },
         },
         MetaBackend::Mem => MetaStoreBackend::Mem,
+        MetaBackend::Sql => MetaStoreBackend::Sql {
+            endpoint: opts.sql_endpoint,
+        },
     };
     match meta_store_backend {
         MetaStoreBackend::Etcd {
@@ -70,18 +78,38 @@ pub async fn get_meta_store(opts: RestoreOpts) -> BackupResult<MetaStoreBackendI
             }
             let client = EtcdClient::connect(endpoints, Some(options), credentials.is_some())
                 .await
-                .map_err(|e| anyhow::anyhow!("failed to connect etcd {}", e))?;
+                .context("failed to connect etcd")?;
             Ok(MetaStoreBackendImpl::Etcd(EtcdMetaStore::new(client)))
         }
         MetaStoreBackend::Mem => Ok(MetaStoreBackendImpl::Mem(MemStore::new())),
+        MetaStoreBackend::Sql { endpoint } => {
+            let max_connection = if DbBackend::Sqlite.is_prefix_of(&endpoint) {
+                // Due to the fact that Sqlite is prone to the error "(code: 5) database is locked" under concurrent access,
+                // here we forcibly specify the number of connections as 1.
+                1
+            } else {
+                10
+            };
+            let mut options = sea_orm::ConnectOptions::new(endpoint);
+            options
+                .max_connections(max_connection)
+                .connect_timeout(Duration::from_secs(10))
+                .idle_timeout(Duration::from_secs(30));
+            let conn = sea_orm::Database::connect(options)
+                .await
+                .map_err(|e| BackupError::MetaStorage(e.into()))?;
+            let meta_store_sql = SqlMetaStore::new(conn);
+            Ok(MetaStoreBackendImpl::Sql(meta_store_sql))
+        }
     }
 }
 
 pub async fn get_backup_store(opts: RestoreOpts) -> BackupResult<MetaSnapshotStorageRef> {
-    let object_store = parse_remote_object_store(
+    let object_store = build_remote_object_store(
         &opts.backup_storage_url,
         Arc::new(ObjectStoreMetrics::unused()),
         "Meta Backup",
+        Arc::new(ObjectStoreConfig::default()),
     )
     .await;
     let backup_store =

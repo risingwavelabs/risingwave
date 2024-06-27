@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,22 +17,41 @@ use std::sync::Arc;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{CompactionConfig, InputLevel, LevelType, OverlappingLevel};
 
-use super::{CompactionInput, CompactionPicker, LocalPickerStatistic};
+use super::{
+    CompactionInput, CompactionPicker, CompactionTaskValidator, LocalPickerStatistic,
+    ValidationRuleType,
+};
 use crate::hummock::level_handler::LevelHandler;
 
 pub struct TierCompactionPicker {
     config: Arc<CompactionConfig>,
+    compaction_task_validator: Arc<CompactionTaskValidator>,
 }
 
 impl TierCompactionPicker {
+    #[cfg(test)]
     pub fn new(config: Arc<CompactionConfig>) -> TierCompactionPicker {
-        TierCompactionPicker { config }
+        TierCompactionPicker {
+            compaction_task_validator: Arc::new(CompactionTaskValidator::new(config.clone())),
+            config,
+        }
+    }
+
+    pub fn new_with_validator(
+        config: Arc<CompactionConfig>,
+        compaction_task_validator: Arc<CompactionTaskValidator>,
+    ) -> TierCompactionPicker {
+        TierCompactionPicker {
+            config,
+            compaction_task_validator,
+        }
     }
 
     fn pick_overlapping_level(
         &self,
         l0: &OverlappingLevel,
         level_handler: &LevelHandler,
+        mut vnode_partition_count: u32,
         stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
         for (idx, level) in l0.sub_levels.iter().enumerate() {
@@ -40,15 +59,21 @@ impl TierCompactionPicker {
                 continue;
             }
 
+            if level.table_infos.is_empty() {
+                continue;
+            }
+
             if level_handler.is_level_pending_compact(level) {
                 continue;
             }
 
-            let mut select_level_inputs = vec![InputLevel {
+            let input_level = InputLevel {
                 level_idx: 0,
                 level_type: level.level_type,
                 table_infos: level.table_infos.clone(),
-            }];
+            };
+
+            let mut select_level_inputs = vec![input_level];
 
             // We assume that the maximum size of each sub_level is sub_level_max_compaction_bytes,
             // so the design here wants to merge multiple overlapping-levels in one compaction
@@ -60,27 +85,15 @@ impl TierCompactionPicker {
 
             let mut compaction_bytes = level.total_file_size;
             let mut compact_file_count = level.table_infos.len() as u64;
-            let mut waiting_enough_files = {
-                if compaction_bytes > max_compaction_bytes {
-                    false
-                } else {
-                    compact_file_count <= self.config.level0_max_compact_file_number
-                }
-            };
+            // Limit sstable file count to avoid using too much memory.
+            let overlapping_max_compact_file_numer = self.config.level0_max_compact_file_number;
 
             for other in &l0.sub_levels[idx + 1..] {
                 if compaction_bytes > max_compaction_bytes {
-                    waiting_enough_files = false;
                     break;
                 }
 
-                if compact_file_count > self.config.level0_max_compact_file_number {
-                    waiting_enough_files = false;
-                    break;
-                }
-
-                if other.level_type() != LevelType::Overlapping {
-                    waiting_enough_files = false;
+                if compact_file_count > overlapping_max_compact_file_numer {
                     break;
                 }
 
@@ -97,24 +110,30 @@ impl TierCompactionPicker {
                 });
             }
 
-            // If waiting_enough_files is not satisfied, we will raise the priority of the number of
-            // levels to ensure that we can merge as many sub_levels as possible
-            let tier_sub_level_compact_level_count =
-                self.config.level0_overlapping_sub_level_compact_level_count as usize;
-            if select_level_inputs.len() < tier_sub_level_compact_level_count
-                && waiting_enough_files
-            {
-                stats.skip_by_count_limit += 1;
-                continue;
+            select_level_inputs.reverse();
+            if compaction_bytes < self.config.sub_level_max_compaction_bytes / 2 {
+                vnode_partition_count = 0;
             }
 
-            select_level_inputs.reverse();
-
-            return Some(CompactionInput {
+            let result = CompactionInput {
                 input_levels: select_level_inputs,
                 target_level: 0,
                 target_sub_level_id: level.sub_level_id,
-            });
+                select_input_size: compaction_bytes,
+                target_input_size: 0,
+                total_file_count: compact_file_count,
+                vnode_partition_count,
+            };
+
+            if !self.compaction_task_validator.valid_compact_task(
+                &result,
+                ValidationRuleType::Tier,
+                stats,
+            ) {
+                continue;
+            }
+
+            return Some(result);
         }
         None
     }
@@ -132,7 +151,12 @@ impl CompactionPicker for TierCompactionPicker {
             return None;
         }
 
-        self.pick_overlapping_level(l0, &level_handlers[0], stats)
+        self.pick_overlapping_level(
+            l0,
+            &level_handlers[0],
+            self.config.split_weight_by_vnode,
+            stats,
+        )
     }
 }
 
@@ -145,11 +169,11 @@ pub mod tests {
     use risingwave_pb::hummock::{LevelType, OverlappingLevel};
 
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
-    use crate::hummock::compaction::level_selector::tests::{
-        generate_l0_overlapping_sublevels, generate_table, push_table_level0_overlapping,
-    };
     use crate::hummock::compaction::picker::{
         CompactionPicker, LocalPickerStatistic, TierCompactionPicker,
+    };
+    use crate::hummock::compaction::selector::tests::{
+        generate_l0_overlapping_sublevels, generate_table, push_table_level0_overlapping,
     };
     use crate::hummock::level_handler::LevelHandler;
 
@@ -216,16 +240,13 @@ pub mod tests {
             ],
             vec![generate_table(6, 1, 1, 100, 1)],
             vec![generate_table(7, 1, 1, 100, 1)],
-            vec![generate_table(8, 1, 1, 100, 1)],
-            vec![generate_table(9, 1, 1, 100, 1)],
         ]);
 
-        let mut levels = Levels {
+        let levels = Levels {
             l0: Some(l0),
             levels: vec![],
             ..Default::default()
         };
-        levels.l0.as_mut().unwrap().sub_levels[0].level_type = LevelType::Nonoverlapping as i32;
         let levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
         let config = Arc::new(
             CompactionConfigBuilder::new()
@@ -241,12 +262,8 @@ pub mod tests {
         // sub-level 0 is excluded because it's nonoverlapping and violating
         // sub_level_max_compaction_bytes.
         let mut picker = TierCompactionPicker::new(config);
-        let ret = picker
-            .pick_compaction(&levels, &levels_handler, &mut local_stats)
-            .unwrap();
-        assert_eq!(ret.input_levels.len(), 4);
-        assert_eq!(ret.target_level, 0);
-        assert_eq!(ret.target_sub_level_id, 1);
+        let ret = picker.pick_compaction(&levels, &levels_handler, &mut local_stats);
+        assert!(ret.is_none());
     }
 
     #[test]
@@ -274,7 +291,6 @@ pub mod tests {
                 sub_levels: vec![l1, l2],
             }),
             levels: vec![],
-            member_table_ids: vec![1],
             ..Default::default()
         };
         let config = Arc::new(

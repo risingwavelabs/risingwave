@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -52,11 +52,9 @@ impl ApplyOffsetRewriter {
     pub fn new(offset: usize, correlated_indices: &[usize], correlated_id: CorrelatedId) -> Self {
         Self {
             offset,
-            index_mapping: ColIndexMapping::new(
-                correlated_indices.iter().copied().map(Some).collect_vec(),
-            )
-            .inverse()
-            .expect("must be invertible"),
+            index_mapping: ApplyCorrelatedIndicesConverter::convert_to_index_mapping(
+                correlated_indices,
+            ),
             has_correlated_input_ref: false,
             correlated_id,
         }
@@ -68,5 +66,26 @@ impl ApplyOffsetRewriter {
 
     pub fn reset_state(&mut self) {
         self.has_correlated_input_ref = false;
+    }
+}
+
+pub struct ApplyCorrelatedIndicesConverter {}
+
+impl ApplyCorrelatedIndicesConverter {
+    pub fn convert_to_index_mapping(correlated_indices: &[usize]) -> ColIndexMapping {
+        // Inverse anyway.
+        let target_size = match correlated_indices.iter().max_by_key(|&&x| x) {
+            Some(target_max) => target_max + 1,
+            None => 0,
+        };
+        let col_mapping = ColIndexMapping::new(
+            correlated_indices.iter().copied().map(Some).collect_vec(),
+            target_size,
+        );
+        let mut map = vec![None; col_mapping.target_size()];
+        for (src, dst) in col_mapping.mapping_pairs() {
+            map[dst] = Some(src);
+        }
+        ColIndexMapping::new(map, col_mapping.source_size())
     }
 }

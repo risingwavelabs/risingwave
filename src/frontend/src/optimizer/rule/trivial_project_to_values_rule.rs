@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use super::{BoxedRule, Rule};
+use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{LogicalValues, PlanTreeNodeUnary};
 use crate::optimizer::plan_visitor::{LogicalCardinalityExt, SideEffectVisitor};
 use crate::optimizer::{PlanRef, PlanVisitor};

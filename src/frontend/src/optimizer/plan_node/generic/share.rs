@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -43,8 +43,8 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Share<PlanRef> {
         self.input.borrow().schema().clone()
     }
 
-    fn logical_pk(&self) -> Option<Vec<usize>> {
-        Some(self.input.borrow().logical_pk().to_vec())
+    fn stream_key(&self) -> Option<Vec<usize>> {
+        Some(self.input.borrow().stream_key()?.to_vec())
     }
 
     fn ctx(&self) -> OptimizerContextRef {

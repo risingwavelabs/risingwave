@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,226 +12,473 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod big_query;
+pub mod boxed;
 pub mod catalog;
+pub mod clickhouse;
+pub mod coordinate;
+pub mod decouple_checkpoint_log_sink;
+pub mod deltalake;
+pub mod doris;
+pub mod doris_starrocks_connector;
+pub mod dynamodb;
+pub mod elasticsearch;
+pub mod encoder;
+pub mod formatter;
+pub mod google_pubsub;
+pub mod iceberg;
 pub mod kafka;
+pub mod kinesis;
+pub mod log_store;
+pub mod mock_coordination_client;
+pub mod mongodb;
+pub mod mqtt;
+pub mod nats;
+pub mod pulsar;
 pub mod redis;
 pub mod remote;
+pub mod snowflake;
+pub mod snowflake_connector;
+pub mod sqlserver;
+pub mod starrocks;
+pub mod test_sink;
+pub mod trivial;
+pub mod utils;
+pub mod writer;
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
+use std::future::Future;
 
+use ::clickhouse::error::Error as ClickHouseError;
+use ::deltalake::DeltaTableError;
+use ::redis::RedisError;
 use anyhow::anyhow;
 use async_trait::async_trait;
-use chrono::{Datelike, NaiveDateTime, Timelike};
-use enum_as_inner::EnumAsInner;
-use risingwave_common::array::{ArrayError, ArrayResult, RowRef, StreamChunk};
-use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::{ErrorCode, RwError};
-use risingwave_common::row::Row;
-use risingwave_common::types::{DataType, DatumRef, ScalarRefImpl, ToText};
-use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_common::buffer::Bitmap;
+use risingwave_common::catalog::{ColumnDesc, Field, Schema};
+use risingwave_common::metrics::{
+    LabelGuardedHistogram, LabelGuardedIntCounter, LabelGuardedIntGauge,
+};
+use risingwave_common::session_config::sink_decouple::SinkDecouple;
+use risingwave_pb::catalog::PbSinkType;
+use risingwave_pb::connector_service::{PbSinkParam, SinkMetadata, TableSchema};
 use risingwave_rpc_client::error::RpcError;
-use serde::{Deserialize, Serialize};
-use serde_json::{json, Map, Value};
+use risingwave_rpc_client::MetaClient;
 use thiserror::Error;
+use thiserror_ext::AsReport;
 pub use tracing;
 
-use self::catalog::{SinkCatalog, SinkType};
-use crate::sink::kafka::{KafkaConfig, KafkaSink, KAFKA_SINK};
-use crate::sink::redis::{RedisConfig, RedisSink};
-use crate::sink::remote::{RemoteConfig, RemoteSink};
-use crate::ConnectorParams;
+use self::catalog::{SinkFormatDesc, SinkType};
+use self::mock_coordination_client::{MockMetaClient, SinkCoordinationRpcClientEnum};
+use crate::error::ConnectorError;
+use crate::sink::catalog::desc::SinkDesc;
+use crate::sink::catalog::{SinkCatalog, SinkId};
+use crate::sink::log_store::{LogReader, LogStoreReadItem, LogStoreResult, TruncateOffset};
+use crate::sink::writer::SinkWriter;
 
-pub const DOWNSTREAM_SINK_KEY: &str = "connector";
+const BOUNDED_CHANNEL_SIZE: usize = 16;
+#[macro_export]
+macro_rules! for_all_sinks {
+    ($macro:path $(, $arg:tt)*) => {
+        $macro! {
+            {
+                { Redis, $crate::sink::redis::RedisSink },
+                { Kafka, $crate::sink::kafka::KafkaSink },
+                { Pulsar, $crate::sink::pulsar::PulsarSink },
+                { BlackHole, $crate::sink::trivial::BlackHoleSink },
+                { Kinesis, $crate::sink::kinesis::KinesisSink },
+                { ClickHouse, $crate::sink::clickhouse::ClickHouseSink },
+                { Iceberg, $crate::sink::iceberg::IcebergSink },
+                { Mqtt, $crate::sink::mqtt::MqttSink },
+                { GooglePubSub, $crate::sink::google_pubsub::GooglePubSubSink },
+                { Nats, $crate::sink::nats::NatsSink },
+                { Jdbc, $crate::sink::remote::JdbcSink },
+                { ElasticSearch, $crate::sink::remote::ElasticSearchSink },
+                { Opensearch, $crate::sink::remote::OpensearchSink },
+                { Cassandra, $crate::sink::remote::CassandraSink },
+                { HttpJava, $crate::sink::remote::HttpJavaSink },
+                { Doris, $crate::sink::doris::DorisSink },
+                { Starrocks, $crate::sink::starrocks::StarrocksSink },
+                { Snowflake, $crate::sink::snowflake::SnowflakeSink },
+                { DeltaLake, $crate::sink::deltalake::DeltaLakeSink },
+                { BigQuery, $crate::sink::big_query::BigQuerySink },
+                { DynamoDb, $crate::sink::dynamodb::DynamoDbSink },
+                { Mongodb, $crate::sink::mongodb::MongodbSink },
+                { SqlServer, $crate::sink::sqlserver::SqlServerSink },
+                { Test, $crate::sink::test_sink::TestSink },
+                { Table, $crate::sink::trivial::TableSink }
+            }
+            $(,$arg)*
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! dispatch_sink {
+    ({$({$variant_name:ident, $sink_type:ty}),*}, $impl:tt, $sink:tt, $body:tt) => {{
+        use $crate::sink::SinkImpl;
+
+        match $impl {
+            $(
+                SinkImpl::$variant_name($sink) => $body,
+            )*
+        }
+    }};
+    ($impl:expr, $sink:ident, $body:expr) => {{
+        $crate::for_all_sinks! {$crate::dispatch_sink, {$impl}, $sink, {$body}}
+    }};
+}
+
+#[macro_export]
+macro_rules! match_sink_name_str {
+    ({$({$variant_name:ident, $sink_type:ty}),*}, $name_str:tt, $type_name:ident, $body:tt, $on_other_closure:tt) => {{
+        use $crate::sink::Sink;
+        match $name_str {
+            $(
+                <$sink_type>::SINK_NAME => {
+                    type $type_name = $sink_type;
+                    {
+                        $body
+                    }
+                },
+            )*
+            other => ($on_other_closure)(other),
+        }
+    }};
+    ($name_str:expr, $type_name:ident, $body:expr, $on_other_closure:expr) => {{
+        $crate::for_all_sinks! {$crate::match_sink_name_str, {$name_str}, $type_name, {$body}, {$on_other_closure}}
+    }};
+}
+
+pub const CONNECTOR_TYPE_KEY: &str = "connector";
 pub const SINK_TYPE_OPTION: &str = "type";
+pub const SINK_WITHOUT_BACKFILL: &str = "snapshot";
 pub const SINK_TYPE_APPEND_ONLY: &str = "append-only";
 pub const SINK_TYPE_DEBEZIUM: &str = "debezium";
 pub const SINK_TYPE_UPSERT: &str = "upsert";
 pub const SINK_USER_FORCE_APPEND_ONLY_OPTION: &str = "force_append_only";
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SinkParam {
+    pub sink_id: SinkId,
+    pub sink_name: String,
+    pub properties: BTreeMap<String, String>,
+    pub columns: Vec<ColumnDesc>,
+    pub downstream_pk: Vec<usize>,
+    pub sink_type: SinkType,
+    pub format_desc: Option<SinkFormatDesc>,
+    pub db_name: String,
+
+    /// - For `CREATE SINK ... FROM ...`, the name of the source table.
+    /// - For `CREATE SINK ... AS <query>`, the name of the sink itself.
+    ///
+    /// See also `gen_sink_plan`.
+    // TODO(eric): Why need these 2 fields (db_name and sink_from_name)?
+    pub sink_from_name: String,
+}
+
+impl SinkParam {
+    pub fn from_proto(pb_param: PbSinkParam) -> Self {
+        let table_schema = pb_param.table_schema.expect("should contain table schema");
+        let format_desc = match pb_param.format_desc {
+            Some(f) => f.try_into().ok(),
+            None => {
+                let connector = pb_param.properties.get(CONNECTOR_TYPE_KEY);
+                let r#type = pb_param.properties.get(SINK_TYPE_OPTION);
+                match (connector, r#type) {
+                    (Some(c), Some(t)) => SinkFormatDesc::from_legacy_type(c, t).ok().flatten(),
+                    _ => None,
+                }
+            }
+        };
+        Self {
+            sink_id: SinkId::from(pb_param.sink_id),
+            sink_name: pb_param.sink_name,
+            properties: pb_param.properties,
+            columns: table_schema.columns.iter().map(ColumnDesc::from).collect(),
+            downstream_pk: table_schema
+                .pk_indices
+                .iter()
+                .map(|i| *i as usize)
+                .collect(),
+            sink_type: SinkType::from_proto(
+                PbSinkType::try_from(pb_param.sink_type).expect("should be able to convert"),
+            ),
+            format_desc,
+            db_name: pb_param.db_name,
+            sink_from_name: pb_param.sink_from_name,
+        }
+    }
+
+    pub fn to_proto(&self) -> PbSinkParam {
+        PbSinkParam {
+            sink_id: self.sink_id.sink_id,
+            sink_name: self.sink_name.clone(),
+            properties: self.properties.clone(),
+            table_schema: Some(TableSchema {
+                columns: self.columns.iter().map(|col| col.to_protobuf()).collect(),
+                pk_indices: self.downstream_pk.iter().map(|i| *i as u32).collect(),
+            }),
+            sink_type: self.sink_type.to_proto().into(),
+            format_desc: self.format_desc.as_ref().map(|f| f.to_proto()),
+            db_name: self.db_name.clone(),
+            sink_from_name: self.sink_from_name.clone(),
+        }
+    }
+
+    pub fn schema(&self) -> Schema {
+        Schema {
+            fields: self.columns.iter().map(Field::from).collect(),
+        }
+    }
+}
+
+impl From<SinkCatalog> for SinkParam {
+    fn from(sink_catalog: SinkCatalog) -> Self {
+        let columns = sink_catalog
+            .visible_columns()
+            .map(|col| col.column_desc.clone())
+            .collect();
+        Self {
+            sink_id: sink_catalog.id,
+            sink_name: sink_catalog.name,
+            properties: sink_catalog.properties,
+            columns,
+            downstream_pk: sink_catalog.downstream_pk,
+            sink_type: sink_catalog.sink_type,
+            format_desc: sink_catalog.format_desc,
+            db_name: sink_catalog.db_name,
+            sink_from_name: sink_catalog.sink_from_name,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct SinkMetrics {
+    pub sink_commit_duration_metrics: LabelGuardedHistogram<3>,
+    pub connector_sink_rows_received: LabelGuardedIntCounter<2>,
+    pub log_store_first_write_epoch: LabelGuardedIntGauge<3>,
+    pub log_store_latest_write_epoch: LabelGuardedIntGauge<3>,
+    pub log_store_write_rows: LabelGuardedIntCounter<3>,
+    pub log_store_latest_read_epoch: LabelGuardedIntGauge<3>,
+    pub log_store_read_rows: LabelGuardedIntCounter<3>,
+
+    pub log_store_reader_wait_new_future_duration_ns: LabelGuardedIntCounter<3>,
+
+    pub iceberg_write_qps: LabelGuardedIntCounter<2>,
+    pub iceberg_write_latency: LabelGuardedHistogram<2>,
+    pub iceberg_rolling_unflushed_data_file: LabelGuardedIntGauge<2>,
+    pub iceberg_position_delete_cache_num: LabelGuardedIntGauge<2>,
+    pub iceberg_partition_num: LabelGuardedIntGauge<2>,
+}
+
+impl SinkMetrics {
+    fn for_test() -> Self {
+        SinkMetrics {
+            sink_commit_duration_metrics: LabelGuardedHistogram::test_histogram(),
+            connector_sink_rows_received: LabelGuardedIntCounter::test_int_counter(),
+            log_store_first_write_epoch: LabelGuardedIntGauge::test_int_gauge(),
+            log_store_latest_write_epoch: LabelGuardedIntGauge::test_int_gauge(),
+            log_store_latest_read_epoch: LabelGuardedIntGauge::test_int_gauge(),
+            log_store_write_rows: LabelGuardedIntCounter::test_int_counter(),
+            log_store_read_rows: LabelGuardedIntCounter::test_int_counter(),
+            log_store_reader_wait_new_future_duration_ns: LabelGuardedIntCounter::test_int_counter(
+            ),
+            iceberg_write_qps: LabelGuardedIntCounter::test_int_counter(),
+            iceberg_write_latency: LabelGuardedHistogram::test_histogram(),
+            iceberg_rolling_unflushed_data_file: LabelGuardedIntGauge::test_int_gauge(),
+            iceberg_position_delete_cache_num: LabelGuardedIntGauge::test_int_gauge(),
+            iceberg_partition_num: LabelGuardedIntGauge::test_int_gauge(),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct SinkWriterParam {
+    pub executor_id: u64,
+    pub vnode_bitmap: Option<Bitmap>,
+    pub meta_client: Option<SinkMetaClient>,
+    pub sink_metrics: SinkMetrics,
+    // The val has two effect:
+    // 1. Indicates that the sink will accpect the data chunk with extra partition value column.
+    // 2. The index of the extra partition value column.
+    // More detail of partition value column, see `PartitionComputeInfo`
+    pub extra_partition_col_idx: Option<usize>,
+}
+
+#[derive(Clone)]
+pub enum SinkMetaClient {
+    MetaClient(MetaClient),
+    MockMetaClient(MockMetaClient),
+}
+
+impl SinkMetaClient {
+    pub async fn sink_coordinate_client(&self) -> SinkCoordinationRpcClientEnum {
+        match self {
+            SinkMetaClient::MetaClient(meta_client) => {
+                SinkCoordinationRpcClientEnum::SinkCoordinationRpcClient(
+                    meta_client.sink_coordinate_client().await,
+                )
+            }
+            SinkMetaClient::MockMetaClient(mock_meta_client) => {
+                SinkCoordinationRpcClientEnum::MockSinkCoordinationRpcClient(
+                    mock_meta_client.sink_coordinate_client(),
+                )
+            }
+        }
+    }
+}
+
+impl SinkWriterParam {
+    pub fn for_test() -> Self {
+        SinkWriterParam {
+            executor_id: Default::default(),
+            vnode_bitmap: Default::default(),
+            meta_client: Default::default(),
+            sink_metrics: SinkMetrics::for_test(),
+            extra_partition_col_idx: Default::default(),
+        }
+    }
+}
+
+pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
+    const SINK_NAME: &'static str;
+    type LogSinker: LogSinker;
+    type Coordinator: SinkCommitCoordinator;
+
+    /// `user_specified` is the value of `sink_decouple` config.
+    fn is_sink_decouple(_desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
+        match user_specified {
+            SinkDecouple::Disable | SinkDecouple::Default => Ok(false),
+            SinkDecouple::Enable => Ok(true),
+        }
+    }
+
+    async fn validate(&self) -> Result<()>;
+    async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker>;
+    #[expect(clippy::unused_async)]
+    async fn new_coordinator(&self) -> Result<Self::Coordinator> {
+        Err(SinkError::Coordinator(anyhow!("no coordinator")))
+    }
+}
+
+pub trait SinkLogReader: Send + Sized + 'static {
+    /// Emit the next item.
+    ///
+    /// The implementation should ensure that the future is cancellation safe.
+    fn next_item(
+        &mut self,
+    ) -> impl Future<Output = LogStoreResult<(u64, LogStoreReadItem)>> + Send + '_;
+
+    /// Mark that all items emitted so far have been consumed and it is safe to truncate the log
+    /// from the current offset.
+    fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()>;
+}
+
+impl<R: LogReader> SinkLogReader for R {
+    fn next_item(
+        &mut self,
+    ) -> impl Future<Output = LogStoreResult<(u64, LogStoreReadItem)>> + Send + '_ {
+        <Self as LogReader>::next_item(self)
+    }
+
+    fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()> {
+        <Self as LogReader>::truncate(self, offset)
+    }
+}
+
 #[async_trait]
-pub trait Sink {
-    async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()>;
-
-    // the following interface is for transactions, if not supported, return Ok(())
-    // start a transaction with epoch number. Note that epoch number should be increasing.
-    async fn begin_epoch(&mut self, epoch: u64) -> Result<()>;
-
-    // commits the current transaction and marks all messages in the transaction success.
-    async fn commit(&mut self) -> Result<()>;
-
-    // aborts the current transaction because some error happens. we should rollback to the last
-    // commit point.
-    async fn abort(&mut self) -> Result<()>;
+pub trait LogSinker: 'static {
+    async fn consume_log_and_sink(self, log_reader: &mut impl SinkLogReader) -> Result<!>;
 }
-
-#[derive(Clone, Debug, EnumAsInner)]
-pub enum SinkConfig {
-    Redis(RedisConfig),
-    Kafka(Box<KafkaConfig>),
-    Remote(RemoteConfig),
-    BlackHole,
-}
-
-#[derive(Clone, Debug, EnumAsInner, Serialize, Deserialize)]
-pub enum SinkState {
-    Kafka,
-    Redis,
-    Remote,
-    Blackhole,
-}
-
-pub const BLACKHOLE_SINK: &str = "blackhole";
-
-#[derive(Debug)]
-pub struct BlockHoleSink;
 
 #[async_trait]
-impl Sink for BlockHoleSink {
-    async fn write_batch(&mut self, _chunk: StreamChunk) -> Result<()> {
+pub trait SinkCommitCoordinator {
+    /// Initialize the sink committer coordinator
+    async fn init(&mut self) -> Result<()>;
+    /// After collecting the metadata from each sink writer, a coordinator will call `commit` with
+    /// the set of metadata. The metadata is serialized into bytes, because the metadata is expected
+    /// to be passed between different gRPC node, so in this general trait, the metadata is
+    /// serialized bytes.
+    async fn commit(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> Result<()>;
+}
+
+pub struct DummySinkCommitCoordinator;
+
+#[async_trait]
+impl SinkCommitCoordinator for DummySinkCommitCoordinator {
+    async fn init(&mut self) -> Result<()> {
         Ok(())
     }
 
-    async fn begin_epoch(&mut self, _epoch: u64) -> Result<()> {
-        Ok(())
-    }
-
-    async fn commit(&mut self) -> Result<()> {
-        Ok(())
-    }
-
-    async fn abort(&mut self) -> Result<()> {
+    async fn commit(&mut self, _epoch: u64, _metadata: Vec<SinkMetadata>) -> Result<()> {
         Ok(())
     }
 }
 
-impl SinkConfig {
-    pub fn from_hashmap(mut properties: HashMap<String, String>) -> Result<Self> {
-        const CONNECTOR_TYPE_KEY: &str = "connector";
+impl SinkImpl {
+    pub fn new(mut param: SinkParam) -> Result<Self> {
         const CONNECTION_NAME_KEY: &str = "connection.name";
         const PRIVATE_LINK_TARGET_KEY: &str = "privatelink.targets";
 
         // remove privatelink related properties if any
-        properties.remove(PRIVATE_LINK_TARGET_KEY);
-        properties.remove(CONNECTION_NAME_KEY);
+        param.properties.remove(PRIVATE_LINK_TARGET_KEY);
+        param.properties.remove(CONNECTION_NAME_KEY);
 
-        let sink_type = properties
+        let sink_type = param
+            .properties
             .get(CONNECTOR_TYPE_KEY)
             .ok_or_else(|| SinkError::Config(anyhow!("missing config: {}", CONNECTOR_TYPE_KEY)))?;
-        match sink_type.to_lowercase().as_str() {
-            KAFKA_SINK => Ok(SinkConfig::Kafka(Box::new(KafkaConfig::from_hashmap(
-                properties,
-            )?))),
-            BLACKHOLE_SINK => Ok(SinkConfig::BlackHole),
-            _ => Ok(SinkConfig::Remote(RemoteConfig::from_hashmap(properties)?)),
-        }
+
+        match_sink_name_str!(
+            sink_type.to_lowercase().as_str(),
+            SinkType,
+            Ok(SinkType::try_from(param)?.into()),
+            |other| {
+                Err(SinkError::Config(anyhow!(
+                    "unsupported sink connector {}",
+                    other
+                )))
+            }
+        )
     }
 
-    pub fn get_connector(&self) -> &'static str {
-        match self {
-            SinkConfig::Kafka(_) => "kafka",
-            SinkConfig::Redis(_) => "redis",
-            SinkConfig::Remote(_) => "remote",
-            SinkConfig::BlackHole => "blackhole",
-        }
+    pub fn is_sink_into_table(&self) -> bool {
+        matches!(self, SinkImpl::Table(_))
+    }
+
+    pub fn is_blackhole(&self) -> bool {
+        matches!(self, SinkImpl::BlackHole(_))
     }
 }
 
-#[derive(Debug)]
-pub enum SinkImpl {
-    Redis(RedisSink),
-    Kafka(KafkaSink<true>),
-    UpsertKafka(KafkaSink<false>),
-    Remote(RemoteSink<true>),
-    UpsertRemote(RemoteSink<false>),
-    BlackHole(BlockHoleSink),
+pub fn build_sink(param: SinkParam) -> Result<SinkImpl> {
+    SinkImpl::new(param)
 }
 
-#[macro_export]
-macro_rules! dispatch_sink {
-    ($impl:expr, $sink:ident, $body:tt) => {{
-        use $crate::sink::SinkImpl;
-
-        match $impl {
-            SinkImpl::Redis($sink) => $body,
-            SinkImpl::Kafka($sink) => $body,
-            SinkImpl::UpsertKafka($sink) => $body,
-            SinkImpl::Remote($sink) => $body,
-            SinkImpl::UpsertRemote($sink) => $body,
-            SinkImpl::BlackHole($sink) => $body,
+macro_rules! def_sink_impl {
+    () => {
+        $crate::for_all_sinks! { def_sink_impl }
+    };
+    ({ $({ $variant_name:ident, $sink_type:ty }),* }) => {
+        #[derive(Debug)]
+        pub enum SinkImpl {
+            $(
+                $variant_name($sink_type),
+            )*
         }
-    }};
+
+        $(
+            impl From<$sink_type> for SinkImpl {
+                fn from(sink: $sink_type) -> SinkImpl {
+                    SinkImpl::$variant_name(sink)
+                }
+            }
+        )*
+    };
 }
 
-impl SinkImpl {
-    pub async fn new(
-        cfg: SinkConfig,
-        schema: Schema,
-        pk_indices: Vec<usize>,
-        connector_params: ConnectorParams,
-        sink_type: SinkType,
-        sink_id: u64,
-    ) -> Result<Self> {
-        Ok(match cfg {
-            SinkConfig::Redis(cfg) => SinkImpl::Redis(RedisSink::new(cfg, schema)?),
-            SinkConfig::Kafka(cfg) => {
-                if sink_type.is_append_only() {
-                    // Append-only Kafka sink
-                    SinkImpl::Kafka(KafkaSink::<true>::new(*cfg, schema, pk_indices).await?)
-                } else {
-                    // Upsert Kafka sink
-                    SinkImpl::UpsertKafka(KafkaSink::<false>::new(*cfg, schema, pk_indices).await?)
-                }
-            }
-            SinkConfig::Remote(cfg) => {
-                if sink_type.is_append_only() {
-                    // Append-only remote sink
-                    SinkImpl::Remote(
-                        RemoteSink::<true>::new(cfg, schema, pk_indices, connector_params, sink_id)
-                            .await?,
-                    )
-                } else {
-                    // Upsert remote sink
-                    SinkImpl::UpsertRemote(
-                        RemoteSink::<false>::new(
-                            cfg,
-                            schema,
-                            pk_indices,
-                            connector_params,
-                            sink_id,
-                        )
-                        .await?,
-                    )
-                }
-            }
-            SinkConfig::BlackHole => SinkImpl::BlackHole(BlockHoleSink),
-        })
-    }
-
-    pub async fn validate(
-        cfg: SinkConfig,
-        sink_catalog: SinkCatalog,
-        connector_rpc_endpoint: Option<String>,
-    ) -> Result<()> {
-        match cfg {
-            SinkConfig::Redis(cfg) => RedisSink::new(cfg, sink_catalog.schema()).map(|_| ()),
-            SinkConfig::Kafka(cfg) => {
-                if sink_catalog.sink_type.is_append_only() {
-                    KafkaSink::<true>::validate(*cfg, sink_catalog.downstream_pk_indices()).await
-                } else {
-                    KafkaSink::<false>::validate(*cfg, sink_catalog.downstream_pk_indices()).await
-                }
-            }
-            SinkConfig::Remote(cfg) => {
-                if sink_catalog.sink_type.is_append_only() {
-                    RemoteSink::<true>::validate(cfg, sink_catalog, connector_rpc_endpoint).await
-                } else {
-                    RemoteSink::<false>::validate(cfg, sink_catalog, connector_rpc_endpoint).await
-                }
-            }
-            SinkConfig::BlackHole => Ok(()),
-        }
-    }
-}
+def_sink_impl!();
 
 pub type Result<T> = std::result::Result<T, SinkError>;
 
@@ -239,230 +486,158 @@ pub type Result<T> = std::result::Result<T, SinkError>;
 pub enum SinkError {
     #[error("Kafka error: {0}")]
     Kafka(#[from] rdkafka::error::KafkaError),
+    #[error("Kinesis error: {0}")]
+    Kinesis(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
     #[error("Remote sink error: {0}")]
-    Remote(String),
-    #[error("Json parse error: {0}")]
-    JsonParse(String),
+    Remote(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
+    #[error("Encode error: {0}")]
+    Encode(String),
+    #[error("Iceberg error: {0}")]
+    Iceberg(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
     #[error("config error: {0}")]
-    Config(#[from] anyhow::Error),
+    Config(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
+    #[error("coordinator error: {0}")]
+    Coordinator(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
+    #[error("ClickHouse error: {0}")]
+    ClickHouse(String),
+    #[error("Redis error: {0}")]
+    Redis(String),
+    #[error("Mqtt error: {0}")]
+    Mqtt(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
+    #[error("Nats error: {0}")]
+    Nats(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
+    #[error("Google Pub/Sub error: {0}")]
+    GooglePubSub(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
+    #[error("Doris/Starrocks connect error: {0}")]
+    DorisStarrocksConnect(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
+    #[error("Doris error: {0}")]
+    Doris(String),
+    #[error("DeltaLake error: {0}")]
+    DeltaLake(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
+    #[error("Starrocks error: {0}")]
+    Starrocks(String),
+    #[error("Snowflake error: {0}")]
+    Snowflake(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
+    #[error("Pulsar error: {0}")]
+    Pulsar(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
+    #[error("Internal error: {0}")]
+    Internal(
+        #[from]
+        #[backtrace]
+        anyhow::Error,
+    ),
+    #[error("BigQuery error: {0}")]
+    BigQuery(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
+    #[error("DynamoDB error: {0}")]
+    DynamoDb(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
+    #[error("SQL Server error: {0}")]
+    SqlServer(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
+    #[error(transparent)]
+    Connector(
+        #[from]
+        #[backtrace]
+        ConnectorError,
+    ),
+    #[error("Mongodb error: {0}")]
+    Mongodb(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
+}
+
+impl From<icelake::Error> for SinkError {
+    fn from(value: icelake::Error) -> Self {
+        SinkError::Iceberg(anyhow!(value))
+    }
 }
 
 impl From<RpcError> for SinkError {
     fn from(value: RpcError) -> Self {
-        SinkError::Remote(format!("{}", value))
+        SinkError::Remote(anyhow!(value))
     }
 }
 
-impl From<SinkError> for RwError {
-    fn from(e: SinkError) -> Self {
-        ErrorCode::SinkError(Box::new(e)).into()
+impl From<ClickHouseError> for SinkError {
+    fn from(value: ClickHouseError) -> Self {
+        SinkError::ClickHouse(value.to_report_string())
     }
 }
 
-pub fn record_to_json(row: RowRef<'_>, schema: &[Field]) -> Result<Map<String, Value>> {
-    let mut mappings = Map::with_capacity(schema.len());
-    for (field, datum_ref) in schema.iter().zip_eq_fast(row.iter()) {
-        let key = field.name.clone();
-        let value = datum_to_json_object(field, datum_ref)
-            .map_err(|e| SinkError::JsonParse(e.to_string()))?;
-        mappings.insert(key, value);
+impl From<DeltaTableError> for SinkError {
+    fn from(value: DeltaTableError) -> Self {
+        SinkError::DeltaLake(anyhow!(value))
     }
-    Ok(mappings)
 }
 
-fn datum_to_json_object(field: &Field, datum: DatumRef<'_>) -> ArrayResult<Value> {
-    let scalar_ref = match datum {
-        None => return Ok(Value::Null),
-        Some(datum) => datum,
-    };
-
-    let data_type = field.data_type();
-
-    tracing::debug!("datum_to_json_object: {:?}, {:?}", data_type, scalar_ref);
-
-    let value = match (data_type, scalar_ref) {
-        (DataType::Boolean, ScalarRefImpl::Bool(v)) => {
-            json!(v)
-        }
-        (DataType::Int16, ScalarRefImpl::Int16(v)) => {
-            json!(v)
-        }
-        (DataType::Int32, ScalarRefImpl::Int32(v)) => {
-            json!(v)
-        }
-        (DataType::Int64, ScalarRefImpl::Int64(v)) => {
-            json!(v)
-        }
-        (DataType::Float32, ScalarRefImpl::Float32(v)) => {
-            json!(f32::from(v))
-        }
-        (DataType::Float64, ScalarRefImpl::Float64(v)) => {
-            json!(f64::from(v))
-        }
-        (DataType::Varchar, ScalarRefImpl::Utf8(v)) => {
-            json!(v)
-        }
-        (DataType::Decimal, ScalarRefImpl::Decimal(v)) => {
-            json!(v.to_text())
-        }
-        (DataType::Timestamptz, ScalarRefImpl::Int64(v)) => {
-            // risingwave's timestamp with timezone is stored in UTC and does not maintain the
-            // timezone info and the time is in microsecond.
-            let secs = v.div_euclid(1_000_000);
-            let nsecs = v.rem_euclid(1_000_000) * 1000;
-            let parsed = NaiveDateTime::from_timestamp_opt(secs, nsecs as u32).unwrap();
-            let v = parsed.format("%Y-%m-%d %H:%M:%S%.6f").to_string();
-            json!(v)
-        }
-        (DataType::Time, ScalarRefImpl::Time(v)) => {
-            // todo: just ignore the nanos part to avoid leap second complex
-            json!(v.0.num_seconds_from_midnight() as i64 * 1000)
-        }
-        (DataType::Date, ScalarRefImpl::Date(v)) => {
-            json!(v.0.num_days_from_ce())
-        }
-        (DataType::Timestamp, ScalarRefImpl::Timestamp(v)) => {
-            json!(v.0.timestamp_millis())
-        }
-        (DataType::Bytea, ScalarRefImpl::Bytea(v)) => {
-            json!(hex::encode(v))
-        }
-        // P<years>Y<months>M<days>DT<hours>H<minutes>M<seconds>S
-        (DataType::Interval, ScalarRefImpl::Interval(v)) => {
-            json!(v.as_iso_8601())
-        }
-        (DataType::List(datatype), ScalarRefImpl::List(list_ref)) => {
-            let elems = list_ref.iter();
-            let mut vec = Vec::with_capacity(elems.len());
-            let inner_field = Field::unnamed(Box::<DataType>::into_inner(datatype));
-            for sub_datum_ref in elems {
-                let value = datum_to_json_object(&inner_field, sub_datum_ref)?;
-                vec.push(value);
-            }
-            json!(vec)
-        }
-        (DataType::Struct(st), ScalarRefImpl::Struct(struct_ref)) => {
-            let mut map = Map::with_capacity(st.fields.len());
-            for (sub_datum_ref, sub_field) in struct_ref.iter_fields_ref().zip_eq_fast(
-                st.fields
-                    .iter()
-                    .zip_eq_fast(st.field_names.iter())
-                    .map(|(dt, name)| Field::with_name(dt.clone(), name)),
-            ) {
-                let value = datum_to_json_object(&sub_field, sub_datum_ref)?;
-                map.insert(sub_field.name.clone(), value);
-            }
-            json!(map)
-        }
-        (data_type, scalar_ref) => {
-            return Err(ArrayError::internal(
-                format!("datum_to_json_object: unsupported data type: field name: {:?}, logical type: {:?}, physical type: {:?}", field.name, data_type, scalar_ref),
-            ));
-        }
-    };
-
-    Ok(value)
+impl From<RedisError> for SinkError {
+    fn from(value: RedisError) -> Self {
+        SinkError::Redis(value.to_report_string())
+    }
 }
 
-#[cfg(test)]
-mod tests {
-
-    use risingwave_common::cast::str_with_time_zone_to_timestamptz;
-    use risingwave_common::types::{Interval, ScalarImpl, Time, Timestamp};
-
-    use super::*;
-    #[test]
-    fn test_to_json_basic_type() {
-        let mock_field = Field {
-            data_type: DataType::Boolean,
-            name: Default::default(),
-            sub_fields: Default::default(),
-            type_name: Default::default(),
-        };
-        let boolean_value = datum_to_json_object(
-            &Field {
-                data_type: DataType::Boolean,
-                ..mock_field.clone()
-            },
-            Some(ScalarImpl::Bool(false).as_scalar_ref_impl()),
-        )
-        .unwrap();
-        assert_eq!(boolean_value, json!(false));
-
-        let int16_value = datum_to_json_object(
-            &Field {
-                data_type: DataType::Int16,
-                ..mock_field.clone()
-            },
-            Some(ScalarImpl::Int16(16).as_scalar_ref_impl()),
-        )
-        .unwrap();
-        assert_eq!(int16_value, json!(16));
-
-        let int64_value = datum_to_json_object(
-            &Field {
-                data_type: DataType::Int64,
-                ..mock_field.clone()
-            },
-            Some(ScalarImpl::Int64(std::i64::MAX).as_scalar_ref_impl()),
-        )
-        .unwrap();
-        assert_eq!(
-            serde_json::to_string(&int64_value).unwrap(),
-            std::i64::MAX.to_string()
-        );
-
-        // https://github.com/debezium/debezium/blob/main/debezium-core/src/main/java/io/debezium/time/ZonedTimestamp.java
-        let tstz_str = "2018-01-26T18:30:09.453Z";
-        let tstz_inner = str_with_time_zone_to_timestamptz(tstz_str).unwrap();
-        let tstz_value = datum_to_json_object(
-            &Field {
-                data_type: DataType::Timestamptz,
-                ..mock_field.clone()
-            },
-            Some(ScalarImpl::Int64(tstz_inner).as_scalar_ref_impl()),
-        )
-        .unwrap();
-        assert_eq!(tstz_value, "2018-01-26 18:30:09.453000");
-
-        let ts_value = datum_to_json_object(
-            &Field {
-                data_type: DataType::Timestamp,
-                ..mock_field.clone()
-            },
-            Some(
-                ScalarImpl::Timestamp(Timestamp::from_timestamp_uncheck(1000, 0))
-                    .as_scalar_ref_impl(),
-            ),
-        )
-        .unwrap();
-        assert_eq!(ts_value, json!(1000 * 1000));
-
-        // Represents the number of microseconds past midnigh, io.debezium.time.Time
-        let time_value = datum_to_json_object(
-            &Field {
-                data_type: DataType::Time,
-                ..mock_field.clone()
-            },
-            Some(
-                ScalarImpl::Time(Time::from_num_seconds_from_midnight_uncheck(1000, 0))
-                    .as_scalar_ref_impl(),
-            ),
-        )
-        .unwrap();
-        assert_eq!(time_value, json!(1000 * 1000));
-
-        let interval_value = datum_to_json_object(
-            &Field {
-                data_type: DataType::Interval,
-                ..mock_field
-            },
-            Some(
-                ScalarImpl::Interval(Interval::from_month_day_usec(13, 2, 1000000))
-                    .as_scalar_ref_impl(),
-            ),
-        )
-        .unwrap();
-        assert_eq!(interval_value, json!("P1Y1M2DT0H0M1S"));
+impl From<tiberius::error::Error> for SinkError {
+    fn from(err: tiberius::error::Error) -> Self {
+        SinkError::SqlServer(anyhow!(err))
     }
 }

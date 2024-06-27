@@ -1,0 +1,21 @@
+# there is no transaction in progress
+statement ok
+commit
+
+# there is no transaction in progress
+statement ok
+rollback
+
+statement ok
+start transaction
+
+# there is already a transaction in progress
+statement ok
+start transaction
+
+statement ok
+rollback
+
+# there is no transaction in progress
+statement ok
+commit

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,38 +12,35 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::LazyLock;
+use risingwave_common::types::{DataType, Fields};
+use risingwave_frontend_macro::system_catalog;
 
-use itertools::Itertools;
-use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{DataType, ScalarImpl};
-
-use crate::catalog::system_catalog::SystemCatalogColumnsDef;
+use crate::catalog::system_catalog::SysCatalogReaderImpl;
 use crate::expr::cast_map_array;
 
 /// The catalog `pg_cast` stores data type conversion paths.
 /// Ref: [`https://www.postgresql.org/docs/current/catalog-pg-cast.html`]
-pub const PG_CAST_TABLE_NAME: &str = "pg_cast";
-pub const PG_CAST_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
-    (DataType::Int32, "oid"),
-    (DataType::Int32, "castsource"),
-    (DataType::Int32, "casttarget"),
-    (DataType::Varchar, "castcontext"),
-];
+#[derive(Fields)]
+struct PgCast {
+    #[primary_key]
+    oid: i32,
+    castsource: i32,
+    casttarget: i32,
+    castcontext: String,
+}
 
-pub static PG_CAST_DATA_ROWS: LazyLock<Vec<OwnedRow>> = LazyLock::new(|| {
+#[system_catalog(table, "pg_catalog.pg_cast")]
+fn read_pg_cast(_: &SysCatalogReaderImpl) -> Vec<PgCast> {
     let mut cast_array = cast_map_array();
     cast_array.sort();
     cast_array
         .iter()
         .enumerate()
-        .map(|(idx, (src, target, ctx))| {
-            OwnedRow::new(vec![
-                Some(ScalarImpl::Int32(idx as i32)),
-                Some(ScalarImpl::Int32(DataType::from(*src).to_oid())),
-                Some(ScalarImpl::Int32(DataType::from(*target).to_oid())),
-                Some(ScalarImpl::Utf8(ctx.to_string().into())),
-            ])
+        .map(|(idx, (src, target, ctx))| PgCast {
+            oid: idx as i32,
+            castsource: DataType::from(*src).to_oid(),
+            casttarget: DataType::from(*target).to_oid(),
+            castcontext: ctx.to_string(),
         })
-        .collect_vec()
-});
+        .collect()
+}

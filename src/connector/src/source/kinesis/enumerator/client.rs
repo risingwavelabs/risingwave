@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,14 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::Result;
+use anyhow::Context as _;
 use async_trait::async_trait;
-use aws_sdk_kinesis::model::Shard;
+use aws_sdk_kinesis::types::Shard;
 use aws_sdk_kinesis::Client as kinesis_client;
+use risingwave_common::bail;
 
-use crate::source::kinesis::split::{KinesisOffset, KinesisSplit};
+use crate::error::ConnectorResult as Result;
+use crate::source::kinesis::split::KinesisOffset;
 use crate::source::kinesis::*;
-use crate::source::SplitEnumerator;
+use crate::source::{SourceEnumeratorContextRef, SplitEnumerator};
 
 pub struct KinesisSplitEnumerator {
     stream_name: String,
@@ -33,7 +35,10 @@ impl SplitEnumerator for KinesisSplitEnumerator {
     type Properties = KinesisProperties;
     type Split = KinesisSplit;
 
-    async fn new(properties: KinesisProperties) -> Result<Self> {
+    async fn new(
+        properties: KinesisProperties,
+        _context: SourceEnumeratorContextRef,
+    ) -> Result<Self> {
         let client = properties.common.build_client().await?;
         let stream_name = properties.common.stream_name.clone();
         Ok(Self {
@@ -53,15 +58,11 @@ impl SplitEnumerator for KinesisSplitEnumerator {
                 .set_next_token(next_token)
                 .stream_name(&self.stream_name)
                 .send()
-                .await?;
+                .await
+                .context("failed to list kinesis shards")?;
             match list_shard_output.shards {
                 Some(shard) => shard_collect.extend(shard),
-                None => {
-                    return Err(anyhow::Error::msg(format!(
-                        "no shards in stream {}",
-                        &self.stream_name
-                    )));
-                }
+                None => bail!("no shards in stream {}", &self.stream_name),
             }
 
             match list_shard_output.next_token {
@@ -72,7 +73,8 @@ impl SplitEnumerator for KinesisSplitEnumerator {
         Ok(shard_collect
             .into_iter()
             .map(|x| KinesisSplit {
-                shard_id: x.shard_id().unwrap_or_default().to_string().into(),
+                shard_id: x.shard_id().to_string().into(),
+                // handle start with position in reader part
                 start_position: KinesisOffset::None,
                 end_position: KinesisOffset::None,
             })
@@ -82,7 +84,7 @@ impl SplitEnumerator for KinesisSplitEnumerator {
 
 #[cfg(test)]
 mod tests {
-    use aws_sdk_kinesis::Region;
+    use aws_sdk_kinesis::config::Region;
 
     use super::*;
 

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,18 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-use risingwave_sqlparser::ast::{Cte, Expr, Fetch, OrderByExpr, Query, Value, With};
+use risingwave_sqlparser::ast::{
+    Cte, CteInner, Expr, Fetch, ObjectName, OrderByExpr, Query, SetExpr, SetOperator, Value, With,
+};
+use thiserror_ext::AsReport;
 
+use super::bind_context::BindingCteState;
 use super::statement::RewriteExprsRecursive;
 use super::BoundValues;
+use crate::binder::bind_context::{BindingCte, RecursiveUnion};
 use crate::binder::{Binder, BoundSetExpr};
+use crate::error::{ErrorCode, Result};
 use crate::expr::{CorrelatedId, Depth, ExprImpl, ExprRewriter};
 
 /// A validated sql query, including order and union.
@@ -80,11 +86,11 @@ impl BoundQuery {
     ///   goes out.
     /// * The last example is also correlated. because it cannot be evaluated independently either.
     pub fn is_correlated(&self, depth: Depth) -> bool {
-        self.body.is_correlated(depth)
+        self.body.is_correlated(depth + 1)
             || self
                 .extra_order_exprs
                 .iter()
-                .any(|e| e.has_correlated_input_ref_by_depth(depth))
+                .any(|e| e.has_correlated_input_ref_by_depth(depth + 1))
     }
 
     pub fn collect_correlated_indices_by_depth_and_assign_id(
@@ -92,9 +98,17 @@ impl BoundQuery {
         depth: Depth,
         correlated_id: CorrelatedId,
     ) -> Vec<usize> {
-        // TODO: collect `correlated_input_ref` in `extra_order_exprs`.
-        self.body
-            .collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id)
+        let mut correlated_indices = vec![];
+
+        correlated_indices.extend(
+            self.body
+                .collect_correlated_indices_by_depth_and_assign_id(depth + 1, correlated_id),
+        );
+
+        correlated_indices.extend(self.extra_order_exprs.iter_mut().flat_map(|expr| {
+            expr.collect_correlated_indices_by_depth_and_assign_id(depth + 1, correlated_id)
+        }));
+        correlated_indices
     }
 
     /// Simple `VALUES` without other clauses.
@@ -176,20 +190,8 @@ impl Binder {
             self.bind_with(with)?;
         }
         let body = self.bind_set_expr(body)?;
-        let mut name_to_index = HashMap::new();
-        body.schema()
-            .fields()
-            .iter()
-            .enumerate()
-            .for_each(|(index, field)| {
-                name_to_index
-                    .entry(field.name.clone())
-                    // Ambiguous (duplicate) output names are marked with usize::MAX.
-                    // This is not necessarily an error as long as not actually referenced by order
-                    // by.
-                    .and_modify(|v| *v = usize::MAX)
-                    .or_insert(index);
-            });
+        let name_to_index =
+            Self::build_name_to_index(body.schema().fields().iter().map(|f| f.name.clone()));
         let mut extra_order_exprs = vec![];
         let visible_output_num = body.schema().len();
         let order = order_by
@@ -213,10 +215,24 @@ impl Binder {
         })
     }
 
+    pub fn build_name_to_index(names: impl Iterator<Item = String>) -> HashMap<String, usize> {
+        let mut m = HashMap::new();
+        names.enumerate().for_each(|(index, name)| {
+            m.entry(name)
+                // Ambiguous (duplicate) output names are marked with usize::MAX.
+                // This is not necessarily an error as long as not actually referenced.
+                .and_modify(|v| *v = usize::MAX)
+                .or_insert(index);
+        });
+        m
+    }
+
     /// Bind an `ORDER BY` expression in a [`Query`], which can be either:
     /// * an output-column name
     /// * index of an output column
     /// * an arbitrary expression
+    ///
+    /// Refer to `bind_group_by_expr_in_select` to see their similarities and differences.
     ///
     /// # Arguments
     ///
@@ -252,7 +268,7 @@ impl Binder {
                 Ok(index) if 1 <= index && index <= visible_output_num => index - 1,
                 _ => {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
-                        "Invalid value in ORDER BY: {}",
+                        "Invalid ordinal number in ORDER BY: {}",
                         number
                     ))
                     .into())
@@ -267,20 +283,205 @@ impl Binder {
     }
 
     fn bind_with(&mut self, with: With) -> Result<()> {
-        if with.recursive {
-            Err(ErrorCode::NotImplemented("recursive cte".into(), None.into()).into())
-        } else {
-            for cte_table in with.cte_tables {
-                let Cte { alias, query, .. } = cte_table;
-                let table_name = alias.name.real_value();
-                let bound_query = self.bind_query(query)?;
-                let share_id = self.next_share_id();
-                self.context
-                    .cte_to_relation
-                    .insert(table_name, Rc::new((share_id, bound_query, alias)));
+        for cte_table in with.cte_tables {
+            // note that the new `share_id` for the rcte is generated here
+            let share_id = self.next_share_id();
+            let Cte { alias, cte_inner } = cte_table;
+            let table_name = alias.name.real_value();
+
+            if with.recursive {
+                if let CteInner::Query(query) = cte_inner {
+                    let (
+                        SetExpr::SetOperation {
+                            op: SetOperator::Union,
+                            all,
+                            left,
+                            right,
+                        },
+                        with,
+                    ) = Self::validate_rcte(query)?
+                    else {
+                        return Err(ErrorCode::BindError(
+                            "expect `SetOperation` as the return type of validation".into(),
+                        )
+                        .into());
+                    };
+
+                    let entry = self
+                        .context
+                        .cte_to_relation
+                        .entry(table_name)
+                        .insert_entry(Rc::new(RefCell::new(BindingCte {
+                            share_id,
+                            state: BindingCteState::Init,
+                            alias,
+                        })))
+                        .get()
+                        .clone();
+
+                    self.bind_rcte(with, entry, *left, *right, all)?;
+                } else {
+                    return Err(ErrorCode::BindError(
+                        "RECURSIVE CTE only support query".to_string(),
+                    )
+                    .into());
+                }
+            } else {
+                match cte_inner {
+                    CteInner::Query(query) => {
+                        let bound_query = self.bind_query(query)?;
+                        self.context.cte_to_relation.insert(
+                            table_name,
+                            Rc::new(RefCell::new(BindingCte {
+                                share_id,
+                                state: BindingCteState::Bound {
+                                    query: either::Either::Left(bound_query),
+                                },
+                                alias,
+                            })),
+                        );
+                    }
+                    CteInner::ChangeLog(from_table_name) => {
+                        self.push_context();
+                        let from_table_relation = self.bind_relation_by_name(
+                            ObjectName::from(vec![from_table_name]),
+                            None,
+                            None,
+                        )?;
+                        self.pop_context()?;
+                        self.context.cte_to_relation.insert(
+                            table_name,
+                            Rc::new(RefCell::new(BindingCte {
+                                share_id,
+                                state: BindingCteState::ChangeLog {
+                                    table: from_table_relation,
+                                },
+                                alias,
+                            })),
+                        );
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// syntactically validate the recursive cte ast with the current support features in rw.
+    fn validate_rcte(query: Query) -> Result<(SetExpr, Option<With>)> {
+        let Query {
+            with,
+            body,
+            order_by,
+            limit,
+            offset,
+            fetch,
+        } = query;
+
+        /// the input clause should not be supported.
+        fn should_be_empty<T>(v: Option<T>, clause: &str) -> Result<()> {
+            if v.is_some() {
+                return Err(ErrorCode::BindError(format!(
+                    "`{clause}` is not supported in recursive CTE"
+                ))
+                .into());
             }
             Ok(())
         }
+
+        should_be_empty(order_by.first(), "ORDER BY")?;
+        should_be_empty(limit, "LIMIT")?;
+        should_be_empty(offset, "OFFSET")?;
+        should_be_empty(fetch, "FETCH")?;
+
+        let SetExpr::SetOperation {
+            op: SetOperator::Union,
+            all,
+            left,
+            right,
+        } = body
+        else {
+            return Err(
+                ErrorCode::BindError("`UNION` is required in recursive CTE".to_string()).into(),
+            );
+        };
+
+        if !all {
+            return Err(ErrorCode::BindError(
+                "only `UNION ALL` is supported in recursive CTE now".to_string(),
+            )
+            .into());
+        }
+
+        Ok((
+            SetExpr::SetOperation {
+                op: SetOperator::Union,
+                all,
+                left,
+                right,
+            },
+            with,
+        ))
+    }
+
+    fn bind_rcte(
+        &mut self,
+        with: Option<With>,
+        entry: Rc<RefCell<BindingCte>>,
+        left: SetExpr,
+        right: SetExpr,
+        all: bool,
+    ) -> Result<()> {
+        self.push_context();
+        let result = self.bind_rcte_inner(with, entry, left, right, all);
+        self.pop_context()?;
+        result
+    }
+
+    fn bind_rcte_inner(
+        &mut self,
+        with: Option<With>,
+        entry: Rc<RefCell<BindingCte>>,
+        left: SetExpr,
+        right: SetExpr,
+        all: bool,
+    ) -> Result<()> {
+        if let Some(with) = with {
+            self.bind_with(with)?;
+        }
+
+        // We assume `left` is the base term, otherwise the implementation may be very hard.
+        // The behavior is the same as PostgreSQL's.
+        // reference: <https://www.postgresql.org/docs/16/sql-select.html#:~:text=the%20recursive%20self%2Dreference%20must%20appear%20on%20the%20right%2Dhand%20side%20of%20the%20UNION>
+        let mut base = self.bind_set_expr(left)?;
+
+        entry.borrow_mut().state = BindingCteState::BaseResolved { base: base.clone() };
+
+        // Reset context for right side, but keep `cte_to_relation`.
+        let new_context = std::mem::take(&mut self.context);
+        self.context
+            .cte_to_relation
+            .clone_from(&new_context.cte_to_relation);
+        // bind the rest of the recursive cte
+        let mut recursive = self.bind_set_expr(right)?;
+        // Reset context for the set operation.
+        self.context = Default::default();
+        self.context.cte_to_relation = new_context.cte_to_relation;
+
+        Self::align_schema(&mut base, &mut recursive, SetOperator::Union)?;
+        let schema = base.schema().clone();
+
+        let recursive_union = RecursiveUnion {
+            all,
+            base: Box::new(base),
+            recursive: Box::new(recursive),
+            schema,
+        };
+
+        entry.borrow_mut().state = BindingCteState::Bound {
+            query: either::Either::Right(recursive_union),
+        };
+
+        Ok(())
     }
 }
 
@@ -294,6 +495,6 @@ fn parse_non_negative_i64(clause: &str, s: &str) -> Result<i64> {
                 Ok(v)
             }
         }
-        Err(e) => Err(ErrorCode::InvalidInputSyntax(e.to_string()).into()),
+        Err(e) => Err(ErrorCode::InvalidInputSyntax(e.to_report_string()).into()),
     }
 }

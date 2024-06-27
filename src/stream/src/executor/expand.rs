@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,39 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::Debug;
+use risingwave_common::array::{Array, I64Array};
 
-use futures::StreamExt;
-use futures_async_stream::try_stream;
-use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::types::DataType;
-
-use super::error::StreamExecutorError;
-use super::*;
+use crate::executor::prelude::*;
 
 pub struct ExpandExecutor {
-    input: BoxedExecutor,
-    schema: Schema,
-    pk_indices: PkIndices,
+    input: Executor,
     column_subsets: Vec<Vec<usize>>,
 }
 
 impl ExpandExecutor {
-    pub fn new(
-        input: Box<dyn Executor>,
-        pk_indices: PkIndices,
-        column_subsets: Vec<Vec<usize>>,
-    ) -> Self {
-        let schema = {
-            let mut fields = input.schema().clone().into_fields();
-            fields.extend(fields.clone());
-            fields.push(Field::with_name(DataType::Int64, "flag"));
-            Schema::new(fields)
-        };
+    pub fn new(input: Executor, column_subsets: Vec<Vec<usize>>) -> Self {
         Self {
             input,
-            schema,
-            pk_indices,
             column_subsets,
         }
     }
@@ -53,26 +33,21 @@ impl ExpandExecutor {
     async fn execute_inner(self) {
         #[for_await]
         for msg in self.input.execute() {
-            match msg? {
-                Message::Chunk(chunk) => {
-                    let chunk = chunk.compact();
-                    let (data_chunk, ops) = chunk.into_parts();
-                    assert!(
-                        data_chunk.dimension() > 0,
-                        "The input data chunk of expand can't be dummy chunk."
-                    );
-                    let cardinality = data_chunk.cardinality();
-                    let (columns, _) = data_chunk.into_parts();
-
-                    #[for_await]
-                    for new_columns in
-                        Column::expand_columns(cardinality, columns, self.column_subsets.to_owned())
-                    {
-                        let stream_chunk = StreamChunk::new(ops.clone(), new_columns?, None);
-                        yield Message::Chunk(stream_chunk)
-                    }
+            let input = match msg? {
+                Message::Chunk(c) => c,
+                m => {
+                    yield m;
+                    continue;
                 }
-                m => yield m,
+            };
+            for (i, subsets) in self.column_subsets.iter().enumerate() {
+                let flags = I64Array::from_iter(std::iter::repeat(i as i64).take(input.capacity()))
+                    .into_ref();
+                let (mut columns, vis) = input.data_chunk().keep_columns(subsets).into_parts();
+                columns.extend(input.columns().iter().cloned());
+                columns.push(flags);
+                let chunk = StreamChunk::with_visibility(input.ops(), columns, vis);
+                yield Message::Chunk(chunk);
             }
         }
     }
@@ -86,19 +61,7 @@ impl Debug for ExpandExecutor {
     }
 }
 
-impl Executor for ExpandExecutor {
-    fn schema(&self) -> &Schema {
-        &self.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        "ExpandExecutor"
-    }
-
+impl Execute for ExpandExecutor {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
     }
@@ -113,7 +76,7 @@ mod tests {
 
     use super::ExpandExecutor;
     use crate::executor::test_utils::MockSource;
-    use crate::executor::{Executor, PkIndices};
+    use crate::executor::{Execute, PkIndices};
 
     #[tokio::test]
     async fn test_expand() {
@@ -124,22 +87,19 @@ mod tests {
             + 6 6 3
             - 7 5 4",
         );
-        let schema = Schema {
-            fields: vec![
+        let source = MockSource::with_chunks(vec![chunk1]).into_executor(
+            Schema::new(vec![
                 Field::unnamed(DataType::Int64),
                 Field::unnamed(DataType::Int64),
                 Field::unnamed(DataType::Int64),
-            ],
-        };
-        let source = MockSource::with_chunks(schema, PkIndices::new(), vec![chunk1]);
+            ]),
+            PkIndices::new(),
+        );
 
         let column_subsets = vec![vec![0, 1], vec![1, 2]];
-        let expand = Box::new(ExpandExecutor::new(
-            Box::new(source),
-            PkIndices::new(),
-            column_subsets,
-        ));
-        let mut expand = expand.execute();
+        let mut expand = ExpandExecutor::new(source, column_subsets)
+            .boxed()
+            .execute();
 
         let chunk = expand.next().await.unwrap().unwrap().into_chunk().unwrap();
         assert_eq!(
@@ -147,6 +107,7 @@ mod tests {
             StreamChunk::from_pretty(
                 " I I I I I I I
                 + 1 4 . 1 4 1 0
+                + 5 2 . 5 2 2 0 D
                 + 6 6 . 6 6 3 0
                 - 7 5 . 7 5 4 0"
             )
@@ -158,6 +119,7 @@ mod tests {
             StreamChunk::from_pretty(
                 " I I I I I I I
                 + . 4 1 1 4 1 1
+                + . 2 2 5 2 2 1 D
                 + . 6 3 6 6 3 1
                 - . 5 4 7 5 4 1"
             )

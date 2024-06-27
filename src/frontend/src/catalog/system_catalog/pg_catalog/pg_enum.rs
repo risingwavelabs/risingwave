@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,17 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::types::DataType;
-
-use crate::catalog::system_catalog::SystemCatalogColumnsDef;
+use risingwave_common::types::Fields;
+use risingwave_frontend_macro::system_catalog;
 
 /// The `pg_enum` catalog contains entries showing the values and labels for each enum type.
 /// The internal representation of a given enum value is actually the OID of its associated row in
 /// `pg_enum`. Reference: [`https://www.postgresql.org/docs/current/catalog-pg-enum.html`]
-pub const PG_ENUM_TABLE_NAME: &str = "pg_enum";
-pub const PG_ENUM_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
-    (DataType::Int32, "oid"),
-    (DataType::Int32, "enumtypid"),
-    (DataType::Float32, "enumsortorder"),
-    (DataType::Varchar, "enumlabel"),
-];
+#[system_catalog(view, "pg_catalog.pg_enum")]
+#[derive(Fields)]
+struct PgEnum {
+    oid: i32,
+    enumtypid: i32,
+    enumsortorder: f32,
+    enumlabel: String,
+}

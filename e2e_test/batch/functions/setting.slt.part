@@ -1,0 +1,19 @@
+query T
+SELECT current_setting('server_version');
+----
+13.14.0
+
+query I
+SELECT current_setting('server_version_num') AS version;
+----
+130014
+
+query T
+SELECT set_config('client_min_messages', 'warning', false);
+----
+warning
+
+query T
+SELECT set_config('client_min_messages', 'notice', false);
+----
+notice

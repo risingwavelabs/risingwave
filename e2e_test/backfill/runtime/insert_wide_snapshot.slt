@@ -1,0 +1,22 @@
+# 15 columns wide
+statement ok
+INSERT INTO t select
+  generate_series,
+  'jakbj2khbe2',
+  22222222222,
+  generate_series,
+  'jakbj2khbe2',
+  22222222222,
+  generate_series,
+  'jakbj2khbe2',
+  22222222222,
+  generate_series,
+  'jakbj2khbe2',
+  22222222222,
+  generate_series,
+  'jakbj2khbe2',
+  22222222222
+  from generate_series(2000001, 4000000);
+
+statement ok
+flush;

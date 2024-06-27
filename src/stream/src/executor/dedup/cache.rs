@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,10 +14,11 @@
 
 use std::hash::Hash;
 
-use risingwave_common::estimate_size::EstimateSize;
+use risingwave_common_estimate_size::EstimateSize;
 
-use crate::cache::{new_unbounded, ManagedLruCache};
-use crate::task::AtomicU64Ref;
+use crate::cache::ManagedLruCache;
+use crate::common::metrics::MetricsInfo;
+use crate::executor::prelude::*;
 
 /// [`DedupCache`] is used for key deduplication. Currently, the cache behaves like a set that only
 /// accepts a key without a value. This could be refined in the future to support k-v pairs.
@@ -26,8 +27,8 @@ pub struct DedupCache<K: Hash + Eq + EstimateSize> {
 }
 
 impl<K: Hash + Eq + EstimateSize> DedupCache<K> {
-    pub fn new(watermark_epoch: AtomicU64Ref) -> Self {
-        let cache = new_unbounded(watermark_epoch);
+    pub fn new(watermark_sequence: AtomicU64Ref, metrics_info: MetricsInfo) -> Self {
+        let cache = ManagedLruCache::unbounded(watermark_sequence, metrics_info);
         Self { inner: cache }
     }
 
@@ -52,11 +53,6 @@ impl<K: Hash + Eq + EstimateSize> DedupCache<K> {
         self.inner.evict()
     }
 
-    pub fn update_epoch(&mut self, epoch: u64) {
-        // Update the current epoch in `ManagedLruCache`
-        self.inner.update_epoch(epoch)
-    }
-
     /// Clear everything in the cache.
     pub fn clear(&mut self) {
         self.inner.clear()
@@ -69,10 +65,11 @@ mod tests {
     use std::sync::Arc;
 
     use super::DedupCache;
+    use crate::common::metrics::MetricsInfo;
 
     #[test]
     fn test_dedup_cache() {
-        let mut cache = DedupCache::new(Arc::new(AtomicU64::new(10000)));
+        let mut cache = DedupCache::new(Arc::new(AtomicU64::new(10000)), MetricsInfo::for_test());
 
         cache.insert(10);
         assert!(cache.contains(&10));

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use core::slice::memchr::memchr;
 use std::cmp::min;
 use std::str::from_utf8;
 
@@ -32,13 +31,11 @@ pub struct RewriteLikeExprRule {}
 impl Rule for RewriteLikeExprRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let filter: &LogicalFilter = plan.as_logical_filter()?;
-        let mut has_like = HasLikeExprVisitor {};
-        if filter
-            .predicate()
-            .conjunctions
-            .iter()
-            .any(|expr| has_like.visit_expr(expr))
-        {
+        if filter.predicate().conjunctions.iter().any(|expr| {
+            let mut has_like = HasLikeExprVisitor { has: false };
+            has_like.visit_expr(expr);
+            has_like.has
+        }) {
             let mut rewriter = LikeExprRewriter {};
             Some(filter.rewrite_exprs(&mut rewriter))
         } else {
@@ -47,31 +44,62 @@ impl Rule for RewriteLikeExprRule {
     }
 }
 
-struct HasLikeExprVisitor {}
+struct HasLikeExprVisitor {
+    has: bool,
+}
 
-impl ExprVisitor<bool> for HasLikeExprVisitor {
-    fn merge(a: bool, b: bool) -> bool {
-        a | b
-    }
-
-    fn visit_function_call(&mut self, func_call: &FunctionCall) -> bool {
-        if func_call.get_expr_type() == ExprType::Like
+impl ExprVisitor for HasLikeExprVisitor {
+    fn visit_function_call(&mut self, func_call: &FunctionCall) {
+        if func_call.func_type() == ExprType::Like
             && let (_, ExprImpl::InputRef(_), ExprImpl::Literal(_)) =
                 func_call.clone().decompose_as_binary()
         {
-            true
+            self.has = true;
         } else {
             func_call
                 .inputs()
                 .iter()
-                .map(|expr| self.visit_expr(expr))
-                .reduce(Self::merge)
-                .unwrap_or_default()
+                .for_each(|expr| self.visit_expr(expr));
         }
     }
 }
 
 struct LikeExprRewriter {}
+
+impl LikeExprRewriter {
+    fn cal_index_and_unescape(bytes: &[u8]) -> (Option<usize>, Option<usize>, Vec<u8>) {
+        // The pattern without escape character.
+        let mut unescaped_bytes = vec![];
+        // The idx of `_` in the `unescaped_bytes`.
+        let mut char_wildcard_idx: Option<usize> = None;
+        // The idx of `%` in the `unescaped_bytes`.
+        let mut str_wildcard_idx: Option<usize> = None;
+
+        let mut in_escape = false;
+        const ESCAPE: u8 = b'\\';
+        for &c in bytes {
+            if !in_escape && c == ESCAPE {
+                in_escape = true;
+                continue;
+            }
+            if in_escape {
+                in_escape = false;
+                unescaped_bytes.push(c);
+                continue;
+            }
+            unescaped_bytes.push(c);
+            if c == b'_' {
+                char_wildcard_idx.get_or_insert(unescaped_bytes.len() - 1);
+            } else if c == b'%' {
+                str_wildcard_idx.get_or_insert(unescaped_bytes.len() - 1);
+            }
+        }
+        // Note: we only support `\\` as the escape character now, and it can't be positioned at the
+        // end of string, which will be banned by parser.
+        assert!(!in_escape);
+        (char_wildcard_idx, str_wildcard_idx, unescaped_bytes)
+    }
+}
 
 impl ExprRewriter for LikeExprRewriter {
     fn rewrite_function_call(&mut self, func_call: FunctionCall) -> ExprImpl {
@@ -80,9 +108,9 @@ impl ExprRewriter for LikeExprRewriter {
             .into_iter()
             .map(|expr| self.rewrite_expr(expr))
             .collect();
-        let func_call = FunctionCall::new_unchecked(func_type, inputs, ret);
+        let func_call = FunctionCall::new_unchecked(func_type, inputs, ret.clone());
 
-        if func_call.get_expr_type() != ExprType::Like {
+        if func_call.func_type() != ExprType::Like {
             return func_call.into();
         }
 
@@ -103,12 +131,23 @@ impl ExprRewriter for LikeExprRewriter {
 
         let bytes = data.as_bytes();
         let len = bytes.len();
-        let idx = match (memchr(b'%', bytes), memchr(b'_', bytes)) {
+
+        let (char_wildcard_idx, str_wildcard_idx, unescaped_bytes) =
+            Self::cal_index_and_unescape(bytes);
+
+        let idx = match (char_wildcard_idx, str_wildcard_idx) {
             (Some(a), Some(b)) => min(a, b),
             (Some(idx), None) => idx,
             (None, Some(idx)) => idx,
             (None, None) => {
-                let (_, inputs, ret) = func_call.decompose();
+                let Ok(unescaped_y) = String::from_utf8(unescaped_bytes) else {
+                    // FIXME: We should definitely treat the argument as UTF-8 string instead of bytes, but currently, we just fallback here.
+                    return func_call.into();
+                };
+                let inputs = vec![
+                    ExprImpl::InputRef(x),
+                    ExprImpl::literal_varchar(unescaped_y),
+                ];
                 let func_call = FunctionCall::new_unchecked(ExprType::Equal, inputs, ret);
                 return func_call.into();
             }
@@ -119,7 +158,7 @@ impl ExprRewriter for LikeExprRewriter {
         }
 
         let (low, high) = {
-            let low = bytes[0..idx].to_owned();
+            let low = unescaped_bytes[0..idx].to_owned();
             if low[idx - 1] == 255 {
                 return func_call.into();
             }
@@ -180,5 +219,31 @@ impl ExprRewriter for LikeExprRewriter {
 impl RewriteLikeExprRule {
     pub fn create() -> BoxedRule {
         Box::new(RewriteLikeExprRule {})
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn test_cal_index_and_unescape() {
+        #[expect(clippy::type_complexity, reason = "in testcase")]
+        let testcases: [(&str, (Option<usize>, Option<usize>, &str)); 7] = [
+            ("testname", (None, None, "testname")),
+            ("test_name", (Some(4), None, "test_name")),
+            ("test_name_2", (Some(4), None, "test_name_2")),
+            ("test%name", (None, Some(4), "test%name")),
+            (r"test\_name", (None, None, "test_name")),
+            (r"test\_name_2", (Some(9), None, "test_name_2")),
+            (r"test\\_name_2", (Some(5), None, r"test\_name_2")),
+        ];
+
+        for (pattern, (c, s, ub)) in testcases {
+            let input = pattern.as_bytes();
+            let (char_wildcard_idx, str_wildcard_idx, unescaped_bytes) =
+                super::LikeExprRewriter::cal_index_and_unescape(input);
+            assert_eq!(char_wildcard_idx, c);
+            assert_eq!(str_wildcard_idx, s);
+            assert_eq!(&String::from_utf8(unescaped_bytes).unwrap(), ub);
+        }
     }
 }

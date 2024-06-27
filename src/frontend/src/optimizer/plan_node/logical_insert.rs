@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,23 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
+use pretty_xmlish::XmlNode;
+use risingwave_common::catalog::TableVersionId;
 
-use itertools::Itertools;
-use risingwave_common::catalog::{Field, Schema, TableVersionId};
-use risingwave_common::error::Result;
-use risingwave_common::types::DataType;
-
+use super::generic::GenericPlanRef;
+use super::utils::{childless_record, Distill};
 use super::{
-    gen_filter_and_pushdown, BatchInsert, ColPrunable, ExprRewritable, PlanBase, PlanRef,
-    PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
+    gen_filter_and_pushdown, generic, BatchInsert, ColPrunable, ExprRewritable, Logical,
+    LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
 };
 use crate::catalog::TableId;
-use crate::expr::ExprImpl;
+use crate::error::Result;
+use crate::expr::{ExprImpl, ExprRewriter, ExprVisitor};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
-use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalInsert` iterates on input relation and insert the data into specified table.
@@ -37,179 +36,111 @@ use crate::utils::{ColIndexMapping, Condition};
 /// statements, the input relation would be [`super::LogicalValues`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalInsert {
-    pub base: PlanBase,
-    table_name: String, // explain-only
-    table_id: TableId,
-    table_version_id: TableVersionId,
-    input: PlanRef,
-    column_indices: Vec<usize>,              // columns in which to insert
-    default_columns: Vec<(usize, ExprImpl)>, // columns to be set to default
-    row_id_index: Option<usize>,
-    returning: bool,
+    pub base: PlanBase<Logical>,
+    core: generic::Insert<PlanRef>,
 }
 
 impl LogicalInsert {
-    /// Create a [`LogicalInsert`] node. Used internally by optimizer.
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        input: PlanRef,
-        table_name: String,
-        table_id: TableId,
-        table_version_id: TableVersionId,
-        column_indices: Vec<usize>,
-        default_columns: Vec<(usize, ExprImpl)>,
-        row_id_index: Option<usize>,
-        returning: bool,
-    ) -> Self {
-        let ctx = input.ctx();
-        let schema = if returning {
-            input.schema().clone()
-        } else {
-            Schema::new(vec![Field::unnamed(DataType::Int64)])
-        };
-        let functional_dependency = FunctionalDependencySet::new(schema.len());
-        let base = PlanBase::new_logical(ctx, schema, vec![], functional_dependency);
-        Self {
-            base,
-            table_name,
-            table_id,
-            table_version_id,
-            input,
-            column_indices,
-            default_columns,
-            row_id_index,
-            returning,
-        }
-    }
-
-    /// Create a [`LogicalInsert`] node. Used by planner.
-    #[allow(clippy::too_many_arguments)]
-    pub fn create(
-        input: PlanRef,
-        table_name: String,
-        table_id: TableId,
-        table_version_id: TableVersionId,
-        column_indices: Vec<usize>,
-        default_columns: Vec<(usize, ExprImpl)>,
-        row_id_index: Option<usize>,
-        returning: bool,
-    ) -> Result<Self> {
-        Ok(Self::new(
-            input,
-            table_name,
-            table_id,
-            table_version_id,
-            column_indices,
-            default_columns,
-            row_id_index,
-            returning,
-        ))
-    }
-
-    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        let verbose = self.ctx().is_explain_verbose();
-        write!(
-            f,
-            "{} {{ table: {}{}",
-            name,
-            self.table_name,
-            if self.returning {
-                ", returning: true"
-            } else {
-                ""
-            }
-        )?;
-        if verbose {
-            write!(
-                f,
-                ", mapping: [{}]",
-                self.column_indices()
-                    .iter()
-                    .cloned()
-                    .enumerate()
-                    .map(|(k, v)| format!("{}:{}", k, v))
-                    .join(", ")
-            )?;
-            if !self.default_columns.is_empty() {
-                write!(
-                    f,
-                    ", default: [{}]",
-                    self.default_columns()
-                        .into_iter()
-                        .map(|(k, v)| format!("{}<-{:?}", k, v))
-                        .join(", ")
-                )?;
-            }
-        }
-        write!(f, " }}")
+    pub fn new(core: generic::Insert<PlanRef>) -> Self {
+        let base = PlanBase::new_logical_with_core(&core);
+        Self { base, core }
     }
 
     // Get the column indexes in which to insert to
     #[must_use]
     pub fn column_indices(&self) -> Vec<usize> {
-        self.column_indices.clone()
+        self.core.column_indices.clone()
     }
 
     #[must_use]
     pub fn default_columns(&self) -> Vec<(usize, ExprImpl)> {
-        self.default_columns.clone()
+        self.core.default_columns.clone()
     }
 
     #[must_use]
     pub fn table_id(&self) -> TableId {
-        self.table_id
+        self.core.table_id
     }
 
     #[must_use]
     pub fn row_id_index(&self) -> Option<usize> {
-        self.row_id_index
+        self.core.row_id_index
     }
 
     pub fn has_returning(&self) -> bool {
-        self.returning
+        self.core.returning
     }
 
     pub fn table_version_id(&self) -> TableVersionId {
-        self.table_version_id
+        self.core.table_version_id
     }
 }
 
 impl PlanTreeNodeUnary for LogicalInsert {
     fn input(&self) -> PlanRef {
-        self.input.clone()
+        self.core.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(
-            input,
-            self.table_name.clone(),
-            self.table_id,
-            self.table_version_id,
-            self.column_indices.clone(),
-            self.default_columns.clone(),
-            self.row_id_index,
-            self.returning,
-        )
+        let mut core = self.core.clone();
+        core.input = input;
+        Self::new(core)
     }
 }
 
 impl_plan_tree_node_for_unary! {LogicalInsert}
 
-impl fmt::Display for LogicalInsert {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.fmt_with_name(f, "LogicalInsert")
+impl Distill for LogicalInsert {
+    fn distill<'a>(&self) -> XmlNode<'a> {
+        let vec = self
+            .core
+            .fields_pretty(self.base.ctx().is_explain_verbose());
+        childless_record("LogicalInsert", vec)
     }
 }
 
 impl ColPrunable for LogicalInsert {
-    fn prune_col(&self, _required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
-        let required_cols: Vec<_> = (0..self.input.schema().len()).collect();
-        self.clone_with_input(self.input.prune_col(&required_cols, ctx))
-            .into()
+    fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
+        let pruned_input = {
+            let input = &self.core.input;
+            let required_cols: Vec<_> = (0..input.schema().len()).collect();
+            input.prune_col(&required_cols, ctx)
+        };
+
+        // No pruning.
+        LogicalProject::with_out_col_idx(
+            self.clone_with_input(pruned_input).into(),
+            required_cols.iter().copied(),
+        )
+        .into()
     }
 }
 
-impl ExprRewritable for LogicalInsert {}
+impl ExprRewritable for LogicalInsert {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
+
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        let mut new = self.clone();
+        new.core.default_columns = new
+            .core
+            .default_columns
+            .into_iter()
+            .map(|(c, e)| (c, r.rewrite_expr(e)))
+            .collect();
+        new.into()
+    }
+}
+
+impl ExprVisitable for LogicalInsert {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.core
+            .default_columns
+            .iter()
+            .for_each(|(_, e)| v.visit_expr(e));
+    }
+}
 
 impl PredicatePushdown for LogicalInsert {
     fn predicate_pushdown(
@@ -224,8 +155,9 @@ impl PredicatePushdown for LogicalInsert {
 impl ToBatch for LogicalInsert {
     fn to_batch(&self) -> Result<PlanRef> {
         let new_input = self.input().to_batch()?;
-        let new_logical = self.clone_with_input(new_input);
-        Ok(BatchInsert::new(new_logical).into())
+        let mut core = self.core.clone();
+        core.input = new_input;
+        Ok(BatchInsert::new(core).into())
     }
 }
 

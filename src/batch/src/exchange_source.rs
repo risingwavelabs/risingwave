@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,8 +15,10 @@
 use std::fmt::Debug;
 use std::future::Future;
 
+use futures_async_stream::try_stream;
 use risingwave_common::array::DataChunk;
 
+use crate::error::{BatchError, Result};
 use crate::execution::grpc_exchange::GrpcExchangeSource;
 use crate::execution::local_exchange::LocalExchangeSource;
 use crate::executor::test_utils::FakeExchangeSource;
@@ -24,11 +26,7 @@ use crate::task::TaskId;
 
 /// Each `ExchangeSource` maps to one task, it takes the execution result from task chunk by chunk.
 pub trait ExchangeSource: Send + Debug {
-    type TakeDataFuture<'a>: Future<Output = risingwave_common::error::Result<Option<DataChunk>>>
-        + 'a
-    where
-        Self: 'a;
-    fn take_data(&mut self) -> Self::TakeDataFuture<'_>;
+    fn take_data(&mut self) -> impl Future<Output = Result<Option<DataChunk>>> + '_;
 
     /// Get upstream task id.
     fn get_task_id(&self) -> TaskId;
@@ -42,9 +40,7 @@ pub enum ExchangeSourceImpl {
 }
 
 impl ExchangeSourceImpl {
-    pub(crate) async fn take_data(
-        &mut self,
-    ) -> risingwave_common::error::Result<Option<DataChunk>> {
+    pub(crate) async fn take_data(&mut self) -> Result<Option<DataChunk>> {
         match self {
             ExchangeSourceImpl::Grpc(grpc) => grpc.take_data().await,
             ExchangeSourceImpl::Local(local) => local.take_data().await,
@@ -57,6 +53,18 @@ impl ExchangeSourceImpl {
             ExchangeSourceImpl::Grpc(grpc) => grpc.get_task_id(),
             ExchangeSourceImpl::Local(local) => local.get_task_id(),
             ExchangeSourceImpl::Fake(fake) => fake.get_task_id(),
+        }
+    }
+
+    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
+    pub(crate) async fn take_data_stream(self) {
+        let mut source = self;
+        loop {
+            match source.take_data().await {
+                Ok(Some(chunk)) => yield chunk,
+                Ok(None) => break,
+                Err(e) => return Err(e),
+            }
         }
     }
 }

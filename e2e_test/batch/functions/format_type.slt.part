@@ -17,3 +17,8 @@ query T
 SELECT format_type(NULL, 0);
 ----
 NULL
+
+query T
+SELECT format_type(1043, '-1');
+----
+character varying

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,15 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use itertools::Itertools;
+use pretty_xmlish::{Pretty, Str, XmlNode};
 use risingwave_common::catalog::{Field, FieldDisplay, Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 
-use super::{GenericPlanNode, GenericPlanRef};
+use super::{DistillUnit, GenericPlanNode, GenericPlanRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::plan_node::utils::childless_record;
 use crate::optimizer::property::FunctionalDependencySet;
 
 /// [`Expand`] expand one row multiple times according to `column_subsets` and also keep
@@ -40,7 +40,7 @@ pub struct Expand<PlanRef> {
 }
 
 impl<PlanRef: GenericPlanRef> Expand<PlanRef> {
-    fn output_len(&self) -> usize {
+    pub fn output_len(&self) -> usize {
         self.input.schema().len() * 2 + 1
     }
 
@@ -51,17 +51,23 @@ impl<PlanRef: GenericPlanRef> Expand<PlanRef> {
 
 impl<PlanRef: GenericPlanRef> GenericPlanNode for Expand<PlanRef> {
     fn schema(&self) -> Schema {
-        let mut fields = self.input.schema().clone().into_fields();
-        fields.extend(fields.clone());
+        let mut fields = self
+            .input
+            .schema()
+            .fields()
+            .iter()
+            .map(|f| Field::with_name(f.data_type(), format!("{}_expanded", f.name)))
+            .collect::<Vec<_>>();
+        fields.extend(self.input.schema().fields().iter().cloned());
         fields.push(Field::with_name(DataType::Int64, "flag"));
         Schema::new(fields)
     }
 
-    fn logical_pk(&self) -> Option<Vec<usize>> {
+    fn stream_key(&self) -> Option<Vec<usize>> {
         let input_schema_len = self.input.schema().len();
         let mut pk_indices = self
             .input
-            .logical_pk()
+            .stream_key()?
             .iter()
             .map(|&pk| pk + input_schema_len)
             .collect_vec();
@@ -100,25 +106,26 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Expand<PlanRef> {
     }
 }
 
-impl<PlanRef: GenericPlanRef> Expand<PlanRef> {
-    pub fn column_subsets_display(&self) -> Vec<Vec<FieldDisplay<'_>>> {
-        self.column_subsets
-            .iter()
-            .map(|subset| {
-                subset
-                    .iter()
-                    .map(|&i| FieldDisplay(self.input.schema().fields.get(i).unwrap()))
-                    .collect()
-            })
-            .collect()
+impl<PlanRef: GenericPlanRef> DistillUnit for Expand<PlanRef> {
+    fn distill_with_name<'a>(&self, name: impl Into<Str<'a>>) -> XmlNode<'a> {
+        childless_record(name, vec![("column_subsets", self.column_subsets_pretty())])
     }
+}
 
-    pub(crate) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        write!(
-            f,
-            "{} {{ column_subsets: {:?} }}",
-            name,
-            self.column_subsets_display()
+impl<PlanRef: GenericPlanRef> Expand<PlanRef> {
+    fn column_subsets_pretty<'a>(&self) -> Pretty<'a> {
+        Pretty::Array(
+            self.column_subsets
+                .iter()
+                .map(|subset| {
+                    subset
+                        .iter()
+                        .map(|&i| FieldDisplay(self.input.schema().fields.get(i).unwrap()))
+                        .map(|d| Pretty::display(&d))
+                        .collect()
+                })
+                .map(Pretty::Array)
+                .collect(),
         )
     }
 
@@ -127,12 +134,16 @@ impl<PlanRef: GenericPlanRef> Expand<PlanRef> {
         let map = (0..input_len)
             .map(|source| Some(source + input_len))
             .collect_vec();
-        ColIndexMapping::with_target_size(map, self.output_len())
+        ColIndexMapping::new(map, self.output_len())
     }
 
     pub fn o2i_col_mapping(&self) -> ColIndexMapping {
         self.i2o_col_mapping()
             .inverse()
             .expect("must be invertible")
+    }
+
+    pub fn decompose(self) -> (PlanRef, Vec<Vec<usize>>) {
+        (self.input, self.column_subsets)
     }
 }

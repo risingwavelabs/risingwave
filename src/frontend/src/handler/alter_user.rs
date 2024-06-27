@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,8 +13,6 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::error::ErrorCode::{InternalError, PermissionDenied};
-use risingwave_common::error::Result;
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::UserInfo;
 use risingwave_sqlparser::ast::{AlterUserStatement, ObjectName, UserOption, UserOptions};
@@ -22,13 +20,18 @@ use risingwave_sqlparser::ast::{AlterUserStatement, ObjectName, UserOption, User
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::CatalogError;
+use crate::error::ErrorCode::{self, InternalError, PermissionDenied};
+use crate::error::Result;
 use crate::handler::HandlerArgs;
-use crate::user::user_authentication::encrypted_password;
+use crate::user::user_authentication::{
+    build_oauth_info, encrypted_password, OAUTH_ISSUER_KEY, OAUTH_JWKS_URL_KEY,
+};
+use crate::user::user_catalog::UserCatalog;
 
 fn alter_prost_user_info(
     mut user_info: UserInfo,
     options: &UserOptions,
-    session_user: &UserInfo,
+    session_user: &UserCatalog,
 ) -> Result<(UserInfo, Vec<UpdateField>)> {
     if !session_user.is_super {
         let require_super = user_info.is_super
@@ -101,12 +104,24 @@ fn alter_prost_user_info(
             }
             UserOption::Password(opt) => {
                 // TODO: Behaviour of PostgreSQL: Notice when password is empty string.
-                if let Some(password) = opt && !password.0.is_empty() {
+                if let Some(password) = opt
+                    && !password.0.is_empty()
+                {
                     user_info.auth_info = encrypted_password(&user_info.name, &password.0);
                 } else {
                     user_info.auth_info = None;
                 }
                 update_fields.push(UpdateField::AuthInfo);
+            }
+            UserOption::OAuth(options) => {
+                let auth_info = build_oauth_info(options).ok_or_else(|| {
+                    ErrorCode::InvalidParameterValue(format!(
+                        "{} and {} must be provided",
+                        OAUTH_JWKS_URL_KEY, OAUTH_ISSUER_KEY
+                    ))
+                })?;
+                user_info.auth_info = Some(auth_info);
+                update_fields.push(UpdateField::AuthInfo)
             }
         }
     }
@@ -116,7 +131,7 @@ fn alter_prost_user_info(
 fn alter_rename_prost_user_info(
     mut user_info: UserInfo,
     new_name: ObjectName,
-    session_user: &UserInfo,
+    session_user: &UserCatalog,
 ) -> Result<(UserInfo, Vec<UpdateField>)> {
     if session_user.id == user_info.id {
         return Err(InternalError("session user cannot be renamed".to_string()).into());
@@ -153,7 +168,7 @@ pub async fn handle_alter_user(
         let old_info = user_reader
             .get_user_by_name(&user_name)
             .ok_or(CatalogError::NotFound("user", user_name))?
-            .clone();
+            .to_prost();
 
         let session_user = user_reader
             .get_user_by_name(session.user_name())
@@ -169,7 +184,7 @@ pub async fn handle_alter_user(
         }
     };
 
-    let user_info_writer = session.env().user_info_writer();
+    let user_info_writer = session.user_info_writer()?;
     user_info_writer
         .update_user(user_info, update_fields)
         .await?;
@@ -178,6 +193,8 @@ pub async fn handle_alter_user(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use risingwave_pb::user::auth_info::EncryptionType;
     use risingwave_pb::user::AuthInfo;
 
@@ -216,7 +233,8 @@ mod tests {
             user_info.auth_info,
             Some(AuthInfo {
                 encryption_type: EncryptionType::Md5 as i32,
-                encrypted_value: b"9f2fa6a30871a92249bdd2f1eeee4ef6".to_vec()
+                encrypted_value: b"9f2fa6a30871a92249bdd2f1eeee4ef6".to_vec(),
+                metadata: HashMap::new(),
             })
         );
     }

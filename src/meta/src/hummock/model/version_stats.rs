@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use prost::Message;
 use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_pb::hummock::HummockVersionStats;
 
@@ -31,10 +30,6 @@ impl MetadataModel for HummockVersionStats {
 
     fn to_protobuf(&self) -> Self::PbType {
         self.clone()
-    }
-
-    fn to_protobuf_encoded_vec(&self) -> Vec<u8> {
-        self.encode_to_vec()
     }
 
     fn from_protobuf(prost: Self::PbType) -> Self {

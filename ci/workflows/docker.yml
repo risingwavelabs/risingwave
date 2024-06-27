@@ -1,5 +1,12 @@
+auto-retry: &auto-retry
+  automatic:
+    # Agent terminated because the AWS EC2 spot instance killed by AWS.
+    - signal_reason: agent_stop
+      limit: 3
+
 steps:
   - label: "docker-build-push: amd64"
+    if: build.env("SKIP_TARGET_AMD64") != "true"
     command: "ci/scripts/docker.sh"
     key: "build-amd64"
     plugins:
@@ -9,8 +16,10 @@ steps:
             GHCR_TOKEN: ghcr-token
             DOCKER_TOKEN: docker-token
             GITHUB_TOKEN: github-token
+    retry: *auto-retry
 
   - label: "docker-build-push: aarch64"
+    if: build.env("SKIP_TARGET_AARCH64") != "true"
     command: "ci/scripts/docker.sh"
     key: "build-aarch64"
     plugins:
@@ -22,6 +31,7 @@ steps:
             GITHUB_TOKEN: github-token
     agents:
       queue: "linux-arm64"
+    retry: *auto-retry
 
   - label: "multi-arch-image-create-push"
     command: "ci/scripts/multi-arch-docker.sh"
@@ -34,17 +44,40 @@ steps:
             GHCR_USERNAME: ghcr-username
             GHCR_TOKEN: ghcr-token
             DOCKER_TOKEN: docker-token
+    retry: *auto-retry
 
-  - label: "pre build binary"
+  - label: "pre build binary: amd64"
+    if: build.env("SKIP_TARGET_AMD64") != "true"
     command: "ci/scripts/release.sh"
     plugins:
       - seek-oss/aws-sm#v2.3.1:
           env:
             GITHUB_TOKEN: github-token
-      - docker-compose#v4.9.0:
-          run: release-env
+      - docker-compose#v5.1.0:
+          run: release-env-x86
           config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+          propagate-environment: true
           environment:
             - BINARY_NAME
-            - BUILDKITE_SOURCE
             - GITHUB_TOKEN
+    retry: *auto-retry
+
+  - label: "pre build binary: aarch64 "
+    if: build.env("SKIP_TARGET_AARCH64") != "true"
+    command: "ci/scripts/release.sh"
+    plugins:
+      - seek-oss/aws-sm#v2.3.1:
+          env:
+            GITHUB_TOKEN: github-token
+      - docker-compose#v5.1.0:
+          run: release-env-arm
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+          propagate-environment: true
+          environment:
+            - BINARY_NAME
+            - GITHUB_TOKEN
+    agents:
+      queue: "linux-arm64"
+    retry: *auto-retry

@@ -47,6 +47,13 @@ select * from t1 right join t3 on t1.v1 = t3.v1 order by t1.v1, t1.v2;
 1 4 1 2
 NULL NULL 4 1
 
+# A bug in https://github.com/risingwavelabs/risingwave/pull/12527
+# lookup join panics when the scan is single distribution
+query I
+select 1 from (select * from t1 left join t3 on t1.v1 = t3.v1 order by t1.v1, t1.v2) where exists (select 1) limit 1;
+----
+1
+
 statement ok
 drop materialized view t3;
 

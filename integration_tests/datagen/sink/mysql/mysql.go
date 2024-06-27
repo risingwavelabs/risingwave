@@ -49,3 +49,7 @@ func (p *MysqlSink) WriteRecord(ctx context.Context, format string, record sink.
 	}
 	return err
 }
+
+func (p *MysqlSink) Flush(ctx context.Context) error {
+	return nil
+}

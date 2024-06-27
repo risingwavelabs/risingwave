@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,15 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ops::Deref;
+
 use bytes::{Buf, BufMut};
 use itertools::Itertools;
+use risingwave_common_estimate_size::EstimateSize;
 use serde::{Deserialize, Serialize};
 
 use super::iter_util::{ZipEqDebug, ZipEqFast};
 use crate::array::{ArrayImpl, DataChunk};
 use crate::row::{OwnedRow, Row};
 use crate::types::{
-    DataType, Date, Datum, Int256, ScalarImpl, Serial, Time, Timestamp, ToDatumRef, F32, F64,
+    DataType, Date, Datum, Int256, ScalarImpl, Serial, Time, Timestamp, Timestamptz, ToDatumRef,
+    F32, F64,
 };
 use crate::util::sort_util::{ColumnOrder, OrderType};
 
@@ -139,7 +143,7 @@ fn calculate_encoded_size_inner(
             DataType::Date => size_of::<Date>(),
             DataType::Time => size_of::<Time>(),
             DataType::Timestamp => size_of::<Timestamp>(),
-            DataType::Timestamptz => size_of::<i64>(),
+            DataType::Timestamptz => size_of::<Timestamptz>(),
             DataType::Boolean => size_of::<u8>(),
             // Interval is serialized as (i32, i32, i64)
             DataType::Interval => size_of::<(i32, i32, i64)>(),
@@ -151,8 +155,7 @@ fn calculate_encoded_size_inner(
             // TODO: need some test for this case (e.g. e2e test)
             DataType::List { .. } => deserializer.skip_bytes()?,
             DataType::Struct(t) => t
-                .fields
-                .iter()
+                .types()
                 .map(|field| {
                     // use default null tags inside composite type
                     calculate_encoded_size_inner(
@@ -181,12 +184,83 @@ fn calculate_encoded_size_inner(
     Ok(deserializer.position() - base_position)
 }
 
-pub fn encode_value(value: impl ToDatumRef, order: OrderType) -> memcomparable::Result<Vec<u8>> {
-    let mut serializer = memcomparable::Serializer::new(vec![]);
-    serialize_datum(value, order, &mut serializer)?;
-    Ok(serializer.into_inner())
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, EstimateSize)]
+pub struct MemcmpEncoded(Box<[u8]>);
+
+impl MemcmpEncoded {
+    pub fn as_inner(&self) -> &[u8] {
+        &self.0
+    }
+
+    pub fn into_inner(self) -> Box<[u8]> {
+        self.0
+    }
 }
 
+impl AsRef<[u8]> for MemcmpEncoded {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+impl Deref for MemcmpEncoded {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl IntoIterator for MemcmpEncoded {
+    type IntoIter = std::vec::IntoIter<Self::Item>;
+    type Item = u8;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_vec().into_iter()
+    }
+}
+
+impl FromIterator<u8> for MemcmpEncoded {
+    fn from_iter<T: IntoIterator<Item = u8>>(iter: T) -> Self {
+        Self(iter.into_iter().collect())
+    }
+}
+
+impl From<Vec<u8>> for MemcmpEncoded {
+    fn from(v: Vec<u8>) -> Self {
+        Self(v.into_boxed_slice())
+    }
+}
+
+impl From<Box<[u8]>> for MemcmpEncoded {
+    fn from(v: Box<[u8]>) -> Self {
+        Self(v)
+    }
+}
+
+impl From<MemcmpEncoded> for Vec<u8> {
+    fn from(v: MemcmpEncoded) -> Self {
+        v.0.into()
+    }
+}
+
+impl From<MemcmpEncoded> for Box<[u8]> {
+    fn from(v: MemcmpEncoded) -> Self {
+        v.0
+    }
+}
+
+/// Encode a datum into memcomparable format.
+pub fn encode_value(
+    value: impl ToDatumRef,
+    order: OrderType,
+) -> memcomparable::Result<MemcmpEncoded> {
+    let mut serializer = memcomparable::Serializer::new(vec![]);
+    serialize_datum(value, order, &mut serializer)?;
+    Ok(serializer.into_inner().into())
+}
+
+/// Decode a datum from memcomparable format.
 pub fn decode_value(
     ty: &DataType,
     encoded_value: &[u8],
@@ -196,7 +270,11 @@ pub fn decode_value(
     deserialize_datum(ty, order, &mut deserializer)
 }
 
-pub fn encode_array(array: &ArrayImpl, order: OrderType) -> memcomparable::Result<Vec<Vec<u8>>> {
+/// Encode an array into memcomparable format.
+pub fn encode_array(
+    array: &ArrayImpl,
+    order: OrderType,
+) -> memcomparable::Result<Vec<MemcmpEncoded>> {
     let mut data = Vec::with_capacity(array.len());
     for datum in array.iter() {
         data.push(encode_value(datum, order)?);
@@ -204,16 +282,14 @@ pub fn encode_array(array: &ArrayImpl, order: OrderType) -> memcomparable::Resul
     Ok(data)
 }
 
-/// This function is used to accelerate the comparison of tuples. It takes datachunk and
-/// user-defined order as input, yield encoded binary string with order preserved for each tuple in
-/// the datachunk.
+/// Encode a chunk into memcomparable format.
 pub fn encode_chunk(
     chunk: &DataChunk,
     column_orders: &[ColumnOrder],
-) -> memcomparable::Result<Vec<Vec<u8>>> {
+) -> memcomparable::Result<Vec<MemcmpEncoded>> {
     let encoded_columns: Vec<_> = column_orders
         .iter()
-        .map(|o| encode_array(chunk.column_at(o.column_index).array_ref(), o.order_type))
+        .map(|o| encode_array(chunk.column_at(o.column_index), o.order_type))
         .try_collect()?;
 
     let mut encoded_chunk = vec![vec![]; chunk.capacity()];
@@ -223,18 +299,22 @@ pub fn encode_chunk(
         }
     }
 
-    Ok(encoded_chunk)
+    Ok(encoded_chunk.into_iter().map(Into::into).collect())
 }
 
 /// Encode a row into memcomparable format.
-pub fn encode_row(row: impl Row, order_types: &[OrderType]) -> memcomparable::Result<Vec<u8>> {
+pub fn encode_row(
+    row: impl Row,
+    order_types: &[OrderType],
+) -> memcomparable::Result<MemcmpEncoded> {
     let mut serializer = memcomparable::Serializer::new(vec![]);
     row.iter()
         .zip_eq_debug(order_types)
         .try_for_each(|(datum, order)| serialize_datum(datum, *order, &mut serializer))?;
-    Ok(serializer.into_inner())
+    Ok(serializer.into_inner().into())
 }
 
+/// Decode a row from memcomparable format.
 pub fn decode_row(
     encoded_row: &[u8],
     data_types: &[DataType],
@@ -253,18 +333,16 @@ pub fn decode_row(
 mod tests {
     use std::ops::Neg;
 
-    use itertools::Itertools;
     use rand::thread_rng;
 
     use super::*;
-    use crate::array::{DataChunk, ListValue, StructValue};
-    use crate::row::{OwnedRow, RowExt};
-    use crate::types::{DataType, FloatExt, ScalarImpl, F32};
-    use crate::util::sort_util::{ColumnOrder, OrderType};
+    use crate::array::{ListValue, StructValue};
+    use crate::row::RowExt;
+    use crate::types::FloatExt;
 
     #[test]
     fn test_memcomparable() {
-        fn encode_num(num: Option<i32>, order_type: OrderType) -> Vec<u8> {
+        fn encode_num(num: Option<i32>, order_type: OrderType) -> MemcmpEncoded {
             encode_value(num.map(ScalarImpl::from), order_type).unwrap()
         }
 
@@ -349,14 +427,14 @@ mod tests {
     fn test_memcomparable_structs() {
         // NOTE: `NULL`s inside composite type values are always the largest.
 
-        let struct_none = None;
-        let struct_1 = Some(
+        let struct_none = Datum::None;
+        let struct_1 = Datum::Some(
             StructValue::new(vec![Some(ScalarImpl::from(1)), Some(ScalarImpl::from(2))]).into(),
         );
-        let struct_2 = Some(
+        let struct_2 = Datum::Some(
             StructValue::new(vec![Some(ScalarImpl::from(1)), Some(ScalarImpl::from(3))]).into(),
         );
-        let struct_3 = Some(StructValue::new(vec![Some(ScalarImpl::from(1)), None]).into());
+        let struct_3 = Datum::Some(StructValue::new(vec![Some(ScalarImpl::from(1)), None]).into());
 
         {
             // ASC NULLS FIRST (NULLS SMALLEST)
@@ -408,12 +486,10 @@ mod tests {
     fn test_memcomparable_lists() {
         // NOTE: `NULL`s inside composite type values are always the largest.
 
-        let list_none = None;
-        let list_1 =
-            Some(ListValue::new(vec![Some(ScalarImpl::from(1)), Some(ScalarImpl::from(2))]).into());
-        let list_2 =
-            Some(ListValue::new(vec![Some(ScalarImpl::from(1)), Some(ScalarImpl::from(3))]).into());
-        let list_3 = Some(ListValue::new(vec![Some(ScalarImpl::from(1)), None]).into());
+        let list_none = Datum::None;
+        let list_1 = Datum::Some(ListValue::from_iter([1, 2]).into());
+        let list_2 = Datum::Some(ListValue::from_iter([1, 3]).into());
+        let list_3 = Datum::Some(ListValue::from_iter([Some(1), None]).into());
 
         {
             // ASC NULLS FIRST (NULLS SMALLEST)
@@ -466,11 +542,11 @@ mod tests {
         use num_traits::*;
         use rand::seq::SliceRandom;
 
-        fn serialize(f: F32) -> Vec<u8> {
-            encode_value(&Some(ScalarImpl::from(f)), OrderType::default()).unwrap()
+        fn serialize(f: F32) -> MemcmpEncoded {
+            encode_value(Some(ScalarImpl::from(f)), OrderType::default()).unwrap()
         }
 
-        fn deserialize(data: Vec<u8>) -> F32 {
+        fn deserialize(data: MemcmpEncoded) -> F32 {
             decode_value(&DataType::Float32, &data, OrderType::default())
                 .unwrap()
                 .unwrap()
@@ -537,14 +613,51 @@ mod tests {
             OrderType::descending(),
         )
         .unwrap();
-        let concated_encoded_row1 = encoded_v10
-            .into_iter()
-            .chain(encoded_v11.into_iter())
-            .collect_vec();
+        let concated_encoded_row1 = encoded_v10.into_iter().chain(encoded_v11).collect();
         assert_eq!(encoded_row1, concated_encoded_row1);
 
         let encoded_row2 = encode_row(row2.project(&order_col_indices), &order_types).unwrap();
         assert!(encoded_row1 < encoded_row2);
+    }
+
+    // See also `row_value_encode_decode()` in `src/common/src/row/owned_row.rs`
+    #[test]
+    fn test_decode_row() {
+        let encoded: Vec<u8> = vec![
+            0, 128, 0, 0, 42, 255, 127, 255, 255, 255, 255, 255, 255, 213, 1, 0, 193, 186, 163,
+            215, 255, 254, 153, 144, 144, 144, 144, 144, 255, 255, 249, 0, 1, 98, 97, 97, 97, 97,
+            114, 0, 0, 6,
+        ];
+
+        let order_types = vec![
+            OrderType::ascending(),
+            OrderType::descending(),
+            OrderType::ascending(),
+            OrderType::ascending(),
+            OrderType::descending(),
+            OrderType::ascending(),
+        ];
+        let data_types = vec![
+            DataType::Int32,
+            DataType::Int64,
+            DataType::Timestamp,
+            DataType::Float32,
+            DataType::Varchar,
+            DataType::Bytea,
+        ];
+
+        let result = decode_row(&encoded, &data_types, &order_types).unwrap();
+        // println!("{:?}", &result);
+
+        let expected = OwnedRow::new(vec![
+            Some(ScalarImpl::Int32(42)),
+            Some(ScalarImpl::Int64(42)),
+            None,
+            Some(ScalarImpl::Float32(23.33.into())),
+            Some(ScalarImpl::Utf8("fooooo".into())),
+            Some(ScalarImpl::Bytea("baaaar".as_bytes().into())),
+        ]);
+        assert_eq!(&result, &expected);
     }
 
     #[test]

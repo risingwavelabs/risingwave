@@ -1,0 +1,136 @@
+- name: lateral join 1
+  sql: |
+    create table all_sales (salesperson_id int, customer_name varchar, amount int );
+    create table salesperson (id int, name varchar );
+    SELECT
+    salesperson.name,
+    max_sale.amount,
+    max_sale_customer.customer_name
+    FROM
+    salesperson,
+    -- calculate maximum size, cache it in transient derived table max_sale
+    LATERAL
+    (SELECT MAX(amount) AS amount
+    FROM all_sales
+    WHERE all_sales.salesperson_id = salesperson.id)
+    AS max_sale,
+    -- find customer, reusing cached maximum size
+    LATERAL
+    (SELECT customer_name
+    FROM all_sales
+    WHERE all_sales.salesperson_id = salesperson.id
+    AND all_sales.amount =
+    -- the cached maximum size
+    max_sale.amount)
+    AS max_sale_customer;
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+- name: lateral join 2
+  sql: |
+    create table all_sales (salesperson_id int, customer_name varchar, amount int );
+    create table salesperson (id int, name varchar );
+    SELECT
+    salesperson.name,
+    max_sale.amount,
+    max_sale.customer_name
+    FROM
+    salesperson,
+    -- find maximum size and customer at same time
+    LATERAL
+    (SELECT amount, customer_name
+    FROM all_sales
+    WHERE all_sales.salesperson_id = salesperson.id
+    ORDER BY amount DESC LIMIT 1)
+    AS max_sale;
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+- name: lateral join 2 (left join)
+  sql: |
+    create table all_sales (salesperson_id int, customer_name varchar, amount int );
+    create table salesperson (id int, name varchar );
+    SELECT
+    salesperson.name,
+    max_sale.amount,
+    max_sale.customer_name
+    FROM
+    salesperson LEFT JOIN
+    -- find maximum size and customer at same time
+    LATERAL
+    (SELECT amount, customer_name
+    FROM all_sales
+    WHERE all_sales.salesperson_id = salesperson.id
+    ORDER BY amount DESC LIMIT 1)
+    AS max_sale on true;
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+- name: lateral join 2 (right join) should throw an error
+  sql: |
+    create table all_sales (salesperson_id int, customer_name varchar, amount int );
+    create table salesperson (id int, name varchar );
+    SELECT
+    salesperson.name,
+    max_sale.amount,
+    max_sale.customer_name
+    FROM
+    salesperson RIGHT JOIN
+    -- find maximum size and customer at same time
+    LATERAL
+    (SELECT amount, customer_name
+    FROM all_sales
+    WHERE all_sales.salesperson_id = salesperson.id
+    ORDER BY amount DESC LIMIT 1)
+    AS max_sale on true;
+  expected_outputs:
+    - binder_error
+- name: implicit lateral subquery of correlated table function
+  sql: |
+    create table t(x int , arr int[]);
+    select * from t cross join unnest(arr);
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+- name: https://github.com/risingwavelabs/risingwave/issues/12298
+  sql: |
+    create table t1(c varchar, n varchar, id varchar, d varchar);
+    create table t2(c varchar, p varchar, id varchar, d varchar);
+    select array_agg(t1.n order by path_idx) from t1
+    join t2
+    on t1.c = 'abc'
+    and t2.c = 'abc'
+    cross join unnest((case when t2.p <> '' then (string_to_array(trim(t2.p, ','), ',') || t2.d) else ARRAY[t2.d] end)) WITH ORDINALITY AS path_cols(path_val, path_idx)
+    where path_val = t1.id;
+  expected_outputs:
+    - stream_plan
+- name: https://github.com/risingwavelabs/risingwave/issues/15337
+  sql: |
+    CREATE TABLE t1 (c1 varchar, c2 bigint,c3 numeric, c4 timestamp) APPEND ONLY;
+    CREATE TABLE t2 (c5 timestamptz, c6 varchar, c7 numeric, c8 numeric, c1 varchar);
+    SELECT o.*, b.v1,b.v2
+    FROM t2 o
+    LEFT JOIN LATERAL (
+    SELECT
+      sum(t.c2 * t.c3) filter ( WHERE (o.c7) * t.c3 <= (o.c7) * o.c8 ) AS v1,
+      sum(t.c2) filter ( WHERE (o.c7) * t.c3 <= (o.c7) * o.c8) AS v2
+      FROM t1 t
+      WHERE t.c1 = o.c1 AND t.c4 >= o.c5 AND t.c4 :: date = o.c5 :: date
+    ) AS b ON TRUE;
+  expected_outputs:
+    - stream_plan
+- name: https://github.com/risingwavelabs/risingwave/issues/17382
+  sql: |
+    CREATE TABLE r(ts TIMESTAMPTZ, src_id int, dev_id int);
+    SELECT e.ts AS e_ts, d.*
+    FROM (
+      SELECT '2024-06-20T19:01:00Z'::TIMESTAMPTZ ts, 1::INT AS src_id) e
+    JOIN LATERAL
+    (
+      SELECT DISTINCT ON(src_id, dev_id) *
+      FROM r
+      WHERE r.src_id = e.src_id AND r.ts <= e.ts
+      ORDER BY src_id, dev_id, ts DESC
+    )d on true;
+  expected_outputs:
+    - batch_plan

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use risingwave_common::buffer::Bitmap;
+use risingwave_common::util::sort_util::ColumnOrder;
 
 use super::*;
 use crate::common::table::state_table::StateTable;
@@ -34,16 +35,7 @@ pub async fn build_agg_state_storages_from_proto<S: StateStore>(
     let mut result = vec![];
     for agg_call_state in agg_call_states {
         let agg_state_store = match agg_call_state.get_inner().unwrap() {
-            agg_call_state::Inner::ResultValueState(..) => AggStateStorage::ResultValue,
-            agg_call_state::Inner::TableState(state) => {
-                let table = StateTable::from_table_catalog(
-                    state.get_table().unwrap(),
-                    store.clone(),
-                    vnodes.clone(),
-                )
-                .await;
-                AggStateStorage::Table { table }
-            }
+            agg_call_state::Inner::ValueState(..) => AggStateStorage::Value,
             agg_call_state::Inner::MaterializedInputState(state) => {
                 let table = StateTable::from_table_catalog(
                     state.get_table().unwrap(),
@@ -65,7 +57,16 @@ pub async fn build_agg_state_storages_from_proto<S: StateStore>(
                             .collect(),
                     ),
                 );
-                AggStateStorage::MaterializedInput { table, mapping }
+                let order_columns = state
+                    .order_columns
+                    .iter()
+                    .map(ColumnOrder::from_protobuf)
+                    .collect();
+                AggStateStorage::MaterializedInput {
+                    table,
+                    mapping,
+                    order_columns,
+                }
             }
         };
 

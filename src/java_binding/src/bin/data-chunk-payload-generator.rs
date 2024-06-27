@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::env;
 use std::io::Write;
 
 use prost::Message;
@@ -45,7 +46,13 @@ fn build_row(index: usize) -> OwnedRow {
 }
 
 fn main() {
-    let row_count = 30000;
+    let args: Vec<String> = env::args().collect();
+    let mut flag = false;
+    let mut row_count: usize = 30000;
+    if args.len() > 1 {
+        flag = true;
+        row_count = args[1].parse().unwrap();
+    }
     let data_types = vec![
         DataType::Int16,
         DataType::Int32,
@@ -65,7 +72,8 @@ fn main() {
             builder.append_one_row(build_row(i)).is_none(),
             "should not finish"
         );
-        if i % 2 == 0 {
+        // In unit test, it does not support delete operation
+        if flag || i % 2 == 0 {
             ops.push(Op::Insert);
         } else {
             ops.push(Op::Delete);

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,11 +13,11 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::{DropMode, ObjectName};
 
 use super::RwPgResponse;
 use crate::binder::Binder;
+use crate::error::{ErrorCode, Result};
 use crate::handler::HandlerArgs;
 
 pub async fn handle_drop_database(
@@ -46,10 +46,12 @@ pub async fn handle_drop_database(
                 // Unable to find this database. If `if_exists` is true,
                 // we can just return success.
                 return if if_exists {
-                    Ok(PgResponse::empty_result_with_notice(
-                        StatementType::DROP_DATABASE,
-                        format!("database \"{}\" does not exist, skipping", database_name),
-                    ))
+                    Ok(PgResponse::builder(StatementType::DROP_DATABASE)
+                        .notice(format!(
+                            "database \"{}\" does not exist, skipping",
+                            database_name
+                        ))
+                        .into())
                 } else {
                     Err(err.into())
                 };
@@ -57,11 +59,9 @@ pub async fn handle_drop_database(
         }
     };
 
-    if session.user_id() != database.owner() {
-        return Err(ErrorCode::PermissionDenied("Do not have the privilege".to_string()).into());
-    }
+    session.check_privilege_for_drop_alter_db_schema(&database)?;
 
-    let catalog_writer = session.env().catalog_writer();
+    let catalog_writer = session.catalog_writer()?;
     catalog_writer.drop_database(database.id()).await?;
     Ok(PgResponse::empty_result(StatementType::DROP_DATABASE))
 }

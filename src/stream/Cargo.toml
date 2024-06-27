@@ -19,44 +19,54 @@ anyhow = "1"
 async-recursion = "1"
 async-stream = "0.3"
 async-trait = "0.1"
-await-tree = "0.1.1"
+auto_enums = { workspace = true }
+await-tree = { workspace = true }
 bytes = "1"
-dyn-clone = "1"
-educe = "0.4"
+cfg-if = "1"
+delta_btree_map = { path = "../utils/delta_btree_map" }
+educe = "0.6"
 either = "1"
-enum-as-inner = "0.5"
-fixedbitset = { version = "0.4", features = ["std"] }
+enum-as-inner = "0.6"
+fail = "0.5"
+foyer = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
+governor = { version = "0.6", default-features = false, features = [
+    "std",
+    "dashmap",
+    "jitter",
+] }
 hytra = "0.1.2"
-iter-chunks = "0.1"
-itertools = "0.10"
+itertools = { workspace = true }
 local_stats_alloc = { path = "../utils/local_stats_alloc" }
-lru = { git = "https://github.com/risingwavelabs/lru-rs.git", rev = "cb2d7c7" }
+lru = { workspace = true }
 maplit = "1.0.2"
 memcomparable = "0.2"
-minitrace = "0.4"
-minstant = "0.1"
-multimap = "0.8"
-num-traits = "0.2"
-parking_lot = "0.12"
+multimap = "0.10"
+parking_lot = { workspace = true }
 pin-project = "1"
+prehash = "1"
 prometheus = { version = "0.13", features = ["process"] }
-prost = "0.11"
-rand = "0.8"
-risingwave_common = { path = "../common" }
-risingwave_common_proc_macro = { path = "../common/proc_macro" }
-risingwave_connector = { path = "../connector" }
-risingwave_expr = { path = "../expr" }
-risingwave_hummock_sdk = { path = "../storage/hummock_sdk" }
-risingwave_pb = { path = "../prost" }
-risingwave_rpc_client = { path = "../rpc_client" }
-risingwave_source = { path = "../source" }
-risingwave_storage = { path = "../storage" }
+prost = { workspace = true }
+rand = { workspace = true }
+risingwave_common = { workspace = true }
+risingwave_common_estimate_size = { workspace = true }
+risingwave_connector = { workspace = true }
+risingwave_dml = { workspace = true }
+risingwave_expr = { workspace = true }
+risingwave_hummock_sdk = { workspace = true }
+risingwave_pb = { workspace = true }
+risingwave_rpc_client = { workspace = true }
+risingwave_storage = { workspace = true }
+rw_futures_util = { workspace = true }
+serde = { version = "1.0", features = ["derive"] }
 serde_json = "1"
 smallvec = "1"
 static_assertions = "1"
+strum = "0.26"
+strum_macros = "0.26"
 thiserror = "1"
+thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
     "rt-multi-thread",
@@ -66,23 +76,34 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "signal",
     "fs",
 ] }
-tokio-metrics = "0.1.0"
+tokio-metrics = "0.3.0"
+tokio-retry = "0.3"
 tokio-stream = "0.1"
-tonic = { version = "0.2", package = "madsim-tonic" }
+tonic = { workspace = true }
 tracing = "0.1"
-
-[target.'cfg(enable_task_local_alloc)'.dependencies]
-task_stats_alloc = { path = "../utils/task_stats_alloc" }
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
 assert_matches = "1"
-criterion = { version = "0.4", features = ["async_tokio", "async"] }
-risingwave_hummock_test = { path = "../storage/hummock_test", features = ["test"] }
+criterion = { workspace = true, features = ["async_tokio", "async"] }
+expect-test = "1"
+risingwave_expr_impl = { workspace = true }
+risingwave_hummock_sdk = { workspace = true }
+risingwave_hummock_test = { path = "../storage/hummock_test", features = [
+    "test",
+] }
+serde_yaml = "0.9"
 tracing-test = "0.2"
 
 [[bench]]
 name = "stream_hash_agg"
 harness = false
+
+[[bench]]
+name = "bench_state_table"
+harness = false
+
+[lints]
+workspace = true

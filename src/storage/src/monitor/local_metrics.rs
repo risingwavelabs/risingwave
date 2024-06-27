@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,9 +19,10 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use prometheus::core::GenericLocalCounter;
-use prometheus::local::LocalHistogram;
+use prometheus::local::{LocalHistogram, LocalIntCounter};
 use risingwave_common::catalog::TableId;
+use risingwave_common::metrics::LabelGuardedLocalIntCounter;
+use risingwave_hummock_sdk::table_stats::TableStatsMap;
 
 use super::HummockStateStoreMetrics;
 use crate::monitor::CompactorMetrics;
@@ -34,6 +35,8 @@ pub struct StoreLocalStatistic {
     pub cache_data_block_total: u64,
     pub cache_meta_block_miss: u64,
     pub cache_meta_block_total: u64,
+    pub cache_data_prefetch_count: u64,
+    pub cache_data_prefetch_block_count: u64,
 
     // include multiple versions of one key.
     pub total_key_count: u64,
@@ -52,10 +55,20 @@ pub struct StoreLocalStatistic {
     pub sub_iter_count: u64,
     pub found_key: bool,
 
+    pub staging_imm_get_count: u64,
+    pub staging_sst_get_count: u64,
+    pub overlapping_get_count: u64,
+    pub non_overlapping_get_count: u64,
+
     #[cfg(all(debug_assertions, not(any(madsim, test, feature = "test"))))]
     reported: AtomicBool,
     #[cfg(all(debug_assertions, not(any(madsim, test, feature = "test"))))]
     added: AtomicBool,
+
+    /// The stats of key skipped by watermark for each table.
+    /// Used by `SkipWatermarkIterator`.
+    /// Generalize it in the future if there're other iterators that'll also drop keys.
+    pub skipped_by_watermark_table_stats: TableStatsMap,
 }
 
 impl StoreLocalStatistic {
@@ -73,11 +86,6 @@ impl StoreLocalStatistic {
         if other.added.fetch_or(true, Ordering::Relaxed) || other.reported.load(Ordering::Relaxed) {
             tracing::error!("double added\n{:#?}", other);
         }
-    }
-
-    pub fn apply_meta_fetch(&mut self, local_cache_meta_block_miss: u64) {
-        self.cache_meta_block_total += 1;
-        self.cache_meta_block_miss += local_cache_meta_block_miss;
     }
 
     fn report(&self, metrics: &mut LocalStoreMetrics) {
@@ -138,7 +146,7 @@ impl StoreLocalStatistic {
         }
     }
 
-    fn report_bloom_filter_metrics(&self, metrics: &mut BloomFilterLocalMetrics) {
+    fn report_bloom_filter_metrics(&self, metrics: &BloomFilterLocalMetrics) {
         if self.bloom_filter_check_counts == 0 {
             return;
         }
@@ -146,6 +154,9 @@ impl StoreLocalStatistic {
         metrics
             .bloom_filter_true_negative_counts
             .inc_by(self.bloom_filter_true_negative_counts);
+        metrics
+            .bloom_filter_check_counts
+            .inc_by(self.bloom_filter_check_counts);
         metrics.read_req_check_bloom_filter_counts.inc();
 
         if self.bloom_filter_check_counts > self.bloom_filter_true_negative_counts {
@@ -163,7 +174,7 @@ impl StoreLocalStatistic {
 
     pub fn flush_all() {
         LOCAL_METRICS.with_borrow_mut(|local_metrics| {
-            for (_, metrics) in local_metrics.iter_mut() {
+            for metrics in local_metrics.values_mut() {
                 if metrics.collect_count > 0 {
                     metrics.flush();
                     metrics.collect_count = 0;
@@ -183,6 +194,7 @@ impl StoreLocalStatistic {
             || self.cache_data_block_total != 0
             || self.cache_meta_block_miss != 0
             || self.cache_meta_block_total != 0
+            || self.cache_data_prefetch_count != 0
             || self.skip_multi_version_key_count != 0
             || self.skip_delete_key_count != 0
             || self.processed_key_count != 0
@@ -205,16 +217,18 @@ impl Drop for StoreLocalStatistic {
 }
 
 struct LocalStoreMetrics {
-    cache_data_block_total: GenericLocalCounter<prometheus::core::AtomicU64>,
-    cache_data_block_miss: GenericLocalCounter<prometheus::core::AtomicU64>,
-    cache_meta_block_total: GenericLocalCounter<prometheus::core::AtomicU64>,
-    cache_meta_block_miss: GenericLocalCounter<prometheus::core::AtomicU64>,
+    cache_data_block_total: LabelGuardedLocalIntCounter<2>,
+    cache_data_block_miss: LabelGuardedLocalIntCounter<2>,
+    cache_meta_block_total: LabelGuardedLocalIntCounter<2>,
+    cache_meta_block_miss: LabelGuardedLocalIntCounter<2>,
+    cache_data_prefetch_count: LabelGuardedLocalIntCounter<2>,
+    cache_data_prefetch_block_count: LabelGuardedLocalIntCounter<2>,
     remote_io_time: LocalHistogram,
-    processed_key_count: GenericLocalCounter<prometheus::core::AtomicU64>,
-    skip_multi_version_key_count: GenericLocalCounter<prometheus::core::AtomicU64>,
-    skip_delete_key_count: GenericLocalCounter<prometheus::core::AtomicU64>,
-    total_key_count: GenericLocalCounter<prometheus::core::AtomicU64>,
-    get_shared_buffer_hit_counts: GenericLocalCounter<prometheus::core::AtomicU64>,
+    processed_key_count: LabelGuardedLocalIntCounter<2>,
+    skip_multi_version_key_count: LabelGuardedLocalIntCounter<2>,
+    skip_delete_key_count: LabelGuardedLocalIntCounter<2>,
+    total_key_count: LabelGuardedLocalIntCounter<2>,
+    get_shared_buffer_hit_counts: LocalIntCounter,
     staging_imm_iter_count: LocalHistogram,
     staging_sst_iter_count: LocalHistogram,
     overlapping_iter_count: LocalHistogram,
@@ -225,6 +239,11 @@ struct LocalStoreMetrics {
     get_filter_metrics: BloomFilterLocalMetrics,
     may_exist_filter_metrics: BloomFilterLocalMetrics,
     collect_count: usize,
+
+    staging_imm_get_count: LocalHistogram,
+    staging_sst_get_count: LocalHistogram,
+    overlapping_get_count: LocalHistogram,
+    non_overlapping_get_count: LocalHistogram,
 }
 
 const FLUSH_LOCAL_METRICS_TIMES: usize = 32;
@@ -244,6 +263,14 @@ impl LocalStoreMetrics {
         let cache_meta_block_total = metrics
             .sst_store_block_request_counts
             .with_label_values(&[table_id_label, "meta_total"])
+            .local();
+        let cache_data_prefetch_count = metrics
+            .sst_store_block_request_counts
+            .with_label_values(&[table_id_label, "prefetch_count"])
+            .local();
+        let cache_data_prefetch_block_count = metrics
+            .sst_store_block_request_counts
+            .with_label_values(&[table_id_label, "prefetch_data_count"])
             .local();
 
         let cache_meta_block_miss = metrics
@@ -309,11 +336,31 @@ impl LocalStoreMetrics {
         let iter_filter_metrics = BloomFilterLocalMetrics::new(metrics, table_id_label, "iter");
         let may_exist_filter_metrics =
             BloomFilterLocalMetrics::new(metrics, table_id_label, "may_exist");
+
+        let staging_imm_get_count = metrics
+            .iter_merge_sstable_counts
+            .with_label_values(&[table_id_label, "staging-imm-get"])
+            .local();
+        let staging_sst_get_count = metrics
+            .iter_merge_sstable_counts
+            .with_label_values(&[table_id_label, "staging-sst-get"])
+            .local();
+        let overlapping_get_count = metrics
+            .iter_merge_sstable_counts
+            .with_label_values(&[table_id_label, "committed-overlapping-get"])
+            .local();
+        let non_overlapping_get_count = metrics
+            .iter_merge_sstable_counts
+            .with_label_values(&[table_id_label, "committed-non-overlapping-get"])
+            .local();
+
         Self {
             cache_data_block_total,
             cache_data_block_miss,
             cache_meta_block_total,
             cache_meta_block_miss,
+            cache_data_prefetch_count,
+            cache_data_prefetch_block_count,
             remote_io_time,
             processed_key_count,
             skip_multi_version_key_count,
@@ -330,6 +377,10 @@ impl LocalStoreMetrics {
             iter_filter_metrics,
             may_exist_filter_metrics,
             collect_count: 0,
+            staging_imm_get_count,
+            staging_sst_get_count,
+            overlapping_get_count,
+            non_overlapping_get_count,
         }
     }
 
@@ -374,7 +425,11 @@ add_local_metrics_histogram!(
     overlapping_iter_count,
     non_overlapping_iter_count,
     sub_iter_count,
-    may_exist_check_sstable_count
+    may_exist_check_sstable_count,
+    staging_imm_get_count,
+    staging_sst_get_count,
+    overlapping_get_count,
+    non_overlapping_get_count
 );
 
 macro_rules! add_local_metrics_count {
@@ -408,6 +463,8 @@ add_local_metrics_count!(
     cache_data_block_miss,
     cache_meta_block_total,
     cache_meta_block_miss,
+    cache_data_prefetch_count,
+    cache_data_prefetch_block_count,
     skip_multi_version_key_count,
     skip_delete_key_count,
     get_shared_buffer_hit_counts,
@@ -418,7 +475,7 @@ add_local_metrics_count!(
 macro_rules! define_bloom_filter_metrics {
     ($($x:ident),*) => (
         struct BloomFilterLocalMetrics {
-            $($x: GenericLocalCounter<prometheus::core::AtomicU64>,)*
+            $($x: LabelGuardedLocalIntCounter<2>,)*
         }
 
         impl BloomFilterLocalMetrics {
@@ -440,6 +497,7 @@ macro_rules! define_bloom_filter_metrics {
 
 define_bloom_filter_metrics!(
     read_req_check_bloom_filter_counts,
+    bloom_filter_check_counts,
     bloom_filter_true_negative_counts,
     read_req_positive_but_non_exist_counts,
     read_req_bloom_filter_positive_counts
@@ -474,7 +532,7 @@ impl Drop for GetLocalMetricsGuard {
                 });
             self.local_stats.report(table_metrics);
             self.local_stats
-                .report_bloom_filter_metrics(&mut table_metrics.get_filter_metrics);
+                .report_bloom_filter_metrics(&table_metrics.get_filter_metrics);
         });
     }
 }
@@ -512,7 +570,7 @@ impl Drop for IterLocalMetricsGuard {
                 });
             self.local_stats.report(table_metrics);
             self.local_stats
-                .report_bloom_filter_metrics(&mut table_metrics.iter_filter_metrics);
+                .report_bloom_filter_metrics(&table_metrics.iter_filter_metrics);
         });
     }
 }
@@ -546,7 +604,7 @@ impl Drop for MayExistLocalMetricsGuard {
                 });
             self.local_stats.report(table_metrics);
             self.local_stats
-                .report_bloom_filter_metrics(&mut table_metrics.may_exist_filter_metrics);
+                .report_bloom_filter_metrics(&table_metrics.may_exist_filter_metrics);
         });
     }
 }

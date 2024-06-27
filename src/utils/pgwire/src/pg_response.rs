@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,11 +20,13 @@ use risingwave_sqlparser::ast::Statement;
 
 use crate::error::PsqlError;
 use crate::pg_field_descriptor::PgFieldDescriptor;
+use crate::pg_protocol::ParameterStatus;
 use crate::pg_server::BoxedError;
 use crate::types::Row;
 
 pub type RowSet = Vec<Row>;
 pub type RowSetResult = Result<RowSet, BoxedError>;
+
 pub trait ValuesStream = Stream<Item = RowSetResult> + Unpin + Send;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -41,36 +43,51 @@ pub enum StatementType {
     FETCH,
     COPY,
     EXPLAIN,
+    CLOSE_CURSOR,
     CREATE_TABLE,
     CREATE_MATERIALIZED_VIEW,
     CREATE_VIEW,
     CREATE_SOURCE,
     CREATE_SINK,
+    CREATE_SUBSCRIPTION,
     CREATE_DATABASE,
     CREATE_SCHEMA,
     CREATE_USER,
     CREATE_INDEX,
+    CREATE_AGGREGATE,
     CREATE_FUNCTION,
     CREATE_CONNECTION,
+    CREATE_SECRET,
+    COMMENT,
+    DECLARE_CURSOR,
     DESCRIBE,
     GRANT_PRIVILEGE,
+    DISCARD,
     DROP_TABLE,
     DROP_MATERIALIZED_VIEW,
     DROP_VIEW,
     DROP_INDEX,
     DROP_FUNCTION,
+    DROP_AGGREGATE,
     DROP_SOURCE,
     DROP_SINK,
+    DROP_SUBSCRIPTION,
     DROP_SCHEMA,
     DROP_DATABASE,
     DROP_USER,
     DROP_CONNECTION,
+    DROP_SECRET,
+    ALTER_DATABASE,
+    ALTER_SCHEMA,
     ALTER_INDEX,
     ALTER_VIEW,
     ALTER_TABLE,
     ALTER_MATERIALIZED_VIEW,
     ALTER_SINK,
+    ALTER_SUBSCRIPTION,
     ALTER_SOURCE,
+    ALTER_FUNCTION,
+    ALTER_CONNECTION,
     ALTER_SYSTEM,
     REVOKE_PRIVILEGE,
     // Introduce ORDER_BY statement type cuz Calcite unvalidated AST has SqlKind.ORDER_BY. Note
@@ -90,6 +107,11 @@ pub enum StatementType {
     COMMIT,
     ROLLBACK,
     SET_TRANSACTION,
+    CANCEL_COMMAND,
+    FETCH_CURSOR,
+    WAIT,
+    KILL,
+    RECOVER,
 }
 
 impl std::fmt::Display for StatementType {
@@ -99,23 +121,99 @@ impl std::fmt::Display for StatementType {
 }
 
 pub trait Callback = Future<Output = Result<(), BoxedError>> + Send;
+
 pub type BoxedCallback = Pin<Box<dyn Callback>>;
 
 pub struct PgResponse<VS> {
     stmt_type: StatementType,
-    // row count of effected row. Used for INSERT, UPDATE, DELETE, COPY, and other statements that
+    // row count of affected row. Used for INSERT, UPDATE, DELETE, COPY, and other statements that
     // don't return rows.
     row_cnt: Option<i32>,
     notices: Vec<String>,
     values_stream: Option<VS>,
     callback: Option<BoxedCallback>,
     row_desc: Vec<PgFieldDescriptor>,
+    status: ParameterStatus,
 }
 
-impl<VS> std::fmt::Debug for PgResponse<VS>
-where
-    VS: ValuesStream,
-{
+pub struct PgResponseBuilder<VS> {
+    stmt_type: StatementType,
+    // row count of affected row. Used for INSERT, UPDATE, DELETE, COPY, and other statements that
+    // don't return rows.
+    row_cnt: Option<i32>,
+    notices: Vec<String>,
+    values_stream: Option<VS>,
+    callback: Option<BoxedCallback>,
+    row_desc: Vec<PgFieldDescriptor>,
+    status: ParameterStatus,
+}
+
+impl<VS> From<PgResponseBuilder<VS>> for PgResponse<VS> {
+    fn from(builder: PgResponseBuilder<VS>) -> Self {
+        Self {
+            stmt_type: builder.stmt_type,
+            row_cnt: builder.row_cnt,
+            notices: builder.notices,
+            values_stream: builder.values_stream,
+            callback: builder.callback,
+            row_desc: builder.row_desc,
+            status: builder.status,
+        }
+    }
+}
+
+impl<VS> PgResponseBuilder<VS> {
+    pub fn empty(stmt_type: StatementType) -> Self {
+        let row_cnt = if stmt_type.is_query() { None } else { Some(0) };
+        Self {
+            stmt_type,
+            row_cnt,
+            notices: vec![],
+            values_stream: None,
+            callback: None,
+            row_desc: vec![],
+            status: Default::default(),
+        }
+    }
+
+    pub fn row_cnt(self, row_cnt: i32) -> Self {
+        Self {
+            row_cnt: Some(row_cnt),
+            ..self
+        }
+    }
+
+    pub fn row_cnt_opt(self, row_cnt: Option<i32>) -> Self {
+        Self { row_cnt, ..self }
+    }
+
+    pub fn values(self, values_stream: VS, row_desc: Vec<PgFieldDescriptor>) -> Self {
+        Self {
+            values_stream: Some(values_stream),
+            row_desc,
+            ..self
+        }
+    }
+
+    pub fn callback(self, callback: impl Callback + 'static) -> Self {
+        Self {
+            callback: Some(callback.boxed()),
+            ..self
+        }
+    }
+
+    pub fn notice(self, notice: impl ToString) -> Self {
+        let mut notices = self.notices;
+        notices.push(notice.to_string());
+        Self { notices, ..self }
+    }
+
+    pub fn status(self, status: ParameterStatus) -> Self {
+        Self { status, ..self }
+    }
+}
+
+impl<VS> std::fmt::Debug for PgResponse<VS> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PgResponse")
             .field("stmt_type", &self.stmt_type)
@@ -170,17 +268,18 @@ impl StatementType {
             Statement::AlterTable { .. } => Ok(StatementType::ALTER_TABLE),
             Statement::AlterSystem { .. } => Ok(StatementType::ALTER_SYSTEM),
             Statement::DropFunction { .. } => Ok(StatementType::DROP_FUNCTION),
+            Statement::Discard(..) => Ok(StatementType::DISCARD),
             Statement::SetVariable { .. } => Ok(StatementType::SET_VARIABLE),
             Statement::ShowVariable { .. } => Ok(StatementType::SHOW_VARIABLE),
             Statement::StartTransaction { .. } => Ok(StatementType::START_TRANSACTION),
-            Statement::BEGIN { .. } => Ok(StatementType::BEGIN),
+            Statement::Begin { .. } => Ok(StatementType::BEGIN),
             Statement::Abort => Ok(StatementType::ABORT),
             Statement::Commit { .. } => Ok(StatementType::COMMIT),
             Statement::Rollback { .. } => Ok(StatementType::ROLLBACK),
             Statement::Grant { .. } => Ok(StatementType::GRANT_PRIVILEGE),
             Statement::Revoke { .. } => Ok(StatementType::REVOKE_PRIVILEGE),
             Statement::Describe { .. } => Ok(StatementType::DESCRIBE),
-            Statement::ShowCreateObject { .. } | Statement::ShowObjects(_) => {
+            Statement::ShowCreateObject { .. } | Statement::ShowObjects { .. } => {
                 Ok(StatementType::SHOW_COMMAND)
             }
             Statement::Drop(stmt) => match stmt.object_type {
@@ -198,9 +297,17 @@ impl StatementType {
                 risingwave_sqlparser::ast::ObjectType::Connection => {
                     Ok(StatementType::DROP_CONNECTION)
                 }
+                risingwave_sqlparser::ast::ObjectType::Secret => Ok(StatementType::DROP_SECRET),
+                risingwave_sqlparser::ast::ObjectType::Subscription => {
+                    Ok(StatementType::DROP_SUBSCRIPTION)
+                }
             },
             Statement::Explain { .. } => Ok(StatementType::EXPLAIN),
+            Statement::DeclareCursor { .. } => Ok(StatementType::DECLARE_CURSOR),
+            Statement::FetchCursor { .. } => Ok(StatementType::FETCH_CURSOR),
+            Statement::CloseCursor { .. } => Ok(StatementType::CLOSE_CURSOR),
             Statement::Flush => Ok(StatementType::FLUSH),
+            Statement::Wait => Ok(StatementType::WAIT),
             _ => Err("unsupported statement type".to_string()),
         }
     }
@@ -244,6 +351,8 @@ impl StatementType {
                 | StatementType::INSERT_RETURNING
                 | StatementType::DELETE_RETURNING
                 | StatementType::UPDATE_RETURNING
+                | StatementType::CANCEL_COMMAND
+                | StatementType::FETCH_CURSOR
         )
     }
 
@@ -261,100 +370,27 @@ impl<VS> PgResponse<VS>
 where
     VS: ValuesStream,
 {
+    pub fn builder(stmt_type: StatementType) -> PgResponseBuilder<VS> {
+        PgResponseBuilder::empty(stmt_type)
+    }
+
     pub fn empty_result(stmt_type: StatementType) -> Self {
-        let row_cnt = if stmt_type.is_query() { None } else { Some(0) };
-        Self {
-            stmt_type,
-            row_cnt,
-            values_stream: None,
-            row_desc: vec![],
-            notices: vec![],
-            callback: None,
-        }
+        PgResponseBuilder::empty(stmt_type).into()
     }
 
-    pub fn empty_result_with_notice(stmt_type: StatementType, notice: String) -> Self {
-        let row_cnt = if stmt_type.is_query() { None } else { Some(0) };
-        Self {
-            stmt_type,
-            row_cnt,
-            values_stream: None,
-            row_desc: vec![],
-            notices: vec![notice],
-            callback: None,
-        }
-    }
-
-    pub fn empty_result_with_notices(stmt_type: StatementType, notices: Vec<String>) -> Self {
-        let row_cnt = if stmt_type.is_query() { None } else { Some(0) };
-        Self {
-            stmt_type,
-            row_cnt,
-            values_stream: None,
-            row_desc: vec![],
-            notices,
-            callback: None,
-        }
-    }
-
-    pub fn new_for_stream(
-        stmt_type: StatementType,
-        row_cnt: Option<i32>,
-        values_stream: VS,
-        row_desc: Vec<PgFieldDescriptor>,
-    ) -> Self {
-        Self::new_for_stream_inner(stmt_type, row_cnt, values_stream, row_desc, vec![], None)
-    }
-
-    pub fn new_for_stream_extra(
-        stmt_type: StatementType,
-        row_cnt: Option<i32>,
-        values_stream: VS,
-        row_desc: Vec<PgFieldDescriptor>,
-        notices: Vec<String>,
-        callback: impl Callback + 'static,
-    ) -> Self {
-        Self::new_for_stream_inner(
-            stmt_type,
-            row_cnt,
-            values_stream,
-            row_desc,
-            notices,
-            Some(callback.boxed()),
-        )
-    }
-
-    fn new_for_stream_inner(
-        stmt_type: StatementType,
-        row_cnt: Option<i32>,
-        values_stream: VS,
-        row_desc: Vec<PgFieldDescriptor>,
-        notices: Vec<String>,
-        callback: Option<BoxedCallback>,
-    ) -> Self {
-        assert!(
-            stmt_type.is_query() ^ row_cnt.is_some(),
-            "should specify row count for command and not for query: {stmt_type}"
-        );
-        Self {
-            stmt_type,
-            row_cnt,
-            values_stream: Some(values_stream),
-            row_desc,
-            notices,
-            callback,
-        }
-    }
-
-    pub fn get_stmt_type(&self) -> StatementType {
+    pub fn stmt_type(&self) -> StatementType {
         self.stmt_type
     }
 
-    pub fn get_notices(&self) -> &[String] {
+    pub fn notices(&self) -> &[String] {
         &self.notices
     }
 
-    pub fn get_effected_rows_cnt(&self) -> Option<i32> {
+    pub fn status(&self) -> &ParameterStatus {
+        &self.status
+    }
+
+    pub fn affected_rows_cnt(&self) -> Option<i32> {
         self.row_cnt
     }
 
@@ -366,7 +402,7 @@ where
         self.stmt_type == StatementType::EMPTY
     }
 
-    pub fn get_row_desc(&self) -> Vec<PgFieldDescriptor> {
+    pub fn row_desc(&self) -> Vec<PgFieldDescriptor> {
         self.row_desc.clone()
     }
 
@@ -385,7 +421,7 @@ where
         }
 
         if let Some(callback) = self.callback.take() {
-            callback.await.map_err(PsqlError::ExecuteError)?;
+            callback.await.map_err(PsqlError::SimpleQueryError)?;
         }
         Ok(())
     }

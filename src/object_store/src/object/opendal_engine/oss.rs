@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,14 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
+use opendal::layers::LoggingLayer;
 use opendal::services::Oss;
 use opendal::Operator;
+use risingwave_common::config::ObjectStoreConfig;
 
 use super::{EngineType, OpendalObjectStore};
+use crate::object::object_metrics::ObjectStoreMetrics;
 use crate::object::ObjectResult;
+
 impl OpendalObjectStore {
     /// create opendal oss engine.
-    pub fn new_oss_engine(bucket: String, root: String) -> ObjectResult<Self> {
+    pub fn new_oss_engine(
+        bucket: String,
+        root: String,
+        config: Arc<ObjectStoreConfig>,
+        metrics: Arc<ObjectStoreMetrics>,
+    ) -> ObjectResult<Self> {
         // Create oss backend builder.
         let mut builder = Oss::default();
 
@@ -38,10 +49,15 @@ impl OpendalObjectStore {
         builder.endpoint(&endpoint);
         builder.access_key_id(&access_key_id);
         builder.access_key_secret(&access_key_secret);
-        let op: Operator = Operator::new(builder)?.finish();
+
+        let op: Operator = Operator::new(builder)?
+            .layer(LoggingLayer::default())
+            .finish();
         Ok(Self {
             op,
             engine_type: EngineType::Oss,
+            config,
+            metrics,
         })
     }
 }

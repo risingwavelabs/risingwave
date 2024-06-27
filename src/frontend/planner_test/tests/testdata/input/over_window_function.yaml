@@ -1,0 +1,643 @@
+# Window function call position restriction
+- id: window function call in expression
+  sql: |
+    create table t(x int, y int);
+    select x + y, y, 2, 1+row_number() over(PARTITION BY y + y ORDER BY x-1), sum(x) over(partition by x * x ORDER BY x-1) from t;
+  expected_outputs:
+    - logical_plan
+- id: window function call in ORDER BY
+  sql: |
+    create table t(x int);
+    select * from t order by (row_number() over(PARTITION BY x ORDER BY x));
+  expected_outputs:
+    - logical_plan
+- id: window function call in GROUP BY
+  sql: |
+    create table t(x int);
+    select x from t group by (row_number(x) over());
+  expected_outputs:
+    - binder_error
+- id: window function call in HAVING
+  sql: |
+    create table t(x int);
+    select x from t having (row_number(x) over() > 1);
+  expected_outputs:
+    - binder_error
+- id: window function call in WHERE
+  sql: |
+    create table t(x int);
+    select x from t where (row_number(x) over() > 1);
+  expected_outputs:
+    - binder_error
+- id: window function call in FILTER
+  sql: |
+    create table t(x int);
+    select sum(x) filter (where row_number() over () > 1) from t;
+  expected_outputs:
+    - binder_error
+
+# Lag/Lead
+- id: lag without over clause
+  sql: |
+    create table t(x int);
+    select lag(x) from t;
+  expected_outputs:
+    - binder_error
+- id: lag with empty over clause
+  sql: |
+    create table t(x int);
+    select lag(x) over() from t;
+  expected_outputs:
+    - logical_plan
+    - stream_error
+    - batch_error
+- id: lead with offset argument and empty over clause
+  sql: |
+    create table t(x int);
+    select lead(x, 2) over() from t;
+  expected_outputs:
+    - logical_plan
+    - stream_error
+    - batch_error
+- id: lead with non-const offset argument and empty over clause
+  sql: |
+    create table t(x int);
+    select lead(x, x + 1) over() from t;
+  expected_outputs:
+    - binder_error
+- id: lag with over clause
+  sql: |
+    create table t(x int, y int);
+    select x, y, lag(x) over(PARTITION BY y ORDER BY x) from t;
+  expected_outputs:
+    - logical_plan
+    - stream_plan
+    - batch_plan
+- id: lag with over clause, ignoring frame definition
+  sql: |
+    create table t(x int, y int);
+    select x, y, lag(x) over(PARTITION BY y ORDER BY x ROWS BETWEEN CURRENT ROW AND 2 FOLLOWING) from t;
+  expected_outputs:
+    - logical_plan
+    - stream_plan
+    - batch_plan
+
+# Aggregate
+- id: aggregate with empty over clause
+  sql: |
+    create table t(x int);
+    select sum(x) over() from t;
+    -- should be optimized to Agg+Join
+  expected_outputs:
+    - logical_plan
+    - stream_error
+    - batch_plan
+- id: aggregate with over clause, without ORDER BY and frame definition
+  sql: |
+    create table t(x int, y int, z int, w int);
+    select x, y, sum(x) over(partition by y), max(x) over(partition by y), min(w) over(partition by y) from t;
+    -- should be optimized to Agg+Join
+  expected_outputs:
+    - logical_plan
+    - stream_plan
+    - batch_plan
+- id: aggregate with over clause, rows frame definition with implicit current row, without ORDER BY
+  sql: |
+    create table t(x int, y int);
+    select x, y, min(x) over(PARTITION BY y ROWS 10 PRECEDING) from t;
+  expected_outputs:
+    - logical_plan
+    - stream_plan
+    - batch_plan
+- id: aggregate with over clause, rows frame definition with between, without ORDER BY
+  sql: |
+    create table t(x int, y int);
+    select x, y, min(x) over(PARTITION BY y ROWS BETWEEN 1 PRECEDING AND 2 FOLLOWING) from t;
+  expected_outputs:
+    - logical_plan
+    - stream_plan
+    - batch_plan
+- id: aggregate with over clause, invalid frame definition case 1
+  sql: |
+    create table t(x int, y int);
+    select x, y, min(x) over(PARTITION BY y ROWS UNBOUNDED FOLLOWING) from t;
+  expected_outputs:
+    - binder_error
+- id: aggregate with over clause, invalid frame definition case 2
+  sql: |
+    create table t(x int, y int);
+    select x, y, min(x) over(PARTITION BY y ROWS BETWEEN 1 FOLLOWING AND 2 PRECEDING) from t;
+  expected_outputs:
+    - binder_error
+- id: aggregate with over clause, range frame definition with implicit current row
+  sql: |
+    create table t(x int, y int);
+    select x, y, max(x) over(PARTITION BY y ORDER BY x RANGE 100 PRECEDING) from t;
+  expected_outputs:
+    - logical_plan
+    - stream_plan
+    - batch_plan
+- id: aggregate with over clause, range frame definition with between
+  sql: |
+    create table t(x int, y int);
+    select x, y, max(x) over(PARTITION BY y ORDER BY x RANGE BETWEEN 100 PRECEDING and UNBOUNDED FOLLOWING) from t;
+  expected_outputs:
+    - logical_plan
+    - stream_plan
+    - batch_plan
+- id: aggregate with over clause, unbounded range, with ORDER BY
+  sql: |
+    create table t(x int, y int);
+    select x, y, first_value(x) over(PARTITION BY y ORDER BY x DESC) from t;
+  expected_outputs:
+    - logical_plan
+    - stream_plan
+    - batch_plan
+- id: more aggregate functions
+  sql: |
+    create table t(x int, y int, z int, w int);
+    select * from (
+        SELECT x, y, z, stddev_pop(x - y) OVER (PARTITION BY z order by x) as res0, stddev_samp(x) OVER (PARTITION BY z order by x) as res1 FROM t
+    )
+    WHERE z > 0 and y > 0 and x > 0 and res0 <= 3.0 and res1 > 1.0;
+  expected_outputs:
+    - logical_plan
+    - stream_plan
+    - batch_plan
+- id: aggregate with expression in func arguments and over clause
+  sql: |
+    create table t(x int, y int, z int, w int);
+    select * from (
+        SELECT x, y, z, avg(z * z) OVER (PARTITION BY y + 1 order by abs(w)) as res FROM t
+    )
+    WHERE z > 0 and y > 0 and x > 0 and res <= 3.0;
+  expected_outputs:
+    - logical_plan
+    - stream_plan
+    - optimized_logical_plan_for_batch
+    - batch_plan
+
+# RowNumber/Rank/...
+- id: row_number with empty over clause
+  sql: |
+    create table t(x int);
+    select row_number() over() from t;
+  expected_outputs:
+    - planner_error
+- id: multiple rank function calls
+  sql: |
+    create table t(x int);
+    select row_number() over(PARTITION BY x ORDER BY x), rank() over(PARTITION BY x ORDER BY x), dense_rank() over (PARTITION BY x ORDER BY x) from t;
+  expected_outputs:
+    - logical_plan
+    - optimized_logical_plan_for_stream
+    - stream_plan
+    - batch_plan
+- id: row_number with valid over clause
+  sql: |
+    create table t(x int, y int);
+    select row_number() over (PARTITION BY x ORDER BY y) from t;
+  expected_outputs:
+    - logical_plan
+    - stream_plan
+    - batch_plan
+
+# TopN pattern
+- id: TopN by row_number with rank output
+  sql: |
+    create table t(x int);
+    select * from
+      (select *, row_number() over(PARTITION BY x ORDER BY x) rank from t)
+    where rank < 3;
+  expected_outputs:
+    - logical_plan
+    - stream_plan
+    - batch_plan
+- id: TopN by row_number without rank output, 1
+  sql: |
+    create table t(x int, y int);
+    select x, y from
+      (select *, row_number() over(PARTITION BY y ORDER BY x) rank from t)
+    where rank <= 3;
+  expected_outputs:
+    - logical_plan
+    - stream_plan
+    - optimized_logical_plan_for_batch
+    - batch_plan
+- id: TopN by row_number without rank output, 2
+  sql: |
+    create table t(x int, y int);
+    select x, y from
+      (select *, row_number() over(PARTITION BY y ORDER BY x) rank from t)
+    where rank < 3 AND x > y;
+  expected_outputs:
+    - logical_plan
+    - stream_plan
+    - optimized_logical_plan_for_batch
+    - batch_plan
+- id: TopN by rank without rank output
+  sql: |
+    create table t(x int, y int);
+    select x, y from
+      (select *, rank() over(PARTITION BY y ORDER BY x) rank from t)
+    where rank <= 3;
+  expected_outputs:
+    - logical_plan
+    - stream_plan
+    - optimized_logical_plan_for_batch
+    - batch_plan
+- id: TopN by rank, with offset
+  sql: |
+    create table t(x int, y int);
+    select x, y from
+      (select *, rank() over(PARTITION BY y ORDER BY x) rank from t)
+    where rank <= 3 AND rank > 1;
+    -- OFFSET for RANK() is not yet supported
+  expected_outputs:
+    - logical_plan
+    - stream_plan
+    - batch_plan
+# >>> TopN by row_number, with offset
+- sql: |
+    create table t(x int, y int);
+    select x, y from
+      (select *, row_number() over(PARTITION BY y ORDER BY x) rank from t)
+    where rank > 3;
+  expected_outputs:
+    - optimized_logical_plan_for_batch
+- sql: |
+    create table t(x int, y int);
+    select x, y from
+      (select *, row_number() over(PARTITION BY y ORDER BY x) rank from t)
+    where rank >= 3;
+  expected_outputs:
+    - optimized_logical_plan_for_batch
+- sql: |
+    create table t(x int, y int);
+    select x, y from
+      (select *, row_number() over(PARTITION BY y ORDER BY x) rank from t)
+    where 3 <= rank AND rank <= 5;
+  expected_outputs:
+    - optimized_logical_plan_for_batch
+- sql: |
+    create table t(x int, y int);
+    select x, y from
+      (select *, row_number() over(PARTITION BY y ORDER BY x) rank from t)
+    where rank BETWEEN 3 AND 5;
+  expected_outputs:
+    - optimized_logical_plan_for_batch
+- sql: |
+    create table t(x int, y int);
+    select x, y from
+      (select *, row_number() over(PARTITION BY y ORDER BY x) rank from t)
+    where 3 < rank AND rank <= 5;
+  expected_outputs:
+    - optimized_logical_plan_for_batch
+- sql: |
+    create table t(x int, y int);
+    select x, y from
+      (select *, row_number() over(PARTITION BY y ORDER BY x) rank from t)
+    where 3 <= rank AND rank < 5;
+  expected_outputs:
+    - optimized_logical_plan_for_batch
+- sql: |
+    create table t(x int, y int);
+    select x, y from
+      (select *, row_number() over(PARTITION BY y ORDER BY x) rank from t)
+    where 3 < rank AND rank < 5;
+  expected_outputs:
+    - optimized_logical_plan_for_batch
+- sql: |
+    create table t(x int, y int);
+    select x, y from
+      (select *, row_number() over(PARTITION BY y ORDER BY x) rank from t)
+    where 3 < rank AND rank < 6 AND rank >= 4 AND rank < 5;
+  expected_outputs:
+    - optimized_logical_plan_for_batch
+- sql: |
+    create table t(x int, y int);
+    select x, y from
+      (select *, row_number() over(PARTITION BY y ORDER BY x) rank from t)
+    where 3 < rank AND rank = 4 AND rank <= 5;
+  expected_outputs:
+    - optimized_logical_plan_for_batch
+- sql: |
+    create table t(x int, y int);
+    select x, y from
+      (select *, row_number() over(PARTITION BY y ORDER BY x) rank from t)
+    where 3 < rank AND rank = 6 AND rank <= 5;
+  # TODO(rc): seems this can be optimized
+  expected_outputs:
+    - logical_plan
+    - stream_plan
+    - batch_plan
+# <<< TopN by row_number, with offset
+- id: Deduplication (Top1) by row_number
+  sql: |
+    create table t(x int, y int);
+    select x, y from
+      (select *, row_number() over(PARTITION BY x ORDER BY y) rank from t)
+    where rank = 1
+  expected_outputs:
+    - logical_plan
+    - stream_plan
+    - optimized_logical_plan_for_batch
+    - batch_plan
+- id: TopN with intersected partition key and order key
+  sql: |
+    create table t (x int, y int, z int);
+    SELECT z FROM (
+      SELECT *, row_number() over (partition by x,y order by x) as rank FROM t
+    )
+    WHERE rank <=1;
+  expected_outputs:
+    - logical_plan
+    - stream_plan
+    - optimized_logical_plan_for_batch
+    - batch_plan
+    - stream_dist_plan
+- id: TopN among multiple window function calls
+  sql: |
+    create table t (x int, y int, z int);
+    select r1
+    from (
+      select
+        *,
+        row_number() over (partition by x order by y) r1,
+        row_number() over (partition by x, y order by z) r2,
+        rank() over (partition by x, y order by z) r3
+      from t
+    ) Q
+    where Q.r1 < 10 and Q.r2 < 10 and Q.r3 < 10;
+  expected_outputs:
+    - logical_plan
+    - optimized_logical_plan_for_stream
+    - stream_plan
+    - batch_plan
+- id: TopN among multiple window function calls, some not TopN
+  sql: |
+    create table t (x int, y int, z int);
+    select r2, r3
+    from (
+      select
+        *,
+        row_number() over (partition by x order by y) r1,
+        row_number() over (partition by x, y order by z) r2,
+        rank() over (partition by x, y order by z) r3
+      from t
+    ) Q
+    where Q.r1 < 10;
+  expected_outputs:
+    - logical_plan
+    - optimized_logical_plan_for_stream
+    - stream_plan
+    - batch_plan
+
+# TopN on nexmark schema
+- id: create_bid
+  sql: |
+    /*
+    The following example is adapted from
+    https://nightlies.apache.org/flink/flink-docs-release-1.16/docs/dev/table/sql/queries/window-topn/
+
+    Licensed to the Apache Software Foundation (ASF) under one
+    or more contributor license agreements.  See the NOTICE file
+    distributed with this work for additional information
+    regarding copyright ownership.  The ASF licenses this file
+    to you under the Apache License, Version 2.0 (the
+    "License"); you may not use this file except in compliance
+    with the License.  You may obtain a copy of the License at
+
+      http://www.apache.org/licenses/LICENSE-2.0
+
+    Unless required by applicable law or agreed to in writing,
+    software distributed under the License is distributed on an
+    "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+    KIND, either express or implied.  See the License for the
+    specific language governing permissions and limitations
+    under the License.
+    */
+    CREATE TABLE bid (
+      "bidtime" TIMESTAMP,
+      "price" BIGINT,
+      "item" VARCHAR,
+      "supplier_id" VARCHAR
+    );
+  expected_outputs: []
+- before:
+    - create_bid
+  sql: |
+    -- Window Top-N which follows after Window Aggregation
+    -- Top 3 suppliers who have the highest sales for every tumbling 10 minutes window.
+    SELECT window_start, window_end, supplier_id, price, cnt
+    FROM (
+      SELECT *, ROW_NUMBER() OVER (PARTITION BY window_start, window_end ORDER BY price DESC) as rownum
+      FROM (
+        SELECT window_start, window_end, supplier_id, SUM(price) as price, COUNT(*) as cnt
+        FROM
+          TUMBLE(Bid, bidtime, INTERVAL '10' MINUTE)
+        GROUP BY window_start, window_end, supplier_id
+      )
+    ) WHERE rownum <= 3;
+  expected_outputs:
+    - stream_plan
+- before:
+    - create_bid
+  sql: |
+    -- Window Top-N follows directly after Window TVF
+    -- Top 3 items which have the highest price for every tumbling 10 minutes window.
+    SELECT window_start, window_end, supplier_id, price
+    FROM (
+      SELECT *, ROW_NUMBER() OVER (PARTITION BY window_start, window_end ORDER BY price DESC) as rownum
+        FROM
+          TUMBLE(Bid, bidtime, INTERVAL '10' MINUTE)
+    ) WHERE rownum <= 3;
+  expected_outputs:
+    - stream_plan
+
+# With CTE
+- id: cte1
+  sql: |
+    create table t (x int, y int, z int);
+    with cte as (
+      SELECT x, y, z FROM (
+        SELECT *, row_number() OVER (PARTITION BY x ORDER BY y) AS rank FROM t
+      ) WHERE rank <= 3
+    ) select z from cte;
+  expected_outputs:
+    - logical_plan
+    - stream_plan
+    - batch_plan
+- id: cte2
+  sql: |
+    create table t (x int, y int, z int);
+    with cte as (
+      select x, z from (
+          select x, y, z, row_number() over (partition by x order by y) as rank from t
+      ) t
+      where rank = 1
+    )
+    select t1.x as t1x, t2.x as t2x, t1.z as t1z, t2.y as t2y, t2.z as t2z from cte t1
+    inner join t t2
+    on t1.x = t2.x;
+  expected_outputs:
+    - logical_plan
+    - stream_plan
+    - batch_plan
+
+# Window function call grouping
+- id: split calls with different ORDER BY or PARTITION BY
+  sql: |
+    create table t(x int, y int, z int);
+    select *, rank() over(PARTITION BY x ORDER BY y) w0, sum(x) over(PARTITION BY z ORDER BY y) w1, row_number() over(PARTITION BY x ORDER BY y) w2, rank() over(PARTITION BY y ORDER BY x) w3 from t;
+  expected_outputs:
+    - logical_plan
+    - optimized_logical_plan_for_stream
+    - stream_plan
+    - optimized_logical_plan_for_batch
+    - batch_plan
+
+# With filter
+- sql: |
+    create table t (id int, cat varchar, rule varchar, at timestamptz);
+    select * from (select cat, rule, at, lag(rule) over (partition by cat order by at) as prev_rule from t) as with_prev
+    where rule = 'B' and cat is not null and at = '2023-11-23T12:00:42Z'::timestamptz;
+  expected_outputs:
+    - optimized_logical_plan_for_stream
+    - optimized_logical_plan_for_batch
+- sql: |
+    create table t (id int, cat varchar, rule varchar, at timestamptz);
+    select cat, rule, at, lag(rule) over (partition by cat order by at) as prev_rule from t
+    where rule = 'B' and cat is not null and at = '2023-11-23T12:00:42Z'::timestamptz;
+  expected_outputs:
+    - optimized_logical_plan_for_stream
+    - optimized_logical_plan_for_batch
+
+# Odd frames
+- sql: |
+    create table t (a int, b int, c int);
+    select
+        count(*) over (partition by 1::int order by b rows between 1 preceding and 10 preceding)
+    from t;
+  expected_outputs:
+    - optimized_logical_plan_for_stream
+    - optimized_logical_plan_for_batch
+- sql: |
+    create table t (a int, b int, c int);
+    select
+        count(*) over (partition by 1::int order by b rows between 1 following and current row)
+    from t;
+  expected_outputs:
+    - binder_error
+- sql: |
+    create table t (a int, b int, c int);
+    select
+        count(*) over (partition by 1::int order by b rows between 1 following and 1 preceding)
+    from t;
+  expected_outputs:
+    - binder_error
+- sql: |
+    create table t (a int, b int, c int);
+    select
+        count(*) over (partition by 1::int order by b rows between current row and 1 preceding)
+    from t;
+  expected_outputs:
+    - binder_error
+- sql: |
+    create table t (a int, b int, c int);
+    select
+        count(*) over (partition by 1::int order by b rows between 10 following and 1 following)
+    from t;
+  expected_outputs:
+    - optimized_logical_plan_for_stream
+    - optimized_logical_plan_for_batch
+
+# Range frames
+- sql: |
+    create table t (i int, bi bigint, d decimal, f float, da date, t time, ts timestamp, tstz timestamptz, itv interval);
+    select
+        count(*) over (partition by 1::int order by i range 1 preceding) as col1,
+        count(*) over (partition by 1::int order by bi range 1 preceding) as col2,
+        count(*) over (partition by 1::int order by d range 1.5 preceding) as col3,
+        count(*) over (partition by 1::int order by f range 1.5 preceding) as col4,
+        -- count(*) over (partition by 1::int order by da range '1 day' preceding) as col5, -- `date` not supported yet
+        -- count(*) over (partition by 1::int order by t range '1 min' preceding) as col6, -- `time` not supported yet
+        count(*) over (partition by 1::int order by ts range '1 day 1 hour' preceding) as col7,
+        count(*) over (partition by 1::int order by tstz range '1 min' preceding) as col8
+    from t;
+  expected_outputs:
+    - logical_plan
+    - optimized_logical_plan_for_stream
+    - stream_plan
+    - batch_plan
+- sql: |
+    create table t (i int, bi bigint, d decimal, f float, da date, t time, ts timestamp, tstz timestamptz, itv interval);
+    select
+        count(*) over (partition by 1::int order by da range '1 day' preceding) -- `date` not supported yet
+    from t;
+  expected_outputs:
+    - binder_error
+- sql: |
+    create table t (i int, bi bigint, d decimal, f float, da date, t time, ts timestamp, tstz timestamptz, itv interval);
+    select
+        count(*) over (partition by 1::int order by t range '1 min' preceding) -- `time` not supported yet
+    from t;
+  expected_outputs:
+    - binder_error
+- sql: |
+    create table t (i int, bi bigint, d decimal, f float, da date, t time, ts timestamp, tstz timestamptz, itv interval);
+    select
+        count(*) over (partition by 1::int order by tstz range '1 day 1 hour' preceding) -- `timestamptz` +/- 'x month x day' not supported yet
+    from t;
+  expected_outputs:
+    - binder_error
+
+# Session frames
+- sql: |
+    create table t (i int, bi bigint, d decimal, f float, da date, t time, ts timestamp, tstz timestamptz, itv interval);
+    select
+        first_value(i) over (partition by bi order by i session with gap 10) as col1,
+        first_value(bi) over (partition by i order by bi session with gap 10) as col2,
+        first_value(i) over (partition by bi order by d session with gap 1.5) as col3,
+        first_value(i) over (partition by bi order by f session with gap 1.5) as col4,
+        -- first_value(i) over (partition by bi order by da session with gap '1 day') as col5, -- `date` not supported yet
+        -- first_value(i) over (partition by bi order by t session with gap '1 min') as col6, -- `time` not supported yet
+        first_value(i) over (partition by bi order by ts session with gap '1 day 1 hour') as col7,
+        first_value(i) over (partition by bi order by tstz session with gap '1 min') as col8
+    from t;
+  expected_outputs:
+    - logical_plan
+    - optimized_logical_plan_for_stream
+    - stream_error # not supported yet
+    - batch_plan
+- sql: |
+    create table t (i int, bi bigint, ts timestamp, watermark for ts as ts - interval '1 minute') append only;
+    select
+        first_value(i) over (partition by bi order by ts session with gap '10 minutes') as window_start,
+        last_value(i) over (partition by bi order by ts session with gap '10 minutes') as window_end
+    from t;
+  expected_outputs:
+    - logical_plan
+    - eowc_stream_plan
+    - batch_plan
+- sql: |
+    create table t (i int, bi bigint, d decimal, f float, da date, t time, ts timestamp, tstz timestamptz, itv interval);
+    select
+        count(*) over (partition by 1::int order by da session with gap '1 day') -- `date` not supported yet
+    from t;
+  expected_outputs:
+    - binder_error
+- sql: |
+    create table t (i int, bi bigint, d decimal, f float, da date, t time, ts timestamp, tstz timestamptz, itv interval);
+    select
+        count(*) over (partition by 1::int order by t session with gap '1 min') -- `time` not supported yet
+    from t;
+  expected_outputs:
+    - binder_error
+- sql: |
+    create table t (i int, bi bigint, d decimal, f float, da date, t time, ts timestamp, tstz timestamptz, itv interval);
+    select
+        count(*) over (partition by 1::int order by tstz session with gap '1 day 1 hour') -- `timestamptz` +/- 'x month x day' not supported yet
+    from t;
+  expected_outputs:
+    - binder_error

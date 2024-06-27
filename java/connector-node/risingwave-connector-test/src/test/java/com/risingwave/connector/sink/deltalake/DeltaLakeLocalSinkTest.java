@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@ import static org.apache.spark.sql.types.DataTypes.*;
 
 import com.google.common.collect.Iterators;
 import com.risingwave.connector.DeltaLakeSink;
-import com.risingwave.connector.api.TableSchema;
+import com.risingwave.connector.TestUtils;
 import com.risingwave.connector.api.sink.ArraySinkRow;
 import io.delta.standalone.DeltaLog;
 import java.io.IOException;
@@ -43,7 +43,7 @@ public class DeltaLakeLocalSinkTest {
         DeltaLakeSinkFactoryTest.createMockTable(location);
         Configuration conf = new Configuration();
         DeltaLog log = DeltaLog.forTable(conf, location);
-        return new DeltaLakeSink(TableSchema.getMockTableSchema(), conf, log);
+        return new DeltaLakeSink(TestUtils.getMockTableSchema(), conf, log);
     }
 
     private void validateTableWithSpark(String location, List<Row> rows, StructType schema) {

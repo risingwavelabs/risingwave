@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 
 /// If <https://github.com/tikv/jemallocator/issues/22> is resolved, we may inline this
 #[macro_export]
-macro_rules! enable_jemalloc_on_unix {
+macro_rules! enable_jemalloc {
     () => {
         #[cfg(unix)]
         #[global_allocator]
@@ -23,9 +23,8 @@ macro_rules! enable_jemalloc_on_unix {
 }
 
 #[macro_export]
-macro_rules! enable_task_local_jemalloc_on_unix {
+macro_rules! enable_task_local_jemalloc {
     () => {
-        #[cfg(unix)]
         #[global_allocator]
         static GLOBAL: task_stats_alloc::TaskLocalAlloc<tikv_jemallocator::Jemalloc> =
             task_stats_alloc::TaskLocalAlloc(tikv_jemallocator::Jemalloc);

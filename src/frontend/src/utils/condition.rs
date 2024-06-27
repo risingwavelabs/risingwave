@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 use std::fmt::{self, Debug, Display};
 use std::ops::Bound;
 use std::rc::Rc;
@@ -21,14 +21,14 @@ use std::sync::LazyLock;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{Schema, TableDesc};
-use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, DefaultOrd, ScalarImpl};
 use risingwave_common::util::scan_range::{is_full_range, ScanRange};
 
+use crate::error::Result;
 use crate::expr::{
-    collect_input_refs, factorization_expr, fold_boolean_constant, push_down_not, to_conjunctions,
-    try_get_bool_constant, ExprDisplay, ExprImpl, ExprMutator, ExprRewriter, ExprType, ExprVisitor,
-    FunctionCall, InequalityInputPair, InputRef,
+    collect_input_refs, column_self_eq_eliminate, factorization_expr, fold_boolean_constant,
+    push_down_not, to_conjunctions, try_get_bool_constant, ExprDisplay, ExprImpl, ExprMutator,
+    ExprRewriter, ExprType, ExprVisitor, FunctionCall, InequalityInputPair, InputRef,
 };
 use crate::utils::condition::cast_compare::{ResultForCmp, ResultForEq};
 
@@ -170,7 +170,7 @@ impl Condition {
         self,
         input_col_nums: &[usize],
         only_eq: bool,
-    ) -> (HashMap<(usize, usize), Self>, Self) {
+    ) -> (BTreeMap<(usize, usize), Self>, Self) {
         let mut bitmaps = Vec::with_capacity(input_col_nums.len());
         let mut cols_seen = 0;
         for cols in input_col_nums {
@@ -178,7 +178,7 @@ impl Condition {
             cols_seen += cols;
         }
 
-        let mut pairwise_conditions = HashMap::with_capacity(self.conjunctions.len());
+        let mut pairwise_conditions = BTreeMap::new();
         let mut non_eq_join = vec![];
 
         for expr in self.conjunctions {
@@ -403,9 +403,13 @@ impl Condition {
                 ));
             }
 
-            let Some((lower_bound_conjunctions,upper_bound_conjunctions,eq_conds,part_of_other_conds)) = Self::analyze_group(
-                group,
-            )? else {
+            let Some((
+                lower_bound_conjunctions,
+                upper_bound_conjunctions,
+                eq_conds,
+                part_of_other_conds,
+            )) = Self::analyze_group(group)?
+            else {
                 return Ok(false_cond());
             };
             other_conds.extend(part_of_other_conds.into_iter());
@@ -561,9 +565,9 @@ impl Condition {
                 };
 
                 let Some(new_cond) = new_expr.fold_const()? else {
-                        // column = NULL, the result is always NULL.
-                        return Ok(None);
-                    };
+                    // column = NULL, the result is always NULL.
+                    return Ok(None);
+                };
                 if Self::mutual_exclusive_with_eq_conds(&new_cond, &eq_conds) {
                     return Ok(None);
                 }
@@ -583,8 +587,8 @@ impl Condition {
                         .unwrap();
                     let value = const_expr.fold_const()?;
                     let Some(value) = value else {
-                            continue;
-                        };
+                        continue;
+                    };
                     scalars.insert(Some(value));
                 }
                 if scalars.is_empty() {
@@ -618,32 +622,16 @@ impl Condition {
                         op,
                     ) {
                         Ok(ResultForCmp::Success(expr)) => expr,
-                        Ok(ResultForCmp::OutUpperBound) => {
-                            if op == ExprType::GreaterThan || op == ExprType::GreaterThanOrEqual {
-                                return Ok(None);
-                            }
-                            // op == < and <= means result is always true, don't need any extra
-                            // work.
-                            continue;
-                        }
-                        Ok(ResultForCmp::OutLowerBound) => {
-                            if op == ExprType::LessThan || op == ExprType::LessThanOrEqual {
-                                return Ok(None);
-                            }
-                            // op == > and >= means result is always true, don't need any extra
-                            // work.
-                            continue;
-                        }
-                        Err(_) => {
+                        _ => {
                             other_conds.push(expr);
                             continue;
                         }
                     }
                 };
                 let Some(value) = new_expr.fold_const()? else {
-                        // column compare with NULL, the result is always  NULL.
-                        return Ok(None);
-                    };
+                    // column compare with NULL, the result is always  NULL.
+                    return Ok(None);
+                };
                 match op {
                     ExprType::LessThan => {
                         upper_bound_conjunctions.push(Bound::Excluded(value));
@@ -840,12 +828,10 @@ impl Condition {
         .simplify()
     }
 
-    pub fn visit_expr<R: Default, V: ExprVisitor<R> + ?Sized>(&self, visitor: &mut V) -> R {
+    pub fn visit_expr<V: ExprVisitor + ?Sized>(&self, visitor: &mut V) {
         self.conjunctions
             .iter()
-            .map(|expr| visitor.visit_expr(expr))
-            .reduce(V::merge)
-            .unwrap_or_default()
+            .for_each(|expr| visitor.visit_expr(expr));
     }
 
     pub fn visit_expr_mut(&mut self, mutator: &mut (impl ExprMutator + ?Sized)) {
@@ -863,6 +849,7 @@ impl Condition {
             .into_iter()
             .map(push_down_not)
             .map(fold_boolean_constant)
+            .map(column_self_eq_eliminate)
             .flat_map(to_conjunctions)
             .collect();
         let mut res: Vec<ExprImpl> = Vec::new();
@@ -885,7 +872,9 @@ impl Condition {
         }
         // remove all constant boolean `true`
         res.retain(|expr| {
-            if let Some(v) = try_get_bool_constant(expr) && v {
+            if let Some(v) = try_get_bool_constant(expr)
+                && v
+            {
                 false
             } else {
                 true
@@ -1029,10 +1018,8 @@ mod cast_compare {
 #[cfg(test)]
 mod tests {
     use rand::Rng;
-    use risingwave_common::types::DataType;
 
     use super::*;
-    use crate::expr::{FunctionCall, InputRef};
 
     #[test]
     fn test_split() {
@@ -1042,8 +1029,9 @@ mod tests {
         let ty = DataType::Int32;
 
         let mut rng = rand::thread_rng();
+
         let left: ExprImpl = FunctionCall::new(
-            ExprType::Equal,
+            ExprType::LessThanOrEqual,
             vec![
                 InputRef::new(rng.gen_range(0..left_col_num), ty.clone()).into(),
                 InputRef::new(rng.gen_range(0..left_col_num), ty.clone()).into(),
@@ -1051,6 +1039,7 @@ mod tests {
         )
         .unwrap()
         .into();
+
         let right: ExprImpl = FunctionCall::new(
             ExprType::LessThan,
             vec![
@@ -1068,6 +1057,7 @@ mod tests {
         )
         .unwrap()
         .into();
+
         let other: ExprImpl = FunctionCall::new(
             ExprType::GreaterThan,
             vec![
@@ -1085,8 +1075,72 @@ mod tests {
         let cond = Condition::with_expr(other.clone())
             .and(Condition::with_expr(right.clone()))
             .and(Condition::with_expr(left.clone()));
+
         let res = cond.split(left_col_num, right_col_num);
+
         assert_eq!(res.0.conjunctions, vec![left]);
+        assert_eq!(res.1.conjunctions, vec![right]);
+        assert_eq!(res.2.conjunctions, vec![other]);
+    }
+
+    #[test]
+    fn test_self_eq_eliminate() {
+        let left_col_num = 3;
+        let right_col_num = 2;
+
+        let ty = DataType::Int32;
+
+        let mut rng = rand::thread_rng();
+
+        let x: ExprImpl = InputRef::new(rng.gen_range(0..left_col_num), ty.clone()).into();
+
+        let left: ExprImpl = FunctionCall::new(ExprType::Equal, vec![x.clone(), x.clone()])
+            .unwrap()
+            .into();
+
+        let right: ExprImpl = FunctionCall::new(
+            ExprType::LessThan,
+            vec![
+                InputRef::new(
+                    rng.gen_range(left_col_num..left_col_num + right_col_num),
+                    ty.clone(),
+                )
+                .into(),
+                InputRef::new(
+                    rng.gen_range(left_col_num..left_col_num + right_col_num),
+                    ty.clone(),
+                )
+                .into(),
+            ],
+        )
+        .unwrap()
+        .into();
+
+        let other: ExprImpl = FunctionCall::new(
+            ExprType::GreaterThan,
+            vec![
+                InputRef::new(rng.gen_range(0..left_col_num), ty.clone()).into(),
+                InputRef::new(
+                    rng.gen_range(left_col_num..left_col_num + right_col_num),
+                    ty,
+                )
+                .into(),
+            ],
+        )
+        .unwrap()
+        .into();
+
+        let cond = Condition::with_expr(other.clone())
+            .and(Condition::with_expr(right.clone()))
+            .and(Condition::with_expr(left.clone()));
+
+        let res = cond.split(left_col_num, right_col_num);
+
+        let left_res = FunctionCall::new(ExprType::IsNotNull, vec![x])
+            .unwrap()
+            .into();
+
+        assert_eq!(res.0.conjunctions, vec![left_res]);
         assert_eq!(res.1.conjunctions, vec![right]);
         assert_eq!(res.2.conjunctions, vec![other]);
     }

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,18 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use fixedbitset::FixedBitSet;
+use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{ColumnDesc, INITIAL_TABLE_VERSION_ID};
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
+use super::stream::prelude::*;
+use super::utils::{childless_record, Distill};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamDml {
-    pub base: PlanBase,
+    pub base: PlanBase<Stream>,
     input: PlanRef,
     column_descs: Vec<ColumnDesc>,
 }
@@ -33,7 +35,7 @@ impl StreamDml {
         let base = PlanBase::new_stream(
             input.ctx(),
             input.schema().clone(),
-            input.logical_pk().to_vec(),
+            input.stream_key().map(|v| v.to_vec()),
             input.functional_dependency().clone(),
             input.distribution().clone(),
             append_only,
@@ -48,21 +50,23 @@ impl StreamDml {
         }
     }
 
-    fn column_names(&self) -> Vec<String> {
+    fn column_names(&self) -> Vec<&str> {
         self.column_descs
             .iter()
-            .map(|column_desc| column_desc.name.clone())
+            .map(|column_desc| column_desc.name.as_str())
             .collect()
     }
 }
 
-impl fmt::Display for StreamDml {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "StreamDml {{ columns: {} }}",
-            format_args!("[{}]", &self.column_names().join(", "))
-        )
+impl Distill for StreamDml {
+    fn distill<'a>(&self) -> XmlNode<'a> {
+        let col = self
+            .column_names()
+            .iter()
+            .map(|n| Pretty::from(n.to_string()))
+            .collect();
+        let col = Pretty::Array(col);
+        childless_record("StreamDml", vec![("columns", col)])
     }
 }
 
@@ -91,3 +95,5 @@ impl StreamNode for StreamDml {
 }
 
 impl ExprRewritable for StreamDml {}
+
+impl ExprVisitable for StreamDml {}

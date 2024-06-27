@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,14 +14,15 @@
 
 use std::collections::BTreeMap;
 
-use risingwave_common::catalog::ColumnCatalog;
+use risingwave_common::catalog::{ColumnCatalog, SourceVersionId};
+use risingwave_common::util::epoch::Epoch;
+use risingwave_connector::WithPropertiesExt;
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::{PbSource, StreamSourceInfo, WatermarkDesc};
 
-use super::{ColumnId, ConnectionId, OwnedByUserCatalog, SourceId};
+use super::{ColumnId, ConnectionId, DatabaseId, OwnedByUserCatalog, SchemaId, SourceId};
 use crate::catalog::TableId;
 use crate::user::UserId;
-use crate::WithOptions;
 
 /// This struct `SourceCatalog` is used in frontend.
 /// Compared with `PbSource`, it only maintains information used during optimization.
@@ -35,17 +36,59 @@ pub struct SourceCatalog {
     pub owner: UserId,
     pub info: StreamSourceInfo,
     pub row_id_index: Option<usize>,
-    pub properties: BTreeMap<String, String>,
+    pub with_properties: BTreeMap<String, String>,
     pub watermark_descs: Vec<WatermarkDesc>,
     pub associated_table_id: Option<TableId>,
     pub definition: String,
     pub connection_id: Option<ConnectionId>,
+    pub created_at_epoch: Option<Epoch>,
+    pub initialized_at_epoch: Option<Epoch>,
+    pub version: SourceVersionId,
+    pub created_at_cluster_version: Option<String>,
+    pub initialized_at_cluster_version: Option<String>,
 }
 
 impl SourceCatalog {
     /// Returns the SQL statement that can be used to create this source.
     pub fn create_sql(&self) -> String {
         self.definition.clone()
+    }
+
+    pub fn to_prost(&self, schema_id: SchemaId, database_id: DatabaseId) -> PbSource {
+        PbSource {
+            id: self.id,
+            schema_id,
+            database_id,
+            name: self.name.clone(),
+            row_id_index: self.row_id_index.map(|idx| idx as _),
+            columns: self.columns.iter().map(|c| c.to_protobuf()).collect(),
+            pk_column_ids: self.pk_col_ids.iter().map(Into::into).collect(),
+            with_properties: self.with_properties.clone().into_iter().collect(),
+            owner: self.owner,
+            info: Some(self.info.clone()),
+            watermark_descs: self.watermark_descs.clone(),
+            definition: self.definition.clone(),
+            connection_id: self.connection_id,
+            initialized_at_epoch: self.initialized_at_epoch.map(|x| x.0),
+            created_at_epoch: self.created_at_epoch.map(|x| x.0),
+            optional_associated_table_id: self
+                .associated_table_id
+                .map(|id| OptionalAssociatedTableId::AssociatedTableId(id.table_id)),
+            version: self.version,
+            created_at_cluster_version: self.created_at_cluster_version.clone(),
+            initialized_at_cluster_version: self.initialized_at_cluster_version.clone(),
+        }
+    }
+
+    /// Get a reference to the source catalog's version.
+    pub fn version(&self) -> SourceVersionId {
+        self.version
+    }
+
+    pub fn connector_name(&self) -> String {
+        self.with_properties
+            .get_connector()
+            .expect("connector name is missing")
     }
 }
 
@@ -60,7 +103,7 @@ impl From<&PbSource> for SourceCatalog {
             .into_iter()
             .map(Into::into)
             .collect();
-        let with_options = WithOptions::new(prost.properties.clone());
+        let with_properties = prost.with_properties.clone().into_iter().collect();
         let columns = prost_columns.into_iter().map(ColumnCatalog::from).collect();
         let row_id_index = prost.row_id_index.map(|idx| idx as _);
 
@@ -74,6 +117,7 @@ impl From<&PbSource> for SourceCatalog {
             .map(|id| match id {
                 OptionalAssociatedTableId::AssociatedTableId(id) => id,
             });
+        let version = prost.version;
 
         let connection_id = prost.connection_id;
 
@@ -86,11 +130,16 @@ impl From<&PbSource> for SourceCatalog {
             owner,
             info: prost.info.clone().unwrap(),
             row_id_index,
-            properties: with_options.into_inner(),
+            with_properties,
             watermark_descs,
             associated_table_id: associated_table_id.map(|x| x.into()),
             definition: prost.definition.clone(),
             connection_id,
+            created_at_epoch: prost.created_at_epoch.map(Epoch::from),
+            initialized_at_epoch: prost.initialized_at_epoch.map(Epoch::from),
+            version,
+            created_at_cluster_version: prost.created_at_cluster_version.clone(),
+            initialized_at_cluster_version: prost.initialized_at_cluster_version.clone(),
         }
     }
 }

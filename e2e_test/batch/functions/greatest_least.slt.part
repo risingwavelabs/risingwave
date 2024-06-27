@@ -1,0 +1,73 @@
+statement ok
+create table t(id int, v1 int2, v2 int4, v3 int8);
+
+statement ok
+insert into t values (1, 1, 2, 3), (2, 2, NULL, 5), (3, NULL, NULL, 8), (4, NULL, NULL, NULL);
+
+statement ok
+flush;
+
+statement error
+select greatest(v1, '123');
+
+statement error
+select greatest();
+
+statement error
+select least();
+
+query I
+select greatest(1, 2, 3);
+----
+3
+
+query I
+select greatest(2);
+----
+2
+
+query I
+select least(1, 2, 3);
+----
+1
+
+query I
+select least(2);
+----
+2
+
+query I
+select greatest(v1, v2, v3) from t order by id;
+----
+3
+5
+8
+NULL
+
+query I
+select least(v1, v2, v3) from t order by id;
+----
+1
+2
+8
+NULL
+
+query I
+select greatest(7, v3) from t order by id;
+----
+7
+7
+8
+7
+
+query I
+select least(NULL, v1, 2) from t order by id;
+----
+1
+2
+2
+2
+
+
+statement ok
+drop table t;

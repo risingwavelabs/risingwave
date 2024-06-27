@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,11 +16,11 @@ use std::env;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 
 use super::{ExecuteContext, Task};
 use crate::util::{get_program_args, get_program_env_cmd, get_program_name};
-use crate::{add_meta_node, ComputeNodeConfig};
+use crate::{add_meta_node, add_tempo_endpoint, ComputeNodeConfig};
 
 pub struct ComputeNodeService {
     config: ComputeNodeConfig,
@@ -34,15 +34,11 @@ impl ComputeNodeService {
     fn compute_node(&self) -> Result<Command> {
         let prefix_bin = env::var("PREFIX_BIN")?;
 
-        if let Ok(x) = env::var("ENABLE_ALL_IN_ONE") && x == "true" {
-            Ok(Command::new(
-                Path::new(&prefix_bin)
-                    .join("risingwave")
-                    .join("compute-node"),
-            ))
-        } else {
-            Ok(Command::new(Path::new(&prefix_bin).join("compute-node")))
-        }
+        Ok(Command::new(
+            Path::new(&prefix_bin)
+                .join("risingwave")
+                .join("compute-node"),
+        ))
     }
 
     /// Apply command args according to config
@@ -56,35 +52,20 @@ impl ComputeNodeService {
             ))
             .arg("--advertise-addr")
             .arg(format!("{}:{}", config.address, config.port))
-            .arg("--metrics-level")
-            .arg("1")
             .arg("--async-stack-trace")
             .arg(&config.async_stack_trace)
-            .arg("--connector-rpc-endpoint")
-            .arg(&config.connector_rpc_endpoint)
             .arg("--parallelism")
-            .arg(&config.parallelism.to_string())
+            .arg(config.parallelism.to_string())
             .arg("--total-memory-bytes")
-            .arg(&config.total_memory_bytes.to_string())
+            .arg(config.total_memory_bytes.to_string())
             .arg("--role")
             .arg(&config.role);
 
-        let provide_jaeger = config.provide_jaeger.as_ref().unwrap();
-        match provide_jaeger.len() {
-            0 => {}
-            1 => {
-                cmd.arg("--enable-jaeger-tracing");
-            }
-            other_size => {
-                return Err(anyhow!(
-                    "{} Jaeger instance found in config, but only 1 is needed",
-                    other_size
-                ))
-            }
-        }
-
         let provide_meta_node = config.provide_meta_node.as_ref().unwrap();
         add_meta_node(provide_meta_node, cmd)?;
+
+        let provide_tempo = config.provide_tempo.as_ref().unwrap();
+        add_tempo_endpoint(provide_tempo, cmd)?;
 
         Ok(())
     }
@@ -99,12 +80,15 @@ impl Task for ComputeNodeService {
 
         let mut cmd = self.compute_node()?;
 
-        cmd.env("RUST_BACKTRACE", "1").env(
+        cmd.env(
             "TOKIO_CONSOLE_BIND",
             format!("127.0.0.1:{}", self.config.port + 1000),
         );
-        // FIXME: Otherwise, CI will throw log size too large error
-        // cmd.env("RW_QUERY_LOG_PATH", DEFAULT_QUERY_LOG_PATH);
+
+        if crate::util::is_enable_backtrace() {
+            cmd.env("RUST_BACKTRACE", "1");
+        }
+
         if crate::util::is_env_set("RISEDEV_ENABLE_PROFILE") {
             cmd.env(
                 "RW_PROFILE_PATH",
@@ -114,9 +98,16 @@ impl Task for ComputeNodeService {
 
         if crate::util::is_env_set("RISEDEV_ENABLE_HEAP_PROFILE") {
             // See https://linux.die.net/man/3/jemalloc for the descriptions of profiling options
+            let conf = "prof:true,lg_prof_interval:34,lg_prof_sample:19,prof_prefix:compute-node";
+            cmd.env("_RJEM_MALLOC_CONF", conf); // prefixed for macos
+            cmd.env("MALLOC_CONF", conf); // unprefixed for linux
+        }
+
+        if crate::util::is_env_set("ENABLE_BUILD_RW_CONNECTOR") {
+            let prefix_bin = env::var("PREFIX_BIN")?;
             cmd.env(
-                "_RJEM_MALLOC_CONF",
-                "prof:true,lg_prof_interval:40,lg_prof_sample:19,prof_prefix:compute-node",
+                "CONNECTOR_LIBS_PATH",
+                Path::new(&prefix_bin).join("connector-node/libs/"),
             );
         }
 
@@ -125,10 +116,17 @@ impl Task for ComputeNodeService {
         Self::apply_command_args(&mut cmd, &self.config)?;
         if self.config.enable_tiered_cache {
             let prefix_data = env::var("PREFIX_DATA")?;
-            cmd.arg("--file-cache-dir").arg(
-                PathBuf::from(prefix_data)
-                    .join("filecache")
-                    .join(self.config.port.to_string()),
+            cmd.arg("--data-file-cache-dir").arg(
+                PathBuf::from(&prefix_data)
+                    .join("foyer")
+                    .join(self.config.port.to_string())
+                    .join("data"),
+            );
+            cmd.arg("--meta-file-cache-dir").arg(
+                PathBuf::from(&prefix_data)
+                    .join("foyer")
+                    .join(self.config.port.to_string())
+                    .join("meta"),
             );
         }
 

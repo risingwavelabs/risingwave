@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,7 +21,7 @@ use itertools::Itertools;
 
 use super::{ExecuteContext, Task};
 use crate::util::{get_program_args, get_program_env_cmd, get_program_name};
-use crate::FrontendConfig;
+use crate::{add_tempo_endpoint, FrontendConfig};
 
 pub struct FrontendService {
     config: FrontendConfig,
@@ -35,15 +35,11 @@ impl FrontendService {
     fn frontend(&self) -> Result<Command> {
         let prefix_bin = env::var("PREFIX_BIN")?;
 
-        if let Ok(x) = env::var("ENABLE_ALL_IN_ONE") && x == "true" {
-            Ok(Command::new(
-                Path::new(&prefix_bin)
-                    .join("risingwave")
-                    .join("frontend-node"),
-            ))
-        } else {
-            Ok(Command::new(Path::new(&prefix_bin).join("frontend")))
-        }
+        Ok(Command::new(
+            Path::new(&prefix_bin)
+                .join("risingwave")
+                .join("frontend-node"),
+        ))
     }
 
     /// Apply command args according to config
@@ -61,9 +57,7 @@ impl FrontendService {
             .arg(format!(
                 "{}:{}",
                 config.listen_address, config.health_check_port
-            ))
-            .arg("--metrics-level")
-            .arg("1");
+            ));
 
         let provide_meta_node = config.provide_meta_node.as_ref().unwrap();
         if provide_meta_node.is_empty() {
@@ -79,6 +73,9 @@ impl FrontendService {
             );
         }
 
+        let provide_tempo = config.provide_tempo.as_ref().unwrap();
+        add_tempo_endpoint(provide_tempo, cmd)?;
+
         Ok(())
     }
 }
@@ -90,9 +87,9 @@ impl Task for FrontendService {
 
         let mut cmd = self.frontend()?;
 
-        cmd.env("RUST_BACKTRACE", "1");
-        // FIXME: Otherwise, CI will throw log size too large error
-        // cmd.env("RW_QUERY_LOG_PATH", DEFAULT_QUERY_LOG_PATH);
+        if crate::util::is_enable_backtrace() {
+            cmd.env("RUST_BACKTRACE", "1");
+        }
 
         let prefix_config = env::var("PREFIX_CONFIG")?;
         cmd.arg("--config-path")

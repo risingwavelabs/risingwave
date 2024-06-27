@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,13 +13,14 @@
 // limitations under the License.
 
 use std::cmp::Ordering::{Equal, Greater, Less};
-use std::future::Future;
 use std::sync::Arc;
 
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_pb::hummock::SstableInfo;
 
-use crate::hummock::iterator::{DirectionEnum, HummockIterator, HummockIteratorDirection};
+use crate::hummock::iterator::{
+    DirectionEnum, HummockIterator, HummockIteratorDirection, ValueMeta,
+};
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{HummockResult, SstableIteratorType, SstableStoreRef};
@@ -79,6 +80,7 @@ impl<TI: SstableIteratorType> ConcatIteratorInner<TI> {
             if let Some(old_iter) = self.sstable_iter.take() {
                 old_iter.collect_local_statistic(&mut self.stats);
             }
+            self.cur_idx = self.tables.len();
         } else {
             let table = self
                 .sstable_store
@@ -107,21 +109,20 @@ impl<TI: SstableIteratorType> ConcatIteratorInner<TI> {
 impl<TI: SstableIteratorType> HummockIterator for ConcatIteratorInner<TI> {
     type Direction = TI::Direction;
 
-    type NextFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
-    type RewindFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
-    type SeekFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
+    async fn next(&mut self) -> HummockResult<()> {
+        let sstable_iter = self.sstable_iter.as_mut().expect("no table iter");
+        sstable_iter.next().await?;
 
-    fn next(&mut self) -> Self::NextFuture<'_> {
-        async move {
-            let sstable_iter = self.sstable_iter.as_mut().expect("no table iter");
-            sstable_iter.next().await?;
-
-            if sstable_iter.is_valid() {
-                Ok(())
-            } else {
-                // seek to next table
-                self.seek_idx(self.cur_idx + 1, None).await
+        if sstable_iter.is_valid() {
+            Ok(())
+        } else {
+            // seek to next table
+            let mut table_idx = self.cur_idx + 1;
+            while !self.is_valid() && table_idx < self.tables.len() {
+                self.seek_idx(table_idx, None).await?;
+                table_idx += 1;
             }
+            Ok(())
         }
     }
 
@@ -137,35 +138,42 @@ impl<TI: SstableIteratorType> HummockIterator for ConcatIteratorInner<TI> {
         self.sstable_iter.as_ref().map_or(false, |i| i.is_valid())
     }
 
-    fn rewind(&mut self) -> Self::RewindFuture<'_> {
-        async move { self.seek_idx(0, None).await }
+    async fn rewind(&mut self) -> HummockResult<()> {
+        self.seek_idx(0, None).await?;
+        let mut table_idx = 1;
+        while !self.is_valid() && table_idx < self.tables.len() {
+            // Seek to next table
+            self.seek_idx(table_idx, None).await?;
+            table_idx += 1;
+        }
+        Ok(())
     }
 
-    fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> Self::SeekFuture<'a> {
-        async move {
-            let table_idx = self
-                .tables
-                .partition_point(|table| match Self::Direction::direction() {
-                    DirectionEnum::Forward => {
-                        let ord = FullKey::decode(smallest_key(table)).cmp(&key);
+    async fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> HummockResult<()> {
+        let mut table_idx = self
+            .tables
+            .partition_point(|table| match Self::Direction::direction() {
+                DirectionEnum::Forward => {
+                    let ord = FullKey::decode(smallest_key(table)).cmp(&key);
 
-                        ord == Less || ord == Equal
-                    }
-                    DirectionEnum::Backward => {
-                        let ord = FullKey::decode(largest_key(table)).cmp(&key);
-                        ord == Greater
-                            || (ord == Equal && !table.key_range.as_ref().unwrap().right_exclusive)
-                    }
-                })
-                .saturating_sub(1); // considering the boundary of 0
+                    ord == Less || ord == Equal
+                }
+                DirectionEnum::Backward => {
+                    let ord = FullKey::decode(largest_key(table)).cmp(&key);
+                    ord == Greater
+                        || (ord == Equal && !table.key_range.as_ref().unwrap().right_exclusive)
+                }
+            })
+            .saturating_sub(1); // considering the boundary of 0
 
-            self.seek_idx(table_idx, Some(key)).await?;
-            if !self.is_valid() {
-                // Seek to next table
-                self.seek_idx(table_idx + 1, None).await?;
-            }
-            Ok(())
+        self.seek_idx(table_idx, Some(key)).await?;
+        table_idx += 1;
+        while !self.is_valid() && table_idx < self.tables.len() {
+            // Seek to next table
+            self.seek_idx(table_idx, None).await?;
+            table_idx += 1;
         }
+        Ok(())
     }
 
     fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
@@ -173,5 +181,12 @@ impl<TI: SstableIteratorType> HummockIterator for ConcatIteratorInner<TI> {
         if let Some(iter) = &self.sstable_iter {
             iter.collect_local_statistic(stats);
         }
+    }
+
+    fn value_meta(&self) -> ValueMeta {
+        self.sstable_iter
+            .as_ref()
+            .expect("no table iter")
+            .value_meta()
     }
 }

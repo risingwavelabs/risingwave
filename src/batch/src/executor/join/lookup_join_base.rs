@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,21 +19,23 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::RwError;
 use risingwave_common::hash::{HashKey, NullBitmap, PrecomputedBuildHasher};
+use risingwave_common::memory::MemoryContext;
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, ToOwnedDatum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{cmp_datum_iter, OrderType};
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_expr::expr::BoxedExpression;
-use tokio::sync::watch::Receiver;
 
+use crate::error::BatchError;
 use crate::executor::join::chunked_data::ChunkedData;
 use crate::executor::{
     utils, BoxedDataChunkListStream, BoxedExecutor, BufferChunkExecutor, EquiJoinParams,
     HashJoinExecutor, JoinHashMap, JoinType, LookupExecutorBuilder, RowId,
 };
-use crate::task::ShutdownMsg;
+use crate::task::ShutdownToken;
 
 /// Lookup Join Base.
 /// Used by `LocalLookupJoinExecutor` and `DistributedLookupJoinExecutor`.
@@ -53,7 +55,8 @@ pub struct LookupJoinBase<K> {
     pub output_indices: Vec<usize>,
     pub chunk_size: usize,
     pub identity: String,
-    pub shutdown_rx: Option<Receiver<ShutdownMsg>>,
+    pub shutdown_rx: ShutdownToken,
+    pub mem_ctx: MemoryContext,
     pub _phantom: PhantomData<K>,
 }
 
@@ -66,7 +69,7 @@ impl<K: HashKey> LookupJoinBase<K> {
     ///      deduplication.
     ///   2. Inner side input lookups inner side table with keys and builds hash map.
     ///   3. Outer side rows join each inner side rows by probing the hash map.
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     pub async fn do_execute(mut self: Box<Self>) {
         let outer_side_schema = self.outer_side_input.schema().clone();
 
@@ -118,30 +121,50 @@ impl<K: HashKey> LookupJoinBase<K> {
             ]
             .concat();
 
-            let mut build_side = Vec::new();
+            // We need to temporary variable to record heap size, since in each loop we
+            // will free build side hash map, and the subtraction is not executed automatically.
+            let mut tmp_heap_size = 0i64;
+
+            let mut build_side = Vec::new_in(self.mem_ctx.global_allocator());
             let mut build_row_count = 0;
             #[for_await]
             for build_chunk in hash_join_build_side_input.execute() {
                 let build_chunk = build_chunk?;
                 if build_chunk.cardinality() > 0 {
                     build_row_count += build_chunk.cardinality();
-                    build_side.push(build_chunk.compact())
+                    let chunk_estimated_heap_size = build_chunk.estimated_heap_size() as i64;
+                    self.mem_ctx.add(chunk_estimated_heap_size);
+                    tmp_heap_size += chunk_estimated_heap_size;
+                    build_side.push(build_chunk);
                 }
             }
-            let mut hash_map =
-                JoinHashMap::with_capacity_and_hasher(build_row_count, PrecomputedBuildHasher);
+            let mut hash_map = JoinHashMap::with_capacity_and_hasher_in(
+                build_row_count,
+                PrecomputedBuildHasher,
+                self.mem_ctx.global_allocator(),
+            );
             let mut next_build_row_with_same_key =
                 ChunkedData::with_chunk_sizes(build_side.iter().map(|c| c.capacity()))?;
 
             // Build hash map
             for (build_chunk_id, build_chunk) in build_side.iter().enumerate() {
-                let build_keys = K::build(&hash_join_build_side_key_idxs, build_chunk)?;
+                let build_keys = K::build_many(&hash_join_build_side_key_idxs, build_chunk);
 
-                for (build_row_id, build_key) in build_keys.into_iter().enumerate() {
+                for (build_row_id, (build_key, visible)) in build_keys
+                    .into_iter()
+                    .zip_eq_fast(build_chunk.visibility().iter())
+                    .enumerate()
+                {
+                    if !visible {
+                        continue;
+                    }
                     // Only insert key to hash map if it is consistent with the null safe
                     // restriction.
                     if build_key.null_bitmap().is_subset(&null_matched) {
                         let row_id = RowId::new(build_chunk_id, build_row_id);
+                        let build_key_estimated_heap_size = build_key.estimated_heap_size() as i64;
+                        self.mem_ctx.add(build_key_estimated_heap_size);
+                        tmp_heap_size += build_key_estimated_heap_size;
                         next_build_row_with_same_key[row_id] = hash_map.insert(build_key, row_id);
                     }
                 }
@@ -184,8 +207,8 @@ impl<K: HashKey> LookupJoinBase<K> {
                     DataChunkBuilder::new(self.schema.data_types(), self.chunk_size);
                 #[for_await]
                 for chunk in stream {
-                    for output_chunk in output_chunk_builder
-                        .append_chunk(chunk?.reorder_columns(&self.output_indices))
+                    for output_chunk in
+                        output_chunk_builder.append_chunk(chunk?.project(&self.output_indices))
                     {
                         yield output_chunk
                     }
@@ -206,9 +229,11 @@ impl<K: HashKey> LookupJoinBase<K> {
                 };
                 #[for_await]
                 for chunk in stream {
-                    yield chunk?.reorder_columns(&self.output_indices)
+                    yield chunk?.project(&self.output_indices)
                 }
             }
+
+            self.mem_ctx.add(-tmp_heap_size);
         }
     }
 }

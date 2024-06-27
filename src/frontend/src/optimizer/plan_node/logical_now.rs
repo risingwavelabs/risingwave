@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,64 +12,59 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
-use itertools::Itertools;
+use pretty_xmlish::XmlNode;
 use risingwave_common::bail;
-use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::Result;
-use risingwave_common::types::DataType;
+use risingwave_common::catalog::Schema;
 
-use super::utils::IndicesDisplay;
+use super::generic::{self, GenericPlanRef, Mode};
+use super::utils::{childless_record, Distill};
 use super::{
-    ColPrunable, ColumnPruningContext, ExprRewritable, LogicalFilter, PlanBase, PlanRef,
-    PredicatePushdown, RewriteStreamContext, StreamNow, ToBatch, ToStream, ToStreamContext,
+    ColPrunable, ColumnPruningContext, ExprRewritable, Logical, LogicalFilter, LogicalValues,
+    PlanBase, PlanRef, PredicatePushdown, RewriteStreamContext, StreamNow, ToBatch, ToStream,
+    ToStreamContext,
 };
-use crate::optimizer::property::FunctionalDependencySet;
+use crate::error::Result;
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
+use crate::optimizer::plan_node::utils::column_names_pretty;
 use crate::utils::ColIndexMapping;
-use crate::OptimizerContextRef;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalNow {
-    pub base: PlanBase,
+    pub base: PlanBase<Logical>,
+    core: generic::Now,
 }
 
 impl LogicalNow {
-    pub fn new(ctx: OptimizerContextRef) -> Self {
-        let schema = Schema::new(vec![Field {
-            data_type: DataType::Timestamptz,
-            name: String::from("now"),
-            sub_fields: vec![],
-            type_name: String::default(),
-        }]);
-        let base = PlanBase::new_logical(ctx, schema, vec![], FunctionalDependencySet::default());
-        Self { base }
+    pub fn new(core: generic::Now) -> Self {
+        let base = PlanBase::new_logical_with_core(&core);
+        Self { base, core }
+    }
+
+    pub fn max_one_row(&self) -> bool {
+        match self.core.mode {
+            Mode::UpdateCurrent => true,
+            Mode::GenerateSeries { .. } => false,
+        }
     }
 }
 
-impl fmt::Display for LogicalNow {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let verbose = self.base.ctx.is_explain_verbose();
-        let mut builder = f.debug_struct("LogicalNow");
+impl Distill for LogicalNow {
+    fn distill<'a>(&self) -> XmlNode<'a> {
+        let vec = if self.base.ctx().is_explain_verbose() {
+            vec![("output", column_names_pretty(self.schema()))]
+        } else {
+            vec![]
+        };
 
-        if verbose {
-            // For now, output all columns from the left side. Make it explicit here.
-            builder.field(
-                "output",
-                &IndicesDisplay {
-                    indices: &(0..self.schema().fields.len()).collect_vec(),
-                    input_schema: self.schema(),
-                },
-            );
-        }
-
-        builder.finish()
+        childless_record("LogicalNow", vec)
     }
 }
 
 impl_plan_tree_node_for_leaf! { LogicalNow }
 
 impl ExprRewritable for LogicalNow {}
+
+impl ExprVisitable for LogicalNow {}
 
 impl PredicatePushdown for LogicalNow {
     fn predicate_pushdown(
@@ -86,12 +81,12 @@ impl ToStream for LogicalNow {
         &self,
         _ctx: &mut RewriteStreamContext,
     ) -> Result<(PlanRef, ColIndexMapping)> {
-        Ok((self.clone().into(), ColIndexMapping::new(vec![Some(0)])))
+        Ok((self.clone().into(), ColIndexMapping::new(vec![Some(0)], 1)))
     }
 
     /// `to_stream` is equivalent to `to_stream_with_dist_required(RequiredDist::Any)`
     fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
-        Ok(StreamNow::new(self.clone(), self.ctx()).into())
+        Ok(StreamNow::new(self.core.clone()).into())
     }
 }
 
@@ -103,7 +98,12 @@ impl ToBatch for LogicalNow {
 
 /// The trait for column pruning, only logical plan node will use it, though all plan node impl it.
 impl ColPrunable for LogicalNow {
-    fn prune_col(&self, _required_cols: &[usize], _ctx: &mut ColumnPruningContext) -> PlanRef {
-        self.clone().into()
+    fn prune_col(&self, required_cols: &[usize], _: &mut ColumnPruningContext) -> PlanRef {
+        if required_cols.is_empty() {
+            LogicalValues::new(vec![], Schema::empty().clone(), self.ctx()).into()
+        } else {
+            assert_eq!(required_cols, &[0], "we only output one column");
+            self.clone().into()
+        }
     }
 }

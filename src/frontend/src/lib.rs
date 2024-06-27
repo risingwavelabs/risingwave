@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,30 +13,38 @@
 // limitations under the License.
 
 #![allow(clippy::derive_partial_eq_without_eq)]
-#![allow(rustdoc::private_intra_doc_links)]
 #![feature(map_try_insert)]
 #![feature(negative_impls)]
-#![feature(generators)]
+#![feature(coroutines)]
 #![feature(proc_macro_hygiene, stmt_expr_attributes)]
 #![feature(trait_alias)]
-#![feature(drain_filter)]
+#![feature(extract_if)]
 #![feature(if_let_guard)]
 #![feature(let_chains)]
 #![feature(assert_matches)]
 #![feature(lint_reasons)]
 #![feature(box_patterns)]
 #![feature(lazy_cell)]
-#![feature(result_option_inspect)]
 #![feature(macro_metavar_expr)]
-#![feature(slice_internals)]
 #![feature(min_specialization)]
-#![feature(is_some_and)]
 #![feature(extend_one)]
 #![feature(type_alias_impl_trait)]
+#![feature(impl_trait_in_assoc_type)]
+#![feature(result_flattening)]
+#![feature(error_generic_member_access)]
+#![feature(iterator_try_collect)]
+#![feature(used_with_arg)]
+#![feature(entry_insert)]
 #![recursion_limit = "256"]
+
+#[cfg(test)]
+risingwave_expr_impl::enable!();
 
 #[macro_use]
 mod catalog;
+
+use std::collections::HashSet;
+
 pub use catalog::TableCatalog;
 mod binder;
 pub use binder::{bind_data_type, Binder};
@@ -51,10 +59,12 @@ pub use planner::Planner;
 mod scheduler;
 pub mod session;
 mod stream_fragmenter;
-use risingwave_common_proc_macro::OverrideConfig;
+use risingwave_common::config::{MetricLevel, OverrideConfig};
+use risingwave_common::util::meta_addr::MetaAddressStrategy;
 pub use stream_fragmenter::build_graph;
 mod utils;
 pub use utils::{explain_stream_graph, WithOptions};
+pub(crate) mod error;
 mod meta_client;
 pub mod test_utils;
 mod user;
@@ -73,29 +83,31 @@ use pgwire::pg_server::pg_serve;
 use session::SessionManagerImpl;
 
 /// Command-line arguments for frontend-node.
-#[derive(Parser, Clone, Debug)]
+#[derive(Parser, Clone, Debug, OverrideConfig)]
+#[command(
+    version,
+    about = "The stateless proxy that parses SQL queries and performs planning and optimizations of query jobs"
+)]
 pub struct FrontendOpts {
     // TODO: rename to listen_addr and separate out the port.
     /// The address that this service listens to.
     /// Usually the localhost + desired port.
-    #[clap(long, env = "RW_LISTEN_ADDR", default_value = "127.0.0.1:4566")]
+    #[clap(long, env = "RW_LISTEN_ADDR", default_value = "0.0.0.0:4566")]
     pub listen_addr: String,
 
     /// The address for contacting this instance of the service.
     /// This would be synonymous with the service's "public address"
     /// or "identifying address".
-    /// Optional, we will use listen_addr if not specified.
+    /// Optional, we will use `listen_addr` if not specified.
     #[clap(long, env = "RW_ADVERTISE_ADDR")]
     pub advertise_addr: Option<String>,
 
-    // TODO: This is currently unused.
-    #[clap(long, env = "RW_PORT")]
-    pub port: Option<u16>,
-
     /// The address via which we will attempt to connect to a leader meta node.
     #[clap(long, env = "RW_META_ADDR", default_value = "http://127.0.0.1:5690")]
-    pub meta_addr: String,
+    pub meta_addr: MetaAddressStrategy,
 
+    /// We will start a http server at this address via `MetricsManager`.
+    /// Then the prometheus instance will poll the metrics from this address.
     #[clap(
         long,
         env = "RW_PROMETHEUS_LISTENER_ADDR",
@@ -119,19 +131,26 @@ pub struct FrontendOpts {
     #[clap(long, env = "RW_CONFIG_PATH", default_value = "")]
     pub config_path: String,
 
-    #[clap(flatten)]
-    override_opts: OverrideConfigOpts,
+    /// Used for control the metrics level, similar to log level.
+    /// 0 = disable metrics
+    /// >0 = enable metrics
+    #[clap(long, hide = true, env = "RW_METRICS_LEVEL")]
+    #[override_opts(path = server.metrics_level)]
+    pub metrics_level: Option<MetricLevel>,
+
+    #[clap(long, hide = true, env = "RW_ENABLE_BARRIER_READ")]
+    #[override_opts(path = batch.enable_barrier_read)]
+    pub enable_barrier_read: Option<bool>,
 }
 
-/// Command-line arguments for frontend-node that overrides the config file.
-#[derive(Parser, Clone, Debug, OverrideConfig)]
-struct OverrideConfigOpts {
-    /// Used for control the metrics level, similar to log level.
-    /// 0 = close metrics
-    /// >0 = open metrics
-    #[clap(long, env = "RW_METRICS_LEVEL")]
-    #[override_opts(path = server.metrics_level)]
-    pub metrics_level: Option<u32>,
+impl risingwave_common::opts::Opts for FrontendOpts {
+    fn name() -> &'static str {
+        "frontend"
+    }
+
+    fn meta_addr(&self) -> MetaAddressStrategy {
+        self.meta_addr.clone()
+    }
 }
 
 impl Default for FrontendOpts {
@@ -152,8 +171,22 @@ pub fn start(opts: FrontendOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     Box::pin(async move {
         let listen_addr = opts.listen_addr.clone();
         let session_mgr = Arc::new(SessionManagerImpl::new(opts).await.unwrap());
-        pg_serve(&listen_addr, session_mgr, Some(TlsConfig::new_default()))
-            .await
-            .unwrap();
+        let redact_sql_option_keywords = Arc::new(
+            session_mgr
+                .env()
+                .batch_config()
+                .redact_sql_option_keywords
+                .iter()
+                .map(|s| s.to_lowercase())
+                .collect::<HashSet<_>>(),
+        );
+        pg_serve(
+            &listen_addr,
+            session_mgr,
+            TlsConfig::new_default(),
+            Some(redact_sql_option_keywords),
+        )
+        .await
+        .unwrap()
     })
 }

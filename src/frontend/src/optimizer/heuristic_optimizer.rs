@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -52,7 +52,7 @@ impl<'a> HeuristicOptimizer<'a> {
         for rule in self.rules {
             if let Some(applied) = rule.apply(plan.clone()) {
                 #[cfg(debug_assertions)]
-                Self::check_equivalent_plan(rule, &plan, &applied);
+                Self::check_equivalent_plan(rule.description(), &plan, &applied);
 
                 plan = applied;
                 self.stats.count_rule(rule);
@@ -62,12 +62,17 @@ impl<'a> HeuristicOptimizer<'a> {
     }
 
     fn optimize_inputs(&mut self, plan: PlanRef) -> PlanRef {
+        let pre_applied = self.stats.total_applied();
         let inputs = plan
             .inputs()
             .into_iter()
             .map(|sub_tree| self.optimize(sub_tree))
             .collect_vec();
-        plan.clone_with_inputs(&inputs)
+        if pre_applied != self.stats.total_applied() {
+            plan.clone_with_inputs(&inputs)
+        } else {
+            plan
+        }
     }
 
     pub fn optimize(&mut self, mut plan: PlanRef) -> PlanRef {
@@ -88,20 +93,21 @@ impl<'a> HeuristicOptimizer<'a> {
     }
 
     #[cfg(debug_assertions)]
-    fn check_equivalent_plan(rule: &BoxedRule, input_plan: &PlanRef, output_plan: &PlanRef) {
+    pub fn check_equivalent_plan(rule_desc: &str, input_plan: &PlanRef, output_plan: &PlanRef) {
         if !input_plan.schema().type_eq(output_plan.schema()) {
             panic!("{} fails to generate equivalent plan.\nInput schema: {:?}\nInput plan: \n{}\nOutput schema: {:?}\nOutput plan: \n{}\nSQL: {}",
-                   rule.description(),
+                   rule_desc,
                    input_plan.schema(),
-                   input_plan.explain_to_string().unwrap(),
+                   input_plan.explain_to_string(),
                    output_plan.schema(),
-                   output_plan.explain_to_string().unwrap(),
+                   output_plan.explain_to_string(),
                    output_plan.ctx().sql());
         }
     }
 }
 
 pub struct Stats {
+    total_applied: usize,
     rule_counter: HashMap<String, u32>,
 }
 
@@ -109,10 +115,12 @@ impl Stats {
     pub fn new() -> Self {
         Self {
             rule_counter: HashMap::new(),
+            total_applied: 0,
         }
     }
 
     pub fn count_rule(&mut self, rule: &BoxedRule) {
+        self.total_applied += 1;
         match self.rule_counter.entry(rule.description().to_string()) {
             Entry::Occupied(mut entry) => {
                 *entry.get_mut() += 1;
@@ -124,7 +132,11 @@ impl Stats {
     }
 
     pub fn has_applied_rule(&self) -> bool {
-        !self.rule_counter.is_empty()
+        self.total_applied != 0
+    }
+
+    pub fn total_applied(&self) -> usize {
+        self.total_applied
     }
 }
 

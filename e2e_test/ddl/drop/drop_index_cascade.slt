@@ -1,0 +1,29 @@
+statement ok
+set rw_streaming_enable_delta_join = true;
+
+statement ok
+create table a (a1 int, a2 int);
+
+statement ok
+create index i_a1 on a(a1);
+
+statement ok
+create table b (b1 int, b2 int);
+
+statement ok
+create index i_b1 on b(b1);
+
+statement ok
+create materialized view v as select * from a join b on a.a1 = b.b1;
+
+statement ok
+drop index i_a1 cascade;
+
+statement ok
+drop table a;
+
+statement ok
+drop table b;
+
+statement ok
+set rw_streaming_enable_delta_join = false;

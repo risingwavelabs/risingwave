@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use fixedbitset::FixedBitSet;
 use risingwave_pb::plan_common::JoinType;
 
 use super::{BoxedRule, Rule};
@@ -43,9 +42,7 @@ impl Rule for ExceptToAntiJoinRule {
             })
             .unwrap();
 
-        let mut bit_set = FixedBitSet::with_capacity(join.schema().len());
-        bit_set.toggle_range(..);
-        Some(Agg::new(vec![], bit_set, join).into())
+        Some(Agg::new(vec![], (0..join.schema().len()).collect(), join).into())
     }
 }
 

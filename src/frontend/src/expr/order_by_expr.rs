@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,7 +22,7 @@ use crate::expr::{ExprImpl, ExprMutator, ExprRewriter, ExprVisitor};
 /// A sort expression in the `ORDER BY` clause.
 ///
 /// See also [`bind_order_by_expr`](`crate::binder::Binder::bind_order_by_expr`).
-#[derive(Clone, Eq, PartialEq, Hash)]
+#[derive(Clone, Eq, PartialEq, Hash, Debug)]
 pub struct OrderByExpr {
     pub expr: ExprImpl,
     pub order_type: OrderType,
@@ -36,7 +36,7 @@ impl Display for OrderByExpr {
 }
 
 /// See [`OrderByExpr`].
-#[derive(Clone, Eq, PartialEq, Hash)]
+#[derive(Clone, Eq, PartialEq, Hash, Debug)]
 pub struct OrderBy {
     pub sort_exprs: Vec<OrderByExpr>,
 }
@@ -71,12 +71,10 @@ impl OrderBy {
         }
     }
 
-    pub fn visit_expr<R: Default, V: ExprVisitor<R> + ?Sized>(&self, visitor: &mut V) -> R {
+    pub fn visit_expr<V: ExprVisitor + ?Sized>(&self, visitor: &mut V) {
         self.sort_exprs
             .iter()
-            .map(|expr| visitor.visit_expr(&expr.expr))
-            .reduce(V::merge)
-            .unwrap_or_default()
+            .for_each(|expr| visitor.visit_expr(&expr.expr));
     }
 
     pub fn visit_expr_mut(&mut self, mutator: &mut (impl ExprMutator + ?Sized)) {

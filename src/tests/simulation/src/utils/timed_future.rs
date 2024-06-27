@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@ use std::time::{Duration, Instant};
 
 use pin_project::pin_project;
 
-/// Inspired by https://stackoverflow.com/a/59935743/2990323
+/// Inspired by <https://stackoverflow.com/a/59935743/2990323>
 /// A wrapper around a Future which adds timing data.
 #[pin_project]
 pub struct Timed<Fut, F>

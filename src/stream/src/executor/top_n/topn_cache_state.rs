@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,12 +14,11 @@
 
 use core::fmt;
 use std::alloc::Global;
-use std::collections::btree_map::{DrainFilter, OccupiedEntry, Range};
-use std::collections::BTreeMap;
+use std::collections::btree_map::{BTreeMap, ExtractIf, OccupiedEntry, Range};
 use std::ops::RangeBounds;
 
-use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::CompactedRow;
+use risingwave_common_estimate_size::{EstimateSize, KvSize};
 
 /// `CacheKey` is composed of `(order_by, remaining columns of pk)`.
 pub type CacheKey = (Vec<u8>, Vec<u8>);
@@ -28,14 +27,14 @@ pub type CacheKey = (Vec<u8>, Vec<u8>);
 pub struct TopNCacheState {
     /// The full copy of the state.
     inner: BTreeMap<CacheKey, CompactedRow>,
-    kv_heap_size: usize,
+    kv_heap_size: KvSize,
 }
 
 impl EstimateSize for TopNCacheState {
     fn estimated_heap_size(&self) -> usize {
         // TODO: Add btreemap internal size.
         // https://github.com/risingwavelabs/risingwave/issues/9713
-        self.kv_heap_size
+        self.kv_heap_size.size()
     }
 }
 
@@ -43,24 +42,20 @@ impl TopNCacheState {
     pub fn new() -> Self {
         Self {
             inner: BTreeMap::new(),
-            kv_heap_size: 0,
+            kv_heap_size: KvSize::new(),
         }
     }
 
     /// Insert into the cache.
     pub fn insert(&mut self, key: CacheKey, value: CompactedRow) -> Option<CompactedRow> {
-        self.kv_heap_size = self
-            .kv_heap_size
-            .saturating_add(key.estimated_heap_size() + value.estimated_heap_size());
+        self.kv_heap_size.add(&key, &value);
         self.inner.insert(key, value)
     }
 
     /// Delete from the cache.
     pub fn remove(&mut self, key: &CacheKey) {
         if let Some(value) = self.inner.remove(key) {
-            self.kv_heap_size = self
-                .kv_heap_size
-                .saturating_sub(key.estimated_heap_size() + value.estimated_heap_size());
+            self.kv_heap_size.sub(key, &value);
         }
     }
 
@@ -86,17 +81,13 @@ impl TopNCacheState {
 
     pub fn pop_first(&mut self) -> Option<(CacheKey, CompactedRow)> {
         self.inner.pop_first().inspect(|(k, v)| {
-            self.kv_heap_size = self
-                .kv_heap_size
-                .saturating_sub(k.estimated_heap_size() + v.estimated_heap_size())
+            self.kv_heap_size.sub(k, v);
         })
     }
 
     pub fn pop_last(&mut self) -> Option<(CacheKey, CompactedRow)> {
         self.inner.pop_last().inspect(|(k, v)| {
-            self.kv_heap_size = self
-                .kv_heap_size
-                .saturating_sub(k.estimated_heap_size() + v.estimated_heap_size())
+            self.kv_heap_size.sub(k, v);
         })
     }
 
@@ -117,22 +108,36 @@ impl TopNCacheState {
         self.inner.range(range)
     }
 
-    pub fn drain_filter<F>(&mut self, pred: F) -> DrainFilter<'_, CacheKey, CompactedRow, F, Global>
+    pub fn extract_if<'a, F1>(
+        &'a mut self,
+        mut pred: F1,
+    ) -> TopNExtractIf<'a, impl FnMut(&CacheKey, &mut CompactedRow) -> bool>
     where
-        F: FnMut(&CacheKey, &mut CompactedRow) -> bool,
+        F1: 'a + FnMut(&CacheKey, &CompactedRow) -> bool,
     {
-        self.inner.drain_filter(pred)
+        let pred_immut = move |key: &CacheKey, value: &mut CompactedRow| pred(key, value);
+        TopNExtractIf {
+            inner: self.inner.extract_if(pred_immut),
+            kv_heap_size: &mut self.kv_heap_size,
+        }
+    }
+
+    pub fn retain<F>(&mut self, mut f: F)
+    where
+        F: FnMut(&CacheKey, &CompactedRow) -> bool,
+    {
+        self.extract_if(|k, v| !f(k, v)).for_each(drop);
     }
 }
 
 pub struct TopNCacheOccupiedEntry<'a> {
     inner: OccupiedEntry<'a, CacheKey, CompactedRow>,
     /// The total size of the `TopNCacheState`
-    kv_heap_size: &'a mut usize,
+    kv_heap_size: &'a mut KvSize,
 }
 
 impl<'a> TopNCacheOccupiedEntry<'a> {
-    pub fn new(entry: OccupiedEntry<'a, CacheKey, CompactedRow>, size: &'a mut usize) -> Self {
+    pub fn new(entry: OccupiedEntry<'a, CacheKey, CompactedRow>, size: &'a mut KvSize) -> Self {
         Self {
             inner: entry,
             kv_heap_size: size,
@@ -141,9 +146,7 @@ impl<'a> TopNCacheOccupiedEntry<'a> {
 
     pub fn remove_entry(self) -> (CacheKey, CompactedRow) {
         let (k, v) = self.inner.remove_entry();
-        *self.kv_heap_size = self
-            .kv_heap_size
-            .saturating_sub(k.estimated_heap_size() + v.estimated_heap_size());
+        self.kv_heap_size.add(&k, &v);
         (k, v)
     }
 
@@ -155,5 +158,30 @@ impl<'a> TopNCacheOccupiedEntry<'a> {
 impl fmt::Debug for TopNCacheState {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.inner.fmt(f)
+    }
+}
+
+pub struct TopNExtractIf<'a, F>
+where
+    F: FnMut(&CacheKey, &mut CompactedRow) -> bool,
+{
+    inner: ExtractIf<'a, CacheKey, CompactedRow, F, Global>,
+    kv_heap_size: &'a mut KvSize,
+}
+
+impl<'a, F> Iterator for TopNExtractIf<'a, F>
+where
+    F: 'a + FnMut(&CacheKey, &mut CompactedRow) -> bool,
+{
+    type Item = (CacheKey, CompactedRow);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner
+            .next()
+            .inspect(|(k, v)| self.kv_heap_size.sub(k, v))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.size_hint()
     }
 }

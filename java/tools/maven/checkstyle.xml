@@ -112,27 +112,6 @@ This file is based on the checkstyle file of Apache Beam.
             <property name="message"
                       value="Use Guava Checks instead of Commons Validate. Please refer to the coding guidelines."/>
         </module>
-        <!-- forbid the use of google.common.base.Preconditions -->
-        <module name="Regexp">
-            <property name="format" value="import com\.google\.common\.base\.Preconditions"/>
-            <property name="illegalPattern" value="true"/>
-            <property name="message"
-                      value="Use Flink's Preconditions instead of Guava's Preconditions"/>
-        </module>
-        <!-- forbid the use of com.google.common.annotations.VisibleForTesting -->
-        <module name="Regexp">
-            <property name="format"
-                      value="import com\.google\.common\.annotations\.VisibleForTesting"/>
-            <property name="illegalPattern" value="true"/>
-            <property name="message"
-                      value="Use Flink's VisibleForTesting instead of Guava's VisibleForTesting"/>
-        </module>
-        <module name="Regexp">
-            <property name="format" value="import static com\.google\.common\.base\.Preconditions"/>
-            <property name="illegalPattern" value="true"/>
-            <property name="message"
-                      value="Use Flink's Preconditions instead of Guava's Preconditions"/>
-        </module>
         <!-- forbid the use of org.apache.commons.lang.SerializationUtils -->
         <module name="Regexp">
             <property name="format" value="org\.apache\.commons\.lang\.SerializationUtils"/>
@@ -191,9 +170,23 @@ This file is based on the checkstyle file of Apache Beam.
             <property name="illegalPkgs" value="io.netty"/>
             <message key="import.illegal" value="{0}; Use flink-shaded-netty instead."/>
         </module>
+        <!--
         <module name="IllegalImport">
             <property name="illegalPkgs" value="com.google.common"/>
             <message key="import.illegal" value="{0}; Use flink-shaded-guava instead."/>
+        </module>
+        -->
+        <module name="IllegalImport">
+            <property name="illegalClasses" value="java.util.Date, java.sql.Date, java.sql.Timestamp, java.sql.Time"/>
+            <message key="import.illegal" value="{0}; Use java.time.* instead."/>
+        </module>
+        <module name="IllegalImport">
+            <property name="illegalClasses" value="java.text.DateFormat, java.text.SimpleDateFormat"/>
+            <message key="import.illegal" value="{0}; Use java.time.* instead."/>
+        </module>
+        <module name="IllegalImport">
+            <property name="illegalClasses" value="java.util.Calendar, java.util.GregorianCalendar"/>
+            <message key="import.illegal" value="{0}; Use java.time.* instead."/>
         </module>
 
         <module name="RedundantModifier">

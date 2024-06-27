@@ -97,7 +97,8 @@ message TableFragments {
   map<uint32, ActorStatus> actor_status = 4;
   map<uint32, source.ConnectorSplits> actor_splits = 5;
 
-  stream_plan.StreamEnvironment env = 6;
+  stream_plan.StreamContext ctx = 6;
+  TableParallelism parallelism = 7;
 }
 
 /// Parallel unit mapping with fragment id, used for notification.
@@ -106,10 +107,29 @@ message FragmentParallelUnitMapping {
   common.ParallelUnitMapping mapping = 2;
 }
 
+message FragmentParallelUnitMappings {
+  repeated FragmentParallelUnitMapping mappings = 1;
+}
+
+/// Worker slot mapping with fragment id, used for notification.
+message FragmentWorkerSlotMapping {
+  uint32 fragment_id = 1;
+  common.WorkerSlotMapping mapping = 2;
+}
+
+message FragmentWorkerSlotMappings {
+  repeated FragmentWorkerSlotMapping mappings = 1;
+}
+
 // TODO: remove this when dashboard refactored.
 message ActorLocation {
   common.WorkerNode node = 1;
   repeated stream_plan.StreamActor actors = 2;
+}
+
+message MigrationPlan {
+  // map<parallel_unit_id, parallel_unit>, the plan indicates that the actors will be migrated from old parallel unit to the new one.
+  map<uint32, common.ParallelUnit> parallel_unit_migration_plan = 1;
 }
 
 message FlushRequest {
@@ -121,18 +141,54 @@ message FlushResponse {
   hummock.HummockSnapshot snapshot = 2;
 }
 
-message CreatingJobInfo {
-  uint32 database_id = 1;
-  uint32 schema_id = 2;
-  string name = 3;
+// The reason why the data sources in the cluster are paused.
+enum PausedReason {
+  PAUSED_REASON_UNSPECIFIED = 0;
+  // The cluster is paused due to configuration change, e.g. altering table schema and scaling.
+  PAUSED_REASON_CONFIG_CHANGE = 1;
+  // The cluster is paused due to manual operation, e.g. `risectl` command or the
+  // `pause_on_next_bootstrap` system variable.
+  PAUSED_REASON_MANUAL = 2;
+}
+
+message PauseRequest {}
+
+message PauseResponse {
+  optional PausedReason prev = 1;
+  optional PausedReason curr = 2;
+}
+
+message ResumeRequest {}
+
+message ResumeResponse {
+  optional PausedReason prev = 1;
+  optional PausedReason curr = 2;
 }
 
 message CancelCreatingJobsRequest {
-  repeated CreatingJobInfo infos = 1;
+  message CreatingJobInfo {
+    uint32 database_id = 1;
+    uint32 schema_id = 2;
+    string name = 3;
+  }
+
+  message CreatingJobInfos {
+    repeated CreatingJobInfo infos = 1;
+  }
+
+  message CreatingJobIds {
+    repeated uint32 job_ids = 1;
+  }
+
+  oneof jobs {
+    CreatingJobInfos infos = 1;
+    CreatingJobIds ids = 2;
+  }
 }
 
 message CancelCreatingJobsResponse {
   common.Status status = 1;
+  repeated uint32 canceled_jobs = 2;
 }
 
 message ListTableFragmentsRequest {
@@ -151,15 +207,92 @@ message ListTableFragmentsResponse {
   }
   message TableFragmentInfo {
     repeated FragmentInfo fragments = 1;
-    stream_plan.StreamEnvironment env = 2;
+    stream_plan.StreamContext ctx = 2;
   }
   map<uint32, TableFragmentInfo> table_fragments = 1;
 }
 
+message ListTableFragmentStatesRequest {}
+
+message ListTableFragmentStatesResponse {
+  message TableFragmentState {
+    uint32 table_id = 1;
+    TableFragments.State state = 2;
+    TableParallelism parallelism = 3;
+  }
+  repeated TableFragmentState states = 1;
+}
+
+message ListFragmentDistributionRequest {}
+
+message ListFragmentDistributionResponse {
+  message FragmentDistribution {
+    uint32 fragment_id = 1;
+    uint32 table_id = 2;
+    TableFragments.Fragment.FragmentDistributionType distribution_type = 3;
+    repeated uint32 state_table_ids = 4;
+    repeated uint32 upstream_fragment_ids = 5;
+    uint32 fragment_type_mask = 6;
+    uint32 parallelism = 7;
+  }
+  repeated FragmentDistribution distributions = 1;
+}
+
+message ListActorStatesRequest {}
+
+message ListActorStatesResponse {
+  message ActorState {
+    uint32 actor_id = 1;
+    uint32 fragment_id = 2;
+    uint32 parallel_unit_id = 3;
+    TableFragments.ActorStatus.ActorState state = 4;
+  }
+  repeated ActorState states = 1;
+}
+
+message ListObjectDependenciesRequest {}
+
+message ListObjectDependenciesResponse {
+  message ObjectDependencies {
+    uint32 object_id = 1;
+    uint32 referenced_object_id = 2;
+  }
+  repeated ObjectDependencies dependencies = 1;
+}
+
+enum ThrottleTarget {
+  THROTTLE_TARGET_UNSPECIFIED = 0;
+  SOURCE = 1;
+  MV = 2;
+  TABLE_WITH_SOURCE = 3;
+}
+
+message ApplyThrottleRequest {
+  ThrottleTarget kind = 1;
+  uint32 id = 2;
+  optional uint32 rate = 3;
+}
+
+message ApplyThrottleResponse {
+  common.Status status = 1;
+}
+
+message RecoverRequest {}
+
+message RecoverResponse {}
+
 service StreamManagerService {
   rpc Flush(FlushRequest) returns (FlushResponse);
+  rpc Pause(PauseRequest) returns (PauseResponse);
+  rpc Resume(ResumeRequest) returns (ResumeResponse);
   rpc CancelCreatingJobs(CancelCreatingJobsRequest) returns (CancelCreatingJobsResponse);
   rpc ListTableFragments(ListTableFragmentsRequest) returns (ListTableFragmentsResponse);
+  rpc ListTableFragmentStates(ListTableFragmentStatesRequest) returns (ListTableFragmentStatesResponse);
+  rpc ListFragmentDistribution(ListFragmentDistributionRequest) returns (ListFragmentDistributionResponse);
+  rpc ListActorStates(ListActorStatesRequest) returns (ListActorStatesResponse);
+  rpc ListObjectDependencies(ListObjectDependenciesRequest) returns (ListObjectDependenciesResponse);
+  rpc ApplyThrottle(ApplyThrottleRequest) returns (ApplyThrottleResponse);
+  rpc Recover(RecoverRequest) returns (RecoverResponse);
 }
 
 // Below for cluster service.
@@ -169,22 +302,25 @@ message AddWorkerNodeRequest {
     uint64 worker_node_parallelism = 1;
     bool is_streaming = 2;
     bool is_serving = 3;
+    bool is_unschedulable = 4;
   }
   common.WorkerType worker_type = 1;
   common.HostAddress host = 2;
   reserved 3;
   Property property = 4;
+  common.WorkerNode.Resource resource = 5;
 }
 
 message AddWorkerNodeResponse {
   reserved 3;
   reserved "system_params";
   common.Status status = 1;
-  common.WorkerNode node = 2;
+  optional uint32 node_id = 2;
 }
 
 message ActivateWorkerNodeRequest {
   common.HostAddress host = 1;
+  uint32 node_id = 2;
 }
 
 message ActivateWorkerNodeResponse {
@@ -199,8 +335,24 @@ message DeleteWorkerNodeResponse {
   common.Status status = 1;
 }
 
+// Mark CN as schedulable or as unschedulable
+message UpdateWorkerNodeSchedulabilityRequest {
+  enum Schedulability {
+    UNSPECIFIED = 0;
+    SCHEDULABLE = 1;
+    UNSCHEDULABLE = 2;
+  }
+
+  repeated uint32 worker_ids = 1;
+  Schedulability schedulability = 2;
+}
+
+message UpdateWorkerNodeSchedulabilityResponse {
+  common.Status status = 1;
+}
+
 message ListAllNodesRequest {
-  common.WorkerType worker_type = 1;
+  optional common.WorkerType worker_type = 1;
   // Whether to include nodes still starting
   bool include_starting_nodes = 2;
 }
@@ -214,6 +366,7 @@ service ClusterService {
   rpc AddWorkerNode(AddWorkerNodeRequest) returns (AddWorkerNodeResponse);
   rpc ActivateWorkerNode(ActivateWorkerNodeRequest) returns (ActivateWorkerNodeResponse);
   rpc DeleteWorkerNode(DeleteWorkerNodeRequest) returns (DeleteWorkerNodeResponse);
+  rpc UpdateWorkerNodeSchedulability(UpdateWorkerNodeSchedulabilityRequest) returns (UpdateWorkerNodeSchedulabilityResponse);
   rpc ListAllNodes(ListAllNodesRequest) returns (ListAllNodesResponse);
 }
 
@@ -235,8 +388,10 @@ message SubscribeRequest {
 message MetaSnapshot {
   message SnapshotVersion {
     uint64 catalog_version = 1;
-    uint64 parallel_unit_mapping_version = 2;
+    reserved 2;
+    reserved "parallel_unit_mapping_version";
     uint64 worker_node_version = 3;
+    uint64 streaming_worker_slot_mapping_version = 4;
   }
   repeated catalog.Database databases = 1;
   repeated catalog.Schema schemas = 2;
@@ -247,13 +402,23 @@ message MetaSnapshot {
   repeated catalog.View views = 7;
   repeated catalog.Function functions = 15;
   repeated catalog.Connection connections = 17;
+  repeated catalog.Subscription subscriptions = 19;
   repeated user.UserInfo users = 8;
-  repeated FragmentParallelUnitMapping parallel_unit_mappings = 9;
+  reserved 9;
+  reserved "parallel_unit_mappings";
+  GetSessionParamsResponse session_params = 20;
+  repeated catalog.Secret secrets = 23;
   repeated common.WorkerNode nodes = 10;
   hummock.HummockSnapshot hummock_snapshot = 11;
   hummock.HummockVersion hummock_version = 12;
   backup_service.MetaBackupManifestId meta_backup_manifest_id = 14;
   hummock.WriteLimits hummock_write_limits = 16;
+  reserved 18;
+  reserved "serving_parallel_unit_mappings";
+
+  // for streaming
+  repeated FragmentWorkerSlotMapping streaming_worker_slot_mappings = 21;
+  repeated FragmentWorkerSlotMapping serving_worker_slot_mappings = 22;
 
   SnapshotVersion version = 13;
 }
@@ -265,12 +430,15 @@ message Relation {
     catalog.Sink sink = 3;
     catalog.Index index = 4;
     catalog.View view = 5;
+    catalog.Subscription subscription = 6;
   }
 }
 
 message RelationGroup {
   repeated Relation relations = 1;
 }
+
+message Recovery {}
 
 message SubscribeResponse {
   enum Operation {
@@ -288,7 +456,7 @@ message SubscribeResponse {
     catalog.Schema schema = 5;
     catalog.Function function = 6;
     user.UserInfo user = 11;
-    FragmentParallelUnitMapping parallel_unit_mapping = 12;
+    SetSessionParamRequest session_param = 26;
     common.WorkerNode node = 13;
     hummock.HummockSnapshot hummock_snapshot = 14;
     hummock.HummockVersionDeltas hummock_version_deltas = 15;
@@ -298,20 +466,21 @@ message SubscribeResponse {
     hummock.WriteLimits hummock_write_limits = 20;
     RelationGroup relation_group = 21;
     catalog.Connection connection = 22;
+    hummock.HummockVersionStats hummock_stats = 24;
+    Recovery recovery = 25;
+    FragmentWorkerSlotMapping streaming_worker_slot_mapping = 27;
+    FragmentWorkerSlotMappings serving_worker_slot_mappings = 28;
+    catalog.Secret secret = 29;
   }
+  reserved 12;
+  reserved "parallel_unit_mapping";
+  reserved 23;
+  reserved "serving_parallel_unit_mappings";
 }
 
 service NotificationService {
   rpc Subscribe(SubscribeRequest) returns (stream SubscribeResponse);
 }
-
-message PauseRequest {}
-
-message PauseResponse {}
-
-message ResumeRequest {}
-
-message ResumeResponse {}
 
 message GetClusterInfoRequest {}
 
@@ -320,27 +489,80 @@ message GetClusterInfoResponse {
   repeated TableFragments table_fragments = 2;
   map<uint32, source.ConnectorSplits> actor_splits = 3;
   map<uint32, catalog.Source> source_infos = 4;
+  uint64 revision = 5;
+}
+
+message Reschedule {
+  repeated uint32 added_parallel_units = 1;
+  repeated uint32 removed_parallel_units = 2;
 }
 
 message RescheduleRequest {
-  message Reschedule {
-    repeated uint32 added_parallel_units = 1;
-    repeated uint32 removed_parallel_units = 2;
-  }
   // reschedule plan for each fragment
   map<uint32, Reschedule> reschedules = 1;
+  uint64 revision = 2;
+  bool resolve_no_shuffle_upstream = 3;
 }
 
 message RescheduleResponse {
   bool success = 1;
+  uint64 revision = 2;
+}
+
+message TableParallelism {
+  message FixedParallelism {
+    uint32 parallelism = 1;
+  }
+
+  // deprecated, treated as AdaptiveParallelism
+  message AutoParallelism {}
+
+  message AdaptiveParallelism {}
+
+  message CustomParallelism {}
+
+  oneof parallelism {
+    FixedParallelism fixed = 1;
+    AutoParallelism auto = 2;
+    CustomParallelism custom = 3;
+    AdaptiveParallelism adaptive = 4;
+  }
+}
+
+message GetReschedulePlanRequest {
+  uint64 revision = 1;
+
+  message WorkerChanges {
+    repeated uint32 include_worker_ids = 1;
+    repeated uint32 exclude_worker_ids = 2;
+    optional uint32 target_parallelism = 3;
+    optional uint32 target_parallelism_per_worker = 4;
+  }
+
+  message StableResizePolicy {
+    map<uint32, WorkerChanges> fragment_worker_changes = 1;
+  }
+
+  oneof policy {
+    // The StableResizePolicy will generate a stable ReschedulePlan, without altering the distribution on WorkerId that's not involved.
+    // Note that this "Stable" doesn't refer to the "determinacy" of the algorithm.
+    // Multiple repeated calls may yield different ReschedulePlan results.
+    StableResizePolicy stable_resize_policy = 2;
+  }
+}
+
+message GetReschedulePlanResponse {
+  uint64 revision = 1;
+  // reschedule plan for each fragment
+  map<uint32, Reschedule> reschedules = 2;
+  // todo, refactor needed
+  bool success = 3;
 }
 
 service ScaleService {
-  // TODO(Kexiang): delete them when config change interface is finished
-  rpc Pause(PauseRequest) returns (PauseResponse);
-  rpc Resume(ResumeRequest) returns (ResumeResponse);
   rpc GetClusterInfo(GetClusterInfoRequest) returns (GetClusterInfoResponse);
   rpc Reschedule(RescheduleRequest) returns (RescheduleResponse);
+  rpc GetReschedulePlan(GetReschedulePlanRequest) returns (GetReschedulePlanResponse);
 }
 
 message MembersRequest {}
@@ -360,7 +582,7 @@ service MetaMemberService {
 
 // The schema for persisted system parameters.
 // Note on backward compatibility:
-// - Do not remove deprecated fields. Mark them as deprecated both after the field definition and in `system_params/mod.rs` instead.
+// - Do not remove deprecated fields. Mark them as deprecated instead.
 // - Do not rename existing fields, since each field is stored separately in the meta store with the field name as the key.
 // - To modify (rename, change the type or semantic of) a field, introduce a new field suffixed by the version.
 message SystemParams {
@@ -373,7 +595,15 @@ message SystemParams {
   optional string data_directory = 7;
   optional string backup_storage_url = 8;
   optional string backup_storage_directory = 9;
-  optional bool telemetry_enabled = 10;
+  // Deprecated. Use config file instead.
+  optional bool telemetry_enabled = 10 [deprecated = true];
+  optional uint32 parallel_compact_size_mb = 11;
+  optional uint32 max_concurrent_creating_streaming_jobs = 12;
+  optional bool pause_on_next_bootstrap = 13;
+  optional string wasm_storage_url = 14 [deprecated = true];
+  optional bool enable_tracing = 15;
+  optional bool use_new_object_prefix_strategy = 16;
+  optional string license_key = 17;
 }
 
 message GetSystemParamsRequest {}
@@ -388,9 +618,122 @@ message SetSystemParamRequest {
   optional string value = 2;
 }
 
-message SetSystemParamResponse {}
+message SetSystemParamResponse {
+  optional SystemParams params = 1;
+}
 
 service SystemParamsService {
   rpc GetSystemParams(GetSystemParamsRequest) returns (GetSystemParamsResponse);
   rpc SetSystemParam(SetSystemParamRequest) returns (SetSystemParamResponse);
+}
+
+message GetSessionParamsRequest {}
+
+message GetSessionParamsResponse {
+  string params = 1;
+}
+
+message SetSessionParamRequest {
+  string param = 1;
+  // None means set to default value.
+  optional string value = 2;
+}
+
+message SetSessionParamResponse {
+  string param = 1;
+}
+
+// Used for alter system wide default parameters
+service SessionParamService {
+  rpc GetSessionParams(GetSessionParamsRequest) returns (GetSessionParamsResponse);
+  rpc SetSessionParam(SetSessionParamRequest) returns (SetSessionParamResponse);
+}
+
+message GetServingVnodeMappingsRequest {}
+
+message GetServingVnodeMappingsResponse {
+  reserved 1;
+  reserved "mappings";
+  map<uint32, uint32> fragment_to_table = 2;
+  repeated FragmentWorkerSlotMapping worker_slot_mappings = 3;
+}
+
+service ServingService {
+  rpc GetServingVnodeMappings(GetServingVnodeMappingsRequest) returns (GetServingVnodeMappingsResponse);
+}
+
+message EventLog {
+  message EventMetaNodeStart {
+    string advertise_addr = 1;
+    string listen_addr = 2;
+    string opts = 3;
+  }
+  message EventCreateStreamJobFail {
+    uint32 id = 1;
+    string name = 2;
+    string definition = 3;
+    string error = 4;
+  }
+  message EventDirtyStreamJobClear {
+    uint32 id = 1;
+    string name = 2;
+    string definition = 3;
+    string error = 4;
+  }
+  message EventBarrierComplete {
+    uint64 prev_epoch = 1;
+    uint64 cur_epoch = 2;
+    double duration_sec = 3;
+    string command = 4;
+    string barrier_kind = 5;
+  }
+  message EventInjectBarrierFail {
+    uint64 prev_epoch = 1;
+    uint64 cur_epoch = 2;
+    string error = 3;
+  }
+  message EventCollectBarrierFail {
+    uint64 prev_epoch = 1;
+    uint64 cur_epoch = 2;
+    string error = 3;
+  }
+  message EventWorkerNodePanic {
+    uint32 worker_id = 1;
+    common.WorkerType worker_type = 2;
+    common.HostAddress host_addr = 3;
+    string panic_info = 4;
+  }
+  // Event logs identifier, which should be populated by event log service.
+  optional string unique_id = 1;
+  // Processing time, which should be populated by event log service.
+  optional uint64 timestamp = 2;
+  oneof event {
+    EventCreateStreamJobFail create_stream_job_fail = 3;
+    EventDirtyStreamJobClear dirty_stream_job_clear = 4;
+    EventMetaNodeStart meta_node_start = 5;
+    EventBarrierComplete barrier_complete = 6;
+    EventInjectBarrierFail inject_barrier_fail = 7;
+    EventCollectBarrierFail collect_barrier_fail = 8;
+    EventLog.EventWorkerNodePanic worker_node_panic = 9;
+  }
+}
+
+message ListEventLogRequest {}
+
+message ListEventLogResponse {
+  repeated EventLog event_logs = 1;
+}
+
+message AddEventLogRequest {
+  // A subset of EventLog.event that can be added by non meta node.
+  oneof event {
+    EventLog.EventWorkerNodePanic worker_node_panic = 1;
+  }
+}
+
+message AddEventLogResponse {}
+
+service EventLogService {
+  rpc ListEventLog(ListEventLogRequest) returns (ListEventLogResponse);
+  rpc AddEventLog(AddEventLogRequest) returns (AddEventLogResponse);
 }

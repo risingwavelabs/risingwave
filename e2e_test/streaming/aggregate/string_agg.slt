@@ -1,0 +1,94 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table t (a varchar, b int, c int);
+
+statement ok
+insert into t values ('a', 1, 2), ('b', 4, 6);
+
+statement ok
+create materialized view mv1 as select string_agg(a, ',' order by a desc) as res from t;
+
+statement ok
+create materialized view mv2 as select string_agg(a, b::varchar order by b) as res from t group by c;
+
+statement ok
+create materialized view mv3 as select string_agg(a, '' order by b) filter (where c != 0) as res from t;
+
+statement ok
+create materialized view mv4 as
+select
+    string_agg(distinct a, ',' order by a) as out1,
+    count(a) as out2,
+    count(*) as out3,
+    count(distinct a) as out4
+from t;
+
+statement ok
+flush;
+
+query T
+select * from mv1;
+----
+b,a
+
+query T
+select * from mv2 order by res;
+----
+a
+b
+
+query T
+select * from mv3;
+----
+ab
+
+statement ok
+insert into t values ('c', 2, 2), ('d', 3, 0), (NULL, 4, 5);
+
+query T
+select * from mv1;
+----
+d,c,b,a
+
+query T
+select * from mv2 order by res;
+----
+a2c
+b
+d
+NULL
+
+query T
+select * from mv3;
+----
+acb
+
+query TIII
+select * from mv4;
+----
+a,b,c,d  4  5  4
+
+statement ok
+insert into t values ('c', 8, 10), ('e', 9, 7);
+
+query TIII
+select * from mv4;
+----
+a,b,c,d,e  6  7  5
+
+statement ok
+drop materialized view mv1;
+
+statement ok
+drop materialized view mv2;
+
+statement ok
+drop materialized view mv3;
+
+statement ok
+drop materialized view mv4;
+
+statement ok
+drop table t;

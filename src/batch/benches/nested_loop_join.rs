@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,13 +15,14 @@ pub mod utils;
 
 use criterion::{criterion_group, criterion_main, Criterion};
 use risingwave_batch::executor::{BoxedExecutor, JoinType, NestedLoopJoinExecutor};
-use risingwave_common::enable_jemalloc_on_unix;
+use risingwave_batch::task::ShutdownToken;
+use risingwave_common::enable_jemalloc;
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::types::DataType;
 use risingwave_expr::expr::build_from_pretty;
 use utils::{bench_join, create_input};
 
-enable_jemalloc_on_unix!();
+enable_jemalloc!();
 
 fn create_nested_loop_join_executor(
     join_type: JoinType,
@@ -44,7 +45,7 @@ fn create_nested_loop_join_executor(
     Box::new(NestedLoopJoinExecutor::new(
         build_from_pretty(
             "(equal:boolean
-                (modulus:int8 $0:int8 2:int8) 
+                (modulus:int8 $0:int8 2:int8)
                 (modulus:int8 $1:int8 3:int8))",
         ),
         join_type,
@@ -54,9 +55,7 @@ fn create_nested_loop_join_executor(
         "NestedLoopJoinExecutor".into(),
         CHUNK_SIZE,
         MemoryContext::none(),
-        // TODO: In practice this `shutdown_rx` will be constantly poll in execution, may need to
-        // use it in bench too.
-        None,
+        ShutdownToken::empty(),
     ))
 }
 

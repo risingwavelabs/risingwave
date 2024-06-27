@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,37 +12,46 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::future::Future;
 use std::io;
-use std::result::Result;
+use std::str::FromStr;
 use std::sync::Arc;
+use std::time::Instant;
 
 use bytes::Bytes;
-use futures::{Stream, TryFutureExt};
+use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, Validation};
+use parking_lot::Mutex;
 use risingwave_common::types::DataType;
-use risingwave_sqlparser::ast::Statement;
+use risingwave_sqlparser::ast::{RedactSqlOptionKeywordsRef, Statement};
+use serde::Deserialize;
+use thiserror_ext::AsReport;
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::net::TcpListener;
-use tracing::debug;
 
+use crate::error::{PsqlError, PsqlResult};
+use crate::net::{AddressRef, Listener};
 use crate::pg_field_descriptor::PgFieldDescriptor;
+use crate::pg_message::TransactionStatus;
 use crate::pg_protocol::{PgProtocol, TlsConfig};
-use crate::pg_response::{PgResponse, RowSetResult};
+use crate::pg_response::{PgResponse, ValuesStream};
 use crate::types::Format;
 
 pub type BoxedError = Box<dyn std::error::Error + Send + Sync>;
-pub type SessionId = (i32, i32);
+type ProcessId = i32;
+type SecretKey = i32;
+pub type SessionId = (ProcessId, SecretKey);
+
 /// The interface for a database system behind pgwire protocol.
 /// We can mock it for testing purpose.
-pub trait SessionManager<VS, PS, PO>: Send + Sync + 'static
-where
-    VS: Stream<Item = RowSetResult> + Unpin + Send,
-    PS: Send + Clone + 'static,
-    PO: Send + Clone + std::fmt::Display + 'static,
-{
-    type Session: Session<VS, PS, PO>;
+pub trait SessionManager: Send + Sync + 'static {
+    type Session: Session;
 
-    fn connect(&self, database: &str, user_name: &str) -> Result<Arc<Self::Session>, BoxedError>;
+    fn connect(
+        &self,
+        database: &str,
+        user_name: &str,
+        peer_addr: AddressRef,
+    ) -> Result<Arc<Self::Session>, BoxedError>;
 
     fn cancel_queries_in_session(&self, session_id: SessionId);
 
@@ -53,26 +62,24 @@ where
 
 /// A psql connection. Each connection binds with a database. Switching database will need to
 /// recreate another connection.
-#[async_trait::async_trait]
-pub trait Session<VS, PS, PO>: Send + Sync
-where
-    VS: Stream<Item = RowSetResult> + Unpin + Send,
-    PS: Send + Clone + 'static,
-    PO: Send + Clone + std::fmt::Display + 'static,
-{
+pub trait Session: Send + Sync {
+    type ValuesStream: ValuesStream;
+    type PreparedStatement: Send + Clone + 'static;
+    type Portal: Send + Clone + std::fmt::Display + 'static;
+
     /// The str sql can not use the unparse from AST: There is some problem when dealing with create
-    /// view, see  https://github.com/risingwavelabs/risingwave/issues/6801.
-    async fn run_one_query(
+    /// view, see <https://github.com/risingwavelabs/risingwave/issues/6801>.
+    fn run_one_query(
         self: Arc<Self>,
-        sql: Statement,
+        stmt: Statement,
         format: Format,
-    ) -> Result<PgResponse<VS>, BoxedError>;
+    ) -> impl Future<Output = Result<PgResponse<Self::ValuesStream>, BoxedError>> + Send;
 
     fn parse(
         self: Arc<Self>,
-        sql: Statement,
-        params_types: Vec<DataType>,
-    ) -> Result<PS, BoxedError>;
+        sql: Option<Statement>,
+        params_types: Vec<Option<DataType>>,
+    ) -> Result<Self::PreparedStatement, BoxedError>;
 
     // TODO: maybe this function should be async and return the notice more timely
     /// try to take the current notices from the session
@@ -80,24 +87,64 @@ where
 
     fn bind(
         self: Arc<Self>,
-        prepare_statement: PS,
-        params: Vec<Bytes>,
+        prepare_statement: Self::PreparedStatement,
+        params: Vec<Option<Bytes>>,
         param_formats: Vec<Format>,
         result_formats: Vec<Format>,
-    ) -> Result<PO, BoxedError>;
+    ) -> Result<Self::Portal, BoxedError>;
 
-    async fn execute(self: Arc<Self>, portal: PO) -> Result<PgResponse<VS>, BoxedError>;
+    fn execute(
+        self: Arc<Self>,
+        portal: Self::Portal,
+    ) -> impl Future<Output = Result<PgResponse<Self::ValuesStream>, BoxedError>> + Send;
 
     fn describe_statement(
         self: Arc<Self>,
-        prepare_statement: PS,
+        prepare_statement: Self::PreparedStatement,
     ) -> Result<(Vec<DataType>, Vec<PgFieldDescriptor>), BoxedError>;
 
-    fn describe_portral(self: Arc<Self>, portal: PO) -> Result<Vec<PgFieldDescriptor>, BoxedError>;
+    fn describe_portal(
+        self: Arc<Self>,
+        portal: Self::Portal,
+    ) -> Result<Vec<PgFieldDescriptor>, BoxedError>;
 
     fn user_authenticator(&self) -> &UserAuthenticator;
 
     fn id(&self) -> SessionId;
+
+    fn set_config(&self, key: &str, value: String) -> Result<String, BoxedError>;
+
+    fn transaction_status(&self) -> TransactionStatus;
+
+    fn init_exec_context(&self, sql: Arc<str>) -> ExecContextGuard;
+
+    fn check_idle_in_transaction_timeout(&self) -> PsqlResult<()>;
+}
+
+/// Each session could run different SQLs multiple times.
+/// `ExecContext` represents the lifetime of a running SQL in the current session.
+pub struct ExecContext {
+    pub running_sql: Arc<str>,
+    /// The instant of the running sql
+    pub last_instant: Instant,
+    /// A reference used to update when `ExecContext` is dropped
+    pub last_idle_instant: Arc<Mutex<Option<Instant>>>,
+}
+
+/// `ExecContextGuard` holds a `Arc` pointer. Once `ExecContextGuard` is dropped,
+/// the inner `Arc<ExecContext>` should not be referred anymore, so that its `Weak` reference (used in `SessionImpl`) will be the same lifecycle of the running sql execution context.
+pub struct ExecContextGuard(#[allow(dead_code)] Arc<ExecContext>);
+
+impl ExecContextGuard {
+    pub fn new(exec_context: Arc<ExecContext>) -> Self {
+        Self(exec_context)
+    }
+}
+
+impl Drop for ExecContext {
+    fn drop(&mut self) {
+        *self.last_idle_instant.lock() = Some(Instant::now());
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -111,75 +158,173 @@ pub enum UserAuthenticator {
         encrypted_password: Vec<u8>,
         salt: [u8; 4],
     },
+    OAuth(HashMap<String, String>),
+}
+
+/// A JWK Set is a JSON object that represents a set of JWKs.
+/// The JSON object MUST have a "keys" member, with its value being an array of JWKs.
+/// See <https://www.rfc-editor.org/rfc/rfc7517.html#section-5> for more details.
+#[derive(Debug, Deserialize)]
+struct Jwks {
+    keys: Vec<Jwk>,
+}
+
+/// A JSON Web Key (JWK) is a JSON object that represents a cryptographic key.
+/// See <https://www.rfc-editor.org/rfc/rfc7517.html#section-4> for more details.
+#[derive(Debug, Deserialize)]
+struct Jwk {
+    kid: String, // Key ID
+    alg: String, // Algorithm
+    n: String,   // Modulus
+    e: String,   // Exponent
+}
+
+async fn validate_jwt(
+    jwt: &str,
+    jwks_url: &str,
+    issuer: &str,
+    metadata: &HashMap<String, String>,
+) -> Result<bool, BoxedError> {
+    let header = decode_header(jwt)?;
+    let jwks: Jwks = reqwest::get(jwks_url).await?.json().await?;
+
+    // 1. Retrieve the kid from the header to find the right JWK in the JWK Set.
+    let kid = header.kid.ok_or("kid not found in jwt header")?;
+    let jwk = jwks
+        .keys
+        .into_iter()
+        .find(|k| k.kid == kid)
+        .ok_or("kid not found in jwks")?;
+
+    // 2. Check if the algorithms are matched.
+    if Algorithm::from_str(&jwk.alg)? != header.alg {
+        return Err("alg in jwt header does not match with alg in jwk".into());
+    }
+
+    // 3. Decode the JWT and validate the claims.
+    let decoding_key = DecodingKey::from_rsa_components(&jwk.n, &jwk.e)?;
+    let mut validation = Validation::new(header.alg);
+    validation.set_issuer(&[issuer]);
+    validation.set_required_spec_claims(&["exp", "iss"]);
+    let token_data = decode::<HashMap<String, serde_json::Value>>(jwt, &decoding_key, &validation)?;
+
+    // 4. Check if the metadata in the token matches.
+    if !metadata.iter().all(
+        |(k, v)| matches!(token_data.claims.get(k), Some(serde_json::Value::String(s)) if s == v),
+    ) {
+        return Err("metadata in jwt does not match with metadata declared with user".into());
+    }
+    Ok(true)
 }
 
 impl UserAuthenticator {
-    pub fn authenticate(&self, password: &[u8]) -> bool {
-        match self {
+    pub async fn authenticate(&self, password: &[u8]) -> PsqlResult<()> {
+        let success = match self {
             UserAuthenticator::None => true,
             UserAuthenticator::ClearText(text) => password == text,
             UserAuthenticator::Md5WithSalt {
                 encrypted_password, ..
             } => encrypted_password == password,
+            UserAuthenticator::OAuth(metadata) => {
+                let mut metadata = metadata.clone();
+                let jwks_url = metadata.remove("jwks_url").unwrap();
+                let issuer = metadata.remove("issuer").unwrap();
+                validate_jwt(
+                    &String::from_utf8_lossy(password),
+                    &jwks_url,
+                    &issuer,
+                    &metadata,
+                )
+                .await
+                .map_err(PsqlError::StartupError)?
+            }
+        };
+        if !success {
+            return Err(PsqlError::PasswordError);
         }
+        Ok(())
     }
 }
 
-/// Binds a Tcp listener at `addr`. Spawn a coroutine to serve every new connection.
-pub async fn pg_serve<VS, PS, PO>(
+/// Binds a Tcp or Unix listener at `addr`. Spawn a coroutine to serve every new connection.
+pub async fn pg_serve(
     addr: &str,
-    session_mgr: Arc<impl SessionManager<VS, PS, PO>>,
-    ssl_config: Option<TlsConfig>,
-) -> io::Result<()>
-where
-    VS: Stream<Item = RowSetResult> + Unpin + Send + 'static,
-    PS: Send + Clone + 'static,
-    PO: Send + Clone + std::fmt::Display + 'static,
-{
-    let listener = TcpListener::bind(addr).await.unwrap();
-    // accept connections and process them, spawning a new thread for each one
-    tracing::info!("Server Listening at {}", addr);
-    loop {
-        let session_mgr = session_mgr.clone();
-        let conn_ret = listener.accept().await;
-        match conn_ret {
-            Ok((stream, peer_addr)) => {
-                tracing::info!("New connection: {}", peer_addr);
-                stream.set_nodelay(true)?;
-                let ssl_config = ssl_config.clone();
-                let fut = handle_connection(stream, session_mgr, ssl_config);
-                tokio::spawn(fut.inspect_err(|e| debug!("error handling connection: {e}")));
-            }
+    session_mgr: Arc<impl SessionManager>,
+    tls_config: Option<TlsConfig>,
+    redact_sql_option_keywords: Option<RedactSqlOptionKeywordsRef>,
+) -> io::Result<()> {
+    let listener = Listener::bind(addr).await?;
+    tracing::info!(addr, "server started");
 
-            Err(e) => {
-                tracing::error!("Connection failure: {}", e);
+    let acceptor_runtime = {
+        let mut builder = tokio::runtime::Builder::new_multi_thread();
+        builder.worker_threads(1);
+        builder
+            .thread_name("rw-acceptor")
+            .enable_all()
+            .build()
+            .unwrap()
+    };
+
+    #[cfg(not(madsim))]
+    let worker_runtime = tokio::runtime::Handle::current();
+    #[cfg(madsim)]
+    let worker_runtime = tokio::runtime::Builder::new_multi_thread().build().unwrap();
+
+    let f = async move {
+        loop {
+            let conn_ret = listener.accept().await;
+            match conn_ret {
+                Ok((stream, peer_addr)) => {
+                    tracing::info!(%peer_addr, "accept connection");
+                    worker_runtime.spawn(handle_connection(
+                        stream,
+                        session_mgr.clone(),
+                        tls_config.clone(),
+                        Arc::new(peer_addr),
+                        redact_sql_option_keywords.clone(),
+                    ));
+                }
+
+                Err(e) => {
+                    tracing::error!(error = %e.as_report(), "failed to accept connection",);
+                }
             }
         }
-    }
+    };
+    acceptor_runtime.spawn(f).await?;
+    Ok(())
 }
 
-#[tracing::instrument(level = "debug", skip_all)]
-pub fn handle_connection<S, SM, VS, PS, PO>(
+pub async fn handle_connection<S, SM>(
     stream: S,
     session_mgr: Arc<SM>,
     tls_config: Option<TlsConfig>,
-) -> impl Future<Output = Result<(), anyhow::Error>>
-where
+    peer_addr: AddressRef,
+    redact_sql_option_keywords: Option<RedactSqlOptionKeywordsRef>,
+) where
     S: AsyncWrite + AsyncRead + Unpin,
-    SM: SessionManager<VS, PS, PO>,
-    VS: Stream<Item = RowSetResult> + Unpin + Send + 'static,
-    PS: Send + Clone + 'static,
-    PO: Send + Clone + std::fmt::Display + 'static,
+    SM: SessionManager,
 {
-    let mut pg_proto = PgProtocol::new(stream, session_mgr, tls_config);
-    async {
-        loop {
-            let msg = pg_proto.read_message().await?;
-            tracing::trace!("Received message: {:?}", msg);
-            let ret = pg_proto.process(msg).await;
-            if ret {
-                return Ok(());
+    let mut pg_proto = PgProtocol::new(
+        stream,
+        session_mgr,
+        tls_config,
+        peer_addr,
+        redact_sql_option_keywords,
+    );
+    loop {
+        let msg = match pg_proto.read_message().await {
+            Ok(msg) => msg,
+            Err(e) => {
+                tracing::error!(error = %e.as_report(), "error when reading message");
+                break;
             }
+        };
+        tracing::trace!("Received message: {:?}", msg);
+        let ret = pg_proto.process(msg).await;
+        if ret {
+            break;
         }
     }
 }
@@ -188,6 +333,7 @@ where
 mod tests {
     use std::error::Error;
     use std::sync::Arc;
+    use std::time::Instant;
 
     use bytes::Bytes;
     use futures::stream::BoxStream;
@@ -196,10 +342,13 @@ mod tests {
     use risingwave_sqlparser::ast::Statement;
     use tokio_postgres::NoTls;
 
+    use crate::error::PsqlResult;
     use crate::pg_field_descriptor::PgFieldDescriptor;
+    use crate::pg_message::TransactionStatus;
     use crate::pg_response::{PgResponse, RowSetResult, StatementType};
     use crate::pg_server::{
-        pg_serve, BoxedError, Session, SessionId, SessionManager, UserAuthenticator,
+        pg_serve, BoxedError, ExecContext, ExecContextGuard, Session, SessionId, SessionManager,
+        UserAuthenticator,
     };
     use crate::types;
     use crate::types::Row;
@@ -207,13 +356,14 @@ mod tests {
     struct MockSessionManager {}
     struct MockSession {}
 
-    impl SessionManager<BoxStream<'static, RowSetResult>, String, String> for MockSessionManager {
+    impl SessionManager for MockSessionManager {
         type Session = MockSession;
 
         fn connect(
             &self,
             _database: &str,
             _user_name: &str,
+            _peer_addr: crate::net::AddressRef,
         ) -> Result<Arc<Self::Session>, Box<dyn Error + Send + Sync>> {
             Ok(Arc::new(MockSession {}))
         }
@@ -229,30 +379,34 @@ mod tests {
         fn end_session(&self, _session: &Self::Session) {}
     }
 
-    #[async_trait::async_trait]
-    impl Session<BoxStream<'static, RowSetResult>, String, String> for MockSession {
+    impl Session for MockSession {
+        type Portal = String;
+        type PreparedStatement = String;
+        type ValuesStream = BoxStream<'static, RowSetResult>;
+
         async fn run_one_query(
             self: Arc<Self>,
-            _sql: Statement,
+            _stmt: Statement,
             _format: types::Format,
         ) -> Result<PgResponse<BoxStream<'static, RowSetResult>>, BoxedError> {
-            Ok(PgResponse::new_for_stream(
-                StatementType::SELECT,
-                None,
-                futures::stream::iter(vec![Ok(vec![Row::new(vec![Some(Bytes::new())])])]).boxed(),
-                vec![
-                    // 1043 is the oid of varchar type.
-                    // -1 is the type len of varchar type.
-                    PgFieldDescriptor::new("".to_string(), 1043, -1);
-                    1
-                ],
-            ))
+            Ok(PgResponse::builder(StatementType::SELECT)
+                .values(
+                    futures::stream::iter(vec![Ok(vec![Row::new(vec![Some(Bytes::new())])])])
+                        .boxed(),
+                    vec![
+                        // 1043 is the oid of varchar type.
+                        // -1 is the type len of varchar type.
+                        PgFieldDescriptor::new("".to_string(), 1043, -1);
+                        1
+                    ],
+                )
+                .into())
         }
 
         fn parse(
             self: Arc<Self>,
-            _sql: Statement,
-            _params_types: Vec<DataType>,
+            _sql: Option<Statement>,
+            _params_types: Vec<Option<DataType>>,
         ) -> Result<String, BoxedError> {
             Ok(String::new())
         }
@@ -260,7 +414,7 @@ mod tests {
         fn bind(
             self: Arc<Self>,
             _prepare_statement: String,
-            _params: Vec<Bytes>,
+            _params: Vec<Option<Bytes>>,
             _param_formats: Vec<types::Format>,
             _result_formats: Vec<types::Format>,
         ) -> Result<String, BoxedError> {
@@ -271,17 +425,18 @@ mod tests {
             self: Arc<Self>,
             _portal: String,
         ) -> Result<PgResponse<BoxStream<'static, RowSetResult>>, BoxedError> {
-            Ok(PgResponse::new_for_stream(
-                StatementType::SELECT,
-                None,
-                futures::stream::iter(vec![Ok(vec![Row::new(vec![Some(Bytes::new())])])]).boxed(),
-                vec![
+            Ok(PgResponse::builder(StatementType::SELECT)
+                .values(
+                    futures::stream::iter(vec![Ok(vec![Row::new(vec![Some(Bytes::new())])])])
+                        .boxed(),
+                    vec![
                     // 1043 is the oid of varchar type.
                     // -1 is the type len of varchar type.
                     PgFieldDescriptor::new("".to_string(), 1043, -1);
                     1
                 ],
-            ))
+                )
+                .into())
         }
 
         fn describe_statement(
@@ -294,7 +449,7 @@ mod tests {
             ))
         }
 
-        fn describe_portral(
+        fn describe_portal(
             self: Arc<Self>,
             _portal: String,
         ) -> Result<Vec<PgFieldDescriptor>, BoxedError> {
@@ -309,22 +464,43 @@ mod tests {
             (0, 0)
         }
 
+        fn set_config(&self, _key: &str, _value: String) -> Result<String, BoxedError> {
+            Ok("".to_string())
+        }
+
         fn take_notices(self: Arc<Self>) -> Vec<String> {
             vec![]
         }
+
+        fn transaction_status(&self) -> TransactionStatus {
+            TransactionStatus::Idle
+        }
+
+        fn init_exec_context(&self, sql: Arc<str>) -> ExecContextGuard {
+            let exec_context = Arc::new(ExecContext {
+                running_sql: sql,
+                last_instant: Instant::now(),
+                last_idle_instant: Default::default(),
+            });
+            ExecContextGuard::new(exec_context)
+        }
+
+        fn check_idle_in_transaction_timeout(&self) -> PsqlResult<()> {
+            Ok(())
+        }
     }
 
-    #[tokio::test]
-    async fn test_query() {
+    async fn do_test_query(bind_addr: impl Into<String>, pg_config: impl Into<String>) {
+        let bind_addr = bind_addr.into();
+        let pg_config = pg_config.into();
+
         let session_mgr = Arc::new(MockSessionManager {});
-        tokio::spawn(async move { pg_serve("127.0.0.1:10000", session_mgr, None).await });
+        tokio::spawn(async move { pg_serve(&bind_addr, session_mgr, None, None).await });
         // wait for server to start
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
         // Connect to the database.
-        let (client, connection) = tokio_postgres::connect("host=localhost port=10000", NoTls)
-            .await
-            .unwrap();
+        let (client, connection) = tokio_postgres::connect(&pg_config, NoTls).await.unwrap();
 
         // The connection object performs the actual communication with the database,
         // so spawn it off to run on its own.
@@ -346,5 +522,24 @@ mod tests {
             .await
             .expect("Error executing query");
         assert_eq!(rows.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_query_tcp() {
+        do_test_query("127.0.0.1:10000", "host=localhost port=10000").await;
+    }
+
+    #[cfg(not(madsim))]
+    #[tokio::test]
+    async fn test_query_unix() {
+        let port: i16 = 10000;
+        let dir = tempfile::TempDir::new().unwrap();
+        let sock = dir.path().join(format!(".s.PGSQL.{port}"));
+
+        do_test_query(
+            format!("unix:{}", sock.to_str().unwrap()),
+            format!("host={} port={}", dir.path().to_str().unwrap(), port),
+        )
+        .await;
     }
 }

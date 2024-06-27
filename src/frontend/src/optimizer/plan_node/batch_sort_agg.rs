@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,101 +12,87 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
-use fixedbitset::FixedBitSet;
-use itertools::Itertools;
-use risingwave_common::error::Result;
-use risingwave_common::types::DataType;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::SortAggNode;
 use risingwave_pb::expr::ExprNode;
 
-use super::generic::{self, GenericPlanRef, PlanAggCall};
+use super::batch::prelude::*;
+use super::generic::{self, PlanAggCall};
+use super::utils::impl_distill_by_unit;
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch};
-use crate::expr::{Expr, ExprImpl, ExprRewriter, InputRef};
+use crate::error::Result;
+use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::ToLocalBatch;
-use crate::optimizer::property::{Distribution, Order, RequiredDist};
-use crate::utils::ColIndexMappingRewriteExt;
+use crate::optimizer::property::{Order, RequiredDist};
+use crate::utils::{ColIndexMappingRewriteExt, IndexSet};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchSortAgg {
-    pub base: PlanBase,
-    logical: generic::Agg<PlanRef>,
+    pub base: PlanBase<Batch>,
+    core: generic::Agg<PlanRef>,
     input_order: Order,
 }
 
 impl BatchSortAgg {
-    pub fn new(logical: generic::Agg<PlanRef>) -> Self {
-        let input = logical.input.clone();
+    pub fn new(core: generic::Agg<PlanRef>) -> Self {
+        assert!(!core.group_key.is_empty());
+        assert!(core.input_provides_order_on_group_keys());
+
+        let input = core.input.clone();
         let input_dist = input.distribution();
-        let dist = match input_dist {
-            Distribution::HashShard(_) | Distribution::UpstreamHashShard(_, _) => logical
-                .i2o_col_mapping()
-                .rewrite_provided_distribution(input_dist),
-            d => d.clone(),
-        };
+        let dist = core
+            .i2o_col_mapping()
+            .rewrite_provided_distribution(input_dist);
         let input_order = Order {
             column_orders: input
                 .order()
                 .column_orders
                 .iter()
-                .filter(|o| logical.group_key.ones().any(|g_k| g_k == o.column_index))
+                .filter(|o| core.group_key.indices().any(|g_k| g_k == o.column_index))
                 .cloned()
                 .collect(),
         };
 
-        assert_eq!(input_order.column_orders.len(), logical.group_key.len());
+        let order = core.i2o_col_mapping().rewrite_provided_order(&input_order);
 
-        let order = logical
-            .i2o_col_mapping()
-            .rewrite_provided_order(&input_order);
-
-        let base = PlanBase::new_batch_from_logical(&logical, dist, order);
+        let base = PlanBase::new_batch_with_core(&core, dist, order);
 
         BatchSortAgg {
             base,
-            logical,
+            core,
             input_order,
         }
     }
 
     pub fn agg_calls(&self) -> &[PlanAggCall] {
-        &self.logical.agg_calls
+        &self.core.agg_calls
     }
 
-    pub fn group_key(&self) -> &FixedBitSet {
-        &self.logical.group_key
-    }
-}
-
-impl fmt::Display for BatchSortAgg {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.logical.fmt_with_name(f, "BatchSortAgg")
+    pub fn group_key(&self) -> &IndexSet {
+        &self.core.group_key
     }
 }
 
 impl PlanTreeNodeUnary for BatchSortAgg {
     fn input(&self) -> PlanRef {
-        self.logical.input.clone()
+        self.core.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        let mut logical = self.logical.clone();
-        logical.input = input;
-        Self::new(logical)
+        let mut core = self.core.clone();
+        core.input = input;
+        Self::new(core)
     }
 }
 impl_plan_tree_node_for_unary! { BatchSortAgg }
+impl_distill_by_unit!(BatchSortAgg, core, "BatchSortAgg");
 
 impl ToDistributedBatch for BatchSortAgg {
     fn to_distributed(&self) -> Result<PlanRef> {
         let new_input = self.input().to_distributed_with_required(
             &self.input_order,
-            &RequiredDist::shard_by_key(
-                self.input().schema().len(),
-                &self.group_key().ones().collect_vec(),
-            ),
+            &RequiredDist::shard_by_key(self.input().schema().len(), &self.group_key().to_vec()),
         )?;
         Ok(self.clone_with_input(new_input).into())
     }
@@ -114,6 +100,7 @@ impl ToDistributedBatch for BatchSortAgg {
 
 impl ToBatchPb for BatchSortAgg {
     fn to_batch_prost_body(&self) -> NodeBody {
+        let input = self.input();
         NodeBody::SortAgg(SortAggNode {
             agg_calls: self
                 .agg_calls()
@@ -122,8 +109,10 @@ impl ToBatchPb for BatchSortAgg {
                 .collect(),
             group_key: self
                 .group_key()
-                .ones()
-                .map(|idx| ExprImpl::InputRef(Box::new(InputRef::new(idx, DataType::Int32))))
+                .indices()
+                .map(|idx| {
+                    ExprImpl::InputRef(InputRef::new(idx, input.schema()[idx].data_type()).into())
+                })
                 .map(|expr| expr.to_expr_proto())
                 .collect::<Vec<ExprNode>>(),
         })
@@ -147,8 +136,14 @@ impl ExprRewritable for BatchSortAgg {
     }
 
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
-        let mut new_logical = self.logical.clone();
+        let mut new_logical = self.core.clone();
         new_logical.rewrite_exprs(r);
         Self::new(new_logical).into()
+    }
+}
+
+impl ExprVisitable for BatchSortAgg {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.core.visit_exprs(v);
     }
 }

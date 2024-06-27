@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,25 +13,40 @@
 // limitations under the License.
 
 pub mod manager;
+pub mod pb_compatible;
 pub mod report;
 
+use std::env;
 use std::time::SystemTime;
 
-use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
-use sysinfo::{System, SystemExt};
+use sysinfo::System;
+use thiserror_ext::AsReport;
 
+use crate::util::env_var::env_var_is_true_or;
 use crate::util::resource_util::cpu::total_cpu_available;
-use crate::util::resource_util::memory::{total_memory_available_bytes, total_memory_used_bytes};
+use crate::util::resource_util::memory::{system_memory_available_bytes, total_memory_used_bytes};
+use crate::RW_VERSION;
+
+pub const TELEMETRY_CLUSTER_TYPE: &str = "RW_TELEMETRY_TYPE";
+const TELEMETRY_CLUSTER_TYPE_HOSTED: &str = "hosted"; // hosted on RisingWave Cloud
+const TELEMETRY_CLUSTER_TYPE_TEST: &str = "test"; // test environment, eg. CI & Risedev
 
 /// Url of telemetry backend
-pub const TELEMETRY_REPORT_URL: &str = "https://telemetry.risingwave.dev/api/v1/report";
+pub const TELEMETRY_REPORT_URL: &str = "https://telemetry.risingwave.dev/api/v2/report";
 
 /// Telemetry reporting interval in seconds, 6 hours
 pub const TELEMETRY_REPORT_INTERVAL: u64 = 6 * 60 * 60;
 
 /// Environment Variable that is default to be true
 const TELEMETRY_ENV_ENABLE: &str = "ENABLE_TELEMETRY";
+
+pub type TelemetryResult<T> = core::result::Result<T, TelemetryError>;
+
+/// Telemetry errors are generally recoverable/ignorable. `String` is good enough.
+pub type TelemetryError = String;
+
+type Result<T> = core::result::Result<T, TelemetryError>;
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum TelemetryNodeType {
@@ -43,23 +58,24 @@ pub enum TelemetryNodeType {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TelemetryReportBase {
-    /// tracking_id is persistent in etcd
+    /// `tracking_id` is persistent in etcd
     pub tracking_id: String,
-    /// session_id is reset every time node restarts
+    /// `session_id` is reset every time node restarts
     pub session_id: String,
-    /// system_data is hardware and os info
+    /// `system_data` is hardware and os info
     pub system_data: SystemData,
-    /// up_time is how long the node has been running
+    /// `up_time` is how long the node has been running
     pub up_time: u64,
-    /// time_stamp is when the report is created
+    /// `time_stamp` is when the report is created
     pub time_stamp: u64,
-    /// node_type is the node that creates the report
+    /// `node_type` is the node that creates the report
     pub node_type: TelemetryNodeType,
+    /// `is_test` is whether the report is from a test environment, default to be false
+    /// needed in CI for compatible tests with telemetry backend
+    pub is_test: bool,
 }
 
-pub trait TelemetryReport {
-    fn to_json(&self) -> Result<String>;
-}
+pub trait TelemetryReport: Serialize {}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SystemData {
@@ -71,7 +87,6 @@ pub struct SystemData {
 #[derive(Debug, Serialize, Deserialize)]
 struct Memory {
     used: usize,
-    available: usize,
     total: usize,
 }
 
@@ -90,25 +105,16 @@ struct Cpu {
 
 impl SystemData {
     pub fn new() -> Self {
-        let mut sys = System::new();
-
         let memory = {
-            let available = total_memory_available_bytes();
+            let total = system_memory_available_bytes();
             let used = total_memory_used_bytes();
-            Memory {
-                available,
-                used,
-                total: available + used,
-            }
+            Memory { used, total }
         };
 
-        let os = {
-            sys.refresh_system();
-            Os {
-                name: sys.name().unwrap_or_default(),
-                kernel_version: sys.kernel_version().unwrap_or_default(),
-                version: sys.os_version().unwrap_or_default(),
-            }
+        let os = Os {
+            name: System::name().unwrap_or_default(),
+            kernel_version: System::kernel_version().unwrap_or_default(),
+            version: System::os_version().unwrap_or_default(),
         };
 
         let cpu = Cpu {
@@ -125,20 +131,21 @@ impl Default for SystemData {
     }
 }
 
-/// post a telemetry reporting request
-pub async fn post_telemetry_report(url: &str, report_body: String) -> Result<(), anyhow::Error> {
+/// Sends a `POST` request of the telemetry reporting to a URL.
+pub async fn post_telemetry_report_pb(url: &str, report_body: Vec<u8>) -> Result<()> {
     let client = reqwest::Client::new();
     let res = client
         .post(url)
-        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .header(reqwest::header::CONTENT_TYPE, "application/x-protobuf")
         .body(report_body)
         .send()
-        .await?;
+        .await
+        .map_err(|err| format!("failed to send telemetry report, err: {}", err.as_report()))?;
     if res.status().is_success() {
         Ok(())
     } else {
-        Err(anyhow!(
-            "invalid telemetry resp, url {}, status {}",
+        Err(format!(
+            "telemetry response is error, url {}, status {}",
             url,
             res.status()
         ))
@@ -148,16 +155,7 @@ pub async fn post_telemetry_report(url: &str, report_body: String) -> Result<(),
 /// check whether telemetry is enabled in environment variable
 pub fn telemetry_env_enabled() -> bool {
     // default to be true
-    get_bool_env(TELEMETRY_ENV_ENABLE).unwrap_or(true)
-}
-
-pub fn get_bool_env(key: &str) -> Result<bool> {
-    let b = std::env::var(key)
-        .unwrap_or("true".to_string())
-        .trim()
-        .to_ascii_lowercase()
-        .parse()?;
-    Ok(b)
+    env_var_is_true_or(TELEMETRY_ENV_ENABLE, true)
 }
 
 pub fn current_timestamp() -> u64 {
@@ -165,6 +163,34 @@ pub fn current_timestamp() -> u64 {
         .duration_since(SystemTime::UNIX_EPOCH)
         .expect("Clock might go backward")
         .as_secs()
+}
+
+pub fn report_scarf_enabled() -> bool {
+    env::var(TELEMETRY_CLUSTER_TYPE)
+        .map(|deploy_type| {
+            !(deploy_type.eq_ignore_ascii_case(TELEMETRY_CLUSTER_TYPE_HOSTED)
+                || deploy_type.eq_ignore_ascii_case(TELEMETRY_CLUSTER_TYPE_TEST))
+        })
+        .unwrap_or(true)
+}
+
+// impl logic to report to Scarf service, containing RW version and deployment platform
+pub async fn report_to_scarf() {
+    let request_url = format!(
+        "https://risingwave.gateway.scarf.sh/telemetry/{}/{}",
+        RW_VERSION,
+        System::name().unwrap_or_default()
+    );
+    // keep trying every 1h until success
+    loop {
+        let res = reqwest::get(&request_url).await;
+        if let Ok(res) = res {
+            if res.status().is_success() {
+                break;
+            }
+        }
+        tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await;
+    }
 }
 
 #[cfg(test)]
@@ -175,7 +201,6 @@ mod tests {
     fn test_system_data_new() {
         let system_data = SystemData::new();
 
-        assert!(system_data.memory.available > 0);
         assert!(system_data.memory.used > 0);
         assert!(system_data.memory.total > 0);
         assert!(!system_data.os.name.is_empty());
@@ -185,42 +210,36 @@ mod tests {
     }
 
     #[test]
-    fn test_get_bool_env_true() {
-        let key = "MY_ENV_VARIABLE_TRUE";
+    fn test_env() {
+        let key = "ENABLE_TELEMETRY";
+
+        // make assertions more readable...
+        fn is_enabled() -> bool {
+            telemetry_env_enabled()
+        }
+        fn is_not_enabled() -> bool {
+            !is_enabled()
+        }
+
         std::env::set_var(key, "true");
-        let result = get_bool_env(key).unwrap();
-        assert!(result);
-    }
+        assert!(is_enabled());
 
-    #[test]
-    fn test_get_bool_env_false() {
-        let key = "MY_ENV_VARIABLE_FALSE";
         std::env::set_var(key, "false");
-        let result = get_bool_env(key).unwrap();
-        assert!(!result);
-    }
+        assert!(is_not_enabled());
 
-    #[test]
-    fn test_get_bool_env_default() {
-        let key = "MY_ENV_VARIABLE_NOT_SET";
-        std::env::remove_var(key);
-        let result = get_bool_env(key).unwrap();
-        assert!(result);
-    }
-
-    #[test]
-    fn test_get_bool_env_case_insensitive() {
-        let key = "MY_ENV_VARIABLE_MIXED_CASE";
         std::env::set_var(key, "tRue");
-        let result = get_bool_env(key).unwrap();
-        assert!(result);
-    }
+        assert!(is_enabled());
 
-    #[test]
-    fn test_get_bool_env_invalid() {
-        let key = "MY_ENV_VARIABLE_INVALID";
+        std::env::set_var(key, "2");
+        assert!(is_not_enabled());
+
+        std::env::set_var(key, "1");
+        assert!(is_enabled());
+
         std::env::set_var(key, "not_a_bool");
-        let result = get_bool_env(key);
-        assert!(result.is_err());
+        assert!(is_not_enabled());
+
+        std::env::remove_var(key);
+        assert!(is_enabled());
     }
 }

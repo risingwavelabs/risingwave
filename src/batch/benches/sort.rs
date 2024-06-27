@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,16 +14,19 @@
 
 pub mod utils;
 
+use std::sync::Arc;
+
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use risingwave_batch::executor::{BoxedExecutor, SortExecutor};
-use risingwave_common::enable_jemalloc_on_unix;
-use risingwave_common::memory::MonitoredGlobalAlloc;
+use risingwave_batch::monitor::BatchSpillMetrics;
+use risingwave_common::enable_jemalloc;
+use risingwave_common::memory::MemoryContext;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use tokio::runtime::Runtime;
 use utils::{create_input, execute_executor};
 
-enable_jemalloc_on_unix!();
+enable_jemalloc!();
 
 fn create_order_by_executor(
     chunk_size: usize,
@@ -57,10 +60,12 @@ fn create_order_by_executor(
 
     Box::new(SortExecutor::new(
         child,
-        column_orders,
+        Arc::new(column_orders),
         "SortExecutor".into(),
         CHUNK_SIZE,
-        MonitoredGlobalAlloc::for_test(),
+        MemoryContext::none(),
+        None,
+        BatchSpillMetrics::for_test(),
     ))
 }
 
@@ -80,7 +85,7 @@ fn bench_order_by(c: &mut Criterion) {
                     let chunk_num = SIZE / chunk_size;
                     b.to_async(&rt).iter_batched(
                         || create_order_by_executor(chunk_size, chunk_num, single_column),
-                        |e| execute_executor(e),
+                        execute_executor,
                         BatchSize::SmallInput,
                     );
                 },

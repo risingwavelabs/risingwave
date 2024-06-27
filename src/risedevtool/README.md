@@ -133,7 +133,7 @@ All steps for downloading components, copying config, and building RisingWave ar
 
 `risedev.yml` is powerful yet simple. If you want to make changes to the configuration format, you may need to understand how it works. Source code is in `risedevtool/src/config`.
 
-> **Note**
+> [!NOTE]
 >
 > The schema for RiseDev configuration files is defined under `src/risedevtool/schemas`.
 >

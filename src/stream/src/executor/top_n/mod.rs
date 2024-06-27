@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-/// Wrapper and helper functions to help implement [`Executor`] for `TopN` variants
+/// Wrapper and helper functions to help implement [`crate::executor::Executor`] for `TopN` variants
 mod utils;
 use utils::*;
 

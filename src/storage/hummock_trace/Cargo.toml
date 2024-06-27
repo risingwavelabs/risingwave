@@ -1,0 +1,34 @@
+[package]
+name = "risingwave_hummock_trace"
+version = { workspace = true }
+edition = { workspace = true }
+homepage = { workspace = true }
+keywords = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+async-trait = "0.1"
+bincode = { version = "=2.0.0-rc.3", features = ["serde"] }
+byteorder = "1"
+bytes = { version = "1", features = ["serde"] }
+futures = { version = "0.3", default-features = false, features = ["alloc"] }
+futures-async-stream = "0.2.9"
+parking_lot = { workspace = true }
+prost = { workspace = true }
+risingwave_common = { workspace = true }
+risingwave_hummock_sdk = { workspace = true }
+risingwave_pb = { workspace = true }
+thiserror = "1.0"
+tokio = { version = "0.2", package = "madsim-tokio" }
+tracing = "0.1"
+foyer = { workspace = true }
+
+[dev-dependencies]
+itertools = { workspace = true }
+mockall = "0.11.4"
+risingwave_hummock_sdk = { workspace = true }
+
+[lints]
+workspace = true

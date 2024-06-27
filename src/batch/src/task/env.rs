@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,17 +14,18 @@
 
 use std::sync::Arc;
 
-use risingwave_common::config::BatchConfig;
+use risingwave_common::config::{BatchConfig, MetricLevel};
 use risingwave_common::util::addr::HostAddr;
+use risingwave_common::util::worker_util::WorkerNodeId;
 use risingwave_connector::source::monitor::SourceMetrics;
+use risingwave_dml::dml_manager::DmlManagerRef;
 use risingwave_rpc_client::ComputeClientPoolRef;
-use risingwave_source::dml_manager::DmlManagerRef;
 use risingwave_storage::StateStoreImpl;
 
-use crate::monitor::{BatchExecutorMetrics, BatchTaskMetrics};
+use crate::monitor::{
+    BatchExecutorMetrics, BatchManagerMetrics, BatchSpillMetrics, BatchTaskMetrics,
+};
 use crate::task::BatchManager;
-
-pub(crate) type WorkerNodeId = u32;
 
 /// The global environment for task execution.
 /// The instance will be shared by every task.
@@ -59,6 +60,11 @@ pub struct BatchEnvironment {
 
     /// Metrics for source.
     source_metrics: Arc<SourceMetrics>,
+
+    /// Batch spill metrics
+    spill_metrics: Arc<BatchSpillMetrics>,
+
+    metric_level: MetricLevel,
 }
 
 impl BatchEnvironment {
@@ -74,6 +80,8 @@ impl BatchEnvironment {
         client_pool: ComputeClientPoolRef,
         dml_manager: DmlManagerRef,
         source_metrics: Arc<SourceMetrics>,
+        spill_metrics: Arc<BatchSpillMetrics>,
+        metric_level: MetricLevel,
     ) -> Self {
         BatchEnvironment {
             server_addr,
@@ -86,22 +94,23 @@ impl BatchEnvironment {
             client_pool,
             dml_manager,
             source_metrics,
+            spill_metrics,
+            metric_level,
         }
     }
 
     // Create an instance for testing purpose.
     #[cfg(test)]
     pub fn for_test() -> Self {
+        use risingwave_dml::dml_manager::DmlManager;
         use risingwave_rpc_client::ComputeClientPool;
-        use risingwave_source::dml_manager::DmlManager;
         use risingwave_storage::monitor::MonitoredStorageMetrics;
-
-        use crate::monitor::BatchManagerMetrics;
 
         BatchEnvironment {
             task_manager: Arc::new(BatchManager::new(
                 BatchConfig::default(),
                 BatchManagerMetrics::for_test(),
+                u64::MAX,
             )),
             server_addr: "127.0.0.1:5688".parse().unwrap(),
             config: Arc::new(BatchConfig::default()),
@@ -111,9 +120,11 @@ impl BatchEnvironment {
             )),
             task_metrics: Arc::new(BatchTaskMetrics::for_test()),
             client_pool: Arc::new(ComputeClientPool::default()),
-            dml_manager: Arc::new(DmlManager::default()),
+            dml_manager: Arc::new(DmlManager::for_test()),
             source_metrics: Arc::new(SourceMetrics::default()),
             executor_metrics: Arc::new(BatchExecutorMetrics::for_test()),
+            spill_metrics: BatchSpillMetrics::for_test(),
+            metric_level: MetricLevel::Debug,
         }
     }
 
@@ -137,6 +148,10 @@ impl BatchEnvironment {
         self.state_store.clone()
     }
 
+    pub fn manager_metrics(&self) -> Arc<BatchManagerMetrics> {
+        self.task_manager.metrics()
+    }
+
     pub fn task_metrics(&self) -> Arc<BatchTaskMetrics> {
         self.task_metrics.clone()
     }
@@ -155,5 +170,13 @@ impl BatchEnvironment {
 
     pub fn source_metrics(&self) -> Arc<SourceMetrics> {
         self.source_metrics.clone()
+    }
+
+    pub fn spill_metrics(&self) -> Arc<BatchSpillMetrics> {
+        self.spill_metrics.clone()
+    }
+
+    pub fn metric_level(&self) -> MetricLevel {
+        self.metric_level
     }
 }

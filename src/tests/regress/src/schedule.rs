@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -221,7 +221,6 @@ impl TestCase {
             DatabaseMode::Risingwave => {
                 vec![
                     "SET RW_IMPLICIT_FLUSH TO true;\n",
-                    "SET CREATE_COMPACTION_GROUP_FOR_MV TO true;\n",
                     "SET QUERY_MODE TO LOCAL;\n",
                 ]
             }
@@ -330,12 +329,16 @@ impl TestCase {
 
             // Find the matching output line, and collect lines before the next matching line.
             let mut expected_output = vec![];
-            while let Some(line) = expected_lines.next() && line != original_input_line {
+            while let Some(line) = expected_lines.next()
+                && line != original_input_line
+            {
                 expected_output.push(line);
             }
 
             let mut actual_output = vec![];
-            while let Some(line) = actual_lines.next() && line != input_line {
+            while let Some(line) = actual_lines.next()
+                && line != input_line
+            {
                 actual_output.push(line);
             }
 
@@ -372,7 +375,9 @@ fn compare_output(query: &[&str], expected: &[String], actual: &[String]) -> boo
         eq
     };
 
-    if let Some(l) = query.last() && l.starts_with(PREFIX_IGNORE) {
+    if let Some(l) = query.last()
+        && l.starts_with(PREFIX_IGNORE)
+    {
         return true;
     }
     if !expected.is_empty()

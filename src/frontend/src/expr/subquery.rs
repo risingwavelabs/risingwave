@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -32,6 +32,8 @@ pub enum SubqueryKind {
     Some(ExprImpl, ExprType),
     /// Expression operator `ALL` subquery.
     All(ExprImpl, ExprType),
+    /// Expression operator `ARRAY` subquery.
+    Array,
 }
 
 /// Subquery expression.
@@ -47,7 +49,7 @@ impl Subquery {
     }
 
     pub fn is_correlated(&self, depth: Depth) -> bool {
-        self.query.is_correlated(depth + 1)
+        self.query.is_correlated(depth)
     }
 
     pub fn collect_correlated_indices_by_depth_and_assign_id(
@@ -57,7 +59,7 @@ impl Subquery {
     ) -> Vec<usize> {
         let mut correlated_indices = self
             .query
-            .collect_correlated_indices_by_depth_and_assign_id(depth + 1, correlated_id);
+            .collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id);
         correlated_indices.sort();
         correlated_indices.dedup();
         correlated_indices
@@ -85,6 +87,11 @@ impl Expr for Subquery {
                 let types = self.query.data_types();
                 assert_eq!(types.len(), 1, "Subquery with more than one column");
                 types[0].clone()
+            }
+            SubqueryKind::Array => {
+                let types = self.query.data_types();
+                assert_eq!(types.len(), 1, "Subquery with more than one column");
+                DataType::List(types[0].clone().into())
             }
             _ => DataType::Boolean,
         }

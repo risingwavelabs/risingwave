@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,17 +13,18 @@
 // limitations under the License.
 
 use std::fmt::{Debug, Formatter};
-use std::future::Future;
 
 use futures::StreamExt;
 use risingwave_common::array::DataChunk;
-use risingwave_common::error::Result;
+use risingwave_expr::expr_context::capture_expr_context;
 use risingwave_pb::batch_plan::exchange_source::LocalExecutePlan::{self, Plan};
 use risingwave_pb::batch_plan::TaskOutputId;
 use risingwave_pb::task_service::{ExecuteRequest, GetDataResponse};
+use risingwave_rpc_client::error::RpcError;
 use risingwave_rpc_client::ComputeClient;
 use tonic::Streaming;
 
+use crate::error::Result;
 use crate::exchange_source::ExchangeSource;
 use crate::task::TaskId;
 
@@ -50,6 +51,8 @@ impl GrpcExchangeSource {
                     task_id: Some(task_id),
                     plan: plan.plan,
                     epoch: plan.epoch,
+                    tracing_context: plan.tracing_context,
+                    expr_context: Some(capture_expr_context()?),
                 };
                 client.execute(execute_request).await?
             }
@@ -72,26 +75,22 @@ impl Debug for GrpcExchangeSource {
 }
 
 impl ExchangeSource for GrpcExchangeSource {
-    type TakeDataFuture<'a> = impl Future<Output = Result<Option<DataChunk>>> + 'a;
+    async fn take_data(&mut self) -> Result<Option<DataChunk>> {
+        let res = match self.stream.next().await {
+            None => {
+                return Ok(None);
+            }
+            Some(r) => r,
+        };
+        let task_data = res.map_err(RpcError::from_batch_status)?;
+        let data = DataChunk::from_protobuf(task_data.get_record_batch()?)?.compact();
+        trace!(
+            "Receiver taskOutput = {:?}, data = {:?}",
+            self.task_output_id,
+            data
+        );
 
-    fn take_data(&mut self) -> Self::TakeDataFuture<'_> {
-        async {
-            let res = match self.stream.next().await {
-                None => {
-                    return Ok(None);
-                }
-                Some(r) => r,
-            };
-            let task_data = res?;
-            let data = DataChunk::from_protobuf(task_data.get_record_batch()?)?.compact();
-            trace!(
-                "Receiver taskOutput = {:?}, data = {:?}",
-                self.task_output_id,
-                data
-            );
-
-            Ok(Some(data))
-        }
+        Ok(Some(data))
     }
 
     fn get_task_id(&self) -> TaskId {

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,6 +13,8 @@
 // limitations under the License.
 
 package com.risingwave.java.binding;
+
+import java.time.ZoneOffset;
 
 public class Utils {
     public static void validateRow(BaseRow row) {
@@ -48,7 +50,7 @@ public class Utils {
                             ((Short) rowIndex).toString().repeat((rowIndex % 10) + 1)));
         }
 
-        if (row.getTimestamp(7).getTime() != rowIndex * 1000) {
+        if (row.getTimestamp(7).toInstant(ZoneOffset.UTC).toEpochMilli() != rowIndex * 1000) {
             throw new RuntimeException(
                     String.format("invalid Timestamp value: %s %s", row.getTimestamp(7), rowIndex));
         }

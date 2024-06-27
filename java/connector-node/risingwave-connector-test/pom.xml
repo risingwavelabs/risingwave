@@ -1,10 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <parent>
-        <artifactId>java-parent</artifactId>
-        <groupId>com.risingwave.java</groupId>
-        <version>1.0-SNAPSHOT</version>
+        <artifactId>risingwave-java-root</artifactId>
+        <groupId>com.risingwave</groupId>
+        <version>0.1.0-SNAPSHOT</version>
         <relativePath>../../pom.xml</relativePath>
     </parent>
     <modelVersion>4.0.0</modelVersion>
@@ -13,28 +14,27 @@
     <artifactId>risingwave-connector-test</artifactId>
 
     <properties>
-        <testcontainers.version>1.17.6</testcontainers.version>
         <iceberg.version>1.0.0</iceberg.version>
     </properties>
 
     <dependencies>
         <dependency>
-            <groupId>com.risingwave.java</groupId>
+            <groupId>com.risingwave</groupId>
             <artifactId>connector-api</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>
-            <groupId>com.risingwave.java</groupId>
+            <groupId>com.risingwave</groupId>
             <artifactId>risingwave-sink-deltalake</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>
-            <groupId>com.risingwave.java</groupId>
+            <groupId>com.risingwave</groupId>
             <artifactId>risingwave-sink-iceberg</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>
-            <groupId>com.risingwave.java</groupId>
+            <groupId>com.risingwave</groupId>
             <artifactId>s3-common</artifactId>
             <scope>test</scope>
         </dependency>
@@ -60,16 +60,18 @@
         </dependency>
         <dependency>
             <groupId>org.apache.logging.log4j</groupId>
-            <artifactId>log4j-slf4j-impl</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.logging.log4j</groupId>
             <artifactId>log4j-core</artifactId>
         </dependency>
         <dependency>
             <groupId>org.apache.hadoop</groupId>
             <artifactId>hadoop-client</artifactId>
             <scope>test</scope>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.slf4j</groupId>
+                    <artifactId>slf4j-reload4j</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
         <dependency>
             <groupId>org.apache.spark</groupId>
@@ -108,47 +110,73 @@
         <dependency>
             <groupId>org.testcontainers</groupId>
             <artifactId>testcontainers</artifactId>
-            <version>${testcontainers.version}</version>
-            <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.testcontainers</groupId>
             <artifactId>mysql</artifactId>
-            <version>${testcontainers.version}</version>
-            <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.testcontainers</groupId>
             <artifactId>postgresql</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>elasticsearch</artifactId>
             <version>${testcontainers.version}</version>
             <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
-            <version>${jackson.version}</version>
+            <version>2.13.5</version>
             <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-core</artifactId>
-            <version>${jackson.version}</version>
+            <version>2.13.5</version>
             <scope>test</scope>
         </dependency>
 
         <dependency>
-            <groupId>com.risingwave.java</groupId>
-            <artifactId>risingwave-source-cdc</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>com.risingwave.java</groupId>
+            <groupId>com.risingwave</groupId>
             <artifactId>risingwave-connector-service</artifactId>
             <scope>test</scope>
+            <exclusions>
+                <exclusion>
+                    <groupId>com.risingwave</groupId>
+                    <artifactId>tracing</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
         <dependency>
-            <groupId>com.risingwave.java</groupId>
+            <groupId>com.risingwave</groupId>
             <artifactId>risingwave-sink-jdbc</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.risingwave</groupId>
+            <artifactId>risingwave-sink-es-7</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.risingwave</groupId>
+            <artifactId>risingwave-sink-cassandra</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.risingwave</groupId>
+            <artifactId>risingwave-sink-mock-flink-runtime</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.risingwave</groupId>
+            <artifactId>risingwave-sink-mock-flink-common</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.risingwave</groupId>
+            <artifactId>risingwave-sink-mock-flink-http-sink</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>

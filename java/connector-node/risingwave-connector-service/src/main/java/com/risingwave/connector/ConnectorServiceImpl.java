@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,9 +23,15 @@ import io.grpc.stub.StreamObserver;
 public class ConnectorServiceImpl extends ConnectorServiceGrpc.ConnectorServiceImplBase {
 
     @Override
-    public StreamObserver<ConnectorServiceProto.SinkStreamRequest> sinkStream(
-            StreamObserver<ConnectorServiceProto.SinkResponse> responseObserver) {
-        return new SinkStreamObserver(responseObserver);
+    public StreamObserver<ConnectorServiceProto.SinkWriterStreamRequest> sinkWriterStream(
+            StreamObserver<ConnectorServiceProto.SinkWriterStreamResponse> responseObserver) {
+        return new SinkWriterStreamObserver(responseObserver);
+    }
+
+    @Override
+    public StreamObserver<ConnectorServiceProto.SinkCoordinatorStreamRequest> sinkCoordinatorStream(
+            StreamObserver<ConnectorServiceProto.SinkCoordinatorStreamResponse> responseObserver) {
+        return new SinkCoordinatorStreamObserver(responseObserver);
     }
 
     @Override

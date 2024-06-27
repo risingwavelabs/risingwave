@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,6 +13,7 @@
 // limitations under the License.
 
 pub(crate) mod user_authentication;
+pub(crate) mod user_catalog;
 pub(crate) mod user_manager;
 pub mod user_privilege;
 pub(crate) mod user_service;

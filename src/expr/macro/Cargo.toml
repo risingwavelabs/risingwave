@@ -8,8 +8,10 @@ edition = "2021"
 proc-macro = true
 
 [dependencies]
-itertools = "0.10"
-proc-macro-error = "1"
+itertools = { workspace = true }
 proc-macro2 = "1"
 quote = "1"
-syn = "1"
+syn = { version = "2", features = ["full", "extra-traits"] }
+
+[lints]
+workspace = true

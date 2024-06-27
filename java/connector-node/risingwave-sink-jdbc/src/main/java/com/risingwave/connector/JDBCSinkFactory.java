@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,8 +17,8 @@ package com.risingwave.connector;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.risingwave.connector.api.TableSchema;
-import com.risingwave.connector.api.sink.SinkBase;
 import com.risingwave.connector.api.sink.SinkFactory;
+import com.risingwave.connector.api.sink.SinkWriter;
 import com.risingwave.proto.Catalog.SinkType;
 import io.grpc.Status;
 import java.sql.*;
@@ -36,7 +36,7 @@ public class JDBCSinkFactory implements SinkFactory {
     public static final String TABLE_NAME_PROP = "table.name";
 
     @Override
-    public SinkBase create(TableSchema tableSchema, Map<String, String> tableProperties) {
+    public SinkWriter createWriter(TableSchema tableSchema, Map<String, String> tableProperties) {
         ObjectMapper mapper = new ObjectMapper();
         JDBCSinkConfig config = mapper.convertValue(tableProperties, JDBCSinkConfig.class);
         return new JDBCSink(config, tableSchema);
@@ -51,17 +51,18 @@ public class JDBCSinkFactory implements SinkFactory {
 
         String jdbcUrl = config.getJdbcUrl();
         String tableName = config.getTableName();
+        String schemaName = config.getSchemaName();
         Set<String> jdbcColumns = new HashSet<>();
-        Set<String> jdbcPk = new HashSet<>();
+        Set<String> jdbcPks = new HashSet<>();
         Set<String> jdbcTableNames = new HashSet<>();
 
         try (Connection conn = DriverManager.getConnection(jdbcUrl);
                 ResultSet tableNamesResultSet =
-                        conn.getMetaData().getTables(null, null, "%", null);
+                        conn.getMetaData().getTables(null, schemaName, "%", null);
                 ResultSet columnResultSet =
-                        conn.getMetaData().getColumns(null, null, tableName, null);
+                        conn.getMetaData().getColumns(null, schemaName, tableName, null);
                 ResultSet pkResultSet =
-                        conn.getMetaData().getPrimaryKeys(null, null, tableName); ) {
+                        conn.getMetaData().getPrimaryKeys(null, schemaName, tableName); ) {
             while (tableNamesResultSet.next()) {
                 jdbcTableNames.add(tableNamesResultSet.getString("TABLE_NAME"));
             }
@@ -69,11 +70,16 @@ public class JDBCSinkFactory implements SinkFactory {
                 jdbcColumns.add(columnResultSet.getString("COLUMN_NAME"));
             }
             while (pkResultSet.next()) {
-                jdbcPk.add(pkResultSet.getString("COLUMN_NAME"));
+                jdbcPks.add(pkResultSet.getString("COLUMN_NAME"));
             }
         } catch (SQLException e) {
+            LOG.error("failed to connect to target database. jdbcUrl: {}", jdbcUrl, e);
             throw Status.INVALID_ARGUMENT
-                    .withDescription("failed to connect to target database: " + e.getSQLState())
+                    .withDescription(
+                            "failed to connect to target database: "
+                                    + e.getSQLState()
+                                    + ": "
+                                    + e.getMessage())
                     .asRuntimeException();
         }
 
@@ -94,21 +100,19 @@ public class JDBCSinkFactory implements SinkFactory {
             }
         }
 
-        if (sinkType == SinkType.UPSERT) {
-            // For JDBC sink, we enforce the primary key as that of the JDBC table's. The JDBC table
-            // must have primary key.
-            if (jdbcPk.isEmpty()) {
+        if (sinkType == SinkType.SINK_TYPE_UPSERT) {
+            // For upsert JDBC sink, the primary key defined on the table must match the one in
+            // config and cannot be empty
+            var pkInWith = new HashSet<>(tableSchema.getPrimaryKeys());
+            if (jdbcPks.isEmpty() || !jdbcPks.equals(pkInWith)) {
                 throw Status.INVALID_ARGUMENT
                         .withDescription(
-                                "JDBC table has no primary key, consider making the sink append-only or defining primary key on the JDBC table")
+                                "JDBC table has no primary key or the primary key doesn't match the 'primary_key' option in the WITH clause")
                         .asRuntimeException();
             }
-            // The user is not allowed to define the primary key for upsert JDBC sink.
-            if (!tableSchema.getPrimaryKeys().isEmpty()) {
+            if (tableSchema.getPrimaryKeys().isEmpty()) {
                 throw Status.INVALID_ARGUMENT
-                        .withDescription(
-                                "should not define primary key on upsert JDBC sink, find downstream primary key: "
-                                        + jdbcPk.toString())
+                        .withDescription("Must specify downstream primary key for upsert JDBC sink")
                         .asRuntimeException();
             }
         }

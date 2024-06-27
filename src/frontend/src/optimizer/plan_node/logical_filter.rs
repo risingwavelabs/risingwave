@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,19 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::bail;
-use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
+use super::generic::GenericPlanRef;
+use super::utils::impl_distill_by_unit;
 use super::{
-    generic, ColPrunable, ExprRewritable, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary,
-    PredicatePushdown, ToBatch, ToStream,
+    generic, ColPrunable, ExprRewritable, Logical, LogicalProject, PlanBase, PlanRef,
+    PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
 };
-use crate::expr::{assert_input_ref, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef};
+use crate::error::Result;
+use crate::expr::{
+    assert_input_ref, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef,
+};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
     BatchFilter, ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext,
     StreamFilter, ToStreamContext,
@@ -37,7 +40,7 @@ use crate::utils::{ColIndexMapping, Condition};
 /// If the condition allows nulls, then a null value is treated the same as false.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalFilter {
-    pub base: PlanBase,
+    pub base: PlanBase<Logical>,
     core: generic::Filter<PlanRef>,
 }
 
@@ -61,27 +64,17 @@ impl LogicalFilter {
         }
     }
 
-    /// Create a `LogicalFilter` to filter the rows with all keys are null.
-    pub fn filter_if_keys_all_null(input: PlanRef, key: &[usize]) -> PlanRef {
+    /// Create a `LogicalFilter` to filter out rows where all keys are null.
+    pub fn filter_out_all_null_keys(input: PlanRef, key: &[usize]) -> PlanRef {
         let schema = input.schema();
-        let cond = key.iter().fold(ExprImpl::literal_bool(false), |expr, i| {
-            ExprImpl::FunctionCall(
-                FunctionCall::new_unchecked(
-                    ExprType::Or,
-                    vec![
-                        expr,
-                        FunctionCall::new_unchecked(
-                            ExprType::IsNotNull,
-                            vec![InputRef::new(*i, schema.fields()[*i].data_type.clone()).into()],
-                            DataType::Boolean,
-                        )
-                        .into(),
-                    ],
-                    DataType::Boolean,
-                )
-                .into(),
+        let cond = ExprImpl::or(key.iter().unique().map(|&i| {
+            FunctionCall::new_unchecked(
+                ExprType::IsNotNull,
+                vec![InputRef::new(i, schema.fields()[i].data_type.clone()).into()],
+                DataType::Boolean,
             )
-        });
+            .into()
+        }));
         LogicalFilter::create_with_expr(input, cond)
     }
 
@@ -117,12 +110,7 @@ impl PlanTreeNodeUnary for LogicalFilter {
 }
 
 impl_plan_tree_node_for_unary! {LogicalFilter}
-
-impl fmt::Display for LogicalFilter {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.core.fmt_with_name(f, "LogicalFilter")
-    }
-}
+impl_distill_by_unit!(LogicalFilter, core, "LogicalFilter");
 
 impl ColPrunable for LogicalFilter {
     fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
@@ -175,6 +163,12 @@ impl ExprRewritable for LogicalFilter {
             core,
         }
         .into()
+    }
+}
+
+impl ExprVisitable for LogicalFilter {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.core.visit_exprs(v)
     }
 }
 
@@ -243,11 +237,11 @@ mod tests {
     use std::collections::HashSet;
 
     use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::types::{DataType, ScalarImpl};
+    use risingwave_common::types::ScalarImpl;
     use risingwave_pb::expr::expr_node::Type;
 
     use super::*;
-    use crate::expr::{assert_eq_input_ref, FunctionCall, InputRef, Literal};
+    use crate::expr::{assert_eq_input_ref, Literal};
     use crate::optimizer::optimizer_context::OptimizerContext;
     use crate::optimizer::plan_node::LogicalValues;
     use crate::optimizer::property::FunctionalDependency;
@@ -308,7 +302,6 @@ mod tests {
         assert_eq!(filter.schema().fields().len(), 2);
         assert_eq!(filter.schema().fields()[0], fields[1]);
         assert_eq!(filter.schema().fields()[1], fields[2]);
-        assert_eq!(filter.id().0, 4);
 
         let expr: ExprImpl = filter.predicate().clone().into();
         let call = expr.as_function_call().unwrap();
@@ -469,7 +462,7 @@ mod tests {
         // 3 --> 1, 2
         values
             .base
-            .functional_dependency
+            .functional_dependency_mut()
             .add_functional_dependency_by_column_indices(&[3], &[1, 2]);
         // v1 = 0 AND v2 = v3
         let predicate = ExprImpl::FunctionCall(Box::new(

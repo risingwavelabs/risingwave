@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![cfg_attr(coverage, feature(no_coverage))]
+#![cfg_attr(coverage, feature(coverage_attribute))]
 
 use estimate_size::{
     add_trait_bounds, extract_ignored_generics_list, has_nested_flag_attribute_list,
@@ -23,7 +23,9 @@ use quote::quote;
 use syn::parse_macro_input;
 
 mod config;
+mod config_doc;
 mod estimate_size;
+mod session_config;
 
 /// Sections in the configuration file can use `#[derive(OverrideConfig)]` to generate the
 /// implementation of overwriting configs from the file.
@@ -43,6 +45,7 @@ mod estimate_size;
 ///
 /// will generate
 ///
+/// ```ignore
 /// impl OverrideConfig for Opts {
 ///     fn r#override(self, config: &mut RwConfig) {
 ///         if let Some(v) = self.required_str {
@@ -51,7 +54,7 @@ mod estimate_size;
 ///     }
 /// }
 /// ```
-#[cfg_attr(coverage, no_coverage)]
+#[cfg_attr(coverage, coverage(off))]
 #[proc_macro_derive(OverrideConfig, attributes(override_opts))]
 #[proc_macro_error]
 pub fn override_config(input: TokenStream) -> TokenStream {
@@ -70,7 +73,7 @@ pub fn derive_estimate_size(input: TokenStream) -> TokenStream {
     // that we can manipulate
     let ast: syn::DeriveInput = syn::parse(input).unwrap();
 
-    // The name of the sruct.
+    // The name of the struct.
     let name = &ast.ident;
 
     // Extract all generics we shall ignore.
@@ -99,7 +102,7 @@ pub fn derive_estimate_size(input: TokenStream) -> TokenStream {
 
             let mut cmds = Vec::with_capacity(data_enum.variants.len());
 
-            for variant in data_enum.variants.iter() {
+            for variant in &data_enum.variants {
                 let ident = &variant.ident;
 
                 match &variant.fields {
@@ -142,7 +145,7 @@ pub fn derive_estimate_size(input: TokenStream) -> TokenStream {
 
                         let mut field_cmds = Vec::with_capacity(num_fields);
 
-                        for field in named_fields.named.iter() {
+                        for field in &named_fields.named {
                             let field_ident = field.ident.as_ref().unwrap();
 
                             field_idents.push(field_ident);
@@ -189,24 +192,45 @@ pub fn derive_estimate_size(input: TokenStream) -> TokenStream {
             if data_struct.fields.is_empty() {
                 // Empty structs are easy to implement.
                 let gen = quote! {
-                    impl EstimateSize for #name {}
+                    impl EstimateSize for #name {
+                        fn estimated_heap_size(&self) -> usize {
+                            0
+                        }
+                    }
                 };
                 return gen.into();
             }
 
-            let mut cmds = Vec::with_capacity(data_struct.fields.len());
+            let mut field_cmds = Vec::with_capacity(data_struct.fields.len());
 
-            for field in data_struct.fields.iter() {
-                // Check if the value should be ignored. If so skip it.
-                if has_nested_flag_attribute_list(&field.attrs, "estimate_size", "ignore") {
-                    continue;
+            match data_struct.fields {
+                syn::Fields::Unnamed(unnamed_fields) => {
+                    for (i, field) in unnamed_fields.unnamed.iter().enumerate() {
+                        // Check if the value should be ignored. If so skip it.
+                        if has_nested_flag_attribute_list(&field.attrs, "estimate_size", "ignore") {
+                            continue;
+                        }
+
+                        let idx = syn::Index::from(i);
+                        field_cmds.push(quote! {
+                            total += EstimateSize::estimated_heap_size(&self.#idx);
+                        })
+                    }
                 }
+                syn::Fields::Named(named_fields) => {
+                    for field in &named_fields.named {
+                        // Check if the value should be ignored. If so skip it.
+                        if has_nested_flag_attribute_list(&field.attrs, "estimate_size", "ignore") {
+                            continue;
+                        }
 
-                let ident = field.ident.as_ref().unwrap();
-
-                cmds.push(quote! {
-                    total += &self.#ident.estimated_heap_size();;
-                })
+                        let field_ident = field.ident.as_ref().unwrap();
+                        field_cmds.push(quote! {
+                            total += &self.#field_ident.estimated_heap_size();
+                        })
+                    }
+                }
+                syn::Fields::Unit => {}
             }
 
             // Build the trait implementation
@@ -215,7 +239,7 @@ pub fn derive_estimate_size(input: TokenStream) -> TokenStream {
                     fn estimated_heap_size(&self) -> usize {
                         let mut total = 0;
 
-                        #(#cmds)*;
+                        #(#field_cmds)*;
 
                         total
                     }
@@ -224,4 +248,61 @@ pub fn derive_estimate_size(input: TokenStream) -> TokenStream {
             gen.into()
         }
     }
+}
+
+/// To add a new parameter, you can add a field with `#[parameter]` in the struct
+/// A default value is required by setting the `default` option.
+/// The field name will be the parameter name. You can overwrite the parameter name by setting the `rename` option.
+/// To check the input parameter, you can use `check_hook` option.
+///
+/// `flags` options include
+/// - `SETTER`: to manually write a `set_your_parameter_name` function, in which you should call `set_your_parameter_name_inner`.
+/// - `REPORT`: to report the parameter through `ConfigReporter`
+/// - `NO_ALTER_SYS`: disallow the parameter to be set by `alter system set`
+#[proc_macro_derive(SessionConfig, attributes(parameter))]
+#[proc_macro_error]
+pub fn session_config(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input);
+    session_config::derive_config(input).into()
+}
+
+/// This proc macro recursively extracts rustdoc comments from the fields in a struct and generates a method
+/// that produces docs for each field.
+/// Unlike rustdoc, this tool focuses solely on extracting rustdoc for struct fields, without methods.
+///
+/// Example:
+///
+/// ```ignore
+/// #[derive(ConfigDoc)]
+/// pub struct Foo {
+///   /// Description for `a`.
+///   a: i32,
+///
+///   #[config_doc(nested)]
+///   b: Bar,
+///
+///   #[config_doc(omitted)]
+///   dummy: (),
+/// }
+/// ```
+///
+/// The `#[config_doc(nested)]` attribute indicates that the field is a nested config that will be documented in a separate section.
+/// Fields marked with `#[config_doc(omitted)]` will simply be omitted from the doc.
+///
+/// Here is the method generated by this macro:
+///
+/// ```ignore
+/// impl Foo {
+///     pub fn config_docs(name: String, docs: &mut std::collections::BTreeMap<String, Vec<(String, String)>>)
+/// }
+/// ```
+///
+/// In `test_example_up_to_date`, we further process the output of this method to generate a markdown in src/config/docs.md.
+#[proc_macro_derive(ConfigDoc, attributes(config_doc))]
+pub fn config_doc(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input);
+
+    let gen = config_doc::generate_config_doc_fn(input);
+
+    gen.into()
 }

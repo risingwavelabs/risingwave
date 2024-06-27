@@ -1,0 +1,47 @@
+statement ok
+set rw_implicit_flush = true;
+
+statement ok
+set rw_streaming_enable_delta_join = true;
+
+statement ok
+create table A      (k1 numeric, k2 smallint, v int);
+
+statement ok
+create index Ak1   on A(k1) include(k1,k2,v);
+
+statement ok
+create table B      (k1 numeric, k2 smallint, v int);
+
+statement ok
+create index Bk1   on B(k1) include(k1,k2,v);
+
+statement ok
+insert into A values(1, 2, 4);
+
+statement ok
+insert into B values(1, 2, 4);
+
+statement ok
+create MATERIALIZED VIEW m1 as select A.v, B.v as Bv from A join B using(k1);
+
+
+query I
+SELECT * from m1;
+----
+4   4
+
+statement ok
+drop MATERIALIZED VIEW m1;
+
+statement ok
+drop index Ak1;
+
+statement ok
+drop index Bk1;
+
+statement ok
+drop table A;
+
+statement ok
+drop table B;

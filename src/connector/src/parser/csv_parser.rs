@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,29 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::str::FromStr;
+use risingwave_common::types::{Date, Decimal, Time, Timestamp, Timestamptz};
 
-use anyhow::anyhow;
-use futures_async_stream::try_stream;
-use risingwave_common::cast::{str_to_date, str_to_timestamp, str_with_time_zone_to_timestamptz};
-use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
-use risingwave_common::error::{Result, RwError};
-use risingwave_common::types::{Datum, Decimal, ScalarImpl};
+use super::unified::{AccessError, AccessResult};
+use super::{ByteStreamSourceParser, CsvProperties};
+use crate::error::ConnectorResult;
+use crate::only_parse_payload;
+use crate::parser::{ParserFormat, SourceStreamChunkRowWriter};
+use crate::source::{DataType, SourceColumnDesc, SourceContext, SourceContextRef};
 
-use crate::impl_common_parser_logic;
-use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
-use crate::source::{DataType, SourceColumnDesc, SourceContextRef};
-impl_common_parser_logic!(CsvParser);
-macro_rules! to_rust_type {
+macro_rules! parse {
     ($v:ident, $t:ty) => {
-        $v.parse::<$t>()
-            .map_err(|_| anyhow!("failed parse {} from {}", stringify!($t), $v))?
+        $v.parse::<$t>().map_err(|_| AccessError::TypeError {
+            expected: stringify!($t).to_owned(),
+            got: "string".to_owned(),
+            value: $v.to_string(),
+        })
     };
-}
-#[derive(Debug, Clone)]
-pub struct CsvParserConfig {
-    pub delimiter: u8,
-    pub has_header: bool,
 }
 
 /// Parser for CSV format
@@ -49,13 +43,13 @@ pub struct CsvParser {
 impl CsvParser {
     pub fn new(
         rw_columns: Vec<SourceColumnDesc>,
-        parser_config: CsvParserConfig,
+        csv_props: CsvProperties,
         source_ctx: SourceContextRef,
-    ) -> Result<Self> {
-        let CsvParserConfig {
+    ) -> ConnectorResult<Self> {
+        let CsvProperties {
             delimiter,
             has_header,
-        } = parser_config;
+        } = csv_props;
 
         Ok(Self {
             rw_columns,
@@ -65,44 +59,40 @@ impl CsvParser {
         })
     }
 
-    fn read_row(&self, buf: &[u8]) -> Result<Vec<String>> {
+    fn read_row(&self, buf: &[u8]) -> ConnectorResult<Vec<String>> {
         let mut reader_builder = csv::ReaderBuilder::default();
         reader_builder.delimiter(self.delimiter).has_headers(false);
         let record = reader_builder
             .from_reader(buf)
             .records()
             .next()
-            .transpose()
-            .map_err(|err| RwError::from(ProtocolError(err.to_string())))?;
+            .transpose()?;
         Ok(record
             .map(|record| record.iter().map(|field| field.to_string()).collect())
             .unwrap_or_default())
     }
 
     #[inline]
-    fn parse_string(dtype: &DataType, v: String) -> Result<Datum> {
+    fn parse_string(dtype: &DataType, v: String) -> AccessResult {
         let v = match dtype {
             // mysql use tinyint to represent boolean
-            DataType::Boolean => ScalarImpl::Bool(to_rust_type!(v, i16) != 0),
-            DataType::Int16 => ScalarImpl::Int16(to_rust_type!(v, i16)),
-            DataType::Int32 => ScalarImpl::Int32(to_rust_type!(v, i32)),
-            DataType::Int64 => ScalarImpl::Int64(to_rust_type!(v, i64)),
-            DataType::Float32 => ScalarImpl::Float32(to_rust_type!(v, f32).into()),
-            DataType::Float64 => ScalarImpl::Float64(to_rust_type!(v, f64).into()),
+            DataType::Boolean => (parse!(v, i16)? != 0).into(),
+            DataType::Int16 => parse!(v, i16)?.into(),
+            DataType::Int32 => parse!(v, i32)?.into(),
+            DataType::Int64 => parse!(v, i64)?.into(),
+            DataType::Float32 => parse!(v, f32)?.into(),
+            DataType::Float64 => parse!(v, f64)?.into(),
             // FIXME: decimal should have more precision than f64
-            DataType::Decimal => Decimal::from_str(v.as_str())
-                .map_err(|_| anyhow!("parse decimal from string err {}", v))?
-                .into(),
+            DataType::Decimal => parse!(v, Decimal)?.into(),
             DataType::Varchar => v.into(),
-            DataType::Date => str_to_date(v.as_str())?.into(),
-            DataType::Time => str_to_date(v.as_str())?.into(),
-            DataType::Timestamp => str_to_timestamp(v.as_str())?.into(),
-            DataType::Timestamptz => str_with_time_zone_to_timestamptz(v.as_str())?.into(),
+            DataType::Date => parse!(v, Date)?.into(),
+            DataType::Time => parse!(v, Time)?.into(),
+            DataType::Timestamp => parse!(v, Timestamp)?.into(),
+            DataType::Timestamptz => parse!(v, Timestamptz)?.into(),
             _ => {
-                return Err(RwError::from(InternalError(format!(
-                    "CSV data source not support type {}",
-                    dtype
-                ))))
+                return Err(AccessError::UnsupportedType {
+                    ty: dtype.to_string(),
+                })
             }
         };
         Ok(Some(v))
@@ -113,16 +103,16 @@ impl CsvParser {
         &mut self,
         payload: Vec<u8>,
         mut writer: SourceStreamChunkRowWriter<'_>,
-    ) -> Result<WriteGuard> {
+    ) -> ConnectorResult<()> {
         let mut fields = self.read_row(&payload)?;
+
         if let Some(headers) = &mut self.headers {
             if headers.is_empty() {
                 *headers = fields;
-                // Here we want a row, but got nothing. So it's an error for the `parse_inner` but
-                // has no bad impact on the system.
-                return  Err(RwError::from(ProtocolError("This message indicates a header, no row will be inserted. However, internal parser state was updated.".to_string())));
+                // The header row does not output a row, so we return early.
+                return Ok(());
             }
-            writer.insert(|desc| {
+            writer.do_insert(|desc| {
                 if let Some(i) = headers.iter().position(|name| name == &desc.name) {
                     let value = fields.get_mut(i).map(std::mem::take).unwrap_or_default();
                     if value.is_empty() {
@@ -132,10 +122,10 @@ impl CsvParser {
                 } else {
                     Ok(None)
                 }
-            })
+            })?;
         } else {
             fields.reverse();
-            writer.insert(|desc| {
+            writer.do_insert(|desc| {
                 if let Some(value) = fields.pop() {
                     if value.is_empty() {
                         return Ok(None);
@@ -144,8 +134,33 @@ impl CsvParser {
                 } else {
                     Ok(None)
                 }
-            })
+            })?;
         }
+
+        Ok(())
+    }
+}
+
+impl ByteStreamSourceParser for CsvParser {
+    fn columns(&self) -> &[SourceColumnDesc] {
+        &self.rw_columns
+    }
+
+    fn source_ctx(&self) -> &SourceContext {
+        &self.source_ctx
+    }
+
+    fn parser_format(&self) -> ParserFormat {
+        ParserFormat::Csv
+    }
+
+    async fn parse_one<'a>(
+        &'a mut self,
+        _key: Option<Vec<u8>>,
+        payload: Option<Vec<u8>>,
+        writer: SourceStreamChunkRowWriter<'a>,
+    ) -> ConnectorResult<()> {
+        only_parse_payload!(self, payload, writer)
     }
 }
 
@@ -173,11 +188,11 @@ mod tests {
         ];
         let mut parser = CsvParser::new(
             Vec::new(),
-            CsvParserConfig {
+            CsvProperties {
                 delimiter: b',',
                 has_header: false,
             },
-            Default::default(),
+            SourceContext::dummy().into(),
         )
         .unwrap();
         let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 4);
@@ -280,11 +295,11 @@ mod tests {
         ];
         let mut parser = CsvParser::new(
             Vec::new(),
-            CsvParserConfig {
+            CsvProperties {
                 delimiter: b',',
                 has_header: true,
             },
-            Default::default(),
+            SourceContext::dummy().into(),
         )
         .unwrap();
         let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 4);

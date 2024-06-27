@@ -1,3 +1,6 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
 query T
 SELECT to_char(timestamp '2002-04-20 17:31:12.66', 'HH12:MI:SS')
 ----
@@ -37,3 +40,83 @@ query T
 SELECT to_char(timestamp '2006-01-02 15:04:05.3', 'yyyy-mm-dd hh24:mi:ss.us');
 ----
 2006-01-02 15:04:05.300000
+
+statement ok
+create table t (tsz timestamptz);
+
+statement ok
+insert into t values (to_timestamp(1617235200)), ('2022-04-08 07:30:00 -07:00'), ('2023-07-12 03:01:00Z');
+
+statement ok
+set timezone to 'US/Pacific';
+
+query T
+select to_char(tsz, 'Mon DD, YYYY HH12:MI:SS am TZH:TZM') from t order by tsz;
+----
+Mar 31, 2021 05:00:00 pm -07:00
+Apr 08, 2022 07:30:00 am -07:00
+Jul 11, 2023 08:01:00 pm -07:00
+
+statement ok
+set timezone to 'UTC';
+
+query T
+select to_char(tsz, 'YYYY-MM-DD HH24:MI:SS TZH:TZM') from t order by tsz;
+----
+2021-04-01 00:00:00 +00:00
+2022-04-08 14:30:00 +00:00
+2023-07-12 03:01:00 +00:00
+
+statement ok
+drop table t;
+
+
+query T
+select to_char('-20459year -256 days  -120hours 866seconds'::interval, 'YYYY IYYY YY IY MM DD PM pm HH HH12 HH24 MI SS');
+----
+-20459 -20460 -59 -60 00 -256 AM am -11 -11 -119 -45 -34
+
+query T
+select to_char('0year -256 days  -120hours'::interval, 'YYYY IYYY YY IY MM DD PM pm HH HH12 HH24 MI SS');
+----
+0000 -001 00 -1 00 -256 AM am 012 012 -120 00 00
+
+query T
+select to_char('0year 0 days  0hours'::interval, 'YYYY IYYY YY IY MM DD PM pm HH12 HH24 MI SS');
+----
+0000 -001 00 -1 00 00 AM am 12 00 00 00
+
+query T
+select to_char('1year 1month 1day 1hours 1minute 1second'::interval, 'YYYY IYYY YY IY MM DD PM pm HH12 HH24 MI SS MS US');
+----
+0001 0001 01 01 01 01 AM am 01 01 01 01 000 000000
+
+query T
+select to_char('-1year -1month -1day -1hours -1minute -1second'::interval, 'YYYY IYYY YY IY MM DD PM pm HH12 HH24 MI SS MS US');
+----
+-0001 -0002 -01 -02 -01 -1 AM am -01 -01 -01 -01 000 000000
+
+query T
+select to_char('23:22:57.124562'::interval, 'HH12 MI SS MS US');
+----
+11 22 57 124 124562
+
+query T
+select to_char('-23:22:57.124562'::interval, 'HH12 MI SS MS US');
+----
+-11 -22 -57 -124 -124562
+
+query error invalid format specification for an interval value
+select to_char('1year 1month 1day 1hours 1minute 1second'::interval, 'IY MM DD AM HH12 MM SS tzhtzm');
+
+query error invalid format specification for an interval value
+select to_char('1year 1month 1day 1hours 1minute 1second'::interval, 'IY MM DD AM HH12 MI SS TZH:TZM');
+
+query error invalid format specification for an interval value
+select to_char('1year 1month 1day 1hours 1minute 1second'::interval, 'IY MM DD AM HH12 MI SS TZH');
+
+query error invalid format specification for an interval value
+select to_char('1year 1month 1day 1hours 1minute 1second'::interval, 'IY MM DD AM HH12 MI SS Month');
+
+query error invalid format specification for an interval value
+select to_char('1year 1month 1day 1hours 1minute 1second'::interval, 'IY MM DD AM HH12 MI SS Mon');

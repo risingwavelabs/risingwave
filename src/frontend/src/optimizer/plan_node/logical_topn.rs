@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,20 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::bail_not_implemented;
 use risingwave_common::util::sort_util::ColumnOrder;
 
-use super::generic::Limit;
+use super::generic::{GenericPlanRef, TopNLimit};
+use super::utils::impl_distill_by_unit;
 use super::{
-    gen_filter_and_pushdown, generic, BatchGroupTopN, ColPrunable, ExprRewritable, PlanBase,
-    PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamGroupTopN, StreamProject, ToBatch,
-    ToStream,
+    gen_filter_and_pushdown, generic, BatchGroupTopN, ColPrunable, ExprRewritable, Logical,
+    PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamGroupTopN, StreamProject,
+    ToBatch, ToStream,
 };
-use crate::expr::{ExprType, FunctionCall, InputRef};
+use crate::error::{ErrorCode, Result, RwError};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
     BatchTopN, ColumnPruningContext, LogicalProject, PredicatePushdownContext,
     RewriteStreamContext, StreamTopN, ToStreamContext,
@@ -37,7 +37,7 @@ use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition};
 /// `LogicalTopN` sorts the input data and fetches up to `limit` rows from `offset`
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalTopN {
-    pub base: PlanBase,
+    pub base: PlanBase<Logical>,
     core: generic::TopN<PlanRef>,
 }
 
@@ -57,7 +57,7 @@ impl LogicalTopN {
         order: Order,
         group_key: Vec<usize>,
     ) -> Self {
-        let limit_attr = Limit::new(limit, with_ties);
+        let limit_attr = TopNLimit::new(limit, with_ties);
         let core = generic::TopN::with_group(input, limit_attr, offset, order, group_key);
         core.into()
     }
@@ -71,16 +71,12 @@ impl LogicalTopN {
         group_key: Vec<usize>,
     ) -> Result<PlanRef> {
         if with_ties && offset > 0 {
-            return Err(ErrorCode::NotImplemented(
-                "WITH TIES is not supported with OFFSET".to_string(),
-                None.into(),
-            )
-            .into());
+            bail_not_implemented!("WITH TIES is not supported with OFFSET");
         }
         Ok(Self::new(input, limit, offset, with_ties, order, group_key).into())
     }
 
-    pub fn limit_attr(&self) -> Limit {
+    pub fn limit_attr(&self) -> TopNLimit {
         self.core.limit_attr
     }
 
@@ -102,69 +98,64 @@ impl LogicalTopN {
         &self.core.group_key
     }
 
-    fn gen_dist_stream_top_n_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
-        let input_dist = stream_input.distribution().clone();
+    /// decompose -> (input, limit, offset, `with_ties`, order, `group_key`)
+    pub fn decompose(self) -> (PlanRef, u64, u64, bool, Order, Vec<usize>) {
+        self.core.decompose()
+    }
 
-        let gen_single_plan = |stream_input: PlanRef| -> Result<PlanRef> {
-            let input =
-                RequiredDist::single().enforce_if_not_satisfies(stream_input, &Order::any())?;
-            let mut logical = self.core.clone();
-            logical.input = input;
-            Ok(StreamTopN::new(logical).into())
-        };
+    fn gen_dist_stream_top_n_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
+        use super::stream::prelude::*;
+
+        let input_dist = stream_input.distribution().clone();
 
         // if it is append only, for now we don't generate 2-phase rules
         if stream_input.append_only() {
-            return gen_single_plan(stream_input);
+            return self.gen_single_stream_top_n_plan(stream_input);
         }
 
         match input_dist {
-            Distribution::Single | Distribution::SomeShard => gen_single_plan(stream_input),
-            Distribution::Broadcast => Err(RwError::from(ErrorCode::NotImplemented(
-                "topN does not support Broadcast".to_string(),
-                None.into(),
-            ))),
+            Distribution::Single | Distribution::SomeShard => {
+                self.gen_single_stream_top_n_plan(stream_input)
+            }
+            Distribution::Broadcast => bail_not_implemented!("topN does not support Broadcast"),
             Distribution::HashShard(dists) | Distribution::UpstreamHashShard(dists, _) => {
-                self.gen_vnode_two_phase_streaming_top_n_plan(stream_input, &dists)
+                self.gen_vnode_two_phase_stream_top_n_plan(stream_input, &dists)
             }
         }
     }
 
-    fn gen_vnode_two_phase_streaming_top_n_plan(
+    fn gen_single_stream_top_n_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
+        let input = RequiredDist::single().enforce_if_not_satisfies(stream_input, &Order::any())?;
+        let mut core = self.core.clone();
+        core.input = input;
+        Ok(StreamTopN::new(core).into())
+    }
+
+    fn gen_vnode_two_phase_stream_top_n_plan(
         &self,
         stream_input: PlanRef,
         dist_key: &[usize],
     ) -> Result<PlanRef> {
-        let input_fields = stream_input.schema().fields();
-
         // use projectiton to add a column for vnode, and use this column as group key.
-        let mut exprs: Vec<_> = input_fields
-            .iter()
-            .enumerate()
-            .map(|(idx, field)| InputRef::new(idx, field.data_type.clone()).into())
-            .collect();
-        exprs.push(
-            FunctionCall::new(
-                ExprType::Vnode,
-                dist_key
-                    .iter()
-                    .map(|idx| InputRef::new(*idx, input_fields[*idx].data_type()).into())
-                    .collect(),
-            )?
-            .into(),
-        );
-        let vnode_col_idx = exprs.len() - 1;
-        let project = StreamProject::new(generic::Project::new(exprs.clone(), stream_input));
-        let limit_attr = Limit::new(
+        let project = StreamProject::new(generic::Project::with_vnode_col(stream_input, dist_key));
+        let vnode_col_idx = project.base.schema().len() - 1;
+
+        let limit_attr = TopNLimit::new(
             self.limit_attr().limit() + self.offset(),
             self.limit_attr().with_ties(),
         );
-        let mut logical_top_n =
-            generic::TopN::without_group(project.into(), limit_attr, 0, self.topn_order().clone());
-        logical_top_n.group_key = vec![vnode_col_idx];
-        let local_top_n = StreamGroupTopN::new(logical_top_n, Some(vnode_col_idx));
+        let local_top_n = generic::TopN::with_group(
+            project.into(),
+            limit_attr,
+            0,
+            self.topn_order().clone(),
+            vec![vnode_col_idx],
+        );
+        let local_top_n = StreamGroupTopN::new(local_top_n, Some(vnode_col_idx));
+
         let exchange =
             RequiredDist::single().enforce_if_not_satisfies(local_top_n.into(), &Order::any())?;
+
         let global_top_n = generic::TopN::without_group(
             exchange,
             self.limit_attr(),
@@ -174,8 +165,11 @@ impl LogicalTopN {
         let global_top_n = StreamTopN::new(global_top_n);
 
         // use another projection to remove the column we added before.
-        exprs.pop();
-        let project = StreamProject::new(generic::Project::new(exprs, global_top_n.into()));
+        assert_eq!(vnode_col_idx, global_top_n.base.schema().len() - 1);
+        let project = StreamProject::new(generic::Project::with_out_col_idx(
+            global_top_n.into(),
+            0..vnode_col_idx,
+        ));
         Ok(project.into())
     }
 }
@@ -209,11 +203,7 @@ impl PlanTreeNodeUnary for LogicalTopN {
     }
 }
 impl_plan_tree_node_for_unary! {LogicalTopN}
-impl fmt::Display for LogicalTopN {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.core.fmt_with_name(f, "LogicalTopN")
-    }
-}
+impl_distill_by_unit!(LogicalTopN, core, "LogicalTopN");
 
 impl ColPrunable for LogicalTopN {
     fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
@@ -287,6 +277,8 @@ impl ColPrunable for LogicalTopN {
 
 impl ExprRewritable for LogicalTopN {}
 
+impl ExprVisitable for LogicalTopN {}
+
 impl PredicatePushdown for LogicalTopN {
     fn predicate_pushdown(
         &self,
@@ -327,9 +319,9 @@ impl ToStream for LogicalTopN {
             let input = self.input().to_stream(ctx)?;
             let input = RequiredDist::hash_shard(self.group_key())
                 .enforce_if_not_satisfies(input, &Order::any())?;
-            let mut logical = self.core.clone();
-            logical.input = input;
-            StreamGroupTopN::new(logical, None).into()
+            let mut core = self.core.clone();
+            core.input = input;
+            StreamGroupTopN::new(core, None).into()
         } else {
             self.gen_dist_stream_top_n_plan(self.input().to_stream(ctx)?)?
         })

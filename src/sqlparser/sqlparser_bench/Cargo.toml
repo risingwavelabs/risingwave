@@ -11,11 +11,14 @@ ignored = ["workspace-hack"]
 normal = ["workspace-hack"]
 
 [dependencies]
-risingwave_sqlparser = { path = "../" }
+risingwave_sqlparser = { workspace = true }
 
 [dev-dependencies]
-criterion = "0.4"
+criterion = { workspace = true }
 
 [[bench]]
 name = "sqlparser_bench"
 harness = false
+
+[lints]
+workspace = true

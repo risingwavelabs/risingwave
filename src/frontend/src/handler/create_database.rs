@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,13 +13,13 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::error::ErrorCode::PermissionDenied;
-use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::ObjectName;
 
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::CatalogError;
+use crate::error::ErrorCode::PermissionDenied;
+use crate::error::Result;
 use crate::handler::HandlerArgs;
 
 pub async fn handle_create_database(
@@ -48,17 +48,16 @@ pub async fn handle_create_database(
         if reader.get_database_by_name(&database_name).is_ok() {
             // If `if_not_exist` is true, not return error.
             return if if_not_exist {
-                Ok(PgResponse::empty_result_with_notice(
-                    StatementType::CREATE_DATABASE,
-                    format!("database \"{}\" exists, skipping", database_name),
-                ))
+                Ok(PgResponse::builder(StatementType::CREATE_DATABASE)
+                    .notice(format!("database \"{}\" exists, skipping", database_name))
+                    .into())
             } else {
                 Err(CatalogError::Duplicated("database", database_name).into())
             };
         }
     }
 
-    let catalog_writer = session.env().catalog_writer();
+    let catalog_writer = session.catalog_writer()?;
     catalog_writer
         .create_database(&database_name, session.user_id())
         .await?;

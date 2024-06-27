@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,25 +13,21 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::sync::Arc;
 
-use risingwave_expr::agg::AggCall;
-use risingwave_storage::StateStore;
+use risingwave_expr::aggregate::AggCall;
+use risingwave_pb::stream_plan::PbAggNodeVersion;
 
 use super::aggregation::AggStateStorage;
-use super::Executor;
-use crate::common::table::state_table::StateTable;
-use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{ActorContextRef, PkIndices};
-use crate::task::AtomicU64Ref;
+use crate::executor::prelude::*;
 
 /// Arguments needed to construct an `XxxAggExecutor`.
 pub struct AggExecutorArgs<S: StateStore, E: AggExecutorExtraArgs> {
+    pub version: PbAggNodeVersion,
+
     // basic
-    pub input: Box<dyn Executor>,
+    pub input: Executor,
     pub actor_ctx: ActorContextRef,
-    pub pk_indices: PkIndices,
-    pub executor_id: u64,
+    pub info: ExecutorInfo,
 
     // system configs
     pub extreme_cache_size: usize,
@@ -40,10 +36,10 @@ pub struct AggExecutorArgs<S: StateStore, E: AggExecutorExtraArgs> {
     pub agg_calls: Vec<AggCall>,
     pub row_count_index: usize,
     pub storages: Vec<AggStateStorage<S>>,
-    pub result_table: StateTable<S>,
+    pub intermediate_state_table: StateTable<S>,
     pub distinct_dedup_tables: HashMap<usize, StateTable<S>>,
     pub watermark_epoch: AtomicU64Ref,
-    pub metrics: Arc<StreamingMetrics>,
+
     // extra
     pub extra: E,
 }
@@ -57,6 +53,7 @@ impl AggExecutorExtraArgs for SimpleAggExecutorExtraArgs {}
 pub struct HashAggExecutorExtraArgs {
     pub group_key_indices: Vec<usize>,
     pub chunk_size: usize,
+    pub max_dirty_groups_heap_size: usize,
     pub emit_on_window_close: bool,
 }
 impl AggExecutorExtraArgs for HashAggExecutorExtraArgs {}

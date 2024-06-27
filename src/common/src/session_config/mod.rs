@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,251 +12,327 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod non_zero64;
+mod over_window;
 mod query_mode;
 mod search_path;
+pub mod sink_decouple;
 mod transaction_isolation_level;
 mod visibility_mode;
 
-use std::num::NonZeroU64;
-use std::ops::Deref;
-
 use chrono_tz::Tz;
-use educe::{self, Educe};
-use itertools::Itertools;
+pub use over_window::OverWindowCachePolicy;
 pub use query_mode::QueryMode;
+use risingwave_common_proc_macro::{ConfigDoc, SessionConfig};
 pub use search_path::{SearchPath, USER_NAME_WILD_CARD};
-use tracing::info;
+use serde::{Deserialize, Serialize};
+use serde_with::{serde_as, DisplayFromStr};
+use thiserror::Error;
 
-use crate::error::{ErrorCode, RwError};
+use self::non_zero64::ConfigNonZeroU64;
+use crate::session_config::sink_decouple::SinkDecouple;
 use crate::session_config::transaction_isolation_level::IsolationLevel;
-use crate::session_config::visibility_mode::VisibilityMode;
-use crate::util::epoch::Epoch;
+pub use crate::session_config::visibility_mode::VisibilityMode;
+use crate::{PG_VERSION, SERVER_ENCODING, SERVER_VERSION_NUM, STANDARD_CONFORMING_STRINGS};
 
-// This is a hack, &'static str is not allowed as a const generics argument.
-// TODO: refine this using the adt_const_params feature.
-const CONFIG_KEYS: [&str; 22] = [
-    "RW_IMPLICIT_FLUSH",
-    "CREATE_COMPACTION_GROUP_FOR_MV",
-    "QUERY_MODE",
-    "EXTRA_FLOAT_DIGITS",
-    "APPLICATION_NAME",
-    "DATESTYLE",
-    "RW_BATCH_ENABLE_LOOKUP_JOIN",
-    "MAX_SPLIT_RANGE_GAP",
-    "SEARCH_PATH",
-    "TRANSACTION ISOLATION LEVEL",
-    "QUERY_EPOCH",
-    "RW_BATCH_ENABLE_SORT_AGG",
-    "VISIBILITY_MODE",
-    "TIMEZONE",
-    "STREAMING_PARALLELISM",
-    "RW_STREAMING_ENABLE_DELTA_JOIN",
-    "RW_ENABLE_TWO_PHASE_AGG",
-    "RW_FORCE_TWO_PHASE_AGG",
-    "RW_ENABLE_SHARE_PLAN",
-    "INTERVALSTYLE",
-    "BATCH_PARALLELISM",
-    "RW_STREAMING_ENABLE_BUSHY_JOIN",
-];
+pub const SESSION_CONFIG_LIST_SEP: &str = ", ";
 
-// MUST HAVE 1v1 relationship to CONFIG_KEYS. e.g. CONFIG_KEYS[IMPLICIT_FLUSH] =
-// "RW_IMPLICIT_FLUSH".
-const IMPLICIT_FLUSH: usize = 0;
-const CREATE_COMPACTION_GROUP_FOR_MV: usize = 1;
-const QUERY_MODE: usize = 2;
-const EXTRA_FLOAT_DIGITS: usize = 3;
-const APPLICATION_NAME: usize = 4;
-const DATE_STYLE: usize = 5;
-const BATCH_ENABLE_LOOKUP_JOIN: usize = 6;
-const MAX_SPLIT_RANGE_GAP: usize = 7;
-const SEARCH_PATH: usize = 8;
-const TRANSACTION_ISOLATION_LEVEL: usize = 9;
-const QUERY_EPOCH: usize = 10;
-const BATCH_ENABLE_SORT_AGG: usize = 11;
-const VISIBILITY_MODE: usize = 12;
-const TIMEZONE: usize = 13;
-const STREAMING_PARALLELISM: usize = 14;
-const STREAMING_ENABLE_DELTA_JOIN: usize = 15;
-const ENABLE_TWO_PHASE_AGG: usize = 16;
-const FORCE_TWO_PHASE_AGG: usize = 17;
-const RW_ENABLE_SHARE_PLAN: usize = 18;
-const INTERVAL_STYLE: usize = 19;
-const BATCH_PARALLELISM: usize = 20;
-const STREAMING_ENABLE_BUSHY_JOIN: usize = 21;
+#[derive(Error, Debug)]
+pub enum SessionConfigError {
+    #[error("Invalid value `{value}` for `{entry}`")]
+    InvalidValue {
+        entry: &'static str,
+        value: String,
+        source: anyhow::Error,
+    },
 
-trait ConfigEntry: Default + for<'a> TryFrom<&'a [&'a str], Error = RwError> {
-    fn entry_name() -> &'static str;
+    #[error("Unrecognized config entry `{0}`")]
+    UnrecognizedEntry(String),
 }
 
-struct ConfigBool<const NAME: usize, const DEFAULT: bool = false>(bool);
+type SessionConfigResult<T> = std::result::Result<T, SessionConfigError>;
 
-impl<const NAME: usize, const DEFAULT: bool> Default for ConfigBool<NAME, DEFAULT> {
-    fn default() -> Self {
-        ConfigBool(DEFAULT)
+// NOTE(kwannoel): We declare it separately as a constant,
+// otherwise seems like it can't infer the type of -1 when written inline.
+const DISABLE_STREAMING_RATE_LIMIT: i32 = -1;
+
+#[serde_as]
+/// This is the Session Config of RisingWave.
+#[derive(Clone, Debug, Deserialize, Serialize, SessionConfig, ConfigDoc, PartialEq)]
+pub struct SessionConfig {
+    /// If `RW_IMPLICIT_FLUSH` is on, then every INSERT/UPDATE/DELETE statement will block
+    /// until the entire dataflow is refreshed. In other words, every related table & MV will
+    /// be able to see the write.
+    #[parameter(default = false, rename = "rw_implicit_flush")]
+    implicit_flush: bool,
+
+    /// If `CREATE_COMPACTION_GROUP_FOR_MV` is on, dedicated compaction groups will be created in
+    /// MV creation.
+    #[parameter(default = false)]
+    create_compaction_group_for_mv: bool,
+
+    /// A temporary config variable to force query running in either local or distributed mode.
+    /// The default value is auto which means let the system decide to run batch queries in local
+    /// or distributed mode automatically.
+    #[serde_as(as = "DisplayFromStr")]
+    #[parameter(default = QueryMode::default(), flags = "NO_ALTER_SYS")]
+    query_mode: QueryMode,
+
+    /// Sets the number of digits displayed for floating-point values.
+    /// See <https://www.postgresql.org/docs/current/runtime-config-client.html#:~:text=for%20more%20information.-,extra_float_digits,-(integer)>
+    #[parameter(default = 1)]
+    extra_float_digits: i32,
+
+    /// Sets the application name to be reported in statistics and logs.
+    /// See <https://www.postgresql.org/docs/14/runtime-config-logging.html#:~:text=What%20to%20Log-,application_name,-(string)>
+    #[parameter(default = "", flags = "REPORT")]
+    application_name: String,
+
+    /// It is typically set by an application upon connection to the server.
+    /// see <https://www.postgresql.org/docs/current/runtime-config-client.html#GUC-DATESTYLE>
+    #[parameter(default = "", rename = "datestyle")]
+    date_style: String,
+
+    /// Force the use of lookup join instead of hash join when possible for local batch execution.
+    #[parameter(default = true, rename = "rw_batch_enable_lookup_join")]
+    batch_enable_lookup_join: bool,
+
+    /// Enable usage of sortAgg instead of hash agg when order property is satisfied in batch
+    /// execution
+    #[parameter(default = true, rename = "rw_batch_enable_sort_agg")]
+    batch_enable_sort_agg: bool,
+
+    /// Enable distributed DML, so an insert, delete, and update statement can be executed in a distributed way (e.g. running in multiple compute nodes).
+    /// No atomicity guarantee in this mode. Its goal is to gain the best ingestion performance for initial batch ingestion where users always can drop their table when failure happens.
+    #[parameter(default = false, rename = "batch_enable_distributed_dml")]
+    batch_enable_distributed_dml: bool,
+
+    /// The max gap allowed to transform small range scan into multi point lookup.
+    #[parameter(default = 8)]
+    max_split_range_gap: i32,
+
+    /// Sets the order in which schemas are searched when an object (table, data type, function, etc.)
+    /// is referenced by a simple name with no schema specified.
+    /// See <https://www.postgresql.org/docs/14/runtime-config-client.html#GUC-SEARCH-PATH>
+    #[serde_as(as = "DisplayFromStr")]
+    #[parameter(default = SearchPath::default())]
+    search_path: SearchPath,
+
+    /// If `VISIBILITY_MODE` is all, we will support querying data without checkpoint.
+    #[serde_as(as = "DisplayFromStr")]
+    #[parameter(default = VisibilityMode::default())]
+    visibility_mode: VisibilityMode,
+
+    /// See <https://www.postgresql.org/docs/current/transaction-iso.html>
+    #[serde_as(as = "DisplayFromStr")]
+    #[parameter(default = IsolationLevel::default())]
+    transaction_isolation: IsolationLevel,
+
+    /// Select as of specific epoch.
+    /// Sets the historical epoch for querying data. If 0, querying latest data.
+    #[serde_as(as = "DisplayFromStr")]
+    #[parameter(default = ConfigNonZeroU64::default())]
+    query_epoch: ConfigNonZeroU64,
+
+    /// Session timezone. Defaults to UTC.
+    #[parameter(default = "UTC", check_hook = check_timezone)]
+    timezone: String,
+
+    /// If `STREAMING_PARALLELISM` is non-zero, CREATE MATERIALIZED VIEW/TABLE/INDEX will use it as
+    /// streaming parallelism.
+    #[serde_as(as = "DisplayFromStr")]
+    #[parameter(default = ConfigNonZeroU64::default())]
+    streaming_parallelism: ConfigNonZeroU64,
+
+    /// Enable delta join for streaming queries. Defaults to false.
+    #[parameter(default = false, rename = "rw_streaming_enable_delta_join")]
+    streaming_enable_delta_join: bool,
+
+    /// Enable bushy join for streaming queries. Defaults to true.
+    #[parameter(default = true, rename = "rw_streaming_enable_bushy_join")]
+    streaming_enable_bushy_join: bool,
+
+    /// Enable arrangement backfill for streaming queries. Defaults to true.
+    /// When set to true, the parallelism of the upstream fragment will be
+    /// decoupled from the parallelism of the downstream scan fragment.
+    /// Or more generally, the parallelism of the upstream table / index / mv
+    /// will be decoupled from the parallelism of the downstream table / index / mv / sink.
+    #[parameter(default = true)]
+    streaming_use_arrangement_backfill: bool,
+
+    /// Allow `jsonb` in stream key
+    #[parameter(default = false, rename = "rw_streaming_allow_jsonb_in_stream_key")]
+    streaming_allow_jsonb_in_stream_key: bool,
+
+    /// Enable join ordering for streaming and batch queries. Defaults to true.
+    #[parameter(default = true, rename = "rw_enable_join_ordering")]
+    enable_join_ordering: bool,
+
+    /// Enable two phase agg optimization. Defaults to true.
+    /// Setting this to true will always set `FORCE_TWO_PHASE_AGG` to false.
+    #[parameter(default = true, flags = "SETTER", rename = "rw_enable_two_phase_agg")]
+    enable_two_phase_agg: bool,
+
+    /// Force two phase agg optimization whenever there's a choice between
+    /// optimizations. Defaults to false.
+    /// Setting this to true will always set `ENABLE_TWO_PHASE_AGG` to false.
+    #[parameter(default = false, flags = "SETTER", rename = "rw_force_two_phase_agg")]
+    force_two_phase_agg: bool,
+
+    /// Enable sharing of common sub-plans.
+    /// This means that DAG structured query plans can be constructed,
+    #[parameter(default = true, rename = "rw_enable_share_plan")]
+    /// rather than only tree structured query plans.
+    enable_share_plan: bool,
+
+    /// Enable split distinct agg
+    #[parameter(default = false, rename = "rw_force_split_distinct_agg")]
+    force_split_distinct_agg: bool,
+
+    /// See <https://www.postgresql.org/docs/current/runtime-config-client.html#GUC-INTERVALSTYLE>
+    #[parameter(default = "", rename = "intervalstyle")]
+    interval_style: String,
+
+    /// If `BATCH_PARALLELISM` is non-zero, batch queries will use this parallelism.
+    #[serde_as(as = "DisplayFromStr")]
+    #[parameter(default = ConfigNonZeroU64::default())]
+    batch_parallelism: ConfigNonZeroU64,
+
+    /// The version of PostgreSQL that Risingwave claims to be.
+    #[parameter(default = PG_VERSION)]
+    server_version: String,
+
+    /// The version of PostgreSQL that Risingwave claims to be.
+    #[parameter(default = SERVER_VERSION_NUM)]
+    server_version_num: i32,
+
+    /// see <https://www.postgresql.org/docs/15/runtime-config-client.html#GUC-CLIENT-MIN-MESSAGES>
+    #[parameter(default = "notice")]
+    client_min_messages: String,
+
+    /// see <https://www.postgresql.org/docs/15/runtime-config-client.html#GUC-CLIENT-ENCODING>
+    #[parameter(default = SERVER_ENCODING, check_hook = check_client_encoding)]
+    client_encoding: String,
+
+    /// Enable decoupling sink and internal streaming graph or not
+    #[serde_as(as = "DisplayFromStr")]
+    #[parameter(default = SinkDecouple::default())]
+    sink_decouple: SinkDecouple,
+
+    /// See <https://www.postgresql.org/docs/current/runtime-config-compatible.html#RUNTIME-CONFIG-COMPATIBLE-VERSION>
+    /// Unused in RisingWave, support for compatibility.
+    #[parameter(default = false)]
+    synchronize_seqscans: bool,
+
+    /// Abort query statement that takes more than the specified amount of time in sec. If
+    /// `log_min_error_statement` is set to ERROR or lower, the statement that timed out will also be
+    /// logged. If this value is specified without units, it is taken as milliseconds. A value of
+    /// zero (the default) disables the timeout.
+    #[parameter(default = 0u32)]
+    statement_timeout: u32,
+
+    /// Terminate any session that has been idle (that is, waiting for a client query) within an open transaction for longer than the specified amount of time in milliseconds.
+    #[parameter(default = 60000u32)]
+    idle_in_transaction_session_timeout: u32,
+
+    /// See <https://www.postgresql.org/docs/current/runtime-config-client.html#GUC-LOCK-TIMEOUT>
+    /// Unused in RisingWave, support for compatibility.
+    #[parameter(default = 0)]
+    lock_timeout: i32,
+
+    /// For limiting the startup time of a shareable CDC streaming source when the source is being created. Unit: seconds.
+    #[parameter(default = 30)]
+    cdc_source_wait_streaming_start_timeout: i32,
+
+    /// see <https://www.postgresql.org/docs/current/runtime-config-client.html#GUC-ROW-SECURITY>.
+    /// Unused in RisingWave, support for compatibility.
+    #[parameter(default = true)]
+    row_security: bool,
+
+    /// see <https://www.postgresql.org/docs/current/runtime-config-client.html#GUC-STANDARD-CONFORMING-STRINGS>
+    #[parameter(default = STANDARD_CONFORMING_STRINGS)]
+    standard_conforming_strings: String,
+
+    /// Set streaming rate limit (rows per second) for each parallelism for mv / source backfilling, source reads.
+    /// If set to -1, disable rate limit.
+    /// If set to 0, this pauses the snapshot read / source read.
+    #[parameter(default = DISABLE_STREAMING_RATE_LIMIT)]
+    streaming_rate_limit: i32,
+
+    /// Cache policy for partition cache in streaming over window.
+    /// Can be "full", "recent", "`recent_first_n`" or "`recent_last_n`".
+    #[serde_as(as = "DisplayFromStr")]
+    #[parameter(default = OverWindowCachePolicy::default(), rename = "rw_streaming_over_window_cache_policy")]
+    streaming_over_window_cache_policy: OverWindowCachePolicy,
+
+    /// Run DDL statements in background
+    #[parameter(default = false)]
+    background_ddl: bool,
+
+    /// Enable shared source. Currently only for Kafka.
+    ///
+    /// When enabled, `CREATE SOURCE` will create a source streaming job, and `CREATE MATERIALIZED VIEWS` from the source
+    /// will forward the data from the same source streaming job, and also backfill prior data from the external source.
+    #[parameter(default = false)]
+    rw_enable_shared_source: bool,
+
+    /// Shows the server-side character set encoding. At present, this parameter can be shown but not set, because the encoding is determined at database creation time.
+    #[parameter(default = SERVER_ENCODING)]
+    server_encoding: String,
+
+    #[parameter(default = "hex", check_hook = check_bytea_output)]
+    bytea_output: String,
+}
+
+fn check_timezone(val: &str) -> Result<(), String> {
+    // Check if the provided string is a valid timezone.
+    Tz::from_str_insensitive(val).map_err(|_e| "Not a valid timezone")?;
+    Ok(())
+}
+
+fn check_client_encoding(val: &str) -> Result<(), String> {
+    // https://github.com/postgres/postgres/blob/REL_15_3/src/common/encnames.c#L525
+    let clean = val.replace(|c: char| !c.is_ascii_alphanumeric(), "");
+    if !clean.eq_ignore_ascii_case("UTF8") {
+        Err("Only support 'UTF8' for CLIENT_ENCODING".to_string())
+    } else {
+        Ok(())
     }
 }
 
-impl<const NAME: usize, const DEFAULT: bool> ConfigEntry for ConfigBool<NAME, DEFAULT> {
-    fn entry_name() -> &'static str {
-        CONFIG_KEYS[NAME]
+fn check_bytea_output(val: &str) -> Result<(), String> {
+    if val == "hex" {
+        Ok(())
+    } else {
+        Err("Only support 'hex' for BYTEA_OUTPUT".to_string())
     }
 }
 
-impl<const NAME: usize, const DEFAULT: bool> TryFrom<&[&str]> for ConfigBool<NAME, DEFAULT> {
-    type Error = RwError;
-
-    fn try_from(value: &[&str]) -> Result<Self, Self::Error> {
-        if value.len() != 1 {
-            return Err(ErrorCode::InternalError(format!(
-                "SET {} takes only one argument",
-                <Self as ConfigEntry>::entry_name()
-            ))
-            .into());
-        }
-
-        let s = value[0];
-        if s.eq_ignore_ascii_case("true") {
-            Ok(ConfigBool(true))
-        } else if s.eq_ignore_ascii_case("false") {
-            Ok(ConfigBool(false))
+impl SessionConfig {
+    pub fn set_force_two_phase_agg(
+        &mut self,
+        val: bool,
+        reporter: &mut impl ConfigReporter,
+    ) -> SessionConfigResult<bool> {
+        let set_val = self.set_force_two_phase_agg_inner(val, reporter)?;
+        if self.force_two_phase_agg {
+            self.set_enable_two_phase_agg(true, reporter)
         } else {
-            Err(ErrorCode::InvalidConfigValue {
-                config_entry: Self::entry_name().to_string(),
-                config_value: s.to_string(),
-            }
-            .into())
+            Ok(set_val)
         }
     }
-}
 
-impl<const NAME: usize, const DEFAULT: bool> Deref for ConfigBool<NAME, DEFAULT> {
-    type Target = bool;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-#[derive(Default)]
-struct ConfigString<const NAME: usize>(String);
-
-impl<const NAME: usize> Deref for ConfigString<NAME> {
-    type Target = String;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl<const NAME: usize> TryFrom<&[&str]> for ConfigString<NAME> {
-    type Error = RwError;
-
-    fn try_from(value: &[&str]) -> Result<Self, Self::Error> {
-        if value.len() != 1 {
-            return Err(ErrorCode::InternalError(format!(
-                "SET {} takes only one argument",
-                Self::entry_name()
-            ))
-            .into());
+    pub fn set_enable_two_phase_agg(
+        &mut self,
+        val: bool,
+        reporter: &mut impl ConfigReporter,
+    ) -> SessionConfigResult<bool> {
+        let set_val = self.set_enable_two_phase_agg_inner(val, reporter)?;
+        if !self.force_two_phase_agg {
+            self.set_force_two_phase_agg(false, reporter)
+        } else {
+            Ok(set_val)
         }
-
-        Ok(Self(value[0].to_string()))
-    }
-}
-
-impl<const NAME: usize> ConfigEntry for ConfigString<NAME> {
-    fn entry_name() -> &'static str {
-        CONFIG_KEYS[NAME]
-    }
-}
-
-struct ConfigI32<const NAME: usize, const DEFAULT: i32 = 0>(i32);
-
-impl<const NAME: usize, const DEFAULT: i32> Default for ConfigI32<NAME, DEFAULT> {
-    fn default() -> Self {
-        ConfigI32(DEFAULT)
-    }
-}
-
-impl<const NAME: usize, const DEFAULT: i32> Deref for ConfigI32<NAME, DEFAULT> {
-    type Target = i32;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl<const NAME: usize, const DEFAULT: i32> ConfigEntry for ConfigI32<NAME, DEFAULT> {
-    fn entry_name() -> &'static str {
-        CONFIG_KEYS[NAME]
-    }
-}
-
-impl<const NAME: usize, const DEFAULT: i32> TryFrom<&[&str]> for ConfigI32<NAME, DEFAULT> {
-    type Error = RwError;
-
-    fn try_from(value: &[&str]) -> Result<Self, Self::Error> {
-        if value.len() != 1 {
-            return Err(ErrorCode::InternalError(format!(
-                "SET {} takes only one argument",
-                Self::entry_name()
-            ))
-            .into());
-        }
-
-        let s = value[0];
-        s.parse::<i32>().map(ConfigI32).map_err(|_e| {
-            ErrorCode::InvalidConfigValue {
-                config_entry: Self::entry_name().to_string(),
-                config_value: s.to_string(),
-            }
-            .into()
-        })
-    }
-}
-
-struct ConfigU64<const NAME: usize, const DEFAULT: u64 = 0>(u64);
-
-impl<const NAME: usize, const DEFAULT: u64> Default for ConfigU64<NAME, DEFAULT> {
-    fn default() -> Self {
-        ConfigU64(DEFAULT)
-    }
-}
-
-impl<const NAME: usize, const DEFAULT: u64> Deref for ConfigU64<NAME, DEFAULT> {
-    type Target = u64;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl<const NAME: usize, const DEFAULT: u64> ConfigEntry for ConfigU64<NAME, DEFAULT> {
-    fn entry_name() -> &'static str {
-        CONFIG_KEYS[NAME]
-    }
-}
-
-impl<const NAME: usize, const DEFAULT: u64> TryFrom<&[&str]> for ConfigU64<NAME, DEFAULT> {
-    type Error = RwError;
-
-    fn try_from(value: &[&str]) -> Result<Self, Self::Error> {
-        if value.len() != 1 {
-            return Err(ErrorCode::InternalError(format!(
-                "SET {} takes only one argument",
-                Self::entry_name()
-            ))
-            .into());
-        }
-
-        let s = value[0];
-        s.parse::<u64>().map(ConfigU64).map_err(|_e| {
-            ErrorCode::InvalidConfigValue {
-                config_entry: Self::entry_name().to_string(),
-                config_value: s.to_string(),
-            }
-            .into()
-        })
     }
 }
 
@@ -266,427 +342,35 @@ pub struct VariableInfo {
     pub description: String,
 }
 
-type ImplicitFlush = ConfigBool<IMPLICIT_FLUSH, false>;
-type CreateCompactionGroupForMv = ConfigBool<CREATE_COMPACTION_GROUP_FOR_MV, false>;
-type ApplicationName = ConfigString<APPLICATION_NAME>;
-type ExtraFloatDigit = ConfigI32<EXTRA_FLOAT_DIGITS, 1>;
-// TODO: We should use more specified type here.
-type DateStyle = ConfigString<DATE_STYLE>;
-type BatchEnableLookupJoin = ConfigBool<BATCH_ENABLE_LOOKUP_JOIN, true>;
-type BatchEnableSortAgg = ConfigBool<BATCH_ENABLE_SORT_AGG, true>;
-type MaxSplitRangeGap = ConfigI32<MAX_SPLIT_RANGE_GAP, 8>;
-type QueryEpoch = ConfigU64<QUERY_EPOCH, 0>;
-type Timezone = ConfigString<TIMEZONE>;
-type StreamingParallelism = ConfigU64<STREAMING_PARALLELISM, 0>;
-type StreamingEnableDeltaJoin = ConfigBool<STREAMING_ENABLE_DELTA_JOIN, false>;
-type StreamingEnableBushyJoin = ConfigBool<STREAMING_ENABLE_BUSHY_JOIN, true>;
-type EnableTwoPhaseAgg = ConfigBool<ENABLE_TWO_PHASE_AGG, true>;
-type ForceTwoPhaseAgg = ConfigBool<FORCE_TWO_PHASE_AGG, false>;
-type EnableSharePlan = ConfigBool<RW_ENABLE_SHARE_PLAN, true>;
-type IntervalStyle = ConfigString<INTERVAL_STYLE>;
-type BatchParallelism = ConfigU64<BATCH_PARALLELISM, 0>;
-
-#[derive(Educe)]
-#[educe(Default)]
-pub struct ConfigMap {
-    /// If `RW_IMPLICIT_FLUSH` is on, then every INSERT/UPDATE/DELETE statement will block
-    /// until the entire dataflow is refreshed. In other words, every related table & MV will
-    /// be able to see the write.
-    implicit_flush: ImplicitFlush,
-
-    /// If `CREATE_COMPACTION_GROUP_FOR_MV` is on, dedicated compaction groups will be created in
-    /// MV creation.
-    create_compaction_group_for_mv: CreateCompactionGroupForMv,
-
-    /// A temporary config variable to force query running in either local or distributed mode.
-    /// The default value is auto which means let the system decide to run batch queries in local
-    /// or distributed mode automatically.
-    query_mode: QueryMode,
-
-    /// see <https://www.postgresql.org/docs/current/runtime-config-client.html#:~:text=for%20more%20information.-,extra_float_digits,-(integer)>
-    extra_float_digit: ExtraFloatDigit,
-
-    /// see <https://www.postgresql.org/docs/14/runtime-config-logging.html#:~:text=What%20to%20Log-,application_name,-(string)>
-    application_name: ApplicationName,
-
-    /// see <https://www.postgresql.org/docs/current/runtime-config-client.html#GUC-DATESTYLE>
-    date_style: DateStyle,
-
-    /// To force the usage of lookup join instead of hash join in batch execution
-    batch_enable_lookup_join: BatchEnableLookupJoin,
-
-    /// To open the usage of sortAgg instead of hash agg when order property is satisfied in batch
-    /// execution
-    batch_enable_sort_agg: BatchEnableSortAgg,
-
-    /// It's the max gap allowed to transform small range scan scan into multi point lookup.
-    max_split_range_gap: MaxSplitRangeGap,
-
-    /// see <https://www.postgresql.org/docs/14/runtime-config-client.html#GUC-SEARCH-PATH>
-    search_path: SearchPath,
-
-    /// If `VISIBILITY_MODE` is all, we will support querying data without checkpoint.
-    visibility_mode: VisibilityMode,
-
-    /// see <https://www.postgresql.org/docs/current/transaction-iso.html>
-    transaction_isolation_level: IsolationLevel,
-
-    /// select as of specific epoch
-    query_epoch: QueryEpoch,
-
-    /// Session timezone. Defaults to UTC.
-    #[educe(Default(expression = "ConfigString::<TIMEZONE>(String::from(\"UTC\"))"))]
-    timezone: Timezone,
-
-    /// If `STREAMING_PARALLELISM` is non-zero, CREATE MATERIALIZED VIEW/TABLE/INDEX will use it as
-    /// streaming parallelism.
-    streaming_parallelism: StreamingParallelism,
-
-    /// Enable delta join in streaming query. Defaults to false.
-    streaming_enable_delta_join: StreamingEnableDeltaJoin,
-
-    /// Enable bushy join in the streaming query. Defaults to false.
-    streaming_enable_bushy_join: StreamingEnableBushyJoin,
-
-    /// Enable two phase agg optimization. Defaults to true.
-    /// Setting this to true will always set `FORCE_TWO_PHASE_AGG` to false.
-    enable_two_phase_agg: EnableTwoPhaseAgg,
-
-    /// Force two phase agg optimization whenever there's a choice between
-    /// optimizations. Defaults to false.
-    /// Setting this to true will always set `ENABLE_TWO_PHASE_AGG` to false.
-    force_two_phase_agg: ForceTwoPhaseAgg,
-
-    /// Enable sharing of common sub-plans.
-    /// This means that DAG structured query plans can be constructed,
-    /// rather than only tree structured query plans.
-    enable_share_plan: EnableSharePlan,
-
-    /// see <https://www.postgresql.org/docs/current/runtime-config-client.html#GUC-INTERVALSTYLE>
-    interval_style: IntervalStyle,
-
-    batch_parallelism: BatchParallelism,
+/// Report status or notice to caller.
+pub trait ConfigReporter {
+    fn report_status(&mut self, key: &str, new_val: String);
 }
 
-impl ConfigMap {
-    pub fn set(&mut self, key: &str, val: Vec<String>) -> Result<(), RwError> {
-        info!(%key, ?val, "set config");
-        let val = val.iter().map(AsRef::as_ref).collect_vec();
-        if key.eq_ignore_ascii_case(ImplicitFlush::entry_name()) {
-            self.implicit_flush = val.as_slice().try_into()?;
-        } else if key.eq_ignore_ascii_case(CreateCompactionGroupForMv::entry_name()) {
-            self.create_compaction_group_for_mv = val.as_slice().try_into()?;
-        } else if key.eq_ignore_ascii_case(QueryMode::entry_name()) {
-            self.query_mode = val.as_slice().try_into()?;
-        } else if key.eq_ignore_ascii_case(ExtraFloatDigit::entry_name()) {
-            self.extra_float_digit = val.as_slice().try_into()?;
-        } else if key.eq_ignore_ascii_case(ApplicationName::entry_name()) {
-            self.application_name = val.as_slice().try_into()?;
-        } else if key.eq_ignore_ascii_case(DateStyle::entry_name()) {
-            self.date_style = val.as_slice().try_into()?;
-        } else if key.eq_ignore_ascii_case(BatchEnableLookupJoin::entry_name()) {
-            self.batch_enable_lookup_join = val.as_slice().try_into()?;
-        } else if key.eq_ignore_ascii_case(BatchEnableSortAgg::entry_name()) {
-            self.batch_enable_sort_agg = val.as_slice().try_into()?;
-        } else if key.eq_ignore_ascii_case(MaxSplitRangeGap::entry_name()) {
-            self.max_split_range_gap = val.as_slice().try_into()?;
-        } else if key.eq_ignore_ascii_case(SearchPath::entry_name()) {
-            self.search_path = val.as_slice().try_into()?;
-        } else if key.eq_ignore_ascii_case(VisibilityMode::entry_name()) {
-            self.visibility_mode = val.as_slice().try_into()?;
-        } else if key.eq_ignore_ascii_case(QueryEpoch::entry_name()) {
-            self.query_epoch = val.as_slice().try_into()?;
-        } else if key.eq_ignore_ascii_case(Timezone::entry_name()) {
-            let raw: Timezone = val.as_slice().try_into()?;
-            // Check if the provided string is a valid timezone.
-            Tz::from_str_insensitive(&raw.0).map_err(|_e| ErrorCode::InvalidConfigValue {
-                config_entry: Timezone::entry_name().to_string(),
-                config_value: raw.0.to_string(),
-            })?;
-            self.timezone = raw;
-        } else if key.eq_ignore_ascii_case(StreamingParallelism::entry_name()) {
-            self.streaming_parallelism = val.as_slice().try_into()?;
-        } else if key.eq_ignore_ascii_case(StreamingEnableDeltaJoin::entry_name()) {
-            self.streaming_enable_delta_join = val.as_slice().try_into()?;
-        } else if key.eq_ignore_ascii_case(StreamingEnableBushyJoin::entry_name()) {
-            self.streaming_enable_bushy_join = val.as_slice().try_into()?;
-        } else if key.eq_ignore_ascii_case(EnableTwoPhaseAgg::entry_name()) {
-            self.enable_two_phase_agg = val.as_slice().try_into()?;
-            if !*self.enable_two_phase_agg {
-                self.force_two_phase_agg = ConfigBool(false);
-            }
-        } else if key.eq_ignore_ascii_case(ForceTwoPhaseAgg::entry_name()) {
-            self.force_two_phase_agg = val.as_slice().try_into()?;
-            if *self.force_two_phase_agg {
-                self.enable_two_phase_agg = ConfigBool(true);
-            }
-        } else if key.eq_ignore_ascii_case(EnableSharePlan::entry_name()) {
-            self.enable_share_plan = val.as_slice().try_into()?;
-        } else if key.eq_ignore_ascii_case(IntervalStyle::entry_name()) {
-            self.interval_style = val.as_slice().try_into()?;
-        } else if key.eq_ignore_ascii_case(BatchParallelism::entry_name()) {
-            self.batch_parallelism = val.as_slice().try_into()?;
-        } else {
-            return Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into());
-        }
+// Report nothing.
+impl ConfigReporter for () {
+    fn report_status(&mut self, _key: &str, _new_val: String) {}
+}
 
-        Ok(())
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[derive(SessionConfig)]
+    struct TestConfig {
+        #[parameter(default = 1, flags = "NO_ALTER_SYS", alias = "test_param_alias" | "alias_param_test")]
+        test_param: i32,
     }
 
-    pub fn get(&self, key: &str) -> Result<String, RwError> {
-        if key.eq_ignore_ascii_case(ImplicitFlush::entry_name()) {
-            Ok(self.implicit_flush.to_string())
-        } else if key.eq_ignore_ascii_case(CreateCompactionGroupForMv::entry_name()) {
-            Ok(self.create_compaction_group_for_mv.to_string())
-        } else if key.eq_ignore_ascii_case(QueryMode::entry_name()) {
-            Ok(self.query_mode.to_string())
-        } else if key.eq_ignore_ascii_case(ExtraFloatDigit::entry_name()) {
-            Ok(self.extra_float_digit.to_string())
-        } else if key.eq_ignore_ascii_case(ApplicationName::entry_name()) {
-            Ok(self.application_name.to_string())
-        } else if key.eq_ignore_ascii_case(DateStyle::entry_name()) {
-            Ok(self.date_style.to_string())
-        } else if key.eq_ignore_ascii_case(BatchEnableLookupJoin::entry_name()) {
-            Ok(self.batch_enable_lookup_join.to_string())
-        } else if key.eq_ignore_ascii_case(BatchEnableSortAgg::entry_name()) {
-            Ok(self.batch_enable_sort_agg.to_string())
-        } else if key.eq_ignore_ascii_case(MaxSplitRangeGap::entry_name()) {
-            Ok(self.max_split_range_gap.to_string())
-        } else if key.eq_ignore_ascii_case(SearchPath::entry_name()) {
-            Ok(self.search_path.to_string())
-        } else if key.eq_ignore_ascii_case(VisibilityMode::entry_name()) {
-            Ok(self.visibility_mode.to_string())
-        } else if key.eq_ignore_ascii_case(IsolationLevel::entry_name()) {
-            Ok(self.transaction_isolation_level.to_string())
-        } else if key.eq_ignore_ascii_case(QueryEpoch::entry_name()) {
-            Ok(self.query_epoch.to_string())
-        } else if key.eq_ignore_ascii_case(Timezone::entry_name()) {
-            Ok(self.timezone.clone())
-        } else if key.eq_ignore_ascii_case(StreamingParallelism::entry_name()) {
-            Ok(self.streaming_parallelism.to_string())
-        } else if key.eq_ignore_ascii_case(StreamingEnableDeltaJoin::entry_name()) {
-            Ok(self.streaming_enable_delta_join.to_string())
-        } else if key.eq_ignore_ascii_case(StreamingEnableBushyJoin::entry_name()) {
-            Ok(self.streaming_enable_bushy_join.to_string())
-        } else if key.eq_ignore_ascii_case(EnableTwoPhaseAgg::entry_name()) {
-            Ok(self.enable_two_phase_agg.to_string())
-        } else if key.eq_ignore_ascii_case(ForceTwoPhaseAgg::entry_name()) {
-            Ok(self.force_two_phase_agg.to_string())
-        } else if key.eq_ignore_ascii_case(EnableSharePlan::entry_name()) {
-            Ok(self.enable_share_plan.to_string())
-        } else if key.eq_ignore_ascii_case(IntervalStyle::entry_name()) {
-            Ok(self.interval_style.to_string())
-        } else if key.eq_ignore_ascii_case(BatchParallelism::entry_name()) {
-            Ok(self.batch_parallelism.to_string())
-        } else {
-            Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into())
-        }
-    }
-
-    pub fn get_all(&self) -> Vec<VariableInfo> {
-        vec![
-            VariableInfo{
-                name : ImplicitFlush::entry_name().to_lowercase(),
-                setting : self.implicit_flush.to_string(),
-                description : String::from("If `RW_IMPLICIT_FLUSH` is on, then every INSERT/UPDATE/DELETE statement will block until the entire dataflow is refreshed.")
-            },
-            VariableInfo{
-                name : CreateCompactionGroupForMv::entry_name().to_lowercase(),
-                setting : self.create_compaction_group_for_mv.to_string(),
-                description : String::from("If `CREATE_COMPACTION_GROUP_FOR_MV` is on, dedicated compaction groups will be created in MV creation.")
-            },
-            VariableInfo{
-                name : QueryMode::entry_name().to_lowercase(),
-                setting : self.query_mode.to_string(),
-                description : String::from("A temporary config variable to force query running in either local or distributed mode. If the value is auto, the system will decide for you automatically.")
-            },
-            VariableInfo{
-                name : ExtraFloatDigit::entry_name().to_lowercase(),
-                setting : self.extra_float_digit.to_string(),
-                description : String::from("Sets the number of digits displayed for floating-point values.")
-            },
-            VariableInfo{
-                name : ApplicationName::entry_name().to_lowercase(),
-                setting : self.application_name.to_string(),
-                description : String::from("Sets the application name to be reported in statistics and logs.")
-            },
-            VariableInfo{
-                name : DateStyle::entry_name().to_lowercase(),
-                setting : self.date_style.to_string(),
-                description : String::from("It is typically set by an application upon connection to the server.")
-            },
-            VariableInfo{
-                name : BatchEnableLookupJoin::entry_name().to_lowercase(),
-                setting : self.batch_enable_lookup_join.to_string(),
-                description : String::from("To enable the usage of lookup join instead of hash join when possible for local batch execution.")
-            },
-            VariableInfo{
-                name : BatchEnableSortAgg::entry_name().to_lowercase(),
-                setting : self.batch_enable_sort_agg.to_string(),
-                description : String::from("To enable the usage of sort agg instead of hash join when order property is satisfied for batch execution.")
-            },
-            VariableInfo{
-                name : MaxSplitRangeGap::entry_name().to_lowercase(),
-                setting : self.max_split_range_gap.to_string(),
-                description : String::from("It's the max gap allowed to transform small range scan scan into multi point lookup.")
-            },
-            VariableInfo {
-                name: SearchPath::entry_name().to_lowercase(),
-                setting : self.search_path.to_string(),
-                description : String::from("Sets the order in which schemas are searched when an object (table, data type, function, etc.) is referenced by a simple name with no schema specified")
-            },
-            VariableInfo{
-                name : VisibilityMode::entry_name().to_lowercase(),
-                setting : self.visibility_mode.to_string(),
-                description : String::from("If `VISIBILITY_MODE` is all, we will support querying data without checkpoint.")
-            },
-            VariableInfo{
-                name: QueryEpoch::entry_name().to_lowercase(),
-                setting : self.query_epoch.to_string(),
-                description : String::from("Sets the historical epoch for querying data. If 0, querying latest data.")
-            },
-            VariableInfo{
-                name : Timezone::entry_name().to_lowercase(),
-                setting : self.timezone.to_string(),
-                description : String::from("The session timezone. This will affect how timestamps are cast into timestamps with timezone.")
-            },
-            VariableInfo{
-                name : StreamingParallelism::entry_name().to_lowercase(),
-                setting : self.streaming_parallelism.to_string(),
-                description: String::from("Sets the parallelism for streaming. If 0, use default value.")
-            },
-            VariableInfo{
-                name : StreamingEnableDeltaJoin::entry_name().to_lowercase(),
-                setting : self.streaming_enable_delta_join.to_string(),
-                description: String::from("Enable delta join in streaming query.")
-            },
-            VariableInfo{
-                name : StreamingEnableBushyJoin::entry_name().to_lowercase(),
-                setting : self.streaming_enable_bushy_join.to_string(),
-                description: String::from("Enable bushy join in streaming query.")
-            },
-            VariableInfo{
-                name : EnableTwoPhaseAgg::entry_name().to_lowercase(),
-                setting : self.enable_two_phase_agg.to_string(),
-                description: String::from("Enable two phase aggregation.")
-            },
-            VariableInfo{
-                name : ForceTwoPhaseAgg::entry_name().to_lowercase(),
-                setting : self.force_two_phase_agg.to_string(),
-                description: String::from("Force two phase aggregation.")
-            },
-            VariableInfo{
-                name : EnableSharePlan::entry_name().to_lowercase(),
-                setting : self.enable_share_plan.to_string(),
-                description: String::from("Enable sharing of common sub-plans. This means that DAG structured query plans can be constructed, rather than only tree structured query plans.")
-            },
-            VariableInfo{
-                name : IntervalStyle::entry_name().to_lowercase(),
-                setting : self.interval_style.to_string(),
-                description : String::from("It is typically set by an application upon connection to the server.")
-            },
-            VariableInfo{
-                name : BatchParallelism::entry_name().to_lowercase(),
-                setting : self.batch_parallelism.to_string(),
-                description: String::from("Sets the parallelism for batch. If 0, use default value.")
-            },
-        ]
-    }
-
-    pub fn get_implicit_flush(&self) -> bool {
-        *self.implicit_flush
-    }
-
-    pub fn get_create_compaction_group_for_mv(&self) -> bool {
-        *self.create_compaction_group_for_mv
-    }
-
-    pub fn get_query_mode(&self) -> QueryMode {
-        self.query_mode
-    }
-
-    pub fn get_extra_float_digit(&self) -> i32 {
-        *self.extra_float_digit
-    }
-
-    pub fn get_application_name(&self) -> &str {
-        &self.application_name
-    }
-
-    pub fn get_date_style(&self) -> &str {
-        &self.date_style
-    }
-
-    pub fn get_batch_enable_lookup_join(&self) -> bool {
-        *self.batch_enable_lookup_join
-    }
-
-    pub fn get_batch_enable_sort_agg(&self) -> bool {
-        *self.batch_enable_sort_agg
-    }
-
-    pub fn get_max_split_range_gap(&self) -> u64 {
-        if *self.max_split_range_gap < 0 {
-            0
-        } else {
-            *self.max_split_range_gap as u64
-        }
-    }
-
-    pub fn get_search_path(&self) -> SearchPath {
-        self.search_path.clone()
-    }
-
-    pub fn only_checkpoint_visible(&self) -> bool {
-        matches!(self.visibility_mode, VisibilityMode::Checkpoint)
-    }
-
-    pub fn get_query_epoch(&self) -> Option<Epoch> {
-        if self.query_epoch.0 != 0 {
-            return Some((self.query_epoch.0).into());
-        }
-        None
-    }
-
-    pub fn get_timezone(&self) -> &str {
-        &self.timezone
-    }
-
-    pub fn get_streaming_parallelism(&self) -> Option<u64> {
-        if self.streaming_parallelism.0 != 0 {
-            return Some(self.streaming_parallelism.0);
-        }
-        None
-    }
-
-    pub fn get_streaming_enable_delta_join(&self) -> bool {
-        *self.streaming_enable_delta_join
-    }
-
-    pub fn get_streaming_enable_bushy_join(&self) -> bool {
-        *self.streaming_enable_bushy_join
-    }
-
-    pub fn get_enable_two_phase_agg(&self) -> bool {
-        *self.enable_two_phase_agg
-    }
-
-    pub fn get_force_two_phase_agg(&self) -> bool {
-        *self.force_two_phase_agg
-    }
-
-    pub fn get_enable_share_plan(&self) -> bool {
-        *self.enable_share_plan
-    }
-
-    pub fn get_interval_style(&self) -> &str {
-        &self.interval_style
-    }
-
-    pub fn get_batch_parallelism(&self) -> Option<NonZeroU64> {
-        if self.batch_parallelism.0 != 0 {
-            return Some(NonZeroU64::new(self.batch_parallelism.0).unwrap());
-        }
-        None
+    #[test]
+    fn test_session_config_alias() {
+        let mut config = TestConfig::default();
+        config.set("test_param", "2".to_string(), &mut ()).unwrap();
+        assert_eq!(config.get("test_param_alias").unwrap(), "2");
+        config
+            .set("alias_param_test", "3".to_string(), &mut ())
+            .unwrap();
+        assert_eq!(config.get("test_param_alias").unwrap(), "3");
+        assert!(TestConfig::check_no_alter_sys("test_param").unwrap());
     }
 }

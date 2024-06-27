@@ -1,3 +1,2 @@
-*.py
-
-!integration_tests.py
+.vscode
+sink-client-venv/

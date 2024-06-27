@@ -1,0 +1,29 @@
+- name: jsonb in group by
+  sql: |
+    create table t1 (v1 jsonb, v2 int);
+    create table t2 (v3 jsonb, v4 int);
+    select v2 from t1 group by v2, v1;
+  expected_outputs:
+  - stream_error
+- name: jsonb in union
+  sql: |
+    create table t1 (v1 jsonb, v2 int);
+    create table t2 (v3 jsonb, v4 int);
+    select v1, v2 from t1 union select v3, v4 from t2;
+  expected_outputs:
+  - stream_error
+- name: jsonb in distinct
+  sql: |
+    create table t1 (v1 jsonb, v2 int);
+    select distinct v1 from t1;
+  expected_outputs:
+  - stream_error
+- name: jsonb in TopN by group
+  sql: |
+    create table t1 (v1 jsonb, v2 int);
+    SELECT v1 FROM (
+      SELECT v1, rank() OVER (PARTITION BY v1 ORDER BY v2) AS rank
+      FROM t1)
+    WHERE rank <= 2;
+  expected_outputs:
+  - stream_error

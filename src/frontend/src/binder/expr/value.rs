@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,15 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::iter::Peekable;
-use std::str::{from_utf8, Chars};
-
 use itertools::Itertools;
-use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::bail_not_implemented;
 use risingwave_common::types::{DataType, DateTimeField, Decimal, Interval, ScalarImpl};
 use risingwave_sqlparser::ast::{DateTimeField as AstDateTimeField, Expr, Value};
+use thiserror_ext::AsReport;
 
 use crate::binder::Binder;
+use crate::error::{ErrorCode, Result};
 use crate::expr::{align_types, Expr as _, ExprImpl, ExprType, FunctionCall, Literal};
 
 impl Binder {
@@ -28,11 +27,11 @@ impl Binder {
         match value {
             Value::Number(s) => self.bind_number(s),
             Value::SingleQuotedString(s) => self.bind_string(s),
-            Value::CstyleEscapesString(s) => self.bind_string(unescape_c_style(&s)?),
+            Value::CstyleEscapedString(s) => self.bind_string(s.value),
             Value::Boolean(b) => self.bind_bool(b),
             // Both null and string literal will be treated as `unknown` during type inference.
             // See [`ExprImpl::is_unknown`].
-            Value::Null => Ok(Literal::new(None, DataType::Varchar)),
+            Value::Null => Ok(Literal::new_untyped(None)),
             Value::Interval {
                 value,
                 leading_field,
@@ -41,27 +40,42 @@ impl Binder {
                 last_field: None,
                 fractional_seconds_precision: None,
             } => self.bind_interval(value, leading_field),
-            _ => Err(ErrorCode::NotImplemented(format!("value: {:?}", value), None.into()).into()),
+            _ => bail_not_implemented!("value: {:?}", value),
         }
     }
 
     pub(super) fn bind_string(&mut self, s: String) -> Result<Literal> {
-        Ok(Literal::new(
-            Some(ScalarImpl::Utf8(s.into())),
-            DataType::Varchar,
-        ))
+        Ok(Literal::new_untyped(Some(s)))
     }
 
     fn bind_bool(&mut self, b: bool) -> Result<Literal> {
         Ok(Literal::new(Some(ScalarImpl::Bool(b)), DataType::Boolean))
     }
 
-    fn bind_number(&mut self, s: String) -> Result<Literal> {
-        let (data, data_type) = if let Ok(int_32) = s.parse::<i32>() {
+    fn bind_number(&mut self, mut s: String) -> Result<Literal> {
+        let prefix_start = match s.starts_with('-') {
+            true => 1,
+            false => 0,
+        };
+        let base = match prefix_start + 2 <= s.len() {
+            true => match &s[prefix_start..prefix_start + 2] {
+                // tokenizer already converts them to lowercase
+                "0x" => 16,
+                "0o" => 8,
+                "0b" => 2,
+                _ => 10,
+            },
+            false => 10,
+        };
+        if base != 10 {
+            s.replace_range(prefix_start..prefix_start + 2, "");
+        }
+
+        let (data, data_type) = if let Ok(int_32) = i32::from_str_radix(&s, base) {
             (Some(ScalarImpl::Int32(int_32)), DataType::Int32)
-        } else if let Ok(int_64) = s.parse::<i64>() {
+        } else if let Ok(int_64) = i64::from_str_radix(&s, base) {
             (Some(ScalarImpl::Int64(int_64)), DataType::Int64)
-        } else if let Ok(decimal) = s.parse::<Decimal>() {
+        } else if let Ok(decimal) = Decimal::from_str_radix(&s, base) {
             // Notice: when the length of decimal exceeds 29(>= 30), it will be rounded up.
             (Some(ScalarImpl::Decimal(decimal)), DataType::Decimal)
         } else if let Some(scientific) = Decimal::from_scientific(&s) {
@@ -78,7 +92,8 @@ impl Binder {
         leading_field: Option<AstDateTimeField>,
     ) -> Result<Literal> {
         let interval =
-            Interval::parse_with_fields(&s, leading_field.map(Self::bind_date_time_field))?;
+            Interval::parse_with_fields(&s, leading_field.map(Self::bind_date_time_field))
+                .map_err(|e| ErrorCode::BindError(e.to_report_string()))?;
         let datum = Some(ScalarImpl::Interval(interval));
         let literal = Literal::new(datum, DataType::Interval);
 
@@ -118,16 +133,6 @@ impl Binder {
     }
 
     pub(super) fn bind_array_cast(&mut self, exprs: Vec<Expr>, ty: DataType) -> Result<ExprImpl> {
-        if exprs.is_empty() {
-            let lhs: ExprImpl = FunctionCall::new_unchecked(
-                ExprType::Array,
-                vec![],
-                // Treat `array[]` as `varchar[]` temporarily before applying cast.
-                DataType::List(Box::new(DataType::Varchar)),
-            )
-            .into();
-            return lhs.cast_explicit(ty).map_err(Into::into);
-        }
         let inner_type = if let DataType::List(datatype) = &ty {
             *datatype.clone()
         } else {
@@ -213,131 +218,22 @@ impl Binder {
     }
 }
 
-/// Helper function used to convert string with c-style escapes into a normal string
-/// e.g. 'hello\x3fworld' -> 'hello?world'
-///
-/// Detail of c-style escapes refer from:
-/// <https://www.postgresql.org/docs/current/sql-syntax-lexical.html#SQL-SYNTAX-STRINGS-UESCAPE:~:text=4.1.2.2.%C2%A0String%20Constants%20With%20C%2DStyle%20Escapes>
-fn unescape_c_style(s: &str) -> Result<String> {
-    let mut chars = s.chars().peekable();
-
-    let mut res = String::with_capacity(s.len());
-
-    let hex_byte_process = |chars: &mut Peekable<Chars<'_>>,
-                            res: &mut String,
-                            len: usize,
-                            default_char: char| {
-        let mut unicode_seq: String = String::with_capacity(len);
-        for _ in 0..len {
-            if let Some(c) = chars.peek() && c.is_ascii_hexdigit() {
-                unicode_seq.push(chars.next().unwrap());
-            } else {
-                break;
-            }
-        }
-
-        if unicode_seq.is_empty() && len == 2 {
-            res.push(default_char);
-            return Ok::<(), RwError>(());
-        } else if unicode_seq.len() < len && len != 2 {
-            return Err(ErrorCode::BindError(
-                "invalid unicode sequence: must be \\uXXXX or \\UXXXXXXXX".to_string(),
-            )
-            .into());
-        }
-
-        if len == 2 {
-            let number = [u8::from_str_radix(&unicode_seq, 16)
-                .map_err(|e| ErrorCode::BindError(format!("invalid unicode sequence: {}", e)))?];
-
-            res.push(
-                from_utf8(&number)
-                    .map_err(|err| {
-                        ErrorCode::BindError(format!("invalid unicode sequence: {}", err))
-                    })?
-                    .chars()
-                    .next()
-                    .unwrap(),
-            );
-        } else {
-            let number = u32::from_str_radix(&unicode_seq, 16)
-                .map_err(|e| ErrorCode::BindError(format!("invalid unicode sequence: {}", e)))?;
-            res.push(char::from_u32(number).ok_or_else(|| {
-                ErrorCode::BindError(format!("invalid unicode sequence: {}", unicode_seq))
-            })?);
-        }
-        Ok(())
-    };
-
-    let octal_byte_process = |chars: &mut Peekable<Chars<'_>>, res: &mut String, digit: char| {
-        let mut unicode_seq: String = String::with_capacity(3);
-        unicode_seq.push(digit);
-        for _ in 0..2 {
-            if let Some(c) = chars.peek() && matches!(*c, '0'..='7') {
-                unicode_seq.push(chars.next().unwrap());
-            } else {
-                break;
-            }
-        }
-
-        let number = [u8::from_str_radix(&unicode_seq, 8)
-            .map_err(|e| ErrorCode::BindError(format!("invalid unicode sequence: {}", e)))?];
-
-        res.push(
-            from_utf8(&number)
-                .map_err(|err| ErrorCode::BindError(format!("invalid unicode sequence: {}", err)))?
-                .chars()
-                .next()
-                .unwrap(),
-        );
-        Ok::<(), RwError>(())
-    };
-
-    while let Some(c) = chars.next() {
-        if c == '\\' {
-            match chars.next() {
-                None => {
-                    return Err(ErrorCode::BindError("unterminated escape sequence".into()).into());
-                }
-                Some(next_c) => match next_c {
-                    'b' => res.push('\u{08}'),
-                    'f' => res.push('\u{0C}'),
-                    'n' => res.push('\n'),
-                    'r' => res.push('\r'),
-                    't' => res.push('\t'),
-                    'x' => hex_byte_process(&mut chars, &mut res, 2, 'x')?,
-                    'u' => hex_byte_process(&mut chars, &mut res, 4, 'u')?,
-                    'U' => hex_byte_process(&mut chars, &mut res, 8, 'U')?,
-                    digit @ '0'..='7' => octal_byte_process(&mut chars, &mut res, digit)?,
-                    _ => res.push(next_c),
-                },
-            }
-        } else {
-            res.push(c);
-        }
-    }
-
-    Ok(res)
-}
-
 #[cfg(test)]
 mod tests {
     use risingwave_common::types::test_utils::IntervalTestExt;
-    use risingwave_common::types::DataType;
     use risingwave_expr::expr::build_from_prost;
     use risingwave_sqlparser::ast::Value::Number;
 
+    use super::*;
     use crate::binder::test_utils::mock_binder;
-    use crate::expr::{Expr, ExprImpl, ExprType, FunctionCall};
+    use crate::expr::Expr;
 
     #[tokio::test]
     async fn test_bind_value() {
         use std::str::FromStr;
 
-        use super::*;
-
         let mut binder = mock_binder();
-        let values = vec![
+        let values = [
             "1",
             "111111111111111",
             "111111111.111111",
@@ -345,7 +241,7 @@ mod tests {
             "0.111111",
             "-0.01",
         ];
-        let data = vec![
+        let data = [
             Some(ScalarImpl::Int32(1)),
             Some(ScalarImpl::Int64(111111111111111)),
             Some(ScalarImpl::Decimal(
@@ -357,7 +253,7 @@ mod tests {
             Some(ScalarImpl::Decimal(Decimal::from_str("0.111111").unwrap())),
             Some(ScalarImpl::Decimal(Decimal::from_str("-0.01").unwrap())),
         ];
-        let data_type = vec![
+        let data_type = [
             DataType::Int32,
             DataType::Int64,
             DataType::Decimal,
@@ -375,13 +271,34 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_bind_radix() {
+        let mut binder = mock_binder();
+
+        for (input, expected) in [
+            ("0x42e3", ScalarImpl::Int32(0x42e3)),
+            ("-0x40", ScalarImpl::Int32(-0x40)),
+            ("0b1101", ScalarImpl::Int32(0b1101)),
+            ("-0b101", ScalarImpl::Int32(-0b101)),
+            ("0o664", ScalarImpl::Int32(0o664)),
+            ("-0o755", ScalarImpl::Int32(-0o755)),
+            ("2147483647", ScalarImpl::Int32(2147483647)),
+            ("2147483648", ScalarImpl::Int64(2147483648)),
+            ("-2147483648", ScalarImpl::Int32(-2147483648)),
+            ("0x7fffffff", ScalarImpl::Int32(0x7fffffff)),
+            ("0x80000000", ScalarImpl::Int64(0x80000000)),
+            ("-0x80000000", ScalarImpl::Int32(-0x80000000)),
+        ] {
+            let lit = binder.bind_number(input.into()).unwrap();
+            assert_eq!(lit.get_data().as_ref().unwrap(), &expected);
+        }
+    }
+
+    #[tokio::test]
     async fn test_bind_scientific_number() {
         use std::str::FromStr;
 
-        use super::*;
-
         let mut binder = mock_binder();
-        let values = vec![
+        let values = [
             ("1e6"),
             ("1.25e6"),
             ("1.25e1"),
@@ -389,7 +306,7 @@ mod tests {
             ("1.25e-2"),
             ("1e15"),
         ];
-        let data = vec![
+        let data = [
             Some(ScalarImpl::Decimal(Decimal::from_str("1000000").unwrap())),
             Some(ScalarImpl::Decimal(Decimal::from_str("1250000").unwrap())),
             Some(ScalarImpl::Decimal(Decimal::from_str("12.5").unwrap())),
@@ -399,7 +316,7 @@ mod tests {
                 Decimal::from_str("1000000000000000").unwrap(),
             )),
         ];
-        let data_type = vec![
+        let data_type = [
             DataType::Decimal,
             DataType::Decimal,
             DataType::Decimal,
@@ -456,10 +373,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_bind_interval() {
-        use super::*;
-
         let mut binder = mock_binder();
-        let values = vec![
+        let values = [
             "1 hour",
             "1 h",
             "1 year",
@@ -468,30 +383,30 @@ mod tests {
             "1 month",
         ];
         let data = vec![
-            Ok(Literal::new(
+            Literal::new(
                 Some(ScalarImpl::Interval(Interval::from_minutes(60))),
                 DataType::Interval,
-            )),
-            Ok(Literal::new(
+            ),
+            Literal::new(
                 Some(ScalarImpl::Interval(Interval::from_minutes(60))),
                 DataType::Interval,
-            )),
-            Ok(Literal::new(
+            ),
+            Literal::new(
                 Some(ScalarImpl::Interval(Interval::from_ymd(1, 0, 0))),
                 DataType::Interval,
-            )),
-            Ok(Literal::new(
+            ),
+            Literal::new(
                 Some(ScalarImpl::Interval(Interval::from_millis(6 * 1000))),
                 DataType::Interval,
-            )),
-            Ok(Literal::new(
+            ),
+            Literal::new(
                 Some(ScalarImpl::Interval(Interval::from_minutes(2))),
                 DataType::Interval,
-            )),
-            Ok(Literal::new(
+            ),
+            Literal::new(
                 Some(ScalarImpl::Interval(Interval::from_month(1))),
                 DataType::Interval,
-            )),
+            ),
         ];
 
         for i in 0..values.len() {
@@ -502,7 +417,7 @@ mod tests {
                 last_field: None,
                 fractional_seconds_precision: None,
             };
-            assert_eq!(binder.bind_value(value), data[i]);
+            assert_eq!(binder.bind_value(value).unwrap(), data[i]);
         }
     }
 }

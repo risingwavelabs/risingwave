@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,27 +12,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::max;
 use std::collections::HashMap;
-use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::{EitherOrBoth, Itertools};
-use risingwave_common::catalog::Schema;
-use risingwave_common::error::{ErrorCode, Result, RwError};
+use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_pb::plan_common::JoinType;
-use risingwave_pb::stream_plan::ChainType;
+use risingwave_pb::stream_plan::StreamScanType;
+use risingwave_sqlparser::ast::AsOf;
 
 use super::generic::{
     push_down_into_join, push_down_join_condition, GenericPlanNode, GenericPlanRef,
 };
+use super::utils::{childless_record, Distill};
 use super::{
-    generic, ColPrunable, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary, PredicatePushdown,
-    StreamHashJoin, StreamProject, ToBatch, ToStream,
+    generic, ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef, PlanTreeNodeBinary,
+    PredicatePushdown, StreamHashJoin, StreamProject, ToBatch, ToStream,
 };
-use crate::expr::{CollectInputRef, Expr, ExprImpl, ExprRewriter, ExprType, InputRef};
+use crate::error::{ErrorCode, Result, RwError};
+use crate::expr::{CollectInputRef, Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, InputRef};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::DynamicFilter;
-use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{
     BatchHashJoin, BatchLookupJoin, BatchNestedLoopJoin, ColumnPruningContext, EqJoinPredicate,
@@ -51,47 +51,29 @@ use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition, Condit
 /// right columns, dependent on the output indices provided. A repeat output index is illegal.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalJoin {
-    pub base: PlanBase,
+    pub base: PlanBase<Logical>,
     core: generic::Join<PlanRef>,
 }
 
-impl fmt::Display for LogicalJoin {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let verbose = self.base.ctx.is_explain_verbose();
-        let mut builder = f.debug_struct("LogicalJoin");
-        builder.field("type", &self.join_type());
+impl Distill for LogicalJoin {
+    fn distill<'a>(&self) -> XmlNode<'a> {
+        let verbose = self.base.ctx().is_explain_verbose();
+        let mut vec = Vec::with_capacity(if verbose { 3 } else { 2 });
+        vec.push(("type", Pretty::debug(&self.join_type())));
 
-        let mut concat_schema = self.left().schema().fields.clone();
-        concat_schema.extend(self.right().schema().fields.clone());
-        let concat_schema = Schema::new(concat_schema);
-        builder.field(
-            "on",
-            &ConditionDisplay {
-                condition: self.on(),
-                input_schema: &concat_schema,
-            },
-        );
+        let concat_schema = self.core.concat_schema();
+        let cond = Pretty::debug(&ConditionDisplay {
+            condition: self.on(),
+            input_schema: &concat_schema,
+        });
+        vec.push(("on", cond));
 
         if verbose {
-            if self
-                .output_indices()
-                .iter()
-                .copied()
-                .eq(0..self.internal_column_num())
-            {
-                builder.field("output", &format_args!("all"));
-            } else {
-                builder.field(
-                    "output",
-                    &IndicesDisplay {
-                        indices: self.output_indices(),
-                        input_schema: &concat_schema,
-                    },
-                );
-            }
+            let data = IndicesDisplay::from_join(&self.core, &concat_schema);
+            vec.push(("output", data));
         }
 
-        builder.finish()
+        childless_record("LogicalJoin", vec)
     }
 }
 
@@ -170,6 +152,11 @@ impl LogicalJoin {
         self.core.join_type
     }
 
+    /// Get the eq join key of the logical join.
+    pub fn eq_indexes(&self) -> Vec<(usize, usize)> {
+        self.core.eq_indexes()
+    }
+
     /// Get the output indices of the logical join.
     pub fn output_indices(&self) -> &Vec<usize> {
         &self.core.output_indices
@@ -203,54 +190,8 @@ impl LogicalJoin {
         self.core.is_full_out()
     }
 
-    /// Try to split and pushdown `predicate` into a join's left/right child or the on clause.
-    /// Returns the pushed predicates. The pushed part will be removed from the original predicate.
-    ///
-    /// `InputRef`s in the right `Condition` are shifted by `-left_col_num`.
-    pub fn push_down(
-        predicate: &mut Condition,
-        left_col_num: usize,
-        right_col_num: usize,
-        push_left: bool,
-        push_right: bool,
-        push_on: bool,
-    ) -> (Condition, Condition, Condition) {
-        let conjunctions = std::mem::take(&mut predicate.conjunctions);
-
-        let (mut left, right, mut others) =
-            Condition { conjunctions }.split(left_col_num, right_col_num);
-
-        if !push_left {
-            others.conjunctions.extend(left);
-            left = Condition::true_cond();
-        };
-
-        let right = if push_right {
-            let mut mapping = ColIndexMapping::with_shift_offset(
-                left_col_num + right_col_num,
-                -(left_col_num as isize),
-            );
-            right.rewrite_expr(&mut mapping)
-        } else {
-            others.conjunctions.extend(right);
-            Condition::true_cond()
-        };
-
-        let on = if push_on {
-            // Do not push now on to the on, it will be pulled up into a filter instead.
-            Condition {
-                conjunctions: others
-                    .conjunctions
-                    .drain_filter(|expr| expr.count_nows() == 0)
-                    .collect(),
-            }
-        } else {
-            Condition::true_cond()
-        };
-
-        predicate.conjunctions = others.conjunctions;
-
-        (left, right, on)
+    pub fn output_indices_are_trivial(&self) -> bool {
+        self.output_indices() == &(0..self.internal_column_num()).collect_vec()
     }
 
     /// Try to simplify the outer join with the predicate on the top of the join
@@ -267,7 +208,7 @@ impl LogicalJoin {
 
         for expr in &predicate.conjunctions {
             if let ExprImpl::FunctionCall(func) = expr {
-                match func.get_expr_type() {
+                match func.func_type() {
                     ExprType::Equal
                     | ExprType::NotEqual
                     | ExprType::LessThan
@@ -377,22 +318,27 @@ impl LogicalJoin {
         let order_key = table_desc.order_column_indices();
         let dist_key = table_desc.distribution_key.clone();
         // The at least prefix of order key that contains distribution key.
-        let at_least_prefix_len = {
-            let mut max_pos = 0;
-            for d in dist_key {
-                max_pos = max(
-                    max_pos,
-                    order_key
-                        .iter()
-                        .position(|&x| x == d)
-                        .expect("dist_key must in order_key"),
-                );
-            }
-            max_pos + 1
-        };
+        let mut dist_key_in_order_key_pos = vec![];
+        for d in dist_key {
+            let pos = order_key
+                .iter()
+                .position(|&x| x == d)
+                .expect("dist_key must in order_key");
+            dist_key_in_order_key_pos.push(pos);
+        }
+        // The shortest prefix of order key that contains distribution key.
+        let shortest_prefix_len = dist_key_in_order_key_pos
+            .iter()
+            .max()
+            .map_or(0, |pos| pos + 1);
+
+        // Distributed lookup join can't support lookup table with a singleton distribution.
+        if shortest_prefix_len == 0 {
+            return None;
+        }
 
         // Reorder the join equal predicate to match the order key.
-        let mut reorder_idx = Vec::with_capacity(at_least_prefix_len);
+        let mut reorder_idx = Vec::with_capacity(shortest_prefix_len);
         for order_col_id in order_col_ids {
             let mut found = false;
             for (i, eq_idx) in predicate.right_eq_indexes().into_iter().enumerate() {
@@ -406,7 +352,7 @@ impl LogicalJoin {
                 break;
             }
         }
-        if reorder_idx.len() < at_least_prefix_len {
+        if reorder_idx.len() < shortest_prefix_len {
             return None;
         }
         let lookup_prefix_len = reorder_idx.len();
@@ -529,7 +475,7 @@ impl PlanTreeNodeBinary for LogicalJoin {
                 *i += left.schema().len();
             }
             map.append(&mut right_map);
-            let mut mapping = ColIndexMapping::new(map);
+            let mut mapping = ColIndexMapping::new(map, left.schema().len() + right.schema().len());
 
             let new_output_indices = self
                 .output_indices()
@@ -655,6 +601,12 @@ impl ExprRewritable for LogicalJoin {
     }
 }
 
+impl ExprVisitable for LogicalJoin {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.core.visit_exprs(v);
+    }
+}
+
 /// We are trying to derive a predicate to apply to the other side of a join if all
 /// the `InputRef`s in the predicate are eq condition columns, and can hence be substituted
 /// with the corresponding eq condition columns of the other side.
@@ -664,8 +616,8 @@ impl ExprRewritable for LogicalJoin {
 ///    then we proceed. Else abort.
 /// 2. Then, we collect `InputRef`s in the conjunction.
 /// 3. If they are all columns in the given side of join eq condition, then we proceed. Else abort.
-/// 4. We then rewrite the `ExprImpl`, by replacing `InputRef` column indices with
-///    the equivalent in the other side.
+/// 4. We then rewrite the `ExprImpl`, by replacing `InputRef` column indices with the equivalent in
+///    the other side.
 ///
 /// # Arguments
 ///
@@ -681,11 +633,19 @@ fn derive_predicate_from_eq_condition(
     if expr.is_impure() {
         return None;
     }
-    let eq_indices = if expr_is_left {
-        eq_condition.left_eq_indexes()
-    } else {
-        eq_condition.right_eq_indexes()
-    };
+    let eq_indices = eq_condition
+        .eq_indexes_typed()
+        .iter()
+        .filter_map(|(l, r)| {
+            if l.return_type() != r.return_type() {
+                None
+            } else if expr_is_left {
+                Some(l.index())
+            } else {
+                Some(r.index())
+            }
+        })
+        .collect_vec();
     if expr
         .collect_input_refs(col_num)
         .ones()
@@ -789,12 +749,24 @@ impl PredicatePushdown for LogicalJoin {
         let right_col_num = self.right().schema().len();
         let join_type = LogicalJoin::simplify_outer(&predicate, left_col_num, self.join_type());
 
-        let (left_from_filter, right_from_filter, on) =
-            push_down_into_join(&mut predicate, left_col_num, right_col_num, join_type);
+        let push_down_temporal_predicate = !self.should_be_temporal_join();
+
+        let (left_from_filter, right_from_filter, on) = push_down_into_join(
+            &mut predicate,
+            left_col_num,
+            right_col_num,
+            join_type,
+            push_down_temporal_predicate,
+        );
 
         let mut new_on = self.on().clone().and(on);
-        let (left_from_on, right_from_on) =
-            push_down_join_condition(&mut new_on, left_col_num, right_col_num, join_type);
+        let (left_from_on, right_from_on) = push_down_join_condition(
+            &mut new_on,
+            left_col_num,
+            right_col_num,
+            join_type,
+            push_down_temporal_predicate,
+        );
 
         let left_predicate = left_from_filter.and(left_from_on);
         let right_predicate = right_from_filter.and(right_from_on);
@@ -868,6 +840,8 @@ impl LogicalJoin {
         predicate: EqJoinPredicate,
         ctx: &mut ToStreamContext,
     ) -> Result<PlanRef> {
+        use super::stream::prelude::*;
+
         assert!(predicate.has_eq());
         let mut right = self.right().to_stream_with_dist_required(
             &RequiredDist::shard_by_key(self.right().schema().len(), &predicate.right_eq_indexes()),
@@ -876,7 +850,7 @@ impl LogicalJoin {
         let mut left = self.left();
 
         let r2l = predicate.r2l_eq_columns_mapping(left.schema().len(), right.schema().len());
-        let l2r = predicate.l2r_eq_columns_mapping(left.schema().len());
+        let l2r = predicate.l2r_eq_columns_mapping(left.schema().len(), right.schema().len());
 
         let right_dist = right.distribution();
         match right_dist {
@@ -959,30 +933,64 @@ impl LogicalJoin {
     fn should_be_temporal_join(&self) -> bool {
         let right = self.right();
         if let Some(logical_scan) = right.as_logical_scan() {
-            logical_scan.for_system_time_as_of_proctime()
+            matches!(logical_scan.as_of(), Some(AsOf::ProcessTime))
         } else {
             false
         }
+    }
+
+    fn to_stream_temporal_join_with_index_selection(
+        &self,
+        predicate: EqJoinPredicate,
+        ctx: &mut ToStreamContext,
+    ) -> Result<StreamTemporalJoin> {
+        // Index selection for temporal join.
+        let right = self.right();
+        // `should_be_temporal_join()` has already check right input for us.
+        let logical_scan: &LogicalScan = right.as_logical_scan().unwrap();
+
+        // Use primary table.
+        let mut result_plan = self.to_stream_temporal_join(predicate.clone(), ctx);
+        // Return directly if this temporal join can match the pk of its right table.
+        if let Ok(temporal_join) = &result_plan
+            && temporal_join.eq_join_predicate().eq_indexes().len()
+                == logical_scan.primary_key().len()
+        {
+            return result_plan;
+        }
+        let indexes = logical_scan.indexes();
+        for index in indexes {
+            // Use index table
+            if let Some(index_scan) = logical_scan.to_index_scan_if_index_covered(index) {
+                let index_scan: PlanRef = index_scan.into();
+                let that = self.clone_with_left_right(self.left(), index_scan.clone());
+                if let Ok(temporal_join) = that.to_stream_temporal_join(predicate.clone(), ctx) {
+                    match &result_plan {
+                        Err(_) => result_plan = Ok(temporal_join),
+                        Ok(prev_temporal_join) => {
+                            // Prefer to the temporal join with a longer lookup prefix len.
+                            if prev_temporal_join.eq_join_predicate().eq_indexes().len()
+                                < temporal_join.eq_join_predicate().eq_indexes().len()
+                            {
+                                result_plan = Ok(temporal_join)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        result_plan
     }
 
     fn to_stream_temporal_join(
         &self,
         predicate: EqJoinPredicate,
         ctx: &mut ToStreamContext,
-    ) -> Result<PlanRef> {
+    ) -> Result<StreamTemporalJoin> {
+        use super::stream::prelude::*;
+
         assert!(predicate.has_eq());
-
-        let left = self.left().to_stream_with_dist_required(
-            &RequiredDist::shard_by_key(self.left().schema().len(), &predicate.left_eq_indexes()),
-            ctx,
-        )?;
-
-        if !left.append_only() {
-            return Err(RwError::from(ErrorCode::NotSupported(
-                "Temporal join requires a append-only left input".into(),
-                "Please ensure your left input is append-only".into(),
-            )));
-        }
 
         let right = self.right();
         let Some(logical_scan) = right.as_logical_scan() else {
@@ -992,7 +1000,7 @@ impl LogicalJoin {
             )));
         };
 
-        if !logical_scan.for_system_time_as_of_proctime() {
+        if !matches!(logical_scan.as_of(), Some(AsOf::ProcessTime)) {
             return Err(RwError::from(ErrorCode::NotSupported(
                 "Temporal join requires a table defined as temporal table".into(),
                 "Please use FOR SYSTEM_TIME AS OF PROCTIME() syntax".into(),
@@ -1000,29 +1008,68 @@ impl LogicalJoin {
         }
 
         let table_desc = logical_scan.table_desc();
-
-        // Verify that right join key columns are the primary key of the lookup table.
-        let order_col_ids = table_desc.order_column_ids();
-        let order_col_ids_len = order_col_ids.len();
         let output_column_ids = logical_scan.output_column_ids();
 
+        // Verify that the right join key columns are the the prefix of the primary key and
+        // also contain the distribution key.
+        let order_col_ids = table_desc.order_column_ids();
+        let order_key = table_desc.order_column_indices();
+        let dist_key = table_desc.distribution_key.clone();
+
+        let mut dist_key_in_order_key_pos = vec![];
+        for d in dist_key {
+            let pos = order_key
+                .iter()
+                .position(|&x| x == d)
+                .expect("dist_key must in order_key");
+            dist_key_in_order_key_pos.push(pos);
+        }
+        // The shortest prefix of order key that contains distribution key.
+        let shortest_prefix_len = dist_key_in_order_key_pos
+            .iter()
+            .max()
+            .map_or(0, |pos| pos + 1);
+
         // Reorder the join equal predicate to match the order key.
-        let mut reorder_idx = vec![];
+        let mut reorder_idx = Vec::with_capacity(shortest_prefix_len);
         for order_col_id in order_col_ids {
+            let mut found = false;
             for (i, eq_idx) in predicate.right_eq_indexes().into_iter().enumerate() {
                 if order_col_id == output_column_ids[eq_idx] {
                     reorder_idx.push(i);
+                    found = true;
                     break;
                 }
             }
+            if !found {
+                break;
+            }
         }
-        if order_col_ids_len != predicate.eq_keys().len() || reorder_idx.len() < order_col_ids_len {
+        if reorder_idx.len() < shortest_prefix_len {
+            // TODO: support index selection for temporal join and refine this error message.
             return Err(RwError::from(ErrorCode::NotSupported(
                 "Temporal join requires the lookup table's primary key contained exactly in the equivalence condition".into(),
                 "Please add the primary key of the lookup table to the join condition and remove any other conditions".into(),
             )));
         }
+        let lookup_prefix_len = reorder_idx.len();
         let predicate = predicate.reorder(&reorder_idx);
+
+        let required_dist = if dist_key_in_order_key_pos.is_empty() {
+            RequiredDist::single()
+        } else {
+            let left_eq_indexes = predicate.left_eq_indexes();
+            let left_dist_key = dist_key_in_order_key_pos
+                .iter()
+                .map(|pos| left_eq_indexes[*pos])
+                .collect_vec();
+
+            RequiredDist::hash_shard(&left_dist_key)
+        };
+
+        let left = self.left().to_stream(ctx)?;
+        // Enforce a shuffle for the temporal join LHS to let the scheduler be able to schedule the join fragment together with the RHS with a `no_shuffle` exchange.
+        let left = required_dist.enforce(left, &Order::any());
 
         // Extract the predicate from logical scan. Only pure scan is supported.
         let (new_scan, scan_predicate, project_expr) = logical_scan.predicate_pull_up();
@@ -1084,7 +1131,7 @@ impl LogicalJoin {
             .collect_vec();
         // Use UpstreamOnly chain type
         let new_stream_table_scan =
-            StreamTableScan::new_with_chain_type(new_scan, ChainType::UpstreamOnly);
+            StreamTableScan::new_with_stream_scan_type(new_scan, StreamScanType::UpstreamOnly);
         let right = RequiredDist::no_shuffle(new_stream_table_scan.into());
 
         // Construct a new logical join, because we have change its RHS.
@@ -1096,7 +1143,9 @@ impl LogicalJoin {
             new_join_output_indices,
         );
 
-        Ok(StreamTemporalJoin::new(new_logical_join, new_predicate).into())
+        let new_predicate = new_predicate.retain_prefix_eq_key(lookup_prefix_len);
+
+        Ok(StreamTemporalJoin::new(new_logical_join, new_predicate))
     }
 
     fn to_stream_dynamic_filter(
@@ -1104,6 +1153,8 @@ impl LogicalJoin {
         predicate: Condition,
         ctx: &mut ToStreamContext,
     ) -> Result<Option<PlanRef>> {
+        use super::stream::prelude::*;
+
         // If there is exactly one predicate, it is a comparison (<, <=, >, >=), and the
         // join is a `Inner` or `LeftSemi` join, we can convert the scalar subquery into a
         // `StreamDynamicFilter`
@@ -1221,7 +1272,8 @@ impl ToBatch for LogicalJoin {
         logical_join.left = logical_join.left.to_batch()?;
         logical_join.right = logical_join.right.to_batch()?;
 
-        let config = self.base.ctx.session_ctx().config();
+        let ctx = self.base.ctx();
+        let config = ctx.session_ctx().config();
 
         if predicate.has_eq() {
             if !predicate.eq_keys_are_type_aligned() {
@@ -1230,7 +1282,7 @@ impl ToBatch for LogicalJoin {
                 ))
                 .into());
             }
-            if config.get_batch_enable_lookup_join() {
+            if config.batch_enable_lookup_join() {
                 if let Some(lookup_join) = self.to_batch_lookup_join_with_index_selection(
                     predicate.clone(),
                     logical_join.clone(),
@@ -1249,6 +1301,17 @@ impl ToBatch for LogicalJoin {
 
 impl ToStream for LogicalJoin {
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
+        if self
+            .on()
+            .conjunctions
+            .iter()
+            .any(|cond| cond.count_nows() > 0)
+        {
+            return Err(ErrorCode::NotSupported(
+                "optimizer has tried to separate the temporal predicate(with now() expression) from the on condition, but it still reminded in on join's condition. Considering move it into WHERE clause?".to_string(),
+                 "please refer to https://www.risingwave.dev/docs/current/sql-pattern-temporal-filters/ for more information".to_string()).into());
+        }
+
         let predicate = EqJoinPredicate::create(
             self.left().schema().len(),
             self.right().schema().len(),
@@ -1264,7 +1327,8 @@ impl ToStream for LogicalJoin {
             }
 
             if self.should_be_temporal_join() {
-                self.to_stream_temporal_join(predicate, ctx)
+                self.to_stream_temporal_join_with_index_selection(predicate, ctx)
+                    .map(|x| x.into())
             } else {
                 self.to_stream_hash_join(predicate, ctx)
             }
@@ -1275,10 +1339,9 @@ impl ToStream for LogicalJoin {
         } else {
             Err(RwError::from(ErrorCode::NotSupported(
                 "streaming nested-loop join".to_string(),
-                // TODO: replace the link with user doc
                 "The non-equal join in the query requires a nested-loop join executor, which could be very expensive to run. \
                  Consider rewriting the query to use dynamic filter as a substitute if possible.\n\
-                 See also: https://github.com/risingwavelabs/rfcs/blob/main/rfcs/0033-dynamic-filter.md".to_owned(),
+                 See also: https://docs.risingwave.com/docs/current/sql-pattern-dynamic-filters/".to_owned(),
             )))
         }
     }
@@ -1307,14 +1370,14 @@ impl ToStream for LogicalJoin {
 
         // Add missing pk indices to the logical join
         let mut left_to_add = left
-            .logical_pk()
+            .expect_stream_key()
             .iter()
             .cloned()
             .filter(|i| l2o.try_map(*i).is_none())
             .collect_vec();
 
         let mut right_to_add = right
-            .logical_pk()
+            .expect_stream_key()
             .iter()
             .filter(|&&i| r2o.try_map(i).is_none())
             .map(|&i| i + left_len)
@@ -1376,19 +1439,19 @@ impl ToStream for LogicalJoin {
                 .composite(&join_with_pk.core.i2o_col_mapping());
             let left_right_stream_keys = join_with_pk
                 .left()
-                .logical_pk()
+                .expect_stream_key()
                 .iter()
                 .map(|i| l2o.map(*i))
                 .chain(
                     join_with_pk
                         .right()
-                        .logical_pk()
+                        .expect_stream_key()
                         .iter()
                         .map(|i| r2o.map(*i)),
                 )
                 .collect_vec();
             let plan: PlanRef = join_with_pk.into();
-            LogicalFilter::filter_if_keys_all_null(plan, &left_right_stream_keys)
+            LogicalFilter::filter_out_all_null_keys(plan, &left_right_stream_keys)
         } else {
             join_with_pk.into()
         };
@@ -1403,12 +1466,12 @@ mod tests {
 
     use std::collections::HashSet;
 
-    use risingwave_common::catalog::Field;
+    use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::{DataType, Datum};
     use risingwave_pb::expr::expr_node::Type;
 
     use super::*;
-    use crate::expr::{assert_eq_input_ref, FunctionCall, InputRef, Literal};
+    use crate::expr::{assert_eq_input_ref, FunctionCall, Literal};
     use crate::optimizer::optimizer_context::OptimizerContext;
     use crate::optimizer::plan_node::LogicalValues;
     use crate::optimizer::property::FunctionalDependency;
@@ -1913,7 +1976,7 @@ mod tests {
             // 0 --> 1
             values
                 .base
-                .functional_dependency
+                .functional_dependency_mut()
                 .add_functional_dependency_by_column_indices(&[0], &[1]);
             values
         };
@@ -1927,7 +1990,7 @@ mod tests {
             // 0 --> 1, 2
             values
                 .base
-                .functional_dependency
+                .functional_dependency_mut()
                 .add_functional_dependency_by_column_indices(&[0], &[1, 2]);
             values
         };

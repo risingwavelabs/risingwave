@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,24 +12,33 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::types::DataType;
-
-use crate::catalog::system_catalog::SystemCatalogColumnsDef;
+use risingwave_common::types::Fields;
+use risingwave_frontend_macro::system_catalog;
 
 /// The view `pg_matviews` provides access to useful information about each materialized view in the
 /// database.
 /// Ref: [`https://www.postgresql.org/docs/current/view-pg-matviews.html`]
-pub const PG_MATVIEWS_TABLE_NAME: &str = "pg_matviews";
-pub const PG_MATVIEWS_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
-    (DataType::Varchar, "schemaname"),
-    (DataType::Varchar, "matviewname"),
-    (DataType::Int32, "matviewowner"),
-    // TODO: add index back when open create index doc again.
-    // (DataType::Boolean, "hasindexes"),
-    (DataType::Varchar, "definition"),
-    // Below are some columns that PostgreSQL doesn't have.
-    (DataType::Int32, "matviewid"),
-    (DataType::Varchar, "matviewtimezone"), /* The timezone used to interpret ambiguous
-                                             * dates/timestamps as tstz */
-    (DataType::Varchar, "matviewgraph"), // materialized view graph is json encoded fragment infos.
-];
+#[system_catalog(
+    view,
+    "pg_catalog.pg_matviews",
+    "SELECT
+       s.name as schemaname,
+       mv.name as matviewname,
+       mv.owner as matviewowner,
+       NULL AS tablespace,
+       false AS hasindexes,
+       true AS ispopulated,
+       mv.definition as definition
+     FROM rw_materialized_views mv
+     JOIN rw_schemas s ON mv.schema_id = s.id"
+)]
+#[derive(Fields)]
+struct PgMatview {
+    schemaname: String,
+    matviewname: String,
+    matviewowner: i32,
+    tablespace: Option<String>,
+    hasindexes: bool,
+    ispopulated: bool,
+    definition: String,
+}

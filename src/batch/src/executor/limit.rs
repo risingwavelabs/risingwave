@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,10 +17,11 @@ use std::cmp::min;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::DataChunk;
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::{Result, RwError};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
+use crate::error::{BatchError, Result};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
@@ -61,7 +62,7 @@ impl BoxedExecutorBuilder for LimitExecutor {
 }
 
 impl LimitExecutor {
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
         if self.limit == 0 {
             return Ok(());
@@ -90,8 +91,8 @@ impl LimitExecutor {
             }
             // process chunk
             let mut new_vis;
-            if let Some(old_vis) = data_chunk.visibility() {
-                new_vis = old_vis.iter().collect_vec();
+            if !data_chunk.is_compacted() {
+                new_vis = data_chunk.visibility().iter().collect_vec();
                 for vis in new_vis.iter_mut().filter(|x| **x) {
                     if skipped < self.offset {
                         skipped += 1;
@@ -112,7 +113,7 @@ impl LimitExecutor {
                 skipped += l;
             }
             yield data_chunk
-                .with_visibility(new_vis.into_iter().collect())
+                .with_visibility(new_vis.into_iter().collect::<Bitmap>())
                 .compact();
         }
     }
@@ -149,17 +150,16 @@ mod tests {
     use std::vec;
 
     use futures_async_stream::for_await;
-    use risingwave_common::array::column::Column;
-    use risingwave_common::array::{Array, BoolArray, DataChunk, PrimitiveArray};
-    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::array::{Array, ArrayRef, BoolArray, PrimitiveArray};
+    use risingwave_common::catalog::Field;
     use risingwave_common::types::DataType;
     use risingwave_common::util::iter_util::ZipEqDebug;
 
     use super::*;
     use crate::executor::test_utils::MockExecutor;
 
-    fn create_column(vec: &[Option<i32>]) -> Column {
-        PrimitiveArray::from_iter(vec).into()
+    fn create_column(vec: &[Option<i32>]) -> ArrayRef {
+        PrimitiveArray::from_iter(vec).into_ref()
     }
 
     async fn test_limit_all_visible(
@@ -207,10 +207,7 @@ mod tests {
         let col = result.column_at(0);
         assert_eq!(result.cardinality(), min(limit, row_num - offset));
         for i in 0..result.cardinality() {
-            assert_eq!(
-                col.array().as_int32().value_at(i),
-                Some((offset + i) as i32)
-            );
+            assert_eq!(col.as_int32().value_at(i), Some((offset + i) as i32));
         }
     }
 
@@ -291,7 +288,7 @@ mod tests {
 
         let visible_array = BoolArray::from_iter(visible.iter().cloned());
 
-        let col1 = visible_array.into();
+        let col1 = visible_array.into_ref();
         let schema = Schema {
             fields: vec![
                 Field::unnamed(DataType::Int32),
@@ -307,7 +304,7 @@ mod tests {
             .into_iter()
             .for_each(|x| {
                 mock_executor
-                    .add(x.with_visibility((x.column_at(1).array_ref().as_bool()).iter().collect()))
+                    .add(x.with_visibility((x.column_at(1).as_bool()).iter().collect::<Bitmap>()))
             });
 
         let limit_executor = Box::new(LimitExecutor {
@@ -344,11 +341,8 @@ mod tests {
         MockLimitIter::new(row_num, limit, offset, visible)
             .zip_eq_debug(0..result.cardinality())
             .for_each(|(expect, chunk_idx)| {
-                assert_eq!(col1.array().as_bool().value_at(chunk_idx), Some(true));
-                assert_eq!(
-                    col0.array().as_int32().value_at(chunk_idx),
-                    Some(expect as i32)
-                );
+                assert_eq!(col1.as_bool().value_at(chunk_idx), Some(true));
+                assert_eq!(col0.as_int32().value_at(chunk_idx), Some(expect as i32));
             });
     }
 

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,9 +13,9 @@
 // limitations under the License.
 
 use fixedbitset::FixedBitSet;
-use risingwave_common::error::Result;
 
 use crate::binder::BoundQuery;
+use crate::error::Result;
 use crate::optimizer::plan_node::{LogicalLimit, LogicalTopN};
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::PlanRoot;
@@ -38,10 +38,16 @@ impl Planner {
 
         let extra_order_exprs_len = extra_order_exprs.len();
         let mut plan = self.plan_set_expr(body, extra_order_exprs, &order)?;
-        let order = Order {
+        let mut order = Order {
             column_orders: order,
         };
+
         if limit.is_some() || offset.is_some() {
+            // Optimize order key if using it for TopN / Limit.
+            // Both are singleton dist, so we can leave dist_key_indices as empty.
+            let func_dep = plan.functional_dependency();
+            order = func_dep.minimize_order_key(order, &[]);
+
             let limit = limit.unwrap_or(LIMIT_ALL_COUNT);
             let offset = offset.unwrap_or_default();
             plan = if order.column_orders.is_empty() {
@@ -56,11 +62,14 @@ impl Planner {
         }
         let mut out_fields = FixedBitSet::with_capacity(plan.schema().len());
         out_fields.insert_range(..plan.schema().len() - extra_order_exprs_len);
-        if let Some(field) = plan.schema().fields.get(0) && field.name == "projected_row_id" {
+        if let Some(field) = plan.schema().fields.first()
+            && field.name == "projected_row_id"
+        {
             // Do not output projected_row_id hidden column.
             out_fields.set(0, false);
         }
-        let root = PlanRoot::new(plan, RequiredDist::Any, order, out_fields, out_names);
+        let root =
+            PlanRoot::new_with_logical_plan(plan, RequiredDist::Any, order, out_fields, out_names);
         Ok(root)
     }
 }

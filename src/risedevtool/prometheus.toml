@@ -9,6 +9,7 @@ PROMETHEUS_RELEASE = "prometheus-${PROMETHEUS_VERSION}.${PROMETHEUS_SYSTEM}"
 PROMETHEUS_DOWNLOAD_TAR_GZ = "https://github.com/prometheus/prometheus/releases/download/v${PROMETHEUS_VERSION}/${PROMETHEUS_RELEASE}.tar.gz"
 
 [tasks.download-prometheus]
+private = true
 category = "RiseDev - Components"
 dependencies = ["prepare"]
 condition = { env_set = [ "ENABLE_PROMETHEUS_GRAFANA" ] }

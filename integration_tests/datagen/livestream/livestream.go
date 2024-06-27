@@ -75,6 +75,14 @@ type liveMetric struct {
 	Country                    string `json:"country"`
 }
 
+func (r *liveMetric) Topic() string {
+	return "live_stream_metrics"
+}
+
+func (r *liveMetric) Key() string {
+	return r.Id
+}
+
 func (r *liveMetric) ToPostgresSql() string {
 	return fmt.Sprintf(
 		`
@@ -85,12 +93,12 @@ VALUES ('%s', '%s', '%s', '%s', %d, %d, %d, %d, %d, %d, '%s', '%s')
 		r.Ip, r.Agent, r.Id, r.RoomId, r.VideoBps, r.VideoFps, r.VideoRtt, r.VideoLostPps, r.VideoLongestFreezeDuration, r.VideoTotalFreezeDuration, r.ReportTimestamp, r.Country)
 }
 
-func (r *liveMetric) ToJson() (topic string, key string, data []byte) {
-	data, _ = json.Marshal(r)
-	return "live_stream_metrics", fmt.Sprint(r.Id), data
+func (r *liveMetric) ToJson() []byte {
+	data, _ := json.Marshal(r)
+	return data
 }
 
-func (r *liveMetric) ToProtobuf() (topic string, key string, data []byte) {
+func (r *liveMetric) ToProtobuf() []byte {
 	m := proto.LiveStreamMetrics{
 		ClientIp:                   r.Ip,
 		UserAgent:                  r.Agent,
@@ -109,7 +117,7 @@ func (r *liveMetric) ToProtobuf() (topic string, key string, data []byte) {
 	if err != nil {
 		panic(err)
 	}
-	return "live_stream_metrics", fmt.Sprint(r.Id), data
+	return data
 }
 
 type liveStreamMetricsGen struct {

@@ -1,0 +1,71 @@
+query T
+select to_date('2022-12-25', 'YYYY-MM-DD');
+----
+2022-12-25
+
+query T
+select to_date('2022/12/25', 'YYYY/MM/DD');
+----
+2022-12-25
+
+query T
+select to_date('12/25/2022', 'MM/DD/YYYY');
+----
+2022-12-25
+
+query T
+select to_date('25-12-2022', 'DD-MM-YYYY');
+----
+2022-12-25
+
+query T
+select to_date('2022-12-25 15:24:33', 'YYYY-MM-DD HH24:MI:SS');
+----
+2022-12-25
+
+query T
+select to_date('2022/12/25 15:24:33', 'YYYY/MM/DD HH24:MI:SS');
+----
+2022-12-25
+
+query T
+select to_date('0001-02-03', 'YYYY-MM-DD') - 100;
+----
+0001-10-26 BC
+
+query TTT
+SELECT s, format, to_date(s, format)
+FROM
+  (VALUES
+    ('2022-12-25', 'YYYY-MM-DD'),
+    ('2022/12/25', 'YYYY/MM/DD'),
+    ('12/25/2022', 'MM/DD/YYYY'),
+    ('2022-2-5', 'YYYY-MM-DD'),
+    ('2022/2/5', 'YYYY/MM/DD'),
+    ('2022.12.25', 'YYYY.MM.DD'),
+    ('2022-Dec-25', 'YYYY-Mon-DD'),
+    ('Dec/25/2022', 'Mon/DD/YYYY'),
+    ('0000-12-25', 'YYYY-MM-DD'),
+    ('-0001-12-25', 'YYYY-MM-DD'),
+    ('-2022-12-25', 'YYYY-MM-DD')
+    -- unsupported formats
+    -- ('95-12-25', 'YYY-MM-DD'),
+    -- ('2006-42-4', 'IYYY-IW-ID'),
+    -- ('2006-291', 'IYYY-IDDD')
+    -- ('Hello Year 2022', '"Hello Year "YYYY')
+    -- ('2022-12-25', 'YYYY "Month" DD'),
+    -- ('2022    12    25', 'FXYYYY MM DD'),
+    -- ('2022///12', 'FXYYYY///MM')
+  ) AS test_cases (s, format);
+----
+2022-12-25      YYYY-MM-DD      2022-12-25
+2022/12/25      YYYY/MM/DD      2022-12-25
+12/25/2022      MM/DD/YYYY      2022-12-25
+2022-2-5        YYYY-MM-DD      2022-02-05
+2022/2/5        YYYY/MM/DD      2022-02-05
+2022.12.25      YYYY.MM.DD      2022-12-25
+2022-Dec-25     YYYY-Mon-DD     2022-12-25
+Dec/25/2022     Mon/DD/YYYY     2022-12-25
+0000-12-25      YYYY-MM-DD      0001-12-25 BC
+-0001-12-25     YYYY-MM-DD      0001-12-25 BC
+-2022-12-25     YYYY-MM-DD      2022-12-25 BC

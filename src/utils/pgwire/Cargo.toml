@@ -16,20 +16,26 @@ normal = ["workspace-hack"]
 
 [dependencies]
 anyhow = { version = "1.0", default-features = false }
-async-trait = "0.1"
-byteorder = "1.4"
+auto_enums = { workspace = true }
+byteorder = "1.5"
 bytes = "1"
-chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-itertools = "0.10"
-openssl = "0.10.48"
-pg_interval = "0.4"
-postgres-types = { version = "0.2.5", features = ["derive","with-chrono-0_4"] }
-regex = "1.5"
-risingwave_common = { path = "../../common" }
-risingwave_sqlparser = { path = "../../sqlparser" }
+itertools = { workspace = true }
+jsonwebtoken = "9"
+openssl = "0.10.60"
+panic-message = "0.3"
+parking_lot = { workspace = true }
+reqwest = "0.12.2"
+risingwave_common = { workspace = true }
+risingwave_sqlparser = { workspace = true }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 thiserror = "1"
-tokio = { version = "0.2", package = "madsim-tokio", features = ["rt", "macros"] }
+thiserror-ext = { workspace = true }
+tokio = { version = "0.2", package = "madsim-tokio", features = [
+    "rt",
+    "macros",
+] }
 tokio-openssl = "0.6.3"
 tracing = "0.1"
 
@@ -37,4 +43,8 @@ tracing = "0.1"
 workspace-hack = { path = "../../workspace-hack" }
 
 [dev-dependencies]
+tempfile = "3"
 tokio-postgres = "0.7"
+
+[lints]
+workspace = true

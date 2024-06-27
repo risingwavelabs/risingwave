@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,11 +13,10 @@
 // limitations under the License.
 
 use std::fmt::{Debug, Formatter};
-use std::future::Future;
 
 use risingwave_common::array::DataChunk;
-use risingwave_common::error::Result;
 
+use crate::error::Result;
 use crate::exchange_source::ExchangeSource;
 use crate::task::{BatchTaskContext, TaskId, TaskOutput, TaskOutputId};
 
@@ -52,23 +51,19 @@ impl Debug for LocalExchangeSource {
 }
 
 impl ExchangeSource for LocalExchangeSource {
-    type TakeDataFuture<'a> = impl Future<Output = Result<Option<DataChunk>>> + 'a;
-
-    fn take_data(&mut self) -> Self::TakeDataFuture<'_> {
-        async {
-            let ret = self.task_output.direct_take_data().await?;
-            if let Some(data) = ret {
-                let data = data.compact();
-                trace!(
-                    "Receiver task: {:?}, source task output: {:?}, data: {:?}",
-                    self.task_id,
-                    self.task_output.id(),
-                    data
-                );
-                Ok(Some(data))
-            } else {
-                Ok(None)
-            }
+    async fn take_data(&mut self) -> Result<Option<DataChunk>> {
+        let ret = self.task_output.direct_take_data().await?;
+        if let Some(data) = ret {
+            let data = data.compact();
+            trace!(
+                "Receiver task: {:?}, source task output: {:?}, data: {:?}",
+                self.task_id,
+                self.task_output.id(),
+                data
+            );
+            Ok(Some(data))
+        } else {
+            Ok(None)
         }
     }
 

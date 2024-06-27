@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,9 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use fixedbitset::FixedBitSet;
+use pretty_xmlish::Pretty;
 use risingwave_common::catalog::Schema;
 use risingwave_common::util::sort_util::OrderType;
 pub use risingwave_pb::expr::expr_node::Type as ExprType;
@@ -59,8 +58,8 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for DynamicFilter<PlanRef> {
         self.left.schema().clone()
     }
 
-    fn logical_pk(&self) -> Option<Vec<usize>> {
-        Some(self.left.logical_pk().to_vec())
+    fn stream_key(&self) -> Option<Vec<usize>> {
+        Some(self.left.stream_key()?.to_vec())
     }
 
     fn ctx(&self) -> OptimizerContextRef {
@@ -122,25 +121,26 @@ impl<PlanRef: GenericPlanRef> DynamicFilter<PlanRef> {
         watermark_columns
     }
 
-    pub fn fmt_fields_with_builder(&self, builder: &mut fmt::DebugStruct<'_, '_>) {
+    fn condition_display(&self) -> (Condition, Schema) {
         let mut concat_schema = self.left.schema().fields.clone();
         concat_schema.extend(self.right.schema().fields.clone());
         let concat_schema = Schema::new(concat_schema);
 
         let predicate = self.predicate();
+        (predicate, concat_schema)
+    }
 
-        builder.field(
-            "predicate",
-            &ConditionDisplay {
-                condition: &predicate,
-                input_schema: &concat_schema,
-            },
-        );
+    pub fn pretty_field<'a>(&self) -> Pretty<'a> {
+        let (condition, input_schema) = &self.condition_display();
+        Pretty::debug(&ConditionDisplay {
+            condition,
+            input_schema,
+        })
     }
 }
 
 pub fn infer_left_internal_table_catalog(
-    me: &impl stream::StreamPlanRef,
+    me: impl stream::StreamPlanRef,
     left_key_index: usize,
 ) -> TableCatalog {
     let schema = me.schema();
@@ -151,14 +151,13 @@ pub fn infer_left_internal_table_catalog(
     let mut pk_indices = vec![left_key_index];
     let read_prefix_len_hint = pk_indices.len();
 
-    for i in me.logical_pk() {
+    for i in me.stream_key().unwrap() {
         if *i != left_key_index {
             pk_indices.push(*i);
         }
     }
 
-    let mut internal_table_catalog_builder =
-        TableCatalogBuilder::new(me.ctx().with_options().internal_table_subset());
+    let mut internal_table_catalog_builder = TableCatalogBuilder::default();
 
     schema.fields().iter().for_each(|field| {
         internal_table_catalog_builder.add_column(field);
@@ -171,7 +170,7 @@ pub fn infer_left_internal_table_catalog(
     internal_table_catalog_builder.build(dist_keys, read_prefix_len_hint)
 }
 
-pub fn infer_right_internal_table_catalog(input: &impl stream::StreamPlanRef) -> TableCatalog {
+pub fn infer_right_internal_table_catalog(input: impl stream::StreamPlanRef) -> TableCatalog {
     let schema = input.schema();
 
     // We require that the right table has distribution `Single`
@@ -180,8 +179,7 @@ pub fn infer_right_internal_table_catalog(input: &impl stream::StreamPlanRef) ->
         Vec::<usize>::new()
     );
 
-    let mut internal_table_catalog_builder =
-        TableCatalogBuilder::new(input.ctx().with_options().internal_table_subset());
+    let mut internal_table_catalog_builder = TableCatalogBuilder::default();
 
     schema.fields().iter().for_each(|field| {
         internal_table_catalog_builder.add_column(field);

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,13 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::Result;
 
-use super::{ColPrunable, ExprRewritable, PlanBase, PlanRef, PredicatePushdown, ToBatch, ToStream};
+use super::utils::impl_distill_by_unit;
+use super::{
+    ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef, PredicatePushdown, ToBatch, ToStream,
+};
+use crate::error::Result;
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{
     generic, ColumnPruningContext, PlanTreeNode, PredicatePushdownContext, RewriteStreamContext,
@@ -30,7 +32,7 @@ use crate::utils::{ColIndexMapping, Condition};
 ///  matching rows from its other inputs.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalExcept {
-    pub base: PlanBase,
+    pub base: PlanBase<Logical>,
     core: generic::Except<PlanRef>,
 }
 
@@ -44,14 +46,6 @@ impl LogicalExcept {
 
     pub fn create(all: bool, inputs: Vec<PlanRef>) -> PlanRef {
         LogicalExcept::new(all, inputs).into()
-    }
-
-    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        self.core.fmt_with_name(f, name)
-    }
-
-    pub fn fmt_fields_with_builder(&self, builder: &mut fmt::DebugStruct<'_, '_>) {
-        self.core.fmt_fields_with_builder(builder)
     }
 
     pub fn all(&self) -> bool {
@@ -69,11 +63,7 @@ impl PlanTreeNode for LogicalExcept {
     }
 }
 
-impl fmt::Display for LogicalExcept {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.fmt_with_name(f, "LogicalExcept")
-    }
-}
+impl_distill_by_unit!(LogicalExcept, core, "LogicalExcept");
 
 impl ColPrunable for LogicalExcept {
     fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
@@ -87,6 +77,8 @@ impl ColPrunable for LogicalExcept {
 }
 
 impl ExprRewritable for LogicalExcept {}
+
+impl ExprVisitable for LogicalExcept {}
 
 impl PredicatePushdown for LogicalExcept {
     fn predicate_pushdown(

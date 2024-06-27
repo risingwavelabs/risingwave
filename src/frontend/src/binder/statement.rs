@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,13 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::Field;
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::Statement;
 
 use super::delete::BoundDelete;
 use super::update::BoundUpdate;
 use crate::binder::{Binder, BoundInsert, BoundQuery};
+use crate::error::Result;
 use crate::expr::ExprRewriter;
 
 #[derive(Debug, Clone)]
@@ -32,18 +33,18 @@ pub enum BoundStatement {
 impl BoundStatement {
     pub fn output_fields(&self) -> Vec<Field> {
         match self {
-            BoundStatement::Insert(i) => i.returning_schema.as_ref().map_or(
-                vec![Field::unnamed(risingwave_common::types::DataType::Int64)],
-                |s| s.fields().into(),
-            ),
-            BoundStatement::Delete(d) => d.returning_schema.as_ref().map_or(
-                vec![Field::unnamed(risingwave_common::types::DataType::Int64)],
-                |s| s.fields().into(),
-            ),
-            BoundStatement::Update(u) => u.returning_schema.as_ref().map_or(
-                vec![Field::unnamed(risingwave_common::types::DataType::Int64)],
-                |s| s.fields().into(),
-            ),
+            BoundStatement::Insert(i) => i
+                .returning_schema
+                .as_ref()
+                .map_or(vec![], |s| s.fields().into()),
+            BoundStatement::Delete(d) => d
+                .returning_schema
+                .as_ref()
+                .map_or(vec![], |s| s.fields().into()),
+            BoundStatement::Update(u) => u
+                .returning_schema
+                .as_ref()
+                .map_or(vec![], |s| s.fields().into()),
             BoundStatement::Query(q) => q.schema().fields().into(),
         }
     }
@@ -82,11 +83,7 @@ impl Binder {
 
             Statement::Query(q) => Ok(BoundStatement::Query(self.bind_query(*q)?.into())),
 
-            _ => Err(ErrorCode::NotImplemented(
-                format!("unsupported statement {:?}", stmt),
-                None.into(),
-            )
-            .into()),
+            _ => bail_not_implemented!("unsupported statement {:?}", stmt),
         }
     }
 }

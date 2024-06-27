@@ -189,6 +189,7 @@ impl fmt::Display for Select {
 /// An `ALL`, `DISTINCT` or `DISTINCT ON (expr, ...)` after `SELECT`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[expect(clippy::enum_variant_names)]
 pub enum Distinct {
     /// An optional parameter that returns all matching rows.
     #[default]
@@ -281,18 +282,26 @@ impl fmt::Display for With {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Cte {
     pub alias: TableAlias,
-    pub query: Query,
-    pub from: Option<Ident>,
+    pub cte_inner: CteInner,
 }
 
 impl fmt::Display for Cte {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} AS ({})", self.alias, self.query)?;
-        if let Some(ref fr) = self.from {
-            write!(f, " FROM {}", fr)?;
+        match &self.cte_inner {
+            CteInner::Query(query) => write!(f, "{} AS ({})", self.alias, query)?,
+            CteInner::ChangeLog(ident) => {
+                write!(f, "{} AS changelog from {}", self.alias, ident.value)?
+            }
         }
         Ok(())
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum CteInner {
+    Query(Query),
+    ChangeLog(Ident),
 }
 
 /// One item of the comma-separated list following `SELECT`
@@ -307,10 +316,10 @@ pub enum SelectItem {
     ExprQualifiedWildcard(Expr, Vec<Ident>),
     /// An expression, followed by `[ AS ] alias`
     ExprWithAlias { expr: Expr, alias: Ident },
-    /// `alias.*` or even `schema.table.*`
-    QualifiedWildcard(ObjectName),
-    /// An unqualified `*`
-    Wildcard,
+    /// `alias.*` or even `schema.table.*` followed by optional except
+    QualifiedWildcard(ObjectName, Option<Vec<Expr>>),
+    /// An unqualified `*`, or `* except (exprs)`
+    Wildcard(Option<Vec<Expr>>),
 }
 
 impl fmt::Display for SelectItem {
@@ -326,8 +335,31 @@ impl fmt::Display for SelectItem {
                     .iter()
                     .format_with("", |i, f| f(&format_args!(".{i}")))
             ),
-            SelectItem::QualifiedWildcard(prefix) => write!(f, "{}.*", prefix),
-            SelectItem::Wildcard => write!(f, "*"),
+            SelectItem::QualifiedWildcard(prefix, except) => match except {
+                Some(cols) => write!(
+                    f,
+                    "{}.* EXCEPT ({})",
+                    prefix,
+                    cols.iter()
+                        .map(|v| v.to_string())
+                        .collect::<Vec<String>>()
+                        .as_slice()
+                        .join(", ")
+                ),
+                None => write!(f, "{}.*", prefix),
+            },
+            SelectItem::Wildcard(except) => match except {
+                Some(cols) => write!(
+                    f,
+                    "* EXCEPT ({})",
+                    cols.iter()
+                        .map(|v| v.to_string())
+                        .collect::<Vec<String>>()
+                        .as_slice()
+                        .join(", ")
+                ),
+                None => write!(f, "*"),
+            },
         }
     }
 }
@@ -356,19 +388,21 @@ pub enum TableFactor {
     Table {
         name: ObjectName,
         alias: Option<TableAlias>,
-        /// syntax `FOR SYSTEM_TIME AS OF PROCTIME()` is used for temporal join.
-        for_system_time_as_of_proctime: bool,
+        as_of: Option<AsOf>,
     },
     Derived {
         lateral: bool,
         subquery: Box<Query>,
         alias: Option<TableAlias>,
     },
-    /// `<expr>[ AS <alias> ]`
+    /// `<expr>(args)[ AS <alias> ]`
+    ///
+    /// Note that scalar functions can also be used in this way.
     TableFunction {
         name: ObjectName,
         alias: Option<TableAlias>,
         args: Vec<FunctionArg>,
+        with_ordinality: bool,
     },
     /// Represents a parenthesized table factor. The SQL spec only allows a
     /// join expression (`(foo <JOIN> bar [ <JOIN> baz ... ])`) to be nested,
@@ -382,14 +416,11 @@ pub enum TableFactor {
 impl fmt::Display for TableFactor {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            TableFactor::Table {
-                name,
-                alias,
-                for_system_time_as_of_proctime,
-            } => {
+            TableFactor::Table { name, alias, as_of } => {
                 write!(f, "{}", name)?;
-                if *for_system_time_as_of_proctime {
-                    write!(f, " FOR SYSTEM_TIME AS OF PROCTIME()")?;
+                match as_of {
+                    Some(as_of) => write!(f, "{}", as_of)?,
+                    None => (),
                 }
                 if let Some(alias) = alias {
                     write!(f, " AS {}", alias)?;
@@ -410,8 +441,16 @@ impl fmt::Display for TableFactor {
                 }
                 Ok(())
             }
-            TableFactor::TableFunction { name, alias, args } => {
+            TableFactor::TableFunction {
+                name,
+                alias,
+                args,
+                with_ordinality,
+            } => {
                 write!(f, "{}({})", name, display_comma_separated(args))?;
+                if *with_ordinality {
+                    write!(f, " WITH ORDINALITY")?;
+                }
                 if let Some(alias) = alias {
                     write!(f, " AS {}", alias)?;
                 }

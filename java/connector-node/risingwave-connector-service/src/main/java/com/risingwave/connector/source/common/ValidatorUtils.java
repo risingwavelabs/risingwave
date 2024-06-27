@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,12 +14,10 @@
 
 package com.risingwave.connector.source.common;
 
-import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.source.SourceTypeE;
 import io.grpc.Status;
 import java.io.IOException;
 import java.util.Properties;
-import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -27,6 +25,11 @@ public final class ValidatorUtils {
     static final Logger LOG = LoggerFactory.getLogger(ValidatorUtils.class);
 
     static final String VALIDATE_SQL_FILE = "validate_sql.properties";
+    static final String INTERNAL_COLUMN_PREFIX = "_rw_";
+
+    public static RuntimeException failedPrecondition(String description) {
+        return Status.FAILED_PRECONDITION.withDescription(description).asRuntimeException();
+    }
 
     public static RuntimeException invalidArgument(String description) {
         return Status.INVALID_ARGUMENT.withDescription(description).asRuntimeException();
@@ -34,10 +37,6 @@ public final class ValidatorUtils {
 
     public static RuntimeException internalError(String description) {
         return Status.INTERNAL.withDescription(description).asRuntimeException();
-    }
-
-    public static RuntimeException internalError(Throwable cause) {
-        return Status.INTERNAL.withCause(cause).asRuntimeException();
     }
 
     private static final Properties storedSqls;
@@ -70,17 +69,5 @@ public final class ValidatorUtils {
             default:
                 throw ValidatorUtils.invalidArgument("Unknown source type: " + sourceType);
         }
-    }
-
-    public static boolean isPrimaryKeyMatch(TableSchema sourceSchema, Set<String> pkFields) {
-        if (sourceSchema.getPrimaryKeys().size() != pkFields.size()) {
-            return false;
-        }
-        for (var colName : sourceSchema.getPrimaryKeys()) {
-            if (!pkFields.contains(colName)) {
-                return false;
-            }
-        }
-        return true;
     }
 }

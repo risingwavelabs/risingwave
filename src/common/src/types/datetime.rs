@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,19 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Date, time, and timestamp types.
+
+use std::error::Error;
+use std::fmt::Display;
 use std::hash::Hash;
 use std::io::Write;
+use std::str::FromStr;
 
 use bytes::{Bytes, BytesMut};
-use chrono::{Datelike, Days, Duration, NaiveDate, NaiveDateTime, NaiveTime, Timelike, Weekday};
-use postgres_types::{ToSql, Type};
+use chrono::{
+    DateTime, Datelike, Days, Duration, NaiveDate, NaiveDateTime, NaiveTime, Timelike, Weekday,
+};
+use postgres_types::{accepts, to_sql_checked, FromSql, IsNull, ToSql, Type};
+use risingwave_common_estimate_size::ZeroHeapSize;
 use thiserror::Error;
 
 use super::to_binary::ToBinary;
 use super::to_text::ToText;
 use super::{CheckedAdd, DataType, Interval};
-use crate::array::ArrayResult;
-use crate::estimate_size::EstimateSize;
+use crate::array::{ArrayError, ArrayResult};
 
 /// The same as `NaiveDate::from_ymd(1970, 1, 1).num_days_from_ce()`.
 /// Minus this magic number to store the number of days since 1970-01-01.
@@ -34,18 +41,7 @@ const NORMAL_DAYS: &[i32] = &[0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
 
 macro_rules! impl_chrono_wrapper {
     ($variant_name:ident, $chrono:ty) => {
-        #[derive(
-            Clone,
-            Copy,
-            Debug,
-            Default,
-            PartialEq,
-            Eq,
-            PartialOrd,
-            Ord,
-            Hash,
-            parse_display::Display,
-        )]
+        #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
         #[repr(transparent)]
         pub struct $variant_name(pub $chrono);
 
@@ -57,11 +53,9 @@ macro_rules! impl_chrono_wrapper {
             }
         }
 
-        impl std::str::FromStr for $variant_name {
-            type Err = chrono::ParseError;
-
-            fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-                Ok($variant_name(s.parse()?))
+        impl Display for $variant_name {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                ToText::write(self, f)
             }
         }
 
@@ -71,11 +65,7 @@ macro_rules! impl_chrono_wrapper {
             }
         }
 
-        impl EstimateSize for $variant_name {
-            fn estimated_heap_size(&self) -> usize {
-                0
-            }
-        }
+        impl ZeroHeapSize for $variant_name {}
     };
 }
 
@@ -83,39 +73,314 @@ impl_chrono_wrapper!(Date, NaiveDate);
 impl_chrono_wrapper!(Timestamp, NaiveDateTime);
 impl_chrono_wrapper!(Time, NaiveTime);
 
+impl ToSql for Date {
+    accepts!(DATE);
+
+    to_sql_checked!();
+
+    fn to_sql(
+        &self,
+        ty: &Type,
+        out: &mut BytesMut,
+    ) -> std::result::Result<IsNull, Box<dyn Error + Sync + Send>>
+    where
+        Self: Sized,
+    {
+        self.0.to_sql(ty, out)
+    }
+}
+
+impl<'a> FromSql<'a> for Date {
+    fn from_sql(
+        ty: &Type,
+        raw: &'a [u8],
+    ) -> std::result::Result<Self, Box<dyn std::error::Error + Sync + Send>> {
+        let instant = NaiveDate::from_sql(ty, raw)?;
+        Ok(Self::from(instant))
+    }
+
+    fn accepts(ty: &Type) -> bool {
+        matches!(*ty, Type::DATE)
+    }
+}
+
+impl ToSql for Time {
+    accepts!(TIME);
+
+    to_sql_checked!();
+
+    fn to_sql(
+        &self,
+        ty: &Type,
+        out: &mut BytesMut,
+    ) -> std::result::Result<IsNull, Box<dyn Error + Sync + Send>>
+    where
+        Self: Sized,
+    {
+        self.0.to_sql(ty, out)
+    }
+}
+
+impl<'a> FromSql<'a> for Time {
+    fn from_sql(
+        ty: &Type,
+        raw: &'a [u8],
+    ) -> std::result::Result<Self, Box<dyn std::error::Error + Sync + Send>> {
+        let instant = NaiveTime::from_sql(ty, raw)?;
+        Ok(Self::from(instant))
+    }
+
+    fn accepts(ty: &Type) -> bool {
+        matches!(*ty, Type::TIME)
+    }
+}
+
+impl ToSql for Timestamp {
+    accepts!(TIMESTAMP);
+
+    to_sql_checked!();
+
+    fn to_sql(
+        &self,
+        ty: &Type,
+        out: &mut BytesMut,
+    ) -> std::result::Result<IsNull, Box<dyn Error + Sync + Send>>
+    where
+        Self: Sized,
+    {
+        self.0.to_sql(ty, out)
+    }
+}
+
+impl<'a> FromSql<'a> for Timestamp {
+    fn from_sql(
+        ty: &Type,
+        raw: &'a [u8],
+    ) -> std::result::Result<Self, Box<dyn std::error::Error + Sync + Send>> {
+        let instant = NaiveDateTime::from_sql(ty, raw)?;
+        Ok(Self::from(instant))
+    }
+
+    fn accepts(ty: &Type) -> bool {
+        matches!(*ty, Type::TIMESTAMP)
+    }
+}
+
+/// Parse a date from varchar.
+///
+/// # Example
+/// ```
+/// use std::str::FromStr;
+///
+/// use risingwave_common::types::Date;
+///
+/// Date::from_str("1999-01-08").unwrap();
+/// ```
+impl FromStr for Date {
+    type Err = InvalidParamsError;
+
+    fn from_str(s: &str) -> Result<Self> {
+        let date = speedate::Date::parse_str_rfc3339(s).map_err(|_| ErrorKind::ParseDate)?;
+        Ok(Date::new(
+            Date::from_ymd_uncheck(date.year as i32, date.month as u32, date.day as u32).0,
+        ))
+    }
+}
+
+/// Parse a time from varchar.
+///
+/// # Example
+/// ```
+/// use std::str::FromStr;
+///
+/// use risingwave_common::types::Time;
+///
+/// Time::from_str("04:05").unwrap();
+/// Time::from_str("04:05:06").unwrap();
+/// ```
+impl FromStr for Time {
+    type Err = InvalidParamsError;
+
+    fn from_str(s: &str) -> Result<Self> {
+        let s_without_zone = s.trim_end_matches('Z');
+        let res = speedate::Time::parse_str(s_without_zone).map_err(|_| ErrorKind::ParseTime)?;
+        Ok(Time::from_hms_micro_uncheck(
+            res.hour as u32,
+            res.minute as u32,
+            res.second as u32,
+            res.microsecond,
+        ))
+    }
+}
+
+/// Parse a timestamp from varchar.
+///
+/// # Example
+/// ```
+/// use std::str::FromStr;
+///
+/// use risingwave_common::types::Timestamp;
+///
+/// Timestamp::from_str("1999-01-08 04:02").unwrap();
+/// Timestamp::from_str("1999-01-08 04:05:06").unwrap();
+/// Timestamp::from_str("1999-01-08T04:05:06").unwrap();
+/// ```
+impl FromStr for Timestamp {
+    type Err = InvalidParamsError;
+
+    fn from_str(s: &str) -> Result<Self> {
+        if let Ok(res) = speedate::DateTime::parse_str_rfc3339(s) {
+            if res.time.tz_offset.is_some() {
+                return Err(ErrorKind::ParseTimestamp.into());
+            }
+            Ok(Date::from_ymd_uncheck(
+                res.date.year as i32,
+                res.date.month as u32,
+                res.date.day as u32,
+            )
+            .and_hms_micro_uncheck(
+                res.time.hour as u32,
+                res.time.minute as u32,
+                res.time.second as u32,
+                res.time.microsecond,
+            ))
+        } else {
+            let res =
+                speedate::Date::parse_str_rfc3339(s).map_err(|_| ErrorKind::ParseTimestamp)?;
+            Ok(
+                Date::from_ymd_uncheck(res.year as i32, res.month as u32, res.day as u32)
+                    .and_hms_micro_uncheck(0, 0, 0, 0),
+            )
+        }
+    }
+}
+
+/// In `PostgreSQL`, casting from timestamp to date discards the time part.
+///
+/// # Example
+/// ```
+/// use std::str::FromStr;
+///
+/// use risingwave_common::types::{Date, Timestamp};
+///
+/// let ts = Timestamp::from_str("1999-01-08 04:02").unwrap();
+/// let date = Date::from(ts);
+/// assert_eq!(date, Date::from_str("1999-01-08").unwrap());
+/// ```
+impl From<Timestamp> for Date {
+    fn from(ts: Timestamp) -> Self {
+        Date::new(ts.0.date())
+    }
+}
+
+/// In `PostgreSQL`, casting from timestamp to time discards the date part.
+///
+/// # Example
+/// ```
+/// use std::str::FromStr;
+///
+/// use risingwave_common::types::{Time, Timestamp};
+///
+/// let ts = Timestamp::from_str("1999-01-08 04:02").unwrap();
+/// let time = Time::from(ts);
+/// assert_eq!(time, Time::from_str("04:02").unwrap());
+/// ```
+impl From<Timestamp> for Time {
+    fn from(ts: Timestamp) -> Self {
+        Time::new(ts.0.time())
+    }
+}
+
+/// In `PostgreSQL`, casting from interval to time discards the days part.
+///
+/// # Example
+/// ```
+/// use std::str::FromStr;
+///
+/// use risingwave_common::types::{Interval, Time};
+///
+/// let interval = Interval::from_month_day_usec(1, 2, 61000003);
+/// let time = Time::from(interval);
+/// assert_eq!(time, Time::from_str("00:01:01.000003").unwrap());
+///
+/// let interval = Interval::from_month_day_usec(0, 0, -61000003);
+/// let time = Time::from(interval);
+/// assert_eq!(time, Time::from_str("23:58:58.999997").unwrap());
+/// ```
+impl From<Interval> for Time {
+    fn from(interval: Interval) -> Self {
+        let usecs = interval.usecs_of_day();
+        let secs = (usecs / 1_000_000) as u32;
+        let nano = (usecs % 1_000_000 * 1000) as u32;
+        Time::from_num_seconds_from_midnight_uncheck(secs, nano)
+    }
+}
+
 #[derive(Copy, Clone, Debug, Error)]
-enum InvalidParamsErrorKind {
+enum ErrorKind {
     #[error("Invalid date: days: {days}")]
     Date { days: i32 },
     #[error("Invalid time: secs: {secs}, nanoseconds: {nsecs}")]
     Time { secs: u32, nsecs: u32 },
     #[error("Invalid datetime: seconds: {secs}, nanoseconds: {nsecs}")]
     DateTime { secs: i64, nsecs: u32 },
+    #[error("Can't cast string to date (expected format is YYYY-MM-DD)")]
+    ParseDate,
+    #[error("Can't cast string to time (expected format is HH:MM:SS[.D+{{up to 6 digits}}][Z] or HH:MM)")]
+    ParseTime,
+    #[error("Can't cast string to timestamp (expected format is YYYY-MM-DD HH:MM:SS[.D+{{up to 6 digits}}] or YYYY-MM-DD HH:MM or YYYY-MM-DD or ISO 8601 format)")]
+    ParseTimestamp,
 }
 
 #[derive(Debug, Error)]
 #[error(transparent)]
-pub struct InvalidParamsError(#[from] InvalidParamsErrorKind);
+pub struct InvalidParamsError(#[from] ErrorKind);
 
 impl InvalidParamsError {
     pub fn date(days: i32) -> Self {
-        InvalidParamsErrorKind::Date { days }.into()
+        ErrorKind::Date { days }.into()
     }
 
     pub fn time(secs: u32, nsecs: u32) -> Self {
-        InvalidParamsErrorKind::Time { secs, nsecs }.into()
+        ErrorKind::Time { secs, nsecs }.into()
     }
 
     pub fn datetime(secs: i64, nsecs: u32) -> Self {
-        InvalidParamsErrorKind::DateTime { secs, nsecs }.into()
+        ErrorKind::DateTime { secs, nsecs }.into()
+    }
+}
+
+impl From<InvalidParamsError> for ArrayError {
+    fn from(e: InvalidParamsError) -> Self {
+        ArrayError::internal(e)
     }
 }
 
 type Result<T> = std::result::Result<T, InvalidParamsError>;
 
 impl ToText for Date {
+    /// ```
+    /// # use risingwave_common::types::Date;
+    /// let date = Date::from_ymd_uncheck(2001, 5, 16);
+    /// assert_eq!(date.to_string(), "2001-05-16");
+    ///
+    /// let date = Date::from_ymd_uncheck(1, 10, 26);
+    /// assert_eq!(date.to_string(), "0001-10-26");
+    ///
+    /// let date = Date::from_ymd_uncheck(0, 10, 26);
+    /// assert_eq!(date.to_string(), "0001-10-26 BC");
+    /// ```
     fn write<W: std::fmt::Write>(&self, f: &mut W) -> std::fmt::Result {
-        write!(f, "{}", self.0)
+        let (ce, year) = self.0.year_ce();
+        let suffix = if ce { "" } else { " BC" };
+        write!(
+            f,
+            "{:04}-{:02}-{:02}{}",
+            year,
+            self.0.month(),
+            self.0.day(),
+            suffix
+        )
     }
 
     fn write_with_type<W: std::fmt::Write>(&self, ty: &DataType, f: &mut W) -> std::fmt::Result {
@@ -141,7 +406,17 @@ impl ToText for Time {
 
 impl ToText for Timestamp {
     fn write<W: std::fmt::Write>(&self, f: &mut W) -> std::fmt::Result {
-        write!(f, "{}", self.0)
+        let (ce, year) = self.0.year_ce();
+        let suffix = if ce { "" } else { " BC" };
+        write!(
+            f,
+            "{:04}-{:02}-{:02} {}{}",
+            year,
+            self.0.month(),
+            self.0.day(),
+            self.0.time(),
+            suffix
+        )
     }
 
     fn write_with_type<W: std::fmt::Write>(&self, ty: &DataType, f: &mut W) -> std::fmt::Result {
@@ -153,7 +428,7 @@ impl ToText for Timestamp {
 }
 
 impl ToBinary for Date {
-    fn to_binary_with_type(&self, ty: &DataType) -> crate::error::Result<Option<Bytes>> {
+    fn to_binary_with_type(&self, ty: &DataType) -> super::to_binary::Result<Option<Bytes>> {
         match ty {
             super::DataType::Date => {
                 let mut output = BytesMut::new();
@@ -166,7 +441,7 @@ impl ToBinary for Date {
 }
 
 impl ToBinary for Time {
-    fn to_binary_with_type(&self, ty: &DataType) -> crate::error::Result<Option<Bytes>> {
+    fn to_binary_with_type(&self, ty: &DataType) -> super::to_binary::Result<Option<Bytes>> {
         match ty {
             super::DataType::Time => {
                 let mut output = BytesMut::new();
@@ -179,7 +454,7 @@ impl ToBinary for Time {
 }
 
 impl ToBinary for Timestamp {
-    fn to_binary_with_type(&self, ty: &DataType) -> crate::error::Result<Option<Bytes>> {
+    fn to_binary_with_type(&self, ty: &DataType) -> super::to_binary::Result<Option<Bytes>> {
         match ty {
             super::DataType::Timestamp => {
                 let mut output = BytesMut::new();
@@ -206,6 +481,13 @@ impl Date {
                 .checked_add_days(Days::new(UNIX_EPOCH_DAYS as u64))
                 .ok_or_else(|| InvalidParamsError::date(days))?,
         ))
+    }
+
+    pub fn get_nums_days_unix_epoch(&self) -> i32 {
+        self.0
+            .checked_sub_days(Days::new(UNIX_EPOCH_DAYS as u64))
+            .unwrap()
+            .num_days_from_ce()
     }
 
     pub fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
@@ -258,10 +540,16 @@ impl Time {
         Self::with_secs_nano(secs, nano).map_err(Into::into)
     }
 
+    pub fn with_micro(micro: u64) -> Result<Self> {
+        let secs = (micro / 1_000_000) as u32;
+        let nano = ((micro % 1_000_000) * 1_000) as u32;
+        Self::with_secs_nano(secs, nano).map_err(Into::into)
+    }
+
     pub fn with_milli(milli: u32) -> Result<Self> {
         let secs = milli / 1_000;
         let nano = (milli % 1_000) * 1_000_000;
-        Self::with_secs_nano(secs, nano)
+        Self::with_secs_nano(secs, nano).map_err(Into::into)
     }
 
     pub fn from_hms_uncheck(hour: u32, min: u32, sec: u32) -> Self {
@@ -284,7 +572,8 @@ impl Time {
 impl Timestamp {
     pub fn with_secs_nsecs(secs: i64, nsecs: u32) -> Result<Self> {
         Ok(Timestamp::new({
-            NaiveDateTime::from_timestamp_opt(secs, nsecs)
+            DateTime::from_timestamp(secs, nsecs)
+                .map(|t| t.naive_utc())
                 .ok_or_else(|| InvalidParamsError::datetime(secs, nsecs))?
         }))
     }
@@ -292,18 +581,28 @@ impl Timestamp {
     /// Although `Timestamp` takes 12 bytes, we drop 4 bytes in protobuf encoding.
     pub fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
         output
-            .write(&(self.0.timestamp_micros()).to_be_bytes())
+            .write(&(self.0.and_utc().timestamp_micros()).to_be_bytes())
             .map_err(Into::into)
     }
 
-    pub fn with_macros(timestamp_micros: i64) -> Result<Self> {
+    pub fn get_timestamp_nanos(&self) -> i64 {
+        self.0.and_utc().timestamp_nanos_opt().unwrap()
+    }
+
+    pub fn with_millis(timestamp_millis: i64) -> Result<Self> {
+        let secs = timestamp_millis.div_euclid(1_000);
+        let nsecs = timestamp_millis.rem_euclid(1_000) * 1_000_000;
+        Self::with_secs_nsecs(secs, nsecs as u32)
+    }
+
+    pub fn with_micros(timestamp_micros: i64) -> Result<Self> {
         let secs = timestamp_micros.div_euclid(1_000_000);
         let nsecs = timestamp_micros.rem_euclid(1_000_000) * 1000;
         Self::with_secs_nsecs(secs, nsecs as u32)
     }
 
     pub fn from_timestamp_uncheck(secs: i64, nsecs: u32) -> Self {
-        Self::new(NaiveDateTime::from_timestamp_opt(secs, nsecs).unwrap())
+        Self::new(DateTime::from_timestamp(secs, nsecs).unwrap().naive_utc())
     }
 
     /// Truncate the timestamp to the precision of microseconds.
@@ -569,5 +868,28 @@ impl CheckedAdd<Interval> for Timestamp {
         datetime = datetime.checked_add_signed(Duration::microseconds(rhs.usecs()))?;
 
         Some(Timestamp::new(datetime))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse() {
+        assert_eq!(
+            Timestamp::from_str("2022-08-03T10:34:02").unwrap(),
+            Timestamp::from_str("2022-08-03 10:34:02").unwrap()
+        );
+        let ts = Timestamp::from_str("0001-11-15 07:35:40.999999").unwrap();
+        assert_eq!(ts.0.and_utc().timestamp_micros(), -62108094259000001);
+
+        let ts = Timestamp::from_str("1969-12-31 23:59:59.999999").unwrap();
+        assert_eq!(ts.0.and_utc().timestamp_micros(), -1);
+
+        // invalid datetime
+        Date::from_str("1999-01-08AA").unwrap_err();
+        Time::from_str("AA04:05:06").unwrap_err();
+        Timestamp::from_str("1999-01-08 04:05:06AA").unwrap_err();
     }
 }

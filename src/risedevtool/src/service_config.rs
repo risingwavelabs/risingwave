@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -35,13 +35,23 @@ pub struct ComputeNodeConfig {
     pub provide_compute_node: Option<Vec<ComputeNodeConfig>>,
     pub provide_opendal: Option<Vec<OpendalConfig>>,
     pub provide_aws_s3: Option<Vec<AwsS3Config>>,
-    pub provide_jaeger: Option<Vec<JaegerConfig>>,
+    pub provide_tempo: Option<Vec<TempoConfig>>,
     pub user_managed: bool,
-    pub connector_rpc_endpoint: String,
 
     pub total_memory_bytes: usize,
     pub parallelism: usize,
     pub role: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
+pub enum MetaBackend {
+    Memory,
+    Etcd,
+    Sqlite,
+    Postgres,
+    Mysql,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -61,12 +71,17 @@ pub struct MetaNodeConfig {
 
     pub user_managed: bool,
 
-    pub connector_rpc_endpoint: String,
+    pub meta_backend: MetaBackend,
     pub provide_etcd_backend: Option<Vec<EtcdConfig>>,
+    pub provide_sqlite_backend: Option<Vec<SqliteConfig>>,
+    pub provide_postgres_backend: Option<Vec<PostgresConfig>>,
+    pub provide_mysql_backend: Option<Vec<MySqlConfig>>,
     pub provide_prometheus: Option<Vec<PrometheusConfig>>,
 
     pub provide_compute_node: Option<Vec<ComputeNodeConfig>>,
     pub provide_compactor: Option<Vec<CompactorConfig>>,
+
+    pub provide_tempo: Option<Vec<TempoConfig>>,
 
     pub provide_aws_s3: Option<Vec<AwsS3Config>>,
     pub provide_minio: Option<Vec<MinioConfig>>,
@@ -90,6 +105,8 @@ pub struct FrontendConfig {
     pub health_check_port: u16,
 
     pub provide_meta_node: Option<Vec<MetaNodeConfig>>,
+    pub provide_tempo: Option<Vec<TempoConfig>>,
+
     pub user_managed: bool,
 }
 
@@ -110,8 +127,9 @@ pub struct CompactorConfig {
     pub provide_minio: Option<Vec<MinioConfig>>,
 
     pub provide_meta_node: Option<Vec<MetaNodeConfig>>,
+    pub provide_tempo: Option<Vec<TempoConfig>>,
+
     pub user_managed: bool,
-    pub max_concurrent_task_number: u64,
     pub compaction_worker_threads_number: Option<usize>,
 }
 
@@ -137,6 +155,10 @@ pub struct MinioConfig {
     pub hummock_bucket: String,
 
     pub provide_prometheus: Option<Vec<PrometheusConfig>>,
+
+    // For rate limiting minio in a test environment.
+    pub api_requests_max: usize,
+    pub api_requests_deadline: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -164,6 +186,17 @@ pub struct EtcdConfig {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 #[serde(deny_unknown_fields)]
+pub struct SqliteConfig {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
+    pub id: String,
+
+    pub file: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
 pub struct PrometheusConfig {
     #[serde(rename = "use")]
     phantom_use: Option<String>,
@@ -178,6 +211,8 @@ pub struct PrometheusConfig {
     pub remote_write_region: String,
     pub remote_write_url: String,
 
+    pub scrape_interval: String,
+
     pub provide_compute_node: Option<Vec<ComputeNodeConfig>>,
     pub provide_meta_node: Option<Vec<MetaNodeConfig>>,
     pub provide_minio: Option<Vec<MinioConfig>>,
@@ -185,7 +220,6 @@ pub struct PrometheusConfig {
     pub provide_etcd: Option<Vec<EtcdConfig>>,
     pub provide_redpanda: Option<Vec<RedPandaConfig>>,
     pub provide_frontend: Option<Vec<FrontendConfig>>,
-    pub provide_connector_node: Option<Vec<ConnectorNodeConfig>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -198,18 +232,24 @@ pub struct GrafanaConfig {
     pub address: String,
     pub listen_address: String,
     pub port: u16,
+
     pub provide_prometheus: Option<Vec<PrometheusConfig>>,
+    pub provide_tempo: Option<Vec<TempoConfig>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 #[serde(deny_unknown_fields)]
-pub struct JaegerConfig {
+pub struct TempoConfig {
     #[serde(rename = "use")]
     phantom_use: Option<String>,
     pub id: String,
-    pub dashboard_address: String,
-    pub dashboard_port: u16,
+
+    pub listen_address: String,
+    pub address: String,
+    pub port: u16,
+    pub otlp_port: u16,
+    pub max_bytes_per_trace: usize,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -220,9 +260,6 @@ pub struct AwsS3Config {
     phantom_use: Option<String>,
     pub id: String,
     pub bucket: String,
-    // 's3_compatible' is true means using other s3 compatible object store, and the access key
-    // id and access key secret is configured in a specific profile.
-    pub s3_compatible: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -236,7 +273,6 @@ pub struct OpendalConfig {
     pub engine: String,
     pub namenode: String,
     pub bucket: String,
-    pub root: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -247,15 +283,45 @@ pub struct KafkaConfig {
     phantom_use: Option<String>,
     pub id: String,
 
+    /// Advertise address
     pub address: String,
     #[serde(with = "string")]
     pub port: u16,
-    pub listen_address: String,
+    /// Port for other services in docker. They need to connect to `host.docker.internal`, while the host
+    /// need to connect to `localhost`.
+    pub docker_port: u16,
 
-    pub provide_zookeeper: Option<Vec<ZooKeeperConfig>>,
+    #[serde(with = "string")]
+    pub controller_port: u16,
+
+    pub image: String,
     pub persist_data: bool,
-    pub broker_id: u32,
+    pub node_id: u32,
+
+    pub user_managed: bool,
 }
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
+pub struct SchemaRegistryConfig {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
+
+    pub id: String,
+
+    pub address: String,
+    #[serde(with = "string")]
+    pub port: u16,
+
+    pub provide_kafka: Option<Vec<KafkaConfig>>,
+
+    pub image: String,
+    /// Redpanda supports schema registry natively. You can configure a `user_managed` schema registry
+    /// to use with redpanda.
+    pub user_managed: bool,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 #[serde(deny_unknown_fields)]
@@ -266,22 +332,6 @@ pub struct PubsubConfig {
     #[serde(with = "string")]
     pub port: u16,
     pub address: String,
-
-    pub persist_data: bool,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-#[serde(deny_unknown_fields)]
-pub struct ZooKeeperConfig {
-    #[serde(rename = "use")]
-    phantom_use: Option<String>,
-    pub id: String,
-
-    pub address: String,
-    #[serde(with = "string")]
-    pub port: u16,
-    pub listen_address: String,
 
     pub persist_data: bool,
 }
@@ -315,13 +365,51 @@ pub struct RedisConfig {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 #[serde(deny_unknown_fields)]
-pub struct ConnectorNodeConfig {
+pub enum Application {
+    Metastore,
+    Connector,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
+pub struct MySqlConfig {
     #[serde(rename = "use")]
     phantom_use: Option<String>,
     pub id: String,
+
     pub port: u16,
-    pub exporter_port: u16,
     pub address: String,
+
+    pub user: String,
+    pub password: String,
+    pub database: String,
+
+    pub application: Application,
+    pub image: String,
+    pub user_managed: bool,
+    pub persist_data: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
+pub struct PostgresConfig {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
+    pub id: String,
+
+    pub port: u16,
+    pub address: String,
+
+    pub user: String,
+    pub password: String,
+    pub database: String,
+
+    pub application: Application,
+    pub image: String,
+    pub user_managed: bool,
+    pub persist_data: bool,
 }
 
 /// All service configuration
@@ -333,17 +421,19 @@ pub enum ServiceConfig {
     Compactor(CompactorConfig),
     Minio(MinioConfig),
     Etcd(EtcdConfig),
+    Sqlite(SqliteConfig),
     Prometheus(PrometheusConfig),
     Grafana(GrafanaConfig),
-    Jaeger(JaegerConfig),
-    OpenDal(OpendalConfig),
+    Tempo(TempoConfig),
+    Opendal(OpendalConfig),
     AwsS3(AwsS3Config),
     Kafka(KafkaConfig),
+    SchemaRegistry(SchemaRegistryConfig),
     Pubsub(PubsubConfig),
     Redis(RedisConfig),
-    ZooKeeper(ZooKeeperConfig),
     RedPanda(RedPandaConfig),
-    ConnectorNode(ConnectorNodeConfig),
+    MySql(MySqlConfig),
+    Postgres(PostgresConfig),
 }
 
 impl ServiceConfig {
@@ -355,17 +445,68 @@ impl ServiceConfig {
             Self::Compactor(c) => &c.id,
             Self::Minio(c) => &c.id,
             Self::Etcd(c) => &c.id,
+            Self::Sqlite(c) => &c.id,
             Self::Prometheus(c) => &c.id,
             Self::Grafana(c) => &c.id,
-            Self::Jaeger(c) => &c.id,
+            Self::Tempo(c) => &c.id,
             Self::AwsS3(c) => &c.id,
-            Self::ZooKeeper(c) => &c.id,
             Self::Kafka(c) => &c.id,
             Self::Pubsub(c) => &c.id,
             Self::Redis(c) => &c.id,
             Self::RedPanda(c) => &c.id,
-            Self::ConnectorNode(c) => &c.id,
-            Self::OpenDal(c) => &c.id,
+            Self::Opendal(c) => &c.id,
+            Self::MySql(c) => &c.id,
+            Self::Postgres(c) => &c.id,
+            Self::SchemaRegistry(c) => &c.id,
+        }
+    }
+
+    /// Used to check whether the port is occupied before running the service.
+    pub fn port(&self) -> Option<u16> {
+        match self {
+            Self::ComputeNode(c) => Some(c.port),
+            Self::MetaNode(c) => Some(c.port),
+            Self::Frontend(c) => Some(c.port),
+            Self::Compactor(c) => Some(c.port),
+            Self::Minio(c) => Some(c.port),
+            Self::Etcd(c) => Some(c.port),
+            Self::Sqlite(_) => None,
+            Self::Prometheus(c) => Some(c.port),
+            Self::Grafana(c) => Some(c.port),
+            Self::Tempo(c) => Some(c.port),
+            Self::AwsS3(_) => None,
+            Self::Kafka(c) => Some(c.port),
+            Self::Pubsub(c) => Some(c.port),
+            Self::Redis(c) => Some(c.port),
+            Self::RedPanda(_c) => None,
+            Self::Opendal(_) => None,
+            Self::MySql(c) => Some(c.port),
+            Self::Postgres(c) => Some(c.port),
+            Self::SchemaRegistry(c) => Some(c.port),
+        }
+    }
+
+    pub fn user_managed(&self) -> bool {
+        match self {
+            Self::ComputeNode(c) => c.user_managed,
+            Self::MetaNode(c) => c.user_managed,
+            Self::Frontend(c) => c.user_managed,
+            Self::Compactor(c) => c.user_managed,
+            Self::Minio(_c) => false,
+            Self::Etcd(_c) => false,
+            Self::Sqlite(_c) => false,
+            Self::Prometheus(_c) => false,
+            Self::Grafana(_c) => false,
+            Self::Tempo(_c) => false,
+            Self::AwsS3(_c) => false,
+            Self::Kafka(c) => c.user_managed,
+            Self::Pubsub(_c) => false,
+            Self::Redis(_c) => false,
+            Self::RedPanda(_c) => false,
+            Self::Opendal(_c) => false,
+            Self::MySql(c) => c.user_managed,
+            Self::Postgres(c) => c.user_managed,
+            Self::SchemaRegistry(c) => c.user_managed,
         }
     }
 }

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,17 +13,14 @@
 // limitations under the License.
 
 //! Provides E2E Test runner functionality.
-
 use std::collections::HashSet;
-use std::path::Path;
+use std::fmt::Write;
 
 use anyhow::anyhow;
 use itertools::Itertools;
-#[cfg(madsim)]
-use rand_chacha::ChaChaRng;
 use regex::Regex;
 use risingwave_sqlparser::ast::{
-    Cte, Expr, FunctionArgExpr, Join, Query, Select, SetExpr, Statement, TableFactor,
+    Cte, CteInner, Expr, FunctionArgExpr, Join, Query, Select, SetExpr, Statement, TableFactor,
     TableWithJoins, With,
 };
 
@@ -33,13 +30,8 @@ use crate::utils::{create_file, read_file_contents, write_to_file};
 type Result<A> = anyhow::Result<A>;
 
 /// Shrinks a given failing query file.
-/// The shrunk query will be written to [`{outdir}/{filename}.reduced.sql`].
-pub fn shrink_file(input_file_path: &str, outdir: &str) -> Result<()> {
+pub fn shrink_file(input_file_path: &str, output_file_path: &str) -> Result<()> {
     // read failed sql
-    let file_stem = Path::new(input_file_path)
-        .file_stem()
-        .ok_or_else(|| anyhow!("Failed to stem input file path: {input_file_path}"))?;
-    let output_file_path = format!("{outdir}/{}.reduced.sql", file_stem.to_string_lossy());
     let file_contents = read_file_contents(input_file_path)?;
 
     // reduce failed sql
@@ -94,8 +86,10 @@ fn shrink(sql: &str) -> Result<String> {
 
     let sql = reduced_statements
         .iter()
-        .map(|s| format!("{s};\n"))
-        .collect::<String>();
+        .fold(String::new(), |mut output, s| {
+            let _ = writeln!(output, "{s};");
+            output
+        });
 
     Ok(sql)
 }
@@ -129,8 +123,10 @@ pub(crate) fn find_ddl_references(sql_statements: &[Statement]) -> HashSet<Strin
 pub(crate) fn find_ddl_references_for_query(query: &Query, ddl_references: &mut HashSet<String>) {
     let Query { with, body, .. } = query;
     if let Some(With { cte_tables, .. }) = with {
-        for Cte { query, .. } in cte_tables {
-            find_ddl_references_for_query(query, ddl_references)
+        for Cte { cte_inner, .. } in cte_tables {
+            if let CteInner::Query(query) = cte_inner {
+                find_ddl_references_for_query(query, ddl_references)
+            }
         }
     }
     find_ddl_references_for_query_in_set_expr(body, ddl_references);

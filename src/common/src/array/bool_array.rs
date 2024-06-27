@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::data::{ArrayType, PbArray};
 
 use super::{Array, ArrayBuilder, DataType};
 use crate::buffer::{Bitmap, BitmapBuilder};
-use crate::estimate_size::EstimateSize;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BoolArray {
@@ -28,6 +28,15 @@ impl BoolArray {
     pub fn new(data: Bitmap, bitmap: Bitmap) -> Self {
         assert_eq!(bitmap.len(), data.len());
         Self { bitmap, data }
+    }
+
+    /// Build a [`BoolArray`] from iterator and bitmap.
+    ///
+    /// NOTE: The length of `bitmap` must be equal to the length of `iter`.
+    pub fn from_iter_bitmap(iter: impl IntoIterator<Item = bool>, bitmap: Bitmap) -> Self {
+        let data: Bitmap = iter.into_iter().collect();
+        assert_eq!(data.len(), bitmap.len());
+        BoolArray { bitmap, data }
     }
 
     pub fn data(&self) -> &Bitmap {
@@ -116,7 +125,7 @@ impl Array for BoolArray {
 }
 
 /// `BoolArrayBuilder` constructs a `BoolArray` from `Option<Bool>`.
-#[derive(Debug)]
+#[derive(Debug, Clone, EstimateSize)]
 pub struct BoolArrayBuilder {
     bitmap: BitmapBuilder,
     data: BitmapBuilder,
@@ -287,7 +296,7 @@ mod tests {
                     None => NULL_VAL_FOR_HASH.hash(state),
                 })
         });
-        let hashes = hash_finish(&mut states[..]);
+        let hashes = hash_finish(&states[..]);
 
         let count = hashes.iter().counts().len();
         assert_eq!(count, 6);

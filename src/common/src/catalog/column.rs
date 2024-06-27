@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,12 +15,14 @@
 use std::borrow::Cow;
 
 use itertools::Itertools;
+use risingwave_pb::expr::ExprNode;
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
-use risingwave_pb::plan_common::{PbColumnCatalog, PbColumnDesc};
+use risingwave_pb::plan_common::{
+    AdditionalColumn, ColumnDescVersion, PbColumnCatalog, PbColumnDesc,
+};
 
-use super::row_id_column_desc;
-use crate::catalog::{Field, ROW_ID_COLUMN_ID};
-use crate::error::ErrorCode;
+use super::{row_id_column_desc, USER_COLUMN_ID_OFFSET};
+use crate::catalog::{cdc_table_name_column_desc, offset_column_desc, Field, ROW_ID_COLUMN_ID};
 use crate::types::DataType;
 
 /// Column ID is the unique identifier of a column in a table. Different from table ID, column ID is
@@ -37,6 +39,15 @@ impl std::fmt::Debug for ColumnId {
 impl ColumnId {
     pub const fn new(column_id: i32) -> Self {
         Self(column_id)
+    }
+
+    /// Sometimes the id field is filled later, we use this value for better debugging.
+    pub const fn placeholder() -> Self {
+        Self(i32::MAX - 1)
+    }
+
+    pub const fn first_user_column() -> Self {
+        Self(USER_COLUMN_ID_OFFSET)
     }
 }
 
@@ -95,6 +106,9 @@ pub struct ColumnDesc {
     pub field_descs: Vec<ColumnDesc>,
     pub type_name: String,
     pub generated_or_default_column: Option<GeneratedOrDefaultColumn>,
+    pub description: Option<String>,
+    pub additional_column: AdditionalColumn,
+    pub version: ColumnDescVersion,
 }
 
 impl ColumnDesc {
@@ -106,6 +120,42 @@ impl ColumnDesc {
             field_descs: vec![],
             type_name: String::new(),
             generated_or_default_column: None,
+            description: None,
+            additional_column: AdditionalColumn { column_type: None },
+            version: ColumnDescVersion::Pr13707,
+        }
+    }
+
+    pub fn named(name: impl Into<String>, column_id: ColumnId, data_type: DataType) -> ColumnDesc {
+        ColumnDesc {
+            data_type,
+            column_id,
+            name: name.into(),
+            field_descs: vec![],
+            type_name: String::new(),
+            generated_or_default_column: None,
+            description: None,
+            additional_column: AdditionalColumn { column_type: None },
+            version: ColumnDescVersion::Pr13707,
+        }
+    }
+
+    pub fn named_with_additional_column(
+        name: impl Into<String>,
+        column_id: ColumnId,
+        data_type: DataType,
+        additional_column_type: AdditionalColumn,
+    ) -> ColumnDesc {
+        ColumnDesc {
+            data_type,
+            column_id,
+            name: name.into(),
+            field_descs: vec![],
+            type_name: String::new(),
+            generated_or_default_column: None,
+            description: None,
+            additional_column: additional_column_type,
+            version: ColumnDescVersion::Pr13707,
         }
     }
 
@@ -123,6 +173,10 @@ impl ColumnDesc {
                 .collect_vec(),
             type_name: self.type_name.clone(),
             generated_or_default_column: self.generated_or_default_column.clone(),
+            description: self.description.clone(),
+            additional_column_type: 0, // deprecated
+            additional_column: Some(self.additional_column.clone()),
+            version: self.version as i32,
         }
     }
 
@@ -140,24 +194,6 @@ impl ColumnDesc {
         descs
     }
 
-    /// Find `column_desc` in `field_descs` by name.
-    pub fn field(&self, name: &String) -> crate::error::Result<(ColumnDesc, i32)> {
-        if let DataType::Struct { .. } = self.data_type {
-            for (index, col) in self.field_descs.iter().enumerate() {
-                if col.name == *name {
-                    return Ok((col.clone(), index as i32));
-                }
-            }
-            Err(ErrorCode::ItemNotFound(format!("Invalid field name: {}", name)).into())
-        } else {
-            Err(ErrorCode::ItemNotFound(format!(
-                "Cannot get field from non nested column: {}",
-                self.name
-            ))
-            .into())
-        }
-    }
-
     pub fn new_atomic(data_type: DataType, name: &str, column_id: i32) -> Self {
         Self {
             data_type,
@@ -166,6 +202,9 @@ impl ColumnDesc {
             field_descs: vec![],
             type_name: "".to_string(),
             generated_or_default_column: None,
+            description: None,
+            additional_column: AdditionalColumn { column_type: None },
+            version: ColumnDescVersion::Pr13707,
         }
     }
 
@@ -186,6 +225,9 @@ impl ColumnDesc {
             field_descs: fields,
             type_name: type_name.to_string(),
             generated_or_default_column: None,
+            description: None,
+            additional_column: AdditionalColumn { column_type: None },
+            version: ColumnDescVersion::Pr13707,
         }
     }
 
@@ -200,7 +242,10 @@ impl ColumnDesc {
                 .map(Self::from_field_without_column_id)
                 .collect_vec(),
             type_name: field.type_name.clone(),
+            description: None,
             generated_or_default_column: None,
+            additional_column: AdditionalColumn { column_type: None },
+            version: ColumnDescVersion::Pr13707,
         }
     }
 
@@ -225,6 +270,11 @@ impl ColumnDesc {
 
 impl From<PbColumnDesc> for ColumnDesc {
     fn from(prost: PbColumnDesc) -> Self {
+        let additional_column = prost
+            .get_additional_column()
+            .unwrap_or(&AdditionalColumn { column_type: None })
+            .clone();
+        let version = prost.version();
         let field_descs: Vec<ColumnDesc> = prost
             .field_descs
             .into_iter()
@@ -237,6 +287,9 @@ impl From<PbColumnDesc> for ColumnDesc {
             type_name: prost.type_name,
             field_descs,
             generated_or_default_column: prost.generated_or_default_column,
+            description: prost.description.clone(),
+            additional_column,
+            version,
         }
     }
 }
@@ -256,6 +309,10 @@ impl From<&ColumnDesc> for PbColumnDesc {
             field_descs: c.field_descs.iter().map(ColumnDesc::to_protobuf).collect(),
             type_name: c.type_name.clone(),
             generated_or_default_column: c.generated_or_default_column.clone(),
+            description: c.description.clone(),
+            additional_column_type: 0, // deprecated
+            additional_column: c.additional_column.clone().into(),
+            version: c.version as i32,
         }
     }
 }
@@ -267,6 +324,20 @@ pub struct ColumnCatalog {
 }
 
 impl ColumnCatalog {
+    pub fn visible(column_desc: ColumnDesc) -> Self {
+        Self {
+            column_desc,
+            is_hidden: false,
+        }
+    }
+
+    pub fn hidden(column_desc: ColumnDesc) -> Self {
+        Self {
+            column_desc,
+            is_hidden: true,
+        }
+    }
+
     /// Get the column catalog's is hidden.
     pub fn is_hidden(&self) -> bool {
         self.is_hidden
@@ -277,9 +348,25 @@ impl ColumnCatalog {
         self.column_desc.is_generated()
     }
 
+    /// If the column is a generated column
+    pub fn generated_expr(&self) -> Option<&ExprNode> {
+        if let Some(GeneratedOrDefaultColumn::GeneratedColumn(desc)) =
+            &self.column_desc.generated_or_default_column
+        {
+            Some(desc.expr.as_ref().unwrap())
+        } else {
+            None
+        }
+    }
+
     /// If the column is a column with default expr
     pub fn is_default(&self) -> bool {
         self.column_desc.is_default()
+    }
+
+    /// If the columns is an `INCLUDE ... AS ...` connector column.
+    pub fn is_connector_additional_column(&self) -> bool {
+        self.column_desc.additional_column.column_type.is_some()
     }
 
     /// Get a reference to the column desc's data type.
@@ -309,6 +396,20 @@ impl ColumnCatalog {
     pub fn row_id_column() -> Self {
         Self {
             column_desc: row_id_column_desc(),
+            is_hidden: true,
+        }
+    }
+
+    pub fn offset_column() -> Self {
+        Self {
+            column_desc: offset_column_desc(),
+            is_hidden: true,
+        }
+    }
+
+    pub fn cdc_table_name_column() -> Self {
+        Self {
+            column_desc: cdc_table_name_column_desc(),
             is_hidden: true,
         }
     }
@@ -352,15 +453,30 @@ pub fn columns_extend(preserved_columns: &mut Vec<ColumnCatalog>, columns: Vec<C
     preserved_columns.extend(columns);
 }
 
-pub fn is_column_ids_dedup(columns: &[ColumnCatalog]) -> bool {
-    let mut column_ids = columns
+pub fn debug_assert_column_ids_distinct(columns: &[ColumnCatalog]) {
+    debug_assert!(
+        columns
+            .iter()
+            .map(|c| c.column_id())
+            .duplicates()
+            .next()
+            .is_none(),
+        "duplicate ColumnId found in source catalog. Columns: {columns:#?}"
+    );
+}
+
+/// FIXME: perhapts we should use sth like `ColumnIdGenerator::new_alter`,
+/// However, the `SourceVersion` is problematic: It doesn't contain `next_col_id`.
+/// (But for now this isn't a large problem, since drop column is not allowed for source yet..)
+///
+/// Besides, the logic of column id handling is a mess.
+/// In some places, we use `ColumnId::placeholder()`, and use `col_id_gen` to fill it at the end;
+/// In other places, we create column id ad-hoc.
+pub fn max_column_id(columns: &[ColumnCatalog]) -> ColumnId {
+    // XXX: should we check the column IDs of struct fields here?
+    columns
         .iter()
-        .map(|column| column.column_id().get_id())
-        .collect_vec();
-    column_ids.sort();
-    let original_len = column_ids.len();
-    column_ids.dedup();
-    column_ids.len() == original_len
+        .fold(ColumnId::first_user_column(), |a, b| a.max(b.column_id()))
 }
 
 #[cfg(test)]

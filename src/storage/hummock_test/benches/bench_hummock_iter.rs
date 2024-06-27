@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,9 +17,13 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use criterion::{criterion_group, criterion_main, Criterion};
-use futures::{pin_mut, TryStreamExt};
-use risingwave_common::cache::CachePriority;
+use foyer::CacheContext;
+use futures::pin_mut;
+use risingwave_common::util::epoch::test_epoch;
+use risingwave_hummock_sdk::key::TableKey;
+use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_hummock_test::get_notification_client_for_test;
+use risingwave_hummock_test::local_state_store_test_utils::LocalStateStoreTestExt;
 use risingwave_hummock_test::test_utils::TestIngestBatch;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
@@ -28,18 +32,19 @@ use risingwave_storage::hummock::test_utils::default_opts_for_test;
 use risingwave_storage::hummock::{CachePolicy, HummockStorage};
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::*;
-use risingwave_storage::StateStore;
 
 fn gen_interleave_shared_buffer_batch_iter(
     batch_size: usize,
     batch_count: usize,
-) -> Vec<Vec<(Bytes, StorageValue)>> {
+) -> Vec<Vec<(TableKey<Bytes>, StorageValue)>> {
     let mut ret = Vec::new();
     for i in 0..batch_count {
         let mut batch_data = vec![];
         for j in 0..batch_size {
             batch_data.push((
-                Bytes::copy_from_slice(format!("test_key_{:08}", j * batch_count + i).as_bytes()),
+                TableKey(Bytes::copy_from_slice(
+                    format!("test_key_{:08}", j * batch_count + i).as_bytes(),
+                )),
                 StorageValue::new_put(Bytes::copy_from_slice("value".as_bytes())),
             ));
         }
@@ -51,7 +56,6 @@ fn gen_interleave_shared_buffer_batch_iter(
 fn criterion_benchmark(c: &mut Criterion) {
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let batches = gen_interleave_shared_buffer_batch_iter(10000, 100);
-    let sstable_store = mock_sstable_store();
     let hummock_options = Arc::new(default_opts_for_test());
     let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         runtime.block_on(setup_compute_env(8080));
@@ -61,6 +65,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     ));
 
     let global_hummock_storage = runtime.block_on(async {
+        let sstable_store = mock_sstable_store().await;
         HummockStorage::for_test(
             hummock_options,
             sstable_store,
@@ -77,14 +82,15 @@ fn criterion_benchmark(c: &mut Criterion) {
             .await
     });
 
-    let epoch = 100;
-    hummock_storage.init(epoch);
+    let epoch = test_epoch(100);
+    runtime
+        .block_on(hummock_storage.init_for_test(epoch))
+        .unwrap();
 
     for batch in batches {
         runtime
             .block_on(hummock_storage.ingest_batch(
                 batch,
-                vec![],
                 WriteOptions {
                     epoch,
                     table_id: Default::default(),
@@ -92,7 +98,7 @@ fn criterion_benchmark(c: &mut Criterion) {
             ))
             .unwrap();
     }
-    hummock_storage.seal_current_epoch(u64::MAX);
+    hummock_storage.seal_current_epoch(HummockEpoch::MAX, SealCurrentEpochOptions::for_test());
 
     c.bench_function("bench-hummock-iter", move |b| {
         b.iter(|| {
@@ -101,13 +107,10 @@ fn criterion_benchmark(c: &mut Criterion) {
                     (Unbounded, Unbounded),
                     epoch,
                     ReadOptions {
-                        prefix_hint: None,
                         ignore_range_tombstone: true,
-                        retention_seconds: None,
-                        table_id: Default::default(),
-                        read_version_from_backup: false,
-                        prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
-                        cache_policy: CachePolicy::Fill(CachePriority::High),
+                        prefetch_options: PrefetchOptions::default(),
+                        cache_policy: CachePolicy::Fill(CacheContext::Default),
+                        ..Default::default()
                     },
                 ))
                 .unwrap();

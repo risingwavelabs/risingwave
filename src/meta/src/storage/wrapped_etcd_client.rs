@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@ use std::sync::Arc;
 use etcd_client::{
     CampaignResponse, ConnectOptions, DeleteOptions, DeleteResponse, GetOptions, GetResponse,
     LeaderResponse, LeaseGrantOptions, LeaseGrantResponse, LeaseKeepAliveStream, LeaseKeeper,
-    ObserveStream, PutOptions, PutResponse, Txn, TxnResponse,
+    ObserveStream, PutOptions, PutResponse, ResignOptions, ResignResponse, Txn, TxnResponse,
 };
 use tokio::sync::RwLock;
 
@@ -163,6 +163,13 @@ impl_etcd_client_command_proxy!(
     election_client,
     (name: impl Into<Vec<u8>>),
     ObserveStream
+);
+
+impl_etcd_client_command_proxy!(
+    resign,
+    election_client,
+    (option: Option<ResignOptions>),
+    ResignResponse
 );
 
 impl WrappedEtcdClient {

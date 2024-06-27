@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,90 +12,55 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::{ArrayBuilderImpl, Op, StreamChunk};
+// Re-export `StreamChunkBuilder`.
+pub use risingwave_common::array::stream_chunk_builder::StreamChunkBuilder;
+use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::row::Row;
-use risingwave_common::types::{DataType, Datum};
-use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_common::types::{DataType, DatumRef};
 
 type IndexMappings = Vec<(usize, usize)>;
 
-// FIXME(rc): I think this type is over-designed for executors with two side inputs.
-/// Build a array and it's corresponding operations.
-pub struct StreamChunkBuilder {
-    /// operations in the data chunk to build
-    ops: Vec<Op>,
-
-    /// arrays in the data chunk to build
-    column_builders: Vec<ArrayBuilderImpl>,
-
-    /// Data types of columns
-    data_types: Vec<DataType>,
+/// Build stream chunks with fixed chunk size from joined two sides of rows.
+pub struct JoinStreamChunkBuilder {
+    builder: StreamChunkBuilder,
 
     /// The column index mapping from update side to output.
     update_to_output: IndexMappings,
 
     /// The column index mapping from matched side to output.
     matched_to_output: IndexMappings,
-
-    /// Maximum capacity of column builder
-    capacity: usize,
-
-    /// Size of column builder
-    size: usize,
 }
 
-impl Drop for StreamChunkBuilder {
-    fn drop(&mut self) {
-        // Possible to fail when async task gets cancelled.
-        if self.size != 0 {
-            tracing::warn!(
-                remaining = self.size,
-                "dropping non-empty stream chunk builder"
-            );
-        }
-    }
-}
-
-impl StreamChunkBuilder {
+impl JoinStreamChunkBuilder {
     pub fn new(
-        capacity: usize,
-        data_types: &[DataType],
+        chunk_size: usize,
+        data_types: Vec<DataType>,
         update_to_output: IndexMappings,
         matched_to_output: IndexMappings,
     ) -> Self {
-        // Leave room for paired `UpdateDelete` and `UpdateInsert`. When there are `capacity - 1`
-        // ops in current builder and the last op is `UpdateDelete`, we delay the chunk generation
-        // until `UpdateInsert` comes. This means that the effective output message size will indeed
-        // be at most the original `capacity`
-        let reduced_capacity = capacity - 1;
-        assert!(reduced_capacity > 0);
-
-        let ops = Vec::with_capacity(capacity);
-        let column_builders = data_types
-            .iter()
-            .map(|datatype| datatype.create_array_builder(capacity))
-            .collect();
         Self {
-            ops,
-            column_builders,
-            data_types: data_types.to_owned(),
+            builder: StreamChunkBuilder::new(chunk_size, data_types),
             update_to_output,
             matched_to_output,
-            capacity: reduced_capacity,
-            size: 0,
         }
     }
 
-    /// Get the mapping from left/right input indices to the output indices.
+    /// Get the mappings from left/right input indices to the output indices. The mappings can be
+    /// used to create [`JoinStreamChunkBuilder`] later.
+    ///
+    /// Please note the semantics of `update` and `matched` when creating the builder: either left
+    /// or right side can be `update` side or `matched` side, the key is to call the corresponding
+    /// append method once you passed `left_to_output`/`right_to_output` to
+    /// `update_to_output`/`matched_to_output`.
     pub fn get_i2o_mapping(
-        output_indices: impl Iterator<Item = usize>,
+        output_indices: &[usize],
         left_len: usize,
         right_len: usize,
     ) -> (IndexMappings, IndexMappings) {
         let mut left_to_output = vec![];
         let mut right_to_output = vec![];
 
-        for (output_idx, idx) in output_indices.enumerate() {
+        for (output_idx, &idx) in output_indices.iter().enumerate() {
             if idx < left_len {
                 left_to_output.push((idx, output_idx))
             } else if idx >= left_len && idx < left_len + right_len {
@@ -107,25 +72,9 @@ impl StreamChunkBuilder {
         (left_to_output, right_to_output)
     }
 
-    /// Increase chunk size
+    /// Append a row with coming update value and matched value.
     ///
-    /// A [`StreamChunk`] will be returned when `size == capacity`
-    #[must_use]
-    fn inc_size(&mut self) -> Option<StreamChunk> {
-        self.size += 1;
-
-        // Take a chunk when capacity is exceeded, but splitting `UpdateDelete` and `UpdateInsert`
-        // should be avoided
-        if self.size >= self.capacity && self.ops[self.ops.len() - 1] != Op::UpdateDelete {
-            self.take()
-        } else {
-            None
-        }
-    }
-
-    /// Append a row with coming update value and matched value
-    ///
-    /// A [`StreamChunk`] will be returned when `size == capacity`
+    /// A [`StreamChunk`] will be returned when `size == capacity`.
     #[must_use]
     pub fn append_row(
         &mut self,
@@ -133,70 +82,62 @@ impl StreamChunkBuilder {
         row_update: impl Row,
         row_matched: impl Row,
     ) -> Option<StreamChunk> {
-        self.ops.push(op);
-        for &(update_idx, output_idx) in &self.update_to_output {
-            self.column_builders[output_idx].append_datum(row_update.datum_at(update_idx));
-        }
-        for &(matched_idx, output_idx) in &self.matched_to_output {
-            self.column_builders[output_idx].append_datum(row_matched.datum_at(matched_idx));
-        }
-
-        self.inc_size()
+        self.builder.append_iter(
+            op,
+            self.update_to_output
+                .iter()
+                .map(|&(update_idx, output_idx)| (output_idx, row_update.datum_at(update_idx)))
+                .chain(
+                    self.matched_to_output
+                        .iter()
+                        .map(|&(matched_idx, output_idx)| {
+                            (output_idx, row_matched.datum_at(matched_idx))
+                        }),
+                ),
+        )
     }
 
     /// Append a row with coming update value and fill the other side with null.
     ///
-    /// A [`StreamChunk`] will be returned when `size == capacity`
+    /// A [`StreamChunk`] will be returned when `size == capacity`.
     #[must_use]
     pub fn append_row_update(&mut self, op: Op, row_update: impl Row) -> Option<StreamChunk> {
-        self.ops.push(op);
-        for &(update_idx, output_idx) in &self.update_to_output {
-            self.column_builders[output_idx].append_datum(row_update.datum_at(update_idx));
-        }
-        for &(_matched_idx, output_idx) in &self.matched_to_output {
-            self.column_builders[output_idx].append_datum(Datum::None);
-        }
-
-        self.inc_size()
+        self.builder.append_iter(
+            op,
+            self.update_to_output
+                .iter()
+                .map(|&(update_idx, output_idx)| (output_idx, row_update.datum_at(update_idx)))
+                .chain(
+                    self.matched_to_output
+                        .iter()
+                        .map(|&(_, output_idx)| (output_idx, DatumRef::None)),
+                ),
+        )
     }
 
-    /// append a row with matched value and fill the coming side with null.
+    /// Append a row with matched value and fill the coming side with null.
     ///
-    /// A [`StreamChunk`] will be returned when `size == capacity`
+    /// A [`StreamChunk`] will be returned when `size == capacity`.
     #[must_use]
     pub fn append_row_matched(&mut self, op: Op, row_matched: impl Row) -> Option<StreamChunk> {
-        self.ops.push(op);
-        for &(_update_idx, output_idx) in &self.update_to_output {
-            self.column_builders[output_idx].append_datum(Datum::None);
-        }
-        for &(matched_idx, output_idx) in &self.matched_to_output {
-            self.column_builders[output_idx].append_datum(row_matched.datum_at(matched_idx));
-        }
-
-        self.inc_size()
+        self.builder.append_iter(
+            op,
+            self.update_to_output
+                .iter()
+                .map(|&(_, output_idx)| (output_idx, DatumRef::None))
+                .chain(
+                    self.matched_to_output
+                        .iter()
+                        .map(|&(matched_idx, output_idx)| {
+                            (output_idx, row_matched.datum_at(matched_idx))
+                        }),
+                ),
+        )
     }
 
+    /// Take out the remaining rows as a chunk. Return `None` if the builder is empty.
     #[must_use]
     pub fn take(&mut self) -> Option<StreamChunk> {
-        if self.size == 0 {
-            return None;
-        }
-
-        self.size = 0;
-        let new_columns = self
-            .column_builders
-            .iter_mut()
-            .zip_eq_fast(&self.data_types)
-            .map(|(builder, datatype)| {
-                std::mem::replace(builder, datatype.create_array_builder(self.capacity)).finish()
-            })
-            .map(Into::into)
-            .collect::<Vec<_>>();
-
-        Some(StreamChunk::new(
-            std::mem::take(&mut self.ops),
-            new_columns,
-            None,
-        ))
+        self.builder.take()
     }
 }

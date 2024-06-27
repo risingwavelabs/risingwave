@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,7 +19,12 @@ import com.risingwave.proto.Catalog.SinkType;
 import java.util.Map;
 
 public interface SinkFactory {
-    SinkBase create(TableSchema tableSchema, Map<String, String> tableProperties);
+    SinkWriter createWriter(TableSchema tableSchema, Map<String, String> tableProperties);
 
     void validate(TableSchema tableSchema, Map<String, String> tableProperties, SinkType sinkType);
+
+    default SinkCoordinator createCoordinator(
+            TableSchema tableSchema, Map<String, String> tableProperties) {
+        throw new UnsupportedOperationException("not support create coordinator");
+    }
 }

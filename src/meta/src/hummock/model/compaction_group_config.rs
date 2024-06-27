@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,10 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::borrow::Borrow;
 use std::sync::Arc;
 
-pub use risingwave_common::catalog::TableOption;
 use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_pb::hummock::CompactionConfig;
 
@@ -24,8 +22,8 @@ use crate::model::{MetadataModel, MetadataModelResult};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CompactionGroup {
-    pub(crate) group_id: CompactionGroupId,
-    pub(crate) compaction_config: Arc<CompactionConfig>,
+    pub group_id: CompactionGroupId,
+    pub compaction_config: Arc<CompactionConfig>,
 }
 
 impl CompactionGroup {
@@ -78,11 +76,11 @@ impl MetadataModel for CompactionGroup {
     }
 
     fn to_protobuf(&self) -> Self::PbType {
-        self.borrow().into()
+        self.into()
     }
 
     fn from_protobuf(prost: Self::PbType) -> Self {
-        prost.borrow().into()
+        (&prost).into()
     }
 
     fn key(&self) -> MetadataModelResult<Self::KeyType> {

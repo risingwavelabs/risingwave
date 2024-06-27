@@ -1,0 +1,780 @@
+// Copyright 2024 RisingWave Labs
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+use std::collections::{btree_map, BTreeMap, HashSet};
+use std::marker::PhantomData;
+use std::ops::RangeInclusive;
+
+use delta_btree_map::{Change, PositionType};
+use itertools::Itertools;
+use risingwave_common::array::stream_record::Record;
+use risingwave_common::array::Op;
+use risingwave_common::row::RowExt;
+use risingwave_common::session_config::OverWindowCachePolicy as CachePolicy;
+use risingwave_common::types::DefaultOrdered;
+use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_common::util::memcmp_encoding::{self, MemcmpEncoded};
+use risingwave_common::util::sort_util::OrderType;
+use risingwave_expr::window_function::{
+    create_window_state, StateKey, WindowFuncCall, WindowStates,
+};
+
+use super::over_partition::{
+    new_empty_partition_cache, shrink_partition_cache, CacheKey, OverPartition, PartitionCache,
+    PartitionDelta,
+};
+use crate::cache::ManagedLruCache;
+use crate::common::metrics::MetricsInfo;
+use crate::consistency::consistency_panic;
+use crate::executor::monitor::OverWindowMetrics;
+use crate::executor::over_window::over_partition::AffectedRange;
+use crate::executor::prelude::*;
+
+/// [`OverWindowExecutor`] consumes retractable input stream and produces window function outputs.
+/// One [`OverWindowExecutor`] can handle one combination of partition key and order key.
+///
+/// - State table schema = output schema, state table pk = `partition key | order key | input pk`.
+/// - Output schema = input schema + window function results.
+pub struct OverWindowExecutor<S: StateStore> {
+    input: Executor,
+    inner: ExecutorInner<S>,
+}
+
+struct ExecutorInner<S: StateStore> {
+    actor_ctx: ActorContextRef,
+
+    schema: Schema,
+    calls: Vec<WindowFuncCall>,
+    partition_key_indices: Vec<usize>,
+    order_key_indices: Vec<usize>,
+    order_key_data_types: Vec<DataType>,
+    order_key_order_types: Vec<OrderType>,
+    input_pk_indices: Vec<usize>,
+    input_schema_len: usize,
+    state_key_to_table_sub_pk_proj: Vec<usize>,
+
+    state_table: StateTable<S>,
+    watermark_sequence: AtomicU64Ref,
+
+    /// The maximum size of the chunk produced by executor at a time.
+    chunk_size: usize,
+    cache_policy: CachePolicy,
+}
+
+struct ExecutionVars<S: StateStore> {
+    /// partition key => partition range cache.
+    cached_partitions: ManagedLruCache<OwnedRow, PartitionCache>,
+    /// partition key => recently accessed range.
+    recently_accessed_ranges: BTreeMap<DefaultOrdered<OwnedRow>, RangeInclusive<StateKey>>,
+    stats: ExecutionStats,
+    _phantom: PhantomData<S>,
+}
+
+#[derive(Default)]
+struct ExecutionStats {
+    cache_miss: u64,
+    cache_lookup: u64,
+}
+
+impl<S: StateStore> Execute for OverWindowExecutor<S> {
+    fn execute(self: Box<Self>) -> crate::executor::BoxedMessageStream {
+        self.executor_inner().boxed()
+    }
+}
+
+impl<S: StateStore> ExecutorInner<S> {
+    fn get_partition_key(&self, full_row: impl Row) -> OwnedRow {
+        full_row
+            .project(&self.partition_key_indices)
+            .into_owned_row()
+    }
+
+    fn get_input_pk(&self, full_row: impl Row) -> OwnedRow {
+        full_row.project(&self.input_pk_indices).into_owned_row()
+    }
+
+    /// `full_row` can be an input row or state table row.
+    fn encode_order_key(&self, full_row: impl Row) -> StreamExecutorResult<MemcmpEncoded> {
+        Ok(memcmp_encoding::encode_row(
+            full_row.project(&self.order_key_indices),
+            &self.order_key_order_types,
+        )?)
+    }
+
+    fn row_to_cache_key(&self, full_row: impl Row + Copy) -> StreamExecutorResult<CacheKey> {
+        Ok(CacheKey::Normal(StateKey {
+            order_key: self.encode_order_key(full_row)?,
+            pk: self.get_input_pk(full_row).into(),
+        }))
+    }
+}
+
+pub struct OverWindowExecutorArgs<S: StateStore> {
+    pub actor_ctx: ActorContextRef,
+
+    pub input: Executor,
+
+    pub schema: Schema,
+    pub calls: Vec<WindowFuncCall>,
+    pub partition_key_indices: Vec<usize>,
+    pub order_key_indices: Vec<usize>,
+    pub order_key_order_types: Vec<OrderType>,
+
+    pub state_table: StateTable<S>,
+    pub watermark_epoch: AtomicU64Ref,
+    pub metrics: Arc<StreamingMetrics>,
+
+    pub chunk_size: usize,
+    pub cache_policy: CachePolicy,
+}
+
+impl<S: StateStore> OverWindowExecutor<S> {
+    pub fn new(args: OverWindowExecutorArgs<S>) -> Self {
+        let input_info = args.input.info().clone();
+        let input_schema = &input_info.schema;
+
+        let has_unbounded_frame = args
+            .calls
+            .iter()
+            .any(|call| call.frame.bounds.is_unbounded());
+        let cache_policy = if has_unbounded_frame {
+            // For unbounded frames, we finally need all entries of the partition in the cache,
+            // so for simplicity we just use full cache policy for these cases.
+            CachePolicy::Full
+        } else {
+            args.cache_policy
+        };
+
+        let order_key_data_types = args
+            .order_key_indices
+            .iter()
+            .map(|i| input_schema[*i].data_type())
+            .collect();
+
+        let state_key_to_table_sub_pk_proj = RowConverter::calc_state_key_to_table_sub_pk_proj(
+            &args.partition_key_indices,
+            &args.order_key_indices,
+            &input_info.pk_indices,
+        );
+
+        Self {
+            input: args.input,
+            inner: ExecutorInner {
+                actor_ctx: args.actor_ctx,
+                schema: args.schema,
+                calls: args.calls,
+                partition_key_indices: args.partition_key_indices,
+                order_key_indices: args.order_key_indices,
+                order_key_data_types,
+                order_key_order_types: args.order_key_order_types,
+                input_pk_indices: input_info.pk_indices,
+                input_schema_len: input_schema.len(),
+                state_key_to_table_sub_pk_proj,
+                state_table: args.state_table,
+                watermark_sequence: args.watermark_epoch,
+                chunk_size: args.chunk_size,
+                cache_policy,
+            },
+        }
+    }
+
+    /// Merge changes by input pk in the given chunk, return a change iterator which guarantees that
+    /// each pk only appears once. This method also validates the consistency of the input
+    /// chunk.
+    ///
+    /// TODO(rc): We may want to optimize this by handling changes on the same pk during generating
+    /// partition [`Change`]s.
+    fn merge_changes_in_chunk<'a>(
+        this: &'_ ExecutorInner<S>,
+        chunk: &'a StreamChunk,
+    ) -> impl Iterator<Item = Record<RowRef<'a>>> {
+        let mut changes_merged = BTreeMap::new();
+        for (op, row) in chunk.rows() {
+            let pk = DefaultOrdered(this.get_input_pk(row));
+            match op {
+                Op::Insert | Op::UpdateInsert => {
+                    if let Some(prev_change) = changes_merged.get_mut(&pk) {
+                        match prev_change {
+                            Record::Delete { old_row } => {
+                                *prev_change = Record::Update {
+                                    old_row: *old_row,
+                                    new_row: row,
+                                };
+                            }
+                            _ => {
+                                consistency_panic!(
+                                    ?pk,
+                                    "inconsistent changes in input chunk, double-inserting"
+                                );
+                                if let Record::Update { old_row, .. } = prev_change {
+                                    *prev_change = Record::Update {
+                                        old_row: *old_row,
+                                        new_row: row,
+                                    };
+                                } else {
+                                    *prev_change = Record::Insert { new_row: row };
+                                }
+                            }
+                        }
+                    } else {
+                        changes_merged.insert(pk, Record::Insert { new_row: row });
+                    }
+                }
+                Op::Delete | Op::UpdateDelete => {
+                    if let Some(prev_change) = changes_merged.get_mut(&pk) {
+                        match prev_change {
+                            Record::Insert { .. } => {
+                                changes_merged.remove(&pk);
+                            }
+                            Record::Update {
+                                old_row: real_old_row,
+                                ..
+                            } => {
+                                *prev_change = Record::Delete {
+                                    old_row: *real_old_row,
+                                };
+                            }
+                            _ => {
+                                consistency_panic!(
+                                    ?pk,
+                                    "inconsistent changes in input chunk, double-deleting"
+                                );
+                                *prev_change = Record::Delete { old_row: row };
+                            }
+                        }
+                    } else {
+                        changes_merged.insert(pk, Record::Delete { old_row: row });
+                    }
+                }
+            }
+        }
+        changes_merged.into_values()
+    }
+
+    #[try_stream(ok = StreamChunk, error = StreamExecutorError)]
+    async fn apply_chunk<'a>(
+        this: &'a mut ExecutorInner<S>,
+        vars: &'a mut ExecutionVars<S>,
+        chunk: StreamChunk,
+        metrics: &'a OverWindowMetrics,
+    ) {
+        // partition key => changes happened in the partition.
+        let mut deltas: BTreeMap<DefaultOrdered<OwnedRow>, PartitionDelta> = BTreeMap::new();
+        // input pk of update records of which the order key is changed.
+        let mut key_change_updated_pks = HashSet::new();
+
+        // Collect changes for each partition.
+        for record in Self::merge_changes_in_chunk(this, &chunk) {
+            match record {
+                Record::Insert { new_row } => {
+                    let part_key = this.get_partition_key(new_row).into();
+                    let part_delta = deltas.entry(part_key).or_default();
+                    part_delta.insert(
+                        this.row_to_cache_key(new_row)?,
+                        Change::Insert(new_row.into_owned_row()),
+                    );
+                }
+                Record::Delete { old_row } => {
+                    let part_key = this.get_partition_key(old_row).into();
+                    let part_delta = deltas.entry(part_key).or_default();
+                    part_delta.insert(this.row_to_cache_key(old_row)?, Change::Delete);
+                }
+                Record::Update { old_row, new_row } => {
+                    let old_part_key = this.get_partition_key(old_row).into();
+                    let new_part_key = this.get_partition_key(new_row).into();
+                    let old_state_key = this.row_to_cache_key(old_row)?;
+                    let new_state_key = this.row_to_cache_key(new_row)?;
+                    if old_part_key == new_part_key && old_state_key == new_state_key {
+                        // not a key-change update
+                        let part_delta = deltas.entry(old_part_key).or_default();
+                        part_delta.insert(old_state_key, Change::Insert(new_row.into_owned_row()));
+                    } else if old_part_key == new_part_key {
+                        // order-change update, split into delete + insert, will be merged after
+                        // building changes
+                        key_change_updated_pks.insert(this.get_input_pk(old_row));
+                        let part_delta = deltas.entry(old_part_key).or_default();
+                        part_delta.insert(old_state_key, Change::Delete);
+                        part_delta.insert(new_state_key, Change::Insert(new_row.into_owned_row()));
+                    } else {
+                        // partition-change update, split into delete + insert
+                        // NOTE(rc): Since we append partition key to logical pk, we can't merge the
+                        // delete + insert back to update later.
+                        // TODO: IMO this behavior is problematic. Deep discussion is needed.
+                        let old_part_delta = deltas.entry(old_part_key).or_default();
+                        old_part_delta.insert(old_state_key, Change::Delete);
+                        let new_part_delta = deltas.entry(new_part_key).or_default();
+                        new_part_delta
+                            .insert(new_state_key, Change::Insert(new_row.into_owned_row()));
+                    }
+                }
+            }
+        }
+
+        // `input pk` => `Record`
+        let mut key_change_update_buffer: BTreeMap<DefaultOrdered<OwnedRow>, Record<OwnedRow>> =
+            BTreeMap::new();
+        let mut chunk_builder = StreamChunkBuilder::new(this.chunk_size, this.schema.data_types());
+
+        // Build final changes partition by partition.
+        for (part_key, delta) in deltas {
+            vars.stats.cache_lookup += 1;
+            if !vars.cached_partitions.contains(&part_key.0) {
+                vars.stats.cache_miss += 1;
+                vars.cached_partitions
+                    .put(part_key.0.clone(), new_empty_partition_cache());
+            }
+            let mut cache = vars.cached_partitions.get_mut(&part_key).unwrap();
+            let mut partition = OverPartition::new(
+                &part_key,
+                &mut cache,
+                this.cache_policy,
+                &this.calls,
+                RowConverter {
+                    state_key_to_table_sub_pk_proj: &this.state_key_to_table_sub_pk_proj,
+                    order_key_indices: &this.order_key_indices,
+                    order_key_data_types: &this.order_key_data_types,
+                    order_key_order_types: &this.order_key_order_types,
+                    input_pk_indices: &this.input_pk_indices,
+                },
+            );
+
+            // Build changes for current partition.
+            let (part_changes, accessed_range) =
+                Self::build_changes_for_partition(this, &mut partition, delta).await?;
+
+            for (key, record) in part_changes {
+                // Build chunk and yield if needed.
+                if !key_change_updated_pks.contains(&key.pk) {
+                    if let Some(chunk) = chunk_builder.append_record(record.as_ref()) {
+                        yield chunk;
+                    }
+                } else {
+                    // For key-change updates, we should wait for both `Delete` and `Insert` changes
+                    // and merge them together.
+                    let pk = key.pk.clone();
+                    let record = record.clone();
+                    if let Some(existed) = key_change_update_buffer.remove(&key.pk) {
+                        match (existed, record) {
+                            (Record::Insert { new_row }, Record::Delete { old_row })
+                            | (Record::Delete { old_row }, Record::Insert { new_row }) => {
+                                // merge `Delete` and `Insert` into `Update`
+                                if let Some(chunk) =
+                                    chunk_builder.append_record(Record::Update { old_row, new_row })
+                                {
+                                    yield chunk;
+                                }
+                            }
+                            (existed, record) => {
+                                // when stream is inconsistent, there may be an `Update` of which the old pk does not actually exist
+                                consistency_panic!(
+                                    ?existed,
+                                    ?record,
+                                    "other cases should not exist",
+                                );
+
+                                key_change_update_buffer.insert(pk, record);
+                                if let Some(chunk) = chunk_builder.append_record(existed) {
+                                    yield chunk;
+                                }
+                            }
+                        }
+                    } else {
+                        key_change_update_buffer.insert(pk, record);
+                    }
+                }
+
+                // Apply the change record.
+                partition.write_record(&mut this.state_table, key, record);
+            }
+
+            if !key_change_update_buffer.is_empty() {
+                consistency_panic!(
+                    ?key_change_update_buffer,
+                    "key-change update buffer should be empty after processing"
+                );
+                // if in non-strict mode, we can reach here, but we don't know the `StateKey`,
+                // so just ignore the buffer.
+            }
+
+            let cache_len = partition.cache_real_len();
+            let stats = partition.summarize();
+            metrics
+                .over_window_range_cache_entry_count
+                .set(cache_len as i64);
+            metrics
+                .over_window_range_cache_lookup_count
+                .inc_by(stats.lookup_count);
+            metrics
+                .over_window_range_cache_left_miss_count
+                .inc_by(stats.left_miss_count);
+            metrics
+                .over_window_range_cache_right_miss_count
+                .inc_by(stats.right_miss_count);
+
+            // Update recently accessed range for later shrinking cache.
+            if !this.cache_policy.is_full()
+                && let Some(accessed_range) = accessed_range
+            {
+                match vars.recently_accessed_ranges.entry(part_key) {
+                    btree_map::Entry::Vacant(vacant) => {
+                        vacant.insert(accessed_range);
+                    }
+                    btree_map::Entry::Occupied(mut occupied) => {
+                        let recently_accessed_range = occupied.get_mut();
+                        let min_start = accessed_range
+                            .start()
+                            .min(recently_accessed_range.start())
+                            .clone();
+                        let max_end = accessed_range
+                            .end()
+                            .max(recently_accessed_range.end())
+                            .clone();
+                        *recently_accessed_range = min_start..=max_end;
+                    }
+                }
+            }
+        }
+
+        // Yield remaining changes to downstream.
+        if let Some(chunk) = chunk_builder.take() {
+            yield chunk;
+        }
+    }
+
+    async fn build_changes_for_partition(
+        this: &ExecutorInner<S>,
+        partition: &mut OverPartition<'_, S>,
+        mut delta: PartitionDelta,
+    ) -> StreamExecutorResult<(
+        BTreeMap<StateKey, Record<OwnedRow>>,
+        Option<RangeInclusive<StateKey>>,
+    )> {
+        let mut part_changes = BTreeMap::new();
+
+        // Find affected ranges, this also ensures that all rows in the affected ranges are loaded
+        // into the cache.
+        let (part_with_delta, affected_ranges) = partition
+            .find_affected_ranges(&this.state_table, &mut delta)
+            .await?;
+
+        let snapshot = part_with_delta.snapshot();
+        let delta = part_with_delta.delta();
+
+        // Generate delete changes first, because deletes are skipped during iteration over
+        // `part_with_delta` in the next step.
+        for (key, change) in delta {
+            if change.is_delete() {
+                part_changes.insert(
+                    key.as_normal_expect().clone(),
+                    Record::Delete {
+                        old_row: snapshot.get(key).unwrap().clone(),
+                    },
+                );
+            }
+        }
+
+        let mut accessed_range: Option<RangeInclusive<StateKey>> = None;
+
+        for AffectedRange {
+            first_frame_start,
+            first_curr_key,
+            last_curr_key,
+            last_frame_end,
+        } in affected_ranges
+        {
+            assert!(first_frame_start <= first_curr_key);
+            assert!(first_curr_key <= last_curr_key);
+            assert!(last_curr_key <= last_frame_end);
+            assert!(first_frame_start.is_normal());
+            assert!(first_curr_key.is_normal());
+            assert!(last_curr_key.is_normal());
+            assert!(last_frame_end.is_normal());
+
+            if let Some(accessed_range) = accessed_range.as_mut() {
+                let min_start = first_frame_start
+                    .as_normal_expect()
+                    .min(accessed_range.start())
+                    .clone();
+                let max_end = last_frame_end
+                    .as_normal_expect()
+                    .max(accessed_range.end())
+                    .clone();
+                *accessed_range = min_start..=max_end;
+            } else {
+                accessed_range = Some(
+                    first_frame_start.as_normal_expect().clone()
+                        ..=last_frame_end.as_normal_expect().clone(),
+                );
+            }
+
+            let mut states =
+                WindowStates::new(this.calls.iter().map(create_window_state).try_collect()?);
+
+            // Populate window states with the affected range of rows.
+            {
+                let mut cursor = part_with_delta
+                    .find(first_frame_start)
+                    .expect("first frame start key must exist");
+                while {
+                    let (key, row) = cursor
+                        .key_value()
+                        .expect("cursor must be valid until `last_frame_end`");
+
+                    for (call, state) in this.calls.iter().zip_eq_fast(states.iter_mut()) {
+                        // TODO(rc): batch appending
+                        state.append(
+                            key.as_normal_expect().clone(),
+                            row.project(call.args.val_indices())
+                                .into_owned_row()
+                                .as_inner()
+                                .into(),
+                        );
+                    }
+                    cursor.move_next();
+
+                    key != last_frame_end
+                } {}
+            }
+
+            // Slide to the first affected key. We can safely compare to `Some(first_curr_key)` here
+            // because it must exist in the states, by the definition of affected range.
+            while states.curr_key() != Some(first_curr_key.as_normal_expect()) {
+                states.just_slide()?;
+            }
+            let mut curr_key_cursor = part_with_delta.find(first_curr_key).unwrap();
+            assert_eq!(
+                states.curr_key(),
+                curr_key_cursor.key().map(CacheKey::as_normal_expect)
+            );
+
+            // Slide and generate changes.
+            while {
+                let (key, row) = curr_key_cursor
+                    .key_value()
+                    .expect("cursor must be valid until `last_curr_key`");
+                let output = states.slide_no_evict_hint()?;
+                let new_row = OwnedRow::new(
+                    row.as_inner()
+                        .iter()
+                        .take(this.input_schema_len)
+                        .cloned()
+                        .chain(output)
+                        .collect(),
+                );
+
+                match curr_key_cursor.position() {
+                    PositionType::Ghost => unreachable!(),
+                    PositionType::Snapshot | PositionType::DeltaUpdate => {
+                        // update
+                        let old_row = snapshot.get(key).unwrap().clone();
+                        if old_row != new_row {
+                            part_changes.insert(
+                                key.as_normal_expect().clone(),
+                                Record::Update { old_row, new_row },
+                            );
+                        }
+                    }
+                    PositionType::DeltaInsert => {
+                        // insert
+                        part_changes
+                            .insert(key.as_normal_expect().clone(), Record::Insert { new_row });
+                    }
+                }
+
+                curr_key_cursor.move_next();
+
+                key != last_curr_key
+            } {}
+        }
+
+        Ok((part_changes, accessed_range))
+    }
+
+    #[try_stream(ok = Message, error = StreamExecutorError)]
+    async fn executor_inner(self) {
+        let OverWindowExecutor {
+            input,
+            inner: mut this,
+        } = self;
+
+        let metrics_info = MetricsInfo::new(
+            this.actor_ctx.streaming_metrics.clone(),
+            this.state_table.table_id(),
+            this.actor_ctx.id,
+            "OverWindow",
+        );
+
+        let metrics = metrics_info.metrics.new_over_window_metrics(
+            this.state_table.table_id(),
+            this.actor_ctx.id,
+            this.actor_ctx.fragment_id,
+        );
+
+        let mut vars = ExecutionVars {
+            cached_partitions: ManagedLruCache::unbounded(
+                this.watermark_sequence.clone(),
+                metrics_info,
+            ),
+            recently_accessed_ranges: Default::default(),
+            stats: Default::default(),
+            _phantom: PhantomData::<S>,
+        };
+
+        let mut input = input.execute();
+        let barrier = expect_first_barrier(&mut input).await?;
+        this.state_table.init_epoch(barrier.epoch);
+
+        yield Message::Barrier(barrier);
+
+        #[for_await]
+        for msg in input {
+            let msg = msg?;
+            match msg {
+                Message::Watermark(_) => {
+                    // TODO(rc): ignore watermark for now, we need to think about watermark for
+                    // window functions like `lead` carefully.
+                    continue;
+                }
+                Message::Chunk(chunk) => {
+                    #[for_await]
+                    for chunk in Self::apply_chunk(&mut this, &mut vars, chunk, &metrics) {
+                        yield Message::Chunk(chunk?);
+                    }
+                    this.state_table.try_flush().await?;
+                }
+                Message::Barrier(barrier) => {
+                    this.state_table.commit(barrier.epoch).await?;
+                    vars.cached_partitions.evict();
+
+                    metrics
+                        .over_window_cached_entry_count
+                        .set(vars.cached_partitions.len() as _);
+                    metrics
+                        .over_window_cache_lookup_count
+                        .inc_by(std::mem::take(&mut vars.stats.cache_lookup));
+                    metrics
+                        .over_window_cache_miss_count
+                        .inc_by(std::mem::take(&mut vars.stats.cache_miss));
+
+                    if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(this.actor_ctx.id) {
+                        let (_, cache_may_stale) =
+                            this.state_table.update_vnode_bitmap(vnode_bitmap);
+                        if cache_may_stale {
+                            vars.cached_partitions.clear();
+                            vars.recently_accessed_ranges.clear();
+                        }
+                    }
+
+                    if !this.cache_policy.is_full() {
+                        for (part_key, recently_accessed_range) in
+                            std::mem::take(&mut vars.recently_accessed_ranges)
+                        {
+                            if let Some(mut range_cache) =
+                                vars.cached_partitions.get_mut(&part_key.0)
+                            {
+                                shrink_partition_cache(
+                                    &part_key.0,
+                                    &mut range_cache,
+                                    this.cache_policy,
+                                    recently_accessed_range,
+                                );
+                            }
+                        }
+                    }
+
+                    yield Message::Barrier(barrier);
+                }
+            }
+        }
+    }
+}
+
+/// A converter that helps convert [`StateKey`] to state table sub-PK and convert executor input/output
+/// row to [`StateKey`].
+///
+/// ## Notes
+///
+/// - [`StateKey`]: Over window range cache key type, containing order key and input pk.
+/// - State table sub-PK: State table PK = PK prefix (partition key) + sub-PK (order key + input pk).
+/// - Input/output row: Input schema is the prefix of output schema.
+///
+/// You can see that the content of [`StateKey`] is very similar to state table sub-PK. There's only
+/// one difference: the state table PK and sub-PK don't have duplicated columns, while in [`StateKey`],
+/// `order_key` and (input)`pk` may contain duplicated columns.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct RowConverter<'a> {
+    state_key_to_table_sub_pk_proj: &'a [usize],
+    order_key_indices: &'a [usize],
+    order_key_data_types: &'a [DataType],
+    order_key_order_types: &'a [OrderType],
+    input_pk_indices: &'a [usize],
+}
+
+impl<'a> RowConverter<'a> {
+    /// Calculate the indices needed for projection from [`StateKey`] to state table sub-PK (used to do
+    /// prefixed table scanning). Ideally this function should be called only once by each executor instance.
+    /// The projection indices vec is the *selected column indices* in [`StateKey`].`order_key.chain(input_pk)`.
+    pub(super) fn calc_state_key_to_table_sub_pk_proj(
+        partition_key_indices: &[usize],
+        order_key_indices: &[usize],
+        input_pk_indices: &'a [usize],
+    ) -> Vec<usize> {
+        // This process is corresponding to `StreamOverWindow::infer_state_table`.
+        let mut projection = Vec::with_capacity(order_key_indices.len() + input_pk_indices.len());
+        let mut col_dedup: HashSet<usize> = partition_key_indices.iter().copied().collect();
+        for (proj_idx, key_idx) in order_key_indices
+            .iter()
+            .chain(input_pk_indices.iter())
+            .enumerate()
+        {
+            if col_dedup.insert(*key_idx) {
+                projection.push(proj_idx);
+            }
+        }
+        projection.shrink_to_fit();
+        projection
+    }
+
+    /// Convert [`StateKey`] to sub-PK (table PK without partition key) as [`OwnedRow`].
+    pub(super) fn state_key_to_table_sub_pk(
+        &self,
+        key: &StateKey,
+    ) -> StreamExecutorResult<OwnedRow> {
+        Ok(memcmp_encoding::decode_row(
+            &key.order_key,
+            self.order_key_data_types,
+            self.order_key_order_types,
+        )?
+        .chain(key.pk.as_inner())
+        .project(self.state_key_to_table_sub_pk_proj)
+        .into_owned_row())
+    }
+
+    /// Convert full input/output row to [`StateKey`].
+    pub(super) fn row_to_state_key(
+        &self,
+        full_row: impl Row + Copy,
+    ) -> StreamExecutorResult<StateKey> {
+        Ok(StateKey {
+            order_key: memcmp_encoding::encode_row(
+                full_row.project(self.order_key_indices),
+                self.order_key_order_types,
+            )?,
+            pk: full_row
+                .project(self.input_pk_indices)
+                .into_owned_row()
+                .into(),
+        })
+    }
+}

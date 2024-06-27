@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,111 +12,123 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::{Debug, Formatter};
-
 use either::Either;
-use futures::StreamExt;
-use futures_async_stream::try_stream;
-use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::types::{DataType, DatumRef};
-use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
+use multimap::MultiMap;
+use risingwave_common::array::{ArrayRef, DataChunk, Op};
+use risingwave_common::bail;
+use risingwave_common::row::RowExt;
+use risingwave_common::types::ToOwnedDatum;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::table_function::ProjectSetSelectItem;
+use risingwave_expr::expr::{self, EvalErrorReport, NonStrictExpression};
+use risingwave_expr::table_function::{self, BoxedTableFunction, TableFunctionOutputIter};
+use risingwave_expr::ExprError;
+use risingwave_pb::expr::project_set_select_item::PbSelectItem;
+use risingwave_pb::expr::PbProjectSetSelectItem;
 
-use super::error::StreamExecutorError;
-use super::{BoxedExecutor, Executor, ExecutorInfo, Message, PkIndices, PkIndicesRef};
+use crate::executor::prelude::*;
+use crate::task::ActorEvalErrorReport;
 
-impl ProjectSetExecutor {
-    pub fn new(
-        input: Box<dyn Executor>,
-        pk_indices: PkIndices,
-        select_list: Vec<ProjectSetSelectItem>,
-        executor_id: u64,
-        chunk_size: usize,
-    ) -> Self {
-        let mut fields = vec![Field::with_name(DataType::Int64, "projected_row_id")];
-        fields.extend(
-            select_list
-                .iter()
-                .map(|expr| Field::unnamed(expr.return_type())),
-        );
-
-        let info = ExecutorInfo {
-            schema: Schema { fields },
-            pk_indices,
-            identity: format!("ProjectSet {:X}", executor_id),
-        };
-        Self {
-            input,
-            info,
-            select_list,
-            chunk_size,
-        }
-    }
-}
+const PROJ_ROW_ID_OFFSET: usize = 1;
 
 /// `ProjectSetExecutor` projects data with the `expr`. The `expr` takes a chunk of data,
 /// and returns a new data chunk. And then, `ProjectSetExecutor` will insert, delete
 /// or update element into next operator according to the result of the expression.
 pub struct ProjectSetExecutor {
-    input: BoxedExecutor,
-    info: ExecutorInfo,
-    /// Expressions of the current project_section.
+    input: Executor,
+    inner: Inner,
+}
+
+struct Inner {
+    _ctx: ActorContextRef,
+
+    /// Expressions of the current `project_section`.
     select_list: Vec<ProjectSetSelectItem>,
     chunk_size: usize,
+    /// All the watermark derivations, (`input_column_index`, `expr_idx`). And the
+    /// derivation expression is the `project_set`'s expression itself.
+    watermark_derivations: MultiMap<usize, usize>,
+    /// Indices of nondecreasing expressions in the expression list.
+    nondecreasing_expr_indices: Vec<usize>,
+    error_report: ActorEvalErrorReport,
+}
+
+impl ProjectSetExecutor {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        ctx: ActorContextRef,
+        input: Executor,
+        select_list: Vec<ProjectSetSelectItem>,
+        chunk_size: usize,
+        watermark_derivations: MultiMap<usize, usize>,
+        nondecreasing_expr_indices: Vec<usize>,
+        error_report: ActorEvalErrorReport,
+    ) -> Self {
+        let inner = Inner {
+            _ctx: ctx,
+            select_list,
+            chunk_size,
+            watermark_derivations,
+            nondecreasing_expr_indices,
+            error_report,
+        };
+
+        Self { input, inner }
+    }
 }
 
 impl Debug for ProjectSetExecutor {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ProjectSetExecutor")
-            .field("exprs", &self.select_list)
+            .field("exprs", &self.inner.select_list)
             .finish()
     }
 }
 
-impl Executor for ProjectSetExecutor {
+impl Execute for ProjectSetExecutor {
     fn execute(self: Box<Self>) -> super::BoxedMessageStream {
-        self.execute_inner().boxed()
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.info.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.info.identity
+        self.inner.execute(self.input).boxed()
     }
 }
 
-impl ProjectSetExecutor {
+impl Inner {
     #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn execute_inner(self) {
+    async fn execute(self, input: Executor) {
         assert!(!self.select_list.is_empty());
-
         // First column will be `projected_row_id`, which represents the index in the
         // output table
-        let mut ops_builder = Vec::with_capacity(self.chunk_size);
-        let mut builder = DataChunkBuilder::new(
-            std::iter::once(DataType::Int64)
-                .chain(self.select_list.iter().map(|i| i.return_type()))
-                .collect(),
-            self.chunk_size,
-        );
+        let data_types: Vec<_> = std::iter::once(DataType::Int64)
+            .chain(self.select_list.iter().map(|i| i.return_type()))
+            .collect();
         // a temporary row buffer
-        let mut row = vec![None as DatumRef<'_>; builder.num_columns()];
+        let mut row = vec![DatumRef::None; data_types.len()];
+        let mut builder = StreamChunkBuilder::new(self.chunk_size, data_types);
 
+        let mut last_nondec_expr_values = vec![None; self.nondecreasing_expr_indices.len()];
         #[for_await]
-        for msg in self.input.execute() {
+        for msg in input.execute() {
             match msg? {
-                Message::Watermark(_) => {
-                    todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                Message::Watermark(watermark) => {
+                    let watermarks = self.handle_watermark(watermark).await?;
+                    for watermark in watermarks {
+                        yield Message::Watermark(watermark)
+                    }
                 }
-                m @ Message::Barrier(_) => yield m,
+                m @ Message::Barrier(_) => {
+                    for (&expr_idx, value) in self
+                        .nondecreasing_expr_indices
+                        .iter()
+                        .zip_eq_fast(&mut last_nondec_expr_values)
+                    {
+                        if let Some(value) = std::mem::take(value) {
+                            yield Message::Watermark(Watermark::new(
+                                expr_idx + PROJ_ROW_ID_OFFSET,
+                                self.select_list[expr_idx].return_type(),
+                                value,
+                            ))
+                        }
+                    }
+                    yield m
+                }
                 Message::Chunk(chunk) => {
                     let mut results = Vec::with_capacity(self.select_list.len());
                     for select_item in &self.select_list {
@@ -146,11 +158,23 @@ impl ProjectSetExecutor {
                             // for each column
                             for (item, value) in results.iter_mut().zip_eq_fast(&mut row[1..]) {
                                 *value = match item {
-                                    Either::Left(state) => if let Some((i, value)) = state.peek() && i == row_idx {
-                                        valid = true;
-                                        value
-                                    } else {
-                                        None
+                                    Either::Left(state) => {
+                                        if let Some((i, result)) = state.peek()
+                                            && i == row_idx
+                                        {
+                                            match result {
+                                                Ok(value) => {
+                                                    valid = true;
+                                                    value
+                                                }
+                                                Err(err) => {
+                                                    self.error_report.report(err);
+                                                    None
+                                                }
+                                            }
+                                        } else {
+                                            None
+                                        }
                                     }
                                     Either::Right(array) => array.value_at(row_idx),
                                 };
@@ -159,110 +183,144 @@ impl ProjectSetExecutor {
                                 // no more output rows for the input row
                                 break;
                             }
-                            ops_builder.push(op);
-                            if let Some(chunk) = builder.append_one_row(&*row) {
-                                let ops = std::mem::replace(
-                                    &mut ops_builder,
-                                    Vec::with_capacity(self.chunk_size),
+                            if let Some(chunk) = builder.append_row(op, &*row) {
+                                self.update_last_nondec_expr_values(
+                                    &mut last_nondec_expr_values,
+                                    &chunk,
                                 );
-                                yield StreamChunk::from_parts(ops, chunk).into();
+                                yield Message::Chunk(chunk);
                             }
                             // move to the next row
                             for item in &mut results {
-                                if let Either::Left(state) = item && matches!(state.peek(), Some((i, _)) if i == row_idx) {
+                                if let Either::Left(state) = item
+                                    && matches!(state.peek(), Some((i, _)) if i == row_idx)
+                                {
                                     state.next().await?;
                                 }
                             }
                         }
                     }
-                    if let Some(chunk) = builder.consume_all() {
-                        let ops = std::mem::replace(
-                            &mut ops_builder,
-                            Vec::with_capacity(self.chunk_size),
-                        );
-                        yield StreamChunk::from_parts(ops, chunk).into();
+                    if let Some(chunk) = builder.take() {
+                        self.update_last_nondec_expr_values(&mut last_nondec_expr_values, &chunk);
+                        yield Message::Chunk(chunk);
                     }
                 }
             }
         }
     }
+
+    fn update_last_nondec_expr_values(
+        &self,
+        last_nondec_expr_values: &mut [Datum],
+        chunk: &StreamChunk,
+    ) {
+        if !self.nondecreasing_expr_indices.is_empty() {
+            if let Some((_, first_visible_row)) = chunk.rows().next() {
+                // it's ok to use the first row here, just one chunk delay
+                first_visible_row
+                    .project(&self.nondecreasing_expr_indices)
+                    .iter()
+                    .enumerate()
+                    .for_each(|(idx, value)| {
+                        last_nondec_expr_values[idx] = Some(
+                            value
+                                .to_owned_datum()
+                                .expect("non-decreasing expression should never be NULL"),
+                        );
+                    });
+            }
+        }
+    }
+
+    async fn handle_watermark(&self, watermark: Watermark) -> StreamExecutorResult<Vec<Watermark>> {
+        let expr_indices = match self.watermark_derivations.get_vec(&watermark.col_idx) {
+            Some(v) => v,
+            None => return Ok(vec![]),
+        };
+        let mut ret = vec![];
+        for expr_idx in expr_indices {
+            let expr_idx = *expr_idx;
+            let derived_watermark = match &self.select_list[expr_idx] {
+                ProjectSetSelectItem::Scalar(expr) => {
+                    watermark
+                        .clone()
+                        .transform_with_expr(expr, expr_idx + PROJ_ROW_ID_OFFSET)
+                        .await
+                }
+                ProjectSetSelectItem::Set(_) => {
+                    bail!("Watermark should not be produced by a table function");
+                }
+            };
+
+            if let Some(derived_watermark) = derived_watermark {
+                ret.push(derived_watermark);
+            } else {
+                warn!(
+                    "a NULL watermark is derived with the expression {}!",
+                    expr_idx
+                );
+            }
+        }
+        Ok(ret)
+    }
 }
 
-#[cfg(test)]
-mod tests {
-    use futures::StreamExt;
-    use risingwave_common::array::stream_chunk::StreamChunkTestExt;
-    use risingwave_common::array::StreamChunk;
-    use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::types::DataType;
-    use risingwave_expr::expr::build_from_pretty;
-    use risingwave_expr::table_function::repeat;
+/// Either a scalar expression or a set-returning function.
+///
+/// See also [`PbProjectSetSelectItem`].
+///
+/// A similar enum is defined in the `batch` module. The difference is that
+/// we use `NonStrictExpression` instead of `BoxedExpression` here.
+#[derive(Debug)]
+pub enum ProjectSetSelectItem {
+    Scalar(NonStrictExpression),
+    Set(BoxedTableFunction),
+}
 
-    use super::super::test_utils::MockSource;
-    use super::super::*;
-    use super::*;
+impl From<BoxedTableFunction> for ProjectSetSelectItem {
+    fn from(table_function: BoxedTableFunction) -> Self {
+        ProjectSetSelectItem::Set(table_function)
+    }
+}
 
-    const CHUNK_SIZE: usize = 1024;
+impl From<NonStrictExpression> for ProjectSetSelectItem {
+    fn from(expr: NonStrictExpression) -> Self {
+        ProjectSetSelectItem::Scalar(expr)
+    }
+}
 
-    #[tokio::test]
-    async fn test_project_set() {
-        let chunk1 = StreamChunk::from_pretty(
-            " I I
-            + 1 4
-            + 2 5
-            + 3 6",
-        );
-        let chunk2 = StreamChunk::from_pretty(
-            " I I
-            + 7 8
-            - 3 6",
-        );
-        let schema = Schema {
-            fields: vec![
-                Field::unnamed(DataType::Int64),
-                Field::unnamed(DataType::Int64),
-            ],
-        };
-        let source = MockSource::with_chunks(schema, PkIndices::new(), vec![chunk1, chunk2]);
-
-        let test_expr = build_from_pretty("(add:int8 $0:int8 $1:int8)");
-        let tf1 = repeat(build_from_pretty("1:int4"), 1);
-        let tf2 = repeat(build_from_pretty("2:int4"), 2);
-
-        let project_set = Box::new(ProjectSetExecutor::new(
-            Box::new(source),
-            vec![],
-            vec![test_expr.into(), tf1.into(), tf2.into()],
-            1,
-            CHUNK_SIZE,
-        ));
-
-        let expected = vec![
-            StreamChunk::from_pretty(
-                " I I i i
-                + 0 5 1 2
-                + 1 5 . 2
-                + 0 7 1 2
-                + 1 7 . 2
-                + 0 9 1 2
-                + 1 9 . 2",
-            ),
-            StreamChunk::from_pretty(
-                " I I  i i
-                + 0 15 1 2
-                + 1 15 . 2
-                - 0 9  1 2
-                - 1 9  . 2",
-            ),
-        ];
-
-        let mut project_set = project_set.execute();
-
-        for expected in expected {
-            let msg = project_set.next().await.unwrap().unwrap();
-            let chunk = msg.as_chunk().unwrap();
-            assert_eq!(*chunk, expected);
+impl ProjectSetSelectItem {
+    pub fn from_prost(
+        prost: &PbProjectSetSelectItem,
+        error_report: impl EvalErrorReport + 'static,
+        chunk_size: usize,
+    ) -> Result<Self, ExprError> {
+        match prost.select_item.as_ref().unwrap() {
+            PbSelectItem::Expr(expr) => {
+                expr::build_non_strict_from_prost(expr, error_report).map(Self::Scalar)
+            }
+            PbSelectItem::TableFunction(tf) => {
+                table_function::build_from_prost(tf, chunk_size).map(Self::Set)
+            }
         }
-        assert!(project_set.next().await.unwrap().unwrap().is_stop());
+    }
+
+    pub fn return_type(&self) -> DataType {
+        match self {
+            ProjectSetSelectItem::Scalar(expr) => expr.return_type(),
+            ProjectSetSelectItem::Set(tf) => tf.return_type(),
+        }
+    }
+
+    pub async fn eval<'a>(
+        &'a self,
+        input: &'a DataChunk,
+    ) -> Result<Either<TableFunctionOutputIter<'a>, ArrayRef>, ExprError> {
+        match self {
+            Self::Scalar(expr) => Ok(Either::Right(expr.eval_infallible(input).await)),
+            Self::Set(tf) => Ok(Either::Left(
+                TableFunctionOutputIter::new(tf.eval(input).await).await?,
+            )),
+        }
     }
 }

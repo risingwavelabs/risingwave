@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -42,30 +42,26 @@ impl RelationCollectorVisitor {
     }
 }
 
-impl PlanVisitor<()> for RelationCollectorVisitor {
-    type DefaultBehavior = impl DefaultBehavior<()>;
+impl PlanVisitor for RelationCollectorVisitor {
+    type Result = ();
+
+    type DefaultBehavior = impl DefaultBehavior<Self::Result>;
 
     fn default_behavior() -> Self::DefaultBehavior {
         DefaultValue
     }
 
     fn visit_batch_seq_scan(&mut self, plan: &crate::optimizer::plan_node::BatchSeqScan) {
-        if !plan.logical().is_sys_table {
-            self.relations.insert(plan.logical().table_desc.table_id);
-        }
+        self.relations.insert(plan.core().table_desc.table_id);
     }
 
     fn visit_logical_scan(&mut self, plan: &LogicalScan) {
-        if !plan.is_sys_table() {
-            self.relations.insert(plan.table_desc().table_id);
-        }
+        self.relations.insert(plan.table_desc().table_id);
     }
 
     fn visit_stream_table_scan(&mut self, plan: &StreamTableScan) {
-        let logical = plan.logical();
-        if !logical.is_sys_table {
-            self.relations.insert(logical.table_desc.table_id);
-        }
+        let logical = plan.core();
+        self.relations.insert(logical.table_desc.table_id);
     }
 
     fn visit_batch_source(&mut self, plan: &BatchSource) {

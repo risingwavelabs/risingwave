@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,15 +16,15 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnCatalog, Schema, TableVersionId};
-use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_sqlparser::ast::{Ident, ObjectName, Query, SelectItem};
 
 use super::statement::RewriteExprsRecursive;
 use super::BoundQuery;
-use crate::binder::Binder;
+use crate::binder::{Binder, Clause};
 use crate::catalog::TableId;
+use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{ExprImpl, InputRef};
 use crate::user::UserId;
 
@@ -38,6 +38,10 @@ pub struct BoundInsert {
 
     /// Name of the table to perform inserting.
     pub table_name: String,
+
+    /// All visible columns of the table, used as the output schema of `Insert` plan node if
+    /// `RETURNING` is specified.
+    pub table_visible_columns: Vec<ColumnCatalog>,
 
     /// Owner of the table to perform inserting.
     pub owner: UserId,
@@ -98,6 +102,8 @@ impl Binder {
         returning_items: Vec<SelectItem>,
     ) -> Result<BoundInsert> {
         let (schema_name, table_name) = Self::resolve_schema_qualified_name(&self.db_name, name)?;
+        // bind insert table
+        self.context.clause = Some(Clause::Insert);
         self.bind_table(schema_name.as_deref(), &table_name, None)?;
 
         let table_catalog = self.resolve_dml_table(schema_name.as_deref(), &table_name, true)?;
@@ -106,6 +112,12 @@ impl Binder {
         let table_id = table_catalog.id;
         let owner = table_catalog.owner;
         let table_version_id = table_catalog.version_id().expect("table must be versioned");
+        let table_visible_columns = table_catalog
+            .columns()
+            .iter()
+            .filter(|c| !c.is_hidden())
+            .cloned()
+            .collect_vec();
         let cols_to_insert_in_table = table_catalog.columns_to_insert().cloned().collect_vec();
 
         let generated_column_names = table_catalog
@@ -119,6 +131,11 @@ impl Binder {
                     &query_col_name
                 ))));
             }
+        }
+        if !generated_column_names.is_empty() && !returning_items.is_empty() {
+            return Err(RwError::from(ErrorCode::BindError(
+                "`RETURNING` clause is not supported for tables with generated columns".to_string(),
+            )));
         }
 
         // TODO(yuhao): refine this if row_id is always the last column.
@@ -158,14 +175,14 @@ impl Binder {
         // is given and it is NOT equivalent to assignment cast over potential implicit cast inside.
         // For example, the following is valid:
         //
-        // ```
+        // ```sql
         //   create table t (v1 time);
         //   insert into t values (timestamp '2020-01-01 01:02:03'), (time '03:04:05');
         // ```
         //
         // But the followings are not:
         //
-        // ```
+        // ```sql
         //   values (timestamp '2020-01-01 01:02:03'), (time '03:04:05');
         //   insert into t values (timestamp '2020-01-01 01:02:03'), (time '03:04:05') limit 1;
         // ```
@@ -267,6 +284,7 @@ impl Binder {
             table_id,
             table_version_id,
             table_name,
+            table_visible_columns,
             owner,
             row_id_index,
             column_indices: col_indices_to_insert,

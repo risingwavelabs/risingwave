@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,17 +15,35 @@
 use std::env;
 use std::ffi::OsStr;
 
-/// Returns whether the environment variable `key` is set to `true` or `1`.
+/// Checks whether the environment variable `key` is set to `true` or `1` or `t`.
+///
+/// Returns `false` if the environment variable is not set, or contains invalid characters.
 pub fn env_var_is_true(key: impl AsRef<OsStr>) -> bool {
-    env::var(key)
-        .map(|value| {
-            let value = value.to_lowercase();
-            value == "1" || value == "true"
-        })
-        .unwrap_or(false)
+    env_var_is_true_or(key, false)
 }
 
-/// Returns whether the environment variable indicating that we're running in CI is set.
-pub fn is_ci() -> bool {
-    env_var_is_true("RISINGWAVE_CI")
+/// Checks whether the environment variable `key` is set to `true` or `1` or `t`.
+///
+/// Returns `default` if the environment variable is not set, or contains invalid characters.
+pub fn env_var_is_true_or(key: impl AsRef<OsStr>, default: bool) -> bool {
+    env::var(key)
+        .map(|value| {
+            ["1", "t", "true"]
+                .iter()
+                .any(|&s| value.eq_ignore_ascii_case(s))
+        })
+        .unwrap_or(default)
+}
+
+/// Checks whether the environment variable `key` is set to `false` or `f` or `0`.
+///
+/// Returns `default` if the environment variable is not set, or contains invalid characters.
+pub fn env_var_is_false_or(key: impl AsRef<OsStr>, default: bool) -> bool {
+    env::var(key)
+        .map(|value| {
+            ["0", "f", "false"]
+                .iter()
+                .any(|&s| value.eq_ignore_ascii_case(s))
+        })
+        .unwrap_or(default)
 }

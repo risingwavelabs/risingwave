@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,371 +12,525 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
-use anyhow::{anyhow, Result};
+use anyhow::anyhow;
 use async_trait::async_trait;
+use aws_sdk_s3::types::Object;
 use bytes::Bytes;
 use enum_as_inner::EnumAsInner;
 use futures::stream::BoxStream;
+use futures::Stream;
 use itertools::Itertools;
-use parking_lot::Mutex;
 use risingwave_common::array::StreamChunk;
+use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
-use risingwave_common::error::{ErrorCode, ErrorSuppressor, Result as RwResult, RwError};
 use risingwave_common::types::{JsonbVal, Scalar};
-use risingwave_pb::connector_service::TableSchema;
+use risingwave_pb::catalog::{PbSource, PbStreamSourceInfo};
+use risingwave_pb::plan_common::ExternalTableDesc;
 use risingwave_pb::source::ConnectorSplit;
-use serde::{Deserialize, Serialize};
+use serde::de::DeserializeOwned;
 
+use super::cdc::DebeziumCdcMeta;
 use super::datagen::DatagenMeta;
-use super::filesystem::{FsSplit, S3FileReader, S3Properties, S3SplitEnumerator, S3_CONNECTOR};
 use super::google_pubsub::GooglePubsubMeta;
 use super::kafka::KafkaMeta;
+use super::kinesis::KinesisMeta;
 use super::monitor::SourceMetrics;
 use super::nexmark::source::message::NexmarkMeta;
+use super::{GCS_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR};
+use crate::error::ConnectorResult as Result;
 use crate::parser::ParserConfig;
-use crate::source::cdc::{
-    CdcProperties, CdcSplit, CdcSplitReader, DebeziumSplitEnumerator, CITUS_CDC_CONNECTOR,
-    MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR,
+use crate::source::filesystem::FsPageItem;
+use crate::source::monitor::EnumeratorMetrics;
+use crate::source::SplitImpl::{CitusCdc, MongodbCdc, MysqlCdc, PostgresCdc};
+use crate::with_options::WithOptions;
+use crate::{
+    dispatch_source_prop, dispatch_split_impl, for_all_sources, impl_connector_properties,
+    impl_split, match_source_name_str,
 };
-use crate::source::datagen::{
-    DatagenProperties, DatagenSplit, DatagenSplitEnumerator, DatagenSplitReader, DATAGEN_CONNECTOR,
-};
-use crate::source::dummy_connector::DummySplitReader;
-use crate::source::google_pubsub::{
-    PubsubProperties, PubsubSplit, PubsubSplitEnumerator, PubsubSplitReader,
-    GOOGLE_PUBSUB_CONNECTOR,
-};
-use crate::source::kafka::enumerator::KafkaSplitEnumerator;
-use crate::source::kafka::source::KafkaSplitReader;
-use crate::source::kafka::{KafkaProperties, KafkaSplit, KAFKA_CONNECTOR};
-use crate::source::kinesis::enumerator::client::KinesisSplitEnumerator;
-use crate::source::kinesis::source::reader::KinesisSplitReader;
-use crate::source::kinesis::split::KinesisSplit;
-use crate::source::kinesis::{KinesisProperties, KINESIS_CONNECTOR};
-use crate::source::nexmark::source::reader::NexmarkSplitReader;
-use crate::source::nexmark::{
-    NexmarkProperties, NexmarkSplit, NexmarkSplitEnumerator, NEXMARK_CONNECTOR,
-};
-use crate::source::pulsar::source::reader::PulsarSplitReader;
-use crate::source::pulsar::{
-    PulsarProperties, PulsarSplit, PulsarSplitEnumerator, PULSAR_CONNECTOR,
-};
-use crate::{impl_connector_properties, impl_split, impl_split_enumerator, impl_split_reader};
 
 const SPLIT_TYPE_FIELD: &str = "split_type";
 const SPLIT_INFO_FIELD: &str = "split_info";
+pub const UPSTREAM_SOURCE_KEY: &str = "connector";
+
+pub trait TryFromBTreeMap: Sized + UnknownFields {
+    /// Used to initialize the source properties from the raw untyped `WITH` options.
+    fn try_from_btreemap(
+        props: BTreeMap<String, String>,
+        deny_unknown_fields: bool,
+    ) -> Result<Self>;
+}
+
+/// Represents `WITH` options for sources.
+///
+/// Each instance should add a `#[derive(with_options::WithOptions)]` marker.
+pub trait SourceProperties: TryFromBTreeMap + Clone + WithOptions {
+    const SOURCE_NAME: &'static str;
+    type Split: SplitMetaData
+        + TryFrom<SplitImpl, Error = crate::error::ConnectorError>
+        + Into<SplitImpl>;
+    type SplitEnumerator: SplitEnumerator<Properties = Self, Split = Self::Split>;
+    type SplitReader: SplitReader<Split = Self::Split, Properties = Self>;
+
+    /// Load additional info from `PbSource`. Currently only used by CDC.
+    fn init_from_pb_source(&mut self, _source: &PbSource) {}
+
+    /// Load additional info from `ExternalTableDesc`. Currently only used by CDC.
+    fn init_from_pb_cdc_table_desc(&mut self, _table_desc: &ExternalTableDesc) {}
+}
+
+pub trait UnknownFields {
+    /// Unrecognized fields in the `WITH` clause.
+    fn unknown_fields(&self) -> HashMap<String, String>;
+}
+
+impl<P: DeserializeOwned + UnknownFields> TryFromBTreeMap for P {
+    fn try_from_btreemap(
+        props: BTreeMap<String, String>,
+        deny_unknown_fields: bool,
+    ) -> Result<Self> {
+        let json_value = serde_json::to_value(props)?;
+        let res = serde_json::from_value::<P>(json_value)?;
+
+        if !deny_unknown_fields || res.unknown_fields().is_empty() {
+            Ok(res)
+        } else {
+            bail!(
+                "Unknown fields in the WITH clause: {:?}",
+                res.unknown_fields()
+            )
+        }
+    }
+}
+
+pub async fn create_split_reader<P: SourceProperties + std::fmt::Debug>(
+    prop: P,
+    splits: Vec<SplitImpl>,
+    parser_config: ParserConfig,
+    source_ctx: SourceContextRef,
+    columns: Option<Vec<Column>>,
+) -> Result<P::SplitReader> {
+    let splits = splits.into_iter().map(P::Split::try_from).try_collect()?;
+    P::SplitReader::new(prop, splits, parser_config, source_ctx, columns).await
+}
 
 /// [`SplitEnumerator`] fetches the split metadata from the external source service.
 /// NOTE: It runs in the meta server, so probably it should be moved to the `meta` crate.
 #[async_trait]
 pub trait SplitEnumerator: Sized {
-    type Split: SplitMetaData + Send + Sync;
+    type Split: SplitMetaData + Send;
     type Properties;
 
-    async fn new(properties: Self::Properties) -> Result<Self>;
+    async fn new(properties: Self::Properties, context: SourceEnumeratorContextRef)
+        -> Result<Self>;
     async fn list_splits(&mut self) -> Result<Vec<Self::Split>>;
 }
 
 pub type SourceContextRef = Arc<SourceContext>;
+pub type SourceEnumeratorContextRef = Arc<SourceEnumeratorContext>;
 
-#[derive(Debug, Default)]
-pub struct SourceContext {
-    pub source_info: SourceInfo,
-    pub metrics: Arc<SourceMetrics>,
-    error_suppressor: Option<Arc<Mutex<ErrorSuppressor>>>,
+/// The max size of a chunk yielded by source stream.
+pub const MAX_CHUNK_SIZE: usize = 1024;
+
+#[derive(Debug, Clone)]
+pub struct SourceCtrlOpts {
+    /// The max size of a chunk yielded by source stream.
+    pub chunk_size: usize,
+    /// Rate limit of source
+    pub rate_limit: Option<u32>,
 }
+
+// The options in `SourceCtrlOpts` are so important that we don't want to impl `Default` for it,
+// so that we can prevent any unintentional use of the default value.
+impl !Default for SourceCtrlOpts {}
+
+#[derive(Debug)]
+pub struct SourceEnumeratorContext {
+    pub info: SourceEnumeratorInfo,
+    pub metrics: Arc<EnumeratorMetrics>,
+}
+
+impl SourceEnumeratorContext {
+    /// Create a dummy `SourceEnumeratorContext` for testing purpose, or for the situation
+    /// where the real context doesn't matter.
+    pub fn dummy() -> SourceEnumeratorContext {
+        SourceEnumeratorContext {
+            info: SourceEnumeratorInfo { source_id: 0 },
+            metrics: Arc::new(EnumeratorMetrics::default()),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct SourceEnumeratorInfo {
+    pub source_id: u32,
+}
+
+#[derive(Debug)]
+pub struct SourceContext {
+    pub actor_id: u32,
+    pub source_id: TableId,
+    pub fragment_id: u32,
+    pub source_name: String,
+    pub metrics: Arc<SourceMetrics>,
+    pub source_ctrl_opts: SourceCtrlOpts,
+    pub connector_props: ConnectorProperties,
+}
+
 impl SourceContext {
     pub fn new(
         actor_id: u32,
-        table_id: TableId,
+        source_id: TableId,
         fragment_id: u32,
+        source_name: String,
         metrics: Arc<SourceMetrics>,
+        source_ctrl_opts: SourceCtrlOpts,
+        connector_props: ConnectorProperties,
     ) -> Self {
         Self {
-            source_info: SourceInfo {
-                actor_id,
-                source_id: table_id,
-                fragment_id,
-            },
+            actor_id,
+            source_id,
+            fragment_id,
+            source_name,
             metrics,
-            error_suppressor: None,
+            source_ctrl_opts,
+            connector_props,
         }
     }
 
-    pub fn add_suppressor(&mut self, error_suppressor: Arc<Mutex<ErrorSuppressor>>) {
-        self.error_suppressor = Some(error_suppressor)
+    /// Create a dummy `SourceContext` for testing purpose, or for the situation
+    /// where the real context doesn't matter.
+    pub fn dummy() -> Self {
+        Self::new(
+            0,
+            TableId::new(0),
+            0,
+            "dummy".to_string(),
+            Arc::new(SourceMetrics::default()),
+            SourceCtrlOpts {
+                chunk_size: MAX_CHUNK_SIZE,
+                rate_limit: None,
+            },
+            ConnectorProperties::default(),
+        )
     }
+}
 
-    pub(crate) fn report_user_source_error(&self, e: RwError) -> RwResult<()> {
-        // Repropagate the error if batch
-        if self.source_info.fragment_id == u32::MAX {
-            return Err(e);
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum SourceFormat {
+    #[default]
+    Invalid,
+    Native,
+    None,
+    Debezium,
+    DebeziumMongo,
+    Maxwell,
+    Canal,
+    Upsert,
+    Plain,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum SourceEncode {
+    #[default]
+    Invalid,
+    Native,
+    None,
+    Avro,
+    Csv,
+    Protobuf,
+    Json,
+    Bytes,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub struct SourceStruct {
+    pub format: SourceFormat,
+    pub encode: SourceEncode,
+}
+
+impl SourceStruct {
+    pub fn new(format: SourceFormat, encode: SourceEncode) -> Self {
+        Self { format, encode }
+    }
+}
+
+// Only return valid (format, encode)
+pub fn extract_source_struct(info: &PbStreamSourceInfo) -> Result<SourceStruct> {
+    use risingwave_pb::plan_common::{PbEncodeType, PbFormatType, RowFormatType};
+
+    // old version meta.
+    if let Ok(format) = info.get_row_format() {
+        let (format, encode) = match format {
+            RowFormatType::Json => (SourceFormat::Plain, SourceEncode::Json),
+            RowFormatType::Protobuf => (SourceFormat::Plain, SourceEncode::Protobuf),
+            RowFormatType::DebeziumJson => (SourceFormat::Debezium, SourceEncode::Json),
+            RowFormatType::Avro => (SourceFormat::Plain, SourceEncode::Avro),
+            RowFormatType::Maxwell => (SourceFormat::Maxwell, SourceEncode::Json),
+            RowFormatType::CanalJson => (SourceFormat::Canal, SourceEncode::Json),
+            RowFormatType::Csv => (SourceFormat::Plain, SourceEncode::Csv),
+            RowFormatType::Native => (SourceFormat::Native, SourceEncode::Native),
+            RowFormatType::DebeziumAvro => (SourceFormat::Debezium, SourceEncode::Avro),
+            RowFormatType::UpsertJson => (SourceFormat::Upsert, SourceEncode::Json),
+            RowFormatType::UpsertAvro => (SourceFormat::Upsert, SourceEncode::Avro),
+            RowFormatType::DebeziumMongoJson => (SourceFormat::DebeziumMongo, SourceEncode::Json),
+            RowFormatType::Bytes => (SourceFormat::Plain, SourceEncode::Bytes),
+            RowFormatType::RowUnspecified => unreachable!(),
+        };
+        return Ok(SourceStruct::new(format, encode));
+    }
+    let source_format = info.get_format()?;
+    let source_encode = info.get_row_encode()?;
+    let (format, encode) = match (source_format, source_encode) {
+        (PbFormatType::Plain, PbEncodeType::Json) => (SourceFormat::Plain, SourceEncode::Json),
+        (PbFormatType::Plain, PbEncodeType::Protobuf) => {
+            (SourceFormat::Plain, SourceEncode::Protobuf)
         }
-        let mut err_str = e.inner().to_string();
-        if let Some(suppressor) = &self.error_suppressor
-            && suppressor.lock().suppress_error(&err_str)
-        {
-            err_str = format!(
-                "error msg suppressed (due to per-actor error limit: {})",
-                suppressor.lock().max()
+        (PbFormatType::Debezium, PbEncodeType::Json) => {
+            (SourceFormat::Debezium, SourceEncode::Json)
+        }
+        (PbFormatType::Plain, PbEncodeType::Avro) => (SourceFormat::Plain, SourceEncode::Avro),
+        (PbFormatType::Maxwell, PbEncodeType::Json) => (SourceFormat::Maxwell, SourceEncode::Json),
+        (PbFormatType::Canal, PbEncodeType::Json) => (SourceFormat::Canal, SourceEncode::Json),
+        (PbFormatType::Plain, PbEncodeType::Csv) => (SourceFormat::Plain, SourceEncode::Csv),
+        (PbFormatType::Native, PbEncodeType::Native) => {
+            (SourceFormat::Native, SourceEncode::Native)
+        }
+        (PbFormatType::None, PbEncodeType::None) => (SourceFormat::None, SourceEncode::None),
+        (PbFormatType::Debezium, PbEncodeType::Avro) => {
+            (SourceFormat::Debezium, SourceEncode::Avro)
+        }
+        (PbFormatType::Upsert, PbEncodeType::Json) => (SourceFormat::Upsert, SourceEncode::Json),
+        (PbFormatType::Upsert, PbEncodeType::Avro) => (SourceFormat::Upsert, SourceEncode::Avro),
+        (PbFormatType::DebeziumMongo, PbEncodeType::Json) => {
+            (SourceFormat::DebeziumMongo, SourceEncode::Json)
+        }
+        (PbFormatType::Plain, PbEncodeType::Bytes) => (SourceFormat::Plain, SourceEncode::Bytes),
+        (format, encode) => {
+            bail!(
+                "Unsupported combination of format {:?} and encode {:?}",
+                format,
+                encode
             );
         }
-        self.metrics
-            .user_source_error_count
-            .with_label_values(&[
-                "SourceError",
-                // TODO(jon-chuang): add the error msg truncator to truncate these
-                &err_str,
-                // Let's be a bit more specific for SourceExecutor
-                "SourceExecutor",
-                &self.source_info.fragment_id.to_string(),
-                &self.source_info.source_id.table_id.to_string(),
-            ])
-            .inc();
-        Ok(())
-    }
+    };
+    Ok(SourceStruct::new(format, encode))
 }
 
-#[derive(Clone, Copy, Debug, Default)]
-pub struct SourceInfo {
-    pub actor_id: u32,
-    pub source_id: TableId,
-    // There should be a 1-1 mapping between `source_id` & `fragment_id`
-    pub fragment_id: u32,
+/// Stream of [`SourceMessage`].
+pub type BoxSourceStream = BoxStream<'static, crate::error::ConnectorResult<Vec<SourceMessage>>>;
+
+// Manually expand the trait alias to improve IDE experience.
+pub trait ChunkSourceStream:
+    Stream<Item = crate::error::ConnectorResult<StreamChunk>> + Send + 'static
+{
+}
+impl<T> ChunkSourceStream for T where
+    T: Stream<Item = crate::error::ConnectorResult<StreamChunk>> + Send + 'static
+{
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SourceFormat {
-    Invalid,
-    Json,
-    UpsertJson,
-    Protobuf,
-    DebeziumJson,
-    Avro,
-    UpsertAvro,
-    Maxwell,
-    CanalJson,
-    Csv,
-    Native,
-    DebeziumAvro,
-    DebeziumMongoJson,
-}
-
-pub type BoxSourceStream = BoxStream<'static, Result<Vec<SourceMessage>>>;
-pub type BoxSourceWithStateStream = BoxStream<'static, Result<StreamChunkWithState, RwError>>;
-
-/// [`StreamChunkWithState`] returns stream chunk together with offset for each split. In the
-/// current design, one connector source can have multiple split reader. The keys are unique
-/// `split_id` and values are the latest offset for each split.
-#[derive(Clone, Debug, PartialEq)]
-pub struct StreamChunkWithState {
-    pub chunk: StreamChunk,
-    pub split_offset_mapping: Option<HashMap<SplitId, String>>,
-}
-
-/// The `split_offset_mapping` field is unused for the table source, so we implement `From` for it.
-impl From<StreamChunk> for StreamChunkWithState {
-    fn from(chunk: StreamChunk) -> Self {
-        Self {
-            chunk,
-            split_offset_mapping: None,
-        }
-    }
-}
+pub type BoxChunkSourceStream = BoxStream<'static, crate::error::ConnectorResult<StreamChunk>>;
+pub type BoxTryStream<M> = BoxStream<'static, crate::error::ConnectorResult<M>>;
 
 /// [`SplitReader`] is a new abstraction of the external connector read interface which is
 /// responsible for parsing, it is used to read messages from the outside and transform them into a
 /// stream of parsed [`StreamChunk`]
 #[async_trait]
-pub trait SplitReader: Sized {
+pub trait SplitReader: Sized + Send {
     type Properties;
+    type Split: SplitMetaData;
 
     async fn new(
         properties: Self::Properties,
-        state: Vec<SplitImpl>,
+        state: Vec<Self::Split>,
         parser_config: ParserConfig,
         source_ctx: SourceContextRef,
         columns: Option<Vec<Column>>,
-    ) -> Result<Self>;
+    ) -> crate::error::ConnectorResult<Self>;
 
-    fn into_stream(self) -> BoxSourceWithStateStream;
+    fn into_stream(self) -> BoxChunkSourceStream;
 }
 
-/// The max size of a chunk yielded by source stream.
-pub const MAX_CHUNK_SIZE: usize = 1024;
+for_all_sources!(impl_connector_properties);
 
-#[derive(Clone, Debug, Deserialize)]
-pub enum ConnectorProperties {
-    Kafka(Box<KafkaProperties>),
-    Pulsar(Box<PulsarProperties>),
-    Kinesis(Box<KinesisProperties>),
-    Nexmark(Box<NexmarkProperties>),
-    Datagen(Box<DatagenProperties>),
-    S3(Box<S3Properties>),
-    MySqlCdc(Box<CdcProperties>),
-    PostgresCdc(Box<CdcProperties>),
-    CitusCdc(Box<CdcProperties>),
-    GooglePubsub(Box<PubsubProperties>),
-    Dummy(Box<()>),
+impl Default for ConnectorProperties {
+    fn default() -> Self {
+        ConnectorProperties::Test(Box::default())
+    }
 }
 
 impl ConnectorProperties {
-    fn new_cdc_properties(
-        connector_name: &str,
-        properties: HashMap<String, String>,
+    pub fn is_new_fs_connector_hash_map(with_properties: &HashMap<String, String>) -> bool {
+        with_properties
+            .get(UPSTREAM_SOURCE_KEY)
+            .map(|s| {
+                s.eq_ignore_ascii_case(OPENDAL_S3_CONNECTOR)
+                    || s.eq_ignore_ascii_case(POSIX_FS_CONNECTOR)
+                    || s.eq_ignore_ascii_case(GCS_CONNECTOR)
+            })
+            .unwrap_or(false)
+    }
+}
+
+impl ConnectorProperties {
+    /// Creates typed source properties from the raw `WITH` properties.
+    ///
+    /// It checks the `connector` field, and them dispatches to the corresponding type's `try_from_btreemap` method.
+    ///
+    /// `deny_unknown_fields`: Since `WITH` options are persisted in meta, we do not deny unknown fields when restoring from
+    /// existing data to avoid breaking backwards compatibility. We only deny unknown fields when creating new sources.
+    pub fn extract(
+        mut with_properties: BTreeMap<String, String>,
+        deny_unknown_fields: bool,
     ) -> Result<Self> {
-        match connector_name {
-            MYSQL_CDC_CONNECTOR => Ok(Self::MySqlCdc(Box::new(CdcProperties {
-                props: properties,
-                source_type: "mysql".to_string(),
-                ..Default::default()
-            }))),
-            POSTGRES_CDC_CONNECTOR => Ok(Self::PostgresCdc(Box::new(CdcProperties {
-                props: properties,
-                source_type: "postgres".to_string(),
-                ..Default::default()
-            }))),
-            CITUS_CDC_CONNECTOR => Ok(Self::CitusCdc(Box::new(CdcProperties {
-                props: properties,
-                source_type: "citus".to_string(),
-                ..Default::default()
-            }))),
-            _ => Err(anyhow!("unexpected cdc connector '{}'", connector_name,)),
-        }
+        let connector = with_properties
+            .remove(UPSTREAM_SOURCE_KEY)
+            .ok_or_else(|| anyhow!("Must specify 'connector' in WITH clause"))?;
+        match_source_name_str!(
+            connector.to_lowercase().as_str(),
+            PropType,
+            PropType::try_from_btreemap(with_properties, deny_unknown_fields)
+                .map(ConnectorProperties::from),
+            |other| bail!("connector '{}' is not supported", other)
+        )
     }
 
-    pub fn init_properties_for_cdc(
-        &mut self,
-        source_id: u32,
-        rpc_addr: String,
-        table_schema: Option<TableSchema>,
-    ) {
-        match self {
-            ConnectorProperties::MySqlCdc(c)
-            | ConnectorProperties::PostgresCdc(c)
-            | ConnectorProperties::CitusCdc(c) => {
-                c.source_id = source_id;
-                c.connector_node_addr = rpc_addr;
-                c.table_schema = table_schema;
+    pub fn enable_split_scale_in(&self) -> bool {
+        // enable split scale in just for Kinesis
+        matches!(self, ConnectorProperties::Kinesis(_))
+    }
+
+    /// Load additional info from `PbSource`. Currently only used by CDC.
+    pub fn init_from_pb_source(&mut self, source: &PbSource) {
+        dispatch_source_prop!(self, prop, prop.init_from_pb_source(source))
+    }
+
+    /// Load additional info from `ExternalTableDesc`. Currently only used by CDC.
+    pub fn init_from_pb_cdc_table_desc(&mut self, cdc_table_desc: &ExternalTableDesc) {
+        dispatch_source_prop!(self, prop, prop.init_from_pb_cdc_table_desc(cdc_table_desc))
+    }
+
+    pub fn support_multiple_splits(&self) -> bool {
+        matches!(self, ConnectorProperties::Kafka(_))
+            || matches!(self, ConnectorProperties::OpendalS3(_))
+            || matches!(self, ConnectorProperties::Gcs(_))
+    }
+}
+
+for_all_sources!(impl_split);
+
+impl From<&SplitImpl> for ConnectorSplit {
+    fn from(split: &SplitImpl) -> Self {
+        dispatch_split_impl!(split, inner, SourcePropType, {
+            ConnectorSplit {
+                split_type: String::from(SourcePropType::SOURCE_NAME),
+                encoded_split: inner.encode_to_bytes().to_vec(),
             }
-            _ => {}
-        }
+        })
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, EnumAsInner, PartialEq, Hash)]
-pub enum SplitImpl {
-    Kafka(KafkaSplit),
-    Pulsar(PulsarSplit),
-    Kinesis(KinesisSplit),
-    Nexmark(NexmarkSplit),
-    Datagen(DatagenSplit),
-    GooglePubsub(PubsubSplit),
-    MySqlCdc(CdcSplit),
-    PostgresCdc(CdcSplit),
-    CitusCdc(CdcSplit),
-    S3(FsSplit),
+impl TryFrom<&ConnectorSplit> for SplitImpl {
+    type Error = crate::error::ConnectorError;
+
+    fn try_from(split: &ConnectorSplit) -> std::result::Result<Self, Self::Error> {
+        match_source_name_str!(
+            split.split_type.to_lowercase().as_str(),
+            PropType,
+            {
+                <PropType as SourceProperties>::Split::restore_from_bytes(
+                    split.encoded_split.as_ref(),
+                )
+                .map(Into::into)
+            },
+            |other| bail!("connector '{}' is not supported", other)
+        )
+    }
 }
 
-// for the `FsSourceExecutor`
 impl SplitImpl {
-    #[allow(clippy::result_unit_err)]
-    pub fn into_fs(self) -> Result<FsSplit, ()> {
-        match self {
-            Self::S3(split) => Ok(split),
-            _ => Err(()),
-        }
+    fn restore_from_json_inner(split_type: &str, value: JsonbVal) -> Result<Self> {
+        match_source_name_str!(
+            split_type.to_lowercase().as_str(),
+            PropType,
+            <PropType as SourceProperties>::Split::restore_from_json(value).map(Into::into),
+            |other| bail!("connector '{}' is not supported", other)
+        )
     }
 
-    pub fn as_fs(&self) -> Option<&FsSplit> {
+    pub fn is_cdc_split(&self) -> bool {
+        matches!(
+            self,
+            MysqlCdc(_) | PostgresCdc(_) | MongodbCdc(_) | CitusCdc(_)
+        )
+    }
+
+    /// Get the current split offset.
+    pub fn get_cdc_split_offset(&self) -> String {
         match self {
-            Self::S3(split) => Some(split),
-            _ => None,
+            MysqlCdc(split) => split.start_offset().clone().unwrap_or_default(),
+            PostgresCdc(split) => split.start_offset().clone().unwrap_or_default(),
+            MongodbCdc(split) => split.start_offset().clone().unwrap_or_default(),
+            CitusCdc(split) => split.start_offset().clone().unwrap_or_default(),
+            _ => unreachable!("get_cdc_split_offset() is only for cdc split"),
         }
     }
 }
 
-pub enum SplitReaderImpl {
-    S3(Box<S3FileReader>),
-    Dummy(Box<DummySplitReader>),
-    Kinesis(Box<KinesisSplitReader>),
-    Kafka(Box<KafkaSplitReader>),
-    Nexmark(Box<NexmarkSplitReader>),
-    Pulsar(Box<PulsarSplitReader>),
-    Datagen(Box<DatagenSplitReader>),
-    MySqlCdc(Box<CdcSplitReader>),
-    PostgresCdc(Box<CdcSplitReader>),
-    CitusCdc(Box<CdcSplitReader>),
-    GooglePubsub(Box<PubsubSplitReader>),
+impl SplitMetaData for SplitImpl {
+    fn id(&self) -> SplitId {
+        dispatch_split_impl!(self, inner, IgnoreType, inner.id())
+    }
+
+    fn encode_to_json(&self) -> JsonbVal {
+        use serde_json::json;
+        let inner = self.encode_to_json_inner().take();
+        json!({ SPLIT_TYPE_FIELD: self.get_type(), SPLIT_INFO_FIELD: inner}).into()
+    }
+
+    fn restore_from_json(value: JsonbVal) -> Result<Self> {
+        let mut value = value.take();
+        let json_obj = value.as_object_mut().unwrap();
+        let split_type = json_obj
+            .remove(SPLIT_TYPE_FIELD)
+            .unwrap()
+            .as_str()
+            .unwrap()
+            .to_string();
+        let inner_value = json_obj.remove(SPLIT_INFO_FIELD).unwrap();
+        Self::restore_from_json_inner(&split_type, inner_value.into())
+    }
+
+    fn update_offset(&mut self, last_seen_offset: String) -> Result<()> {
+        dispatch_split_impl!(
+            self,
+            inner,
+            IgnoreType,
+            inner.update_offset(last_seen_offset)
+        )
+    }
 }
 
-pub enum SplitEnumeratorImpl {
-    Kafka(KafkaSplitEnumerator),
-    Pulsar(PulsarSplitEnumerator),
-    Kinesis(KinesisSplitEnumerator),
-    Nexmark(NexmarkSplitEnumerator),
-    Datagen(DatagenSplitEnumerator),
-    MySqlCdc(DebeziumSplitEnumerator),
-    PostgresCdc(DebeziumSplitEnumerator),
-    CitusCdc(DebeziumSplitEnumerator),
-    GooglePubsub(PubsubSplitEnumerator),
-    S3(S3SplitEnumerator),
-}
+impl SplitImpl {
+    pub fn get_type(&self) -> String {
+        dispatch_split_impl!(self, _ignored, PropType, {
+            PropType::SOURCE_NAME.to_string()
+        })
+    }
 
-impl_connector_properties! {
-    { Kafka, KAFKA_CONNECTOR },
-    { Pulsar, PULSAR_CONNECTOR },
-    { Kinesis, KINESIS_CONNECTOR },
-    { Nexmark, NEXMARK_CONNECTOR },
-    { Datagen, DATAGEN_CONNECTOR },
-    { S3, S3_CONNECTOR },
-    { MySqlCdc, MYSQL_CDC_CONNECTOR },
-    { PostgresCdc, POSTGRES_CDC_CONNECTOR },
-    { CitusCdc, CITUS_CDC_CONNECTOR },
-    { GooglePubsub, GOOGLE_PUBSUB_CONNECTOR}
-}
+    pub fn update_in_place(&mut self, last_seen_offset: String) -> Result<()> {
+        dispatch_split_impl!(self, inner, IgnoreType, {
+            inner.update_offset(last_seen_offset)?
+        });
+        Ok(())
+    }
 
-impl_split_enumerator! {
-    { Kafka, KafkaSplitEnumerator },
-    { Pulsar, PulsarSplitEnumerator },
-    { Kinesis, KinesisSplitEnumerator },
-    { Nexmark, NexmarkSplitEnumerator },
-    { Datagen, DatagenSplitEnumerator },
-    { MySqlCdc, DebeziumSplitEnumerator },
-    { PostgresCdc, DebeziumSplitEnumerator },
-    { CitusCdc, DebeziumSplitEnumerator },
-    { GooglePubsub, PubsubSplitEnumerator},
-    { S3, S3SplitEnumerator }
-}
-
-impl_split! {
-    { Kafka, KAFKA_CONNECTOR, KafkaSplit },
-    { Pulsar, PULSAR_CONNECTOR, PulsarSplit },
-    { Kinesis, KINESIS_CONNECTOR, KinesisSplit },
-    { Nexmark, NEXMARK_CONNECTOR, NexmarkSplit },
-    { Datagen, DATAGEN_CONNECTOR, DatagenSplit },
-    { GooglePubsub, GOOGLE_PUBSUB_CONNECTOR, PubsubSplit },
-    { MySqlCdc, MYSQL_CDC_CONNECTOR, CdcSplit },
-    { PostgresCdc, POSTGRES_CDC_CONNECTOR, CdcSplit },
-    { CitusCdc, CITUS_CDC_CONNECTOR, CdcSplit },
-    { S3, S3_CONNECTOR, FsSplit }
-}
-
-impl_split_reader! {
-    { S3, S3FileReader },
-    { Kafka, KafkaSplitReader },
-    { Pulsar, PulsarSplitReader },
-    { Kinesis, KinesisSplitReader },
-    { Nexmark, NexmarkSplitReader },
-    { Datagen, DatagenSplitReader },
-    { MySqlCdc, CdcSplitReader},
-    { PostgresCdc, CdcSplitReader},
-    { CitusCdc, CdcSplitReader },
-    { GooglePubsub, PubsubSplitReader },
-    { Dummy, DummySplitReader }
+    pub fn encode_to_json_inner(&self) -> JsonbVal {
+        dispatch_split_impl!(self, inner, IgnoreType, inner.encode_to_json())
+    }
 }
 
 pub type DataType = risingwave_common::types::DataType;
@@ -385,6 +539,7 @@ pub type DataType = risingwave_common::types::DataType;
 pub struct Column {
     pub name: String,
     pub data_type: DataType,
+    /// This field is only used by datagen.
     pub is_visible: bool,
 }
 
@@ -395,19 +550,34 @@ pub type SplitId = Arc<str>;
 /// The third-party message structs will eventually be transformed into this struct.
 #[derive(Debug, Clone)]
 pub struct SourceMessage {
+    pub key: Option<Vec<u8>>,
     pub payload: Option<Vec<u8>>,
-    pub offset: String,
+    pub offset: String, // TODO: use `Arc<str>`
     pub split_id: SplitId,
-
     pub meta: SourceMeta,
+}
+
+impl SourceMessage {
+    /// Create a dummy `SourceMessage` with all fields unset for testing purposes.
+    pub fn dummy() -> Self {
+        Self {
+            key: None,
+            payload: None,
+            offset: "".to_string(),
+            split_id: "".into(),
+            meta: SourceMeta::Empty,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
 pub enum SourceMeta {
     Kafka(KafkaMeta),
+    Kinesis(KinesisMeta),
     Nexmark(NexmarkMeta),
     GooglePubsub(GooglePubsubMeta),
     Datagen(DatagenMeta),
+    DebeziumCdc(DebeziumCdcMeta),
     // For the source that doesn't have meta data.
     Empty,
 }
@@ -435,15 +605,28 @@ pub trait SplitMetaData: Sized {
         Self::restore_from_json(JsonbVal::value_deserialize(bytes).unwrap())
     }
 
+    /// Encode the whole split metadata to a JSON object
     fn encode_to_json(&self) -> JsonbVal;
     fn restore_from_json(value: JsonbVal) -> Result<Self>;
+    fn update_offset(&mut self, last_seen_offset: String) -> crate::error::ConnectorResult<()>;
 }
 
 /// [`ConnectorState`] maintains the consuming splits' info. In specific split readers,
 /// `ConnectorState` cannot be [`None`] and contains one(for mq split readers) or many(for fs
 /// split readers) [`SplitImpl`]. If no split is assigned to source executor, `ConnectorState` is
-/// [`None`] and [`DummySplitReader`] is up instead of other split readers.
+/// [`None`] and the created source stream will be a pending stream.
 pub type ConnectorState = Option<Vec<SplitImpl>>;
+
+#[derive(Debug, Clone, Default)]
+pub struct FsFilterCtrlCtx;
+pub type FsFilterCtrlCtxRef = Arc<FsFilterCtrlCtx>;
+
+#[async_trait]
+pub trait FsListInner: Sized {
+    // fixme: better to implement as an Iterator, but the last page still have some contents
+    async fn get_next_page<T: for<'a> From<&'a Object>>(&mut self) -> Result<(Vec<T>, bool)>;
+    fn filter_policy(&self, ctx: &FsFilterCtrlCtx, page_num: usize, item: &FsPageItem) -> bool;
+}
 
 #[cfg(test)]
 mod tests {
@@ -451,6 +634,8 @@ mod tests {
     use nexmark::event::EventType;
 
     use super::*;
+    use crate::source::cdc::{DebeziumCdcSplit, Mysql};
+    use crate::source::kafka::KafkaSplit;
 
     #[test]
     fn test_split_impl_get_fn() -> Result<()> {
@@ -467,7 +652,8 @@ mod tests {
     #[test]
     fn test_cdc_split_state() -> Result<()> {
         let offset_str = "{\"sourcePartition\":{\"server\":\"RW_CDC_mydb.products\"},\"sourceOffset\":{\"transaction_id\":null,\"ts_sec\":1670407377,\"file\":\"binlog.000001\",\"pos\":98587,\"row\":2,\"server_id\":1,\"event\":2}}";
-        let split_impl = SplitImpl::MySqlCdc(CdcSplit::new(1001, offset_str.to_string()));
+        let split = DebeziumCdcSplit::<Mysql>::new(1001, Some(offset_str.to_string()), None);
+        let split_impl = SplitImpl::MysqlCdc(split);
         let encoded_split = split_impl.encode_to_bytes();
         let restored_split_impl = SplitImpl::restore_from_bytes(encoded_split.as_ref())?;
         assert_eq!(
@@ -494,13 +680,13 @@ mod tests {
 
     #[test]
     fn test_extract_nexmark_config() {
-        let props: HashMap<String, String> = convert_args!(hashmap!(
+        let props = convert_args!(btreemap!(
             "connector" => "nexmark",
             "nexmark.table.type" => "Person",
             "nexmark.split.num" => "1",
         ));
 
-        let props = ConnectorProperties::extract(props).unwrap();
+        let props = ConnectorProperties::extract(props, true).unwrap();
 
         if let ConnectorProperties::Nexmark(props) = props {
             assert_eq!(props.table_type, Some(EventType::Person));
@@ -512,7 +698,7 @@ mod tests {
 
     #[test]
     fn test_extract_kafka_config() {
-        let props: HashMap<String, String> = convert_args!(hashmap!(
+        let props = convert_args!(btreemap!(
             "connector" => "kafka",
             "properties.bootstrap.server" => "b1,b2",
             "topic" => "test",
@@ -520,10 +706,13 @@ mod tests {
             "broker.rewrite.endpoints" => r#"{"b-1:9092":"dns-1", "b-2:9092":"dns-2"}"#,
         ));
 
-        let props = ConnectorProperties::extract(props).unwrap();
+        let props = ConnectorProperties::extract(props, true).unwrap();
         if let ConnectorProperties::Kafka(k) = props {
-            assert!(k.common.broker_rewrite_map.is_some());
-            println!("{:?}", k.common.broker_rewrite_map);
+            let btreemap = btreemap! {
+                "b-1:9092".to_string() => "dns-1".to_string(),
+                "b-2:9092".to_string() => "dns-2".to_string(),
+            };
+            assert_eq!(k.privatelink_common.broker_rewrite_map, Some(btreemap));
         } else {
             panic!("extract kafka config failed");
         }
@@ -531,8 +720,7 @@ mod tests {
 
     #[test]
     fn test_extract_cdc_properties() {
-        let user_props_mysql: HashMap<String, String> = convert_args!(hashmap!(
-            "connector_node_addr" => "localhost",
+        let user_props_mysql = convert_args!(btreemap!(
             "connector" => "mysql-cdc",
             "database.hostname" => "127.0.0.1",
             "database.port" => "3306",
@@ -542,8 +730,7 @@ mod tests {
             "table.name" => "products",
         ));
 
-        let user_props_postgres: HashMap<String, String> = convert_args!(hashmap!(
-            "connector_node_addr" => "localhost",
+        let user_props_postgres = convert_args!(btreemap!(
             "connector" => "postgres-cdc",
             "database.hostname" => "127.0.0.1",
             "database.port" => "5432",
@@ -554,33 +741,27 @@ mod tests {
             "table.name" => "orders",
         ));
 
-        let conn_props = ConnectorProperties::extract(user_props_mysql).unwrap();
-        if let ConnectorProperties::MySqlCdc(c) = conn_props {
-            assert_eq!(c.source_id, 0);
-            assert_eq!(c.source_type, "mysql");
-            assert_eq!(c.props.get("connector_node_addr").unwrap(), "localhost");
-            assert_eq!(c.props.get("database.hostname").unwrap(), "127.0.0.1");
-            assert_eq!(c.props.get("database.port").unwrap(), "3306");
-            assert_eq!(c.props.get("database.user").unwrap(), "root");
-            assert_eq!(c.props.get("database.password").unwrap(), "123456");
-            assert_eq!(c.props.get("database.name").unwrap(), "mydb");
-            assert_eq!(c.props.get("table.name").unwrap(), "products");
+        let conn_props = ConnectorProperties::extract(user_props_mysql, true).unwrap();
+        if let ConnectorProperties::MysqlCdc(c) = conn_props {
+            assert_eq!(c.properties.get("database.hostname").unwrap(), "127.0.0.1");
+            assert_eq!(c.properties.get("database.port").unwrap(), "3306");
+            assert_eq!(c.properties.get("database.user").unwrap(), "root");
+            assert_eq!(c.properties.get("database.password").unwrap(), "123456");
+            assert_eq!(c.properties.get("database.name").unwrap(), "mydb");
+            assert_eq!(c.properties.get("table.name").unwrap(), "products");
         } else {
             panic!("extract cdc config failed");
         }
 
-        let conn_props = ConnectorProperties::extract(user_props_postgres).unwrap();
+        let conn_props = ConnectorProperties::extract(user_props_postgres, true).unwrap();
         if let ConnectorProperties::PostgresCdc(c) = conn_props {
-            assert_eq!(c.source_id, 0);
-            assert_eq!(c.source_type, "postgres");
-            assert_eq!(c.props.get("connector_node_addr").unwrap(), "localhost");
-            assert_eq!(c.props.get("database.hostname").unwrap(), "127.0.0.1");
-            assert_eq!(c.props.get("database.port").unwrap(), "5432");
-            assert_eq!(c.props.get("database.user").unwrap(), "root");
-            assert_eq!(c.props.get("database.password").unwrap(), "654321");
-            assert_eq!(c.props.get("schema.name").unwrap(), "public");
-            assert_eq!(c.props.get("database.name").unwrap(), "mypgdb");
-            assert_eq!(c.props.get("table.name").unwrap(), "orders");
+            assert_eq!(c.properties.get("database.hostname").unwrap(), "127.0.0.1");
+            assert_eq!(c.properties.get("database.port").unwrap(), "5432");
+            assert_eq!(c.properties.get("database.user").unwrap(), "root");
+            assert_eq!(c.properties.get("database.password").unwrap(), "654321");
+            assert_eq!(c.properties.get("schema.name").unwrap(), "public");
+            assert_eq!(c.properties.get("database.name").unwrap(), "mypgdb");
+            assert_eq!(c.properties.get("table.name").unwrap(), "orders");
         } else {
             panic!("extract cdc config failed");
         }

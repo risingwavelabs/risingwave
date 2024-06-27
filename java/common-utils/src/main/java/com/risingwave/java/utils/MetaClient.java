@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -93,7 +93,7 @@ public class MetaClient implements AutoCloseable {
 
         AddWorkerNodeRequest req =
                 AddWorkerNodeRequest.newBuilder()
-                        .setWorkerType(WorkerType.RISE_CTL)
+                        .setWorkerType(WorkerType.WORKER_TYPE_RISE_CTL)
                         .setHost(
                                 HostAddress.newBuilder().setHost("127.0.0.1").setPort(8880).build())
                         .setProperty(
@@ -105,7 +105,7 @@ public class MetaClient implements AutoCloseable {
                         .build();
         AddWorkerNodeResponse resp = clusterStub.addWorkerNode(req);
 
-        this.workerId = resp.getNode().getId();
+        this.workerId = resp.getNodeId();
     }
 
     public HummockVersion pinVersion() {

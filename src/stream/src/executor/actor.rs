@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,91 +12,101 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use anyhow::anyhow;
 use await_tree::InstrumentAwait;
 use futures::future::join_all;
 use hytra::TrAdder;
-use minitrace::prelude::*;
-use parking_lot::Mutex;
-use risingwave_common::error::ErrorSuppressor;
+use risingwave_common::catalog::TableId;
+use risingwave_common::log::LogSuppresser;
+use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::util::epoch::EpochPair;
+use risingwave_expr::expr_context::{expr_context_scope, FRAGMENT_ID};
 use risingwave_expr::ExprError;
+use risingwave_pb::plan_common::ExprContext;
+use risingwave_pb::stream_plan::PbStreamActor;
+use thiserror_ext::AsReport;
 use tokio_stream::StreamExt;
+use tracing::Instrument;
 
 use super::monitor::StreamingMetrics;
 use super::subtask::SubtaskHandle;
 use super::StreamConsumer;
 use crate::error::StreamResult;
-use crate::task::{ActorId, SharedContext};
+use crate::task::{ActorId, LocalBarrierManager};
 
 /// Shared by all operators of an actor.
 pub struct ActorContext {
     pub id: ActorId,
     pub fragment_id: u32,
+    pub mview_definition: String,
 
+    // TODO(eric): these seem to be useless now?
     last_mem_val: Arc<AtomicUsize>,
     cur_mem_val: Arc<AtomicUsize>,
     total_mem_val: Arc<TrAdder<i64>>,
+
     pub streaming_metrics: Arc<StreamingMetrics>,
-    pub error_suppressor: Arc<Mutex<ErrorSuppressor>>,
+
+    /// This is the number of dispatchers when the actor is created. It will not be updated during runtime when new downstreams are added.
+    pub initial_dispatch_num: usize,
+    // mv_table_id to subscription id
+    pub related_subscriptions: HashMap<TableId, HashSet<u32>>,
 }
 
 pub type ActorContextRef = Arc<ActorContext>;
 
 impl ActorContext {
-    pub fn create(id: ActorId) -> ActorContextRef {
+    pub fn for_test(id: ActorId) -> ActorContextRef {
         Arc::new(Self {
             id,
             fragment_id: 0,
+            mview_definition: "".to_string(),
             cur_mem_val: Arc::new(0.into()),
             last_mem_val: Arc::new(0.into()),
             total_mem_val: Arc::new(TrAdder::new()),
             streaming_metrics: Arc::new(StreamingMetrics::unused()),
-            error_suppressor: Arc::new(Mutex::new(ErrorSuppressor::new(10))),
+            // Set 1 for test to enable sanity check on table
+            initial_dispatch_num: 1,
+            related_subscriptions: HashMap::new(),
         })
     }
 
-    pub fn create_with_metrics(
-        id: ActorId,
-        fragment_id: u32,
+    pub fn create(
+        stream_actor: &PbStreamActor,
         total_mem_val: Arc<TrAdder<i64>>,
         streaming_metrics: Arc<StreamingMetrics>,
-        unique_user_errors: usize,
+        initial_dispatch_num: usize,
+        related_subscriptions: HashMap<TableId, HashSet<u32>>,
     ) -> ActorContextRef {
         Arc::new(Self {
-            id,
-            fragment_id,
+            id: stream_actor.actor_id,
+            fragment_id: stream_actor.fragment_id,
+            mview_definition: stream_actor.mview_definition.clone(),
             cur_mem_val: Arc::new(0.into()),
             last_mem_val: Arc::new(0.into()),
             total_mem_val,
             streaming_metrics,
-            error_suppressor: Arc::new(Mutex::new(ErrorSuppressor::new(unique_user_errors))),
+            initial_dispatch_num,
+            related_subscriptions,
         })
     }
 
     pub fn on_compute_error(&self, err: ExprError, identity: &str) {
-        tracing::error!("Compute error: {}, executor: {identity}", err);
-        let executor_name = identity.split(' ').next().unwrap_or("name_not_found");
-        let mut err_str = err.to_string();
-
-        if self.error_suppressor.lock().suppress_error(&err_str) {
-            err_str = format!(
-                "error msg suppressed (due to per-actor error limit: {})",
-                self.error_suppressor.lock().max()
-            );
+        static LOG_SUPPERSSER: LazyLock<LogSuppresser> = LazyLock::new(LogSuppresser::default);
+        if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+            tracing::error!(identity, error = %err.as_report(), suppressed_count, "failed to evaluate expression");
         }
-        self.streaming_metrics
-            .user_compute_error_count
-            .with_label_values(&[
-                "ExprError",
-                &err_str,
-                executor_name,
-                &self.fragment_id.to_string(),
-            ])
-            .inc();
+
+        let executor_name = identity.split(' ').next().unwrap_or("name_not_found");
+        GLOBAL_ERROR_METRICS.user_compute_error.report([
+            "ExprError".to_owned(),
+            executor_name.to_owned(),
+            self.fragment_id.to_string(),
+        ]);
     }
 
     pub fn store_mem_usage(&self, val: usize) {
@@ -124,9 +134,10 @@ pub struct Actor<C> {
     /// The subtasks to execute concurrently.
     subtasks: Vec<SubtaskHandle>,
 
-    context: Arc<SharedContext>,
     _metrics: Arc<StreamingMetrics>,
-    actor_context: ActorContextRef,
+    pub actor_context: ActorContextRef,
+    expr_context: ExprContext,
+    barrier_manager: LocalBarrierManager,
 }
 
 impl<C> Actor<C>
@@ -136,41 +147,58 @@ where
     pub fn new(
         consumer: C,
         subtasks: Vec<SubtaskHandle>,
-        context: Arc<SharedContext>,
         metrics: Arc<StreamingMetrics>,
         actor_context: ActorContextRef,
+        expr_context: ExprContext,
+        barrier_manager: LocalBarrierManager,
     ) -> Self {
         Self {
             consumer,
             subtasks,
-            context,
             _metrics: metrics,
             actor_context,
+            expr_context,
+            barrier_manager,
         }
     }
 
     #[inline(always)]
     pub async fn run(mut self) -> StreamResult<()> {
-        tokio::join!(
-            // Drive the subtasks concurrently.
-            join_all(std::mem::take(&mut self.subtasks)),
-            self.run_consumer(),
+        FRAGMENT_ID::scope(
+            self.actor_context.fragment_id,
+            expr_context_scope(self.expr_context.clone(), async move {
+                tokio::join!(
+                    // Drive the subtasks concurrently.
+                    join_all(std::mem::take(&mut self.subtasks)),
+                    self.run_consumer(),
+                )
+                .1
+            }),
         )
-        .1
+        .await
     }
 
     async fn run_consumer(self) -> StreamResult<()> {
+        fail::fail_point!("start_actors_err", |_| Err(anyhow::anyhow!(
+            "intentional start_actors_err"
+        )
+        .into()));
+
         let id = self.actor_context.id;
 
-        let span_name = format!("actor_poll_{:03}", id);
-        let mut span = {
-            let mut span = Span::enter_with_local_parent("actor_poll");
-            span.add_property(|| ("otel.name", span_name.to_string()));
-            span.add_property(|| ("next", id.to_string()));
-            span.add_property(|| ("next", "Outbound".to_string()));
-            span.add_property(|| ("epoch", (-1).to_string()));
-            span
+        let span_name = format!("Actor {id}");
+
+        let new_span = |epoch: Option<EpochPair>| {
+            tracing::info_span!(
+                parent: None,
+                "actor",
+                "otel.name" = span_name,
+                actor_id = id,
+                prev_epoch = epoch.map(|e| e.prev),
+                curr_epoch = epoch.map(|e| e.curr),
+            )
         };
+        let mut span = new_span(None);
 
         let mut last_epoch: Option<EpochPair> = None;
         let mut stream = Box::pin(Box::new(self.consumer).execute());
@@ -179,7 +207,7 @@ where
         let result = loop {
             let barrier = match stream
                 .try_next()
-                .in_span(span)
+                .instrument(span.clone())
                 .instrument_await(
                     last_epoch.map_or("Epoch <initial>".into(), |e| format!("Epoch {}", e.curr)),
                 )
@@ -190,29 +218,33 @@ where
                 Err(err) => break Err(err),
             };
 
-            // Collect barriers to local barrier manager
-            self.context.lock_barrier_manager().collect(id, &barrier);
+            fail::fail_point!("collect_actors_err", id == 10, |_| Err(anyhow::anyhow!(
+                "intentional collect_actors_err"
+            )
+            .into()));
 
             // Then stop this actor if asked
             if barrier.is_stop(id) {
-                break Ok(());
+                debug!(actor_id = id, epoch = ?barrier.epoch, "stop at barrier");
+                break Ok(barrier);
             }
+
+            // Collect barriers to local barrier manager
+            self.barrier_manager.collect(id, &barrier);
 
             // Tracing related work
             last_epoch = Some(barrier.epoch);
-            span = {
-                let mut span = Span::enter_with_local_parent("actor_poll");
-                span.add_property(|| ("otel.name", span_name.to_string()));
-                span.add_property(|| ("next", id.to_string()));
-                span.add_property(|| ("next", "Outbound".to_string()));
-                span.add_property(|| ("epoch", barrier.epoch.curr.to_string()));
-                span
-            };
+            span = barrier.tracing_context().attach(new_span(last_epoch));
         };
 
         spawn_blocking_drop_stream(stream).await;
 
-        tracing::trace!(actor_id = id, "actor exit");
+        let result = result.map(|stop_barrier| {
+            // Collect the stop barrier after the stream has been dropped to ensure that all resources
+            self.barrier_manager.collect(id, &stop_barrier);
+        });
+
+        tracing::debug!(actor_id = id, ok = result.is_ok(), "actor exit");
         result
     }
 }
@@ -220,7 +252,7 @@ where
 /// Drop the stream in a blocking task to avoid interfering with other actors.
 ///
 /// Logically the actor is dropped after we send the barrier with `Drop` mutation to the
-/// downstream，thus making the `drop`'s progress asynchronous. However, there might be a
+/// downstream, thus making the `drop`'s progress asynchronous. However, there might be a
 /// considerable amount of data in the executors' in-memory cache, dropping these structures might
 /// be a CPU-intensive task. This may lead to the runtime being unable to schedule other actors if
 /// the `drop` is called on the current thread.

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@ use parse_display::Display;
 use crate::array::{Array, ArrayImpl, DataChunk};
 use crate::hash::Crc32HashCode;
 use crate::row::{Row, RowExt};
-use crate::types::ScalarRefImpl;
+use crate::types::{DataType, Datum, DatumRef, ScalarImpl, ScalarRefImpl};
 use crate::util::hash_util::Crc32FastBuilder;
 use crate::util::row_id::extract_vnode_id_from_row_id;
 
@@ -64,6 +64,9 @@ pub type AllVirtualNodeIter = std::iter::Map<std::ops::Range<usize>, fn(usize) -
 impl VirtualNode {
     /// The maximum value of the virtual node.
     pub const MAX: VirtualNode = VirtualNode::from_index(Self::COUNT - 1);
+    /// We may use `VirtualNode` as a datum in a stream, or store it as a column.
+    /// Hence this reifies it as a RW datatype.
+    pub const RW_TYPE: DataType = DataType::Int16;
     /// The minimum (zero) value of the virtual node.
     pub const ZERO: VirtualNode = VirtualNode::from_index(0);
 
@@ -84,9 +87,17 @@ impl VirtualNode {
         Self(scalar as _)
     }
 
+    pub fn from_datum(datum: DatumRef<'_>) -> Self {
+        Self::from_scalar(datum.expect("should not be none").into_int16())
+    }
+
     /// Returns the scalar representation of the virtual node. Used by `VNODE` expression.
     pub const fn to_scalar(self) -> i16 {
         self.0 as _
+    }
+
+    pub const fn to_datum(self) -> Datum {
+        Some(ScalarImpl::Int16(self.to_scalar()))
     }
 
     /// Creates a virtual node from the given big-endian bytes representation.
@@ -114,11 +125,23 @@ impl VirtualNode {
     // and directly extract the `VirtualNode` from `RowId`.
     pub fn compute_chunk(data_chunk: &DataChunk, keys: &[usize]) -> Vec<VirtualNode> {
         if let Ok(idx) = keys.iter().exactly_one()
-            && let ArrayImpl::Serial(serial_array) = data_chunk.column_at(*idx).array_ref()
+            && let ArrayImpl::Serial(serial_array) = &**data_chunk.column_at(*idx)
         {
             return serial_array
                 .iter()
-                .map(|serial| extract_vnode_id_from_row_id(serial.unwrap().as_row_id()))
+                .enumerate()
+                .map(|(idx, serial)| {
+                    if let Some(serial) = serial {
+                        extract_vnode_id_from_row_id(serial.as_row_id())
+                    } else {
+                        // NOTE: here it will hash the entire row when the `_row_id` is missing,
+                        // which could result in rows from the same chunk being allocated to different chunks.
+                        // This process doesn’t guarantee the order of rows, producing indeterminate results in some cases,
+                        // such as when `distinct on` is used without an `order by`.
+                        let (row, _) = data_chunk.row_at(idx);
+                        row.hash(Crc32FastBuilder).into()
+                    }
+                })
                 .collect();
         }
 
@@ -129,8 +152,8 @@ impl VirtualNode {
             .collect()
     }
 
-    // `compute_row` is used to calculate the `VirtualNode` for the corresponding column in a `Row`.
-    // Similar to `compute_chunk`, it also contains special handling for serial columns.
+    // `compute_row` is used to calculate the `VirtualNode` for the corresponding columns in a
+    // `Row`. Similar to `compute_chunk`, it also contains special handling for serial columns.
     pub fn compute_row(row: impl Row, indices: &[usize]) -> VirtualNode {
         let project = row.project(indices);
         if let Ok(Some(ScalarRefImpl::Serial(s))) = project.iter().exactly_one().as_ref() {
@@ -146,7 +169,6 @@ mod tests {
     use super::*;
     use crate::array::DataChunkTestExt;
     use crate::row::OwnedRow;
-    use crate::types::ScalarImpl;
     use crate::util::row_id::RowIdGenerator;
 
     #[test]

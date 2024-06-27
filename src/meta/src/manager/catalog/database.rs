@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,15 +16,23 @@ use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use itertools::Itertools;
+use risingwave_common::bail;
 use risingwave_common::catalog::TableOption;
+use risingwave_pb::catalog::subscription::PbSubscriptionState;
+use risingwave_pb::catalog::table::TableType;
 use risingwave_pb::catalog::{
-    Connection, Database, Function, Index, Schema, Sink, Source, Table, View,
+    Connection, CreateType, Database, Function, Index, PbStreamJobStatus, Schema, Secret, Sink,
+    Source, StreamJobStatus, Subscription, Table, View,
 };
+use risingwave_pb::data::DataType;
+use risingwave_pb::user::grant_privilege::PbObject;
 
-use super::{ConnectionId, DatabaseId, FunctionId, RelationId, SchemaId, SinkId, SourceId, ViewId};
-use crate::manager::{IndexId, MetaSrvEnv, TableId};
+use super::{
+    ConnectionId, DatabaseId, FunctionId, RelationId, SchemaId, SecretId, SinkId, SourceId,
+    SubscriptionId, ViewId,
+};
+use crate::manager::{IndexId, MetaSrvEnv, TableId, UserId};
 use crate::model::MetadataModel;
-use crate::storage::MetaStore;
 use crate::{MetaError, MetaResult};
 
 pub type Catalog = (
@@ -33,15 +41,18 @@ pub type Catalog = (
     Vec<Table>,
     Vec<Source>,
     Vec<Sink>,
+    Vec<Subscription>,
     Vec<Index>,
     Vec<View>,
     Vec<Function>,
     Vec<Connection>,
+    Vec<Secret>,
 );
 
 type DatabaseKey = String;
 type SchemaKey = (DatabaseId, String);
 type RelationKey = (DatabaseId, SchemaId, String);
+type FunctionKey = (DatabaseId, SchemaId, String, Vec<DataType>);
 
 /// [`DatabaseManager`] caches meta catalog information and maintains dependent relationship
 /// between tables.
@@ -54,6 +65,8 @@ pub struct DatabaseManager {
     pub(super) sources: BTreeMap<SourceId, Source>,
     /// Cached sink information.
     pub(super) sinks: BTreeMap<SinkId, Sink>,
+    /// Cached subscription information.
+    pub(super) subscriptions: BTreeMap<SubscriptionId, Subscription>,
     /// Cached index information.
     pub(super) indexes: BTreeMap<IndexId, Index>,
     /// Cached table information.
@@ -64,10 +77,16 @@ pub struct DatabaseManager {
     pub(super) functions: BTreeMap<FunctionId, Function>,
     /// Cached connection information.
     pub(super) connections: BTreeMap<ConnectionId, Connection>,
+    /// Cached secret information.
+    pub(super) secrets: BTreeMap<SecretId, Secret>,
 
     /// Relation reference count mapping.
-    // TODO(zehua): avoid key conflicts after distinguishing table's and source's id generator.
     pub(super) relation_ref_count: HashMap<RelationId, usize>,
+
+    /// Secret reference count mapping
+    pub(super) secret_ref_count: HashMap<SecretId, usize>,
+    /// Connection reference count mapping.
+    pub(super) connection_ref_count: HashMap<ConnectionId, usize>,
     // In-progress creation tracker.
     pub(super) in_progress_creation_tracker: HashSet<RelationKey>,
     // In-progress creating streaming job tracker: this is a temporary workaround to avoid clean up
@@ -78,18 +97,22 @@ pub struct DatabaseManager {
 }
 
 impl DatabaseManager {
-    pub async fn new<S: MetaStore>(env: MetaSrvEnv<S>) -> MetaResult<Self> {
-        let databases = Database::list(env.meta_store()).await?;
-        let schemas = Schema::list(env.meta_store()).await?;
-        let sources = Source::list(env.meta_store()).await?;
-        let sinks = Sink::list(env.meta_store()).await?;
-        let tables = Table::list(env.meta_store()).await?;
-        let indexes = Index::list(env.meta_store()).await?;
-        let views = View::list(env.meta_store()).await?;
-        let functions = Function::list(env.meta_store()).await?;
-        let connections = Connection::list(env.meta_store()).await?;
+    pub async fn new(env: MetaSrvEnv) -> MetaResult<Self> {
+        let databases = Database::list(env.meta_store().as_kv()).await?;
+        let schemas = Schema::list(env.meta_store().as_kv()).await?;
+        let sources = Source::list(env.meta_store().as_kv()).await?;
+        let sinks = Sink::list(env.meta_store().as_kv()).await?;
+        let tables = Table::list(env.meta_store().as_kv()).await?;
+        let indexes = Index::list(env.meta_store().as_kv()).await?;
+        let views = View::list(env.meta_store().as_kv()).await?;
+        let functions = Function::list(env.meta_store().as_kv()).await?;
+        let connections = Connection::list(env.meta_store().as_kv()).await?;
+        let subscriptions = Subscription::list(env.meta_store().as_kv()).await?;
+        let secrets = Secret::list(env.meta_store().as_kv()).await?;
 
         let mut relation_ref_count = HashMap::new();
+        let mut connection_ref_count = HashMap::new();
+        let mut _secret_ref_count = HashMap::new();
 
         let databases = BTreeMap::from_iter(
             databases
@@ -98,9 +121,8 @@ impl DatabaseManager {
         );
         let schemas = BTreeMap::from_iter(schemas.into_iter().map(|schema| (schema.id, schema)));
         let sources = BTreeMap::from_iter(sources.into_iter().map(|source| {
-            // TODO(weili): wait for yezizp to refactor ref cnt
             if let Some(connection_id) = source.connection_id {
-                *relation_ref_count.entry(connection_id).or_default() += 1;
+                *connection_ref_count.entry(connection_id).or_default() += 1;
             }
             (source.id, source)
         }));
@@ -108,8 +130,18 @@ impl DatabaseManager {
             for depend_relation_id in &sink.dependent_relations {
                 *relation_ref_count.entry(*depend_relation_id).or_default() += 1;
             }
+            if let Some(connection_id) = sink.connection_id {
+                *connection_ref_count.entry(connection_id).or_default() += 1;
+            }
             (sink.id, sink)
         }));
+        let subscriptions = BTreeMap::from_iter(subscriptions.into_iter().map(|subscription| {
+            *relation_ref_count
+                .entry(subscription.dependent_table_id)
+                .or_default() += 1;
+            (subscription.id, subscription)
+        }));
+        let secrets = BTreeMap::from_iter(secrets.into_iter().map(|secret| (secret.id, secret)));
         let indexes = BTreeMap::from_iter(indexes.into_iter().map(|index| (index.id, index)));
         let tables = BTreeMap::from_iter(tables.into_iter().map(|table| {
             for depend_relation_id in &table.dependent_relations {
@@ -126,17 +158,23 @@ impl DatabaseManager {
         let functions = BTreeMap::from_iter(functions.into_iter().map(|f| (f.id, f)));
         let connections = BTreeMap::from_iter(connections.into_iter().map(|c| (c.id, c)));
 
+        // todo: scan over stream source info and sink to update secret ref count `_secret_ref_count`
+
         Ok(Self {
             databases,
             schemas,
             sources,
             sinks,
+            subscriptions,
             views,
             tables,
             indexes,
             functions,
             connections,
             relation_ref_count,
+            connection_ref_count,
+            secrets,
+            secret_ref_count: _secret_ref_count,
             in_progress_creation_tracker: HashSet::default(),
             in_progress_creation_streaming_job: HashMap::default(),
             in_progress_creating_tables: HashMap::default(),
@@ -147,23 +185,69 @@ impl DatabaseManager {
         (
             self.databases.values().cloned().collect_vec(),
             self.schemas.values().cloned().collect_vec(),
-            self.tables.values().cloned().collect_vec(),
+            self.tables
+                .values()
+                .filter(|t| {
+                    t.stream_job_status == PbStreamJobStatus::Unspecified as i32
+                        || t.stream_job_status == PbStreamJobStatus::Created as i32
+                })
+                .cloned()
+                .collect_vec(),
             self.sources.values().cloned().collect_vec(),
-            self.sinks.values().cloned().collect_vec(),
-            self.indexes.values().cloned().collect_vec(),
+            self.sinks
+                .values()
+                .filter(|t| {
+                    t.stream_job_status == PbStreamJobStatus::Unspecified as i32
+                        || t.stream_job_status == PbStreamJobStatus::Created as i32
+                })
+                .cloned()
+                .collect_vec(),
+            self.subscriptions
+                .values()
+                .filter(|t| t.subscription_state == PbSubscriptionState::Created as i32)
+                .cloned()
+                .collect_vec(),
+            self.indexes
+                .values()
+                .filter(|t| {
+                    t.stream_job_status == PbStreamJobStatus::Unspecified as i32
+                        || t.stream_job_status == PbStreamJobStatus::Created as i32
+                })
+                .cloned()
+                .collect_vec(),
             self.views.values().cloned().collect_vec(),
             self.functions.values().cloned().collect_vec(),
             self.connections.values().cloned().collect_vec(),
+            self.secrets.values().cloned().collect_vec(),
         )
     }
 
+    pub fn get_table_name_and_type_mapping(&self) -> HashMap<TableId, (String, String)> {
+        self.tables
+            .values()
+            .map(|table| {
+                (
+                    table.id,
+                    (
+                        table.name.clone(),
+                        table.table_type().as_str_name().to_string(),
+                    ),
+                )
+            })
+            .collect()
+    }
+
     pub fn check_relation_name_duplicated(&self, relation_key: &RelationKey) -> MetaResult<()> {
-        if self.tables.values().any(|x| {
+        if let Some(t) = self.tables.values().find(|x| {
             x.database_id == relation_key.0
                 && x.schema_id == relation_key.1
                 && x.name.eq(&relation_key.2)
         }) {
-            Err(MetaError::catalog_duplicated("table", &relation_key.2))
+            if t.stream_job_status == StreamJobStatus::Creating as i32 {
+                bail!("table is in creating procedure, table id: {}", t.id);
+            } else {
+                Err(MetaError::catalog_duplicated("table", &relation_key.2))
+            }
         } else if self.sources.values().any(|x| {
             x.database_id == relation_key.0
                 && x.schema_id == relation_key.1
@@ -182,6 +266,15 @@ impl DatabaseManager {
                 && x.name.eq(&relation_key.2)
         }) {
             Err(MetaError::catalog_duplicated("sink", &relation_key.2))
+        } else if self.subscriptions.values().any(|x| {
+            x.database_id == relation_key.0
+                && x.schema_id == relation_key.1
+                && x.name.eq(&relation_key.2)
+        }) {
+            Err(MetaError::catalog_duplicated(
+                "subscription",
+                &relation_key.2,
+            ))
         } else if self.views.values().any(|x| {
             x.database_id == relation_key.0
                 && x.schema_id == relation_key.1
@@ -193,14 +286,14 @@ impl DatabaseManager {
         }
     }
 
-    pub fn check_function_duplicated(&self, function: &Function) -> MetaResult<()> {
+    pub fn check_function_duplicated(&self, function_key: &FunctionKey) -> MetaResult<()> {
         if self.functions.values().any(|x| {
-            x.database_id == function.database_id
-                && x.schema_id == function.schema_id
-                && x.name.eq(&function.name)
-                && x.arg_types == function.arg_types
+            x.database_id == function_key.0
+                && x.schema_id == function_key.1
+                && x.name.eq(&function_key.2)
+                && x.arg_types == function_key.3
         }) {
-            Err(MetaError::catalog_duplicated("function", &function.name))
+            Err(MetaError::catalog_duplicated("function", &function_key.2))
         } else {
             Ok(())
         }
@@ -218,13 +311,40 @@ impl DatabaseManager {
         }
     }
 
+    pub fn check_secret_name_duplicated(&self, secret_key: &RelationKey) -> MetaResult<()> {
+        if self.secrets.values().any(|x| {
+            x.database_id == secret_key.0 && x.schema_id == secret_key.1 && x.name.eq(&secret_key.2)
+        }) {
+            Err(MetaError::catalog_duplicated("secret", &secret_key.2))
+        } else {
+            Ok(())
+        }
+    }
+
     pub fn list_databases(&self) -> Vec<Database> {
         self.databases.values().cloned().collect_vec()
     }
 
-    pub fn list_creating_tables(&self) -> Vec<Table> {
-        self.in_progress_creating_tables
+    pub fn list_schemas(&self) -> Vec<Schema> {
+        self.schemas.values().cloned().collect_vec()
+    }
+
+    pub fn list_creating_background_mvs(&self) -> Vec<Table> {
+        self.tables
             .values()
+            .filter(|&t| {
+                t.stream_job_status == PbStreamJobStatus::Creating as i32
+                    && t.table_type == TableType::MaterializedView as i32
+                    && t.create_type == CreateType::Background as i32
+            })
+            .cloned()
+            .collect_vec()
+    }
+
+    pub fn list_persisted_creating_tables(&self) -> Vec<Table> {
+        self.tables
+            .values()
+            .filter(|&t| t.stream_job_status == PbStreamJobStatus::Creating as i32)
             .cloned()
             .collect_vec()
     }
@@ -237,23 +357,63 @@ impl DatabaseManager {
         self.tables.get(&table_id)
     }
 
+    pub fn get_sink(&self, sink_id: SinkId) -> Option<&Sink> {
+        self.sinks.get(&sink_id)
+    }
+
+    pub fn get_subscription(&self, subscription_id: SubscriptionId) -> Option<&Subscription> {
+        self.subscriptions.get(&subscription_id)
+    }
+
     pub fn get_all_table_options(&self) -> HashMap<TableId, TableOption> {
         self.tables
             .iter()
-            .map(|(id, table)| (*id, TableOption::build_table_option(&table.properties)))
+            .map(|(id, table)| (*id, TableOption::new(table.retention_seconds)))
             .collect()
     }
 
-    pub fn list_table_ids(&self, schema_id: SchemaId) -> Vec<TableId> {
+    pub fn list_readonly_table_ids(&self, schema_id: SchemaId) -> Vec<TableId> {
         self.tables
             .values()
-            .filter(|table| table.schema_id == schema_id)
+            .filter(|table| {
+                table.schema_id == schema_id && table.table_type != TableType::Table as i32
+            })
             .map(|table| table.id)
+            .collect_vec()
+    }
+
+    pub fn list_dml_table_ids(&self, schema_id: SchemaId) -> Vec<TableId> {
+        self.tables
+            .values()
+            .filter(|table| {
+                table.schema_id == schema_id && table.table_type == TableType::Table as i32
+            })
+            .map(|table| table.id)
+            .collect_vec()
+    }
+
+    pub fn list_view_ids(&self, schema_id: SchemaId) -> Vec<ViewId> {
+        self.views
+            .values()
+            .filter(|view| view.schema_id == schema_id)
+            .map(|view| view.id)
             .collect_vec()
     }
 
     pub fn list_sources(&self) -> Vec<Source> {
         self.sources.values().cloned().collect_vec()
+    }
+
+    pub fn list_sinks(&self) -> Vec<Sink> {
+        self.sinks.values().cloned().collect_vec()
+    }
+
+    pub fn list_subscriptions(&self) -> Vec<Subscription> {
+        self.subscriptions.values().cloned().collect_vec()
+    }
+
+    pub fn list_views(&self) -> Vec<View> {
+        self.views.values().cloned().collect_vec()
     }
 
     pub fn list_source_ids(&self, schema_id: SchemaId) -> Vec<SourceId> {
@@ -278,6 +438,14 @@ impl DatabaseManager {
             .copied()
             .chain(self.sinks.keys().copied())
             .chain(self.indexes.keys().copied())
+            .chain(self.sources.keys().copied())
+            .chain(
+                self.sources
+                    .iter()
+                    .filter(|(_, source)| source.info.as_ref().is_some_and(|info| info.is_shared()))
+                    .map(|(id, _)| id)
+                    .copied(),
+            )
     }
 
     pub fn check_database_duplicated(&self, database_key: &DatabaseKey) -> MetaResult<()> {
@@ -304,16 +472,52 @@ impl DatabaseManager {
         self.tables.values().all(|t| t.schema_id != schema_id)
             && self.sources.values().all(|s| s.schema_id != schema_id)
             && self.sinks.values().all(|s| s.schema_id != schema_id)
+            && self
+                .subscriptions
+                .values()
+                .all(|s| s.schema_id != schema_id)
             && self.indexes.values().all(|i| i.schema_id != schema_id)
             && self.views.values().all(|v| v.schema_id != schema_id)
     }
 
-    pub fn increase_ref_count(&mut self, relation_id: RelationId) {
+    pub fn increase_relation_ref_count(&mut self, relation_id: RelationId) {
         *self.relation_ref_count.entry(relation_id).or_insert(0) += 1;
     }
 
-    pub fn decrease_ref_count(&mut self, relation_id: RelationId) {
+    pub fn decrease_relation_ref_count(&mut self, relation_id: RelationId) {
         match self.relation_ref_count.entry(relation_id) {
+            Entry::Occupied(mut o) => {
+                *o.get_mut() -= 1;
+                if *o.get() == 0 {
+                    o.remove_entry();
+                }
+            }
+            Entry::Vacant(_) => unreachable!(),
+        }
+    }
+
+    pub fn increase_secret_ref_count(&mut self, secret_id: SecretId) {
+        *self.secret_ref_count.entry(secret_id).or_insert(0) += 1;
+    }
+
+    pub fn decrease_secret_ref_count(&mut self, secret_id: SecretId) {
+        match self.secret_ref_count.entry(secret_id) {
+            Entry::Occupied(mut o) => {
+                *o.get_mut() -= 1;
+                if *o.get() == 0 {
+                    o.remove_entry();
+                }
+            }
+            Entry::Vacant(_) => unreachable!(),
+        }
+    }
+
+    pub fn increase_connection_ref_count(&mut self, connection_id: ConnectionId) {
+        *self.connection_ref_count.entry(connection_id).or_insert(0) += 1;
+    }
+
+    pub fn decrease_connection_ref_count(&mut self, connection_id: ConnectionId) {
+        match self.connection_ref_count.entry(connection_id) {
             Entry::Occupied(mut o) => {
                 *o.get_mut() -= 1;
                 if *o.get() == 0 {
@@ -337,21 +541,22 @@ impl DatabaseManager {
     }
 
     pub fn has_in_progress_creation(&self, relation: &RelationKey) -> bool {
-        self.in_progress_creation_tracker
-            .contains(&relation.clone())
+        self.in_progress_creation_tracker.contains(relation)
     }
 
+    /// For all types of DDL
     pub fn mark_creating(&mut self, relation: &RelationKey) {
         self.in_progress_creation_tracker.insert(relation.clone());
     }
 
+    /// Only for streaming DDL
     pub fn mark_creating_streaming_job(&mut self, table_id: TableId, key: RelationKey) {
         self.in_progress_creation_streaming_job
             .insert(table_id, key);
     }
 
     pub fn unmark_creating(&mut self, relation: &RelationKey) {
-        self.in_progress_creation_tracker.remove(&relation.clone());
+        self.in_progress_creation_tracker.remove(relation);
     }
 
     pub fn unmark_creating_streaming_job(&mut self, table_id: TableId) {
@@ -362,6 +567,18 @@ impl DatabaseManager {
         self.in_progress_creation_streaming_job
             .iter()
             .find(|(_, v)| *v == key)
+            .map(|(k, _)| *k)
+    }
+
+    pub fn find_persisted_creating_table_id(&self, key: &RelationKey) -> Option<TableId> {
+        self.tables
+            .iter()
+            .find(|(_, t)| {
+                t.stream_job_status == PbStreamJobStatus::Creating as i32
+                    && t.database_id == key.0
+                    && t.schema_id == key.1
+                    && t.name == key.2
+            })
             .map(|(k, _)| *k)
     }
 
@@ -428,6 +645,17 @@ impl DatabaseManager {
         }
     }
 
+    pub fn ensure_subscription_id(&self, subscription_id: SubscriptionId) -> MetaResult<()> {
+        if self.subscriptions.contains_key(&subscription_id) {
+            Ok(())
+        } else {
+            Err(MetaError::catalog_id_not_found(
+                "subscription",
+                subscription_id,
+            ))
+        }
+    }
+
     pub fn ensure_index_id(&self, index_id: IndexId) -> MetaResult<()> {
         if self.indexes.contains_key(&index_id) {
             Ok(())
@@ -444,7 +672,14 @@ impl DatabaseManager {
         }
     }
 
-    // TODO(zehua): refactor when using SourceId.
+    pub fn ensure_function_id(&self, function_id: FunctionId) -> MetaResult<()> {
+        if self.functions.contains_key(&function_id) {
+            Ok(())
+        } else {
+            Err(MetaError::catalog_id_not_found("function", function_id))
+        }
+    }
+
     pub fn ensure_table_view_or_source_id(&self, table_id: &TableId) -> MetaResult<()> {
         if self.tables.contains_key(table_id)
             || self.sources.contains_key(table_id)
@@ -456,6 +691,52 @@ impl DatabaseManager {
                 "table, view or source",
                 *table_id,
             ))
+        }
+    }
+
+    pub fn get_object_owner(&self, object: &PbObject) -> MetaResult<UserId> {
+        match object {
+            PbObject::DatabaseId(id) => self
+                .databases
+                .get(id)
+                .map(|d| d.owner)
+                .ok_or_else(|| MetaError::catalog_id_not_found("database", id)),
+            PbObject::SchemaId(id) => self
+                .schemas
+                .get(id)
+                .map(|s| s.owner)
+                .ok_or_else(|| MetaError::catalog_id_not_found("schema", id)),
+            PbObject::TableId(id) => self
+                .tables
+                .get(id)
+                .map(|t| t.owner)
+                .ok_or_else(|| MetaError::catalog_id_not_found("table", id)),
+            PbObject::SourceId(id) => self
+                .sources
+                .get(id)
+                .map(|s| s.owner)
+                .ok_or_else(|| MetaError::catalog_id_not_found("source", id)),
+            PbObject::SinkId(id) => self
+                .sinks
+                .get(id)
+                .map(|s| s.owner)
+                .ok_or_else(|| MetaError::catalog_id_not_found("sink", id)),
+            PbObject::SubscriptionId(id) => self
+                .subscriptions
+                .get(id)
+                .map(|s| s.owner)
+                .ok_or_else(|| MetaError::catalog_id_not_found("subscription", id)),
+            PbObject::ViewId(id) => self
+                .views
+                .get(id)
+                .map(|v| v.owner)
+                .ok_or_else(|| MetaError::catalog_id_not_found("view", id)),
+            PbObject::FunctionId(id) => self
+                .functions
+                .get(id)
+                .map(|f| f.owner)
+                .ok_or_else(|| MetaError::catalog_id_not_found("function", id)),
+            _ => unreachable!("unexpected object type: {:?}", object),
         }
     }
 }

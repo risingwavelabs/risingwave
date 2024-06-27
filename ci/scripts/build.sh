@@ -28,11 +28,12 @@ if [[ "$profile" != "ci-dev" ]] && [[ "$profile" != "ci-release" ]]; then
 fi
 
 echo "--- Rust cargo-sort check"
-cargo sort --check --workspace
+cargo sort --check --workspace --grouped
 
-echo "--- Rust cargo-hakari check"
-cargo hakari generate --diff
-cargo hakari verify
+# Disable hakari until we make sure it's useful
+# echo "--- Rust cargo-hakari check"
+# cargo hakari generate --diff
+# cargo hakari verify
 
 echo "--- Rust format check"
 cargo fmt --all -- --check
@@ -40,9 +41,10 @@ cargo fmt --all -- --check
 echo "--- Build Rust components"
 
 if [[ "$profile" == "ci-dev" ]]; then
-    RISINGWAVE_FEATURE_FLAGS="--features rw-dynamic-link --no-default-features"
-else 
-    RISINGWAVE_FEATURE_FLAGS="--features rw-static-link"
+    RISINGWAVE_FEATURE_FLAGS=(--features rw-dynamic-link --no-default-features)
+else
+    RISINGWAVE_FEATURE_FLAGS=(--features rw-static-link)
+    export OPENSSL_STATIC=1
 fi
 
 cargo build \
@@ -51,23 +53,25 @@ cargo build \
     -p risingwave_regress_test \
     -p risingwave_sqlsmith \
     -p risingwave_compaction_test \
-    -p risingwave_backup_cmd \
-    -p risingwave_java_binding \
     -p risingwave_e2e_extended_mode_test \
-    $RISINGWAVE_FEATURE_FLAGS \
-    --profile "$profile"
+    "${RISINGWAVE_FEATURE_FLAGS[@]}" \
+    --features all-udf \
+    --profile "$profile" \
+    --timings
 
-# the file name suffix of artifact for risingwave_java_binding is so only for linux. It is dylib for MacOS
-artifacts=(risingwave sqlsmith compaction-test backup-restore risingwave_regress_test risingwave_e2e_extended_mode_test risedev-dev delete-range-test librisingwave_java_binding.so)
+
+artifacts=(risingwave sqlsmith compaction-test risingwave_regress_test risingwave_e2e_extended_mode_test risedev-dev delete-range-test)
 
 echo "--- Show link info"
 ldd target/"$profile"/risingwave
 
 echo "--- Upload artifacts"
 echo -n "${artifacts[*]}" | parallel -d ' ' "mv target/$profile/{} ./{}-$profile && compress-and-upload-artifact ./{}-$profile"
+buildkite-agent artifact upload target/cargo-timings/cargo-timing.html
 
 # This magically makes it faster to exit the docker
 rm -rf target
 
 echo "--- Show sccache stats"
 sccache --show-stats
+sccache --zero-stats

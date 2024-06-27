@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,54 +16,68 @@
 //! response gRPC message structs.
 
 #![feature(trait_alias)]
-#![feature(binary_heap_drain_sorted)]
-#![feature(result_option_inspect)]
 #![feature(type_alias_impl_trait)]
 #![feature(associated_type_defaults)]
-#![feature(generators)]
+#![feature(coroutines)]
 #![feature(iterator_try_collect)]
-#![feature(hash_drain_filter)]
+#![feature(hash_extract_if)]
 #![feature(try_blocks)]
+#![feature(let_chains)]
+#![feature(impl_trait_in_assoc_type)]
+#![feature(error_generic_member_access)]
+#![feature(panic_update_hook)]
+#![feature(negative_impls)]
 
-#[cfg(madsim)]
-use std::collections::HashMap;
+use std::any::type_name;
+use std::fmt::{Debug, Formatter};
+use std::future::Future;
 use std::iter::repeat;
 use std::sync::Arc;
 
-#[cfg(not(madsim))]
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use async_trait::async_trait;
 use futures::future::try_join_all;
-#[cfg(not(madsim))]
+use futures::stream::{BoxStream, Peekable};
+use futures::{Stream, StreamExt};
 use moka::future::Cache;
 use rand::prelude::SliceRandom;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::meta::heartbeat_request::extra_info;
-#[cfg(madsim)]
-use tokio::sync::Mutex;
+use tokio::sync::mpsc::{
+    channel, unbounded_channel, Receiver, Sender, UnboundedReceiver, UnboundedSender,
+};
 
 pub mod error;
-use error::{Result, RpcError};
+use error::Result;
+mod compactor_client;
 mod compute_client;
 mod connector_client;
 mod hummock_meta_client;
 mod meta_client;
-// mod sink_client;
+mod sink_coordinate_client;
 mod stream_client;
+mod tracing;
 
+pub use compactor_client::{CompactorClient, GrpcCompactorProxyClient};
 pub use compute_client::{ComputeClient, ComputeClientPool, ComputeClientPoolRef};
-pub use connector_client::ConnectorClient;
-pub use hummock_meta_client::{CompactTaskItem, HummockMetaClient};
-pub use meta_client::MetaClient;
-pub use stream_client::{StreamClient, StreamClientPool, StreamClientPoolRef};
+pub use connector_client::{ConnectorClient, SinkCoordinatorStreamHandle, SinkWriterStreamHandle};
+pub use hummock_meta_client::{CompactionEventItem, HummockMetaClient};
+pub use meta_client::{MetaClient, SinkCoordinationRpcClient};
+use rw_futures_util::await_future_with_monitor_error_stream;
+pub use sink_coordinate_client::CoordinatorStreamHandle;
+pub use stream_client::{
+    StreamClient, StreamClientPool, StreamClientPoolRef, StreamingControlHandle,
+};
 
 #[async_trait]
 pub trait RpcClient: Send + Sync + 'static + Clone {
     async fn new_client(host_addr: HostAddr) -> Result<Self>;
 
-    async fn new_clients(host_addr: HostAddr, size: usize) -> Result<Vec<Self>> {
-        try_join_all(repeat(host_addr).take(size).map(Self::new_client)).await
+    async fn new_clients(host_addr: HostAddr, size: usize) -> Result<Arc<Vec<Self>>> {
+        try_join_all(repeat(host_addr).take(size).map(Self::new_client))
+            .await
+            .map(Arc::new)
     }
 }
 
@@ -71,12 +85,7 @@ pub trait RpcClient: Send + Sync + 'static + Clone {
 pub struct RpcClientPool<S> {
     connection_pool_size: u16,
 
-    #[cfg(not(madsim))]
-    clients: Cache<HostAddr, Vec<S>>,
-
-    // moka::Cache internally uses system thread, so we can't use it in simulation
-    #[cfg(madsim)]
-    clients: Arc<Mutex<HashMap<HostAddr, S>>>,
+    clients: Cache<HostAddr, Arc<Vec<S>>>,
 }
 
 impl<S> Default for RpcClientPool<S>
@@ -95,10 +104,7 @@ where
     pub fn new(connection_pool_size: u16) -> Self {
         Self {
             connection_pool_size,
-            #[cfg(not(madsim))]
             clients: Cache::new(u64::MAX),
-            #[cfg(madsim)]
-            clients: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -111,7 +117,6 @@ where
 
     /// Gets the RPC client for the given addr. If the connection is not established, a
     /// new client will be created and returned.
-    #[cfg(not(madsim))]
     pub async fn get_by_addr(&self, addr: HostAddr) -> Result<S> {
         Ok(self
             .clients
@@ -120,23 +125,14 @@ where
                 S::new_clients(addr.clone(), self.connection_pool_size as usize),
             )
             .await
-            .map_err(|e| -> RpcError {
-                anyhow!("failed to create RPC client to {addr}: {:?}", e).into()
-            })?
+            .with_context(|| format!("failed to create RPC client to {addr}"))?
             .choose(&mut rand::thread_rng())
             .unwrap()
             .clone())
     }
 
-    #[cfg(madsim)]
-    pub async fn get_by_addr(&self, addr: HostAddr) -> Result<S> {
-        let mut clients = self.clients.lock().await;
-        if let Some(client) = clients.get(&addr) {
-            return Ok(client.clone());
-        }
-        let client = S::new_client(addr.clone()).await?;
-        clients.insert(addr, client.clone());
-        Ok(client)
+    pub fn invalidate_all(&self) {
+        self.clients.invalidate_all()
     }
 }
 
@@ -150,7 +146,7 @@ pub trait ExtraInfoSource: Send + Sync {
 pub type ExtraInfoSourceRef = Arc<dyn ExtraInfoSource>;
 
 #[macro_export]
-macro_rules! rpc_client_method_impl {
+macro_rules! stream_rpc_client_method_impl {
     ($( { $client:tt, $fn_name:ident, $req:ty, $resp:ty }),*) => {
         $(
             pub async fn $fn_name(&self, request: $req) -> $crate::Result<$resp> {
@@ -158,7 +154,8 @@ macro_rules! rpc_client_method_impl {
                     .$client
                     .to_owned()
                     .$fn_name(request)
-                    .await?
+                    .await
+                    .map_err($crate::error::RpcError::from_stream_status)?
                     .into_inner())
             }
         )*
@@ -175,10 +172,175 @@ macro_rules! meta_rpc_client_method_impl {
                     Ok(resp) => Ok(resp.into_inner()),
                     Err(e) => {
                         self.refresh_client_if_needed(e.code()).await;
-                        Err(RpcError::GrpcStatus(e))
+                        Err($crate::error::RpcError::from_meta_status(e))
                     }
                 }
             }
         )*
+    }
+}
+
+pub const DEFAULT_BUFFER_SIZE: usize = 16;
+
+pub struct BidiStreamSender<REQ> {
+    tx: Sender<REQ>,
+}
+
+impl<REQ> BidiStreamSender<REQ> {
+    pub async fn send_request<R: Into<REQ>>(&mut self, request: R) -> Result<()> {
+        self.tx
+            .send(request.into())
+            .await
+            .map_err(|_| anyhow!("unable to send request {}", type_name::<REQ>()).into())
+    }
+}
+
+pub struct BidiStreamReceiver<RSP> {
+    pub stream: Peekable<BoxStream<'static, Result<RSP>>>,
+}
+
+impl<RSP> BidiStreamReceiver<RSP> {
+    pub async fn next_response(&mut self) -> Result<RSP> {
+        self.stream
+            .next()
+            .await
+            .ok_or_else(|| anyhow!("end of response stream"))?
+    }
+}
+
+pub struct BidiStreamHandle<REQ, RSP> {
+    pub request_sender: BidiStreamSender<REQ>,
+    pub response_stream: BidiStreamReceiver<RSP>,
+}
+
+impl<REQ, RSP> Debug for BidiStreamHandle<REQ, RSP> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str(type_name::<Self>())
+    }
+}
+
+impl<REQ, RSP> BidiStreamHandle<REQ, RSP> {
+    pub fn for_test(
+        request_sender: Sender<REQ>,
+        response_stream: BoxStream<'static, Result<RSP>>,
+    ) -> Self {
+        Self {
+            request_sender: BidiStreamSender { tx: request_sender },
+            response_stream: BidiStreamReceiver {
+                stream: response_stream.peekable(),
+            },
+        }
+    }
+
+    pub async fn initialize<
+        F: FnOnce(Receiver<REQ>) -> Fut,
+        St: Stream<Item = Result<RSP>> + Send + Unpin + 'static,
+        Fut: Future<Output = Result<St>> + Send,
+        R: Into<REQ>,
+    >(
+        first_request: R,
+        init_stream_fn: F,
+    ) -> Result<(Self, RSP)> {
+        let (request_sender, request_receiver) = channel(DEFAULT_BUFFER_SIZE);
+
+        // Send initial request in case of the blocking receive call from creating streaming request
+        request_sender
+            .send(first_request.into())
+            .await
+            .map_err(|_err| anyhow!("unable to send first request of {}", type_name::<REQ>()))?;
+
+        let mut response_stream = init_stream_fn(request_receiver).await?;
+
+        let first_response = response_stream
+            .next()
+            .await
+            .ok_or_else(|| anyhow!("get empty response from first request"))??;
+
+        Ok((
+            Self {
+                request_sender: BidiStreamSender { tx: request_sender },
+                response_stream: BidiStreamReceiver {
+                    stream: response_stream.boxed().peekable(),
+                },
+            },
+            first_response,
+        ))
+    }
+
+    pub async fn next_response(&mut self) -> Result<RSP> {
+        self.response_stream.next_response().await
+    }
+
+    pub async fn send_request(&mut self, request: REQ) -> Result<()> {
+        match await_future_with_monitor_error_stream(
+            &mut self.response_stream.stream,
+            self.request_sender.send_request(request),
+        )
+        .await
+        {
+            Ok(send_result) => send_result,
+            Err(None) => Err(anyhow!("end of response stream").into()),
+            Err(Some(e)) => Err(e),
+        }
+    }
+}
+
+/// The handle of a bidi-stream started from the rpc client. It is similar to the `BidiStreamHandle`
+/// except that its sender is unbounded.
+pub struct UnboundedBidiStreamHandle<REQ, RSP> {
+    pub request_sender: UnboundedSender<REQ>,
+    pub response_stream: BoxStream<'static, Result<RSP>>,
+}
+
+impl<REQ, RSP> Debug for UnboundedBidiStreamHandle<REQ, RSP> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str(type_name::<Self>())
+    }
+}
+
+impl<REQ, RSP> UnboundedBidiStreamHandle<REQ, RSP> {
+    pub async fn initialize<
+        F: FnOnce(UnboundedReceiver<REQ>) -> Fut,
+        St: Stream<Item = Result<RSP>> + Send + Unpin + 'static,
+        Fut: Future<Output = Result<St>> + Send,
+        R: Into<REQ>,
+    >(
+        first_request: R,
+        init_stream_fn: F,
+    ) -> Result<(Self, RSP)> {
+        let (request_sender, request_receiver) = unbounded_channel();
+
+        // Send initial request in case of the blocking receive call from creating streaming request
+        request_sender
+            .send(first_request.into())
+            .map_err(|_err| anyhow!("unable to send first request of {}", type_name::<REQ>()))?;
+
+        let mut response_stream = init_stream_fn(request_receiver).await?;
+
+        let first_response = response_stream
+            .next()
+            .await
+            .context("get empty response from first request")??;
+
+        Ok((
+            Self {
+                request_sender,
+                response_stream: response_stream.boxed(),
+            },
+            first_response,
+        ))
+    }
+
+    pub async fn next_response(&mut self) -> Result<RSP> {
+        self.response_stream
+            .next()
+            .await
+            .ok_or_else(|| anyhow!("end of response stream"))?
+    }
+
+    pub fn send_request(&mut self, request: REQ) -> Result<()> {
+        self.request_sender
+            .send(request)
+            .map_err(|_| anyhow!("unable to send request {}", type_name::<REQ>()).into())
     }
 }

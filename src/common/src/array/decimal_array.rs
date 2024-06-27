@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -128,7 +128,7 @@ mod tests {
                     None => NULL_VAL_FOR_HASH.hash(state),
                 })
         });
-        let hashes = hash_finish(&mut states[..]);
+        let hashes = hash_finish(&states[..]);
 
         let count = hashes.iter().counts().len();
         assert_eq!(count, 30);

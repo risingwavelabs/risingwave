@@ -3,20 +3,16 @@
 set -euo pipefail
 
 export DOCKER_BUILDKIT=1
-DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 cd "$DIR"
 
 cat ../rust-toolchain
 # shellcheck disable=SC2155
-export RUST_TOOLCHAIN=$(cat ../rust-toolchain)
 
-######################################################
-# !!! CHANGE THIS WHEN YOU WANT TO BUMP CI IMAGE !!! #
-#          AND ALSO docker-compose.yml               #
-######################################################
-export BUILD_ENV_VERSION=v20230517
+# REMEMBER TO ALSO UPDATE ci/docker-compose.yml
+export BUILD_ENV_VERSION=v20240624
 
-export BUILD_TAG="public.ecr.aws/x5u3w5h6/rw-build-env:${BUILD_ENV_VERSION}"
+export BUILD_TAG="public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION}"
 
 echo "+++ Arch"
 arch
@@ -30,7 +26,7 @@ fi
 set -e
 
 echo "--- Docker login"
-aws ecr-public get-login-password --region us-east-1 | docker login --username AWS --password-stdin public.ecr.aws/x5u3w5h6
+aws ecr-public get-login-password --region us-east-1 | docker login --username AWS --password-stdin public.ecr.aws/w1p7b4n3
 
 echo "--- Check image existence"
 set +e
@@ -51,7 +47,7 @@ else
     export DOCKER_BUILD_PROGRESS="--progress=plain"
 fi
 
-docker build -t ${BUILD_TAG} ${DOCKER_BUILD_PROGRESS} --no-cache --build-arg "RUST_TOOLCHAIN=${RUST_TOOLCHAIN}" .
+docker build -t ${BUILD_TAG} ${DOCKER_BUILD_PROGRESS} --no-cache .
 
 echo "--- Docker push"
 docker push ${BUILD_TAG}

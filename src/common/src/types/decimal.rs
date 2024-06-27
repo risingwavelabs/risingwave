@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,28 +13,27 @@
 // limitations under the License.
 
 use std::fmt::Debug;
-use std::io::{Read, Write};
+use std::io::{Cursor, Read, Write};
 use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
 
+use byteorder::{BigEndian, ReadBytesExt};
 use bytes::{BufMut, Bytes, BytesMut};
-use num_traits::{CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Zero};
-use postgres_types::{ToSql, Type};
-use risingwave_common_proc_macro::EstimateSize;
+use num_traits::{
+    CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Num, One, Zero,
+};
+use postgres_types::{accepts, to_sql_checked, FromSql, IsNull, ToSql, Type};
+use risingwave_common_estimate_size::ZeroHeapSize;
 use rust_decimal::prelude::FromStr;
-use rust_decimal::{Decimal as RustDecimal, Error, RoundingStrategy};
+use rust_decimal::{Decimal as RustDecimal, Error, MathematicalOps as _, RoundingStrategy};
 
 use super::to_binary::ToBinary;
 use super::to_text::ToText;
 use super::DataType;
 use crate::array::ArrayResult;
-use crate::error::Result as RwResult;
-use crate::estimate_size::EstimateSize;
 use crate::types::ordered_float::OrderedFloat;
 use crate::types::Decimal::Normalized;
 
-#[derive(
-    Debug, Copy, parse_display::Display, Clone, PartialEq, Hash, Eq, Ord, PartialOrd, EstimateSize,
-)]
+#[derive(Debug, Copy, parse_display::Display, Clone, PartialEq, Hash, Eq, Ord, PartialOrd)]
 pub enum Decimal {
     #[display("-Infinity")]
     NegativeInf,
@@ -45,6 +44,8 @@ pub enum Decimal {
     #[display("NaN")]
     NaN,
 }
+
+impl ZeroHeapSize for Decimal {}
 
 impl ToText for Decimal {
     fn write<W: std::fmt::Write>(&self, f: &mut W) -> std::fmt::Result {
@@ -78,44 +79,92 @@ impl Decimal {
         let decimal = RustDecimal::from_scientific(value).ok()?;
         Some(Normalized(decimal))
     }
+
+    pub fn from_str_radix(s: &str, radix: u32) -> rust_decimal::Result<Self> {
+        match s.to_ascii_lowercase().as_str() {
+            "nan" => Ok(Decimal::NaN),
+            "inf" | "+inf" | "infinity" | "+infinity" => Ok(Decimal::PositiveInf),
+            "-inf" | "-infinity" => Ok(Decimal::NegativeInf),
+            s => RustDecimal::from_str_radix(s, radix).map(Decimal::Normalized),
+        }
+    }
 }
 
 impl ToBinary for Decimal {
-    fn to_binary_with_type(&self, ty: &DataType) -> RwResult<Option<Bytes>> {
+    fn to_binary_with_type(&self, ty: &DataType) -> super::to_binary::Result<Option<Bytes>> {
         match ty {
             DataType::Decimal => {
                 let mut output = BytesMut::new();
-                match self {
-                    Decimal::Normalized(d) => {
-                        d.to_sql(&Type::ANY, &mut output).unwrap();
-                        return Ok(Some(output.freeze()));
-                    }
-                    Decimal::NaN => {
-                        output.reserve(8);
-                        output.put_u16(0);
-                        output.put_i16(0);
-                        output.put_u16(0xC000);
-                        output.put_i16(0);
-                    }
-                    Decimal::PositiveInf => {
-                        output.reserve(8);
-                        output.put_u16(0);
-                        output.put_i16(0);
-                        output.put_u16(0xD000);
-                        output.put_i16(0);
-                    }
-                    Decimal::NegativeInf => {
-                        output.reserve(8);
-                        output.put_u16(0);
-                        output.put_i16(0);
-                        output.put_u16(0xF000);
-                        output.put_i16(0);
-                    }
-                };
+                self.to_sql(&Type::NUMERIC, &mut output).unwrap();
                 Ok(Some(output.freeze()))
             }
             _ => unreachable!(),
         }
+    }
+}
+
+impl ToSql for Decimal {
+    accepts!(NUMERIC);
+
+    to_sql_checked!();
+
+    fn to_sql(
+        &self,
+        ty: &Type,
+        out: &mut BytesMut,
+    ) -> Result<IsNull, Box<dyn std::error::Error + Sync + Send>>
+    where
+        Self: Sized,
+    {
+        match self {
+            Decimal::Normalized(d) => {
+                return d.to_sql(ty, out);
+            }
+            Decimal::NaN => {
+                out.reserve(8);
+                out.put_u16(0);
+                out.put_i16(0);
+                out.put_u16(0xC000);
+                out.put_i16(0);
+            }
+            Decimal::PositiveInf => {
+                out.reserve(8);
+                out.put_u16(0);
+                out.put_i16(0);
+                out.put_u16(0xD000);
+                out.put_i16(0);
+            }
+            Decimal::NegativeInf => {
+                out.reserve(8);
+                out.put_u16(0);
+                out.put_i16(0);
+                out.put_u16(0xF000);
+                out.put_i16(0);
+            }
+        }
+        Ok(IsNull::No)
+    }
+}
+
+impl<'a> FromSql<'a> for Decimal {
+    fn from_sql(
+        ty: &Type,
+        raw: &'a [u8],
+    ) -> Result<Self, Box<dyn std::error::Error + 'static + Sync + Send>> {
+        let mut rdr = Cursor::new(raw);
+        let _n_digits = rdr.read_u16::<BigEndian>()?;
+        let _weight = rdr.read_i16::<BigEndian>()?;
+        let sign = rdr.read_u16::<BigEndian>()?;
+        match sign {
+            0xC000 => Ok(Self::NaN),
+            0xD000 => Ok(Self::PositiveInf),
+            0xF000 => Ok(Self::NegativeInf),
+            _ => RustDecimal::from_sql(ty, raw).map(Self::Normalized),
+        }
+    }
+
+    fn accepts(ty: &Type) -> bool {
+        matches!(*ty, Type::NUMERIC)
     }
 }
 
@@ -406,47 +455,19 @@ impl Sub for Decimal {
 }
 
 impl Decimal {
-    /// TODO: handle nan and inf
-    pub fn mantissa(&self) -> i128 {
-        match self {
-            Self::Normalized(d) => d.mantissa(),
-            _ => 0,
+    pub const MAX_PRECISION: u8 = 28;
+
+    pub fn scale(&self) -> Option<i32> {
+        let Decimal::Normalized(d) = self else {
+            return None;
+        };
+        Some(d.scale() as _)
+    }
+
+    pub fn rescale(&mut self, scale: u32) {
+        if let Normalized(a) = self {
+            a.rescale(scale);
         }
-    }
-
-    /// TODO: handle nan and inf
-    pub fn scale(&self) -> i32 {
-        match self {
-            Self::Normalized(d) => d.scale() as i32,
-            _ => 0,
-        }
-    }
-
-    /// TODO: handle nan and inf
-    /// There are maybe better solution here.
-    pub fn precision(&self) -> u32 {
-        match &self {
-            Decimal::Normalized(decimal) => {
-                let s = decimal.to_string();
-                let mut res = s.len();
-                if s.find('.').is_some() {
-                    res -= 1;
-                }
-                if s.find('-').is_some() {
-                    res -= 1;
-                }
-                res as u32
-            }
-            _ => 0,
-        }
-    }
-
-    pub fn new(num: i64, scale: u32) -> Self {
-        Self::Normalized(RustDecimal::new(num, scale))
-    }
-
-    pub fn zero() -> Self {
-        Self::from(0)
     }
 
     #[must_use]
@@ -457,6 +478,40 @@ impl Decimal {
                 Self::Normalized(new_d)
             }
             d => *d,
+        }
+    }
+
+    /// Round to the left of the decimal point, for example `31.5` -> `30`.
+    #[must_use]
+    pub fn round_left_ties_away(&self, left: u32) -> Option<Self> {
+        let Self::Normalized(mut d) = self else {
+            return Some(*self);
+        };
+
+        // First, move the decimal point to the left so that we can reuse `round`. This is more
+        // efficient than division.
+        let old_scale = d.scale();
+        let new_scale = old_scale.saturating_add(left);
+        const MANTISSA_UP: i128 = 5 * 10i128.pow(Decimal::MAX_PRECISION as _);
+        let d = match new_scale.cmp(&Self::MAX_PRECISION.add(1).into()) {
+            // trivial within 28 digits
+            std::cmp::Ordering::Less => {
+                d.set_scale(new_scale).unwrap();
+                d.round_dp_with_strategy(0, RoundingStrategy::MidpointAwayFromZero)
+            }
+            // Special case: scale cannot be 29, but it may or may not be >= 0.5e+29
+            std::cmp::Ordering::Equal => (d.mantissa() / MANTISSA_UP).signum().into(),
+            // always 0 for >= 30 digits
+            std::cmp::Ordering::Greater => 0.into(),
+        };
+
+        // Then multiply back. Note that we cannot move decimal point to the right in order to get
+        // more zeros.
+        match left > Decimal::MAX_PRECISION.into() {
+            true => d.is_zero().then(|| 0.into()),
+            false => d
+                .checked_mul(RustDecimal::from_i128_with_scale(10i128.pow(left), 0))
+                .map(Self::Normalized),
         }
     }
 
@@ -478,6 +533,20 @@ impl Decimal {
     pub fn floor(&self) -> Self {
         match self {
             Self::Normalized(d) => Self::Normalized(d.floor()),
+            d => *d,
+        }
+    }
+
+    #[must_use]
+    pub fn trunc(&self) -> Self {
+        match self {
+            Self::Normalized(d) => {
+                let mut d = d.trunc();
+                if d.is_zero() {
+                    d.set_sign_positive(true);
+                }
+                Self::Normalized(d)
+            }
             d => *d,
         }
     }
@@ -537,6 +606,130 @@ impl Decimal {
             Self::NegativeInf => Self::PositiveInf,
         }
     }
+
+    pub fn sign(&self) -> Self {
+        match self {
+            Self::NaN => Self::NaN,
+            _ => match self.cmp(&0.into()) {
+                std::cmp::Ordering::Less => (-1).into(),
+                std::cmp::Ordering::Equal => 0.into(),
+                std::cmp::Ordering::Greater => 1.into(),
+            },
+        }
+    }
+
+    pub fn checked_exp(&self) -> Option<Decimal> {
+        match self {
+            Self::Normalized(d) => d.checked_exp().map(Self::Normalized),
+            Self::NaN => Some(Self::NaN),
+            Self::PositiveInf => Some(Self::PositiveInf),
+            Self::NegativeInf => Some(Self::zero()),
+        }
+    }
+
+    pub fn checked_ln(&self) -> Option<Decimal> {
+        match self {
+            Self::Normalized(d) => d.checked_ln().map(Self::Normalized),
+            Self::NaN => Some(Self::NaN),
+            Self::PositiveInf => Some(Self::PositiveInf),
+            Self::NegativeInf => None,
+        }
+    }
+
+    pub fn checked_log10(&self) -> Option<Decimal> {
+        match self {
+            Self::Normalized(d) => d.checked_log10().map(Self::Normalized),
+            Self::NaN => Some(Self::NaN),
+            Self::PositiveInf => Some(Self::PositiveInf),
+            Self::NegativeInf => None,
+        }
+    }
+
+    pub fn checked_powd(&self, rhs: &Self) -> Result<Self, PowError> {
+        use std::cmp::Ordering;
+
+        match (self, rhs) {
+            // A. Handle `nan`, where `1 ^ nan == 1` and `nan ^ 0 == 1`
+            (Decimal::NaN, Decimal::NaN)
+            | (Decimal::PositiveInf, Decimal::NaN)
+            | (Decimal::NegativeInf, Decimal::NaN)
+            | (Decimal::NaN, Decimal::PositiveInf)
+            | (Decimal::NaN, Decimal::NegativeInf) => Ok(Self::NaN),
+            (Normalized(lhs), Decimal::NaN) => match lhs.is_one() {
+                true => Ok(1.into()),
+                false => Ok(Self::NaN),
+            },
+            (Decimal::NaN, Normalized(rhs)) => match rhs.is_zero() {
+                true => Ok(1.into()),
+                false => Ok(Self::NaN),
+            },
+
+            // B. Handle `b ^ inf`
+            (Normalized(lhs), Decimal::PositiveInf) => match lhs.abs().cmp(&1.into()) {
+                Ordering::Greater => Ok(Self::PositiveInf),
+                Ordering::Equal => Ok(1.into()),
+                Ordering::Less => Ok(0.into()),
+            },
+            // Simply special case of `abs(b) > 1`.
+            // Also consistent with `inf ^ p` and `-inf ^ p` below where p is not fractional or odd.
+            (Decimal::PositiveInf, Decimal::PositiveInf)
+            | (Decimal::NegativeInf, Decimal::PositiveInf) => Ok(Self::PositiveInf),
+
+            // C. Handle `b ^ -inf`, which is `(1/b) ^ inf`
+            (Normalized(lhs), Decimal::NegativeInf) => match lhs.abs().cmp(&1.into()) {
+                Ordering::Greater => Ok(0.into()),
+                Ordering::Equal => Ok(1.into()),
+                Ordering::Less => match lhs.is_zero() {
+                    // Fun fact: ISO 9899 is removing this error to follow IEEE 754 2008.
+                    true => Err(PowError::ZeroNegative),
+                    false => Ok(Self::PositiveInf),
+                },
+            },
+            (Decimal::PositiveInf, Decimal::NegativeInf)
+            | (Decimal::NegativeInf, Decimal::NegativeInf) => Ok(0.into()),
+
+            // D. Handle `inf ^ p`
+            (Decimal::PositiveInf, Normalized(rhs)) => match rhs.cmp(&0.into()) {
+                Ordering::Greater => Ok(Self::PositiveInf),
+                Ordering::Equal => Ok(1.into()),
+                Ordering::Less => Ok(0.into()),
+            },
+
+            // E. Handle `-inf ^ p`. Finite `p` can be fractional, odd, or even.
+            (Decimal::NegativeInf, Normalized(rhs)) => match !rhs.fract().is_zero() {
+                // Err in PostgreSQL. No err in ISO 9899 which treats fractional as non-odd below.
+                true => Err(PowError::NegativeFract),
+                false => match (rhs.cmp(&0.into()), rhs.rem(&2.into()).abs().is_one()) {
+                    (Ordering::Greater, true) => Ok(Self::NegativeInf),
+                    (Ordering::Greater, false) => Ok(Self::PositiveInf),
+                    (Ordering::Equal, true) => unreachable!(),
+                    (Ordering::Equal, false) => Ok(1.into()),
+                    (Ordering::Less, true) => Ok(0.into()), // no `-0` in PostgreSQL decimal
+                    (Ordering::Less, false) => Ok(0.into()),
+                },
+            },
+
+            // F. Finite numbers
+            (Normalized(lhs), Normalized(rhs)) => {
+                if lhs.is_zero() && rhs < &0.into() {
+                    return Err(PowError::ZeroNegative);
+                }
+                if lhs < &0.into() && !rhs.fract().is_zero() {
+                    return Err(PowError::NegativeFract);
+                }
+                match lhs.checked_powd(*rhs) {
+                    Some(d) => Ok(Self::Normalized(d)),
+                    None => Err(PowError::Overflow),
+                }
+            }
+        }
+    }
+}
+
+pub enum PowError {
+    ZeroNegative,
+    NegativeFract,
+    Overflow,
 }
 
 impl From<Decimal> for memcomparable::Decimal {
@@ -594,6 +787,28 @@ impl Zero for Decimal {
     }
 }
 
+impl One for Decimal {
+    fn one() -> Self {
+        Self::Normalized(RustDecimal::one())
+    }
+}
+
+impl Num for Decimal {
+    type FromStrRadixErr = Error;
+
+    fn from_str_radix(str: &str, radix: u32) -> Result<Self, Self::FromStrRadixErr> {
+        if str.eq_ignore_ascii_case("inf") || str.eq_ignore_ascii_case("infinity") {
+            Ok(Self::PositiveInf)
+        } else if str.eq_ignore_ascii_case("-inf") || str.eq_ignore_ascii_case("-infinity") {
+            Ok(Self::NegativeInf)
+        } else if str.eq_ignore_ascii_case("nan") {
+            Ok(Self::NaN)
+        } else {
+            RustDecimal::from_str_radix(str, radix).map(Decimal::Normalized)
+        }
+    }
+}
+
 impl From<RustDecimal> for Decimal {
     fn from(d: RustDecimal) -> Self {
         Self::Normalized(d)
@@ -603,6 +818,7 @@ impl From<RustDecimal> for Decimal {
 #[cfg(test)]
 mod tests {
     use itertools::Itertools as _;
+    use risingwave_common_estimate_size::EstimateSize;
 
     use super::*;
     use crate::util::iter_util::ZipEqFast;

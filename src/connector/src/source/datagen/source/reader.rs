@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,28 +14,26 @@
 
 use std::collections::HashMap;
 
-use anyhow::{anyhow, Result};
+use anyhow::Context;
 use async_trait::async_trait;
-use futures::{StreamExt, TryStreamExt};
-use futures_async_stream::try_stream;
+use futures::{Stream, StreamExt, TryStreamExt};
 use risingwave_common::field_generator::{FieldGeneratorImpl, VarcharProperty};
-use risingwave_common::util::iter_util::zip_eq_fast;
+use thiserror_ext::AsReport;
 
 use super::generator::DatagenEventGenerator;
-use crate::impl_common_split_reader_logic;
-use crate::parser::{ParserConfig, SpecificParserConfig};
+use crate::error::{ConnectorResult, ConnectorResult as Result};
+use crate::parser::{EncodingProperties, ParserConfig, ProtocolProperties};
 use crate::source::data_gen_util::spawn_data_generation_stream;
 use crate::source::datagen::source::SEQUENCE_FIELD_KIND;
 use crate::source::datagen::{DatagenProperties, DatagenSplit, FieldDesc};
 use crate::source::{
-    BoxSourceStream, BoxSourceWithStateStream, Column, DataType, SourceContextRef, SplitId,
-    SplitImpl, SplitMetaData, SplitReader,
+    into_chunk_stream, BoxChunkSourceStream, Column, DataType, SourceContextRef, SourceMessage,
+    SplitId, SplitMetaData, SplitReader,
 };
-
-impl_common_split_reader_logic!(DatagenSplitReader, DatagenProperties);
 
 pub struct DatagenSplitReader {
     generator: DatagenEventGenerator,
+    #[expect(dead_code)]
     assigned_split: DatagenSplit,
 
     split_id: SplitId,
@@ -46,16 +44,16 @@ pub struct DatagenSplitReader {
 #[async_trait]
 impl SplitReader for DatagenSplitReader {
     type Properties = DatagenProperties;
+    type Split = DatagenSplit;
 
     #[allow(clippy::unused_async)]
     async fn new(
         properties: DatagenProperties,
-        splits: Vec<SplitImpl>,
+        splits: Vec<DatagenSplit>,
         parser_config: ParserConfig,
         source_ctx: SourceContextRef,
         columns: Option<Vec<Column>>,
     ) -> Result<Self> {
-        let mut assigned_split = DatagenSplit::default();
         let mut events_so_far = u64::default();
         tracing::debug!("Splits for datagen found! {:?}", splits);
 
@@ -63,14 +61,12 @@ impl SplitReader for DatagenSplitReader {
         let split = splits.into_iter().next().unwrap();
         // TODO: currently, assume there's only on split in one reader
         let split_id = split.id();
-        if let SplitImpl::Datagen(n) = split {
-            if let Some(s) = n.start_offset {
-                // start_offset in `SplitImpl` indicates the latest successfully generated
-                // index, so here we use start_offset+1
-                events_so_far = s + 1;
-            };
-            assigned_split = n;
-        }
+        let assigned_split = split;
+        if let Some(s) = assigned_split.start_offset {
+            // start_offset in `SplitImpl` indicates the latest successfully generated
+            // index, so here we use start_offset+1
+            events_so_far = s + 1;
+        };
 
         let split_index = assigned_split.split_index as u64;
         let split_num = assigned_split.split_num as u64;
@@ -127,7 +123,7 @@ impl SplitReader for DatagenSplitReader {
         let generator = DatagenEventGenerator::new(
             fields_vec,
             field_names,
-            parser_config.specific.get_source_format(),
+            parser_config.specific.clone(),
             data_types,
             rows_per_second,
             events_so_far,
@@ -145,39 +141,54 @@ impl SplitReader for DatagenSplitReader {
         })
     }
 
-    fn into_stream(self) -> BoxSourceWithStateStream {
+    fn into_stream(self) -> BoxChunkSourceStream {
         // Will buffer at most 4 event chunks.
         const BUFFER_SIZE: usize = 4;
         // spawn_data_generation_stream(self.generator.into_native_stream(), BUFFER_SIZE).boxed()
-        match self.parser_config.specific {
-            SpecificParserConfig::Native => {
-                let actor_id = self.source_ctx.source_info.actor_id.to_string();
-                let source_id = self.source_ctx.source_info.source_id.to_string();
+        match (
+            &self.parser_config.specific.protocol_config,
+            &self.parser_config.specific.encoding_config,
+        ) {
+            (ProtocolProperties::Native, EncodingProperties::Native) => {
+                let actor_id = self.source_ctx.actor_id.to_string();
+                let fragment_id = self.source_ctx.fragment_id.to_string();
+                let source_id = self.source_ctx.source_id.to_string();
+                let source_name = self.source_ctx.source_name.to_string();
                 let split_id = self.split_id.to_string();
                 let metrics = self.source_ctx.metrics.clone();
                 spawn_data_generation_stream(
                     self.generator
                         .into_native_stream()
-                        .inspect_ok(move |chunk_with_states| {
+                        .inspect_ok(move |stream_chunk| {
                             metrics
                                 .partition_input_count
-                                .with_label_values(&[&actor_id, &source_id, &split_id])
-                                .inc_by(chunk_with_states.chunk.cardinality() as u64);
+                                .with_label_values(&[
+                                    &actor_id,
+                                    &source_id,
+                                    &split_id,
+                                    &source_name,
+                                    &fragment_id,
+                                ])
+                                .inc_by(stream_chunk.cardinality() as u64);
                         }),
                     BUFFER_SIZE,
                 )
                 .boxed()
             }
-            _ => self.into_chunk_stream(),
+            _ => {
+                let parser_config = self.parser_config.clone();
+                let source_context = self.source_ctx.clone();
+                into_chunk_stream(self.into_data_stream(), parser_config, source_context)
+            }
         }
     }
 }
 
 impl DatagenSplitReader {
-    pub(crate) fn into_data_stream(self) -> BoxSourceStream {
+    fn into_data_stream(self) -> impl Stream<Item = ConnectorResult<Vec<SourceMessage>>> {
         // Will buffer at most 4 event chunks.
         const BUFFER_SIZE: usize = 4;
-        spawn_data_generation_stream(self.generator.into_msg_stream(), BUFFER_SIZE).boxed()
+        spawn_data_generation_stream(self.generator.into_msg_stream(), BUFFER_SIZE)
     }
 }
 
@@ -201,9 +212,9 @@ fn generator_from_data_type(
                 Ok(seed) => seed ^ split_index,
                 Err(e) => {
                     tracing::warn!(
-                        "cannot parse {:?} to u64 due to {:?}, will use {:?} as random seed",
+                        error = %e.as_report(),
+                        "cannot parse {:?} to u64, will use {:?} as random seed",
                         seed,
-                        e,
                         split_index
                     );
                     split_index
@@ -213,57 +224,67 @@ fn generator_from_data_type(
         None => split_index,
     };
     match data_type {
-        DataType::Timestamp => {
+        ty @ (DataType::Timestamp | DataType::Timestamptz) => {
             let max_past_key = format!("fields.{}.max_past", name);
-            let max_past_value = fields_option_map.get(&max_past_key).map(|s| s.to_string());
+            let max_past_value = fields_option_map.get(&max_past_key).cloned();
             let max_past_mode_key = format!("fields.{}.max_past_mode", name);
             let max_past_mode_value = fields_option_map
                 .get(&max_past_mode_key)
                 .map(|s| s.to_lowercase());
             let basetime = match fields_option_map.get(format!("fields.{}.basetime", name).as_str())
             {
-                Some(base) => {
-                    Some(chrono::DateTime::parse_from_rfc3339(base).map_err(|e| {
-                        anyhow!("cannot parse {:?} to rfc3339 due to {:?}", base, e)
-                    })?)
-                }
+                Some(base) => Some(
+                    chrono::DateTime::parse_from_rfc3339(base)
+                        .with_context(|| format!("cannot parse `{base}` to rfc3339"))?,
+                ),
                 None => None,
             };
 
-            FieldGeneratorImpl::with_timestamp(
-                basetime,
-                max_past_value,
-                max_past_mode_value,
-                random_seed,
-            )
+            if ty == DataType::Timestamptz {
+                FieldGeneratorImpl::with_timestamptz(
+                    basetime,
+                    max_past_value,
+                    max_past_mode_value,
+                    random_seed,
+                )
+            } else {
+                FieldGeneratorImpl::with_timestamp(
+                    basetime,
+                    max_past_value,
+                    max_past_mode_value,
+                    random_seed,
+                )
+            }
+            .map_err(Into::into)
         }
         DataType::Varchar => {
             let length_key = format!("fields.{}.length", name);
             let length_value = fields_option_map
                 .get(&length_key)
                 .map(|s| s.parse::<usize>())
-                .transpose()?;
+                .transpose()
+                .context("failed to parse the length of varchar field")?;
             Ok(FieldGeneratorImpl::with_varchar(
                 &VarcharProperty::RandomFixedLength(length_value),
                 random_seed,
             ))
         }
         DataType::Struct(struct_type) => {
-            let struct_fields =
-                zip_eq_fast(struct_type.field_names.clone(), struct_type.fields.clone())
-                    .map(|(field_name, data_type)| {
-                        let gen = generator_from_data_type(
-                            data_type,
-                            fields_option_map,
-                            &format!("{}.{}", name, field_name),
-                            split_index,
-                            split_num,
-                            offset,
-                        )?;
-                        Ok((field_name, gen))
-                    })
-                    .collect::<Result<_>>()?;
-            FieldGeneratorImpl::with_struct_fields(struct_fields)
+            let struct_fields = struct_type
+                .iter()
+                .map(|(field_name, data_type)| {
+                    let gen = generator_from_data_type(
+                        data_type.clone(),
+                        fields_option_map,
+                        &format!("{}.{}", name, field_name),
+                        split_index,
+                        split_num,
+                        offset,
+                    )?;
+                    Ok((field_name.to_string(), gen))
+                })
+                .collect::<Result<_>>()?;
+            FieldGeneratorImpl::with_struct_fields(struct_fields).map_err(Into::into)
         }
         DataType::List(datatype) => {
             let length_key = format!("fields.{}.length", name);
@@ -276,7 +297,7 @@ fn generator_from_data_type(
                 split_num,
                 offset,
             )?;
-            FieldGeneratorImpl::with_list(generator, length_value)
+            FieldGeneratorImpl::with_list(generator, length_value).map_err(Into::into)
         }
         _ => {
             let kind_key = format!("fields.{}.kind", name);
@@ -295,12 +316,14 @@ fn generator_from_data_type(
                     split_num,
                     offset,
                 )
+                .map_err(Into::into)
             } else {
                 let min_key = format!("fields.{}.min", name);
                 let max_key = format!("fields.{}.max", name);
                 let min_value = fields_option_map.get(&min_key).map(|s| s.to_string());
                 let max_value = fields_option_map.get(&max_key).map(|s| s.to_string());
                 FieldGeneratorImpl::with_number_random(data_type, min_value, max_value, random_seed)
+                    .map_err(Into::into)
             }
         }
     }
@@ -308,14 +331,14 @@ fn generator_from_data_type(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use maplit::{convert_args, hashmap};
     use risingwave_common::array::{Op, StructValue};
     use risingwave_common::row::Row;
     use risingwave_common::types::{ScalarImpl, StructType, ToDatumRef};
 
     use super::*;
+    use crate::parser::SpecificParserConfig;
+    use crate::source::SourceContext;
 
     #[tokio::test]
     async fn test_generator() -> Result<()> {
@@ -337,18 +360,18 @@ mod tests {
             },
             Column {
                 name: "struct".to_string(),
-                data_type: DataType::Struct(Arc::new(StructType {
-                    fields: vec![DataType::Int32],
-                    field_names: vec!["random_int".to_string()],
-                })),
+                data_type: DataType::Struct(StructType::new(vec![(
+                    "random_int".to_string(),
+                    DataType::Int32,
+                )])),
                 is_visible: true,
             },
         ];
-        let state = vec![SplitImpl::Datagen(DatagenSplit {
+        let state = vec![DatagenSplit {
             split_index: 0,
             split_num: 1,
             start_offset: None,
-        })];
+        }];
         let properties = DatagenProperties {
             split_num: None,
             rows_per_second: 10,
@@ -374,15 +397,21 @@ mod tests {
         let mut reader = DatagenSplitReader::new(
             properties,
             state,
-            Default::default(),
-            Default::default(),
+            ParserConfig {
+                specific: SpecificParserConfig {
+                    encoding_config: EncodingProperties::Native,
+                    protocol_config: ProtocolProperties::Native,
+                },
+                ..Default::default()
+            },
+            SourceContext::dummy().into(),
             Some(mock_datum),
         )
         .await?
         .into_stream();
 
         let stream_chunk = reader.next().await.unwrap().unwrap();
-        let (op, row) = stream_chunk.chunk.rows().next().unwrap();
+        let (op, row) = stream_chunk.rows().next().unwrap();
         assert_eq!(op, Op::Insert);
         assert_eq!(row.datum_at(0), Some(ScalarImpl::Int32(533)).to_datum_ref(),);
         assert_eq!(
@@ -415,21 +444,28 @@ mod tests {
                 is_visible: true,
             },
         ];
-        let state = vec![SplitImpl::Datagen(DatagenSplit {
+        let state = vec![DatagenSplit {
             split_index: 0,
             split_num: 1,
             start_offset: None,
-        })];
+        }];
         let properties = DatagenProperties {
             split_num: None,
             rows_per_second: 10,
             fields: HashMap::new(),
         };
+        let parser_config = ParserConfig {
+            specific: SpecificParserConfig {
+                encoding_config: EncodingProperties::Native,
+                protocol_config: ProtocolProperties::Native,
+            },
+            ..Default::default()
+        };
         let stream = DatagenSplitReader::new(
             properties.clone(),
             state,
-            Default::default(),
-            Default::default(),
+            parser_config.clone(),
+            SourceContext::dummy().into(),
             Some(mock_datum.clone()),
         )
         .await?
@@ -437,16 +473,16 @@ mod tests {
 
         let v1 = stream.skip(1).next().await.unwrap()?;
 
-        let state = vec![SplitImpl::Datagen(DatagenSplit {
+        let state = vec![DatagenSplit {
             split_index: 0,
             split_num: 1,
             start_offset: Some(9),
-        })];
+        }];
         let mut stream = DatagenSplitReader::new(
             properties,
             state,
-            Default::default(),
-            Default::default(),
+            parser_config,
+            SourceContext::dummy().into(),
             Some(mock_datum),
         )
         .await?

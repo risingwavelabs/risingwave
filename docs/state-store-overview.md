@@ -29,10 +29,10 @@ Hummock consists of a manager service on the meta node, clients on worker nodes 
 The streaming state store has distinguished workload characteristics.
 
 * Every streaming executor will only ***read and write its own portion of data***.
-* Data (generally) ***won’t be shared across nodes***, so every worker node will only read and write its own data. Therefore, every Hummock API, like `get` or `scan`, only guarantees that writes on one node can be immediately read from the same node. In some cases, if we want to read data written from other nodes, we will need to ***wait for the epoch***.
+* Data (generally) ***won't be shared across nodes***, so every worker node will only read and write its own data. Therefore, every Hummock API, like `get` or `scan`, only guarantees that writes on one node can be immediately read from the same node. In some cases, if we want to read data written from other nodes, we will need to ***wait for the epoch***.
 * Streaming data are ***committed in serial***. Based on the [barrier-based checkpoint algorithm](https://en.wikipedia.org/wiki/Chandy%E2%80%93Lamport_algorithm), the states are persisted epoch by epoch. We can tailor the write path specifically for the epoch-based checkpoint workload.
 
-This leads to the design of Hummock, the cloud-native KV-based streaming state store. We’ll explain concepts like “epoch” and “barrier” in the following chapters.
+This leads to the design of Hummock, the cloud-native KV-based streaming state store. We'll explain concepts like “epoch” and “barrier” in the following chapters.
 
 ## The Hummock User API
 
@@ -42,7 +42,7 @@ In this part, we will introduce how users can use Hummock as a KV store.
 
 The Hummock itself provides 3 simple APIs: `ingest_batch`, `get`, and `scan`. Hummock provides MVCC write and read on KV pairs. Every key stored in Hummock has an *epoch* (aka. timestamp). Developers should specify an epoch when calling Hummock APIs.
 
-Hummock doesn’t support writing a single key. To write data into Hummock, users should provide a ***sorted, unique*** list of ***keys*** and the corresponding ***operations*** (put value, delete), with an ***epoch***, and call the `ingest_batch` API. Therefore, within one epoch, users can only have one operation for a key. For example,
+Hummock doesn't support writing a single key. To write data into Hummock, users should provide a ***sorted, unique*** list of ***keys*** and the corresponding ***operations*** (put value, delete), with an ***epoch***, and call the `ingest_batch` API. Therefore, within one epoch, users can only have one operation for a key. For example,
 
 ```
 [a => put 1, b => put 2] epoch = 1 is a valid write batch
@@ -50,7 +50,7 @@ Hummock doesn’t support writing a single key. To write data into Hummock, user
 [b => put 1, a => put 2] epoch = 1 is an invalid write batch
 ```
 
-For reads, we can call the `scan` and `get` API on the Hummock client. Developers need to specify a read epoch for read APIs. Hummock only guarantees that writes on one node can be immediately read from the same node. Let’s take a look at the following example:
+For reads, we can call the `scan` and `get` API on the Hummock client. Developers need to specify a read epoch for read APIs. Hummock only guarantees that writes on one node can be immediately read from the same node. Let's take a look at the following example:
 
 ```
 Node 1: write a => 1, b => 2 at epoch 1
@@ -101,7 +101,7 @@ The Hummock client will batch writes and generate SSTs to sync to the underlying
 - <id>`.data`: Data file composed of ~64KB blocks, each of which contains the actual key-value pairs.
 - <id>`.meta`: Meta file containing large metadata including min-max index, Bloom filter as well as data block metadata.
 
-After the SST is uploaded to an S3-compatible service, the Hummock client will let the Hummock manager know there’s a new table.
+After the SST is uploaded to an S3-compatible service, the Hummock client will let the Hummock manager know there's a new table.
 The list of all SSTs along with some metadata forms a ***version***. When the Hummock client adds new SSTs to the Hummock manager, a new version will be generated with the new set of SST files.
 
 ![Write Path](images/state-store-overview/state-store-overview-02.svg)

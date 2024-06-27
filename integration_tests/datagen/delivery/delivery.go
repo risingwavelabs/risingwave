@@ -19,14 +19,22 @@ type orderEvent struct {
 	OrderTimestamp string `json:"order_timestamp"`
 }
 
+func (r *orderEvent) Topic() string {
+	return "delivery_orders"
+}
+
+func (r *orderEvent) Key() string {
+	return fmt.Sprint(r.OrderId)
+}
+
 func (r *orderEvent) ToPostgresSql() string {
 	return fmt.Sprintf("INSERT INTO %s (order_id, restaurant_id, order_state, order_timestamp) values ('%d', '%d', '%s', '%s')",
 		"delivery_orders_source", r.OrderId, r.RestaurantId, r.OrderState, r.OrderTimestamp)
 }
 
-func (r *orderEvent) ToJson() (topic string, key string, data []byte) {
-	data, _ = json.Marshal(r)
-	return "delivery_orders", fmt.Sprint(r.OrderId), data
+func (r *orderEvent) ToJson() []byte {
+	data, _ := json.Marshal(r)
+	return data
 }
 
 type orderEventGen struct {
@@ -61,7 +69,7 @@ func (g *orderEventGen) Load(ctx context.Context, outCh chan<- sink.SinkRecord) 
 			OrderId:        g.seqOrderId,
 			RestaurantId:   rand.Int63n(num_of_restaurants),
 			OrderState:     order_states[rand.Intn(len(order_states))],
-			OrderTimestamp: now.Add(time.Duration(rand.Intn(total_minutes)) * time.Minute).Format(gen.RwTimestampLayout),
+			OrderTimestamp: now.Add(time.Duration(rand.Intn(total_minutes)) * time.Minute).Format(gen.RwTimestampNaiveLayout),
 		}
 		g.seqOrderId++
 		select {

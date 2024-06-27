@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,20 +14,22 @@
 
 //! Handle creation of logical (non-materialized) views.
 
+use either::Either;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::error::Result;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::catalog::PbView;
 use risingwave_sqlparser::ast::{Ident, ObjectName, Query, Statement};
 
 use super::RwPgResponse;
 use crate::binder::Binder;
+use crate::error::Result;
 use crate::handler::HandlerArgs;
 use crate::optimizer::OptimizerContext;
 
 pub async fn handle_create_view(
     handler_args: HandlerArgs,
+    if_not_exists: bool,
     name: ObjectName,
     columns: Vec<Ident>,
     query: Query,
@@ -40,7 +42,13 @@ pub async fn handle_create_view(
 
     let properties = handler_args.with_options.clone();
 
-    session.check_relation_name_duplicated(name.clone())?;
+    if let Either::Right(resp) = session.check_relation_name_duplicated(
+        name.clone(),
+        StatementType::CREATE_VIEW,
+        if_not_exists,
+    )? {
+        return Ok(resp);
+    }
 
     // plan the query to validate it and resolve dependencies
     let (dependent_relations, schema) = {
@@ -62,7 +70,7 @@ pub async fn handle_create_view(
         schema.fields().to_vec()
     } else {
         if columns.len() != schema.fields().len() {
-            return Err(risingwave_common::error::ErrorCode::InternalError(
+            return Err(crate::error::ErrorCode::InternalError(
                 "view has different number of columns than the query's columns".to_string(),
             )
             .into());
@@ -94,7 +102,7 @@ pub async fn handle_create_view(
         columns: columns.into_iter().map(|f| f.to_prost()).collect(),
     };
 
-    let catalog_writer = session.env().catalog_writer();
+    let catalog_writer = session.catalog_writer()?;
     catalog_writer.create_view(view).await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_VIEW))

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,25 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::{Ord, Ordering};
+use std::cmp::Ordering;
 use std::fmt;
 use std::sync::Arc;
 
 use parse_display::Display;
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::common::{PbColumnOrder, PbDirection, PbNullsAre, PbOrderType};
 
 use super::iter_util::ZipEqDebug;
-use crate::array::{Array, ArrayImpl, DataChunk};
+use crate::array::{Array, DataChunk};
 use crate::catalog::{FieldDisplay, Schema};
-use crate::error::ErrorCode::InternalError;
-use crate::error::Result;
-use crate::estimate_size::EstimateSize;
+use crate::dispatch_array_variants;
 use crate::row::Row;
 use crate::types::{DefaultOrdered, ToDatumRef};
 
 /// Sort direction, ascending/descending.
 #[derive(PartialEq, Eq, Hash, Copy, Clone, Debug, Display, Default)]
-enum Direction {
+pub enum Direction {
     #[default]
     #[display("ASC")]
     Ascending,
@@ -39,7 +38,7 @@ enum Direction {
 }
 
 impl Direction {
-    pub fn from_protobuf(direction: &PbDirection) -> Self {
+    fn from_protobuf(direction: &PbDirection) -> Self {
         match direction {
             PbDirection::Ascending => Self::Ascending,
             PbDirection::Descending => Self::Descending,
@@ -47,10 +46,19 @@ impl Direction {
         }
     }
 
-    pub fn to_protobuf(self) -> PbDirection {
+    fn to_protobuf(self) -> PbDirection {
         match self {
             Self::Ascending => PbDirection::Ascending,
             Self::Descending => PbDirection::Descending,
+        }
+    }
+}
+
+impl Direction {
+    fn reverse(self) -> Self {
+        match self {
+            Self::Ascending => Self::Descending,
+            Self::Descending => Self::Ascending,
         }
     }
 }
@@ -66,7 +74,7 @@ enum NullsAre {
 }
 
 impl NullsAre {
-    pub fn from_protobuf(nulls_are: &PbNullsAre) -> Self {
+    fn from_protobuf(nulls_are: &PbNullsAre) -> Self {
         match nulls_are {
             PbNullsAre::Largest => Self::Largest,
             PbNullsAre::Smallest => Self::Smallest,
@@ -74,7 +82,7 @@ impl NullsAre {
         }
     }
 
-    pub fn to_protobuf(self) -> PbNullsAre {
+    fn to_protobuf(self) -> PbNullsAre {
         match self {
             Self::Largest => PbNullsAre::Largest,
             Self::Smallest => PbNullsAre::Smallest,
@@ -177,6 +185,10 @@ impl OrderType {
         Self::nulls_last(Direction::Descending)
     }
 
+    pub fn direction(&self) -> Direction {
+        self.direction
+    }
+
     pub fn is_ascending(&self) -> bool {
         self.direction == Direction::Ascending
     }
@@ -200,6 +212,10 @@ impl OrderType {
 
     pub fn nulls_are_last(&self) -> bool {
         !self.nulls_are_first()
+    }
+
+    pub fn reverse(self) -> Self {
+        Self::new(self.direction.reverse(), self.nulls_are)
     }
 }
 
@@ -296,7 +312,7 @@ pub struct HeapElem {
     chunk: DataChunk,
     chunk_idx: usize,
     elem_idx: usize,
-    /// DataChunk can be encoded to accelerate the comparison.
+    /// `DataChunk` can be encoded to accelerate the comparison.
     /// Use `risingwave_common::util::encoding_for_comparison::encode_chunk`
     /// to perform encoding, otherwise the comparison will be performed
     /// column by column.
@@ -358,7 +374,6 @@ impl Ord for HeapElem {
                 other.elem_idx,
                 self.column_orders.as_ref(),
             )
-            .unwrap()
         };
         ord.reverse()
     }
@@ -425,30 +440,43 @@ where
     .expect("items in the same `Array` type should be able to compare")
 }
 
-pub fn compare_rows_in_chunk(
+fn compare_rows_in_chunk(
     lhs_data_chunk: &DataChunk,
     lhs_idx: usize,
     rhs_data_chunk: &DataChunk,
     rhs_idx: usize,
     column_orders: &[ColumnOrder],
-) -> Result<Ordering> {
-    for column_order in column_orders.iter() {
-        let lhs_array = lhs_data_chunk.column_at(column_order.column_index).array();
-        let rhs_array = rhs_data_chunk.column_at(column_order.column_index).array();
-        macro_rules! gen_match {
-            ( $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
-                match (lhs_array.as_ref(), rhs_array.as_ref()) {
-                    $((ArrayImpl::$variant_name(lhs_inner), ArrayImpl::$variant_name(rhs_inner)) => Ok(compare_values_in_array(lhs_inner, lhs_idx, rhs_inner, rhs_idx, column_order.order_type)),)*
-                    (l_arr, r_arr) => Err(InternalError(format!("Unmatched array types, lhs array is: {}, rhs array is: {}", l_arr.get_ident(), r_arr.get_ident()))),
-                }?
-            }
-        }
-        let res = for_all_variants! { gen_match };
+) -> Ordering {
+    for column_order in column_orders {
+        let lhs_array = lhs_data_chunk.column_at(column_order.column_index);
+        let rhs_array = rhs_data_chunk.column_at(column_order.column_index);
+
+        let res = dispatch_array_variants!(&**lhs_array, lhs_inner, {
+            #[expect(
+                clippy::unnecessary_fallible_conversions,
+                reason = "FIXME: Array's `into` is not safe. We should revise it."
+            )]
+            let rhs_inner = (&**rhs_array).try_into().unwrap_or_else(|_| {
+                panic!(
+                    "Unmatched array types, lhs array is: {}, rhs array is: {}",
+                    lhs_array.get_ident(),
+                    rhs_array.get_ident(),
+                )
+            });
+            compare_values_in_array(
+                lhs_inner,
+                lhs_idx,
+                rhs_inner,
+                rhs_idx,
+                column_order.order_type,
+            )
+        });
+
         if res != Ordering::Equal {
-            return Ok(res);
+            return res;
         }
     }
-    Ok(Ordering::Equal)
+    Ordering::Equal
 }
 
 /// Partial compare two `Datum`s with specified order type.
@@ -481,10 +509,8 @@ pub fn partial_cmp_datum_iter(
     order_types: impl IntoIterator<Item = OrderType>,
 ) -> Option<Ordering> {
     let mut order_types_iter = order_types.into_iter();
-    lhs.into_iter().partial_cmp_by(rhs.into_iter(), |x, y| {
-        let Some(order_type) = order_types_iter.next() else {
-            return None;
-        };
+    lhs.into_iter().partial_cmp_by(rhs, |x, y| {
+        let order_type = order_types_iter.next()?;
         partial_cmp_datum(x, y, order_type)
     })
 }
@@ -501,7 +527,7 @@ pub fn cmp_datum_iter(
     order_types: impl IntoIterator<Item = OrderType>,
 ) -> Ordering {
     let mut order_types_iter = order_types.into_iter();
-    lhs.into_iter().cmp_by(rhs.into_iter(), |x, y| {
+    lhs.into_iter().cmp_by(rhs, |x, y| {
         let order_type = order_types_iter
             .next()
             .expect("number of `OrderType`s is not enough");
@@ -523,12 +549,9 @@ pub fn partial_cmp_rows(
     lhs.iter()
         .zip_eq_debug(rhs.iter())
         .zip_eq_debug(order_types)
-        .fold(Some(Ordering::Equal), |acc, ((l, r), order_type)| {
-            if acc == Some(Ordering::Equal) {
-                partial_cmp_datum(l, r, *order_type)
-            } else {
-                acc
-            }
+        .try_fold(Ordering::Equal, |acc, ((l, r), order_type)| match acc {
+            Ordering::Equal => partial_cmp_datum(l, r, *order_type),
+            acc => Some(acc),
         })
 }
 
@@ -539,19 +562,23 @@ pub fn partial_cmp_rows(
 /// Panics if the length of `lhs`, `rhs` and `order_types` are not equal,
 /// or, if the schemas of `lhs` and `rhs` are not matched.
 pub fn cmp_rows(lhs: impl Row, rhs: impl Row, order_types: &[OrderType]) -> Ordering {
-    partial_cmp_rows(&lhs, &rhs, order_types)
-        .unwrap_or_else(|| panic!("cannot compare {lhs:?} with {rhs:?}"))
+    assert_eq!(lhs.len(), rhs.len());
+    lhs.iter()
+        .zip_eq_debug(rhs.iter())
+        .zip_eq_debug(order_types)
+        .fold(Ordering::Equal, |acc, ((l, r), order_type)| match acc {
+            Ordering::Equal => cmp_datum(l, r, *order_type),
+            acc => acc,
+        })
 }
 
 #[cfg(test)]
 mod tests {
-    use std::cmp::Ordering;
-
     use itertools::Itertools;
 
     use super::*;
-    use crate::array::{DataChunk, ListValue, StructValue};
-    use crate::row::{OwnedRow, Row};
+    use crate::array::{ListValue, StructValue};
+    use crate::row::OwnedRow;
     use crate::types::{DataType, Datum, ScalarImpl};
 
     #[test]
@@ -590,6 +617,17 @@ mod tests {
         assert!(OrderType::descending_nulls_last().is_descending());
         assert!(OrderType::descending_nulls_last().nulls_are_smallest());
         assert!(OrderType::descending_nulls_last().nulls_are_last());
+
+        assert_eq!(OrderType::ascending().reverse(), OrderType::descending());
+        assert_eq!(OrderType::descending().reverse(), OrderType::ascending());
+        assert_eq!(
+            OrderType::ascending_nulls_first().reverse(),
+            OrderType::descending_nulls_last()
+        );
+        assert_eq!(
+            OrderType::ascending_nulls_last().reverse(),
+            OrderType::descending_nulls_first()
+        );
     }
 
     #[test]
@@ -614,11 +652,11 @@ mod tests {
 
         assert_eq!(
             Ordering::Equal,
-            compare_rows_in_chunk(&chunk, 0, &chunk, 0, &column_orders).unwrap()
+            compare_rows_in_chunk(&chunk, 0, &chunk, 0, &column_orders)
         );
         assert_eq!(
             Ordering::Less,
-            compare_rows_in_chunk(&chunk, 0, &chunk, 1, &column_orders).unwrap()
+            compare_rows_in_chunk(&chunk, 0, &chunk, 1, &column_orders)
         );
     }
 
@@ -641,10 +679,7 @@ mod tests {
                 Some(ScalarImpl::Int32(1)),
                 Some(ScalarImpl::Float32(3.0.into())),
             ]))),
-            Some(ScalarImpl::List(ListValue::new(vec![
-                Some(ScalarImpl::Int32(1)),
-                Some(ScalarImpl::Int32(2)),
-            ]))),
+            Some(ScalarImpl::List(ListValue::from_iter([1, 2]))),
         ]);
         let row2 = OwnedRow::new(vec![
             Some(ScalarImpl::Int16(16)),
@@ -663,10 +698,7 @@ mod tests {
                 Some(ScalarImpl::Int32(1)),
                 Some(ScalarImpl::Float32(33333.0.into())), // larger than row1
             ]))),
-            Some(ScalarImpl::List(ListValue::new(vec![
-                Some(ScalarImpl::Int32(1)),
-                Some(ScalarImpl::Int32(2)),
-            ]))),
+            Some(ScalarImpl::List(ListValue::from_iter([1, 2]))),
         ]);
 
         let column_orders = (0..row1.len())
@@ -694,11 +726,11 @@ mod tests {
         );
         assert_eq!(
             Ordering::Equal,
-            compare_rows_in_chunk(&chunk, 0, &chunk, 0, &column_orders).unwrap()
+            compare_rows_in_chunk(&chunk, 0, &chunk, 0, &column_orders)
         );
         assert_eq!(
             Ordering::Less,
-            compare_rows_in_chunk(&chunk, 0, &chunk, 1, &column_orders).unwrap()
+            compare_rows_in_chunk(&chunk, 0, &chunk, 1, &column_orders)
         );
     }
 

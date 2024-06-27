@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,29 +15,21 @@
 use std::iter;
 use std::mem::size_of;
 
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::common::buffer::CompressionType;
 use risingwave_pb::common::Buffer;
 use risingwave_pb::data::{ArrayType, PbArray};
 
 use super::{Array, ArrayBuilder, DataType};
 use crate::buffer::{Bitmap, BitmapBuilder};
-use crate::estimate_size::EstimateSize;
 use crate::util::iter_util::ZipEqDebug;
 
 /// `BytesArray` is a collection of Rust `[u8]`s.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, EstimateSize)]
 pub struct BytesArray {
-    offset: Vec<u32>,
+    offset: Box<[u32]>,
     bitmap: Bitmap,
-    data: Vec<u8>,
-}
-
-impl EstimateSize for BytesArray {
-    fn estimated_heap_size(&self) -> usize {
-        self.offset.capacity() * size_of::<u32>()
-            + self.bitmap.estimated_heap_size()
-            + self.data.capacity()
-    }
+    data: Box<[u8]>,
 }
 
 impl Array for BytesArray {
@@ -86,7 +78,7 @@ impl Array for BytesArray {
             },
             Buffer {
                 compression: CompressionType::None as i32,
-                body: data_buffer,
+                body: data_buffer.into(),
             },
         ];
         let null_bitmap = self.null_bitmap().to_protobuf();
@@ -116,12 +108,6 @@ impl Array for BytesArray {
     }
 }
 
-impl BytesArray {
-    pub(super) fn data(&self) -> &[u8] {
-        &self.data
-    }
-}
-
 impl<'a> FromIterator<Option<&'a [u8]>> for BytesArray {
     fn from_iter<I: IntoIterator<Item = Option<&'a [u8]>>>(iter: I) -> Self {
         let iter = iter.into_iter();
@@ -146,7 +132,7 @@ impl<'a> FromIterator<&'a [u8]> for BytesArray {
 }
 
 /// `BytesArrayBuilder` use `&[u8]` to build an `BytesArray`.
-#[derive(Debug)]
+#[derive(Debug, Clone, EstimateSize)]
 pub struct BytesArrayBuilder {
     offset: Vec<u32>,
     bitmap: BitmapBuilder,
@@ -156,19 +142,24 @@ pub struct BytesArrayBuilder {
 impl ArrayBuilder for BytesArrayBuilder {
     type ArrayType = BytesArray;
 
-    fn new(capacity: usize) -> Self {
-        let mut offset = Vec::with_capacity(capacity + 1);
+    /// Creates a new `BytesArrayBuilder`.
+    ///
+    /// `item_capacity` is the number of items to pre-allocate. The size of the preallocated
+    /// buffer of offsets is the number of items plus one.
+    /// No additional memory is pre-allocated for the data buffer.
+    fn new(item_capacity: usize) -> Self {
+        let mut offset = Vec::with_capacity(item_capacity + 1);
         offset.push(0);
         Self {
             offset,
-            data: Vec::with_capacity(capacity),
-            bitmap: BitmapBuilder::with_capacity(capacity),
+            data: Vec::with_capacity(0),
+            bitmap: BitmapBuilder::with_capacity(item_capacity),
         }
     }
 
-    fn with_type(capacity: usize, ty: DataType) -> Self {
+    fn with_type(item_capacity: usize, ty: DataType) -> Self {
         assert_eq!(ty, DataType::Bytea);
-        Self::new(capacity)
+        Self::new(item_capacity)
     }
 
     fn append_n<'a>(&'a mut self, n: usize, value: Option<&'a [u8]>) {
@@ -221,9 +212,9 @@ impl ArrayBuilder for BytesArrayBuilder {
 
     fn finish(self) -> BytesArray {
         BytesArray {
-            bitmap: (self.bitmap).finish(),
-            data: self.data,
-            offset: self.offset,
+            bitmap: self.bitmap.finish(),
+            data: self.data.into(),
+            offset: self.offset.into(),
         }
     }
 }

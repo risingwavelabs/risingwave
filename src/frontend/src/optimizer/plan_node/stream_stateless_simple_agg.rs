@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,16 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::generic::{self, PlanAggCall};
+use super::stream::prelude::*;
+use super::utils::impl_distill_by_unit;
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
-use crate::expr::ExprRewriter;
-use crate::optimizer::plan_node::stream::StreamPlanRef;
+use crate::expr::{ExprRewriter, ExprVisitor};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::property::RequiredDist;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
@@ -33,54 +33,49 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 /// by `StreamSimpleAgg`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamStatelessSimpleAgg {
-    pub base: PlanBase,
-    logical: generic::Agg<PlanRef>,
+    pub base: PlanBase<Stream>,
+    core: generic::Agg<PlanRef>,
 }
 
 impl StreamStatelessSimpleAgg {
-    pub fn new(logical: generic::Agg<PlanRef>) -> Self {
-        let input = logical.input.clone();
+    pub fn new(core: generic::Agg<PlanRef>) -> Self {
+        let input = core.input.clone();
         let input_dist = input.distribution();
         debug_assert!(input_dist.satisfies(&RequiredDist::AnyShard));
 
-        let mut watermark_columns = FixedBitSet::with_capacity(logical.output_len());
+        let mut watermark_columns = FixedBitSet::with_capacity(core.output_len());
         // Watermark column(s) must be in group key.
-        for (idx, input_idx) in logical.group_key.ones().enumerate() {
+        for (idx, input_idx) in core.group_key.indices().enumerate() {
             if input.watermark_columns().contains(input_idx) {
                 watermark_columns.insert(idx);
             }
         }
 
-        let base = PlanBase::new_stream_with_logical(
-            &logical,
+        let base = PlanBase::new_stream_with_core(
+            &core,
             input_dist.clone(),
             input.append_only(),
             input.emit_on_window_close(),
             watermark_columns,
         );
-        StreamStatelessSimpleAgg { base, logical }
+        StreamStatelessSimpleAgg { base, core }
     }
 
     pub fn agg_calls(&self) -> &[PlanAggCall] {
-        &self.logical.agg_calls
+        &self.core.agg_calls
     }
 }
-
-impl fmt::Display for StreamStatelessSimpleAgg {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.logical.fmt_with_name(f, "StreamStatelessSimpleAgg")
-    }
-}
+impl_distill_by_unit!(StreamStatelessSimpleAgg, core, "StreamStatelessSimpleAgg");
 
 impl PlanTreeNodeUnary for StreamStatelessSimpleAgg {
     fn input(&self) -> PlanRef {
-        self.logical.input.clone()
+        self.core.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        let mut logical = self.logical.clone();
-        logical.input = input;
-        Self::new(logical)
+        let mut core = self.core.clone();
+        core.input = input;
+        Self::new(core)
     }
 }
 impl_plan_tree_node_for_unary! { StreamStatelessSimpleAgg }
@@ -102,9 +97,10 @@ impl StreamNode for StreamStatelessSimpleAgg {
                 .map(|idx| *idx as u32)
                 .collect_vec(),
             agg_call_states: vec![],
-            result_table: None,
+            intermediate_state_table: None,
             is_append_only: self.input().append_only(),
             distinct_dedup_tables: Default::default(),
+            version: AggNodeVersion::Issue13465 as _,
         })
     }
 }
@@ -115,8 +111,14 @@ impl ExprRewritable for StreamStatelessSimpleAgg {
     }
 
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
-        let mut logical = self.logical.clone();
-        logical.rewrite_exprs(r);
-        Self::new(logical).into()
+        let mut core = self.core.clone();
+        core.rewrite_exprs(r);
+        Self::new(core).into()
+    }
+}
+
+impl ExprVisitable for StreamStatelessSimpleAgg {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.core.visit_exprs(v);
     }
 }

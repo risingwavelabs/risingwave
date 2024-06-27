@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,6 @@
 use std::env;
 use std::sync::Arc;
 
-use itertools::Itertools;
 use libtest_mimic::{Arguments, Failed, Trial};
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
@@ -27,8 +26,9 @@ use risingwave_frontend::{
 };
 use risingwave_sqlparser::ast::Statement;
 use risingwave_sqlsmith::{
-    create_table_statement_to_table, is_permissible_error, mview_sql_gen, parse_sql, sql_gen, Table,
+    is_permissible_error, mview_sql_gen, parse_create_table_statements, parse_sql, sql_gen, Table,
 };
+use thiserror_ext::AsReport;
 use tokio::runtime::Runtime;
 
 type Result<T> = std::result::Result<T, Failed>;
@@ -45,16 +45,16 @@ pub struct SqlsmithEnv {
 /// Returns `Ok(true)` if query result was ignored.
 /// Skip status is required, so that we know if a SQL statement writing to the database was skipped.
 /// Then, we can infer the correct state of the database.
-async fn handle(session: Arc<SessionImpl>, stmt: Statement, sql: &str) -> Result<bool> {
+async fn handle(session: Arc<SessionImpl>, stmt: Statement, sql: Arc<str>) -> Result<bool> {
     let result = handler::handle(session.clone(), stmt, sql, vec![])
         .await
         .map(|_| ())
-        .map_err(|e| format!("Error Reason:\n{}", e).into());
+        .map_err(|e| format!("Error Reason:\n{}", e.as_report()).into());
     validate_result(result)
 }
 
 fn get_seed_table_sql() -> String {
-    let seed_files = vec![
+    let seed_files = [
         "tests/testdata/tpch.sql",
         "tests/testdata/nexmark.sql",
         "tests/testdata/alltypes.sql",
@@ -95,25 +95,22 @@ async fn create_tables(
     let sql = get_seed_table_sql();
     setup_sql.push_str(&sql);
 
-    let statements = parse_sql(&sql);
-    let mut tables = statements
-        .iter()
-        .map(create_table_statement_to_table)
-        .collect_vec();
+    let (mut tables, statements) = parse_create_table_statements(sql);
 
     for s in statements {
-        let create_sql = s.to_string();
-        handle(session.clone(), s, &create_sql).await?;
+        let create_sql: Arc<str> = Arc::from(s.to_string());
+        handle(session.clone(), s, create_sql).await?;
     }
 
     // Generate some mviews
-    for i in 0..10 {
+    for i in 0..20 {
         let (sql, table) = mview_sql_gen(rng, tables.clone(), &format!("m{}", i));
+        let sql: Arc<str> = Arc::from(sql);
         reproduce_failing_queries(&setup_sql, &sql);
         setup_sql.push_str(&format!("{};", &sql));
         let stmts = parse_sql(&sql);
         let stmt = stmts[0].clone();
-        let skipped = handle(session.clone(), stmt, &sql).await?;
+        let skipped = handle(session.clone(), stmt, sql).await?;
         if !skipped {
             tables.push(table);
         }
@@ -154,22 +151,25 @@ async fn test_stream_query(
     setup_sql: &str,
 ) -> Result<()> {
     let mut rng;
-    if let Ok(x) = env::var("RW_RANDOM_SEED_SQLSMITH") && x == "true" {
+    if let Ok(x) = env::var("RW_RANDOM_SEED_SQLSMITH")
+        && x == "true"
+    {
         rng = SmallRng::from_entropy();
     } else {
         rng = SmallRng::seed_from_u64(seed);
     }
 
     let (sql, table) = mview_sql_gen(&mut rng, tables.clone(), "stream_query");
+    let sql: Arc<str> = Arc::from(sql);
     reproduce_failing_queries(setup_sql, &sql);
     // The generated SQL must be parsable.
     let stmt = round_trip_parse_test(&sql)?;
-    let skipped = handle(session.clone(), stmt, &sql).await?;
+    let skipped = handle(session.clone(), stmt, sql).await?;
     if !skipped {
-        let drop_sql = format!("DROP MATERIALIZED VIEW {}", table.name);
+        let drop_sql: Arc<str> = Arc::from(format!("DROP MATERIALIZED VIEW {}", table.name));
         let drop_stmts = parse_sql(&drop_sql);
         let drop_stmt = drop_stmts[0].clone();
-        handle(session.clone(), drop_stmt, &drop_sql).await?;
+        handle(session.clone(), drop_stmt, drop_sql).await?;
     }
     Ok(())
 }
@@ -179,25 +179,31 @@ fn run_batch_query(
     context: OptimizerContextRef,
     stmt: Statement,
 ) -> Result<()> {
+    let _guard = session.txn_begin_implicit();
+
     let mut binder = Binder::new(&session);
     let bound = binder
         .bind(stmt)
-        .map_err(|e| Failed::from(format!("Failed to bind:\nReason:\n{}", e)))?;
+        .map_err(|e| Failed::from(format!("Failed to bind:\nReason:\n{}", e.as_report())))?;
     let mut planner = Planner::new(context);
-    let mut logical_plan = planner
-        .plan(bound)
-        .map_err(|e| Failed::from(format!("Failed to generate logical plan:\nReason:\n{}", e)))?;
-    let batch_plan = logical_plan
-        .gen_batch_plan()
-        .map_err(|e| Failed::from(format!("Failed to generate batch plan:\nReason:\n{}", e)))?;
-    logical_plan
-        .gen_batch_distributed_plan(batch_plan)
-        .map_err(|e| {
-            Failed::from(format!(
-                "Failed to generate batch distributed plan:\nReason:\n{}",
-                e
-            ))
-        })?;
+    let mut plan_root = planner.plan(bound).map_err(|e| {
+        Failed::from(format!(
+            "Failed to generate logical plan:\nReason:\n{}",
+            e.as_report()
+        ))
+    })?;
+    plan_root.gen_batch_plan().map_err(|e| {
+        Failed::from(format!(
+            "Failed to generate batch plan:\nReason:\n{}",
+            e.as_report()
+        ))
+    })?;
+    plan_root.gen_batch_distributed_plan().map_err(|e| {
+        Failed::from(format!(
+            "Failed to generate batch distributed plan:\nReason:\n{}",
+            e.as_report()
+        ))
+    })?;
     Ok(())
 }
 
@@ -208,19 +214,21 @@ fn test_batch_query(
     setup_sql: &str,
 ) -> Result<()> {
     let mut rng;
-    if let Ok(x) = env::var("RW_RANDOM_SEED_SQLSMITH") && x == "true" {
+    if let Ok(x) = env::var("RW_RANDOM_SEED_SQLSMITH")
+        && x == "true"
+    {
         rng = SmallRng::from_entropy();
     } else {
         rng = SmallRng::seed_from_u64(seed);
     }
 
-    let sql = sql_gen(&mut rng, tables);
+    let sql: Arc<str> = Arc::from(sql_gen(&mut rng, tables));
     reproduce_failing_queries(setup_sql, &sql);
 
     // The generated SQL must be parsable.
     let stmt = round_trip_parse_test(&sql)?;
     let context: OptimizerContextRef =
-        OptimizerContext::from_handler_args(HandlerArgs::new(session.clone(), &stmt, &sql)?).into();
+        OptimizerContext::from_handler_args(HandlerArgs::new(session.clone(), &stmt, sql)?).into();
 
     match stmt {
         Statement::Query(_) => {
@@ -251,7 +259,9 @@ async fn setup_sqlsmith_with_seed_inner(seed: u64) -> Result<SqlsmithEnv> {
     let session = frontend.session_ref();
 
     let mut rng;
-    if let Ok(x) = env::var("RW_RANDOM_SEED_SQLSMITH") && x == "true" {
+    if let Ok(x) = env::var("RW_RANDOM_SEED_SQLSMITH")
+        && x == "true"
+    {
         rng = SmallRng::from_entropy();
     } else {
         rng = SmallRng::seed_from_u64(seed);
@@ -269,7 +279,9 @@ async fn setup_sqlsmith_with_seed_inner(seed: u64) -> Result<SqlsmithEnv> {
 /// Otherwise no error: skip status: false.
 fn validate_result<T>(result: Result<T>) -> Result<bool> {
     if let Err(e) = result {
-        if let Some(s) = e.message() && is_permissible_error(s) {
+        if let Some(s) = e.message()
+            && is_permissible_error(s)
+        {
             return Ok(true);
         } else {
             return Err(e);

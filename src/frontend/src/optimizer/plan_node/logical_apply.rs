@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,19 +11,23 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
-use std::fmt;
 
+//
+use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::plan_common::JoinType;
 
-use super::generic::{self, push_down_into_join, push_down_join_condition, GenericPlanNode};
+use super::generic::{
+    self, push_down_into_join, push_down_join_condition, GenericPlanNode, GenericPlanRef,
+};
+use super::utils::{childless_record, Distill};
 use super::{
-    ColPrunable, LogicalJoin, LogicalProject, PlanBase, PlanRef, PlanTreeNodeBinary,
+    ColPrunable, Logical, LogicalJoin, LogicalProject, PlanBase, PlanRef, PlanTreeNodeBinary,
     PredicatePushdown, ToBatch, ToStream,
 };
-use crate::expr::{CorrelatedId, Expr, ExprImpl, ExprRewriter, InputRef};
+use crate::error::{ErrorCode, Result, RwError};
+use crate::expr::{CorrelatedId, Expr, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, ExprRewritable, LogicalFilter, PredicatePushdownContext,
     RewriteStreamContext, ToStreamContext,
@@ -35,46 +39,44 @@ use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 /// left side.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalApply {
-    pub base: PlanBase,
+    pub base: PlanBase<Logical>,
     left: PlanRef,
     right: PlanRef,
     on: Condition,
     join_type: JoinType,
 
     /// Id of the Apply operator.
-    /// So correlated_input_ref can refer the Apply operator exactly by correlated_id.
+    /// So `correlated_input_ref` can refer the Apply operator exactly by `correlated_id`.
     correlated_id: CorrelatedId,
     /// The indices of `CorrelatedInputRef`s in `right`.
     correlated_indices: Vec<usize>,
     /// Whether we require the subquery to produce at most one row. If `true`, we have to report an
     /// error if the subquery produces more than one row.
     max_one_row: bool,
+
+    /// An apply has been translated by `translate_apply()`, so we should not translate it in `translate_apply_rule` again.
+    /// This flag is used to avoid infinite loop in General Unnesting(Translate Apply), since we use a top-down apply order instead of bottom-up to improve the multi-scalar subqueries optimization time.
+    translated: bool,
 }
 
-impl fmt::Display for LogicalApply {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut builder = f.debug_struct("LogicalApply");
+impl Distill for LogicalApply {
+    fn distill<'a>(&self) -> XmlNode<'a> {
+        let mut vec = Vec::with_capacity(if self.max_one_row { 4 } else { 3 });
+        vec.push(("type", Pretty::debug(&self.join_type)));
 
-        builder.field("type", &self.join_type);
+        let concat_schema = self.concat_schema();
+        let cond = Pretty::debug(&ConditionDisplay {
+            condition: &self.on,
+            input_schema: &concat_schema,
+        });
+        vec.push(("on", cond));
 
-        let mut concat_schema = self.left().schema().fields.clone();
-        concat_schema.extend(self.right().schema().fields.clone());
-        let concat_schema = Schema::new(concat_schema);
-        builder.field(
-            "on",
-            &ConditionDisplay {
-                condition: &self.on,
-                input_schema: &concat_schema,
-            },
-        );
-
-        builder.field("correlated_id", &self.correlated_id);
-
+        vec.push(("correlated_id", Pretty::debug(&self.correlated_id)));
         if self.max_one_row {
-            builder.field("max_one_row", &self.max_one_row);
+            vec.push(("max_one_row", Pretty::debug(&true)));
         }
 
-        builder.finish()
+        childless_record("LogicalApply", vec)
     }
 }
 
@@ -87,20 +89,18 @@ impl LogicalApply {
         correlated_id: CorrelatedId,
         correlated_indices: Vec<usize>,
         max_one_row: bool,
+        translated: bool,
     ) -> Self {
         let ctx = left.ctx();
         let join_core = generic::Join::with_full_output(left, right, join_type, on);
         let schema = join_core.schema();
-        let pk_indices = join_core.logical_pk();
-        let (functional_dependency, pk_indices) = match pk_indices {
-            Some(pk_indices) => (
-                FunctionalDependencySet::with_key(schema.len(), &pk_indices),
-                pk_indices,
-            ),
-            None => (FunctionalDependencySet::new(schema.len()), vec![]),
+        let stream_key = join_core.stream_key();
+        let functional_dependency = match &stream_key {
+            Some(stream_key) => FunctionalDependencySet::with_key(schema.len(), stream_key),
+            None => FunctionalDependencySet::new(schema.len()),
         };
         let (left, right, on, join_type, _output_indices) = join_core.decompose();
-        let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
+        let base = PlanBase::new_logical(ctx, schema, stream_key, functional_dependency);
         LogicalApply {
             base,
             left,
@@ -110,6 +110,7 @@ impl LogicalApply {
             correlated_id,
             correlated_indices,
             max_one_row,
+            translated,
         }
     }
 
@@ -130,6 +131,7 @@ impl LogicalApply {
             correlated_id,
             correlated_indices,
             max_one_row,
+            false,
         )
         .into()
     }
@@ -167,6 +169,10 @@ impl LogicalApply {
 
     pub fn correlated_indices(&self) -> Vec<usize> {
         self.correlated_indices.to_owned()
+    }
+
+    pub fn translated(&self) -> bool {
+        self.translated
     }
 
     pub fn max_one_row(&self) -> bool {
@@ -207,7 +213,7 @@ impl LogicalApply {
         let apply_left_len = apply_left.schema().len();
         let correlated_indices_len = correlated_indices.len();
 
-        let new_apply = LogicalApply::create(
+        let new_apply = LogicalApply::new(
             domain,
             apply_right,
             JoinType::Inner,
@@ -215,7 +221,9 @@ impl LogicalApply {
             correlated_id,
             correlated_indices,
             max_one_row,
-        );
+            true,
+        )
+        .into();
 
         let on = Self::rewrite_on(on, correlated_indices_len, apply_left_len).and(Condition {
             conjunctions: eq_predicates,
@@ -264,6 +272,12 @@ impl LogicalApply {
         };
         on.rewrite_expr(&mut rewriter)
     }
+
+    fn concat_schema(&self) -> Schema {
+        let mut concat_schema = self.left().schema().fields.clone();
+        concat_schema.extend(self.right().schema().fields.clone());
+        Schema::new(concat_schema)
+    }
 }
 
 impl PlanTreeNodeBinary for LogicalApply {
@@ -284,6 +298,7 @@ impl PlanTreeNodeBinary for LogicalApply {
             self.correlated_id,
             self.correlated_indices.clone(),
             self.max_one_row,
+            self.translated,
         )
     }
 }
@@ -309,6 +324,12 @@ impl ExprRewritable for LogicalApply {
     }
 }
 
+impl ExprVisitable for LogicalApply {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.on.visit_expr(v)
+    }
+}
+
 impl PredicatePushdown for LogicalApply {
     fn predicate_pushdown(
         &self,
@@ -320,11 +341,11 @@ impl PredicatePushdown for LogicalApply {
         let join_type = self.join_type();
 
         let (left_from_filter, right_from_filter, on) =
-            push_down_into_join(&mut predicate, left_col_num, right_col_num, join_type);
+            push_down_into_join(&mut predicate, left_col_num, right_col_num, join_type, true);
 
         let mut new_on = self.on.clone().and(on);
         let (left_from_on, right_from_on) =
-            push_down_join_condition(&mut new_on, left_col_num, right_col_num, join_type);
+            push_down_join_condition(&mut new_on, left_col_num, right_col_num, join_type, true);
 
         let left_predicate = left_from_filter.and(left_from_on);
         let right_predicate = right_from_filter.and(right_from_on);

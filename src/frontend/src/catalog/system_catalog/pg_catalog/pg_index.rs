@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,24 +12,88 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::LazyLock;
-
-use risingwave_common::types::DataType;
-
-use crate::catalog::system_catalog::SystemCatalogColumnsDef;
+use risingwave_common::types::Fields;
+use risingwave_frontend_macro::system_catalog;
 
 /// The catalog `pg_index` contains part of the information about indexes.
 /// Ref: [`https://www.postgresql.org/docs/current/catalog-pg-index.html`]
-pub const PG_INDEX_TABLE_NAME: &str = "pg_index";
-pub static PG_INDEX_COLUMNS: LazyLock<Vec<SystemCatalogColumnsDef<'_>>> = LazyLock::new(|| {
-    vec![
-        (DataType::Int32, "indexrelid"),
-        (DataType::Int32, "indrelid"),
-        (DataType::Int16, "indnatts"),
-        (DataType::List(Box::new(DataType::Int16)), "indkey"),
-        // None. We don't have `pg_node_tree` type yet, so we use `text` instead.
-        (DataType::Varchar, "indexprs"),
-        // None. We don't have `pg_node_tree` type yet, so we use `text` instead.
-        (DataType::Varchar, "indpred"),
-    ]
-});
+#[system_catalog(
+    view,
+    "pg_catalog.pg_index",
+    "SELECT id AS indexrelid,
+        primary_table_id AS indrelid,
+        ARRAY_LENGTH(key_columns || include_columns)::smallint AS indnatts,
+        ARRAY_LENGTH(key_columns)::smallint AS indnkeyatts,
+        false AS indisunique,
+        key_columns || include_columns AS indkey,
+        ARRAY[]::smallint[] as indoption,
+        NULL AS indexprs,
+        NULL AS indpred,
+        FALSE AS indisprimary,
+        ARRAY[]::int[] AS indclass,
+        false AS indisexclusion,
+        true AS indimmediate,
+        false AS indisclustered,
+        true AS indisvalid,
+        false AS indcheckxmin,
+        true AS indisready,
+        true AS indislive,
+        false AS indisreplident
+    FROM rw_catalog.rw_indexes
+    UNION ALL
+    SELECT c.relation_id AS indexrelid,
+        c.relation_id AS indrelid,
+        COUNT(*)::smallint AS indnatts,
+        COUNT(*)::smallint AS indnkeyatts,
+        true AS indisunique,
+        ARRAY_AGG(c.position)::smallint[] AS indkey,
+        ARRAY[]::smallint[] as indoption,
+        NULL AS indexprs,
+        NULL AS indpred,
+        TRUE AS indisprimary,
+        ARRAY[]::int[] AS indclass,
+        false AS indisexclusion,
+        true AS indimmediate,
+        false AS indisclustered,
+        true AS indisvalid,
+        false AS indcheckxmin,
+        true AS indisready,
+        true AS indislive,
+        false AS indisreplident
+    FROM rw_catalog.rw_columns c
+    WHERE c.is_primary_key = true AND c.is_hidden = false
+    AND c.relation_id IN (
+        SELECT id
+        FROM rw_catalog.rw_tables
+    )
+    GROUP BY c.relation_id"
+)]
+#[derive(Fields)]
+struct PgIndex {
+    indexrelid: i32,
+    indrelid: i32,
+    indnatts: i16,
+    indnkeyatts: i16,
+    // We return false as default to indicate that this is NOT a unique index
+    indisunique: bool,
+    indkey: Vec<i16>,
+    indoption: Vec<i16>,
+    // None. We don't have `pg_node_tree` type yet, so we use `text` instead.
+    indexprs: Option<String>,
+    // None. We don't have `pg_node_tree` type yet, so we use `text` instead.
+    indpred: Option<String>,
+    // TODO: we return false as the default value.
+    indisprimary: bool,
+    // Empty array. We only have a dummy implementation of `pg_opclass` yet.
+    indclass: Vec<i32>,
+
+    // Unused columns. Kept for compatibility with PG.
+    indisexclusion: bool,
+    indimmediate: bool,
+    indisclustered: bool,
+    indisvalid: bool,
+    indcheckxmin: bool,
+    indisready: bool,
+    indislive: bool,
+    indisreplident: bool,
+}

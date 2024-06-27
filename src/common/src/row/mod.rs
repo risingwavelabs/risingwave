@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
 use std::borrow::Cow;
 use std::fmt::Display;
 use std::hash::{BuildHasher, Hasher};
+use std::ops::RangeBounds;
 
 use bytes::{BufMut, Bytes, BytesMut};
 use itertools::Itertools;
@@ -27,10 +28,6 @@ use crate::util::value_encoding;
 
 /// The trait for abstracting over a Row-like type.
 pub trait Row: Sized + std::fmt::Debug + PartialEq + Eq {
-    type Iter<'a>: Iterator<Item = DatumRef<'a>>
-    where
-        Self: 'a;
-
     /// Returns the [`DatumRef`] at the given `index`.
     fn datum_at(&self, index: usize) -> DatumRef<'_>;
 
@@ -50,7 +47,7 @@ pub trait Row: Sized + std::fmt::Debug + PartialEq + Eq {
     }
 
     /// Returns an iterator over the datums in the row, in [`DatumRef`] form.
-    fn iter(&self) -> Self::Iter<'_>;
+    fn iter(&self) -> impl Iterator<Item = DatumRef<'_>>;
 
     /// Converts the row into an [`OwnedRow`].
     ///
@@ -114,20 +111,35 @@ pub trait Row: Sized + std::fmt::Debug + PartialEq + Eq {
         buf
     }
 
+    /// Hash the datums of this row into the given hasher.
+    ///
+    /// Implementors should delegate [`std::hash::Hash::hash`] to this method.
+    fn hash_datums_into<H: Hasher>(&self, state: &mut H) {
+        for datum in self.iter() {
+            hash_datum(datum, state);
+        }
+    }
+
     /// Returns the hash code of the row.
-    #[inline]
     fn hash<H: BuildHasher>(&self, hash_builder: H) -> HashCode<H> {
         let mut hasher = hash_builder.build_hasher();
-        for datum in self.iter() {
-            hash_datum(datum, &mut hasher);
-        }
+        self.hash_datums_into(&mut hasher);
         hasher.finish().into()
     }
 
     /// Determines whether the datums of this row are equal to those of another.
     #[inline]
     fn eq(this: &Self, other: impl Row) -> bool {
-        this.iter().eq(other.iter())
+        if this.len() != other.len() {
+            return false;
+        }
+        for i in (0..this.len()).rev() {
+            // compare from the end to the start, as it's more likely to have same prefix
+            if this.datum_at(i) != other.datum_at(i) {
+                return false;
+            }
+        }
+        true
     }
 }
 
@@ -156,6 +168,17 @@ pub trait RowExt: Row {
         assert_row(Project::new(self, indices))
     }
 
+    /// Adapter for slicing a row with the given `range`.
+    ///
+    /// # Panics
+    /// Panics if range is out of bounds.
+    fn slice(self, range: impl RangeBounds<usize>) -> Slice<Self>
+    where
+        Self: Sized,
+    {
+        assert_row(Slice::new(self, range))
+    }
+
     fn display(&self) -> impl Display + '_ {
         struct D<'a, T: Row>(&'a T);
         impl<'a, T: Row> Display for D<'a, T> {
@@ -173,6 +196,10 @@ pub trait RowExt: Row {
             }
         }
         D(self)
+    }
+
+    fn is_null_at(&self, index: usize) -> bool {
+        self.datum_at(index).is_none()
     }
 }
 
@@ -197,7 +224,7 @@ macro_rules! deref_forward_row {
             (**self).is_empty()
         }
 
-        fn iter(&self) -> Self::Iter<'_> {
+        fn iter(&self) -> impl Iterator<Item = crate::types::DatumRef<'_>> {
             (**self).iter()
         }
 
@@ -229,6 +256,10 @@ macro_rules! deref_forward_row {
             (**self).hash(hash_builder)
         }
 
+        fn hash_datums_into<H: std::hash::Hasher>(&self, state: &mut H) {
+            (**self).hash_datums_into(state)
+        }
+
         fn eq(this: &Self, other: impl Row) -> bool {
             Row::eq(&(**this), other)
         }
@@ -236,18 +267,10 @@ macro_rules! deref_forward_row {
 }
 
 impl<R: Row> Row for &R {
-    type Iter<'a> = R::Iter<'a>
-    where
-        Self: 'a;
-
     deref_forward_row!();
 }
 
 impl<R: Row + Clone> Row for Cow<'_, R> {
-    type Iter<'a> = R::Iter<'a>
-    where
-        Self: 'a;
-
     deref_forward_row!();
 
     // Manually implemented in case `R` has a more efficient implementation.
@@ -257,10 +280,6 @@ impl<R: Row + Clone> Row for Cow<'_, R> {
 }
 
 impl<R: Row> Row for Box<R> {
-    type Iter<'a> = R::Iter<'a>
-    where
-        Self: 'a;
-
     deref_forward_row!();
 
     // Manually implemented in case the `Cow` is `Owned` and `R` has a more efficient
@@ -289,36 +308,26 @@ macro_rules! impl_slice_row {
         }
 
         #[inline]
-        fn iter(&self) -> Self::Iter<'_> {
+        fn iter(&self) -> impl Iterator<Item = DatumRef<'_>> {
             self.as_ref().iter().map(ToDatumRef::to_datum_ref)
         }
     };
 }
 
-type SliceIter<'a, D> = std::iter::Map<std::slice::Iter<'a, D>, fn(&'a D) -> DatumRef<'a>>;
-
 impl<D: ToDatumRef> Row for &[D] {
-    type Iter<'a> = SliceIter<'a, D>
-    where
-        Self: 'a;
-
     impl_slice_row!();
 }
 
 impl<D: ToDatumRef, const N: usize> Row for [D; N] {
-    type Iter<'a> = SliceIter<'a, D>
-    where
-        Self: 'a;
+    impl_slice_row!();
+}
 
+impl<D: ToDatumRef + Default, const N: usize> Row for ArrayVec<[D; N]> {
     impl_slice_row!();
 }
 
 /// Implements [`Row`] for an optional row.
 impl<R: Row> Row for Option<R> {
-    type Iter<'a> = itertools::Either<R::Iter<'a>, <Empty as Row>::Iter<'a>>
-    where
-        Self: 'a;
-
     fn datum_at(&self, index: usize) -> DatumRef<'_> {
         match self {
             Some(row) => row.datum_at(index),
@@ -340,10 +349,10 @@ impl<R: Row> Row for Option<R> {
         }
     }
 
-    fn iter(&self) -> Self::Iter<'_> {
+    fn iter(&self) -> impl Iterator<Item = DatumRef<'_>> {
         match self {
-            Some(row) => itertools::Either::Left(row.iter()),
-            None => itertools::Either::Right(EMPTY.iter()),
+            Some(row) => either::Either::Left(row.iter()),
+            None => either::Either::Right(EMPTY.iter()),
         }
     }
 
@@ -374,6 +383,69 @@ impl<R: Row> Row for Option<R> {
     }
 }
 
+/// Implements [`Row`] for an [`either::Either`] of two different types of rows.
+impl<R1: Row, R2: Row> Row for either::Either<R1, R2> {
+    fn datum_at(&self, index: usize) -> DatumRef<'_> {
+        either::for_both!(self, row => row.datum_at(index))
+    }
+
+    unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
+        either::for_both!(self, row => row.datum_at_unchecked(index))
+    }
+
+    fn len(&self) -> usize {
+        either::for_both!(self, row => row.len())
+    }
+
+    fn is_empty(&self) -> bool {
+        either::for_both!(self, row => row.is_empty())
+    }
+
+    fn iter(&self) -> impl Iterator<Item = DatumRef<'_>> {
+        self.as_ref().map_either(Row::iter, Row::iter)
+    }
+
+    fn to_owned_row(&self) -> OwnedRow {
+        either::for_both!(self, row => row.to_owned_row())
+    }
+
+    fn into_owned_row(self) -> OwnedRow {
+        either::for_both!(self, row => row.into_owned_row())
+    }
+
+    fn value_serialize_into(&self, buf: impl BufMut) {
+        either::for_both!(self, row => row.value_serialize_into(buf))
+    }
+
+    fn value_serialize(&self) -> Vec<u8> {
+        either::for_both!(self, row => row.value_serialize())
+    }
+
+    fn value_serialize_bytes(&self) -> Bytes {
+        either::for_both!(self, row => row.value_serialize_bytes())
+    }
+
+    fn memcmp_serialize_into(&self, serde: &OrderedRowSerde, buf: impl BufMut) {
+        either::for_both!(self, row => row.memcmp_serialize_into(serde, buf))
+    }
+
+    fn memcmp_serialize(&self, serde: &OrderedRowSerde) -> Vec<u8> {
+        either::for_both!(self, row => row.memcmp_serialize(serde))
+    }
+
+    fn hash_datums_into<H: Hasher>(&self, state: &mut H) {
+        either::for_both!(self, row => row.hash_datums_into(state))
+    }
+
+    fn hash<H: BuildHasher>(&self, hash_builder: H) -> HashCode<H> {
+        either::for_both!(self, row => row.hash(hash_builder))
+    }
+
+    fn eq(this: &Self, other: impl Row) -> bool {
+        either::for_both!(this, row => Row::eq(row, other))
+    }
+}
+
 mod chain;
 mod compacted_row;
 mod empty;
@@ -382,6 +454,8 @@ mod ordered;
 mod owned_row;
 mod project;
 mod repeat_n;
+mod slice;
+pub use ::tinyvec::ArrayVec;
 pub use chain::Chain;
 pub use compacted_row::CompactedRow;
 pub use empty::{empty, Empty};
@@ -389,3 +463,4 @@ pub use once::{once, Once};
 pub use owned_row::{OwnedRow, RowDeserializer};
 pub use project::Project;
 pub use repeat_n::{repeat_n, RepeatN};
+pub use slice::Slice;

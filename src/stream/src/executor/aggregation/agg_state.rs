@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,155 +12,145 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::stream_chunk::Ops;
-use risingwave_common::array::ArrayImpl;
+use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
-use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::must_match;
-use risingwave_common::row::OwnedRow;
 use risingwave_common::types::Datum;
-use risingwave_common_proc_macro::EstimateSize;
-use risingwave_expr::agg::AggCall;
+use risingwave_common::util::sort_util::ColumnOrder;
+use risingwave_common_estimate_size::EstimateSize;
+use risingwave_expr::aggregate::{AggCall, AggregateState, BoxedAggregateFunction};
+use risingwave_pb::stream_plan::PbAggNodeVersion;
 use risingwave_storage::StateStore;
 
 use super::minput::MaterializedInputState;
-use super::table::TableState;
-use super::value::ValueState;
+use super::GroupKey;
 use crate::common::table::state_table::StateTable;
 use crate::common::StateTableColumnMapping;
 use crate::executor::{PkIndices, StreamExecutorResult};
 
 /// Represents the persistent storage of aggregation state.
 pub enum AggStateStorage<S: StateStore> {
-    /// The state is stored in the result table. No standalone state table is needed.
-    ResultValue,
-
-    /// The state is stored in a single state table whose schema is deduced by frontend and backend
-    /// with implicit consensus.
-    Table { table: StateTable<S> },
+    /// The state is stored as a value in the intermediate state table.
+    Value,
 
     /// The state is stored as a materialization of input chunks, in a standalone state table.
     /// `mapping` describes the mapping between the columns in the state table and the input
-    /// chunks.
+    /// chunks. `order_columns` list the index and order type of sort keys.
     MaterializedInput {
         table: StateTable<S>,
         mapping: StateTableColumnMapping,
+        order_columns: Vec<ColumnOrder>,
     },
-}
-
-/// Verify if the data going through the state is valid by checking if `ops.len() ==
-/// visibility.len() == columns[x].len()`.
-fn verify_chunk(ops: Ops<'_>, visibility: Option<&Bitmap>, columns: &[&ArrayImpl]) -> bool {
-    let mut all_lengths = vec![ops.len()];
-    if let Some(visibility) = visibility {
-        all_lengths.push(visibility.len());
-    }
-    all_lengths.extend(columns.iter().map(|x| x.len()));
-    all_lengths.iter().min() == all_lengths.iter().max()
 }
 
 /// State for single aggregation call. It manages the state cache and interact with the
 /// underlying state store if necessary.
-#[derive(EstimateSize)]
-pub enum AggState<S: StateStore> {
-    /// State as single scalar value, e.g. `count`, `sum`, append-only `min`/`max`.
-    Value(ValueState),
-
-    /// State as a single state table whose schema is deduced by frontend and backend with implicit
-    /// consensus, e.g. append-only `single_phase_approx_count_distinct`.
-    Table(TableState<S>),
+pub enum AggState {
+    /// State as a single scalar value.
+    /// e.g. `count`, `sum`, append-only `min`/`max`.
+    Value(AggregateState),
 
     /// State as materialized input chunk, e.g. non-append-only `min`/`max`, `string_agg`.
-    MaterializedInput(MaterializedInputState<S>),
+    MaterializedInput(Box<MaterializedInputState>),
 }
 
-impl<S: StateStore> AggState<S> {
+impl EstimateSize for AggState {
+    fn estimated_heap_size(&self) -> usize {
+        match self {
+            Self::Value(state) => state.estimated_heap_size(),
+            Self::MaterializedInput(state) => state.estimated_size(),
+        }
+    }
+}
+
+impl AggState {
     /// Create an [`AggState`] from a given [`AggCall`].
     #[allow(clippy::too_many_arguments)]
-    pub async fn create(
+    pub fn create(
+        version: PbAggNodeVersion,
         agg_call: &AggCall,
-        storage: &AggStateStorage<S>,
-        prev_output: Option<&Datum>,
+        agg_func: &BoxedAggregateFunction,
+        storage: &AggStateStorage<impl StateStore>,
+        encoded_state: Option<&Datum>,
         pk_indices: &PkIndices,
-        group_key: Option<&OwnedRow>,
         extreme_cache_size: usize,
         input_schema: &Schema,
     ) -> StreamExecutorResult<Self> {
         Ok(match storage {
-            AggStateStorage::ResultValue => {
-                Self::Value(ValueState::new(agg_call, prev_output.cloned())?)
+            AggStateStorage::Value => {
+                let state = match encoded_state {
+                    Some(encoded) => agg_func.decode_state(encoded.clone())?,
+                    None => agg_func.create_state()?,
+                };
+                Self::Value(state)
             }
-            AggStateStorage::Table { table } => {
-                Self::Table(TableState::new(agg_call, table, group_key).await?)
-            }
-            AggStateStorage::MaterializedInput { mapping, .. } => {
-                Self::MaterializedInput(MaterializedInputState::new(
-                    agg_call,
-                    pk_indices,
-                    mapping,
-                    extreme_cache_size,
-                    input_schema,
-                ))
-            }
+            AggStateStorage::MaterializedInput {
+                mapping,
+                order_columns,
+                ..
+            } => Self::MaterializedInput(Box::new(MaterializedInputState::new(
+                version,
+                agg_call,
+                pk_indices,
+                order_columns,
+                mapping,
+                extreme_cache_size,
+                input_schema,
+            )?)),
         })
     }
 
     /// Apply input chunk to the state.
-    pub fn apply_chunk(
+    pub async fn apply_chunk(
         &mut self,
-        ops: Ops<'_>,
-        visibility: Option<&Bitmap>,
-        columns: &[&ArrayImpl],
-        storage: &mut AggStateStorage<S>,
+        chunk: &StreamChunk,
+        call: &AggCall,
+        func: &BoxedAggregateFunction,
+        visibility: Bitmap,
     ) -> StreamExecutorResult<()> {
-        debug_assert!(verify_chunk(ops, visibility, columns));
         match self {
             Self::Value(state) => {
-                debug_assert!(matches!(storage, AggStateStorage::ResultValue));
-                state.apply_chunk(ops, visibility, columns)
-            }
-            Self::Table(state) => {
-                debug_assert!(matches!(storage, AggStateStorage::Table { .. }));
-                state.apply_chunk(ops, visibility, columns)
+                let chunk = chunk.project_with_vis(call.args.val_indices(), visibility);
+                func.update(state, &chunk).await?;
+                Ok(())
             }
             Self::MaterializedInput(state) => {
-                debug_assert!(matches!(storage, AggStateStorage::MaterializedInput { .. }));
-                state.apply_chunk(ops, visibility, columns)
+                // the input chunk for minput is unprojected
+                let chunk = chunk.clone_with_vis(visibility);
+                state.apply_chunk(&chunk)
             }
         }
     }
 
-    /// Get the output of the state.
+    /// Get the output of aggregations.
     pub async fn get_output(
         &mut self,
-        storage: &AggStateStorage<S>,
-        group_key: Option<&OwnedRow>,
+        storage: &AggStateStorage<impl StateStore>,
+        func: &BoxedAggregateFunction,
+        group_key: Option<&GroupKey>,
     ) -> StreamExecutorResult<Datum> {
         match self {
             Self::Value(state) => {
-                debug_assert!(matches!(storage, AggStateStorage::ResultValue));
-                Ok(state.get_output())
-            }
-            Self::Table(state) => {
-                debug_assert!(matches!(storage, AggStateStorage::Table { .. }));
-                state.get_output()
+                debug_assert!(matches!(storage, AggStateStorage::Value));
+                Ok(func.get_result(state).await?)
             }
             Self::MaterializedInput(state) => {
                 let state_table = must_match!(
                     storage,
                     AggStateStorage::MaterializedInput { table, .. } => table
                 );
-                state.get_output(state_table, group_key).await
+                state.get_output(state_table, group_key, func).await
             }
         }
     }
 
     /// Reset the value state to initial state.
-    pub fn reset(&mut self) {
+    pub fn reset(&mut self, func: &BoxedAggregateFunction) -> StreamExecutorResult<()> {
         if let Self::Value(state) = self {
             // now only value states need to be reset
-            state.reset();
+            *state = func.create_state()?;
         }
+        Ok(())
     }
 }

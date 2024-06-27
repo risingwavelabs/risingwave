@@ -1,0 +1,4 @@
+psycopg2-binary
+pytest
+sqlalchemy-risingwave
+SQLAlchemy==1.4.51

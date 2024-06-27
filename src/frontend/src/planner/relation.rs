@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,20 +14,27 @@
 
 use std::rc::Rc;
 
+use either::Either;
 use itertools::Itertools;
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::bail_not_implemented;
+use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::{DataType, Interval, ScalarImpl};
+use risingwave_sqlparser::ast::AsOf;
 
 use crate::binder::{
-    BoundBaseTable, BoundJoin, BoundShare, BoundSource, BoundSystemTable, BoundWatermark,
-    BoundWindowTableFunction, Relation, WindowTableFunctionKind,
+    BoundBackCteRef, BoundBaseTable, BoundJoin, BoundShare, BoundShareInput, BoundSource,
+    BoundSystemTable, BoundWatermark, BoundWindowTableFunction, Relation, WindowTableFunctionKind,
 };
-use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef, TableFunction};
+use crate::error::{ErrorCode, Result};
+use crate::expr::{Expr, ExprImpl, ExprType, FunctionCall, InputRef};
+use crate::optimizer::plan_node::generic::SourceNodeKind;
 use crate::optimizer::plan_node::{
-    LogicalHopWindow, LogicalJoin, LogicalProject, LogicalScan, LogicalShare, LogicalSource,
-    LogicalTableFunction, PlanRef,
+    LogicalApply, LogicalCteRef, LogicalHopWindow, LogicalJoin, LogicalProject, LogicalScan,
+    LogicalShare, LogicalSource, LogicalSysScan, LogicalTableFunction, LogicalValues, PlanRef,
 };
+use crate::optimizer::property::Cardinality;
 use crate::planner::Planner;
+use crate::utils::Condition;
 
 const ERROR_WINDOW_SIZE_ARG: &str =
     "The size arg of window table function should be an interval literal.";
@@ -35,49 +42,90 @@ const ERROR_WINDOW_SIZE_ARG: &str =
 impl Planner {
     pub fn plan_relation(&mut self, relation: Relation) -> Result<PlanRef> {
         match relation {
-            Relation::BaseTable(t) => self.plan_base_table(*t),
+            Relation::BaseTable(t) => self.plan_base_table(&t),
             Relation::SystemTable(st) => self.plan_sys_table(*st),
             // TODO: order is ignored in the subquery
-            Relation::Subquery(q) => Ok(self.plan_query(q.query)?.into_subplan()),
+            Relation::Subquery(q) => Ok(self.plan_query(q.query)?.into_unordered_subplan()),
             Relation::Join(join) => self.plan_join(*join),
+            Relation::Apply(join) => self.plan_apply(*join),
             Relation::WindowTableFunction(tf) => self.plan_window_table_function(*tf),
             Relation::Source(s) => self.plan_source(*s),
-            Relation::TableFunction(tf) => self.plan_table_function(*tf),
+            Relation::TableFunction {
+                expr: tf,
+                with_ordinality,
+            } => self.plan_table_function(tf, with_ordinality),
             Relation::Watermark(tf) => self.plan_watermark(*tf),
+            // note that rcte (i.e., RecursiveUnion) is included *implicitly* in share.
             Relation::Share(share) => self.plan_share(*share),
+            Relation::BackCteRef(cte_ref) => self.plan_cte_ref(*cte_ref),
         }
     }
 
     pub(crate) fn plan_sys_table(&mut self, sys_table: BoundSystemTable) -> Result<PlanRef> {
-        Ok(LogicalScan::create(
+        Ok(LogicalSysScan::create(
             sys_table.sys_table_catalog.name().to_string(),
-            true,
             Rc::new(sys_table.sys_table_catalog.table_desc()),
-            vec![],
             self.ctx(),
-            false,
+            Cardinality::unknown(), // TODO(card): cardinality of system table
         )
         .into())
     }
 
-    pub(super) fn plan_base_table(&mut self, base_table: BoundBaseTable) -> Result<PlanRef> {
+    pub(super) fn plan_base_table(&mut self, base_table: &BoundBaseTable) -> Result<PlanRef> {
+        let as_of = base_table.as_of.clone();
+        match as_of {
+            None | Some(AsOf::ProcessTime) => {}
+            Some(AsOf::TimestampString(_)) | Some(AsOf::TimestampNum(_)) => {
+                bail_not_implemented!("As Of Timestamp is not supported yet.")
+            }
+            Some(AsOf::VersionNum(_)) | Some(AsOf::VersionString(_)) => {
+                bail_not_implemented!("As Of Version is not supported yet.")
+            }
+        }
+        let table_cardinality = base_table.table_catalog.cardinality;
         Ok(LogicalScan::create(
             base_table.table_catalog.name().to_string(),
-            false,
-            Rc::new(base_table.table_catalog.table_desc()),
+            base_table.table_catalog.clone(),
             base_table
                 .table_indexes
                 .iter()
                 .map(|x| x.as_ref().clone().into())
                 .collect(),
             self.ctx(),
-            base_table.for_system_time_as_of_proctime,
+            as_of,
+            table_cardinality,
         )
         .into())
     }
 
     pub(super) fn plan_source(&mut self, source: BoundSource) -> Result<PlanRef> {
-        Ok(LogicalSource::with_catalog(Rc::new(source.catalog), false, self.ctx())?.into())
+        if source.is_shareable_cdc_connector() {
+            Err(ErrorCode::InternalError(
+                "Should not create MATERIALIZED VIEW or SELECT directly on shared CDC source. HINT: create TABLE from the source instead.".to_string(),
+            )
+            .into())
+        } else {
+            let as_of = source.as_of.clone();
+            match as_of {
+                None
+                | Some(AsOf::VersionNum(_))
+                | Some(AsOf::TimestampString(_))
+                | Some(AsOf::TimestampNum(_)) => {}
+                Some(AsOf::ProcessTime) => {
+                    bail_not_implemented!("As Of ProcessTime() is not supported yet.")
+                }
+                Some(AsOf::VersionString(_)) => {
+                    bail_not_implemented!("As Of Version is not supported yet.")
+                }
+            }
+            Ok(LogicalSource::with_catalog(
+                Rc::new(source.catalog),
+                SourceNodeKind::CreateMViewOrBatch,
+                self.ctx(),
+                as_of,
+            )?
+            .into())
+        }
     }
 
     pub(super) fn plan_join(&mut self, join: BoundJoin) -> Result<PlanRef> {
@@ -86,14 +134,35 @@ impl Planner {
         let join_type = join.join_type;
         let on_clause = join.cond;
         if on_clause.has_subquery() {
-            Err(ErrorCode::NotImplemented(
-                "Subquery in join on condition is unsupported".into(),
-                None.into(),
-            )
-            .into())
+            bail_not_implemented!("Subquery in join on condition");
         } else {
             Ok(LogicalJoin::create(left, right, join_type, on_clause))
         }
+    }
+
+    pub(super) fn plan_apply(&mut self, mut join: BoundJoin) -> Result<PlanRef> {
+        let join_type = join.join_type;
+        let on_clause = join.cond;
+        if on_clause.has_subquery() {
+            bail_not_implemented!("Subquery in join on condition");
+        }
+
+        let correlated_id = self.ctx.next_correlated_id();
+        let correlated_indices = join
+            .right
+            .collect_correlated_indices_by_depth_and_assign_id(0, correlated_id);
+        let left = self.plan_relation(join.left)?;
+        let right = self.plan_relation(join.right)?;
+
+        Ok(LogicalApply::create(
+            left,
+            right,
+            join_type,
+            Condition::with_expr(on_clause),
+            correlated_id,
+            correlated_indices,
+            false,
+        ))
     }
 
     pub(super) fn plan_window_table_function(
@@ -115,25 +184,84 @@ impl Planner {
         }
     }
 
-    pub(super) fn plan_table_function(&mut self, table_function: TableFunction) -> Result<PlanRef> {
-        Ok(LogicalTableFunction::new(table_function, self.ctx()).into())
+    pub(super) fn plan_table_function(
+        &mut self,
+        table_function: ExprImpl,
+        with_ordinality: bool,
+    ) -> Result<PlanRef> {
+        // TODO: maybe we can unify LogicalTableFunction with LogicalValues
+        match table_function {
+            ExprImpl::TableFunction(tf) => {
+                Ok(LogicalTableFunction::new(*tf, with_ordinality, self.ctx()).into())
+            }
+            expr => {
+                let schema = Schema {
+                    // TODO: should be named
+                    fields: vec![Field::unnamed(expr.return_type())],
+                };
+                let expr_return_type = expr.return_type();
+                let root = LogicalValues::create(vec![vec![expr]], schema, self.ctx());
+                let input_ref = ExprImpl::from(InputRef::new(0, expr_return_type.clone()));
+                let mut exprs = if let DataType::Struct(st) = expr_return_type {
+                    st.iter()
+                        .enumerate()
+                        .map(|(i, (_, ty))| {
+                            let idx = ExprImpl::literal_int(i.try_into().unwrap());
+                            let args = vec![input_ref.clone(), idx];
+                            FunctionCall::new_unchecked(ExprType::Field, args, ty.clone()).into()
+                        })
+                        .collect()
+                } else {
+                    vec![input_ref]
+                };
+                if with_ordinality {
+                    exprs.push(ExprImpl::literal_bigint(1));
+                }
+                Ok(LogicalProject::create(root, exprs))
+            }
+        }
     }
 
     pub(super) fn plan_share(&mut self, share: BoundShare) -> Result<PlanRef> {
-        match self.share_cache.get(&share.share_id) {
-            None => {
-                let result = self.plan_relation(share.input)?;
+        match share.input {
+            BoundShareInput::Query(Either::Left(nonrecursive_query)) => {
+                let id = share.share_id;
+                match self.share_cache.get(&id) {
+                    None => {
+                        let result = self
+                            .plan_query(nonrecursive_query)?
+                            .into_unordered_subplan();
+                        let logical_share = LogicalShare::create(result);
+                        self.share_cache.insert(id, logical_share.clone());
+                        Ok(logical_share)
+                    }
+                    Some(result) => Ok(result.clone()),
+                }
+            }
+            // for the recursive union in rcte
+            BoundShareInput::Query(Either::Right(recursive_union)) => self.plan_recursive_union(
+                *recursive_union.base,
+                *recursive_union.recursive,
+                share.share_id,
+            ),
+            BoundShareInput::ChangeLog(relation) => {
+                let id = share.share_id;
+                let result = self.plan_changelog(relation)?;
                 let logical_share = LogicalShare::create(result);
-                self.share_cache
-                    .insert(share.share_id, logical_share.clone());
+                self.share_cache.insert(id, logical_share.clone());
                 Ok(logical_share)
             }
-            Some(result) => Ok(result.clone()),
         }
     }
 
     pub(super) fn plan_watermark(&mut self, _watermark: BoundWatermark) -> Result<PlanRef> {
         todo!("plan watermark");
+    }
+
+    pub(super) fn plan_cte_ref(&mut self, cte_ref: BoundBackCteRef) -> Result<PlanRef> {
+        // TODO: this is actually duplicated from `plan_recursive_union`, refactor?
+        let base = self.plan_set_expr(cte_ref.base, vec![], &[])?;
+        Ok(LogicalCteRef::create(cte_ref.share_id, base))
     }
 
     fn collect_col_data_types_for_tumble_window(relation: &Relation) -> Result<Vec<DataType>> {
@@ -150,14 +278,13 @@ impl Planner {
                 .iter()
                 .map(|col| col.data_type().clone())
                 .collect(),
-            Relation::Subquery(q) => q
-                .query
-                .schema()
-                .fields
-                .iter()
-                .map(|f| f.data_type())
+            Relation::Subquery(q) => q.query.schema().data_types(),
+            Relation::Share(share) => share
+                .input
+                .fields()?
+                .into_iter()
+                .map(|(_, f)| f.data_type)
                 .collect(),
-            Relation::Share(share) => Self::collect_col_data_types_for_tumble_window(&share.input)?,
             r => {
                 return Err(ErrorCode::BindError(format!(
                     "Invalid input relation to tumble: {r:?}"

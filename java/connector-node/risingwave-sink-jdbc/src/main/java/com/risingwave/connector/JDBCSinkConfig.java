@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 RisingWave Labs
+ * Copyright 2024 RisingWave Labs
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,8 +27,10 @@ public class JDBCSinkConfig extends CommonSinkConfig {
 
     private String sinkType;
 
-    @JsonProperty(value = "force_append_only")
-    private Boolean forceAppendOnly;
+    private final boolean isUpsertSink;
+
+    @JsonProperty(value = "schema.name")
+    private String schemaName;
 
     @JsonCreator
     public JDBCSinkConfig(
@@ -38,6 +40,11 @@ public class JDBCSinkConfig extends CommonSinkConfig {
         this.jdbcUrl = jdbcUrl;
         this.tableName = tableName;
         this.sinkType = sinkType;
+        this.isUpsertSink = "upsert".equalsIgnoreCase(sinkType);
+    }
+
+    public String getSchemaName() {
+        return schemaName;
     }
 
     public String getJdbcUrl() {
@@ -50,5 +57,9 @@ public class JDBCSinkConfig extends CommonSinkConfig {
 
     public String getSinkType() {
         return sinkType;
+    }
+
+    public boolean isUpsertSink() {
+        return this.isUpsertSink;
     }
 }

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -29,8 +29,8 @@ mod compose;
 pub use compose::*;
 mod compose_deploy;
 pub use compose_deploy::*;
-mod risectl_env;
-pub use risectl_env::*;
+mod risedev_env;
+pub use risedev_env::*;
 
 mod task;
 pub mod util;

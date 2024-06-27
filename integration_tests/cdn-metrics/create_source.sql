@@ -11,7 +11,7 @@ CREATE SOURCE nics_metrics (
     topic = 'nics_metrics',
     properties.bootstrap.server = 'message_queue:29092',
     scan.startup.mode = 'earliest'
-) ROW FORMAT JSON;
+) FORMAT PLAIN ENCODE JSON;
 
 CREATE SOURCE tcp_metrics (
     device_id VARCHAR,
@@ -23,4 +23,4 @@ CREATE SOURCE tcp_metrics (
     topic = 'tcp_metrics',
     properties.bootstrap.server = 'message_queue:29092',
     scan.startup.mode = 'earliest'
-) ROW FORMAT JSON;
+) FORMAT PLAIN ENCODE JSON;

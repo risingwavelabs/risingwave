@@ -1,0 +1,32 @@
+statement ok
+set RW_IMPLICIT_FLUSH to true;
+
+statement ok
+create table t (x int);
+
+query II
+select (select x from t) x, 1 one;
+----
+NULL 1
+
+statement ok
+insert into t values (114514);
+
+query II
+select (select x from t) x, 1 one;
+----
+114514 1
+
+# Cannot create materialized view as the cardinality of the subquery is unknown
+statement error Scalar subquery might produce more than one row
+create materialized view mv as select (select x from t) x, 1 one;
+
+statement ok
+insert into t values (1919810);
+
+# Cannot query as the cardinality of the subquery is now 2
+query error Scalar subquery produced more than one row
+select (select x from t) x, 1 one;
+
+statement ok
+drop table t;

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,18 +14,13 @@
 
 //! Value encoding is an encoding format which converts the data into a binary form (not
 //! memcomparable).
-
-use std::marker::{Send, Sync};
-use std::sync::Arc;
-
 use bytes::{Buf, BufMut};
 use chrono::{Datelike, Timelike};
 use either::{for_both, Either};
 use enum_as_inner::EnumAsInner;
-use itertools::Itertools;
+use risingwave_pb::data::PbDatum;
 
-use crate::array::{ArrayImpl, ListRef, ListValue, StructRef, StructValue};
-use crate::catalog::ColumnId;
+use crate::array::ArrayImpl;
 use crate::row::{Row, RowDeserializer as BasicDeserializer};
 use crate::types::*;
 
@@ -56,21 +51,9 @@ pub trait ValueRowDeserializer: Clone {
     fn deserialize(&self, encoded_bytes: &[u8]) -> Result<Vec<Datum>>;
 }
 
-/// Part of `ValueRowSerde` that implements `new` a serde given `column_ids` and `schema`
-pub trait ValueRowSerdeNew: Clone {
-    fn new(column_ids: &[ColumnId], schema: Arc<[DataType]>) -> Self;
-}
-
-/// The compound trait used in `StateTableInner`, implemented by `BasicSerde` and `ColumnAwareSerde`
-pub trait ValueRowSerde:
-    ValueRowSerializer + ValueRowDeserializer + ValueRowSerdeNew + Sync + Send + 'static
-{
-    fn kind(&self) -> ValueRowSerdeKind;
-}
-
 /// The type-erased `ValueRowSerde`, used for simplifying the code.
 #[derive(Clone)]
-pub struct EitherSerde(Either<BasicSerde, ColumnAwareSerde>);
+pub struct EitherSerde(pub Either<BasicSerde, ColumnAwareSerde>);
 
 impl From<BasicSerde> for EitherSerde {
     fn from(value: BasicSerde) -> Self {
@@ -95,18 +78,6 @@ impl ValueRowDeserializer for EitherSerde {
     }
 }
 
-impl ValueRowSerdeNew for EitherSerde {
-    fn new(_column_ids: &[ColumnId], _schema: Arc<[DataType]>) -> EitherSerde {
-        unreachable!("should construct manually")
-    }
-}
-
-impl ValueRowSerde for EitherSerde {
-    fn kind(&self) -> ValueRowSerdeKind {
-        for_both!(&self.0, s => s.kind())
-    }
-}
-
 /// Wrap of the original `Row` serializing function
 #[derive(Clone)]
 pub struct BasicSerializer;
@@ -123,24 +94,15 @@ impl ValueRowSerializer for BasicSerializer {
 
 impl ValueRowDeserializer for BasicDeserializer {
     fn deserialize(&self, encoded_bytes: &[u8]) -> Result<Vec<Datum>> {
-        Ok(self.deserialize(encoded_bytes)?.into_inner())
+        Ok(self.deserialize(encoded_bytes)?.into_inner().into())
     }
 }
 
 /// Wrap of the original `Row` serializing and deserializing function
 #[derive(Clone)]
 pub struct BasicSerde {
-    serializer: BasicSerializer,
-    deserializer: BasicDeserializer,
-}
-
-impl ValueRowSerdeNew for BasicSerde {
-    fn new(_column_ids: &[ColumnId], schema: Arc<[DataType]>) -> BasicSerde {
-        BasicSerde {
-            serializer: BasicSerializer {},
-            deserializer: BasicDeserializer::new(schema.as_ref().to_owned()),
-        }
-    }
+    pub serializer: BasicSerializer,
+    pub deserializer: BasicDeserializer,
 }
 
 impl ValueRowSerializer for BasicSerde {
@@ -151,13 +113,11 @@ impl ValueRowSerializer for BasicSerde {
 
 impl ValueRowDeserializer for BasicSerde {
     fn deserialize(&self, encoded_bytes: &[u8]) -> Result<Vec<Datum>> {
-        Ok(self.deserializer.deserialize(encoded_bytes)?.into_inner())
-    }
-}
-
-impl ValueRowSerde for BasicSerde {
-    fn kind(&self) -> ValueRowSerdeKind {
-        ValueRowSerdeKind::Basic
+        Ok(self
+            .deserializer
+            .deserialize(encoded_bytes)?
+            .into_inner()
+            .into())
     }
 }
 
@@ -170,7 +130,6 @@ pub fn try_get_exact_serialize_datum_size(arr: &ArrayImpl) -> Option<usize> {
         ArrayImpl::Float32(_) => Some(4),
         ArrayImpl::Float64(_) => Some(8),
         ArrayImpl::Bool(_) => Some(1),
-        ArrayImpl::Jsonb(_) => Some(8),
         ArrayImpl::Decimal(_) => Some(estimate_serialize_decimal_size()),
         ArrayImpl::Interval(_) => Some(estimate_serialize_interval_size()),
         ArrayImpl::Date(_) => Some(estimate_serialize_date_size()),
@@ -206,6 +165,24 @@ pub fn estimate_serialize_datum_size(datum_ref: impl ToDatumRef) -> usize {
     }
 }
 
+#[easy_ext::ext(DatumFromProtoExt)]
+impl Datum {
+    /// Create a datum from the protobuf representation with the given data type.
+    pub fn from_protobuf(proto: &PbDatum, data_type: &DataType) -> Result<Datum> {
+        deserialize_datum(proto.body.as_slice(), data_type)
+    }
+}
+
+#[easy_ext::ext(DatumToProtoExt)]
+impl<D: ToDatumRef> D {
+    /// Convert the datum to the protobuf representation.
+    pub fn to_protobuf(&self) -> PbDatum {
+        PbDatum {
+            body: serialize_datum(self),
+        }
+    }
+}
+
 /// Deserialize bytes into a datum (Not order guarantee, used in value encoding).
 pub fn deserialize_datum(mut data: impl Buf, ty: &DataType) -> Result<Datum> {
     inner_deserialize_datum(&mut data, ty)
@@ -237,9 +214,12 @@ fn serialize_scalar(value: ScalarRefImpl<'_>, buf: &mut impl BufMut) {
         ScalarRefImpl::Decimal(v) => serialize_decimal(&v, buf),
         ScalarRefImpl::Interval(v) => serialize_interval(&v, buf),
         ScalarRefImpl::Date(v) => serialize_date(v.0.num_days_from_ce(), buf),
-        ScalarRefImpl::Timestamp(v) => {
-            serialize_timestamp(v.0.timestamp(), v.0.timestamp_subsec_nanos(), buf)
-        }
+        ScalarRefImpl::Timestamp(v) => serialize_timestamp(
+            v.0.and_utc().timestamp(),
+            v.0.and_utc().timestamp_subsec_nanos(),
+            buf,
+        ),
+        ScalarRefImpl::Timestamptz(v) => buf.put_i64_le(v.timestamp_micros()),
         ScalarRefImpl::Time(v) => {
             serialize_time(v.0.num_seconds_from_midnight(), v.0.nanosecond(), buf)
         }
@@ -265,8 +245,10 @@ fn estimate_serialize_scalar_size(value: ScalarRefImpl<'_>) -> usize {
         ScalarRefImpl::Interval(_) => estimate_serialize_interval_size(),
         ScalarRefImpl::Date(_) => estimate_serialize_date_size(),
         ScalarRefImpl::Timestamp(_) => estimate_serialize_timestamp_size(),
+        ScalarRefImpl::Timestamptz(_) => 8,
         ScalarRefImpl::Time(_) => estimate_serialize_time_size(),
-        ScalarRefImpl::Jsonb(_) => 8,
+        // not exact as we use internal encoding size to estimate the json string size
+        ScalarRefImpl::Jsonb(v) => v.capacity(),
         ScalarRefImpl::Struct(s) => estimate_serialize_struct_size(s),
         ScalarRefImpl::List(v) => estimate_serialize_list_size(v),
     }
@@ -361,7 +343,9 @@ fn deserialize_value(ty: &DataType, data: &mut impl Buf) -> Result<ScalarImpl> {
         DataType::Interval => ScalarImpl::Interval(deserialize_interval(data)?),
         DataType::Time => ScalarImpl::Time(deserialize_time(data)?),
         DataType::Timestamp => ScalarImpl::Timestamp(deserialize_timestamp(data)?),
-        DataType::Timestamptz => ScalarImpl::Int64(data.get_i64_le()),
+        DataType::Timestamptz => {
+            ScalarImpl::Timestamptz(Timestamptz::from_micros(data.get_i64_le()))
+        }
         DataType::Date => ScalarImpl::Date(deserialize_date(data)?),
         DataType::Jsonb => ScalarImpl::Jsonb(
             JsonbVal::value_deserialize(&deserialize_bytea(data))
@@ -374,9 +358,8 @@ fn deserialize_value(ty: &DataType, data: &mut impl Buf) -> Result<ScalarImpl> {
 }
 
 fn deserialize_struct(struct_def: &StructType, data: &mut impl Buf) -> Result<ScalarImpl> {
-    let num_fields = struct_def.fields.len();
-    let mut field_values = Vec::with_capacity(num_fields);
-    for field_type in &struct_def.fields {
+    let mut field_values = Vec::with_capacity(struct_def.len());
+    for field_type in struct_def.types() {
         field_values.push(inner_deserialize_datum(data, field_type)?);
     }
 
@@ -385,11 +368,11 @@ fn deserialize_struct(struct_def: &StructType, data: &mut impl Buf) -> Result<Sc
 
 fn deserialize_list(item_type: &DataType, data: &mut impl Buf) -> Result<ScalarImpl> {
     let len = data.get_u32_le();
-    let mut values = Vec::with_capacity(len as usize);
+    let mut builder = item_type.create_array_builder(len as usize);
     for _ in 0..len {
-        values.push(inner_deserialize_datum(data, item_type)?);
+        builder.append(inner_deserialize_datum(data, item_type)?);
     }
-    Ok(ScalarImpl::List(ListValue::new(values)))
+    Ok(ScalarImpl::List(ListValue::new(builder.finish())))
 }
 
 fn deserialize_str(data: &mut impl Buf) -> Result<Box<str>> {
@@ -512,10 +495,7 @@ mod tests {
             ScalarImpl::Int64(233).into(),
             ScalarImpl::Float64(23.33.into()).into(),
         ])));
-        test_estimate_serialize_scalar_size(ScalarImpl::List(ListValue::new(vec![
-            ScalarImpl::Int64(233).into(),
-            ScalarImpl::Int64(2333).into(),
-        ])));
+        test_estimate_serialize_scalar_size(ScalarImpl::List(ListValue::from_iter([233i64, 2333])));
     }
 
     #[test]
@@ -540,7 +520,7 @@ mod tests {
             0.0,
         );
         for column in chunk.columns() {
-            test_try_get_exact_serialize_datum_size(&column.array());
+            test_try_get_exact_serialize_datum_size(column);
         }
     }
 }

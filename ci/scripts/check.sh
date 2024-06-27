@@ -17,17 +17,37 @@ done
 
 source ci/scripts/common.sh
 
+echo "--- Run trailing spaces check"
+scripts/check/check-trailing-spaces.sh
+
 echo "--- Run clippy check (dev, all features)"
 cargo clippy --all-targets --all-features --locked -- -D warnings
 
+echo "--- Show sccache stats"
+sccache --show-stats
+sccache --zero-stats
+
 echo "--- Run clippy check (release)"
-cargo clippy --release  --all-targets --features "rw-static-link" --locked -- -D warnings
+OPENSSL_STATIC=1 cargo clippy --release --all-targets --features "rw-static-link" --locked -- -D warnings
+
+echo "--- Run cargo check on building the release binary (release)"
+OPENSSL_STATIC=1 cargo check -p risingwave_cmd_all --features "rw-static-link" --profile release
+OPENSSL_STATIC=1 cargo check -p risingwave_cmd --bin risectl --features "rw-static-link" --profile release
+
+echo "--- Show sccache stats"
+sccache --show-stats
+sccache --zero-stats
 
 echo "--- Build documentation"
-cargo doc --document-private-items --no-deps
+RUSTDOCFLAGS="-Dwarnings" cargo doc --document-private-items --no-deps
+
+echo "--- Show sccache stats"
+sccache --show-stats
+sccache --zero-stats
 
 echo "--- Run doctest"
-cargo test --doc
+RUSTDOCFLAGS="-Clink-arg=-fuse-ld=lld" cargo test --doc
 
-echo "--- Run audit check"
-cargo audit
+echo "--- Show sccache stats"
+sccache --show-stats
+sccache --zero-stats

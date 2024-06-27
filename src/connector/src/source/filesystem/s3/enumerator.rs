@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,21 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
-
 use anyhow::Context;
 use async_trait::async_trait;
 use aws_sdk_s3::client::Client;
-use globset::{Glob, GlobMatcher};
-use itertools::Itertools;
 
-use crate::aws_utils::{default_conn_config, s3_client, AwsConfigV2};
+use crate::aws_utils::{default_conn_config, s3_client};
+use crate::connector_common::AwsAuthProps;
 use crate::source::filesystem::file_common::FsSplit;
 use crate::source::filesystem::s3::S3Properties;
-use crate::source::SplitEnumerator;
+use crate::source::{FsListInner, SourceEnumeratorContextRef, SplitEnumerator};
 
 /// Get the prefix from a glob
-fn get_prefix(glob: &str) -> String {
+pub fn get_prefix(glob: &str) -> String {
     let mut escaped = false;
     let mut escaped_filter = false;
     glob.chars()
@@ -60,11 +57,14 @@ fn get_prefix(glob: &str) -> String {
 
 #[derive(Debug, Clone)]
 pub struct S3SplitEnumerator {
-    bucket_name: String,
+    pub(crate) bucket_name: String,
     // prefix is used to reduce the number of objects to be listed
-    prefix: Option<String>,
-    matcher: Option<GlobMatcher>,
-    client: Client,
+    pub(crate) prefix: Option<String>,
+    pub(crate) matcher: Option<glob::Pattern>,
+    pub(crate) client: Client,
+
+    // token get the next page, used when the current page is truncated
+    pub(crate) next_continuation_token: Option<String>,
 }
 
 #[async_trait]
@@ -72,68 +72,48 @@ impl SplitEnumerator for S3SplitEnumerator {
     type Properties = S3Properties;
     type Split = FsSplit;
 
-    async fn new(properties: Self::Properties) -> anyhow::Result<Self> {
-        let config = AwsConfigV2::from(HashMap::from(properties.clone()));
-        let sdk_config = config.load_config(None).await;
+    async fn new(
+        properties: Self::Properties,
+        _context: SourceEnumeratorContextRef,
+    ) -> crate::error::ConnectorResult<Self> {
+        let config = AwsAuthProps::from(&properties);
+        let sdk_config = config.build_config().await?;
         let s3_client = s3_client(&sdk_config, Some(default_conn_config()));
-        let matcher = if let Some(pattern) = properties.match_pattern.as_ref() {
-            let glob = Glob::new(pattern)
+        let properties = properties.common;
+        let (prefix, matcher) = if let Some(pattern) = properties.match_pattern.as_ref() {
+            let prefix = get_prefix(pattern);
+            let matcher = glob::Pattern::new(pattern)
                 .with_context(|| format!("Invalid match_pattern: {}", pattern))?;
-            Some(glob.compile_matcher())
+            (Some(prefix), Some(matcher))
         } else {
-            None
+            (None, None)
         };
-        let prefix = matcher.as_ref().map(|m| get_prefix(m.glob().glob()));
 
         Ok(S3SplitEnumerator {
             bucket_name: properties.bucket_name,
             matcher,
             prefix,
             client: s3_client,
+            next_continuation_token: None,
         })
     }
 
-    async fn list_splits(&mut self) -> anyhow::Result<Vec<Self::Split>> {
+    async fn list_splits(&mut self) -> crate::error::ConnectorResult<Vec<Self::Split>> {
         let mut objects = Vec::new();
-        let mut next_continuation_token = None;
         loop {
-            let mut req = self
-                .client
-                .list_objects_v2()
-                .bucket(&self.bucket_name)
-                .set_prefix(self.prefix.clone());
-            if let Some(continuation_token) = next_continuation_token.take() {
-                req = req.continuation_token(continuation_token);
-            }
-            let mut res = req.send().await?;
-            objects.extend(res.contents.take().unwrap_or_default());
-            if res.is_truncated() {
-                next_continuation_token = Some(res.next_continuation_token.unwrap())
-            } else {
+            let (files, has_finished) = self.get_next_page::<FsSplit>().await?;
+            objects.extend(files);
+            if has_finished {
                 break;
             }
         }
-
-        let matched_objs = objects
-            .iter()
-            .filter(|obj| obj.key().is_some())
-            .filter(|obj| {
-                self.matcher
-                    .as_ref()
-                    .map(|m| m.is_match(obj.key().unwrap()))
-                    .unwrap_or(true)
-            })
-            .collect_vec();
-
-        Ok(matched_objs
-            .into_iter()
-            .map(|obj| FsSplit::new(obj.key().unwrap().to_owned(), 0, obj.size() as usize))
-            .collect_vec())
+        Ok(objects)
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use itertools::Itertools;
 
     #[test]
     fn test_get_prefix() {
@@ -146,10 +126,12 @@ mod tests {
     }
 
     use super::*;
+    use crate::source::filesystem::s3::S3PropertiesCommon;
+    use crate::source::SourceEnumeratorContext;
     #[tokio::test]
     #[ignore]
     async fn test_s3_split_enumerator() {
-        let props = S3Properties {
+        let props = S3PropertiesCommon {
             region_name: "ap-southeast-1".to_owned(),
             bucket_name: "mingchao-s3-source".to_owned(),
             match_pattern: Some("happy[0-9].csv".to_owned()),
@@ -157,7 +139,10 @@ mod tests {
             secret: None,
             endpoint_url: None,
         };
-        let mut enumerator = S3SplitEnumerator::new(props.clone()).await.unwrap();
+        let mut enumerator =
+            S3SplitEnumerator::new(props.into(), SourceEnumeratorContext::dummy().into())
+                .await
+                .unwrap();
         let splits = enumerator.list_splits().await.unwrap();
         let names = splits.into_iter().map(|split| split.name).collect_vec();
         assert_eq!(names.len(), 2);

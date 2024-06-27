@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -43,13 +43,14 @@ impl MonitoredGlobalAlloc {
 unsafe impl<A: Allocator> Allocator for MonitoredAlloc<A> {
     fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
         let ret = self.alloc.allocate(layout)?;
+        // We don't throw an AllocError if the memory context is out of memory, otherwise the whole process will crash.
         self.ctx.add(layout.size() as i64);
         Ok(ret)
     }
 
     unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
         self.alloc.deallocate(ptr, layout);
-        self.ctx.add(-(layout.size() as i64))
+        self.ctx.add(-(layout.size() as i64));
     }
 }
 

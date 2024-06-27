@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -26,7 +26,9 @@ impl Rule for ExceptMergeRule {
         let top_except_inputs = top_except.inputs();
         let (left_most_input, remain_vec) = top_except_inputs.split_at(1);
 
-        if let Some(bottom_except) = left_most_input[0].as_logical_except() && bottom_except.all() == top_all {
+        if let Some(bottom_except) = left_most_input[0].as_logical_except()
+            && bottom_except.all() == top_all
+        {
             let mut new_inputs = vec![];
             new_inputs.extend(bottom_except.inputs());
             new_inputs.extend(remain_vec.iter().cloned());

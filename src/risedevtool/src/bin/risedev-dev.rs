@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 
 use std::env;
 use std::fmt::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -24,13 +24,14 @@ use fs_err::OpenOptions;
 use indicatif::ProgressBar;
 use risedev::util::{complete_spin, fail_spin};
 use risedev::{
-    compute_risectl_env, preflight_check, AwsS3Config, CompactorService, ComputeNodeService,
-    ConfigExpander, ConfigureTmuxTask, ConnectorNodeService, EnsureStopService, ExecuteContext,
-    FrontendService, GrafanaService, JaegerService, KafkaService, MetaNodeService, MinioService,
-    OpendalConfig, PrometheusService, PubsubService, RedisService, ServiceConfig, Task,
-    ZooKeeperService, RISEDEV_SESSION_NAME,
+    generate_risedev_env, preflight_check, CompactorService, ComputeNodeService, ConfigExpander,
+    ConfigureTmuxTask, DummyService, EnsureStopService, ExecuteContext, FrontendService,
+    GrafanaService, KafkaService, MetaNodeService, MinioService, MySqlService, PostgresService,
+    PrometheusService, PubsubService, RedisService, SchemaRegistryService, ServiceConfig,
+    SqliteConfig, Task, TempoService, RISEDEV_NAME,
 };
 use tempfile::tempdir;
+use thiserror_ext::AsReport;
 use yaml_rust::YamlEmitter;
 
 #[derive(Default)]
@@ -87,7 +88,7 @@ fn task_main(
         writeln!(
             log_buffer,
             "* Run {} to attach to the tmux console.",
-            style(format!("tmux a -t {}", RISEDEV_SESSION_NAME))
+            style(format!("tmux -L {RISEDEV_NAME} a -t {RISEDEV_NAME}"))
                 .blue()
                 .bold()
         )?;
@@ -97,28 +98,8 @@ fn task_main(
     let mut ports = vec![];
 
     for service in services {
-        let listen_info = match service {
-            ServiceConfig::Minio(c) => Some((c.port, c.id.clone())),
-            ServiceConfig::Etcd(c) => Some((c.port, c.id.clone())),
-            ServiceConfig::Prometheus(c) => Some((c.port, c.id.clone())),
-            ServiceConfig::ComputeNode(c) => Some((c.port, c.id.clone())),
-            ServiceConfig::MetaNode(c) => Some((c.port, c.id.clone())),
-            ServiceConfig::Frontend(c) => Some((c.port, c.id.clone())),
-            ServiceConfig::Compactor(c) => Some((c.port, c.id.clone())),
-            ServiceConfig::Grafana(c) => Some((c.port, c.id.clone())),
-            ServiceConfig::Jaeger(c) => Some((c.dashboard_port, c.id.clone())),
-            ServiceConfig::Kafka(c) => Some((c.port, c.id.clone())),
-            ServiceConfig::Pubsub(c) => Some((c.port, c.id.clone())),
-            ServiceConfig::Redis(c) => Some((c.port, c.id.clone())),
-            ServiceConfig::ZooKeeper(c) => Some((c.port, c.id.clone())),
-            ServiceConfig::AwsS3(_) => None,
-            ServiceConfig::OpenDal(_) => None,
-            ServiceConfig::RedPanda(_) => None,
-            ServiceConfig::ConnectorNode(c) => Some((c.port, c.id.clone())),
-        };
-
-        if let Some(x) = listen_info {
-            ports.push(x);
+        if let Some(port) = service.port() {
+            ports.push((port, service.id().to_string(), service.user_managed()));
         }
     }
 
@@ -154,17 +135,43 @@ fn task_main(
                 // let mut task = risedev::EtcdReadyCheckTask::new(c.clone())?;
                 // TODO(chi): etcd will set its health check to success only after all nodes are
                 // connected and there's a leader, therefore we cannot do health check for now.
-                let mut task =
-                    risedev::ConfigureGrpcNodeTask::new(c.address.clone(), c.port, false)?;
+                let mut task = risedev::TcpReadyCheckTask::new(c.address.clone(), c.port, false)?;
                 task.execute(&mut ctx)?;
+            }
+            ServiceConfig::Sqlite(c) => {
+                let mut ctx =
+                    ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
+
+                struct SqliteService(SqliteConfig);
+                impl Task for SqliteService {
+                    fn execute(
+                        &mut self,
+                        _ctx: &mut ExecuteContext<impl std::io::Write>,
+                    ) -> anyhow::Result<()> {
+                        Ok(())
+                    }
+
+                    fn id(&self) -> String {
+                        self.0.id.clone()
+                    }
+                }
+
+                let prefix_data = env::var("PREFIX_DATA")?;
+                let file_dir = PathBuf::from(&prefix_data).join(&c.id);
+                std::fs::create_dir_all(&file_dir)?;
+                let file_path = file_dir.join(&c.file);
+
+                ctx.service(&SqliteService(c.clone()));
+                ctx.complete_spin();
+                ctx.pb
+                    .set_message(format!("using local sqlite: {:?}", file_path));
             }
             ServiceConfig::Prometheus(c) => {
                 let mut ctx =
                     ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
                 let mut service = PrometheusService::new(c.clone())?;
                 service.execute(&mut ctx)?;
-                let mut task =
-                    risedev::ConfigureGrpcNodeTask::new(c.address.clone(), c.port, false)?;
+                let mut task = risedev::TcpReadyCheckTask::new(c.address.clone(), c.port, false)?;
                 task.execute(&mut ctx)?;
                 ctx.pb
                     .set_message(format!("api http://{}:{}/", c.address, c.port));
@@ -176,7 +183,7 @@ fn task_main(
                 service.execute(&mut ctx)?;
 
                 let mut task =
-                    risedev::ConfigureGrpcNodeTask::new(c.address.clone(), c.port, c.user_managed)?;
+                    risedev::TcpReadyCheckTask::new(c.address.clone(), c.port, c.user_managed)?;
                 task.execute(&mut ctx)?;
                 ctx.pb
                     .set_message(format!("api grpc://{}:{}/", c.address, c.port));
@@ -187,7 +194,7 @@ fn task_main(
                 let mut service = MetaNodeService::new(c.clone())?;
                 service.execute(&mut ctx)?;
                 let mut task =
-                    risedev::ConfigureGrpcNodeTask::new(c.address.clone(), c.port, c.user_managed)?;
+                    risedev::TcpReadyCheckTask::new(c.address.clone(), c.port, c.user_managed)?;
                 task.execute(&mut ctx)?;
                 ctx.pb.set_message(format!(
                     "api grpc://{}:{}/, dashboard http://{}:{}/",
@@ -200,7 +207,7 @@ fn task_main(
                 let mut service = FrontendService::new(c.clone())?;
                 service.execute(&mut ctx)?;
                 let mut task =
-                    risedev::ConfigureGrpcNodeTask::new(c.address.clone(), c.port, c.user_managed)?;
+                    risedev::TcpReadyCheckTask::new(c.address.clone(), c.port, c.user_managed)?;
                 task.execute(&mut ctx)?;
                 ctx.pb
                     .set_message(format!("api postgres://{}:{}/", c.address, c.port));
@@ -222,7 +229,7 @@ fn task_main(
                 let mut service = CompactorService::new(c.clone())?;
                 service.execute(&mut ctx)?;
                 let mut task =
-                    risedev::ConfigureGrpcNodeTask::new(c.address.clone(), c.port, c.user_managed)?;
+                    risedev::TcpReadyCheckTask::new(c.address.clone(), c.port, c.user_managed)?;
                 task.execute(&mut ctx)?;
                 ctx.pb
                     .set_message(format!("compactor {}:{}", c.address, c.port));
@@ -232,95 +239,58 @@ fn task_main(
                     ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
                 let mut service = GrafanaService::new(c.clone())?;
                 service.execute(&mut ctx)?;
-                let mut task =
-                    risedev::ConfigureGrpcNodeTask::new(c.address.clone(), c.port, false)?;
+                let mut task = risedev::TcpReadyCheckTask::new(c.address.clone(), c.port, false)?;
                 task.execute(&mut ctx)?;
                 ctx.pb
                     .set_message(format!("dashboard http://{}:{}/", c.address, c.port));
             }
-            ServiceConfig::Jaeger(c) => {
+            ServiceConfig::Tempo(c) => {
                 let mut ctx =
                     ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
-                let mut service = JaegerService::new(c.clone())?;
+                let mut service = TempoService::new(c.clone())?;
                 service.execute(&mut ctx)?;
-                let mut task = risedev::ConfigureGrpcNodeTask::new(
-                    c.dashboard_address.clone(),
-                    c.dashboard_port,
-                    false,
-                )?;
+                let mut task =
+                    risedev::TcpReadyCheckTask::new(c.listen_address.clone(), c.port, false)?;
                 task.execute(&mut ctx)?;
-                ctx.pb.set_message(format!(
-                    "dashboard http://{}:{}/",
-                    c.dashboard_address, c.dashboard_port
-                ));
+                ctx.pb
+                    .set_message(format!("api http://{}:{}/", c.listen_address, c.port));
             }
             ServiceConfig::AwsS3(c) => {
                 let mut ctx =
                     ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
-
-                struct AwsService(AwsS3Config);
-                impl Task for AwsService {
-                    fn execute(
-                        &mut self,
-                        _ctx: &mut ExecuteContext<impl std::io::Write>,
-                    ) -> anyhow::Result<()> {
-                        Ok(())
-                    }
-
-                    fn id(&self) -> String {
-                        self.0.id.clone()
-                    }
-                }
-
-                ctx.service(&AwsService(c.clone()));
-                ctx.complete_spin();
+                DummyService::new(&c.id).execute(&mut ctx)?;
                 ctx.pb
                     .set_message(format!("using AWS s3 bucket {}", c.bucket));
             }
-            ServiceConfig::OpenDal(c) => {
+            ServiceConfig::Opendal(c) => {
                 let mut ctx =
                     ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
-
-                struct OpendalService(OpendalConfig);
-                impl Task for OpendalService {
-                    fn execute(
-                        &mut self,
-                        _ctx: &mut ExecuteContext<impl std::io::Write>,
-                    ) -> anyhow::Result<()> {
-                        Ok(())
-                    }
-
-                    fn id(&self) -> String {
-                        self.0.id.clone()
-                    }
-                }
-
-                ctx.service(&OpendalService(c.clone()));
-                ctx.complete_spin();
+                DummyService::new(&c.id).execute(&mut ctx)?;
                 ctx.pb
                     .set_message(format!("using Opendal, namenode =  {}", c.namenode));
-            }
-            ServiceConfig::ZooKeeper(c) => {
-                let mut ctx =
-                    ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
-                let mut service = ZooKeeperService::new(c.clone())?;
-                service.execute(&mut ctx)?;
-                let mut task =
-                    risedev::ConfigureGrpcNodeTask::new(c.address.clone(), c.port, false)?;
-                task.execute(&mut ctx)?;
-                ctx.pb
-                    .set_message(format!("zookeeper {}:{}", c.address, c.port));
             }
             ServiceConfig::Kafka(c) => {
                 let mut ctx =
                     ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
-                let mut service = KafkaService::new(c.clone())?;
+                let mut service = KafkaService::new(c.clone());
                 service.execute(&mut ctx)?;
                 let mut task = risedev::KafkaReadyCheckTask::new(c.clone())?;
                 task.execute(&mut ctx)?;
                 ctx.pb
                     .set_message(format!("kafka {}:{}", c.address, c.port));
             }
+            ServiceConfig::SchemaRegistry(c) => {
+                let mut ctx =
+                    ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
+                let mut service = SchemaRegistryService::new(c.clone());
+                service.execute(&mut ctx)?;
+                let mut task =
+                    risedev::TcpReadyCheckTask::new(c.address.clone(), c.port, c.user_managed)?;
+                task.execute(&mut ctx)?;
+                ctx.pb
+                    .set_message(format!("schema registry http://{}:{}", c.address, c.port));
+            }
+
             ServiceConfig::Pubsub(c) => {
                 let mut ctx =
                     ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
@@ -344,16 +314,38 @@ fn task_main(
                 ctx.pb
                     .set_message(format!("redis {}:{}", c.address, c.port));
             }
-            ServiceConfig::ConnectorNode(c) => {
+            ServiceConfig::MySql(c) => {
                 let mut ctx =
                     ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
-                let mut service = ConnectorNodeService::new(c.clone())?;
-                service.execute(&mut ctx)?;
-                let mut task =
-                    risedev::ConfigureGrpcNodeTask::new(c.address.clone(), c.port, false)?;
-                task.execute(&mut ctx)?;
+                MySqlService::new(c.clone()).execute(&mut ctx)?;
+                if c.user_managed {
+                    let mut task =
+                        risedev::TcpReadyCheckTask::new(c.address.clone(), c.port, c.user_managed)?;
+                    task.execute(&mut ctx)?;
+                } else {
+                    // When starting a MySQL container, the MySQL process is set as the main process.
+                    // Since the first process in a container always gets PID 1, the MySQL log always shows
+                    // "starting as process 1".
+                    let mut task = risedev::LogReadyCheckTask::new("starting as process 1\n")?;
+                    task.execute(&mut ctx)?;
+                }
                 ctx.pb
-                    .set_message(format!("connector grpc://{}:{}", c.address, c.port));
+                    .set_message(format!("mysql {}:{}", c.address, c.port));
+            }
+            ServiceConfig::Postgres(c) => {
+                let mut ctx =
+                    ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
+                PostgresService::new(c.clone()).execute(&mut ctx)?;
+                if c.user_managed {
+                    let mut task =
+                        risedev::TcpReadyCheckTask::new(c.address.clone(), c.port, c.user_managed)?;
+                    task.execute(&mut ctx)?;
+                } else {
+                    let mut task = risedev::LogReadyCheckTask::new("ready to accept connections")?;
+                    task.execute(&mut ctx)?;
+                }
+                ctx.pb
+                    .set_message(format!("postgres {}:{}", c.address, c.port));
             }
         }
 
@@ -366,6 +358,10 @@ fn task_main(
 }
 
 fn main() -> Result<()> {
+    // Intentionally disable backtrace to provide more compact error message for `risedev dev`.
+    // Backtraces for RisingWave components are enabled in `Task::execute`.
+    std::env::set_var("RUST_BACKTRACE", "0");
+
     preflight_check()?;
 
     let task_name = std::env::args()
@@ -429,14 +425,9 @@ fn main() -> Result<()> {
             println!("-------------------------------");
             println!();
 
-            let risectl_env = match compute_risectl_env(&services) {
-                Ok(x) => x,
-                Err(_) => "".into(),
-            };
-
             fs_err::write(
-                Path::new(&env::var("PREFIX_CONFIG")?).join("risectl-env"),
-                risectl_env,
+                Path::new(&env::var("PREFIX_CONFIG")?).join("risedev-env"),
+                generate_risedev_env(&services),
             )?;
 
             println!("All services started successfully.");
@@ -462,13 +453,13 @@ fn main() -> Result<()> {
         }
         Err(err) => {
             println!(
-                "{} - Failed to start: {}\nCaused by:\n\t{}",
+                "{} - Failed to start: {:#}", // pretty with `Caused by`
                 style("ERROR").red().bold(),
-                err,
-                err.root_cause().to_string().trim(),
+                err.as_report(),
             );
+            println!();
             println!(
-                "* Use `{}` to enable new compoenents, if they are missing.",
+                "* Use `{}` to enable new components, if they are missing.",
                 style("./risedev configure").blue().bold(),
             );
             println!(
@@ -486,9 +477,12 @@ fn main() -> Result<()> {
             );
             println!("---");
             println!();
-            println!();
 
-            Err(err)
+            // As we have already printed the error above, we don't need to print that error again.
+            // However, to return with a proper exit code, still return an error here.
+            Err(anyhow!(
+                "Failed to start all services. See details and instructions above."
+            ))
         }
     }
 }

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,95 +15,52 @@
 pub use agg_group::*;
 pub use agg_state::*;
 pub use distinct::*;
-use risingwave_common::array::column::Column;
 use risingwave_common::array::ArrayImpl::Bool;
 use risingwave_common::array::DataChunk;
 use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::{Field, Schema};
-use risingwave_expr::agg::{AggCall, AggKind};
+use risingwave_expr::aggregate::{AggCall, AggKind};
+use risingwave_expr::expr::{LogReport, NonStrictExpression};
 use risingwave_storage::StateStore;
 
-use super::ActorContextRef;
 use crate::common::table::state_table::StateTable;
 use crate::executor::error::StreamExecutorResult;
-use crate::executor::Executor;
 
 mod agg_group;
-pub mod agg_impl;
 mod agg_state;
 mod agg_state_cache;
 mod distinct;
 mod minput;
-mod minput_agg_impl;
-mod table;
-mod value;
-
-/// Generate [`crate::executor::HashAggExecutor`]'s schema from `input`, `agg_calls` and
-/// `group_key_indices`. For [`crate::executor::HashAggExecutor`], the group key indices should
-/// be provided.
-pub fn generate_agg_schema(
-    input: &dyn Executor,
-    agg_calls: &[AggCall],
-    group_key_indices: Option<&[usize]>,
-) -> Schema {
-    let aggs = agg_calls
-        .iter()
-        .map(|agg| Field::unnamed(agg.return_type.clone()));
-
-    let fields = if let Some(key_indices) = group_key_indices {
-        let keys = key_indices
-            .iter()
-            .map(|idx| input.schema().fields[*idx].clone());
-
-        keys.chain(aggs).collect()
-    } else {
-        aggs.collect()
-    };
-
-    Schema { fields }
-}
 
 pub async fn agg_call_filter_res(
-    ctx: &ActorContextRef,
-    identity: &str,
     agg_call: &AggCall,
-    columns: &[Column],
-    base_visibility: Option<&Bitmap>,
-    capacity: usize,
-) -> StreamExecutorResult<Option<Bitmap>> {
-    let agg_col_vis = if matches!(
+    chunk: &DataChunk,
+) -> StreamExecutorResult<Bitmap> {
+    let mut vis = chunk.visibility().clone();
+    if matches!(
         agg_call.kind,
         AggKind::Min | AggKind::Max | AggKind::StringAgg
     ) {
         // should skip NULL value for these kinds of agg function
         let agg_col_idx = agg_call.args.val_indices()[0]; // the first arg is the agg column for all these kinds
-        let agg_col_bitmap = columns[agg_col_idx].array_ref().null_bitmap();
-        Some(agg_col_bitmap)
-    } else {
-        None
-    };
+        let agg_col_bitmap = chunk.column_at(agg_col_idx).null_bitmap();
+        vis &= agg_col_bitmap;
+    }
 
-    let filter_vis = if let Some(ref filter) = agg_call.filter {
-        let data_chunk = DataChunk::new(columns.to_vec(), capacity);
-        if let Bool(filter_res) = filter
-            .eval_infallible(&data_chunk, |err| ctx.on_compute_error(err, identity))
+    if let Some(ref filter) = agg_call.filter {
+        // TODO: should we build `filter` in non-strict mode?
+        if let Bool(filter_res) = NonStrictExpression::new_topmost(&**filter, LogReport)
+            .eval_infallible(chunk)
             .await
             .as_ref()
         {
-            Some(filter_res.to_bitmap())
+            vis &= filter_res.to_bitmap();
         } else {
             bail!("Filter can only receive bool array");
         }
-    } else {
-        None
-    };
+    }
 
-    Ok([base_visibility, agg_col_vis, filter_vis.as_ref()]
-        .into_iter()
-        .flatten()
-        .cloned()
-        .reduce(|x, y| &x & &y))
+    Ok(vis)
 }
 
 pub fn iter_table_storage<S>(
@@ -115,8 +72,7 @@ where
     state_storages
         .iter_mut()
         .filter_map(|storage| match storage {
-            AggStateStorage::ResultValue => None,
-            AggStateStorage::Table { table } => Some(table),
+            AggStateStorage::Value => None,
             AggStateStorage::MaterializedInput { table, .. } => Some(table),
         })
 }

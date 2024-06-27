@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,8 +19,9 @@ import static io.grpc.Status.*;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.risingwave.connector.api.TableSchema;
-import com.risingwave.connector.api.sink.SinkBase;
 import com.risingwave.connector.api.sink.SinkFactory;
+import com.risingwave.connector.api.sink.SinkWriter;
+import com.risingwave.connector.api.sink.SinkWriterV1;
 import com.risingwave.connector.common.S3Utils;
 import com.risingwave.java.utils.UrlParser;
 import com.risingwave.proto.Catalog.SinkType;
@@ -32,7 +33,7 @@ import org.apache.hadoop.conf.Configuration;
 
 public class DeltaLakeSinkFactory implements SinkFactory {
     @Override
-    public SinkBase create(TableSchema tableSchema, Map<String, String> tableProperties) {
+    public SinkWriter createWriter(TableSchema tableSchema, Map<String, String> tableProperties) {
         ObjectMapper mapper = new ObjectMapper();
         DeltaLakeSinkConfig config =
                 mapper.convertValue(tableProperties, DeltaLakeSinkConfig.class);
@@ -42,13 +43,14 @@ public class DeltaLakeSinkFactory implements SinkFactory {
         DeltaLog log = DeltaLog.forTable(hadoopConf, config.getLocation());
         StructType schema = log.snapshot().getMetadata().getSchema();
         DeltaLakeSinkUtil.checkSchema(tableSchema, schema);
-        return new DeltaLakeSink(tableSchema, hadoopConf, log);
+        return new SinkWriterV1.Adapter(new DeltaLakeSink(tableSchema, hadoopConf, log));
     }
 
     @Override
     public void validate(
             TableSchema tableSchema, Map<String, String> tableProperties, SinkType sinkType) {
-        if (sinkType != SinkType.APPEND_ONLY && sinkType != SinkType.FORCE_APPEND_ONLY) {
+        if (sinkType != SinkType.SINK_TYPE_APPEND_ONLY
+                && sinkType != SinkType.SINK_TYPE_FORCE_APPEND_ONLY) {
             throw Status.INVALID_ARGUMENT
                     .withDescription("only append-only delta lake sink is supported")
                     .asRuntimeException();

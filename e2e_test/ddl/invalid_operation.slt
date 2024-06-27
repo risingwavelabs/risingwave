@@ -40,22 +40,22 @@ drop view not_exists.not_exists;
 
 # 3. drop relation in another database
 
-statement error not equal to current database name
+statement error cross-database references are not implemented
 drop table not_exists.not_exists.not_exists;
 
-statement error not equal to current database name
+statement error cross-database references are not implemented
 drop materialized view not_exists.not_exists.not_exists;
 
-statement error not equal to current database name
+statement error cross-database references are not implemented
 drop index not_exists.not_exists.not_exists;
 
-statement error not equal to current database name
+statement error cross-database references are not implemented
 drop source not_exists.not_exists.not_exists;
 
-statement error not equal to current database name
+statement error cross-database references are not implemented
 drop sink not_exists.not_exists.not_exists;
 
-statement error not equal to current database name
+statement error cross-database references are not implemented
 drop view not_exists.not_exists.not_exists;
 
 # 4. Relation exists, but the DROP type is wrong.
@@ -74,7 +74,7 @@ statement error Use `DROP TABLE`
 drop source t;
 
 # FIXME: improve the error message
-statement error not found 
+statement error not found
 drop sink t;
 
 # FIXME: improve the error message
@@ -132,7 +132,7 @@ create table msrc (v int) with (
     fields.v.end  = '10',
     datagen.rows.per.second='15',
     datagen.split.num = '1'
-) row format json;
+) FORMAT PLAIN ENCODE JSON;
 
 statement error Use `DROP TABLE`
 drop materialized view msrc;
@@ -160,7 +160,7 @@ create source src (v int) with (
     fields.v.end  = '10',
     datagen.rows.per.second='15',
     datagen.split.num = '1'
-) row format json;
+) FORMAT PLAIN ENCODE JSON;
 
 # FIXME: improve the error message
 statement error not found
@@ -182,7 +182,7 @@ drop sink src;
 statement error not found
 drop view src;
 
-# 4.6 sink 
+# 4.6 sink
 statement ok
 CREATE SINK sink FROM mv WITH (connector='blackhole');
 
@@ -190,7 +190,7 @@ CREATE SINK sink FROM mv WITH (connector='blackhole');
 statement error not found
 drop table sink;
 
-statement error sink properties not provided
+statement error sql parser error
 CREATE SINK sink FROM mv;
 
 # FIXME: improve the error message
@@ -253,7 +253,6 @@ SELECT * from msrc limit 0;
 # FIXME: improve the error message
 query error not found
 SELECT * from sink limit 0;
-----
 
 query I
 SELECT * from v limit 0;
@@ -264,7 +263,7 @@ SELECT * from v limit 0;
 statement ok
 insert into t values (1);
 
-statement error QueryError: Bind error: update modifying the PK column is banned
+statement error update modifying the PK column is unsupported
 update t set v = 2;
 
 statement ok
@@ -362,7 +361,7 @@ statement error view.*exists
 create table v(v int);
 
 # 8. create with unsupport format
-statement error connector datagen does not support row format DebeziumJson
+statement error connector datagen does not support format Debezium
 create table err_t1 (v int) with (
     connector = 'datagen',
     fields.v.kind = 'sequence',
@@ -370,7 +369,7 @@ create table err_t1 (v int) with (
     fields.v.end  = '10',
     datagen.rows.per.second='15',
     datagen.split.num = '1'
-) row format debezium_json;
+) FORMAT DEBEZIUM ENCODE JSON;
 
 # cleanup
 

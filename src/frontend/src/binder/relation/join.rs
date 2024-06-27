@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::plan_common::JoinType;
 use risingwave_sqlparser::ast::{
     BinaryOperator, Expr, Ident, JoinConstraint, JoinOperator, TableFactor, TableWithJoins, Value,
@@ -20,7 +19,8 @@ use risingwave_sqlparser::ast::{
 
 use crate::binder::bind_context::BindContext;
 use crate::binder::statement::RewriteExprsRecursive;
-use crate::binder::{Binder, Relation, COLUMN_GROUP_PREFIX};
+use crate::binder::{Binder, Clause, Relation, COLUMN_GROUP_PREFIX};
+use crate::error::{ErrorCode, Result};
 use crate::expr::ExprImpl;
 
 #[derive(Debug, Clone)]
@@ -35,8 +35,7 @@ impl RewriteExprsRecursive for BoundJoin {
     fn rewrite_exprs_recursive(&mut self, rewriter: &mut impl crate::expr::ExprRewriter) {
         self.left.rewrite_exprs_recursive(rewriter);
         self.right.rewrite_exprs_recursive(rewriter);
-        let dummy = ExprImpl::literal_bool(true);
-        self.cond = rewriter.rewrite_expr(std::mem::replace(&mut self.cond, dummy));
+        self.cond = rewriter.rewrite_expr(self.cond.take());
     }
 }
 
@@ -57,12 +56,28 @@ impl Binder {
             self.push_lateral_context();
             let right = self.bind_table_with_joins(t.clone())?;
             self.pop_and_merge_lateral_context()?;
-            root = Relation::Join(Box::new(BoundJoin {
-                join_type: JoinType::Inner,
-                left: root,
-                right,
-                cond: ExprImpl::literal_bool(true),
-            }));
+
+            let is_lateral = match &right {
+                Relation::Subquery(subquery) if subquery.lateral => true,
+                Relation::TableFunction { .. } => true,
+                _ => false,
+            };
+
+            root = if is_lateral {
+                Relation::Apply(Box::new(BoundJoin {
+                    join_type: JoinType::Inner,
+                    left: root,
+                    right,
+                    cond: ExprImpl::literal_bool(true),
+                }))
+            } else {
+                Relation::Join(Box::new(BoundJoin {
+                    join_type: JoinType::Inner,
+                    left: root,
+                    right,
+                    cond: ExprImpl::literal_bool(true),
+                }))
+            }
         }
         Ok(Some(root))
     }
@@ -92,13 +107,36 @@ impl Binder {
                 right = self.bind_table_factor(join.relation.clone())?;
                 (cond, _) = self.bind_join_constraint(constraint, None, join_type)?;
             }
-            let join = BoundJoin {
-                join_type,
-                left: root,
-                right,
-                cond,
+
+            let is_lateral = match &right {
+                Relation::Subquery(subquery) if subquery.lateral => true,
+                Relation::TableFunction { .. } => true,
+                _ => false,
             };
-            root = Relation::Join(Box::new(join));
+
+            root = if is_lateral {
+                match join_type {
+                    JoinType::Inner | JoinType::LeftOuter => {}
+                    _ => {
+                        return Err(ErrorCode::InvalidInputSyntax("The combining JOIN type must be INNER or LEFT for a LATERAL reference.".to_string())
+                            .into());
+                    }
+                }
+
+                Relation::Apply(Box::new(BoundJoin {
+                    join_type,
+                    left: root,
+                    right,
+                    cond,
+                }))
+            } else {
+                Relation::Join(Box::new(BoundJoin {
+                    join_type,
+                    left: root,
+                    right,
+                    cond,
+                }))
+            };
         }
 
         Ok(root)
@@ -126,10 +164,10 @@ impl Binder {
                     JoinConstraint::Using(cols) => {
                         // sanity check
                         for col in &cols {
-                            if old_context.indices_of.get(&col.real_value()).is_none() {
+                            if !old_context.indices_of.contains_key(&col.real_value()) {
                                 return Err(ErrorCode::ItemNotFound(format!("column \"{}\" specified in USING clause does not exist in left table", col.real_value())).into());
                             }
-                            if self.context.indices_of.get(&col.real_value()).is_none() {
+                            if !self.context.indices_of.contains_key(&col.real_value()) {
                                 return Err(ErrorCode::ItemNotFound(format!("column \"{}\" specified in USING clause does not exist in right table", col.real_value())).into());
                             }
                         }
@@ -142,7 +180,7 @@ impl Binder {
                     .context
                     .indices_of
                     .iter()
-                    .filter(|(s, _)| *s != "_row_id") // filter out `_row_id`
+                    .filter(|(_, idxs)| idxs.iter().all(|i| !self.context.columns[*i].is_hidden))
                     .map(|(s, idxes)| (Ident::new_unchecked(s.to_owned()), idxes))
                     .collect::<Vec<_>>();
                 columns.sort_by(|a, b| a.0.real_value().cmp(&b.0.real_value()));
@@ -155,7 +193,9 @@ impl Binder {
                     // TODO: is it ok to ignore quote style?
                     // If we have a `USING` constraint, we only bind the columns appearing in the
                     // constraint.
-                    if let Some(cols) = &using_columns && !cols.contains(&column) {
+                    if let Some(cols) = &using_columns
+                        && !cols.contains(&column)
+                    {
                         continue;
                     }
                     let indices_l = match old_context.get_unqualified_indices(&column.real_value())
@@ -207,9 +247,12 @@ impl Binder {
                 (expr, Some(relation))
             }
             JoinConstraint::On(expr) => {
-                let bound_expr = self
+                let clause = self.context.clause;
+                self.context.clause = Some(Clause::JoinOn);
+                let bound_expr: ExprImpl = self
                     .bind_expr(expr)
                     .and_then(|expr| expr.enforce_bool_clause("JOIN ON"))?;
+                self.context.clause = clause;
                 (bound_expr, None)
             }
         })

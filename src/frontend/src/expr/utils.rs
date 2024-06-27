@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,16 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::VecDeque;
+
 use fixedbitset::FixedBitSet;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_pb::expr::expr_node::Type;
 
+use super::now::RewriteNowToProcTime;
 use super::{Expr, ExprImpl, ExprRewriter, ExprVisitor, FunctionCall, InputRef};
 use crate::expr::ExprType;
 
 fn split_expr_by(expr: ExprImpl, op: ExprType, rets: &mut Vec<ExprImpl>) {
     match expr {
-        ExprImpl::FunctionCall(func_call) if func_call.get_expr_type() == op => {
+        ExprImpl::FunctionCall(func_call) if func_call.func_type() == op => {
             let (_, exprs, _) = func_call.decompose();
             for expr in exprs {
                 split_expr_by(expr, op, rets);
@@ -31,19 +34,30 @@ fn split_expr_by(expr: ExprImpl, op: ExprType, rets: &mut Vec<ExprImpl>) {
     }
 }
 
-pub fn merge_expr_by_binary<I>(mut exprs: I, op: ExprType, identity_elem: ExprImpl) -> ExprImpl
+/// Merge the given expressions by the logical operation.
+///
+/// The `op` must be commutative and associative, typically `And` or `Or`.
+pub(super) fn merge_expr_by_logical<I>(exprs: I, op: ExprType, identity_elem: ExprImpl) -> ExprImpl
 where
-    I: Iterator<Item = ExprImpl>,
+    I: IntoIterator<Item = ExprImpl>,
 {
-    if let Some(e) = exprs.next() {
-        let mut ret = e;
-        for expr in exprs {
-            ret = FunctionCall::new(op, vec![ret, expr]).unwrap().into();
+    let mut exprs: VecDeque<_> = exprs.into_iter().map(|e| (0usize, e)).collect();
+
+    while exprs.len() > 1 {
+        let (level, lhs) = exprs.pop_front().unwrap();
+        let rhs_level = exprs.front().unwrap().0;
+
+        // If there's one element left in the current level, move it to the end of the next level.
+        if level < rhs_level {
+            exprs.push_back((level, lhs));
+        } else {
+            let rhs = exprs.pop_front().unwrap().1;
+            let new_expr = FunctionCall::new(op, vec![lhs, rhs]).unwrap().into();
+            exprs.push_back((level + 1, new_expr));
         }
-        ret
-    } else {
-        identity_elem
     }
+
+    exprs.pop_front().map(|(_, e)| e).unwrap_or(identity_elem)
 }
 
 /// Transform a bool expression to Conjunctive form. e.g. given expression is
@@ -67,6 +81,85 @@ pub fn to_disjunctions(expr: ExprImpl) -> Vec<ExprImpl> {
 pub fn fold_boolean_constant(expr: ExprImpl) -> ExprImpl {
     let mut rewriter = BooleanConstantFolding {};
     rewriter.rewrite_expr(expr)
+}
+
+/// check `ColumnSelfEqualRewriter`'s comment below.
+pub fn column_self_eq_eliminate(expr: ExprImpl) -> ExprImpl {
+    ColumnSelfEqualRewriter::rewrite(expr)
+}
+
+/// for every `(col) == (col)`,
+/// transform to `IsNotNull(col)`
+/// since in the boolean context, `null = (...)` will always
+/// be treated as false.
+/// note: as always, only for *single column*.
+pub struct ColumnSelfEqualRewriter {}
+
+impl ColumnSelfEqualRewriter {
+    /// the exact copy from `logical_filter_expression_simplify_rule`
+    fn extract_column(expr: ExprImpl, columns: &mut Vec<ExprImpl>) {
+        match expr.clone() {
+            ExprImpl::FunctionCall(func_call) => {
+                // the functions that *never* return null will be ignored
+                if Self::is_not_null(func_call.func_type()) {
+                    return;
+                }
+                for sub_expr in func_call.inputs() {
+                    Self::extract_column(sub_expr.clone(), columns);
+                }
+            }
+            ExprImpl::InputRef(_) => {
+                if !columns.contains(&expr) {
+                    // only add the column if not exists
+                    columns.push(expr);
+                }
+            }
+            _ => (),
+        }
+    }
+
+    /// the exact copy from `logical_filter_expression_simplify_rule`
+    fn is_not_null(func_type: ExprType) -> bool {
+        func_type == ExprType::IsNull
+            || func_type == ExprType::IsNotNull
+            || func_type == ExprType::IsTrue
+            || func_type == ExprType::IsFalse
+            || func_type == ExprType::IsNotTrue
+            || func_type == ExprType::IsNotFalse
+    }
+
+    pub fn rewrite(expr: ExprImpl) -> ExprImpl {
+        let mut columns = vec![];
+        Self::extract_column(expr.clone(), &mut columns);
+        if columns.len() > 1 {
+            // leave it intact
+            return expr;
+        }
+
+        // extract the equal inputs with sanity check
+        let ExprImpl::FunctionCall(func_call) = expr.clone() else {
+            return expr;
+        };
+        if func_call.func_type() != ExprType::Equal || func_call.inputs().len() != 2 {
+            return expr;
+        }
+        assert_eq!(func_call.return_type(), DataType::Boolean);
+        let inputs = func_call.inputs();
+        let e1 = inputs[0].clone();
+        let e2 = inputs[1].clone();
+
+        if e1 == e2 {
+            if columns.is_empty() {
+                return ExprImpl::literal_bool(true);
+            }
+            let Ok(ret) = FunctionCall::new(ExprType::IsNotNull, vec![columns[0].clone()]) else {
+                return expr;
+            };
+            ret.into()
+        } else {
+            expr
+        }
+    }
 }
 
 /// Fold boolean constants in a expr
@@ -307,24 +400,14 @@ pub fn factorization_expr(expr: ExprImpl) -> Vec<ExprImpl> {
     let (last, remaining) = disjunctions.split_last_mut().unwrap();
     // now greatest_common_factor == [C, D]
     let greatest_common_divider: Vec<_> = last
-        .drain_filter(|factor| remaining.iter().all(|expr| expr.contains(factor)))
+        .extract_if(|factor| remaining.iter().all(|expr| expr.contains(factor)))
         .collect();
     for disjunction in remaining {
         // remove common factors
         disjunction.retain(|factor| !greatest_common_divider.contains(factor));
     }
     // now disjunctions == [[A, B], [B], [E]]
-    let remaining = merge_expr_by_binary(
-        disjunctions.into_iter().map(|conjunction| {
-            merge_expr_by_binary(
-                conjunction.into_iter(),
-                ExprType::And,
-                ExprImpl::literal_bool(true),
-            )
-        }),
-        ExprType::Or,
-        ExprImpl::literal_bool(false),
-    );
+    let remaining = ExprImpl::or(disjunctions.into_iter().map(ExprImpl::and));
     // now remaining is (A & B) | (B) | (E)
     // the result is C & D & ((A & B) | (B) | (E))
     greatest_common_divider
@@ -353,9 +436,7 @@ pub struct CollectInputRef {
     input_bits: FixedBitSet,
 }
 
-impl ExprVisitor<()> for CollectInputRef {
-    fn merge(_: (), _: ()) {}
-
+impl ExprVisitor for CollectInputRef {
     fn visit_input_ref(&mut self, expr: &InputRef) {
         self.input_bits.insert(expr.index());
     }
@@ -406,36 +487,44 @@ pub fn collect_input_refs<'a>(
 
 /// Count `Now`s in the expression.
 #[derive(Clone, Default)]
-pub struct CountNow {}
+pub struct CountNow {
+    count: usize,
+}
 
-impl ExprVisitor<usize> for CountNow {
-    fn merge(a: usize, b: usize) -> usize {
-        a + b
+impl CountNow {
+    pub fn count(&self) -> usize {
+        self.count
     }
+}
 
-    fn visit_now(&mut self, _: &super::Now) -> usize {
-        1
+impl ExprVisitor for CountNow {
+    fn visit_now(&mut self, _: &super::Now) {
+        self.count += 1;
     }
+}
+
+pub fn rewrite_now_to_proctime(expr: ExprImpl) -> ExprImpl {
+    let mut r = RewriteNowToProcTime;
+    r.rewrite_expr(expr)
 }
 
 /// analyze if the expression can derive a watermark from some input watermark. If it can
 /// derive, return the input watermark column index
-pub fn try_derive_watermark(expr: &ExprImpl) -> Option<usize> {
+pub fn try_derive_watermark(expr: &ExprImpl) -> WatermarkDerivation {
     let a = WatermarkAnalyzer {};
-    if let WatermarkDerivation::Watermark(idx) = a.visit_expr(expr) {
-        return Some(idx);
-    }
-    None
+    a.visit_expr(expr)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-enum WatermarkDerivation {
-    /// the expression will return a constant and not depends on its input.
+pub enum WatermarkDerivation {
+    /// The expression will return a constant and not depends on its input.
     Constant,
-    /// can derive a watermark if an input column has watermark, the usize field is the input
-    /// column index
+    /// Can derive a watermark if an input column has watermark, the usize field is the input
+    /// column index.
     Watermark(usize),
-    /// can not derive a watermark in any cases.
+    /// For nondecreasing functions, we can always produce watermarks from where they are called.
+    Nondecreasing,
+    /// Can not derive a watermark in any cases.
     None,
 }
 
@@ -448,6 +537,7 @@ impl WatermarkAnalyzer {
             ExprImpl::InputRef(inner) => WatermarkDerivation::Watermark(inner.index()),
             ExprImpl::Literal(_) => WatermarkDerivation::Constant,
             ExprImpl::FunctionCall(inner) => self.visit_function_call(inner),
+            ExprImpl::FunctionCallWithLambda(inner) => self.visit_function_call(inner.base()),
             ExprImpl::TableFunction(_) => WatermarkDerivation::None,
             ExprImpl::Subquery(_)
             | ExprImpl::AggCall(_)
@@ -486,29 +576,47 @@ impl WatermarkAnalyzer {
     }
 
     fn visit_function_call(&self, func_call: &FunctionCall) -> WatermarkDerivation {
-        match func_call.get_expr_type() {
-            ExprType::Unspecified | ExprType::InputRef | ExprType::ConstantValue => unreachable!(),
-            ExprType::Add | ExprType::Multiply => match self.visit_binary_op(func_call.inputs()) {
-                (WatermarkDerivation::Constant, WatermarkDerivation::Constant) => {
-                    WatermarkDerivation::Constant
-                }
-                (WatermarkDerivation::Constant, WatermarkDerivation::Watermark(idx))
-                | (WatermarkDerivation::Watermark(idx), WatermarkDerivation::Constant) => {
-                    WatermarkDerivation::Watermark(idx)
-                }
+        use WatermarkDerivation::{Constant, Nondecreasing, Watermark};
+        match func_call.func_type() {
+            ExprType::Unspecified => unreachable!(),
+            ExprType::Add => match self.visit_binary_op(func_call.inputs()) {
+                (Constant, Constant) => Constant,
+                (Constant, Watermark(idx)) | (Watermark(idx), Constant) => Watermark(idx),
+                (Constant, Nondecreasing) | (Nondecreasing, Constant) => Nondecreasing,
                 _ => WatermarkDerivation::None,
             },
-            ty @ (ExprType::Subtract
-            | ExprType::Divide
-            | ExprType::TumbleStart
-            | ExprType::AtTimeZone) => match self.visit_binary_op(func_call.inputs()) {
-                (WatermarkDerivation::Constant, WatermarkDerivation::Constant) => {
-                    WatermarkDerivation::Constant
+            ExprType::Subtract | ExprType::TumbleStart => {
+                if func_call.inputs().len() == 3 {
+                    // With `offset` specified
+                    // e.g., select * from tumble(t1, start, interval, offset);
+                    assert_eq!(ExprType::TumbleStart, func_call.func_type());
+                    match self.visit_ternary_op(func_call.inputs()) {
+                        (Constant, Constant, Constant) => Constant,
+                        (Watermark(idx), Constant, Constant) => Watermark(idx),
+                        (Nondecreasing, Constant, Constant) => Nondecreasing,
+                        _ => WatermarkDerivation::None,
+                    }
+                } else {
+                    match self.visit_binary_op(func_call.inputs()) {
+                        (Constant, Constant) => Constant,
+                        (Watermark(idx), Constant) => Watermark(idx),
+                        (Nondecreasing, Constant) => Nondecreasing,
+                        _ => WatermarkDerivation::None,
+                    }
                 }
-                (WatermarkDerivation::Watermark(idx), WatermarkDerivation::Constant) => {
-                    if ty == ExprType::AtTimeZone
-                        && !(func_call.return_type() == DataType::Timestamptz
-                            && func_call.inputs()[0].return_type() == DataType::Timestamp)
+            }
+            ExprType::Multiply | ExprType::Divide | ExprType::Modulus => {
+                match self.visit_binary_op(func_call.inputs()) {
+                    (Constant, Constant) => Constant,
+                    // not meaningful to derive watermark for other situations
+                    _ => WatermarkDerivation::None,
+                }
+            }
+            ExprType::AtTimeZone => match self.visit_binary_op(func_call.inputs()) {
+                (Constant, Constant) => Constant,
+                (derivation @ (Watermark(_) | Nondecreasing), Constant) => {
+                    if !(func_call.return_type() == DataType::Timestamptz
+                        && func_call.inputs()[0].return_type() == DataType::Timestamp)
                         && func_call.inputs()[1]
                             .as_literal()
                             .and_then(|literal| literal.get_data().as_ref())
@@ -518,39 +626,59 @@ impl WatermarkAnalyzer {
                     {
                         WatermarkDerivation::None
                     } else {
-                        WatermarkDerivation::Watermark(idx)
+                        derivation
                     }
                 }
                 _ => WatermarkDerivation::None,
             },
-            ExprType::Modulus => WatermarkDerivation::None,
+            ExprType::AddWithTimeZone | ExprType::SubtractWithTimeZone => {
+                // Requires time zone and interval to be literal, at least for now.
+                let time_zone = match &func_call.inputs()[2] {
+                    ExprImpl::Literal(lit) => lit.get_data().as_ref().map(|s| s.as_utf8()),
+                    _ => return WatermarkDerivation::None,
+                };
+                let interval = match &func_call.inputs()[1] {
+                    ExprImpl::Literal(lit) => lit.get_data().as_ref().map(|s| s.as_interval()),
+                    _ => return WatermarkDerivation::None,
+                };
+                // null zone or null interval is treated same as const `interval '1' second`, to be
+                // consistent with other match arms.
+                let zone_without_dst = time_zone.map_or(true, |s| s.eq_ignore_ascii_case("UTC"));
+                let quantitative_only = interval.map_or(true, |v| {
+                    v.months() == 0 && (v.days() == 0 || zone_without_dst)
+                });
+                match (self.visit_expr(&func_call.inputs()[0]), quantitative_only) {
+                    (Constant, _) => Constant,
+                    (Watermark(idx), true) => Watermark(idx),
+                    (Nondecreasing, true) => Nondecreasing,
+                    (Watermark(_) | Nondecreasing, false) => WatermarkDerivation::None,
+                    (WatermarkDerivation::None, _) => WatermarkDerivation::None,
+                }
+            }
             ExprType::DateTrunc => match func_call.inputs().len() {
                 2 => match self.visit_binary_op(func_call.inputs()) {
-                    (WatermarkDerivation::Constant, WatermarkDerivation::Constant) => {
-                        WatermarkDerivation::Constant
-                    }
-                    (WatermarkDerivation::Constant, WatermarkDerivation::Watermark(idx)) => {
-                        WatermarkDerivation::Watermark(idx)
-                    }
+                    (Constant, any_derivation) => any_derivation,
                     _ => WatermarkDerivation::None,
                 },
                 3 => match self.visit_ternary_op(func_call.inputs()) {
-                    (
-                        WatermarkDerivation::Constant,
-                        WatermarkDerivation::Constant,
-                        WatermarkDerivation::Constant,
-                    ) => WatermarkDerivation::Constant,
-                    (
-                        WatermarkDerivation::Constant,
-                        WatermarkDerivation::Watermark(idx),
-                        WatermarkDerivation::Constant,
-                    ) => WatermarkDerivation::Watermark(idx),
+                    (Constant, Constant, Constant) => Constant,
+                    (Constant, derivation @ (Watermark(_) | Nondecreasing), Constant) => {
+                        let zone_without_dst = func_call.inputs()[2]
+                            .as_literal()
+                            .and_then(|literal| literal.get_data().as_ref())
+                            .map_or(false, |s| s.as_utf8().eq_ignore_ascii_case("UTC"));
+                        if zone_without_dst {
+                            derivation
+                        } else {
+                            WatermarkDerivation::None
+                        }
+                    }
                     _ => WatermarkDerivation::None,
                 },
                 _ => unreachable!(),
             },
-            ExprType::ToTimestamp => self.visit_unary_op(func_call.inputs()),
-            ExprType::ToTimestamp1 => WatermarkDerivation::None,
+            ExprType::SecToTimestamptz => self.visit_unary_op(func_call.inputs()),
+            ExprType::CharToTimestamptz => WatermarkDerivation::None,
             ExprType::Cast => {
                 // TODO: need more derivation
                 WatermarkDerivation::None
@@ -559,6 +687,7 @@ impl WatermarkAnalyzer {
                 // TODO: do we need derive watermark when every case can derive a common watermark?
                 WatermarkDerivation::None
             }
+            ExprType::Proctime => Nondecreasing,
             _ => WatermarkDerivation::None,
         }
     }

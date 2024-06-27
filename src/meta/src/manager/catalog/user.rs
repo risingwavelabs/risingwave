@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,13 +16,13 @@ use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use anyhow::anyhow;
+use risingwave_pb::catalog::table::TableType;
 use risingwave_pb::user::UserInfo;
 
 use super::database::DatabaseManager;
 use super::UserId;
 use crate::manager::MetaSrvEnv;
 use crate::model::MetadataModel;
-use crate::storage::MetaStore;
 use crate::MetaResult;
 
 pub struct UserManager {
@@ -34,11 +34,8 @@ pub struct UserManager {
 }
 
 impl UserManager {
-    pub async fn new<S: MetaStore>(
-        env: MetaSrvEnv<S>,
-        database: &DatabaseManager,
-    ) -> MetaResult<Self> {
-        let users = UserInfo::list(env.meta_store()).await?;
+    pub async fn new(env: MetaSrvEnv, database: &DatabaseManager) -> MetaResult<Self> {
+        let users = UserInfo::list(env.meta_store().as_kv()).await?;
         let user_info = BTreeMap::from_iter(users.into_iter().map(|user| (user.id, user)));
 
         let mut user_manager = Self {
@@ -56,8 +53,27 @@ impl UserManager {
             .chain(database.sources.values().map(|source| source.owner))
             .chain(database.sinks.values().map(|sink| sink.owner))
             .chain(database.indexes.values().map(|index| index.owner))
-            .chain(database.tables.values().map(|table| table.owner))
+            .chain(
+                database
+                    .subscriptions
+                    .values()
+                    .map(|subscriptions| subscriptions.owner),
+            )
+            .chain(
+                database
+                    .tables
+                    .values()
+                    .filter(|table| table.table_type() != TableType::Internal)
+                    .map(|table| table.owner),
+            )
             .chain(database.views.values().map(|view| view.owner))
+            .chain(database.functions.values().map(|function| function.owner))
+            .chain(
+                database
+                    .connections
+                    .values()
+                    .map(|connection| connection.owner),
+            )
             .for_each(|owner_id| user_manager.increase_ref(owner_id));
 
         Ok(user_manager)
@@ -88,7 +104,7 @@ impl UserManager {
                 for option in &grant_privilege_item.action_with_opts {
                     self.user_grant_relation
                         .entry(option.get_granted_by())
-                        .or_insert_with(HashSet::new)
+                        .or_default()
                         .insert(*user_id);
                 }
             }
@@ -115,7 +131,11 @@ impl UserManager {
     pub fn decrease_ref_count(&mut self, user_id: UserId, count: usize) {
         match self.catalog_create_ref_count.entry(user_id) {
             Entry::Occupied(mut o) => {
-                assert!(*o.get_mut() >= count);
+                assert!(
+                    *o.get() >= count,
+                    "Attempted to decrease ref_count by {} but current ref_count is only {}. UserId: {:?}",
+                    count, *o.get(), user_id
+                );
                 *o.get_mut() -= count;
                 if *o.get() == 0 {
                     o.remove_entry();
@@ -129,13 +149,14 @@ impl UserManager {
 #[cfg(test)]
 mod tests {
     use risingwave_common::catalog::{DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID};
+    use risingwave_pb::catalog::PbTable;
     use risingwave_pb::user::grant_privilege::{Action, ActionWithGrantOption, Object};
     use risingwave_pb::user::GrantPrivilege;
 
     use super::*;
     use crate::manager::{commit_meta, CatalogManager};
-    use crate::model::{BTreeMapTransaction, ValTransaction};
-    use crate::storage::{MemStore, Transaction};
+    use crate::model::BTreeMapTransaction;
+    use crate::storage::Transaction;
 
     fn make_test_user(id: u32, name: &str) -> UserInfo {
         UserInfo {
@@ -182,6 +203,31 @@ mod tests {
 
         let users = catalog_manager.list_users().await;
         assert_eq!(users.len(), 4);
+
+        let table = PbTable {
+            id: 0,
+            name: "t1".to_string(),
+            owner: DEFAULT_SUPER_USER_ID,
+            ..Default::default()
+        };
+        let other_table = PbTable {
+            id: 1,
+            name: "t2".to_string(),
+            owner: DEFAULT_SUPER_USER_ID,
+            ..Default::default()
+        };
+        catalog_manager
+            .start_create_table_procedure(&table, vec![])
+            .await?;
+        catalog_manager
+            .finish_create_table_procedure(vec![], table)
+            .await?;
+        catalog_manager
+            .start_create_table_procedure(&other_table, vec![])
+            .await?;
+        catalog_manager
+            .finish_create_table_procedure(vec![], other_table)
+            .await?;
 
         let object = Object::TableId(0);
         let other_object = Object::TableId(1);
@@ -402,8 +448,8 @@ mod tests {
         // Release all privileges with object.
         let user_core = &mut catalog_manager.core.lock().await.user;
         let mut users = BTreeMapTransaction::new(&mut user_core.user_info);
-        CatalogManager::<MemStore>::update_user_privileges(&mut users, &[object]);
-        commit_meta!(catalog_manager, users)?;
+        CatalogManager::update_user_privileges(&mut users, &[object]);
+        commit_meta!(&catalog_manager, users)?;
         let user = user_core.user_info.get(&test_user_id).unwrap();
         assert!(user.grant_privileges.is_empty());
 

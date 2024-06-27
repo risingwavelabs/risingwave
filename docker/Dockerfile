@@ -1,63 +1,145 @@
-FROM ubuntu:22.04 as base
+FROM ubuntu:24.04 AS base
 
 ENV LANG en_US.utf8
 
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install make build-essential cmake protobuf-compiler curl bash lld maven unzip
+RUN apt-get update \
+  && apt-get -y install ca-certificates build-essential libsasl2-dev openjdk-17-jdk software-properties-common python3.12 python3.12-dev openssl pkg-config
 
-FROM base as builder
+FROM base AS rust-base
+
+RUN apt-get update && apt-get -y install make cmake protobuf-compiler curl bash lld unzip rsync
+
+# Install Node.js as dependency for building the dashboard.
+# Bump version together with `dashboard/.node-version`.
+ENV NVM_DIR /root/.nvm
+ENV NODE_VERSION 20.11.1
+RUN curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash \
+  && . $NVM_DIR/nvm.sh \
+  && nvm install $NODE_VERSION
+ENV PATH $NVM_DIR/versions/node/v$NODE_VERSION/bin:$PATH
 
 SHELL ["/bin/bash", "-c"]
 
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-modify-path --default-toolchain none -y
-
-RUN mkdir -p /risingwave
-
-WORKDIR /risingwave
-
-COPY ./ /risingwave
-
 ENV PATH /root/.cargo/bin/:$PATH
+ENV CARGO_INCREMENTAL=0
 
-ENV IN_CONTAINER=1
-
-ARG GIT_SHA
-ENV GIT_SHA=$GIT_SHA
-
-RUN curl -LO https://github.com/risingwavelabs/risingwave/archive/refs/heads/dashboard-artifact.zip
-RUN unzip dashboard-artifact.zip && mv risingwave-dashboard-artifact /risingwave/ui && rm dashboard-artifact.zip
+COPY rust-toolchain rust-toolchain
 
 # We need to add the `rustfmt` dependency, otherwise `risingwave_pb` will not compile
 RUN rustup self update \
   && rustup set profile minimal \
-  && rustup default $(cat "/risingwave/rust-toolchain") \
-  && rustup component add rustfmt
+  && rustup show \
+  && rustup component add rustfmt \
+  && rustup target add wasm32-wasi
 
-RUN cargo fetch
+RUN cargo install flamegraph
+# TODO: cargo-chef doesn't work well now, because we update Cargo.lock very often.
+# We may consider sccache instead.
 
-RUN cargo build -p risingwave_cmd_all -p risingwave_java_binding --release --features "rw-static-link" && \
-  mkdir -p /risingwave/bin && mv /risingwave/target/release/risingwave /risingwave/bin/ && \
-  mkdir -p /risingwave/lib && mv /risingwave/target/release/librisingwave_java_binding.so /risingwave/lib && \
-  cargo clean
+# RUN cargo install --git https://github.com/xxchan/cargo-chef cargo-chef --locked --rev 11f9fed
 
-RUN cd /risingwave/java && mvn -B package -Dmaven.test.skip=true && \
-    mkdir -p /risingwave/bin/connector-node && \
-    tar -zxvf /risingwave/java/connector-node/assembly/target/risingwave-connector-1.0.0.tar.gz -C /risingwave/bin/connector-node
+# FROM rust-base AS rust-planner
 
-FROM ubuntu:22.04 as image-base
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install ca-certificates openjdk-11-jdk && rm -rf /var/lib/{apt,dpkg,cache,log}/
+# RUN mkdir -p /risingwave
+# WORKDIR /risingwave
+# COPY ./ /risingwave
 
-FROM image-base as risingwave
+# RUN cargo chef prepare --recipe-path recipe.json
+
+# FROM rust-base AS rust-builder
+
+# RUN mkdir -p /risingwave
+# WORKDIR /risingwave
+
+# COPY --from=rust-planner /risingwave/recipe.json recipe.json
+
+# # Build dependencies - this can be cached if the dependencies don't change
+# RUN cargo chef cook --release --recipe-path recipe.json
+
+FROM rust-base AS rust-builder
+
+# Build application
+ARG GIT_SHA
+ENV GIT_SHA=$GIT_SHA
+
+COPY ./ /risingwave
+WORKDIR /risingwave
+
+ENV ENABLE_BUILD_DASHBOARD=1
+ENV OPENSSL_STATIC=1
+
+RUN cargo fetch && \
+  cargo build -p risingwave_cmd_all --release --features "rw-static-link" --features all-udf && \
+  mkdir -p /risingwave/bin && \
+    mv /risingwave/target/release/risingwave /risingwave/bin/ && \
+    mv /risingwave/target/release/risingwave.dwp /risingwave/bin/ && \
+  cp ./target/release/build/tikv-jemalloc-sys-*/out/build/bin/jeprof /risingwave/bin/ && \
+  chmod +x /risingwave/bin/jeprof && \
+  mkdir -p /risingwave/lib && cargo clean
+
+FROM base AS java-planner
+
+RUN mkdir -p /risingwave
+WORKDIR /risingwave
+
+COPY java /risingwave/java/
+
+# Move java/**/pom.xml to poms/**/pom.xml
+RUN find . -name pom.xml -exec bash -c 'mkdir -p poms/$(dirname {}); mv {} poms/{}' \;
+
+# We use rust-maven-plugin to build java-binding. So it's FROM rust-base
+FROM rust-base AS java-builder
+
+RUN apt-get update && apt-get -y install maven
+
+RUN mkdir -p /risingwave
+WORKDIR /risingwave/java
+
+# 1. copy only poms
+COPY --from=java-planner /risingwave/poms /risingwave/java/
+
+# 2. start downloading dependencies
+RUN mvn dependency:go-offline --fail-never
+
+# 3. add all source code and start compiling
+# TODO: only add java related code so that changing rust code won't recompile java code
+# Currently java-binding depends on the workspace Cargo.toml, which depends on the whole rust codebase
+# Besides, rust-maven-plugin sets --target-dir, so the dependencies are built twice. How to dedup?
+COPY ./ /risingwave
+
+RUN mvn -B package -Dmaven.test.skip=true -Dno-build-rust && \
+  mkdir -p /risingwave/bin/connector-node && \
+  tar -zxvf /risingwave/java/connector-node/assembly/target/risingwave-connector-1.0.0.tar.gz -C /risingwave/bin/connector-node
+
+FROM base AS risingwave
+
 LABEL org.opencontainers.image.source https://github.com/risingwavelabs/risingwave
+
+RUN apt-get update && apt-get -y install linux-tools-generic \
+    && ln -s "$(find /usr/lib/linux-tools/*/perf | head -1)" /usr/local/bin/perf
+
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install gdb libpam-krb5 krb5-user telnet kafkacat rustup \
+  && rm -rf /var/lib/{apt,dpkg,cache,log}/
+
+# Set default Rust toolchain but don't install it to keep the image size small
+# The toolchain will be installed when it is first used
+# Do not use `rustup default stable` because it will install immediately
+RUN rustup show && sed -i '1s/^/default_toolchain = "stable"\n/' ~/.rustup/settings.toml
+
 RUN mkdir -p /risingwave/bin/connector-node && mkdir -p /risingwave/lib
-COPY --from=builder /risingwave/bin/risingwave /risingwave/bin/risingwave
-COPY --from=builder /risingwave/bin/connector-node /risingwave/bin/connector-node
-COPY --from=builder /risingwave/ui /risingwave/ui
-COPY --from=builder /risingwave/lib/librisingwave_java_binding.so /risingwave/lib/librisingwave_java_binding.so
-# Set java.library.path env to /risingwave/lib
-ENV RW_JAVA_BINDING_LIB_PATH /risingwave/lib
+
+COPY --from=rust-builder /risingwave/bin/risingwave /risingwave/bin/risingwave
+COPY --from=rust-builder /risingwave/bin/risingwave.dwp /risingwave/bin/risingwave.dwp
+COPY --from=java-builder /risingwave/bin/connector-node /risingwave/bin/connector-node
+COPY --from=rust-builder /risingwave/bin/jeprof /usr/local/bin/jeprof
+COPY --from=rust-base /root/.cargo/bin/flamegraph /usr/local/bin/flamegraph
+
 # Set default playground mode to docker-playground profile
 ENV PLAYGROUND_PROFILE docker-playground
-# Set default dashboard UI to local path instead of github proxy
-ENV RW_DASHBOARD_UI_PATH /risingwave/ui
+# Set default connector libs path
+ENV CONNECTOR_LIBS_PATH /risingwave/bin/connector-node/libs
+ENV IN_CONTAINER=1
+
 ENTRYPOINT [ "/risingwave/bin/risingwave" ]
-CMD [ "playground" ]
+CMD [ "single_node" ]

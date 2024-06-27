@@ -1,0 +1,14 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+CREATE TABLE t(v1 int primary key, v2 int);
+
+statement ok
+INSERT INTO t SELECT a AS v1, a * 2 AS v2 FROM generate_series(1, 10000) AS s(a);
+
+statement ok
+CREATE MATERIALIZED VIEW m as SELECT * from t;
+
+statement ok
+UPDATE t SET v2 = v2 + 1 WHERE v1 >= 1 AND v1 <= 5000;

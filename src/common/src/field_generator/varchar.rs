@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,8 +11,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
-use std::string::ToString;
 
 use rand::distributions::Alphanumeric;
 use rand::rngs::StdRng;
@@ -32,8 +30,10 @@ impl VarcharRandomVariableLengthField {
     }
 
     pub fn generate_string(&mut self, offset: u64) -> String {
+        let len = rand::thread_rng().gen_range(0..=DEFAULT_LENGTH * 2);
         StdRng::seed_from_u64(offset ^ self.seed)
             .sample_iter(&Alphanumeric)
+            .take(len)
             .map(char::from)
             .collect()
     }

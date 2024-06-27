@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,7 +17,8 @@ use std::collections::HashSet;
 use super::{DefaultBehavior, DefaultValue};
 use crate::expr::{CorrelatedId, CorrelatedInputRef, ExprVisitor};
 use crate::optimizer::plan_node::{
-    LogicalAgg, LogicalFilter, LogicalJoin, LogicalProject, PlanTreeNode,
+    LogicalAgg, LogicalFilter, LogicalJoin, LogicalProject, LogicalProjectSet,
+    LogicalTableFunction, PlanTreeNode,
 };
 use crate::optimizer::plan_visitor::PlanVisitor;
 use crate::PlanRef;
@@ -39,11 +40,13 @@ impl PlanCorrelatedIdFinder {
     }
 }
 
-impl PlanVisitor<()> for PlanCorrelatedIdFinder {
+impl PlanVisitor for PlanCorrelatedIdFinder {
     /// `correlated_input_ref` can only appear in `LogicalProject`, `LogicalFilter`,
     /// `LogicalJoin` or the `filter` clause of `PlanAggCall` of `LogicalAgg` now.
 
-    type DefaultBehavior = impl DefaultBehavior<()>;
+    type Result = ();
+
+    type DefaultBehavior = impl DefaultBehavior<Self::Result>;
 
     fn default_behavior() -> Self::DefaultBehavior {
         DefaultValue
@@ -90,6 +93,31 @@ impl PlanVisitor<()> for PlanCorrelatedIdFinder {
             .into_iter()
             .for_each(|input| self.visit(input));
     }
+
+    fn visit_logical_project_set(&mut self, plan: &LogicalProjectSet) {
+        let mut finder = ExprCorrelatedIdFinder::default();
+        plan.select_list()
+            .iter()
+            .for_each(|expr| finder.visit_expr(expr));
+        self.correlated_id_set.extend(finder.correlated_id_set);
+
+        plan.inputs()
+            .into_iter()
+            .for_each(|input| self.visit(input));
+    }
+
+    fn visit_logical_table_function(&mut self, plan: &LogicalTableFunction) {
+        let mut finder = ExprCorrelatedIdFinder::default();
+        plan.table_function
+            .args
+            .iter()
+            .for_each(|expr| finder.visit_expr(expr));
+        self.correlated_id_set.extend(finder.correlated_id_set);
+
+        plan.inputs()
+            .into_iter()
+            .for_each(|input| self.visit(input));
+    }
 }
 
 #[derive(Default)]
@@ -101,11 +129,13 @@ impl ExprCorrelatedIdFinder {
     pub fn contains(&self, correlated_id: &CorrelatedId) -> bool {
         self.correlated_id_set.contains(correlated_id)
     }
+
+    pub fn has_correlated_input_ref(&self) -> bool {
+        !self.correlated_id_set.is_empty()
+    }
 }
 
-impl ExprVisitor<()> for ExprCorrelatedIdFinder {
-    fn merge(_: (), _: ()) {}
-
+impl ExprVisitor for ExprCorrelatedIdFinder {
     fn visit_correlated_input_ref(&mut self, correlated_input_ref: &CorrelatedInputRef) {
         self.correlated_id_set
             .insert(correlated_input_ref.correlated_id());

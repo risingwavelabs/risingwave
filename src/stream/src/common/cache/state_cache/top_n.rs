@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,15 +13,14 @@
 // limitations under the License.
 
 use risingwave_common::array::Op;
-use risingwave_common::estimate_size::EstimateSize;
-use risingwave_common_proc_macro::EstimateSize;
+use risingwave_common_estimate_size::EstimateSize;
 
 use super::{StateCache, StateCacheFiller};
 use crate::common::cache::TopNCache;
 
 /// An implementation of [`StateCache`] that uses a [`TopNCache`] as the underlying cache, with
 /// limited capacity.
-#[derive(EstimateSize)]
+#[derive(Clone, EstimateSize)]
 pub struct TopNStateCache<K: Ord + EstimateSize, V: EstimateSize> {
     table_row_count: Option<usize>,
     cache: TopNCache<K, V>,
@@ -47,6 +46,11 @@ impl<K: Ord + EstimateSize, V: EstimateSize> TopNStateCache<K, V> {
 
     pub fn set_table_row_count(&mut self, table_row_count: usize) {
         self.table_row_count = Some(table_row_count);
+    }
+
+    #[cfg(test)]
+    pub fn get_table_row_count(&self) -> &Option<usize> {
+        &self.table_row_count
     }
 
     fn row_count_matched(&self) -> bool {
@@ -81,6 +85,18 @@ impl<K: Ord + EstimateSize, V: EstimateSize> TopNStateCache<K, V> {
             self.synced = false;
         }
         old_val
+    }
+
+    pub fn capacity_inner(&self) -> usize {
+        self.cache.capacity()
+    }
+
+    pub fn len(&self) -> usize {
+        self.cache.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.cache.is_empty()
     }
 }
 
@@ -154,7 +170,7 @@ impl<K: Ord + EstimateSize, V: EstimateSize> StateCacheFiller for &mut TopNState
     type Value = V;
 
     fn capacity(&self) -> Option<usize> {
-        Some(self.cache.capacity())
+        Some(self.capacity_inner())
     }
 
     fn insert_unchecked(&mut self, key: Self::Key, value: Self::Value) {

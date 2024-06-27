@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,26 +12,41 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use opendal::layers::LoggingLayer;
 use opendal::services::Hdfs;
 use opendal::Operator;
+use risingwave_common::config::ObjectStoreConfig;
 
 use super::{EngineType, OpendalObjectStore};
+use crate::object::object_metrics::ObjectStoreMetrics;
+use crate::object::opendal_engine::ATOMIC_WRITE_DIR;
 use crate::object::ObjectResult;
+
 impl OpendalObjectStore {
     /// create opendal hdfs engine.
-    pub fn new_hdfs_engine(namenode: String, root: String) -> ObjectResult<Self> {
+    pub fn new_hdfs_engine(
+        namenode: String,
+        root: String,
+        config: Arc<ObjectStoreConfig>,
+        metrics: Arc<ObjectStoreMetrics>,
+    ) -> ObjectResult<Self> {
         // Create hdfs backend builder.
         let mut builder = Hdfs::default();
         // Set the name node for hdfs.
         builder.name_node(&namenode);
-        // Set the root for hdfs, all operations will happen under this root.
-        // NOTE: the root must be absolute path.
         builder.root(&root);
-
-        let op: Operator = Operator::new(builder)?.finish();
+        if config.retry.set_atomic_write_dir {
+            let atomic_write_dir = format!("{}/{}", root, ATOMIC_WRITE_DIR);
+            builder.atomic_write_dir(&atomic_write_dir);
+        }
+        let op: Operator = Operator::new(builder)?
+            .layer(LoggingLayer::default())
+            .finish();
         Ok(Self {
             op,
             engine_type: EngineType::Hdfs,
+            config,
+            metrics,
         })
     }
 }

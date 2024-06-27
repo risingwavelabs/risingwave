@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,23 +12,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
-use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::types::DataType;
-use risingwave_expr::agg::AggKind;
-use risingwave_expr::sig::agg::AGG_FUNC_SIG_MAP;
+use std::sync::Arc;
 
-use super::{Expr, ExprImpl, OrderBy};
+use risingwave_common::types::DataType;
+use risingwave_expr::aggregate::AggKind;
+
+use super::{infer_type, Expr, ExprImpl, Literal, OrderBy};
+use crate::catalog::function_catalog::{FunctionCatalog, FunctionKind};
+use crate::error::Result;
 use crate::utils::Condition;
 
 #[derive(Clone, Eq, PartialEq, Hash)]
 pub struct AggCall {
-    agg_kind: AggKind,
-    return_type: DataType,
-    inputs: Vec<ExprImpl>,
-    distinct: bool,
-    order_by: OrderBy,
-    filter: Condition,
+    pub agg_kind: AggKind,
+    pub return_type: DataType,
+    pub args: Vec<ExprImpl>,
+    pub distinct: bool,
+    pub order_by: OrderBy,
+    pub filter: Condition,
+    pub direct_args: Vec<Literal>,
+    /// Catalog of user defined aggregate function.
+    pub user_defined: Option<Arc<FunctionCatalog>>,
 }
 
 impl std::fmt::Debug for AggCall {
@@ -37,12 +41,12 @@ impl std::fmt::Debug for AggCall {
             f.debug_struct("AggCall")
                 .field("agg_kind", &self.agg_kind)
                 .field("return_type", &self.return_type)
-                .field("inputs", &self.inputs)
+                .field("args", &self.args)
                 .field("filter", &self.filter)
                 .finish()
         } else {
             let mut builder = f.debug_tuple(&format!("{}", self.agg_kind));
-            self.inputs.iter().for_each(|child| {
+            self.args.iter().for_each(|child| {
                 builder.field(child);
             });
             builder.finish()
@@ -51,94 +55,82 @@ impl std::fmt::Debug for AggCall {
 }
 
 impl AggCall {
-    /// Infer the return type for the given agg call.
-    /// Returns error if not supported or the arguments are invalid.
-    pub fn infer_return_type(agg_kind: AggKind, inputs: &[DataType]) -> Result<DataType> {
-        // The function signatures are aligned with postgres, see
-        // https://www.postgresql.org/docs/current/functions-aggregate.html.
-        use DataType::*;
-        let err = || {
-            RwError::from(ErrorCode::InvalidInputSyntax(format!(
-                "Invalid aggregation: {}({})",
-                agg_kind,
-                inputs.iter().map(|t| format!("{}", t)).join(", ")
-            )))
-        };
-        Ok(match (agg_kind, inputs) {
-            // XXX: some special cases that can not be handled by signature map.
-
-            // may return list or struct type
-            (AggKind::Min | AggKind::Max | AggKind::FirstValue, [input]) => input.clone(),
-            (AggKind::ArrayAgg, [input]) => List(Box::new(input.clone())),
-            // functions that are rewritten in the frontend and don't exist in the expr crate
-            (AggKind::Avg, [input]) => match input {
-                Int16 | Int32 | Int64 | Decimal => Decimal,
-                Float32 | Float64 | Int256 => Float64,
-                Interval => Interval,
-                _ => return Err(err()),
-            },
-            (
-                AggKind::StddevPop | AggKind::StddevSamp | AggKind::VarPop | AggKind::VarSamp,
-                [input],
-            ) => match input {
-                Int16 | Int32 | Int64 | Decimal => Decimal,
-                Float32 | Float64 | Int256 => Float64,
-                _ => return Err(err()),
-            },
-
-            // other functions are handled by signature map
-            _ => {
-                let args = inputs.iter().map(|t| t.into()).collect::<Vec<_>>();
-                return match AGG_FUNC_SIG_MAP.get_return_type(agg_kind, &args) {
-                    Some(t) => Ok(t.into()),
-                    None => Err(err()),
-                };
-            }
-        })
-    }
-
     /// Returns error if the function name matches with an existing function
     /// but with illegal arguments.
     pub fn new(
         agg_kind: AggKind,
-        inputs: Vec<ExprImpl>,
+        mut args: Vec<ExprImpl>,
         distinct: bool,
         order_by: OrderBy,
         filter: Condition,
+        direct_args: Vec<Literal>,
     ) -> Result<Self> {
-        let data_types = inputs.iter().map(ExprImpl::return_type).collect_vec();
-        let return_type = Self::infer_return_type(agg_kind, &data_types)?;
+        let return_type = infer_type(agg_kind.into(), &mut args)?;
         Ok(AggCall {
             agg_kind,
             return_type,
-            inputs,
+            args,
             distinct,
             order_by,
             filter,
+            direct_args,
+            user_defined: None,
         })
     }
 
-    pub fn decompose(self) -> (AggKind, Vec<ExprImpl>, bool, OrderBy, Condition) {
-        (
-            self.agg_kind,
-            self.inputs,
-            self.distinct,
-            self.order_by,
-            self.filter,
-        )
+    /// Constructs an `AggCall` without type inference.
+    pub fn new_unchecked(
+        agg_kind: AggKind,
+        args: Vec<ExprImpl>,
+        return_type: DataType,
+    ) -> Result<Self> {
+        Ok(AggCall {
+            agg_kind,
+            return_type,
+            args,
+            distinct: false,
+            order_by: OrderBy::any(),
+            filter: Condition::true_cond(),
+            direct_args: vec![],
+            user_defined: None,
+        })
+    }
+
+    /// Create a user-defined `AggCall`.
+    pub fn new_user_defined(
+        args: Vec<ExprImpl>,
+        distinct: bool,
+        order_by: OrderBy,
+        filter: Condition,
+        direct_args: Vec<Literal>,
+        user_defined: Arc<FunctionCatalog>,
+    ) -> Result<Self> {
+        let FunctionKind::Aggregate = &user_defined.kind else {
+            panic!("not an aggregate function");
+        };
+        Ok(AggCall {
+            agg_kind: AggKind::UserDefined,
+            return_type: user_defined.return_type.clone(),
+            args,
+            distinct,
+            order_by,
+            filter,
+            direct_args,
+            user_defined: Some(user_defined),
+        })
     }
 
     pub fn agg_kind(&self) -> AggKind {
         self.agg_kind
     }
 
-    /// Get a reference to the agg call's inputs.
-    pub fn inputs(&self) -> &[ExprImpl] {
-        self.inputs.as_ref()
+    /// Get a reference to the agg call's arguments.
+    pub fn args(&self) -> &[ExprImpl] {
+        self.args.as_ref()
     }
 
-    pub fn inputs_mut(&mut self) -> &mut [ExprImpl] {
-        self.inputs.as_mut()
+    pub fn args_mut(&mut self) -> &mut [ExprImpl] {
+        self.args.as_mut()
     }
 
     pub fn order_by(&self) -> &OrderBy {

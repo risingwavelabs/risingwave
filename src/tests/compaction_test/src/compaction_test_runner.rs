@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,27 +23,27 @@ use std::time::Duration;
 use anyhow::anyhow;
 use bytes::{BufMut, Bytes, BytesMut};
 use clap::Parser;
-use futures::TryStreamExt;
-use risingwave_common::cache::CachePriority;
+use foyer::CacheContext;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::{
-    extract_storage_memory_config, load_config, MetaConfig, NO_OVERRIDE,
+    extract_storage_memory_config, load_config, MetaConfig, NoOverride,
 };
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_hummock_sdk::key::TableKey;
+use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, FIRST_VERSION_ID};
 use risingwave_pb::common::WorkerType;
-use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta};
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
-use risingwave_storage::hummock::{CachePolicy, HummockStorage, TieredCacheMetricsBuilder};
+use risingwave_storage::hummock::{CachePolicy, HummockStorage};
 use risingwave_storage::monitor::{
     CompactorMetrics, HummockMetrics, HummockStateStoreMetrics, MonitoredStateStore,
     MonitoredStorageMetrics, ObjectStoreMetrics,
 };
 use risingwave_storage::opts::StorageOpts;
 use risingwave_storage::store::{ReadOptions, StateStoreRead};
-use risingwave_storage::{StateStore, StateStoreImpl};
+use risingwave_storage::{StateStore, StateStoreImpl, StateStoreIter};
 
 const SST_ID_SHIFT_COUNT: u32 = 1000000;
 const CHECKPOINT_FREQ_FOR_REPLAY: u64 = 99999999;
@@ -69,9 +69,9 @@ impl CompactionTestMetrics {
 /// 1. Start the cluster with ci-compaction-test config: `./risedev d ci-compaction-test`
 /// 2. Ingest enough L0 SSTs, for example we can use the tpch-bench tool
 /// 3. Disable hummock manager commit new epochs: `./risedev ctl hummock disable-commit-epoch`, and
-/// it will print the current max committed epoch in Meta.
+///    it will print the current max committed epoch in Meta.
 /// 4. Use the test tool to replay hummock version deltas and trigger compactions:
-/// `./risedev compaction-test --state-store hummock+s3://your-bucket -t <table_id>`
+///    `./risedev compaction-test --state-store hummock+s3://your-bucket -t <table_id>`
 pub async fn compaction_test_main(
     _listen_addr: SocketAddr,
     advertise_addr: HostAddr,
@@ -128,7 +128,7 @@ pub async fn compaction_test_main(
 }
 
 pub async fn start_meta_node(listen_addr: String, state_store: String, config_path: String) {
-    let meta_opts = risingwave_meta::MetaNodeOpts::parse_from([
+    let meta_opts = risingwave_meta_node::MetaNodeOpts::parse_from([
         "meta-node",
         "--listen-addr",
         &listen_addr,
@@ -141,10 +141,7 @@ pub async fn start_meta_node(listen_addr: String, state_store: String, config_pa
         "--config-path",
         &config_path,
     ]);
-    let config = load_config(
-        &meta_opts.config_path,
-        Some(meta_opts.override_opts.clone()),
-    );
+    let config = load_config(&meta_opts.config_path, &meta_opts);
     // We set a large checkpoint frequency to prevent the embedded meta node
     // to commit new epochs to avoid bumping the hummock version during version log replay.
     assert_eq!(
@@ -156,7 +153,7 @@ pub async fn start_meta_node(listen_addr: String, state_store: String, config_pa
         "enable_compaction_deterministic should be set"
     );
 
-    risingwave_meta::start(meta_opts).await
+    risingwave_meta_node::start(meta_opts).await
 }
 
 async fn start_compactor_node(
@@ -239,7 +236,7 @@ async fn init_metadata_for_replay(
             tracing::info!("Ctrl+C received, now exiting");
             std::process::exit(0);
         },
-        ret = MetaClient::register_new(cluster_meta_endpoint, WorkerType::RiseCtl, advertise_addr, Default::default(), &meta_config) => {
+        ret = MetaClient::register_new(cluster_meta_endpoint.parse()?, WorkerType::RiseCtl, advertise_addr, Default::default(), &meta_config) => {
             (meta_client, _) = ret.unwrap();
         },
     }
@@ -250,7 +247,7 @@ async fn init_metadata_for_replay(
     let tables = meta_client.risectl_list_state_tables().await?;
 
     let (new_meta_client, _) = MetaClient::register_new(
-        new_meta_endpoint,
+        new_meta_endpoint.parse()?,
         WorkerType::RiseCtl,
         advertise_addr,
         Default::default(),
@@ -282,7 +279,7 @@ async fn pull_version_deltas(
     // Register to the cluster.
     // We reuse the RiseCtl worker type here
     let (meta_client, _) = MetaClient::register_new(
-        cluster_meta_endpoint,
+        cluster_meta_endpoint.parse()?,
         WorkerType::RiseCtl,
         advertise_addr,
         Default::default(),
@@ -298,8 +295,7 @@ async fn pull_version_deltas(
     let res = meta_client
         .list_version_deltas(0, u32::MAX, u64::MAX)
         .await
-        .unwrap()
-        .version_deltas;
+        .unwrap();
 
     if let Err(err) = shutdown_tx.send(()) {
         tracing::warn!("Failed to send shutdown to heartbeat task: {:?}", err);
@@ -322,7 +318,7 @@ async fn start_replay(
     );
 
     let mut metric = CompactionTestMetrics::new();
-    let config = load_config(&opts.config_path_for_meta, NO_OVERRIDE);
+    let config = load_config(&opts.config_path_for_meta, NoOverride);
     tracing::info!(
         "Starting replay with config {:?} and opts {:?}",
         config,
@@ -332,7 +328,7 @@ async fn start_replay(
     // Register to the cluster.
     // We reuse the RiseCtl worker type here
     let (meta_client, system_params) = MetaClient::register_new(
-        &opts.meta_address,
+        opts.meta_address.parse()?,
         WorkerType::RiseCtl,
         &advertise_addr,
         Default::default(),
@@ -413,7 +409,7 @@ async fn start_replay(
             replayed_epochs.pop();
             let mut epochs = vec![max_committed_epoch];
             epochs.extend(
-                pin_old_snapshots(&meta_client, &mut replayed_epochs, 1)
+                pin_old_snapshots(&meta_client, &replayed_epochs, 1)
                     .await
                     .into_iter(),
             );
@@ -524,7 +520,7 @@ async fn start_replay(
 
 async fn pin_old_snapshots(
     meta_client: &MetaClient,
-    replayed_epochs: &mut [HummockEpoch],
+    replayed_epochs: &[HummockEpoch],
     num: usize,
 ) -> Vec<HummockEpoch> {
     let mut old_epochs = vec![];
@@ -606,8 +602,7 @@ async fn poll_compaction_tasks_status(
     (compaction_ok, cur_version)
 }
 
-type StateStoreIterType =
-    Pin<Box<<MonitoredStateStore<HummockStorage> as StateStoreRead>::IterStream>>;
+type StateStoreIterType = Pin<Box<<MonitoredStateStore<HummockStorage> as StateStoreRead>::Iter>>;
 
 async fn open_hummock_iters(
     hummock: &MonitoredStateStore<HummockStorage>,
@@ -622,25 +617,22 @@ async fn open_hummock_iters(
     buf.put_u32(table_id);
     let b = buf.freeze();
     let range = (
-        Bound::Included(b.clone()),
+        Bound::Included(b.clone()).map(TableKey),
         Bound::Excluded(Bytes::from(risingwave_hummock_sdk::key::next_key(
             b.as_ref(),
-        ))),
+        )))
+        .map(TableKey),
     );
 
-    for &epoch in snapshots.iter() {
+    for &epoch in snapshots {
         let iter = hummock
             .iter(
                 range.clone(),
                 epoch,
                 ReadOptions {
-                    prefix_hint: None,
                     table_id: TableId { table_id },
-                    retention_seconds: None,
-                    ignore_range_tombstone: false,
-                    read_version_from_backup: false,
-                    prefetch_options: Default::default(),
-                    cache_policy: CachePolicy::Fill(CachePriority::High),
+                    cache_policy: CachePolicy::Fill(CacheContext::Default),
+                    ..Default::default()
                 },
             )
             .await?;
@@ -652,11 +644,11 @@ async fn open_hummock_iters(
 pub async fn check_compaction_results(
     version_id: u64,
     mut expect_results: BTreeMap<HummockEpoch, StateStoreIterType>,
-    mut actual_resutls: BTreeMap<HummockEpoch, StateStoreIterType>,
+    mut actual_results: BTreeMap<HummockEpoch, StateStoreIterType>,
 ) -> anyhow::Result<()> {
     let combined = expect_results
         .iter_mut()
-        .zip_eq_fast(actual_resutls.iter_mut());
+        .zip_eq_fast(actual_results.iter_mut());
     for ((e1, expect_iter), (e2, actual_iter)) in combined {
         assert_eq!(e1, e2);
         tracing::info!(
@@ -667,8 +659,6 @@ pub async fn check_compaction_results(
         let mut expect_cnt = 0;
         let mut actual_cnt = 0;
 
-        futures::pin_mut!(expect_iter);
-        futures::pin_mut!(actual_iter);
         while let Some(kv_expect) = expect_iter.try_next().await? {
             expect_cnt += 1;
             let ret = actual_iter.try_next().await?;
@@ -718,10 +708,10 @@ pub async fn create_hummock_store_with_metrics(
         )),
         metrics.state_store_metrics.clone(),
         metrics.object_store_metrics.clone(),
-        TieredCacheMetricsBuilder::unused(),
-        Arc::new(risingwave_tracing::RwTracingService::disabled()),
         metrics.storage_metrics.clone(),
         metrics.compactor_metrics.clone(),
+        None,
+        true,
     )
     .await?;
 

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 // Licensed under the Apache License, Version 2.0 (the "License");
 //
 // you may not use this file except in compliance with the License.
@@ -13,23 +13,25 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::default::Default;
 use std::fmt::{Debug, Formatter};
 use std::mem;
 use std::sync::Arc;
 
-use anyhow::anyhow;
+use anyhow::Context;
 use futures::executor::block_on;
 use petgraph::dot::{Config, Dot};
 use petgraph::Graph;
 use pgwire::pg_server::SessionId;
+use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
 use risingwave_common::array::DataChunk;
 use risingwave_pb::batch_plan::{TaskId as TaskIdPb, TaskOutputId as TaskOutputIdPb};
 use risingwave_pb::common::HostAddress;
 use risingwave_rpc_client::ComputeClientPoolRef;
+use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::{oneshot, RwLock};
-use tracing::{debug, error, info, warn};
+use tokio::task::JoinHandle;
+use tracing::{debug, error, info, warn, Instrument};
 
 use super::{DistributedQueryMetrics, QueryExecutionInfoRef, QueryResultFetcher, StageEvent};
 use crate::catalog::catalog_service::CatalogReader;
@@ -38,17 +40,15 @@ use crate::scheduler::distributed::stage::StageEvent::ScheduledRoot;
 use crate::scheduler::distributed::StageEvent::Scheduled;
 use crate::scheduler::distributed::StageExecution;
 use crate::scheduler::plan_fragmenter::{Query, StageId, ROOT_TASK_ID, ROOT_TASK_OUTPUT_ID};
-use crate::scheduler::worker_node_manager::WorkerNodeSelector;
-use crate::scheduler::{
-    ExecutionContextRef, PinnedHummockSnapshot, SchedulerError, SchedulerResult,
-};
+use crate::scheduler::{ExecutionContextRef, ReadSnapshot, SchedulerError, SchedulerResult};
 
 /// Message sent to a `QueryRunner` to control its execution.
 #[derive(Debug)]
 pub enum QueryMessage {
     /// Events passed running execution.
     Stage(StageEvent),
-    CancelQuery,
+    /// Cancelled by some reason
+    CancelQuery(String),
 }
 
 enum QueryState {
@@ -70,8 +70,10 @@ pub struct QueryExecution {
     query: Arc<Query>,
     state: RwLock<QueryState>,
     shutdown_tx: Sender<QueryMessage>,
-    /// Identified by process_id, secret_key. Query in the same session should have same key.
+    /// Identified by `process_id`, `secret_key`. Query in the same session should have same key.
     pub session_id: SessionId,
+    /// Permit to execute the query. Once query finishes execution, this is dropped.
+    pub permit: Option<tokio::sync::OwnedSemaphorePermit>,
 }
 
 struct QueryRunner {
@@ -88,11 +90,16 @@ struct QueryRunner {
     query_execution_info: QueryExecutionInfoRef,
 
     query_metrics: Arc<DistributedQueryMetrics>,
+    timeout_abort_task_handle: Option<JoinHandle<()>>,
 }
 
 impl QueryExecution {
     #[allow(clippy::too_many_arguments)]
-    pub fn new(query: Query, session_id: SessionId) -> Self {
+    pub fn new(
+        query: Query,
+        session_id: SessionId,
+        permit: Option<tokio::sync::OwnedSemaphorePermit>,
+    ) -> Self {
         let query = Arc::new(query);
         let (sender, receiver) = channel(100);
         let state = QueryState::Pending {
@@ -104,6 +111,7 @@ impl QueryExecution {
             state: RwLock::new(state),
             shutdown_tx: sender,
             session_id,
+            permit,
         }
     }
 
@@ -113,10 +121,10 @@ impl QueryExecution {
     /// cancel request (from ctrl-c, cli, ui etc).
     #[allow(clippy::too_many_arguments)]
     pub async fn start(
-        &self,
+        self: Arc<Self>,
         context: ExecutionContextRef,
         worker_node_manager: WorkerNodeSelector,
-        pinned_snapshot: PinnedHummockSnapshot,
+        pinned_snapshot: ReadSnapshot,
         compute_client_pool: ComputeClientPoolRef,
         catalog_reader: CatalogReader,
         query_execution_info: QueryExecutionInfoRef,
@@ -130,7 +138,7 @@ impl QueryExecution {
         // can control when to release the snapshot.
         let stage_executions = self.gen_stage_executions(
             &pinned_snapshot,
-            context,
+            context.clone(),
             worker_node_manager,
             compute_client_pool.clone(),
             catalog_reader,
@@ -139,6 +147,22 @@ impl QueryExecution {
         match cur_state {
             QueryState::Pending { msg_receiver } => {
                 *state = QueryState::Running;
+
+                // Start a timer to cancel the query
+                let mut timeout_abort_task_handle: Option<JoinHandle<()>> = None;
+                if let Some(timeout) = context.timeout() {
+                    let this = self.clone();
+                    timeout_abort_task_handle = Some(tokio::spawn(async move {
+                        tokio::time::sleep(timeout).await;
+                        warn!(
+                            "Query {:?} timeout after {} seconds, sending cancel message.",
+                            this.query.query_id,
+                            timeout.as_secs(),
+                        );
+                        this.abort(format!("timeout after {} seconds", timeout.as_secs()))
+                            .await;
+                    }));
+                }
 
                 // Create a oneshot channel for QueryResultFetcher to get failed event.
                 let (root_stage_sender, root_stage_receiver) =
@@ -152,16 +176,23 @@ impl QueryExecution {
                     scheduled_stages_count: 0,
                     query_execution_info,
                     query_metrics,
+                    timeout_abort_task_handle,
                 };
+
+                let span = tracing::info_span!(
+                    "distributed_execute",
+                    query_id = self.query.query_id.id,
+                    epoch = ?pinned_snapshot.batch_query_epoch(),
+                );
 
                 tracing::trace!("Starting query: {:?}", self.query.query_id);
 
                 // Not trace the error here, it will be processed in scheduler.
-                tokio::spawn(async move { runner.run(pinned_snapshot).await });
+                tokio::spawn(async move { runner.run(pinned_snapshot).instrument(span).await });
 
                 let root_stage = root_stage_receiver
                     .await
-                    .map_err(|e| anyhow!("Starting query execution failed: {:?}", e))??;
+                    .context("Starting query execution failed")??;
 
                 tracing::trace!(
                     "Received root stage query result fetcher: {:?}, query id: {:?}",
@@ -179,10 +210,10 @@ impl QueryExecution {
     }
 
     /// Cancel execution of this query.
-    pub async fn abort(self: Arc<Self>) {
+    pub async fn abort(self: Arc<Self>, reason: String) {
         if self
             .shutdown_tx
-            .send(QueryMessage::CancelQuery)
+            .send(QueryMessage::CancelQuery(reason))
             .await
             .is_err()
         {
@@ -194,7 +225,7 @@ impl QueryExecution {
 
     fn gen_stage_executions(
         &self,
-        pinned_snapshot: &PinnedHummockSnapshot,
+        pinned_snapshot: &ReadSnapshot,
         context: ExecutionContextRef,
         worker_node_manager: WorkerNodeSelector,
         compute_client_pool: ComputeClientPoolRef,
@@ -213,7 +244,7 @@ impl QueryExecution {
                 .collect::<Vec<Arc<StageExecution>>>();
 
             let stage_exec = Arc::new(StageExecution::new(
-                pinned_snapshot.get_batch_query_epoch(),
+                pinned_snapshot.batch_query_epoch(),
                 self.query.stage_graph.stages[&stage_id].clone(),
                 worker_node_manager.clone(),
                 self.shutdown_tx.clone(),
@@ -231,6 +262,9 @@ impl QueryExecution {
 impl Drop for QueryRunner {
     fn drop(&mut self) {
         self.query_metrics.running_query_num.dec();
+        self.timeout_abort_task_handle
+            .as_ref()
+            .inspect(|h| h.abort());
     }
 }
 
@@ -262,7 +296,7 @@ impl Debug for QueryRunner {
 }
 
 impl QueryRunner {
-    async fn run(mut self, pinned_snapshot: PinnedHummockSnapshot) {
+    async fn run(mut self, pinned_snapshot: ReadSnapshot) {
         self.query_metrics.running_query_num.inc();
         // Start leaf stages.
         let leaf_stages = self.query.leaf_stages();
@@ -318,8 +352,10 @@ impl QueryRunner {
                 }
                 Stage(StageEvent::Failed { id, reason }) => {
                     error!(
-                        "Query stage {:?}-{:?} failed: {:?}.",
-                        self.query.query_id, id, reason
+                        error = %reason.as_report(),
+                        query_id = ?self.query.query_id,
+                        stage_id = ?id,
+                        "query stage failed"
                     );
 
                     self.clean_all_stages(Some(reason)).await;
@@ -339,8 +375,8 @@ impl QueryRunner {
                         break;
                     }
                 }
-                QueryMessage::CancelQuery => {
-                    self.clean_all_stages(Some(SchedulerError::QueryCancelError))
+                QueryMessage::CancelQuery(reason) => {
+                    self.clean_all_stages(Some(SchedulerError::QueryCancelled(reason)))
                         .await;
                     // One stage failed, not necessary to execute schedule stages.
                     break;
@@ -396,7 +432,8 @@ impl QueryRunner {
     /// Handle ctrl-c query or failed execution. Should stop all executions and send error to query
     /// result fetcher.
     async fn clean_all_stages(&mut self, error: Option<SchedulerError>) {
-        let error_msg = error.as_ref().map(|e| e.to_string());
+        // TODO(error-handling): should prefer use error types than strings.
+        let error_msg = error.as_ref().map(|e| e.to_report_string());
         if let Some(reason) = error {
             // Consume sender here and send error to root stage.
             let root_stage_sender = mem::take(&mut self.root_stage_sender);
@@ -429,13 +466,17 @@ impl QueryRunner {
 #[cfg(test)]
 pub(crate) mod tests {
     use std::collections::HashMap;
-    use std::rc::Rc;
     use std::sync::{Arc, RwLock};
 
     use fixedbitset::FixedBitSet;
-    use risingwave_common::catalog::{ColumnDesc, TableDesc};
-    use risingwave_common::constants::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
-    use risingwave_common::hash::ParallelUnitMapping;
+    use risingwave_batch::worker_manager::worker_node_manager::{
+        WorkerNodeManager, WorkerNodeSelector,
+    };
+    use risingwave_common::catalog::{
+        ColumnCatalog, ColumnDesc, ConflictBehavior, CreateType, StreamJobStatus,
+        DEFAULT_SUPER_USER_ID,
+    };
+    use risingwave_common::hash::{WorkerSlotId, WorkerSlotMapping};
     use risingwave_common::types::DataType;
     use risingwave_pb::common::worker_node::Property;
     use risingwave_pb::common::{HostAddress, ParallelUnit, WorkerNode, WorkerType};
@@ -444,22 +485,23 @@ pub(crate) mod tests {
 
     use crate::catalog::catalog_service::CatalogReader;
     use crate::catalog::root_catalog::Catalog;
+    use crate::catalog::table_catalog::TableType;
     use crate::expr::InputRef;
     use crate::optimizer::plan_node::{
         generic, BatchExchange, BatchFilter, BatchHashJoin, EqJoinPredicate, LogicalScan, ToBatch,
     };
-    use crate::optimizer::property::{Distribution, Order};
+    use crate::optimizer::property::{Cardinality, Distribution, Order};
     use crate::optimizer::{OptimizerContext, PlanRef};
     use crate::scheduler::distributed::QueryExecution;
     use crate::scheduler::plan_fragmenter::{BatchPlanFragmenter, Query};
-    use crate::scheduler::worker_node_manager::{WorkerNodeManager, WorkerNodeSelector};
     use crate::scheduler::{
-        DistributedQueryMetrics, ExecutionContext, HummockSnapshotManager, PinnedHummockSnapshot,
-        QueryExecutionInfo,
+        DistributedQueryMetrics, ExecutionContext, HummockSnapshotManager, QueryExecutionInfo,
+        ReadSnapshot,
     };
     use crate::session::SessionImpl;
     use crate::test_utils::MockFrontendMetaClient;
     use crate::utils::Condition;
+    use crate::TableCatalog;
 
     #[tokio::test]
     async fn test_query_should_not_hang_with_empty_worker() {
@@ -473,17 +515,20 @@ pub(crate) mod tests {
             CatalogReader::new(Arc::new(parking_lot::RwLock::new(Catalog::default())));
         let query = create_query().await;
         let query_id = query.query_id().clone();
-        let pinned_snapshot = hummock_snapshot_manager.acquire(&query_id).await.unwrap();
-        let query_execution = Arc::new(QueryExecution::new(query, (0, 0)));
+        let pinned_snapshot = hummock_snapshot_manager.acquire();
+        let query_execution = Arc::new(QueryExecution::new(query, (0, 0), None));
         let query_execution_info = Arc::new(RwLock::new(QueryExecutionInfo::new_from_map(
             HashMap::from([(query_id, query_execution.clone())]),
         )));
 
         assert!(query_execution
             .start(
-                ExecutionContext::new(SessionImpl::mock().into()).into(),
+                ExecutionContext::new(SessionImpl::mock().into(), None).into(),
                 worker_node_selector,
-                PinnedHummockSnapshot::FrontendPinned(pinned_snapshot, true),
+                ReadSnapshot::FrontendPinned {
+                    snapshot: pinned_snapshot,
+                    is_barrier_read: true
+                },
                 compute_client_pool,
                 catalog_reader,
                 query_execution_info,
@@ -503,29 +548,62 @@ pub(crate) mod tests {
         //
         let ctx = OptimizerContext::mock().await;
         let table_id = 0.into();
+        let table_catalog: TableCatalog = TableCatalog {
+            id: table_id,
+            associated_source_id: None,
+            name: "test".to_string(),
+            dependent_relations: vec![],
+            columns: vec![
+                ColumnCatalog {
+                    column_desc: ColumnDesc::new_atomic(DataType::Int32, "a", 0),
+                    is_hidden: false,
+                },
+                ColumnCatalog {
+                    column_desc: ColumnDesc::new_atomic(DataType::Float64, "b", 1),
+                    is_hidden: false,
+                },
+                ColumnCatalog {
+                    column_desc: ColumnDesc::new_atomic(DataType::Int64, "c", 2),
+                    is_hidden: false,
+                },
+            ],
+            pk: vec![],
+            stream_key: vec![],
+            table_type: TableType::Table,
+            distribution_key: vec![],
+            append_only: false,
+            owner: DEFAULT_SUPER_USER_ID,
+            retention_seconds: None,
+            fragment_id: 0,        // FIXME
+            dml_fragment_id: None, // FIXME
+            vnode_col_index: None,
+            row_id_index: None,
+            value_indices: vec![0, 1, 2],
+            definition: "".to_string(),
+            conflict_behavior: ConflictBehavior::NoCheck,
+            version_column_index: None,
+            read_prefix_len_hint: 0,
+            version: None,
+            watermark_columns: FixedBitSet::with_capacity(3),
+            dist_key_in_pk: vec![],
+            cardinality: Cardinality::unknown(),
+            cleaned_by_watermark: false,
+            created_at_epoch: None,
+            initialized_at_epoch: None,
+            stream_job_status: StreamJobStatus::Creating,
+            create_type: CreateType::Foreground,
+            description: None,
+            incoming_sinks: vec![],
+            initialized_at_cluster_version: None,
+            created_at_cluster_version: None,
+        };
         let batch_plan_node: PlanRef = LogicalScan::create(
             "".to_string(),
-            false,
-            Rc::new(TableDesc {
-                table_id,
-                stream_key: vec![],
-                pk: vec![],
-                columns: vec![
-                    ColumnDesc::new_atomic(DataType::Int32, "a", 0),
-                    ColumnDesc::new_atomic(DataType::Float64, "b", 1),
-                    ColumnDesc::new_atomic(DataType::Int64, "c", 2),
-                ],
-                distribution_key: vec![],
-                append_only: false,
-                retention_seconds: TABLE_OPTION_DUMMY_RETENTION_SECOND,
-                value_indices: vec![0, 1, 2],
-                read_prefix_len_hint: 0,
-                watermark_columns: FixedBitSet::with_capacity(3),
-                versioned: false,
-            }),
+            table_catalog.into(),
             vec![],
             ctx,
-            false,
+            None,
+            Cardinality::unknown(),
         )
         .to_batch()
         .unwrap()
@@ -599,9 +677,12 @@ pub(crate) mod tests {
             state: risingwave_pb::common::worker_node::State::Running as i32,
             parallel_units: generate_parallel_units(0, 0),
             property: Some(Property {
-                is_streaming: true,
+                is_unschedulable: false,
                 is_serving: true,
+                is_streaming: true,
             }),
+            transactional_id: Some(0),
+            ..Default::default()
         };
         let worker2 = WorkerNode {
             id: 1,
@@ -613,9 +694,12 @@ pub(crate) mod tests {
             state: risingwave_pb::common::worker_node::State::Running as i32,
             parallel_units: generate_parallel_units(8, 1),
             property: Some(Property {
-                is_streaming: true,
+                is_unschedulable: false,
                 is_serving: true,
+                is_streaming: true,
             }),
+            transactional_id: Some(1),
+            ..Default::default()
         };
         let worker3 = WorkerNode {
             id: 2,
@@ -627,15 +711,25 @@ pub(crate) mod tests {
             state: risingwave_pb::common::worker_node::State::Running as i32,
             parallel_units: generate_parallel_units(16, 2),
             property: Some(Property {
-                is_streaming: true,
+                is_unschedulable: false,
                 is_serving: true,
+                is_streaming: true,
             }),
+            transactional_id: Some(2),
+            ..Default::default()
         };
         let workers = vec![worker1, worker2, worker3];
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(workers));
         let worker_node_selector = WorkerNodeSelector::new(worker_node_manager.clone(), false);
-        worker_node_manager
-            .insert_streaming_fragment_mapping(0, ParallelUnitMapping::new_single(0));
+        worker_node_manager.insert_streaming_fragment_mapping(
+            0,
+            WorkerSlotMapping::new_single(WorkerSlotId::new(0, 0)),
+        );
+        worker_node_manager.set_serving_fragment_mapping(
+            vec![(0, WorkerSlotMapping::new_single(WorkerSlotId::new(0, 0)))]
+                .into_iter()
+                .collect(),
+        );
         let catalog = Arc::new(parking_lot::RwLock::new(Catalog::default()));
         catalog.write().insert_table_id_mapping(table_id, 0);
         let catalog_reader = CatalogReader::new(catalog);

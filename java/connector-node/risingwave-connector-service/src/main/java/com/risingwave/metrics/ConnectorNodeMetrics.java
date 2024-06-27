@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -113,7 +113,7 @@ public class ConnectorNodeMetrics {
         }
     }
 
-    public static void startHTTPServer(int port) {
+    public static void startHTTPServer(String host, int port) {
         CollectorRegistry registry = new CollectorRegistry();
         registry.register(activeSourceConnections);
         registry.register(activeSinkConnections);
@@ -124,7 +124,7 @@ public class ConnectorNodeMetrics {
         PeriodicMetricsCollector collector = new PeriodicMetricsCollector(1000, "connector");
         collector.start();
         try {
-            new HTTPServer(new InetSocketAddress("localhost", port), registry);
+            new HTTPServer(new InetSocketAddress(host, port), registry);
         } catch (IOException e) {
             throw INTERNAL.withDescription("Failed to start HTTP server")
                     .withCause(e)
@@ -140,20 +140,20 @@ public class ConnectorNodeMetrics {
         activeSourceConnections.remove(sourceType, ip);
     }
 
-    public static void incActiveSinkConnections(String connectorType, String ip) {
-        activeSinkConnections.labels(connectorType, ip).inc();
+    public static void incActiveSinkConnections(String connectorName, String ip) {
+        activeSinkConnections.labels(connectorName, ip).inc();
     }
 
-    public static void decActiveSinkConnections(String connectorType, String ip) {
-        activeSinkConnections.remove(connectorType, ip);
+    public static void decActiveSinkConnections(String connectorName, String ip) {
+        activeSinkConnections.remove(connectorName, ip);
     }
 
     public static void incSourceRowsReceived(String sourceType, String sourceId, double amt) {
         sourceRowsReceived.labels(sourceType, sourceId).inc(amt);
     }
 
-    public static void incSinkRowsReceived(String connectorType, String sinkId, double amt) {
-        sinkRowsReceived.labels(connectorType, sinkId).inc(amt);
+    public static void incSinkRowsReceived(String connectorName, String sinkId, double amt) {
+        sinkRowsReceived.labels(connectorName, sinkId).inc(amt);
     }
 
     public static void incTotalConnections(String sinkType, String ip) {

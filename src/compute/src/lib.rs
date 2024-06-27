@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,32 +13,43 @@
 // limitations under the License.
 
 #![feature(trait_alias)]
-#![feature(binary_heap_drain_sorted)]
-#![feature(generators)]
+#![feature(coroutines)]
 #![feature(type_alias_impl_trait)]
 #![feature(let_chains)]
-#![feature(result_option_inspect)]
 #![feature(lint_reasons)]
-#![cfg_attr(coverage, feature(no_coverage))]
+#![feature(impl_trait_in_assoc_type)]
+#![feature(lazy_cell)]
+#![cfg_attr(coverage, feature(coverage_attribute))]
 
 #[macro_use]
 extern crate tracing;
 
-pub mod memory_management;
+pub mod memory;
 pub mod observer;
 pub mod rpc;
 pub mod server;
 pub mod telemetry;
 
+use std::future::Future;
+use std::pin::Pin;
+
 use clap::{Parser, ValueEnum};
-use risingwave_common::config::AsyncStackTraceOption;
+use risingwave_common::config::{AsyncStackTraceOption, MetricLevel, OverrideConfig};
+use risingwave_common::util::meta_addr::MetaAddressStrategy;
 use risingwave_common::util::resource_util::cpu::total_cpu_available;
-use risingwave_common::util::resource_util::memory::total_memory_available_bytes;
-use risingwave_common_proc_macro::OverrideConfig;
+use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
 use serde::{Deserialize, Serialize};
 
+/// If `total_memory_bytes` is not specified, the default memory limit will be set to
+/// the system memory limit multiplied by this proportion
+const DEFAULT_MEMORY_PROPORTION: f64 = 0.7;
+
 /// Command-line arguments for compute-node.
-#[derive(Parser, Clone, Debug)]
+#[derive(Parser, Clone, Debug, OverrideConfig)]
+#[command(
+    version,
+    about = "The worker node that executes query plans and handles data ingestion and output"
+)]
 pub struct ComputeNodeOpts {
     // TODO: rename to listen_addr and separate out the port.
     /// The address that this service listens to.
@@ -49,10 +60,12 @@ pub struct ComputeNodeOpts {
     /// The address for contacting this instance of the service.
     /// This would be synonymous with the service's "public address"
     /// or "identifying address".
-    /// Optional, we will use listen_addr if not specified.
-    #[clap(long, env = "RW_ADVERTISE_ADDR", long)]
+    /// Optional, we will use `listen_addr` if not specified.
+    #[clap(long, env = "RW_ADVERTISE_ADDR")]
     pub advertise_addr: Option<String>,
 
+    /// We will start a http server at this address via `MetricsManager`.
+    /// Then the prometheus instance will poll the metrics from this address.
     #[clap(
         long,
         env = "RW_PROMETHEUS_LISTENER_ADDR",
@@ -61,15 +74,7 @@ pub struct ComputeNodeOpts {
     pub prometheus_listener_addr: String,
 
     #[clap(long, env = "RW_META_ADDR", default_value = "http://127.0.0.1:5690")]
-    pub meta_address: String,
-
-    /// Endpoint of the connector node
-    #[clap(long, env = "RW_CONNECTOR_RPC_ENDPOINT")]
-    pub connector_rpc_endpoint: Option<String>,
-
-    /// Payload format of connector sink rpc
-    #[clap(long, env = "RW_CONNECTOR_RPC_SINK_PAYLOAD_FORMAT")]
-    pub connector_rpc_sink_payload_format: Option<String>,
+    pub meta_address: MetaAddressStrategy,
 
     /// The path of `risingwave.toml` configuration file.
     ///
@@ -81,43 +86,65 @@ pub struct ComputeNodeOpts {
     #[clap(long, env = "RW_TOTAL_MEMORY_BYTES", default_value_t = default_total_memory_bytes())]
     pub total_memory_bytes: usize,
 
+    /// Reserved memory for the compute node in bytes.
+    /// If not set, a portion (default to 30%) for the `total_memory_bytes` will be used as the reserved memory.
+    ///
+    /// The total memory compute and storage can use is `total_memory_bytes` - `reserved_memory_bytes`.
+    #[clap(long, env = "RW_RESERVED_MEMORY_BYTES")]
+    pub reserved_memory_bytes: Option<usize>,
+
     /// The parallelism that the compute node will register to the scheduler of the meta service.
     #[clap(long, env = "RW_PARALLELISM", default_value_t = default_parallelism())]
+    #[override_opts(if_absent, path = streaming.actor_runtime_worker_threads_num)]
     pub parallelism: usize,
 
     /// Decides whether the compute node can be used for streaming and serving.
     #[clap(long, env = "RW_COMPUTE_NODE_ROLE", value_enum, default_value_t = default_role())]
     pub role: Role,
 
-    #[clap(flatten)]
-    override_config: OverrideConfigOpts,
-}
-
-/// Command-line arguments for compute-node that overrides the config file.
-#[derive(Parser, Clone, Debug, OverrideConfig)]
-struct OverrideConfigOpts {
     /// Used for control the metrics level, similar to log level.
-    /// 0 = close metrics
-    /// >0 = open metrics
-    #[clap(long, env = "RW_METRICS_LEVEL")]
+    /// 0 = disable metrics
+    /// >0 = enable metrics
+    #[clap(long, hide = true, env = "RW_METRICS_LEVEL")]
     #[override_opts(path = server.metrics_level)]
-    pub metrics_level: Option<u32>,
+    pub metrics_level: Option<MetricLevel>,
 
-    /// Path to file cache data directory.
+    /// Path to data file cache data directory.
     /// Left empty to disable file cache.
-    #[clap(long, env = "RW_FILE_CACHE_DIR")]
-    #[override_opts(path = storage.file_cache.dir)]
-    pub file_cache_dir: Option<String>,
+    #[clap(long, hide = true, env = "RW_DATA_FILE_CACHE_DIR")]
+    #[override_opts(path = storage.data_file_cache.dir)]
+    pub data_file_cache_dir: Option<String>,
 
-    /// Enable reporting tracing information to jaeger.
-    #[clap(long, env = "RW_ENABLE_JAEGER_TRACING", default_missing_value = None)]
-    #[override_opts(path = streaming.enable_jaeger_tracing)]
-    pub enable_jaeger_tracing: Option<bool>,
+    /// Path to meta file cache data directory.
+    /// Left empty to disable file cache.
+    #[clap(long, hide = true, env = "RW_META_FILE_CACHE_DIR")]
+    #[override_opts(path = storage.meta_file_cache.dir)]
+    pub meta_file_cache_dir: Option<String>,
 
     /// Enable async stack tracing through `await-tree` for risectl.
-    #[clap(long, env = "RW_ASYNC_STACK_TRACE", value_enum)]
+    #[clap(long, hide = true, env = "RW_ASYNC_STACK_TRACE", value_enum)]
     #[override_opts(path = streaming.async_stack_trace)]
     pub async_stack_trace: Option<AsyncStackTraceOption>,
+
+    /// Enable heap profile dump when memory usage is high.
+    #[clap(long, hide = true, env = "RW_HEAP_PROFILING_DIR")]
+    #[override_opts(path = server.heap_profiling.dir)]
+    pub heap_profiling_dir: Option<String>,
+
+    /// Endpoint of the connector node.
+    #[deprecated = "connector node has been deprecated."]
+    #[clap(long, hide = true, env = "RW_CONNECTOR_RPC_ENDPOINT")]
+    pub connector_rpc_endpoint: Option<String>,
+}
+
+impl risingwave_common::opts::Opts for ComputeNodeOpts {
+    fn name() -> &'static str {
+        "compute"
+    }
+
+    fn meta_addr(&self) -> MetaAddressStrategy {
+        self.meta_address.clone()
+    }
 }
 
 #[derive(Copy, Clone, Debug, Default, ValueEnum, Serialize, Deserialize)]
@@ -147,9 +174,9 @@ impl Role {
 }
 
 fn validate_opts(opts: &ComputeNodeOpts) {
-    let total_memory_available_bytes = total_memory_available_bytes();
-    if opts.total_memory_bytes > total_memory_available_bytes {
-        let error_msg = format!("total_memory_bytes {} is larger than the total memory available bytes {} that can be acquired.", opts.total_memory_bytes, total_memory_available_bytes);
+    let system_memory_available_bytes = system_memory_available_bytes();
+    if opts.total_memory_bytes > system_memory_available_bytes {
+        let error_msg = format!("total_memory_bytes {} is larger than the total memory available bytes {} that can be acquired.", opts.total_memory_bytes, system_memory_available_bytes);
         tracing::error!(error_msg);
         panic!("{}", error_msg);
     }
@@ -168,9 +195,6 @@ fn validate_opts(opts: &ComputeNodeOpts) {
     }
 }
 
-use std::future::Future;
-use std::pin::Pin;
-
 use crate::server::compute_node_serve;
 
 /// Start compute node
@@ -182,7 +206,6 @@ pub fn start(opts: ComputeNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> 
         validate_opts(&opts);
 
         let listen_addr = opts.listen_addr.parse().unwrap();
-        tracing::info!("Server Listening at {}", listen_addr);
 
         let advertise_addr = opts
             .advertise_addr
@@ -198,20 +221,22 @@ pub fn start(opts: ComputeNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> 
         let (join_handle_vec, _shutdown_send) =
             compute_node_serve(listen_addr, advertise_addr, opts).await;
 
+        tracing::info!("Server listening at {}", listen_addr);
+
         for join_handle in join_handle_vec {
             join_handle.await.unwrap();
         }
     })
 }
 
-fn default_total_memory_bytes() -> usize {
-    total_memory_available_bytes()
+pub fn default_total_memory_bytes() -> usize {
+    (system_memory_available_bytes() as f64 * DEFAULT_MEMORY_PROPORTION) as usize
 }
 
-fn default_parallelism() -> usize {
+pub fn default_parallelism() -> usize {
     total_cpu_available().ceil() as usize
 }
 
-fn default_role() -> Role {
+pub fn default_role() -> Role {
     Role::Both
 }

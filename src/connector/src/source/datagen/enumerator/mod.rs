@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,10 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::Context;
 use async_trait::async_trait;
 
 use crate::source::datagen::{DatagenProperties, DatagenSplit};
-use crate::source::SplitEnumerator;
+use crate::source::{SourceEnumeratorContextRef, SplitEnumerator};
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct DatagenSplitEnumerator {
@@ -27,13 +28,18 @@ impl SplitEnumerator for DatagenSplitEnumerator {
     type Properties = DatagenProperties;
     type Split = DatagenSplit;
 
-    async fn new(properties: DatagenProperties) -> anyhow::Result<DatagenSplitEnumerator> {
+    async fn new(
+        properties: DatagenProperties,
+        _context: SourceEnumeratorContextRef,
+    ) -> crate::error::ConnectorResult<DatagenSplitEnumerator> {
         let split_num = properties.split_num.unwrap_or_else(|| "1".to_string());
-        let split_num = split_num.parse::<i32>()?;
+        let split_num = split_num
+            .parse::<i32>()
+            .context("failed to parse datagen split num")?;
         Ok(Self { split_num })
     }
 
-    async fn list_splits(&mut self) -> anyhow::Result<Vec<DatagenSplit>> {
+    async fn list_splits(&mut self) -> crate::error::ConnectorResult<Vec<DatagenSplit>> {
         let mut splits = vec![];
         for i in 0..self.split_num {
             splits.push(DatagenSplit {

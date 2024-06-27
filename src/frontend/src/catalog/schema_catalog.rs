@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,49 +16,67 @@ use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use itertools::Itertools;
 use risingwave_common::catalog::{valid_table_name, FunctionId, IndexId, TableId};
 use risingwave_common::types::DataType;
 use risingwave_connector::sink::catalog::SinkCatalog;
+pub use risingwave_expr::sig::*;
 use risingwave_pb::catalog::{
-    PbConnection, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView,
+    PbConnection, PbFunction, PbIndex, PbSchema, PbSecret, PbSink, PbSource, PbSubscription,
+    PbTable, PbView,
 };
+use risingwave_pb::user::grant_privilege::Object;
 
+use super::subscription_catalog::SubscriptionCatalog;
+use super::{OwnedByUserCatalog, SubscriptionId};
 use crate::catalog::connection_catalog::ConnectionCatalog;
 use crate::catalog::function_catalog::FunctionCatalog;
 use crate::catalog::index_catalog::IndexCatalog;
+use crate::catalog::secret_catalog::SecretCatalog;
 use crate::catalog::source_catalog::SourceCatalog;
-use crate::catalog::system_catalog::SystemCatalog;
+use crate::catalog::system_catalog::SystemTableCatalog;
 use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::view_catalog::ViewCatalog;
-use crate::catalog::{ConnectionId, SchemaId, SinkId, SourceId, ViewId};
+use crate::catalog::{ConnectionId, DatabaseId, SchemaId, SecretId, SinkId, SourceId, ViewId};
+use crate::expr::{infer_type_name, infer_type_with_sigmap, Expr, ExprImpl};
+use crate::user::UserId;
 
 #[derive(Clone, Debug)]
 pub struct SchemaCatalog {
     id: SchemaId,
-    name: String,
+    pub name: String,
+    pub database_id: DatabaseId,
     table_by_name: HashMap<String, Arc<TableCatalog>>,
     table_by_id: HashMap<TableId, Arc<TableCatalog>>,
     source_by_name: HashMap<String, Arc<SourceCatalog>>,
     source_by_id: HashMap<SourceId, Arc<SourceCatalog>>,
     sink_by_name: HashMap<String, Arc<SinkCatalog>>,
     sink_by_id: HashMap<SinkId, Arc<SinkCatalog>>,
+    subscription_by_name: HashMap<String, Arc<SubscriptionCatalog>>,
+    subscription_by_id: HashMap<SubscriptionId, Arc<SubscriptionCatalog>>,
     index_by_name: HashMap<String, Arc<IndexCatalog>>,
     index_by_id: HashMap<IndexId, Arc<IndexCatalog>>,
     indexes_by_table_id: HashMap<TableId, Vec<Arc<IndexCatalog>>>,
     view_by_name: HashMap<String, Arc<ViewCatalog>>,
     view_by_id: HashMap<ViewId, Arc<ViewCatalog>>,
+    function_registry: FunctionRegistry,
     function_by_name: HashMap<String, HashMap<Vec<DataType>, Arc<FunctionCatalog>>>,
     function_by_id: HashMap<FunctionId, Arc<FunctionCatalog>>,
     connection_by_name: HashMap<String, Arc<ConnectionCatalog>>,
     connection_by_id: HashMap<ConnectionId, Arc<ConnectionCatalog>>,
+    secret_by_name: HashMap<String, Arc<SecretCatalog>>,
+    secret_by_id: HashMap<SecretId, Arc<SecretCatalog>>,
+
+    _secret_source_ref: HashMap<SecretId, Vec<SourceId>>,
+    _secret_sink_ref: HashMap<SecretId, Vec<SinkId>>,
 
     // This field is currently used only for `show connections`
     connection_source_ref: HashMap<ConnectionId, Vec<SourceId>>,
     // This field is currently used only for `show connections`
     connection_sink_ref: HashMap<ConnectionId, Vec<SinkId>>,
     // This field only available when schema is "pg_catalog". Meanwhile, others will be empty.
-    system_table_by_name: HashMap<String, SystemCatalog>,
-    owner: u32,
+    system_table_by_name: HashMap<String, Arc<SystemTableCatalog>>,
+    pub owner: u32,
 }
 
 impl SchemaCatalog {
@@ -75,9 +93,18 @@ impl SchemaCatalog {
         table_ref
     }
 
-    pub fn create_sys_table(&mut self, sys_table: SystemCatalog) {
+    pub fn create_sys_table(&mut self, sys_table: Arc<SystemTableCatalog>) {
         self.system_table_by_name
             .try_insert(sys_table.name.clone(), sys_table)
+            .unwrap();
+    }
+
+    pub fn create_sys_view(&mut self, sys_view: Arc<ViewCatalog>) {
+        self.view_by_name
+            .try_insert(sys_view.name().to_string(), sys_view.clone())
+            .unwrap();
+        self.view_by_id
+            .try_insert(sys_view.id, sys_view.clone())
             .unwrap();
     }
 
@@ -173,7 +200,7 @@ impl SchemaCatalog {
                     .unwrap();
                 entry.get_mut().remove(pos);
             }
-            Vacant(_entry) => unreachable!(),
+            Vacant(_entry) => (),
         };
     }
 
@@ -275,6 +302,44 @@ impl SchemaCatalog {
         self.sink_by_id.insert(id, sink_ref);
     }
 
+    pub fn create_subscription(&mut self, prost: &PbSubscription) {
+        let name = prost.name.clone();
+        let id = prost.id;
+        let subscription_catalog = SubscriptionCatalog::from(prost);
+        let subscription_ref = Arc::new(subscription_catalog);
+
+        self.subscription_by_name
+            .try_insert(name, subscription_ref.clone())
+            .unwrap();
+        self.subscription_by_id
+            .try_insert(id, subscription_ref)
+            .unwrap();
+    }
+
+    pub fn drop_subscription(&mut self, id: SubscriptionId) {
+        let subscription_ref = self.subscription_by_id.remove(&id).unwrap();
+        self.subscription_by_name
+            .remove(&subscription_ref.name)
+            .unwrap();
+    }
+
+    pub fn update_subscription(&mut self, prost: &PbSubscription) {
+        let name = prost.name.clone();
+        let id = prost.id;
+        let subscription = SubscriptionCatalog::from(prost);
+        let subscription_ref = Arc::new(subscription);
+
+        let old_subscription = self.subscription_by_id.get(&id).unwrap();
+        // check if subscription name get updated.
+        if old_subscription.name != name {
+            self.subscription_by_name.remove(&old_subscription.name);
+        }
+
+        self.subscription_by_name
+            .insert(name, subscription_ref.clone());
+        self.subscription_by_id.insert(id, subscription_ref);
+    }
+
     pub fn create_view(&mut self, prost: &PbView) {
         let name = prost.name.clone();
         let id = prost.id;
@@ -308,6 +373,23 @@ impl SchemaCatalog {
         self.view_by_id.insert(id, view_ref);
     }
 
+    pub fn get_func_sign(func: &FunctionCatalog) -> FuncSign {
+        FuncSign {
+            name: FuncName::Udf(func.name.clone()),
+            inputs_type: func
+                .arg_types
+                .iter()
+                .map(|t| t.clone().into())
+                .collect_vec(),
+            variadic: false,
+            ret_type: func.return_type.clone().into(),
+            build: FuncBuilder::Udf,
+            // dummy type infer, will not use this result
+            type_infer: |_| Ok(DataType::Boolean),
+            deprecated: false,
+        }
+    }
+
     pub fn create_function(&mut self, prost: &PbFunction) {
         let name = prost.name.clone();
         let id = prost.id;
@@ -315,6 +397,8 @@ impl SchemaCatalog {
         let args = function.arg_types.clone();
         let function_ref = Arc::new(function);
 
+        self.function_registry
+            .insert(Self::get_func_sign(&function_ref));
         self.function_by_name
             .entry(name)
             .or_default()
@@ -330,11 +414,42 @@ impl SchemaCatalog {
             .function_by_id
             .remove(&id)
             .expect("function not found by id");
+
+        self.function_registry
+            .remove(Self::get_func_sign(&function_ref))
+            .expect("function not found in registry");
+
         self.function_by_name
             .get_mut(&function_ref.name)
             .expect("function not found by name")
             .remove(&function_ref.arg_types)
             .expect("function not found by argument types");
+    }
+
+    pub fn update_function(&mut self, prost: &PbFunction) {
+        let name = prost.name.clone();
+        let id = prost.id.into();
+        let function = FunctionCatalog::from(prost);
+        let function_ref = Arc::new(function);
+
+        let old_function_by_id = self.function_by_id.get(&id).unwrap();
+        let old_function_by_name = self
+            .function_by_name
+            .get_mut(&old_function_by_id.name)
+            .unwrap();
+        // check if function name get updated.
+        if old_function_by_id.name != name {
+            old_function_by_name.remove(&old_function_by_id.arg_types);
+            if old_function_by_name.is_empty() {
+                self.function_by_name.remove(&old_function_by_id.name);
+            }
+        }
+
+        self.function_by_name
+            .entry(name)
+            .or_default()
+            .insert(old_function_by_id.arg_types.clone(), function_ref.clone());
+        self.function_by_id.insert(id, function_ref);
     }
 
     pub fn create_connection(&mut self, prost: &PbConnection) {
@@ -350,6 +465,22 @@ impl SchemaCatalog {
             .unwrap();
     }
 
+    pub fn update_connection(&mut self, prost: &PbConnection) {
+        let name = prost.name.clone();
+        let id = prost.id;
+        let connection = ConnectionCatalog::from(prost);
+        let connection_ref = Arc::new(connection);
+
+        let old_connection = self.connection_by_id.get(&id).unwrap();
+        // check if connection name get updated.
+        if old_connection.name != name {
+            self.connection_by_name.remove(&old_connection.name);
+        }
+
+        self.connection_by_name.insert(name, connection_ref.clone());
+        self.connection_by_id.insert(id, connection_ref);
+    }
+
     pub fn drop_connection(&mut self, connection_id: ConnectionId) {
         let connection_ref = self
             .connection_by_id
@@ -358,6 +489,46 @@ impl SchemaCatalog {
         self.connection_by_name
             .remove(&connection_ref.name)
             .expect("connection not found by name");
+    }
+
+    pub fn create_secret(&mut self, prost: &PbSecret) {
+        let name = prost.name.clone();
+        let id = SecretId::new(prost.id);
+        let secret = SecretCatalog::from(prost);
+        let secret_ref = Arc::new(secret);
+
+        self.secret_by_id
+            .try_insert(id, secret_ref.clone())
+            .unwrap();
+        self.secret_by_name
+            .try_insert(name, secret_ref.clone())
+            .unwrap();
+    }
+
+    pub fn update_secret(&mut self, prost: &PbSecret) {
+        let name = prost.name.clone();
+        let id = SecretId::new(prost.id);
+        let secret = SecretCatalog::from(prost);
+        let secret_ref = Arc::new(secret);
+
+        let old_secret = self.secret_by_id.get(&id).unwrap();
+        // check if secret name get updated.
+        if old_secret.name != name {
+            self.secret_by_name.remove(&old_secret.name);
+        }
+
+        self.secret_by_name.insert(name, secret_ref.clone());
+        self.secret_by_id.insert(id, secret_ref);
+    }
+
+    pub fn drop_secret(&mut self, secret_id: SecretId) {
+        let secret_ref = self
+            .secret_by_id
+            .remove(&secret_id)
+            .expect("secret not found by id");
+        self.secret_by_name
+            .remove(&secret_ref.name)
+            .expect("secret not found by name");
     }
 
     pub fn iter_all(&self) -> impl Iterator<Item = &Arc<TableCatalog>> {
@@ -406,6 +577,10 @@ impl SchemaCatalog {
         self.sink_by_name.values()
     }
 
+    pub fn iter_subscription(&self) -> impl Iterator<Item = &Arc<SubscriptionCatalog>> {
+        self.subscription_by_name.values()
+    }
+
     pub fn iter_view(&self) -> impl Iterator<Item = &Arc<ViewCatalog>> {
         self.view_by_name.values()
     }
@@ -418,7 +593,11 @@ impl SchemaCatalog {
         self.connection_by_name.values()
     }
 
-    pub fn iter_system_tables(&self) -> impl Iterator<Item = &SystemCatalog> {
+    pub fn iter_secret(&self) -> impl Iterator<Item = &Arc<SecretCatalog>> {
+        self.secret_by_name.values()
+    }
+
+    pub fn iter_system_tables(&self) -> impl Iterator<Item = &Arc<SystemTableCatalog>> {
         self.system_table_by_name.values()
     }
 
@@ -428,6 +607,14 @@ impl SchemaCatalog {
 
     pub fn get_table_by_id(&self, table_id: &TableId) -> Option<&Arc<TableCatalog>> {
         self.table_by_id.get(table_id)
+    }
+
+    pub fn get_view_by_name(&self, view_name: &str) -> Option<&Arc<ViewCatalog>> {
+        self.view_by_name.get(view_name)
+    }
+
+    pub fn get_view_by_id(&self, view_id: &ViewId) -> Option<&Arc<ViewCatalog>> {
+        self.view_by_id.get(view_id)
     }
 
     pub fn get_source_by_name(&self, source_name: &str) -> Option<&Arc<SourceCatalog>> {
@@ -446,6 +633,20 @@ impl SchemaCatalog {
         self.sink_by_id.get(sink_id)
     }
 
+    pub fn get_subscription_by_name(
+        &self,
+        subscription_name: &str,
+    ) -> Option<&Arc<SubscriptionCatalog>> {
+        self.subscription_by_name.get(subscription_name)
+    }
+
+    pub fn get_subscription_by_id(
+        &self,
+        subscription_id: &SubscriptionId,
+    ) -> Option<&Arc<SubscriptionCatalog>> {
+        self.subscription_by_id.get(subscription_id)
+    }
+
     pub fn get_index_by_name(&self, index_name: &str) -> Option<&Arc<IndexCatalog>> {
         self.index_by_name.get(index_name)
     }
@@ -461,7 +662,7 @@ impl SchemaCatalog {
             .unwrap_or_default()
     }
 
-    pub fn get_system_table_by_name(&self, table_name: &str) -> Option<&SystemCatalog> {
+    pub fn get_system_table_by_name(&self, table_name: &str) -> Option<&Arc<SystemTableCatalog>> {
         self.system_table_by_name.get(table_name)
     }
 
@@ -471,8 +672,23 @@ impl SchemaCatalog {
             .map(|table| table.name.clone())
     }
 
-    pub fn get_view_by_name(&self, view_name: &str) -> Option<&Arc<ViewCatalog>> {
-        self.view_by_name.get(view_name)
+    pub fn get_function_by_id(&self, function_id: FunctionId) -> Option<&Arc<FunctionCatalog>> {
+        self.function_by_id.get(&function_id)
+    }
+
+    pub fn get_function_by_name_inputs(
+        &self,
+        name: &str,
+        inputs: &mut [ExprImpl],
+    ) -> Option<&Arc<FunctionCatalog>> {
+        infer_type_with_sigmap(
+            FuncName::Udf(name.to_string()),
+            inputs,
+            &self.function_registry,
+        )
+        .ok()?;
+        let args = inputs.iter().map(|x| x.return_type()).collect_vec();
+        self.function_by_name.get(name)?.get(&args)
     }
 
     pub fn get_function_by_name_args(
@@ -480,7 +696,27 @@ impl SchemaCatalog {
         name: &str,
         args: &[DataType],
     ) -> Option<&Arc<FunctionCatalog>> {
-        self.function_by_name.get(name)?.get(args)
+        let args = args.iter().map(|x| Some(x.clone())).collect_vec();
+        let func = infer_type_name(
+            &self.function_registry,
+            FuncName::Udf(name.to_string()),
+            &args,
+        )
+        .ok()?;
+
+        let args = func
+            .inputs_type
+            .iter()
+            .filter_map(|x| {
+                if let SigDataType::Exact(t) = x {
+                    Some(t.clone())
+                } else {
+                    None
+                }
+            })
+            .collect_vec();
+
+        self.function_by_name.get(name)?.get(&args)
     }
 
     pub fn get_functions_by_name(&self, name: &str) -> Option<Vec<&Arc<FunctionCatalog>>> {
@@ -491,8 +727,23 @@ impl SchemaCatalog {
         Some(functions.values().collect())
     }
 
+    pub fn get_connection_by_id(
+        &self,
+        connection_id: &ConnectionId,
+    ) -> Option<&Arc<ConnectionCatalog>> {
+        self.connection_by_id.get(connection_id)
+    }
+
     pub fn get_connection_by_name(&self, connection_name: &str) -> Option<&Arc<ConnectionCatalog>> {
         self.connection_by_name.get(connection_name)
+    }
+
+    pub fn get_secret_by_name(&self, secret_name: &str) -> Option<&Arc<SecretCatalog>> {
+        self.secret_by_name.get(secret_name)
+    }
+
+    pub fn get_secret_by_id(&self, secret_id: &SecretId) -> Option<&Arc<SecretCatalog>> {
+        self.secret_by_id.get(secret_id)
     }
 
     /// get all sources referencing the connection
@@ -512,15 +763,38 @@ impl SchemaCatalog {
             .map(|s| s.to_owned())
     }
 
+    pub fn get_grant_object_by_oid(&self, oid: u32) -> Option<Object> {
+        #[allow(clippy::manual_map)]
+        if self.get_table_by_id(&TableId::new(oid)).is_some()
+            || self.get_index_by_id(&IndexId::new(oid)).is_some()
+        {
+            Some(Object::TableId(oid))
+        } else if self.get_source_by_id(&oid).is_some() {
+            Some(Object::SourceId(oid))
+        } else if self.get_sink_by_id(&oid).is_some() {
+            Some(Object::SinkId(oid))
+        } else if self.get_view_by_id(&oid).is_some() {
+            Some(Object::ViewId(oid))
+        } else {
+            None
+        }
+    }
+
     pub fn id(&self) -> SchemaId {
         self.id
+    }
+
+    pub fn database_id(&self) -> DatabaseId {
+        self.database_id
     }
 
     pub fn name(&self) -> String {
         self.name.clone()
     }
+}
 
-    pub fn owner(&self) -> u32 {
+impl OwnedByUserCatalog for SchemaCatalog {
+    fn owner(&self) -> UserId {
         self.owner
     }
 }
@@ -531,6 +805,7 @@ impl From<&PbSchema> for SchemaCatalog {
             id: schema.id,
             owner: schema.owner,
             name: schema.name.clone(),
+            database_id: schema.database_id,
             table_by_name: HashMap::new(),
             table_by_id: HashMap::new(),
             source_by_name: HashMap::new(),
@@ -543,12 +818,19 @@ impl From<&PbSchema> for SchemaCatalog {
             system_table_by_name: HashMap::new(),
             view_by_name: HashMap::new(),
             view_by_id: HashMap::new(),
+            function_registry: FunctionRegistry::default(),
             function_by_name: HashMap::new(),
             function_by_id: HashMap::new(),
             connection_by_name: HashMap::new(),
             connection_by_id: HashMap::new(),
+            secret_by_name: HashMap::new(),
+            secret_by_id: HashMap::new(),
+            _secret_source_ref: HashMap::new(),
+            _secret_sink_ref: HashMap::new(),
             connection_source_ref: HashMap::new(),
             connection_sink_ref: HashMap::new(),
+            subscription_by_name: HashMap::new(),
+            subscription_by_id: HashMap::new(),
         }
     }
 }

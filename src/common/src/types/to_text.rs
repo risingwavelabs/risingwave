@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,10 +15,8 @@
 use std::fmt::{Result, Write};
 use std::num::FpCategory;
 
-use chrono::{TimeZone, Utc};
-
 use super::{DataType, DatumRef, ScalarRefImpl};
-use crate::for_all_scalar_variants;
+use crate::dispatch_scalar_ref_variants;
 
 // Used to convert ScalarRef to text format
 pub trait ToText {
@@ -49,18 +47,18 @@ pub trait ToText {
     /// - `ScalarRefImpl::Float32` -> `DataType::Float32`
     /// - `ScalarRefImpl::Float64` -> `DataType::Float64`
     /// - `ScalarRefImpl::Decimal` -> `DataType::Decimal`
-    /// - `ScalarRefImpl::Boolean` -> `DataType::Boolean`
+    /// - `ScalarRefImpl::Bool` -> `DataType::Boolean`
     /// - `ScalarRefImpl::Utf8` -> `DataType::Varchar`
     /// - `ScalarRefImpl::Bytea` -> `DataType::Bytea`
     /// - `ScalarRefImpl::Date` -> `DataType::Date`
     /// - `ScalarRefImpl::Time` -> `DataType::Time`
     /// - `ScalarRefImpl::Timestamp` -> `DataType::Timestamp`
+    /// - `ScalarRefImpl::Timestamptz` -> `DataType::Timestamptz`
     /// - `ScalarRefImpl::Interval` -> `DataType::Interval`
+    /// - `ScalarRefImpl::Jsonb` -> `DataType::Jsonb`
     /// - `ScalarRefImpl::List` -> `DataType::List`
     /// - `ScalarRefImpl::Struct` -> `DataType::Struct`
-    ///
-    /// Exception:
-    /// The scalar of `DataType::Timestamptz` is the `ScalarRefImpl::Int64`.
+    /// - `ScalarRefImpl::Serial` -> `DataType::Serial`
     fn to_text(&self) -> String {
         let mut s = String::new();
         self.write(&mut s).unwrap();
@@ -110,8 +108,9 @@ implement_using_to_string! {
 }
 
 implement_using_itoa! {
-    { i16 ,Int16},
-    { i32 ,Int32}
+    { i16, Int16 },
+    { i32, Int32 },
+    { i64, Int64 }
 }
 
 macro_rules! implement_using_ryu {
@@ -167,30 +166,6 @@ implement_using_ryu! {
     { crate::types::F64, Float64 }
 }
 
-impl ToText for i64 {
-    fn write<W: Write>(&self, f: &mut W) -> Result {
-        write!(f, "{self}")
-    }
-
-    fn write_with_type<W: Write>(&self, ty: &DataType, f: &mut W) -> Result {
-        match ty {
-            DataType::Int64 => self.write(f),
-            DataType::Timestamptz => {
-                // Just a meaningful representation as placeholder. The real implementation depends
-                // on TimeZone from session. See #3552.
-                let secs = self.div_euclid(1_000_000);
-                let nsecs = self.rem_euclid(1_000_000) * 1000;
-                let instant = Utc.timestamp_opt(secs, nsecs as u32).unwrap();
-                // PostgreSQL uses a space rather than `T` to separate the date and time.
-                // https://www.postgresql.org/docs/current/datatype-datetime.html#DATATYPE-DATETIME-OUTPUT
-                // same as `instant.format("%Y-%m-%d %H:%M:%S%.f%:z")` but faster
-                write!(f, "{}+00:00", instant.naive_local())
-            }
-            _ => unreachable!(),
-        }
-    }
-}
-
 impl ToText for bool {
     fn write<W: Write>(&self, f: &mut W) -> Result {
         if *self {
@@ -221,24 +196,15 @@ impl ToText for &[u8] {
     }
 }
 
-macro_rules! impl_totext_for_scalar {
-    ($({ $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty }),*) => {
-        impl ToText for ScalarRefImpl<'_> {
-            fn write<W: Write>(&self, f: &mut W) -> Result {
-                match self {
-                    $(ScalarRefImpl::$variant_name(v) => v.write(f),)*
-                }
-            }
+impl ToText for ScalarRefImpl<'_> {
+    fn write<W: Write>(&self, f: &mut W) -> Result {
+        dispatch_scalar_ref_variants!(self, v, { v.write(f) })
+    }
 
-            fn write_with_type<W: Write>(&self, ty: &DataType, f: &mut W) -> Result {
-                match self {
-                    $(ScalarRefImpl::$variant_name(v) => v.write_with_type(ty, f),)*
-                }
-            }
-        }
-    };
+    fn write_with_type<W: Write>(&self, ty: &DataType, f: &mut W) -> Result {
+        dispatch_scalar_ref_variants!(self, v, { v.write_with_type(ty, f) })
+    }
 }
-for_all_scalar_variants! { impl_totext_for_scalar }
 
 impl ToText for DatumRef<'_> {
     fn write<W: Write>(&self, f: &mut W) -> Result {

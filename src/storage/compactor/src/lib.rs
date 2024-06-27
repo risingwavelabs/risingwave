@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,18 +12,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![feature(lint_reasons)]
+
 mod compactor_observer;
 mod rpc;
-mod server;
+pub mod server;
 mod telemetry;
 
 use clap::Parser;
-use risingwave_common_proc_macro::OverrideConfig;
+use risingwave_common::config::{
+    AsyncStackTraceOption, CompactorMode, MetricLevel, OverrideConfig,
+};
+use risingwave_common::util::meta_addr::MetaAddressStrategy;
 
-use crate::server::compactor_serve;
+use crate::server::{compactor_serve, shared_compactor_serve};
 
-/// Command-line arguments for compute-node.
-#[derive(Parser, Clone, Debug)]
+/// Command-line arguments for compactor-node.
+#[derive(Parser, Clone, Debug, OverrideConfig)]
+#[command(
+    version,
+    about = "The stateless worker node that compacts data for the storage engine"
+)]
 pub struct CompactorOpts {
     // TODO: rename to listen_addr and separate out the port.
     /// The address that this service listens to.
@@ -34,14 +43,17 @@ pub struct CompactorOpts {
     /// The address for contacting this instance of the service.
     /// This would be synonymous with the service's "public address"
     /// or "identifying address".
-    /// Optional, we will use listen_addr if not specified.
+    /// Optional, we will use `listen_addr` if not specified.
     #[clap(long, env = "RW_ADVERTISE_ADDR")]
     pub advertise_addr: Option<String>,
 
+    // TODO(eric): remove me
     // TODO: This is currently unused.
     #[clap(long, env = "RW_PORT")]
     pub port: Option<u16>,
 
+    /// We will start a http server at this address via `MetricsManager`.
+    /// Then the prometheus instance will poll the metrics from this address.
     #[clap(
         long,
         env = "RW_PROMETHEUS_LISTENER_ADDR",
@@ -50,7 +62,7 @@ pub struct CompactorOpts {
     pub prometheus_listener_addr: String,
 
     #[clap(long, env = "RW_META_ADDR", default_value = "http://127.0.0.1:5690")]
-    pub meta_address: String,
+    pub meta_address: MetaAddressStrategy,
 
     #[clap(long, env = "RW_COMPACTION_WORKER_THREADS_NUMBER")]
     pub compaction_worker_threads_number: Option<usize>,
@@ -61,24 +73,36 @@ pub struct CompactorOpts {
     #[clap(long, env = "RW_CONFIG_PATH", default_value = "")]
     pub config_path: String,
 
-    #[clap(flatten)]
-    override_config: OverrideConfigOpts,
+    /// Used for control the metrics level, similar to log level.
+    #[clap(long, hide = true, env = "RW_METRICS_LEVEL")]
+    #[override_opts(path = server.metrics_level)]
+    pub metrics_level: Option<MetricLevel>,
+
+    /// Enable async stack tracing through `await-tree` for risectl.
+    #[clap(long, hide = true, env = "RW_ASYNC_STACK_TRACE", value_enum)]
+    #[override_opts(path = streaming.async_stack_trace)]
+    pub async_stack_trace: Option<AsyncStackTraceOption>,
+
+    /// Enable heap profile dump when memory usage is high.
+    #[clap(long, hide = true, env = "RW_HEAP_PROFILING_DIR")]
+    #[override_opts(path = server.heap_profiling.dir)]
+    pub heap_profiling_dir: Option<String>,
+
+    #[clap(long, env = "RW_COMPACTOR_MODE", value_enum)]
+    pub compactor_mode: Option<CompactorMode>,
+
+    #[clap(long, hide = true, env = "RW_PROXY_RPC_ENDPOINT", default_value = "")]
+    pub proxy_rpc_endpoint: String,
 }
 
-/// Command-line arguments for compactor-node that overrides the config file.
-#[derive(Parser, Clone, Debug, OverrideConfig)]
-struct OverrideConfigOpts {
-    /// Used for control the metrics level, similar to log level.
-    /// 0 = close metrics
-    /// >0 = open metrics
-    #[clap(long, env = "RW_METRICS_LEVEL")]
-    #[override_opts(path = server.metrics_level)]
-    pub metrics_level: Option<u32>,
+impl risingwave_common::opts::Opts for CompactorOpts {
+    fn name() -> &'static str {
+        "compactor"
+    }
 
-    /// It's a hint used by meta node.
-    #[clap(long, env = "RW_MAX_CONCURRENT_TASK_NUMBER")]
-    #[override_opts(path = storage.max_concurrent_compaction_task_number)]
-    pub max_concurrent_task_number: Option<u64>,
+    fn meta_addr(&self) -> MetaAddressStrategy {
+        self.meta_address.clone()
+    }
 }
 
 use std::future::Future;
@@ -87,28 +111,42 @@ use std::pin::Pin;
 pub fn start(opts: CompactorOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     // WARNING: don't change the function signature. Making it `async fn` will cause
     // slow compile in release mode.
-    Box::pin(async move {
-        tracing::info!("Compactor node options: {:?}", opts);
-        tracing::info!("meta address: {}", opts.meta_address.clone());
+    match opts.compactor_mode {
+        Some(CompactorMode::Shared) => Box::pin(async move {
+            tracing::info!("Shared compactor pod options: {:?}", opts);
+            tracing::info!("Proxy rpc endpoint: {}", opts.proxy_rpc_endpoint.clone());
 
-        let listen_addr = opts.listen_addr.parse().unwrap();
-        tracing::info!("Server Listening at {}", listen_addr);
+            let listen_addr = opts.listen_addr.parse().unwrap();
 
-        let advertise_addr = opts
-            .advertise_addr
-            .as_ref()
-            .unwrap_or_else(|| {
-                tracing::warn!("advertise addr is not specified, defaulting to listen address");
-                &opts.listen_addr
-            })
-            .parse()
-            .unwrap();
-        tracing::info!(" address is {}", advertise_addr);
+            let (join_handle, _shutdown_sender) = shared_compactor_serve(listen_addr, opts).await;
 
-        let (join_handle, observer_join_handle, _shutdown_sender) =
-            compactor_serve(listen_addr, advertise_addr, opts).await;
+            tracing::info!("Server listening at {}", listen_addr);
 
-        join_handle.await.unwrap();
-        observer_join_handle.abort();
-    })
+            join_handle.await.unwrap();
+        }),
+        None | Some(CompactorMode::Dedicated) => Box::pin(async move {
+            tracing::info!("Compactor node options: {:?}", opts);
+            tracing::info!("meta address: {}", opts.meta_address.clone());
+
+            let listen_addr = opts.listen_addr.parse().unwrap();
+
+            let advertise_addr = opts
+                .advertise_addr
+                .as_ref()
+                .unwrap_or_else(|| {
+                    tracing::warn!("advertise addr is not specified, defaulting to listen address");
+                    &opts.listen_addr
+                })
+                .parse()
+                .unwrap();
+            tracing::info!(" address is {}", advertise_addr);
+            let (join_handle, observer_join_handle, _shutdown_sender) =
+                compactor_serve(listen_addr, advertise_addr, opts).await;
+
+            tracing::info!("Server listening at {}", listen_addr);
+
+            join_handle.await.unwrap();
+            observer_join_handle.abort();
+        }),
+    }
 }

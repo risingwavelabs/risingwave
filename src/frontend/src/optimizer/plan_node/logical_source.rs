@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,48 +12,53 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::{max, min};
-use std::fmt;
-use std::ops::Bound;
-use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::rc::Rc;
 
-use itertools::Itertools;
-use risingwave_common::catalog::{ColumnCatalog, Schema};
-use risingwave_common::error::Result;
-use risingwave_connector::source::DataType;
+use fixedbitset::FixedBitSet;
+use pretty_xmlish::{Pretty, XmlNode};
+use risingwave_common::bail;
+use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, Field};
+use risingwave_connector::source::iceberg::ICEBERG_CONNECTOR;
+use risingwave_connector::source::{DataType, UPSTREAM_SOURCE_KEY};
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::GeneratedColumnDesc;
+use risingwave_sqlparser::ast::AsOf;
 
+use super::generic::{GenericPlanRef, SourceNodeKind};
 use super::stream_watermark_filter::StreamWatermarkFilter;
+use super::utils::{childless_record, Distill};
 use super::{
-    generic, BatchProject, BatchSource, ColPrunable, ExprRewritable, LogicalFilter, LogicalProject,
-    PlanBase, PlanRef, PredicatePushdown, StreamProject, StreamRowIdGen, StreamSource, ToBatch,
-    ToStream,
+    generic, BatchProject, BatchSource, ColPrunable, ExprRewritable, Logical, LogicalFilter,
+    LogicalProject, PlanBase, PlanRef, PredicatePushdown, StreamProject, StreamRowIdGen,
+    StreamSource, StreamSourceScan, ToBatch, ToStream,
 };
 use crate::catalog::source_catalog::SourceCatalog;
-use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, InputRef};
+use crate::error::Result;
+use crate::expr::{ExprImpl, ExprRewriter, ExprVisitor, InputRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
+use crate::optimizer::plan_node::stream_fs_fetch::StreamFsFetch;
+use crate::optimizer::plan_node::utils::column_names_pretty;
 use crate::optimizer::plan_node::{
-    ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
+    ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, StreamDedup,
+    ToStreamContext,
 };
+use crate::optimizer::property::Distribution::HashShard;
+use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::utils::{ColIndexMapping, Condition, IndexRewriter};
-
-/// For kafka source, we attach a hidden column [`KAFKA_TIMESTAMP_COLUMN_NAME`] to it, so that we
-/// can limit the timestamp range when querying it directly with batch query. The column type is
-/// [`DataType::Timestamptz`]. For more details, please refer to
-/// [this rfc](https://github.com/risingwavelabs/rfcs/pull/20).
-pub const KAFKA_TIMESTAMP_COLUMN_NAME: &str = "_rw_kafka_timestamp";
 
 /// `LogicalSource` returns contents of a table or other equivalent object
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalSource {
-    pub base: PlanBase,
+    pub base: PlanBase<Logical>,
     pub core: generic::Source,
 
     /// Expressions to output. This field presents and will be turned to a `Project` when
     /// converting to a physical plan, only if there are generated columns.
-    output_exprs: Option<Vec<ExprImpl>>,
+    pub(crate) output_exprs: Option<Vec<ExprImpl>>,
+    /// When there are generated columns, the `StreamRowIdGen`'s `row_id_index` is different from
+    /// the one in `core`. So we store the one in `output_exprs` here.
+    pub(crate) output_row_id_index: Option<usize>,
 }
 
 impl LogicalSource {
@@ -61,51 +66,68 @@ impl LogicalSource {
         source_catalog: Option<Rc<SourceCatalog>>,
         column_catalog: Vec<ColumnCatalog>,
         row_id_index: Option<usize>,
-        gen_row_id: bool,
-        for_table: bool,
+        kind: SourceNodeKind,
         ctx: OptimizerContextRef,
+        as_of: Option<AsOf>,
     ) -> Result<Self> {
-        let kafka_timestamp_range = (Bound::Unbounded, Bound::Unbounded);
+        // XXX: should we reorder the columns?
+        // The order may be strange if the schema is changed, e.g., [foo:Varchar, _rw_kafka_timestamp:Timestamptz, _row_id:Serial, bar:Int32]
+        // related: https://github.com/risingwavelabs/risingwave/issues/16486
+        // The order does not matter much. The columns field is essentially a map indexed by the column id.
+        // It will affect what users will see in `SELECT *`.
+        // But not sure if we rely on the position of hidden column like `_row_id` somewhere. For `projected_row_id` we do so...
         let core = generic::Source {
             catalog: source_catalog,
             column_catalog,
             row_id_index,
-            gen_row_id,
-            for_table,
+            kind,
             ctx,
-            kafka_timestamp_range,
+            as_of,
         };
+
+        if core.as_of.is_some() && !core.support_time_travel() {
+            bail!("Time travel is not supported for the source")
+        }
 
         let base = PlanBase::new_logical_with_core(&core);
 
         let output_exprs = Self::derive_output_exprs_from_generated_columns(&core.column_catalog)?;
+        let (core, output_row_id_index) = core.exclude_generated_columns();
 
         Ok(LogicalSource {
             base,
             core,
             output_exprs,
+            output_row_id_index,
         })
     }
 
     pub fn with_catalog(
         source_catalog: Rc<SourceCatalog>,
-        for_table: bool,
+        kind: SourceNodeKind,
         ctx: OptimizerContextRef,
+        as_of: Option<AsOf>,
     ) -> Result<Self> {
         let column_catalogs = source_catalog.columns.clone();
         let row_id_index = source_catalog.row_id_index;
-        let gen_row_id = source_catalog.append_only;
+        if !source_catalog.append_only {
+            assert!(row_id_index.is_none());
+        }
 
         Self::new(
             Some(source_catalog),
             column_catalogs,
             row_id_index,
-            gen_row_id,
-            for_table,
+            kind,
             ctx,
+            as_of,
         )
     }
 
+    /// If there are no generated columns, returns `None`.
+    ///
+    /// Otherwise, the returned expressions correspond to all columns.
+    /// Non-generated columns are represented by `InputRef`.
     pub fn derive_output_exprs_from_generated_columns(
         columns: &[ColumnCatalog],
     ) -> Result<Option<Vec<ExprImpl>>> {
@@ -124,7 +146,7 @@ impl LogicalSource {
                     mapping[idx] = None;
                 }
             }
-            ColIndexMapping::new(mapping)
+            ColIndexMapping::new(mapping, columns.len())
         };
 
         let mut rewriter = IndexRewriter::new(col_mapping);
@@ -156,101 +178,94 @@ impl LogicalSource {
         Ok(Some(exprs))
     }
 
-    /// `row_id_index` in source node should rule out generated column
-    #[must_use]
-    fn rewrite_row_id_idx(columns: &[ColumnCatalog], row_id_index: Option<usize>) -> Option<usize> {
-        row_id_index.map(|idx| {
-            let mut cnt = 0;
-            for col in columns.iter().take(idx + 1) {
-                if col.is_generated() {
-                    cnt += 1;
-                }
-            }
-            idx - cnt
+    /// `StreamSource` (list) -> shuffle -> `StreamDedup`
+    fn create_fs_list_plan(core: generic::Source) -> Result<PlanRef> {
+        let logical_source = generic::Source {
+            column_catalog: vec![
+                ColumnCatalog {
+                    column_desc: ColumnDesc::from_field_with_column_id(
+                        &Field {
+                            name: "filename".to_string(),
+                            data_type: DataType::Varchar,
+                            sub_fields: vec![],
+                            type_name: "".to_string(),
+                        },
+                        0,
+                    ),
+                    is_hidden: false,
+                },
+                ColumnCatalog {
+                    column_desc: ColumnDesc::from_field_with_column_id(
+                        &Field {
+                            name: "last_edit_time".to_string(),
+                            data_type: DataType::Timestamptz,
+                            sub_fields: vec![],
+                            type_name: "".to_string(),
+                        },
+                        1,
+                    ),
+                    is_hidden: false,
+                },
+                ColumnCatalog {
+                    column_desc: ColumnDesc::from_field_with_column_id(
+                        &Field {
+                            name: "file_size".to_string(),
+                            data_type: DataType::Int64,
+                            sub_fields: vec![],
+                            type_name: "".to_string(),
+                        },
+                        0,
+                    ),
+                    is_hidden: false,
+                },
+            ],
+            row_id_index: None,
+            ..core
+        };
+        let mut new_s3_plan: PlanRef = StreamSource {
+            base: PlanBase::new_stream_with_core(
+                &logical_source,
+                Distribution::Single,
+                true, // `list` will keep listing all objects, it must be append-only
+                false,
+                FixedBitSet::with_capacity(logical_source.column_catalog.len()),
+            ),
+            core: logical_source,
+        }
+        .into();
+        new_s3_plan = RequiredDist::shard_by_key(3, &[0])
+            .enforce_if_not_satisfies(new_s3_plan, &Order::any())?;
+        new_s3_plan = StreamDedup::new(generic::Dedup {
+            input: new_s3_plan,
+            dedup_cols: vec![0],
         })
-    }
+        .into();
 
-    pub(super) fn column_names(&self) -> Vec<String> {
-        self.schema()
-            .fields()
-            .iter()
-            .map(|f| f.name.clone())
-            .collect()
+        Ok(new_s3_plan)
     }
 
     pub fn source_catalog(&self) -> Option<Rc<SourceCatalog>> {
         self.core.catalog.clone()
     }
-
-    fn clone_with_kafka_timestamp_range(&self, range: (Bound<i64>, Bound<i64>)) -> Self {
-        let mut core = self.core.clone();
-        core.kafka_timestamp_range = range;
-        Self {
-            base: self.base.clone(),
-            core,
-            output_exprs: self.output_exprs.clone(),
-        }
-    }
-
-    /// The columns in stream/batch source node indicate the actual columns it will produce,
-    /// instead of the columns defined in source catalog. The difference is generated columns.
-    #[must_use]
-    fn rewrite_to_stream_batch_source(&self) -> generic::Source {
-        let column_catalog = self.core.column_catalog.clone();
-        // Filter out the generated columns.
-        let row_id_index = Self::rewrite_row_id_idx(&column_catalog, self.core.row_id_index);
-        let source_column_catalogs = column_catalog
-            .into_iter()
-            .filter(|c| !c.is_generated())
-            .collect_vec();
-        generic::Source {
-            catalog: self.core.catalog.clone(),
-            column_catalog: source_column_catalogs,
-            row_id_index,
-            ctx: self.core.ctx.clone(),
-            ..self.core
-        }
-    }
-
-    fn wrap_with_optional_generated_columns_stream_proj(&self) -> Result<PlanRef> {
-        if let Some(exprs) = &self.output_exprs {
-            let source = StreamSource::new(self.rewrite_to_stream_batch_source());
-            let logical_project = generic::Project::new(exprs.to_vec(), source.into());
-            Ok(StreamProject::new(logical_project).into())
-        } else {
-            let source = StreamSource::new(self.core.clone());
-            Ok(source.into())
-        }
-    }
-
-    fn wrap_with_optional_generated_columns_batch_proj(&self) -> Result<PlanRef> {
-        if let Some(exprs) = &self.output_exprs {
-            let source = BatchSource::new(self.rewrite_to_stream_batch_source());
-            let logical_project = generic::Project::new(exprs.to_vec(), source.into());
-            Ok(BatchProject::new(logical_project).into())
-        } else {
-            let source = BatchSource::new(self.core.clone());
-            Ok(source.into())
-        }
-    }
 }
 
 impl_plan_tree_node_for_leaf! {LogicalSource}
-
-impl fmt::Display for LogicalSource {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // TODO: show generated columns
-        if let Some(catalog) = self.source_catalog() {
-            write!(
-                f,
-                "LogicalSource {{ source: {}, columns: [{}], time_range: [{:?}] }}",
-                catalog.name,
-                self.column_names().join(", "),
-                self.core.kafka_timestamp_range,
-            )
+impl Distill for LogicalSource {
+    fn distill<'a>(&self) -> XmlNode<'a> {
+        let fields = if let Some(catalog) = self.source_catalog() {
+            let src = Pretty::from(catalog.name.clone());
+            let mut fields = vec![
+                ("source", src),
+                ("columns", column_names_pretty(self.schema())),
+            ];
+            if let Some(as_of) = &self.core.as_of {
+                fields.push(("as_of", Pretty::debug(as_of)));
+            }
+            fields
         } else {
-            write!(f, "LogicalSource")
-        }
+            vec![]
+        };
+        childless_record("LogicalSource", fields)
     }
 }
 
@@ -281,155 +296,12 @@ impl ExprRewritable for LogicalSource {
     }
 }
 
-/// A util function to extract kafka offset timestamp range.
-///
-/// Currently we only support limiting kafka offset timestamp range using literals, e.g. we only
-/// support expressions like `_rw_kafka_timestamp <= '2022-10-11 1:00:00+00:00'`.
-///
-/// # Parameters
-///
-/// * `expr`: Expression to be consumed.
-/// * `range`: Original timestamp range, if `expr` can be recognized, we will update `range`.
-/// * `schema`: Input schema.
-///
-/// # Return Value
-///
-/// If `expr` can be recognized and consumed by this function, then we return `None`.
-/// Otherwise `expr` is returned.
-fn expr_to_kafka_timestamp_range(
-    expr: ExprImpl,
-    range: &mut (Bound<i64>, Bound<i64>),
-    schema: &Schema,
-) -> Option<ExprImpl> {
-    let merge_upper_bound = |first, second| -> Bound<i64> {
-        match (first, second) {
-            (first, Unbounded) => first,
-            (Unbounded, second) => second,
-            (Included(f1), Included(f2)) => Included(min(f1, f2)),
-            (Included(f1), Excluded(f2)) => {
-                if f1 < f2 {
-                    Included(f1)
-                } else {
-                    Excluded(f2)
-                }
-            }
-            (Excluded(f1), Included(f2)) => {
-                if f2 < f1 {
-                    Included(f2)
-                } else {
-                    Excluded(f1)
-                }
-            }
-            (Excluded(f1), Excluded(f2)) => Excluded(min(f1, f2)),
-        }
-    };
-
-    let merge_lower_bound = |first, second| -> Bound<i64> {
-        match (first, second) {
-            (first, Unbounded) => first,
-            (Unbounded, second) => second,
-            (Included(f1), Included(f2)) => Included(max(f1, f2)),
-            (Included(f1), Excluded(f2)) => {
-                if f1 > f2 {
-                    Included(f1)
-                } else {
-                    Excluded(f2)
-                }
-            }
-            (Excluded(f1), Included(f2)) => {
-                if f2 > f1 {
-                    Included(f2)
-                } else {
-                    Excluded(f1)
-                }
-            }
-            (Excluded(f1), Excluded(f2)) => Excluded(max(f1, f2)),
-        }
-    };
-
-    let extract_timestampz_literal = |expr: &ExprImpl| -> Result<Option<(i64, bool)>> {
-        match expr {
-            ExprImpl::FunctionCall(function_call) if function_call.inputs().len() == 2 => {
-                match (&function_call.inputs()[0], &function_call.inputs()[1]) {
-                    (ExprImpl::InputRef(input_ref), literal)
-                        if let Some(datum) = literal.try_fold_const().transpose()?
-                            && schema.fields[input_ref.index].name
-                                == KAFKA_TIMESTAMP_COLUMN_NAME
-                            && literal.return_type() == DataType::Timestamptz =>
-                    {
-                        Ok(Some((
-                            datum.unwrap().into_int64() / 1000,
-                            false,
-                        )))
-                    }
-                    (literal, ExprImpl::InputRef(input_ref))
-                        if let Some(datum) = literal.try_fold_const().transpose()?
-                            && schema.fields[input_ref.index].name
-                                == KAFKA_TIMESTAMP_COLUMN_NAME
-                            && literal.return_type() == DataType::Timestamptz =>
-                    {
-                        Ok(Some((
-                            datum.unwrap().into_int64() / 1000,
-                            true,
-                        )))
-                    }
-                    _ => Ok(None),
-                }
-            }
-            _ => Ok(None),
-        }
-    };
-
-    match &expr {
-        ExprImpl::FunctionCall(function_call) => {
-            if let Some((timestampz_literal, reverse)) = extract_timestampz_literal(&expr).unwrap()
-            {
-                match function_call.get_expr_type() {
-                    ExprType::GreaterThan => {
-                        if reverse {
-                            range.1 = merge_upper_bound(range.1, Excluded(timestampz_literal));
-                        } else {
-                            range.0 = merge_lower_bound(range.0, Excluded(timestampz_literal));
-                        }
-
-                        None
-                    }
-                    ExprType::GreaterThanOrEqual => {
-                        if reverse {
-                            range.1 = merge_upper_bound(range.1, Included(timestampz_literal));
-                        } else {
-                            range.0 = merge_lower_bound(range.0, Included(timestampz_literal));
-                        }
-                        None
-                    }
-                    ExprType::Equal => {
-                        range.0 = merge_lower_bound(range.0, Included(timestampz_literal));
-                        range.1 = merge_upper_bound(range.1, Included(timestampz_literal));
-                        None
-                    }
-                    ExprType::LessThan => {
-                        if reverse {
-                            range.0 = merge_lower_bound(range.0, Excluded(timestampz_literal));
-                        } else {
-                            range.1 = merge_upper_bound(range.1, Excluded(timestampz_literal));
-                        }
-                        None
-                    }
-                    ExprType::LessThanOrEqual => {
-                        if reverse {
-                            range.0 = merge_lower_bound(range.0, Included(timestampz_literal));
-                        } else {
-                            range.1 = merge_upper_bound(range.1, Included(timestampz_literal));
-                        }
-                        None
-                    }
-                    _ => Some(expr),
-                }
-            } else {
-                Some(expr)
-            }
-        }
-        _ => Some(expr),
+impl ExprVisitable for LogicalSource {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.output_exprs
+            .iter()
+            .flatten()
+            .for_each(|e| v.visit_expr(e));
     }
 }
 
@@ -439,57 +311,95 @@ impl PredicatePushdown for LogicalSource {
         predicate: Condition,
         _ctx: &mut PredicatePushdownContext,
     ) -> PlanRef {
-        let mut range = self.core.kafka_timestamp_range;
-
-        let mut new_conjunctions = Vec::with_capacity(predicate.conjunctions.len());
-        for expr in predicate.conjunctions {
-            if let Some(e) = expr_to_kafka_timestamp_range(expr, &mut range, &self.base.schema) {
-                // Not recognized, so push back
-                new_conjunctions.push(e);
-            }
-        }
-
-        let new_source = self.clone_with_kafka_timestamp_range(range).into();
-
-        if new_conjunctions.is_empty() {
-            new_source
-        } else {
-            LogicalFilter::create(
-                new_source,
-                Condition {
-                    conjunctions: new_conjunctions,
-                },
-            )
-        }
+        LogicalFilter::create(self.clone().into(), predicate)
     }
 }
 
 impl ToBatch for LogicalSource {
     fn to_batch(&self) -> Result<PlanRef> {
-        let source = self.wrap_with_optional_generated_columns_batch_proj()?;
-        Ok(source)
+        assert!(
+            !self.core.is_kafka_connector(),
+            "LogicalSource with a kafka property should be converted to LogicalKafkaScan"
+        );
+        assert!(
+            !self.core.is_iceberg_connector(),
+            "LogicalSource with a iceberg property should be converted to LogicalIcebergScan"
+        );
+        let mut plan: PlanRef = BatchSource::new(self.core.clone()).into();
+
+        if let Some(exprs) = &self.output_exprs {
+            let logical_project = generic::Project::new(exprs.to_vec(), plan);
+            plan = BatchProject::new(logical_project).into();
+        }
+
+        Ok(plan)
     }
 }
 
 impl ToStream for LogicalSource {
     fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
-        let mut plan = if self.core.for_table {
-            StreamSource::new(self.rewrite_to_stream_batch_source()).into()
-        } else {
-            // Create MV on source.
-            self.wrap_with_optional_generated_columns_stream_proj()?
-        };
+        let mut plan: PlanRef;
 
-        if let Some(catalog) = self.source_catalog()
-            && !catalog.watermark_descs.is_empty()
-            && !self.core.for_table
-        {
-            plan = StreamWatermarkFilter::new(plan, catalog.watermark_descs.clone()).into();
+        match self.core.kind {
+            SourceNodeKind::CreateTable | SourceNodeKind::CreateSharedSource => {
+                // Note: for create table, row_id and generated columns is created in plan_root.gen_table_plan.
+                // for shared source, row_id and generated columns is created after SourceBackfill node.
+                if self.core.is_new_fs_connector() {
+                    plan = Self::create_fs_list_plan(self.core.clone())?;
+                    plan = StreamFsFetch::new(plan, self.core.clone()).into();
+                } else {
+                    plan = StreamSource::new(self.core.clone()).into()
+                }
+            }
+            SourceNodeKind::CreateMViewOrBatch => {
+                // Create MV on source.
+                // We only check rw_enable_shared_source is true when `CREATE SOURCE`.
+                // The value does not affect the behavior of `CREATE MATERIALIZED VIEW` here.
+                let use_shared_source = self.source_catalog().is_some_and(|c| c.info.is_shared());
+                if use_shared_source {
+                    plan = StreamSourceScan::new(self.core.clone()).into();
+                } else {
+                    // non-shared source
+                    if self.core.is_new_fs_connector() {
+                        plan = Self::create_fs_list_plan(self.core.clone())?;
+                        plan = StreamFsFetch::new(plan, self.core.clone()).into();
+                    } else {
+                        plan = StreamSource::new(self.core.clone()).into()
+                    }
+                }
+
+                if let Some(exprs) = &self.output_exprs {
+                    let logical_project = generic::Project::new(exprs.to_vec(), plan);
+                    plan = StreamProject::new(logical_project).into();
+                }
+
+                if let Some(catalog) = self.source_catalog()
+                    && !catalog.watermark_descs.is_empty()
+                {
+                    plan = StreamWatermarkFilter::new(plan, catalog.watermark_descs.clone()).into();
+                }
+
+                if let Some(row_id_index) = self.output_row_id_index {
+                    plan = StreamRowIdGen::new_with_dist(
+                        plan,
+                        row_id_index,
+                        HashShard(vec![row_id_index]),
+                    )
+                    .into();
+                }
+            }
         }
-
-        assert!(!(self.core.gen_row_id && self.core.for_table));
-        if let Some(row_id_index) = self.core.row_id_index && self.core.gen_row_id {
-            plan = StreamRowIdGen::new(plan, row_id_index).into();
+        if let Some(source) = &self.core.catalog {
+            let connector = &source
+                .with_properties
+                .get(UPSTREAM_SOURCE_KEY)
+                .map(|s| s.to_lowercase())
+                .unwrap();
+            if ICEBERG_CONNECTOR == connector {
+                return Err(
+                    anyhow::anyhow!("Iceberg source is not supported in stream queries").into(),
+                );
+            }
         }
         Ok(plan)
     }

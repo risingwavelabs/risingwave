@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,12 +20,11 @@ use risingwave_pb::expr::expr_node::Type::{
 use risingwave_pb::stream_plan::DynamicFilterNode;
 
 use super::*;
-use crate::common::table::state_table::StateTable;
+use crate::common::table::state_table::{StateTable, WatermarkCacheStateTable};
 use crate::executor::DynamicFilterExecutor;
 
 pub struct DynamicFilterExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for DynamicFilterExecutorBuilder {
     type Node = DynamicFilterNode;
 
@@ -33,19 +32,14 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         store: impl StateStore,
-        _stream: &mut LocalStreamManagerCore,
-    ) -> StreamResult<BoxedExecutor> {
+    ) -> StreamResult<Executor> {
         let [source_l, source_r]: [_; 2] = params.input.try_into().unwrap();
         let key_l = node.get_left_key() as usize;
 
-        let vnodes = Arc::new(
-            params
-                .vnode_bitmap
-                .expect("vnodes not set for dynamic filter"),
-        );
+        let vnodes = params.vnode_bitmap.map(Arc::new);
 
         let prost_condition = node.get_condition()?;
-        let comparator = prost_condition.get_expr_type()?;
+        let comparator = prost_condition.get_function_type()?;
         if !matches!(
             comparator,
             GreaterThan | GreaterThanOrEqual | LessThan | LessThanOrEqual
@@ -56,30 +50,57 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
             );
         }
 
-        // TODO: use consistent operation for dynamic filter <https://github.com/risingwavelabs/risingwave/issues/3893>
-        let state_table_l = StateTable::from_table_catalog_inconsistent_op(
-            node.get_left_table()?,
-            store.clone(),
-            Some(vnodes),
-        )
-        .await;
+        let condition_always_relax = node.get_condition_always_relax();
 
         let state_table_r =
-            StateTable::from_table_catalog_inconsistent_op(node.get_right_table()?, store, None)
-                .await;
+            StateTable::from_table_catalog(node.get_right_table()?, store.clone(), None).await;
 
-        Ok(Box::new(DynamicFilterExecutor::new(
-            params.actor_context,
-            source_l,
-            source_r,
-            key_l,
-            params.pk_indices,
-            params.executor_id,
-            comparator,
-            state_table_l,
-            state_table_r,
-            params.executor_stats,
-            params.env.config().developer.chunk_size,
-        )))
+        let left_table = node.get_left_table()?;
+        let cleaned_by_watermark = left_table.get_cleaned_by_watermark();
+
+        let exec = if cleaned_by_watermark {
+            let state_table_l =
+                WatermarkCacheStateTable::from_table_catalog(node.get_left_table()?, store, vnodes)
+                    .await;
+
+            DynamicFilterExecutor::new(
+                params.actor_context,
+                params.eval_error_report,
+                params.info.schema.clone(),
+                source_l,
+                source_r,
+                key_l,
+                comparator,
+                state_table_l,
+                state_table_r,
+                params.executor_stats,
+                params.env.config().developer.chunk_size,
+                condition_always_relax,
+                cleaned_by_watermark,
+            )
+            .boxed()
+        } else {
+            let state_table_l =
+                StateTable::from_table_catalog(node.get_left_table()?, store, vnodes).await;
+
+            DynamicFilterExecutor::new(
+                params.actor_context,
+                params.eval_error_report,
+                params.info.schema.clone(),
+                source_l,
+                source_r,
+                key_l,
+                comparator,
+                state_table_l,
+                state_table_r,
+                params.executor_stats,
+                params.env.config().developer.chunk_size,
+                condition_always_relax,
+                cleaned_by_watermark,
+            )
+            .boxed()
+        };
+
+        Ok((params.info, exec).into())
     }
 }

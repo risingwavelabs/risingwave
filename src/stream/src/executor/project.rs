@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,74 +12,66 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::{Debug, Formatter};
-
-use itertools::Itertools;
 use multimap::MultiMap;
-use risingwave_common::array::column::Column;
-use risingwave_common::array::StreamChunk;
-use risingwave_common::catalog::{Field, Schema};
-use risingwave_expr::expr::BoxedExpression;
+use risingwave_common::row::RowExt;
+use risingwave_common::types::ToOwnedDatum;
+use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_expr::expr::NonStrictExpression;
 
-use super::*;
+use crate::executor::prelude::*;
 
 /// `ProjectExecutor` project data with the `expr`. The `expr` takes a chunk of data,
 /// and returns a new data chunk. And then, `ProjectExecutor` will insert, delete
 /// or update element into next operator according to the result of the expression.
 pub struct ProjectExecutor {
-    input: BoxedExecutor,
+    input: Executor,
     inner: Inner,
 }
 
 struct Inner {
-    ctx: ActorContextRef,
-    info: ExecutorInfo,
+    _ctx: ActorContextRef,
 
     /// Expressions of the current projection.
-    exprs: Vec<BoxedExpression>,
-    /// All the watermark derivations, (input_column_index, output_column_index). And the
+    exprs: Vec<NonStrictExpression>,
+    /// All the watermark derivations, (`input_column_index`, `output_column_index`). And the
     /// derivation expression is the project's expression itself.
     watermark_derivations: MultiMap<usize, usize>,
+    /// Indices of nondecreasing expressions in the expression list.
+    nondecreasing_expr_indices: Vec<usize>,
+    /// Last seen values of nondecreasing expressions, buffered to periodically produce watermarks.
+    last_nondec_expr_values: Vec<Option<ScalarImpl>>,
 
-    /// the selectivity threshold which should be in [0,1]. for the chunk with selectivity less
+    /// the selectivity threshold which should be in `[0,1]`. for the chunk with selectivity less
     /// than the threshold, the Project executor will construct a new chunk before expr evaluation,
     materialize_selectivity_threshold: f64,
+
+    /// Whether there are likely no-op updates in the output chunks, so that eliminating them with
+    /// `StreamChunk::eliminate_adjacent_noop_update` could be beneficial.
+    noop_update_hint: bool,
 }
 
 impl ProjectExecutor {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         ctx: ActorContextRef,
-        input: Box<dyn Executor>,
-        pk_indices: PkIndices,
-        exprs: Vec<BoxedExpression>,
-        executor_id: u64,
+        input: Executor,
+        exprs: Vec<NonStrictExpression>,
         watermark_derivations: MultiMap<usize, usize>,
+        nondecreasing_expr_indices: Vec<usize>,
         materialize_selectivity_threshold: f64,
+        noop_update_hint: bool,
     ) -> Self {
-        let info = ExecutorInfo {
-            schema: input.schema().to_owned(),
-            pk_indices,
-            identity: "Project".to_owned(),
-        };
-
-        let schema = Schema {
-            fields: exprs
-                .iter()
-                .map(|e| Field::unnamed(e.return_type()))
-                .collect_vec(),
-        };
+        let n_nondecreasing_exprs = nondecreasing_expr_indices.len();
         Self {
             input,
             inner: Inner {
-                ctx,
-                info: ExecutorInfo {
-                    schema,
-                    pk_indices: info.pk_indices,
-                    identity: format!("ProjectExecutor {:X}", executor_id),
-                },
+                _ctx: ctx,
                 exprs,
                 watermark_derivations,
+                nondecreasing_expr_indices,
+                last_nondec_expr_values: vec![None; n_nondecreasing_exprs],
                 materialize_selectivity_threshold,
+                noop_update_hint,
             },
         }
     }
@@ -93,19 +85,7 @@ impl Debug for ProjectExecutor {
     }
 }
 
-impl Executor for ProjectExecutor {
-    fn schema(&self) -> &Schema {
-        &self.inner.info.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.inner.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.inner.info.identity
-    }
-
+impl Execute for ProjectExecutor {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.inner.execute(self.input).boxed()
     }
@@ -125,17 +105,15 @@ impl Inner {
         let mut projected_columns = Vec::new();
 
         for expr in &self.exprs {
-            let evaluated_expr = expr
-                .eval_infallible(&data_chunk, |err| {
-                    self.ctx.on_compute_error(err, &self.info.identity)
-                })
-                .await;
-            let new_column = Column::new(evaluated_expr);
-            projected_columns.push(new_column);
+            let evaluated_expr = expr.eval_infallible(&data_chunk).await;
+            projected_columns.push(evaluated_expr);
         }
         let (_, vis) = data_chunk.into_parts();
-        let vis = vis.into_visibility();
-        let new_chunk = StreamChunk::new(ops, projected_columns, vis);
+
+        let mut new_chunk = StreamChunk::with_visibility(ops, projected_columns, vis);
+        if self.noop_update_hint {
+            new_chunk = new_chunk.eliminate_adjacent_noop_update();
+        }
         Ok(Some(new_chunk))
     }
 
@@ -149,19 +127,14 @@ impl Inner {
             let out_col_idx = *out_col_idx;
             let derived_watermark = watermark
                 .clone()
-                .transform_with_expr(&self.exprs[out_col_idx], out_col_idx, |err| {
-                    self.ctx.on_compute_error(
-                        err,
-                        &(self.info.identity.to_string() + "(when computing watermark)"),
-                    )
-                })
+                .transform_with_expr(&self.exprs[out_col_idx], out_col_idx)
                 .await;
             if let Some(derived_watermark) = derived_watermark {
                 ret.push(derived_watermark);
             } else {
                 warn!(
-                    "{} derive a NULL watermark with the expression {}!",
-                    self.info.identity, out_col_idx
+                    "a NULL watermark is derived with the expression {}!",
+                    out_col_idx
                 );
             }
         }
@@ -169,7 +142,7 @@ impl Inner {
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn execute(self, input: BoxedExecutor) {
+    async fn execute(mut self, input: Executor) {
         #[for_await]
         for msg in input.execute() {
             let msg = msg?;
@@ -181,10 +154,42 @@ impl Inner {
                     }
                 }
                 Message::Chunk(chunk) => match self.map_filter_chunk(chunk).await? {
-                    Some(new_chunk) => yield Message::Chunk(new_chunk),
+                    Some(new_chunk) => {
+                        if !self.nondecreasing_expr_indices.is_empty() {
+                            if let Some((_, first_visible_row)) = new_chunk.rows().next() {
+                                // it's ok to use the first row here, just one chunk delay
+                                first_visible_row
+                                    .project(&self.nondecreasing_expr_indices)
+                                    .iter()
+                                    .enumerate()
+                                    .for_each(|(idx, value)| {
+                                        self.last_nondec_expr_values[idx] =
+                                            Some(value.to_owned_datum().expect(
+                                                "non-decreasing expression should never be NULL",
+                                            ));
+                                    });
+                            }
+                        }
+                        yield Message::Chunk(new_chunk)
+                    }
                     None => continue,
                 },
-                m => yield m,
+                barrier @ Message::Barrier(_) => {
+                    for (&expr_idx, value) in self
+                        .nondecreasing_expr_indices
+                        .iter()
+                        .zip_eq_fast(&mut self.last_nondec_expr_values)
+                    {
+                        if let Some(value) = std::mem::take(value) {
+                            yield Message::Watermark(Watermark::new(
+                                expr_idx,
+                                self.exprs[expr_idx].return_type(),
+                                value,
+                            ))
+                        }
+                    }
+                    yield barrier;
+                }
             }
         }
     }
@@ -192,16 +197,19 @@ impl Inner {
 
 #[cfg(test)]
 mod tests {
-    use futures::StreamExt;
+    use std::sync::atomic::{self, AtomicI64};
+
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
-    use risingwave_common::array::StreamChunk;
-    use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::types::DataType;
-    use risingwave_expr::expr::build_from_pretty;
+    use risingwave_common::array::DataChunk;
+    use risingwave_common::catalog::Field;
+    use risingwave_common::util::epoch::test_epoch;
+    use risingwave_expr::expr::{self, ValueImpl};
 
     use super::super::test_utils::MockSource;
     use super::super::*;
     use super::*;
+    use crate::executor::test_utils::expr::build_from_pretty;
+    use crate::executor::test_utils::StreamExecutorTestExt;
 
     #[tokio::test]
     async fn test_projection() {
@@ -222,22 +230,24 @@ mod tests {
                 Field::unnamed(DataType::Int64),
             ],
         };
-        let (mut tx, source) = MockSource::channel(schema, PkIndices::new());
+        let pk_indices = vec![0];
+        let (mut tx, source) = MockSource::channel();
+        let source = source.into_executor(schema, pk_indices);
 
         let test_expr = build_from_pretty("(add:int8 $0:int8 $1:int8)");
 
-        let project = Box::new(ProjectExecutor::new(
-            ActorContext::create(123),
-            Box::new(source),
-            vec![],
+        let project = ProjectExecutor::new(
+            ActorContext::for_test(123),
+            source,
             vec![test_expr],
-            1,
             MultiMap::new(),
+            vec![],
             0.0,
-        ));
-        let mut project = project.execute();
+            false,
+        );
+        let mut project = project.boxed().execute();
 
-        tx.push_barrier(1, false);
+        tx.push_barrier(test_epoch(1), false);
         let barrier = project.next().await.unwrap().unwrap();
         barrier.as_barrier().unwrap();
 
@@ -265,9 +275,35 @@ mod tests {
             )
         );
 
-        tx.push_barrier(2, true);
+        tx.push_barrier(test_epoch(2), true);
         assert!(project.next().await.unwrap().unwrap().is_stop());
     }
+
+    static DUMMY_COUNTER: AtomicI64 = AtomicI64::new(0);
+
+    #[derive(Debug)]
+    struct DummyNondecreasingExpr;
+
+    #[async_trait::async_trait]
+    impl Expression for DummyNondecreasingExpr {
+        fn return_type(&self) -> DataType {
+            DataType::Int64
+        }
+
+        async fn eval_v2(&self, input: &DataChunk) -> expr::Result<ValueImpl> {
+            let value = DUMMY_COUNTER.fetch_add(1, atomic::Ordering::SeqCst);
+            Ok(ValueImpl::Scalar {
+                value: Some(value.into()),
+                capacity: input.capacity(),
+            })
+        }
+
+        async fn eval_row(&self, _input: &OwnedRow) -> expr::Result<Datum> {
+            let value = DUMMY_COUNTER.fetch_add(1, atomic::Ordering::SeqCst);
+            Ok(Some(value.into()))
+        }
+    }
+
     #[tokio::test]
     async fn test_watermark_projection() {
         let schema = Schema {
@@ -276,31 +312,30 @@ mod tests {
                 Field::unnamed(DataType::Int64),
             ],
         };
-        let (mut tx, source) = MockSource::channel(schema, PkIndices::new());
+        let (mut tx, source) = MockSource::channel();
+        let source = source.into_executor(schema, PkIndices::new());
 
         let a_expr = build_from_pretty("(add:int8 $0:int8 1:int8)");
         let b_expr = build_from_pretty("(subtract:int8 $0:int8 1:int8)");
+        let c_expr = NonStrictExpression::for_test(DummyNondecreasingExpr);
 
-        let project = Box::new(ProjectExecutor::new(
-            ActorContext::create(123),
-            Box::new(source),
-            vec![],
-            vec![a_expr, b_expr],
-            1,
+        let project = ProjectExecutor::new(
+            ActorContext::for_test(123),
+            source,
+            vec![a_expr, b_expr, c_expr],
             MultiMap::from_iter(vec![(0, 0), (0, 1)].into_iter()),
+            vec![2],
             0.0,
-        ));
-        let mut project = project.execute();
+            false,
+        );
+        let mut project = project.boxed().execute();
 
-        tx.push_barrier(1, false);
+        tx.push_barrier(test_epoch(1), false);
         tx.push_int64_watermark(0, 100);
 
-        let b1 = project.next().await.unwrap().unwrap();
-        b1.as_barrier().unwrap();
-        let w1 = project.next().await.unwrap().unwrap();
-        let w1 = w1.as_watermark().unwrap();
-        let w2 = project.next().await.unwrap().unwrap();
-        let w2 = w2.as_watermark().unwrap();
+        project.expect_barrier().await;
+        let w1 = project.expect_watermark().await;
+        let w2 = project.expect_watermark().await;
         let (w1, w2) = if w1.col_idx < w2.col_idx {
             (w1, w2)
         } else {
@@ -309,23 +344,58 @@ mod tests {
 
         assert_eq!(
             w1,
-            &Watermark {
+            Watermark {
                 col_idx: 0,
                 data_type: DataType::Int64,
                 val: ScalarImpl::Int64(101)
             }
         );
-
         assert_eq!(
             w2,
-            &Watermark {
+            Watermark {
                 col_idx: 1,
                 data_type: DataType::Int64,
                 val: ScalarImpl::Int64(99)
             }
         );
+
+        // just push some random chunks
+        tx.push_chunk(StreamChunk::from_pretty(
+            "   I I
+            + 120 4
+            + 146 5
+            + 133 6",
+        ));
+        project.expect_chunk().await;
+        tx.push_chunk(StreamChunk::from_pretty(
+            "   I I
+            + 213 8
+            - 133 6",
+        ));
+        project.expect_chunk().await;
+
+        tx.push_barrier(test_epoch(2), false);
+        let w3 = project.expect_watermark().await;
+        project.expect_barrier().await;
+
+        tx.push_chunk(StreamChunk::from_pretty(
+            "   I I
+            + 100 3
+            + 104 5
+            + 187 3",
+        ));
+        project.expect_chunk().await;
+
+        tx.push_barrier(test_epoch(3), false);
+        let w4 = project.expect_watermark().await;
+        project.expect_barrier().await;
+
+        assert_eq!(w3.col_idx, w4.col_idx);
+        assert!(w3.val.default_cmp(&w4.val).is_le());
+
         tx.push_int64_watermark(1, 100);
-        tx.push_barrier(2, true);
+        tx.push_barrier(test_epoch(4), true);
+
         assert!(project.next().await.unwrap().unwrap().is_stop());
     }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 RisingWave Labs
+ * Copyright 2024 RisingWave Labs
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,18 +16,17 @@
  */
 
 const express = require("express")
+const cors = require("cors")
 
 const app = express()
+app.use(cors())
+
 app.listen(32333, () => {
   console.log("Server running on port 32333")
 })
 
 app.get("/actors", (req, res, next) => {
   res.json(require("./mock/actors.json"))
-})
-
-app.get("/fragments", (req, res, next) => {
-  res.json(require("./mock/fragments.json"))
 })
 
 app.get("/fragments2", (req, res, next) => {
@@ -40,6 +39,10 @@ app.get("/materialized_views", (req, res, next) => {
 
 app.get("/tables", (req, res, next) => {
   res.json(require("./mock/tables.json"))
+})
+
+app.get("/indexes", (req, res, next) => {
+  res.json(require("./mock/indexes.json"))
 })
 
 app.get("/indexes", (req, res, next) => {
@@ -72,6 +75,10 @@ app.get("/clusters/2", (req, res, next) => {
 
 app.get("/metrics/cluster", (req, res, next) => {
   res.json(require("./mock/metrics_cluster.json"))
+})
+
+app.get("/metrics/fragment/prometheus_back_pressures", (req, res, next) => {
+  res.json(require("./mock/fragment_prometheus_back_pressures.json"))
 })
 
 app.get("/monitor/await_tree/1", (req, res, next) => {

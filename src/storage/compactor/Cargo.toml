@@ -15,20 +15,19 @@ ignored = ["workspace-hack"]
 normal = ["workspace-hack"]
 
 [dependencies]
-anyhow = "1"
 async-trait = "0.1"
-clap = { version = "4", features = ["derive"] }
-prometheus = { version = "0.13" }
-risingwave_common = { path = "../../common" }
-risingwave_common_proc_macro = { path = "../../common/proc_macro" }
-risingwave_common_service = { path = "../../common/common_service" }
-risingwave_hummock_sdk = { path = "../hummock_sdk" }
-risingwave_object_store = { path = "../../object_store" }
-risingwave_pb = { path = "../../prost" }
-risingwave_rpc_client = { path = "../../rpc_client" }
-risingwave_storage = { path = "../../storage" }
+await-tree = { workspace = true }
+clap = { workspace = true }
+parking_lot = { workspace = true }
+prost = { workspace = true }
+risingwave_common = { workspace = true }
+risingwave_common_heap_profiling = { workspace = true }
+risingwave_common_service = { workspace = true }
+risingwave_object_store = { workspace = true }
+risingwave_pb = { workspace = true }
+risingwave_rpc_client = { workspace = true }
+risingwave_storage = { workspace = true }
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "fs",
     "rt",
@@ -38,8 +37,11 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "time",
     "signal",
 ] }
-tonic = { version = "0.2", package = "madsim-tonic" }
+tonic = { workspace = true }
 tracing = "0.1"
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../../workspace-hack" }
+
+[lints]
+workspace = true

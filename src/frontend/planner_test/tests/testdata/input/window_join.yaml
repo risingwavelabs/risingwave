@@ -1,0 +1,26 @@
+- name: Window join
+  sql: |
+    create source t1 (ts1 timestamp with time zone, a1 int, b1 int, watermark for ts1 as ts1 - INTERVAL '1' SECOND) with (
+    connector = 'datagen',
+    datagen.rows.per.second = '10',
+    );
+    create source t2 (ts2 timestamp with time zone, a2 int, b2 int, watermark for ts2 as ts2 - INTERVAL '1' SECOND) with (
+    connector = 'datagen',
+    datagen.rows.per.second = '10',
+    );
+    select * from t1, t2 where ts1 = ts2 and a1 = a2;
+  expected_outputs:
+  - stream_plan
+- name: Window join expression reorder
+  sql: |
+    create source t1 (ts1 timestamp with time zone, a1 int, b1 int, watermark for ts1 as ts1 - INTERVAL '1' SECOND) with (
+    connector = 'datagen',
+    datagen.rows.per.second = '10',
+    );
+    create source t2 (ts2 timestamp with time zone, a2 int, b2 int, watermark for ts2 as ts2 - INTERVAL '1' SECOND) with (
+    connector = 'datagen',
+    datagen.rows.per.second = '10',
+    );
+    select * from t1, t2 where a1 = a2 and ts1 = ts2;
+  expected_outputs:
+  - stream_plan

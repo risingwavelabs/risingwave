@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,20 +13,20 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
-use std::collections::BinaryHeap;
 use std::sync::Arc;
-use std::vec::Vec;
 
 use futures_async_stream::try_stream;
-use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::{Result, RwError};
+use risingwave_common::memory::{MemMonitoredHeap, MemoryContext};
+use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
-use risingwave_common::util::memcmp_encoding::encode_chunk;
+use risingwave_common::util::memcmp_encoding::{encode_chunk, MemcmpEncoded};
 use risingwave_common::util::sort_util::ColumnOrder;
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
+use crate::error::{BatchError, Result};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
@@ -44,6 +44,7 @@ pub struct TopNExecutor {
     schema: Schema,
     identity: String,
     chunk_size: usize,
+    mem_ctx: MemoryContext,
 }
 
 #[async_trait::async_trait]
@@ -62,14 +63,18 @@ impl BoxedExecutorBuilder for TopNExecutor {
             .iter()
             .map(ColumnOrder::from_protobuf)
             .collect();
+
+        let identity = source.plan_node().get_identity();
+
         Ok(Box::new(Self::new(
             child,
             column_orders,
             top_n_node.get_offset() as usize,
             top_n_node.get_limit() as usize,
             top_n_node.get_with_ties(),
-            source.plan_node().get_identity().clone(),
+            identity.clone(),
             source.context.get_config().developer.chunk_size,
+            source.context().create_executor_mem_context(identity),
         )))
     }
 }
@@ -83,6 +88,7 @@ impl TopNExecutor {
         with_ties: bool,
         identity: String,
         chunk_size: usize,
+        mem_ctx: MemoryContext,
     ) -> Self {
         let schema = child.schema().clone();
         Self {
@@ -94,6 +100,7 @@ impl TopNExecutor {
             schema,
             identity,
             chunk_size,
+            mem_ctx,
         }
     }
 }
@@ -116,20 +123,34 @@ pub const MAX_TOPN_INIT_HEAP_CAPACITY: usize = 1024;
 
 /// A max-heap used to find the smallest `limit+offset` items.
 pub struct TopNHeap {
-    heap: BinaryHeap<HeapElem>,
+    heap: MemMonitoredHeap<HeapElem>,
     limit: usize,
     offset: usize,
     with_ties: bool,
 }
 
 impl TopNHeap {
-    pub fn new(limit: usize, offset: usize, with_ties: bool) -> Self {
+    pub fn new(limit: usize, offset: usize, with_ties: bool, mem_ctx: MemoryContext) -> Self {
         assert!(limit > 0);
         Self {
-            heap: BinaryHeap::with_capacity((limit + offset).min(MAX_TOPN_INIT_HEAP_CAPACITY)),
+            heap: MemMonitoredHeap::with_capacity(
+                (limit + offset).min(MAX_TOPN_INIT_HEAP_CAPACITY),
+                mem_ctx,
+            ),
             limit,
             offset,
             with_ties,
+        }
+    }
+
+    // Only used for swapping out the heap in hashmap, due to a bug in hashmap which forbids us from
+    // using `into_iter`. We should remove this after Hashmap upgraded and fixed the bug.
+    pub fn empty() -> Self {
+        Self {
+            heap: MemMonitoredHeap::with_capacity(0, MemoryContext::none()),
+            limit: 0,
+            offset: 0,
+            with_ties: false,
         }
     }
 
@@ -139,10 +160,17 @@ impl TopNHeap {
         } else {
             // heap is full
             if !self.with_ties {
-                let mut peek = self.heap.peek_mut().unwrap();
-                if elem < *peek {
-                    *peek = elem;
+                let peek = self.heap.pop().unwrap();
+                if elem < peek {
+                    self.heap.push(elem);
+                } else {
+                    self.heap.push(peek);
                 }
+                // let inner = self.heap.inner();
+                // let mut peek = inner.peek_mut().unwrap();
+                // if elem < *peek {
+                //     *peek = elem;
+                // }
             } else {
                 let peek = self.heap.peek().unwrap().clone();
                 match elem.cmp(&peek) {
@@ -150,7 +178,9 @@ impl TopNHeap {
                         let mut ties_with_peek = vec![];
                         // pop all the ties with peek
                         ties_with_peek.push(self.heap.pop().unwrap());
-                        while let Some(e) = self.heap.peek() && e.encoded_row == peek.encoded_row {
+                        while let Some(e) = self.heap.peek()
+                            && e.encoded_row == peek.encoded_row
+                        {
                             ties_with_peek.push(self.heap.pop().unwrap());
                         }
                         self.heap.push(elem);
@@ -172,19 +202,17 @@ impl TopNHeap {
     /// Returns the elements in the range `[offset, offset+limit)`.
     pub fn dump(self) -> impl Iterator<Item = HeapElem> {
         self.heap
-            .into_iter_sorted()
-            .collect_vec()
+            .into_sorted_vec()
             .into_iter()
             .rev()
             .skip(self.offset)
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, EstimateSize)]
 pub struct HeapElem {
-    pub encoded_row: Vec<u8>,
-    pub chunk: Arc<DataChunk>,
-    pub row_id: usize,
+    encoded_row: MemcmpEncoded,
+    row: OwnedRow,
 }
 
 impl PartialEq for HeapElem {
@@ -197,7 +225,7 @@ impl Eq for HeapElem {}
 
 impl PartialOrd for HeapElem {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        self.encoded_row.partial_cmp(&other.encoded_row)
+        Some(self.cmp(other))
     }
 }
 
@@ -207,13 +235,31 @@ impl Ord for HeapElem {
     }
 }
 
+impl HeapElem {
+    pub fn new(encoded_row: MemcmpEncoded, row: impl Row) -> Self {
+        Self {
+            encoded_row,
+            row: row.into_owned_row(),
+        }
+    }
+
+    pub fn row(&self) -> impl Row + '_ {
+        &self.row
+    }
+}
+
 impl TopNExecutor {
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
         if self.limit == 0 {
             return Ok(());
         }
-        let mut heap = TopNHeap::new(self.limit, self.offset, self.with_ties);
+        let mut heap = TopNHeap::new(
+            self.limit,
+            self.offset,
+            self.with_ties,
+            self.mem_ctx.clone(),
+        );
 
         #[for_await]
         for chunk in self.child.execute() {
@@ -224,16 +270,14 @@ impl TopNExecutor {
             {
                 heap.push(HeapElem {
                     encoded_row,
-                    chunk: chunk.clone(),
-                    row_id,
+                    row: chunk.row_at(row_id).0.to_owned_row(),
                 });
             }
         }
 
         let mut chunk_builder = DataChunkBuilder::new(self.schema.data_types(), self.chunk_size);
-        for HeapElem { chunk, row_id, .. } in heap.dump() {
-            if let Some(spilled) = chunk_builder.append_one_row(chunk.row_at_unchecked_vis(row_id))
-            {
+        for HeapElem { row, .. } in heap.dump() {
+            if let Some(spilled) = chunk_builder.append_one_row(row) {
                 yield spilled
             }
         }
@@ -247,8 +291,8 @@ impl TopNExecutor {
 mod tests {
     use futures::stream::StreamExt;
     use itertools::Itertools;
-    use risingwave_common::array::{Array, DataChunk};
-    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::array::Array;
+    use risingwave_common::catalog::Field;
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
@@ -293,6 +337,7 @@ mod tests {
             false,
             "TopNExecutor".to_string(),
             CHUNK_SIZE,
+            MemoryContext::none(),
         ));
         let fields = &top_n_executor.schema().fields;
         assert_eq!(fields[0].data_type, DataType::Int32);
@@ -301,18 +346,18 @@ mod tests {
         let mut stream = top_n_executor.execute();
         let res = stream.next().await;
 
-        assert!(matches!(res, Some(_)));
+        assert!(res.is_some());
         if let Some(res) = res {
             let res = res.unwrap();
             assert_eq!(res.cardinality(), 3);
             assert_eq!(
-                res.column_at(0).array().as_int32().iter().collect_vec(),
+                res.column_at(0).as_int32().iter().collect_vec(),
                 vec![Some(4), Some(3), Some(2)]
             );
         }
 
         let res = stream.next().await;
-        assert!(matches!(res, None));
+        assert!(res.is_none());
     }
 
     #[tokio::test]
@@ -350,6 +395,7 @@ mod tests {
             false,
             "TopNExecutor".to_string(),
             CHUNK_SIZE,
+            MemoryContext::none(),
         ));
         let fields = &top_n_executor.schema().fields;
         assert_eq!(fields[0].data_type, DataType::Int32);
@@ -358,6 +404,6 @@ mod tests {
         let mut stream = top_n_executor.execute();
         let res = stream.next().await;
 
-        assert!(matches!(res, None));
+        assert!(res.is_none());
     }
 }

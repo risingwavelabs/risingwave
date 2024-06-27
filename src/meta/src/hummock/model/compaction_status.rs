@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,8 +11,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
-use std::borrow::Borrow;
 
 use itertools::Itertools;
 use risingwave_hummock_sdk::CompactionGroupId;
@@ -34,7 +32,7 @@ impl MetadataModel for CompactStatus {
     }
 
     fn from_protobuf(prost: Self::PbType) -> Self {
-        prost.borrow().into()
+        (&prost).into()
     }
 
     fn key(&self) -> MetadataModelResult<Self::KeyType> {
@@ -53,7 +51,7 @@ impl From<&CompactStatus> for risingwave_pb::hummock::CompactStatus {
 
 impl From<CompactStatus> for risingwave_pb::hummock::CompactStatus {
     fn from(status: CompactStatus) -> Self {
-        status.borrow().into()
+        (&status).into()
     }
 }
 

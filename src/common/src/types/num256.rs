@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,20 +23,20 @@ use std::str::FromStr;
 use bytes::{BufMut, Bytes};
 use ethnum::{i256, u256, AsI256};
 use num_traits::{
-    CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Num, One, Signed, Zero,
+    CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Num, One, Zero,
 };
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::data::ArrayType;
 use serde::{Deserialize, Serialize};
 use to_text::ToText;
 
 use crate::array::ArrayResult;
-use crate::estimate_size::EstimateSize;
 use crate::types::to_binary::ToBinary;
 use crate::types::{to_text, Buf, DataType, Scalar, ScalarRef, F64};
 
 /// A 256-bit signed integer.
 #[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Default, Hash)]
-pub struct Int256(Box<i256>);
+pub struct Int256(pub(crate) Box<i256>);
 
 /// A reference to an `Int256` value.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd)]
@@ -165,7 +165,10 @@ macro_rules! impl_common_for_num256 {
         }
 
         impl ToBinary for $scalar_ref<'_> {
-            fn to_binary_with_type(&self, _ty: &DataType) -> crate::error::Result<Option<Bytes>> {
+            fn to_binary_with_type(
+                &self,
+                _ty: &DataType,
+            ) -> super::to_binary::Result<Option<Bytes>> {
                 let mut output = bytes::BytesMut::new();
                 let buffer = self.to_be_bytes();
                 output.put_slice(&buffer);
@@ -323,46 +326,6 @@ impl Num for Int256 {
     }
 }
 
-impl Signed for Int256 {
-    fn abs(&self) -> Self {
-        self.0.abs().into()
-    }
-
-    fn abs_sub(&self, other: &Self) -> Self {
-        if self <= other {
-            Self::zero()
-        } else {
-            self.abs()
-        }
-    }
-
-    fn signum(&self) -> Self {
-        self.0.signum().into()
-    }
-
-    fn is_positive(&self) -> bool {
-        self.0.is_positive()
-    }
-
-    fn is_negative(&self) -> bool {
-        self.0.is_negative()
-    }
-}
-
-impl From<arrow_buffer::i256> for Int256 {
-    fn from(value: arrow_buffer::i256) -> Self {
-        let buffer = value.to_be_bytes();
-        Int256::from_be_bytes(buffer)
-    }
-}
-
-impl<'a> From<Int256Ref<'a>> for arrow_buffer::i256 {
-    fn from(val: Int256Ref<'a>) -> Self {
-        let buffer = val.to_be_bytes();
-        arrow_buffer::i256::from_be_bytes(buffer)
-    }
-}
-
 impl EstimateSize for Int256 {
     fn estimated_heap_size(&self) -> usize {
         mem::size_of::<i128>() * 2
@@ -372,7 +335,6 @@ impl EstimateSize for Int256 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::F64;
 
     macro_rules! check_op {
         ($t:ty, $lhs:expr, $rhs:expr, [$($op:tt),+]) => {
@@ -441,13 +403,6 @@ mod tests {
         assert_eq!(-Int256::from(1), Int256::from(-1));
         assert_eq!(Int256::from(0).neg(), Int256::from(0));
         assert_eq!(-Int256::from(0), Int256::from(0));
-    }
-
-    #[test]
-    fn test_abs() {
-        assert_eq!(Int256::from(-1).abs(), Int256::from(1));
-        assert_eq!(Int256::from(1).abs(), Int256::from(1));
-        assert_eq!(Int256::from(0).abs(), Int256::from(0));
     }
 
     #[test]

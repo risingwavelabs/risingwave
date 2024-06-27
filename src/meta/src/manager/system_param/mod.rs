@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,9 +19,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::anyhow;
+use risingwave_common::system_param::common::CommonHandler;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::system_param::{check_missing_params, set_system_param};
-use risingwave_common::{for_all_undeprecated_params, key_of};
+use risingwave_common::{for_all_params, key_of};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::SystemParams;
 use tokio::sync::oneshot::Sender;
@@ -31,34 +32,36 @@ use tracing::info;
 
 use self::model::SystemParamsModel;
 use super::NotificationManagerRef;
-use crate::model::{ValTransaction, VarTransaction};
-use crate::storage::{MetaStore, Transaction};
+use crate::model::{InMemValTransaction, ValTransaction, VarTransaction};
+use crate::storage::{MetaStore, MetaStoreRef, Transaction};
 use crate::{MetaError, MetaResult};
 
-pub type SystemParamsManagerRef<S> = Arc<SystemParamsManager<S>>;
+pub type SystemParamsManagerRef = Arc<SystemParamsManager>;
 
-pub struct SystemParamsManager<S: MetaStore> {
-    meta_store: Arc<S>,
+pub struct SystemParamsManager {
+    meta_store: MetaStoreRef,
     // Notify workers and local subscribers of parameter change.
-    notification_manager: NotificationManagerRef<S>,
+    notification_manager: NotificationManagerRef,
     // Cached parameters.
     params: RwLock<SystemParams>,
+    /// Common handler for system params.
+    common_handler: CommonHandler,
 }
 
-impl<S: MetaStore> SystemParamsManager<S> {
+impl SystemParamsManager {
     /// Return error if `init_params` conflict with persisted system params.
     pub async fn new(
-        meta_store: Arc<S>,
-        notification_manager: NotificationManagerRef<S>,
+        meta_store: MetaStoreRef,
+        notification_manager: NotificationManagerRef,
         init_params: SystemParams,
         cluster_first_launch: bool,
     ) -> MetaResult<Self> {
         let params = if cluster_first_launch {
             init_params
-        } else if let Some(persisted) = SystemParams::get(meta_store.as_ref()).await? {
+        } else if let Some(persisted) = SystemParams::get(&meta_store).await? {
             merge_params(persisted, init_params)
         } else {
-            return Err(MetaError::system_param(
+            return Err(MetaError::system_params(
                 "cluster is not newly created but no system parameters can be found",
             ));
         };
@@ -69,7 +72,8 @@ impl<S: MetaStore> SystemParamsManager<S> {
         Ok(Self {
             meta_store,
             notification_manager,
-            params: RwLock::new(params),
+            params: RwLock::new(params.clone()),
+            common_handler: CommonHandler::new(params.into()),
         })
     }
 
@@ -81,18 +85,28 @@ impl<S: MetaStore> SystemParamsManager<S> {
         self.params.read().await.clone().into()
     }
 
-    pub async fn set_param(&self, name: &str, value: Option<String>) -> MetaResult<()> {
+    pub async fn set_param(&self, name: &str, value: Option<String>) -> MetaResult<SystemParams> {
         let mut params_guard = self.params.write().await;
         let params = params_guard.deref_mut();
         let mut mem_txn = VarTransaction::new(params);
 
-        set_system_param(mem_txn.deref_mut(), name, value).map_err(MetaError::system_param)?;
+        let Some((_new_value, diff)) =
+            set_system_param(mem_txn.deref_mut(), name, value).map_err(MetaError::system_params)?
+        else {
+            // No changes on the parameter.
+            return Ok(params.clone());
+        };
 
         let mut store_txn = Transaction::default();
-        mem_txn.apply_to_txn(&mut store_txn)?;
+        mem_txn.apply_to_txn(&mut store_txn).await?;
         self.meta_store.txn(store_txn).await?;
 
         mem_txn.commit();
+
+        // Run common handler.
+        self.common_handler.handle_change(&diff);
+
+        // TODO: notify the diff instead of the snapshot.
 
         // Sync params to other managers on the meta node only once, since it's infallible.
         self.notification_manager
@@ -102,23 +116,18 @@ impl<S: MetaStore> SystemParamsManager<S> {
             .await;
 
         // Sync params to worker nodes.
-        self.notify_workers(params).await;
+        self.notify_workers(params);
 
-        Ok(())
+        Ok(params.clone())
     }
 
     /// Flush the cached params to meta store.
     pub async fn flush_params(&self) -> MetaResult<()> {
-        Ok(
-            SystemParams::insert(self.params.read().await.deref(), self.meta_store.as_ref())
-                .await?,
-        )
+        Ok(SystemParams::insert(self.params.read().await.deref(), &self.meta_store).await?)
     }
 
     // Periodically sync params to worker nodes.
-    pub async fn start_params_notifier(
-        system_params_manager: Arc<Self>,
-    ) -> (JoinHandle<()>, Sender<()>) {
+    pub fn start_params_notifier(system_params_manager: Arc<Self>) -> (JoinHandle<()>, Sender<()>) {
         const NOTIFY_INTERVAL: Duration = Duration::from_millis(5000);
 
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
@@ -133,9 +142,7 @@ impl<S: MetaStore> SystemParamsManager<S> {
                         return;
                     }
                 }
-                system_params_manager
-                    .notify_workers(&*system_params_manager.params.read().await)
-                    .await;
+                system_params_manager.notify_workers(&*system_params_manager.params.read().await);
             }
         });
 
@@ -143,16 +150,16 @@ impl<S: MetaStore> SystemParamsManager<S> {
     }
 
     // Notify workers of parameter change.
-    async fn notify_workers(&self, params: &SystemParams) {
+    // TODO: add system params into snapshot to avoid periodically sync.
+    fn notify_workers(&self, params: &SystemParams) {
         self.notification_manager
-            .notify_frontend(Operation::Update, Info::SystemParams(params.clone()))
-            .await;
+            .notify_frontend_without_version(Operation::Update, Info::SystemParams(params.clone()));
         self.notification_manager
-            .notify_compute(Operation::Update, Info::SystemParams(params.clone()))
-            .await;
-        self.notification_manager
-            .notify_compactor(Operation::Update, Info::SystemParams(params.clone()))
-            .await;
+            .notify_compute_without_version(Operation::Update, Info::SystemParams(params.clone()));
+        self.notification_manager.notify_compactor_without_version(
+            Operation::Update,
+            Info::SystemParams(params.clone()),
+        );
     }
 }
 
@@ -164,7 +171,7 @@ impl<S: MetaStore> SystemParamsManager<S> {
 // 4. None, None: A new version of RW cluster is launched for the first time and newly introduced
 // params are not set. The new field is not initialized either, just leave it as `None`.
 macro_rules! impl_merge_params {
-    ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr },)*) => {
+    ($({ $field:ident, $($rest:tt)* },)*) => {
         fn merge_params(mut persisted: SystemParams, init: SystemParams) -> SystemParams {
             $(
                 match (persisted.$field.as_ref(), init.$field) {
@@ -187,4 +194,4 @@ macro_rules! impl_merge_params {
     };
 }
 
-for_all_undeprecated_params!(impl_merge_params);
+for_all_params!(impl_merge_params);

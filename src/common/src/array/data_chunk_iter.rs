@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,9 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::iter::TrustedLen;
+use std::hash::Hash;
+use std::iter::{FusedIterator, TrustedLen};
+use std::ops::Range;
 
-use super::column::Column;
+use super::ArrayRef;
 use crate::array::DataChunk;
 use crate::row::Row;
 use crate::types::DatumRef;
@@ -22,9 +24,14 @@ use crate::types::DatumRef;
 impl DataChunk {
     /// Get an iterator for visible rows.
     pub fn rows(&self) -> DataChunkRefIter<'_> {
+        self.rows_in(0..self.capacity())
+    }
+
+    /// Get an iterator for visible rows in range.
+    pub fn rows_in(&self, range: Range<usize>) -> DataChunkRefIter<'_> {
         DataChunkRefIter {
             chunk: self,
-            idx: Some(0),
+            idx: range,
         }
     }
 
@@ -39,40 +46,36 @@ impl DataChunk {
 
 pub struct DataChunkRefIter<'a> {
     chunk: &'a DataChunk,
-    /// `None` means finished
-    idx: Option<usize>,
+    idx: Range<usize>,
 }
 
 impl<'a> Iterator for DataChunkRefIter<'a> {
     type Item = RowRef<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match self.idx {
-            None => None,
-            Some(idx) => {
-                self.idx = self.chunk.next_visible_row_idx(idx);
-                match self.idx {
-                    None => None,
-                    Some(idx) => {
-                        self.idx = Some(idx + 1);
-                        Some(RowRef {
-                            chunk: self.chunk,
-                            idx,
-                        })
-                    }
-                }
+        if self.idx.start == self.idx.end {
+            return None;
+        }
+        match self.chunk.next_visible_row_idx(self.idx.start) {
+            Some(idx) if idx < self.idx.end => {
+                self.idx.start = idx + 1;
+                Some(RowRef::new(self.chunk, idx))
+            }
+            _ => {
+                self.idx.start = self.idx.end;
+                None
             }
         }
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        if let Some(idx) = self.idx {
+        if self.idx.start != self.idx.end {
             (
                 // if all following rows are invisible
                 0,
                 // if all following rows are visible
                 Some(std::cmp::min(
-                    self.chunk.capacity() - idx,
+                    self.idx.end - self.idx.start,
                     self.chunk.cardinality(),
                 )),
             )
@@ -81,6 +84,8 @@ impl<'a> Iterator for DataChunkRefIter<'a> {
         }
     }
 }
+
+impl<'a> FusedIterator for DataChunkRefIter<'a> {}
 
 pub struct DataChunkRefIterWithHoles<'a> {
     chunk: &'a DataChunk,
@@ -92,17 +97,14 @@ impl<'a> Iterator for DataChunkRefIterWithHoles<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let len = self.chunk.capacity();
-        let vis = self.chunk.vis();
+        let vis = self.chunk.visibility();
         if self.idx == len {
             None
         } else {
             let ret = Some(if !vis.is_set(self.idx) {
                 None
             } else {
-                Some(RowRef {
-                    chunk: self.chunk,
-                    idx: self.idx,
-                })
+                Some(RowRef::new(self.chunk, self.idx))
             });
             self.idx += 1;
             ret
@@ -118,99 +120,160 @@ impl<'a> Iterator for DataChunkRefIterWithHoles<'a> {
 impl ExactSizeIterator for DataChunkRefIterWithHoles<'_> {}
 unsafe impl TrustedLen for DataChunkRefIterWithHoles<'_> {}
 
-#[derive(Clone, Copy)]
-pub struct RowRef<'a> {
-    chunk: &'a DataChunk,
+// Deliberately making `RowRef` and `RowRefIter` defined in a private module to ensure
+// the checks in the constructors are always performed.
+mod row_ref {
+    use super::*;
 
-    idx: usize,
-}
+    #[derive(Clone, Copy)]
+    pub struct RowRef<'a> {
+        columns: &'a [ArrayRef],
 
-impl<'a> std::fmt::Debug for RowRef<'a> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_list().entries(self.iter()).finish()
-    }
-}
-
-impl<'a> RowRef<'a> {
-    pub fn new(chunk: &'a DataChunk, idx: usize) -> Self {
-        debug_assert!(idx < chunk.capacity());
-        Self { chunk, idx }
+        idx: usize,
     }
 
-    /// Get the index of this row in the data chunk.
-    #[must_use]
-    pub fn index(&self) -> usize {
-        self.idx
+    impl<'a> std::fmt::Debug for RowRef<'a> {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.debug_list().entries(self.iter()).finish()
+        }
     }
-}
 
-impl PartialEq for RowRef<'_> {
-    fn eq(&self, other: &Self) -> bool {
-        self.iter().eq(other.iter())
+    impl<'a> RowRef<'a> {
+        pub fn new(chunk: &'a DataChunk, idx: usize) -> Self {
+            assert!(
+                idx < chunk.capacity(),
+                "index {idx} out of bound {}",
+                chunk.capacity()
+            );
+
+            Self {
+                columns: chunk.columns(),
+                idx,
+            }
+        }
+
+        pub fn with_columns(columns: &'a [ArrayRef], idx: usize) -> Self {
+            for column in columns {
+                assert!(
+                    idx < column.len(),
+                    "index {idx} out of bound {}",
+                    column.len()
+                );
+            }
+
+            Self { columns, idx }
+        }
+
+        /// Get the index of this row in the data chunk.
+        #[must_use]
+        pub fn index(&self) -> usize {
+            self.idx
+        }
     }
-}
-impl Eq for RowRef<'_> {}
 
-impl Row for RowRef<'_> {
-    type Iter<'a> = RowRefIter<'a>
-    where
-        Self: 'a;
+    impl PartialEq for RowRef<'_> {
+        fn eq(&self, other: &Self) -> bool {
+            self.iter().eq(other.iter())
+        }
+    }
+    impl Eq for RowRef<'_> {}
 
-    fn datum_at(&self, index: usize) -> DatumRef<'_> {
-        debug_assert!(self.idx < self.chunk.capacity());
-        // for `RowRef`, the index is always in bound.
-        unsafe {
-            self.chunk.columns()[index]
-                .array_ref()
+    impl Hash for RowRef<'_> {
+        fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+            self.hash_datums_into(state)
+        }
+    }
+
+    impl Row for RowRef<'_> {
+        fn datum_at(&self, index: usize) -> DatumRef<'_> {
+            // SAFETY: `self.idx` is already checked in `new` or `with_columns`.
+            unsafe { self.columns[index].value_at_unchecked(self.idx) }
+        }
+
+        unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
+            self.columns
+                .get_unchecked(index)
                 .value_at_unchecked(self.idx)
         }
-    }
 
-    unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
-        debug_assert!(self.idx < self.chunk.capacity());
-        // for `RowRef`, the index is always in bound.
-        self.chunk
-            .columns()
-            .get_unchecked(index)
-            .array_ref()
-            .value_at_unchecked(self.idx)
-    }
-
-    fn len(&self) -> usize {
-        self.chunk.columns().len()
-    }
-
-    fn iter(&self) -> Self::Iter<'_> {
-        debug_assert!(self.idx < self.chunk.capacity());
-        RowRefIter {
-            columns: self.chunk.columns().iter(),
-            row_idx: self.idx,
+        fn len(&self) -> usize {
+            self.columns.len()
         }
-    }
-}
 
-#[derive(Clone)]
-pub struct RowRefIter<'a> {
-    columns: std::slice::Iter<'a, Column>,
-    row_idx: usize,
-}
-
-impl<'a> Iterator for RowRefIter<'a> {
-    type Item = DatumRef<'a>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        // SAFETY: for `RowRef`, the index is always in bound.
-        unsafe {
-            self.columns
-                .next()
-                .map(|col| col.array_ref().value_at_unchecked(self.row_idx))
+        fn iter(&self) -> impl ExactSizeIterator<Item = DatumRef<'_>> {
+            RowRefIter {
+                columns: self.columns.iter(),
+                row_idx: self.idx,
+            }
         }
     }
 
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.columns.size_hint()
+    #[derive(Clone)]
+    pub struct RowRefIter<'a> {
+        columns: std::slice::Iter<'a, ArrayRef>,
+        row_idx: usize,
     }
+
+    impl<'a> Iterator for RowRefIter<'a> {
+        type Item = DatumRef<'a>;
+
+        fn next(&mut self) -> Option<Self::Item> {
+            // SAFETY: `self.row_idx` is already checked in `new` or `with_columns` of `RowRef`.
+            unsafe {
+                self.columns
+                    .next()
+                    .map(|col| col.value_at_unchecked(self.row_idx))
+            }
+        }
+
+        fn size_hint(&self) -> (usize, Option<usize>) {
+            self.columns.size_hint()
+        }
+    }
+
+    impl ExactSizeIterator for RowRefIter<'_> {}
+    unsafe impl TrustedLen for RowRefIter<'_> {}
 }
 
-impl ExactSizeIterator for RowRefIter<'_> {}
-unsafe impl TrustedLen for RowRefIter<'_> {}
+pub use row_ref::{RowRef, RowRefIter};
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+
+    use crate::array::StreamChunk;
+    use crate::test_prelude::StreamChunkTestExt;
+
+    #[test]
+    fn test_row_ref_hash() {
+        let mut set = HashSet::new();
+        let chunk1 = StreamChunk::from_pretty(
+            " I I I
+            + 2 5 1
+            + 4 9 2
+            - 2 5 1",
+        );
+        for (_, row) in chunk1.rows() {
+            set.insert(row);
+        }
+        assert_eq!(set.len(), 2);
+
+        let chunk2 = StreamChunk::from_pretty(
+            " I I I
+            - 4 9 2",
+        );
+        for (_, row) in chunk2.rows() {
+            set.insert(row);
+        }
+        assert_eq!(set.len(), 2);
+
+        let chunk3 = StreamChunk::from_pretty(
+            " I I I
+            + 1 2 3",
+        );
+        for (_, row) in chunk3.rows() {
+            set.insert(row);
+        }
+        assert_eq!(set.len(), 3);
+    }
+}

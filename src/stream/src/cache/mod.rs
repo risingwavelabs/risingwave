@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -26,7 +26,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 /// cache aware of the consistent hashing to avoid unnecessary eviction in the future.
 /// Check this [issue](https://github.com/risingwavelabs/risingwave/issues/5567).
 ///
-/// TODO: may encapsulate the logic into [`ExecutorCache`] when ready.
+/// TODO: may encapsulate the logic into `ExecutorCache` when ready.
 ///
 /// # Explanation
 /// We use a lazy manner to manipulate the cache. When scaling out, the partition of the existing

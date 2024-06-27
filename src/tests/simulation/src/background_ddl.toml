@@ -1,0 +1,10 @@
+[server]
+telemetry_enabled = false
+metrics_level = "Disabled"
+
+[streaming.developer]
+stream_chunk_size = 1
+
+[system]
+barrier_interval_ms = 1000
+max_concurrent_creating_streaming_jobs = 4

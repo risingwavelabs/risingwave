@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use risingwave_common::hash::{HashKey, HashKeyDispatcher};
 use risingwave_common::types::DataType;
-use risingwave_expr::agg::AggCall;
+use risingwave_expr::aggregate::AggCall;
 use risingwave_pb::stream_plan::HashAggNode;
 
 use super::agg_common::{
@@ -35,7 +35,7 @@ pub struct HashAggExecutorDispatcherArgs<S: StateStore> {
 }
 
 impl<S: StateStore> HashKeyDispatcher for HashAggExecutorDispatcherArgs<S> {
-    type Output = StreamResult<BoxedExecutor>;
+    type Output = StreamResult<Box<dyn Execute>>;
 
     fn dispatch_impl<K: HashKey>(self) -> Self::Output {
         Ok(HashAggExecutor::<K, S>::new(self.args)?.boxed())
@@ -48,7 +48,6 @@ impl<S: StateStore> HashKeyDispatcher for HashAggExecutorDispatcherArgs<S> {
 
 pub struct HashAggExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for HashAggExecutorBuilder {
     type Node = HashAggNode;
 
@@ -56,8 +55,7 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         store: impl StateStore,
-        stream: &mut LocalStreamManagerCore,
-    ) -> StreamResult<BoxedExecutor> {
+    ) -> StreamResult<Executor> {
         let group_key_indices = node
             .get_group_key()
             .iter()
@@ -84,8 +82,9 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
             vnodes.clone(),
         )
         .await;
-        let result_table = StateTable::from_table_catalog(
-            node.get_result_table().unwrap(),
+        // disable sanity check so that old value is not required when updating states
+        let intermediate_state_table = StateTable::from_table_catalog_inconsistent_op(
+            node.get_intermediate_state_table().unwrap(),
             store.clone(),
             vnodes.clone(),
         )
@@ -94,30 +93,36 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
             build_distinct_dedup_table_from_proto(node.get_distinct_dedup_tables(), store, vnodes)
                 .await;
 
-        HashAggExecutorDispatcherArgs {
+        let exec = HashAggExecutorDispatcherArgs {
             args: AggExecutorArgs {
+                version: node.version(),
+
                 input,
                 actor_ctx: params.actor_context,
-                pk_indices: params.pk_indices,
-                executor_id: params.executor_id,
+                info: params.info.clone(),
 
-                extreme_cache_size: stream.config.developer.unsafe_extreme_cache_size,
+                extreme_cache_size: params.env.config().developer.unsafe_extreme_cache_size,
 
                 agg_calls,
                 row_count_index: node.get_row_count_index() as usize,
                 storages,
-                result_table,
+                intermediate_state_table,
                 distinct_dedup_tables,
-                watermark_epoch: stream.get_watermark_epoch(),
-                metrics: params.executor_stats,
+                watermark_epoch: params.watermark_epoch,
                 extra: HashAggExecutorExtraArgs {
                     group_key_indices,
                     chunk_size: params.env.config().developer.chunk_size,
-                    emit_on_window_close: false,
+                    max_dirty_groups_heap_size: params
+                        .env
+                        .config()
+                        .developer
+                        .hash_agg_max_dirty_groups_heap_size,
+                    emit_on_window_close: node.get_emit_on_window_close(),
                 },
             },
             group_key_types,
         }
-        .dispatch()
+        .dispatch()?;
+        Ok((params.info, exec).into())
     }
 }

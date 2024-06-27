@@ -1,0 +1,25 @@
+# https://github.com/risingwavelabs/risingwave/issues/10448
+# TL;DR All `CREATE` statements incorrectly treat all errors as "table already exists" while `IF NOT EXISTS` is used.
+
+# Create table should fail since we don't have the schema.
+statement error schema not found
+create table s1.t1 (v1 int);
+
+# The error should be same if we add `IF NOT EXISTS` to the statement.
+statement error schema not found
+create table if not exists s1.t1 (v1 int);
+
+# Then create the schema.
+statement ok
+create schema s1;
+
+# Then the create table should succeed.
+statement ok
+create table if not exists s1.t1 (v1 int);
+
+# cleanup
+statement ok
+drop table s1.t1;
+
+statement ok
+drop schema s1;

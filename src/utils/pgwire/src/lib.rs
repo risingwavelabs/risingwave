@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,16 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(io_error_other)]
 #![feature(lint_reasons)]
 #![feature(trait_alias)]
-#![feature(result_option_inspect)]
 #![feature(iterator_try_collect)]
 #![feature(trusted_len)]
+#![feature(lazy_cell)]
+#![feature(buf_read_has_data_left)]
+#![feature(round_char_boundary)]
 #![expect(clippy::doc_markdown, reason = "FIXME: later")]
 
 pub mod error;
 pub mod error_or_notice;
+pub mod net;
 pub mod pg_extended;
 pub mod pg_field_descriptor;
 pub mod pg_message;

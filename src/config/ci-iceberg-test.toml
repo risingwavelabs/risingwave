@@ -1,7 +1,6 @@
 [meta]
 disable_recovery = true
-enable_committed_sst_sanity_check = true
-max_heartbeat_interval_secs = 600
+max_heartbeat_interval_secs = 60
 
 [streaming]
 in_flight_barrier_nums = 10
@@ -9,3 +8,4 @@ in_flight_barrier_nums = 10
 [system]
 barrier_interval_ms = 5000
 checkpoint_frequency = 1
+max_concurrent_creating_streaming_jobs = 0

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 
 //! Streaming Simple Aggregator
 
-use risingwave_expr::agg::AggCall;
+use risingwave_expr::aggregate::AggCall;
 use risingwave_pb::stream_plan::SimpleAggNode;
 
 use super::agg_common::{
@@ -27,7 +27,6 @@ use crate::executor::SimpleAggExecutor;
 
 pub struct SimpleAggExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for SimpleAggExecutorBuilder {
     type Node = SimpleAggNode;
 
@@ -35,8 +34,7 @@ impl ExecutorBuilder for SimpleAggExecutorBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         store: impl StateStore,
-        stream: &mut LocalStreamManagerCore,
-    ) -> StreamResult<BoxedExecutor> {
+    ) -> StreamResult<Executor> {
         let [input]: [_; 1] = params.input.try_into().unwrap();
         let agg_calls: Vec<AggCall> = node
             .get_agg_calls()
@@ -46,30 +44,35 @@ impl ExecutorBuilder for SimpleAggExecutorBuilder {
         let storages =
             build_agg_state_storages_from_proto(node.get_agg_call_states(), store.clone(), None)
                 .await;
-        let result_table =
-            StateTable::from_table_catalog(node.get_result_table().unwrap(), store.clone(), None)
-                .await;
+        // disable sanity check so that old value is not required when updating states
+        let intermediate_state_table = StateTable::from_table_catalog_inconsistent_op(
+            node.get_intermediate_state_table().unwrap(),
+            store.clone(),
+            None,
+        )
+        .await;
         let distinct_dedup_tables =
             build_distinct_dedup_table_from_proto(node.get_distinct_dedup_tables(), store, None)
                 .await;
 
-        Ok(SimpleAggExecutor::new(AggExecutorArgs {
+        let exec = SimpleAggExecutor::new(AggExecutorArgs {
+            version: node.version(),
+
             input,
             actor_ctx: params.actor_context,
-            pk_indices: params.pk_indices,
-            executor_id: params.executor_id,
+            info: params.info.clone(),
 
-            extreme_cache_size: stream.config.developer.unsafe_extreme_cache_size,
+            extreme_cache_size: params.env.config().developer.unsafe_extreme_cache_size,
 
             agg_calls,
             row_count_index: node.get_row_count_index() as usize,
             storages,
-            result_table,
+            intermediate_state_table,
             distinct_dedup_tables,
-            watermark_epoch: stream.get_watermark_epoch(),
-            metrics: params.executor_stats,
+            watermark_epoch: params.watermark_epoch,
             extra: SimpleAggExecutorExtraArgs {},
-        })?
-        .boxed())
+        })?;
+
+        Ok((params.info, exec).into())
     }
 }

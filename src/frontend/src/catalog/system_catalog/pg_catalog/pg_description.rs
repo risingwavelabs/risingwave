@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,29 +12,29 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{DataType, ScalarImpl};
-
-use crate::catalog::system_catalog::SystemCatalogColumnsDef;
+use risingwave_common::types::Fields;
+use risingwave_frontend_macro::system_catalog;
 
 /// The catalog `pg_description` stores description.
 /// Ref: [`https://www.postgresql.org/docs/current/catalog-pg-description.html`]
-pub const PG_DESCRIPTION_TABLE_NAME: &str = "pg_description";
-pub const PG_DESCRIPTION_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
-    (DataType::Int32, "objoid"),
-    // None
-    (DataType::Int32, "classoid"),
-    // 0
-    (DataType::Int32, "objsubid"),
-    // None
-    (DataType::Varchar, "description"),
-];
-
-pub fn new_pg_description_row(id: u32) -> OwnedRow {
-    OwnedRow::new(vec![
-        Some(ScalarImpl::Int32(id as i32)),
-        None,
-        Some(ScalarImpl::Int32(0)),
-        None,
-    ])
+#[system_catalog(view, "pg_catalog.pg_description",
+    // objsubid = 0     => _row_id (hidden column)
+    // objsubid is NULL => table self
+    "SELECT objoid,
+        classoid,
+        CASE
+            WHEN objsubid = 0 THEN -1
+            WHEN objsubid IS NULL THEN 0
+            ELSE objsubid
+        END AS objsubid,
+        description
+    FROM rw_catalog.rw_description
+    WHERE description IS NOT NULL;"
+)]
+#[derive(Fields)]
+struct PgDescription {
+    objoid: i32,
+    classoid: i32,
+    objsubid: i32,
+    description: String,
 }

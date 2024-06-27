@@ -1,13 +1,20 @@
 [default.extend-words]
-indexs = "indices"
-Stichting = "Stichting"
-fo = "fo"
-FPR = "FPR"
+indexs = "indices"      # Both are valid, just pick one.
+Stichting = "Stichting" # This is Dutch for "Foundation". From DuckDB.
+FPR = "FPR"             # False Positive Rate
+inout = "inout"         # This is a SQL keyword!
+numer = "numer"         # numerator
+nd = "nd"               # N-dimentional / 2nd
+steam = "stream"        # You played with Steam games too much.
+ser = "ser"             # Serialization
+# Some weird short variable names
 ot = "ot"
-inout = "inout"
-numer = "numer"
-nd = "nd"
-steam = "stream"
+bui = "bui"             # BackwardUserIterator
+mosquitto = "mosquitto" # This is a MQTT broker.
+abd = "abd"
+iy = "iy"
+Pn = "Pn"
+[default.extend-identifiers]
 
 [files]
 extend-exclude = [
@@ -15,9 +22,12 @@ extend-exclude = [
     "e2e_test",
     "**/*.svg",
     "scripts",
+    "src/sqlparser/tests/testdata/",
     "src/frontend/planner_test/tests/testdata",
     "src/tests/sqlsmith/tests/freeze",
-    "src/workspace-hack/Cargo.toml",
+    "src/license/src/manager.rs",
+    "Cargo.lock",
+    "**/Cargo.toml",
     "**/go.mod",
     "**/go.sum",
 ]

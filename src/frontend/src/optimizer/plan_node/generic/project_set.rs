@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,15 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
+use pretty_xmlish::{Pretty, Str, XmlNode};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
 
-use super::{GenericPlanNode, GenericPlanRef};
-use crate::expr::{Expr, ExprDisplay, ExprImpl, ExprRewriter};
+use super::{DistillUnit, GenericPlanNode, GenericPlanRef};
+use crate::expr::{Expr, ExprDisplay, ExprImpl, ExprRewriter, ExprVisitor};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::batch::BatchPlanRef;
+use crate::optimizer::plan_node::utils::childless_record;
 use crate::optimizer::property::{FunctionalDependencySet, Order};
 use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt};
 
@@ -30,8 +30,8 @@ use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt};
 /// See also [`ProjectSetSelectItem`](risingwave_pb::expr::ProjectSetSelectItem) for examples.
 ///
 /// To have a pk, it has a hidden column `projected_row_id` at the beginning. The implementation of
-/// `LogicalProjectSet` is highly similar to [`LogicalProject`], except for the additional hidden
-/// column.
+/// `LogicalProjectSet` is highly similar to [`super::super::LogicalProject`], except for the
+/// additional hidden column.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ProjectSet<PlanRef> {
     pub select_list: Vec<ExprImpl>,
@@ -47,14 +47,23 @@ impl<PlanRef> ProjectSet<PlanRef> {
             .collect();
     }
 
+    pub(crate) fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.select_list.iter().for_each(|e| v.visit_expr(e));
+    }
+
     pub(crate) fn output_len(&self) -> usize {
         self.select_list.len() + 1
     }
 
-    pub fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        let mut builder = f.debug_struct(name);
-        builder.field("select_list", &self.select_list);
-        builder.finish()
+    pub fn decompose(self) -> (Vec<ExprImpl>, PlanRef) {
+        (self.select_list, self.input)
+    }
+}
+
+impl<PlanRef> DistillUnit for ProjectSet<PlanRef> {
+    fn distill_with_name<'a>(&self, name: impl Into<Str<'a>>) -> XmlNode<'a> {
+        let fields = vec![("select_list", Pretty::debug(&self.select_list))];
+        childless_record(name, fields)
     }
 }
 
@@ -83,11 +92,11 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for ProjectSet<PlanRef> {
         Schema { fields }
     }
 
-    fn logical_pk(&self) -> Option<Vec<usize>> {
+    fn stream_key(&self) -> Option<Vec<usize>> {
         let i2o = self.i2o_col_mapping();
         let mut pk = self
             .input
-            .logical_pk()
+            .stream_key()?
             .iter()
             .map(|pk_col| i2o.try_map(*pk_col))
             .collect::<Option<Vec<_>>>()
@@ -117,7 +126,7 @@ impl<PlanRef: GenericPlanRef> ProjectSet<PlanRef> {
                 map[1 + i] = Some(input.index())
             }
         }
-        ColIndexMapping::with_target_size(map, input_len)
+        ColIndexMapping::new(map, input_len)
     }
 
     /// Gets the Mapping of columnIndex from input column index to output column index,if a input
@@ -130,7 +139,7 @@ impl<PlanRef: GenericPlanRef> ProjectSet<PlanRef> {
                 map[input.index()] = Some(1 + i)
             }
         }
-        ColIndexMapping::with_target_size(map, 1 + self.select_list.len())
+        ColIndexMapping::new(map, 1 + self.select_list.len())
     }
 }
 

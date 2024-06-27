@@ -1,0 +1,4 @@
+query I
+SELECT count(*) FROM m1;
+----
+500000

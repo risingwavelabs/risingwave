@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,9 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use fixedbitset::FixedBitSet;
 use risingwave_common::types::DataType;
-use risingwave_expr::agg::AggKind;
+use risingwave_expr::aggregate::AggKind;
 use risingwave_pb::plan_common::JoinType;
 
 use super::{ApplyOffsetRewriter, BoxedRule, Rule};
@@ -22,7 +21,7 @@ use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::generic::Agg;
 use crate::optimizer::plan_node::{LogicalAgg, LogicalApply, LogicalFilter, LogicalProject};
 use crate::optimizer::PlanRef;
-use crate::utils::Condition;
+use crate::utils::{Condition, IndexSet};
 
 /// Transpose `LogicalApply` and `LogicalAgg`.
 ///
@@ -53,7 +52,9 @@ impl Rule for ApplyAggTransposeRule {
             apply.clone().decompose();
         assert_eq!(join_type, JoinType::Inner);
         let agg: &LogicalAgg = right.as_logical_agg()?;
-        let (mut agg_calls, agg_group_key, agg_input) = agg.clone().decompose();
+        let (mut agg_calls, agg_group_key, grouping_sets, agg_input, enable_two_phase) =
+            agg.clone().decompose();
+        assert!(grouping_sets.is_empty());
         let is_scalar_agg = agg_group_key.is_empty();
         let apply_left_len = left.schema().len();
 
@@ -105,10 +106,11 @@ impl Rule for ApplyAggTransposeRule {
                 correlated_id,
                 correlated_indices.clone(),
                 false,
+                false,
             )
             .translate_apply(left, eq_predicates)
         } else {
-            LogicalApply::new(
+            LogicalApply::create(
                 left,
                 input,
                 JoinType::Inner,
@@ -117,7 +119,6 @@ impl Rule for ApplyAggTransposeRule {
                 correlated_indices.clone(),
                 false,
             )
-            .into()
         };
 
         let group_agg = {
@@ -139,15 +140,58 @@ impl Rule for ApplyAggTransposeRule {
                 // convert count(*) to count(1).
                 let pos_of_constant_column = node.schema().len() - 1;
                 agg_calls.iter_mut().for_each(|agg_call| {
-                    if agg_call.agg_kind == AggKind::Count && agg_call.inputs.is_empty() {
-                        let input_ref = InputRef::new(pos_of_constant_column, DataType::Int32);
-                        agg_call.inputs.push(input_ref);
+                    match agg_call.agg_kind {
+                        AggKind::Count if agg_call.inputs.is_empty() => {
+                            let input_ref = InputRef::new(pos_of_constant_column, DataType::Int32);
+                            agg_call.inputs.push(input_ref);
+                        }
+                        AggKind::ArrayAgg
+                        | AggKind::JsonbAgg
+                        | AggKind::JsonbObjectAgg
+                        | AggKind::UserDefined => {
+                            let input_ref = InputRef::new(pos_of_constant_column, DataType::Int32);
+                            let cond = FunctionCall::new(ExprType::IsNotNull, vec![input_ref.into()]).unwrap();
+                            agg_call.filter.conjunctions.push(cond.into());
+                        }
+                        AggKind::Count
+                        | AggKind::Sum
+                        | AggKind::Sum0
+                        | AggKind::Avg
+                        | AggKind::Min
+                        | AggKind::Max
+                        | AggKind::BitAnd
+                        | AggKind::BitOr
+                        | AggKind::BitXor
+                        | AggKind::BoolAnd
+                        | AggKind::BoolOr
+                        | AggKind::StringAgg
+                        // not in PostgreSQL
+                        | AggKind::ApproxCountDistinct
+                        | AggKind::FirstValue
+                        | AggKind::LastValue
+                        | AggKind::InternalLastSeenValue
+                        // All statistical aggregates only consider non-null inputs.
+                        | AggKind::VarPop
+                        | AggKind::VarSamp
+                        | AggKind::StddevPop
+                        | AggKind::StddevSamp
+                        // All ordered-set aggregates ignore null values in their aggregated input.
+                        | AggKind::PercentileCont
+                        | AggKind::PercentileDisc
+                        | AggKind::Mode
+                        // `grouping` has no *aggregate* input and unreachable when `is_scalar_agg`.
+                        | AggKind::Grouping
+                        => {
+                            // no-op when `agg(0 rows) == agg(1 row of nulls)`
+                        }
                     }
                 });
             }
-            let mut group_keys: FixedBitSet = (0..apply_left_len).collect();
-            group_keys.extend(agg_group_key.ones().map(|key| key + apply_left_len));
-            Agg::new(agg_calls, group_keys, node).into()
+            let mut group_keys: IndexSet = (0..apply_left_len).collect();
+            group_keys.extend(agg_group_key.indices().map(|key| key + apply_left_len));
+            Agg::new(agg_calls, group_keys, node)
+                .with_enable_two_phase(enable_two_phase)
+                .into()
         };
 
         let filter = LogicalFilter::create(group_agg, on);

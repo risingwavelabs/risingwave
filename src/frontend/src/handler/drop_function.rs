@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,34 +12,34 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use pgwire::pg_response::StatementType;
-use risingwave_sqlparser::ast::{DropFunctionDesc, ReferentialAction};
-
 use super::*;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::CatalogError;
 use crate::{bind_data_type, Binder};
 
+/// Drop a function or an aggregate.
 pub async fn handle_drop_function(
     handler_args: HandlerArgs,
     if_exists: bool,
-    mut func_desc: Vec<DropFunctionDesc>,
+    mut func_desc: Vec<FunctionDesc>,
     _option: Option<ReferentialAction>,
+    aggregate: bool,
 ) -> Result<RwPgResponse> {
     if func_desc.len() != 1 {
-        return Err(ErrorCode::NotImplemented(
-            "only support dropping 1 function".to_string(),
-            None.into(),
-        )
-        .into());
+        bail_not_implemented!("only support dropping 1 function");
     }
+    let stmt_type = if aggregate {
+        StatementType::DROP_AGGREGATE
+    } else {
+        StatementType::DROP_FUNCTION
+    };
     let func_desc = func_desc.remove(0);
 
     let session = handler_args.session;
     let db_name = session.database();
     let (schema_name, function_name) =
         Binder::resolve_schema_qualified_name(db_name, func_desc.name)?;
-    let search_path = session.config().get_search_path();
+    let search_path = session.config().search_path();
     let user_name = &session.auth_context().user_name;
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
@@ -77,20 +77,33 @@ pub async fn handle_drop_function(
         match res {
             Ok((function, schema_name)) => {
                 session.check_privilege_for_drop_alter(schema_name, &**function)?;
+                if !aggregate && function.kind.is_aggregate() {
+                    return Err(ErrorCode::CatalogError(
+                        format!("\"{function_name}\" is an aggregate function\nHINT:  Use DROP AGGREGATE to drop aggregate functions.").into(),
+                    )
+                    .into());
+                } else if aggregate && !function.kind.is_aggregate() {
+                    return Err(ErrorCode::CatalogError(
+                        format!("\"{function_name}\" is not an aggregate").into(),
+                    )
+                    .into());
+                }
                 function.id
             }
             Err(CatalogError::NotFound(kind, _)) if kind == "function" && if_exists => {
-                return Ok(RwPgResponse::empty_result_with_notice(
-                    StatementType::DROP_FUNCTION,
-                    format!("function \"{}\" does not exist, skipping", function_name),
-                ));
+                return Ok(RwPgResponse::builder(stmt_type)
+                    .notice(format!(
+                        "function \"{}\" does not exist, skipping",
+                        function_name
+                    ))
+                    .into());
             }
             Err(e) => return Err(e.into()),
         }
     };
 
-    let catalog_writer = session.env().catalog_writer();
+    let catalog_writer = session.catalog_writer()?;
     catalog_writer.drop_function(function_id).await?;
 
-    Ok(PgResponse::empty_result(StatementType::DROP_FUNCTION))
+    Ok(PgResponse::empty_result(stmt_type))
 }

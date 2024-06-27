@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,20 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use await_tree::InstrumentAwait;
-use futures::{pin_mut, StreamExt};
-use futures_async_stream::try_stream;
-use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::catalog::Schema;
+use risingwave_common::array::Op;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
-use risingwave_storage::table::TableIter;
-use risingwave_storage::StateStore;
+use risingwave_storage::table::collect_data_chunk;
 
-use super::error::StreamExecutorError;
-use super::{Executor, ExecutorInfo, Message};
-use crate::executor::BoxedMessageStream;
+use crate::executor::prelude::*;
 
 pub struct BatchQueryExecutor<S: StateStore> {
     /// The [`StorageTable`] that needs to be queried
@@ -34,18 +27,18 @@ pub struct BatchQueryExecutor<S: StateStore> {
     /// The number of tuples in one [`StreamChunk`]
     batch_size: usize,
 
-    info: ExecutorInfo,
+    schema: Schema,
 }
 
 impl<S> BatchQueryExecutor<S>
 where
     S: StateStore,
 {
-    pub fn new(table: StorageTable<S>, batch_size: usize, info: ExecutorInfo) -> Self {
+    pub fn new(table: StorageTable<S>, batch_size: usize, schema: Schema) -> Self {
         Self {
             table,
             batch_size,
-            info,
+            schema,
         }
     }
 
@@ -56,15 +49,15 @@ where
             .batch_iter(
                 HummockReadEpoch::Committed(epoch),
                 false,
-                PrefetchOptions::new_for_exhaust_iter(),
+                PrefetchOptions::prefetch_for_large_range_scan(),
             )
             .await?;
         pin_mut!(iter);
 
-        while let Some(data_chunk) = iter
-            .collect_data_chunk(self.schema(), Some(self.batch_size))
-            .instrument_await("batch_query_executor_collect_chunk")
-            .await?
+        while let Some(data_chunk) =
+            collect_data_chunk(&mut iter, &self.schema, Some(self.batch_size))
+                .instrument_await("batch_query_executor_collect_chunk")
+                .await?
         {
             let ops = vec![Op::Insert; data_chunk.capacity()];
             let stream_chunk = StreamChunk::from_parts(ops, data_chunk);
@@ -73,24 +66,12 @@ where
     }
 }
 
-impl<S> Executor for BatchQueryExecutor<S>
+impl<S> Execute for BatchQueryExecutor<S>
 where
     S: StateStore,
 {
     fn execute(self: Box<Self>) -> super::BoxedMessageStream {
         unreachable!("should call `execute_with_epoch`")
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.info.schema
-    }
-
-    fn pk_indices(&self) -> super::PkIndicesRef<'_> {
-        &self.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.info.identity
     }
 
     fn execute_with_epoch(self: Box<Self>, epoch: u64) -> BoxedMessageStream {
@@ -100,9 +81,6 @@ where
 
 #[cfg(test)]
 mod test {
-
-    use std::vec;
-
     use futures_async_stream::for_await;
 
     use super::*;
@@ -114,27 +92,17 @@ mod test {
         let test_batch_count = 5;
         let table = gen_basic_table(test_batch_count * test_batch_size).await;
 
-        let info = ExecutorInfo {
-            schema: table.schema().clone(),
-            pk_indices: vec![0, 1],
-            identity: "BatchQuery".to_owned(),
-        };
-
-        let executor = Box::new(BatchQueryExecutor::new(table, test_batch_size, info));
-
-        let stream = executor.execute_with_epoch(u64::MAX);
+        let schema = table.schema().clone();
+        let stream = BatchQueryExecutor::new(table, test_batch_size, schema)
+            .boxed()
+            .execute_with_epoch(u64::MAX);
         let mut batch_cnt = 0;
 
         #[for_await]
         for msg in stream {
             let msg: Message = msg.unwrap();
             let chunk = msg.as_chunk().unwrap();
-            let data = *chunk
-                .column_at(0)
-                .array_ref()
-                .datum_at(0)
-                .unwrap()
-                .as_int32();
+            let data = *chunk.column_at(0).datum_at(0).unwrap().as_int32();
             assert_eq!(data, (batch_cnt * test_batch_size) as i32);
             batch_cnt += 1;
         }

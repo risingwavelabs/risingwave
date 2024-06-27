@@ -1,4 +1,4 @@
-//  Copyright 2023 RisingWave Labs
+//  Copyright 2024 RisingWave Labs
 //
 //  Licensed under the Apache License, Version 2.0 (the "License");
 //  you may not use this file except in compliance with the License.
@@ -20,21 +20,20 @@
 use std::collections::BTreeMap;
 use std::vec;
 
-use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-use risingwave_expr::agg::AggKind;
+use risingwave_expr::aggregate::AggKind;
 
 use super::{BoxedRule, Rule};
 use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
-use crate::optimizer::plan_node::generic::Agg;
+use crate::optimizer::plan_node::generic::{Agg, GenericPlanRef};
 use crate::optimizer::plan_node::{
     LogicalAgg, LogicalFilter, LogicalScan, LogicalTopN, PlanAggCall, PlanTreeNodeUnary,
 };
 use crate::optimizer::property::Order;
 use crate::optimizer::PlanRef;
-use crate::utils::Condition;
+use crate::utils::{Condition, IndexSet};
 
 pub struct MinMaxOnIndexRule {}
 
@@ -124,8 +123,10 @@ impl MinMaxOnIndexRule {
                         filter: Condition {
                             conjunctions: vec![],
                         },
+                        direct_args: vec![],
+                        user_defined: None,
                     }],
-                    FixedBitSet::new(),
+                    IndexSet::empty(),
                     topn.into(),
                 );
 
@@ -193,8 +194,10 @@ impl MinMaxOnIndexRule {
                     filter: Condition {
                         conjunctions: vec![],
                     },
+                    direct_args: vec![],
+                    user_defined: None,
                 }],
-                FixedBitSet::new(),
+                IndexSet::empty(),
                 topn.into(),
             );
 

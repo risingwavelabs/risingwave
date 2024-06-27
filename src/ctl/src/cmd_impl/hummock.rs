@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,13 +19,15 @@ pub use list_kv::*;
 mod sst_dump;
 pub use sst_dump::*;
 mod compaction_group;
-mod disable_commit_epoch;
 mod list_version_deltas;
+mod pause_resume;
 mod trigger_full_gc;
 mod trigger_manual_compaction;
+mod validate_version;
 
 pub use compaction_group::*;
-pub use disable_commit_epoch::*;
 pub use list_version_deltas::*;
+pub use pause_resume::*;
 pub use trigger_full_gc::*;
 pub use trigger_manual_compaction::*;
+pub use validate_version::*;

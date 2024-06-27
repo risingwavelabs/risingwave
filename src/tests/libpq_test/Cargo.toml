@@ -1,0 +1,12 @@
+[workspace]
+# To speedup the building, we don't include the test in the root workspace.
+
+[package]
+name = "risingwave_libpq_test"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1"
+libpq = "3.0"
+clap = { workspace = true }

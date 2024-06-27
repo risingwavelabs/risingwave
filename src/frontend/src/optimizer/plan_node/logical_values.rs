@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,19 +13,23 @@
 // limitations under the License.
 
 use std::sync::Arc;
-use std::{fmt, vec};
+use std::vec;
 
 use itertools::Itertools;
+use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, ScalarImpl};
 
+use super::generic::GenericPlanRef;
+use super::utils::{childless_record, Distill};
 use super::{
-    BatchValues, ColPrunable, ExprRewritable, LogicalFilter, PlanBase, PlanRef, PredicatePushdown,
-    StreamValues, ToBatch, ToStream,
+    BatchValues, ColPrunable, ExprRewritable, Logical, LogicalFilter, PlanBase, PlanRef,
+    PredicatePushdown, StreamValues, ToBatch, ToStream,
 };
-use crate::expr::{Expr, ExprImpl, ExprRewriter, Literal};
+use crate::error::Result;
+use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprVisitor, Literal};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
@@ -35,7 +39,7 @@ use crate::utils::{ColIndexMapping, Condition};
 /// `LogicalValues` builds rows according to a list of expressions
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalValues {
-    pub base: PlanBase,
+    pub base: PlanBase<Logical>,
     rows: Arc<[Vec<ExprImpl>]>,
 }
 
@@ -48,7 +52,7 @@ impl LogicalValues {
             }
         }
         let functional_dependency = FunctionalDependencySet::new(schema.len());
-        let base = PlanBase::new_logical(ctx, schema, vec![], functional_dependency);
+        let base = PlanBase::new_logical(ctx, schema, None, functional_dependency);
         Self {
             rows: rows.into(),
             base,
@@ -68,7 +72,7 @@ impl LogicalValues {
             }
         }
         let functional_dependency = FunctionalDependencySet::new(schema.len());
-        let base = PlanBase::new_logical(ctx, schema, vec![pk_index], functional_dependency);
+        let base = PlanBase::new_logical(ctx, schema, Some(vec![pk_index]), functional_dependency);
         Self {
             rows: rows.into(),
             base,
@@ -85,16 +89,26 @@ impl LogicalValues {
     pub fn rows(&self) -> &[Vec<ExprImpl>] {
         self.rows.as_ref()
     }
+
+    pub(super) fn rows_pretty<'a>(&self) -> Pretty<'a> {
+        let data = self
+            .rows()
+            .iter()
+            .map(|row| {
+                let collect = row.iter().map(Pretty::debug).collect();
+                Pretty::Array(collect)
+            })
+            .collect();
+        Pretty::Array(data)
+    }
 }
 
 impl_plan_tree_node_for_leaf! { LogicalValues }
-
-impl fmt::Display for LogicalValues {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("LogicalValues")
-            .field("rows", &self.rows)
-            .field("schema", &self.schema())
-            .finish()
+impl Distill for LogicalValues {
+    fn distill<'a>(&self) -> XmlNode<'a> {
+        let data = self.rows_pretty();
+        let fields = vec![("rows", data), ("schema", Pretty::debug(&self.schema()))];
+        childless_record("LogicalValues", fields)
     }
 }
 
@@ -121,6 +135,12 @@ impl ExprRewritable for LogicalValues {
     }
 }
 
+impl ExprVisitable for LogicalValues {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.rows.iter().flatten().for_each(|e| v.visit_expr(e));
+    }
+}
+
 impl ColPrunable for LogicalValues {
     fn prune_col(&self, required_cols: &[usize], _ctx: &mut ColumnPruningContext) -> PlanRef {
         let rows = self
@@ -132,7 +152,7 @@ impl ColPrunable for LogicalValues {
             .iter()
             .map(|i| self.schema().fields[*i].clone())
             .collect();
-        Self::new(rows, Schema { fields }, self.base.ctx.clone()).into()
+        Self::new(rows, Schema { fields }, self.base.ctx().clone()).into()
     }
 }
 
@@ -185,11 +205,9 @@ impl ToStream for LogicalValues {
 #[cfg(test)]
 mod tests {
 
-    use risingwave_common::catalog::Field;
-    use risingwave_common::types::{DataType, Datum};
+    use risingwave_common::types::Datum;
 
     use super::*;
-    use crate::expr::Literal;
     use crate::optimizer::optimizer_context::OptimizerContext;
 
     fn literal(val: i32) -> ExprImpl {

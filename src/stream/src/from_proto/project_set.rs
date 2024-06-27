@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,15 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_expr::table_function::ProjectSetSelectItem;
+use multimap::MultiMap;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::stream_plan::ProjectSetNode;
 
 use super::*;
-use crate::executor::ProjectSetExecutor;
+use crate::executor::{ProjectSetExecutor, ProjectSetSelectItem};
 
 pub struct ProjectSetExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for ProjectSetExecutorBuilder {
     type Node = ProjectSetNode;
 
@@ -28,24 +28,45 @@ impl ExecutorBuilder for ProjectSetExecutorBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         _store: impl StateStore,
-        _stream: &mut LocalStreamManagerCore,
-    ) -> StreamResult<BoxedExecutor> {
+    ) -> StreamResult<Executor> {
         let [input]: [_; 1] = params.input.try_into().unwrap();
         let select_list: Vec<_> = node
             .get_select_list()
             .iter()
             .map(|proto| {
-                ProjectSetSelectItem::from_prost(proto, params.env.config().developer.chunk_size)
+                ProjectSetSelectItem::from_prost(
+                    proto,
+                    params.eval_error_report.clone(),
+                    params.env.config().developer.chunk_size,
+                )
             })
             .try_collect()?;
+        let watermark_derivations = MultiMap::from_iter(
+            node.get_watermark_input_cols()
+                .iter()
+                .map(|idx| *idx as usize)
+                .zip_eq_fast(
+                    node.get_watermark_expr_indices()
+                        .iter()
+                        .map(|idx| *idx as usize),
+                ),
+        );
+        let nondecreasing_expr_indices = node
+            .get_nondecreasing_exprs()
+            .iter()
+            .map(|idx| *idx as usize)
+            .collect();
+
         let chunk_size = params.env.config().developer.chunk_size;
-        Ok(ProjectSetExecutor::new(
+        let exec = ProjectSetExecutor::new(
+            params.actor_context,
             input,
-            params.pk_indices,
             select_list,
-            params.executor_id,
             chunk_size,
-        )
-        .boxed())
+            watermark_derivations,
+            nondecreasing_expr_indices,
+            params.eval_error_report,
+        );
+        Ok((params.info, exec).into())
     }
 }

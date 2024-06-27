@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_expr::expr::build_from_prost;
+use risingwave_expr::expr::build_non_strict_from_prost;
 use risingwave_pb::stream_plan::FilterNode;
 
 use super::*;
@@ -20,7 +20,6 @@ use crate::executor::FilterExecutor;
 
 pub struct FilterExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for FilterExecutorBuilder {
     type Node = FilterNode;
 
@@ -28,17 +27,12 @@ impl ExecutorBuilder for FilterExecutorBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         _store: impl StateStore,
-        _stream: &mut LocalStreamManagerCore,
-    ) -> StreamResult<BoxedExecutor> {
+    ) -> StreamResult<Executor> {
         let [input]: [_; 1] = params.input.try_into().unwrap();
-        let search_condition = build_from_prost(node.get_search_condition()?)?;
+        let search_condition =
+            build_non_strict_from_prost(node.get_search_condition()?, params.eval_error_report)?;
 
-        Ok(FilterExecutor::new(
-            params.actor_context,
-            input,
-            search_condition,
-            params.executor_id,
-        )
-        .boxed())
+        let exec = FilterExecutor::new(params.actor_context, input, search_condition);
+        Ok((params.info, exec).into())
     }
 }

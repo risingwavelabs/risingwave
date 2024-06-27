@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,21 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::pin::pin;
-
 use futures::channel::{mpsc, oneshot};
+use futures::stream;
 use futures::stream::select_with_strategy;
-use futures::{stream, StreamExt};
-use futures_async_stream::try_stream;
-use risingwave_common::array::StreamChunk;
-use risingwave_common::catalog::Schema;
 
-use super::error::StreamExecutorError;
-use super::{
-    expect_first_barrier, Barrier, BoxedExecutor, Executor, ExecutorInfo, Message, MessageStream,
-};
-use crate::executor::PkIndices;
-use crate::task::{ActorId, CreateMviewProgress};
+use crate::executor::prelude::*;
+use crate::task::CreateMviewProgress;
 
 /// `ChainExecutor` is an executor that enables synchronization between the existing stream and
 /// newly appended executors. Currently, `ChainExecutor` is mainly used to implement MV on MV
@@ -36,15 +27,13 @@ use crate::task::{ActorId, CreateMviewProgress};
 /// [`RearrangedChainExecutor`] resolves the latency problem when creating MV with a huge amount of
 /// existing data, by rearranging the barrier from the upstream. Check the design doc for details.
 pub struct RearrangedChainExecutor {
-    snapshot: BoxedExecutor,
+    snapshot: Executor,
 
-    upstream: BoxedExecutor,
+    upstream: Executor,
 
     progress: CreateMviewProgress,
 
     actor_id: ActorId,
-
-    info: ExecutorInfo,
 }
 
 #[derive(Debug)]
@@ -85,19 +74,8 @@ impl RearrangedMessage {
 }
 
 impl RearrangedChainExecutor {
-    pub fn new(
-        snapshot: BoxedExecutor,
-        upstream: BoxedExecutor,
-        progress: CreateMviewProgress,
-        schema: Schema,
-        pk_indices: PkIndices,
-    ) -> Self {
+    pub fn new(snapshot: Executor, upstream: Executor, progress: CreateMviewProgress) -> Self {
         Self {
-            info: ExecutorInfo {
-                schema,
-                pk_indices,
-                identity: "RearrangedChain".to_owned(),
-            },
             snapshot,
             upstream,
             actor_id: progress.actor_id(),
@@ -135,6 +113,8 @@ impl RearrangedChainExecutor {
                 .unbounded_send(RearrangedMessage::PhantomBarrier(first_barrier))
                 .unwrap();
 
+            let mut processed_rows: u64 = 0;
+
             {
                 // 3. Rearrange stream, will yield the barriers polled from upstream to rearrange.
                 let rearranged_barrier =
@@ -161,8 +141,6 @@ impl RearrangedChainExecutor {
                 // Record the epoch of the last rearranged barrier we received.
                 let mut last_rearranged_epoch = create_epoch;
                 let mut stop_rearrange_tx = Some(stop_rearrange_tx);
-
-                let mut processed_rows: u64 = 0;
 
                 #[for_await]
                 for rearranged_msg in &mut rearranged {
@@ -208,9 +186,9 @@ impl RearrangedChainExecutor {
 
                 // 7. Rearranged task finished.
                 // The reason for finish must be that we told it to stop.
-                tracing::trace!(actor = self.actor_id, "rearranged task finished");
+                tracing::trace!("rearranged task finished");
                 if stop_rearrange_tx.is_some() {
-                    tracing::error!(actor = self.actor_id, "rearrangement finished passively");
+                    tracing::error!("rearrangement finished passively");
                 }
 
                 // 8. Consume remainings.
@@ -219,22 +197,24 @@ impl RearrangedChainExecutor {
                 #[for_await]
                 for msg in rearranged {
                     let msg: RearrangedMessage = msg?;
-                    let Some(msg) = msg.phantom_into() else { continue };
+                    let Some(msg) = msg.phantom_into() else {
+                        continue;
+                    };
                     if let Some(barrier) = msg.as_barrier() {
-                        self.progress.finish(barrier.epoch.curr);
+                        self.progress.finish(barrier.epoch.curr, processed_rows);
                     }
                     yield msg;
                 }
             }
 
             // Consume remaining upstream.
-            tracing::trace!(actor = self.actor_id, "begin to consume remaining upstream");
+            tracing::trace!("begin to consume remaining upstream");
 
             #[for_await]
             for msg in upstream {
                 let msg: Message = msg?;
                 if let Some(barrier) = msg.as_barrier() {
-                    self.progress.finish(barrier.epoch.curr);
+                    self.progress.finish(barrier.epoch.curr, processed_rows);
                 }
                 yield msg;
             }
@@ -292,25 +272,9 @@ impl RearrangedChainExecutor {
     }
 }
 
-impl Executor for RearrangedChainExecutor {
+impl Execute for RearrangedChainExecutor {
     fn execute(self: Box<Self>) -> super::BoxedMessageStream {
         self.execute_inner().boxed()
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.info.schema
-    }
-
-    fn pk_indices(&self) -> super::PkIndicesRef<'_> {
-        &self.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.info.identity
-    }
-
-    fn info(&self) -> ExecutorInfo {
-        self.info.clone()
     }
 }
 

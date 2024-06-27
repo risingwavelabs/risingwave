@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,8 @@ use std::collections::HashMap;
 use std::ffi::CStr;
 use std::io::{Error, ErrorKind, IoSlice, Result, Write};
 
-use byteorder::{BigEndian, ByteOrder};
+use anyhow::anyhow;
+use byteorder::{BigEndian, ByteOrder, NetworkEndian};
 /// Part of code learned from <https://github.com/zenithdb/zenith/blob/main/zenith_utils/src/pq_proto.rs>.
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use tokio::io::{AsyncRead, AsyncReadExt};
@@ -31,6 +32,7 @@ use crate::types::Row;
 #[derive(Debug)]
 pub enum FeMessage {
     Ssl,
+    Gss,
     Startup(FeStartupMessage),
     Query(FeQueryMessage),
     Parse(FeParseMessage),
@@ -43,6 +45,8 @@ pub enum FeMessage {
     CancelQuery(FeCancelMessage),
     Terminate,
     Flush,
+    // special msg to detect health check, which represents the client immediately closes the connection cleanly without sending any data.
+    HealthCheck,
 }
 
 #[derive(Debug)]
@@ -56,7 +60,7 @@ impl FeStartupMessage {
             Ok(v) => Ok(v.trim_end_matches('\0')),
             Err(err) => Err(Error::new(
                 ErrorKind::InvalidInput,
-                format!("Input end error: {}", err),
+                anyhow!(err).context("Input end error"),
             )),
         }?;
         let mut map = HashMap::new();
@@ -85,7 +89,7 @@ pub struct FeBindMessage {
     pub param_format_codes: Vec<i16>,
     pub result_format_codes: Vec<i16>,
 
-    pub params: Vec<Bytes>,
+    pub params: Vec<Option<Bytes>>,
     pub portal_name: Bytes,
     pub statement_name: Bytes,
 }
@@ -177,7 +181,11 @@ impl FeBindMessage {
         let params = (0..len)
             .map(|_| {
                 let val_len = buf.get_i32();
-                buf.copy_to_bytes(val_len as usize)
+                if val_len == -1 {
+                    None
+                } else {
+                    Some(buf.copy_to_bytes(val_len as usize))
+                }
             })
             .collect();
 
@@ -236,12 +244,12 @@ impl FeQueryMessage {
             Ok(cstr) => cstr.to_str().map_err(|err| {
                 Error::new(
                     ErrorKind::InvalidInput,
-                    format!("Invalid UTF-8 sequence: {}", err),
+                    anyhow!(err).context("Invalid UTF-8 sequence"),
                 )
             }),
             Err(err) => Err(Error::new(
                 ErrorKind::InvalidInput,
-                format!("Input end error: {}", err),
+                anyhow!(err).context("Input end error"),
             )),
         }
     }
@@ -289,7 +297,31 @@ impl FeMessage {
 impl FeStartupMessage {
     /// Read startup message from the stream.
     pub async fn read(stream: &mut (impl AsyncRead + Unpin)) -> Result<FeMessage> {
-        let len = stream.read_i32().await?;
+        let mut buffer1 = vec![0; 1];
+        let result = stream.read_exact(&mut buffer1).await;
+        let filled1 = match result {
+            Ok(n) => n,
+            Err(err) => {
+                // Detect whether it is a health check.
+                if err.kind() == ErrorKind::UnexpectedEof {
+                    return Ok(FeMessage::HealthCheck);
+                } else {
+                    return Err(err);
+                }
+            }
+        };
+        assert_eq!(filled1, 1);
+
+        let mut buffer2 = vec![0; 3];
+        let filled2 = stream.read_exact(&mut buffer2).await?;
+        assert_eq!(filled2, 3);
+
+        let mut buffer3 = BytesMut::with_capacity(4);
+        buffer3.put_slice(&buffer1);
+        buffer3.put_slice(&buffer2);
+
+        let len = NetworkEndian::read_i32(&buffer3);
+
         let protocol_num = stream.read_i32().await?;
         let payload_len = (len - 8) as usize;
         if payload_len >= isize::MAX as usize {
@@ -307,6 +339,7 @@ impl FeStartupMessage {
             196608 => Ok(FeMessage::Startup(FeStartupMessage::build_with_payload(
                 &payload,
             )?)),
+            80877104 => Ok(FeMessage::Gss),
             80877103 => Ok(FeMessage::Ssl),
             // Cancel request code.
             80877102 => FeCancelMessage::parse(Bytes::from(payload)),
@@ -351,7 +384,8 @@ pub enum BeMessage<'a> {
     CommandComplete(BeCommandCompleteMessage),
     NoticeResponse(&'a str),
     // Single byte - used in response to SSLRequest/GSSENCRequest.
-    EncryptionResponseYes,
+    EncryptionResponseSsl,
+    EncryptionResponseGss,
     EncryptionResponseNo,
     EmptyQueryResponse,
     ParseComplete,
@@ -362,7 +396,7 @@ pub enum BeMessage<'a> {
     NoData,
     DataRow(&'a Row),
     ParameterStatus(BeParameterStatusMessage<'a>),
-    ReadyForQuery,
+    ReadyForQuery(TransactionStatus),
     RowDescription(&'a [PgFieldDescriptor]),
     ErrorResponse(BoxedError),
     CloseComplete,
@@ -376,12 +410,20 @@ pub enum BeParameterStatusMessage<'a> {
     ClientEncoding(&'a str),
     StandardConformingString(&'a str),
     ServerVersion(&'a str),
+    ApplicationName(&'a str),
 }
 
 #[derive(Debug)]
 pub struct BeCommandCompleteMessage {
     pub stmt_type: StatementType,
     pub rows_cnt: i32,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum TransactionStatus {
+    Idle,
+    InTransaction,
+    InFailedTransaction,
 }
 
 impl<'a> BeMessage<'a> {
@@ -426,22 +468,6 @@ impl<'a> BeMessage<'a> {
             // +-----+-----------+----------+------+-----------+------+
             // | 'S' | int32 len | str name | '\0' | str value | '\0' |
             // +-----+-----------+----------+------+-----------+------+
-            //
-            // At present there is a hard-wired set of parameters for which
-            // ParameterStatus will be generated: they are:
-            //  server_version,
-            //  server_encoding,
-            //  client_encoding,
-            //  application_name,
-            //  is_superuser,
-            //  session_authorization,
-            //  DateStyle,
-            //  IntervalStyle,
-            //  TimeZone,
-            //  integer_datetimes,
-            //  standard_conforming_string
-            //
-            // See: https://www.postgresql.org/docs/9.2/static/protocol-flow.html#PROTOCOL-ASYNC.
             BeMessage::ParameterStatus(param) => {
                 use BeParameterStatusMessage::*;
                 let [name, value] = match param {
@@ -450,12 +476,13 @@ impl<'a> BeMessage<'a> {
                         [b"standard_conforming_strings", val.as_bytes()]
                     }
                     ServerVersion(val) => [b"server_version", val.as_bytes()],
+                    ApplicationName(val) => [b"application_name", val.as_bytes()],
                 };
 
                 // Parameter names and values are passed as null-terminated strings
                 let iov = &mut [name, b"\0", value, b"\0"].map(IoSlice::new);
-                let mut buffer = [0u8; 64]; // this should be enough
-                let cnt = buffer.as_mut().write_vectored(iov).unwrap();
+                let mut buffer = vec![];
+                let cnt = buffer.write_vectored(iov).unwrap();
 
                 buf.put_u8(b'S');
                 write_body(buf, |stream| {
@@ -502,7 +529,7 @@ impl<'a> BeMessage<'a> {
             // https://www.postgresql.org/docs/current/protocol-error-fields.html
             BeMessage::NoticeResponse(notice) => {
                 buf.put_u8(b'N');
-                write_err_or_notice(buf, &ErrorOrNoticeMessage::notice(notice));
+                write_err_or_notice(buf, &ErrorOrNoticeMessage::notice(notice))?;
             }
 
             // DataRow
@@ -547,7 +574,7 @@ impl<'a> BeMessage<'a> {
                 buf.put_u8(b'T');
                 write_body(buf, |buf| {
                     buf.put_i16(row_descs.len() as i16); // # of fields
-                    for pg_field in row_descs.iter() {
+                    for pg_field in *row_descs {
                         write_cstr(buf, pg_field.get_name().as_bytes())?;
                         buf.put_i32(pg_field.get_table_oid()); // table oid
                         buf.put_i16(pg_field.get_col_attr_num()); // attnum
@@ -563,11 +590,15 @@ impl<'a> BeMessage<'a> {
             // +-----+----------+---------------------------+
             // | 'Z' | int32(5) | byte1(transaction status) |
             // +-----+----------+---------------------------+
-            BeMessage::ReadyForQuery => {
+            BeMessage::ReadyForQuery(txn_status) => {
                 buf.put_u8(b'Z');
                 buf.put_i32(5);
                 // TODO: add transaction status
-                buf.put_u8(b'I');
+                buf.put_u8(match txn_status {
+                    TransactionStatus::Idle => b'I',
+                    TransactionStatus::InTransaction => b'T',
+                    TransactionStatus::InFailedTransaction => b'E',
+                });
             }
 
             BeMessage::ParseComplete => {
@@ -597,7 +628,7 @@ impl<'a> BeMessage<'a> {
                 buf.put_u8(b't');
                 write_body(buf, |buf| {
                     buf.put_i16(para_descs.len() as i16);
-                    for oid in para_descs.iter() {
+                    for oid in *para_descs {
                         buf.put_i32(*oid);
                     }
                     Ok(())
@@ -609,8 +640,12 @@ impl<'a> BeMessage<'a> {
                 write_body(buf, |_| Ok(())).unwrap();
             }
 
-            BeMessage::EncryptionResponseYes => {
+            BeMessage::EncryptionResponseSsl => {
                 buf.put_u8(b'S');
+            }
+
+            BeMessage::EncryptionResponseGss => {
+                buf.put_u8(b'G');
             }
 
             BeMessage::EncryptionResponseNo => {
@@ -627,13 +662,15 @@ impl<'a> BeMessage<'a> {
             }
 
             BeMessage::ErrorResponse(error) => {
+                use thiserror_ext::AsReport;
                 // For all the errors set Severity to Error and error code to
                 // 'internal error'.
 
                 // 'E' signalizes ErrorResponse messages
                 buf.put_u8(b'E');
-                let msg = error.to_string();
-                write_err_or_notice(buf, &ErrorOrNoticeMessage::internal_error(&msg));
+                // Format the error as a pretty report.
+                let msg = error.to_report_string_pretty();
+                write_err_or_notice(buf, &ErrorOrNoticeMessage::internal_error(&msg))?;
             }
 
             BeMessage::BackendKeyData((process_id, secret_key)) => {
@@ -660,7 +697,7 @@ macro_rules! from_usize {
         impl FromUsize for $t {
             #[inline]
             fn from_usize(x: usize) -> Result<$t> {
-                if x > <$t>::max_value() as usize {
+                if x > <$t>::MAX as usize {
                     Err(Error::new(ErrorKind::InvalidInput, "value too large to transmit").into())
                 } else {
                     Ok(x as $t)
@@ -703,7 +740,7 @@ fn write_cstr(buf: &mut BytesMut, s: &[u8]) -> Result<()> {
 }
 
 /// Safe write error or notice message.
-fn write_err_or_notice(buf: &mut BytesMut, msg: &ErrorOrNoticeMessage<'_>) {
+fn write_err_or_notice(buf: &mut BytesMut, msg: &ErrorOrNoticeMessage<'_>) -> Result<()> {
     write_body(buf, |buf| {
         buf.put_u8(b'S'); // severity
         write_cstr(buf, msg.severity.as_str().as_bytes())?;
@@ -717,7 +754,6 @@ fn write_err_or_notice(buf: &mut BytesMut, msg: &ErrorOrNoticeMessage<'_>) {
         buf.put_u8(0); // terminator
         Ok(())
     })
-    .unwrap();
 }
 
 #[cfg(test)]

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ops::Bound;
+use std::ops::Bound::Unbounded;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use std::time::Instant;
@@ -20,6 +22,7 @@ use anyhow::Result;
 use clap::Subcommand;
 use futures::future::try_join_all;
 use futures::{pin_mut, Future, StreamExt};
+use risingwave_common::row::{self, OwnedRow};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_storage::store::PrefetchOptions;
 use size::Size;
@@ -39,6 +42,8 @@ pub enum BenchCommands {
         #[clap(long, default_value_t = 1)]
         threads: usize,
         data_dir: Option<String>,
+        #[clap(short, long = "use-new-object-prefix-strategy", default_value = "true")]
+        use_new_object_prefix_strategy: bool,
     },
 }
 
@@ -83,9 +88,13 @@ pub async fn do_bench(context: &CtlContext, cmd: BenchCommands) -> Result<()> {
             mv_name,
             threads,
             data_dir,
+            use_new_object_prefix_strategy,
         } => {
             let (hummock, metrics) = context
-                .hummock_store_with_metrics(HummockServiceOpts::from_env(data_dir)?)
+                .hummock_store_with_metrics(HummockServiceOpts::from_env(
+                    data_dir,
+                    use_new_object_prefix_strategy,
+                )?)
                 .await?;
             let table = get_table_catalog(meta.clone(), mv_name).await?;
             let mut handlers = vec![];
@@ -102,8 +111,14 @@ pub async fn do_bench(context: &CtlContext, cmd: BenchCommands) -> Result<()> {
                         tb
                     };
                     loop {
+                        let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) =
+                            &(Unbounded, Unbounded);
                         let stream = state_table
-                            .iter(PrefetchOptions::new_for_exhaust_iter())
+                            .iter_with_prefix(
+                                row::empty(),
+                                sub_range,
+                                PrefetchOptions::prefetch_for_large_range_scan(),
+                            )
                             .await?;
                         pin_mut!(stream);
                         iter_cnt.fetch_add(1, std::sync::atomic::Ordering::Relaxed);

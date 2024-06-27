@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,34 +14,34 @@
 
 #![allow(clippy::derive_partial_eq_without_eq)]
 #![feature(trait_alias)]
-#![feature(binary_heap_drain_sorted)]
 #![feature(type_alias_impl_trait)]
-#![feature(drain_filter)]
+#![feature(extract_if)]
 #![feature(custom_test_frameworks)]
 #![feature(lint_reasons)]
 #![feature(map_try_insert)]
-#![feature(hash_drain_filter)]
-#![feature(is_some_and)]
-#![feature(btree_drain_filter)]
-#![feature(result_option_inspect)]
+#![feature(hash_extract_if)]
+#![feature(btree_extract_if)]
 #![feature(lazy_cell)]
 #![feature(let_chains)]
 #![feature(error_generic_member_access)]
-#![feature(provide_any)]
-#![cfg_attr(coverage, feature(no_coverage))]
+#![cfg_attr(coverage, feature(coverage_attribute))]
 
 pub mod error;
 pub mod meta_snapshot;
+pub mod meta_snapshot_v1;
+pub mod meta_snapshot_v2;
 pub mod storage;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::hash::Hasher;
 
 use itertools::Itertools;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
+use risingwave_common::catalog::TableId;
+use risingwave_common::RW_VERSION;
+use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{HummockSstableObjectId, HummockVersionId};
 use risingwave_pb::backup_service::{PbMetaSnapshotManifest, PbMetaSnapshotMetadata};
-use risingwave_pb::hummock::HummockVersion;
+use risingwave_pb::hummock::PbStateTableInfo;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{BackupError, BackupResult};
@@ -54,21 +54,34 @@ pub type MetaBackupJobId = u64;
 pub struct MetaSnapshotMetadata {
     pub id: MetaSnapshotId,
     pub hummock_version_id: HummockVersionId,
-    pub ssts: Vec<HummockSstableObjectId>,
+    pub ssts: HashSet<HummockSstableObjectId>,
     pub max_committed_epoch: u64,
     pub safe_epoch: u64,
+    #[serde(default)]
+    pub format_version: u32,
+    pub remarks: Option<String>,
+    #[serde(with = "table_id_key_map")]
+    pub state_table_info: HashMap<TableId, PbStateTableInfo>,
+    pub rw_version: Option<String>,
 }
 
 impl MetaSnapshotMetadata {
-    pub fn new(id: MetaSnapshotId, v: &HummockVersion) -> Self {
+    pub fn new(
+        id: MetaSnapshotId,
+        v: &HummockVersion,
+        format_version: u32,
+        remarks: Option<String>,
+    ) -> Self {
         Self {
             id,
             hummock_version_id: v.id,
-            ssts: HashSet::<HummockSstableObjectId>::from_iter(v.get_object_ids())
-                .into_iter()
-                .collect_vec(),
+            ssts: v.get_object_ids(),
             max_committed_epoch: v.max_committed_epoch,
-            safe_epoch: v.safe_epoch,
+            safe_epoch: v.visible_table_safe_epoch(),
+            format_version,
+            remarks,
+            state_table_info: v.state_table_info.info().clone(),
+            rw_version: Some(RW_VERSION.to_owned()),
         }
     }
 }
@@ -105,6 +118,14 @@ impl From<&MetaSnapshotMetadata> for PbMetaSnapshotMetadata {
             hummock_version_id: m.hummock_version_id,
             max_committed_epoch: m.max_committed_epoch,
             safe_epoch: m.safe_epoch,
+            format_version: Some(m.format_version),
+            remarks: m.remarks.clone(),
+            state_table_info: m
+                .state_table_info
+                .iter()
+                .map(|(t, i)| (t.table_id, i.clone()))
+                .collect(),
+            rw_version: m.rw_version.clone(),
         }
     }
 }
@@ -115,5 +136,42 @@ impl From<&MetaSnapshotManifest> for PbMetaSnapshotManifest {
             manifest_id: m.manifest_id,
             snapshot_metadata: m.snapshot_metadata.iter().map_into().collect_vec(),
         }
+    }
+}
+
+mod table_id_key_map {
+    use std::collections::HashMap;
+    use std::str::FromStr;
+
+    use risingwave_common::catalog::TableId;
+    use risingwave_pb::hummock::PbStateTableInfo;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<S>(
+        map: &HashMap<TableId, PbStateTableInfo>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let map_as_str: HashMap<String, &PbStateTableInfo> =
+            map.iter().map(|(k, v)| (k.to_string(), v)).collect();
+        map_as_str.serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D>(
+        deserializer: D,
+    ) -> Result<HashMap<TableId, PbStateTableInfo>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let map_as_str: HashMap<String, PbStateTableInfo> = HashMap::deserialize(deserializer)?;
+        map_as_str
+            .into_iter()
+            .map(|(k, v)| {
+                let key = u32::from_str(&k).map_err(serde::de::Error::custom)?;
+                Ok((TableId::new(key), v))
+            })
+            .collect()
     }
 }

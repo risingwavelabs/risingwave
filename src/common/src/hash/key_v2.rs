@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,17 +20,17 @@ use bytes::BufMut;
 use educe::Educe;
 use either::{for_both, Either};
 use itertools::Itertools;
+use risingwave_common_estimate_size::EstimateSize;
 use tinyvec::ArrayVec;
 
 use super::{HeapNullBitmap, NullBitmap, XxHash64HashCode};
-use crate::array::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayResult, DataChunk};
-use crate::estimate_size::EstimateSize;
-use crate::for_all_type_pairs;
+use crate::array::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayResult, DataChunk};
 use crate::hash::{HashKeyDe, HashKeySer};
 use crate::row::OwnedRow;
 use crate::types::{DataType, Datum, ScalarImpl};
 use crate::util::hash_util::XxHash64Builder;
 use crate::util::iter_util::ZipEqFast;
+use crate::{dispatch_array_builder_variants, dispatch_array_variants, dispatch_data_types};
 
 /// The storage where the hash key resides in memory.
 pub trait KeyStorage: 'static {
@@ -207,20 +207,9 @@ impl<'a, S: KeyStorage, N: NullBitmap> Deserializer<'a, S, N> {
 
     /// Deserializes a type-erased datum from the hash key.
     fn deserialize_impl(&mut self, data_type: &DataType) -> Datum {
-        macro_rules! deserialize {
-            ($( { $DataType:ident, $PhysicalType:ident }),*) => {
-                match data_type {
-                    $(
-                        DataType::$DataType { .. } => {
-                            let datum = self.deserialize(data_type);
-                            datum.map(ScalarImpl::$PhysicalType)
-                        },
-                    )*
-                }
-            }
-        }
-
-        for_all_type_pairs! { deserialize }
+        dispatch_data_types!(data_type, [S = Scalar], {
+            self.deserialize::<S>(data_type).map(ScalarImpl::from)
+        })
     }
 }
 
@@ -235,9 +224,8 @@ pub trait HashKey:
     // TODO: rename to `NullBitmap` and note that high bit represents null!
     type Bitmap: NullBitmap;
 
-    // TODO: remove result and rename to `build_many`
     /// Build hash keys from the given `data_chunk` with `column_indices` in a batch.
-    fn build(column_indices: &[usize], data_chunk: &DataChunk) -> ArrayResult<Vec<Self>>;
+    fn build_many(column_indices: &[usize], data_chunk: &DataChunk) -> Vec<Self>;
 
     /// Deserializes the hash key into a row.
     fn deserialize(&self, data_types: &[DataType]) -> ArrayResult<OwnedRow>;
@@ -299,15 +287,13 @@ impl<S: KeyStorage, N: NullBitmap> EstimateSize for HashKeyImpl<S, N> {
 impl<S: KeyStorage, N: NullBitmap> HashKey for HashKeyImpl<S, N> {
     type Bitmap = N;
 
-    fn build(column_indices: &[usize], data_chunk: &DataChunk) -> ArrayResult<Vec<Self>> {
+    fn build_many(column_indices: &[usize], data_chunk: &DataChunk) -> Vec<Self> {
         let hash_codes = data_chunk.get_hash_values(column_indices, XxHash64Builder);
 
         let mut serializers = {
             let buffers = if S::Buffer::alloc() {
                 // Pre-estimate the key size to avoid reallocation as much as possible.
-                // FIXME(bugen): hash key encoding is not value encoding, the implementation needs
-                // to be revisited and updated.
-                let estimated_key_sizes = data_chunk.compute_key_sizes_by_columns(column_indices);
+                let estimated_key_sizes = data_chunk.estimate_hash_key_sizes(column_indices);
 
                 Either::Left(
                     estimated_key_sizes
@@ -328,18 +314,18 @@ impl<S: KeyStorage, N: NullBitmap> HashKey for HashKeyImpl<S, N> {
         };
 
         for &i in column_indices {
-            let array = data_chunk.column_at(i).array_ref();
+            let array = data_chunk.column_at(i).as_ref();
 
             // Dispatch types once to accelerate the inner call.
-            dispatch_all_variants!(array, ArrayImpl, array, {
-                for (scalar, serializer) in array.iter().zip_eq_fast(&mut serializers) {
-                    serializer.serialize(scalar);
+            dispatch_array_variants!(array, array, {
+                for i in data_chunk.visibility().iter_ones() {
+                    // SAFETY(value_at_unchecked): the idx is always in bound.
+                    unsafe { serializers[i].serialize(array.value_at_unchecked(i)) }
                 }
             });
         }
 
-        let hash_keys = serializers.into_iter().map(|s| s.finish()).collect();
-        Ok(hash_keys)
+        serializers.into_iter().map(|s| s.finish()).collect()
     }
 
     fn deserialize(&self, data_types: &[DataType]) -> ArrayResult<OwnedRow> {
@@ -363,7 +349,7 @@ impl<S: KeyStorage, N: NullBitmap> HashKey for HashKeyImpl<S, N> {
 
         for (data_type, array_builder) in data_types.iter().zip_eq_fast(array_builders.iter_mut()) {
             // Dispatch types once to accelerate the inner call.
-            dispatch_all_variants!(array_builder, ArrayBuilderImpl, array_builder, {
+            dispatch_array_builder_variants!(array_builder, array_builder, {
                 let datum = deserializer.deserialize(data_type);
                 array_builder.append_owned(datum);
             });
@@ -374,6 +360,39 @@ impl<S: KeyStorage, N: NullBitmap> HashKey for HashKeyImpl<S, N> {
 
     fn null_bitmap(&self) -> &Self::Bitmap {
         &self.null_bitmap
+    }
+}
+
+#[easy_ext::ext]
+impl DataChunk {
+    fn estimate_hash_key_sizes(&self, column_indices: &[usize]) -> Vec<usize> {
+        let mut estimated_column_indices = Vec::new();
+        let mut exact_size = 0;
+
+        for &i in column_indices {
+            dispatch_array_variants!(&*self.columns()[i], [S = ScalarRef], {
+                match S::exact_size() {
+                    Some(size) => exact_size += size,
+                    None => estimated_column_indices.push(i),
+                }
+            })
+        }
+        let mut sizes = vec![exact_size; self.capacity()];
+
+        for i in estimated_column_indices {
+            dispatch_array_variants!(&*self.columns()[i], col, {
+                for i in self.visibility().iter_ones() {
+                    // SAFETY(value_at_unchecked): the idx is always in bound.
+                    unsafe {
+                        if let Some(scalar) = col.value_at_unchecked(i) {
+                            sizes[i] += HashKeySer::estimated_size(scalar);
+                        }
+                    }
+                }
+            })
+        }
+
+        sizes
     }
 }
 

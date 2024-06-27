@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,8 +16,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use risingwave_common_service::observer_manager::{ObserverState, SubscribeHummock};
+use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
+use risingwave_hummock_trace::TraceSpan;
 use risingwave_pb::catalog::Table;
-use risingwave_pb::hummock::version_update_payload;
 use risingwave_pb::meta::relation::RelationInfo;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::SubscribeResponse;
@@ -25,14 +26,14 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use crate::filter_key_extractor::{FilterKeyExtractorImpl, FilterKeyExtractorManagerRef};
 use crate::hummock::backup_reader::BackupReaderRef;
-use crate::hummock::event_handler::HummockEvent;
+use crate::hummock::event_handler::HummockVersionUpdate;
 use crate::hummock::write_limiter::WriteLimiterRef;
 
 pub struct HummockObserverNode {
     filter_key_extractor_manager: FilterKeyExtractorManagerRef,
     backup_reader: BackupReaderRef,
     write_limiter: WriteLimiterRef,
-    version_update_sender: UnboundedSender<HummockEvent>,
+    version_update_sender: UnboundedSender<HummockVersionUpdate>,
     version: u64,
 }
 
@@ -43,6 +44,9 @@ impl ObserverState for HummockObserverNode {
         let Some(info) = resp.info.as_ref() else {
             return;
         };
+
+        let _span: risingwave_hummock_trace::MayTraceSpan =
+            TraceSpan::new_meta_message_span(resp.clone());
 
         match info.to_owned() {
             Info::RelationGroup(relation_group) => {
@@ -67,11 +71,15 @@ impl ObserverState for HummockObserverNode {
             Info::HummockVersionDeltas(hummock_version_deltas) => {
                 let _ = self
                     .version_update_sender
-                    .send(HummockEvent::VersionUpdate(
-                        version_update_payload::Payload::VersionDeltas(hummock_version_deltas),
+                    .send(HummockVersionUpdate::VersionDeltas(
+                        hummock_version_deltas
+                            .version_deltas
+                            .iter()
+                            .map(HummockVersionDelta::from_rpc_protobuf)
+                            .collect(),
                     ))
                     .inspect_err(|e| {
-                        tracing::error!("unable to send version delta: {:?}", e);
+                        tracing::error!(event = ?e.0, "unable to send version delta");
                     });
             }
 
@@ -91,6 +99,9 @@ impl ObserverState for HummockObserverNode {
     }
 
     fn handle_initialization_notification(&mut self, resp: SubscribeResponse) {
+        let _span: risingwave_hummock_trace::MayTraceSpan =
+            TraceSpan::new_meta_message_span(resp.clone());
+
         let Some(Info::Snapshot(snapshot)) = resp.info else {
             unreachable!();
         };
@@ -110,15 +121,15 @@ impl ObserverState for HummockObserverNode {
         );
         let _ = self
             .version_update_sender
-            .send(HummockEvent::VersionUpdate(
-                version_update_payload::Payload::PinnedVersion(
-                    snapshot
+            .send(HummockVersionUpdate::PinnedVersion(Box::new(
+                HummockVersion::from_rpc_protobuf(
+                    &snapshot
                         .hummock_version
                         .expect("should get hummock version"),
                 ),
-            ))
+            )))
             .inspect_err(|e| {
-                tracing::error!("unable to send full version: {:?}", e);
+                tracing::error!(event = ?e.0, "unable to send full version");
             });
         let snapshot_version = snapshot.version.unwrap();
         self.version = snapshot_version.catalog_version;
@@ -129,7 +140,7 @@ impl HummockObserverNode {
     pub fn new(
         filter_key_extractor_manager: FilterKeyExtractorManagerRef,
         backup_reader: BackupReaderRef,
-        version_update_sender: UnboundedSender<HummockEvent>,
+        version_update_sender: UnboundedSender<HummockVersionUpdate>,
         write_limiter: WriteLimiterRef,
     ) -> Self {
         Self {

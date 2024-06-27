@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,21 +12,41 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::types::DataType;
-
-use crate::catalog::system_catalog::SystemCatalogColumnsDef;
+use risingwave_common::types::{Fields, Timestamptz};
+use risingwave_frontend_macro::system_catalog;
 
 /// The catalog `pg_roles` provides access to information about database roles. This is simply a
 /// publicly readable view of `pg_authid` that blanks out the password field.
 /// Ref: [`https://www.postgresql.org/docs/current/view-pg-roles.html`]
-pub const PG_ROLES_TABLE_NAME: &str = "pg_roles";
-pub const PG_ROLES_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
-    (DataType::Int32, "oid"),
-    (DataType::Varchar, "rolname"),
-    (DataType::Boolean, "rolsuper"),
-    (DataType::Boolean, "rolinherit"),
-    (DataType::Boolean, "rolcreaterole"),
-    (DataType::Boolean, "rolcreatedb"),
-    (DataType::Boolean, "rolcanlogin"),
-    (DataType::Varchar, "rolpassword"),
-];
+#[system_catalog(
+    view,
+    "pg_catalog.pg_roles",
+    "SELECT id AS oid,
+        name AS rolname,
+        is_super AS rolsuper,
+        true AS rolinherit,
+        create_user AS rolcreaterole,
+        create_db AS rolcreatedb,
+        can_login AS rolcanlogin,
+        true AS rolreplication,
+        -1 AS rolconnlimit,
+        NULL::timestamptz AS rolvaliduntil,
+        true AS rolbypassrls,
+        '********' AS rolpassword
+    FROM rw_catalog.rw_users"
+)]
+#[derive(Fields)]
+struct PgRule {
+    oid: i32,
+    rolname: String,
+    rolsuper: bool,
+    rolinherit: bool,
+    rolcreaterole: bool,
+    rolcreatedb: bool,
+    rolcanlogin: bool,
+    rolreplication: bool,
+    rolconnlimit: i32,
+    rolvaliduntil: Timestamptz,
+    rolbypassrls: bool,
+    rolpassword: String,
+}

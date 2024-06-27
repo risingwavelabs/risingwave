@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,113 +16,250 @@ package com.risingwave.connector.sink.jdbc;
 
 import static org.junit.Assert.*;
 
-import com.google.common.collect.Iterators;
+import com.google.common.collect.Lists;
 import com.risingwave.connector.JDBCSink;
 import com.risingwave.connector.JDBCSinkConfig;
 import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.ArraySinkRow;
+import com.risingwave.proto.Data;
+import com.risingwave.proto.Data.DataType.TypeName;
 import com.risingwave.proto.Data.Op;
 import java.sql.*;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.util.List;
 import org.junit.Test;
 import org.testcontainers.containers.JdbcDatabaseContainer;
 import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.containers.PostgreSQLContainer;
 
 public class JDBCSinkTest {
-    static void createMockTable(String jdbcUrl, String tableName) throws SQLException {
+    private enum TestType {
+        TestPg,
+        TestMySQL,
+    }
+
+    private static final String pgCreateStmt =
+            "CREATE TABLE %s (id INT PRIMARY KEY, v_varchar VARCHAR(255), v_date DATE, v_time TIME, v_timestamp TIMESTAMP, v_timestamptz TIMESTAMPTZ, v_jsonb JSONB, v_bytea BYTEA)";
+    private static final String mysqlCreateStmt =
+            "CREATE TABLE %s (id INT PRIMARY KEY, v_varchar VARCHAR(255), v_date DATE, v_time TIME(6), v_timestamp DATETIME(6), v_timestamptz TIMESTAMP(6), v_jsonb JSON, v_bytea BLOB)";
+
+    static void createMockTable(String jdbcUrl, String tableName, TestType testType)
+            throws SQLException {
         Connection conn = DriverManager.getConnection(jdbcUrl);
         conn.setAutoCommit(false);
         Statement stmt = conn.createStatement();
         stmt.execute("DROP TABLE IF EXISTS " + tableName);
-        stmt.execute("create table " + tableName + " (id int primary key, name varchar(255))");
+        if (testType == TestType.TestPg) {
+            stmt.execute(String.format(pgCreateStmt, tableName));
+        } else {
+            stmt.execute(String.format(mysqlCreateStmt, tableName));
+        }
         conn.commit();
         conn.close();
     }
 
-    static void testJDBCSync(JdbcDatabaseContainer<?> container) throws SQLException {
-        String tableName = "test";
-        createMockTable(container.getJdbcUrl(), tableName);
-
-        JDBCSink sink =
-                new JDBCSink(
-                        new JDBCSinkConfig(container.getJdbcUrl(), tableName, "upsert"),
-                        TableSchema.getMockTableSchema());
-        assertEquals(tableName, sink.getTableName());
-        Connection conn = sink.getConn();
-
-        sink.write(Iterators.forArray(new ArraySinkRow(Op.INSERT, 1, "Alice")));
-        sink.sync();
-
-        Statement stmt = conn.createStatement();
-        ResultSet rs = stmt.executeQuery("SELECT * FROM test");
-        int count;
-        for (count = 0; rs.next(); ) {
-            count++;
-        }
-        assertEquals(1, count);
-
-        sink.write(Iterators.forArray(new ArraySinkRow(Op.INSERT, 2, "Bob")));
-        sink.sync();
-        stmt = conn.createStatement();
-        rs = stmt.executeQuery("SELECT * FROM test");
-        for (count = 0; rs.next(); ) {
-            count++;
-        }
-        assertEquals(2, count);
-
-        sink.sync();
-        sink.drop();
+    static TableSchema getTestTableSchema() {
+        return new TableSchema(
+                Lists.newArrayList(
+                        "id",
+                        "v_varchar",
+                        "v_date",
+                        "v_time",
+                        "v_timestamp",
+                        "v_timestamptz",
+                        "v_jsonb",
+                        "v_bytea"),
+                Lists.newArrayList(
+                        Data.DataType.newBuilder().setTypeName(TypeName.INT32).build(),
+                        Data.DataType.newBuilder().setTypeName(TypeName.VARCHAR).build(),
+                        Data.DataType.newBuilder().setTypeName(TypeName.DATE).build(),
+                        Data.DataType.newBuilder().setTypeName(TypeName.TIME).build(),
+                        Data.DataType.newBuilder().setTypeName(TypeName.TIMESTAMP).build(),
+                        Data.DataType.newBuilder().setTypeName(TypeName.TIMESTAMPTZ).build(),
+                        Data.DataType.newBuilder().setTypeName(TypeName.JSONB).build(),
+                        Data.DataType.newBuilder().setTypeName(TypeName.BYTEA).build()),
+                Lists.newArrayList("id"));
     }
 
-    static void testJDBCWrite(JdbcDatabaseContainer<?> container) throws SQLException {
-        String tableName = "test";
-        createMockTable(container.getJdbcUrl(), tableName);
-
+    static void testJDBCSync(JdbcDatabaseContainer<?> container, TestType testType)
+            throws SQLException {
+        String tableName = "test2";
+        createMockTable(container.getJdbcUrl(), tableName, testType);
         JDBCSink sink =
                 new JDBCSink(
                         new JDBCSinkConfig(container.getJdbcUrl(), tableName, "upsert"),
-                        TableSchema.getMockTableSchema());
+                        getTestTableSchema());
         assertEquals(tableName, sink.getTableName());
-        Connection conn = sink.getConn();
+        Connection conn = DriverManager.getConnection(container.getJdbcUrl());
 
         sink.write(
-                Iterators.forArray(
-                        new ArraySinkRow(Op.INSERT, 1, "Alice"),
-                        new ArraySinkRow(Op.INSERT, 2, "Bob"),
-                        new ArraySinkRow(Op.UPDATE_DELETE, 1, "Alice"),
-                        new ArraySinkRow(Op.UPDATE_INSERT, 1, "Clare"),
-                        new ArraySinkRow(Op.DELETE, 2, "Bob")));
-        sink.sync();
+                List.of(
+                        new ArraySinkRow(
+                                Op.INSERT,
+                                1,
+                                "Alice",
+                                LocalDate.ofEpochDay(0),
+                                LocalTime.of(0, 0, 0, 1000),
+                                LocalDateTime.of(1970, 1, 1, 0, 0, 0, 1000),
+                                OffsetDateTime.of(1970, 1, 1, 0, 0, 1, 1000, ZoneOffset.UTC),
+                                "{\"key\": \"password\", \"value\": \"Singularity123\"}",
+                                "I want to sleep".getBytes())));
+        sink.barrier(true);
 
         Statement stmt = conn.createStatement();
-        ResultSet rs = stmt.executeQuery("SELECT * FROM test");
-        rs.next();
+        try (var rs = stmt.executeQuery(String.format("SELECT * FROM %s", tableName))) {
+            int count;
+            for (count = 0; rs.next(); ) {
+                count++;
+            }
+            assertEquals(1, count);
+        }
 
-        // check if rows are inserted
-        assertEquals(1, rs.getInt(1));
-        assertEquals("Clare", rs.getString(2));
-        assertFalse(rs.next());
-
-        sink.sync();
+        sink.write(
+                List.of(
+                        new ArraySinkRow(
+                                Op.INSERT,
+                                2,
+                                "Bob",
+                                LocalDate.ofEpochDay(0),
+                                LocalTime.of(0, 0, 0, 1000),
+                                LocalDateTime.of(1970, 1, 1, 0, 0, 0, 1000),
+                                OffsetDateTime.of(1970, 1, 1, 0, 0, 1, 1000, ZoneOffset.UTC),
+                                "{\"key\": \"password\", \"value\": \"Singularity123\"}",
+                                "I want to sleep".getBytes())));
+        sink.barrier(true);
+        try (var rs = stmt.executeQuery(String.format("SELECT * FROM %s", tableName))) {
+            int count;
+            for (count = 0; rs.next(); ) {
+                count++;
+            }
+            assertEquals(2, count);
+        }
         stmt.close();
+        conn.close();
+
+        sink.barrier(true);
+        sink.drop();
     }
 
-    static void testJDBCDrop(JdbcDatabaseContainer<?> container) throws SQLException {
-        String tableName = "test";
-        createMockTable(container.getJdbcUrl(), tableName);
+    static void testJDBCWrite(JdbcDatabaseContainer<?> container, TestType testType)
+            throws SQLException {
+        String tableName = "test1";
+        createMockTable(container.getJdbcUrl(), tableName, testType);
 
         JDBCSink sink =
                 new JDBCSink(
                         new JDBCSinkConfig(container.getJdbcUrl(), tableName, "upsert"),
-                        TableSchema.getMockTableSchema());
+                        getTestTableSchema());
+        assertEquals(tableName, sink.getTableName());
+        Connection conn = DriverManager.getConnection(container.getJdbcUrl());
+        Statement stmt = conn.createStatement();
+
+        sink.write(
+                List.of(
+                        new ArraySinkRow(
+                                Op.INSERT,
+                                1,
+                                "Alice",
+                                LocalDate.ofEpochDay(0),
+                                LocalTime.of(0, 0, 0, 1000),
+                                LocalDateTime.of(1970, 1, 1, 0, 0, 0, 1000),
+                                OffsetDateTime.of(1970, 1, 1, 0, 0, 1, 1000, ZoneOffset.UTC),
+                                "{\"key\": \"password\", \"value\": \"Singularity123\"}",
+                                "I want to sleep".getBytes()),
+                        new ArraySinkRow(
+                                Op.INSERT,
+                                2,
+                                "Bob",
+                                LocalDate.ofEpochDay(0),
+                                LocalTime.of(0, 0, 0, 1000),
+                                LocalDateTime.of(1970, 1, 1, 0, 0, 0, 1000),
+                                OffsetDateTime.of(1970, 1, 1, 0, 0, 1, 1000, ZoneOffset.UTC),
+                                "{\"key\": \"password\", \"value\": \"Singularity123\"}",
+                                "I want to sleep".getBytes())));
+
+        // chunk will commit after sink.write()
+        try (var rs = stmt.executeQuery(String.format("SELECT COUNT(*) FROM %s", tableName))) {
+            assertTrue(rs.next());
+            assertEquals(2, rs.getInt(1));
+        }
+
+        sink.write(
+                List.of(
+                        new ArraySinkRow(
+                                Op.UPDATE_DELETE,
+                                1,
+                                "Alice",
+                                LocalDate.ofEpochDay(0),
+                                LocalTime.of(0, 0, 0, 1000),
+                                LocalDateTime.of(1970, 1, 1, 0, 0, 0, 1000),
+                                OffsetDateTime.of(1970, 1, 1, 0, 0, 1, 1000, ZoneOffset.UTC),
+                                "{\"key\": \"password\", \"value\": \"Singularity123\"}",
+                                "I want to sleep".getBytes()),
+                        new ArraySinkRow(
+                                Op.UPDATE_INSERT,
+                                1,
+                                "Clare",
+                                LocalDate.ofEpochDay(0),
+                                LocalTime.of(0, 0, 0, 1000),
+                                LocalDateTime.of(1970, 1, 1, 0, 0, 0, 1000),
+                                OffsetDateTime.of(1970, 1, 1, 0, 0, 1, 1000, ZoneOffset.UTC),
+                                "{\"key\": \"password\", \"value\": \"Singularity123123123123\"}",
+                                "I want to eat".getBytes()),
+                        new ArraySinkRow(
+                                Op.DELETE,
+                                2,
+                                "Bob",
+                                LocalDate.ofEpochDay(0),
+                                LocalTime.of(0, 0, 0, 1000),
+                                LocalDateTime.of(1970, 1, 1, 0, 0, 0, 1000),
+                                OffsetDateTime.of(1970, 1, 1, 0, 0, 1, 1000, ZoneOffset.UTC),
+                                "{\"key\": \"password\", \"value\": \"Singularity123\"}",
+                                "I want to sleep".getBytes())));
+
+        try (var rs = stmt.executeQuery(String.format("SELECT * FROM %s", tableName))) {
+            assertTrue(rs.next());
+
+            // check if rows are inserted
+            assertEquals(1, rs.getInt(1));
+            assertEquals("Clare", rs.getString(2));
+            assertEquals(LocalDate.ofEpochDay(0), rs.getObject(3, LocalDate.class));
+            assertEquals(LocalTime.of(0, 0, 0, 1000), rs.getObject(4, LocalTime.class));
+            assertEquals(
+                    LocalDateTime.of(1970, 1, 1, 0, 0, 0, 1000),
+                    rs.getObject(5, LocalDateTime.class));
+            assertEquals(
+                    OffsetDateTime.of(1970, 1, 1, 0, 0, 1, 1000, ZoneOffset.UTC),
+                    rs.getObject(6, OffsetDateTime.class).toInstant().atOffset(ZoneOffset.UTC));
+            assertEquals(
+                    "{\"key\": \"password\", \"value\": \"Singularity123123123123\"}",
+                    rs.getString(7));
+            assertEquals("I want to eat", new String(rs.getBytes(8)));
+            assertFalse(rs.next());
+        }
+
+        sink.barrier(true);
+        stmt.close();
+        conn.close();
+    }
+
+    static void testJDBCDrop(JdbcDatabaseContainer<?> container, TestType testType)
+            throws SQLException {
+        String tableName = "test3";
+        createMockTable(container.getJdbcUrl(), tableName, testType);
+
+        JDBCSink sink =
+                new JDBCSink(
+                        new JDBCSinkConfig(container.getJdbcUrl(), tableName, "upsert"),
+                        getTestTableSchema());
         assertEquals(tableName, sink.getTableName());
         Connection conn = sink.getConn();
         sink.drop();
-        try {
-            assertTrue(conn.isClosed());
-        } catch (SQLException e) {
-            fail(String.valueOf(e));
-        }
+        assertTrue(conn.isClosed());
     }
 
     @Test
@@ -136,16 +273,16 @@ public class JDBCSinkTest {
                         .withUrlParam("user", "postgres")
                         .withUrlParam("password", "password");
         pg.start();
-        testJDBCSync(pg);
-        testJDBCWrite(pg);
-        testJDBCDrop(pg);
+        testJDBCWrite(pg, TestType.TestPg);
+        testJDBCSync(pg, TestType.TestPg);
+        testJDBCDrop(pg, TestType.TestPg);
         pg.stop();
     }
 
     @Test
     public void testMySQL() throws SQLException {
         MySQLContainer mysql =
-                new MySQLContainer<>("mysql:8")
+                new MySQLContainer<>("mysql:8.0")
                         .withDatabaseName("test")
                         .withUsername("postgres")
                         .withPassword("password")
@@ -153,9 +290,9 @@ public class JDBCSinkTest {
                         .withUrlParam("user", "postgres")
                         .withUrlParam("password", "password");
         mysql.start();
-        testJDBCSync(mysql);
-        testJDBCWrite(mysql);
-        testJDBCDrop(mysql);
+        testJDBCWrite(mysql, TestType.TestMySQL);
+        testJDBCSync(mysql, TestType.TestMySQL);
+        testJDBCDrop(mysql, TestType.TestMySQL);
         mysql.stop();
     }
 }

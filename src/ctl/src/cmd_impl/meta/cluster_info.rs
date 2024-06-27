@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -37,6 +37,7 @@ pub async fn source_split_info(context: &CtlContext) -> anyhow::Result<()> {
         source_infos: _,
         table_fragments,
         mut actor_splits,
+        revision: _,
     } = get_cluster_info(context).await?;
 
     for table_fragment in &table_fragments {
@@ -47,25 +48,30 @@ pub async fn source_split_info(context: &CtlContext) -> anyhow::Result<()> {
         println!("Table #{}", table_fragment.table_id);
 
         for fragment in table_fragment.fragments.values() {
-            if fragment.fragment_type_mask & FragmentTypeFlag::Source as u32 == 0 {
+            let fragment_type_mask = fragment.fragment_type_mask;
+            if fragment_type_mask & FragmentTypeFlag::Source as u32 == 0
+                || fragment_type_mask & FragmentTypeFlag::Dml as u32 != 0
+            {
+                // skip dummy source for dml fragment
                 continue;
             }
 
             println!("\tFragment #{}", fragment.fragment_id);
             for actor in &fragment.actors {
-                let ConnectorSplits { splits } = actor_splits.remove(&actor.actor_id).unwrap();
-                let splits = splits
-                    .iter()
-                    .map(|split| SplitImpl::try_from(split).unwrap())
-                    .map(|split| split.id())
-                    .collect_vec();
+                if let Some(ConnectorSplits { splits }) = actor_splits.remove(&actor.actor_id) {
+                    let splits = splits
+                        .iter()
+                        .map(|split| SplitImpl::try_from(split).unwrap())
+                        .map(|split| split.id())
+                        .collect_vec();
 
-                println!(
-                    "\t\tActor #{} ({}): [{}]",
-                    actor.actor_id,
-                    splits.len(),
-                    splits.join(",")
-                );
+                    println!(
+                        "\t\tActor #{:<3} ({}): [{}]",
+                        actor.actor_id,
+                        splits.len(),
+                        splits.join(",")
+                    );
+                }
             }
         }
     }
@@ -79,6 +85,7 @@ pub async fn cluster_info(context: &CtlContext) -> anyhow::Result<()> {
         table_fragments,
         actor_splits: _,
         source_infos: _,
+        revision,
     } = get_cluster_info(context).await?;
 
     // Fragment ID -> [Parallel Unit ID -> (Parallel Unit, Actor)]
@@ -146,10 +153,16 @@ pub async fn cluster_info(context: &CtlContext) -> anyhow::Result<()> {
             "".into()
         } else {
             last_worker_id = Some(worker.id);
+            let cordoned = if worker.get_property().map_or(true, |p| p.is_unschedulable) {
+                " (cordoned)"
+            } else {
+                ""
+            };
             Cell::new(format!(
-                "{}@{}",
+                "{}@{}{}",
                 worker.id,
-                HostAddr::from(worker.get_host().unwrap())
+                HostAddr::from(worker.get_host().unwrap()),
+                cordoned,
             ))
             .add_attribute(Attribute::Bold)
         });
@@ -167,6 +180,7 @@ pub async fn cluster_info(context: &CtlContext) -> anyhow::Result<()> {
     }
 
     println!("{table}");
+    println!("Revision: {}", revision);
 
     Ok(())
 }

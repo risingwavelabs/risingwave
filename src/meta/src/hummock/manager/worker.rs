@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,18 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::time::Duration;
-
 use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_pb::common::WorkerType;
 use sync_point::sync_point;
+use thiserror_ext::AsReport;
 use tokio::task::JoinHandle;
-use tokio_retry::strategy::{jitter, ExponentialBackoff};
 
-use crate::hummock::utils::RetryableError;
 use crate::hummock::{HummockManager, HummockManagerRef};
 use crate::manager::LocalNotification;
-use crate::storage::MetaStore;
 
 pub type HummockManagerEventSender = tokio::sync::mpsc::UnboundedSender<HummockManagerEvent>;
 pub type HummockManagerEventReceiver = tokio::sync::mpsc::UnboundedReceiver<HummockManagerEvent>;
@@ -34,12 +30,9 @@ pub enum HummockManagerEvent {
     Shutdown,
 }
 
-impl<S> HummockManager<S>
-where
-    S: MetaStore,
-{
-    pub(crate) async fn start_worker(
-        self: &HummockManagerRef<S>,
+impl HummockManager {
+    pub async fn start_worker(
+        self: &HummockManagerRef,
         mut receiver: HummockManagerEventReceiver,
     ) -> JoinHandle<()> {
         let (local_notification_tx, mut local_notification_rx) =
@@ -99,61 +92,21 @@ where
     }
 
     async fn handle_local_notification(&self, notification: LocalNotification) {
-        let retry_strategy = ExponentialBackoff::from_millis(10)
-            .max_delay(Duration::from_secs(60))
-            .map(jitter);
-        match notification {
-            LocalNotification::WorkerNodeIsDeleted(worker_node) => {
-                if worker_node.get_type().unwrap() == WorkerType::Compactor {
-                    self.compactor_manager.remove_compactor(worker_node.id);
-                }
-                tokio_retry::RetryIf::spawn(
-                    retry_strategy.clone(),
-                    || async {
-                        if let Err(err) = self.release_contexts(vec![worker_node.id]).await {
-                            tracing::warn!(
-                                "Failed to release hummock context {}. {}. Will retry.",
-                                worker_node.id,
-                                err
-                            );
-                            return Err(err);
-                        }
-                        Ok(())
-                    },
-                    RetryableError::default(),
-                )
-                .await
-                .expect("retry until success");
-                tracing::info!("Released hummock context {}", worker_node.id);
-                sync_point!("AFTER_RELEASE_HUMMOCK_CONTEXTS_ASYNC");
+        if let LocalNotification::WorkerNodeDeleted(worker_node) = notification {
+            if worker_node.get_type().unwrap() == WorkerType::Compactor {
+                self.compactor_manager.remove_compactor(worker_node.id);
             }
-            // TODO move `CompactionTaskNeedCancel` to `handle_hummock_manager_event`
-            // TODO extract retry boilerplate code
-            LocalNotification::CompactionTaskNeedCancel(compact_task) => {
-                let task_id = compact_task.task_id;
-                tokio_retry::RetryIf::spawn(
-                    retry_strategy.clone(),
-                    || async {
-                        let mut compact_task_mut = compact_task.clone();
-                        if let Err(err) = self.cancel_compact_task_impl(&mut compact_task_mut).await
-                        {
-                            tracing::warn!(
-                                "Failed to cancel compaction task {}. {}. Will retry.",
-                                compact_task.task_id,
-                                err
-                            );
-                            return Err(err);
-                        }
-                        Ok(())
-                    },
-                    RetryableError::default(),
-                )
+            self.release_contexts(vec![worker_node.id])
                 .await
-                .expect("retry until success");
-                tracing::info!("Cancelled compaction task {}", task_id);
-                sync_point!("AFTER_CANCEL_COMPACTION_TASK_ASYNC");
-            }
-            LocalNotification::SystemParamsChange(_) => {}
+                .unwrap_or_else(|err| {
+                    panic!(
+                        "Failed to release hummock context {}, error={}",
+                        worker_node.id,
+                        err.as_report()
+                    )
+                });
+            tracing::info!("Released hummock context {}", worker_node.id);
+            sync_point!("AFTER_RELEASE_HUMMOCK_CONTEXTS_ASYNC");
         }
     }
 }

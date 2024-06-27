@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,152 +14,165 @@
 
 use std::sync::Arc;
 
+use anyhow::anyhow;
 use bytes::Bytes;
-use futures::TryStreamExt;
-use risingwave_common::catalog::ColumnId;
+use foyer::HybridCacheBuilder;
+use futures::{TryFutureExt, TryStreamExt};
+use risingwave_common::catalog::ColumnDesc;
+use risingwave_common::config::{MetricLevel, ObjectStoreConfig};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::DataType;
-use risingwave_common::util::select_all;
 use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
-use risingwave_common::util::value_encoding::{
-    BasicSerde, EitherSerde, ValueRowDeserializer, ValueRowSerdeNew,
-};
-use risingwave_hummock_sdk::key::{map_table_key_range, prefixed_range, TableKeyRange};
+use risingwave_common::util::value_encoding::{BasicSerde, EitherSerde, ValueRowDeserializer};
+use risingwave_hummock_sdk::key::{prefixed_range_with_vnode, TableKeyRange};
+use risingwave_hummock_sdk::version::HummockVersion;
+use risingwave_jni_core::HummockJavaBindingIterator;
+use risingwave_object_store::object::build_remote_object_store;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
-use risingwave_object_store::object::parse_remote_object_store;
 use risingwave_pb::java_binding::key_range::Bound;
 use risingwave_pb::java_binding::{KeyRange, ReadPlan};
 use risingwave_storage::error::{StorageError, StorageResult};
 use risingwave_storage::hummock::local_version::pinned_version::PinnedVersion;
-use risingwave_storage::hummock::store::state_store::HummockStorageIterator;
 use risingwave_storage::hummock::store::version::HummockVersionReader;
-use risingwave_storage::hummock::{CachePolicy, SstableStore, TieredCache};
-use risingwave_storage::monitor::HummockStateStoreMetrics;
-use risingwave_storage::store::{ReadOptions, StateStoreReadIterStream, StreamTypeOfIter};
+use risingwave_storage::hummock::store::HummockStorageIterator;
+use risingwave_storage::hummock::{
+    get_committed_read_version_tuple, CachePolicy, HummockError, SstableStore, SstableStoreConfig,
+};
+use risingwave_storage::monitor::{global_hummock_state_store_metrics, HummockStateStoreMetrics};
+use risingwave_storage::row_serde::value_serde::ValueRowSerdeNew;
+use risingwave_storage::store::{ReadOptions, StateStoreIterExt};
+use rw_futures_util::select_all;
 use tokio::sync::mpsc::unbounded_channel;
 
-type SelectAllIterStream = impl StateStoreReadIterStream + Unpin;
+type SingleIterStream = HummockJavaBindingIterator;
 
-fn select_all_vnode_stream(
-    streams: Vec<StreamTypeOfIter<HummockStorageIterator>>,
-) -> SelectAllIterStream {
-    select_all(streams.into_iter().map(Box::pin))
+fn select_all_vnode_stream(streams: Vec<SingleIterStream>) -> HummockJavaBindingIterator {
+    Box::pin(select_all(streams))
 }
 
-pub struct HummockJavaBindingIterator {
+fn to_deserialized_stream(
+    iter: HummockStorageIterator,
     row_serde: EitherSerde,
-    stream: SelectAllIterStream,
-    pub class_cache: Arc<crate::JavaClassMethodCache>,
+) -> SingleIterStream {
+    Box::pin(
+        iter.into_stream(move |(key, value)| {
+            Ok((
+                Bytes::copy_from_slice(key.user_key.table_key.0),
+                row_serde.deserialize(value).map(OwnedRow::new)?,
+            ))
+        })
+        .map_err(|e| anyhow!(e)),
+    )
 }
 
-pub struct KeyedRow {
-    key: Bytes,
-    row: OwnedRow,
-}
-
-impl KeyedRow {
-    pub fn key(&self) -> &[u8] {
-        self.key.as_ref()
-    }
-
-    pub fn row(&self) -> &OwnedRow {
-        &self.row
-    }
-}
-
-impl HummockJavaBindingIterator {
-    pub async fn new(read_plan: ReadPlan) -> StorageResult<Self> {
+pub(crate) async fn new_hummock_java_binding_iter(
+    read_plan: ReadPlan,
+) -> StorageResult<HummockJavaBindingIterator> {
+    {
         // Note(bugen): should we forward the implementation to the `StorageTable`?
         let object_store = Arc::new(
-            parse_remote_object_store(
+            build_remote_object_store(
                 &read_plan.object_store_url,
                 Arc::new(ObjectStoreMetrics::unused()),
                 "Hummock",
+                Arc::new(ObjectStoreConfig::default()),
             )
             .await,
         );
-        let sstable_store = Arc::new(SstableStore::new(
-            object_store,
-            read_plan.data_dir,
-            1 << 10,
-            1 << 10,
+
+        let meta_cache = HybridCacheBuilder::new()
+            .memory(1 << 10)
+            .with_shards(2)
+            .storage()
+            .build()
+            .map_err(HummockError::foyer_error)
+            .map_err(StorageError::from)
+            .await?;
+        let block_cache = HybridCacheBuilder::new()
+            .memory(1 << 10)
+            .with_shards(2)
+            .storage()
+            .build()
+            .map_err(HummockError::foyer_error)
+            .map_err(StorageError::from)
+            .await?;
+
+        let sstable_store = Arc::new(SstableStore::new(SstableStoreConfig {
+            store: object_store,
+            path: read_plan.data_dir,
+            prefetch_buffer_capacity: 1 << 10,
+            max_prefetch_block_number: 16,
+            recent_filter: None,
+            state_store_metrics: Arc::new(global_hummock_state_store_metrics(
+                MetricLevel::Disabled,
+            )),
+            use_new_object_prefix_strategy: read_plan.use_new_object_prefix_strategy,
+            meta_cache,
+            block_cache,
+        }));
+        let reader = HummockVersionReader::new(
+            sstable_store,
+            Arc::new(HummockStateStoreMetrics::unused()),
             0,
-            TieredCache::none(),
-        ));
-        let reader =
-            HummockVersionReader::new(sstable_store, Arc::new(HummockStateStoreMetrics::unused()));
+        );
+
+        let table = read_plan.table_catalog.unwrap();
+        let versioned = table.version.is_some();
+        let table_columns = table
+            .columns
+            .into_iter()
+            .map(|c| ColumnDesc::from(c.column_desc.unwrap()));
+
+        // Decide which serializer to use based on whether the table is versioned or not.
+        let row_serde: EitherSerde = if versioned {
+            ColumnAwareSerde::new(
+                Arc::from_iter(0..table_columns.len()),
+                Arc::from_iter(table_columns),
+            )
+            .into()
+        } else {
+            BasicSerde::new(
+                Arc::from_iter(0..table_columns.len()),
+                Arc::from_iter(table_columns),
+            )
+            .into()
+        };
 
         let mut streams = Vec::with_capacity(read_plan.vnode_ids.len());
         let key_range = read_plan.key_range.unwrap();
-        let pin_version = PinnedVersion::new(read_plan.version.unwrap(), unbounded_channel().0);
+        let pin_version = PinnedVersion::new(
+            HummockVersion::from_rpc_protobuf(&read_plan.version.unwrap()),
+            unbounded_channel().0,
+        );
+        let table_id = read_plan.table_id.into();
 
         for vnode in read_plan.vnode_ids {
-            let stream = reader
+            let vnode = VirtualNode::from_index(vnode as usize);
+            let key_range = table_key_range_from_prost(vnode, key_range.clone());
+            let (key_range, read_version_tuple) = get_committed_read_version_tuple(
+                pin_version.clone(),
+                table_id,
+                key_range,
+                read_plan.epoch,
+            );
+            let iter = reader
                 .iter(
-                    table_key_range_from_prost(
-                        VirtualNode::from_index(vnode as usize),
-                        key_range.clone(),
-                    ),
+                    key_range,
                     read_plan.epoch,
                     ReadOptions {
-                        prefix_hint: None,
-                        ignore_range_tombstone: false,
-                        retention_seconds: None,
-                        table_id: read_plan.table_id.into(),
-                        read_version_from_backup: false,
-                        prefetch_options: Default::default(),
+                        table_id,
                         cache_policy: CachePolicy::NotFill,
+                        ..Default::default()
                     },
-                    (vec![], vec![], pin_version.clone()),
+                    read_version_tuple,
                 )
                 .await?;
-            streams.push(stream);
+            streams.push(to_deserialized_stream(iter, row_serde.clone()));
         }
 
         let stream = select_all_vnode_stream(streams);
 
-        let table = read_plan.table_catalog.unwrap();
-        let versioned = table.version.is_some();
-        let (column_ids, schema): (Vec<_>, Vec<_>) = table
-            .columns
-            .into_iter()
-            .map(|c| c.column_desc.unwrap())
-            .map(|c| {
-                (
-                    ColumnId::new(c.column_id),
-                    DataType::from(&c.column_type.unwrap()),
-                )
-            })
-            .unzip();
-
-        // Decide which serializer to use based on whether the table is versioned or not.
-        let row_serde = if versioned {
-            ColumnAwareSerde::new(&column_ids, schema.into()).into()
-        } else {
-            BasicSerde::new(&column_ids, schema.into()).into()
-        };
-
-        Ok(Self {
-            row_serde,
-            stream,
-            class_cache: Default::default(),
-        })
-    }
-
-    pub async fn next(&mut self) -> StorageResult<Option<KeyedRow>> {
-        let item = self.stream.try_next().await?;
-        Ok(match item {
-            Some((key, value)) => Some(KeyedRow {
-                key: key.user_key.table_key.0,
-                row: OwnedRow::new(
-                    self.row_serde
-                        .deserialize(&value)
-                        .map_err(StorageError::DeserializeRow)?,
-                ),
-            }),
-            None => None,
-        })
+        Ok(stream)
     }
 }
 
@@ -175,7 +188,5 @@ fn table_key_range_from_prost(vnode: VirtualNode, r: KeyRange) -> TableKeyRange 
     let left = map_bound(left_bound, r.left);
     let right = map_bound(right_bound, r.right);
 
-    let vnode_slice = vnode.to_be_bytes();
-
-    map_table_key_range(prefixed_range((left, right), &vnode_slice[..]))
+    prefixed_range_with_vnode((left, right), vnode)
 }

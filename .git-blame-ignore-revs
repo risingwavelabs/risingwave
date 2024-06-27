@@ -27,3 +27,18 @@ e7b7842826035b645bc4feddf5ef315d0935e35e
 
 # chore: use rustflags for lints (#5508)
 055107da6b969d31cd6aca396f4d9ed209845391
+
+# test: split input/output for planner test (#9902)
+f8266748dcb70541da944664552c1944ff8362e4
+
+# feat(risedev): add check for trailing spaces in `risedev check` (#11294)
+f2a3fd021059e680b35b24c63cff5f8dbe9f9d5f
+
+# chore(rustfmt): format let-chains and let-else #9409
+d70dba827c303373f3220c9733f7c7443e5c2d37
+
+# chore: cargo +nightly fmt (#13162) (format let-chains)
+c583e2c6c054764249acf484438c7bf7197765f4
+
+# chore: replace all ProstXxx with PbXxx (#8621)
+6fd8821f2e053957b183d648bea9c95b6703941f

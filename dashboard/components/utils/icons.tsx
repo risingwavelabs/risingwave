@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 RisingWave Labs
+ * Copyright 2024 RisingWave Labs
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,4 +25,8 @@ export function IconArrowRightCircle() {
 
 export function IconArrowRightCircleFill() {
   return <i className="bi bi-arrow-right-circle-fill"></i>
+}
+
+export function IconBoxArrowUpRight() {
+  return <i className="bi bi-box-arrow-up-right"></i>
 }

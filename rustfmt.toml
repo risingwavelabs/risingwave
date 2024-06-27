@@ -9,4 +9,7 @@ group_imports = "StdExternalCrate"
 reorder_impl_items = true
 reorder_imports = true
 tab_spaces = 4
-wrap_comments = true
+# TODO: Fix it later. It produces too many unwanted changes related with markdown lists now. e.g.,
+# https://github.com/rust-lang/rustfmt/issues/5862
+# https://github.com/rust-lang/rustfmt/issues/5836
+# wrap_comments = true

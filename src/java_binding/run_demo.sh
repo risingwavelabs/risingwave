@@ -20,7 +20,7 @@ set -x
 cd ${RISINGWAVE_ROOT}/java
 
 java -cp "./java-binding-integration-test/target/dependency/*:./java-binding-integration-test/target/classes" \
-    -Djava.library.path=${RISINGWAVE_ROOT}/target/debug  com.risingwave.java.binding.HummockReadDemo
+    com.risingwave.java.binding.HummockReadDemo
 
 psql -d dev -h localhost -p 4566 -U root << EOF
 DROP TABLE ${TABLE_NAME};

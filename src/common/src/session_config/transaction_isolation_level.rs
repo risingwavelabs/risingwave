@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,9 +13,7 @@
 // limitations under the License.
 
 use std::fmt::Formatter;
-
-use crate::error::{ErrorCode, RwError};
-use crate::session_config::{ConfigEntry, CONFIG_KEYS, TRANSACTION_ISOLATION_LEVEL};
+use std::str::FromStr;
 
 #[derive(Copy, Default, Debug, Clone, PartialEq, Eq)]
 // Some variants are never constructed so allow dead code here.
@@ -28,30 +26,29 @@ pub enum IsolationLevel {
     Serializable,
 }
 
-impl ConfigEntry for IsolationLevel {
-    fn entry_name() -> &'static str {
-        CONFIG_KEYS[TRANSACTION_ISOLATION_LEVEL]
-    }
-}
+impl FromStr for IsolationLevel {
+    type Err = &'static str;
 
-impl TryFrom<&[&str]> for IsolationLevel {
-    type Error = RwError;
-
-    fn try_from(_value: &[&str]) -> Result<Self, Self::Error> {
-        Err(
-            ErrorCode::InternalError("Support set transaction isolation level first".to_string())
-                .into(),
-        )
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_ascii_lowercase().as_str() {
+            "read committed" => Ok(Self::ReadCommitted),
+            "read uncommitted" => Ok(Self::ReadUncommitted),
+            "repeatable read" => Ok(Self::RepeatableRead),
+            "serializable" => Ok(Self::Serializable),
+            _ => Err(
+                "expect one of [read committed, read uncommitted, repeatable read, serializable]",
+            ),
+        }
     }
 }
 
 impl std::fmt::Display for IsolationLevel {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::ReadCommitted => write!(f, "READ_COMMITTED"),
-            Self::ReadUncommitted => write!(f, "READ_UNCOMMITTED"),
-            Self::RepeatableRead => write!(f, "REPEATABLE_READ"),
-            Self::Serializable => write!(f, "SERIALIZABLE"),
+            Self::ReadCommitted => write!(f, "read committed"),
+            Self::ReadUncommitted => write!(f, "read uncommitted"),
+            Self::RepeatableRead => write!(f, "repeatable read"),
+            Self::Serializable => write!(f, "serializable"),
         }
     }
 }

@@ -1,0 +1,23 @@
+# streaming_rate_limit also applies to create sink and create source, please refer to
+# e2e_test/source/basic/kafka.slt and e2e_test/sink/kafka/create_sink.slt for this part
+
+statement ok
+create table t1 (v1 int);
+
+# tracked in https://github.com/risingwavelabs/risingwave/issues/13474
+# create with duplicate streaming_rate_limit
+statement error Duplicated option
+create materialized view mv1 with (streaming_rate_limit = 1000, streaming_rate_limit = 2000) as select * from t1;
+
+# create with unknown fields
+statement error unexpected options in WITH clause
+create materialized view mv1 with (streaming_rate_limit = 1000, unknown_field = 2000) as select * from t1;
+
+statement ok
+create materialized view mv1 with (streaming_rate_limit = 1000) as select * from t1;
+
+statement ok
+drop materialized view mv1;
+
+statement ok
+drop table t1;

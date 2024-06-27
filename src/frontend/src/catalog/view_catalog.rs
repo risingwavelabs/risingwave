@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -46,6 +46,11 @@ impl From<&PbView> for ViewCatalog {
 impl ViewCatalog {
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    pub fn with_id(mut self, id: ViewId) -> Self {
+        self.id = id;
+        self
     }
 
     /// Returns the SQL statement that can be used to create this view.

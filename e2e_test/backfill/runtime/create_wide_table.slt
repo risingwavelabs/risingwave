@@ -1,0 +1,20 @@
+statement ok
+CREATE TABLE t (
+    v1 int,
+    v2 varchar,
+    v3 bigint,
+    v4 int,
+    v5 varchar,
+    v6 bigint,
+    v7 int,
+    v8 varchar,
+    v9 bigint,
+    v10 int,
+    v11 varchar,
+    v12 bigint,
+    v13 int,
+    v14 varchar,
+    v15 bigint,
+    primary key (v1, v2, v3, v4, v5,
+                 v8, v9, v10, v11, v12)
+);

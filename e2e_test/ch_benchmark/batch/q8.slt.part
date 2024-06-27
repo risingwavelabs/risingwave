@@ -1,5 +1,5 @@
 query TR
-select 
+select
      extract(year from o_entry_d::timestamp) as l_year,
 	 round((sum(case when n2.n_name = 'GERMANY' or n2.n_name = 'UNITED STATES' then ol_amount else 0 end) / sum(ol_amount))::decimal, 2) as mkt_share
 from	 item, supplier, stock, orderline, orders, customer, nation n1, nation n2, region

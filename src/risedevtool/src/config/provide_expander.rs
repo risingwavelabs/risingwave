@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -70,7 +70,9 @@ impl ProvideExpander {
                     .into_hash()
                     .ok_or_else(|| anyhow!("expect a hashmap"))?;
                 let map = map.into_iter().map(|(k, v)| {
-                    if let Some(k) = k.as_str() && k.starts_with("provide-") {
+                    if let Some(k) = k.as_str()
+                        && k.starts_with("provide-")
+                    {
                         let array = v
                             .as_vec()
                             .ok_or_else(|| anyhow!("expect an array of provide-"))?;

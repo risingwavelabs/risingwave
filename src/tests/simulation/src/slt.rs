@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,26 +16,49 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use rand::{thread_rng, Rng};
-use sqllogictest::ParallelTestError;
+use anyhow::{bail, Result};
+use itertools::Itertools;
+use rand::{thread_rng, Rng, SeedableRng};
+use rand_chacha::ChaChaRng;
+use sqllogictest::{Condition, ParallelTestError, QueryExpect, Record, StatementExpect};
 
 use crate::client::RisingWave;
 use crate::cluster::{Cluster, KillOpts};
 use crate::utils::TimedExt;
 
+// retry a maximum times until it succeed
+const MAX_RETRY: usize = 5;
+
 fn is_create_table_as(sql: &str) -> bool {
-    let parts: Vec<String> = sql
-        .trim_start()
-        .split_whitespace()
-        .map(|s| s.to_lowercase())
-        .collect();
+    let parts: Vec<String> = sql.split_whitespace().map(|s| s.to_lowercase()).collect();
 
     parts.len() >= 4 && parts[0] == "create" && parts[1] == "table" && parts[3] == "as"
 }
 
-#[derive(PartialEq, Eq)]
+fn is_sink_into_table(sql: &str) -> bool {
+    let parts: Vec<String> = sql.split_whitespace().map(|s| s.to_lowercase()).collect();
+
+    parts.len() >= 4 && parts[0] == "create" && parts[1] == "sink" && parts[3] == "into"
+}
+
+#[derive(Debug, PartialEq, Eq)]
 enum SqlCmd {
-    Create { is_create_table_as: bool },
+    /// Other create statements.
+    Create {
+        is_create_table_as: bool,
+    },
+    /// Create sink.
+    CreateSink {
+        is_sink_into_table: bool,
+    },
+    /// Create Materialized views
+    CreateMaterializedView {
+        name: String,
+    },
+    /// Set background ddl
+    SetBackgroundDdl {
+        enable: bool,
+    },
     Drop,
     Dml,
     Flush,
@@ -44,35 +67,78 @@ enum SqlCmd {
 }
 
 impl SqlCmd {
-    // We won't kill during insert/update/delete/alter since the atomicity is not guaranteed.
-    // Notice that `create table as` is also not atomic in our system.
-    // TODO: For `SqlCmd::Alter`, since table fragment and catalog commit for table schema change
-    // are not transactional, we can't kill during `alter table add/drop columns` for now, will
-    // remove it until transactional commit of table fragment and catalog is supported.
-    fn ignore_kill(&self) -> bool {
+    fn allow_kill(&self) -> bool {
         matches!(
             self,
-            SqlCmd::Dml
-                | SqlCmd::Flush
-                | SqlCmd::Alter
-                | SqlCmd::Create {
-                    is_create_table_as: true
-                }
+            SqlCmd::Create {
+                // `create table as` is also not atomic in our system.
+                is_create_table_as: false,
+                ..
+            } | SqlCmd::CreateSink {
+                is_sink_into_table: false,
+            } | SqlCmd::CreateMaterializedView { .. }
+                | SqlCmd::Drop
         )
+        // We won't kill during insert/update/delete/alter since the atomicity is not guaranteed.
+        // TODO: For `SqlCmd::Alter`, since table fragment and catalog commit for table schema change
+        // are not transactional, we can't kill during `alter table add/drop columns` for now, will
+        // remove it until transactional commit of table fragment and catalog is supported.
     }
 }
 
 fn extract_sql_command(sql: &str) -> SqlCmd {
-    let cmd = sql
-        .trim_start()
-        .split_once(' ')
-        .unwrap_or_default()
-        .0
-        .to_lowercase();
-    match cmd.as_str() {
-        "create" => SqlCmd::Create {
-            is_create_table_as: is_create_table_as(sql),
-        },
+    let sql = sql.to_lowercase();
+    let tokens = sql.split_whitespace();
+    let mut tokens = tokens.multipeek();
+    let first_token = tokens.next().unwrap_or("");
+
+    match first_token {
+        // NOTE(kwannoel):
+        // It's entirely possible for a malformed command to be parsed as `SqlCmd::Create`.
+        // BUT an error should be expected for such a test.
+        // So we don't need to handle this case.
+        // Eventually if there are too many edge cases, we can opt to use our parser.
+        "create" => {
+            let result: Option<SqlCmd> = try {
+                match tokens.next()? {
+                    "materialized" => {
+                        // view
+                        tokens.next()?;
+
+                        // if not exists | name
+                        let next = *tokens.peek()?;
+                        if "if" == next
+                            && let Some("not") = tokens.peek().cloned()
+                            && let Some("exists") = tokens.peek().cloned()
+                        {
+                            tokens.next();
+                            tokens.next();
+                            tokens.next();
+                            let name = tokens.next()?.to_string();
+                            SqlCmd::CreateMaterializedView { name }
+                        } else {
+                            let name = next.to_string();
+                            SqlCmd::CreateMaterializedView { name }
+                        }
+                    }
+                    "sink" => SqlCmd::CreateSink {
+                        is_sink_into_table: is_sink_into_table(&sql),
+                    },
+                    _ => SqlCmd::Create {
+                        is_create_table_as: is_create_table_as(&sql),
+                    },
+                }
+            };
+            result.unwrap_or(SqlCmd::Others)
+        }
+        "set" => {
+            if sql.contains("background_ddl") {
+                let enable = sql.contains("true");
+                SqlCmd::SetBackgroundDdl { enable }
+            } else {
+                SqlCmd::Others
+            }
+        }
         "drop" => SqlCmd::Drop,
         "insert" | "update" | "delete" => SqlCmd::Dml,
         "flush" => SqlCmd::Flush,
@@ -85,20 +151,64 @@ const KILL_IGNORE_FILES: &[&str] = &[
     // TPCH queries are too slow for recovery.
     "tpch_snapshot.slt",
     "tpch_upstream.slt",
-    // This depends on session config.
-    "session_timezone.slt",
+    // Drop is not retryable in search path test.
+    "search_path.slt",
+    // Transaction statements are not retryable.
+    "transaction/now.slt",
+    "transaction/read_only_multi_conn.slt",
+    "transaction/read_only.slt",
+    "transaction/tolerance.slt",
+    "transaction/cursor.slt",
+    "transaction/cursor_multi_conn.slt",
 ];
 
+/// Wait for background mv to finish creating
+async fn wait_background_mv_finished(mview_name: &str) -> Result<()> {
+    let Ok(rw) = RisingWave::connect("frontend".into(), "dev".into()).await else {
+        bail!("failed to connect to frontend for {mview_name}");
+    };
+    let client = rw.pg_client();
+    if client.simple_query("WAIT;").await.is_err() {
+        bail!("failed to wait for background mv to finish creating for {mview_name}");
+    }
+
+    let Ok(result) = client
+        .query(
+            "select count(*) from pg_matviews where matviewname=$1;",
+            &[&mview_name],
+        )
+        .await
+    else {
+        bail!("failed to query pg_matviews for {mview_name}");
+    };
+
+    match result[0].try_get::<_, i64>(0) {
+        Ok(1) => Ok(()),
+        r => bail!("expected 1 row in pg_matviews, got {r:#?} instead for {mview_name}"),
+    }
+}
+
 /// Run the sqllogictest files in `glob`.
-pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
+pub async fn run_slt_task(
+    cluster: Arc<Cluster>,
+    glob: &str,
+    opts: &KillOpts,
+    // Probability of background_ddl being set to true per ddl record.
+    background_ddl_rate: f64,
+) {
+    tracing::info!("background_ddl_rate: {}", background_ddl_rate);
+    let seed = std::env::var("MADSIM_TEST_SEED")
+        .unwrap_or("0".to_string())
+        .parse::<u64>()
+        .unwrap();
+    let mut rng = ChaChaRng::seed_from_u64(seed);
     let kill = opts.kill_compute || opts.kill_meta || opts.kill_frontend || opts.kill_compactor;
     let files = glob::glob(glob).expect("failed to read glob pattern");
     for file in files {
         // use a session per file
-        let risingwave = RisingWave::connect("frontend".into(), "dev".into())
-            .await
-            .unwrap();
-        let mut tester = sqllogictest::Runner::new(risingwave);
+        let mut tester =
+            sqllogictest::Runner::new(|| RisingWave::connect("frontend".into(), "dev".into()));
+        tester.add_label("madsim");
 
         let file = file.unwrap();
         let path = file.as_path();
@@ -110,6 +220,14 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
         let tempfile = (path.ends_with("kafka.slt") || path.ends_with("kafka_batch.slt"))
             .then(|| hack_kafka_test(path));
         let path = tempfile.as_ref().map(|p| p.path()).unwrap_or(path);
+
+        // NOTE(kwannoel): For background ddl
+        let mut background_ddl_enabled = false;
+
+        // If background ddl is set to true within the test case, prevent random setting of background_ddl to true.
+        // We can revert it back to false only if we encounter a record that sets background_ddl to false.
+        let mut manual_background_ddl_enabled = false;
+
         for record in sqllogictest::parse_file(path).expect("failed to parse file") {
             // uncomment to print metrics for task counts
             // let metrics = madsim::runtime::Handle::current().metrics();
@@ -139,8 +257,42 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
                 | sqllogictest::Record::Query { sql, .. } => extract_sql_command(sql),
                 _ => SqlCmd::Others,
             };
+            tracing::debug!(?cmd, "Running");
 
-            if cmd.ignore_kill() {
+            if background_ddl_rate > 0.0
+                && let SqlCmd::SetBackgroundDdl { enable } = cmd
+            {
+                manual_background_ddl_enabled = enable;
+            }
+
+            // For each background ddl compatible statement, provide a chance for background_ddl=true.
+            if let Record::Statement {
+                loc,
+                conditions,
+                connection,
+                ..
+            } = &record
+                && matches!(cmd, SqlCmd::CreateMaterializedView { .. })
+                && !manual_background_ddl_enabled
+                && conditions.iter().all(|c| {
+                    *c != Condition::SkipIf {
+                        label: "madsim".to_string(),
+                    }
+                })
+            {
+                let background_ddl_setting = rng.gen_bool(background_ddl_rate);
+                let set_background_ddl = Record::Statement {
+                    loc: loc.clone(),
+                    conditions: conditions.clone(),
+                    connection: connection.clone(),
+                    expected: StatementExpect::Ok,
+                    sql: format!("SET BACKGROUND_DDL={background_ddl_setting};"),
+                };
+                tester.run_async(set_background_ddl).await.unwrap();
+                background_ddl_enabled = background_ddl_setting;
+            };
+
+            if !cmd.allow_kill() {
                 for i in 0usize.. {
                     let delay = Duration::from_secs(1 << i);
                     if let Err(err) = tester
@@ -150,10 +302,13 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
                         })
                         .await
                     {
+                        let err_string = err.to_string();
                         // cluster could be still under recovering if killed before, retry if
                         // meets `no reader for dml in table with id {}`.
-                        let should_retry =
-                            err.to_string().contains("no reader for dml in table") && i < 5;
+                        let should_retry = (err_string.contains("no reader for dml in table")
+                            || err_string
+                                .contains("error reading a body from connection: broken pipe"))
+                            || err_string.contains("failed to inject barrier") && i < MAX_RETRY;
                         if !should_retry {
                             panic!("{}", err);
                         }
@@ -180,9 +335,13 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
             } else {
                 None
             };
-            // retry up to 5 times until it succeed
+
             for i in 0usize.. {
+                tracing::debug!(iteration = i, "retry count");
                 let delay = Duration::from_secs(1 << i);
+                if i > 0 {
+                    tokio::time::sleep(delay).await;
+                }
                 match tester
                     .run_async(record.clone())
                     .timed(|_res, elapsed| {
@@ -190,34 +349,114 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
                     })
                     .await
                 {
-                    Ok(_) => break,
-                    // allow 'table exists' error when retry CREATE statement
-                    Err(e)
-                        if matches!(
-                            cmd,
-                            SqlCmd::Create {
-                                is_create_table_as: false
+                    Ok(_) => {
+                        // For background ddl
+                        if let SqlCmd::CreateMaterializedView { ref name } = cmd
+                            && background_ddl_enabled
+                            && !matches!(
+                                record,
+                                Record::Statement {
+                                    expected: StatementExpect::Error(_),
+                                    ..
+                                } | Record::Query {
+                                    expected: QueryExpect::Error(_),
+                                    ..
+                                }
+                            )
+                        {
+                            tracing::debug!(iteration = i, "Retry for background ddl");
+                            match wait_background_mv_finished(name).await {
+                                Ok(_) => {
+                                    tracing::debug!(
+                                        iteration = i,
+                                        "Record with background_ddl {:?} finished",
+                                        record
+                                    );
+                                    break;
+                                }
+                                Err(err) => {
+                                    tracing::error!(
+                                        iteration = i,
+                                        ?err,
+                                        "failed to wait for background mv to finish creating"
+                                    );
+                                    if i >= MAX_RETRY {
+                                        panic!("failed to run test after retry {i} times, error={err:#?}");
+                                    }
+                                    continue;
+                                }
                             }
-                        ) && i != 0
-                            && e.to_string().contains("exists")
-                            && e.to_string().contains("Catalog error") =>
-                    {
-                        break
+                        }
+                        break;
                     }
-                    // allow 'not found' error when retry DROP statement
-                    Err(e)
-                        if cmd == SqlCmd::Drop
-                            && i != 0
-                            && e.to_string().contains("not found")
-                            && e.to_string().contains("Catalog error") =>
-                    {
-                        break
+                    Err(e) => {
+                        match cmd {
+                            // allow 'table exists' error when retry CREATE statement
+                            SqlCmd::Create {
+                                is_create_table_as: false,
+                            }
+                            | SqlCmd::CreateSink {
+                                is_sink_into_table: false,
+                            }
+                            | SqlCmd::CreateMaterializedView { .. }
+                                if i != 0
+                                    && e.to_string().contains("exists")
+                                    && e.to_string().contains("Catalog error") =>
+                            {
+                                break
+                            }
+                            // allow 'not found' error when retry DROP statement
+                            SqlCmd::Drop
+                                if i != 0
+                                    && e.to_string().contains("not found")
+                                    && e.to_string().contains("Catalog error") =>
+                            {
+                                break
+                            }
+
+                            // Keep i >= MAX_RETRY for other errors. Since these errors indicate that the MV might not yet be created.
+                            _ if i >= MAX_RETRY => {
+                                panic!("failed to run test after retry {i} times: {e}")
+                            }
+                            SqlCmd::CreateMaterializedView { ref name }
+                                if i != 0
+                                    && e.to_string().contains("table is in creating procedure")
+                                    && background_ddl_enabled =>
+                            {
+                                tracing::debug!(iteration = i, name, "Retry for background ddl");
+                                match wait_background_mv_finished(name).await {
+                                    Ok(_) => {
+                                        tracing::debug!(
+                                            iteration = i,
+                                            "Record with background_ddl {:?} finished",
+                                            record
+                                        );
+                                        break;
+                                    }
+                                    Err(err) => {
+                                        tracing::error!(
+                                            iteration = i,
+                                            ?err,
+                                            "failed to wait for background mv to finish creating"
+                                        );
+                                        if i >= MAX_RETRY {
+                                            panic!("failed to run test after retry {i} times, error={err:#?}");
+                                        }
+                                        continue;
+                                    }
+                                }
+                            }
+                            _ => tracing::error!(
+                                iteration = i,
+                                "failed to run test: {e}\nretry after {delay:?}"
+                            ),
+                        }
                     }
-                    Err(e) if i >= 5 => panic!("failed to run test after retry {i} times: {e}"),
-                    Err(e) => tracing::error!("failed to run test: {e}\nretry after {delay:?}"),
                 }
-                tokio::time::sleep(delay).await;
             }
+            if let SqlCmd::SetBackgroundDdl { enable } = cmd {
+                background_ddl_enabled = enable;
+            };
             if let Some(handle) = handle {
                 handle.await.unwrap();
             }
@@ -226,10 +465,10 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
 }
 
 pub async fn run_parallel_slt_task(glob: &str, jobs: usize) -> Result<(), ParallelTestError> {
-    let db = RisingWave::connect("frontend".into(), "dev".into())
-        .await
-        .unwrap();
-    let mut tester = sqllogictest::Runner::new(db);
+    let mut tester =
+        sqllogictest::Runner::new(|| RisingWave::connect("frontend".into(), "dev".into()));
+    tester.add_label("madsim");
+
     tester
         .run_parallel_async(
             glob,
@@ -252,8 +491,12 @@ fn hack_kafka_test(path: &Path) -> tempfile::NamedTempFile {
             .expect("failed to get schema path");
     let proto_full_path = std::fs::canonicalize("src/connector/src/test_data/complex-schema")
         .expect("failed to get schema path");
+    let json_schema_full_path =
+        std::fs::canonicalize("src/connector/src/test_data/complex-schema.json")
+            .expect("failed to get schema path");
     let content = content
         .replace("127.0.0.1:29092", "192.168.11.1:29092")
+        .replace("localhost:29092", "192.168.11.1:29092")
         .replace(
             "/risingwave/avro-simple-schema.avsc",
             simple_avsc_full_path.to_str().unwrap(),
@@ -265,6 +508,10 @@ fn hack_kafka_test(path: &Path) -> tempfile::NamedTempFile {
         .replace(
             "/risingwave/proto-complex-schema",
             proto_full_path.to_str().unwrap(),
+        )
+        .replace(
+            "/risingwave/json-complex-schema",
+            json_schema_full_path.to_str().unwrap(),
         );
     let file = tempfile::NamedTempFile::new().expect("failed to create temp file");
     std::fs::write(file.path(), content).expect("failed to write file");
@@ -274,7 +521,17 @@ fn hack_kafka_test(path: &Path) -> tempfile::NamedTempFile {
 
 #[cfg(test)]
 mod tests {
+    use std::fmt::Debug;
+
+    use expect_test::{expect, Expect};
+
     use super::*;
+
+    fn check(actual: impl Debug, expect: Expect) {
+        let actual = format!("{:#?}", actual);
+        expect.assert_eq(&actual);
+    }
+
     #[test]
     fn test_is_create_table_as() {
         assert!(is_create_table_as("     create     table xx  as select 1;"));
@@ -282,5 +539,51 @@ mod tests {
             "     create table xx not  as select 1;"
         ));
         assert!(!is_create_table_as("     create view xx as select 1;"));
+    }
+
+    #[test]
+    fn test_extract_sql_command() {
+        check(
+            extract_sql_command("create  table  t as select 1;"),
+            expect![[r#"
+                Create {
+                    is_create_table_as: true,
+                }"#]],
+        );
+        check(
+            extract_sql_command("  create table  t (a int);"),
+            expect![[r#"
+                Create {
+                    is_create_table_as: false,
+                }"#]],
+        );
+        check(
+            extract_sql_command(" create materialized   view  m_1 as select 1;"),
+            expect![[r#"
+                CreateMaterializedView {
+                    name: "m_1",
+                }"#]],
+        );
+        check(
+            extract_sql_command("set background_ddl= true;"),
+            expect![[r#"
+                SetBackgroundDdl {
+                    enable: true,
+                }"#]],
+        );
+        check(
+            extract_sql_command("SET BACKGROUND_DDL=true;"),
+            expect![[r#"
+                SetBackgroundDdl {
+                    enable: true,
+                }"#]],
+        );
+        check(
+            extract_sql_command("CREATE MATERIALIZED VIEW if not exists m_1 as select 1;"),
+            expect![[r#"
+                CreateMaterializedView {
+                    name: "m_1",
+                }"#]],
+        )
     }
 }

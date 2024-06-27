@@ -1,0 +1,23 @@
+statement ok
+DELETE FROM supplier;
+
+statement ok
+DELETE FROM part;
+
+statement ok
+DELETE FROM partsupp;
+
+statement ok
+DELETE FROM customer;
+
+statement ok
+DELETE FROM orders;
+
+statement ok
+DELETE FROM lineitem;
+
+statement ok
+DELETE FROM nation;
+
+statement ok
+DELETE FROM region;

@@ -1,0 +1,23 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table t_simple (v1 int, v2 int);
+
+statement ok
+create table m_simple (v1 int primary key, v2 int);
+
+statement error unsupported sink type table
+create sink s from t_simple with (connector = 'table');
+
+statement error connector table is not supported by FORMAT ... ENCODE ... syntax
+create sink s into m_simple as select v1, v2 from t_simple with (type = 'upsert') FORMAT PLAIN ENCODE NATIVE;
+
+statement error connector table is not supported by FORMAT ... ENCODE ... syntax
+create sink s into m_simple as select v1, v2 from t_simple with (type = 'upsert') FORMAT PLAIN ENCODE JSON;
+
+statement ok
+drop table t_simple;
+
+statement ok
+drop table m_simple;

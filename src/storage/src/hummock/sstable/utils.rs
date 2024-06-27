@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,6 +14,7 @@
 
 // Copyright 2020 TiKV Project Authors. Licensed under Apache-2.0.
 
+use std::fmt::Display;
 use std::ptr;
 
 use risingwave_hummock_sdk::key::MAX_KEY_LEN;
@@ -21,11 +22,11 @@ use xxhash_rust::xxh64;
 
 use super::{HummockError, HummockResult};
 
-unsafe fn u64(ptr: *const u8) -> u64 {
+unsafe fn read_u64(ptr: *const u8) -> u64 {
     ptr::read_unaligned(ptr as *const u64)
 }
 
-unsafe fn u32(ptr: *const u8) -> u32 {
+unsafe fn read_u32(ptr: *const u8) -> u32 {
     ptr::read_unaligned(ptr as *const u32)
 }
 
@@ -35,12 +36,12 @@ pub fn bytes_diff_below_max_key_length<'a>(base: &[u8], target: &'a [u8]) -> &'a
     let mut i = 0;
     unsafe {
         while i + 8 <= end {
-            if u64(base.as_ptr().add(i)) != u64(target.as_ptr().add(i)) {
+            if read_u64(base.as_ptr().add(i)) != read_u64(target.as_ptr().add(i)) {
                 break;
             }
             i += 8;
         }
-        if i + 4 <= end && u32(base.as_ptr().add(i)) == u32(target.as_ptr().add(i)) {
+        if i + 4 <= end && read_u32(base.as_ptr().add(i)) == read_u32(target.as_ptr().add(i)) {
             i += 4;
         }
         while i < end {
@@ -70,8 +71,9 @@ pub fn xxhash64_verify(data: &[u8], checksum: u64) -> HummockResult<()> {
 
 use bytes::{Buf, BufMut};
 
-pub fn put_length_prefixed_slice(buf: &mut Vec<u8>, slice: &[u8]) {
-    let len = slice.len() as u32;
+pub fn put_length_prefixed_slice(mut buf: impl BufMut, slice: &[u8]) {
+    let len = checked_into_u32(slice.len())
+        .unwrap_or_else(|_| panic!("WARN overflow can't convert slice {} into u32", slice.len()));
     buf.put_u32_le(len);
     buf.put_slice(slice);
 }
@@ -112,6 +114,16 @@ impl CompressionAlgorithm {
     }
 }
 
+impl From<u32> for CompressionAlgorithm {
+    fn from(ca: u32) -> Self {
+        match ca {
+            0 => CompressionAlgorithm::None,
+            1 => CompressionAlgorithm::Lz4,
+            _ => CompressionAlgorithm::Zstd,
+        }
+    }
+}
+
 impl From<CompressionAlgorithm> for u8 {
     fn from(ca: CompressionAlgorithm) -> Self {
         match ca {
@@ -145,4 +157,8 @@ impl TryFrom<u8> for CompressionAlgorithm {
             )),
         }
     }
+}
+
+pub fn checked_into_u32<T: TryInto<u32> + Copy + Display>(i: T) -> Result<u32, T::Error> {
+    i.try_into()
 }

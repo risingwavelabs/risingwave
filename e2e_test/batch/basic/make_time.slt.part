@@ -1,0 +1,185 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+query T
+SELECT make_timestamptz(1973, 07, 15, 08, 15, 55.33);
+----
+1973-07-15 08:15:55.330+00:00
+
+query T
+SELECT make_timestamptz(-1973, 07, 15, 08, 15, 55.33);
+----
+1973-07-15 08:15:55.330+00:00 BC
+
+query T
+SELECT make_timestamptz(20240, 1, 26, 14, 20, 26);
+----
+20240-01-26 14:20:26+00:00
+
+query error Invalid parameter year, month, day: invalid date: -3-2-29
+SELECT make_timestamptz(-4, 02, 29, 08, 15, 55.33);
+
+query T
+SELECT make_timestamptz(-5, 02, 29, 08, 15, 55.33);
+----
+0005-02-29 08:15:55.330+00:00 BC
+
+query error Invalid parameter sec: invalid sec: -55.33
+SELECT make_timestamptz(1973, 07, 15, 08, 15, -55.33);
+
+query error Invalid parameter hour, min, sec: invalid time: 8:-15:55.33
+SELECT make_timestamptz(1973, 07, 15, 08, -15, 55.33);
+
+query error Invalid parameter year, month, day: invalid date: 1973--7-15
+SELECT make_timestamptz(1973, -07, 15, 08, 15, 55.33);
+
+query error Invalid parameter year, month, day: invalid date: 1973-6-31
+SELECT make_timestamptz(1973, 06, 31, 08, 15, 55.33);
+
+query error Invalid parameter year, month, day: invalid date: 0-6-31
+SELECT make_timestamptz(0, 06, 31, 08, 15, 55.33);
+
+statement ok
+set TimeZone to 'America/New_York';
+
+query T
+SELECT make_timestamptz(1973, 07, 15, 08, 15, 55.33);
+----
+1973-07-15 08:15:55.330-04:00
+
+statement ok
+create table ttz(tstz timestamptz);
+
+statement ok
+insert into ttz values(make_timestamptz(1973, 06, 25, 08, 15, 55.33));
+
+query TT
+select * from ttz;
+----
+1973-06-25 08:15:55.330-04:00
+
+statement ok
+drop table ttz;
+
+query error Invalid parameter time_zone: 'Nehwon/Lankhmar' is not a valid timezone
+SELECT make_timestamptz(1910, 12, 24, 0, 0, 0, 'Nehwon/Lankhmar');
+
+query TT
+WITH tzs (tz) AS (VALUES ('Europe/Prague'), ('Europe/Paris'), ('America/New_York'), ('EST'), ('EST5EDT'), ('PST8PDT')) SELECT make_timestamptz(2010, 2, 27, 3, 45, 00, tz), tz FROM tzs;
+----
+2010-02-26 21:45:00-05:00	Europe/Prague
+2010-02-26 21:45:00-05:00	Europe/Paris
+2010-02-27 03:45:00-05:00	America/New_York
+2010-02-27 03:45:00-05:00	EST
+2010-02-27 03:45:00-05:00	EST5EDT
+2010-02-27 06:45:00-05:00	PST8PDT
+
+query TT
+WITH tzs (tz) AS (VALUES ('Europe/Prague'), ('Europe/Paris'), ('America/New_York'), ('EST'), ('EST5EDT'), ('PST8PDT')) SELECT make_timestamptz(2010, 2, 27, 3, 45, 00, tz) AT TIME ZONE 'EST5EDT', tz FROM tzs;
+----
+2010-02-26 21:45:00	Europe/Prague
+2010-02-26 21:45:00	Europe/Paris
+2010-02-27 03:45:00	America/New_York
+2010-02-27 03:45:00	EST
+2010-02-27 03:45:00	EST5EDT
+2010-02-27 06:45:00	PST8PDT
+
+query T
+SELECT make_timestamptz(1973, 07, 15, 08, 15, 55.33, 'Asia/Manila') = '1973-07-14 20:15:55.33'::timestamptz;
+----
+t
+
+statement ok
+set TimeZone to 'Europe/London';
+
+query T
+SELECT make_timestamptz(2013, 7, 15, 8, 15, 23.5);
+----
+2013-07-15 08:15:23.500+01:00
+
+query T
+SELECT make_timestamptz(2013, 7, 15, 8, 15, 23.5, 'America/New_York');
+----
+2013-07-15 13:15:23.500+01:00
+
+statement ok
+set timezone to 'UTC';
+
+query T
+SELECT make_date(2024, 1, 26);
+----
+2024-01-26
+
+query T
+SELECT make_date(20240, 1, 26);
+----
+20240-01-26
+
+query T
+SELECT make_date(-2024, 1, 26);
+----
+2024-01-26 BC
+
+query error Invalid parameter year, month, day: invalid date: -3-2-29
+SELECT make_date(-4, 2, 29);
+
+query T
+SELECT make_date(-5, 2, 29);
+----
+0005-02-29 BC
+
+query error Invalid parameter year, month, day: invalid date: 0-7-15
+select make_date(0, 7, 15);
+
+query error Invalid parameter year, month, day: invalid date: 2013-2-30
+select make_date(2013, 2, 30);
+
+query error Invalid parameter year, month, day: invalid date: 2013-13-1
+select make_date(2013, 13, 1);
+
+query error Invalid parameter year, month, day: invalid date: 2013-11--1
+select make_date(2013, 11, -1);
+
+query error Invalid parameter hour, min, sec: invalid time: 10:55:100.1
+select make_time(10, 55, 100.1);
+
+query T
+SELECT make_time(14, 20, 26);
+----
+14:20:26
+
+query error Invalid parameter hour, min, sec: invalid time: 24:0:2.1
+select make_time(24, 0, 2.1);
+
+query T
+SELECT make_timestamp(2024, 1, 26, 14, 20, 26);
+----
+2024-01-26 14:20:26
+
+query T
+SELECT make_timestamp(20240, 1, 26, 14, 20, 26);
+----
+20240-01-26 14:20:26
+
+query T
+SELECT make_timestamp(-1973, 07, 15, 08, 15, 55.33);
+----
+1973-07-15 08:15:55.330 BC
+
+query error Invalid parameter year, month, day: invalid date: -3-2-29
+SELECT make_timestamp(-4, 02, 29, 08, 15, 55.33);
+
+query T
+SELECT make_timestamp(-5, 02, 29, 08, 15, 55.33);
+----
+0005-02-29 08:15:55.330 BC
+
+query T
+select '0001-01-01 12:34:56'::timestamp - '10 year'::interval;
+----
+0010-01-01 12:34:56 BC
+
+query T
+select '0001-01-01 12:34:56'::timestamptz - '10 year'::interval;
+----
+0010-01-01 12:34:56+00:00 BC

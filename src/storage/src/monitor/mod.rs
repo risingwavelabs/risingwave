@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,7 +13,7 @@
 // limitations under the License.
 
 mod hummock_state_store_metrics;
-
+use futures::Future;
 pub use hummock_state_store_metrics::*;
 mod monitored_store;
 pub use monitored_store::*;
@@ -28,4 +28,35 @@ pub use compactor_metrics::*;
 
 mod local_metrics;
 pub use local_metrics::*;
-pub use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
+
+mod hitmap;
+pub use hitmap::*;
+pub use risingwave_object_store::object::object_metrics::{
+    ObjectStoreMetrics, GLOBAL_OBJECT_STORE_METRICS,
+};
+
+// include only when hummock trace enabled
+#[cfg(all(not(madsim), feature = "hm-trace"))]
+mod traced_store;
+
+pub trait HummockTraceFutureExt: Sized + Future {
+    type TraceOutput;
+    fn may_trace_hummock(self) -> Self::TraceOutput;
+}
+
+impl<F: Future> HummockTraceFutureExt for F {
+    type TraceOutput = impl Future<Output = F::Output>;
+
+    // simply return a future that does nothing if trace is not enabled
+    fn may_trace_hummock(self) -> Self::TraceOutput {
+        #[cfg(not(all(not(madsim), feature = "hm-trace")))]
+        {
+            self
+        }
+        #[cfg(all(not(madsim), feature = "hm-trace"))]
+        {
+            use risingwave_hummock_trace::hummock_trace_scope;
+            hummock_trace_scope(self)
+        }
+    }
+}

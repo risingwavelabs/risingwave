@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,17 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use itertools::Itertools;
-use risingwave_common::error::Result;
 
+use super::generic::GenericPlanRef;
+use super::utils::impl_distill_by_unit;
 use super::{
-    gen_filter_and_pushdown, generic, BatchExpand, ColPrunable, ExprRewritable, PlanBase, PlanRef,
-    PlanTreeNodeUnary, PredicatePushdown, StreamExpand, ToBatch, ToStream,
+    gen_filter_and_pushdown, generic, BatchExpand, ColPrunable, ExprRewritable, Logical, PlanBase,
+    PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamExpand, ToBatch, ToStream,
 };
+use crate::error::Result;
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
-    ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
+    ColumnPruningContext, LogicalProject, PredicatePushdownContext, RewriteStreamContext,
+    ToStreamContext,
 };
 use crate::utils::{ColIndexMapping, Condition};
 
@@ -36,7 +38,7 @@ use crate::utils::{ColIndexMapping, Condition};
 /// is used to distinguish between different `subset`s in `column_subsets`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalExpand {
-    pub base: PlanBase,
+    pub base: PlanBase<Logical>,
     core: generic::Expand<PlanRef>,
 }
 
@@ -63,8 +65,8 @@ impl LogicalExpand {
         &self.core.column_subsets
     }
 
-    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        self.core.fmt_with_name(f, name)
+    pub fn decompose(self) -> (PlanRef, Vec<Vec<usize>>) {
+        self.core.decompose()
     }
 }
 
@@ -93,37 +95,56 @@ impl PlanTreeNodeUnary for LogicalExpand {
                     .collect_vec()
             })
             .collect_vec();
-        let (mut mapping, new_input_col_num) = input_col_change.into_parts();
-        mapping.extend({
-            mapping
-                .iter()
-                .map(|p| p.map(|i| i + new_input_col_num))
-                .collect_vec()
-        });
-        mapping.push(Some(2 * new_input_col_num));
 
-        (
-            Self::new(input, column_subsets),
-            ColIndexMapping::new(mapping),
-        )
+        let old_out_len = self.schema().len();
+        let old_in_len = self.input().schema().len();
+        let new_in_len = input.schema().len();
+        assert_eq!(
+            old_out_len,
+            old_in_len * 2 + 1 // expanded input cols + real input cols + flag
+        );
+
+        let mut mapping = Vec::with_capacity(old_out_len);
+        // map the expanded input columns
+        for i in 0..old_in_len {
+            mapping.push(input_col_change.try_map(i));
+        }
+        // map the real input columns
+        for i in 0..old_in_len {
+            mapping.push(
+                input_col_change
+                    .try_map(i)
+                    .map(|x| x + new_in_len /* # of new expanded input cols */),
+            );
+        }
+        // map the flag column
+        mapping.push(Some(2 * new_in_len));
+
+        let expand = Self::new(input, column_subsets);
+        let output_col_num = expand.schema().len();
+        (expand, ColIndexMapping::new(mapping, output_col_num))
     }
 }
 
 impl_plan_tree_node_for_unary! {LogicalExpand}
-
-impl fmt::Display for LogicalExpand {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.fmt_with_name(f, "LogicalExpand")
-    }
-}
+impl_distill_by_unit!(LogicalExpand, core, "LogicalExpand");
 
 impl ColPrunable for LogicalExpand {
-    fn prune_col(&self, _required_cols: &[usize], _ctx: &mut ColumnPruningContext) -> PlanRef {
-        todo!("prune_col of LogicalExpand is not implemented yet.");
+    fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
+        // No pruning.
+        let input_required_cols = (0..self.input().schema().len()).collect_vec();
+        LogicalProject::with_out_col_idx(
+            self.clone_with_input(self.input().prune_col(&input_required_cols, ctx))
+                .into(),
+            required_cols.iter().cloned(),
+        )
+        .into()
     }
 }
 
 impl ExprRewritable for LogicalExpand {}
+
+impl ExprVisitable for LogicalExpand {}
 
 impl PredicatePushdown for LogicalExpand {
     fn predicate_pushdown(
@@ -131,11 +152,7 @@ impl PredicatePushdown for LogicalExpand {
         predicate: Condition,
         ctx: &mut PredicatePushdownContext,
     ) -> PlanRef {
-        // TODO: how to do predicate pushdown for Expand?
-        //
-        // let new_input = self.input.predicate_pushdown(predicate);
-        // self.clone_with_input(new_input).into()
-
+        // No pushdown.
         gen_filter_and_pushdown(self, predicate, Condition::true_cond(), ctx)
     }
 }
@@ -192,7 +209,7 @@ mod tests {
         let mut values = LogicalValues::new(vec![], Schema { fields }, ctx);
         values
             .base
-            .functional_dependency
+            .functional_dependency_mut()
             .add_functional_dependency_by_column_indices(&[0], &[1, 2]);
 
         let column_subsets = vec![vec![0, 1], vec![2]];

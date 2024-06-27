@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,17 +17,18 @@ package com.risingwave.connector;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.risingwave.connector.api.TableSchema;
-import com.risingwave.connector.api.sink.SinkBase;
 import com.risingwave.connector.api.sink.SinkFactory;
+import com.risingwave.connector.api.sink.SinkWriter;
+import com.risingwave.connector.api.sink.SinkWriterV1;
 import com.risingwave.proto.Catalog.SinkType;
 import java.util.Map;
 
 public class FileSinkFactory implements SinkFactory {
     @Override
-    public SinkBase create(TableSchema tableSchema, Map<String, String> tableProperties) {
+    public SinkWriter createWriter(TableSchema tableSchema, Map<String, String> tableProperties) {
         ObjectMapper mapper = new ObjectMapper();
         FileSinkConfig config = mapper.convertValue(tableProperties, FileSinkConfig.class);
-        return new FileSink(config, tableSchema);
+        return new SinkWriterV1.Adapter(new FileSink(config, tableSchema));
     }
 
     @Override

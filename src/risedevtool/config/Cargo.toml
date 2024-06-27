@@ -9,10 +9,12 @@ repository = { workspace = true }
 
 [dependencies]
 anyhow = { version = "1", features = ["backtrace"] }
-clap = { version = "4", features = ["derive"] }
+clap = { workspace = true }
 console = "0.15"
-dialoguer = "0.10"
-enum-iterator = "1"
-fs-err = "2.9.0"
-itertools = "0.10"
-tempfile = "3"
+dialoguer = "0.11"
+enum-iterator = "2"
+fs-err = "2.11.0"
+itertools = { workspace = true }
+
+[lints]
+workspace = true

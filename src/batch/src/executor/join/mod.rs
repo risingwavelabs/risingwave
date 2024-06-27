@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -26,14 +26,13 @@ use itertools::Itertools;
 pub use local_lookup_join::*;
 pub use lookup_join_base::*;
 pub use nested_loop_join::*;
-use risingwave_common::array::{DataChunk, RowRef, Vis};
-use risingwave_common::error::Result;
+use risingwave_common::array::{DataChunk, RowRef};
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, DatumRef};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::plan_common::JoinType as JoinTypePb;
 
-use crate::error::BatchError;
+use crate::error::Result;
 
 #[derive(Copy, Clone, Debug, Default, PartialEq)]
 pub enum JoinType {
@@ -53,14 +52,6 @@ pub enum JoinType {
 }
 
 impl JoinType {
-    #[inline(always)]
-    pub(super) fn need_join_remaining(self) -> bool {
-        matches!(
-            self,
-            JoinType::RightOuter | JoinType::RightAnti | JoinType::FullOuter
-        )
-    }
-
     pub fn from_prost(prost: JoinTypePb) -> Self {
         match prost {
             JoinTypePb::Inner => JoinType::Inner,
@@ -73,6 +64,19 @@ impl JoinType {
             JoinTypePb::FullOuter => JoinType::FullOuter,
             JoinTypePb::Unspecified => unreachable!(),
         }
+    }
+}
+
+#[cfg(test)]
+impl JoinType {
+    #![allow(dead_code)]
+
+    #[inline(always)]
+    pub(super) fn need_join_remaining(self) -> bool {
+        matches!(
+            self,
+            JoinType::RightOuter | JoinType::RightAnti | JoinType::FullOuter
+        )
     }
 
     fn need_build(self) -> bool {
@@ -124,14 +128,11 @@ fn concatenate(left: &DataChunk, right: &DataChunk) -> Result<DataChunk> {
     concated_columns.extend_from_slice(left.columns());
     concated_columns.extend_from_slice(right.columns());
     // Only handle one side is constant row chunk: One of visibility must be None.
-    let vis = match (left.vis(), right.vis()) {
-        (Vis::Compact(_), _) => right.vis().clone(),
-        (_, Vis::Compact(_)) => left.vis().clone(),
-        (Vis::Bitmap(_), Vis::Bitmap(_)) => {
-            return Err(BatchError::UnsupportedFunction(
-                "The concatenate behaviour of two chunk with visibility is undefined".to_string(),
-            )
-            .into())
+    let vis = match (left.is_compacted(), right.is_compacted()) {
+        (true, _) => right.visibility().clone(),
+        (_, true) => left.visibility().clone(),
+        (false, false) => {
+            panic!("The concatenate behaviour of two chunk with visibility is undefined")
         }
     };
     let data_chunk = DataChunk::new(concated_columns, vis);
@@ -150,7 +151,7 @@ fn convert_datum_refs_to_chunk(
         .collect();
     for _i in 0..num_tuples {
         for (builder, datum_ref) in output_array_builders.iter_mut().zip_eq_fast(datum_refs) {
-            builder.append_datum(*datum_ref);
+            builder.append(*datum_ref);
         }
     }
 
@@ -176,7 +177,8 @@ fn convert_row_to_chunk(
 #[cfg(test)]
 mod tests {
 
-    use risingwave_common::array::{ArrayBuilder, DataChunk, PrimitiveArrayBuilder, Vis};
+    use risingwave_common::array::{Array, ArrayBuilder, DataChunk, PrimitiveArrayBuilder};
+    use risingwave_common::buffer::Bitmap;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::row::Row;
     use risingwave_common::types::{DataType, ScalarRefImpl};
@@ -194,22 +196,16 @@ mod tests {
                 builder.append(Some(i as i32));
             }
             let arr = builder.finish();
-            columns.push(arr.into())
+            columns.push(arr.into_ref())
         }
-        let chunk1: DataChunk = DataChunk::new(columns.clone(), length);
-        let bool_vec = vec![true, false, true, false, false];
-        let chunk2: DataChunk = DataChunk::new(
-            columns.clone(),
-            Vis::Bitmap((bool_vec.clone()).into_iter().collect()),
-        );
+        let chunk1 = DataChunk::new(columns.clone(), length);
+        let visibility = Bitmap::from_bool_slice(&[true, false, true, false, false]);
+        let chunk2 = DataChunk::new(columns.clone(), visibility.clone());
         let chunk = concatenate(&chunk1, &chunk2).unwrap();
         assert_eq!(chunk.capacity(), chunk1.capacity());
         assert_eq!(chunk.capacity(), chunk2.capacity());
         assert_eq!(chunk.columns().len(), chunk1.columns().len() * 2);
-        assert_eq!(
-            chunk.visibility().cloned().unwrap(),
-            (bool_vec).into_iter().collect()
-        );
+        assert_eq!(chunk.visibility(), &visibility);
     }
 
     /// Test the function of convert row into constant row chunk (one row repeat multiple times).

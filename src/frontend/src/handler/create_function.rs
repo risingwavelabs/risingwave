@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,17 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::anyhow;
-use itertools::Itertools;
-use pgwire::pg_response::StatementType;
+use anyhow::Context;
 use risingwave_common::catalog::FunctionId;
 use risingwave_common::types::DataType;
+use risingwave_expr::sig::{CreateFunctionOptions, UdfKind};
 use risingwave_pb::catalog::function::{Kind, ScalarFunction, TableFunction};
 use risingwave_pb::catalog::Function;
-use risingwave_sqlparser::ast::{
-    CreateFunctionBody, FunctionDefinition, ObjectName, OperateFunctionArg,
-};
-use risingwave_udf::ArrowFlightUdfClient;
 
 use super::*;
 use crate::catalog::CatalogError;
@@ -36,41 +31,48 @@ pub async fn handle_create_function(
     args: Option<Vec<OperateFunctionArg>>,
     returns: Option<CreateFunctionReturns>,
     params: CreateFunctionBody,
+    with_options: CreateFunctionWithOptions,
 ) -> Result<RwPgResponse> {
     if or_replace {
-        return Err(ErrorCode::NotImplemented(
-            "CREATE OR REPLACE FUNCTION".to_string(),
-            None.into(),
-        )
-        .into());
+        bail_not_implemented!("CREATE OR REPLACE FUNCTION");
     }
     if temporary {
-        return Err(ErrorCode::NotImplemented(
-            "CREATE TEMPORARY FUNCTION".to_string(),
-            None.into(),
-        )
-        .into());
+        bail_not_implemented!("CREATE TEMPORARY FUNCTION");
     }
+    // e.g., `language [ python / java / ...etc]`
     let language = match params.language {
-        Some(lang) => lang.real_value().to_lowercase(),
-        None => {
-            return Err(
-                ErrorCode::InvalidParameterValue("LANGUAGE must be specified".to_string()).into(),
-            )
+        Some(lang) => {
+            let lang = lang.real_value().to_lowercase();
+            match &*lang {
+                "python" | "java" | "wasm" | "rust" | "javascript" => lang,
+                _ => {
+                    return Err(ErrorCode::InvalidParameterValue(format!(
+                        "language {} is not supported",
+                        lang
+                    ))
+                    .into())
+                }
+            }
         }
+        // Empty language is acceptable since we only require the external server implements the
+        // correct protocol.
+        None => "".to_string(),
     };
-    if language != "python" {
-        return Err(ErrorCode::InvalidParameterValue(
-            "LANGUAGE should be one of: python".to_string(),
-        )
-        .into());
-    }
-    let Some(FunctionDefinition::SingleQuotedDef(identifier)) = params.as_ else {
-        return Err(ErrorCode::InvalidParameterValue("AS must be specified".to_string()).into());
+
+    let runtime = match params.runtime {
+        Some(runtime) => {
+            if language == "javascript" {
+                Some(runtime.real_value())
+            } else {
+                return Err(ErrorCode::InvalidParameterValue(
+                    "runtime is only supported for javascript".to_string(),
+                )
+                .into());
+            }
+        }
+        None => None,
     };
-    let Some(CreateFunctionUsing::Link(link)) = params.using else {
-        return Err(ErrorCode::InvalidParameterValue("USING must be specified".to_string()).into());
-    };
+
     let return_type;
     let kind = match returns {
         Some(CreateFunctionReturns::Value(data_type)) => {
@@ -83,14 +85,10 @@ pub async fn handle_create_function(
                 return_type = bind_data_type(&columns[0].data_type)?;
             } else {
                 // return type is a struct for multiple columns
-                let datatypes = columns
-                    .iter()
-                    .map(|c| bind_data_type(&c.data_type))
-                    .collect::<Result<Vec<_>>>()?;
-                let names = columns
-                    .iter()
-                    .map(|c| c.name.real_value())
-                    .collect::<Vec<_>>();
+                let it = columns
+                    .into_iter()
+                    .map(|c| bind_data_type(&c.data_type).map(|ty| (ty, c.name.real_value())));
+                let (datatypes, names) = itertools::process_results(it, |it| it.unzip())?;
                 return_type = DataType::new_struct(datatypes, names);
             }
             Kind::Table(TableFunction {})
@@ -103,8 +101,10 @@ pub async fn handle_create_function(
         }
     };
 
+    let mut arg_names = vec![];
     let mut arg_types = vec![];
     for arg in args.unwrap_or_default() {
+        arg_names.push(arg.name.map_or("".to_string(), |n| n.real_value()));
         arg_types.push(bind_data_type(&arg.data_type)?);
     }
 
@@ -114,7 +114,7 @@ pub async fn handle_create_function(
     let (schema_name, function_name) = Binder::resolve_schema_qualified_name(db_name, name)?;
     let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
 
-    // check if function exists
+    // check if the function exists in the catalog
     if (session.env().catalog_reader().read_guard())
         .get_schema_by_id(&database_id, &schema_id)?
         .get_function_by_name_args(&function_name, &arg_types)
@@ -127,37 +127,44 @@ pub async fn handle_create_function(
         return Err(CatalogError::Duplicated("function", name).into());
     }
 
-    // check the service
-    let client = ArrowFlightUdfClient::connect(&link)
-        .await
-        .map_err(|e| anyhow!(e))?;
-    /// A helper function to create a unnamed field from data type.
-    fn to_field(data_type: arrow_schema::DataType) -> arrow_schema::Field {
-        arrow_schema::Field::new("", data_type, true)
-    }
-    let args = arrow_schema::Schema::new(arg_types.iter().map(|t| to_field(t.into())).collect());
-    let returns = arrow_schema::Schema::new(match kind {
-        Kind::Scalar(_) => vec![to_field(return_type.clone().into())],
-        Kind::Table(_) => {
-            let mut fields = vec![arrow_schema::Field::new(
-                "row_index",
-                arrow_schema::DataType::Int64,
-                true,
-            )];
-            match &return_type {
-                DataType::Struct(s) => {
-                    fields.extend(s.fields.iter().map(|t| to_field(t.clone().into())))
-                }
-                _ => fields.push(to_field(return_type.clone().into())),
-            }
-            fields
+    let link = match &params.using {
+        Some(CreateFunctionUsing::Link(l)) => Some(l.as_str()),
+        _ => None,
+    };
+    let base64_decoded = match &params.using {
+        Some(CreateFunctionUsing::Base64(encoded)) => {
+            use base64::prelude::{Engine, BASE64_STANDARD};
+            let bytes = BASE64_STANDARD
+                .decode(encoded)
+                .context("invalid base64 encoding")?;
+            Some(bytes)
         }
-        _ => unreachable!(),
-    });
-    client
-        .check(&identifier, &args, &returns)
-        .await
-        .map_err(|e| anyhow!(e))?;
+        _ => None,
+    };
+    let function_type = match params.function_type {
+        Some(CreateFunctionType::Sync) => Some("sync".to_string()),
+        Some(CreateFunctionType::Async) => Some("async".to_string()),
+        Some(CreateFunctionType::Generator) => Some("generator".to_string()),
+        Some(CreateFunctionType::AsyncGenerator) => Some("async_generator".to_string()),
+        None => None,
+    };
+
+    let create_fn =
+        risingwave_expr::sig::find_udf_impl(&language, runtime.as_deref(), link)?.create_fn;
+    let output = create_fn(CreateFunctionOptions {
+        kind: match kind {
+            Kind::Scalar(_) => UdfKind::Scalar,
+            Kind::Table(_) => UdfKind::Table,
+            Kind::Aggregate(_) => unreachable!(),
+        },
+        name: &function_name,
+        arg_names: &arg_names,
+        arg_types: &arg_types,
+        return_type: &return_type,
+        as_: params.as_.as_ref().map(|s| s.as_str()),
+        using_link: link,
+        using_base64_decoded: base64_decoded.as_deref(),
+    })?;
 
     let function = Function {
         id: FunctionId::placeholder().0,
@@ -165,15 +172,23 @@ pub async fn handle_create_function(
         database_id,
         name: function_name,
         kind: Some(kind),
+        arg_names,
         arg_types: arg_types.into_iter().map(|t| t.into()).collect(),
         return_type: Some(return_type.into()),
         language,
-        identifier,
-        link,
+        identifier: Some(output.identifier),
+        link: link.map(|s| s.to_string()),
+        body: output.body,
+        compressed_binary: output.compressed_binary,
         owner: session.user_id(),
+        always_retry_on_network_error: with_options
+            .always_retry_on_network_error
+            .unwrap_or_default(),
+        runtime,
+        function_type,
     };
 
-    let catalog_writer = session.env().catalog_writer();
+    let catalog_writer = session.catalog_writer()?;
     catalog_writer.create_function(function).await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_FUNCTION))

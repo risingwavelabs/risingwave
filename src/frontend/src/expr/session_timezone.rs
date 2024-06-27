@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,7 +17,8 @@ pub use risingwave_pb::expr::expr_node::Type as ExprType;
 
 pub use crate::expr::expr_rewriter::ExprRewriter;
 pub use crate::expr::function_call::FunctionCall;
-use crate::expr::{Expr, ExprImpl, Literal};
+use crate::expr::{Expr, ExprImpl, ExprVisitor};
+use crate::session::current;
 
 /// `SessionTimezone` will be used to resolve session
 /// timezone-dependent casts, comparisons or arithmetic.
@@ -35,7 +36,7 @@ impl ExprRewriter for SessionTimezone {
             .map(|expr| self.rewrite_expr(expr))
             .collect();
         if let Some(expr) = self.with_timezone(func_type, &inputs, ret.clone()) {
-            self.used = true;
+            self.mark_used();
             expr
         } else {
             FunctionCall::new_unchecked(func_type, inputs, ret).into()
@@ -59,16 +60,15 @@ impl SessionTimezone {
         self.used
     }
 
-    pub fn warning(&self) -> Option<String> {
-        if self.used {
-            Some(format!(
+    fn mark_used(&mut self) {
+        if !self.used {
+            self.used = true;
+            current::notice_to_user(format!(
                 "Your session timezone is {}. It was used in the interpretation of timestamps and dates in your query. If this is unintended, \
                 change your timezone to match that of your data's with `set timezone = [timezone]` or \
                 rewrite your query with an explicit timezone conversion, e.g. with `AT TIME ZONE`.\n",
                 self.timezone
-            ))
-        } else {
-            None
+            ));
         }
     }
 
@@ -76,10 +76,24 @@ impl SessionTimezone {
     fn with_timezone(
         &self,
         func_type: ExprType,
-        inputs: &Vec<ExprImpl>,
+        inputs: &[ExprImpl],
         return_type: DataType,
     ) -> Option<ExprImpl> {
         match func_type {
+            // `input_timestamptz::varchar`
+            // => `cast_with_time_zone(input_timestamptz, zone_string)`
+            // `input_varchar::timestamptz`
+            // => `cast_with_time_zone(input_varchar, zone_string)`
+            // `input_date::timestamptz`
+            // => `input_date::timestamp AT TIME ZONE zone_string`
+            // `input_timestamp::timestamptz`
+            // => `input_timestamp AT TIME ZONE zone_string`
+            // `input_timestamptz::date`
+            // => `(input_timestamptz AT TIME ZONE zone_string)::date`
+            // `input_timestamptz::time`
+            // => `(input_timestamptz AT TIME ZONE zone_string)::time`
+            // `input_timestamptz::timestamp`
+            // => `input_timestamptz AT TIME ZONE zone_string`
             ExprType::Cast => {
                 assert_eq!(inputs.len(), 1);
                 let mut input = inputs[0].clone();
@@ -104,7 +118,14 @@ impl SessionTimezone {
                     _ => None,
                 }
             }
-            // is cmp
+            // `lhs_date CMP rhs_timestamptz`
+            // => `(lhs_date::timestamp AT TIME ZONE zone_string) CMP rhs_timestamptz`
+            // `lhs_timestamp CMP rhs_timestamptz`
+            // => `(lhs_timestamp AT TIME ZONE zone_string) CMP rhs_timestamptz`
+            // `lhs_timestamptz CMP rhs_date`
+            // => `lhs_timestamptz CMP (rhs_date::timestamp AT TIME ZONE zone_string)`
+            // `lhs_timestamptz CMP rhs_timestamp`
+            // => `lhs_timestamptz CMP (rhs_timestamp AT TIME ZONE zone_string)`
             ExprType::Equal
             | ExprType::NotEqual
             | ExprType::LessThan
@@ -114,7 +135,7 @@ impl SessionTimezone {
             | ExprType::IsDistinctFrom
             | ExprType::IsNotDistinctFrom => {
                 assert_eq!(inputs.len(), 2);
-                let mut inputs = inputs.clone();
+                let mut inputs = inputs.to_vec();
                 for idx in 0..2 {
                     if matches!(inputs[(idx + 1) % 2].return_type(), DataType::Timestamptz)
                         && matches!(
@@ -134,36 +155,12 @@ impl SessionTimezone {
                 }
                 None
             }
-            // TODO: handle tstz-related arithmetic with timezone
-            // We first translate to timestamp to handle years, months and days,
-            // then we translate back to timestamptz handle hours and milliseconds
-            //
-            // For performance concern, we assume that most the intervals are const-evaled.
-            //
-            // We impl the following expression tree:
-            //
-            //                    [+/-]
-            //                   /      \
-            //             timestamptz   [-]
-            //              /            /   \
-            //          [+/-]       interval  date_trunc
-            //          /    \                   /     \
-            //    timestamp  date_trunc       'day' interval
-            //        /        /     \
-            //  timestamptz  'day'  interval
-            //
-            //
-            // Const-evaled expr tree:
-            //
-            //                    [+/-]
-            //                   /      \
-            //             timestamptz   interval_non_date_part
-            //              /
-            //          [+/-]
-            //          /    \
-            //    timestamp  interval_date_part
-            //        /
-            //  timestamptz
+            // `add(lhs_interval, rhs_timestamptz)`
+            // => `add_with_time_zone(rhs_timestamptz, lhs_interval, zone_string)`
+            // `add(lhs_timestamptz, rhs_interval)`
+            // => `add_with_time_zone(lhs_timestamptz, rhs_interval, zone_string)`
+            // `subtract(lhs_timestamptz, rhs_interval)`
+            // => `subtract_with_time_zone(lhs_timestamptz, rhs_interval, zone_string)`
             ExprType::Subtract | ExprType::Add => {
                 assert_eq!(inputs.len(), 2);
                 let canonical_match = matches!(inputs[0].return_type(), DataType::Timestamptz)
@@ -178,46 +175,72 @@ impl SessionTimezone {
                         } else {
                             (inputs[0].clone(), inputs[1].clone())
                         };
-                    let interval_date_part: ExprImpl = FunctionCall::new_unchecked(
-                        ExprType::DateTrunc,
+                    let new_type = match func_type {
+                        ExprType::Add => ExprType::AddWithTimeZone,
+                        ExprType::Subtract => ExprType::SubtractWithTimeZone,
+                        _ => unreachable!(),
+                    };
+                    let rewritten_expr = FunctionCall::new(
+                        new_type,
                         vec![
-                            Literal::new(Some("day".into()), DataType::Varchar).into(),
-                            interval.clone(),
+                            orig_timestamptz,
+                            interval,
+                            ExprImpl::literal_varchar(self.timezone()),
                         ],
-                        DataType::Interval,
                     )
+                    .unwrap()
                     .into();
-                    let interval_non_date_part = FunctionCall::new_unchecked(
-                        ExprType::Subtract,
-                        vec![interval, interval_date_part.clone()],
-                        DataType::Interval,
-                    )
-                    .into();
-                    let timestamp = self
-                        .with_timezone(ExprType::Cast, &vec![orig_timestamptz], DataType::Timestamp)
-                        .unwrap();
-                    let timestamp_op_date_part = FunctionCall::new_unchecked(
-                        func_type,
-                        vec![timestamp, interval_date_part],
-                        DataType::Timestamp,
-                    )
-                    .into();
-                    let timestamptz = self
-                        .with_timezone(
-                            ExprType::Cast,
-                            &vec![timestamp_op_date_part],
-                            DataType::Timestamptz,
-                        )
-                        .unwrap();
-                    let timestamptz_op_non_date_part = FunctionCall::new_unchecked(
-                        func_type,
-                        vec![timestamptz, interval_non_date_part],
-                        DataType::Timestamptz,
-                    )
-                    .into();
-                    return Some(timestamptz_op_non_date_part);
+                    return Some(rewritten_expr);
                 }
                 None
+            }
+            // `date_trunc(field_string, input_timestamptz)`
+            // => `date_trunc(field_string, input_timestamptz, zone_string)`
+            ExprType::DateTrunc | ExprType::Extract | ExprType::DatePart => {
+                if !(inputs.len() == 2 && inputs[1].return_type() == DataType::Timestamptz) {
+                    return None;
+                }
+                assert_eq!(inputs[0].return_type(), DataType::Varchar);
+                if let ExprImpl::Literal(lit) = &inputs[0]
+                    && matches!(func_type, ExprType::Extract | ExprType::DatePart)
+                    && lit
+                        .get_data()
+                        .as_ref()
+                        .map_or(true, |v| v.as_utf8().eq_ignore_ascii_case("epoch"))
+                {
+                    // No need to rewrite when field is `null` or `epoch`.
+                    // This is optional but avoids false warning in common case.
+                    return None;
+                }
+                let mut new_inputs = inputs.to_vec();
+                new_inputs.push(ExprImpl::literal_varchar(self.timezone()));
+                Some(FunctionCall::new(func_type, new_inputs).unwrap().into())
+            }
+            // `char_to_timestamptz(input_string, format_string)`
+            // => `char_to_timestamptz(input_string, format_string, zone_string)`
+            ExprType::CharToTimestamptz => {
+                if !(inputs.len() == 2
+                    && inputs[0].return_type() == DataType::Varchar
+                    && inputs[1].return_type() == DataType::Varchar)
+                {
+                    return None;
+                }
+                let mut new_inputs = inputs.to_vec();
+                new_inputs.push(ExprImpl::literal_varchar(self.timezone()));
+                Some(FunctionCall::new(func_type, new_inputs).unwrap().into())
+            }
+            // `to_char(input_timestamptz, format_string)`
+            // => `to_char(input_timestamptz, format_string, zone_string)`
+            ExprType::ToChar => {
+                if !(inputs.len() == 2
+                    && inputs[0].return_type() == DataType::Timestamptz
+                    && inputs[1].return_type() == DataType::Varchar)
+                {
+                    return None;
+                }
+                let mut new_inputs = inputs.to_vec();
+                new_inputs.push(ExprImpl::literal_varchar(self.timezone()));
+                Some(FunctionCall::new(func_type, new_inputs).unwrap().into())
             }
             _ => None,
         }
@@ -239,5 +262,37 @@ impl SessionTimezone {
             return_type,
         )
         .into()
+    }
+}
+
+#[derive(Default)]
+pub struct TimestamptzExprFinder {
+    has: bool,
+}
+
+impl TimestamptzExprFinder {
+    pub fn has(&self) -> bool {
+        self.has
+    }
+}
+
+impl ExprVisitor for TimestamptzExprFinder {
+    fn visit_function_call(&mut self, func_call: &FunctionCall) {
+        if func_call.return_type() == DataType::Timestamptz {
+            self.has = true;
+            return;
+        }
+
+        for input in &func_call.inputs {
+            if input.return_type() == DataType::Timestamptz {
+                self.has = true;
+                return;
+            }
+        }
+
+        func_call
+            .inputs()
+            .iter()
+            .for_each(|expr| self.visit_expr(expr));
     }
 }

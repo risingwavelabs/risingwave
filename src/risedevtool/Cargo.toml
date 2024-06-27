@@ -15,25 +15,27 @@ normal = ["workspace-hack"]
 
 [dependencies]
 anyhow = { version = "1", features = ["backtrace"] }
-chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
-clap = { version = "4", features = ["derive"] }
+chrono = { version = "0.4", default-features = false, features = [
+    "clock",
+    "std",
+] }
+clap = { workspace = true }
 console = "0.15"
-dialoguer = "0.10"
-enum-iterator = "1"
-fs-err = "2.9.0"
+fs-err = "2.11.0"
 glob = "0.3"
-google-cloud-pubsub = "0.14"
+google-cloud-pubsub = "0.25"
 indicatif = "0.17"
-itertools = "0.10"
+itertools = { workspace = true }
 rdkafka = { workspace = true }
-redis = "0.22"
+redis = "0.25"
 regex = "1"
-reqwest = "0.11"
+reqwest = { version = "0.12.2", features = ["blocking"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-serde_with = "2"
+serde_with = "3"
 serde_yaml = "0.9"
 tempfile = "3"
+thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
     "rt-multi-thread",
@@ -41,9 +43,12 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "macros",
     "time",
     "signal",
-    "fs"
+    "fs",
 ] }
 tracing = "0.1"
 tracing-subscriber = "0.3"
 workspace-hack = { path = "../workspace-hack" }
 yaml-rust = "0.4"
+
+[lints]
+workspace = true

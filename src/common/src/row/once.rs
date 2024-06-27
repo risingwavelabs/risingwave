@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,10 +20,6 @@ use crate::types::{DatumRef, ToDatumRef};
 pub struct Once<D>(D);
 
 impl<D: ToDatumRef> Row for Once<D> {
-    type Iter<'a> = std::iter::Once<DatumRef<'a>>
-    where
-        Self: 'a;
-
     #[inline]
     fn datum_at(&self, index: usize) -> DatumRef<'_> {
         if index == 0 {
@@ -45,7 +41,7 @@ impl<D: ToDatumRef> Row for Once<D> {
     }
 
     #[inline]
-    fn iter(&self) -> Self::Iter<'_> {
+    fn iter(&self) -> impl ExactSizeIterator<Item = DatumRef<'_>> {
         std::iter::once(self.0.to_datum_ref())
     }
 }

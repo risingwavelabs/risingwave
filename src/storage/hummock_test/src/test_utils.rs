@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::Bound;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -20,23 +19,23 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common_service::observer_manager::ObserverManager;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
+use risingwave_hummock_sdk::key::TableKey;
+pub use risingwave_hummock_sdk::key::{gen_key_from_bytes, gen_key_from_str};
 use risingwave_meta::hummock::test_utils::{
     register_table_ids_to_compaction_group, setup_compute_env,
 };
 use risingwave_meta::hummock::{HummockManagerRef, MockHummockMetaClient};
 use risingwave_meta::manager::MetaSrvEnv;
-use risingwave_meta::storage::{MemStore, MetaStore};
 use risingwave_pb::catalog::{PbTable, Table};
 use risingwave_pb::common::WorkerNode;
-use risingwave_pb::hummock::version_update_payload;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::error::StorageResult;
 use risingwave_storage::filter_key_extractor::{
-    FilterKeyExtractorImpl, FilterKeyExtractorManager, FilterKeyExtractorManagerRef,
-    FullKeyFilterKeyExtractor,
+    FilterKeyExtractorImpl, FilterKeyExtractorManager, FullKeyFilterKeyExtractor,
+    RpcFilterKeyExtractorManager,
 };
 use risingwave_storage::hummock::backup_reader::BackupReader;
-use risingwave_storage::hummock::event_handler::HummockEvent;
+use risingwave_storage::hummock::event_handler::HummockVersionUpdate;
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
 use risingwave_storage::hummock::local_version::pinned_version::PinnedVersion;
 use risingwave_storage::hummock::observer_manager::HummockObserverNode;
@@ -50,23 +49,23 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use crate::mock_notification_client::get_notification_client_for_test;
 
 pub async fn prepare_first_valid_version(
-    env: MetaSrvEnv<MemStore>,
-    hummock_manager_ref: HummockManagerRef<MemStore>,
+    env: MetaSrvEnv,
+    hummock_manager_ref: HummockManagerRef,
     worker_node: WorkerNode,
 ) -> (
     PinnedVersion,
-    UnboundedSender<HummockEvent>,
-    UnboundedReceiver<HummockEvent>,
+    UnboundedSender<HummockVersionUpdate>,
+    UnboundedReceiver<HummockVersionUpdate>,
 ) {
     let (tx, mut rx) = unbounded_channel();
     let notification_client =
         get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node.clone());
-    let backup_manager = BackupReader::unused();
+    let backup_manager = BackupReader::unused().await;
     let write_limiter = WriteLimiter::unused();
     let observer_manager = ObserverManager::new(
         notification_client,
         HummockObserverNode::new(
-            Arc::new(FilterKeyExtractorManager::default()),
+            Arc::new(RpcFilterKeyExtractorManager::default()),
             backup_manager,
             tx.clone(),
             write_limiter,
@@ -75,14 +74,12 @@ pub async fn prepare_first_valid_version(
     .await;
     observer_manager.start().await;
     let hummock_version = match rx.recv().await {
-        Some(HummockEvent::VersionUpdate(version_update_payload::Payload::PinnedVersion(
-            version,
-        ))) => version,
+        Some(HummockVersionUpdate::PinnedVersion(version)) => version,
         _ => unreachable!("should be full version"),
     };
 
     (
-        PinnedVersion::new(hummock_version, unbounded_channel().0),
+        PinnedVersion::new(*hummock_version, unbounded_channel().0),
         tx,
         rx,
     )
@@ -92,8 +89,7 @@ pub async fn prepare_first_valid_version(
 pub trait TestIngestBatch: LocalStateStore {
     async fn ingest_batch(
         &mut self,
-        kv_pairs: Vec<(Bytes, StorageValue)>,
-        delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
+        kv_pairs: Vec<(TableKey<Bytes>, StorageValue)>,
         write_options: WriteOptions,
     ) -> StorageResult<usize>;
 }
@@ -102,8 +98,7 @@ pub trait TestIngestBatch: LocalStateStore {
 impl<S: LocalStateStore> TestIngestBatch for S {
     async fn ingest_batch(
         &mut self,
-        kv_pairs: Vec<(Bytes, StorageValue)>,
-        delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
+        kv_pairs: Vec<(TableKey<Bytes>, StorageValue)>,
         write_options: WriteOptions,
     ) -> StorageResult<usize> {
         assert_eq!(self.epoch(), write_options.epoch);
@@ -113,29 +108,14 @@ impl<S: LocalStateStore> TestIngestBatch for S {
                 Some(value) => self.insert(key, value, None)?,
             }
         }
-        self.flush(delete_ranges).await
-    }
-}
-
-#[async_trait::async_trait]
-pub(crate) trait HummockStateStoreTestTrait: StateStore {
-    fn get_pinned_version(&self) -> PinnedVersion;
-    async fn seal_and_sync_epoch(&self, epoch: u64) -> StorageResult<SyncResult> {
-        self.seal_epoch(epoch, true);
-        self.sync(epoch).await
-    }
-}
-
-impl HummockStateStoreTestTrait for HummockStorage {
-    fn get_pinned_version(&self) -> PinnedVersion {
-        self.get_pinned_version()
+        self.flush().await
     }
 }
 
 pub async fn with_hummock_storage_v2(
     table_id: TableId,
 ) -> (HummockStorage, Arc<MockHummockMetaClient>) {
-    let sstable_store = mock_sstable_store();
+    let sstable_store = mock_sstable_store().await;
     let hummock_options = Arc::new(default_opts_for_test());
     let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;
@@ -163,22 +143,27 @@ pub async fn with_hummock_storage_v2(
     (hummock_storage, meta_client)
 }
 pub fn update_filter_key_extractor_for_table_ids(
-    filter_key_extractor_manager_ref: &FilterKeyExtractorManagerRef,
+    filter_key_extractor_manager_ref: &FilterKeyExtractorManager,
     table_ids: &[u32],
 ) {
+    let rpc_filter_key_extractor_manager = match filter_key_extractor_manager_ref {
+        FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
+            rpc_filter_key_extractor_manager,
+        ) => rpc_filter_key_extractor_manager,
+        FilterKeyExtractorManager::StaticFilterKeyExtractorManager(_) => unreachable!(),
+    };
+
     for table_id in table_ids {
-        filter_key_extractor_manager_ref.update(
+        rpc_filter_key_extractor_manager.update(
             *table_id,
-            Arc::new(FilterKeyExtractorImpl::FullKey(
-                FullKeyFilterKeyExtractor::default(),
-            )),
+            Arc::new(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor)),
         )
     }
 }
 
-pub async fn register_tables_with_id_for_test<S: MetaStore>(
-    filter_key_extractor_manager: &FilterKeyExtractorManagerRef,
-    hummock_manager_ref: &HummockManagerRef<S>,
+pub async fn register_tables_with_id_for_test(
+    filter_key_extractor_manager: &FilterKeyExtractorManager,
+    hummock_manager_ref: &HummockManagerRef,
     table_ids: &[u32],
 ) {
     update_filter_key_extractor_for_table_ids(filter_key_extractor_manager, table_ids);
@@ -191,19 +176,25 @@ pub async fn register_tables_with_id_for_test<S: MetaStore>(
 }
 
 pub fn update_filter_key_extractor_for_tables(
-    filter_key_extractor_manager_ref: &FilterKeyExtractorManagerRef,
+    filter_key_extractor_manager: &FilterKeyExtractorManager,
     tables: &[PbTable],
 ) {
+    let rpc_filter_key_extractor_manager = match filter_key_extractor_manager {
+        FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
+            rpc_filter_key_extractor_manager,
+        ) => rpc_filter_key_extractor_manager,
+        FilterKeyExtractorManager::StaticFilterKeyExtractorManager(_) => unreachable!(),
+    };
     for table in tables {
-        filter_key_extractor_manager_ref.update(
+        rpc_filter_key_extractor_manager.update(
             table.id,
             Arc::new(FilterKeyExtractorImpl::from_table(table)),
         )
     }
 }
-pub async fn register_tables_with_catalog_for_test<S: MetaStore>(
-    filter_key_extractor_manager: &FilterKeyExtractorManagerRef,
-    hummock_manager_ref: &HummockManagerRef<S>,
+pub async fn register_tables_with_catalog_for_test(
+    filter_key_extractor_manager: &FilterKeyExtractorManager,
+    hummock_manager_ref: &HummockManagerRef,
     tables: &[Table],
 ) {
     update_filter_key_extractor_for_tables(filter_key_extractor_manager, tables);
@@ -218,11 +209,17 @@ pub async fn register_tables_with_catalog_for_test<S: MetaStore>(
 
 pub struct HummockTestEnv {
     pub storage: HummockStorage,
-    pub manager: HummockManagerRef<MemStore>,
+    pub manager: HummockManagerRef,
     pub meta_client: Arc<MockHummockMetaClient>,
 }
 
 impl HummockTestEnv {
+    async fn wait_version_sync(&self) {
+        self.storage
+            .wait_version(self.manager.get_current_version().await)
+            .await
+    }
+
     pub async fn register_table_id(&self, table_id: TableId) {
         register_tables_with_id_for_test(
             self.storage.filter_key_extractor_manager(),
@@ -230,6 +227,7 @@ impl HummockTestEnv {
             &[table_id.table_id()],
         )
         .await;
+        self.wait_version_sync().await;
     }
 
     pub async fn register_table(&self, table: PbTable) {
@@ -239,22 +237,21 @@ impl HummockTestEnv {
             &[table],
         )
         .await;
+        self.wait_version_sync().await;
     }
 
     // Seal, sync and commit a epoch.
     // On completion of this function call, the provided epoch should be committed and visible.
     pub async fn commit_epoch(&self, epoch: u64) {
         let res = self.storage.seal_and_sync_epoch(epoch).await.unwrap();
-        self.meta_client
-            .commit_epoch(epoch, res.uncommitted_ssts)
-            .await
-            .unwrap();
+        self.meta_client.commit_epoch(epoch, res).await.unwrap();
+
         self.storage.try_wait_epoch_for_test(epoch).await;
     }
 }
 
 pub async fn prepare_hummock_test_env() -> HummockTestEnv {
-    let sstable_store = mock_sstable_store();
+    let sstable_store = mock_sstable_store().await;
     let hummock_options = Arc::new(default_opts_for_test());
     let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;

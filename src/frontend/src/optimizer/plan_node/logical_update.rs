@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,22 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{fmt, vec};
+use risingwave_common::catalog::TableVersionId;
 
-use risingwave_common::catalog::{Field, Schema, TableVersionId};
-use risingwave_common::error::Result;
-use risingwave_common::types::DataType;
-
+use super::generic::GenericPlanRef;
+use super::utils::impl_distill_by_unit;
 use super::{
-    gen_filter_and_pushdown, generic, BatchUpdate, ColPrunable, ExprRewritable, PlanBase, PlanRef,
-    PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
+    gen_filter_and_pushdown, generic, BatchUpdate, ColPrunable, ExprRewritable, Logical,
+    LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
 };
 use crate::catalog::TableId;
-use crate::expr::{ExprImpl, ExprRewriter};
+use crate::error::Result;
+use crate::expr::{ExprImpl, ExprRewriter, ExprVisitor};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
-use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{ColIndexMapping, Condition};
 
 /// [`LogicalUpdate`] iterates on input relation, set some columns, and inject update records into
@@ -36,20 +35,13 @@ use crate::utils::{ColIndexMapping, Condition};
 /// It corresponds to the `UPDATE` statements in SQL.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalUpdate {
-    pub base: PlanBase,
+    pub base: PlanBase<Logical>,
     core: generic::Update<PlanRef>,
 }
 
 impl From<generic::Update<PlanRef>> for LogicalUpdate {
     fn from(core: generic::Update<PlanRef>) -> Self {
-        let ctx = core.input.ctx();
-        let schema = if core.returning {
-            core.input.schema().clone()
-        } else {
-            Schema::new(vec![Field::unnamed(DataType::Int64)])
-        };
-        let fd_set = FunctionalDependencySet::new(schema.len());
-        let base = PlanBase::new_logical(ctx, schema, vec![], fd_set);
+        let base = PlanBase::new_logical_with_core(&core);
         Self { base, core }
     }
 }
@@ -86,12 +78,7 @@ impl PlanTreeNodeUnary for LogicalUpdate {
 }
 
 impl_plan_tree_node_for_unary! { LogicalUpdate }
-
-impl fmt::Display for LogicalUpdate {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.core.fmt_with_name(f, "LogicalUpdate")
-    }
-}
+impl_distill_by_unit!(LogicalUpdate, core, "LogicalUpdate");
 
 impl ExprRewritable for LogicalUpdate {
     fn has_rewritable_expr(&self) -> bool {
@@ -105,12 +92,26 @@ impl ExprRewritable for LogicalUpdate {
     }
 }
 
+impl ExprVisitable for LogicalUpdate {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.core.exprs.iter().for_each(|e| v.visit_expr(e));
+    }
+}
+
 impl ColPrunable for LogicalUpdate {
-    fn prune_col(&self, _required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
-        let input = self.input();
-        let required_cols: Vec<_> = (0..input.schema().len()).collect();
-        self.clone_with_input(input.prune_col(&required_cols, ctx))
-            .into()
+    fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
+        let pruned_input = {
+            let input = &self.core.input;
+            let required_cols: Vec<_> = (0..input.schema().len()).collect();
+            input.prune_col(&required_cols, ctx)
+        };
+
+        // No pruning.
+        LogicalProject::with_out_col_idx(
+            self.clone_with_input(pruned_input).into(),
+            required_cols.iter().copied(),
+        )
+        .into()
     }
 }
 

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,8 +18,8 @@ import static io.grpc.Status.*;
 
 import com.google.gson.Gson;
 import com.risingwave.connector.api.TableSchema;
-import com.risingwave.connector.api.sink.SinkBase;
 import com.risingwave.connector.api.sink.SinkRow;
+import com.risingwave.connector.api.sink.SinkWriterBase;
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
@@ -29,7 +29,7 @@ import java.util.Iterator;
 import java.util.UUID;
 import java.util.stream.IntStream;
 
-public class FileSink extends SinkBase {
+public class FileSink extends SinkWriterBase {
     private final FileWriter sinkWriter;
 
     private FileSinkConfig config;
@@ -60,28 +60,25 @@ public class FileSink extends SinkBase {
     @Override
     public void write(Iterator<SinkRow> rows) {
         while (rows.hasNext()) {
-            try (SinkRow row = rows.next()) {
-                switch (row.getOp()) {
-                    case INSERT:
-                        String buf =
-                                new Gson()
-                                        .toJson(
-                                                IntStream.range(0, row.size())
-                                                        .mapToObj(row::get)
-                                                        .toArray());
-                        try {
-                            sinkWriter.write(buf + System.lineSeparator());
-                        } catch (IOException e) {
-                            throw INTERNAL.withCause(e).asRuntimeException();
-                        }
-                        break;
-                    default:
-                        throw UNIMPLEMENTED
-                                .withDescription("unsupported operation: " + row.getOp())
-                                .asRuntimeException();
-                }
-            } catch (Exception e) {
-                throw new RuntimeException(e);
+            SinkRow row = rows.next();
+            switch (row.getOp()) {
+                case INSERT:
+                    String buf =
+                            new Gson()
+                                    .toJson(
+                                            IntStream.range(0, row.size())
+                                                    .mapToObj(row::get)
+                                                    .toArray());
+                    try {
+                        sinkWriter.write(buf + System.lineSeparator());
+                    } catch (IOException e) {
+                        throw INTERNAL.withCause(e).asRuntimeException();
+                    }
+                    break;
+                default:
+                    throw UNIMPLEMENTED
+                            .withDescription("unsupported operation: " + row.getOp())
+                            .asRuntimeException();
             }
         }
     }

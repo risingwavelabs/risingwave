@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,17 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod cloud_provider;
+pub mod cloud_provider;
 pub mod ddl_controller;
-mod election_client;
-mod intercept;
+mod ddl_controller_v2;
+pub mod election;
+pub mod intercept;
 pub mod metrics;
-pub mod server;
-mod service;
 
-pub use service::cluster_service::ClusterServiceImpl;
-pub use service::ddl_service::DdlServiceImpl;
-pub use service::heartbeat_service::HeartbeatServiceImpl;
-pub use service::hummock_service::HummockServiceImpl;
-pub use service::notification_service::NotificationServiceImpl;
-pub use service::stream_service::StreamServiceImpl;
+pub type ElectionClientRef = std::sync::Arc<dyn ElectionClient>;
+
+pub use election::etcd::EtcdElectionClient;
+pub use election::{ElectionClient, ElectionMember};

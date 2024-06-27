@@ -1,0 +1,105 @@
+statement ok
+create user setsuna;
+
+statement ok
+create table t (v int);
+
+statement ok
+insert into t values (1), (2);
+
+statement ok
+flush;
+
+statement ok
+start transaction read only;
+
+query I rowsort
+select * from t;
+----
+1
+2
+
+statement error read-only transaction
+insert into t values (3);
+
+statement error read-only transaction
+create table if not exists t2 (v int);
+
+statement ok
+create table if not exists t (v int);
+
+statement error read-only transaction
+drop table t;
+
+statement error read-only transaction
+alter table t add column v2 int;
+
+statement error read-only transaction
+create user touma;
+
+statement error read-only transaction
+grant all privileges on all materialized views in schema public to setsuna;
+
+statement ok
+commit;
+
+statement ok
+insert into t values (3);
+
+statement ok
+flush;
+
+query I rowsort
+select * from t;
+----
+1
+2
+3
+
+# test transaction with ISOLATION LEVEL
+statement ok
+START TRANSACTION READ ONLY, ISOLATION LEVEL REPEATABLE READ;
+
+statement ok
+COMMIT;
+
+# test read-write transaction
+statement ok
+START TRANSACTION READ WRITE;
+
+statement ok
+COMMIT;
+
+# test read-write transaction, with ISOLATION LEVEL
+statement ok
+START TRANSACTION READ WRITE, ISOLATION LEVEL REPEATABLE READ;
+
+query I rowsort
+select * from t;
+----
+1
+2
+3
+
+statement ok
+insert into t values (4);
+
+statement ok
+COMMIT;
+
+statement ok
+flush;
+
+query I rowsort
+select * from t;
+----
+1
+2
+3
+4
+
+statement ok
+drop table t;
+
+statement ok
+drop user setsuna;

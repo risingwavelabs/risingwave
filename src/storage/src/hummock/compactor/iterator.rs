@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,33 +14,39 @@
 
 use std::cmp::Ordering;
 use std::collections::HashSet;
-use std::future::Future;
 use std::sync::atomic::AtomicU64;
 use std::sync::{atomic, Arc};
 use std::time::Instant;
 
+use await_tree::InstrumentAwait;
+use fail::fail_point;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::KeyComparator;
 use risingwave_pb::hummock::SstableInfo;
 
-use crate::hummock::iterator::{Forward, HummockIterator};
-use crate::hummock::sstable_store::{BlockStream, SstableStoreRef};
+use crate::hummock::block_stream::BlockDataStream;
+use crate::hummock::compactor::task_progress::TaskProgress;
+use crate::hummock::iterator::{Forward, HummockIterator, ValueMeta};
+use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::value::HummockValue;
-use crate::hummock::{Block, BlockHolder, BlockIterator, HummockResult};
+use crate::hummock::{BlockHolder, BlockIterator, BlockMeta, HummockResult};
 use crate::monitor::StoreLocalStatistic;
 
+const PROGRESS_KEY_INTERVAL: usize = 100;
+
 /// Iterates over the KV-pairs of an SST while downloading it.
-struct SstableStreamIterator {
+pub struct SstableStreamIterator {
+    sstable_store: SstableStoreRef,
+    block_metas: Vec<BlockMeta>,
     /// The downloading stream.
-    block_stream: BlockStream,
+    block_stream: Option<BlockDataStream>,
 
     /// Iterates over the KV-pairs of the current block.
     block_iter: Option<BlockIterator>,
 
-    /// The maximum number of remaining blocks that iterator will download and read.
-    remaining_blocks: usize,
+    seek_block_idx: usize,
 
     /// Counts the time used for IO.
     stats_ptr: Arc<AtomicU64>,
@@ -48,6 +54,9 @@ struct SstableStreamIterator {
     /// For key sanity check of divided SST and debugging
     sstable_info: SstableInfo,
     existing_table_ids: HashSet<StateTableId>,
+    task_progress: Arc<TaskProgress>,
+    io_retry_times: usize,
+    max_io_retry_times: usize,
 }
 
 impl SstableStreamIterator {
@@ -63,23 +72,44 @@ impl SstableStreamIterator {
     // BlockStream follows a different approach. After new(), we do not seek, instead next()
     // returns the first value.
 
-    /// Initialises a new [`SstableStreamIterator`] which iterates over the given [`BlockStream`].
+    /// Initialises a new [`SstableStreamIterator`] which iterates over the given [`BlockDataStream`].
     /// The iterator reads at most `max_block_count` from the stream.
     pub fn new(
-        sstable_info: &SstableInfo,
+        block_metas: Vec<BlockMeta>,
+        sstable_info: SstableInfo,
         existing_table_ids: HashSet<StateTableId>,
-        block_stream: BlockStream,
-        max_block_count: usize,
+        start_block_idx: usize,
         stats: &StoreLocalStatistic,
+        task_progress: Arc<TaskProgress>,
+        sstable_store: SstableStoreRef,
+        max_io_retry_times: usize,
     ) -> Self {
         Self {
-            block_stream,
+            block_stream: None,
             block_iter: None,
-            remaining_blocks: max_block_count,
+            block_metas,
+            seek_block_idx: start_block_idx,
             stats_ptr: stats.remote_io_time.clone(),
             existing_table_ids,
-            sstable_info: sstable_info.clone(),
+            sstable_info,
+            sstable_store,
+            task_progress,
+            io_retry_times: 0,
+            max_io_retry_times,
         }
+    }
+
+    async fn create_stream(&mut self) -> HummockResult<()> {
+        let block_stream = self
+            .sstable_store
+            .get_stream_for_blocks(
+                self.sstable_info.object_id,
+                &self.block_metas[self.seek_block_idx..],
+            )
+            .verbose_instrument_await("stream_iter_get_stream")
+            .await?;
+        self.block_stream = Some(block_stream);
+        Ok(())
     }
 
     async fn prune_from_valid_block_iter(&mut self) -> HummockResult<()> {
@@ -114,7 +144,6 @@ impl SstableStreamIterator {
             if !block_iter.is_valid() {
                 // `seek_key` is larger than everything in the first block.
                 self.next_block().await?;
-            } else {
             }
         }
 
@@ -127,29 +156,44 @@ impl SstableStreamIterator {
     /// `self.block_iter` to `None`.
     async fn next_block(&mut self) -> HummockResult<()> {
         // Check if we want and if we can load the next block.
-        if self.remaining_blocks > 0 && let Some(block) = self.download_next_block().await? {
-            let mut block_iter = BlockIterator::new(BlockHolder::from_owned_block(block));
-            block_iter.seek_to_first();
-
-            self.remaining_blocks -= 1;
-            self.block_iter = Some(block_iter);
-        } else {
-            self.remaining_blocks = 0;
-            self.block_iter = None;
+        if self.seek_block_idx < self.block_metas.len() {
+            loop {
+                let now = Instant::now();
+                let ret = match &mut self.block_stream {
+                    Some(block_stream) => block_stream.next_block().await,
+                    None => {
+                        self.create_stream().await?;
+                        continue;
+                    }
+                };
+                let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
+                match ret {
+                    Ok(Some(block)) => {
+                        let mut block_iter =
+                            BlockIterator::new(BlockHolder::from_owned_block(block));
+                        block_iter.seek_to_first();
+                        self.seek_block_idx += 1;
+                        self.block_iter = Some(block_iter);
+                        return Ok(());
+                    }
+                    Ok(None) => break,
+                    Err(e) => {
+                        if !e.is_object_error() || !self.need_recreate_io_stream() {
+                            return Err(e);
+                        }
+                        self.block_stream.take();
+                        self.io_retry_times += 1;
+                        fail_point!("create_stream_err");
+                    }
+                }
+                self.stats_ptr
+                    .fetch_add(add as u64, atomic::Ordering::Relaxed);
+            }
         }
+        self.seek_block_idx = self.block_metas.len();
+        self.block_iter = None;
 
         Ok(())
-    }
-
-    /// Wrapper function for `self.block_stream.next()` which allows us to measure the time needed.
-    async fn download_next_block(&mut self) -> HummockResult<Option<Box<Block>>> {
-        let now = Instant::now();
-        let result = self.block_stream.next().await;
-        let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
-        self.stats_ptr
-            .fetch_add(add as u64, atomic::Ordering::Relaxed);
-
-        result
     }
 
     /// Moves to the next KV-pair in the table. Assumes that the current position is valid. Even if
@@ -173,14 +217,14 @@ impl SstableStreamIterator {
         Ok(())
     }
 
-    fn key(&self) -> FullKey<&[u8]> {
+    pub fn key(&self) -> FullKey<&[u8]> {
         self.block_iter
             .as_ref()
             .unwrap_or_else(|| panic!("no block iter sstinfo={}", self.sst_debug_info()))
             .key()
     }
 
-    fn value(&self) -> HummockValue<&[u8]> {
+    pub fn value(&self) -> HummockValue<&[u8]> {
         let raw_value = self
             .block_iter
             .as_ref()
@@ -190,7 +234,7 @@ impl SstableStreamIterator {
             .unwrap_or_else(|_| panic!("decode error sstinfo={}", self.sst_debug_info()))
     }
 
-    fn is_valid(&self) -> bool {
+    pub fn is_valid(&self) -> bool {
         // True iff block_iter exists and is valid.
         self.block_iter.as_ref().map_or(false, |i| i.is_valid())
     }
@@ -204,11 +248,23 @@ impl SstableStreamIterator {
             self.sstable_info.table_ids
         )
     }
+
+    fn need_recreate_io_stream(&self) -> bool {
+        self.io_retry_times < self.max_io_retry_times
+    }
+}
+
+impl Drop for SstableStreamIterator {
+    fn drop(&mut self) {
+        self.task_progress.dec_num_pending_read_io()
+    }
 }
 
 /// Iterates over the KV-pairs of a given list of SSTs. The key-ranges of these SSTs are assumed to
 /// be consecutive and non-overlapping.
 pub struct ConcatSstableIterator {
+    /// **CAUTION:** `key_range` is used for optimization. It doesn't guarantee value returned by
+    /// the iterator is in this range.
     key_range: KeyRange,
 
     /// The iterator of the current table.
@@ -225,6 +281,8 @@ pub struct ConcatSstableIterator {
     sstable_store: SstableStoreRef,
 
     stats: StoreLocalStatistic,
+    task_progress: Arc<TaskProgress>,
+    max_io_retry_times: usize,
 }
 
 impl ConcatSstableIterator {
@@ -236,6 +294,8 @@ impl ConcatSstableIterator {
         sst_infos: Vec<SstableInfo>,
         key_range: KeyRange,
         sstable_store: SstableStoreRef,
+        task_progress: Arc<TaskProgress>,
+        max_io_retry_times: usize,
     ) -> Self {
         Self {
             key_range,
@@ -244,8 +304,27 @@ impl ConcatSstableIterator {
             sstables: sst_infos,
             existing_table_ids: HashSet::from_iter(existing_table_ids),
             sstable_store,
+            task_progress,
             stats: StoreLocalStatistic::default(),
+            max_io_retry_times,
         }
+    }
+
+    #[cfg(test)]
+    pub fn for_test(
+        existing_table_ids: Vec<StateTableId>,
+        sst_infos: Vec<SstableInfo>,
+        key_range: KeyRange,
+        sstable_store: SstableStoreRef,
+    ) -> Self {
+        Self::new(
+            existing_table_ids,
+            sst_infos,
+            key_range,
+            sstable_store,
+            Arc::new(TaskProgress::default()),
+            0,
+        )
     }
 
     /// Resets the iterator, loads the specified SST, and seeks in that SST to `seek_key` if given.
@@ -280,10 +359,9 @@ impl ConcatSstableIterator {
             let sstable = self
                 .sstable_store
                 .sstable(table_info, &mut self.stats)
+                .verbose_instrument_await("stream_iter_sstable")
                 .await?;
-            let stats_ptr = self.stats.remote_io_time.clone();
-            let now = Instant::now();
-            let block_metas = &sstable.value().meta.block_metas;
+            let block_metas = &sstable.meta.block_metas;
             let mut start_index = match seek_key {
                 None => 0,
                 Some(seek_key) => {
@@ -320,21 +398,16 @@ impl ConcatSstableIterator {
             if start_index >= end_index {
                 found = false;
             } else {
-                let block_stream = self
-                    .sstable_store
-                    .get_stream(sstable.value(), Some(start_index))
-                    .await?;
-
-                // Determine time needed to open stream.
-                let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
-                stats_ptr.fetch_add(add as u64, atomic::Ordering::Relaxed);
-
+                self.task_progress.inc_num_pending_read_io();
                 let mut sstable_iter = SstableStreamIterator::new(
-                    table_info,
+                    sstable.meta.block_metas.clone(),
+                    table_info.clone(),
                     self.existing_table_ids.clone(),
-                    block_stream,
-                    end_index - start_index,
+                    start_index,
                     &self.stats,
+                    self.task_progress.clone(),
+                    self.sstable_store.clone(),
+                    self.max_io_retry_times,
                 );
                 sstable_iter.seek(seek_key).await?;
 
@@ -358,23 +431,17 @@ impl ConcatSstableIterator {
 impl HummockIterator for ConcatSstableIterator {
     type Direction = Forward;
 
-    type NextFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
-    type RewindFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
-    type SeekFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
+    async fn next(&mut self) -> HummockResult<()> {
+        let sstable_iter = self.sstable_iter.as_mut().expect("no table iter");
 
-    fn next(&mut self) -> Self::NextFuture<'_> {
-        async {
-            let sstable_iter = self.sstable_iter.as_mut().expect("no table iter");
-
-            // Does just calling `next()` suffice?
-            sstable_iter.next().await?;
-            if sstable_iter.is_valid() {
-                Ok(())
-            } else {
-                // No, seek to next table.
-                self.seek_idx(self.cur_idx + 1, None).await?;
-                Ok(())
-            }
+        // Does just calling `next()` suffice?
+        sstable_iter.next().await?;
+        if sstable_iter.is_valid() {
+            Ok(())
+        } else {
+            // No, seek to next table.
+            self.seek_idx(self.cur_idx + 1, None).await?;
+            Ok(())
         }
     }
 
@@ -390,38 +457,112 @@ impl HummockIterator for ConcatSstableIterator {
         self.sstable_iter.as_ref().map_or(false, |i| i.is_valid())
     }
 
-    fn rewind(&mut self) -> Self::RewindFuture<'_> {
-        async { self.seek_idx(0, None).await }
+    async fn rewind(&mut self) -> HummockResult<()> {
+        self.seek_idx(0, None).await
     }
 
     /// Resets the iterator and seeks to the first position where the stored key >= `key`.
-    fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> Self::SeekFuture<'a> {
-        async move {
-            let seek_key = if self.key_range.left.is_empty() {
-                key
-            } else {
-                match key.cmp(&FullKey::decode(&self.key_range.left)) {
-                    Ordering::Less | Ordering::Equal => FullKey::decode(&self.key_range.left),
-                    Ordering::Greater => key,
-                }
-            };
-            let table_idx = self.sstables.partition_point(|table| {
-                // We use the maximum key of an SST for the search. That way, we guarantee that the
-                // resulting SST contains either that key or the next-larger KV-pair. Subsequently,
-                // we avoid calling `seek_idx()` twice if the determined SST does not contain `key`.
+    async fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> HummockResult<()> {
+        let seek_key = if self.key_range.left.is_empty() {
+            key
+        } else {
+            match key.cmp(&FullKey::decode(&self.key_range.left)) {
+                Ordering::Less | Ordering::Equal => FullKey::decode(&self.key_range.left),
+                Ordering::Greater => key,
+            }
+        };
+        let table_idx = self.sstables.partition_point(|table| {
+            // We use the maximum key of an SST for the search. That way, we guarantee that the
+            // resulting SST contains either that key or the next-larger KV-pair. Subsequently,
+            // we avoid calling `seek_idx()` twice if the determined SST does not contain `key`.
 
-                // Note that we need to use `<` instead of `<=` to ensure that all keys in an SST
-                // (including its max. key) produce the same search result.
-                let max_sst_key = &table.key_range.as_ref().unwrap().right;
-                FullKey::decode(max_sst_key).cmp(&seek_key) == Ordering::Less
-            });
+            // Note that we need to use `<` instead of `<=` to ensure that all keys in an SST
+            // (including its max. key) produce the same search result.
+            let max_sst_key = &table.key_range.as_ref().unwrap().right;
+            FullKey::decode(max_sst_key).cmp(&seek_key) == Ordering::Less
+        });
 
-            self.seek_idx(table_idx, Some(key)).await
-        }
+        self.seek_idx(table_idx, Some(key)).await
     }
 
     fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
         stats.add(&self.stats)
+    }
+
+    fn value_meta(&self) -> ValueMeta {
+        let iter = self.sstable_iter.as_ref().expect("no table iter");
+        // sstable_iter's seek_block_idx must have advanced at least one.
+        // See SstableStreamIterator::next_block.
+        assert!(iter.seek_block_idx >= 1);
+        ValueMeta {
+            object_id: Some(iter.sstable_info.object_id),
+            block_id: Some(iter.seek_block_idx as u64 - 1),
+        }
+    }
+}
+
+pub struct MonitoredCompactorIterator<I> {
+    inner: I,
+    task_progress: Arc<TaskProgress>,
+
+    processed_key_num: usize,
+}
+
+impl<I: HummockIterator<Direction = Forward>> MonitoredCompactorIterator<I> {
+    pub fn new(inner: I, task_progress: Arc<TaskProgress>) -> Self {
+        Self {
+            inner,
+            task_progress,
+            processed_key_num: 0,
+        }
+    }
+}
+
+impl<I: HummockIterator<Direction = Forward>> HummockIterator for MonitoredCompactorIterator<I> {
+    type Direction = Forward;
+
+    async fn next(&mut self) -> HummockResult<()> {
+        self.inner.next().await?;
+        self.processed_key_num += 1;
+
+        if self.processed_key_num % PROGRESS_KEY_INTERVAL == 0 {
+            self.task_progress
+                .inc_progress_key(PROGRESS_KEY_INTERVAL as _);
+        }
+
+        Ok(())
+    }
+
+    fn key(&self) -> FullKey<&[u8]> {
+        self.inner.key()
+    }
+
+    fn value(&self) -> HummockValue<&[u8]> {
+        self.inner.value()
+    }
+
+    fn is_valid(&self) -> bool {
+        self.inner.is_valid()
+    }
+
+    async fn rewind(&mut self) -> HummockResult<()> {
+        self.processed_key_num = 0;
+        self.inner.rewind().await?;
+        Ok(())
+    }
+
+    async fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> HummockResult<()> {
+        self.processed_key_num = 0;
+        self.inner.seek(key).await?;
+        Ok(())
+    }
+
+    fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
+        self.inner.collect_local_statistic(stats)
+    }
+
+    fn value_meta(&self) -> ValueMeta {
+        self.inner.value_meta()
     }
 }
 
@@ -436,19 +577,19 @@ mod tests {
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::iterator::HummockIterator;
     use crate::hummock::test_utils::{
-        default_builder_opt_for_test, gen_test_sstable_and_info, test_key_of, test_value_of,
+        default_builder_opt_for_test, gen_test_sstable_info, test_key_of, test_value_of,
         TEST_KEYS_COUNT,
     };
     use crate::hummock::value::HummockValue;
 
     #[tokio::test]
     async fn test_concat_iterator() {
-        let sstable_store = mock_sstable_store();
+        let sstable_store = mock_sstable_store().await;
         let mut table_infos = vec![];
         for object_id in 0..3 {
             let start_index = object_id * TEST_KEYS_COUNT;
             let end_index = (object_id + 1) * TEST_KEYS_COUNT;
-            let (_table, table_info) = gen_test_sstable_and_info(
+            let table_info = gen_test_sstable_info(
                 default_builder_opt_for_test(),
                 object_id as u64,
                 (start_index..end_index)
@@ -465,7 +606,7 @@ mod tests {
             test_key_of(start_index).encode().into(),
             test_key_of(end_index).encode().into(),
         );
-        let mut iter = ConcatSstableIterator::new(
+        let mut iter = ConcatSstableIterator::for_test(
             vec![0],
             table_infos.clone(),
             kr.clone(),
@@ -489,7 +630,7 @@ mod tests {
             test_key_of(30000).encode().into(),
             test_key_of(40000).encode().into(),
         );
-        let mut iter = ConcatSstableIterator::new(
+        let mut iter = ConcatSstableIterator::for_test(
             vec![0],
             table_infos.clone(),
             kr.clone(),
@@ -501,7 +642,7 @@ mod tests {
             test_key_of(start_index).encode().into(),
             test_key_of(40000).encode().into(),
         );
-        let mut iter = ConcatSstableIterator::new(
+        let mut iter = ConcatSstableIterator::for_test(
             vec![0],
             table_infos.clone(),
             kr.clone(),
@@ -525,7 +666,7 @@ mod tests {
             test_key_of(0).encode().into(),
             test_key_of(40000).encode().into(),
         );
-        let mut iter = ConcatSstableIterator::new(
+        let mut iter = ConcatSstableIterator::for_test(
             vec![0],
             table_infos.clone(),
             kr.clone(),
@@ -549,7 +690,7 @@ mod tests {
             test_key_of(6000).encode().into(),
             test_key_of(16000).encode().into(),
         );
-        let mut iter = ConcatSstableIterator::new(
+        let mut iter = ConcatSstableIterator::for_test(
             vec![0],
             table_infos.clone(),
             kr.clone(),
@@ -563,12 +704,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_concat_iterator_seek_idx() {
-        let sstable_store = mock_sstable_store();
+        let sstable_store = mock_sstable_store().await;
         let mut table_infos = vec![];
         for object_id in 0..3 {
             let start_index = object_id * TEST_KEYS_COUNT + TEST_KEYS_COUNT / 2;
             let end_index = (object_id + 1) * TEST_KEYS_COUNT;
-            let (_table, table_info) = gen_test_sstable_and_info(
+            let table_info = gen_test_sstable_info(
                 default_builder_opt_for_test(),
                 object_id as u64,
                 (start_index..end_index)
@@ -584,7 +725,7 @@ mod tests {
             test_key_of(0).encode().into(),
             test_key_of(40000).encode().into(),
         );
-        let mut iter = ConcatSstableIterator::new(
+        let mut iter = ConcatSstableIterator::for_test(
             vec![0],
             table_infos.clone(),
             kr.clone(),
@@ -594,7 +735,7 @@ mod tests {
             .sstable(&iter.sstables[0], &mut iter.stats)
             .await
             .unwrap();
-        let block_metas = &sst.value().meta.block_metas;
+        let block_metas = &sst.meta.block_metas;
         let block_1_smallest_key = block_metas[1].smallest_key.clone();
         let block_2_smallest_key = block_metas[2].smallest_key.clone();
         // Use block_1_smallest_key as seek key and result in the first KV of block 1.
@@ -624,7 +765,7 @@ mod tests {
             next_full_key(&block_1_smallest_key).into(),
             prev_full_key(&block_2_smallest_key).into(),
         );
-        let mut iter = ConcatSstableIterator::new(
+        let mut iter = ConcatSstableIterator::for_test(
             vec![0],
             table_infos.clone(),
             kr.clone(),

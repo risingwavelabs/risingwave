@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,22 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use fixedbitset::FixedBitSet;
+use pretty_xmlish::XmlNode;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::values_node::ExprTuple;
 use risingwave_pb::stream_plan::ValuesNode;
 
+use super::stream::prelude::*;
+use super::utils::{childless_record, Distill};
 use super::{ExprRewritable, LogicalValues, PlanBase, StreamNode};
-use crate::expr::{Expr, ExprImpl};
+use crate::expr::{Expr, ExprImpl, ExprVisitor};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// `StreamValues` implements `LogicalValues.to_stream()`
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamValues {
-    pub base: PlanBase,
+    pub base: PlanBase<Stream>,
     logical: LogicalValues,
 }
 
@@ -37,17 +39,15 @@ impl StreamValues {
     /// `StreamValues` should enforce `Distribution::Single`
     pub fn new(logical: LogicalValues) -> Self {
         let ctx = logical.ctx();
-        let mut watermark_columns = FixedBitSet::with_capacity(logical.schema().len());
-        (0..(logical.schema().len() - 1)).for_each(|i| watermark_columns.set(i, true));
         let base = PlanBase::new_stream(
             ctx,
             logical.schema().clone(),
-            logical.logical_pk().to_vec(),
+            logical.stream_key().map(|v| v.to_vec()),
             logical.functional_dependency().clone(),
             Distribution::Single,
+            true,
             false,
-            false,
-            watermark_columns,
+            FixedBitSet::with_capacity(logical.schema().len()),
         );
         Self { base, logical }
     }
@@ -62,11 +62,10 @@ impl StreamValues {
     }
 }
 
-impl fmt::Display for StreamValues {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("StreamValues")
-            .field("rows", &self.logical.rows())
-            .finish()
+impl Distill for StreamValues {
+    fn distill<'a>(&self) -> XmlNode<'a> {
+        let data = self.logical.rows_pretty();
+        childless_record("StreamValues", vec![("rows", data)])
     }
 }
 
@@ -90,4 +89,29 @@ impl StreamNode for StreamValues {
     }
 }
 
-impl ExprRewritable for StreamValues {}
+impl ExprRewritable for StreamValues {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
+
+    fn rewrite_exprs(&self, r: &mut dyn crate::expr::ExprRewriter) -> crate::PlanRef {
+        Self::new(
+            self.logical
+                .rewrite_exprs(r)
+                .as_logical_values()
+                .unwrap()
+                .clone(),
+        )
+        .into()
+    }
+}
+
+impl ExprVisitable for StreamValues {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.logical
+            .rows()
+            .iter()
+            .flatten()
+            .for_each(|e| v.visit_expr(e));
+    }
+}

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,18 +17,20 @@ use std::collections::HashMap;
 use itertools::Itertools;
 use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
 use risingwave_pb::catalog::{PbDatabase, PbSchema};
+use risingwave_pb::user::grant_privilege::Object;
 
+use super::OwnedByUserCatalog;
 use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::catalog::{DatabaseId, SchemaId, TableId};
+use crate::user::UserId;
 
 #[derive(Clone, Debug)]
 pub struct DatabaseCatalog {
     id: DatabaseId,
-    #[expect(dead_code)]
-    name: String,
+    pub name: String,
     schema_by_name: HashMap<String, SchemaCatalog>,
     schema_name_by_id: HashMap<SchemaId, String>,
-    owner: u32,
+    pub owner: u32,
 }
 
 impl DatabaseCatalog {
@@ -74,6 +76,10 @@ impl DatabaseCatalog {
         self.schema_by_name.values()
     }
 
+    pub fn iter_schemas_mut(&mut self) -> impl Iterator<Item = &mut SchemaCatalog> {
+        self.schema_by_name.values_mut()
+    }
+
     pub fn get_schema_by_name(&self, name: &str) -> Option<&SchemaCatalog> {
         self.schema_by_name.get(name)
     }
@@ -88,6 +94,42 @@ impl DatabaseCatalog {
         self.schema_by_name.get_mut(name)
     }
 
+    pub fn find_schema_containing_table_id(&self, table_id: &TableId) -> Option<&SchemaCatalog> {
+        self.schema_by_name
+            .values()
+            .find(|schema| schema.get_table_by_id(table_id).is_some())
+    }
+
+    pub fn get_grant_object_by_oid(&self, oid: u32) -> Option<Object> {
+        for schema in self.schema_by_name.values() {
+            let object = schema.get_grant_object_by_oid(oid);
+            if object.is_some() {
+                return object;
+            }
+        }
+        None
+    }
+
+    pub fn update_schema(&mut self, prost: &PbSchema) {
+        let id = prost.id;
+        let name = prost.name.clone();
+
+        let old_schema_name = self.schema_name_by_id.get(&id).unwrap().to_owned();
+        if old_schema_name != name {
+            let mut schema = self.schema_by_name.remove(&old_schema_name).unwrap();
+            schema.name.clone_from(&name);
+            schema.database_id = prost.database_id;
+            schema.owner = prost.owner;
+            self.schema_by_name.insert(name.clone(), schema);
+            self.schema_name_by_id.insert(id, name);
+        } else {
+            let schema = self.get_schema_mut(id).unwrap();
+            schema.name.clone_from(&name);
+            schema.database_id = prost.database_id;
+            schema.owner = prost.owner;
+        };
+    }
+
     pub fn is_empty(&self) -> bool {
         self.schema_by_name.len() == 1 && self.schema_by_name.contains_key(PG_CATALOG_SCHEMA_NAME)
     }
@@ -96,10 +138,17 @@ impl DatabaseCatalog {
         self.id
     }
 
-    pub fn owner(&self) -> u32 {
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+}
+
+impl OwnedByUserCatalog for DatabaseCatalog {
+    fn owner(&self) -> UserId {
         self.owner
     }
 }
+
 impl From<&PbDatabase> for DatabaseCatalog {
     fn from(db: &PbDatabase) -> Self {
         Self {

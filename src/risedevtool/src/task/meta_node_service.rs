@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::env;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{anyhow, Result};
@@ -21,7 +21,10 @@ use itertools::Itertools;
 
 use super::{ExecuteContext, Task};
 use crate::util::{get_program_args, get_program_env_cmd, get_program_name};
-use crate::{add_hummock_backend, HummockInMemoryStrategy, MetaNodeConfig};
+use crate::{
+    add_hummock_backend, add_tempo_endpoint, Application, HummockInMemoryStrategy, MetaBackend,
+    MetaNodeConfig,
+};
 
 pub struct MetaNodeService {
     config: MetaNodeConfig,
@@ -35,13 +38,9 @@ impl MetaNodeService {
     fn meta_node(&self) -> Result<Command> {
         let prefix_bin = env::var("PREFIX_BIN")?;
 
-        if let Ok(x) = env::var("ENABLE_ALL_IN_ONE") && x == "true" {
-            Ok(Command::new(
-                Path::new(&prefix_bin).join("risingwave").join("meta-node"),
-            ))
-        } else {
-            Ok(Command::new(Path::new(&prefix_bin).join("meta-node")))
-        }
+        Ok(Command::new(
+            Path::new(&prefix_bin).join("risingwave").join("meta-node"),
+        ))
     }
 
     /// Apply command args according to config
@@ -60,13 +59,10 @@ impl MetaNodeService {
                 config.listen_address, config.dashboard_port
             ));
 
-        cmd.arg("--prometheus-host")
-            .arg(format!(
-                "{}:{}",
-                config.listen_address, config.exporter_port
-            ))
-            .arg("--connector-rpc-endpoint")
-            .arg(&config.connector_rpc_endpoint);
+        cmd.arg("--prometheus-host").arg(format!(
+            "{}:{}",
+            config.listen_address, config.exporter_port
+        ));
 
         match config.provide_prometheus.as_ref().unwrap().as_slice() {
             [] => {}
@@ -82,20 +78,82 @@ impl MetaNodeService {
             }
         }
 
-        match config.provide_etcd_backend.as_ref().unwrap().as_slice() {
-            [] => {
+        let mut is_persistent_meta_store = false;
+
+        match &config.meta_backend {
+            MetaBackend::Memory => {
                 cmd.arg("--backend").arg("mem");
             }
-            etcds => {
+            MetaBackend::Etcd => {
+                let etcd_config = config.provide_etcd_backend.as_ref().unwrap();
+                assert!(!etcd_config.is_empty());
+                is_persistent_meta_store = true;
+
                 cmd.arg("--backend")
                     .arg("etcd")
                     .arg("--etcd-endpoints")
                     .arg(
-                        etcds
+                        etcd_config
                             .iter()
                             .map(|etcd| format!("{}:{}", etcd.address, etcd.port))
                             .join(","),
                     );
+            }
+            MetaBackend::Sqlite => {
+                let sqlite_config = config.provide_sqlite_backend.as_ref().unwrap();
+                assert_eq!(sqlite_config.len(), 1);
+                is_persistent_meta_store = true;
+
+                let prefix_data = env::var("PREFIX_DATA")?;
+                let file_path = PathBuf::from(&prefix_data)
+                    .join(&sqlite_config[0].id)
+                    .join(&sqlite_config[0].file);
+                cmd.arg("--backend")
+                    .arg("sql")
+                    .arg("--sql-endpoint")
+                    .arg(format!("sqlite://{}?mode=rwc", file_path.display()));
+            }
+            MetaBackend::Postgres => {
+                let pg_config = config.provide_postgres_backend.as_ref().unwrap();
+                let pg_store_config = pg_config
+                    .iter()
+                    .filter(|c| c.application == Application::Metastore)
+                    .exactly_one()
+                    .expect("more than one or no pg store config found for metastore");
+                is_persistent_meta_store = true;
+
+                cmd.arg("--backend")
+                    .arg("sql")
+                    .arg("--sql-endpoint")
+                    .arg(format!(
+                        "postgres://{}:{}@{}:{}/{}",
+                        pg_store_config.user,
+                        pg_store_config.password,
+                        pg_store_config.address,
+                        pg_store_config.port,
+                        pg_store_config.database
+                    ));
+            }
+            MetaBackend::Mysql => {
+                let mysql_config = config.provide_mysql_backend.as_ref().unwrap();
+                let mysql_store_config = mysql_config
+                    .iter()
+                    .filter(|c| c.application == Application::Metastore)
+                    .exactly_one()
+                    .expect("more than one or no mysql store config found for metastore");
+                is_persistent_meta_store = true;
+
+                cmd.arg("--backend")
+                    .arg("sql")
+                    .arg("--sql-endpoint")
+                    .arg(format!(
+                        "mysql://{}:{}@{}:{}/{}",
+                        mysql_store_config.user,
+                        mysql_store_config.password,
+                        mysql_store_config.address,
+                        mysql_store_config.port,
+                        mysql_store_config.database
+                    ));
             }
         }
 
@@ -106,7 +164,7 @@ impl MetaNodeService {
         let provide_compute_node = config.provide_compute_node.as_ref().unwrap();
         let provide_compactor = config.provide_compactor.as_ref().unwrap();
 
-        let is_shared_backend = match (
+        let (is_shared_backend, is_persistent_backend) = match (
             config.enable_in_memory_kv_state_backend,
             provide_minio.as_slice(),
             provide_aws_s3.as_slice(),
@@ -114,7 +172,7 @@ impl MetaNodeService {
         ) {
             (true, [], [], []) => {
                 cmd.arg("--state-store").arg("in-memory");
-                false
+                (false, false)
             }
             (true, _, _, _) => {
                 return Err(anyhow!(
@@ -149,8 +207,16 @@ impl MetaNodeService {
                 "When using a shared backend (minio, aws-s3, or shared in-memory with `risedev playground`), at least one compactor is required. Consider adding `use: compactor` in risedev config."
             ));
         }
+        if is_persistent_meta_store && !is_persistent_backend {
+            return Err(anyhow!(
+                "When using a persistent meta store (etcd), a persistent state store is required (e.g. minio, aws-s3, etc.)."
+            ));
+        }
 
         cmd.arg("--data-directory").arg("hummock_001");
+
+        let provide_tempo = config.provide_tempo.as_ref().unwrap();
+        add_tempo_endpoint(provide_tempo, cmd)?;
 
         Ok(())
     }
@@ -163,9 +229,9 @@ impl Task for MetaNodeService {
 
         let mut cmd = self.meta_node()?;
 
-        cmd.env("RUST_BACKTRACE", "1");
-        // FIXME: Otherwise, CI will throw log size too large error
-        // cmd.env("RW_QUERY_LOG_PATH", DEFAULT_QUERY_LOG_PATH);
+        if crate::util::is_enable_backtrace() {
+            cmd.env("RUST_BACKTRACE", "1");
+        }
 
         if crate::util::is_env_set("RISEDEV_ENABLE_PROFILE") {
             cmd.env(
@@ -176,9 +242,16 @@ impl Task for MetaNodeService {
 
         if crate::util::is_env_set("RISEDEV_ENABLE_HEAP_PROFILE") {
             // See https://linux.die.net/man/3/jemalloc for the descriptions of profiling options
+            let conf = "prof:true,lg_prof_interval:32,lg_prof_sample:19,prof_prefix:meta-node";
+            cmd.env("_RJEM_MALLOC_CONF", conf); // prefixed for macos
+            cmd.env("MALLOC_CONF", conf); // unprefixed for linux
+        }
+
+        if crate::util::is_env_set("ENABLE_BUILD_RW_CONNECTOR") {
+            let prefix_bin = env::var("PREFIX_BIN")?;
             cmd.env(
-                "_RJEM_MALLOC_CONF",
-                "prof:true,lg_prof_interval:32,lg_prof_sample:19,prof_prefix:meta-node",
+                "CONNECTOR_LIBS_PATH",
+                Path::new(&prefix_bin).join("connector-node/libs/"),
             );
         }
 
@@ -187,9 +260,6 @@ impl Task for MetaNodeService {
         let prefix_config = env::var("PREFIX_CONFIG")?;
         cmd.arg("--config-path")
             .arg(Path::new(&prefix_config).join("risingwave.toml"));
-
-        cmd.arg("--dashboard-ui-path")
-            .arg(env::var("PREFIX_UI").unwrap_or_else(|_| ".risingwave/ui".to_owned()));
 
         if !self.config.user_managed {
             ctx.run_command(ctx.tmux_run(cmd)?)?;

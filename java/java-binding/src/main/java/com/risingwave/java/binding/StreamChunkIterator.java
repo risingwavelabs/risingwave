@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,14 +18,14 @@ public class StreamChunkIterator implements AutoCloseable {
     private final long pointer;
     private boolean isClosed;
 
-    public StreamChunkIterator(byte[] streamChunkPayload) {
-        this.pointer = Binding.streamChunkIteratorNew(streamChunkPayload);
+    public StreamChunkIterator(StreamChunk chunk) {
+        this.pointer = Binding.iteratorNewStreamChunk(chunk.getPointer());
         this.isClosed = false;
     }
 
     public StreamChunkRow next() {
-        long pointer = Binding.streamChunkIteratorNext(this.pointer);
-        if (pointer == 0) {
+        boolean hasNext = Binding.iteratorNext(this.pointer);
+        if (!hasNext) {
             return null;
         }
         return new StreamChunkRow(pointer);
@@ -35,7 +35,7 @@ public class StreamChunkIterator implements AutoCloseable {
     public void close() {
         if (!isClosed) {
             isClosed = true;
-            Binding.streamChunkIteratorClose(pointer);
+            Binding.iteratorClose(pointer);
         }
     }
 }

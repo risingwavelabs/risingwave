@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,127 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::Debug;
-
-use futures_async_stream::try_stream;
-use risingwave_common::error::ErrorCode::ProtocolError;
-use risingwave_common::error::{Result, RwError};
-use simd_json::{BorrowedValue, ValueAccess};
-
-use super::operators::*;
-use crate::impl_common_parser_logic;
-use crate::parser::common::{json_object_smart_get_value, simd_json_parse_value};
-use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
-use crate::source::{SourceColumnDesc, SourceContextRef, SourceFormat};
-
-const AFTER: &str = "data";
-const BEFORE: &str = "old";
-const OP: &str = "type";
-
-impl_common_parser_logic!(MaxwellParser);
-
-#[derive(Debug)]
-pub struct MaxwellParser {
-    pub(crate) rw_columns: Vec<SourceColumnDesc>,
-    source_ctx: SourceContextRef,
-}
-
-impl MaxwellParser {
-    pub fn new(rw_columns: Vec<SourceColumnDesc>, source_ctx: SourceContextRef) -> Result<Self> {
-        Ok(Self {
-            rw_columns,
-            source_ctx,
-        })
-    }
-
-    #[allow(clippy::unused_async)]
-    pub async fn parse_inner(
-        &self,
-        mut payload: Vec<u8>,
-        mut writer: SourceStreamChunkRowWriter<'_>,
-    ) -> Result<WriteGuard> {
-        let event: BorrowedValue<'_> = simd_json::to_borrowed_value(&mut payload)
-            .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
-
-        let op = event.get(OP).and_then(|v| v.as_str()).ok_or_else(|| {
-            RwError::from(ProtocolError(
-                "op field not found in maxwell json".to_owned(),
-            ))
-        })?;
-
-        let format = SourceFormat::Maxwell;
-        match op {
-            MAXWELL_INSERT_OP => {
-                let after = event.get(AFTER).ok_or_else(|| {
-                    RwError::from(ProtocolError(
-                        "data is missing for creating event".to_string(),
-                    ))
-                })?;
-                writer.insert(|column| {
-                    simd_json_parse_value(
-                        &format,
-                        &column.data_type,
-                        json_object_smart_get_value(after, column.name.as_str().into()),
-                    )
-                    .map_err(Into::into)
-                })
-            }
-            MAXWELL_UPDATE_OP => {
-                let after = event.get(AFTER).ok_or_else(|| {
-                    RwError::from(ProtocolError(
-                        "data is missing for updating event".to_string(),
-                    ))
-                })?;
-                let before = event.get(BEFORE).ok_or_else(|| {
-                    RwError::from(ProtocolError(
-                        "old is missing for updating event".to_string(),
-                    ))
-                })?;
-
-                writer.update(|column| {
-                    // old only contains the changed columns but data contains all columns.
-                    let col_name_lc = column.name.as_str();
-                    let before_value = json_object_smart_get_value(before, col_name_lc.into())
-                        .or_else(|| json_object_smart_get_value(after, col_name_lc.into()));
-                    let before = simd_json_parse_value(&format, &column.data_type, before_value)?;
-                    let after = simd_json_parse_value(
-                        &format,
-                        &column.data_type,
-                        json_object_smart_get_value(after, col_name_lc.into()),
-                    )?;
-                    Ok((before, after))
-                })
-            }
-            MAXWELL_DELETE_OP => {
-                let before = event.get(AFTER).ok_or_else(|| {
-                    RwError::from(ProtocolError("old is missing for delete event".to_string()))
-                })?;
-                writer.delete(|column| {
-                    simd_json_parse_value(
-                        &format,
-                        &column.data_type,
-                        json_object_smart_get_value(before, column.name.as_str().into()),
-                    )
-                    .map_err(Into::into)
-                })
-            }
-            other => Err(RwError::from(ProtocolError(format!(
-                "unknown Maxwell op: {}",
-                other
-            )))),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use risingwave_common::array::Op;
-    use risingwave_common::cast::str_to_timestamp;
     use risingwave_common::row::Row;
     use risingwave_common::types::{DataType, ScalarImpl, ToOwnedDatum};
 
-    use super::*;
-    use crate::parser::{SourceColumnDesc, SourceStreamChunkBuilder};
+    use crate::parser::maxwell::MaxwellParser;
+    use crate::parser::{
+        EncodingProperties, JsonProperties, ProtocolProperties, SourceColumnDesc,
+        SourceStreamChunkBuilder, SpecificParserConfig,
+    };
+    use crate::source::SourceContext;
+
     #[tokio::test]
     async fn test_json_parser() {
         let descs = vec![
@@ -142,7 +34,16 @@ mod tests {
             SourceColumnDesc::simple("birthday", DataType::Timestamp, 3.into()),
         ];
 
-        let parser = MaxwellParser::new(descs.clone(), Default::default()).unwrap();
+        let props = SpecificParserConfig {
+            encoding_config: EncodingProperties::Json(JsonProperties {
+                use_schema_registry: false,
+                timestamptz_handling: None,
+            }),
+            protocol_config: ProtocolProperties::Maxwell,
+        };
+        let mut parser = MaxwellParser::new(props, descs.clone(), SourceContext::dummy().into())
+            .await
+            .unwrap();
 
         let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 4);
         let payloads = vec![
@@ -175,7 +76,7 @@ mod tests {
             assert_eq!(
                 row.datum_at(3).to_owned_datum(),
                 (Some(ScalarImpl::Timestamp(
-                    str_to_timestamp("2017-12-31 16:00:01").unwrap()
+                    "2017-12-31 16:00:01".parse().unwrap()
                 )))
             )
         }
@@ -195,34 +96,14 @@ mod tests {
             assert_eq!(
                 row.datum_at(3).to_owned_datum(),
                 (Some(ScalarImpl::Timestamp(
-                    str_to_timestamp("1999-12-31 16:00:01").unwrap()
+                    "1999-12-31 16:00:01".parse().unwrap()
                 )))
             )
         }
 
         {
             let (op, row) = rows.next().unwrap();
-            assert_eq!(op, Op::UpdateDelete);
-            assert_eq!(row.datum_at(0).to_owned_datum(), Some(ScalarImpl::Int32(2)));
-            assert_eq!(
-                row.datum_at(1).to_owned_datum(),
-                (Some(ScalarImpl::Utf8("alex".into())))
-            );
-            assert_eq!(
-                row.datum_at(2).to_owned_datum(),
-                (Some(ScalarImpl::Int16(1)))
-            );
-            assert_eq!(
-                row.datum_at(3).to_owned_datum(),
-                (Some(ScalarImpl::Timestamp(
-                    str_to_timestamp("1999-12-31 16:00:01").unwrap()
-                )))
-            )
-        }
-
-        {
-            let (op, row) = rows.next().unwrap();
-            assert_eq!(op, Op::UpdateInsert);
+            assert_eq!(op, Op::Insert);
             assert_eq!(row.datum_at(0).to_owned_datum(), Some(ScalarImpl::Int32(2)));
             assert_eq!(
                 row.datum_at(1).to_owned_datum(),
@@ -235,7 +116,7 @@ mod tests {
             assert_eq!(
                 row.datum_at(3).to_owned_datum(),
                 (Some(ScalarImpl::Timestamp(
-                    str_to_timestamp("1999-12-31 16:00:01").unwrap()
+                    "1999-12-31 16:00:01".parse().unwrap()
                 )))
             )
         }

@@ -5,6 +5,7 @@ package task_service;
 import "batch_plan.proto";
 import "common.proto";
 import "data.proto";
+import "plan_common.proto";
 import "stream_plan.proto";
 
 option java_package = "com.risingwave.proto";
@@ -27,6 +28,7 @@ message TaskInfoResponse {
     FAILED = 7;
     ABORTED = 8;
     CANCELLED = 9;
+    PING = 10;
   }
   batch_plan.TaskId task_id = 1;
   TaskStatus task_status = 2;
@@ -38,6 +40,8 @@ message CreateTaskRequest {
   batch_plan.TaskId task_id = 1;
   batch_plan.PlanFragment plan = 2;
   common.BatchQueryEpoch epoch = 3;
+  map<string, string> tracing_context = 4;
+  plan_common.ExprContext expr_context = 5;
 }
 
 message CancelTaskRequest {
@@ -60,6 +64,8 @@ message ExecuteRequest {
   batch_plan.TaskId task_id = 1;
   batch_plan.PlanFragment plan = 2;
   common.BatchQueryEpoch epoch = 3;
+  map<string, string> tracing_context = 4;
+  plan_common.ExprContext expr_context = 5;
 }
 
 service TaskService {

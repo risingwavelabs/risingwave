@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,7 +25,7 @@ use risingwave_common::bail;
 use super::error::StreamExecutorError;
 use super::{Barrier, BoxedMessageStream, Message, StreamChunk, StreamExecutorResult, Watermark};
 use crate::executor::monitor::StreamingMetrics;
-use crate::task::ActorId;
+use crate::task::{ActorId, FragmentId};
 
 pub type AlignedMessageStreamItem = StreamExecutorResult<AlignedMessage>;
 pub trait AlignedMessageStream = futures::Stream<Item = AlignedMessageStreamItem> + Send;
@@ -44,9 +44,24 @@ pub async fn barrier_align(
     mut left: BoxedMessageStream,
     mut right: BoxedMessageStream,
     actor_id: ActorId,
+    fragment_id: FragmentId,
     metrics: Arc<StreamingMetrics>,
+    executor_name: &str,
 ) {
     let actor_id = actor_id.to_string();
+    let fragment_id = fragment_id.to_string();
+    let left_barrier_align_duration = metrics.barrier_align_duration.with_label_values(&[
+        &actor_id,
+        &fragment_id,
+        "left",
+        executor_name,
+    ]);
+    let right_barrier_align_duration = metrics.barrier_align_duration.with_label_values(&[
+        &actor_id,
+        &fragment_id,
+        "right",
+        executor_name,
+    ]);
     loop {
         let prefer_left: bool = rand::random();
         let select_result = if prefer_left {
@@ -105,9 +120,7 @@ pub async fn barrier_align(
                         Message::Chunk(chunk) => yield AlignedMessage::Right(chunk),
                         Message::Barrier(barrier) => {
                             yield AlignedMessage::Barrier(barrier);
-                            metrics
-                                .join_barrier_align_duration
-                                .with_label_values(&[&actor_id, "right"])
+                            right_barrier_align_duration
                                 .observe(start_time.elapsed().as_secs_f64());
                             break;
                         }
@@ -131,10 +144,7 @@ pub async fn barrier_align(
                         Message::Chunk(chunk) => yield AlignedMessage::Left(chunk),
                         Message::Barrier(barrier) => {
                             yield AlignedMessage::Barrier(barrier);
-                            metrics
-                                .join_barrier_align_duration
-                                .with_label_values(&[&actor_id, "left"])
-                                .observe(start_time.elapsed().as_secs_f64());
+                            left_barrier_align_duration.observe(start_time.elapsed().as_secs_f64());
                             break;
                         }
                     }
@@ -151,6 +161,7 @@ mod tests {
     use async_stream::try_stream;
     use futures::{Stream, TryStreamExt};
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
+    use risingwave_common::util::epoch::test_epoch;
     use tokio::time::sleep;
 
     use super::*;
@@ -159,23 +170,30 @@ mod tests {
         left: BoxedMessageStream,
         right: BoxedMessageStream,
     ) -> impl Stream<Item = Result<AlignedMessage, StreamExecutorError>> {
-        barrier_align(left, right, 0, Arc::new(StreamingMetrics::unused()))
+        barrier_align(
+            left,
+            right,
+            0,
+            0,
+            Arc::new(StreamingMetrics::unused()),
+            "dummy_executor",
+        )
     }
 
     #[tokio::test]
     async fn test_barrier_align() {
         let left = try_stream! {
             yield Message::Chunk(StreamChunk::from_pretty("I\n + 1"));
-            yield Message::Barrier(Barrier::new_test_barrier(1));
+            yield Message::Barrier(Barrier::new_test_barrier(test_epoch(1)));
             yield Message::Chunk(StreamChunk::from_pretty("I\n + 2"));
-            yield Message::Barrier(Barrier::new_test_barrier(2));
+            yield Message::Barrier(Barrier::new_test_barrier(test_epoch(2)));
         }
         .boxed();
         let right = try_stream! {
             sleep(Duration::from_millis(1)).await;
             yield Message::Chunk(StreamChunk::from_pretty("I\n + 1"));
-            yield Message::Barrier(Barrier::new_test_barrier(1));
-            yield Message::Barrier(Barrier::new_test_barrier(2));
+            yield Message::Barrier(Barrier::new_test_barrier(test_epoch(1)));
+            yield Message::Barrier(Barrier::new_test_barrier(test_epoch(2)));
             yield Message::Chunk(StreamChunk::from_pretty("I\n + 3"));
         }
         .boxed();
@@ -188,9 +206,9 @@ mod tests {
             vec![
                 AlignedMessage::Left(StreamChunk::from_pretty("I\n + 1")),
                 AlignedMessage::Right(StreamChunk::from_pretty("I\n + 1")),
-                AlignedMessage::Barrier(Barrier::new_test_barrier(1)),
+                AlignedMessage::Barrier(Barrier::new_test_barrier(test_epoch(1))),
                 AlignedMessage::Left(StreamChunk::from_pretty("I\n + 2")),
-                AlignedMessage::Barrier(Barrier::new_test_barrier(2)),
+                AlignedMessage::Barrier(Barrier::new_test_barrier(2 * test_epoch(1))),
                 AlignedMessage::Right(StreamChunk::from_pretty("I\n + 3")),
             ]
         );
@@ -202,7 +220,7 @@ mod tests {
         let left = try_stream! {
             sleep(Duration::from_millis(1)).await;
             yield Message::Chunk(StreamChunk::from_pretty("I\n + 1"));
-            yield Message::Barrier(Barrier::new_test_barrier(1));
+            yield Message::Barrier(Barrier::new_test_barrier(test_epoch(1)));
         }
         .boxed();
         let right = try_stream! {
@@ -220,7 +238,7 @@ mod tests {
     async fn left_barrier_right_end_2() {
         let left = try_stream! {
             yield Message::Chunk(StreamChunk::from_pretty("I\n + 1"));
-            yield Message::Barrier(Barrier::new_test_barrier(1));
+            yield Message::Barrier(Barrier::new_test_barrier(test_epoch(1)));
         }
         .boxed();
         let right = try_stream! {

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,5 @@ mod prometheus_gen;
 pub use prometheus_gen::*;
 mod grafana_gen;
 pub use grafana_gen::*;
-mod zookeeper_gen;
-pub use zookeeper_gen::*;
-mod kafka_gen;
-pub use kafka_gen::*;
+mod tempo_gen;
+pub use tempo_gen::*;

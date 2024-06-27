@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use itertools::Itertools;
+use thiserror_ext::AsReport;
 use tracing::*;
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -36,15 +37,14 @@ fn extract_slt(filepath: &Path) -> Vec<SltBlock> {
 
     let mut blocks = vec![];
     let mut iter = content.lines().enumerate();
-    'block: while let Some((i, line)) = iter.next() {
+    while let Some((i, line)) = iter.next() {
         if !line.trim_end().ends_with("```slt") {
             continue;
         }
         let mut content = String::new();
         loop {
             let Some((i, mut line)) = iter.next() else {
-                error!("unexpected end of file at {}", filepath.display());
-                break 'block;
+                panic!("unexpected end of file at {}", filepath.display());
             };
             line = line.trim();
             // skip empty lines
@@ -52,14 +52,14 @@ fn extract_slt(filepath: &Path) -> Vec<SltBlock> {
                 continue;
             }
             if !(line.starts_with("///") || line.starts_with("//!")) {
-                error!("expect /// or //! at {}:{}", filepath.display(), i + 1);
-                continue 'block;
+                panic!("expect /// or //! at {}:{}", filepath.display(), i + 1);
             }
-            line = line[3..].trim();
-            if line == "```" {
+            line = &line[3..];
+            if line.trim() == "```" {
                 break;
             }
-            content += line;
+            // strip one leading space
+            content += line.strip_prefix(' ').unwrap_or(line);
             content += "\n";
         }
         blocks.push(SltBlock {
@@ -90,7 +90,7 @@ fn main() -> Result<()> {
         let path = match entry {
             Ok(path) => path,
             Err(e) => {
-                error!("{:?}", e);
+                error!("{}", e.as_report());
                 continue;
             }
         };
@@ -114,10 +114,7 @@ fn main() -> Result<()> {
             # This file is generated from `{}` at {}.\n\
             \n\
             statement ok\n\
-            set RW_IMPLICIT_FLUSH to true;\n\
-            \n\
-            statement ok\n\
-            set CREATE_COMPACTION_GROUP_FOR_MV to true;\n",
+            set RW_IMPLICIT_FLUSH to true;\n",
             path.display(),
             chrono::Utc::now()
         )?;

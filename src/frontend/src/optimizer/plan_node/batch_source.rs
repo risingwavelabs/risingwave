@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,74 +12,78 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
 use std::rc::Rc;
 
-use risingwave_common::error::Result;
+use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::SourceNode;
+use risingwave_sqlparser::ast::AsOf;
 
+use super::batch::prelude::*;
+use super::utils::{childless_record, column_names_pretty, Distill};
 use super::{
     generic, ExprRewritable, PlanBase, PlanRef, ToBatchPb, ToDistributedBatch, ToLocalBatch,
 };
 use crate::catalog::source_catalog::SourceCatalog;
+use crate::error::Result;
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::property::{Distribution, Order};
 
 /// [`BatchSource`] represents a table/connector source at the very beginning of the graph.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchSource {
-    pub base: PlanBase,
-    logical: generic::Source,
+    pub base: PlanBase<Batch>,
+    pub core: generic::Source,
 }
 
 impl BatchSource {
-    pub fn new(logical: generic::Source) -> Self {
-        let base = PlanBase::new_batch_from_logical(
-            &logical,
+    pub fn new(core: generic::Source) -> Self {
+        let base = PlanBase::new_batch_with_core(
+            &core,
             // Use `Single` by default, will be updated later with `clone_with_dist`.
             Distribution::Single,
             Order::any(),
         );
 
-        Self { base, logical }
+        Self { base, core }
     }
 
     pub fn column_names(&self) -> Vec<&str> {
-        self.schema()
-            .fields()
-            .iter()
-            .map(|f| f.name.as_str())
-            .collect()
+        self.schema().names_str()
     }
 
     pub fn source_catalog(&self) -> Option<Rc<SourceCatalog>> {
-        self.logical.catalog.clone()
+        self.core.catalog.clone()
     }
 
-    pub fn kafka_timestamp_range_value(&self) -> (Option<i64>, Option<i64>) {
-        self.logical.kafka_timestamp_range_value()
+    pub fn as_of(&self) -> Option<AsOf> {
+        self.core.as_of.clone()
     }
 
     pub fn clone_with_dist(&self) -> Self {
-        let mut base = self.base.clone();
-        base.dist = Distribution::SomeShard;
+        let base = self
+            .base
+            .clone_with_new_distribution(Distribution::SomeShard);
         Self {
             base,
-            logical: self.logical.clone(),
+            core: self.core.clone(),
         }
     }
 }
 
 impl_plan_tree_node_for_leaf! { BatchSource }
 
-impl fmt::Display for BatchSource {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut builder = f.debug_struct("BatchSource");
-        builder
-            .field("source", &self.source_catalog().unwrap().name)
-            .field("columns", &self.column_names())
-            .field("filter", &self.kafka_timestamp_range_value())
-            .finish()
+impl Distill for BatchSource {
+    fn distill<'a>(&self) -> XmlNode<'a> {
+        let src = Pretty::from(self.source_catalog().unwrap().name.clone());
+        let mut fields = vec![
+            ("source", src),
+            ("columns", column_names_pretty(self.schema())),
+        ];
+        if let Some(as_of) = &self.core.as_of {
+            fields.push(("as_of", Pretty::debug(as_of)));
+        }
+        childless_record("BatchSource", fields)
     }
 }
 
@@ -102,14 +106,17 @@ impl ToBatchPb for BatchSource {
             source_id: source_catalog.id,
             info: Some(source_catalog.info.clone()),
             columns: self
-                .logical
+                .core
                 .column_catalog
                 .iter()
                 .map(|c| c.to_protobuf())
                 .collect(),
-            properties: source_catalog.properties.clone().into_iter().collect(),
+            with_properties: source_catalog.with_properties.clone().into_iter().collect(),
             split: vec![],
         })
     }
 }
+
 impl ExprRewritable for BatchSource {}
+
+impl ExprVisitable for BatchSource {}

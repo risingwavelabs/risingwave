@@ -1,2 +1,19 @@
 statement ok
 set extra_float_digits = 3;
+
+statement ok
+set application_name = "slt"
+
+query T
+show application_name;
+----
+slt
+
+statement ok
+set synchronize_seqscans to on;
+
+statement ok
+set synchronize_seqscans to f;
+
+statement ok
+set synchronize_seqscans to default;

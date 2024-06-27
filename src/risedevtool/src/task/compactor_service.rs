@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@ use std::process::Command;
 use anyhow::Result;
 
 use crate::util::{get_program_args, get_program_env_cmd, get_program_name};
-use crate::{add_meta_node, CompactorConfig, ExecuteContext, Task};
+use crate::{add_meta_node, add_tempo_endpoint, CompactorConfig, ExecuteContext, Task};
 
 pub struct CompactorService {
     config: CompactorConfig,
@@ -34,13 +34,9 @@ impl CompactorService {
     fn compactor(&self) -> Result<Command> {
         let prefix_bin = env::var("PREFIX_BIN")?;
 
-        if let Ok(x) = env::var("ENABLE_ALL_IN_ONE") && x == "true" {
-            Ok(Command::new(
-                Path::new(&prefix_bin).join("risingwave").join("compactor"),
-            ))
-        } else {
-            Ok(Command::new(Path::new(&prefix_bin).join("compactor")))
-        }
+        Ok(Command::new(
+            Path::new(&prefix_bin).join("risingwave").join("compactor"),
+        ))
     }
 
     /// Apply command args according to config
@@ -53,11 +49,7 @@ impl CompactorService {
                 config.listen_address, config.exporter_port
             ))
             .arg("--advertise-addr")
-            .arg(format!("{}:{}", config.address, config.port))
-            .arg("--metrics-level")
-            .arg("1")
-            .arg("--max-concurrent-task-number")
-            .arg(format!("{}", config.max_concurrent_task_number));
+            .arg(format!("{}:{}", config.address, config.port));
         if let Some(compaction_worker_threads_number) =
             config.compaction_worker_threads_number.as_ref()
         {
@@ -67,6 +59,9 @@ impl CompactorService {
 
         let provide_meta_node = config.provide_meta_node.as_ref().unwrap();
         add_meta_node(provide_meta_node, cmd)?;
+
+        let provide_tempo = config.provide_tempo.as_ref().unwrap();
+        add_tempo_endpoint(provide_tempo, cmd)?;
 
         Ok(())
     }
@@ -81,10 +76,10 @@ impl Task for CompactorService {
 
         let mut cmd = self.compactor()?;
 
-        cmd.env("RUST_BACKTRACE", "1");
+        if crate::util::is_enable_backtrace() {
+            cmd.env("RUST_BACKTRACE", "1");
+        }
 
-        // FIXME: Otherwise, CI will throw log size too large error
-        // cmd.env("RW_QUERY_LOG_PATH", DEFAULT_QUERY_LOG_PATH);
         if crate::util::is_env_set("RISEDEV_ENABLE_PROFILE") {
             cmd.env(
                 "RW_PROFILE_PATH",
@@ -94,10 +89,9 @@ impl Task for CompactorService {
 
         if crate::util::is_env_set("RISEDEV_ENABLE_HEAP_PROFILE") {
             // See https://linux.die.net/man/3/jemalloc for the descriptions of profiling options
-            cmd.env(
-                "_RJEM_MALLOC_CONF",
-                "prof:true,lg_prof_interval:38,lg_prof_sample:19,prof_prefix:compactor",
-            );
+            let conf = "prof:true,lg_prof_interval:34,lg_prof_sample:19,prof_prefix:compactor";
+            cmd.env("_RJEM_MALLOC_CONF", conf); // prefixed for macos
+            cmd.env("MALLOC_CONF", conf); // unprefixed for linux
         }
 
         cmd.arg("--config-path")

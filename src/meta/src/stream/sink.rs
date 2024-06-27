@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,28 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::anyhow;
+use anyhow::Context;
+use risingwave_connector::dispatch_sink;
 use risingwave_connector::sink::catalog::SinkCatalog;
-use risingwave_connector::sink::kafka::KAFKA_SINK;
-use risingwave_connector::sink::{SinkConfig, SinkImpl, DOWNSTREAM_SINK_KEY};
+use risingwave_connector::sink::{build_sink, Sink, SinkParam};
 use risingwave_pb::catalog::PbSink;
 
-use crate::{MetaError, MetaResult};
+use crate::MetaResult;
 
-pub async fn validate_sink(
-    prost_sink_catalog: &PbSink,
-    connector_rpc_endpoint: Option<String>,
-) -> MetaResult<()> {
+pub async fn validate_sink(prost_sink_catalog: &PbSink) -> MetaResult<()> {
     let sink_catalog = SinkCatalog::from(prost_sink_catalog);
-    let mut properties = sink_catalog.properties.clone();
-    // Insert a value as the `identifier` field to get parsed by serde.
-    if let Some(connector) = properties.get(DOWNSTREAM_SINK_KEY) && connector == KAFKA_SINK {
-        properties.insert("identifier".to_string(), u64::MAX.to_string());
-    }
-    let sink_config = SinkConfig::from_hashmap(properties)
-        .map_err(|err| MetaError::from(anyhow!(err.to_string())))?;
+    let param = SinkParam::from(sink_catalog);
 
-    SinkImpl::validate(sink_config, sink_catalog, connector_rpc_endpoint)
-        .await
-        .map_err(|err| MetaError::from(anyhow!(err.to_string())))
+    let sink = build_sink(param)?;
+
+    dispatch_sink!(
+        sink,
+        sink,
+        Ok(sink.validate().await.context("failed to validate sink")?)
+    )
 }

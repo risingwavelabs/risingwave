@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,52 +12,35 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
+use std::future::Future;
 
-use async_trait::async_trait;
-use futures::StreamExt;
-use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::array::Op;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::Schema;
-use risingwave_common::row::{CompactedRow, Row, RowDeserializer};
+use risingwave_common::row::{CompactedRow, RowDeserializer};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::ColumnOrder;
 
 use super::CacheKey;
-use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
-use crate::executor::{
-    expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor,
-    ExecutorInfo, Message, PkIndicesRef, Watermark,
-};
+use crate::executor::prelude::*;
 
-#[async_trait]
 pub trait TopNExecutorBase: Send + 'static {
     /// Apply the chunk to the dirty state and get the diffs.
-    async fn apply_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<StreamChunk>;
+    fn apply_chunk(
+        &mut self,
+        chunk: StreamChunk,
+    ) -> impl Future<Output = StreamExecutorResult<StreamChunk>> + Send;
 
     /// Flush the buffered chunk to the storage backend.
-    async fn flush_data(&mut self, epoch: EpochPair) -> StreamExecutorResult<()>;
+    fn flush_data(
+        &mut self,
+        epoch: EpochPair,
+    ) -> impl Future<Output = StreamExecutorResult<()>> + Send;
 
-    fn info(&self) -> &ExecutorInfo;
-
-    /// See [`Executor::schema`].
-    fn schema(&self) -> &Schema {
-        &self.info().schema
-    }
-
-    /// See [`Executor::pk_indices`].
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        self.info().pk_indices.as_ref()
-    }
-
-    /// See [`Executor::identity`].
-    fn identity(&self) -> &str {
-        &self.info().identity
-    }
+    /// Flush the buffered chunk to the storage backend.
+    fn try_flush_data(&mut self) -> impl Future<Output = StreamExecutorResult<()>> + Send;
 
     /// Update the vnode bitmap for the state table and manipulate the cache if necessary, only used
     /// by Group Top-N since it's distributed.
@@ -66,43 +49,29 @@ pub trait TopNExecutorBase: Send + 'static {
     }
 
     fn evict(&mut self) {}
-    fn update_epoch(&mut self, _epoch: u64) {}
 
-    async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()>;
+    fn init(&mut self, epoch: EpochPair) -> impl Future<Output = StreamExecutorResult<()>> + Send;
 
     /// Handle incoming watermarks
-    async fn handle_watermark(&mut self, watermark: Watermark) -> Option<Watermark>;
+    fn handle_watermark(
+        &mut self,
+        watermark: Watermark,
+    ) -> impl Future<Output = Option<Watermark>> + Send;
 }
 
 /// The struct wraps a [`TopNExecutorBase`]
 pub struct TopNExecutorWrapper<E> {
-    pub(super) input: BoxedExecutor,
+    pub(super) input: Executor,
     pub(super) ctx: ActorContextRef,
     pub(super) inner: E,
 }
 
-impl<E> Executor for TopNExecutorWrapper<E>
+impl<E> Execute for TopNExecutorWrapper<E>
 where
     E: TopNExecutorBase,
 {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.top_n_executor_execute().boxed()
-    }
-
-    fn schema(&self) -> &Schema {
-        self.inner.schema()
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        self.inner.pk_indices()
-    }
-
-    fn identity(&self) -> &str {
-        self.inner.identity()
-    }
-
-    fn info(&self) -> ExecutorInfo {
-        self.inner.info().clone()
     }
 }
 
@@ -132,7 +101,10 @@ where
                         yield Message::Watermark(output_watermark);
                     }
                 }
-                Message::Chunk(chunk) => yield Message::Chunk(self.inner.apply_chunk(chunk).await?),
+                Message::Chunk(chunk) => {
+                    yield Message::Chunk(self.inner.apply_chunk(chunk).await?);
+                    self.inner.try_flush_data().await?;
+                }
                 Message::Barrier(barrier) => {
                     self.inner.flush_data(barrier.epoch).await?;
 
@@ -141,7 +113,6 @@ where
                         self.inner.update_vnode_bitmap(vnode_bitmap);
                     }
 
-                    self.inner.update_epoch(barrier.epoch.curr);
                     yield Message::Barrier(barrier)
                 }
             };
@@ -164,7 +135,7 @@ pub fn generate_output(
         }
         // since `new_rows` is not empty, we unwrap directly
         let new_data_chunk = data_chunk_builder.consume_all().unwrap();
-        let new_stream_chunk = StreamChunk::new(new_ops, new_data_chunk.columns().to_vec(), None);
+        let new_stream_chunk = StreamChunk::new(new_ops, new_data_chunk.columns().to_vec());
         Ok(new_stream_chunk)
     } else {
         let columns = schema
@@ -172,7 +143,7 @@ pub fn generate_output(
             .into_iter()
             .map(|x| x.finish().into())
             .collect_vec();
-        Ok(StreamChunk::new(vec![], columns, None))
+        Ok(StreamChunk::new(vec![], columns))
     }
 }
 

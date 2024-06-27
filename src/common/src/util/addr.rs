@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,11 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::net::SocketAddr;
+use std::net::{SocketAddr, ToSocketAddrs};
 use std::str::FromStr;
+use std::time::Duration;
 
-use anyhow::anyhow;
+use anyhow::Context;
 use risingwave_pb::common::PbHostAddress;
+use thiserror_ext::AsReport;
+use tokio::time::sleep;
+use tokio_retry::strategy::ExponentialBackoff;
+use tracing::error;
 
 /// General host address and port.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -43,14 +48,11 @@ impl TryFrom<&str> for HostAddr {
     type Error = anyhow::Error;
 
     fn try_from(s: &str) -> Result<Self, Self::Error> {
-        let addr =
-            url::Url::parse(&format!("http://{}", s)).map_err(|e| anyhow!("{}: {}", e, s))?;
+        let s = format!("http://{s}");
+        let addr = url::Url::parse(&s).with_context(|| format!("failed to parse address: {s}"))?;
         Ok(HostAddr {
-            host: addr
-                .host()
-                .ok_or_else(|| anyhow!("invalid host"))?
-                .to_string(),
-            port: addr.port().ok_or_else(|| anyhow!("invalid port"))?,
+            host: addr.host().context("invalid host")?.to_string(),
+            port: addr.port().context("invalid port")?,
         })
     }
 }
@@ -91,6 +93,32 @@ impl HostAddr {
 
 pub fn is_local_address(server_addr: &HostAddr, peer_addr: &HostAddr) -> bool {
     server_addr == peer_addr
+}
+
+pub async fn try_resolve_dns(host: &str, port: i32) -> Result<SocketAddr, String> {
+    let addr = format!("{}:{}", host, port);
+    let mut backoff = ExponentialBackoff::from_millis(100)
+        .max_delay(Duration::from_secs(3))
+        .factor(5);
+    const MAX_RETRY: usize = 20;
+    for i in 1..=MAX_RETRY {
+        let err = match addr.to_socket_addrs() {
+            Ok(mut addr_iter) => {
+                if let Some(addr) = addr_iter.next() {
+                    return Ok(addr);
+                } else {
+                    format!("{} resolved to no addr", addr)
+                }
+            }
+            Err(e) => e.to_report_string(),
+        };
+        // It may happen that the dns information of newly registered worker node
+        // has not been propagated to the meta node and cause error. Wait for a while and retry
+        let delay = backoff.next().unwrap();
+        error!(attempt = i, backoff_delay = ?delay, err, addr, "fail to resolve worker node address");
+        sleep(delay).await;
+    }
+    Err(format!("failed to resolve dns: {}", addr))
 }
 
 #[cfg(test)]

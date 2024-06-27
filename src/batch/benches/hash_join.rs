@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,13 +18,16 @@ use criterion::{criterion_group, criterion_main, Criterion};
 use risingwave_batch::executor::hash_join::HashJoinExecutor;
 use risingwave_batch::executor::test_utils::{gen_projected_data, MockExecutor};
 use risingwave_batch::executor::{BoxedExecutor, JoinType};
+use risingwave_batch::monitor::BatchSpillMetrics;
+use risingwave_batch::task::ShutdownToken;
 use risingwave_common::catalog::schema_test_utils::field_n;
+use risingwave_common::memory::MemoryContext;
 use risingwave_common::types::DataType;
-use risingwave_common::{enable_jemalloc_on_unix, hash};
+use risingwave_common::{enable_jemalloc, hash};
 use risingwave_expr::expr::build_from_pretty;
 use utils::bench_join;
 
-enable_jemalloc_on_unix!();
+enable_jemalloc!();
 
 fn create_hash_join_executor(
     join_type: JoinType,
@@ -59,7 +62,7 @@ fn create_hash_join_executor(
         _ => vec![0, 1],
     };
 
-    let cond = with_cond.then(|| build_from_pretty("(greater_than:int8 $0:int8 100:int8)"));
+    let cond = with_cond.then(|| build_from_pretty("(greater_than:int8 $0:int8 100:int8)").into());
 
     Box::new(HashJoinExecutor::<hash::Key64>::new(
         join_type,
@@ -72,9 +75,10 @@ fn create_hash_join_executor(
         cond,
         "HashJoinExecutor".into(),
         CHUNK_SIZE,
-        // TODO: In practice this `shutdown_rx` will be constantly poll in execution, may need to
-        // use it in bench too.
-        None,
+        false,
+        BatchSpillMetrics::for_test(),
+        ShutdownToken::empty(),
+        MemoryContext::none(),
     ))
 }
 

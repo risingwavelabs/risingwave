@@ -31,7 +31,7 @@ var AvroSchema string = `
 		]
 	  }
 	]
-}   
+}
 `
 
 var AvroCodec *goavro.Codec = nil

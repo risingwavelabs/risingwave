@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use super::{
-    AggCall, CorrelatedInputRef, ExprImpl, FunctionCall, InputRef, Literal, Now, Parameter,
-    Subquery, TableFunction, UserDefinedFunction, WindowFunction,
+    AggCall, CorrelatedInputRef, ExprImpl, FunctionCall, FunctionCallWithLambda, InputRef, Literal,
+    Now, Parameter, Subquery, TableFunction, UserDefinedFunction, WindowFunction,
 };
 
 /// with the same visit logic of `ExprVisitor`, but mutable.
@@ -24,6 +24,7 @@ pub trait ExprMutator {
             ExprImpl::InputRef(inner) => self.visit_input_ref(inner),
             ExprImpl::Literal(inner) => self.visit_literal(inner),
             ExprImpl::FunctionCall(inner) => self.visit_function_call(inner),
+            ExprImpl::FunctionCallWithLambda(inner) => self.visit_function_call_with_lambda(inner),
             ExprImpl::AggCall(inner) => self.visit_agg_call(inner),
             ExprImpl::Subquery(inner) => self.visit_subquery(inner),
             ExprImpl::CorrelatedInputRef(inner) => self.visit_correlated_input_ref(inner),
@@ -40,9 +41,14 @@ pub trait ExprMutator {
             .iter_mut()
             .for_each(|expr| self.visit_expr(expr))
     }
+
+    fn visit_function_call_with_lambda(&mut self, func_call: &mut FunctionCallWithLambda) {
+        self.visit_function_call(func_call.base_mut())
+    }
+
     fn visit_agg_call(&mut self, agg_call: &mut AggCall) {
         agg_call
-            .inputs_mut()
+            .args_mut()
             .iter_mut()
             .for_each(|expr| self.visit_expr(expr));
         agg_call.order_by_mut().visit_expr_mut(self);

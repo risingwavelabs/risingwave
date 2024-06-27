@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,11 +13,11 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{DataType, Scalar};
 use risingwave_sqlparser::ast::{Expr, Ident};
 
 use crate::binder::Binder;
+use crate::error::{ErrorCode, Result};
 use crate::expr::{Expr as RwExpr, ExprImpl, ExprType, FunctionCall, Literal};
 
 impl Binder {
@@ -67,7 +67,7 @@ impl Binder {
         idents: &[Ident],
         wildcard: bool,
     ) -> Result<Vec<(ExprImpl, String)>> {
-        match idents.get(0) {
+        match idents.first() {
             Some(ident) => {
                 let field_name = ident.real_value();
                 let (field_type, field_index) = find_field(expr.return_type(), ident.real_value())?;
@@ -101,10 +101,9 @@ impl Binder {
     fn bind_wildcard_field(expr: ExprImpl) -> Result<Vec<(ExprImpl, String)>> {
         let input = expr.return_type();
         if let DataType::Struct(t) = input {
-            Ok(t.fields
-                .iter()
+            Ok(t.iter()
                 .enumerate()
-                .map(|(i, f)| {
+                .map(|(i, (name, ty))| {
                     (
                         FunctionCall::new_unchecked(
                             ExprType::Field,
@@ -113,10 +112,10 @@ impl Binder {
                                 Literal::new(Some((i as i32).to_scalar_value()), DataType::Int32)
                                     .into(),
                             ],
-                            f.clone(),
+                            ty.clone(),
                         )
                         .into(),
-                        t.field_names[i].clone(),
+                        name.to_string(),
                     )
                 })
                 .collect_vec())
@@ -128,8 +127,8 @@ impl Binder {
 
 fn find_field(input: DataType, field_name: String) -> Result<(DataType, usize)> {
     if let DataType::Struct(t) = input {
-        if let Some((pos, _)) = t.field_names.iter().find_position(|s| **s == field_name) {
-            Ok((t.fields[pos].clone(), pos))
+        if let Some((pos, (_, ty))) = t.iter().find_position(|(name, _)| name == &field_name) {
+            Ok((ty.clone(), pos))
         } else {
             Err(ErrorCode::BindError(format!(
                 "column \"{}\" not found in struct type",

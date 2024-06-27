@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::anyhow;
 use risingwave_common::types::JsonbVal;
 use serde::{Deserialize, Serialize};
 
+use crate::error::ConnectorResult;
 use crate::source::{SplitId, SplitMetaData};
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Hash)]
@@ -24,6 +24,12 @@ pub struct KafkaSplit {
     pub(crate) partition: i32,
     pub(crate) start_offset: Option<i64>,
     pub(crate) stop_offset: Option<i64>,
+    #[serde(skip)]
+    /// Used by shared source to hackily seek to the latest offset without fetching start offset first.
+    /// XXX: But why do we fetch low watermark for latest start offset..?
+    ///
+    /// When this is `true`, `start_offset` will be ignored.
+    pub(crate) hack_seek_to_latest: bool,
 }
 
 impl SplitMetaData for KafkaSplit {
@@ -32,12 +38,17 @@ impl SplitMetaData for KafkaSplit {
         format!("{}", self.partition).into()
     }
 
-    fn restore_from_json(value: JsonbVal) -> anyhow::Result<Self> {
-        serde_json::from_value(value.take()).map_err(|e| anyhow!(e))
+    fn restore_from_json(value: JsonbVal) -> ConnectorResult<Self> {
+        serde_json::from_value(value.take()).map_err(Into::into)
     }
 
     fn encode_to_json(&self) -> JsonbVal {
         serde_json::to_value(self.clone()).unwrap().into()
+    }
+
+    fn update_offset(&mut self, last_seen_offset: String) -> ConnectorResult<()> {
+        self.start_offset = Some(last_seen_offset.as_str().parse::<i64>().unwrap());
+        Ok(())
     }
 }
 
@@ -53,19 +64,16 @@ impl KafkaSplit {
             partition,
             start_offset,
             stop_offset,
+            hack_seek_to_latest: false,
         }
-    }
-
-    pub fn copy_with_offset(&self, start_offset: String) -> Self {
-        Self::new(
-            self.partition,
-            Some(start_offset.as_str().parse::<i64>().unwrap()),
-            self.stop_offset,
-            self.topic.clone(),
-        )
     }
 
     pub fn get_topic_and_partition(&self) -> (String, i32) {
         (self.topic.clone(), self.partition)
+    }
+
+    /// This should only be used for a fresh split, not persisted in state table yet.
+    pub fn seek_to_latest_offset(&mut self) {
+        self.hack_seek_to_latest = true;
     }
 }

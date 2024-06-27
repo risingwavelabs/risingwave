@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,19 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use either::Either;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::acl::AclMode;
 use risingwave_pb::catalog::PbTable;
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
-use risingwave_pb::user::grant_privilege::Action;
 use risingwave_sqlparser::ast::{EmitMode, Ident, ObjectName, Query};
 
 use super::privilege::resolve_relation_privileges;
 use super::RwPgResponse;
 use crate::binder::{Binder, BoundQuery, BoundSetExpr};
+use crate::catalog::check_valid_column_name;
+use crate::error::ErrorCode::ProtocolError;
+use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::privilege::resolve_query_privileges;
 use crate::handler::HandlerArgs;
+use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::Explain;
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, RelationCollectorVisitor};
 use crate::planner::Planner;
@@ -32,21 +36,24 @@ use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
 
+pub(super) fn parse_column_names(columns: &[Ident]) -> Option<Vec<String>> {
+    if columns.is_empty() {
+        None
+    } else {
+        Some(columns.iter().map(|v| v.real_value()).collect())
+    }
+}
+
+/// If columns is empty, it means that the user did not specify the column names.
+/// In this case, we extract the column names from the query.
+/// If columns is not empty, it means that user specify the column names and the user
+/// should guarantee that the column names number are consistent with the query.
 pub(super) fn get_column_names(
     bound: &BoundQuery,
     session: &SessionImpl,
     columns: Vec<Ident>,
 ) -> Result<Option<Vec<String>>> {
-    // If columns is empty, it means that the user did not specify the column names.
-    // In this case, we extract the column names from the query.
-    // If columns is not empty, it means that user specify the column names and the user
-    // should guarantee that the column names number are consistent with the query.
-    let col_names: Option<Vec<String>> = if columns.is_empty() {
-        None
-    } else {
-        Some(columns.iter().map(|v| v.real_value()).collect())
-    };
-
+    let col_names = parse_column_names(&columns);
     if let BoundSetExpr::Select(select) = &bound.body {
         // `InputRef`'s alias will be implicitly assigned in `bind_project`.
         // If user provide columns name (col_names.is_some()), we don't need alias.
@@ -64,7 +71,7 @@ pub(super) fn get_column_names(
         }
         if let Some(relation) = &select.from {
             let mut check_items = Vec::new();
-            resolve_relation_privileges(relation, Action::Select, &mut check_items);
+            resolve_relation_privileges(relation, AclMode::Select, &mut check_items);
             session.check_privileges(&check_items)?;
         }
     }
@@ -81,6 +88,10 @@ pub fn gen_create_mv_plan(
     columns: Vec<Ident>,
     emit_mode: Option<EmitMode>,
 ) -> Result<(PlanRef, PbTable)> {
+    if session.config().create_compaction_group_for_mv() {
+        context.warn_to_user("The session variable CREATE_COMPACTION_GROUP_FOR_MV has been deprecated. It will not take effect.");
+    }
+
     let db_name = session.database();
     let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, name)?;
 
@@ -106,17 +117,15 @@ pub fn gen_create_mv_plan(
 
     let mut plan_root = Planner::new(context).plan_query(bound)?;
     if let Some(col_names) = col_names {
+        for name in &col_names {
+            check_valid_column_name(name)?;
+        }
         plan_root.set_out_names(col_names)?;
     }
     let materialize =
         plan_root.gen_materialize_plan(table_name, definition, emit_on_window_close)?;
     let mut table = materialize.table().to_prost(schema_id, database_id);
-    if session.config().get_create_compaction_group_for_mv() {
-        table.properties.insert(
-            String::from("independent_compaction_group"),
-            String::from("1"),
-        );
-    }
+
     let plan: PlanRef = materialize.into();
     let dependent_relations =
         RelationCollectorVisitor::collect_with(dependent_relations, plan.clone());
@@ -133,7 +142,7 @@ pub fn gen_create_mv_plan(
     let explain_trace = ctx.is_explain_trace();
     if explain_trace {
         ctx.trace("Create Materialized View:");
-        ctx.trace(plan.explain_to_string().unwrap());
+        ctx.trace(plan.explain_to_string());
     }
 
     Ok((plan, table))
@@ -141,6 +150,7 @@ pub fn gen_create_mv_plan(
 
 pub async fn handle_create_mv(
     handler_args: HandlerArgs,
+    if_not_exists: bool,
     name: ObjectName,
     query: Query,
     columns: Vec<Ident>,
@@ -148,10 +158,23 @@ pub async fn handle_create_mv(
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
 
-    session.check_relation_name_duplicated(name.clone())?;
+    if let Either::Right(resp) = session.check_relation_name_duplicated(
+        name.clone(),
+        StatementType::CREATE_MATERIALIZED_VIEW,
+        if_not_exists,
+    )? {
+        return Ok(resp);
+    }
 
     let (table, graph) = {
         let context = OptimizerContext::from_handler_args(handler_args);
+        if !context.with_options().is_empty() {
+            // get other useful fields by `remove`, the logic here is to reject unknown options.
+            return Err(RwError::from(ProtocolError(format!(
+                "unexpected options in WITH clause: {:?}",
+                context.with_options().keys()
+            ))));
+        }
 
         let has_order_by = !query.order_by.is_empty();
         if has_order_by {
@@ -162,19 +185,24 @@ It only indicates the physical clustering of the data, which may improve the per
 
         let (plan, table) =
             gen_create_mv_plan(&session, context.into(), query, name, columns, emit_mode)?;
-        let context = plan.plan_base().ctx.clone();
-        let mut graph = build_graph(plan);
-        graph.parallelism = session
-            .config()
-            .get_streaming_parallelism()
-            .map(|parallelism| Parallelism { parallelism });
-        // Set the timezone for the stream environment
-        let env = graph.env.as_mut().unwrap();
-        env.timezone = context.get_session_timezone();
+
+        let context = plan.plan_base().ctx().clone();
+        let mut graph = build_graph(plan)?;
+        graph.parallelism =
+            session
+                .config()
+                .streaming_parallelism()
+                .map(|parallelism| Parallelism {
+                    parallelism: parallelism.get(),
+                });
+        // Set the timezone for the stream context
+        let ctx = graph.ctx.as_mut().unwrap();
+        ctx.timezone = context.get_session_timezone();
 
         (table, graph)
     };
 
+    // Ensure writes to `StreamJobTracker` are atomic.
     let _job_guard =
         session
             .env()
@@ -186,7 +214,8 @@ It only indicates the physical clustering of the data, which may improve the per
                 table.name.clone(),
             ));
 
-    let catalog_writer = session.env().catalog_writer();
+    let session = session.clone();
+    let catalog_writer = session.catalog_writer()?;
     catalog_writer
         .create_materialized_view(table, graph)
         .await?;
@@ -215,9 +244,7 @@ pub mod tests {
     use std::collections::HashMap;
 
     use pgwire::pg_response::StatementType::CREATE_MATERIALIZED_VIEW;
-    use risingwave_common::catalog::{
-        row_id_column_name, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME,
-    };
+    use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, ROWID_PREFIX};
     use risingwave_common::types::DataType;
 
     use crate::catalog::root_catalog::SchemaPath;
@@ -229,13 +256,13 @@ pub mod tests {
         let sql = format!(
             r#"CREATE SOURCE t1
     WITH (connector = 'kinesis')
-    ROW FORMAT PROTOBUF MESSAGE '.test.TestRecord' ROW SCHEMA LOCATION 'file://{}'"#,
+    FORMAT PLAIN ENCODE PROTOBUF (message = '.test.TestRecord', schema.location = 'file://{}')"#,
             proto_file.path().to_str().unwrap()
         );
         let frontend = LocalFrontend::new(Default::default()).await;
         frontend.run_sql(sql).await.unwrap();
 
-        let sql = "create materialized view mv1 with (ttl = 300) as select t1.country from t1";
+        let sql = "create materialized view mv1 as select t1.country from t1";
         frontend.run_sql(sql).await.unwrap();
 
         let session = frontend.session_ref();
@@ -264,9 +291,8 @@ pub mod tests {
             vec![DataType::Varchar, DataType::Varchar],
             vec!["address".to_string(), "zipcode".to_string()],
         );
-        let row_id_col_name = row_id_column_name();
         let expected_columns = maplit::hashmap! {
-            row_id_col_name.as_str() => DataType::Serial,
+            ROWID_PREFIX => DataType::Serial,
             "country" => DataType::new_struct(
                  vec![DataType::Varchar,city_type,DataType::Varchar],
                  vec!["address".to_string(), "city".to_string(), "zipcode".to_string()],
@@ -323,12 +349,12 @@ pub mod tests {
         // Without order by
         let sql = "create materialized view mv1 as select * from t";
         let response = frontend.run_sql(sql).await.unwrap();
-        assert_eq!(response.get_stmt_type(), CREATE_MATERIALIZED_VIEW);
-        assert!(response.get_notices().is_empty());
+        assert_eq!(response.stmt_type(), CREATE_MATERIALIZED_VIEW);
+        assert!(response.notices().is_empty());
 
         // With order by
         let sql = "create materialized view mv2 as select * from t order by x";
         let response = frontend.run_sql(sql).await.unwrap();
-        assert_eq!(response.get_stmt_type(), CREATE_MATERIALIZED_VIEW);
+        assert_eq!(response.stmt_type(), CREATE_MATERIALIZED_VIEW);
     }
 }

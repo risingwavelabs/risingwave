@@ -129,7 +129,7 @@ INSERT INTO t.t VALUES (ROW(ROW(ROW(42))));
 query I
 SELECT (t.t.t).t FROM t.t;
 ----
-((42))
+("(42)")
 
 query I
 SELECT (t.t.t).t.t FROM t.t;

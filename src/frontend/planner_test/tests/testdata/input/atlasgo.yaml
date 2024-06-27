@@ -1,0 +1,14 @@
+- sql: |
+    SELECT
+      (
+        SELECT
+          t.typtype
+        FROM
+          pg_catalog.pg_type AS t
+        WHERE
+          t.oid = t4.typelem
+      ) AS elemtyp
+    FROM
+      pg_catalog.pg_type AS t4;
+  expected_outputs:
+    - batch_plan

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod prelude;
+
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -20,29 +22,28 @@ use await_tree::InstrumentAwait;
 use enum_as_inner::EnumAsInner;
 use futures::stream::BoxStream;
 use futures::{Stream, StreamExt};
-use futures_async_stream::try_stream;
 use itertools::Itertools;
-use minitrace::prelude::*;
-use risingwave_common::array::column::Column;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{DataType, DefaultOrd, DefaultPartialOrd, ScalarImpl};
+use risingwave_common::types::{DataType, Datum, DefaultOrd, ScalarImpl};
 use risingwave_common::util::epoch::{Epoch, EpochPair};
-use risingwave_common::util::value_encoding::{deserialize_datum, serialize_datum};
+use risingwave_common::util::tracing::TracingContext;
+use risingwave_common::util::value_encoding::{DatumFromProtoExt, DatumToProtoExt};
 use risingwave_connector::source::SplitImpl;
-use risingwave_expr::expr::BoxedExpression;
-use risingwave_expr::ExprError;
-use risingwave_pb::data::{PbDatum, PbEpoch};
+use risingwave_expr::expr::{Expression, NonStrictExpression};
+use risingwave_pb::data::PbEpoch;
 use risingwave_pb::expr::PbInputRef;
-use risingwave_pb::stream_plan::add_mutation::Dispatchers;
-use risingwave_pb::stream_plan::barrier::PbMutation;
+use risingwave_pb::stream_plan::barrier::BarrierKind;
+use risingwave_pb::stream_plan::barrier_mutation::Mutation as PbMutation;
 use risingwave_pb::stream_plan::stream_message::StreamMessage;
 use risingwave_pb::stream_plan::update_mutation::{DispatcherUpdate, MergeUpdate};
 use risingwave_pb::stream_plan::{
-    AddMutation, PauseMutation, PbBarrier, PbDispatcher, PbStreamMessage, PbWatermark,
-    ResumeMutation, SourceChangeSplitMutation, StopMutation, UpdateMutation,
+    BarrierMutation, CombinedMutation, CreateSubscriptionMutation, Dispatchers,
+    DropSubscriptionMutation, PauseMutation, PbAddMutation, PbBarrier, PbDispatcher,
+    PbStreamMessage, PbUpdateMutation, PbWatermark, ResumeMutation, SourceChangeSplitMutation,
+    StopMutation, ThrottleMutation,
 };
 use smallvec::SmallVec;
 
@@ -56,22 +57,24 @@ pub mod monitor;
 
 pub mod agg_common;
 pub mod aggregation;
+mod backfill;
 mod barrier_recv;
 mod batch_query;
 mod chain;
+mod changelog;
 mod dedup;
 mod dispatch;
 pub mod dml;
 mod dynamic_filter;
-mod error;
+pub mod error;
 mod expand;
 mod filter;
 mod hash_agg;
 pub mod hash_join;
 mod hop_window;
+mod join;
 mod lookup;
 mod lookup_union;
-mod managed_state;
 mod merge;
 mod mview;
 mod no_op;
@@ -92,23 +95,27 @@ mod stream_reader;
 pub mod subtask;
 mod temporal_join;
 mod top_n;
+mod troublemaker;
 mod union;
 mod values;
 mod watermark;
 mod watermark_filter;
 mod wrapper;
 
-mod backfill;
 #[cfg(test)]
 mod integration_tests;
 pub mod test_utils;
+mod utils;
 
 pub use actor::{Actor, ActorContext, ActorContextRef};
 use anyhow::Context;
-pub use backfill::*;
+pub use backfill::arrangement_backfill::*;
+pub use backfill::cdc::{CdcBackfillExecutor, CdcScanOptions, ExternalStorageTable};
+pub use backfill::no_shuffle_backfill::*;
 pub use barrier_recv::BarrierRecvExecutor;
 pub use batch_query::BatchQueryExecutor;
 pub use chain::ChainExecutor;
+pub use changelog::ChangeLogExecutor;
 pub use dedup::AppendOnlyDedupExecutor;
 pub use dispatch::{DispatchExecutor, DispatcherImpl};
 pub use dynamic_filter::DynamicFilterExecutor;
@@ -118,12 +125,13 @@ pub use filter::FilterExecutor;
 pub use hash_agg::HashAggExecutor;
 pub use hash_join::*;
 pub use hop_window::HopWindowExecutor;
+pub use join::JoinType;
 pub use lookup::*;
 pub use lookup_union::LookupUnionExecutor;
 pub use merge::MergeExecutor;
 pub use mview::*;
 pub use no_op::NoOpExecutor;
-pub use now::NowExecutor;
+pub use now::*;
 pub use over_window::*;
 pub use project::ProjectExecutor;
 pub use project_set::*;
@@ -133,72 +141,52 @@ use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 pub use simple_agg::SimpleAggExecutor;
 pub use sink::SinkExecutor;
 pub use sort::*;
-pub use source::*;
 pub use stateless_simple_agg::StatelessSimpleAggExecutor;
 pub use temporal_join::*;
 pub use top_n::{
     AppendOnlyGroupTopNExecutor, AppendOnlyTopNExecutor, GroupTopNExecutor, TopNExecutor,
 };
+pub use troublemaker::TroublemakerExecutor;
 pub use union::UnionExecutor;
+pub use utils::DummyExecutor;
 pub use values::ValuesExecutor;
 pub use watermark_filter::WatermarkFilterExecutor;
 pub use wrapper::WrapperExecutor;
 
 use self::barrier_align::AlignedMessageStream;
 
-pub type BoxedExecutor = Box<dyn Executor>;
 pub type MessageStreamItem = StreamExecutorResult<Message>;
 pub type BoxedMessageStream = BoxStream<'static, MessageStreamItem>;
 
 pub use risingwave_common::util::epoch::task_local::{curr_epoch, epoch, prev_epoch};
+use risingwave_pb::stream_plan::throttle_mutation::RateLimit;
 
 pub trait MessageStream = futures::Stream<Item = MessageStreamItem> + Send;
 
 /// Static information of an executor.
 #[derive(Debug, Default, Clone)]
 pub struct ExecutorInfo {
-    /// See [`Executor::schema`].
+    /// The schema of the OUTPUT of the executor.
     pub schema: Schema,
 
-    /// See [`Executor::pk_indices`].
+    /// The primary key indices of the OUTPUT of the executor.
+    /// Schema is used by both OLAP and streaming, therefore
+    /// pk indices are maintained independently.
     pub pk_indices: PkIndices,
 
-    /// See [`Executor::identity`].
+    /// Identity of the executor.
     pub identity: String,
 }
 
-/// `Executor` supports handling of control messages.
-pub trait Executor: Send + 'static {
+/// [`Execute`] describes the methods an executor should implement to handle control messages.
+pub trait Execute: Send + 'static {
     fn execute(self: Box<Self>) -> BoxedMessageStream;
-
-    /// Return the schema of the OUTPUT of the executor.
-    fn schema(&self) -> &Schema;
-
-    /// Return the primary key indices of the OUTPUT of the executor.
-    /// Schema is used by both OLAP and streaming, therefore
-    /// pk indices are maintained independently.
-    fn pk_indices(&self) -> PkIndicesRef<'_>;
-
-    /// Identity of the executor.
-    fn identity(&self) -> &str;
 
     fn execute_with_epoch(self: Box<Self>, _epoch: u64) -> BoxedMessageStream {
         self.execute()
     }
 
-    #[inline(always)]
-    fn info(&self) -> ExecutorInfo {
-        let schema = self.schema().to_owned();
-        let pk_indices = self.pk_indices().to_owned();
-        let identity = self.identity().to_owned();
-        ExecutorInfo {
-            schema,
-            pk_indices,
-            identity,
-        }
-    }
-
-    fn boxed(self) -> BoxedExecutor
+    fn boxed(self) -> Box<dyn Execute>
     where
         Self: Sized + Send + 'static,
     {
@@ -206,9 +194,61 @@ pub trait Executor: Send + 'static {
     }
 }
 
-impl std::fmt::Debug for BoxedExecutor {
+/// [`Executor`] combines the static information ([`ExecutorInfo`]) and the executable object to
+/// handle messages ([`Execute`]).
+pub struct Executor {
+    info: ExecutorInfo,
+    execute: Box<dyn Execute>,
+}
+
+impl Executor {
+    pub fn new(info: ExecutorInfo, execute: Box<dyn Execute>) -> Self {
+        Self { info, execute }
+    }
+
+    pub fn info(&self) -> &ExecutorInfo {
+        &self.info
+    }
+
+    pub fn schema(&self) -> &Schema {
+        &self.info.schema
+    }
+
+    pub fn pk_indices(&self) -> PkIndicesRef<'_> {
+        &self.info.pk_indices
+    }
+
+    pub fn identity(&self) -> &str {
+        &self.info.identity
+    }
+
+    pub fn execute(self) -> BoxedMessageStream {
+        self.execute.execute()
+    }
+
+    pub fn execute_with_epoch(self, epoch: u64) -> BoxedMessageStream {
+        self.execute.execute_with_epoch(epoch)
+    }
+}
+
+impl std::fmt::Debug for Executor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.identity())
+    }
+}
+
+impl From<(ExecutorInfo, Box<dyn Execute>)> for Executor {
+    fn from((info, execute): (ExecutorInfo, Box<dyn Execute>)) -> Self {
+        Self::new(info, execute)
+    }
+}
+
+impl<E> From<(ExecutorInfo, E)> for Executor
+where
+    E: Execute,
+{
+    fn from((info, execute): (ExecutorInfo, E)) -> Self {
+        Self::new(info, execute.boxed())
     }
 }
 
@@ -216,33 +256,54 @@ pub const INVALID_EPOCH: u64 = 0;
 
 type UpstreamFragmentId = FragmentId;
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct UpdateMutation {
+    pub dispatchers: HashMap<ActorId, Vec<DispatcherUpdate>>,
+    pub merges: HashMap<(ActorId, UpstreamFragmentId), MergeUpdate>,
+    pub vnode_bitmaps: HashMap<ActorId, Arc<Bitmap>>,
+    pub dropped_actors: HashSet<ActorId>,
+    pub actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
+    pub actor_new_dispatchers: HashMap<ActorId, Vec<PbDispatcher>>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AddMutation {
+    pub adds: HashMap<ActorId, Vec<PbDispatcher>>,
+    pub added_actors: HashSet<ActorId>,
+    // TODO: remove this and use `SourceChangesSplit` after we support multiple mutations.
+    pub splits: HashMap<ActorId, Vec<SplitImpl>>,
+    pub pause: bool,
+}
+
 /// See [`PbMutation`] for the semantics of each mutation.
-#[derive(Debug, Clone, PartialEq, EnumAsInner)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Mutation {
     Stop(HashSet<ActorId>),
-    Update {
-        dispatchers: HashMap<ActorId, Vec<DispatcherUpdate>>,
-        merges: HashMap<(ActorId, UpstreamFragmentId), MergeUpdate>,
-        vnode_bitmaps: HashMap<ActorId, Arc<Bitmap>>,
-        dropped_actors: HashSet<ActorId>,
-        actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
-    },
-    Add {
-        adds: HashMap<ActorId, Vec<PbDispatcher>>,
-        added_actors: HashSet<ActorId>,
-        // TODO: remove this and use `SourceChangesSplit` after we support multiple mutations.
-        splits: HashMap<ActorId, Vec<SplitImpl>>,
-    },
+    Update(UpdateMutation),
+    Add(AddMutation),
     SourceChangeSplit(HashMap<ActorId, Vec<SplitImpl>>),
     Pause,
     Resume,
+    Throttle(HashMap<ActorId, Option<u32>>),
+    AddAndUpdate(AddMutation, UpdateMutation),
+    CreateSubscription {
+        subscription_id: u32,
+        upstream_mv_table_id: TableId,
+    },
+    DropSubscription {
+        subscription_id: u32,
+        upstream_mv_table_id: TableId,
+    },
 }
 
 #[derive(Debug, Clone)]
 pub struct Barrier {
     pub epoch: EpochPair,
     pub mutation: Option<Arc<Mutation>>,
-    pub checkpoint: bool,
+    pub kind: BarrierKind,
+
+    /// Tracing context for the **current** epoch of this barrier.
+    tracing_context: TracingContext,
 
     /// The actors that this barrier has passed locally. Used for debugging only.
     pub passed_actors: Vec<ActorId>,
@@ -253,7 +314,8 @@ impl Barrier {
     pub fn new_test_barrier(epoch: u64) -> Self {
         Self {
             epoch: EpochPair::new_test_epoch(epoch),
-            checkpoint: true,
+            kind: BarrierKind::Checkpoint,
+            tracing_context: TracingContext::none(),
             mutation: Default::default(),
             passed_actors: Default::default(),
         }
@@ -262,7 +324,8 @@ impl Barrier {
     pub fn with_prev_epoch_for_test(epoch: u64, prev_epoch: u64) -> Self {
         Self {
             epoch: EpochPair::new(epoch, prev_epoch),
-            checkpoint: true,
+            kind: BarrierKind::Checkpoint,
+            tracing_context: TracingContext::none(),
             mutation: Default::default(),
             passed_actors: Default::default(),
         }
@@ -296,7 +359,10 @@ impl Barrier {
     pub fn all_stop_actors(&self) -> Option<&HashSet<ActorId>> {
         match self.mutation.as_deref() {
             Some(Mutation::Stop(actors)) => Some(actors),
-            Some(Mutation::Update { dropped_actors, .. }) => Some(dropped_actors),
+            Some(Mutation::Update(UpdateMutation { dropped_actors, .. }))
+            | Some(Mutation::AddAndUpdate(_, UpdateMutation { dropped_actors, .. })) => {
+                Some(dropped_actors)
+            }
             _ => None,
         }
     }
@@ -308,23 +374,74 @@ impl Barrier {
     /// added for scaling are not included.
     pub fn is_newly_added(&self, actor_id: ActorId) -> bool {
         match self.mutation.as_deref() {
-            Some(Mutation::Add { added_actors, .. }) => added_actors.contains(&actor_id),
+            Some(Mutation::Add(AddMutation { added_actors, .. }))
+            | Some(Mutation::AddAndUpdate(AddMutation { added_actors, .. }, _)) => {
+                added_actors.contains(&actor_id)
+            }
             _ => false,
         }
     }
 
-    /// Whether this barrier is for pause.
-    pub fn is_pause(&self) -> bool {
-        matches!(self.mutation.as_deref(), Some(Mutation::Pause))
+    /// Whether this barrier adds new downstream fragment for the actor with `upstream_actor_id`.
+    ///
+    /// # Use case
+    /// Some optimizations are applied when an actor doesn't have any downstreams ("standalone" actors).
+    /// * Pause a standalone shared `SourceExecutor`.
+    /// * Disable a standalone `MaterializeExecutor`'s conflict check.
+    ///
+    /// This is implemented by checking `actor_context.initial_dispatch_num` on startup, and
+    /// check `has_more_downstream_fragments` on barrier to see whether the optimization
+    /// needs to be turned off.
+    ///
+    /// ## Some special cases not included
+    ///
+    /// Note that this is not `has_new_downstream_actor/fragment`. For our use case, we only
+    /// care about **number of downstream fragments** (more precisely, existence).
+    /// - When scaling, the number of downstream actors is changed, and they are "new", but downstream fragments is not changed.
+    /// - When `ALTER TABLE sink_into_table`, the fragment is replaced with a "new" one, but the number is not changed.
+    pub fn has_more_downstream_fragments(&self, upstream_actor_id: ActorId) -> bool {
+        let Some(mutation) = self.mutation.as_deref() else {
+            return false;
+        };
+        match mutation {
+            // Add is for mv, index and sink creation.
+            Mutation::Add(AddMutation { adds, .. }) => adds.get(&upstream_actor_id).is_some(),
+            // AddAndUpdate is for sink-into-table.
+            Mutation::AddAndUpdate(
+                AddMutation { adds, .. },
+                UpdateMutation {
+                    dispatchers,
+                    actor_new_dispatchers,
+                    ..
+                },
+            ) => {
+                adds.get(&upstream_actor_id).is_some()
+                    || actor_new_dispatchers.get(&upstream_actor_id).is_some()
+                    || dispatchers.get(&upstream_actor_id).is_some()
+            }
+            Mutation::Update(_)
+            | Mutation::Stop(_)
+            | Mutation::Pause
+            | Mutation::Resume
+            | Mutation::SourceChangeSplit(_)
+            | Mutation::Throttle(_)
+            | Mutation::CreateSubscription { .. }
+            | Mutation::DropSubscription { .. } => false,
+        }
     }
 
-    /// Whether this barrier is for configuration change. Used for source executor initialization.
-    pub fn is_update(&self) -> bool {
-        matches!(self.mutation.as_deref(), Some(Mutation::Update { .. }))
+    /// Whether this barrier requires the executor to pause its data stream on startup.
+    pub fn is_pause_on_startup(&self) -> bool {
+        match self.mutation.as_deref() {
+            Some(
+                  Mutation::Update { .. } // new actors for scaling
+                | Mutation::Add(AddMutation { pause: true, .. }) // new streaming job, or recovery
+            ) => true,
+            _ => false,
+        }
     }
 
-    /// Whether this barrier is for resume. Used for now executor to determine whether to yield a
-    /// chunk and a watermark before this barrier.
+    /// Whether this barrier is for resume.
     pub fn is_resume(&self) -> bool {
         matches!(self.mutation.as_deref(), Some(Mutation::Resume))
     }
@@ -339,7 +456,11 @@ impl Barrier {
         self.mutation
             .as_deref()
             .and_then(|mutation| match mutation {
-                Mutation::Update { merges, .. } => merges.get(&(actor_id, upstream_fragment_id)),
+                Mutation::Update(UpdateMutation { merges, .. })
+                | Mutation::AddAndUpdate(_, UpdateMutation { merges, .. }) => {
+                    merges.get(&(actor_id, upstream_fragment_id))
+                }
+
                 _ => None,
             })
     }
@@ -353,13 +474,21 @@ impl Barrier {
         self.mutation
             .as_deref()
             .and_then(|mutation| match mutation {
-                Mutation::Update { vnode_bitmaps, .. } => vnode_bitmaps.get(&actor_id).cloned(),
+                Mutation::Update(UpdateMutation { vnode_bitmaps, .. })
+                | Mutation::AddAndUpdate(_, UpdateMutation { vnode_bitmaps, .. }) => {
+                    vnode_bitmaps.get(&actor_id).cloned()
+                }
                 _ => None,
             })
     }
 
     pub fn get_curr_epoch(&self) -> Epoch {
         Epoch(self.epoch.curr)
+    }
+
+    /// Retrieve the tracing context for the **current** epoch of this barrier.
+    pub fn tracing_context(&self) -> &TracingContext {
+        &self.tracing_context
     }
 }
 
@@ -397,13 +526,14 @@ impl Mutation {
             Mutation::Stop(actors) => PbMutation::Stop(StopMutation {
                 actors: actors.iter().copied().collect::<Vec<_>>(),
             }),
-            Mutation::Update {
+            Mutation::Update(UpdateMutation {
                 dispatchers,
                 merges,
                 vnode_bitmaps,
                 dropped_actors,
                 actor_splits,
-            } => PbMutation::Update(UpdateMutation {
+                actor_new_dispatchers,
+            }) => PbMutation::Update(PbUpdateMutation {
                 dispatcher_update: dispatchers.values().flatten().cloned().collect(),
                 merge_update: merges.values().cloned().collect(),
                 actor_vnode_bitmap_update: vnode_bitmaps
@@ -412,12 +542,24 @@ impl Mutation {
                     .collect(),
                 dropped_actors: dropped_actors.iter().cloned().collect(),
                 actor_splits: actor_splits_to_protobuf(actor_splits),
+                actor_new_dispatchers: actor_new_dispatchers
+                    .iter()
+                    .map(|(&actor_id, dispatchers)| {
+                        (
+                            actor_id,
+                            Dispatchers {
+                                dispatchers: dispatchers.clone(),
+                            },
+                        )
+                    })
+                    .collect(),
             }),
-            Mutation::Add {
+            Mutation::Add(AddMutation {
                 adds,
                 added_actors,
                 splits,
-            } => PbMutation::Add(AddMutation {
+                pause,
+            }) => PbMutation::Add(PbAddMutation {
                 actor_dispatchers: adds
                     .iter()
                     .map(|(&actor_id, dispatchers)| {
@@ -431,6 +573,7 @@ impl Mutation {
                     .collect(),
                 added_actors: added_actors.iter().copied().collect(),
                 actor_splits: actor_splits_to_protobuf(splits),
+                pause: *pause,
             }),
             Mutation::SourceChangeSplit(changes) => PbMutation::Splits(SourceChangeSplitMutation {
                 actor_splits: changes
@@ -447,6 +590,37 @@ impl Mutation {
             }),
             Mutation::Pause => PbMutation::Pause(PauseMutation {}),
             Mutation::Resume => PbMutation::Resume(ResumeMutation {}),
+            Mutation::Throttle(changes) => PbMutation::Throttle(ThrottleMutation {
+                actor_throttle: changes
+                    .iter()
+                    .map(|(actor_id, limit)| (*actor_id, RateLimit { rate_limit: *limit }))
+                    .collect(),
+            }),
+
+            Mutation::AddAndUpdate(add, update) => PbMutation::Combined(CombinedMutation {
+                mutations: vec![
+                    BarrierMutation {
+                        mutation: Some(Mutation::Add(add.clone()).to_protobuf()),
+                    },
+                    BarrierMutation {
+                        mutation: Some(Mutation::Update(update.clone()).to_protobuf()),
+                    },
+                ],
+            }),
+            Mutation::CreateSubscription {
+                upstream_mv_table_id,
+                subscription_id,
+            } => PbMutation::CreateSubscription(CreateSubscriptionMutation {
+                upstream_mv_table_id: upstream_mv_table_id.table_id,
+                subscription_id: *subscription_id,
+            }),
+            Mutation::DropSubscription {
+                upstream_mv_table_id,
+                subscription_id,
+            } => PbMutation::DropSubscription(DropSubscriptionMutation {
+                upstream_mv_table_id: upstream_mv_table_id.table_id,
+                subscription_id: *subscription_id,
+            }),
         }
     }
 
@@ -454,7 +628,7 @@ impl Mutation {
         let mutation = match prost {
             PbMutation::Stop(stop) => Mutation::Stop(HashSet::from_iter(stop.get_actors().clone())),
 
-            PbMutation::Update(update) => Mutation::Update {
+            PbMutation::Update(update) => Mutation::Update(UpdateMutation {
                 dispatchers: update
                     .dispatcher_update
                     .iter()
@@ -485,9 +659,14 @@ impl Mutation {
                         )
                     })
                     .collect(),
-            },
+                actor_new_dispatchers: update
+                    .actor_new_dispatchers
+                    .iter()
+                    .map(|(&actor_id, dispatchers)| (actor_id, dispatchers.dispatchers.clone()))
+                    .collect(),
+            }),
 
-            PbMutation::Add(add) => Mutation::Add {
+            PbMutation::Add(add) => Mutation::Add(AddMutation {
                 adds: add
                     .actor_dispatchers
                     .iter()
@@ -510,7 +689,8 @@ impl Mutation {
                         )
                     })
                     .collect(),
-            },
+                pause: add.pause,
+            }),
 
             PbMutation::Splits(s) => {
                 let mut change_splits: Vec<(ActorId, Vec<SplitImpl>)> =
@@ -531,6 +711,40 @@ impl Mutation {
             }
             PbMutation::Pause(_) => Mutation::Pause,
             PbMutation::Resume(_) => Mutation::Resume,
+            PbMutation::Throttle(changes) => Mutation::Throttle(
+                changes
+                    .actor_throttle
+                    .iter()
+                    .map(|(actor_id, limit)| (*actor_id, limit.rate_limit))
+                    .collect(),
+            ),
+            PbMutation::CreateSubscription(create) => Mutation::CreateSubscription {
+                upstream_mv_table_id: TableId::new(create.upstream_mv_table_id),
+                subscription_id: create.subscription_id,
+            },
+            PbMutation::DropSubscription(drop) => Mutation::DropSubscription {
+                upstream_mv_table_id: TableId::new(drop.upstream_mv_table_id),
+                subscription_id: drop.subscription_id,
+            },
+            PbMutation::Combined(CombinedMutation { mutations }) => match &mutations[..] {
+                [BarrierMutation {
+                    mutation: Some(add),
+                }, BarrierMutation {
+                    mutation: Some(update),
+                }] => {
+                    let Mutation::Add(add_mutation) = Mutation::from_protobuf(add)? else {
+                        unreachable!();
+                    };
+
+                    let Mutation::Update(update_mutation) = Mutation::from_protobuf(update)? else {
+                        unreachable!();
+                    };
+
+                    Mutation::AddAndUpdate(add_mutation, update_mutation)
+                }
+
+                _ => unreachable!(),
+            },
         };
         Ok(mutation)
     }
@@ -541,18 +755,22 @@ impl Barrier {
         let Barrier {
             epoch,
             mutation,
-            checkpoint,
+            kind,
             passed_actors,
+            tracing_context,
             ..
-        }: Barrier = self.clone();
+        } = self.clone();
+
         PbBarrier {
             epoch: Some(PbEpoch {
                 curr: epoch.curr,
                 prev: epoch.prev,
             }),
-            mutation: mutation.map(|mutation| mutation.to_protobuf()),
-            span: vec![],
-            checkpoint,
+            mutation: mutation.map(|m| BarrierMutation {
+                mutation: Some(m.to_protobuf()),
+            }),
+            tracing_context: tracing_context.to_protobuf(),
+            kind: kind as _,
             passed_actors,
         }
     }
@@ -561,33 +779,31 @@ impl Barrier {
         let mutation = prost
             .mutation
             .as_ref()
-            .map(Mutation::from_protobuf)
+            .map(|m| Mutation::from_protobuf(m.mutation.as_ref().unwrap()))
             .transpose()?
             .map(Arc::new);
         let epoch = prost.get_epoch()?;
+
         Ok(Barrier {
-            checkpoint: prost.checkpoint,
+            kind: prost.kind(),
             epoch: EpochPair::new(epoch.curr, epoch.prev),
             mutation,
             passed_actors: prost.get_passed_actors().clone(),
+            tracing_context: TracingContext::from_protobuf(&prost.tracing_context),
         })
     }
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Watermark {
-    col_idx: usize,
-    data_type: DataType,
-    val: ScalarImpl,
+    pub col_idx: usize,
+    pub data_type: DataType,
+    pub val: ScalarImpl,
 }
 
 impl PartialOrd for Watermark {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        if self.col_idx == other.col_idx {
-            self.val.default_partial_cmp(&other.val)
-        } else {
-            None
-        }
+        Some(self.cmp(other))
     }
 }
 
@@ -608,22 +824,17 @@ impl Watermark {
 
     pub async fn transform_with_expr(
         self,
-        expr: &BoxedExpression,
+        expr: &NonStrictExpression<impl Expression>,
         new_col_idx: usize,
-        on_err: impl Fn(ExprError),
     ) -> Option<Self> {
-        let Self {
-            col_idx,
-            data_type,
-            val,
-        } = self;
+        let Self { col_idx, val, .. } = self;
         let row = {
             let mut row = vec![None; col_idx + 1];
             row[col_idx] = Some(val);
             OwnedRow::new(row)
         };
-        let val = expr.eval_row_infallible(&row, on_err).await?;
-        Some(Self::new(new_col_idx, data_type, val))
+        let val = expr.eval_row_infallible(&row).await?;
+        Some(Self::new(new_col_idx, expr.inner().return_type(), val))
     }
 
     /// Transform the watermark with the given output indices. If this watermark is not in the
@@ -641,16 +852,14 @@ impl Watermark {
                 index: self.col_idx as _,
                 r#type: Some(self.data_type.to_protobuf()),
             }),
-            val: Some(PbDatum {
-                body: serialize_datum(Some(&self.val)),
-            }),
+            val: Some(&self.val).to_protobuf().into(),
         }
     }
 
     pub fn from_protobuf(prost: &PbWatermark) -> StreamExecutorResult<Self> {
         let col_ref = prost.get_column()?;
         let data_type = DataType::from(col_ref.get_type()?);
-        let val = deserialize_datum(prost.get_val()?.get_body().as_slice(), &data_type)?
+        let val = Datum::from_protobuf(prost.get_val()?, &data_type)?
             .expect("watermark value cannot be null");
         Ok(Self::new(col_ref.get_index() as _, data_type, val))
     }
@@ -660,7 +869,7 @@ impl Watermark {
     }
 }
 
-#[derive(Debug, EnumAsInner, PartialEq)]
+#[derive(Debug, EnumAsInner, PartialEq, Clone)]
 pub enum Message {
     Chunk(StreamChunk),
     Barrier(Barrier),
@@ -747,6 +956,11 @@ pub async fn expect_first_barrier(
     let barrier = message
         .into_barrier()
         .expect("the first message must be a barrier");
+    // TODO: Is this check correct?
+    assert!(matches!(
+        barrier.kind,
+        BarrierKind::Checkpoint | BarrierKind::Initial
+    ));
     Ok(barrier)
 }
 

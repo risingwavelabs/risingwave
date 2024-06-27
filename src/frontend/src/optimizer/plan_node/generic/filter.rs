@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,40 +12,34 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
+use pretty_xmlish::{Pretty, Str, XmlNode};
 use risingwave_common::catalog::Schema;
 
-use super::{GenericPlanNode, GenericPlanRef};
-use crate::expr::ExprRewriter;
+use super::{DistillUnit, GenericPlanNode, GenericPlanRef};
+use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::plan_node::utils::childless_record;
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{Condition, ConditionDisplay};
 
-/// [`Filter`] iterates over its input and returns elements for which `predicate` evaluates to
-/// true, filtering out the others.
-///
-/// If the condition allows nulls, then a null value is treated the same as false.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Filter<PlanRef> {
     pub predicate: Condition,
     pub input: PlanRef,
 }
 
-impl<PlanRef: GenericPlanRef> Filter<PlanRef> {
-    pub(crate) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
+impl<PlanRef: GenericPlanRef> DistillUnit for Filter<PlanRef> {
+    fn distill_with_name<'a>(&self, name: impl Into<Str<'a>>) -> XmlNode<'a> {
         let input_schema = self.input.schema();
-        write!(
-            f,
-            "{} {{ predicate: {} }}",
-            name,
-            ConditionDisplay {
-                condition: &self.predicate,
-                input_schema
-            }
-        )
+        let predicate = ConditionDisplay {
+            condition: &self.predicate,
+            input_schema,
+        };
+        childless_record(name, vec![("predicate", Pretty::display(&predicate))])
     }
+}
 
+impl<PlanRef: GenericPlanRef> Filter<PlanRef> {
     pub fn new(predicate: Condition, input: PlanRef) -> Self {
         Filter { predicate, input }
     }
@@ -55,8 +49,8 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Filter<PlanRef> {
         self.input.schema().clone()
     }
 
-    fn logical_pk(&self) -> Option<Vec<usize>> {
-        Some(self.input.logical_pk().to_vec())
+    fn stream_key(&self) -> Option<Vec<usize>> {
+        Some(self.input.stream_key()?.to_vec())
     }
 
     fn ctx(&self) -> OptimizerContextRef {
@@ -82,5 +76,9 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Filter<PlanRef> {
 impl<PlanRef> Filter<PlanRef> {
     pub(crate) fn rewrite_exprs(&mut self, r: &mut dyn ExprRewriter) {
         self.predicate = self.predicate.clone().rewrite_expr(r);
+    }
+
+    pub(crate) fn visit_exprs(&self, r: &mut dyn ExprVisitor) {
+        self.predicate.visit_expr(r);
     }
 }

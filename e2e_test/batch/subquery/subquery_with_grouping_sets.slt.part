@@ -1,0 +1,52 @@
+# Copied from https://github.com/duckdb/duckdb (MIT licensed).
+# Copyright 2018-2023 Stichting DuckDB Foundation
+# description: Test window functions in correlated subqueries
+# group: [scalar]
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+CREATE TABLE integers(i INTEGER)
+
+statement ok
+INSERT INTO integers VALUES (1), (2), (3), (NULL)
+
+# aggregate with correlation in GROUPING SET
+query II
+SELECT i, (SELECT COUNT(*) FROM (SELECT i1.i FROM integers GROUP BY GROUPING SETS(i1.i)) tbl) AS j FROM integers i1 ORDER BY i;
+----
+1	1
+2	1
+3	1
+NULL	1
+
+# many grouping sets
+query II
+SELECT i, (SELECT COUNT(*) FROM (SELECT i1.i FROM integers GROUP BY GROUPING SETS((i1.i), (), (i1.i), (i1.i, i1.i))) tbl) AS j FROM integers i1 ORDER BY i;
+----
+1	4
+2	4
+3	4
+NULL	4
+
+# rollup
+query II
+SELECT i, (SELECT COUNT(*) FROM (SELECT i1.i FROM integers GROUP BY ROLLUP (i1.i, i1.i, i1.i, i1.i)) tbl) AS j FROM integers i1 ORDER BY i;
+----
+1	5
+2	5
+3	5
+NULL	5
+
+# cube
+query II
+SELECT i, (SELECT COUNT(*) FROM (SELECT i1.i FROM integers GROUP BY CUBE (i1.i, i1.i, i1.i, i1.i)) tbl) AS j FROM integers i1 ORDER BY i;
+----
+1	16
+2	16
+3	16
+NULL	16
+
+statement ok
+drop table integers;

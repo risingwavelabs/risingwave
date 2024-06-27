@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,15 +19,19 @@ use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
 
 /// Spawn the data generator to a dedicated runtime, returns a channel receiver
-/// for acquiring the generated data. This is used for the [`DatagenSplitReader`] and
-/// [`NexmarkSplitReader`] in case that they are CPU intensive and may block the streaming actors.
+/// for acquiring the generated data. This is used for the [`DatagenSplitReader`]
+/// and [`NexmarkSplitReader`] in case that they are CPU intensive
+/// and may block the streaming actors.
+///
+/// [`DatagenSplitReader`]: super::datagen::DatagenSplitReader
+/// [`NexmarkSplitReader`]: super::nexmark::source::reader::NexmarkSplitReader
 pub fn spawn_data_generation_stream<T: Send + 'static>(
     stream: impl Stream<Item = T> + Send + 'static,
     buffer_size: usize,
 ) -> impl Stream<Item = T> + Send + 'static {
     static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
         tokio::runtime::Builder::new_multi_thread()
-            .thread_name("risingwave-data-generation")
+            .thread_name("rw-datagen")
             .enable_all()
             .build()
             .expect("failed to build data-generation runtime")

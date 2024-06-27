@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,9 +14,11 @@
 
 use risingwave_common::types::DataType;
 use risingwave_common::util::epoch::Epoch;
-use risingwave_pb::expr::{expr_node, ExprNode};
+use risingwave_pb::expr::expr_node::{self, NowRexNode};
+use risingwave_pb::expr::ExprNode;
 
 use super::{Expr, ExprImpl, ExprRewriter, FunctionCall, Literal};
+use crate::expr::ExprVisitor;
 
 /// The `NOW()` function.
 /// - in streaming queries, it represents a retractable monotonic timestamp stream,
@@ -34,9 +36,11 @@ impl Expr for Now {
     }
 
     fn to_expr_proto(&self) -> ExprNode {
-        unreachable!(
-            "`Now` should be translated to `Literal` in batch mode or `NowNode` in stream mode"
-        )
+        ExprNode {
+            function_type: expr_node::Type::Unspecified.into(),
+            return_type: Some(self.return_type().into()),
+            rex_node: Some(expr_node::RexNode::Now(NowRexNode {})),
+        }
     }
 }
 
@@ -76,5 +80,47 @@ impl ExprRewriter for InlineNowProcTime {
             .map(|expr| self.rewrite_expr(expr))
             .collect();
         FunctionCall::new_unchecked(func_type, inputs, ret).into()
+    }
+}
+
+/// Expression rewriter to rewrite `NOW()` to `PROCTIME()`
+///
+/// This is applied for the sink into table query for those column with default expression containing `now()` because streaming execution can not handle `now` expression
+pub struct RewriteNowToProcTime;
+
+impl ExprRewriter for RewriteNowToProcTime {
+    fn rewrite_now(&mut self, _now: Now) -> ExprImpl {
+        FunctionCall::new(expr_node::Type::Proctime, vec![])
+            .unwrap()
+            .into()
+    }
+}
+
+#[derive(Default)]
+pub struct NowProcTimeFinder {
+    has: bool,
+}
+
+impl NowProcTimeFinder {
+    pub fn has(&self) -> bool {
+        self.has
+    }
+}
+
+impl ExprVisitor for NowProcTimeFinder {
+    fn visit_now(&mut self, _: &Now) {
+        self.has = true;
+    }
+
+    fn visit_function_call(&mut self, func_call: &FunctionCall) {
+        if let expr_node::Type::Proctime = func_call.func_type {
+            self.has = true;
+            return;
+        }
+
+        func_call
+            .inputs()
+            .iter()
+            .for_each(|expr| self.visit_expr(expr));
     }
 }

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,18 +12,74 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::types::{DatumRef, ScalarRefImpl, Timestamptz};
 use risingwave_pb::connector_service::CdcMessage;
 
 use crate::source::base::SourceMessage;
 use crate::source::SourceMeta;
 
+#[derive(Debug, Clone)]
+pub struct DebeziumCdcMeta {
+    db_name_prefix_len: usize,
+
+    pub full_table_name: String,
+    // extracted from `payload.source.ts_ms`, the time that the change event was made in the database
+    pub source_ts_ms: i64,
+    // Whether the message is a transaction metadata
+    pub is_transaction_meta: bool,
+}
+
+impl DebeziumCdcMeta {
+    pub fn extract_timestamp(&self) -> DatumRef<'_> {
+        Some(ScalarRefImpl::Timestamptz(
+            Timestamptz::from_millis(self.source_ts_ms).unwrap(),
+        ))
+    }
+
+    pub fn extract_database_name(&self) -> DatumRef<'_> {
+        Some(ScalarRefImpl::Utf8(
+            &self.full_table_name.as_str()[0..self.db_name_prefix_len],
+        ))
+    }
+
+    pub fn extract_table_name(&self) -> DatumRef<'_> {
+        Some(ScalarRefImpl::Utf8(
+            &self.full_table_name.as_str()[self.db_name_prefix_len..],
+        ))
+    }
+
+    pub fn new(full_table_name: String, source_ts_ms: i64, is_transaction_meta: bool) -> Self {
+        // full_table_name is in the format of `database_name.table_name`
+        let db_name_prefix_len = full_table_name.as_str().find('.').unwrap_or(0);
+        Self {
+            db_name_prefix_len,
+            full_table_name,
+            source_ts_ms,
+            is_transaction_meta,
+        }
+    }
+}
+
 impl From<CdcMessage> for SourceMessage {
     fn from(message: CdcMessage) -> Self {
         SourceMessage {
-            payload: Some(message.payload.as_bytes().to_vec()),
+            key: if message.key.is_empty() {
+                None // only data message has key
+            } else {
+                Some(message.key.as_bytes().to_vec())
+            },
+            payload: if message.payload.is_empty() {
+                None // heartbeat message
+            } else {
+                Some(message.payload.as_bytes().to_vec())
+            },
             offset: message.offset,
             split_id: message.partition.into(),
-            meta: SourceMeta::Empty,
+            meta: SourceMeta::DebeziumCdc(DebeziumCdcMeta::new(
+                message.full_table_name,
+                message.source_ts_ms,
+                message.is_transaction_meta,
+            )),
         }
     }
 }

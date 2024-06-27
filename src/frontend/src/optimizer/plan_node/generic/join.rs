@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,15 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::EitherOrBoth;
-use risingwave_common::catalog::Schema;
+use itertools::{EitherOrBoth, Itertools};
+use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::types::DataType;
+use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::plan_common::JoinType;
 
 use super::{EqJoinPredicate, GenericPlanNode, GenericPlanRef};
-use crate::expr::ExprRewriter;
+use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::plan_node::stream;
+use crate::optimizer::plan_node::utils::TableCatalogBuilder;
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition};
+use crate::TableCatalog;
 
 /// [`Join`] combines two relations according to some condition.
 ///
@@ -41,9 +46,20 @@ pub(crate) fn has_repeated_element(slice: &[usize]) -> bool {
     (1..slice.len()).any(|i| slice[i..].contains(&slice[i - 1]))
 }
 
-impl<PlanRef> Join<PlanRef> {
+impl<PlanRef: GenericPlanRef> Join<PlanRef> {
     pub(crate) fn rewrite_exprs(&mut self, r: &mut dyn ExprRewriter) {
         self.on = self.on.clone().rewrite_expr(r);
+    }
+
+    pub(crate) fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.on.visit_expr(v);
+    }
+
+    pub fn eq_indexes(&self) -> Vec<(usize, usize)> {
+        let left_len = self.left.schema().len();
+        let right_len = self.right.schema().len();
+        let eq_predicate = EqJoinPredicate::create(left_len, right_len, self.on.clone());
+        eq_predicate.eq_indexes()
     }
 
     pub fn new(
@@ -62,6 +78,73 @@ impl<PlanRef> Join<PlanRef> {
             join_type,
             output_indices,
         }
+    }
+}
+
+impl<I: stream::StreamPlanRef> Join<I> {
+    /// Return stream hash join internal table catalog and degree table catalog.
+    pub fn infer_internal_and_degree_table_catalog(
+        input: I,
+        join_key_indices: Vec<usize>,
+        dk_indices_in_jk: Vec<usize>,
+    ) -> (TableCatalog, TableCatalog, Vec<usize>) {
+        let schema = input.schema();
+
+        let internal_table_dist_keys = dk_indices_in_jk
+            .iter()
+            .map(|idx| join_key_indices[*idx])
+            .collect_vec();
+
+        let degree_table_dist_keys = dk_indices_in_jk.clone();
+
+        // The pk of hash join internal and degree table should be join_key + input_pk.
+        let join_key_len = join_key_indices.len();
+        let mut pk_indices = join_key_indices;
+
+        // dedup the pk in dist key..
+        let mut deduped_input_pk_indices = vec![];
+        for input_pk_idx in input.stream_key().unwrap() {
+            if !pk_indices.contains(input_pk_idx)
+                && !deduped_input_pk_indices.contains(input_pk_idx)
+            {
+                deduped_input_pk_indices.push(*input_pk_idx);
+            }
+        }
+
+        pk_indices.extend(deduped_input_pk_indices.clone());
+
+        // Build internal table
+        let mut internal_table_catalog_builder = TableCatalogBuilder::default();
+        let internal_columns_fields = schema.fields().to_vec();
+
+        internal_columns_fields.iter().for_each(|field| {
+            internal_table_catalog_builder.add_column(field);
+        });
+        pk_indices.iter().for_each(|idx| {
+            internal_table_catalog_builder.add_order_column(*idx, OrderType::ascending())
+        });
+
+        // Build degree table.
+        let mut degree_table_catalog_builder = TableCatalogBuilder::default();
+
+        let degree_column_field = Field::with_name(DataType::Int64, "_degree");
+
+        pk_indices.iter().enumerate().for_each(|(order_idx, idx)| {
+            degree_table_catalog_builder.add_column(&internal_columns_fields[*idx]);
+            degree_table_catalog_builder.add_order_column(order_idx, OrderType::ascending());
+        });
+        degree_table_catalog_builder.add_column(&degree_column_field);
+        degree_table_catalog_builder
+            .set_value_indices(vec![degree_table_catalog_builder.columns().len() - 1]);
+
+        internal_table_catalog_builder.set_dist_key_in_pk(dk_indices_in_jk.clone());
+        degree_table_catalog_builder.set_dist_key_in_pk(dk_indices_in_jk);
+
+        (
+            internal_table_catalog_builder.build(internal_table_dist_keys, join_key_len),
+            degree_table_catalog_builder.build(degree_table_dist_keys, join_key_len),
+            deduped_input_pk_indices,
+        )
     }
 }
 
@@ -90,75 +173,86 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Join<PlanRef> {
         Schema { fields }
     }
 
-    fn logical_pk(&self) -> Option<Vec<usize>> {
-        let _left_len = self.left.schema().len();
-        let _right_len = self.right.schema().len();
-        let left_pk = self.left.logical_pk();
-        let right_pk = self.right.logical_pk();
+    fn stream_key(&self) -> Option<Vec<usize>> {
+        let eq_indexes = self.eq_indexes();
+        let left_pk = self.left.stream_key()?;
+        let right_pk = self.right.stream_key()?;
         let l2i = self.l2i_col_mapping();
         let r2i = self.r2i_col_mapping();
         let full_out_col_num = self.internal_column_num();
         let i2o = ColIndexMapping::with_remaining_columns(&self.output_indices, full_out_col_num);
 
-        let pk_indices = left_pk
+        let mut pk_indices = left_pk
             .iter()
             .map(|index| l2i.try_map(*index))
             .chain(right_pk.iter().map(|index| r2i.try_map(*index)))
             .flatten()
             .map(|index| i2o.try_map(index))
-            .collect::<Option<Vec<_>>>();
+            .collect::<Option<Vec<_>>>()?;
 
         // NOTE(st1page): add join keys in the pk_indices a work around before we really have stream
         // key.
-        pk_indices.and_then(|mut pk_indices| {
-            let left_len = self.left.schema().len();
-            let right_len = self.right.schema().len();
-            let eq_predicate = EqJoinPredicate::create(left_len, right_len, self.on.clone());
+        let l2i = self.l2i_col_mapping();
+        let r2i = self.r2i_col_mapping();
+        let full_out_col_num = self.internal_column_num();
+        let i2o = ColIndexMapping::with_remaining_columns(&self.output_indices, full_out_col_num);
 
-            let l2i = self.l2i_col_mapping();
-            let r2i = self.r2i_col_mapping();
-            let full_out_col_num = self.internal_column_num();
-            let i2o =
-                ColIndexMapping::with_remaining_columns(&self.output_indices, full_out_col_num);
+        let either_or_both = self.add_which_join_key_to_pk();
 
-            let either_or_both = self.add_which_join_key_to_pk();
-
-            for (lk, rk) in eq_predicate.eq_indexes() {
-                match either_or_both {
-                    EitherOrBoth::Left(_) => {
-                        if let Some(lk) = l2i.try_map(lk) {
-                            let out_k = i2o.try_map(lk)?;
-                            if !pk_indices.contains(&out_k) {
-                                pk_indices.push(out_k);
-                            }
+        for (lk, rk) in eq_indexes {
+            match either_or_both {
+                EitherOrBoth::Left(_) => {
+                    // Remove right-side join-key column it from pk_indices.
+                    // This may happen when right-side join-key is included in right-side PK.
+                    // e.g. select a, b where a.bid = b.id
+                    // Here the pk_indices should be [a.id, a.bid] instead of [a.id, b.id, a.bid],
+                    // because b.id = a.bid, so either of them would be enough.
+                    if let Some(rk) = r2i.try_map(rk) {
+                        if let Some(out_k) = i2o.try_map(rk) {
+                            pk_indices.retain(|&x| x != out_k);
                         }
                     }
-                    EitherOrBoth::Right(_) => {
-                        if let Some(rk) = r2i.try_map(rk) {
-                            let out_k = i2o.try_map(rk)?;
-                            if !pk_indices.contains(&out_k) {
-                                pk_indices.push(out_k);
-                            }
+                    // Add left-side join-key column in pk_indices
+                    if let Some(lk) = l2i.try_map(lk) {
+                        let out_k = i2o.try_map(lk)?;
+                        if !pk_indices.contains(&out_k) {
+                            pk_indices.push(out_k);
                         }
                     }
-                    EitherOrBoth::Both(_, _) => {
-                        if let Some(lk) = l2i.try_map(lk) {
-                            let out_k = i2o.try_map(lk)?;
-                            if !pk_indices.contains(&out_k) {
-                                pk_indices.push(out_k);
-                            }
-                        }
-                        if let Some(rk) = r2i.try_map(rk) {
-                            let out_k = i2o.try_map(rk)?;
-                            if !pk_indices.contains(&out_k) {
-                                pk_indices.push(out_k);
-                            }
+                }
+                EitherOrBoth::Right(_) => {
+                    // Remove left-side join-key column it from pk_indices
+                    // See the example above
+                    if let Some(lk) = l2i.try_map(lk) {
+                        if let Some(out_k) = i2o.try_map(lk) {
+                            pk_indices.retain(|&x| x != out_k);
                         }
                     }
-                };
-            }
-            Some(pk_indices)
-        })
+                    // Add right-side join-key column in pk_indices
+                    if let Some(rk) = r2i.try_map(rk) {
+                        let out_k = i2o.try_map(rk)?;
+                        if !pk_indices.contains(&out_k) {
+                            pk_indices.push(out_k);
+                        }
+                    }
+                }
+                EitherOrBoth::Both(_, _) => {
+                    if let Some(lk) = l2i.try_map(lk) {
+                        let out_k = i2o.try_map(lk)?;
+                        if !pk_indices.contains(&out_k) {
+                            pk_indices.push(out_k);
+                        }
+                    }
+                    if let Some(rk) = r2i.try_map(rk) {
+                        let out_k = i2o.try_map(rk)?;
+                        if !pk_indices.contains(&out_k) {
+                            pk_indices.push(out_k);
+                        }
+                    }
+                }
+            };
+        }
+        Some(pk_indices)
     }
 
     fn ctx(&self) -> OptimizerContextRef {
@@ -202,11 +296,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Join<PlanRef> {
                 get_new_left_fd_set(left_fd_set)
                     .into_dependencies()
                     .into_iter()
-                    .chain(
-                        get_new_right_fd_set(right_fd_set)
-                            .into_dependencies()
-                            .into_iter(),
-                    )
+                    .chain(get_new_right_fd_set(right_fd_set).into_dependencies())
                     .for_each(|fd| fd_set.add_functional_dependency(fd));
                 fd_set
             }
@@ -347,7 +437,10 @@ impl<PlanRef: GenericPlanRef> Join<PlanRef> {
     pub fn o2i_col_mapping(&self) -> ColIndexMapping {
         // If output_indices = [0, 0, 1], we should use it as `o2i_col_mapping` directly.
         // If we use `self.i2o_col_mapping().inverse()`, we will lose the first 0.
-        ColIndexMapping::new(self.output_indices.iter().map(|x| Some(*x)).collect())
+        ColIndexMapping::new(
+            self.output_indices.iter().map(|x| Some(*x)).collect(),
+            self.internal_column_num(),
+        )
     }
 
     pub fn add_which_join_key_to_pk(&self) -> EitherOrBoth<(), ()> {
@@ -366,6 +459,16 @@ impl<PlanRef: GenericPlanRef> Join<PlanRef> {
             JoinType::Unspecified => unreachable!(),
         }
     }
+
+    pub fn concat_schema(&self) -> Schema {
+        Schema::new(
+            [
+                self.left.schema().fields.clone(),
+                self.right.schema().fields.clone(),
+            ]
+            .concat(),
+        )
+    }
 }
 
 /// Try to split and pushdown `predicate` into a into a join condition and into the inputs of the
@@ -379,6 +482,7 @@ pub fn push_down_into_join(
     left_col_num: usize,
     right_col_num: usize,
     ty: JoinType,
+    push_temporal_predicate: bool,
 ) -> (Condition, Condition, Condition) {
     let (left, right) = push_down_to_inputs(
         predicate,
@@ -386,19 +490,24 @@ pub fn push_down_into_join(
         right_col_num,
         can_push_left_from_filter(ty),
         can_push_right_from_filter(ty),
+        push_temporal_predicate,
     );
 
     let on = if can_push_on_from_filter(ty) {
         let mut conjunctions = std::mem::take(&mut predicate.conjunctions);
 
-        // Do not push now on to the on, it will be pulled up into a filter instead.
-        let on = Condition {
-            conjunctions: conjunctions
-                .drain_filter(|expr| expr.count_nows() == 0)
-                .collect(),
-        };
-        predicate.conjunctions = conjunctions;
-        on
+        if push_temporal_predicate {
+            Condition { conjunctions }
+        } else {
+            // Do not push now on to the on, it will be pulled up into a filter instead.
+            let on = Condition {
+                conjunctions: conjunctions
+                    .extract_if(|expr| expr.count_nows() == 0)
+                    .collect(),
+            };
+            predicate.conjunctions = conjunctions;
+            on
+        }
     } else {
         Condition::true_cond()
     };
@@ -415,6 +524,7 @@ pub fn push_down_join_condition(
     left_col_num: usize,
     right_col_num: usize,
     ty: JoinType,
+    push_temporal_predicate: bool,
 ) -> (Condition, Condition) {
     push_down_to_inputs(
         on_condition,
@@ -422,6 +532,7 @@ pub fn push_down_join_condition(
         right_col_num,
         can_push_left_from_on(ty),
         can_push_right_from_on(ty),
+        push_temporal_predicate,
     )
 }
 
@@ -435,11 +546,21 @@ fn push_down_to_inputs(
     right_col_num: usize,
     push_left: bool,
     push_right: bool,
+    push_temporal_predicate: bool,
 ) -> (Condition, Condition) {
-    let conjunctions = std::mem::take(&mut predicate.conjunctions);
+    let mut conjunctions = std::mem::take(&mut predicate.conjunctions);
+    let (mut left, right, mut others) = if push_temporal_predicate {
+        Condition { conjunctions }.split(left_col_num, right_col_num)
+    } else {
+        let temporal_filter_cons = conjunctions
+            .extract_if(|e| e.count_nows() != 0)
+            .collect_vec();
+        let (left, right, mut others) =
+            Condition { conjunctions }.split(left_col_num, right_col_num);
 
-    let (mut left, right, mut others) =
-        Condition { conjunctions }.split(left_col_num, right_col_num);
+        others.conjunctions.extend(temporal_filter_cons);
+        (left, right, others)
+    };
 
     if !push_left {
         others.conjunctions.extend(left);

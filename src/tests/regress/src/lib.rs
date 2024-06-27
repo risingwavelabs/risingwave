@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -27,6 +27,9 @@
 #![deny(rustdoc::broken_intra_doc_links)]
 #![feature(path_file_prefix)]
 #![feature(let_chains)]
+#![feature(register_tool)]
+#![register_tool(rw)]
+#![allow(rw::format_error)]
 
 mod opts;
 

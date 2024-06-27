@@ -6,8 +6,11 @@ import (
 	"datagen/sink/kafka"
 	"datagen/sink/kinesis"
 	"datagen/sink/mysql"
+	"datagen/sink/nats"
 	"datagen/sink/postgres"
 	"datagen/sink/pulsar"
+	"datagen/sink/s3"
+	"time"
 
 	"gonum.org/v1/gonum/stat/distuv"
 )
@@ -18,6 +21,8 @@ type GeneratorConfig struct {
 	Kafka    kafka.KafkaConfig
 	Pulsar   pulsar.PulsarConfig
 	Kinesis  kinesis.KinesisConfig
+	S3       s3.S3Config
+	Nats     nats.NatsConfig
 
 	// Whether to print the content of every event.
 	PrintInsert bool
@@ -34,6 +39,12 @@ type GeneratorConfig struct {
 
 	// The record format, used when the sink is a message queue.
 	Format string
+
+	// The topic to filter. If not specified, all topics will be used.
+	Topic string
+
+	// The total number of events to generate.
+	TotalEvents int64
 }
 
 type LoadGenerator interface {
@@ -42,7 +53,8 @@ type LoadGenerator interface {
 	Load(ctx context.Context, outCh chan<- sink.SinkRecord)
 }
 
-const RwTimestampLayout = "2006-01-02 15:04:05.07+01:00"
+const RwTimestampNaiveLayout = time.DateTime
+const RwTimestamptzLayout = time.RFC3339
 
 type RandDist interface {
 	// Rand returns a random number ranging from [0, max].

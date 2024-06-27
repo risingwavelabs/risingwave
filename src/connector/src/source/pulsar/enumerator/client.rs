@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,16 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::anyhow;
 use async_trait::async_trait;
 use itertools::Itertools;
 use pulsar::{Pulsar, TokioExecutor};
+use risingwave_common::bail;
 use serde::{Deserialize, Serialize};
 
+use crate::error::ConnectorResult;
 use crate::source::pulsar::split::PulsarSplit;
 use crate::source::pulsar::topic::{parse_topic, Topic};
 use crate::source::pulsar::PulsarProperties;
-use crate::source::SplitEnumerator;
+use crate::source::{SourceEnumeratorContextRef, SplitEnumerator};
 
 pub struct PulsarSplitEnumerator {
     client: Pulsar<TokioExecutor>,
@@ -42,9 +44,15 @@ impl SplitEnumerator for PulsarSplitEnumerator {
     type Properties = PulsarProperties;
     type Split = PulsarSplit;
 
-    async fn new(properties: PulsarProperties) -> Result<PulsarSplitEnumerator> {
-        let pulsar = properties.build_pulsar_client().await?;
-        let topic = properties.topic;
+    async fn new(
+        properties: PulsarProperties,
+        _context: SourceEnumeratorContextRef,
+    ) -> ConnectorResult<PulsarSplitEnumerator> {
+        let pulsar = properties
+            .common
+            .build_client(&properties.oauth, &properties.aws_auth_props)
+            .await?;
+        let topic = properties.common.topic;
         let parsed_topic = parse_topic(&topic)?;
 
         let mut scan_start_offset = match properties
@@ -74,7 +82,7 @@ impl SplitEnumerator for PulsarSplitEnumerator {
         })
     }
 
-    async fn list_splits(&mut self) -> anyhow::Result<Vec<PulsarSplit>> {
+    async fn list_splits(&mut self) -> ConnectorResult<Vec<PulsarSplit>> {
         let offset = self.start_offset.clone();
         // MessageId is only used when recovering from a State
         assert!(!matches!(offset, PulsarEnumeratorOffset::MessageId(_)));

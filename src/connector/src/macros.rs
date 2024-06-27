@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,288 +13,262 @@
 // limitations under the License.
 
 #[macro_export]
-macro_rules! impl_split_enumerator {
-    ($({ $variant_name:ident, $split_enumerator_name:ident} ),*) => {
-        impl SplitEnumeratorImpl {
-
-             pub async fn create(properties: ConnectorProperties) -> Result<Self> {
-                match properties {
-                    $( ConnectorProperties::$variant_name(props) => $split_enumerator_name::new(*props).await.map(Self::$variant_name), )*
-                    other => Err(anyhow!(
-                        "split enumerator type for config {:?} is not supported",
-                        other
-                    )),
-                }
-             }
-
-             pub async fn list_splits(&mut self) -> Result<Vec<SplitImpl>> {
-                match self {
-                    $( Self::$variant_name(inner) => inner
-                        .list_splits()
-                        .await
-                        .map(|ss| {
-                            ss.into_iter()
-                                .map(SplitImpl::$variant_name)
-                                .collect_vec()
-                        })
-                        .map_err(|e| ErrorCode::ConnectorError(e.into()).into()),
-                    )*
-                }
-             }
+macro_rules! for_all_classified_sources {
+    ($macro:path $(,$extra_args:tt)*) => {
+        $macro! {
+            // cdc sources
+            {
+                { Mysql },
+                { Postgres },
+                { Citus },
+                { Mongodb }
+            },
+            // other sources
+            // todo: file source do not nest with mq source.
+            {
+                { Kafka, $crate::source::kafka::KafkaProperties, $crate::source::kafka::KafkaSplit },
+                { Pulsar, $crate::source::pulsar::PulsarProperties, $crate::source::pulsar::PulsarSplit },
+                { Kinesis, $crate::source::kinesis::KinesisProperties, $crate::source::kinesis::split::KinesisSplit },
+                { Nexmark, $crate::source::nexmark::NexmarkProperties, $crate::source::nexmark::NexmarkSplit },
+                { Datagen, $crate::source::datagen::DatagenProperties, $crate::source::datagen::DatagenSplit },
+                { GooglePubsub, $crate::source::google_pubsub::PubsubProperties, $crate::source::google_pubsub::PubsubSplit },
+                { Mqtt, $crate::source::mqtt::MqttProperties, $crate::source::mqtt::split::MqttSplit },
+                { Nats, $crate::source::nats::NatsProperties, $crate::source::nats::split::NatsSplit },
+                { S3, $crate::source::filesystem::S3Properties, $crate::source::filesystem::FsSplit },
+                { Gcs, $crate::source::filesystem::opendal_source::GcsProperties , $crate::source::filesystem::OpendalFsSplit<$crate::source::filesystem::opendal_source::OpendalGcs> },
+                { OpendalS3, $crate::source::filesystem::opendal_source::OpendalS3Properties, $crate::source::filesystem::OpendalFsSplit<$crate::source::filesystem::opendal_source::OpendalS3> },
+                { PosixFs, $crate::source::filesystem::opendal_source::PosixFsProperties, $crate::source::filesystem::OpendalFsSplit<$crate::source::filesystem::opendal_source::OpendalPosixFs> },
+                { Test, $crate::source::test_source::TestSourceProperties, $crate::source::test_source::TestSourceSplit},
+                { Iceberg, $crate::source::iceberg::IcebergProperties, $crate::source::iceberg::IcebergSplit}
+            }
+            $(
+                ,$extra_args
+            )*
         }
-    }
+    };
+}
+
+#[macro_export]
+macro_rules! for_all_sources_inner {
+    (
+        {$({ $cdc_source_type:ident }),* },
+        { $({ $source_variant:ident, $prop_name:ty, $split:ty }),* },
+        $macro:tt $(, $extra_args:tt)*
+    ) => {
+        $crate::paste! {
+            $macro! {
+                {
+                    $(
+                        {
+                            [< $cdc_source_type Cdc >],
+                            $crate::source::cdc::[< $cdc_source_type CdcProperties >],
+                            $crate::source::cdc::DebeziumCdcSplit<$crate::source::cdc::$cdc_source_type>
+                        },
+                    )*
+                    $(
+                        { $source_variant, $prop_name, $split }
+                    ),*
+                }
+                $(,$extra_args)*
+            }
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! for_all_sources {
+    ($macro:path $(, $arg:tt )*) => {
+        $crate::for_all_classified_sources! {$crate::for_all_sources_inner, $macro $(,$arg)* }
+    };
+}
+
+#[macro_export]
+macro_rules! dispatch_source_enum_inner {
+    (
+        {$({$source_variant:ident, $prop_name:ty, $split:ty }),*},
+        $enum_name:ident,
+        $impl:tt,
+        {$inner_name:ident, $prop_type_name:ident, $split_type_name:ident},
+        $body:expr
+    ) => {{
+        match $impl {
+            $(
+                $enum_name::$source_variant($inner_name) => {
+                    #[allow(dead_code)]
+                    type $prop_type_name = $prop_name;
+                    #[allow(dead_code)]
+                    type $split_type_name = $split;
+                    {
+                        $body
+                    }
+                },
+            )*
+        }
+    }}
+}
+
+#[macro_export]
+macro_rules! dispatch_source_enum {
+    ($enum_name:ident, $impl:expr, $inner_name:tt, $body:expr) => {{
+        $crate::for_all_sources! {$crate::dispatch_source_enum_inner, $enum_name, { $impl }, $inner_name, $body}
+    }};
+}
+
+#[macro_export]
+macro_rules! match_source_name_str_inner {
+    (
+        {$({$source_variant:ident, $prop_name:ty, $split:ty }),*},
+        $source_name_str:expr,
+        $prop_type_name:ident,
+        $body:expr,
+        $on_other_closure:expr
+    ) => {{
+        match $source_name_str {
+            $(
+                <$prop_name>::SOURCE_NAME => {
+                    type $prop_type_name = $prop_name;
+                    {
+                        $body
+                    }
+                },
+            )*
+            other => ($on_other_closure)(other),
+        }
+    }}
+}
+
+/// Matches against `SourceProperties::SOURCE_NAME` to dispatch logic.
+#[macro_export]
+macro_rules! match_source_name_str {
+    ($source_name_str:expr, $prop_type_name:ident, $body:expr, $on_other_closure:expr) => {{
+        $crate::for_all_sources! {
+            $crate::match_source_name_str_inner,
+            { $source_name_str },
+            $prop_type_name,
+            { $body },
+            { $on_other_closure }
+        }
+    }};
+}
+
+#[macro_export]
+macro_rules! dispatch_split_impl {
+    ($impl:expr, $inner_name:ident, $prop_type_name:ident, $body:expr) => {{
+        use $crate::source::SplitImpl;
+        $crate::dispatch_source_enum! {SplitImpl, { $impl }, {$inner_name, $prop_type_name, IgnoreSplitType}, $body}
+    }};
 }
 
 #[macro_export]
 macro_rules! impl_split {
-    ($({ $variant_name:ident, $connector_name:ident, $split:ty} ),*) => {
-        impl From<&SplitImpl> for ConnectorSplit {
-            fn from(split: &SplitImpl) -> Self {
-                match split {
-                    $( SplitImpl::$variant_name(inner) => ConnectorSplit { split_type: String::from($connector_name), encoded_split: inner.encode_to_bytes().to_vec() }, )*
-                }
-            }
+    ({$({ $variant_name:ident, $prop_name:ty, $split:ty}),*}) => {
+
+        #[derive(Debug, Clone, EnumAsInner, PartialEq)]
+        pub enum SplitImpl {
+            $(
+                $variant_name($split),
+            )*
         }
 
-        impl TryFrom<&ConnectorSplit> for SplitImpl {
-            type Error = anyhow::Error;
+        $(
+            impl TryFrom<SplitImpl> for $split {
+                type Error = $crate::error::ConnectorError;
 
-            fn try_from(split: &ConnectorSplit) -> std::result::Result<Self, Self::Error> {
-                match split.split_type.to_lowercase().as_str() {
-                    $( $connector_name => <$split>::restore_from_bytes(split.encoded_split.as_ref()).map(SplitImpl::$variant_name), )*
-                        other => {
-                    Err(anyhow!("connector '{}' is not supported", other))
+                fn try_from(split: SplitImpl) -> std::result::Result<Self, Self::Error> {
+                    match split {
+                        SplitImpl::$variant_name(inner) => Ok(inner),
+                        other => risingwave_common::bail!("expect {} but get {:?}", stringify!($split), other),
                     }
                 }
             }
-        }
 
-        impl SplitMetaData for SplitImpl {
-            fn id(&self) -> SplitId {
-                match self {
-                    $( Self::$variant_name(inner) => inner.id(), )*
+            impl From<$split> for SplitImpl {
+                fn from(split: $split) -> SplitImpl {
+                    SplitImpl::$variant_name(split)
                 }
             }
 
-            fn encode_to_json(&self) -> JsonbVal {
-                use serde_json::json;
-                let inner = self.encode_to_json_inner().take();
-                json!({ SPLIT_TYPE_FIELD: self.get_type(), SPLIT_INFO_FIELD: inner}).into()
-            }
-
-            fn restore_from_json(value: JsonbVal) -> Result<Self> {
-                let mut value = value.take();
-                let json_obj = value.as_object_mut().unwrap();
-                let split_type = json_obj.remove(SPLIT_TYPE_FIELD).unwrap().as_str().unwrap().to_string();
-                let inner_value = json_obj.remove(SPLIT_INFO_FIELD).unwrap();
-                Self::restore_from_json_inner(&split_type, inner_value.into())
-            }
-        }
-
-        impl SplitImpl {
-             pub fn get_type(&self) -> String {
-                match self {
-                    $( Self::$variant_name(_) => $connector_name, )*
-                }
-                    .to_string()
-            }
-
-            pub fn update(&self, start_offset: String) -> Self {
-                match self {
-                    $( Self::$variant_name(inner) => Self::$variant_name(inner.copy_with_offset(start_offset)), )*
-                }
-            }
-
-            pub fn encode_to_json_inner(&self) -> JsonbVal {
-                match self {
-                    $( Self::$variant_name(inner) => inner.encode_to_json(), )*
-                }
-            }
-
-            fn restore_from_json_inner(split_type: &str, value: JsonbVal) -> Result<Self> {
-                match split_type.to_lowercase().as_str() {
-                    $( $connector_name => <$split>::restore_from_json(value).map(SplitImpl::$variant_name), )*
-                        other => {
-                    Err(anyhow!("connector '{}' is not supported", other))
-                    }
-                }
-            }
-        }
+        )*
     }
 }
 
 #[macro_export]
-macro_rules! impl_split_reader {
-    ($({ $variant_name:ident, $split_reader_name:ident} ),*) => {
-        impl SplitReaderImpl {
-            pub fn into_stream(self) -> BoxSourceWithStateStream {
-                match self {
-                    $( Self::$variant_name(inner) => inner.into_stream(), )*                 }
-            }
-
-            pub async fn create(
-                config: ConnectorProperties,
-                state: ConnectorState,
-                parser_config: ParserConfig,
-                source_ctx: SourceContextRef,
-                columns: Option<Vec<Column>>,
-            ) -> Result<Self> {
-                if state.is_none() {
-                    return Ok(Self::Dummy(Box::new(DummySplitReader {})));
-                }
-                let splits = state.unwrap();
-                let connector = match config {
-                     $( ConnectorProperties::$variant_name(props) => Self::$variant_name(Box::new($split_reader_name::new(*props, splits, parser_config, source_ctx, columns).await?)), )*
-                };
-
-                Ok(connector)
-            }
-        }
-    }
+macro_rules! dispatch_source_prop {
+    ($impl:expr, $source_prop:tt, $body:expr) => {{
+        use $crate::source::ConnectorProperties;
+        $crate::dispatch_source_enum! {ConnectorProperties, { $impl }, {$source_prop, IgnorePropType, IgnoreSplitType}, {$body}}
+    }};
 }
 
 #[macro_export]
 macro_rules! impl_connector_properties {
-    ($({ $variant_name:ident, $connector_name:ident } ),*) => {
-        impl ConnectorProperties {
-            pub fn extract(mut props: HashMap<String, String>) -> Result<Self> {
-                const UPSTREAM_SOURCE_KEY: &str = "connector";
-                let connector = props.remove(UPSTREAM_SOURCE_KEY).ok_or_else(|| anyhow!("Must specify 'connector' in WITH clause"))?;
-                if connector.ends_with("cdc") {
-                    ConnectorProperties::new_cdc_properties(&connector, props)
-                } else {
-                    let json_value = serde_json::to_value(props).map_err(|e| anyhow!(e))?;
-                    match connector.to_lowercase().as_str() {
-                        $(
-                            $connector_name => {
-                                serde_json::from_value(json_value).map_err(|e| anyhow!(e.to_string())).map(Self::$variant_name)
-                            },
-                        )*
-                        _ => {
-                            Err(anyhow!("connector '{}' is not supported", connector,))
-                        }
-                    }
+    ({$({ $variant_name:ident, $prop_name:ty, $split:ty}),*}) => {
+        #[derive(Clone, Debug)]
+        pub enum ConnectorProperties {
+            $(
+                $variant_name(Box<$prop_name>),
+            )*
+        }
+
+        $(
+            impl From<$prop_name> for ConnectorProperties {
+                fn from(prop: $prop_name) -> ConnectorProperties {
+                    ConnectorProperties::$variant_name(Box::new(prop))
                 }
             }
-        }
+        )*
     }
 }
 
 #[macro_export]
-macro_rules! impl_common_parser_logic {
-    ($parser_name:ty) => {
-        impl $parser_name {
-            #[allow(unused_mut)]
-            #[try_stream(boxed, ok = $crate::source::StreamChunkWithState, error = RwError)]
-            async fn into_chunk_stream(mut self, data_stream: $crate::source::BoxSourceStream) {
-                #[for_await]
-                for batch in data_stream {
-                    let batch = batch?;
-                    let mut builder =
-                    $crate::parser::SourceStreamChunkBuilder::with_capacity(self.rw_columns.clone(), batch.len());
-                    let mut split_offset_mapping: std::collections::HashMap<$crate::source::SplitId, String> = std::collections::HashMap::new();
-
-                    for msg in batch {
-                        if let Some(content) = msg.payload {
-                            split_offset_mapping.insert(msg.split_id, msg.offset);
-
-                            let old_op_num = builder.op_num();
-
-                            if let Err(e) = self.parse_inner(content, builder.row_writer())
-                                .await
-                            {
-                                tracing::warn!("message parsing failed {}, skipping", e.to_string());
-                                // This will throw an error for batch
-                                self.source_ctx.report_user_source_error(e)?;
-                                continue;
-                            }
-
-                            let new_op_num = builder.op_num();
-
-                            // new_op_num - old_op_num is the number of rows added to the builder
-                            for _ in old_op_num..new_op_num {
-                                // TODO: support more kinds of SourceMeta
-                                if let $crate::source::SourceMeta::Kafka(kafka_meta) = msg.meta.clone() {
-                                    let f = |desc: &SourceColumnDesc| -> Option<risingwave_common::types::Datum> {
-                                        if !desc.is_meta {
-                                            return None;
-                                        }
-                                        match desc.name.as_str() {
-                                            "_rw_kafka_timestamp" => Some(
-                                                kafka_meta
-                                                    .timestamp
-                                                    .map(|ts| risingwave_common::cast::i64_to_timestamptz(ts).unwrap().into()),
-                                            ),
-                                            _ => unreachable!(
-                                                "kafka will not have this meta column: {}",
-                                                desc.name
-                                            ),
-                                        }
-                                    };
-                                    builder.row_writer().fulfill_meta_column(f)?;
-                                }
-                            }
-                        }
+macro_rules! impl_cdc_source_type {
+    (
+        {$({$cdc_source_type:tt}),*},
+        {$($_ignore:tt),*}
+    ) => {
+        $(
+            $crate::paste!{
+                #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+                pub struct $cdc_source_type;
+                impl CdcSourceTypeTrait for $cdc_source_type {
+                    const CDC_CONNECTOR_NAME: &'static str = concat!(stringify!([<$cdc_source_type:lower>]), "-cdc");
+                    fn source_type() -> CdcSourceType {
+                        CdcSourceType::$cdc_source_type
                     }
-                    yield $crate::source::StreamChunkWithState {
-                        chunk: builder.finish(),
-                        split_offset_mapping: Some(split_offset_mapping),
-                    };
+                }
+                pub type [<$cdc_source_type CdcProperties>] = CdcProperties<$cdc_source_type>;
+            }
+        )*
+
+        #[derive(Clone)]
+        pub enum CdcSourceType {
+            $(
+                $cdc_source_type,
+            )*
+            Unspecified,
+        }
+
+        impl From<PbSourceType> for CdcSourceType {
+            fn from(value: PbSourceType) -> Self {
+                match value {
+                    PbSourceType::Unspecified => CdcSourceType::Unspecified,
+                    $(
+                        PbSourceType::$cdc_source_type => CdcSourceType::$cdc_source_type,
+                    )*
                 }
             }
         }
 
-        impl $crate::parser::ByteStreamSourceParser for $parser_name {
-            fn into_stream(self, data_stream: $crate::source::BoxSourceStream) -> $crate::source::BoxSourceWithStateStream {
-                self.into_chunk_stream(data_stream)
+        impl From<CdcSourceType> for PbSourceType {
+            fn from(this: CdcSourceType) -> PbSourceType {
+                match this {
+                    $(
+                        CdcSourceType::$cdc_source_type => PbSourceType::$cdc_source_type,
+                    )*
+                   CdcSourceType::Unspecified => PbSourceType::Unspecified,
+                }
             }
         }
 
     }
-}
-
-#[macro_export]
-macro_rules! impl_common_split_reader_logic {
-    ($reader:ty, $props:ty) => {
-        impl $reader {
-            #[try_stream(boxed, ok = $crate::source::StreamChunkWithState, error = risingwave_common::error::RwError)]
-            pub(crate) async fn into_chunk_stream(self) {
-                use $crate::parser::ByteStreamSourceParser;
-                let parser_config = self.parser_config.clone();
-                let actor_id = self.source_ctx.source_info.actor_id.to_string();
-                let source_id = self.source_ctx.source_info.source_id.to_string();
-                let split_id = self.split_id.clone();
-                let metrics = self.source_ctx.metrics.clone();
-                let source_ctx = self.source_ctx.clone();
-
-                let data_stream = self.into_data_stream();
-
-                let data_stream = data_stream
-                    .inspect_ok(move |data_batch| {
-                        metrics
-                            .partition_input_count
-                            .with_label_values(&[&actor_id, &source_id, &split_id])
-                            .inc_by(data_batch.len() as u64);
-                        let sum_bytes = data_batch
-                            .iter()
-                            .map(|msg| match &msg.payload {
-                                None => 0,
-                                Some(payload) => payload.len() as u64,
-                            })
-                            .sum();
-                        metrics
-                            .partition_input_bytes
-                            .with_label_values(&[&actor_id, &source_id, &split_id])
-                            .inc_by(sum_bytes);
-                    })
-                    .boxed();
-                let parser =
-                    $crate::parser::ByteStreamSourceParserImpl::create(parser_config, source_ctx)?;
-                #[for_await]
-                for msg_batch in parser.into_stream(data_stream) {
-                    yield msg_batch?;
-                }
-            }
-        }
-    };
 }

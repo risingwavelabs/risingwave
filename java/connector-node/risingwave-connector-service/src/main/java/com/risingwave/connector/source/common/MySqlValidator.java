@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,8 +20,7 @@ import com.risingwave.proto.Data;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
-import java.util.HashSet;
-import java.util.Map;
+import java.util.*;
 
 public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
     private final Map<String, String> userProps;
@@ -30,7 +29,16 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
 
     private final Connection jdbcConnection;
 
-    public MySqlValidator(Map<String, String> userProps, TableSchema tableSchema)
+    // validation is for cdc source job
+    private final boolean isCdcSourceJob;
+    // validation is for backfill table
+    private final boolean isBackfillTable;
+
+    public MySqlValidator(
+            Map<String, String> userProps,
+            TableSchema tableSchema,
+            boolean isCdcSourceJob,
+            boolean isBackfillTable)
             throws SQLException {
         this.userProps = userProps;
         this.tableSchema = tableSchema;
@@ -40,9 +48,16 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
         var dbName = userProps.get(DbzConnectorConfig.DB_NAME);
         var jdbcUrl = ValidatorUtils.getJdbcUrl(SourceTypeE.MYSQL, dbHost, dbPort, dbName);
 
-        var user = userProps.get(DbzConnectorConfig.USER);
-        var password = userProps.get(DbzConnectorConfig.PASSWORD);
-        this.jdbcConnection = DriverManager.getConnection(jdbcUrl, user, password);
+        var properties = new Properties();
+        properties.setProperty("user", userProps.get(DbzConnectorConfig.USER));
+        properties.setProperty("password", userProps.get(DbzConnectorConfig.PASSWORD));
+        properties.setProperty(
+                "sslMode", userProps.getOrDefault(DbzConnectorConfig.MYSQL_SSL_MODE, "DISABLED"));
+        properties.setProperty("allowPublicKeyRetrieval", "true");
+
+        this.jdbcConnection = DriverManager.getConnection(jdbcUrl, properties);
+        this.isCdcSourceJob = isCdcSourceJob;
+        this.isBackfillTable = isBackfillTable;
     }
 
     @Override
@@ -51,7 +66,7 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
             // TODO: check database server version
             validateBinlogConfig();
         } catch (SQLException e) {
-            throw ValidatorUtils.internalError(e);
+            throw ValidatorUtils.internalError(e.getMessage());
         }
     }
 
@@ -93,9 +108,45 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
     @Override
     public void validateUserPrivilege() {
         try {
-            validatePrivileges();
+            String[] privilegesRequired = getRequiredPrivileges();
+            var hashSet = new HashSet<>(List.of(privilegesRequired));
+            try (var stmt = jdbcConnection.createStatement()) {
+                var res = stmt.executeQuery(ValidatorUtils.getSql("mysql.grants"));
+                while (res.next()) {
+                    String granted = res.getString(1).toUpperCase();
+                    // mysql 5.7 root user has all privileges
+                    if (granted.contains("ALL")) {
+                        // all privileges granted, check passed
+                        return;
+                    }
+
+                    // remove granted privilege from the set
+                    hashSet.removeIf(granted::contains);
+                    if (hashSet.isEmpty()) {
+                        break;
+                    }
+                }
+                if (!hashSet.isEmpty()) {
+                    throw ValidatorUtils.invalidArgument(
+                            "MySQL user doesn't have enough privileges: " + hashSet);
+                }
+            }
         } catch (SQLException e) {
-            throw ValidatorUtils.internalError(e);
+            throw ValidatorUtils.internalError(e.getMessage());
+        }
+    }
+
+    private String[] getRequiredPrivileges() {
+        if (isCdcSourceJob) {
+            return new String[] {"SELECT", "REPLICATION SLAVE", "REPLICATION CLIENT"};
+        } else if (isBackfillTable) {
+            // check privilege again to ensure the user has the privilege to backfill
+            return new String[] {"SELECT", "REPLICATION SLAVE", "REPLICATION CLIENT"};
+        } else {
+            // dedicated source needs more privileges to acquire global lock
+            return new String[] {
+                "SELECT", "RELOAD", "SHOW DATABASES", "REPLICATION SLAVE", "REPLICATION CLIENT"
+            };
         }
     }
 
@@ -104,20 +155,28 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
         try {
             validateTableSchema();
         } catch (SQLException e) {
-            throw ValidatorUtils.internalError(e);
+            throw ValidatorUtils.internalError(e.getMessage());
         }
+    }
+
+    @Override
+    boolean isCdcSourceJob() {
+        return isCdcSourceJob;
     }
 
     private void validateTableSchema() throws SQLException {
         // check whether table exist
+        var dbName = userProps.get(DbzConnectorConfig.DB_NAME);
+        var tableName = userProps.get(DbzConnectorConfig.TABLE_NAME);
         try (var stmt = jdbcConnection.prepareStatement(ValidatorUtils.getSql("mysql.table"))) {
-            stmt.setString(1, userProps.get(DbzConnectorConfig.DB_NAME));
-            stmt.setString(2, userProps.get(DbzConnectorConfig.TABLE_NAME));
+            stmt.setString(1, dbName);
+            stmt.setString(2, tableName);
             var res = stmt.executeQuery();
             while (res.next()) {
                 var ret = res.getInt(1);
                 if (ret == 0) {
-                    throw ValidatorUtils.invalidArgument("MySQL table doesn't exist");
+                    throw ValidatorUtils.invalidArgument(
+                            String.format("MySQL table '%s' doesn't exist", tableName));
                 }
             }
         }
@@ -125,67 +184,43 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
         // check whether PK constraint match source table definition
         try (var stmt =
                 jdbcConnection.prepareStatement(ValidatorUtils.getSql("mysql.table_schema"))) {
-            stmt.setString(1, userProps.get(DbzConnectorConfig.DB_NAME));
-            stmt.setString(2, userProps.get(DbzConnectorConfig.TABLE_NAME));
-            var res = stmt.executeQuery();
+            stmt.setString(1, dbName);
+            stmt.setString(2, tableName);
+
+            // Field name in lower case -> data type, because MySQL column name is case-insensitive
+            // https://dev.mysql.com/doc/refman/5.7/en/identifier-case-sensitivity.html
+            var upstreamSchema = new HashMap<String, String>();
             var pkFields = new HashSet<String>();
-            int index = 0;
+            var res = stmt.executeQuery();
             while (res.next()) {
                 var field = res.getString(1);
                 var dataType = res.getString(2);
                 var key = res.getString(3);
-
-                if (index >= tableSchema.getNumColumns()) {
-                    throw ValidatorUtils.invalidArgument("The number of columns mismatch");
-                }
-
-                var srcColName = tableSchema.getColumnNames()[index++];
-                if (!srcColName.equals(field)) {
-                    throw ValidatorUtils.invalidArgument(
-                            String.format("column name mismatch: %s, [%s]", field, srcColName));
-                }
-
-                if (!isDataTypeCompatible(dataType, tableSchema.getColumnType(srcColName))) {
-                    throw ValidatorUtils.invalidArgument(
-                            String.format("incompatible data type of column %s", srcColName));
-                }
+                upstreamSchema.put(field.toLowerCase(), dataType);
                 if (key.equalsIgnoreCase("PRI")) {
-                    pkFields.add(field);
+                    pkFields.add(field.toLowerCase());
                 }
             }
 
-            if (!ValidatorUtils.isPrimaryKeyMatch(tableSchema, pkFields)) {
+            // All columns defined must exist in upstream database
+            for (var e : tableSchema.getColumnTypes().entrySet()) {
+                // skip validate internal columns
+                if (e.getKey().startsWith(ValidatorUtils.INTERNAL_COLUMN_PREFIX)) {
+                    continue;
+                }
+                var dataType = upstreamSchema.get(e.getKey().toLowerCase());
+                if (dataType == null) {
+                    throw ValidatorUtils.invalidArgument(
+                            "Column '" + e.getKey() + "' not found in the upstream database");
+                }
+                if (!isDataTypeCompatible(dataType, e.getValue())) {
+                    throw ValidatorUtils.invalidArgument(
+                            "Incompatible data type of column " + e.getKey());
+                }
+            }
+
+            if (!isPrimaryKeyMatch(tableSchema, pkFields)) {
                 throw ValidatorUtils.invalidArgument("Primary key mismatch");
-            }
-        }
-    }
-
-    private void validatePrivileges() throws SQLException {
-        String[] privilegesRequired = {
-            "SELECT",
-            "RELOAD",
-            "SHOW DATABASES",
-            "REPLICATION SLAVE",
-            "REPLICATION CLIENT",
-            "LOCK TABLES"
-        };
-        try (var stmt = jdbcConnection.createStatement()) {
-            var res = stmt.executeQuery(ValidatorUtils.getSql("mysql.grants"));
-            while (res.next()) {
-                String grants = res.getString(1).toUpperCase();
-                // all privileges granted, check passed
-                if (grants.contains("ALL")) {
-                    break;
-                }
-                // check whether each privilege is granted
-                for (String privilege : privilegesRequired) {
-                    if (!grants.contains(privilege)) {
-                        throw ValidatorUtils.invalidArgument(
-                                String.format(
-                                        "MySQL user does not have privilege %s, which is needed for debezium connector",
-                                        privilege));
-                    }
-                }
             }
         }
     }
@@ -195,6 +230,18 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
         if (null != jdbcConnection) {
             jdbcConnection.close();
         }
+    }
+
+    private boolean isPrimaryKeyMatch(TableSchema sourceSchema, Set<String> pkFields) {
+        if (sourceSchema.getPrimaryKeys().size() != pkFields.size()) {
+            return false;
+        }
+        for (var colName : sourceSchema.getPrimaryKeys()) {
+            if (!pkFields.contains(colName.toLowerCase())) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private boolean isDataTypeCompatible(String mysqlDataType, Data.DataType.TypeName typeName) {
@@ -224,6 +271,8 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
                 return val == Data.DataType.TypeName.DECIMAL_VALUE;
             case "varchar":
                 return val == Data.DataType.TypeName.VARCHAR_VALUE;
+            case "timestamp":
+                return val == Data.DataType.TypeName.TIMESTAMPTZ_VALUE;
             default:
                 return true; // true for other uncovered types
         }

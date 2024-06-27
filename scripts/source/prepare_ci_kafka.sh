@@ -3,19 +3,13 @@
 # Exits as soon as any line fails.
 set -e
 
-KCAT_BIN="kcat"
-# kcat bin name on linux is "kafkacat"
-if [ "$(uname)" == "Linux" ]
-then
-    KCAT_BIN="kafkacat"
-fi
-
 SCRIPT_PATH="$(cd "$(dirname "$0")" >/dev/null 2>&1 && pwd)"
 cd "$SCRIPT_PATH/.." || exit 1
-
-KAFKA_BIN="$SCRIPT_PATH/../../.risingwave/bin/kafka/bin"
+# cwd is /scripts
 
 echo "$SCRIPT_PATH"
+
+source ../.risingwave/config/risedev-env
 
 if [ "$1" == "compress" ]; then
   echo "Compress test_data/ into test_data.zip"
@@ -46,10 +40,10 @@ for filename in $kafka_data_files; do
 
     # always ok
     echo "Drop topic $topic"
-    "$KAFKA_BIN"/kafka-topics.sh --bootstrap-server 127.0.0.1:29092 --topic "$topic" --delete || true
+    risedev rpk topic delete "$topic" || true
 
     echo "Recreate topic $topic with partition $partition"
-    "$KAFKA_BIN"/kafka-topics.sh --bootstrap-server 127.0.0.1:29092 --topic "$topic" --create --partitions "$partition") &
+    risedev rpk topic create "$topic" --partitions "$partition") &
 done
 wait
 
@@ -62,10 +56,13 @@ for filename in $kafka_data_files; do
     echo "Fulfill kafka topic $topic with data from $base"
     # binary data, one message a file, filename/topic ends with "bin"
     if [[ "$topic" = *bin ]]; then
-        ${KCAT_BIN} -P -b 127.0.0.1:29092 -t "$topic" "$filename"
+        kcat -P -b "${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}" -t "$topic" "$filename"
+    elif [[ "$topic" = *avro_json ]]; then
+        python3 source/schema_registry_producer.py "${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}" "${RISEDEV_SCHEMA_REGISTRY_URL}" "$filename" "topic" "avro"
+    elif [[ "$topic" = *json_schema ]]; then
+        python3 source/schema_registry_producer.py "${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}" "${RISEDEV_SCHEMA_REGISTRY_URL}" "$filename" "topic" "json"
     else
-        cat "$filename" | ${KCAT_BIN} -P -K ^  -b 127.0.0.1:29092 -t "$topic"
+        cat "$filename" | kcat -P -K ^  -b "${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}" -t "$topic"
     fi
     ) &
 done
-wait

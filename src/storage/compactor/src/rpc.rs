@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,15 +13,132 @@
 // limitations under the License.
 
 use risingwave_pb::compactor::compactor_service_server::CompactorService;
-use risingwave_pb::compactor::{EchoRequest, EchoResponse};
+use risingwave_pb::compactor::{
+    DispatchCompactionTaskRequest, DispatchCompactionTaskResponse, EchoRequest, EchoResponse,
+};
+use risingwave_pb::monitor_service::monitor_service_server::MonitorService;
+use risingwave_pb::monitor_service::{
+    AnalyzeHeapRequest, AnalyzeHeapResponse, GetBackPressureRequest, GetBackPressureResponse,
+    HeapProfilingRequest, HeapProfilingResponse, ListHeapProfilingRequest,
+    ListHeapProfilingResponse, ProfilingRequest, ProfilingResponse, StackTraceRequest,
+    StackTraceResponse,
+};
+use risingwave_storage::hummock::compactor::await_tree_key::Compaction;
+use risingwave_storage::hummock::compactor::CompactionAwaitTreeRegRef;
+use tokio::sync::mpsc;
 use tonic::{Request, Response, Status};
 
 #[derive(Default)]
-pub struct CompactorServiceImpl {}
-
+pub struct CompactorServiceImpl {
+    sender: Option<mpsc::UnboundedSender<Request<DispatchCompactionTaskRequest>>>,
+}
+impl CompactorServiceImpl {
+    pub fn new(sender: mpsc::UnboundedSender<Request<DispatchCompactionTaskRequest>>) -> Self {
+        Self {
+            sender: Some(sender),
+        }
+    }
+}
 #[async_trait::async_trait]
 impl CompactorService for CompactorServiceImpl {
     async fn echo(&self, _request: Request<EchoRequest>) -> Result<Response<EchoResponse>, Status> {
         Ok(Response::new(EchoResponse {}))
+    }
+
+    async fn dispatch_compaction_task(
+        &self,
+        request: Request<DispatchCompactionTaskRequest>,
+    ) -> Result<Response<DispatchCompactionTaskResponse>, Status> {
+        match &self.sender.as_ref() {
+            Some(sender) => {
+                sender
+                    .send(request)
+                    .expect("DispatchCompactionTaskRequest should be able to send");
+            }
+            None => {
+                tracing::error!(
+                    "fail to send DispatchCompactionTaskRequest, sender has not been initialized."
+                );
+            }
+        }
+        Ok(Response::new(DispatchCompactionTaskResponse {
+            status: None,
+        }))
+    }
+}
+
+pub struct MonitorServiceImpl {
+    await_tree_reg: Option<CompactionAwaitTreeRegRef>,
+}
+
+impl MonitorServiceImpl {
+    pub fn new(await_tree_reg: Option<CompactionAwaitTreeRegRef>) -> Self {
+        Self { await_tree_reg }
+    }
+}
+
+#[async_trait::async_trait]
+impl MonitorService for MonitorServiceImpl {
+    async fn stack_trace(
+        &self,
+        _request: Request<StackTraceRequest>,
+    ) -> Result<Response<StackTraceResponse>, Status> {
+        let compaction_task_traces = match &self.await_tree_reg {
+            None => Default::default(),
+            Some(await_tree_reg) => await_tree_reg
+                .collect::<Compaction>()
+                .into_iter()
+                .map(|(k, v)| (format!("{k:?}"), v.to_string()))
+                .collect(),
+        };
+        Ok(Response::new(StackTraceResponse {
+            compaction_task_traces,
+            ..Default::default()
+        }))
+    }
+
+    async fn profiling(
+        &self,
+        _request: Request<ProfilingRequest>,
+    ) -> Result<Response<ProfilingResponse>, Status> {
+        Err(Status::unimplemented(
+            "CPU profiling unimplemented in compactor",
+        ))
+    }
+
+    async fn heap_profiling(
+        &self,
+        _request: Request<HeapProfilingRequest>,
+    ) -> Result<Response<HeapProfilingResponse>, Status> {
+        Err(Status::unimplemented(
+            "Heap profiling unimplemented in compactor",
+        ))
+    }
+
+    async fn list_heap_profiling(
+        &self,
+        _request: Request<ListHeapProfilingRequest>,
+    ) -> Result<Response<ListHeapProfilingResponse>, Status> {
+        Err(Status::unimplemented(
+            "Heap profiling unimplemented in compactor",
+        ))
+    }
+
+    async fn analyze_heap(
+        &self,
+        _request: Request<AnalyzeHeapRequest>,
+    ) -> Result<Response<AnalyzeHeapResponse>, Status> {
+        Err(Status::unimplemented(
+            "Heap profiling unimplemented in compactor",
+        ))
+    }
+
+    async fn get_back_pressure(
+        &self,
+        _request: Request<GetBackPressureRequest>,
+    ) -> Result<Response<GetBackPressureResponse>, Status> {
+        Err(Status::unimplemented(
+            "Get Back Pressure unimplemented in compactor",
+        ))
     }
 }

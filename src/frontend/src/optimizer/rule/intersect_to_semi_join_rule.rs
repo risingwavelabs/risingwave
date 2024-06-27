@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use fixedbitset::FixedBitSet;
 use risingwave_common::types::DataType::Boolean;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_pb::plan_common::JoinType;
@@ -45,22 +44,20 @@ impl Rule for IntersectToSemiJoinRule {
             })
             .unwrap();
 
-        let mut bit_set = FixedBitSet::with_capacity(join.schema().len());
-        bit_set.toggle_range(..);
-        Some(Agg::new(vec![], bit_set, join).into())
+        Some(Agg::new(vec![], (0..join.schema().len()).collect(), join).into())
     }
 }
 
 impl IntersectToSemiJoinRule {
     pub(crate) fn gen_null_safe_equal(left: PlanRef, right: PlanRef) -> ExprImpl {
-        (left
+        let arms = (left
             .schema()
             .fields()
             .iter()
             .zip_eq_debug(right.schema().fields())
             .enumerate())
-        .fold(None, |expr, (i, (left_field, right_field))| {
-            let equal = ExprImpl::FunctionCall(Box::new(FunctionCall::new_unchecked(
+        .map(|(i, (left_field, right_field))| {
+            ExprImpl::FunctionCall(Box::new(FunctionCall::new_unchecked(
                 ExprType::IsNotDistinctFrom,
                 vec![
                     ExprImpl::InputRef(Box::new(InputRef::new(i, left_field.data_type()))),
@@ -70,16 +67,9 @@ impl IntersectToSemiJoinRule {
                     ))),
                 ],
                 Boolean,
-            )));
-
-            match expr {
-                None => Some(equal),
-                Some(expr) => Some(ExprImpl::FunctionCall(Box::new(
-                    FunctionCall::new_unchecked(ExprType::And, vec![expr, equal], Boolean),
-                ))),
-            }
-        })
-        .unwrap()
+            )))
+        });
+        ExprImpl::and(arms)
     }
 }
 

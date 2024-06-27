@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,18 +13,23 @@
 // limitations under the License.
 
 #![feature(async_closure)]
-#![feature(drain_filter)]
-#![feature(hash_drain_filter)]
+#![feature(extract_if)]
+#![feature(hash_extract_if)]
 #![feature(lint_reasons)]
 #![feature(map_many_mut)]
-#![feature(bound_map)]
 #![feature(type_alias_impl_trait)]
+#![feature(impl_trait_in_assoc_type)]
+#![feature(is_sorted)]
+#![feature(let_chains)]
+#![feature(btree_cursors)]
+#![feature(lazy_cell)]
 
 mod key_cmp;
-
 use std::cmp::Ordering;
+use std::collections::HashMap;
 
 pub use key_cmp::*;
+use risingwave_common::util::epoch::EPOCH_SPILL_TIME_MASK;
 use risingwave_pb::common::{batch_query_epoch, BatchQueryEpoch};
 use risingwave_pb::hummock::SstableInfo;
 
@@ -32,12 +37,20 @@ use crate::compaction_group::StaticCompactionGroupId;
 use crate::key_range::KeyRangeCommon;
 use crate::table_stats::{to_prost_table_stats_map, PbTableStatsMap, TableStatsMap};
 
+pub mod change_log;
 pub mod compact;
 pub mod compaction_group;
 pub mod key;
 pub mod key_range;
 pub mod prost_key_range;
 pub mod table_stats;
+pub mod table_watermark;
+pub mod version;
+
+pub use compact::*;
+use risingwave_common::catalog::TableId;
+
+use crate::table_watermark::TableWatermarks;
 
 pub type HummockSstableObjectId = u64;
 pub type HummockSstableId = u64;
@@ -77,6 +90,18 @@ macro_rules! info_in_release {
             }
         }
     }
+}
+
+#[derive(Default, Debug)]
+pub struct SyncResult {
+    /// The size of all synced shared buffers.
+    pub sync_size: usize,
+    /// The `sst_info` of sync.
+    pub uncommitted_ssts: Vec<LocalSstableInfo>,
+    /// The collected table watermarks written by state tables.
+    pub table_watermarks: HashMap<TableId, TableWatermarks>,
+    /// Sstable that holds the uncommitted old value
+    pub old_value_ssts: Vec<LocalSstableInfo>,
 }
 
 #[derive(Debug, Clone)]
@@ -239,12 +264,12 @@ impl SstObjectIdRange {
 
 pub fn can_concat(ssts: &[SstableInfo]) -> bool {
     let len = ssts.len();
-    for i in 0..len - 1 {
-        if ssts[i]
+    for i in 1..len {
+        if ssts[i - 1]
             .key_range
             .as_ref()
             .unwrap()
-            .compare_right_with(&ssts[i + 1].key_range.as_ref().unwrap().left)
+            .compare_right_with(&ssts[i].key_range.as_ref().unwrap().left)
             != Ordering::Less
         {
             return false;
@@ -255,11 +280,70 @@ pub fn can_concat(ssts: &[SstableInfo]) -> bool {
 
 const CHECKPOINT_DIR: &str = "checkpoint";
 const CHECKPOINT_NAME: &str = "0";
+const ARCHIVE_DIR: &str = "archive";
 
 pub fn version_checkpoint_path(root_dir: &str) -> String {
     format!("{}/{}/{}", root_dir, CHECKPOINT_DIR, CHECKPOINT_NAME)
 }
 
+pub fn version_archive_dir(root_dir: &str) -> String {
+    format!("{}/{}", root_dir, ARCHIVE_DIR)
+}
+
 pub fn version_checkpoint_dir(checkpoint_path: &str) -> String {
     checkpoint_path.trim_end_matches(|c| c != '/').to_string()
+}
+
+/// Represents an epoch with a gap.
+///
+/// When a spill of the mem table occurs between two epochs, `EpochWithGap` generates an offset.
+/// This offset is encoded when performing full key encoding. When returning to the upper-level
+/// interface, a pure epoch with the lower 16 bits set to 0 should be returned.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Default, Debug, PartialOrd, Ord)]
+pub struct EpochWithGap(u64);
+
+impl EpochWithGap {
+    #[allow(unused_variables)]
+    pub fn new(epoch: u64, spill_offset: u16) -> Self {
+        // We only use 48 high bit to store epoch and use 16 low bit to store spill offset. But for MAX epoch,
+        // we still keep `u64::MAX` because we have use it in delete range and persist this value to sstable files.
+        //  So for compatibility, we must skip checking it for u64::MAX. See bug description in https://github.com/risingwavelabs/risingwave/issues/13717
+        if risingwave_common::util::epoch::is_max_epoch(epoch) {
+            EpochWithGap::new_max_epoch()
+        } else {
+            debug_assert!((epoch & EPOCH_SPILL_TIME_MASK) == 0);
+            EpochWithGap(epoch + spill_offset as u64)
+        }
+    }
+
+    pub fn new_from_epoch(epoch: u64) -> Self {
+        EpochWithGap::new(epoch, 0)
+    }
+
+    pub fn new_min_epoch() -> Self {
+        EpochWithGap(0)
+    }
+
+    pub fn new_max_epoch() -> Self {
+        EpochWithGap(HummockEpoch::MAX)
+    }
+
+    // return the epoch_with_gap(epoch + spill_offset)
+    pub(crate) fn as_u64(&self) -> HummockEpoch {
+        self.0
+    }
+
+    // return the epoch_with_gap(epoch + spill_offset)
+    pub fn from_u64(epoch_with_gap: u64) -> Self {
+        EpochWithGap(epoch_with_gap)
+    }
+
+    // return the pure epoch without spill offset
+    pub fn pure_epoch(&self) -> HummockEpoch {
+        self.0 & !EPOCH_SPILL_TIME_MASK
+    }
+
+    pub fn offset(&self) -> u64 {
+        self.0 & EPOCH_SPILL_TIME_MASK
+    }
 }

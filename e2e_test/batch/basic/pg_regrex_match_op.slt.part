@@ -7,3 +7,13 @@ query T
 select 'foobarbequebazilbarfbonk' !~ '(b[^b]+)(b[^b]+)';
 ----
 f
+
+query T
+select 'foobarbequebazilbarfbonk' ~ null;
+----
+NULL
+
+query T
+select null !~ '(b[^b]+)(b[^b]+)';
+----
+NULL

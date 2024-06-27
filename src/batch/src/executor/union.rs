@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,10 +17,10 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::{Result, RwError};
-use risingwave_common::util::select_all;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
+use rw_futures_util::select_all;
 
+use crate::error::{BatchError, Result};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
@@ -46,7 +46,7 @@ impl Executor for UnionExecutor {
 }
 
 impl UnionExecutor {
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
         let mut stream = select_all(
             self.inputs
@@ -135,7 +135,7 @@ mod tests {
         assert_matches!(res, Ok(_));
         if let Ok(res) = res {
             let col1 = res.column_at(0);
-            let array = col1.array();
+            let array = col1;
             let col1 = array.as_int32();
             assert_eq!(col1.len(), 4);
             assert_eq!(col1.value_at(0), Some(1));
@@ -144,7 +144,7 @@ mod tests {
             assert_eq!(col1.value_at(3), Some(4));
 
             let col2 = res.column_at(1);
-            let array = col2.array();
+            let array = col2;
             let col2 = array.as_int32();
             assert_eq!(col2.len(), 4);
             assert_eq!(col2.value_at(0), Some(10));
@@ -157,7 +157,7 @@ mod tests {
         assert_matches!(res, Ok(_));
         if let Ok(res) = res {
             let col1 = res.column_at(0);
-            let array = col1.array();
+            let array = col1;
             let col1 = array.as_int32();
             assert_eq!(col1.len(), 4);
             assert_eq!(col1.value_at(0), Some(5));
@@ -166,7 +166,7 @@ mod tests {
             assert_eq!(col1.value_at(3), Some(8));
 
             let col2 = res.column_at(1);
-            let array = col2.array();
+            let array = col2;
             let col2 = array.as_int32();
             assert_eq!(col2.len(), 4);
             assert_eq!(col2.value_at(0), Some(50));

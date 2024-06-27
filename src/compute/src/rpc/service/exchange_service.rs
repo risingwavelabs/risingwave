@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,6 @@
 
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::Instant;
 
 use either::Either;
 use futures::{pin_mut, Stream, StreamExt, TryStreamExt};
@@ -27,6 +26,7 @@ use risingwave_pb::task_service::{
 use risingwave_stream::executor::exchange::permit::{MessageWithPermits, Receiver};
 use risingwave_stream::executor::Message;
 use risingwave_stream::task::LocalStreamManager;
+use thiserror_ext::AsReport;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status, Streaming};
 
@@ -38,19 +38,19 @@ const BATCH_EXCHANGE_BUFFER_SIZE: usize = 1024;
 #[derive(Clone)]
 pub struct ExchangeServiceImpl {
     batch_mgr: Arc<BatchManager>,
-    stream_mgr: Arc<LocalStreamManager>,
+    stream_mgr: LocalStreamManager,
     metrics: Arc<ExchangeServiceMetrics>,
 }
 
-type BatchDataStream = ReceiverStream<std::result::Result<GetDataResponse, Status>>;
-type StreamDataStream = impl Stream<Item = std::result::Result<GetStreamResponse, Status>>;
+pub type BatchDataStream = ReceiverStream<std::result::Result<GetDataResponse, Status>>;
+pub type StreamDataStream = impl Stream<Item = std::result::Result<GetStreamResponse, Status>>;
 
 #[async_trait::async_trait]
 impl ExchangeService for ExchangeServiceImpl {
     type GetDataStream = BatchDataStream;
     type GetStreamStream = StreamDataStream;
 
-    #[cfg_attr(coverage, no_coverage)]
+    #[cfg_attr(coverage, coverage(off))]
     async fn get_data(
         &self,
         request: Request<GetDataRequest>,
@@ -64,7 +64,11 @@ impl ExchangeService for ExchangeServiceImpl {
             .expect("Failed to get task output id.");
         let (tx, rx) = tokio::sync::mpsc::channel(BATCH_EXCHANGE_BUFFER_SIZE);
         if let Err(e) = self.batch_mgr.get_data(tx, peer_addr, &pb_task_output_id) {
-            error!("Failed to serve exchange RPC from {}: {}", peer_addr, e);
+            error!(
+                %peer_addr,
+                error = %e.as_report(),
+                "Failed to serve exchange RPC"
+            );
             return Err(e.into());
         }
 
@@ -81,10 +85,15 @@ impl ExchangeService for ExchangeServiceImpl {
             .remote_addr()
             .ok_or_else(|| Status::unavailable("get_stream connection unestablished"))?;
 
-        let mut request_stream = request.into_inner();
+        let mut request_stream: Streaming<GetStreamRequest> = request.into_inner();
 
         // Extract the first `Get` request from the stream.
-        let get_req = {
+        let Get {
+            up_actor_id,
+            down_actor_id,
+            up_fragment_id,
+            down_fragment_id,
+        } = {
             let req = request_stream
                 .next()
                 .await
@@ -95,9 +104,10 @@ impl ExchangeService for ExchangeServiceImpl {
             }
         };
 
-        let up_down_actor_ids = (get_req.up_actor_id, get_req.down_actor_id);
-        let up_down_fragment_ids = (get_req.up_fragment_id, get_req.down_fragment_id);
-        let receiver = self.stream_mgr.take_receiver(up_down_actor_ids).await?;
+        let receiver = self
+            .stream_mgr
+            .take_receiver((up_actor_id, down_actor_id))
+            .await?;
 
         // Map the remaining stream to add-permits.
         let add_permits_stream = request_stream.map_ok(|req| match req.value.unwrap() {
@@ -110,8 +120,7 @@ impl ExchangeService for ExchangeServiceImpl {
             peer_addr,
             receiver,
             add_permits_stream,
-            up_down_actor_ids,
-            up_down_fragment_ids,
+            (up_fragment_id, down_fragment_id),
         )))
     }
 }
@@ -119,7 +128,7 @@ impl ExchangeService for ExchangeServiceImpl {
 impl ExchangeServiceImpl {
     pub fn new(
         mgr: Arc<BatchManager>,
-        stream_mgr: Arc<LocalStreamManager>,
+        stream_mgr: LocalStreamManager,
         metrics: Arc<ExchangeServiceMetrics>,
     ) -> Self {
         ExchangeServiceImpl {
@@ -135,11 +144,9 @@ impl ExchangeServiceImpl {
         peer_addr: SocketAddr,
         mut receiver: Receiver,
         add_permits_stream: impl Stream<Item = std::result::Result<permits::Value, tonic::Status>>,
-        up_down_actor_ids: (u32, u32),
         up_down_fragment_ids: (u32, u32),
     ) {
-        tracing::trace!(target: "events::compute::exchange", peer_addr = %peer_addr, "serve stream exchange RPC");
-        let up_actor_id = up_down_actor_ids.0.to_string();
+        tracing::debug!(target: "events::compute::exchange", peer_addr = %peer_addr, "serve stream exchange RPC");
         let up_fragment_id = up_down_fragment_ids.0.to_string();
         let down_fragment_id = up_down_fragment_ids.1.to_string();
 
@@ -157,29 +164,20 @@ impl ExchangeServiceImpl {
         );
         pin_mut!(select_stream);
 
-        let mut rr = 0;
-        const SAMPLING_FREQUENCY: u64 = 100;
-
         while let Some(r) = select_stream.try_next().await? {
             match r {
                 Either::Left(permits_to_add) => {
                     permits.add_permits(permits_to_add);
                 }
-                Either::Right(MessageWithPermits { message, permits }) => {
-                    // add serialization duration metric with given sampling frequency
-                    let proto = if rr % SAMPLING_FREQUENCY == 0 {
-                        let start_time = Instant::now();
-                        let proto = message.to_protobuf();
-                        metrics
-                            .actor_sampled_serialize_duration_ns
-                            .with_label_values(&[&up_actor_id])
-                            .inc_by(start_time.elapsed().as_nanos() as u64);
-                        proto
-                    } else {
-                        message.to_protobuf()
-                    };
-                    rr += 1;
-
+                Either::Right(MessageWithPermits {
+                    mut message,
+                    permits,
+                }) => {
+                    // Erase the mutation of the barrier to avoid decoding in remote side.
+                    if let Message::Barrier(barrier) = &mut message {
+                        barrier.mutation = None;
+                    }
+                    let proto = message.to_protobuf();
                     // forward the acquired permit to the downstream
                     let response = GetStreamResponse {
                         message: Some(proto),

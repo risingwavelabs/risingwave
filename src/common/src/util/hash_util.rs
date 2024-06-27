@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 
 use std::hash::{BuildHasher, Hasher};
 
-pub fn finalize_hashers<H: Hasher>(hashers: &mut [H]) -> Vec<u64> {
+pub fn finalize_hashers<H: Hasher>(hashers: &[H]) -> Vec<u64> {
     return hashers
         .iter()
         .map(|hasher| hasher.finish())

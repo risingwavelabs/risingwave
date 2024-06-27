@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,9 +15,7 @@
 use std::hash::Hasher;
 
 use super::*;
-use crate::array::list_array::{ListRef, ListValue};
-use crate::array::struct_array::{StructRef, StructValue};
-use crate::{for_all_native_types, for_all_scalar_variants};
+use crate::{dispatch_scalar_ref_variants, dispatch_scalar_variants, for_all_native_types};
 
 /// `ScalarPartialOrd` allows comparison between `Scalar` and `ScalarRef`.
 ///
@@ -89,7 +87,7 @@ impl Scalar for ListValue {
     type ScalarRefType<'a> = ListRef<'a>;
 
     fn as_scalar_ref(&self) -> ListRef<'_> {
-        ListRef::ValueRef { val: self }
+        self.into()
     }
 }
 
@@ -269,6 +267,28 @@ impl<'a> ScalarRef<'a> for Time {
     }
 }
 
+/// Implement `Scalar` for `Timestamptz`.
+impl Scalar for Timestamptz {
+    type ScalarRefType<'a> = Timestamptz;
+
+    fn as_scalar_ref(&self) -> Timestamptz {
+        *self
+    }
+}
+
+/// Implement `ScalarRef` for `Timestamptz`.
+impl<'a> ScalarRef<'a> for Timestamptz {
+    type ScalarType = Timestamptz;
+
+    fn to_owned_scalar(&self) -> Timestamptz {
+        *self
+    }
+
+    fn hash_scalar<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.hash(state)
+    }
+}
+
 /// Implement `Scalar` for `StructValue`.
 impl<'a> ScalarRef<'a> for StructRef<'a> {
     type ScalarType = StructValue;
@@ -288,11 +308,7 @@ impl<'a> ScalarRef<'a> for ListRef<'a> {
     type ScalarType = ListValue;
 
     fn to_owned_scalar(&self) -> ListValue {
-        let fields = self
-            .iter()
-            .map(|f| f.map(|s| s.into_scalar_impl()))
-            .collect();
-        ListValue::new(fields)
+        (*self).into()
     }
 
     fn hash_scalar<H: std::hash::Hasher>(&self, state: &mut H) {
@@ -302,26 +318,12 @@ impl<'a> ScalarRef<'a> for ListRef<'a> {
 
 impl ScalarImpl {
     pub fn get_ident(&self) -> &'static str {
-        macro_rules! impl_all_get_ident {
-            ($({ $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
-                match self {
-                    $( Self::$variant_name(_) => stringify!($variant_name), )*
-                }
-            };
-        }
-        for_all_scalar_variants! { impl_all_get_ident }
+        dispatch_scalar_variants!(self, [I = VARIANT_NAME], { I })
     }
 }
 
 impl<'scalar> ScalarRefImpl<'scalar> {
     pub fn get_ident(&self) -> &'static str {
-        macro_rules! impl_all_get_ident {
-            ($({ $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
-                match self {
-                    $( Self::$variant_name(_) => stringify!($variant_name), )*
-                }
-            };
-        }
-        for_all_scalar_variants! { impl_all_get_ident }
+        dispatch_scalar_ref_variants!(self, [I = VARIANT_NAME], { I })
     }
 }

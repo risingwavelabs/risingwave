@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -45,6 +45,10 @@ impl Row {
     pub fn values(&self) -> &[Option<Bytes>] {
         &self.0
     }
+
+    pub fn take(self) -> Vec<Option<Bytes>> {
+        self.0
+    }
 }
 
 impl Index<usize> for Row {
@@ -66,7 +70,7 @@ impl Format {
         match format_code {
             0 => Ok(Format::Text),
             1 => Ok(Format::Binary),
-            _ => Err(PsqlError::Internal(
+            _ => Err(PsqlError::Uncategorized(
                 format!("Unknown format code: {}", format_code).into(),
             )),
         }
@@ -102,7 +106,7 @@ impl<'a, 'b> FormatIterator<'a, 'b> {
             ));
         }
 
-        let default_format = provided_formats.get(0).copied().unwrap_or(Format::Text);
+        let default_format = provided_formats.first().copied().unwrap_or(Format::Text);
 
         Ok(Self {
             _formats: provided_formats,

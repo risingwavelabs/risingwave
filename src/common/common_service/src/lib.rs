@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,8 +15,12 @@
 // This is a stub lib.rs.
 
 #![feature(lint_reasons)]
+#![feature(impl_trait_in_assoc_type)]
+#![feature(error_generic_member_access)]
 
 pub mod metrics_manager;
 pub mod observer_manager;
 
 pub use metrics_manager::MetricsManager;
+
+pub mod tracing;

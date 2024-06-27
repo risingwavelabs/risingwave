@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,24 +14,37 @@
 
 use std::sync::Arc;
 
-use risingwave_rpc_client::HummockMetaClient;
-
 use super::task_progress::TaskProgressManagerRef;
-use crate::filter_key_extractor::FilterKeyExtractorManagerRef;
 use crate::hummock::compactor::CompactionExecutor;
 use crate::hummock::sstable_store::SstableStoreRef;
-use crate::hummock::{MemoryLimiter, SstableObjectIdManagerRef};
+use crate::hummock::MemoryLimiter;
 use crate::monitor::CompactorMetrics;
 use crate::opts::StorageOpts;
+
+pub type CompactionAwaitTreeRegRef = await_tree::Registry;
+
+pub fn new_compaction_await_tree_reg_ref(config: await_tree::Config) -> CompactionAwaitTreeRegRef {
+    await_tree::Registry::new(config)
+}
+
+pub mod await_tree_key {
+    /// Await-tree key type for compaction tasks.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    pub enum Compaction {
+        CompactRunner { task_id: u64, split_index: usize },
+        CompactSharedBuffer { id: usize },
+        SpawnUploadTask { id: usize },
+        MergingTask { id: usize },
+    }
+
+    pub use Compaction::*;
+}
 
 /// A `CompactorContext` describes the context of a compactor.
 #[derive(Clone)]
 pub struct CompactorContext {
     /// Storage options.
     pub storage_opts: Arc<StorageOpts>,
-
-    /// The meta client.
-    pub hummock_meta_client: Arc<dyn HummockMetaClient>,
 
     /// Sstable store that manages the sstables.
     pub sstable_store: SstableStoreRef,
@@ -44,23 +57,19 @@ pub struct CompactorContext {
 
     pub compaction_executor: Arc<CompactionExecutor>,
 
-    pub filter_key_extractor_manager: FilterKeyExtractorManagerRef,
-
-    pub output_memory_limiter: Arc<MemoryLimiter>,
-
-    pub sstable_object_id_manager: SstableObjectIdManagerRef,
+    pub memory_limiter: Arc<MemoryLimiter>,
 
     pub task_progress_manager: TaskProgressManagerRef,
+
+    pub await_tree_reg: Option<CompactionAwaitTreeRegRef>,
 }
 
 impl CompactorContext {
     pub fn new_local_compact_context(
         storage_opts: Arc<StorageOpts>,
         sstable_store: SstableStoreRef,
-        hummock_meta_client: Arc<dyn HummockMetaClient>,
         compactor_metrics: Arc<CompactorMetrics>,
-        sstable_object_id_manager: SstableObjectIdManagerRef,
-        filter_key_extractor_manager: FilterKeyExtractorManagerRef,
+        await_tree_reg: Option<CompactionAwaitTreeRegRef>,
     ) -> Self {
         let compaction_executor = if storage_opts.share_buffer_compaction_worker_threads_number == 0
         {
@@ -70,19 +79,17 @@ impl CompactorContext {
                 storage_opts.share_buffer_compaction_worker_threads_number as usize,
             )))
         };
+
         // not limit memory for local compact
-        let memory_limiter = MemoryLimiter::unlimit();
         Self {
             storage_opts,
-            hummock_meta_client,
             sstable_store,
             compactor_metrics,
             is_share_buffer_compact: true,
             compaction_executor,
-            filter_key_extractor_manager,
-            output_memory_limiter: memory_limiter,
-            sstable_object_id_manager,
+            memory_limiter: MemoryLimiter::unlimit(),
             task_progress_manager: Default::default(),
+            await_tree_reg,
         }
     }
 }

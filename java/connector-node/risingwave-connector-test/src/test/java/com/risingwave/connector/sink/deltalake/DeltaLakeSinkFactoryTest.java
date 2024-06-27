@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
 package com.risingwave.connector.sink.deltalake;
 
 import com.risingwave.connector.DeltaLakeSinkFactory;
-import com.risingwave.connector.api.TableSchema;
+import com.risingwave.connector.TestUtils;
 import io.delta.standalone.DeltaLog;
 import io.delta.standalone.Operation;
 import io.delta.standalone.OptimisticTransaction;
@@ -49,7 +49,7 @@ public class DeltaLakeSinkFactoryTest {
         Configuration conf = new Configuration();
         DeltaLog log = DeltaLog.forTable(conf, location);
 
-        // should be synchronized with `TableSchema.getMockTableSchema()`;
+        // should be synchronized with `TestUtils.getMockTableSchema()`;
         StructType schema =
                 new StructType(
                         new StructField[] {
@@ -72,8 +72,8 @@ public class DeltaLakeSinkFactoryTest {
     public void testCreate() throws IOException {
         createMockTable(location);
         DeltaLakeSinkFactory sinkFactory = new DeltaLakeSinkFactory();
-        sinkFactory.create(
-                TableSchema.getMockTableSchema(),
+        sinkFactory.createWriter(
+                TestUtils.getMockTableSchema(),
                 new HashMap<>() {
                     {
                         put("location", String.format("file://%s", location));

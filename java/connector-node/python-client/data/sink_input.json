@@ -1,18 +1,27 @@
 [
     [
         {
-            "id":1,
-            "name":"Alice"
+            "op_type": 1,
+            "line": {
+                "id": 1,
+                "name": "Alice"
+            }
         },
         {
-            "id":2,
-            "name":"Bob"
+            "op_type": 1,
+            "line": {
+                "id": 2,
+                "name": "Bob"
+            }
         }
     ],
     [
         {
-            "id":3,
-            "name":"clare"
+            "op_type": 1,
+            "line": {
+                "id": 3,
+                "name": "clare"
+            }
         }
     ]
 ]

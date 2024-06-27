@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,7 +11,8 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use anyhow::anyhow;
+
+pub mod aggregation;
 mod delete;
 mod expand;
 mod filter;
@@ -19,16 +20,21 @@ mod generic_exchange;
 mod group_top_n;
 mod hash_agg;
 mod hop_window;
+mod iceberg_scan;
 mod insert;
 mod join;
 mod limit;
-mod manager;
+mod log_row_seq_scan;
+mod managed;
+mod max_one_row;
+mod merge_sort;
 mod merge_sort_exchange;
 mod order_by;
 mod project;
 mod project_set;
 mod row_seq_scan;
 mod sort_agg;
+mod sort_over_window;
 mod source;
 mod sys_row_seq_scan;
 mod table_function;
@@ -39,6 +45,7 @@ mod update;
 mod utils;
 mod values;
 
+use anyhow::Context;
 use async_recursion::async_recursion;
 pub use delete::*;
 pub use expand::*;
@@ -48,34 +55,39 @@ pub use generic_exchange::*;
 pub use group_top_n::*;
 pub use hash_agg::*;
 pub use hop_window::*;
+pub use iceberg_scan::*;
 pub use insert::*;
 pub use join::*;
 pub use limit::*;
-pub use manager::*;
+pub use managed::*;
+pub use max_one_row::*;
+pub use merge_sort::*;
 pub use merge_sort_exchange::*;
 pub use order_by::*;
 pub use project::*;
 pub use project_set::*;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::PlanNode;
 use risingwave_pb::common::BatchQueryEpoch;
 pub use row_seq_scan::*;
 pub use sort_agg::*;
+pub use sort_over_window::SortOverWindowExecutor;
 pub use source::*;
 pub use table_function::*;
-use tokio::sync::watch::Receiver;
+use thiserror_ext::AsReport;
 pub use top_n::TopNExecutor;
 pub use union::*;
 pub use update::*;
 pub use utils::*;
 pub use values::*;
 
-use self::test_utils::{BlockExecutorBuidler, BusyLoopExecutorBuidler};
+use self::log_row_seq_scan::LogStoreRowSeqScanExecutorBuilder;
+use self::test_utils::{BlockExecutorBuilder, BusyLoopExecutorBuilder};
+use crate::error::Result;
 use crate::executor::sys_row_seq_scan::SysRowSeqScanExecutorBuilder;
-use crate::task::{BatchTaskContext, ShutdownMsg, TaskId};
+use crate::task::{BatchTaskContext, ShutdownToken, TaskId};
 
 pub type BoxedExecutor = Box<dyn Executor>;
 pub type BoxedDataChunkStream = BoxStream<'static, Result<DataChunk>>;
@@ -122,7 +134,7 @@ pub struct ExecutorBuilder<'a, C> {
     pub task_id: &'a TaskId,
     context: C,
     epoch: BatchQueryEpoch,
-    shutdown_rx: Receiver<ShutdownMsg>,
+    shutdown_rx: ShutdownToken,
 }
 
 macro_rules! build_executor {
@@ -143,7 +155,7 @@ impl<'a, C: Clone> ExecutorBuilder<'a, C> {
         task_id: &'a TaskId,
         context: C,
         epoch: BatchQueryEpoch,
-        shutdown_rx: Receiver<ShutdownMsg>,
+        shutdown_rx: ShutdownToken,
     ) -> Self {
         Self {
             plan_node,
@@ -180,12 +192,14 @@ impl<'a, C: Clone> ExecutorBuilder<'a, C> {
 
 impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
     pub async fn build(&self) -> Result<BoxedExecutor> {
-        self.try_build().await.map_err(|e| {
-            let err_msg = format!("Failed to build executor: {e}");
-            let plan_node_body = self.plan_node.get_node_body();
-            error!("{err_msg}, plan node is: \n {plan_node_body:?}");
-            anyhow!(err_msg).into()
-        })
+        self.try_build()
+            .await
+            .inspect_err(|e| {
+                let plan_node = self.plan_node.get_node_body();
+                error!(error = %e.as_report(), ?plan_node, "failed to build executor");
+            })
+            .context("failed to build executor")
+            .map_err(Into::into)
     }
 
     #[async_recursion]
@@ -224,15 +238,17 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
             NodeBody::ProjectSet => ProjectSetExecutor,
             NodeBody::Union => UnionExecutor,
             NodeBody::Source => SourceExecutor,
+            NodeBody::SortOverWindow => SortOverWindowExecutor,
+            NodeBody::MaxOneRow => MaxOneRowExecutor,
             // Follow NodeBody only used for test
-            NodeBody::BlockExecutor => BlockExecutorBuidler,
-            NodeBody::BusyLoopExecutor => BusyLoopExecutorBuidler,
+            NodeBody::BlockExecutor => BlockExecutorBuilder,
+            NodeBody::BusyLoopExecutor => BusyLoopExecutorBuilder,
+            NodeBody::LogRowSeqScan => LogStoreRowSeqScanExecutorBuilder,
         }
         .await?;
-        let input_desc = real_executor.identity().to_string();
+
         Ok(Box::new(ManagedExecutor::new(
             real_executor,
-            input_desc,
             self.shutdown_rx.clone(),
         )) as BoxedExecutor)
     }
@@ -242,26 +258,24 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
 mod tests {
     use risingwave_hummock_sdk::to_committed_batch_query_epoch;
     use risingwave_pb::batch_plan::PlanNode;
-    use tokio::sync::watch;
 
     use crate::executor::ExecutorBuilder;
-    use crate::task::{ComputeNodeContext, ShutdownMsg, TaskId};
+    use crate::task::{ComputeNodeContext, ShutdownToken, TaskId};
 
-    #[test]
-    fn test_clone_for_plan() {
+    #[tokio::test]
+    async fn test_clone_for_plan() {
         let plan_node = PlanNode::default();
         let task_id = &TaskId {
             task_id: 1,
             stage_id: 1,
             query_id: "test_query_id".to_string(),
         };
-        let (_tx, rx) = watch::channel(ShutdownMsg::Init);
         let builder = ExecutorBuilder::new(
             &plan_node,
             task_id,
             ComputeNodeContext::for_test(),
             to_committed_batch_query_epoch(u64::MAX),
-            rx,
+            ShutdownToken::empty(),
         );
         let child_plan = &PlanNode::default();
         let cloned_builder = builder.clone_for_plan(child_plan);

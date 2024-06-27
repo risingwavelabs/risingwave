@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@ mod consistent_hash; // TODO: move this to a separate module
 mod dispatcher;
 mod key;
 mod key_v2;
+pub mod table_distribution;
 
 pub use consistent_hash::bitmap::*;
 pub use consistent_hash::mapping::*;

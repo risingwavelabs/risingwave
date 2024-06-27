@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,20 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use core::fmt;
-
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::error::Result;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 
-use super::generic::Limit;
+use super::generic::TopNLimit;
+use super::utils::impl_distill_by_unit;
 use super::{
     gen_filter_and_pushdown, generic, BatchGroupTopN, ColPrunable, ColumnPruningContext,
-    ExprRewritable, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown,
-    PredicatePushdownContext, RewriteStreamContext, StreamDedup, StreamGroupTopN, ToBatch,
-    ToStream, ToStreamContext,
+    ExprRewritable, Logical, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary,
+    PredicatePushdown, PredicatePushdownContext, RewriteStreamContext, StreamDedup,
+    StreamGroupTopN, ToBatch, ToStream, ToStreamContext,
 };
+use crate::error::Result;
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::utils::Condition;
 
@@ -33,19 +33,14 @@ use crate::utils::Condition;
 /// an `ORDER BY`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalDedup {
-    pub base: PlanBase,
+    pub base: PlanBase<Logical>,
     core: generic::Dedup<PlanRef>,
 }
 
 impl LogicalDedup {
     pub fn new(input: PlanRef, dedup_cols: Vec<usize>) -> Self {
-        let base = PlanBase::new_logical(
-            input.ctx(),
-            input.schema().clone(),
-            dedup_cols.clone(),
-            input.functional_dependency().clone(),
-        );
         let core = generic::Dedup { input, dedup_cols };
+        let base = PlanBase::new_logical_with_core(&core);
         LogicalDedup { base, core }
     }
 
@@ -105,6 +100,8 @@ impl ToStream for LogicalDedup {
     }
 
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
+        use super::stream::prelude::*;
+
         let input = self.input().to_stream(ctx)?;
         let input = RequiredDist::hash_shard(self.dedup_cols())
             .enforce_if_not_satisfies(input, &Order::any())?;
@@ -117,7 +114,7 @@ impl ToStream for LogicalDedup {
             // If the input is not append-only, we use a `StreamGroupTopN` with the limit being 1.
             let logical_top_n = generic::TopN::with_group(
                 input,
-                Limit::new(1, false),
+                TopNLimit::new(1, false),
                 0,
                 Order::default(),
                 self.dedup_cols().to_vec(),
@@ -132,7 +129,7 @@ impl ToBatch for LogicalDedup {
         let input = self.input().to_batch()?;
         let logical_top_n = generic::TopN::with_group(
             input,
-            Limit::new(1, false),
+            TopNLimit::new(1, false),
             0,
             Order::default(),
             self.dedup_cols().to_vec(),
@@ -142,6 +139,8 @@ impl ToBatch for LogicalDedup {
 }
 
 impl ExprRewritable for LogicalDedup {}
+
+impl ExprVisitable for LogicalDedup {}
 
 impl ColPrunable for LogicalDedup {
     fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
@@ -183,8 +182,4 @@ impl ColPrunable for LogicalDedup {
     }
 }
 
-impl fmt::Display for LogicalDedup {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.core.fmt_with_name(f, "LogicalDedup")
-    }
-}
+impl_distill_by_unit!(LogicalDedup, core, "LogicalDedup");

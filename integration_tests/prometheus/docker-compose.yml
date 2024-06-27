@@ -1,30 +1,17 @@
 ---
-version: "3"
 services:
-  compactor-0:
+  risingwave-standalone:
     extends:
       file: ../../docker/docker-compose.yml
-      service: compactor-0
-  compute-node-0:
+      service: risingwave-standalone
+  postgres-0:
     extends:
       file: ../../docker/docker-compose.yml
-      service: compute-node-0
-  etcd-0:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: etcd-0
-  frontend-node-0:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: frontend-node-0
+      service: postgres-0
   grafana-0:
     extends:
       file: ../../docker/docker-compose.yml
       service: grafana-0
-  meta-node-0:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: meta-node-0
   minio-0:
     extends:
       file: ../../docker/docker-compose.yml
@@ -50,10 +37,8 @@ services:
     container_name: prometheus-0
     healthcheck:
       test:
-        - CMD
-        - printf
-        - ""
-        - /dev/tcp/127.0.0.1/9500
+        - CMD-SHELL
+        - sh -c 'printf "GET /-/healthy HTTP/1.0\n\n" | nc localhost 9500; exit $?;'
       interval: 1s
       timeout: 5s
       retries: 5
@@ -79,9 +64,9 @@ services:
       - prometheus-0
       - message_queue
 volumes:
-  compute-node-0:
+  risingwave-standalone:
     external: false
-  etcd-0:
+  postgres-0:
     external: false
   grafana-0:
     external: false

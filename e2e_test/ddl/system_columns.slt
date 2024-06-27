@@ -1,0 +1,23 @@
+statement error conflicts with a system column name
+create table t (v1 int, cmin int);
+
+statement error conflicts with a system column name
+create materialized view mv as select 1 as tableoid;
+
+statement error conflicts with a system column name
+create materialized view mv(ctid) as select 1 as x;
+
+# Unlike keywords, these are still reserved with quotes
+statement error conflicts with a system column name
+create table t (v1 int, "xmax" int);
+
+# But only reserved in lowercase
+statement ok
+create table t (v1 int, "xMin" int);
+
+statement ok
+drop table t;
+
+# Note that PostgreSQL folds to lowercase automatically without quotes
+statement error conflicts with a system column name
+create table t (v1 int, cMax int);

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,18 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ops::Range;
+use std::sync::Arc;
+use std::time::Duration;
+
 use bytes::Bytes;
 use fail::fail_point;
-use futures::future::try_join_all;
-use futures::StreamExt;
-use itertools::Itertools;
+use futures::{stream, StreamExt};
+use opendal::layers::{RetryLayer, TimeoutLayer};
+use opendal::raw::BoxedStaticFuture;
 use opendal::services::Memory;
-use opendal::{Metakey, Operator, Writer};
-use tokio::io::AsyncRead;
+use opendal::{Execute, Executor, Metakey, Operator, Writer};
+use risingwave_common::config::ObjectStoreConfig;
+use risingwave_common::range::RangeBoundsExt;
+use thiserror_ext::AsReport;
 
+use crate::object::object_metrics::ObjectStoreMetrics;
 use crate::object::{
-    BlockLocation, BoxedStreamingUploader, ObjectError, ObjectMetadata, ObjectResult, ObjectStore,
-    StreamingUploader,
+    prefix, ObjectDataStream, ObjectError, ObjectMetadata, ObjectMetadataIter, ObjectRangeBounds,
+    ObjectResult, ObjectStore, OperationType, StreamingUploader,
 };
 
 /// Opendal object storage.
@@ -31,12 +38,19 @@ use crate::object::{
 pub struct OpendalObjectStore {
     pub(crate) op: Operator,
     pub(crate) engine_type: EngineType,
+
+    pub(crate) config: Arc<ObjectStoreConfig>,
+    pub(crate) metrics: Arc<ObjectStoreMetrics>,
 }
+
 #[derive(Clone)]
 pub enum EngineType {
     Memory,
     Hdfs,
     Gcs,
+    Minio,
+    S3,
+    Obs,
     Oss,
     Webhdfs,
     Azblob,
@@ -45,21 +59,38 @@ pub enum EngineType {
 
 impl OpendalObjectStore {
     /// create opendal memory engine, used for unit tests.
-    pub fn new_memory_engine() -> ObjectResult<Self> {
+    pub fn test_new_memory_engine() -> ObjectResult<Self> {
         // Create memory backend builder.
         let builder = Memory::default();
         let op: Operator = Operator::new(builder)?.finish();
         Ok(Self {
             op,
             engine_type: EngineType::Memory,
+            config: Arc::new(ObjectStoreConfig::default()),
+            metrics: Arc::new(ObjectStoreMetrics::unused()),
         })
     }
 }
 
 #[async_trait::async_trait]
 impl ObjectStore for OpendalObjectStore {
-    fn get_object_prefix(&self, _obj_id: u64) -> String {
-        String::default()
+    type StreamingUploader = OpendalStreamingUploader;
+
+    fn get_object_prefix(&self, obj_id: u64, use_new_object_prefix_strategy: bool) -> String {
+        match self.engine_type {
+            EngineType::S3 => prefix::s3::get_object_prefix(obj_id),
+            EngineType::Minio => prefix::s3::get_object_prefix(obj_id),
+            EngineType::Memory => String::default(),
+            EngineType::Hdfs
+            | EngineType::Gcs
+            | EngineType::Obs
+            | EngineType::Oss
+            | EngineType::Webhdfs
+            | EngineType::Azblob
+            | EngineType::Fs => {
+                prefix::opendal_engine::get_object_prefix(obj_id, use_new_object_prefix_strategy)
+            }
+        }
     }
 
     async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
@@ -71,34 +102,40 @@ impl ObjectStore for OpendalObjectStore {
         }
     }
 
-    async fn streaming_upload(&self, path: &str) -> ObjectResult<BoxedStreamingUploader> {
-        Ok(Box::new(
-            OpenDalStreamingUploader::new(self.op.clone(), path.to_string()).await?,
-        ))
+    async fn streaming_upload(&self, path: &str) -> ObjectResult<Self::StreamingUploader> {
+        Ok(OpendalStreamingUploader::new(
+            self.op.clone(),
+            path.to_string(),
+            self.config.clone(),
+            self.metrics.clone(),
+            self.store_media_type(),
+        )
+        .await?)
     }
 
-    async fn read(&self, path: &str, block: Option<BlockLocation>) -> ObjectResult<Bytes> {
-        match block {
-            Some(block) => {
-                let range = block.offset as u64..(block.offset + block.size) as u64;
-                let res = Bytes::from(self.op.range_read(path, range).await?);
+    async fn read(&self, path: &str, range: impl ObjectRangeBounds) -> ObjectResult<Bytes> {
+        let data = if range.is_full() {
+            self.op.read(path).await?
+        } else {
+            self.op
+                .read_with(path)
+                .range(range.map(|v| *v as u64))
+                .await?
+        };
 
-                if block.size != res.len() {
-                    Err(ObjectError::internal("bad block offset and size"))
-                } else {
-                    Ok(res)
-                }
-            }
-            None => Ok(Bytes::from(self.op.read(path).await?)),
+        if let Some(len) = range.len()
+            && len != data.len()
+        {
+            return Err(ObjectError::internal(format!(
+                "mismatched size: expected {}, found {} when reading {} at {:?}",
+                len,
+                data.len(),
+                path,
+                range,
+            )));
         }
-    }
 
-    async fn readv(&self, path: &str, block_locs: &[BlockLocation]) -> ObjectResult<Vec<Bytes>> {
-        let futures = block_locs
-            .iter()
-            .map(|block_loc| self.read(path, Some(*block_loc)))
-            .collect_vec();
-        try_join_all(futures).await
+        Ok(data.to_bytes())
     }
 
     /// Returns a stream reading the object specified in `path`. If given, the stream starts at the
@@ -107,17 +144,45 @@ impl ObjectStore for OpendalObjectStore {
     async fn streaming_read(
         &self,
         path: &str,
-        start_pos: Option<usize>,
-    ) -> ObjectResult<Box<dyn AsyncRead + Unpin + Send + Sync>> {
+        range: Range<usize>,
+    ) -> ObjectResult<ObjectDataStream> {
         fail_point!("opendal_streaming_read_err", |_| Err(
             ObjectError::internal("opendal streaming read error")
         ));
-        let reader = match start_pos {
-            Some(start_position) => self.op.range_reader(path, start_position as u64..).await?,
-            None => self.op.reader(path).await?,
-        };
+        let range: Range<u64> = (range.start as u64)..(range.end as u64);
 
-        Ok(Box::new(reader))
+        // The layer specified first will be executed first.
+        // `TimeoutLayer` must be specified before `RetryLayer`.
+        // Otherwise, it will lead to bad state inside OpenDAL and panic.
+        // See https://docs.rs/opendal/latest/opendal/layers/struct.RetryLayer.html#panics
+        let reader = self
+            .op
+            .clone()
+            .layer(TimeoutLayer::new().with_io_timeout(Duration::from_millis(
+                self.config.retry.streaming_read_attempt_timeout_ms,
+            )))
+            .layer(
+                RetryLayer::new()
+                    .with_min_delay(Duration::from_millis(
+                        self.config.retry.req_backoff_interval_ms,
+                    ))
+                    .with_max_delay(Duration::from_millis(
+                        self.config.retry.req_backoff_max_delay_ms,
+                    ))
+                    .with_max_times(self.config.retry.streaming_read_retry_attempts)
+                    .with_factor(self.config.retry.req_backoff_factor as f32)
+                    .with_jitter(),
+            )
+            .reader_with(path)
+            .await?;
+        let stream = reader.into_bytes_stream(range).await?.map(|item| {
+            item.map(|b| Bytes::copy_from_slice(b.as_ref()))
+                .map_err(|e| {
+                    ObjectError::internal(format!("reader into_stream fail {}", e.as_report()))
+                })
+        });
+
+        Ok(Box::pin(stream))
     }
 
     async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata> {
@@ -149,139 +214,256 @@ impl ObjectStore for OpendalObjectStore {
         Ok(())
     }
 
-    async fn list(&self, prefix: &str) -> ObjectResult<Vec<ObjectMetadata>> {
-        let mut object_lister = self.op.scan(prefix).await?;
-        let mut metadata_list = vec![];
-        while let Some(obj) = object_lister.next().await {
-            let object = obj?;
+    async fn list(&self, prefix: &str) -> ObjectResult<ObjectMetadataIter> {
+        let object_lister = self
+            .op
+            .lister_with(prefix)
+            .recursive(true)
+            .metakey(Metakey::ContentLength)
+            .await?;
 
-            let key = object.path().to_string();
+        let stream = stream::unfold(object_lister, |mut object_lister| async move {
+            match object_lister.next().await {
+                Some(Ok(object)) => {
+                    let key = object.path().to_string();
+                    let om = object.metadata();
+                    let last_modified = match om.last_modified() {
+                        Some(t) => t.timestamp() as f64,
+                        None => 0_f64,
+                    };
+                    let total_size = om.content_length() as usize;
+                    let metadata = ObjectMetadata {
+                        key,
+                        last_modified,
+                        total_size,
+                    };
+                    Some((Ok(metadata), object_lister))
+                }
+                Some(Err(err)) => Some((Err(err.into()), object_lister)),
+                None => None,
+            }
+        });
 
-            let om = self
-                .op
-                .metadata(&object, Metakey::LastModified | Metakey::ContentLength)
-                .await?;
-
-            let last_modified = match om.last_modified() {
-                Some(t) => t.timestamp() as f64,
-                None => 0_f64,
-            };
-
-            let total_size = om.content_length() as usize;
-            let metadata = ObjectMetadata {
-                key,
-                last_modified,
-                total_size,
-            };
-            metadata_list.push(metadata);
-        }
-        Ok(metadata_list)
+        Ok(stream.boxed())
     }
 
     fn store_media_type(&self) -> &'static str {
         match self.engine_type {
             EngineType::Memory => "Memory",
             EngineType::Hdfs => "Hdfs",
+            EngineType::Minio => "Minio",
+            EngineType::S3 => "S3",
             EngineType::Gcs => "Gcs",
+            EngineType::Obs => "Obs",
             EngineType::Oss => "Oss",
             EngineType::Webhdfs => "Webhdfs",
             EngineType::Azblob => "Azblob",
             EngineType::Fs => "Fs",
         }
     }
+
+    fn support_streaming_upload(&self) -> bool {
+        self.op.info().native_capability().write_can_multi
+    }
+}
+
+struct OpendalStreamingUploaderExecute {
+    /// To record metrics for uploading part.
+    metrics: Arc<ObjectStoreMetrics>,
+    media_type: &'static str,
+}
+
+impl OpendalStreamingUploaderExecute {
+    const STREAMING_UPLOAD_TYPE: OperationType = OperationType::StreamingUpload;
+
+    fn new(metrics: Arc<ObjectStoreMetrics>, media_type: &'static str) -> Self {
+        Self {
+            metrics,
+            media_type,
+        }
+    }
+}
+
+impl Execute for OpendalStreamingUploaderExecute {
+    fn execute(&self, f: BoxedStaticFuture<()>) {
+        let operation_type_str = Self::STREAMING_UPLOAD_TYPE.as_str();
+        let media_type = self.media_type;
+
+        let metrics = self.metrics.clone();
+        let _handle = tokio::spawn(async move {
+            let _timer = metrics
+                .operation_latency
+                .with_label_values(&[media_type, operation_type_str])
+                .start_timer();
+
+            f.await
+        });
+    }
 }
 
 /// Store multiple parts in a map, and concatenate them on finish.
-pub struct OpenDalStreamingUploader {
+pub struct OpendalStreamingUploader {
     writer: Writer,
+    /// Buffer for data. It will store at least `UPLOAD_BUFFER_SIZE` bytes of data before wrapping itself
+    /// into a stream and upload to object store as a part.
+    buf: Vec<Bytes>,
+    /// Length of the data that have not been uploaded to object store.
+    not_uploaded_len: usize,
+    /// Whether the writer is valid. The writer is invalid after abort/close.
+    is_valid: bool,
+
+    abort_on_err: bool,
 }
-impl OpenDalStreamingUploader {
-    pub async fn new(op: Operator, path: String) -> ObjectResult<Self> {
-        let writer = op.writer(&path).await?;
-        Ok(Self { writer })
+
+impl OpendalStreamingUploader {
+    const UPLOAD_BUFFER_SIZE: usize = 16 * 1024 * 1024;
+
+    pub async fn new(
+        op: Operator,
+        path: String,
+        config: Arc<ObjectStoreConfig>,
+        metrics: Arc<ObjectStoreMetrics>,
+        media_type: &'static str,
+    ) -> ObjectResult<Self> {
+        let monitored_execute = OpendalStreamingUploaderExecute::new(metrics, media_type);
+
+        // The layer specified first will be executed first.
+        // `TimeoutLayer` must be specified before `RetryLayer`.
+        // Otherwise, it will lead to bad state inside OpenDAL and panic.
+        // See https://docs.rs/opendal/latest/opendal/layers/struct.RetryLayer.html#panics
+        let writer = op
+            .clone()
+            .layer(TimeoutLayer::new().with_io_timeout(Duration::from_millis(
+                config.retry.streaming_upload_attempt_timeout_ms,
+            )))
+            .layer(
+                RetryLayer::new()
+                    .with_min_delay(Duration::from_millis(config.retry.req_backoff_interval_ms))
+                    .with_max_delay(Duration::from_millis(config.retry.req_backoff_max_delay_ms))
+                    .with_max_times(config.retry.streaming_upload_retry_attempts)
+                    .with_factor(config.retry.req_backoff_factor as f32)
+                    .with_jitter(),
+            )
+            .writer_with(&path)
+            .concurrent(config.opendal_upload_concurrency)
+            .executor(Executor::with(monitored_execute))
+            .await?;
+        Ok(Self {
+            writer,
+            buf: vec![],
+            not_uploaded_len: 0,
+            is_valid: true,
+            abort_on_err: config.opendal_writer_abort_on_err,
+        })
+    }
+
+    async fn flush(&mut self) -> ObjectResult<()> {
+        let data: Vec<Bytes> = self.buf.drain(..).collect();
+        debug_assert_eq!(
+            data.iter().map(|b| b.len()).sum::<usize>(),
+            self.not_uploaded_len
+        );
+        if let Err(err) = self.writer.write(data).await {
+            self.is_valid = false;
+            if self.abort_on_err {
+                self.writer.abort().await?;
+            }
+            return Err(err.into());
+        }
+        self.not_uploaded_len = 0;
+        Ok(())
     }
 }
 
-const OPENDAL_BUFFER_SIZE: u64 = 8 * 1024 * 1024;
-
-#[async_trait::async_trait]
-impl StreamingUploader for OpenDalStreamingUploader {
+impl StreamingUploader for OpendalStreamingUploader {
     async fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()> {
-        self.writer.write(data).await?;
+        assert!(self.is_valid);
+        self.not_uploaded_len += data.len();
+        self.buf.push(data);
+        if self.not_uploaded_len >= Self::UPLOAD_BUFFER_SIZE {
+            self.flush().await?;
+        }
         Ok(())
     }
 
-    async fn finish(mut self: Box<Self>) -> ObjectResult<()> {
+    async fn finish(mut self) -> ObjectResult<()> {
+        assert!(self.is_valid);
+        if self.not_uploaded_len > 0 {
+            self.flush().await?;
+        }
+
+        assert!(self.buf.is_empty());
+        assert_eq!(self.not_uploaded_len, 0);
+
+        self.is_valid = false;
         match self.writer.close().await {
             Ok(_) => (),
-            Err(_) => self.writer.abort().await?,
+            Err(err) => {
+                if self.abort_on_err {
+                    self.writer.abort().await?;
+                }
+                return Err(err.into());
+            }
         };
 
         Ok(())
     }
 
     fn get_memory_usage(&self) -> u64 {
-        OPENDAL_BUFFER_SIZE
+        Self::UPLOAD_BUFFER_SIZE as u64
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use bytes::Bytes;
+    use stream::TryStreamExt;
 
     use super::*;
 
-    fn gen_test_payload() -> Vec<u8> {
-        let mut ret = Vec::new();
-        for i in 0..100000 {
-            ret.extend(format!("{:05}", i).as_bytes());
-        }
-        ret
+    async fn list_all(prefix: &str, store: &OpendalObjectStore) -> Vec<ObjectMetadata> {
+        store
+            .list(prefix)
+            .await
+            .unwrap()
+            .try_collect::<Vec<_>>()
+            .await
+            .unwrap()
     }
+
     #[tokio::test]
     async fn test_memory_upload() {
         let block = Bytes::from("123456");
-        let store = OpendalObjectStore::new_memory_engine().unwrap();
+        let store = OpendalObjectStore::test_new_memory_engine().unwrap();
         store.upload("/abc", block).await.unwrap();
 
         // No such object.
-        store
-            .read("/ab", Some(BlockLocation { offset: 0, size: 3 }))
-            .await
-            .unwrap_err();
+        store.read("/ab", 0..3).await.unwrap_err();
 
-        let bytes = store
-            .read("/abc", Some(BlockLocation { offset: 4, size: 2 }))
-            .await
-            .unwrap();
+        let bytes = store.read("/abc", 4..6).await.unwrap();
         assert_eq!(String::from_utf8(bytes.to_vec()).unwrap(), "56".to_string());
-
-        // Overflow.
-        store
-            .read(
-                "/abc",
-                Some(BlockLocation {
-                    offset: 4,
-                    size: 40,
-                }),
-            )
-            .await
-            .unwrap_err();
 
         store.delete("/abc").await.unwrap();
 
         // No such object.
-        store
-            .read("/abc", Some(BlockLocation { offset: 0, size: 3 }))
-            .await
-            .unwrap_err();
+        store.read("/abc", 0..3).await.unwrap_err();
+    }
+
+    #[tokio::test]
+    #[should_panic]
+    async fn test_memory_read_overflow() {
+        let block = Bytes::from("123456");
+        let store = OpendalObjectStore::test_new_memory_engine().unwrap();
+        store.upload("/abc", block).await.unwrap();
+
+        // Overflow.
+        store.read("/abc", 4..44).await.unwrap_err();
     }
 
     #[tokio::test]
     async fn test_memory_metadata() {
         let block = Bytes::from("123456");
         let path = "/abc".to_string();
-        let obj_store = OpendalObjectStore::new_memory_engine().unwrap();
+        let obj_store = OpendalObjectStore::test_new_memory_engine().unwrap();
         obj_store.upload("/abc", block).await.unwrap();
 
         let err = obj_store.metadata("/not_exist").await.unwrap_err();
@@ -295,51 +477,21 @@ mod tests {
     async fn test_memory_delete_objects_and_list_object() {
         let block1 = Bytes::from("123456");
         let block2 = Bytes::from("987654");
-        let store = OpendalObjectStore::new_memory_engine().unwrap();
+        let store = OpendalObjectStore::test_new_memory_engine().unwrap();
         store.upload("abc", Bytes::from("123456")).await.unwrap();
         store.upload("prefix/abc", block1).await.unwrap();
+
         store.upload("prefix/xyz", block2).await.unwrap();
 
-        assert_eq!(store.list("").await.unwrap().len(), 3);
-        assert_eq!(store.list("prefix/").await.unwrap().len(), 2);
+        assert_eq!(list_all("", &store).await.len(), 3);
+        assert_eq!(list_all("prefix/", &store).await.len(), 2);
         let str_list = [String::from("prefix/abc"), String::from("prefix/xyz")];
 
         store.delete_objects(&str_list).await.unwrap();
 
-        assert!(store.read("prefix/abc/", None).await.is_err());
-        assert!(store.read("prefix/xyz/", None).await.is_err());
-        assert_eq!(store.list("").await.unwrap().len(), 1);
-        assert_eq!(store.list("prefix/").await.unwrap().len(), 0);
-    }
-
-    #[tokio::test]
-    async fn test_memory_read_multi_block() {
-        let store = OpendalObjectStore::new_memory_engine().unwrap();
-        let payload = gen_test_payload();
-        store
-            .upload("test.obj", Bytes::from(payload.clone()))
-            .await
-            .unwrap();
-        let metadata = store.metadata("test.obj").await.unwrap();
-        assert_eq!(payload.len(), metadata.total_size);
-        let test_loc = vec![(0, 1000), (10000, 1000), (20000, 1000)];
-        let read_data = store
-            .readv(
-                "test.obj",
-                &test_loc
-                    .iter()
-                    .map(|(offset, size)| BlockLocation {
-                        offset: *offset,
-                        size: *size,
-                    })
-                    .collect_vec(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(test_loc.len(), read_data.len());
-        for (i, (offset, size)) in test_loc.iter().enumerate() {
-            assert_eq!(&payload[*offset..(*offset + *size)], &read_data[i][..]);
-        }
-        store.delete("test.obj").await.unwrap();
+        assert!(store.read("prefix/abc/", ..).await.is_err());
+        assert!(store.read("prefix/xyz/", ..).await.is_err());
+        assert_eq!(list_all("", &store).await.len(), 1);
+        assert_eq!(list_all("prefix/", &store).await.len(), 0);
     }
 }

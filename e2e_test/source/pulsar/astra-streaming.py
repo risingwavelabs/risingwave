@@ -20,11 +20,11 @@ def do_test(config):
     cur.execute(f'''CREATE TABLE t (v1 int, v2 varchar)
                     WITH (
                     connector='pulsar',
-                    topic='persistent://tenant0/default/topic0',
+                    topic='persistent://meetup/default/ci-test',
                     service.url='pulsar+ssl://pulsar-gcp-useast1.streaming.datastax.com:6651',
                     auth.token='{config['ASTRA_STREAMING_TOKEN']}'
                     )
-                    ROW FORMAT JSON''')
+                    FORMAT PLAIN ENCODE JSON''')
     sleep(5)
 
     # Do test with slt

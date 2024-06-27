@@ -18,6 +18,18 @@ GRANT CREATE ON SCHEMA schema1 TO user1 WITH GRANT OPTION GRANTED BY user;
 statement ok
 GRANT ALL PRIVILEGES ON ALL SOURCES IN SCHEMA schema1 TO user1 GRANTED BY user;
 
+# Grant invalid privilege on source.
+statement error
+GRANT INSERT ON ALL SOURCES IN SCHEMA schema1 TO user1 GRANTED BY user;
+
+# Grant insert privilege on table.
+statement ok
+GRANT INSERT ON ALL TABLES IN SCHEMA schema1 TO user1 GRANTED BY user;
+
+# Grant privilege on table.
+statement ok
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA schema1 TO user1 GRANTED BY user;
+
 # Grant privilege on all mviews in schema for user1.
 statement ok
 GRANT ALL PRIVILEGES ON ALL MATERIALIZED VIEWS IN SCHEMA schema1 TO user1 GRANTED BY user;
@@ -29,6 +41,9 @@ REVOKE ALL PRIVILEGES ON ALL MATERIALIZED VIEWS IN SCHEMA schema1 FROM user1;
 # Revoke privilege on all sources in schema for user1.
 statement ok
 REVOKE ALL PRIVILEGES ON ALL SOURCES IN SCHEMA schema1 FROM user1;
+
+statement ok
+REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA schema1 FROM user1;
 
 # Revoke privilege on schema for user1.
 statement ok

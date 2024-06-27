@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,23 +12,31 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::LazyLock;
+
 use prometheus::core::{AtomicU64, GenericCounter, GenericCounterVec};
 use prometheus::{
     exponential_buckets, histogram_opts, register_histogram_vec_with_registry,
     register_int_counter_vec_with_registry, register_int_counter_with_registry, HistogramVec,
     Registry,
 };
+use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 
+pub static GLOBAL_OBJECT_STORE_METRICS: LazyLock<ObjectStoreMetrics> =
+    LazyLock::new(|| ObjectStoreMetrics::new(&GLOBAL_METRICS_REGISTRY));
+
+#[derive(Clone)]
 pub struct ObjectStoreMetrics {
     pub write_bytes: GenericCounter<AtomicU64>,
     pub read_bytes: GenericCounter<AtomicU64>,
     pub operation_latency: HistogramVec,
     pub operation_size: HistogramVec,
     pub failure_count: GenericCounterVec<AtomicU64>,
+    pub request_retry_count: GenericCounterVec<AtomicU64>,
 }
 
 impl ObjectStoreMetrics {
-    pub fn new(registry: Registry) -> Self {
+    fn new(registry: &Registry) -> Self {
         let read_bytes = register_int_counter_with_registry!(
             "object_store_read_bytes",
             "Total bytes of requests read from object store",
@@ -81,17 +89,26 @@ impl ObjectStoreMetrics {
         )
         .unwrap();
 
+        let request_retry_count = register_int_counter_vec_with_registry!(
+            "object_store_request_retry_count",
+            "The number of retry times of object store request",
+            &["type"],
+            registry
+        )
+        .unwrap();
+
         Self {
             write_bytes,
             read_bytes,
             operation_latency,
             operation_size,
             failure_count,
+            request_retry_count,
         }
     }
 
     /// Creates a new `HummockStateStoreMetrics` instance used in tests or other places.
     pub fn unused() -> Self {
-        Self::new(Registry::new())
+        GLOBAL_OBJECT_STORE_METRICS.clone()
     }
 }

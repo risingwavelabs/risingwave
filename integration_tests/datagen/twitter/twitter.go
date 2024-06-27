@@ -36,6 +36,15 @@ type twitterUser struct {
 	Followers int    `json:"followers"`
 }
 
+// TODO(eric): Actually there are 2 topics here...
+func (r *twitterEvent) Topic() string {
+	return "twitter"
+}
+
+func (r *twitterEvent) Key() string {
+	return r.Data.Id
+}
+
 func (r *twitterEvent) ToPostgresSql() string {
 	return fmt.Sprintf("INSERT INTO tweet (created_at, id, text, lang, author_id) values ('%s', '%s', '%s', '%s', '%s'); INSERT INTO user (created_at, id, name, username, followers) values ('%s', '%s', '%s', '%s', %d);",
 		r.Data.CreatedAt, r.Data.Id, r.Data.Text, r.Data.Lang, r.Author.Id,
@@ -43,12 +52,12 @@ func (r *twitterEvent) ToPostgresSql() string {
 	)
 }
 
-func (r *twitterEvent) ToJson() (topic string, key string, data []byte) {
-	data, _ = json.Marshal(r)
-	return "twitter", r.Data.Id, data
+func (r *twitterEvent) ToJson() []byte {
+	data, _ := json.Marshal(r)
+	return data
 }
 
-func (r *twitterEvent) ToProtobuf() (topic string, key string, data []byte) {
+func (r *twitterEvent) ToProtobuf() []byte {
 	m := proto.Event{
 		Data: &proto.TweetData{
 			CreatedAt: r.Data.CreatedAt,
@@ -68,10 +77,10 @@ func (r *twitterEvent) ToProtobuf() (topic string, key string, data []byte) {
 	if err != nil {
 		panic(err)
 	}
-	return "twitter", r.Data.Id, data
+	return data
 }
 
-func (r *twitterEvent) ToAvro() (topic string, key string, data []byte) {
+func (r *twitterEvent) ToAvro() []byte {
 	obj := map[string]interface{}{
 		"data": map[string]interface{}{
 			"created_at": r.Data.CreatedAt,
@@ -91,7 +100,7 @@ func (r *twitterEvent) ToAvro() (topic string, key string, data []byte) {
 	if err != nil {
 		panic(err)
 	}
-	return "twitter", r.Data.Id, binary
+	return binary
 }
 
 type twitterGen struct {
@@ -111,7 +120,7 @@ func NewTwitterGen() gen.LoadGenerator {
 			endTime, _ := time.Parse("2006-01-01", fmt.Sprintf("%d-01-01", endYear))
 			startTime, _ := time.Parse("2006-01-01", fmt.Sprintf("%d-01-01", startYear))
 			users[id] = &twitterUser{
-				CreatedAt: faker.DateRange(startTime, endTime).Format(gen.RwTimestampLayout),
+				CreatedAt: faker.DateRange(startTime, endTime).Format(gen.RwTimestamptzLayout),
 				Id:        id,
 				Name:      fmt.Sprintf("%s %s", faker.Name(), faker.Adverb()),
 				UserName:  faker.Username(),
@@ -143,7 +152,7 @@ func (t *twitterGen) generate() twitterEvent {
 	return twitterEvent{
 		Data: tweetData{
 			Id:        id,
-			CreatedAt: time.Now().Format(gen.RwTimestampLayout),
+			CreatedAt: time.Now().Format(gen.RwTimestamptzLayout),
 			Text:      sentence,
 			Lang:      gofakeit.Language(),
 		},

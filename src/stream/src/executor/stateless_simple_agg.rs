@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,106 +12,57 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use futures::StreamExt;
-use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::column::Column;
-use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::catalog::Schema;
+use risingwave_common::array::Op;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::agg::AggCall;
+use risingwave_expr::aggregate::{
+    build_retractable, AggCall, AggregateState, BoxedAggregateFunction,
+};
 
-use super::aggregation::agg_impl::{create_streaming_agg_impl, StreamingAggImpl};
-use super::aggregation::{agg_call_filter_res, generate_agg_schema};
-use super::error::StreamExecutorError;
-use super::*;
-use crate::error::StreamResult;
+use super::aggregation::agg_call_filter_res;
+use crate::executor::prelude::*;
 
 pub struct StatelessSimpleAggExecutor {
-    ctx: ActorContextRef,
-    pub(super) input: Box<dyn Executor>,
-    pub(super) info: ExecutorInfo,
+    _ctx: ActorContextRef,
+    pub(super) input: Executor,
+    pub(super) schema: Schema,
+    pub(super) aggs: Vec<BoxedAggregateFunction>,
     pub(super) agg_calls: Vec<AggCall>,
 }
 
-impl Executor for StatelessSimpleAggExecutor {
+impl Execute for StatelessSimpleAggExecutor {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.info.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.info.identity
     }
 }
 
 impl StatelessSimpleAggExecutor {
     async fn apply_chunk(
-        ctx: &ActorContextRef,
-        identity: &str,
         agg_calls: &[AggCall],
-        aggregators: &mut [Box<dyn StreamingAggImpl>],
-        chunk: StreamChunk,
+        aggs: &[BoxedAggregateFunction],
+        states: &mut [AggregateState],
+        chunk: &StreamChunk,
     ) -> StreamExecutorResult<()> {
-        let capacity = chunk.capacity();
-        let (ops, columns, visibility) = chunk.into_inner();
-        let mut visibilities = Vec::with_capacity(agg_calls.len());
-        for agg_call in agg_calls {
-            let result = agg_call_filter_res(
-                ctx,
-                identity,
-                agg_call,
-                &columns,
-                visibility.as_ref(),
-                capacity,
-            )
-            .await?;
-            visibilities.push(result)
+        for ((agg, call), state) in aggs.iter().zip_eq_fast(agg_calls).zip_eq_fast(states) {
+            let vis = agg_call_filter_res(call, chunk).await?;
+            let chunk = chunk.project_with_vis(call.args.val_indices(), vis);
+            agg.update(state, &chunk).await?;
         }
-        agg_calls
-            .iter()
-            .zip_eq_fast(visibilities)
-            .zip_eq_fast(aggregators)
-            .try_for_each(|((agg_call, visibility), state)| {
-                let col_refs = agg_call
-                    .args
-                    .val_indices()
-                    .iter()
-                    .map(|idx| columns[*idx].array_ref())
-                    .collect_vec();
-                state.apply_batch(&ops, visibility.as_ref(), &col_refs)
-            })?;
         Ok(())
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(self) {
         let StatelessSimpleAggExecutor {
-            ctx,
+            _ctx,
             input,
-            info,
+            schema,
+            aggs,
             agg_calls,
         } = self;
         let input = input.execute();
         let mut is_dirty = false;
-        let mut aggregators: Vec<_> = agg_calls
-            .iter()
-            .map(|agg_call| {
-                create_streaming_agg_impl(
-                    agg_call.args.arg_types(),
-                    &agg_call.kind,
-                    &agg_call.return_type,
-                    None,
-                )
-            })
-            .try_collect()?;
+        let mut states: Vec<_> = aggs.iter().map(|agg| agg.create_state()).try_collect()?;
 
         #[for_await]
         for msg in input {
@@ -119,32 +70,31 @@ impl StatelessSimpleAggExecutor {
             match msg {
                 Message::Watermark(_) => {}
                 Message::Chunk(chunk) => {
-                    Self::apply_chunk(&ctx, &info.identity, &agg_calls, &mut aggregators, chunk)
-                        .await?;
+                    Self::apply_chunk(&agg_calls, &aggs, &mut states, &chunk).await?;
                     is_dirty = true;
                 }
                 m @ Message::Barrier(_) => {
                     if is_dirty {
                         is_dirty = false;
 
-                        let mut builders = info.schema.create_array_builders(1);
-                        aggregators
-                            .iter_mut()
+                        let mut builders = schema.create_array_builders(1);
+                        for ((agg, state), builder) in aggs
+                            .iter()
+                            .zip_eq_fast(states.iter_mut())
                             .zip_eq_fast(builders.iter_mut())
-                            .try_for_each(|(state, builder)| {
-                                let data = state.get_output()?;
-                                trace!("append_datum: {:?}", data);
-                                builder.append_datum(&data);
-                                state.reset();
-                                Ok::<_, StreamExecutorError>(())
-                            })?;
-                        let columns: Vec<Column> = builders
+                        {
+                            let data = agg.get_result(state).await?;
+                            *state = agg.create_state()?;
+                            trace!("append: {:?}", data);
+                            builder.append(data);
+                        }
+                        let columns = builders
                             .into_iter()
                             .map(|builder| Ok::<_, StreamExecutorError>(builder.finish().into()))
                             .try_collect()?;
                         let ops = vec![Op::Insert; 1];
 
-                        yield Message::Chunk(StreamChunk::new(ops, columns, None));
+                        yield Message::Chunk(StreamChunk::new(ops, columns));
                     }
 
                     yield m;
@@ -157,22 +107,16 @@ impl StatelessSimpleAggExecutor {
 impl StatelessSimpleAggExecutor {
     pub fn new(
         ctx: ActorContextRef,
-        input: Box<dyn Executor>,
+        input: Executor,
+        schema: Schema,
         agg_calls: Vec<AggCall>,
-        pk_indices: PkIndices,
-        executor_id: u64,
     ) -> StreamResult<Self> {
-        let schema = generate_agg_schema(input.as_ref(), &agg_calls, None);
-        let info = ExecutorInfo {
-            schema,
-            pk_indices,
-            identity: format!("StatelessSimpleAggExecutor-{}", executor_id),
-        };
-
+        let aggs = agg_calls.iter().map(build_retractable).try_collect()?;
         Ok(StatelessSimpleAggExecutor {
-            ctx,
+            _ctx: ctx,
             input,
-            info,
+            schema,
+            aggs,
             agg_calls,
         })
     }
@@ -181,45 +125,30 @@ impl StatelessSimpleAggExecutor {
 #[cfg(test)]
 mod tests {
     use assert_matches::assert_matches;
-    use futures::StreamExt;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
-    use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::schema_test_utils;
-    use risingwave_common::types::DataType;
-    use risingwave_expr::agg::{AggArgs, AggKind};
+    use risingwave_common::util::epoch::test_epoch;
 
     use super::*;
+    use crate::executor::test_utils::agg_executor::generate_agg_schema;
     use crate::executor::test_utils::MockSource;
-    use crate::executor::{Executor, StatelessSimpleAggExecutor};
 
     #[tokio::test]
     async fn test_no_chunk() {
         let schema = schema_test_utils::ii();
-        let (mut tx, source) = MockSource::channel(schema, vec![2]);
-        tx.push_barrier(1, false);
-        tx.push_barrier(2, false);
-        tx.push_barrier(3, false);
+        let (mut tx, source) = MockSource::channel();
+        let source = source.into_executor(schema, vec![2]);
+        tx.push_barrier(test_epoch(1), false);
+        tx.push_barrier(test_epoch(2), false);
+        tx.push_barrier(test_epoch(3), false);
 
-        let agg_calls = vec![AggCall {
-            kind: AggKind::Count,
-            args: AggArgs::None,
-            return_type: DataType::Int64,
-            column_orders: vec![],
-            filter: None,
-            distinct: false,
-        }];
+        let agg_calls = vec![AggCall::from_pretty("(count:int8)")];
+        let schema = generate_agg_schema(&source, &agg_calls, None);
 
-        let simple_agg = Box::new(
-            StatelessSimpleAggExecutor::new(
-                ActorContext::create(123),
-                Box::new(source),
-                agg_calls,
-                vec![],
-                1,
-            )
-            .unwrap(),
-        );
-        let mut simple_agg = simple_agg.execute();
+        let simple_agg =
+            StatelessSimpleAggExecutor::new(ActorContext::for_test(123), source, schema, agg_calls)
+                .unwrap();
+        let mut simple_agg = simple_agg.boxed().execute();
 
         assert_matches!(
             simple_agg.next().await.unwrap().unwrap(),
@@ -238,15 +167,16 @@ mod tests {
     #[tokio::test]
     async fn test_local_simple_agg() {
         let schema = schema_test_utils::iii();
-        let (mut tx, source) = MockSource::channel(schema, vec![2]); // pk\
-        tx.push_barrier(1, false);
+        let (mut tx, source) = MockSource::channel();
+        let source = source.into_executor(schema, vec![2]);
+        tx.push_barrier(test_epoch(1), false);
         tx.push_chunk(StreamChunk::from_pretty(
             "   I   I    I
             + 100 200 1001
             +  10  14 1002
             +   4 300 1003",
         ));
-        tx.push_barrier(2, false);
+        tx.push_barrier(test_epoch(2), false);
         tx.push_chunk(StreamChunk::from_pretty(
             "   I   I    I
             - 100 200 1001
@@ -254,46 +184,19 @@ mod tests {
             -   4 300 1003
             + 104 500 1004",
         ));
-        tx.push_barrier(3, false);
+        tx.push_barrier(test_epoch(3), false);
 
         let agg_calls = vec![
-            AggCall {
-                kind: AggKind::Count,
-                args: AggArgs::None,
-                return_type: DataType::Int64,
-                column_orders: vec![],
-                filter: None,
-                distinct: false,
-            },
-            AggCall {
-                kind: AggKind::Sum,
-                args: AggArgs::Unary(DataType::Int64, 0),
-                return_type: DataType::Int64,
-                column_orders: vec![],
-                filter: None,
-                distinct: false,
-            },
-            AggCall {
-                kind: AggKind::Sum,
-                args: AggArgs::Unary(DataType::Int64, 1),
-                return_type: DataType::Int64,
-                column_orders: vec![],
-                filter: None,
-                distinct: false,
-            },
+            AggCall::from_pretty("(count:int8)"),
+            AggCall::from_pretty("(sum:int8 $0:int8)"),
+            AggCall::from_pretty("(sum:int8 $1:int8)"),
         ];
+        let schema = generate_agg_schema(&source, &agg_calls, None);
 
-        let simple_agg = Box::new(
-            StatelessSimpleAggExecutor::new(
-                ActorContext::create(123),
-                Box::new(source),
-                agg_calls,
-                vec![],
-                1,
-            )
-            .unwrap(),
-        );
-        let mut simple_agg = simple_agg.execute();
+        let simple_agg =
+            StatelessSimpleAggExecutor::new(ActorContext::for_test(123), source, schema, agg_calls)
+                .unwrap();
+        let mut simple_agg = simple_agg.boxed().execute();
 
         // Consume the init barrier
         simple_agg.next().await.unwrap().unwrap();

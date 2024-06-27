@@ -56,10 +56,14 @@ pub enum DataType {
     Interval,
     /// Regclass used in postgresql serial
     Regclass,
+    /// Regproc used in postgresql function
+    Regproc,
     /// Text
     Text,
     /// Bytea
     Bytea,
+    /// JSONB
+    Jsonb,
     /// Custom type such as enums
     Custom(ObjectName),
     /// Arrays
@@ -97,8 +101,10 @@ impl fmt::Display for DataType {
             }
             DataType::Interval => write!(f, "INTERVAL"),
             DataType::Regclass => write!(f, "REGCLASS"),
+            DataType::Regproc => write!(f, "REGPROC"),
             DataType::Text => write!(f, "TEXT"),
             DataType::Bytea => write!(f, "BYTEA"),
+            DataType::Jsonb => write!(f, "JSONB"),
             DataType::Array(ty) => write!(f, "{}[]", ty),
             DataType::Custom(ty) => write!(f, "{}", ty),
             DataType::Struct(defs) => {

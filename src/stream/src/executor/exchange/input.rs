@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,26 +14,24 @@
 
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use std::time::Instant;
 
 use anyhow::Context as _;
-use futures::{pin_mut, Stream};
+use futures::pin_mut;
 use futures_async_stream::try_stream;
 use pin_project::pin_project;
-use risingwave_common::bail;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
 use risingwave_pb::task_service::{permits, GetStreamResponse};
 use risingwave_rpc_client::ComputeClientPool;
 
+use super::error::ExchangeChannelClosed;
 use super::permit::Receiver;
-use crate::error::StreamResult;
-use crate::executor::error::StreamExecutorError;
-use crate::executor::monitor::StreamingMetrics;
-use crate::executor::*;
-use crate::task::{FragmentId, SharedContext, UpDownActorIds, UpDownFragmentIds};
+use crate::executor::prelude::*;
+use crate::task::{
+    FragmentId, LocalBarrierManager, SharedContext, UpDownActorIds, UpDownFragmentIds,
+};
 
-/// `Input` provides an interface for [`MergeExecutor`] and [`ReceiverExecutor`] to receive data
-/// from upstream actors.
+/// `Input` provides an interface for [`MergeExecutor`](crate::executor::MergeExecutor) and
+/// [`ReceiverExecutor`](crate::executor::ReceiverExecutor) to receive data from upstream actors.
 pub trait Input: MessageStream {
     /// The upstream actor id.
     fn actor_id(&self) -> ActorId;
@@ -80,6 +78,9 @@ impl LocalInput {
         while let Some(msg) = channel.recv().verbose_instrument_await(span.clone()).await {
             yield msg;
         }
+        // Always emit an error outside the loop. This is because we use barrier as the control
+        // message to stop the stream. Reaching here means the channel is closed unexpectedly.
+        Err(ExchangeChannelClosed::local_input(actor_id))?
     }
 }
 
@@ -112,6 +113,7 @@ impl RemoteInput {
     /// Create a remote input from compute client and related info. Should provide the corresponding
     /// compute client of where the actor is placed.
     pub fn new(
+        local_barrier_manager: LocalBarrierManager,
         client_pool: ComputeClientPool,
         upstream_addr: HostAddr,
         up_down_ids: UpDownActorIds,
@@ -124,6 +126,7 @@ impl RemoteInput {
         Self {
             actor_id,
             inner: Self::run(
+                local_barrier_manager,
                 client_pool,
                 upstream_addr,
                 up_down_ids,
@@ -136,6 +139,7 @@ impl RemoteInput {
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn run(
+        local_barrier_manager: LocalBarrierManager,
         client_pool: ComputeClientPool,
         upstream_addr: HostAddr,
         up_down_ids: UpDownActorIds,
@@ -149,12 +153,12 @@ impl RemoteInput {
             .await?;
 
         let up_actor_id = up_down_ids.0.to_string();
-        let down_actor_id = up_down_ids.1.to_string();
         let up_fragment_id = up_down_frag.0.to_string();
         let down_fragment_id = up_down_frag.1.to_string();
+        let exchange_frag_recv_size_metrics = metrics
+            .exchange_frag_recv_size
+            .with_guarded_label_values(&[&up_fragment_id, &down_fragment_id]);
 
-        let mut rr = 0;
-        const SAMPLING_FREQUENCY: u64 = 100;
         let span: await_tree::Span = format!("RemoteInput (actor {up_actor_id})").into();
 
         let mut batched_permits_accumulated = 0;
@@ -166,25 +170,9 @@ impl RemoteInput {
                     let msg = message.unwrap();
                     let bytes = Message::get_encoded_len(&msg);
 
-                    metrics
-                        .exchange_frag_recv_size
-                        .with_label_values(&[&up_fragment_id, &down_fragment_id])
-                        .inc_by(bytes as u64);
+                    exchange_frag_recv_size_metrics.inc_by(bytes as u64);
 
-                    // add deserialization duration metric with given sampling frequency
-                    let msg_res = if rr % SAMPLING_FREQUENCY == 0 {
-                        let start_time = Instant::now();
-                        let msg_res = Message::from_protobuf(&msg);
-                        metrics
-                            .actor_sampled_deserialize_duration_ns
-                            .with_label_values(&[&down_actor_id])
-                            .inc_by(start_time.elapsed().as_nanos() as u64);
-                        msg_res
-                    } else {
-                        Message::from_protobuf(&msg)
-                    };
-                    rr += 1;
-
+                    let msg_res = Message::from_protobuf(&msg);
                     if let Some(add_back_permits) = match permits.unwrap().value {
                         // For records, batch the permits we received to reduce the backward
                         // `AddPermits` messages.
@@ -206,19 +194,32 @@ impl RemoteInput {
                             .context("RemoteInput backward permits channel closed.")?;
                     }
 
-                    match msg_res {
-                        Ok(msg) => yield msg,
-                        Err(e) => bail!("RemoteInput decode message error: {}", e),
+                    let mut msg = msg_res.context("RemoteInput decode message error")?;
+
+                    // Read barrier mutation from local barrier manager and attach it to the barrier message.
+                    if cfg!(not(test)) {
+                        if let Message::Barrier(barrier) = &mut msg {
+                            assert!(
+                                barrier.mutation.is_none(),
+                                "Mutation should be erased in remote side"
+                            );
+                            let mutation = local_barrier_manager
+                                .read_barrier_mutation(barrier)
+                                .await
+                                .context("Read barrier mutation error")?;
+                            barrier.mutation = mutation;
+                        }
                     }
+                    yield msg;
                 }
-                Err(e) => {
-                    return Err(StreamExecutorError::channel_closed(format!(
-                        "RemoteInput tonic error: {}",
-                        e
-                    )))
-                }
+
+                Err(e) => Err(ExchangeChannelClosed::remote_input(up_down_ids.0, Some(e)))?,
             }
         }
+
+        // Always emit an error outside the loop. This is because we use barrier as the control
+        // message to stop the stream. Reaching here means the channel is closed unexpectedly.
+        Err(ExchangeChannelClosed::remote_input(up_down_ids.0, None))?
     }
 }
 
@@ -253,12 +254,13 @@ pub(crate) fn new_input(
 
     let input = if is_local_address(&context.addr, &upstream_addr) {
         LocalInput::new(
-            context.take_receiver(&(upstream_actor_id, actor_id))?,
+            context.take_receiver((upstream_actor_id, actor_id))?,
             upstream_actor_id,
         )
         .boxed_input()
     } else {
         RemoteInput::new(
+            context.local_barrier_manager.clone(),
             context.compute_client_pool.clone(),
             upstream_addr,
             (upstream_actor_id, actor_id),

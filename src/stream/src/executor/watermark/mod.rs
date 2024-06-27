@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -68,7 +68,7 @@ impl<Id: Ord + Hash + std::fmt::Debug> BufferedWatermarks<Id> {
     /// buffer id.
     pub fn handle_watermark(&mut self, buffer_id: Id, watermark: Watermark) -> Option<Watermark> {
         // Note: The staged watermark buffer should be created before handling the watermark.
-        let mut staged = self.other_buffered_watermarks.get_mut(&buffer_id).unwrap();
+        let staged = self.other_buffered_watermarks.get_mut(&buffer_id).unwrap();
 
         if staged.in_heap {
             staged.staged.push_back(watermark);

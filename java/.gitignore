@@ -1,5 +1,10 @@
 # Java
 target/
 test_db/
+bin/
+.settings/
 *.log
 *.class
+.project
+.factorypath
+.classpath

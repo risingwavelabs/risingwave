@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,12 +19,9 @@ use std::sync::LazyLock;
 
 use itertools::Itertools;
 use risingwave_common::types::{DataType, DataTypeName};
-use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::agg::AggKind;
-use risingwave_expr::sig::agg::{agg_func_sigs, AggFuncSig as RwAggFuncSig};
-use risingwave_expr::sig::cast::{cast_sigs, CastContext, CastSig as RwCastSig};
-use risingwave_expr::sig::func::{func_sigs, FuncSign as RwFuncSig};
-use risingwave_frontend::expr::ExprType;
+use risingwave_expr::aggregate::AggKind;
+use risingwave_expr::sig::{FuncSign, FUNCTION_REGISTRY};
+use risingwave_frontend::expr::{cast_sigs, CastContext, CastSig as RwCastSig, ExprType};
 use risingwave_sqlparser::ast::{BinaryOperator, DataType as AstDataType, StructField};
 
 pub(super) fn data_type_to_ast_data_type(data_type: &DataType) -> AstDataType {
@@ -48,11 +45,9 @@ pub(super) fn data_type_to_ast_data_type(data_type: &DataType) -> AstDataType {
         DataType::Jsonb => AstDataType::Custom(vec!["JSONB".into()].into()),
         DataType::Struct(inner) => AstDataType::Struct(
             inner
-                .field_names
                 .iter()
-                .zip_eq_fast(inner.fields.iter())
                 .map(|(name, typ)| StructField {
-                    name: name.as_str().into(),
+                    name: name.into(),
                     data_type: data_type_to_ast_data_type(typ),
                 })
                 .collect(),
@@ -107,73 +102,20 @@ impl TryFrom<RwCastSig> for CastSig {
     }
 }
 
-/// Provide internal `FuncSig` which can be used for `struct` and `list`.
-#[derive(Clone)]
-pub struct FuncSig {
-    pub func: ExprType,
-    pub inputs_type: Vec<DataType>,
-    pub ret_type: DataType,
-}
-
-impl TryFrom<&RwFuncSig> for FuncSig {
-    type Error = String;
-
-    fn try_from(value: &RwFuncSig) -> Result<Self, Self::Error> {
-        if let Some(inputs_type) = value
-            .inputs_type
-            .iter()
-            .map(data_type_name_to_ast_data_type)
-            .collect()
-            && let Some(ret_type) = data_type_name_to_ast_data_type(&value.ret_type)
-        {
-            Ok(FuncSig {
-                inputs_type,
-                ret_type,
-                func: value.func,
-            })
-        } else {
-            Err(format!("unsupported func sig: {:?}", value))
-        }
-    }
-}
-
-/// Provide internal `AggFuncSig` which can be used for `struct` and `list`.
-#[derive(Clone)]
-pub struct AggFuncSig {
-    pub func: AggKind,
-    pub inputs_type: Vec<DataType>,
-    pub ret_type: DataType,
-}
-
-impl TryFrom<&RwAggFuncSig> for AggFuncSig {
-    type Error = String;
-
-    fn try_from(value: &RwAggFuncSig) -> Result<Self, Self::Error> {
-        if let Some(inputs_type) = value
-            .inputs_type
-            .iter()
-            .map(data_type_name_to_ast_data_type)
-            .collect()
-            && let Some(ret_type) = data_type_name_to_ast_data_type(&value.ret_type)
-        {
-            Ok(AggFuncSig {
-                inputs_type,
-                ret_type,
-                func: value.func,
-            })
-        } else {
-            Err(format!("unsupported agg_func sig: {:?}", value))
-        }
-    }
-}
-
 /// Function ban list.
 /// These functions should be generated eventually, by adding expression constraints.
 /// If we naively generate arguments for these functions, it will affect sqlsmith
 /// effectiveness, e.g. cause it to crash.
 static FUNC_BAN_LIST: LazyLock<HashSet<ExprType>> = LazyLock::new(|| {
     [
-        ExprType::Repeat, // FIXME: https://github.com/risingwavelabs/risingwave/issues/8003
+        // FIXME: https://github.com/risingwavelabs/risingwave/issues/8003
+        ExprType::Repeat,
+        // The format argument needs to be handled specially. It is still generated in `gen_special_func`.
+        ExprType::Decode,
+        // ENABLE: https://github.com/risingwavelabs/risingwave/issues/16293
+        ExprType::Sqrt,
+        // ENABLE: https://github.com/risingwavelabs/risingwave/issues/16293
+        ExprType::Pow,
     ]
     .into_iter()
     .collect()
@@ -181,25 +123,38 @@ static FUNC_BAN_LIST: LazyLock<HashSet<ExprType>> = LazyLock::new(|| {
 
 /// Table which maps functions' return types to possible function signatures.
 // ENABLE: https://github.com/risingwavelabs/risingwave/issues/5826
-pub(crate) static FUNC_TABLE: LazyLock<HashMap<DataType, Vec<FuncSig>>> = LazyLock::new(|| {
-    let mut funcs = HashMap::<DataType, Vec<FuncSig>>::new();
-    func_sigs()
-        .filter(|func| {
-            func.inputs_type
-                .iter()
-                .all(|t| *t != DataTypeName::Timestamptz)
-                && !FUNC_BAN_LIST.contains(&func.func)
-        })
-        .filter_map(|func| func.try_into().ok())
-        .for_each(|func: FuncSig| funcs.entry(func.ret_type.clone()).or_default().push(func));
-    funcs
-});
+// TODO: Create a `SPECIAL_FUNC` table.
+// Otherwise when we dump the function table, we won't include those functions in
+// gen_special_func.
+pub(crate) static FUNC_TABLE: LazyLock<HashMap<DataType, Vec<&'static FuncSign>>> =
+    LazyLock::new(|| {
+        let mut funcs = HashMap::<DataType, Vec<&'static FuncSign>>::new();
+        FUNCTION_REGISTRY
+            .iter_scalars()
+            .filter(|func| {
+                func.inputs_type.iter().all(|t| {
+                    t.is_exact()
+                        && t.as_exact() != &DataType::Timestamptz
+                        && t.as_exact() != &DataType::Serial
+                }) && func.ret_type.is_exact()
+                    && !FUNC_BAN_LIST.contains(&func.name.as_scalar())
+                    && !func.deprecated // deprecated functions are not accepted by frontend
+            })
+            .for_each(|func| {
+                funcs
+                    .entry(func.ret_type.as_exact().clone())
+                    .or_default()
+                    .push(func)
+            });
+        funcs
+    });
 
 /// Set of invariant functions
 // ENABLE: https://github.com/risingwavelabs/risingwave/issues/5826
 pub(crate) static INVARIANT_FUNC_SET: LazyLock<HashSet<ExprType>> = LazyLock::new(|| {
-    func_sigs()
-        .map(|sig| sig.func)
+    FUNCTION_REGISTRY
+        .iter_scalars()
+        .map(|sig| sig.name.as_scalar())
         .counts()
         .into_iter()
         .filter(|(_key, count)| *count == 1)
@@ -209,25 +164,45 @@ pub(crate) static INVARIANT_FUNC_SET: LazyLock<HashSet<ExprType>> = LazyLock::ne
 
 /// Table which maps aggregate functions' return types to possible function signatures.
 // ENABLE: https://github.com/risingwavelabs/risingwave/issues/5826
-pub(crate) static AGG_FUNC_TABLE: LazyLock<HashMap<DataType, Vec<AggFuncSig>>> =
+pub(crate) static AGG_FUNC_TABLE: LazyLock<HashMap<DataType, Vec<&'static FuncSign>>> =
     LazyLock::new(|| {
-        let mut funcs = HashMap::<DataType, Vec<AggFuncSig>>::new();
-        agg_func_sigs()
+        let mut funcs = HashMap::<DataType, Vec<&'static FuncSign>>::new();
+        FUNCTION_REGISTRY
+            .iter_aggregates()
             .filter(|func| {
                 func.inputs_type
                     .iter()
-                    .all(|t| *t != DataTypeName::Timestamptz)
+                    .all(|t| t.is_exact() && t.as_exact() != &DataType::Timestamptz && t.as_exact() != &DataType::Serial)
+                    && func.ret_type.is_exact()
+                    // Ignored functions
                     && ![
+                        AggKind::InternalLastSeenValue, // Use internally
+                        AggKind::Sum0, // Used internally
                         AggKind::BitAnd,
                         AggKind::BitOr,
                         AggKind::BoolAnd,
                         AggKind::BoolOr,
+                        AggKind::PercentileCont,
+                        AggKind::PercentileDisc,
+                        AggKind::Mode,
+                        AggKind::JsonbObjectAgg, // ENABLE: https://github.com/risingwavelabs/risingwave/issues/16293
+                        AggKind::StddevSamp, // ENABLE: https://github.com/risingwavelabs/risingwave/issues/16293
+                        AggKind::VarSamp, // ENABLE: https://github.com/risingwavelabs/risingwave/issues/16293
                     ]
-                    .contains(&func.func)
+                    .contains(&func.name.as_aggregate())
+                    // Exclude 2 phase agg global sum.
+                    // Sum(Int64) -> Int64.
+                    // Otherwise it conflicts with normal aggregation:
+                    // Sum(Int64) -> Decimal.
+                    // And sqlsmith will generate expressions with wrong types.
+                    && if func.name.as_aggregate() == AggKind::Sum {
+                       !(func.inputs_type[0].as_exact() == &DataType::Int64 && func.ret_type.as_exact() == &DataType::Int64)
+                    } else {
+                       true
+                    }
             })
-            .filter_map(|func| func.try_into().ok())
-            .for_each(|func: AggFuncSig| {
-                funcs.entry(func.ret_type.clone()).or_default().push(func)
+            .for_each(|func| {
+                funcs.entry(func.ret_type.as_exact().clone()).or_default().push(func)
             });
         funcs
     });
@@ -285,28 +260,22 @@ pub(crate) static BINARY_INEQUALITY_OP_TABLE: LazyLock<
     HashMap<(DataType, DataType), Vec<BinaryOperator>>,
 > = LazyLock::new(|| {
     let mut funcs = HashMap::<(DataType, DataType), Vec<BinaryOperator>>::new();
-    func_sigs()
+    FUNCTION_REGISTRY
+        .iter_scalars()
         .filter(|func| {
-            !FUNC_BAN_LIST.contains(&func.func)
-                && func.ret_type == DataTypeName::Boolean
+            !FUNC_BAN_LIST.contains(&func.name.as_scalar())
+                && func.ret_type == DataType::Boolean.into()
                 && func.inputs_type.len() == 2
                 && func
                     .inputs_type
                     .iter()
-                    .all(|t| *t != DataTypeName::Timestamptz)
+                    .all(|t| t.is_exact() && t.as_exact() != &DataType::Timestamptz)
         })
         .filter_map(|func| {
-            let Some(lhs) = data_type_name_to_ast_data_type(&func.inputs_type[0]) else {
-                return None;
-            };
-            let Some(rhs) = data_type_name_to_ast_data_type(&func.inputs_type[1]) else {
-                return None;
-            };
-            let args = (lhs, rhs);
-            let Some(op) = expr_type_to_inequality_op(func.func) else {
-                return None;
-            };
-            Some((args, op))
+            let lhs = func.inputs_type[0].as_exact().clone();
+            let rhs = func.inputs_type[1].as_exact().clone();
+            let op = expr_type_to_inequality_op(func.name.as_scalar())?;
+            Some(((lhs, rhs), op))
         })
         .for_each(|(args, op)| funcs.entry(args).or_default().push(op));
     funcs

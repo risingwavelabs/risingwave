@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,14 +16,12 @@ use std::sync::Arc;
 
 use futures::{Stream, StreamExt};
 use itertools::Itertools;
-use risingwave_common::array::column::Column;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::{Result, RwError};
 use risingwave_expr::expr::{build_from_prost, BoxedExpression, Expression};
-use risingwave_expr::ExprError;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
+use crate::error::{BatchError, Result};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
@@ -61,18 +59,14 @@ impl ProjectExecutor {
                 async move {
                     let data_chunk = data_chunk?;
                     let arrays = {
-                        let data_chunk = &data_chunk;
-                        let expr_futs = expr.iter().map(|expr| async move {
-                            Ok::<_, ExprError>(Column::new(expr.eval(data_chunk).await?))
-                        });
-                        let arrays: Vec<Column> = futures::future::join_all(expr_futs)
+                        let expr_futs = expr.iter().map(|expr| expr.eval(&data_chunk));
+                        futures::future::join_all(expr_futs)
                             .await
                             .into_iter()
-                            .try_collect()?;
-                        arrays
+                            .try_collect()?
                     };
                     let (_, vis) = data_chunk.into_parts();
-                    Ok::<_, RwError>(DataChunk::new(arrays, vis))
+                    Ok::<_, BatchError>(DataChunk::new(arrays, vis))
                 }
             })
             .buffered(16)
@@ -114,16 +108,14 @@ impl BoxedExecutorBuilder for ProjectExecutor {
 
 #[cfg(test)]
 mod tests {
-    use futures::stream::StreamExt;
     use risingwave_common::array::{Array, I32Array};
-    use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::test_prelude::*;
     use risingwave_common::types::DataType;
     use risingwave_expr::expr::{InputRefExpression, LiteralExpression};
 
     use super::*;
     use crate::executor::test_utils::MockExecutor;
-    use crate::executor::{Executor, ValuesExecutor};
+    use crate::executor::ValuesExecutor;
     use crate::*;
 
     const CHUNK_SIZE: usize = 1024;
@@ -169,7 +161,6 @@ mod tests {
         assert_eq!(
             result_chunk
                 .column_at(0)
-                .array()
                 .as_int32()
                 .iter()
                 .collect::<Vec<_>>(),
@@ -197,9 +188,6 @@ mod tests {
         });
         let mut stream = proj_executor.execute();
         let chunk = stream.next().await.unwrap().unwrap();
-        assert_eq!(
-            *chunk.column_at(0).array(),
-            array_nonnull!(I32Array, [1]).into()
-        );
+        assert_eq!(*chunk.column_at(0), I32Array::from_iter([1]).into_ref());
     }
 }

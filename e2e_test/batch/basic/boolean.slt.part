@@ -127,3 +127,18 @@ select booleq(true,true),
        boolne('true'::bool,true);
 ----
 t f f t f t t f t t f
+
+query TTTT
+select
+	true is unknown,
+	null is unknown,
+	't' is not unknown,
+	'on' is not unknown;
+----
+f t t t
+
+statement error
+select 1 is unknown;
+
+statement error
+select 'a' is not unknown;

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ package com.risingwave.connector.source.core;
 import com.risingwave.connector.api.source.SourceHandler;
 import com.risingwave.connector.api.source.SourceTypeE;
 import com.risingwave.connector.source.common.DbzConnectorConfig;
+import java.util.HashMap;
 import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -25,9 +26,23 @@ public abstract class SourceHandlerFactory {
     static final Logger LOG = LoggerFactory.getLogger(SourceHandlerFactory.class);
 
     public static SourceHandler createSourceHandler(
-            SourceTypeE source, long sourceId, String startOffset, Map<String, String> userProps) {
-        var config = new DbzConnectorConfig(source, sourceId, startOffset, userProps);
-        LOG.info("resolved config for source#{}: {}", sourceId, config.getResolvedDebeziumProps());
+            SourceTypeE source,
+            long sourceId,
+            String startOffset,
+            Map<String, String> userProps,
+            boolean snapshotDone,
+            boolean isCdcSourceJob) {
+        // userProps extracted from grpc request, underlying implementation is UnmodifiableMap
+        Map<String, String> mutableUserProps = new HashMap<>(userProps);
+        mutableUserProps.put("source.id", Long.toString(sourceId));
+        var config =
+                new DbzConnectorConfig(
+                        source,
+                        sourceId,
+                        startOffset,
+                        mutableUserProps,
+                        snapshotDone,
+                        isCdcSourceJob);
         return new DbzSourceHandler(config);
     }
 }

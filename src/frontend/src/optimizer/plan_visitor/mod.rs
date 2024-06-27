@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use paste::paste;
-mod max_one_row_visitor;
-pub use max_one_row_visitor::*;
+mod apply_visitor;
+pub use apply_visitor::*;
 mod plan_correlated_id_finder;
 pub use plan_correlated_id_finder::*;
 mod share_parent_counter;
@@ -37,6 +37,10 @@ mod side_effect_visitor;
 pub use side_effect_visitor::*;
 mod cardinality_visitor;
 pub use cardinality_visitor::*;
+mod jsonb_stream_key_checker;
+pub use jsonb_stream_key_checker::*;
+mod distributed_dml_visitor;
+pub use distributed_dml_visitor::*;
 
 use crate::for_all_plan_nodes;
 use crate::optimizer::plan_node::*;
@@ -80,24 +84,34 @@ macro_rules! def_visitor {
     ($({ $convention:ident, $name:ident }),*) => {
         /// The visitor for plan nodes. visit all inputs and return the ret value of the left most input,
         /// and leaf node returns `R::default()`
-        pub trait PlanVisitor<R: Default> {
-            type DefaultBehavior: DefaultBehavior<R>;
+        pub trait PlanVisitor {
+            type Result: Default;
+            type DefaultBehavior: DefaultBehavior<Self::Result>;
 
             /// The behavior for the default implementations of `visit_xxx`.
             fn default_behavior() -> Self::DefaultBehavior;
 
             paste! {
-                fn visit(&mut self, plan: PlanRef) -> R{
-                    match plan.node_type() {
-                        $(
-                            PlanNodeType::[<$convention $name>] => self.[<visit_ $convention:snake _ $name:snake>](plan.downcast_ref::<[<$convention $name>]>().unwrap()),
-                        )*
-                    }
+                fn visit(&mut self, plan: PlanRef) -> Self::Result {
+                    use risingwave_common::util::recursive::{tracker, Recurse};
+                    use crate::session::current::notice_to_user;
+
+                    tracker!().recurse(|t| {
+                        if t.depth_reaches(PLAN_DEPTH_THRESHOLD) {
+                            notice_to_user(PLAN_TOO_DEEP_NOTICE);
+                        }
+
+                        match plan.node_type() {
+                            $(
+                                PlanNodeType::[<$convention $name>] => self.[<visit_ $convention:snake _ $name:snake>](plan.downcast_ref::<[<$convention $name>]>().unwrap()),
+                            )*
+                        }
+                    })
                 }
 
                 $(
                     #[doc = "Visit [`" [<$convention $name>] "`] , the function should visit the inputs."]
-                    fn [<visit_ $convention:snake _ $name:snake>](&mut self, plan: &[<$convention $name>]) -> R {
+                    fn [<visit_ $convention:snake _ $name:snake>](&mut self, plan: &[<$convention $name>]) -> Self::Result {
                         let results = plan.inputs().into_iter().map(|input| self.visit(input));
                         Self::default_behavior().apply(results)
                     }
@@ -121,17 +135,18 @@ macro_rules! impl_has_variant {
                         pred: P,
                     }
 
-                    impl<P> PlanVisitor<bool> for HasWhere<P>
+                    impl<P> PlanVisitor for HasWhere<P>
                     where
                         P: FnMut(&$variant) -> bool,
                     {
-                        type DefaultBehavior = impl DefaultBehavior<bool>;
+                        type Result = bool;
+                        type DefaultBehavior = impl DefaultBehavior<Self::Result>;
 
                         fn default_behavior() -> Self::DefaultBehavior {
                             Merge(|a, b| a | b)
                         }
 
-                        fn [<visit_ $variant:snake>](&mut self, node: &$variant) -> bool {
+                        fn [<visit_ $variant:snake>](&mut self, node: &$variant) -> Self::Result {
                             (self.pred)(node)
                         }
                     }
@@ -151,6 +166,7 @@ macro_rules! impl_has_variant {
 
 impl_has_variant! {
     LogicalApply,
+    LogicalMaxOneRow,
     LogicalOverWindow,
     LogicalScan,
     LogicalSource,

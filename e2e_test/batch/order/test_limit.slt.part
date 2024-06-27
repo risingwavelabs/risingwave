@@ -18,6 +18,16 @@ SELECT a FROM test order by 1 LIMIT 1;
 ----
 11
 
+query I
+SELECT a FROM test order by 1 LIMIT 1::bigint;
+----
+11
+
+query I
+SELECT a FROM test order by 1 LIMIT 1::bigint OFFSET 1::bigint;
+----
+12
+
 # decimal limit
 # query I
 # SELECT a FROM test order by 1 LIMIT 1.25;

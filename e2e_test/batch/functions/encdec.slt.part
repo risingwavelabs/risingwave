@@ -1,0 +1,114 @@
+# Text/Binary String Conversion Functions
+
+# encode/decode
+# escape
+query T
+SELECT encode('\xc3b1', 'escape');
+----
+\303\261
+
+query T
+SELECT decode('\303\261', 'escape');
+----
+\xc3b1
+
+query T
+SELECT encode('\xe78e8be58695e6adbbe4ba86e788b6e4bab2', 'escape');
+----
+\347\216\213\345\206\225\346\255\273\344\272\206\347\210\266\344\272\262
+
+query T
+SELECT decode('王冕死了父亲', 'escape');
+----
+\xe78e8be58695e6adbbe4ba86e788b6e4bab2
+
+# base64
+query T
+SELECT encode('123\000\001', 'base64');
+----
+MTIzAAE=
+
+query T
+SELECT decode('MTIzAAE=', 'base64');
+----
+\x3132330001
+
+# hex
+query T
+SELECT encode('joanna', 'hex');
+----
+6a6f616e6e61
+
+query T
+SELECT decode('6a6f616e6e61', 'hex');
+----
+\x6a6f616e6e61
+
+# convert
+# convert_from
+query T
+SELECT convert_from('\xc3b1', 'UTF8');
+----
+ñ
+
+query T
+SELECT convert_from('\xe78e8be58695e6adbbe4ba86e788b6e4bab2', 'UTF8');
+----
+王冕死了父亲
+
+query T
+SELECT convert_from('\x6a6f616e6e61', 'UTF8');
+----
+joanna
+
+# UTF[-]8, case-insensitive
+query T
+SELECT convert_from('\x6a6f616e6e61', 'UTF-8');
+----
+joanna
+
+query T
+SELECT convert_from('\x6a6f616e6e61', 'utf8');
+----
+joanna
+
+query T
+SELECT convert_from('\x6a6f616e6e61', 'utf-8');
+----
+joanna
+
+query T
+SELECT convert_from('\x6a6f616e6e61', 'UtF8');
+----
+joanna
+
+query T
+SELECT convert_from('\x6a6f616e6e61', 'uTF-8');
+----
+joanna
+
+# convert_to
+query T
+SELECT convert_to('some_text', 'UTF8');
+----
+\x736f6d655f74657874
+
+query T
+SELECT convert_to('柠檬', 'UTF8');
+----
+\xe69fa0e6aaac
+
+query T
+SELECT convert_to('🍋', 'UTF8');
+----
+\xf09f8d8b
+
+query T
+SELECT convert_from(convert_to('good', 'UTF8'), 'UTF8');
+----
+good
+
+query T
+SELECT convert_from(convert_to('wow🐮', 'UTF8'), 'UTF8');
+----
+wow🐮

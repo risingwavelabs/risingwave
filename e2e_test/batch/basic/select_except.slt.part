@@ -1,0 +1,92 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table t1 (v1 int, v2 int, v3 int);
+
+statement ok
+create table t2 (v1 int, v2 int, v3 int);
+
+statement ok
+insert into t1 values(1, 2, NULL);
+
+statement ok
+insert into t2 values(2, NULL, 4), (1, NULL, 3);
+
+statement ok
+flush;
+
+query II
+select * except (v1) from t1;
+----
+2 NULL
+
+query II
+select * except ("v1", t1.v2) from t1;
+----
+NULL
+
+query II
+select * except (v3, a.v2) from t1 a;
+----
+1
+
+query II
+select t1.* except (v1) from t1;
+----
+2 NULL
+
+query IIII
+select t1.* except (v1), * except (v2) from t1;
+----
+2 NULL 1 NULL
+
+query II
+select a.* except (a.v2, a.v3), b.* except (b.v1, b.v3) from t1 a cross join t1 b;
+----
+1 2
+
+query III
+select * except (a.v1, b.v2, b.v3) from t1 a cross join t1 b;
+----
+2 NULL 1
+
+query III
+select a.* except (b.v1) from t1 a, t1 b;
+----
+1 2 NULL
+
+query IIII
+select * except (a.v1) from (select * from t1 join t2 using (v1)) as a;
+----
+2 NULL NULL 3
+
+query III
+select * except (a.v3) from (select * except (v2) from t1) as a;
+----
+1
+
+statement error Ambiguous column name: a
+select * except (a) from t1 t(a,a,a);
+
+statement error Ambiguous column name: v1
+select * except (v1) from t1 a, t1 b;
+
+statement error Item not found: Invalid column: v5
+select * except (v5) from t1;
+
+statement error Duplicate entry in except list
+select * except (v1, v1) from t1;
+
+statement error Only support column name in except list
+select * except (1) from t1;
+
+statement error Only support column name in except list
+select * except ('test') from t1;
+
+
+statement ok
+drop table t1;
+
+statement ok
+drop table t2;

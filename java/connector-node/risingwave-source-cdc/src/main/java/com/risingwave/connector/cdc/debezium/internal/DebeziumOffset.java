@@ -43,12 +43,15 @@ public class DebeziumOffset implements Serializable {
 
     public Map<String, ?> sourcePartition;
     public Map<String, ?> sourceOffset;
+    public boolean isHeartbeat;
 
     public DebeziumOffset() {}
 
-    public DebeziumOffset(Map<String, ?> sourcePartition, Map<String, ?> sourceOffset) {
+    public DebeziumOffset(
+            Map<String, ?> sourcePartition, Map<String, ?> sourceOffset, boolean isHeartbeat) {
         this.sourcePartition = sourcePartition;
         this.sourceOffset = sourceOffset;
+        this.isHeartbeat = isHeartbeat;
     }
 
     public void setSourcePartition(Map<String, ?> sourcePartition) {
@@ -59,10 +62,16 @@ public class DebeziumOffset implements Serializable {
         this.sourceOffset = sourceOffset;
     }
 
+    public void setHeartbeat(boolean heartbeat) {
+        isHeartbeat = heartbeat;
+    }
+
     @Override
     public String toString() {
         return "DebeziumOffset{"
-                + "sourcePartition="
+                + "isHeartbeat="
+                + isHeartbeat
+                + ", sourcePartition="
                 + sourcePartition
                 + ", sourceOffset="
                 + sourceOffset

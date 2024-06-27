@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,18 +15,18 @@
 use std::vec::IntoIter;
 
 use futures::stream::FusedStream;
-use futures::{Stream, StreamExt, TryStreamExt};
+use futures::{StreamExt, TryStreamExt};
 use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::error::{PsqlError, PsqlResult};
 use crate::pg_message::{BeCommandCompleteMessage, BeMessage};
 use crate::pg_protocol::Conn;
-use crate::pg_response::{PgResponse, RowSetResult};
+use crate::pg_response::{PgResponse, ValuesStream};
 use crate::types::Row;
 
 pub struct ResultCache<VS>
 where
-    VS: Stream<Item = RowSetResult> + Unpin + Send,
+    VS: ValuesStream,
 {
     result: PgResponse<VS>,
     row_cache: IntoIter<Row>,
@@ -34,7 +34,7 @@ where
 
 impl<VS> ResultCache<VS>
 where
-    VS: Stream<Item = RowSetResult> + Unpin + Send,
+    VS: ValuesStream,
 {
     pub fn new(result: PgResponse<VS>) -> Self {
         ResultCache {
@@ -49,9 +49,17 @@ where
         row_limit: usize,
         msg_stream: &mut Conn<S>,
     ) -> PsqlResult<bool> {
-        for notice in self.result.get_notices() {
+        for notice in self.result.notices() {
             msg_stream.write_no_flush(&BeMessage::NoticeResponse(notice))?;
         }
+
+        let status = self.result.status();
+        if let Some(ref application_name) = status.application_name {
+            msg_stream.write_no_flush(&BeMessage::ParameterStatus(
+                crate::pg_message::BeParameterStatusMessage::ApplicationName(application_name),
+            ))?;
+        }
+
         if self.result.is_empty() {
             // Run the callback before sending the response.
             self.result.run_callback().await?;
@@ -82,7 +90,7 @@ where
                         .values_stream()
                         .try_next()
                         .await
-                        .map_err(|err| PsqlError::ExecuteError(err))?
+                        .map_err(PsqlError::ExtendedExecuteError)?
                     {
                         rows.into_iter()
                     } else {
@@ -103,7 +111,7 @@ where
 
                 msg_stream.write_no_flush(&BeMessage::CommandComplete(
                     BeCommandCompleteMessage {
-                        stmt_type: self.result.get_stmt_type(),
+                        stmt_type: self.result.stmt_type(),
                         rows_cnt: query_row_count as i32,
                     },
                 ))?;
@@ -115,10 +123,10 @@ where
             self.result.run_callback().await?;
 
             msg_stream.write_no_flush(&BeMessage::CommandComplete(BeCommandCompleteMessage {
-                stmt_type: self.result.get_stmt_type(),
+                stmt_type: self.result.stmt_type(),
                 rows_cnt: self
                     .result
-                    .get_effected_rows_cnt()
+                    .affected_rows_cnt()
                     .expect("row count should be set"),
             }))?;
 

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,15 +14,14 @@
 
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::column::Column;
-use risingwave_common::array::{DataChunk, Vis};
+use risingwave_common::array::{Array, DataChunk, I64Array};
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use super::{BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
+use crate::error::{BatchError, Result};
 use crate::task::BatchTaskContext;
 
 pub struct ExpandExecutor {
@@ -48,29 +47,23 @@ impl Executor for ExpandExecutor {
 }
 
 impl ExpandExecutor {
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
         let mut data_chunk_builder =
             DataChunkBuilder::new(self.schema.data_types(), self.chunk_size);
 
         #[for_await]
-        for data_chunk in self.child.execute() {
-            let data_chunk: DataChunk = data_chunk?.compact();
-            assert!(
-                data_chunk.dimension() > 0,
-                "The input data chunk of expand can't be dummy chunk."
-            );
-            let cardinality = data_chunk.cardinality();
-            let (columns, vis) = data_chunk.into_parts();
-            assert_eq!(vis, Vis::Compact(cardinality));
+        for input in self.child.execute() {
+            let input = input?;
+            for (i, subsets) in self.column_subsets.iter().enumerate() {
+                let flags = I64Array::from_iter(std::iter::repeat(i as i64).take(input.capacity()))
+                    .into_ref();
+                let (mut columns, vis) = input.keep_columns(subsets).into_parts();
+                columns.extend(input.columns().iter().cloned());
+                columns.push(flags);
+                let chunk = DataChunk::new(columns, vis);
 
-            #[for_await]
-            for new_columns in
-                Column::expand_columns(cardinality, columns, self.column_subsets.to_owned())
-            {
-                for data_chunk in
-                    data_chunk_builder.append_chunk(DataChunk::new(new_columns?, vis.clone()))
-                {
+                for data_chunk in data_chunk_builder.append_chunk(chunk) {
                     yield data_chunk;
                 }
             }

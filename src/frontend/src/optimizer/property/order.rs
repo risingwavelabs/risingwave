@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,13 +15,13 @@
 use std::fmt;
 
 use itertools::Itertools;
+use pretty_xmlish::Pretty;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::Result;
 use risingwave_common::util::sort_util::{ColumnOrder, ColumnOrderDisplay};
 use risingwave_pb::common::PbColumnOrder;
 
 use super::super::plan_node::*;
-use crate::optimizer::PlanRef;
+use crate::error::Result;
 
 // TODO(rc): use this type to replace all `Vec<ColumnOrder>`
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
@@ -65,24 +65,16 @@ pub struct OrderDisplay<'a> {
     pub input_schema: &'a Schema,
 }
 
-impl fmt::Display for OrderDisplay<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let that = self.order;
-        write!(f, "[")?;
-        for (i, column_order) in that.column_orders.iter().enumerate() {
-            if i > 0 {
-                write!(f, ", ")?;
-            }
-            write!(
-                f,
-                "{}",
-                ColumnOrderDisplay {
-                    column_order,
-                    input_schema: self.input_schema,
-                }
-            )?;
-        }
-        write!(f, "]")
+impl OrderDisplay<'_> {
+    pub fn distill<'a>(self) -> Pretty<'a> {
+        let iter = self.order.column_orders.iter();
+        let vec = iter.map(|column_order| {
+            Pretty::display(&ColumnOrderDisplay {
+                column_order,
+                input_schema: self.input_schema,
+            })
+        });
+        Pretty::Array(vec.collect())
     }
 }
 
@@ -92,6 +84,8 @@ const ANY_ORDER: Order = Order {
 
 impl Order {
     pub fn enforce_if_not_satisfies(&self, plan: PlanRef) -> Result<PlanRef> {
+        use crate::optimizer::plan_node::batch::prelude::*;
+
         if !plan.order().satisfies(self) {
             Ok(self.enforce(plan))
         } else {
@@ -99,7 +93,7 @@ impl Order {
         }
     }
 
-    pub fn enforce(&self, plan: PlanRef) -> PlanRef {
+    fn enforce(&self, plan: PlanRef) -> PlanRef {
         assert_eq!(plan.convention(), Convention::Batch);
         BatchSort::new(plan, self.clone()).into()
     }

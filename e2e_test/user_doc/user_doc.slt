@@ -54,14 +54,14 @@ INSERT INTO taxi VALUES
         (
             '1001',
             ARRAY['ABCD1234', 'ABCD1235', 'ABCD1236', 'ABCD1237'],
-            'N5432N', 
-            'FAST TAXI', 
-            '2030-12-31', 
+            'N5432N',
+            'FAST TAXI',
+            '2030-12-31',
             'DAVID WANG'
         );
 
 statement ok
-SELECT trip_id[1] 
+SELECT trip_id[1]
 FROM taxi;
 
 statement ok
@@ -110,17 +110,17 @@ CREATE TABLE trip (
             initial_charge DOUBLE PRECISION,
             subsequent_charge DOUBLE PRECISION,
             surcharge DOUBLE PRECISION,
-            tolls DOUBLE PRECISION 
-            > 
+            tolls DOUBLE PRECISION
+            >
         );
 
 statement ok
-INSERT INTO trip VALUES 
+INSERT INTO trip VALUES
         (
-            '1234ABCD', 
-            '2022-07-28 11:04:05', 
-            '2022-07-28 11:15:22', 
-            6.1, 
+            '1234ABCD',
+            '2022-07-28 11:04:05',
+            '2022-07-28 11:15:22',
+            6.1,
             ROW(1.0, 4.0, 1.5, 2.0)
         );
 
@@ -149,10 +149,10 @@ drop table if exists taxi_trips;
 statement ok
 create table taxi_trips (trip_id varchar, taxi_id varchar, completed_at timestamp, distance double precision, duration double precision);
 
-statement ok 
-insert into taxi_trips values 
-(1, 1001, '2022-07-01 22:00:00', 4, 6), 
-(2, 1002, '2022-07-01 22:01:00', 6, 9), 
+statement ok
+insert into taxi_trips values
+(1, 1001, '2022-07-01 22:00:00', 4, 6),
+(2, 1002, '2022-07-01 22:01:00', 6, 9),
 (3, 1003, '2022-07-01 22:02:00', 3, 5),
 (4, 1004, '2022-07-01 22:03:00', 7, 15),
 (5, 1005, '2022-07-01 22:05:00', 2, 4),
@@ -168,15 +168,15 @@ FROM HOP (taxi_trips, completed_at, INTERVAL '1 MINUTE', INTERVAL '2 MINUTES')
 ORDER BY window_start;
 
 statement ok
-SELECT window_start, window_end, count(trip_id) as no_of_trips, sum(distance) as total_distance 
-FROM TUMBLE (taxi_trips, completed_at, INTERVAL '2 MINUTES') 
-GROUP BY window_start, window_end 
+SELECT window_start, window_end, count(trip_id) as no_of_trips, sum(distance) as total_distance
+FROM TUMBLE (taxi_trips, completed_at, INTERVAL '2 MINUTES')
+GROUP BY window_start, window_end
 ORDER BY window_start ASC;
 
 statement ok
-SELECT window_start, window_end, count(trip_id) as no_of_trips, sum(distance) as total_distance 
-FROM HOP (taxi_trips, completed_at, INTERVAL '1 MINUTES', INTERVAL '2 MINUTES') 
-GROUP BY window_start, window_end 
+SELECT window_start, window_end, count(trip_id) as no_of_trips, sum(distance) as total_distance
+FROM HOP (taxi_trips, completed_at, INTERVAL '1 MINUTES', INTERVAL '2 MINUTES')
+GROUP BY window_start, window_end
 ORDER BY window_start ASC;
 
 
@@ -187,12 +187,12 @@ statement ok
 create table taxi_simple (taxi_id varchar, company varchar);
 
 statement ok
-insert into taxi_simple values 
-(1001, 'SAFE TAXI'), 
-(1002, 'SUPER TAXI'), 
-(1003, 'FAST TAXI'), 
-(1004, 'BEST TAXI'), 
-(1005, 'WEST TAXI'), 
+insert into taxi_simple values
+(1001, 'SAFE TAXI'),
+(1002, 'SUPER TAXI'),
+(1003, 'FAST TAXI'),
+(1004, 'BEST TAXI'),
+(1005, 'WEST TAXI'),
 (1006, 'EAST TAXI');
 
 statement ok
@@ -202,11 +202,11 @@ statement ok
 CREATE TABLE taxi_fare (trip_id VARCHAR, completed_at TIMESTAMP, total_fare DOUBLE PRECISION, payment_status VARCHAR);
 
 statement ok
-INSERT INTO taxi_fare VALUES 
-(1, '2022-07-01 22:00:00', 8, 'COMPLETED'), 
-(2, '2022-07-01 22:01:00', 12, 'PROCESSING'), 
-(3, '2022-07-01 22:02:10', 5, 'COMPLETED'), 
-(4, '2022-07-01 22:03:00', 15, 'COMPLETED'), 
+INSERT INTO taxi_fare VALUES
+(1, '2022-07-01 22:00:00', 8, 'COMPLETED'),
+(2, '2022-07-01 22:01:00', 12, 'PROCESSING'),
+(3, '2022-07-01 22:02:10', 5, 'COMPLETED'),
+(4, '2022-07-01 22:03:00', 15, 'COMPLETED'),
 (5, '2022-07-01 22:06:00', 5, 'REJECTED'),
 (6, '2022-07-01 22:06:00', 20, 'COMPLETED');
 

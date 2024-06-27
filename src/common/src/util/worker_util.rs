@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,21 +12,4 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
-
-use risingwave_pb::common::WorkerNode;
-
-use crate::hash::ParallelUnitId;
-
-pub fn get_pu_to_worker_mapping(nodes: &[WorkerNode]) -> HashMap<ParallelUnitId, WorkerNode> {
-    let mut pu_to_worker = HashMap::new();
-
-    for node in nodes {
-        for pu in &node.parallel_units {
-            let res = pu_to_worker.insert(pu.id, node.clone());
-            assert!(res.is_none(), "duplicate parallel unit id");
-        }
-    }
-
-    pu_to_worker
-}
+pub type WorkerNodeId = u32;

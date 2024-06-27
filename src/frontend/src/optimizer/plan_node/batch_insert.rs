@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,55 +12,55 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
-use itertools::Itertools;
-use risingwave_common::error::Result;
+use pretty_xmlish::XmlNode;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::InsertNode;
 use risingwave_pb::plan_common::{DefaultColumns, IndexAndExpr};
 
-use super::{
-    ExprRewritable, LogicalInsert, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch,
-};
+use super::batch::prelude::*;
+use super::utils::{childless_record, Distill};
+use super::{generic, ExprRewritable, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch};
+use crate::error::Result;
 use crate::expr::Expr;
-use crate::optimizer::plan_node::{PlanBase, ToLocalBatch};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
+use crate::optimizer::plan_node::{utils, PlanBase, ToLocalBatch};
+use crate::optimizer::plan_visitor::DistributedDmlVisitor;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 
-/// `BatchInsert` implements [`LogicalInsert`]
+/// `BatchInsert` implements [`super::LogicalInsert`]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchInsert {
-    pub base: PlanBase,
-    pub logical: LogicalInsert,
+    pub base: PlanBase<Batch>,
+    pub core: generic::Insert<PlanRef>,
 }
 
 impl BatchInsert {
-    pub fn new(logical: LogicalInsert) -> Self {
-        let ctx = logical.base.ctx.clone();
-        // TODO: derive from input
-        let base = PlanBase::new_batch(
-            ctx,
-            logical.schema().clone(),
-            Distribution::Single,
-            Order::any(),
-        );
-        BatchInsert { base, logical }
+    pub fn new(core: generic::Insert<PlanRef>) -> Self {
+        let base: PlanBase<Batch> =
+            PlanBase::new_batch_with_core(&core, core.input.distribution().clone(), Order::any());
+
+        BatchInsert { base, core }
     }
 }
 
-impl fmt::Display for BatchInsert {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.logical.fmt_with_name(f, "BatchInsert")
+impl Distill for BatchInsert {
+    fn distill<'a>(&self) -> XmlNode<'a> {
+        let vec = self
+            .core
+            .fields_pretty(self.base.ctx().is_explain_verbose());
+        childless_record("BatchInsert", vec)
     }
 }
 
 impl PlanTreeNodeUnary for BatchInsert {
     fn input(&self) -> PlanRef {
-        self.logical.input()
+        self.core.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(self.logical.clone_with_input(input))
+        let mut core = self.core.clone();
+        core.input = input;
+        Self::new(core)
     }
 }
 
@@ -68,43 +68,53 @@ impl_plan_tree_node_for_unary! { BatchInsert }
 
 impl ToDistributedBatch for BatchInsert {
     fn to_distributed(&self) -> Result<PlanRef> {
-        let new_input = RequiredDist::single()
+        if DistributedDmlVisitor::dml_should_run_in_distributed(self.input()) {
+            // Add an hash shuffle between the insert and its input.
+            let new_input = RequiredDist::PhysicalDist(Distribution::HashShard(
+                (0..self.input().schema().len()).collect(),
+            ))
             .enforce_if_not_satisfies(self.input().to_distributed()?, &Order::any())?;
-        Ok(self.clone_with_input(new_input).into())
+            let new_insert: PlanRef = self.clone_with_input(new_input).into();
+            if self.core.returning {
+                Ok(new_insert)
+            } else {
+                utils::sum_affected_row(new_insert)
+            }
+        } else {
+            let new_input = RequiredDist::single()
+                .enforce_if_not_satisfies(self.input().to_distributed()?, &Order::any())?;
+            Ok(self.clone_with_input(new_input).into())
+        }
     }
 }
 
 impl ToBatchPb for BatchInsert {
     fn to_batch_prost_body(&self) -> NodeBody {
-        let column_indices = self
-            .logical
-            .column_indices()
-            .iter()
-            .map(|&i| i as u32)
-            .collect();
+        let column_indices = self.core.column_indices.iter().map(|&i| i as u32).collect();
 
-        let default_columns = self.logical.default_columns();
+        let default_columns = &self.core.default_columns;
         let has_default_columns = !default_columns.is_empty();
         let default_columns = DefaultColumns {
             default_columns: default_columns
-                .into_iter()
+                .iter()
                 .map(|(i, expr)| IndexAndExpr {
-                    index: i as u32,
+                    index: *i as u32,
                     expr: Some(expr.to_expr_proto()),
                 })
-                .collect_vec(),
+                .collect(),
         };
         NodeBody::Insert(InsertNode {
-            table_id: self.logical.table_id().table_id(),
-            table_version_id: self.logical.table_version_id(),
+            table_id: self.core.table_id.table_id(),
+            table_version_id: self.core.table_version_id,
             column_indices,
             default_columns: if has_default_columns {
                 Some(default_columns)
             } else {
                 None
             },
-            row_id_index: self.logical.row_id_index().map(|index| index as _),
-            returning: self.logical.has_returning(),
+            row_id_index: self.core.row_id_index.map(|index| index as _),
+            returning: self.core.returning,
+            session_id: self.base.ctx().session_ctx().session_id().0 as u32,
         })
     }
 }
@@ -118,3 +128,5 @@ impl ToLocalBatch for BatchInsert {
 }
 
 impl ExprRewritable for BatchInsert {}
+
+impl ExprVisitable for BatchInsert {}

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,6 @@
 use std::collections::{HashMap, HashSet};
 
 use risingwave_common::catalog::TableOption;
-use risingwave_common::constants::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::key_range::KeyRangeCommon;
@@ -61,15 +60,11 @@ impl TtlPickerState {
 }
 
 pub struct TtlReclaimCompactionPicker {
-    max_ttl_reclaim_bytes: u64,
     table_id_to_ttl: HashMap<u32, u32>,
 }
 
 impl TtlReclaimCompactionPicker {
-    pub fn new(
-        max_ttl_reclaim_bytes: u64,
-        table_id_to_options: HashMap<StateTableId, TableOption>,
-    ) -> Self {
+    pub fn new(table_id_to_options: HashMap<StateTableId, TableOption>) -> Self {
         let table_id_to_ttl: HashMap<u32, u32> = table_id_to_options
             .iter()
             .filter(|id_to_option| {
@@ -79,10 +74,7 @@ impl TtlReclaimCompactionPicker {
             .map(|id_to_option| (*id_to_option.0, id_to_option.1.retention_seconds.unwrap()))
             .collect();
 
-        Self {
-            max_ttl_reclaim_bytes,
-            table_id_to_ttl,
-        }
+        Self { table_id_to_ttl }
     }
 
     fn filter(&self, sst: &SstableInfo, current_epoch_physical_time: u64) -> bool {
@@ -93,7 +85,7 @@ impl TtlReclaimCompactionPicker {
         for table_id in table_id_in_sst {
             match self.table_id_to_ttl.get(&table_id) {
                 Some(ttl_second_u32) => {
-                    assert!(*ttl_second_u32 != TABLE_OPTION_DUMMY_RETENTION_SECOND);
+                    assert!(*ttl_second_u32 > 0);
                     // default to zero.
                     let ttl_mill = *ttl_second_u32 as u64 * 1000;
                     let min_epoch = expire_epoch.subtract_ms(ttl_mill);
@@ -154,7 +146,6 @@ impl TtlReclaimCompactionPicker {
         }
 
         let current_epoch_physical_time = Epoch::now().physical_time();
-        let mut select_file_size = 0;
 
         for sst in &reclaimed_level.table_infos {
             let unmatched_sst = sst
@@ -167,22 +158,11 @@ impl TtlReclaimCompactionPicker {
                 || level_handler.is_pending_compact(&sst.sst_id)
                 || self.filter(sst, current_epoch_physical_time)
             {
-                if !select_input_ssts.is_empty() {
-                    // Our goal is to pick as many complete layers of data as possible and keep the
-                    // picked files contiguous to avoid overlapping key_ranges, so the strategy is
-                    // to pick as many contiguous files as possible (at least one)
-                    break;
-                }
-
                 continue;
             }
 
             select_input_ssts.push(sst.clone());
-            select_file_size += sst.file_size;
-
-            if select_file_size > self.max_ttl_reclaim_bytes {
-                break;
-            }
+            break;
         }
 
         // turn to next_round
@@ -199,6 +179,8 @@ impl TtlReclaimCompactionPicker {
         });
 
         Some(CompactionInput {
+            select_input_size: select_input_ssts.iter().map(|sst| sst.file_size).sum(),
+            total_file_count: select_input_ssts.len() as _,
             input_levels: vec![
                 InputLevel {
                     level_idx: reclaimed_level.level_idx,
@@ -212,25 +194,28 @@ impl TtlReclaimCompactionPicker {
                 },
             ],
             target_level: reclaimed_level.level_idx as usize,
-            target_sub_level_id: 0,
+            ..Default::default()
         })
     }
 }
 
 #[cfg(test)]
 mod test {
+    use std::collections::BTreeSet;
+    use std::sync::Arc;
+
     use itertools::Itertools;
     use risingwave_pb::hummock::compact_task;
-    pub use risingwave_pb::hummock::{KeyRange, Level, LevelType};
+    pub use risingwave_pb::hummock::{Level, LevelType};
 
     use super::*;
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
-    use crate::hummock::compaction::level_selector::tests::{
+    use crate::hummock::compaction::selector::tests::{
         assert_compaction_task, generate_l0_nonoverlapping_sublevels, generate_level,
         generate_table_with_ids_and_epochs,
     };
-    use crate::hummock::compaction::level_selector::{LevelSelector, TtlCompactionSelector};
-    use crate::hummock::compaction::LocalSelectorStatistic;
+    use crate::hummock::compaction::selector::{CompactionSelector, TtlCompactionSelector};
+    use crate::hummock::compaction::{CompactionDeveloperConfig, LocalSelectorStatistic};
     use crate::hummock::model::CompactionGroup;
 
     #[test]
@@ -357,6 +342,7 @@ mod test {
                 total_file_size: 0,
                 sub_level_id: 0,
                 uncompressed_file_size: 0,
+                ..Default::default()
             },
         ];
 
@@ -392,15 +378,17 @@ mod test {
                     1,
                     &group_config,
                     &levels,
+                    &BTreeSet::new(),
                     &mut levels_handler,
                     &mut local_stats,
                     table_id_to_options,
+                    Arc::new(CompactionDeveloperConfig::default()),
                 )
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);
             assert_eq!(task.input.input_levels.len(), 2);
             assert_eq!(task.input.input_levels[0].level_idx, 4);
-            assert_eq!(task.input.input_levels[0].table_infos.len(), 5);
+            assert_eq!(task.input.input_levels[0].table_infos.len(), 1);
 
             let mut start_id = 2;
             for sst in &task.input.input_levels[0].table_infos {
@@ -441,9 +429,11 @@ mod test {
                     1,
                     &group_config,
                     &levels,
+                    &BTreeSet::new(),
                     &mut levels_handler,
                     &mut local_stats,
                     table_id_to_options.clone(),
+                    Arc::new(CompactionDeveloperConfig::default()),
                 )
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);
@@ -451,9 +441,9 @@ mod test {
             assert_eq!(task.input.input_levels[0].level_idx, 4);
 
             // test select index, picker will select file from state
-            assert_eq!(task.input.input_levels[0].table_infos.len(), 4);
+            assert_eq!(task.input.input_levels[0].table_infos.len(), 1);
 
-            let mut start_id = 7;
+            let mut start_id = 3;
             for sst in &task.input.input_levels[0].table_infos {
                 assert_eq!(start_id, sst.get_sst_id());
                 start_id += 1;
@@ -473,9 +463,11 @@ mod test {
                     1,
                     &group_config,
                     &levels,
+                    &BTreeSet::new(),
                     &mut levels_handler,
                     &mut local_stats,
                     table_id_to_options.clone(),
+                    Arc::new(CompactionDeveloperConfig::default()),
                 )
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);
@@ -493,17 +485,6 @@ mod test {
                 assert_eq!(start_id, sst.get_sst_id());
                 start_id += 1;
             }
-
-            assert!(selector
-                .pick_compaction(
-                    1,
-                    &group_config,
-                    &levels,
-                    &mut levels_handler,
-                    &mut local_stats,
-                    table_id_to_options,
-                )
-                .is_none())
         }
 
         {
@@ -539,9 +520,11 @@ mod test {
                     1,
                     &group_config,
                     &levels,
+                    &BTreeSet::new(),
                     &mut levels_handler,
                     &mut local_stats,
                     table_id_to_options,
+                    Arc::new(CompactionDeveloperConfig::default()),
                 )
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);
@@ -579,9 +562,11 @@ mod test {
                 1,
                 &group_config,
                 &levels,
+                &BTreeSet::new(),
                 &mut levels_handler,
                 &mut local_stats,
                 HashMap::default(),
+                Arc::new(CompactionDeveloperConfig::default()),
             );
 
             // empty table_options does not select any files
@@ -631,8 +616,8 @@ mod test {
                 },
             );
 
-            let expect_task_file_count = vec![3, 2, 1];
-            let expect_task_sst_id_range = vec![vec![2, 3, 4], vec![6, 7], vec![10]];
+            let expect_task_file_count = [1, 1, 1];
+            let expect_task_sst_id_range = [vec![2], vec![3], vec![4]];
             for (index, x) in expect_task_file_count.iter().enumerate() {
                 // // pick ttl reclaim
                 let task = selector
@@ -640,9 +625,11 @@ mod test {
                         1,
                         &group_config,
                         &levels,
+                        &BTreeSet::new(),
                         &mut levels_handler,
                         &mut local_stats,
                         table_id_to_options.clone(),
+                        Arc::new(CompactionDeveloperConfig::default()),
                     )
                     .unwrap();
 
@@ -713,8 +700,8 @@ mod test {
                 },
             );
 
-            let expect_task_file_count = vec![3, 3];
-            let expect_task_sst_id_range = vec![vec![2, 3, 4], vec![5, 6, 7]];
+            let expect_task_file_count = [1, 1];
+            let expect_task_sst_id_range = [vec![2], vec![3]];
             for (index, x) in expect_task_file_count.iter().enumerate() {
                 if index == expect_task_file_count.len() - 1 {
                     table_id_to_options.insert(
@@ -731,9 +718,11 @@ mod test {
                         1,
                         &group_config,
                         &levels,
+                        &BTreeSet::new(),
                         &mut levels_handler,
                         &mut local_stats,
                         table_id_to_options.clone(),
+                        Arc::new(CompactionDeveloperConfig::default()),
                     )
                     .unwrap();
 

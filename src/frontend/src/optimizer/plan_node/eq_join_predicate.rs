@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,10 +14,12 @@
 
 use std::fmt;
 
+use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 
 use crate::expr::{
-    ExprRewriter, ExprType, FunctionCall, InequalityInputPair, InputRef, InputRefDisplay,
+    ExprRewriter, ExprType, ExprVisitor, FunctionCall, InequalityInputPair, InputRef,
+    InputRefDisplay,
 };
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 
@@ -237,16 +239,20 @@ impl EqJoinPredicate {
         for (left, right, _) in self.eq_keys() {
             map[right.index - left_cols_num] = Some(left.index);
         }
-        ColIndexMapping::new(map)
+        ColIndexMapping::new(map, left_cols_num)
     }
 
     /// return the eq columns index mapping from left inputs to right inputs
-    pub fn l2r_eq_columns_mapping(&self, left_cols_num: usize) -> ColIndexMapping {
+    pub fn l2r_eq_columns_mapping(
+        &self,
+        left_cols_num: usize,
+        right_cols_num: usize,
+    ) -> ColIndexMapping {
         let mut map = vec![None; left_cols_num];
         for (left, right, _) in self.eq_keys() {
             map[left.index] = Some(right.index - left_cols_num);
         }
-        ColIndexMapping::new(map)
+        ColIndexMapping::new(map, right_cols_num)
     }
 
     /// Reorder the `eq_keys` according to the `reorder_idx`.
@@ -270,10 +276,51 @@ impl EqJoinPredicate {
         )
     }
 
+    /// Retain the prefix of `eq_keys` based on the `prefix_len`. The other part is moved to the
+    /// other condition.
+    pub fn retain_prefix_eq_key(self, prefix_len: usize) -> Self {
+        assert!(prefix_len <= self.eq_keys.len());
+        let (retain_eq_key, other_eq_key) = self.eq_keys.split_at(prefix_len);
+        let mut new_other_conjunctions = self.other_cond.conjunctions;
+        new_other_conjunctions.extend(
+            other_eq_key
+                .iter()
+                .cloned()
+                .map(|(l, r, null_safe)| {
+                    FunctionCall::new(
+                        if null_safe {
+                            ExprType::IsNotDistinctFrom
+                        } else {
+                            ExprType::Equal
+                        },
+                        vec![l.into(), r.into()],
+                    )
+                    .unwrap()
+                    .into()
+                })
+                .collect_vec(),
+        );
+
+        let new_other_cond = Condition {
+            conjunctions: new_other_conjunctions,
+        };
+
+        Self::new(
+            new_other_cond,
+            retain_eq_key.to_owned(),
+            self.left_cols_num,
+            self.right_cols_num,
+        )
+    }
+
     pub fn rewrite_exprs(&self, rewriter: &mut (impl ExprRewriter + ?Sized)) -> Self {
         let mut new = self.clone();
         new.other_cond = new.other_cond.rewrite_expr(rewriter);
         new
+    }
+
+    pub fn visit_exprs(&self, v: &mut (impl ExprVisitor + ?Sized)) {
+        self.other_cond.visit_expr(v);
     }
 }
 

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,12 +17,8 @@
 
 use std::path::PathBuf;
 
+use cfg_or_panic::cfg_or_panic;
 use clap::Parser;
-
-#[cfg(not(madsim))]
-fn main() {
-    println!("This binary is only available in simulation.");
-}
 
 /// Deterministic simulation end-to-end test runner.
 ///
@@ -57,7 +53,7 @@ pub struct Args {
 
     /// The number of CPU cores for each compute node.
     ///
-    /// This determines worker_node_parallelism.
+    /// This determines `worker_node_parallelism`.
     #[clap(long, default_value = "2")]
     compute_node_cores: usize,
 
@@ -129,6 +125,10 @@ pub struct Args {
     #[clap(long)]
     generate_sqlsmith_queries: Option<String>,
 
+    /// Run sqlsmith for differential testing
+    #[clap(long)]
+    run_differential_tests: bool,
+
     /// Load etcd data from toml file.
     #[clap(long)]
     etcd_data: Option<PathBuf>,
@@ -139,10 +139,19 @@ pub struct Args {
 
     #[arg(short, long)]
     e2e_extended_test: bool,
+
+    /// Background ddl
+    /// The probability of background ddl for a ddl query.
+    #[clap(long, default_value = "0.0")]
+    background_ddl_rate: f64,
+
+    /// Use arrangement backfill by default
+    #[clap(long, default_value = "false")]
+    use_arrangement_backfill: bool,
 }
 
-#[cfg(madsim)]
-#[madsim::main]
+#[tokio::main]
+#[cfg_or_panic(madsim)]
 async fn main() {
     use std::sync::Arc;
 
@@ -168,6 +177,12 @@ async fn main() {
         meta_nodes: args.meta_nodes,
         etcd_timeout_rate: args.etcd_timeout_rate,
         etcd_data_path: args.etcd_data,
+        per_session_queries: if args.use_arrangement_backfill {
+            vec!["SET STREAMING_USE_ARRANGEMENT_BACKFILL = true;".to_string()].into()
+        } else {
+            vec!["SET STREAMING_USE_ARRANGEMENT_BACKFILL = false;".to_string()].into()
+        },
+        ..Default::default()
     };
     let kill_opts = KillOpts {
         kill_meta: args.kill_meta || args.kill,
@@ -196,7 +211,7 @@ async fn main() {
                     .await
                     .unwrap();
                 if let Some(outdir) = args.generate_sqlsmith_queries {
-                    risingwave_sqlsmith::runner::generate(
+                    risingwave_sqlsmith::test_runners::generate(
                         rw.pg_client(),
                         &args.files,
                         count,
@@ -204,15 +219,27 @@ async fn main() {
                         Some(seed),
                     )
                     .await;
-                } else {
-                    risingwave_sqlsmith::runner::run(
+                    return;
+                }
+                if args.run_differential_tests {
+                    risingwave_sqlsmith::test_runners::run_differential_testing(
                         rw.pg_client(),
                         &args.files,
                         count,
                         Some(seed),
                     )
-                    .await;
+                    .await
+                    .unwrap();
+                    return;
                 }
+
+                risingwave_sqlsmith::test_runners::run(
+                    rw.pg_client(),
+                    &args.files,
+                    count,
+                    Some(seed),
+                )
+                .await;
             })
             .await;
         return;
@@ -225,7 +252,7 @@ async fn main() {
                 let rw = RisingWave::connect("frontend".into(), "dev".into())
                     .await
                     .unwrap();
-                risingwave_sqlsmith::runner::run_pre_generated(rw.pg_client(), &outdir).await;
+                risingwave_sqlsmith::test_runners::run_pre_generated(rw.pg_client(), &outdir).await;
             })
             .await;
         return;
@@ -238,7 +265,7 @@ async fn main() {
             if let Some(jobs) = args.jobs {
                 run_parallel_slt_task(glob, jobs).await.unwrap();
             } else {
-                run_slt_task(cluster0, glob, &kill_opts).await;
+                run_slt_task(cluster0, glob, &kill_opts, args.background_ddl_rate).await;
             }
         })
         .await;

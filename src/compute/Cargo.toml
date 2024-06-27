@@ -16,30 +16,35 @@ normal = ["workspace-hack"]
 [dependencies]
 anyhow = "1"
 async-trait = "0.1"
-await-tree = "0.1.1"
-clap = { version = "4", features = ["derive"] }
+await-tree = { workspace = true }
+chrono = { version = "0.4" }
+clap = { workspace = true }
 either = "1"
+foyer = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
-hyper = "0.14"
-itertools = "0.10"
+hyper = "0.14" # required by tonic
+itertools = { workspace = true }
 maplit = "1.0.2"
-pprof = { version = "0.11", features = ["flamegraph"] }
+pprof = { version = "0.13", features = ["flamegraph"] }
 prometheus = { version = "0.13" }
-risingwave_batch = { path = "../batch" }
-risingwave_common = { path = "../common" }
-risingwave_common_proc_macro = { path = "../common/proc_macro" }
-risingwave_common_service = { path = "../common/common_service" }
-risingwave_connector = { path = "../connector" }
-risingwave_hummock_sdk = { path = "../storage/hummock_sdk" }
-risingwave_pb = { path = "../prost" }
-risingwave_rpc_client = { path = "../rpc_client" }
-risingwave_source = { path = "../source" }
-risingwave_storage = { path = "../storage" }
-risingwave_stream = { path = "../stream" }
-risingwave_tracing = { path = "../tracing" }
+prost = { workspace = true }
+risingwave_batch = { workspace = true }
+risingwave_common = { workspace = true }
+risingwave_common_heap_profiling = { workspace = true }
+risingwave_common_service = { workspace = true }
+risingwave_connector = { workspace = true }
+risingwave_dml = { workspace = true }
+risingwave_hummock_sdk = { workspace = true }
+risingwave_jni_core = { workspace = true }
+risingwave_pb = { workspace = true }
+risingwave_rpc_client = { workspace = true }
+risingwave_storage = { workspace = true }
+risingwave_stream = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+thiserror-ext = { workspace = true }
+tikv-jemalloc-ctl = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
     "rt-multi-thread",
@@ -50,18 +55,18 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "fs",
 ] }
 tokio-stream = "0.1"
-tonic = { version = "0.2", package = "madsim-tonic" }
+tonic = { workspace = true }
 tower = { version = "0.4", features = ["util", "load-shed"] }
 tracing = "0.1"
-uuid = "1.2.2"
-
-[target.'cfg(target_os = "linux")'.dependencies]
-tikv-jemalloc-ctl = "0.5"
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
 futures-async-stream = { workspace = true }
-rand = "0.8"
+rand = { workspace = true }
+risingwave_hummock_sdk = { workspace = true }
 tempfile = "3"
+
+[lints]
+workspace = true

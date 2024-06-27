@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,25 +21,33 @@ use risingwave_common::session_config::{SearchPath, USER_NAME_WILD_CARD};
 use risingwave_common::types::DataType;
 use risingwave_connector::sink::catalog::SinkCatalog;
 use risingwave_pb::catalog::{
-    PbConnection, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView,
+    PbConnection, PbDatabase, PbFunction, PbIndex, PbSchema, PbSecret, PbSink, PbSource,
+    PbSubscription, PbTable, PbView,
 };
+use risingwave_pb::hummock::HummockVersionStats;
 
 use super::function_catalog::FunctionCatalog;
 use super::source_catalog::SourceCatalog;
-use super::system_catalog::get_sys_catalogs_in_schema;
+use super::subscription_catalog::SubscriptionCatalog;
 use super::view_catalog::ViewCatalog;
-use super::{CatalogError, CatalogResult, ConnectionId, SinkId, SourceId, ViewId};
+use super::{
+    CatalogError, CatalogResult, ConnectionId, SecretId, SinkId, SourceId, SubscriptionId, ViewId,
+};
 use crate::catalog::connection_catalog::ConnectionCatalog;
 use crate::catalog::database_catalog::DatabaseCatalog;
 use crate::catalog::schema_catalog::SchemaCatalog;
-use crate::catalog::system_catalog::SystemCatalog;
+use crate::catalog::secret_catalog::SecretCatalog;
+use crate::catalog::system_catalog::{
+    get_sys_tables_in_schema, get_sys_views_in_schema, SystemTableCatalog,
+};
 use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::{DatabaseId, IndexCatalog, SchemaId};
+use crate::expr::{Expr, ExprImpl};
 
 #[derive(Copy, Clone)]
 pub enum SchemaPath<'a> {
     Name(&'a str),
-    /// (search_path, user_name).
+    /// (`search_path`, `user_name`).
     Path(&'a SearchPath, &'a str),
 }
 
@@ -86,7 +94,7 @@ impl<'a> SchemaPath<'a> {
 /// - catalog (root catalog)
 ///   - database catalog
 ///     - schema catalog
-///       - function catalog
+///       - function catalog (i.e., user defined function)
 ///       - table/sink/source/index/view catalog
 ///        - column catalog
 pub struct Catalog {
@@ -95,6 +103,7 @@ pub struct Catalog {
     db_name_by_id: HashMap<DatabaseId, String>,
     /// all table catalogs in the cluster identified by universal unique table id.
     table_by_id: HashMap<TableId, Arc<TableCatalog>>,
+    table_stats: HummockVersionStats,
 }
 
 #[expect(clippy::derivable_impls)]
@@ -105,6 +114,7 @@ impl Default for Catalog {
             database_by_name: HashMap::new(),
             db_name_by_id: HashMap::new(),
             table_by_id: HashMap::new(),
+            table_stats: HummockVersionStats::default(),
         }
     }
 }
@@ -136,14 +146,19 @@ impl Catalog {
             .unwrap()
             .create_schema(proto);
 
-        if let Some(sys_tables) = get_sys_catalogs_in_schema(proto.name.as_str()) {
-            sys_tables.into_iter().for_each(|sys_table| {
-                self.get_database_mut(proto.database_id)
-                    .unwrap()
-                    .get_schema_mut(proto.id)
-                    .unwrap()
-                    .create_sys_table(sys_table);
-            });
+        for sys_table in get_sys_tables_in_schema(proto.name.as_str()) {
+            self.get_database_mut(proto.database_id)
+                .unwrap()
+                .get_schema_mut(proto.id)
+                .unwrap()
+                .create_sys_table(sys_table);
+        }
+        for sys_view in get_sys_views_in_schema(proto.name.as_str()) {
+            self.get_database_mut(proto.database_id)
+                .unwrap()
+                .get_schema_mut(proto.id)
+                .unwrap()
+                .create_sys_view(sys_view);
         }
     }
 
@@ -179,6 +194,22 @@ impl Catalog {
             .get_schema_mut(proto.schema_id)
             .unwrap()
             .create_sink(proto);
+    }
+
+    pub fn create_subscription(&mut self, proto: &PbSubscription) {
+        self.get_database_mut(proto.database_id)
+            .unwrap()
+            .get_schema_mut(proto.schema_id)
+            .unwrap()
+            .create_subscription(proto);
+    }
+
+    pub fn create_secret(&mut self, proto: &PbSecret) {
+        self.get_database_mut(proto.database_id)
+            .unwrap()
+            .get_schema_mut(proto.schema_id)
+            .unwrap()
+            .create_secret(proto);
     }
 
     pub fn create_view(&mut self, proto: &PbView) {
@@ -218,6 +249,44 @@ impl Catalog {
             .drop_connection(connection_id);
     }
 
+    pub fn update_connection(&mut self, proto: &PbConnection) {
+        let database = self.get_database_mut(proto.database_id).unwrap();
+        let schema = database.get_schema_mut(proto.schema_id).unwrap();
+        if schema.get_connection_by_id(&proto.id).is_some() {
+            schema.update_connection(proto);
+        } else {
+            // Enter this branch when schema is changed by `ALTER ... SET SCHEMA ...` statement.
+            schema.create_connection(proto);
+            database
+                .iter_schemas_mut()
+                .find(|schema| {
+                    schema.id() != proto.schema_id
+                        && schema.get_connection_by_id(&proto.id).is_some()
+                })
+                .unwrap()
+                .drop_connection(proto.id);
+        }
+    }
+
+    pub fn update_secret(&mut self, proto: &PbSecret) {
+        let database = self.get_database_mut(proto.database_id).unwrap();
+        let schema = database.get_schema_mut(proto.schema_id).unwrap();
+        let secret_id = SecretId::new(proto.id);
+        if schema.get_secret_by_id(&secret_id).is_some() {
+            schema.update_secret(proto);
+        } else {
+            // Enter this branch when schema is changed by `ALTER ... SET SCHEMA ...` statement.
+            schema.create_secret(proto);
+            database
+                .iter_schemas_mut()
+                .find(|schema| {
+                    schema.id() != proto.schema_id && schema.get_secret_by_id(&secret_id).is_some()
+                })
+                .unwrap()
+                .drop_secret(secret_id);
+        }
+    }
+
     pub fn drop_database(&mut self, db_id: DatabaseId) {
         let name = self.db_name_by_id.remove(&db_id).unwrap();
         let database = self.database_by_name.remove(&name).unwrap();
@@ -240,21 +309,68 @@ impl Catalog {
     }
 
     pub fn update_table(&mut self, proto: &PbTable) {
-        let table = self
-            .get_database_mut(proto.database_id)
-            .unwrap()
-            .get_schema_mut(proto.schema_id)
-            .unwrap()
-            .update_table(proto);
+        let database = self.get_database_mut(proto.database_id).unwrap();
+        let schema = database.get_schema_mut(proto.schema_id).unwrap();
+        let table = if schema.get_table_by_id(&proto.id.into()).is_some() {
+            schema.update_table(proto)
+        } else {
+            // Enter this branch when schema is changed by `ALTER ... SET SCHEMA ...` statement.
+            let new_table = schema.create_table(proto);
+            database
+                .iter_schemas_mut()
+                .find(|schema| {
+                    schema.id() != proto.schema_id
+                        && schema.get_table_by_id(&proto.id.into()).is_some()
+                })
+                .unwrap()
+                .drop_table(proto.id.into());
+            new_table
+        };
+
         self.table_by_id.insert(proto.id.into(), table);
     }
 
-    pub fn update_index(&mut self, proto: &PbIndex) {
+    pub fn update_database(&mut self, proto: &PbDatabase) {
+        let id = proto.id;
+        let name = proto.name.clone();
+
+        let old_database_name = self.db_name_by_id.get(&id).unwrap().to_owned();
+        if old_database_name != name {
+            let mut database = self.database_by_name.remove(&old_database_name).unwrap();
+            database.name.clone_from(&name);
+            database.owner = proto.owner;
+            self.database_by_name.insert(name.clone(), database);
+            self.db_name_by_id.insert(id, name);
+        } else {
+            let database = self.get_database_mut(id).unwrap();
+            database.name = name;
+            database.owner = proto.owner;
+        }
+    }
+
+    pub fn update_schema(&mut self, proto: &PbSchema) {
         self.get_database_mut(proto.database_id)
             .unwrap()
-            .get_schema_mut(proto.schema_id)
-            .unwrap()
-            .update_index(proto);
+            .update_schema(proto);
+    }
+
+    pub fn update_index(&mut self, proto: &PbIndex) {
+        let database = self.get_database_mut(proto.database_id).unwrap();
+        let schema = database.get_schema_mut(proto.schema_id).unwrap();
+        if schema.get_index_by_id(&proto.id.into()).is_some() {
+            schema.update_index(proto);
+        } else {
+            // Enter this branch when schema is changed by `ALTER ... SET SCHEMA ...` statement.
+            schema.create_index(proto);
+            database
+                .iter_schemas_mut()
+                .find(|schema| {
+                    schema.id() != proto.schema_id
+                        && schema.get_index_by_id(&proto.id.into()).is_some()
+                })
+                .unwrap()
+                .drop_index(proto.id.into());
+        }
     }
 
     pub fn drop_source(&mut self, db_id: DatabaseId, schema_id: SchemaId, source_id: SourceId) {
@@ -266,11 +382,21 @@ impl Catalog {
     }
 
     pub fn update_source(&mut self, proto: &PbSource) {
-        self.get_database_mut(proto.database_id)
-            .unwrap()
-            .get_schema_mut(proto.schema_id)
-            .unwrap()
-            .update_source(proto);
+        let database = self.get_database_mut(proto.database_id).unwrap();
+        let schema = database.get_schema_mut(proto.schema_id).unwrap();
+        if schema.get_source_by_id(&proto.id).is_some() {
+            schema.update_source(proto);
+        } else {
+            // Enter this branch when schema is changed by `ALTER ... SET SCHEMA ...` statement.
+            schema.create_source(proto);
+            database
+                .iter_schemas_mut()
+                .find(|schema| {
+                    schema.id() != proto.schema_id && schema.get_source_by_id(&proto.id).is_some()
+                })
+                .unwrap()
+                .drop_source(proto.id);
+        }
     }
 
     pub fn drop_sink(&mut self, db_id: DatabaseId, schema_id: SchemaId, sink_id: SinkId) {
@@ -281,12 +407,62 @@ impl Catalog {
             .drop_sink(sink_id);
     }
 
+    pub fn drop_secret(&mut self, db_id: DatabaseId, schema_id: SchemaId, secret_id: SecretId) {
+        self.get_database_mut(db_id)
+            .unwrap()
+            .get_schema_mut(schema_id)
+            .unwrap()
+            .drop_secret(secret_id);
+    }
+
     pub fn update_sink(&mut self, proto: &PbSink) {
-        self.get_database_mut(proto.database_id)
+        let database = self.get_database_mut(proto.database_id).unwrap();
+        let schema = database.get_schema_mut(proto.schema_id).unwrap();
+        if schema.get_sink_by_id(&proto.id).is_some() {
+            schema.update_sink(proto);
+        } else {
+            // Enter this branch when schema is changed by `ALTER ... SET SCHEMA ...` statement.
+            schema.create_sink(proto);
+            database
+                .iter_schemas_mut()
+                .find(|schema| {
+                    schema.id() != proto.schema_id && schema.get_sink_by_id(&proto.id).is_some()
+                })
+                .unwrap()
+                .drop_sink(proto.id);
+        }
+    }
+
+    pub fn drop_subscription(
+        &mut self,
+        db_id: DatabaseId,
+        schema_id: SchemaId,
+        subscription_id: SubscriptionId,
+    ) {
+        self.get_database_mut(db_id)
             .unwrap()
-            .get_schema_mut(proto.schema_id)
+            .get_schema_mut(schema_id)
             .unwrap()
-            .update_sink(proto);
+            .drop_subscription(subscription_id);
+    }
+
+    pub fn update_subscription(&mut self, proto: &PbSubscription) {
+        let database = self.get_database_mut(proto.database_id).unwrap();
+        let schema = database.get_schema_mut(proto.schema_id).unwrap();
+        if schema.get_subscription_by_id(&proto.id).is_some() {
+            schema.update_subscription(proto);
+        } else {
+            // Enter this branch when schema is changed by `ALTER ... SET SCHEMA ...` statement.
+            schema.create_subscription(proto);
+            database
+                .iter_schemas_mut()
+                .find(|schema| {
+                    schema.id() != proto.schema_id
+                        && schema.get_subscription_by_id(&proto.id).is_some()
+                })
+                .unwrap()
+                .drop_subscription(proto.id);
+        }
     }
 
     pub fn drop_index(&mut self, db_id: DatabaseId, schema_id: SchemaId, index_id: IndexId) {
@@ -306,11 +482,21 @@ impl Catalog {
     }
 
     pub fn update_view(&mut self, proto: &PbView) {
-        self.get_database_mut(proto.database_id)
-            .unwrap()
-            .get_schema_mut(proto.schema_id)
-            .unwrap()
-            .update_view(proto);
+        let database = self.get_database_mut(proto.database_id).unwrap();
+        let schema = database.get_schema_mut(proto.schema_id).unwrap();
+        if schema.get_view_by_id(&proto.id).is_some() {
+            schema.update_view(proto);
+        } else {
+            // Enter this branch when schema is changed by `ALTER ... SET SCHEMA ...` statement.
+            schema.create_view(proto);
+            database
+                .iter_schemas_mut()
+                .find(|schema| {
+                    schema.id() != proto.schema_id && schema.get_view_by_id(&proto.id).is_some()
+                })
+                .unwrap()
+                .drop_view(proto.id);
+        }
     }
 
     pub fn drop_function(
@@ -324,6 +510,31 @@ impl Catalog {
             .get_schema_mut(schema_id)
             .unwrap()
             .drop_function(function_id);
+    }
+
+    pub fn update_function(&mut self, proto: &PbFunction) {
+        let database = self.get_database_mut(proto.database_id).unwrap();
+        let schema = database.get_schema_mut(proto.schema_id).unwrap();
+        if schema.get_function_by_id(proto.id.into()).is_some() {
+            schema.update_function(proto);
+        } else {
+            // Enter this branch when schema is changed by `ALTER ... SET SCHEMA ...` statement.
+            schema.create_function(proto);
+            database
+                .iter_schemas_mut()
+                .find(|schema| {
+                    schema.id() != proto.schema_id
+                        && schema.get_function_by_id(proto.id.into()).is_some()
+                })
+                .unwrap()
+                .drop_function(proto.id.into());
+        }
+
+        self.get_database_mut(proto.database_id)
+            .unwrap()
+            .get_schema_mut(proto.schema_id)
+            .unwrap()
+            .update_function(proto);
     }
 
     pub fn get_database_by_name(&self, db_name: &str) -> CatalogResult<&DatabaseCatalog> {
@@ -361,6 +572,10 @@ impl Catalog {
         self.database_by_name.keys().cloned().collect_vec()
     }
 
+    pub fn iter_databases(&self) -> impl Iterator<Item = &DatabaseCatalog> {
+        self.database_by_name.values()
+    }
+
     pub fn get_schema_by_name(
         &self,
         db_name: &str,
@@ -386,6 +601,17 @@ impl Catalog {
             .ok_or_else(|| CatalogError::NotFound("schema_id", schema_id.to_string()))
     }
 
+    pub fn get_source_by_id(
+        &self,
+        db_id: &DatabaseId,
+        schema_id: &SchemaId,
+        source_id: &SourceId,
+    ) -> CatalogResult<&Arc<SourceCatalog>> {
+        self.get_schema_by_id(db_id, schema_id)?
+            .get_source_by_id(source_id)
+            .ok_or_else(|| CatalogError::NotFound("source_id", source_id.to_string()))
+    }
+
     /// Refer to [`SearchPath`].
     pub fn first_valid_schema(
         &self,
@@ -409,6 +635,7 @@ impl Catalog {
         ))
     }
 
+    /// Used to get `TableCatalog` for Materialized Views, Tables and Indexes.
     pub fn get_table_by_name<'a>(
         &self,
         db_name: &str,
@@ -428,6 +655,32 @@ impl Catalog {
         self.table_by_id
             .get(table_id)
             .ok_or_else(|| CatalogError::NotFound("table id", table_id.to_string()))
+    }
+
+    /// This function is similar to `get_table_by_id` expect that a table must be in a given database.
+    pub fn get_table_by_id_with_db(
+        &self,
+        db_name: &str,
+        table_id: u32,
+    ) -> CatalogResult<&Arc<TableCatalog>> {
+        let table_id = TableId::from(table_id);
+        for schema in self.get_database_by_name(db_name)?.iter_schemas() {
+            if let Some(table) = schema.get_table_by_id(&table_id) {
+                return Ok(table);
+            }
+        }
+        Err(CatalogError::NotFound("table id", table_id.to_string()))
+    }
+
+    pub fn get_schema_by_table_id(
+        &self,
+        db_name: &str,
+        table_id: &TableId,
+    ) -> CatalogResult<&SchemaCatalog> {
+        self.database_by_name
+            .get(db_name)
+            .and_then(|db| db.find_schema_containing_table_id(table_id))
+            .ok_or_else(|| CatalogError::NotFound("schema with table", table_id.to_string()))
     }
 
     // Used by test_utils only.
@@ -473,7 +726,7 @@ impl Catalog {
         db_name: &str,
         schema_name: &str,
         table_name: &str,
-    ) -> CatalogResult<&SystemCatalog> {
+    ) -> CatalogResult<&Arc<SystemTableCatalog>> {
         self.get_schema_by_name(db_name, schema_name)
             .unwrap()
             .get_system_table_by_name(table_name)
@@ -510,6 +763,21 @@ impl Catalog {
             .ok_or_else(|| CatalogError::NotFound("sink", sink_name.to_string()))
     }
 
+    pub fn get_subscription_by_name<'a>(
+        &self,
+        db_name: &str,
+        schema_path: SchemaPath<'a>,
+        subscription_name: &str,
+    ) -> CatalogResult<(&Arc<SubscriptionCatalog>, &'a str)> {
+        schema_path
+            .try_find(|schema_name| {
+                Ok(self
+                    .get_schema_by_name(db_name, schema_name)?
+                    .get_subscription_by_name(subscription_name))
+            })?
+            .ok_or_else(|| CatalogError::NotFound("subscription", subscription_name.to_string()))
+    }
+
     pub fn get_index_by_name<'a>(
         &self,
         db_name: &str,
@@ -523,6 +791,20 @@ impl Catalog {
                     .get_index_by_name(index_name))
             })?
             .ok_or_else(|| CatalogError::NotFound("index", index_name.to_string()))
+    }
+
+    pub fn get_index_by_id(
+        &self,
+        db_name: &str,
+        index_id: u32,
+    ) -> CatalogResult<&Arc<IndexCatalog>> {
+        let index_id = IndexId::from(index_id);
+        for schema in self.get_database_by_name(db_name)?.iter_schemas() {
+            if let Some(index) = schema.get_index_by_id(&index_id) {
+                return Ok(index);
+            }
+        }
+        Err(CatalogError::NotFound("index", index_id.to_string()))
     }
 
     pub fn get_view_by_name<'a>(
@@ -540,6 +822,30 @@ impl Catalog {
             .ok_or_else(|| CatalogError::NotFound("view", view_name.to_string()))
     }
 
+    pub fn get_view_by_id(&self, db_name: &str, view_id: u32) -> CatalogResult<Arc<ViewCatalog>> {
+        for schema in self.get_database_by_name(db_name)?.iter_schemas() {
+            if let Some(view) = schema.get_view_by_id(&ViewId::from(view_id)) {
+                return Ok(view.clone());
+            }
+        }
+        Err(CatalogError::NotFound("view", view_id.to_string()))
+    }
+
+    pub fn get_secret_by_name<'a>(
+        &self,
+        db_name: &str,
+        schema_path: SchemaPath<'a>,
+        secret_name: &str,
+    ) -> CatalogResult<(&Arc<SecretCatalog>, &'a str)> {
+        schema_path
+            .try_find(|schema_name| {
+                Ok(self
+                    .get_schema_by_name(db_name, schema_name)?
+                    .get_secret_by_name(secret_name))
+            })?
+            .ok_or_else(|| CatalogError::NotFound("secret", secret_name.to_string()))
+    }
+
     pub fn get_connection_by_name<'a>(
         &self,
         db_name: &str,
@@ -553,6 +859,34 @@ impl Catalog {
                     .get_connection_by_name(connection_name))
             })?
             .ok_or_else(|| CatalogError::NotFound("connection", connection_name.to_string()))
+    }
+
+    pub fn get_function_by_name_inputs<'a>(
+        &self,
+        db_name: &str,
+        schema_path: SchemaPath<'a>,
+        function_name: &str,
+        inputs: &mut [ExprImpl],
+    ) -> CatalogResult<(&Arc<FunctionCatalog>, &'a str)> {
+        schema_path
+            .try_find(|schema_name| {
+                Ok(self
+                    .get_schema_by_name(db_name, schema_name)?
+                    .get_function_by_name_inputs(function_name, inputs))
+            })?
+            .ok_or_else(|| {
+                CatalogError::NotFound(
+                    "function",
+                    format!(
+                        "{}({})",
+                        function_name,
+                        inputs
+                            .iter()
+                            .map(|a| a.return_type().to_string())
+                            .join(", ")
+                    ),
+                )
+            })
     }
 
     pub fn get_function_by_name_args<'a>(
@@ -625,6 +959,34 @@ impl Catalog {
             Err(CatalogError::Duplicated("sink", relation_name.to_string()))
         } else if schema.get_view_by_name(relation_name).is_some() {
             Err(CatalogError::Duplicated("view", relation_name.to_string()))
+        } else if schema.get_subscription_by_name(relation_name).is_some() {
+            Err(CatalogError::Duplicated(
+                "subscription",
+                relation_name.to_string(),
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
+    pub fn check_function_name_duplicated(
+        &self,
+        db_name: &str,
+        schema_name: &str,
+        function_name: &str,
+        arg_types: &[DataType],
+    ) -> CatalogResult<()> {
+        let schema = self.get_schema_by_name(db_name, schema_name)?;
+
+        if schema
+            .get_function_by_name_args(function_name, arg_types)
+            .is_some()
+        {
+            let name = format!(
+                "{function_name}({})",
+                arg_types.iter().map(|t| t.to_string()).join(",")
+            );
+            Err(CatalogError::Duplicated("function", name))
         } else {
             Ok(())
         }
@@ -649,6 +1011,21 @@ impl Catalog {
         }
     }
 
+    pub fn check_secret_name_duplicated(
+        &self,
+        db_name: &str,
+        schema_name: &str,
+        secret_name: &str,
+    ) -> CatalogResult<()> {
+        let schema = self.get_schema_by_name(db_name, schema_name)?;
+
+        if schema.get_secret_by_name(secret_name).is_some() {
+            Err(CatalogError::Duplicated("secret", secret_name.to_string()))
+        } else {
+            Ok(())
+        }
+    }
+
     /// Get the catalog cache's catalog version.
     pub fn version(&self) -> u64 {
         self.version
@@ -657,6 +1034,14 @@ impl Catalog {
     /// Set the catalog cache's catalog version.
     pub fn set_version(&mut self, catalog_version: CatalogVersion) {
         self.version = catalog_version;
+    }
+
+    pub fn table_stats(&self) -> &HummockVersionStats {
+        &self.table_stats
+    }
+
+    pub fn set_table_stats(&mut self, table_stats: HummockVersionStats) {
+        self.table_stats = table_stats;
     }
 
     pub fn get_all_indexes_related_to_object(

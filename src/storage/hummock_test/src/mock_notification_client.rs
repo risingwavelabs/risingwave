@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,29 +15,27 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use risingwave_common::error::Result;
 use risingwave_common::util::addr::HostAddr;
-use risingwave_common_service::observer_manager::{Channel, NotificationClient};
+use risingwave_common_service::observer_manager::{Channel, NotificationClient, ObserverError};
 use risingwave_meta::hummock::{HummockManager, HummockManagerRef};
 use risingwave_meta::manager::{MessageStatus, MetaSrvEnv, NotificationManagerRef, WorkerKey};
-use risingwave_meta::storage::{MemStore, MetaStore};
 use risingwave_pb::backup_service::MetaBackupManifestId;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::WriteLimits;
 use risingwave_pb::meta::{MetaSnapshot, SubscribeResponse, SubscribeType};
 use tokio::sync::mpsc::UnboundedReceiver;
 
-pub struct MockNotificationClient<S: MetaStore> {
+pub struct MockNotificationClient {
     addr: HostAddr,
-    notification_manager: NotificationManagerRef<S>,
-    hummock_manager: HummockManagerRef<S>,
+    notification_manager: NotificationManagerRef,
+    hummock_manager: HummockManagerRef,
 }
 
-impl<S: MetaStore> MockNotificationClient<S> {
+impl MockNotificationClient {
     pub fn new(
         addr: HostAddr,
-        notification_manager: NotificationManagerRef<S>,
-        hummock_manager: HummockManagerRef<S>,
+        notification_manager: NotificationManagerRef,
+        hummock_manager: HummockManagerRef,
     ) -> Self {
         Self {
             addr,
@@ -48,10 +46,13 @@ impl<S: MetaStore> MockNotificationClient<S> {
 }
 
 #[async_trait::async_trait]
-impl<S: MetaStore> NotificationClient for MockNotificationClient<S> {
+impl NotificationClient for MockNotificationClient {
     type Channel = TestChannel<SubscribeResponse>;
 
-    async fn subscribe(&self, subscribe_type: SubscribeType) -> Result<Self::Channel> {
+    async fn subscribe(
+        &self,
+        subscribe_type: SubscribeType,
+    ) -> Result<Self::Channel, ObserverError> {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
 
         let worker_key = WorkerKey(self.addr.to_protobuf());
@@ -61,7 +62,7 @@ impl<S: MetaStore> NotificationClient for MockNotificationClient<S> {
 
         let hummock_version = self.hummock_manager.get_current_version().await;
         let meta_snapshot = MetaSnapshot {
-            hummock_version: Some(hummock_version),
+            hummock_version: Some(hummock_version.to_protobuf()),
             version: Some(Default::default()),
             meta_backup_manifest_id: Some(MetaBackupManifestId { id: 0 }),
             hummock_write_limits: Some(WriteLimits {
@@ -78,10 +79,10 @@ impl<S: MetaStore> NotificationClient for MockNotificationClient<S> {
 }
 
 pub fn get_notification_client_for_test(
-    env: MetaSrvEnv<MemStore>,
-    hummock_manager_ref: Arc<HummockManager<MemStore>>,
+    env: MetaSrvEnv,
+    hummock_manager_ref: Arc<HummockManager>,
     worker_node: WorkerNode,
-) -> MockNotificationClient<MemStore> {
+) -> MockNotificationClient {
     MockNotificationClient::new(
         worker_node.get_host().unwrap().into(),
         env.notification_manager_ref(),
@@ -89,13 +90,13 @@ pub fn get_notification_client_for_test(
     )
 }
 
-pub struct TestChannel<T>(UnboundedReceiver<std::result::Result<T, MessageStatus>>);
+pub struct TestChannel<T>(UnboundedReceiver<Result<T, MessageStatus>>);
 
 #[async_trait::async_trait]
 impl<T: Send + 'static> Channel for TestChannel<T> {
     type Item = T;
 
-    async fn message(&mut self) -> std::result::Result<Option<T>, MessageStatus> {
+    async fn message(&mut self) -> Result<Option<T>, MessageStatus> {
         match self.0.recv().await {
             None => Ok(None),
             Some(result) => result.map(|r| Some(r)),

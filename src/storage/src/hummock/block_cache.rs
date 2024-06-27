@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,30 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
 use std::ops::Deref;
 use std::sync::Arc;
 
-use futures::Future;
-use risingwave_common::cache::{
-    CachePriority, CacheableEntry, LookupResponse, LruCache, LruCacheEventListener,
-};
-use risingwave_hummock_sdk::HummockSstableObjectId;
-use tokio::sync::oneshot::Receiver;
-use tokio::task::JoinHandle;
+use await_tree::InstrumentAwait;
+use foyer::{FetchState, HybridCacheEntry, HybridFetch};
+use risingwave_common::config::EvictionConfig;
 
-use super::{Block, HummockResult, TieredCacheEntry};
+use super::{Block, HummockResult, SstableBlockIndex};
 use crate::hummock::HummockError;
 
-const MIN_BUFFER_SIZE_PER_SHARD: usize = 256 * 1024 * 1024;
-
-type CachedBlockEntry = CacheableEntry<(HummockSstableObjectId, u64), Box<Block>>;
+type HybridCachedBlockEntry = HybridCacheEntry<SstableBlockIndex, Box<Block>>;
 
 enum BlockEntry {
-    Cache(CachedBlockEntry),
-    Owned(Box<Block>),
-    RefEntry(Arc<Block>),
+    HybridCache(#[allow(dead_code)] HybridCachedBlockEntry),
+    Owned(#[allow(dead_code)] Box<Block>),
+    RefEntry(#[allow(dead_code)] Arc<Block>),
 }
 
 pub struct BlockHolder {
@@ -60,20 +52,11 @@ impl BlockHolder {
         }
     }
 
-    pub fn from_cached_block(entry: CachedBlockEntry) -> Self {
+    pub fn from_hybrid_cache_entry(entry: HybridCachedBlockEntry) -> Self {
         let ptr = entry.value().as_ref() as *const _;
         Self {
-            _handle: BlockEntry::Cache(entry),
+            _handle: BlockEntry::HybridCache(entry),
             block: ptr,
-        }
-    }
-
-    pub fn from_tiered_cache(
-        entry: TieredCacheEntry<(HummockSstableObjectId, u64), Box<Block>>,
-    ) -> Self {
-        match entry {
-            TieredCacheEntry::Cache(entry) => Self::from_cached_block(entry),
-            TieredCacheEntry::Owned(block) => Self::from_owned_block(*block),
         }
     }
 }
@@ -89,158 +72,39 @@ impl Deref for BlockHolder {
 unsafe impl Send for BlockHolder {}
 unsafe impl Sync for BlockHolder {}
 
-type BlockCacheEventListener =
-    Arc<dyn LruCacheEventListener<K = (HummockSstableObjectId, u64), T = Box<Block>>>;
-
-#[derive(Clone)]
-pub struct BlockCache {
-    inner: Arc<LruCache<(HummockSstableObjectId, u64), Box<Block>>>,
+#[derive(Debug)]
+pub struct BlockCacheConfig {
+    pub capacity: usize,
+    pub shard_num: usize,
+    pub eviction: EvictionConfig,
 }
 
 pub enum BlockResponse {
     Block(BlockHolder),
-    WaitPendingRequest(Receiver<CachedBlockEntry>),
-    Miss(JoinHandle<Result<CachedBlockEntry, HummockError>>),
+    Entry(HybridFetch<SstableBlockIndex, Box<Block>>),
 }
 
 impl BlockResponse {
     pub async fn wait(self) -> HummockResult<BlockHolder> {
-        match self {
-            BlockResponse::Block(block_holder) => Ok(block_holder),
-            BlockResponse::WaitPendingRequest(receiver) => receiver
-                .await
-                .map_err(|recv_error| recv_error.into())
-                .map(BlockHolder::from_cached_block),
-            BlockResponse::Miss(join_handle) => join_handle
-                .await
-                .unwrap()
-                .map(BlockHolder::from_cached_block),
-        }
-    }
-}
-
-impl BlockCache {
-    pub fn new(capacity: usize, max_shard_bits: usize, high_priority_ratio: usize) -> Self {
-        Self::new_inner(capacity, max_shard_bits, high_priority_ratio, None)
-    }
-
-    pub fn with_event_listener(
-        capacity: usize,
-        max_shard_bits: usize,
-        high_priority_ratio: usize,
-        listener: BlockCacheEventListener,
-    ) -> Self {
-        Self::new_inner(
-            capacity,
-            max_shard_bits,
-            high_priority_ratio,
-            Some(listener),
-        )
-    }
-
-    fn new_inner(
-        capacity: usize,
-        mut max_shard_bits: usize,
-        high_priority_ratio: usize,
-        listener: Option<BlockCacheEventListener>,
-    ) -> Self {
-        if capacity == 0 {
-            panic!("block cache capacity == 0");
-        }
-        while (capacity >> max_shard_bits) < MIN_BUFFER_SIZE_PER_SHARD && max_shard_bits > 0 {
-            max_shard_bits -= 1;
-        }
-
-        let cache = match listener {
-            Some(listener) => LruCache::with_event_listener(
-                max_shard_bits,
-                capacity,
-                high_priority_ratio,
-                listener,
-            ),
-            None => LruCache::new(max_shard_bits, capacity, high_priority_ratio),
+        let entry = match self {
+            BlockResponse::Block(block) => return Ok(block),
+            BlockResponse::Entry(entry) => entry,
         };
-
-        Self {
-            inner: Arc::new(cache),
+        match entry.state() {
+            FetchState::Hit => entry
+                .await
+                .map(BlockHolder::from_hybrid_cache_entry)
+                .map_err(HummockError::foyer_error),
+            FetchState::Wait => entry
+                .verbose_instrument_await("wait_pending_fetch_block")
+                .await
+                .map(BlockHolder::from_hybrid_cache_entry)
+                .map_err(HummockError::foyer_error),
+            FetchState::Miss => entry
+                .verbose_instrument_await("fetch_block")
+                .await
+                .map(BlockHolder::from_hybrid_cache_entry)
+                .map_err(HummockError::foyer_error),
         }
-    }
-
-    pub fn get(&self, object_id: HummockSstableObjectId, block_idx: u64) -> Option<BlockHolder> {
-        self.inner
-            .lookup(Self::hash(object_id, block_idx), &(object_id, block_idx))
-            .map(BlockHolder::from_cached_block)
-    }
-
-    pub fn exists_block(&self, sst_id: HummockSstableObjectId, block_idx: u64) -> bool {
-        self.inner
-            .contains(Self::hash(sst_id, block_idx), &(sst_id, block_idx))
-    }
-
-    pub fn insert(
-        &self,
-        object_id: HummockSstableObjectId,
-        block_idx: u64,
-        block: Box<Block>,
-        priority: CachePriority,
-    ) -> BlockHolder {
-        BlockHolder::from_cached_block(self.inner.insert(
-            (object_id, block_idx),
-            Self::hash(object_id, block_idx),
-            block.capacity(),
-            block,
-            priority,
-        ))
-    }
-
-    pub fn get_or_insert_with<F, Fut>(
-        &self,
-        object_id: HummockSstableObjectId,
-        block_idx: u64,
-        priority: CachePriority,
-        mut fetch_block: F,
-    ) -> BlockResponse
-    where
-        F: FnMut() -> Fut,
-        Fut: Future<Output = HummockResult<Box<Block>>> + Send + 'static,
-    {
-        let h = Self::hash(object_id, block_idx);
-        let key = (object_id, block_idx);
-        match self
-            .inner
-            .lookup_with_request_dedup::<_, HummockError, _>(h, key, priority, || {
-                let f = fetch_block();
-                async move {
-                    let block = f.await?;
-                    let len = block.capacity();
-                    Ok((block, len))
-                }
-            }) {
-            LookupResponse::Invalid => unreachable!(),
-            LookupResponse::Cached(entry) => {
-                BlockResponse::Block(BlockHolder::from_cached_block(entry))
-            }
-            LookupResponse::WaitPendingRequest(receiver) => {
-                BlockResponse::WaitPendingRequest(receiver)
-            }
-            LookupResponse::Miss(join_handle) => BlockResponse::Miss(join_handle),
-        }
-    }
-
-    fn hash(object_id: HummockSstableObjectId, block_idx: u64) -> u64 {
-        let mut hasher = DefaultHasher::default();
-        object_id.hash(&mut hasher);
-        block_idx.hash(&mut hasher);
-        hasher.finish()
-    }
-
-    pub fn size(&self) -> usize {
-        self.inner.get_memory_usage()
-    }
-
-    #[cfg(any(test, feature = "test"))]
-    pub fn clear(&self) {
-        // This is only a method for test. Therefore it should be safe to call the unsafe method.
-        self.inner.clear();
     }
 }

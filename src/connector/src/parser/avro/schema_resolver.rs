@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,86 +12,35 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
-use std::path::Path;
 use std::sync::Arc;
 
+use anyhow::Context;
 use apache_avro::Schema;
 use moka::future::Cache;
-use risingwave_common::error::ErrorCode::{InternalError, InvalidConfigValue, ProtocolError};
-use risingwave_common::error::{Result, RwError};
-use url::Url;
 
-use crate::aws_utils::{default_conn_config, s3_client, AwsConfigV2};
-use crate::parser::schema_registry::{Client, ConfluentSchema};
-use crate::parser::util::download_from_http;
+use crate::error::ConnectorResult;
+use crate::schema::schema_registry::{Client, ConfluentSchema};
 
-const AVRO_SCHEMA_LOCATION_S3_REGION: &str = "region";
-
-/// Read schema from s3 bucket.
-/// S3 file location format: <s3://bucket_name/file_name>
-pub(super) async fn read_schema_from_s3(
-    url: &Url,
-    properties: &HashMap<String, String>,
-) -> Result<String> {
-    let bucket = url
-        .domain()
-        .ok_or_else(|| RwError::from(InternalError(format!("Illegal Avro schema path {}", url))))?;
-    if properties.get(AVRO_SCHEMA_LOCATION_S3_REGION).is_none() {
-        return Err(RwError::from(InvalidConfigValue {
-            config_entry: AVRO_SCHEMA_LOCATION_S3_REGION.to_string(),
-            config_value: "NONE".to_string(),
-        }));
-    }
-    let key = url.path().replace('/', "");
-    let config = AwsConfigV2::from(properties.clone());
-    let sdk_config = config.load_config(None).await;
-    let s3_client = s3_client(&sdk_config, Some(default_conn_config()));
-    let response = s3_client
-        .get_object()
-        .bucket(bucket.to_string())
-        .key(key)
-        .send()
-        .await
-        .map_err(|e| RwError::from(InternalError(e.to_string())))?;
-    let body_bytes = response.body.collect().await.map_err(|e| {
-        RwError::from(InternalError(format!(
-            "Read Avro schema file from s3 {}",
-            e
-        )))
-    })?;
-    let schema_bytes = body_bytes.into_bytes().to_vec();
-    String::from_utf8(schema_bytes)
-        .map_err(|e| RwError::from(InternalError(format!("Avro schema not valid utf8 {}", e))))
-}
-
-/// Read avro schema file from local file.For on-premise or testing.
-pub(super) fn read_schema_from_local(path: impl AsRef<Path>) -> Result<String> {
-    std::fs::read_to_string(path.as_ref()).map_err(|e| e.into())
-}
-
-/// Read avro schema file from local file.For common usage.
-pub(super) async fn read_schema_from_http(location: &Url) -> Result<String> {
-    let schema_bytes = download_from_http(location).await?;
-
-    String::from_utf8(schema_bytes.into()).map_err(|e| {
-        RwError::from(InternalError(format!(
-            "read schema string from https failed {}",
-            e
-        )))
-    })
-}
-
+/// Fetch schemas from confluent schema registry and cache them.
+///
+/// Background: This is mainly used for Avro **writer schema** (during schema evolution): When decoding an Avro message,
+/// we must get the message's schema id, and use the *exactly same schema* to decode the message, and then
+/// convert it with the reader schema. (This is also why Avro has to be used with a schema registry instead of a static schema file.)
+///
+/// TODO: support protobuf (not sure if it's needed)
 #[derive(Debug)]
-pub struct ConfluentSchemaResolver {
+pub struct ConfluentSchemaCache {
     writer_schemas: Cache<i32, Arc<Schema>>,
     confluent_client: Client,
 }
 
-impl ConfluentSchemaResolver {
-    async fn parse_and_cache_schema(&self, raw_schema: ConfluentSchema) -> Result<Arc<Schema>> {
-        let schema = Schema::parse_str(&raw_schema.content)
-            .map_err(|e| RwError::from(ProtocolError(format!("Avro schema parse error {}", e))))?;
+impl ConfluentSchemaCache {
+    async fn parse_and_cache_schema(
+        &self,
+        raw_schema: ConfluentSchema,
+    ) -> ConnectorResult<Arc<Schema>> {
+        let schema =
+            Schema::parse_str(&raw_schema.content).context("failed to parse avro schema")?;
         let schema = Arc::new(schema);
         self.writer_schemas
             .insert(raw_schema.id, Arc::clone(&schema))
@@ -101,13 +50,14 @@ impl ConfluentSchemaResolver {
 
     /// Create a new `ConfluentSchemaResolver`
     pub fn new(client: Client) -> Self {
-        ConfluentSchemaResolver {
+        ConfluentSchemaCache {
             writer_schemas: Cache::new(u64::MAX),
             confluent_client: client,
         }
     }
 
-    pub async fn get_by_subject_name(&self, subject_name: &str) -> Result<Arc<Schema>> {
+    /// Gets the latest schema by subject name, which is used as *reader schema*.
+    pub async fn get_by_subject(&self, subject_name: &str) -> ConnectorResult<Arc<Schema>> {
         let raw_schema = self
             .confluent_client
             .get_schema_by_subject(subject_name)
@@ -115,9 +65,10 @@ impl ConfluentSchemaResolver {
         self.parse_and_cache_schema(raw_schema).await
     }
 
-    // get the writer schema by id
-    pub async fn get(&self, schema_id: i32) -> Result<Arc<Schema>> {
-        if let Some(schema) = self.writer_schemas.get(&schema_id) {
+    /// Gets the a specific schema by id, which is used as *writer schema*.
+    pub async fn get_by_id(&self, schema_id: i32) -> ConnectorResult<Arc<Schema>> {
+        // TODO: use `get_with`
+        if let Some(schema) = self.writer_schemas.get(&schema_id).await {
             Ok(schema)
         } else {
             let raw_schema = self.confluent_client.get_schema_by_id(schema_id).await?;

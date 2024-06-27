@@ -30,3 +30,44 @@ query T
 show timezone;
 ----
 GMT
+
+statement ok
+set time zone local;
+
+statement ok
+set time zone default;
+
+statement ok
+set time zone 'utc';
+
+statement error Invalid value
+set time zone 'utcx';
+
+statement ok
+set time zone utc;
+
+statement error Invalid value
+set time zone utcx;
+
+statement ok
+set time zone "utc";
+
+statement error Invalid value
+set time zone "utcx";
+
+statement error Invalid value
+set time zone "default";
+
+statement error Invalid value
+set time zone "local";
+
+statement error Invalid value
+set time zone null;
+
+# The following are valid in PostgreSQL but we do not support them for simplicity.
+
+statement error Invalid value
+set time zone 12.3;
+
+statement error
+set time zone interval '1' hour;

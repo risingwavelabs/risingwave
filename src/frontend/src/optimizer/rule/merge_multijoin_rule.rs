@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -46,6 +46,7 @@ mod tests {
     use super::*;
     use crate::expr::{ExprImpl, FunctionCall, InputRef};
     use crate::optimizer::optimizer_context::OptimizerContext;
+    use crate::optimizer::plan_node::generic::GenericPlanRef;
     use crate::utils::Condition;
 
     #[tokio::test]

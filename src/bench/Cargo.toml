@@ -8,32 +8,34 @@ license = { workspace = true }
 repository = { workspace = true }
 
 [dependencies]
+anyhow = "1"
 async-trait = "0.1"
 aws-config = { workspace = true }
 aws-sdk-s3 = { workspace = true }
 aws-smithy-http = { workspace = true }
+aws-smithy-types = { workspace = true }
 bcc = { version = "0.0.33", optional = true }
 bytes = "1"
 bytesize = { version = "1", features = ["serde"] }
-clap = { version = "4", features = ["derive"] }
+clap = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
+futures-async-stream = { workspace = true }
 hdrhistogram = "7"
-isahc = { version = "1", default-features = false }
-itertools = "0.10"
+itertools = { workspace = true }
 libc = "0.2"
-opentelemetry = { version = "0.17", optional = true, features = ["rt-tokio"] }
-opentelemetry-jaeger = { version = "0.16", optional = true, features = [
-    "rt-tokio",
-    "collector_client",
-    "isahc",
-    "isahc_collector_client",
-] }
-parking_lot = "0.12"
+opentelemetry = { workspace = true, optional = true }
+parking_lot = { workspace = true }
 prometheus = { version = "0.13", features = ["process"] }
-rand = "0.8"
-risingwave_common = { path = "../common" }
-risingwave_storage = { path = "../storage" }
+rand = { workspace = true }
+risingwave_common = { workspace = true }
+risingwave_connector = { workspace = true }
+risingwave_pb = { workspace = true }
+risingwave_rt = { workspace = true, optional = true }
+risingwave_storage = { workspace = true }
+risingwave_stream = { workspace = true }
 serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
+thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "fs",
     "rt",
@@ -44,25 +46,27 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "signal",
 ] }
 tokio-stream = "0.1"
-toml = "0.7"
+toml = "0.8"
 tracing = "0.1"
-tracing-opentelemetry = { version = "0.17", optional = true }
-tracing-subscriber = "0.3.16"
+tracing-subscriber = "0.3.17"
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-nix = { version = "0.25", features = ["fs", "mman"] }
-
-[[bin]]
-name = "file-cache-bench"
-path = "file_cache_bench/main.rs"
+nix = { version = "0.29", features = ["fs", "mman"] }
 
 [[bin]]
 name = "s3-bench"
 path = "s3_bench/main.rs"
 
+[[bin]]
+name = "sink-bench"
+path = "sink_bench/main.rs"
+
 [features]
 bpf = ["bcc", "risingwave_storage/bpf"]
-trace = ["opentelemetry", "opentelemetry-jaeger", "tracing-opentelemetry", "tracing/release_max_level_trace"]
+trace = ["opentelemetry", "risingwave_rt", "tracing/release_max_level_trace"]
+
+[lints]
+workspace = true

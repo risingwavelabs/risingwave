@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -82,7 +82,7 @@ pub fn run_test_inner(cases: &[&TestDescAndFn], hook: impl TestHook + 'static + 
     test_main(&args, cases, None)
 }
 
-thread_local!(static FS: RefCell<Option<fail::FailScenario<'static>>> = RefCell::new(None));
+thread_local!(static FS: RefCell<Option<fail::FailScenario<'static>>> = const { RefCell::new(None) });
 #[derive(Clone)]
 struct FailPointHook;
 

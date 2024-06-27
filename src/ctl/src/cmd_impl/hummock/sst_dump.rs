@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,19 +19,17 @@ use bytes::{Buf, Bytes};
 use chrono::offset::Utc;
 use chrono::DateTime;
 use clap::Args;
+use futures::TryStreamExt;
 use itertools::Itertools;
 use risingwave_common::types::ToText;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
-use risingwave_common::util::value_encoding::{
-    BasicSerde, EitherSerde, ValueRowDeserializer, ValueRowSerdeNew,
-};
+use risingwave_common::util::value_encoding::{BasicSerde, EitherSerde, ValueRowDeserializer};
 use risingwave_frontend::TableCatalog;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::HummockSstableObjectId;
-use risingwave_object_store::object::{BlockLocation, ObjectMetadata, ObjectStoreImpl};
+use risingwave_object_store::object::{ObjectMetadata, ObjectStoreImpl};
 use risingwave_pb::hummock::{Level, SstableInfo};
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::value::HummockValue;
@@ -39,6 +37,7 @@ use risingwave_storage::hummock::{
     Block, BlockHolder, BlockIterator, CompressionAlgorithm, Sstable, SstableStore,
 };
 use risingwave_storage::monitor::StoreLocalStatistic;
+use risingwave_storage::row_serde::value_serde::ValueRowSerdeNew;
 
 use crate::common::HummockServiceOpts;
 use crate::CtlContext;
@@ -59,6 +58,8 @@ pub struct SstDumpArgs {
     print_table: bool,
     #[clap(short = 'd')]
     data_dir: Option<String>,
+    #[clap(short, long = "use-new-object-prefix-strategy", default_value = "true")]
+    use_new_object_prefix_strategy: bool,
 }
 
 pub async fn sst_dump(context: &CtlContext, args: SstDumpArgs) -> anyhow::Result<()> {
@@ -72,9 +73,12 @@ pub async fn sst_dump(context: &CtlContext, args: SstDumpArgs) -> anyhow::Result
     if args.print_level {
         // Level information is retrieved from meta service
         let hummock = context
-            .hummock_store(HummockServiceOpts::from_env(args.data_dir.clone())?)
+            .hummock_store(HummockServiceOpts::from_env(
+                args.data_dir.clone(),
+                args.use_new_object_prefix_strategy,
+            )?)
             .await?;
-        let version = hummock.inner().get_pinned_version().version();
+        let version = hummock.inner().get_pinned_version().version().clone();
         let sstable_store = hummock.sstable_store();
         for level in version.get_combined_levels() {
             for sstable_info in &level.table_infos {
@@ -108,15 +112,20 @@ pub async fn sst_dump(context: &CtlContext, args: SstDumpArgs) -> anyhow::Result
         }
     } else {
         // Object information is retrieved from object store. Meta service is not required.
-        let hummock_service_opts = HummockServiceOpts::from_env(args.data_dir.clone())?;
-        let sstable_store = hummock_service_opts.create_sstable_store().await?;
+        let hummock_service_opts = HummockServiceOpts::from_env(
+            args.data_dir.clone(),
+            args.use_new_object_prefix_strategy,
+        )?;
+        let sstable_store = hummock_service_opts
+            .create_sstable_store(args.use_new_object_prefix_strategy)
+            .await?;
         if let Some(obj_id) = &args.object_id {
             let obj_store = sstable_store.store();
             let obj_path = sstable_store.get_sst_data_path(*obj_id);
-            let obj = &obj_store.list(&obj_path).await?[0];
-            print_object(obj);
-            let meta_offset = get_meta_offset_from_object(obj, obj_store.as_ref()).await?;
-            let obj_id = sstable_store.get_object_id_from_path(&obj.key);
+            let obj = obj_store.metadata(&obj_path).await?;
+            print_object(&obj);
+            let meta_offset = get_meta_offset_from_object(&obj, obj_store.as_ref()).await?;
+            let obj_id = SstableStore::get_object_id_from_path(&obj.key);
             sst_dump_via_sstable_store(
                 &sstable_store,
                 obj_id,
@@ -127,12 +136,14 @@ pub async fn sst_dump(context: &CtlContext, args: SstDumpArgs) -> anyhow::Result
             )
             .await?;
         } else {
-            let objects = sstable_store.list_ssts_from_object_store().await?;
-            for obj in objects {
+            let mut metadata_iter = sstable_store
+                .list_object_metadata_from_object_store()
+                .await?;
+            while let Some(obj) = metadata_iter.try_next().await? {
                 print_object(&obj);
                 let meta_offset =
                     get_meta_offset_from_object(&obj, sstable_store.store().as_ref()).await?;
-                let obj_id = sstable_store.get_object_id_from_path(&obj.key);
+                let obj_id = SstableStore::get_object_id_from_path(&obj.key);
                 sst_dump_via_sstable_store(
                     &sstable_store,
                     obj_id,
@@ -169,20 +180,15 @@ async fn get_meta_offset_from_object(
     obj: &ObjectMetadata,
     obj_store: &ObjectStoreImpl,
 ) -> anyhow::Result<u64> {
-    let meta_offset_loc = BlockLocation {
-        offset: obj.total_size
-            - (
-                // version, magic
-                2 * std::mem::size_of::<u32>() +
-                // footer, checksum
-                2 * std::mem::size_of::<u64>()
-            ),
-        size: std::mem::size_of::<u64>(),
-    };
-    Ok(obj_store
-        .read(&obj.key, Some(meta_offset_loc))
-        .await?
-        .get_u64_le())
+    let start = obj.total_size
+        - (
+            // version, magic
+            2 * std::mem::size_of::<u32>() +
+        // footer, checksum
+        2 * std::mem::size_of::<u64>()
+        );
+    let end = start + std::mem::size_of::<u64>();
+    Ok(obj_store.read(&obj.key, start..end).await?.get_u64_le())
 }
 
 pub async fn sst_dump_via_sstable_store(
@@ -202,7 +208,7 @@ pub async fn sst_dump_via_sstable_store(
     let sstable_cache = sstable_store
         .sstable(&sstable_info, &mut StoreLocalStatistic::default())
         .await?;
-    let sstable = sstable_cache.value().as_ref();
+    let sstable = sstable_cache.as_ref();
     let sstable_meta = &sstable.meta;
     let smallest_key = FullKey::decode(&sstable_meta.smallest_key);
     let largest_key = FullKey::decode(&sstable_meta.largest_key);
@@ -274,11 +280,8 @@ async fn print_block(
 
     // Retrieve encoded block data in bytes
     let store = sstable_store.store();
-    let block_loc = BlockLocation {
-        offset: block_meta.offset as usize,
-        size: block_meta.len as usize,
-    };
-    let block_data = store.read(&data_path, Some(block_loc)).await?;
+    let range = block_meta.offset as usize..block_meta.offset as usize + block_meta.len as usize;
+    let block_data = store.read(&data_path, range).await?;
 
     // Retrieve checksum and compression algorithm used from the encoded block data
     let len = block_data.len();
@@ -321,13 +324,17 @@ fn print_kv_pairs(
         let full_val = block_iter.value();
         let humm_val = HummockValue::from_slice(full_val)?;
 
-        let epoch = Epoch::from(full_key.epoch);
+        let epoch = Epoch::from(full_key.epoch_with_gap.pure_epoch());
         let date_time = DateTime::<Utc>::from(epoch.as_system_time());
 
         println!("\t\t   key: {:?}, len={}", full_key, full_key.encoded_len());
         println!("\t\t value: {:?}, len={}", humm_val, humm_val.encoded_len());
-        println!("\t\t epoch: {} ({})", epoch, date_time);
-
+        println!(
+            "\t\t epoch: {} offset = {}  ({})",
+            epoch,
+            full_key.epoch_with_gap.offset(),
+            date_time
+        );
         if args.print_table {
             print_table_column(full_key, humm_val, table_data)?;
         }
@@ -369,21 +376,31 @@ fn print_table_column(
             .iter()
             .map(|idx| table_catalog.columns[*idx].column_desc.name.clone())
             .collect_vec();
-        let data_types = table_catalog
-            .value_indices
-            .iter()
-            .map(|idx| table_catalog.columns[*idx].data_type().clone())
-            .collect_vec();
-        let column_ids = table_catalog
-            .value_indices
-            .iter()
-            .map(|idx| table_catalog.columns[*idx].column_id())
-            .collect_vec();
-        let schema = Arc::from(data_types.into_boxed_slice());
+
         let row_deserializer: EitherSerde = if table_catalog.version().is_some() {
-            ColumnAwareSerde::new(&column_ids, schema).into()
+            ColumnAwareSerde::new(
+                table_catalog.value_indices.clone().into(),
+                Arc::from_iter(
+                    table_catalog
+                        .columns()
+                        .iter()
+                        .cloned()
+                        .map(|c| c.column_desc),
+                ),
+            )
+            .into()
         } else {
-            BasicSerde::new(&column_ids, schema).into()
+            BasicSerde::new(
+                table_catalog.value_indices.clone().into(),
+                Arc::from_iter(
+                    table_catalog
+                        .columns()
+                        .iter()
+                        .cloned()
+                        .map(|c| c.column_desc),
+                ),
+            )
+            .into()
         };
         let row = row_deserializer.deserialize(user_val)?;
         for (c, v) in column_desc.iter().zip_eq_fast(row.iter()) {

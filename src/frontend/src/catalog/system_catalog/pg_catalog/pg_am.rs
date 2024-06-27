@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,16 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::types::DataType;
-
-use crate::catalog::system_catalog::SystemCatalogColumnsDef;
+use risingwave_common::types::Fields;
+use risingwave_frontend_macro::system_catalog;
 
 /// Stores information about relation access methods.
 /// Reference: [`https://www.postgresql.org/docs/current/catalog-pg-am.html`]
-pub const PG_AM_TABLE_NAME: &str = "pg_am";
-pub const PG_AM_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
-    (DataType::Int32, "oid"),
-    (DataType::Varchar, "amname"),
-    (DataType::Int32, "amhandler"),
-    (DataType::Varchar, "amtype"),
-];
+#[system_catalog(view, "pg_catalog.pg_am")]
+#[derive(Fields)]
+struct PgAmColumn {
+    oid: i32,
+    amname: String,
+    amhandler: i32,
+    amtype: String,
+}

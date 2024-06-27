@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,8 +17,9 @@ use std::sync::Arc;
 
 use risingwave_common::hash::{HashKey, HashKeyDispatcher};
 use risingwave_common::types::DataType;
-use risingwave_expr::expr::{build, build_from_prost, BoxedExpression, InputRefExpression};
-pub use risingwave_pb::expr::expr_node::Type as ExprType;
+use risingwave_expr::expr::{
+    build_func_non_strict, build_non_strict_from_prost, InputRefExpression, NonStrictExpression,
+};
 use risingwave_pb::plan_common::JoinType as JoinTypeProto;
 use risingwave_pb::stream_plan::HashJoinNode;
 
@@ -26,12 +27,11 @@ use super::*;
 use crate::common::table::state_table::StateTable;
 use crate::executor::hash_join::*;
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{ActorContextRef, PkIndices};
+use crate::executor::{ActorContextRef, JoinType};
 use crate::task::AtomicU64Ref;
 
 pub struct HashJoinExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for HashJoinExecutorBuilder {
     type Node = HashJoinNode;
 
@@ -39,8 +39,7 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         store: impl StateStore,
-        stream: &mut LocalStreamManagerCore,
-    ) -> StreamResult<BoxedExecutor> {
+    ) -> StreamResult<Executor> {
         let is_append_only = node.is_append_only;
         let vnodes = Arc::new(params.vnode_bitmap.expect("vnodes not set for hash join"));
 
@@ -80,7 +79,10 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
             .collect_vec();
 
         let condition = match node.get_condition() {
-            Ok(cond_prost) => Some(build_from_prost(cond_prost)?),
+            Ok(cond_prost) => Some(build_non_strict_from_prost(
+                cond_prost,
+                params.eval_error_report.clone(),
+            )?),
             Err(_) => None,
         };
         trace!("Join non-equi condition: {:?}", condition);
@@ -96,13 +98,18 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
                     let data_type = source_l.schema().fields
                         [min(key_required_larger, key_required_smaller)]
                     .data_type();
-                    Some(build(
+                    Some(build_func_non_strict(
                         delta_expression.delta_type(),
                         data_type.clone(),
                         vec![
                             Box::new(InputRefExpression::new(data_type, 0)),
-                            build_from_prost(delta_expression.delta.as_ref().unwrap())?,
+                            build_non_strict_from_prost(
+                                delta_expression.delta.as_ref().unwrap(),
+                                params.eval_error_report.clone(),
+                            )?
+                            .into_inner(),
                         ],
+                        params.eval_error_report.clone(),
                     )?)
                 } else {
                     None
@@ -129,46 +136,48 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
 
         let args = HashJoinExecutorDispatcherArgs {
             ctx: params.actor_context,
+            info: params.info.clone(),
             source_l,
             source_r,
             params_l,
             params_r,
             null_safe,
-            pk_indices: params.pk_indices,
             output_indices,
-            executor_id: params.executor_id,
             cond: condition,
             inequality_pairs,
-            op_info: params.op_info,
             state_table_l,
             degree_state_table_l,
             state_table_r,
             degree_state_table_r,
-            lru_manager: stream.get_watermark_epoch(),
+            lru_manager: params.watermark_epoch,
             is_append_only,
             metrics: params.executor_stats,
             join_type_proto: node.get_join_type()?,
             join_key_data_types,
             chunk_size: params.env.config().developer.chunk_size,
+            high_join_amplification_threshold: params
+                .env
+                .config()
+                .developer
+                .high_join_amplification_threshold,
         };
 
-        args.dispatch()
+        let exec = args.dispatch()?;
+        Ok((params.info, exec).into())
     }
 }
 
 struct HashJoinExecutorDispatcherArgs<S: StateStore> {
     ctx: ActorContextRef,
-    source_l: Box<dyn Executor>,
-    source_r: Box<dyn Executor>,
+    info: ExecutorInfo,
+    source_l: Executor,
+    source_r: Executor,
     params_l: JoinParams,
     params_r: JoinParams,
     null_safe: Vec<bool>,
-    pk_indices: PkIndices,
     output_indices: Vec<usize>,
-    executor_id: u64,
-    cond: Option<BoxedExpression>,
-    inequality_pairs: Vec<(usize, usize, bool, Option<BoxedExpression>)>,
-    op_info: String,
+    cond: Option<NonStrictExpression>,
+    inequality_pairs: Vec<(usize, usize, bool, Option<NonStrictExpression>)>,
     state_table_l: StateTable<S>,
     degree_state_table_l: StateTable<S>,
     state_table_r: StateTable<S>,
@@ -179,39 +188,38 @@ struct HashJoinExecutorDispatcherArgs<S: StateStore> {
     join_type_proto: JoinTypeProto,
     join_key_data_types: Vec<DataType>,
     chunk_size: usize,
+    high_join_amplification_threshold: usize,
 }
 
 impl<S: StateStore> HashKeyDispatcher for HashJoinExecutorDispatcherArgs<S> {
-    type Output = StreamResult<BoxedExecutor>;
+    type Output = StreamResult<Box<dyn Execute>>;
 
     fn dispatch_impl<K: HashKey>(self) -> Self::Output {
         /// This macro helps to fill the const generic type parameter.
         macro_rules! build {
             ($join_type:ident) => {
-                Ok(Box::new(
-                    HashJoinExecutor::<K, S, { JoinType::$join_type }>::new(
-                        self.ctx,
-                        self.source_l,
-                        self.source_r,
-                        self.params_l,
-                        self.params_r,
-                        self.null_safe,
-                        self.pk_indices,
-                        self.output_indices,
-                        self.executor_id,
-                        self.cond,
-                        self.inequality_pairs,
-                        self.op_info,
-                        self.state_table_l,
-                        self.degree_state_table_l,
-                        self.state_table_r,
-                        self.degree_state_table_r,
-                        self.lru_manager,
-                        self.is_append_only,
-                        self.metrics,
-                        self.chunk_size,
-                    ),
-                ))
+                Ok(HashJoinExecutor::<K, S, { JoinType::$join_type }>::new(
+                    self.ctx,
+                    self.info,
+                    self.source_l,
+                    self.source_r,
+                    self.params_l,
+                    self.params_r,
+                    self.null_safe,
+                    self.output_indices,
+                    self.cond,
+                    self.inequality_pairs,
+                    self.state_table_l,
+                    self.degree_state_table_l,
+                    self.state_table_r,
+                    self.degree_state_table_r,
+                    self.lru_manager,
+                    self.is_append_only,
+                    self.metrics,
+                    self.chunk_size,
+                    self.high_join_amplification_threshold,
+                )
+                .boxed())
             };
         }
         match self.join_type_proto {

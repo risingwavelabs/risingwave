@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,10 +14,11 @@
 
 package com.risingwave.connector;
 
+import static com.risingwave.connector.SinkUtils.getConnectorName;
+
 import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.SinkFactory;
 import com.risingwave.proto.ConnectorServiceProto;
-import com.risingwave.proto.ConnectorServiceProto.SinkConfig;
 import io.grpc.stub.StreamObserver;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -35,10 +36,16 @@ public class SinkValidationHandler {
 
     public void handle(ConnectorServiceProto.ValidateSinkRequest request) {
         try {
-            SinkConfig sinkConfig = request.getSinkConfig();
-            TableSchema tableSchema = TableSchema.fromProto(sinkConfig.getTableSchema());
-            SinkFactory sinkFactory = SinkUtils.getSinkFactory(sinkConfig.getConnectorType());
-            sinkFactory.validate(tableSchema, sinkConfig.getPropertiesMap(), request.getSinkType());
+            ConnectorServiceProto.SinkParam sinkParam = request.getSinkParam();
+            TableSchema tableSchema = TableSchema.fromProto(sinkParam.getTableSchema());
+            String connectorName = getConnectorName(request.getSinkParam());
+            SinkFactory sinkFactory = SinkUtils.getSinkFactory(connectorName);
+            sinkFactory.validate(
+                    tableSchema, sinkParam.getPropertiesMap(), sinkParam.getSinkType());
+
+            responseObserver.onNext(
+                    ConnectorServiceProto.ValidateSinkResponse.newBuilder().build());
+            responseObserver.onCompleted();
 
         } catch (IllegalArgumentException e) {
             LOG.error("sink validation failed", e);
@@ -74,8 +81,5 @@ public class SinkValidationHandler {
                             .build());
             responseObserver.onCompleted();
         }
-
-        responseObserver.onNext(ConnectorServiceProto.ValidateSinkResponse.newBuilder().build());
-        responseObserver.onCompleted();
     }
 }

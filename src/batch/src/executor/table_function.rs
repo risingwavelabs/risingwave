@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,14 +13,14 @@
 // limitations under the License.
 
 use futures_async_stream::try_stream;
-use risingwave_common::array::DataChunk;
+use risingwave_common::array::{ArrayImpl, DataChunk};
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
-use risingwave_expr::table_function::{build_from_prost, BoxedTableFunction};
+use risingwave_expr::table_function::{build_from_prost, check_error, BoxedTableFunction};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
+use crate::error::{BatchError, Result};
 use crate::executor::{BoxedDataChunkStream, Executor, ExecutorBuilder};
 use crate::task::BatchTaskContext;
 
@@ -28,6 +28,7 @@ pub struct TableFunctionExecutor {
     schema: Schema,
     identity: String,
     table_function: BoxedTableFunction,
+    #[expect(dead_code)]
     chunk_size: usize,
 }
 
@@ -46,15 +47,19 @@ impl Executor for TableFunctionExecutor {
 }
 
 impl TableFunctionExecutor {
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
         let dummy_chunk = DataChunk::new_dummy(1);
 
         #[for_await]
         for chunk in self.table_function.eval(&dummy_chunk).await {
             let chunk = chunk?;
-            // remove the first column
-            yield chunk.split_column_at(1).1;
+            check_error(&chunk)?;
+            // remove the first column and expand the second column if its data type is struct
+            yield match chunk.column_at(1).as_ref() {
+                ArrayImpl::Struct(struct_array) => struct_array.into(),
+                _ => chunk.split_column_at(1).1,
+            };
         }
     }
 }
@@ -85,7 +90,7 @@ impl BoxedExecutorBuilder for TableFunctionExecutorBuilder {
         let table_function = build_from_prost(node.table_function.as_ref().unwrap(), chunk_size)?;
 
         let schema = if let DataType::Struct(fields) = table_function.return_type() {
-            (&*fields).into()
+            (&fields).into()
         } else {
             Schema {
                 // TODO: should be named

@@ -1,0 +1,96 @@
+---
+services:
+  risingwave-standalone:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: risingwave-standalone
+  postgres-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: postgres-0
+  grafana-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: grafana-0
+  minio-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: minio-0
+  prometheus-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: prometheus-0
+  kafka:
+    image: confluentinc/cp-kafka:latest
+    hostname: kafka
+    container_name: kafka
+    ports:
+      - "29092:29092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_TOOLS_LOG4J_LOGLEVEL: ERROR
+    depends_on:
+      [ zookeeper ]
+    healthcheck: { test: nc -z localhost 9092, interval: 1s, start_period: 120s }
+  pinot-controller:
+    image: apachepinot/pinot:latest
+    command: "StartController -zkAddress zookeeper:2181"
+    container_name: "pinot-controller"
+    volumes:
+      - ./config:/config
+    restart: unless-stopped
+    ports:
+      - "9000:9000"
+    depends_on:
+      - zookeeper
+  pinot-broker:
+    image: apachepinot/pinot:latest
+    command: "StartBroker -zkAddress zookeeper:2181"
+    restart: unless-stopped
+    container_name: "pinot-broker"
+    ports:
+      - "8099:8099"
+    depends_on:
+      - pinot-controller
+  pinot-server:
+    image: apachepinot/pinot:latest
+    container_name: "pinot-server"
+    command: "StartServer -zkAddress zookeeper:2181"
+    restart: unless-stopped
+    depends_on:
+      - pinot-broker
+  zookeeper:
+    image: confluentinc/cp-zookeeper:latest
+    hostname: zookeeper
+    container_name: zookeeper
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+  postgres:
+    image: postgres:latest
+    command: tail -f /dev/null
+    volumes:
+      - "./update.sql:/update.sql"
+    restart: on-failure
+    container_name: postgres
+volumes:
+  risingwave-standalone:
+    external: false
+  postgres-0:
+    external: false
+  grafana-0:
+    external: false
+  minio-0:
+    external: false
+  prometheus-0:
+    external: false
+  message_queue:
+    external: false
+name: risingwave-compose

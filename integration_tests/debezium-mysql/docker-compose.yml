@@ -1,14 +1,29 @@
 ---
-version: "3"
 services:
-  risingwave:
-    image: ghcr.io/risingwavelabs/risingwave:latest
-    ports:
-      - 4566:4566
-      - 5691:5691
-    command:
-      - playground
-    container_name: risingwave
+  risingwave-standalone:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: risingwave-standalone
+  postgres-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: postgres-0
+  grafana-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: grafana-0
+  minio-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: minio-0
+  prometheus-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: prometheus-0
+  message_queue:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: message_queue
   mysql:
     image: mysql:8.0
     ports:
@@ -21,6 +36,7 @@ services:
     volumes:
       - ./mysql/mysql.cnf:/etc/mysql/conf.d/mysql.cnf
       - ./mysql/mysql_bootstrap.sql:/docker-entrypoint-initdb.d/mysql_bootstrap.sql
+      - ./mysql_prepare.sql:/mysql_prepare.sql
     healthcheck:
       test:
         [
@@ -31,12 +47,9 @@ services:
       timeout: 5s
       retries: 5
     container_name: mysql
-  message_queue:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: message_queue
   debezium:
-    image: debezium/connect:1.9
+    image: debezium-connect
+    build: .
     environment:
       BOOTSTRAP_SERVERS: message_queue:29092
       GROUP_ID: 1
@@ -58,30 +71,19 @@ services:
       message_queue: { condition: service_healthy }
       mysql: { condition: service_healthy }
     container_name: debezium
-  debezium_deploy:
-    image: debezium/connect:1.9
-    depends_on:
-      debezium:
-        condition: service_healthy
-    volumes:
-      - ./mysql/mysql_dbz.sh:/mysql_dbz.sh
-    entrypoint: [ bash, -c, /mysql_dbz.sh ]
-    container_name: debezium_deploy
-    restart: on-failure
-  datagen:
-    image: mysql:8.0
-    depends_on:
-      mysql: { condition: service_healthy }
-    command:
-      - /bin/sh
-      - -c
-      - "mysql -p123456 -h mysql mydb < mysql_prepare.sql"
-    volumes:
-      - "./mysql_prepare.sql:/mysql_prepare.sql"
-    container_name: datagen
-    restart: on-failure
+
 volumes:
   message_queue:
+    external: false
+  risingwave-standalone:
+    external: false
+  postgres-0:
+    external: false
+  grafana-0:
+    external: false
+  minio-0:
+    external: false
+  prometheus-0:
     external: false
 
 name: risingwave-compose

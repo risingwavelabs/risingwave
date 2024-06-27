@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -52,7 +52,7 @@ fn bench_block_iter(c: &mut Criterion) {
     c.bench_with_input(
         BenchmarkId::new(
             format!(
-                "block - iter next - {} tables * {} keys",
+                "block_iter_next_{}_tables_x_{}_keys",
                 TABLES_PER_SSTABLE, KEYS_PER_TABLE
             ),
             "",
@@ -71,7 +71,7 @@ fn bench_block_iter(c: &mut Criterion) {
     c.bench_with_input(
         BenchmarkId::new(
             format!(
-                "block - iter prev - {} tables * {} keys",
+                "block_iter_prev_{}_tables_x_{}_keys",
                 TABLES_PER_SSTABLE, KEYS_PER_TABLE
             ),
             "",

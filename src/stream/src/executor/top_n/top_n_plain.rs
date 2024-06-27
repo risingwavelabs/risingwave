@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,19 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use async_trait::async_trait;
-use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::array::Op;
 use risingwave_common::row::RowExt;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::sort_util::ColumnOrder;
-use risingwave_storage::StateStore;
 
 use super::utils::*;
 use super::{ManagedTopNState, TopNCache, TopNCacheTrait};
-use crate::common::table::state_table::StateTable;
-use crate::error::StreamResult;
-use crate::executor::error::StreamExecutorResult;
-use crate::executor::{ActorContextRef, Executor, ExecutorInfo, PkIndices, Watermark};
+use crate::executor::prelude::*;
 
 /// `TopNExecutor` works with input with modification, it keeps all the data
 /// records/rows that have been seen, and returns topN records overall.
@@ -34,25 +29,22 @@ pub type TopNExecutor<S, const WITH_TIES: bool> =
 impl<S: StateStore, const WITH_TIES: bool> TopNExecutor<S, WITH_TIES> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        input: Box<dyn Executor>,
+        input: Executor,
         ctx: ActorContextRef,
+        schema: Schema,
         storage_key: Vec<ColumnOrder>,
         offset_and_limit: (usize, usize),
         order_by: Vec<ColumnOrder>,
-        executor_id: u64,
         state_table: StateTable<S>,
     ) -> StreamResult<Self> {
-        let info = input.info();
-
         Ok(TopNExecutorWrapper {
             input,
             ctx,
             inner: InnerTopNExecutor::new(
-                info,
+                schema,
                 storage_key,
                 offset_and_limit,
                 order_by,
-                executor_id,
                 state_table,
             )?,
         })
@@ -65,24 +57,16 @@ impl<S: StateStore> TopNExecutor<S, true> {
     #[allow(clippy::too_many_arguments)]
     #[cfg(test)]
     pub fn new_with_ties_for_test(
-        input: Box<dyn Executor>,
+        input: Executor,
         ctx: ActorContextRef,
+        schema: Schema,
         storage_key: Vec<ColumnOrder>,
         offset_and_limit: (usize, usize),
         order_by: Vec<ColumnOrder>,
-        executor_id: u64,
         state_table: StateTable<S>,
     ) -> StreamResult<Self> {
-        let info = input.info();
-
-        let mut inner = InnerTopNExecutor::new(
-            info,
-            storage_key,
-            offset_and_limit,
-            order_by,
-            executor_id,
-            state_table,
-        )?;
+        let mut inner =
+            InnerTopNExecutor::new(schema, storage_key, offset_and_limit, order_by, state_table)?;
 
         inner.cache.high_capacity = 2;
 
@@ -91,7 +75,7 @@ impl<S: StateStore> TopNExecutor<S, true> {
 }
 
 pub struct InnerTopNExecutor<S: StateStore, const WITH_TIES: bool> {
-    info: ExecutorInfo,
+    schema: Schema,
 
     /// The storage key indices of the `TopNExecutor`
     storage_key_indices: PkIndices,
@@ -101,7 +85,7 @@ pub struct InnerTopNExecutor<S: StateStore, const WITH_TIES: bool> {
     /// In-memory cache of top (N + N * `TOPN_CACHE_HIGH_CAPACITY_FACTOR`) rows
     cache: TopNCache<WITH_TIES>,
 
-    /// Used for serializing pk into CacheKey.
+    /// Used for serializing pk into `CacheKey`.
     cache_key_serde: CacheKeySerde,
 }
 
@@ -115,16 +99,12 @@ impl<S: StateStore, const WITH_TIES: bool> InnerTopNExecutor<S, WITH_TIES> {
     /// into `CacheKey`.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        input_info: ExecutorInfo,
+        schema: Schema,
         storage_key: Vec<ColumnOrder>,
         offset_and_limit: (usize, usize),
         order_by: Vec<ColumnOrder>,
-        executor_id: u64,
         state_table: StateTable<S>,
     ) -> StreamResult<Self> {
-        let ExecutorInfo {
-            pk_indices, schema, ..
-        } = input_info;
         let num_offset = offset_and_limit.0;
         let num_limit = offset_and_limit.1;
 
@@ -133,11 +113,7 @@ impl<S: StateStore, const WITH_TIES: bool> InnerTopNExecutor<S, WITH_TIES> {
         let data_types = schema.data_types();
 
         Ok(Self {
-            info: ExecutorInfo {
-                schema,
-                pk_indices,
-                identity: format!("TopNExecutor {:X}", executor_id),
-            },
+            schema,
             managed_state,
             storage_key_indices: storage_key.into_iter().map(|op| op.column_index).collect(),
             cache: TopNCache::new(num_offset, num_limit, data_types),
@@ -146,7 +122,6 @@ impl<S: StateStore, const WITH_TIES: bool> InnerTopNExecutor<S, WITH_TIES> {
     }
 }
 
-#[async_trait]
 impl<S: StateStore, const WITH_TIES: bool> TopNExecutorBase for InnerTopNExecutor<S, WITH_TIES>
 where
     TopNCache<WITH_TIES>: TopNCacheTrait,
@@ -183,19 +158,19 @@ where
                 }
             }
         }
-        generate_output(res_rows, res_ops, self.schema())
+        generate_output(res_rows, res_ops, &self.schema)
     }
 
     async fn flush_data(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         self.managed_state.flush(epoch).await
     }
 
-    fn info(&self) -> &ExecutorInfo {
-        &self.info
+    async fn try_flush_data(&mut self) -> StreamExecutorResult<()> {
+        self.managed_state.try_flush().await
     }
 
     async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
-        self.managed_state.state_table.init_epoch(epoch);
+        self.managed_state.init_epoch(epoch);
         self.managed_state
             .init_topn_cache(NO_GROUP_KEY, &mut self.cache)
             .await
@@ -210,7 +185,6 @@ where
 #[cfg(test)]
 mod tests {
     use assert_matches::assert_matches;
-    use futures::StreamExt;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
@@ -222,8 +196,11 @@ mod tests {
     use crate::executor::{Barrier, Message};
 
     mod test1 {
+
+        use risingwave_common::util::epoch::test_epoch;
+
         use super::*;
-        use crate::executor::ActorContext;
+
         fn create_stream_chunks() -> Vec<StreamChunk> {
             let chunk1 = StreamChunk::from_pretty(
                 "  I I
@@ -282,24 +259,21 @@ mod tests {
             vec![0, 1]
         }
 
-        fn create_source() -> Box<MockSource> {
+        fn create_source() -> Executor {
             let mut chunks = create_stream_chunks();
             let schema = create_schema();
-            Box::new(MockSource::with_messages(
-                schema,
-                pk_indices(),
-                vec![
-                    Message::Barrier(Barrier::new_test_barrier(1)),
-                    Message::Chunk(std::mem::take(&mut chunks[0])),
-                    Message::Barrier(Barrier::new_test_barrier(2)),
-                    Message::Chunk(std::mem::take(&mut chunks[1])),
-                    Message::Barrier(Barrier::new_test_barrier(3)),
-                    Message::Chunk(std::mem::take(&mut chunks[2])),
-                    Message::Barrier(Barrier::new_test_barrier(4)),
-                    Message::Chunk(std::mem::take(&mut chunks[3])),
-                    Message::Barrier(Barrier::new_test_barrier(5)),
-                ],
-            ))
+            MockSource::with_messages(vec![
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(1))),
+                Message::Chunk(std::mem::take(&mut chunks[0])),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
+                Message::Chunk(std::mem::take(&mut chunks[1])),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
+                Message::Chunk(std::mem::take(&mut chunks[2])),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(4))),
+                Message::Chunk(std::mem::take(&mut chunks[3])),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(5))),
+            ])
+            .into_executor(schema, pk_indices())
         }
 
         #[tokio::test]
@@ -311,19 +285,19 @@ mod tests {
                 &pk_indices(),
             )
             .await;
-            let top_n_executor = Box::new(
-                TopNExecutor::<_, false>::new(
-                    source as Box<dyn Executor>,
-                    ActorContext::create(0),
-                    storage_key(),
-                    (3, 1000),
-                    order_by(),
-                    1,
-                    state_table,
-                )
-                .unwrap(),
-            );
-            let mut top_n_executor = top_n_executor.execute();
+
+            let schema = source.schema().clone();
+            let top_n_executor = TopNExecutor::<_, false>::new(
+                source,
+                ActorContext::for_test(0),
+                schema,
+                storage_key(),
+                (3, 1000),
+                order_by(),
+                state_table,
+            )
+            .unwrap();
+            let mut top_n_executor = top_n_executor.boxed().execute();
 
             // consume the init barrier
             top_n_executor.next().await.unwrap().unwrap();
@@ -407,19 +381,18 @@ mod tests {
                 &pk_indices(),
             )
             .await;
-            let top_n_executor = Box::new(
-                TopNExecutor::<_, false>::new(
-                    source as Box<dyn Executor>,
-                    ActorContext::create(0),
-                    storage_key(),
-                    (0, 4),
-                    order_by(),
-                    1,
-                    state_table,
-                )
-                .unwrap(),
-            );
-            let mut top_n_executor = top_n_executor.execute();
+            let schema = source.schema().clone();
+            let top_n_executor = TopNExecutor::<_, false>::new(
+                source,
+                ActorContext::for_test(0),
+                schema,
+                storage_key(),
+                (0, 4),
+                order_by(),
+                state_table,
+            )
+            .unwrap();
+            let mut top_n_executor = top_n_executor.boxed().execute();
 
             // consume the init barrier
             top_n_executor.next().await.unwrap().unwrap();
@@ -515,19 +488,18 @@ mod tests {
                 &pk_indices(),
             )
             .await;
-            let top_n_executor = Box::new(
-                TopNExecutor::<_, true>::new(
-                    source as Box<dyn Executor>,
-                    ActorContext::create(0),
-                    storage_key(),
-                    (0, 4),
-                    order_by(),
-                    1,
-                    state_table,
-                )
-                .unwrap(),
-            );
-            let mut top_n_executor = top_n_executor.execute();
+            let schema = source.schema().clone();
+            let top_n_executor = TopNExecutor::<_, true>::new(
+                source,
+                ActorContext::for_test(0),
+                schema,
+                storage_key(),
+                (0, 4),
+                order_by(),
+                state_table,
+            )
+            .unwrap();
+            let mut top_n_executor = top_n_executor.boxed().execute();
 
             // consume the init barrier
             top_n_executor.next().await.unwrap().unwrap();
@@ -622,19 +594,18 @@ mod tests {
                 &pk_indices(),
             )
             .await;
-            let top_n_executor = Box::new(
-                TopNExecutor::<_, false>::new(
-                    source as Box<dyn Executor>,
-                    ActorContext::create(0),
-                    storage_key(),
-                    (3, 4),
-                    order_by(),
-                    1,
-                    state_table,
-                )
-                .unwrap(),
-            );
-            let mut top_n_executor = top_n_executor.execute();
+            let schema = source.schema().clone();
+            let top_n_executor = TopNExecutor::<_, false>::new(
+                source,
+                ActorContext::for_test(0),
+                schema,
+                storage_key(),
+                (3, 4),
+                order_by(),
+                state_table,
+            )
+            .unwrap();
+            let mut top_n_executor = top_n_executor.boxed().execute();
 
             // consume the init barrier
             top_n_executor.next().await.unwrap().unwrap();
@@ -707,13 +678,13 @@ mod tests {
     }
 
     mod test2 {
+
+        use risingwave_common::util::epoch::test_epoch;
         use risingwave_storage::memory::MemoryStateStore;
 
         use super::*;
         use crate::executor::test_utils::top_n_executor::create_in_memory_state_table_from_state_store;
-        use crate::executor::ActorContext;
-
-        fn create_source_new() -> Box<MockSource> {
+        fn create_source_new() -> Executor {
             let mut chunks = vec![
                 StreamChunk::from_pretty(
                     " I I I I
@@ -742,22 +713,19 @@ mod tests {
                     Field::unnamed(DataType::Int64),
                 ],
             };
-            Box::new(MockSource::with_messages(
-                schema,
-                pk_indices(),
-                vec![
-                    Message::Barrier(Barrier::new_test_barrier(1)),
-                    Message::Chunk(std::mem::take(&mut chunks[0])),
-                    Message::Chunk(std::mem::take(&mut chunks[1])),
-                    Message::Chunk(std::mem::take(&mut chunks[2])),
-                    Message::Chunk(std::mem::take(&mut chunks[3])),
-                    Message::Barrier(Barrier::new_test_barrier(2)),
-                ],
-            ))
+            MockSource::with_messages(vec![
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(1))),
+                Message::Chunk(std::mem::take(&mut chunks[0])),
+                Message::Chunk(std::mem::take(&mut chunks[1])),
+                Message::Chunk(std::mem::take(&mut chunks[2])),
+                Message::Chunk(std::mem::take(&mut chunks[3])),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
+            ])
+            .into_executor(schema, pk_indices())
         }
 
-        fn create_source_new_before_recovery() -> Box<MockSource> {
-            let mut chunks = vec![
+        fn create_source_new_before_recovery() -> Executor {
+            let mut chunks = [
                 StreamChunk::from_pretty(
                     " I I I I
                 +  1 1 4 1001",
@@ -775,20 +743,17 @@ mod tests {
                     Field::unnamed(DataType::Int64),
                 ],
             };
-            Box::new(MockSource::with_messages(
-                schema,
-                pk_indices(),
-                vec![
-                    Message::Barrier(Barrier::new_test_barrier(1)),
-                    Message::Chunk(std::mem::take(&mut chunks[0])),
-                    Message::Chunk(std::mem::take(&mut chunks[1])),
-                    Message::Barrier(Barrier::new_test_barrier(2)),
-                ],
-            ))
+            MockSource::with_messages(vec![
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(1))),
+                Message::Chunk(std::mem::take(&mut chunks[0])),
+                Message::Chunk(std::mem::take(&mut chunks[1])),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
+            ])
+            .into_executor(schema, pk_indices())
         }
 
-        fn create_source_new_after_recovery() -> Box<MockSource> {
-            let mut chunks = vec![
+        fn create_source_new_after_recovery() -> Executor {
+            let mut chunks = [
                 StreamChunk::from_pretty(
                     " I I I I
                 +  1 9 1 1003
@@ -808,16 +773,13 @@ mod tests {
                     Field::unnamed(DataType::Int64),
                 ],
             };
-            Box::new(MockSource::with_messages(
-                schema,
-                pk_indices(),
-                vec![
-                    Message::Barrier(Barrier::new_test_barrier(3)),
-                    Message::Chunk(std::mem::take(&mut chunks[0])),
-                    Message::Chunk(std::mem::take(&mut chunks[1])),
-                    Message::Barrier(Barrier::new_test_barrier(4)),
-                ],
-            ))
+            MockSource::with_messages(vec![
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
+                Message::Chunk(std::mem::take(&mut chunks[0])),
+                Message::Chunk(std::mem::take(&mut chunks[1])),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(4))),
+            ])
+            .into_executor(schema, pk_indices())
         }
 
         fn storage_key() -> Vec<ColumnOrder> {
@@ -849,19 +811,18 @@ mod tests {
                 &pk_indices(),
             )
             .await;
-            let top_n_executor = Box::new(
-                TopNExecutor::<_, false>::new(
-                    source as Box<dyn Executor>,
-                    ActorContext::create(0),
-                    storage_key(),
-                    (1, 3),
-                    order_by(),
-                    1,
-                    state_table,
-                )
-                .unwrap(),
-            );
-            let mut top_n_executor = top_n_executor.execute();
+            let schema = source.schema().clone();
+            let top_n_executor = TopNExecutor::<_, false>::new(
+                source,
+                ActorContext::for_test(0),
+                schema,
+                storage_key(),
+                (1, 3),
+                order_by(),
+                state_table,
+            )
+            .unwrap();
+            let mut top_n_executor = top_n_executor.boxed().execute();
 
             // consume the init barrier
             top_n_executor.next().await.unwrap().unwrap();
@@ -927,19 +888,19 @@ mod tests {
                 state_store.clone(),
             )
             .await;
-            let top_n_executor = Box::new(
-                TopNExecutor::<_, false>::new(
-                    create_source_new_before_recovery() as Box<dyn Executor>,
-                    ActorContext::create(0),
-                    storage_key(),
-                    (1, 3),
-                    order_by(),
-                    1,
-                    state_table,
-                )
-                .unwrap(),
-            );
-            let mut top_n_executor = top_n_executor.execute();
+            let source = create_source_new_before_recovery();
+            let schema = source.schema().clone();
+            let top_n_executor = TopNExecutor::<_, false>::new(
+                source,
+                ActorContext::for_test(0),
+                schema,
+                storage_key(),
+                (1, 3),
+                order_by(),
+                state_table,
+            )
+            .unwrap();
+            let mut top_n_executor = top_n_executor.boxed().execute();
 
             // consume the init barrier
             top_n_executor.next().await.unwrap().unwrap();
@@ -981,19 +942,19 @@ mod tests {
             .await;
 
             // recovery
-            let top_n_executor_after_recovery = Box::new(
-                TopNExecutor::<_, false>::new(
-                    create_source_new_after_recovery() as Box<dyn Executor>,
-                    ActorContext::create(0),
-                    storage_key(),
-                    (1, 3),
-                    order_by(),
-                    1,
-                    state_table,
-                )
-                .unwrap(),
-            );
-            let mut top_n_executor = top_n_executor_after_recovery.execute();
+            let source = create_source_new_after_recovery();
+            let schema = source.schema().clone();
+            let top_n_executor_after_recovery = TopNExecutor::<_, false>::new(
+                source,
+                ActorContext::for_test(0),
+                schema,
+                storage_key(),
+                (1, 3),
+                order_by(),
+                state_table,
+            )
+            .unwrap();
+            let mut top_n_executor = top_n_executor_after_recovery.boxed().execute();
 
             // barrier
             assert_matches!(
@@ -1032,13 +993,14 @@ mod tests {
     }
 
     mod test_with_ties {
+
+        use risingwave_common::util::epoch::test_epoch;
         use risingwave_storage::memory::MemoryStateStore;
 
         use super::*;
         use crate::executor::test_utils::top_n_executor::create_in_memory_state_table_from_state_store;
-        use crate::executor::ActorContext;
 
-        fn create_source() -> Box<MockSource> {
+        fn create_source() -> Executor {
             let mut chunks = vec![
                 StreamChunk::from_pretty(
                     "  I I
@@ -1073,18 +1035,15 @@ mod tests {
                     Field::unnamed(DataType::Int64),
                 ],
             };
-            Box::new(MockSource::with_messages(
-                schema,
-                pk_indices(),
-                vec![
-                    Message::Barrier(Barrier::new_test_barrier(1)),
-                    Message::Chunk(std::mem::take(&mut chunks[0])),
-                    Message::Chunk(std::mem::take(&mut chunks[1])),
-                    Message::Chunk(std::mem::take(&mut chunks[2])),
-                    Message::Chunk(std::mem::take(&mut chunks[3])),
-                    Message::Barrier(Barrier::new_test_barrier(2)),
-                ],
-            ))
+            MockSource::with_messages(vec![
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(1))),
+                Message::Chunk(std::mem::take(&mut chunks[0])),
+                Message::Chunk(std::mem::take(&mut chunks[1])),
+                Message::Chunk(std::mem::take(&mut chunks[2])),
+                Message::Chunk(std::mem::take(&mut chunks[3])),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
+            ])
+            .into_executor(schema, pk_indices())
         }
 
         fn storage_key() -> Vec<ColumnOrder> {
@@ -1110,19 +1069,18 @@ mod tests {
                 &pk_indices(),
             )
             .await;
-            let top_n_executor = Box::new(
-                TopNExecutor::new_with_ties_for_test(
-                    source as Box<dyn Executor>,
-                    ActorContext::create(0),
-                    storage_key(),
-                    (0, 3),
-                    order_by(),
-                    1,
-                    state_table,
-                )
-                .unwrap(),
-            );
-            let mut top_n_executor = top_n_executor.execute();
+            let schema = source.schema().clone();
+            let top_n_executor = TopNExecutor::new_with_ties_for_test(
+                source,
+                ActorContext::for_test(0),
+                schema,
+                storage_key(),
+                (0, 3),
+                order_by(),
+                state_table,
+            )
+            .unwrap();
+            let mut top_n_executor = top_n_executor.boxed().execute();
 
             // consume the init barrier
             top_n_executor.next().await.unwrap().unwrap();
@@ -1182,8 +1140,8 @@ mod tests {
             );
         }
 
-        fn create_source_before_recovery() -> Box<MockSource> {
-            let mut chunks = vec![
+        fn create_source_before_recovery() -> Executor {
+            let mut chunks = [
                 StreamChunk::from_pretty(
                     "  I I
                     +  1 0
@@ -1209,20 +1167,17 @@ mod tests {
                     Field::unnamed(DataType::Int64),
                 ],
             };
-            Box::new(MockSource::with_messages(
-                schema,
-                pk_indices(),
-                vec![
-                    Message::Barrier(Barrier::new_test_barrier(1)),
-                    Message::Chunk(std::mem::take(&mut chunks[0])),
-                    Message::Chunk(std::mem::take(&mut chunks[1])),
-                    Message::Barrier(Barrier::new_test_barrier(2)),
-                ],
-            ))
+            MockSource::with_messages(vec![
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(1))),
+                Message::Chunk(std::mem::take(&mut chunks[0])),
+                Message::Chunk(std::mem::take(&mut chunks[1])),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
+            ])
+            .into_executor(schema, pk_indices())
         }
 
-        fn create_source_after_recovery() -> Box<MockSource> {
-            let mut chunks = vec![
+        fn create_source_after_recovery() -> Executor {
+            let mut chunks = [
                 StreamChunk::from_pretty(
                     " I I
                     - 1 0",
@@ -1238,16 +1193,13 @@ mod tests {
                     Field::unnamed(DataType::Int64),
                 ],
             };
-            Box::new(MockSource::with_messages(
-                schema,
-                pk_indices(),
-                vec![
-                    Message::Barrier(Barrier::new_test_barrier(3)),
-                    Message::Chunk(std::mem::take(&mut chunks[0])),
-                    Message::Chunk(std::mem::take(&mut chunks[1])),
-                    Message::Barrier(Barrier::new_test_barrier(4)),
-                ],
-            ))
+            MockSource::with_messages(vec![
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
+                Message::Chunk(std::mem::take(&mut chunks[0])),
+                Message::Chunk(std::mem::take(&mut chunks[1])),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(4))),
+            ])
+            .into_executor(schema, pk_indices())
         }
 
         #[tokio::test]
@@ -1260,19 +1212,19 @@ mod tests {
                 state_store.clone(),
             )
             .await;
-            let top_n_executor = Box::new(
-                TopNExecutor::new_with_ties_for_test(
-                    create_source_before_recovery() as Box<dyn Executor>,
-                    ActorContext::create(0),
-                    storage_key(),
-                    (0, 3),
-                    order_by(),
-                    1,
-                    state_table,
-                )
-                .unwrap(),
-            );
-            let mut top_n_executor = top_n_executor.execute();
+            let source = create_source_before_recovery();
+            let schema = source.schema().clone();
+            let top_n_executor = TopNExecutor::new_with_ties_for_test(
+                source,
+                ActorContext::for_test(0),
+                schema,
+                storage_key(),
+                (0, 3),
+                order_by(),
+                state_table,
+            )
+            .unwrap();
+            let mut top_n_executor = top_n_executor.boxed().execute();
 
             // consume the init barrier
             top_n_executor.next().await.unwrap().unwrap();
@@ -1317,19 +1269,19 @@ mod tests {
             .await;
 
             // recovery
-            let top_n_executor_after_recovery = Box::new(
-                TopNExecutor::new_with_ties_for_test(
-                    create_source_after_recovery() as Box<dyn Executor>,
-                    ActorContext::create(0),
-                    storage_key(),
-                    (0, 3),
-                    order_by(),
-                    1,
-                    state_table,
-                )
-                .unwrap(),
-            );
-            let mut top_n_executor = top_n_executor_after_recovery.execute();
+            let source = create_source_after_recovery();
+            let schema = source.schema().clone();
+            let top_n_executor_after_recovery = TopNExecutor::new_with_ties_for_test(
+                source,
+                ActorContext::for_test(0),
+                schema,
+                storage_key(),
+                (0, 3),
+                order_by(),
+                state_table,
+            )
+            .unwrap();
+            let mut top_n_executor = top_n_executor_after_recovery.boxed().execute();
 
             // barrier
             assert_matches!(

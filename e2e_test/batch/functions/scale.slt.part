@@ -1,0 +1,23 @@
+query RIIR
+with t(v) as (values
+	(8.4100),
+	(0),
+	(10),
+	(10.0),
+	('-inf'),
+	('inf'),
+	('nan')
+) select
+	v,
+	scale(v),
+	min_scale(v),
+	trim_scale(v)
+from t;
+----
+   8.4100    4    2      8.41
+        0    0    0         0
+       10    0    0        10
+     10.0    1    0        10
+-Infinity NULL NULL -Infinity
+ Infinity NULL NULL  Infinity
+      NaN NULL NULL       NaN

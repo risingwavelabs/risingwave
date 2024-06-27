@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -140,6 +140,10 @@ impl Schema {
         self.fields().iter().map(|f| f.name.clone()).collect()
     }
 
+    pub fn names_str(&self) -> Vec<&str> {
+        self.fields().iter().map(|f| f.name.as_str()).collect()
+    }
+
     pub fn data_types(&self) -> Vec<DataType> {
         self.fields
             .iter()
@@ -278,10 +282,8 @@ impl FromIterator<Field> for Schema {
 impl From<&StructType> for Schema {
     fn from(t: &StructType) -> Self {
         Schema::new(
-            t.fields
-                .iter()
-                .zip_eq_fast(t.field_names.iter())
-                .map(|(d, s)| Field::with_name(d.clone(), s))
+            t.iter()
+                .map(|(s, d)| Field::with_name(d.clone(), s))
                 .collect(),
         )
     }

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,15 +16,14 @@ use std::num::NonZeroUsize;
 
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::column::Column;
-use risingwave_common::array::{DataChunk, Vis};
+use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{DataType, Interval};
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_expr::ExprError;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
+use crate::error::{BatchError, Result};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
@@ -33,7 +32,6 @@ pub struct HopWindowExecutor {
     child: BoxedExecutor,
     identity: String,
     schema: Schema,
-    time_col_idx: usize,
     window_slide: Interval,
     window_size: Interval,
     window_start_exprs: Vec<BoxedExpression>,
@@ -53,7 +51,6 @@ impl BoxedExecutorBuilder for HopWindowExecutor {
             source.plan_node().get_node_body().unwrap(),
             NodeBody::HopWindow
         )?;
-        let time_col = hop_window_node.get_time_col() as usize;
         let window_slide = hop_window_node.get_window_slide()?.into();
         let window_size = hop_window_node.get_window_size()?.into();
         let output_indices = hop_window_node
@@ -75,6 +72,7 @@ impl BoxedExecutorBuilder for HopWindowExecutor {
             .try_collect()?;
         assert_eq!(window_start_exprs.len(), window_end_exprs.len());
 
+        let time_col = hop_window_node.get_time_col() as usize;
         let time_col_data_type = child.schema().fields()[time_col].data_type();
         let output_type = DataType::window_of(&time_col_data_type).unwrap();
         let original_schema: Schema = child
@@ -94,7 +92,6 @@ impl BoxedExecutorBuilder for HopWindowExecutor {
         Ok(Box::new(HopWindowExecutor::new(
             child,
             output_indices_schema,
-            time_col,
             window_slide,
             window_size,
             source.plan_node().get_identity().clone(),
@@ -110,7 +107,6 @@ impl HopWindowExecutor {
     fn new(
         child: BoxedExecutor,
         schema: Schema,
-        time_col_idx: usize,
         window_slide: Interval,
         window_size: Interval,
         identity: String,
@@ -122,7 +118,6 @@ impl HopWindowExecutor {
             child,
             identity,
             schema,
-            time_col_idx,
             window_slide,
             window_size,
             window_start_exprs,
@@ -147,7 +142,7 @@ impl Executor for HopWindowExecutor {
 }
 
 impl HopWindowExecutor {
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
         let Self {
             child,
@@ -164,7 +159,8 @@ impl HopWindowExecutor {
                 reason: format!(
                     "window_size {} cannot be divided by window_slide {}",
                     window_size, window_slide
-                ),
+                )
+                .into(),
             })?
             .get();
 
@@ -173,7 +169,7 @@ impl HopWindowExecutor {
         #[for_await]
         for data_chunk in child.execute() {
             let data_chunk = data_chunk?;
-            assert!(matches!(data_chunk.vis(), Vis::Compact(_)));
+            assert!(data_chunk.is_compacted());
             let len = data_chunk.cardinality();
             for i in 0..units {
                 let window_start_col = if output_indices.contains(&window_start_col_index) {
@@ -192,9 +188,9 @@ impl HopWindowExecutor {
                         if idx < window_start_col_index {
                             Some(data_chunk.column_at(idx).clone())
                         } else if idx == window_start_col_index {
-                            Some(Column::new(window_start_col.clone().unwrap()))
+                            Some(window_start_col.clone().unwrap())
                         } else if idx == window_end_col_index {
-                            Some(Column::new(window_end_col.clone().unwrap()))
+                            Some(window_end_col.clone().unwrap())
                         } else {
                             None
                         }
@@ -209,10 +205,8 @@ impl HopWindowExecutor {
 #[cfg(test)]
 mod tests {
     use futures::stream::StreamExt;
-    use risingwave_common::array::{DataChunk, DataChunkTestExt};
-    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::array::DataChunkTestExt;
     use risingwave_common::types::test_utils::IntervalTestExt;
-    use risingwave_common::types::DataType;
     use risingwave_expr::expr::test_utils::make_hop_window_expression;
 
     use super::*;
@@ -239,7 +233,7 @@ mod tests {
             6 2 ^10:42:00
             7 1 ^10:51:00
             8 3 ^11:02:00"
-                .replace('^', "2022-2-2T"),
+                .replace('^', "2022-02-02T"),
         );
         let mut mock_executor = MockExecutor::new(schema.clone());
         mock_executor.add(chunk);
@@ -256,7 +250,6 @@ mod tests {
         Box::new(HopWindowExecutor::new(
             Box::new(mock_executor),
             schema,
-            2,
             window_slide,
             window_size,
             "test".to_string(),
@@ -326,7 +319,7 @@ mod tests {
                 6 2 ^10:42:00 ^10:14:00 ^10:44:00
                 7 1 ^10:51:00 ^10:29:00 ^10:59:00
                 8 3 ^11:02:00 ^10:44:00 ^11:14:00"
-                    .replace('^', "2022-2-2T"),
+                    .replace('^', "2022-02-02T"),
             )
         );
         assert_eq!(
@@ -341,7 +334,7 @@ mod tests {
                 6 2 ^10:42:00 ^10:14:00 ^10:44:00
                 7 1 ^10:51:00 ^10:29:00 ^10:59:00
                 8 3 ^11:02:00 ^10:44:00 ^11:14:00"
-                    .replace('^', "2022-2-2T"),
+                    .replace('^', "2022-02-02T"),
             )
         );
     }
@@ -371,7 +364,7 @@ mod tests {
                 6 2 ^10:42:00 ^10:15:00 ^10:45:00
                 7 1 ^10:51:00 ^10:30:00 ^11:00:00
                 8 3 ^11:02:00 ^10:45:00 ^11:15:00"
-                    .replace('^', "2022-2-2T"),
+                    .replace('^', "2022-02-02T"),
             )
         );
 
@@ -388,7 +381,7 @@ mod tests {
                 6 2 ^10:42:00 ^10:30:00 ^11:00:00
                 7 1 ^10:51:00 ^10:45:00 ^11:15:00
                 8 3 ^11:02:00 ^11:00:00 ^11:30:00"
-                    .replace('^', "2022-2-2T"),
+                    .replace('^', "2022-02-02T"),
             )
         );
     }
@@ -415,7 +408,7 @@ mod tests {
                    2 ^10:15:00 ^10:45:00 ^10:42:00
                    1 ^10:30:00 ^11:00:00 ^10:51:00
                    3 ^10:45:00 ^11:15:00 ^11:02:00"
-                    .replace('^', "2022-2-2T"),
+                    .replace('^', "2022-02-02T"),
             )
         );
 
@@ -432,7 +425,7 @@ mod tests {
                   2 ^10:30:00 ^11:00:00 ^10:42:00
                   1 ^10:45:00 ^11:15:00 ^10:51:00
                   3 ^11:00:00 ^11:30:00 ^11:02:00"
-                    .replace('^', "2022-2-2T"),
+                    .replace('^', "2022-02-02T"),
             )
         );
     }

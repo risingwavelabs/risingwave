@@ -17,6 +17,8 @@ use core::fmt;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
+use super::ObjectName;
+
 /// Primitive SQL values such as number and string
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -28,7 +30,7 @@ pub enum Value {
     // $<tag_name>$string value$<tag_name>$ (postgres syntax)
     DollarQuotedString(DollarQuotedString),
     /// String Constants With C-Style Escapes
-    CstyleEscapesString(String),
+    CstyleEscapedString(CstyleEscapedString),
     /// N'string value'
     NationalStringLiteral(String),
     /// X'hex value'
@@ -57,6 +59,8 @@ pub enum Value {
     },
     /// `NULL` value
     Null,
+    /// name of the reference to secret
+    Ref(ObjectName),
 }
 
 impl fmt::Display for Value {
@@ -68,7 +72,7 @@ impl fmt::Display for Value {
             Value::DollarQuotedString(v) => write!(f, "{}", v),
             Value::NationalStringLiteral(v) => write!(f, "N'{}'", v),
             Value::HexStringLiteral(v) => write!(f, "X'{}'", v),
-            Value::CstyleEscapesString(v) => write!(f, "E'{}'", v),
+            Value::CstyleEscapedString(v) => write!(f, "E'{}'", v),
             Value::Boolean(v) => write!(f, "{}", v),
             Value::Interval {
                 value,
@@ -111,6 +115,7 @@ impl fmt::Display for Value {
                 Ok(())
             }
             Value::Null => write!(f, "NULL"),
+            Value::Ref(v) => write!(f, "ref secret {}", v),
         }
     }
 }
@@ -132,6 +137,21 @@ impl fmt::Display for DollarQuotedString {
                 write!(f, "$${}$$", self.value)
             }
         }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct CstyleEscapedString {
+    /// The unescaped string.
+    pub value: String,
+    /// The raw string used for simplifying `fmt::Display` (unparsing) implementation.
+    pub raw: String,
+}
+
+impl fmt::Display for CstyleEscapedString {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.raw)
     }
 }
 
@@ -193,6 +213,28 @@ impl fmt::Display for TrimWhereField {
             Both => "BOTH",
             Leading => "LEADING",
             Trailing => "TRAILING",
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum JsonPredicateType {
+    #[default]
+    Value,
+    Array,
+    Object,
+    Scalar,
+}
+
+impl fmt::Display for JsonPredicateType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use JsonPredicateType::*;
+        f.write_str(match self {
+            Value => "",
+            Array => " ARRAY",
+            Object => " OBJECT",
+            Scalar => " SCALAR",
         })
     }
 }

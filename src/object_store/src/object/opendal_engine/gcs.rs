@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,14 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
+use opendal::layers::LoggingLayer;
 use opendal::services::Gcs;
 use opendal::Operator;
+use risingwave_common::config::ObjectStoreConfig;
 
 use super::{EngineType, OpendalObjectStore};
+use crate::object::object_metrics::ObjectStoreMetrics;
 use crate::object::ObjectResult;
+
 impl OpendalObjectStore {
     /// create opendal gcs engine.
-    pub fn new_gcs_engine(bucket: String, root: String) -> ObjectResult<Self> {
+    pub fn new_gcs_engine(
+        bucket: String,
+        root: String,
+        config: Arc<ObjectStoreConfig>,
+        metrics: Arc<ObjectStoreMetrics>,
+    ) -> ObjectResult<Self> {
         // Create gcs backend builder.
         let mut builder = Gcs::default();
 
@@ -33,10 +44,14 @@ impl OpendalObjectStore {
             builder.credential(&cred);
         }
 
-        let op: Operator = Operator::new(builder)?.finish();
+        let op: Operator = Operator::new(builder)?
+            .layer(LoggingLayer::default())
+            .finish();
         Ok(Self {
             op,
             engine_type: EngineType::Gcs,
+            config,
+            metrics,
         })
     }
 }

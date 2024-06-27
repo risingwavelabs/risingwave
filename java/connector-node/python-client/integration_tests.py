@@ -1,4 +1,4 @@
-# Copyright 2023 RisingWave Labs
+# Copyright 2024 RisingWave Labs
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,6 +19,8 @@ import json
 import grpc
 import connector_service_pb2_grpc
 import connector_service_pb2
+import plan_common_pb2
+import data_pb2
 import psycopg2
 
 
@@ -26,184 +28,299 @@ def make_mock_schema():
     # todo
     schema = connector_service_pb2.TableSchema(
         columns=[
-            connector_service_pb2.TableSchema.Column(name="id", data_type=2),
-            connector_service_pb2.TableSchema.Column(name="name", data_type=7)
+            plan_common_pb2.ColumnDesc(
+                name="id", column_type=data_pb2.DataType(type_name=2)
+            ),
+            plan_common_pb2.ColumnDesc(
+                name="name", column_type=data_pb2.DataType(type_name=7)
+            ),
         ],
-        pk_indices=[0]
+        pk_indices=[0],
+    )
+    return schema
+
+
+def make_mock_schema_stream_chunk():
+    schema = connector_service_pb2.TableSchema(
+        columns=[
+            plan_common_pb2.ColumnDesc(
+                name="v1", column_type=data_pb2.DataType(type_name=1)
+            ),
+            plan_common_pb2.ColumnDesc(
+                name="v2", column_type=data_pb2.DataType(type_name=2)
+            ),
+            plan_common_pb2.ColumnDesc(
+                name="v3", column_type=data_pb2.DataType(type_name=3)
+            ),
+            plan_common_pb2.ColumnDesc(
+                name="v4", column_type=data_pb2.DataType(type_name=4)
+            ),
+            plan_common_pb2.ColumnDesc(
+                name="v5", column_type=data_pb2.DataType(type_name=5)
+            ),
+            plan_common_pb2.ColumnDesc(
+                name="v6", column_type=data_pb2.DataType(type_name=6)
+            ),
+            plan_common_pb2.ColumnDesc(
+                name="v7", column_type=data_pb2.DataType(type_name=7)
+            ),
+        ],
+        pk_indices=[0],
     )
     return schema
 
 
 def load_input(input_file):
-    with open(input_file, 'r') as file:
+    with open(input_file, "r") as file:
         sink_input = json.load(file)
     return sink_input
 
 
-def test_upsert_sink(type, prop, input_file):
+def load_binary_input(input_file):
+    with open(input_file, "rb") as file:
+        sink_input = file.read()
+    return sink_input
+
+
+def load_json_payload(input_file):
     sink_input = load_input(input_file)
-    with grpc.insecure_channel('localhost:50051') as channel:
-        stub = connector_service_pb2_grpc.ConnectorServiceStub(channel)
-        request_list = [
-            connector_service_pb2.SinkStreamRequest(start=connector_service_pb2.SinkStreamRequest.StartSink(
-                format=connector_service_pb2.SinkPayloadFormat.JSON,
-                sink_config=connector_service_pb2.SinkConfig(
-                    connector_type=type,
-                    properties=prop,
-                    table_schema=make_mock_schema()
+    payloads = []
+    for batch in sink_input:
+        row_ops = []
+        for row in batch:
+            row_ops.append(
+                connector_service_pb2.SinkWriterStreamRequest.WriteBatch.JsonPayload.RowOp(
+                    op_type=row["op_type"], line=str(row["line"])
                 )
-            ))]
-        epoch = 0
+            )
+
+        payloads.append(
+            {
+                "json_payload": connector_service_pb2.SinkWriterStreamRequest.WriteBatch.JsonPayload(
+                    row_ops=row_ops
+                )
+            }
+        )
+    return payloads
+
+
+def load_stream_chunk_payload(input_file):
+    payloads = []
+    sink_input = load_binary_input(input_file)
+    payloads.append(
+        {
+            "stream_chunk_payload": connector_service_pb2.SinkWriterStreamRequest.WriteBatch.StreamChunkPayload(
+                binary_data=sink_input
+            )
+        }
+    )
+    return payloads
+
+
+def test_sink(prop, payload_input, table_schema, is_coordinated=False):
+    sink_param = connector_service_pb2.SinkParam(
+        sink_id=0,
+        properties=prop,
+        table_schema=table_schema,
+    )
+
+    # read input, Add StartSink request
+    request_list = [
+        connector_service_pb2.SinkWriterStreamRequest(
+            start=connector_service_pb2.SinkWriterStreamRequest.StartSink(
+                sink_param=sink_param,
+            )
+        )
+    ]
+
+    with grpc.insecure_channel("localhost:50051") as channel:
+        stub = connector_service_pb2_grpc.ConnectorServiceStub(channel)
+        epoch = 1
         batch_id = 1
-        for batch in sink_input:
-            request_list.append(connector_service_pb2.SinkStreamRequest(
-                start_epoch=connector_service_pb2.SinkStreamRequest.StartEpoch(epoch=epoch)))
-            row_ops = []
-            for row in batch:
-                row_ops.append(connector_service_pb2.SinkStreamRequest.WriteBatch.JsonPayload.RowOp(
-                    op_type=row['op_type'], line=str(row['line'])))
-            request_list.append(connector_service_pb2.SinkStreamRequest(write=connector_service_pb2.SinkStreamRequest.WriteBatch(
-                json_payload=connector_service_pb2.SinkStreamRequest.WriteBatch.JsonPayload(row_ops=row_ops),
-                batch_id=batch_id,
-                epoch=epoch
-            )))
-            request_list.append(connector_service_pb2.SinkStreamRequest(sync=connector_service_pb2.SinkStreamRequest.SyncBatch(epoch=epoch)))
+        epoch_list = []
+        # construct request
+        for payload in payload_input:
+            request_list.append(
+                connector_service_pb2.SinkWriterStreamRequest(
+                    write_batch=connector_service_pb2.SinkWriterStreamRequest.WriteBatch(
+                        batch_id=batch_id, epoch=epoch, **payload
+                    )
+                )
+            )
+
+            request_list.append(
+                connector_service_pb2.SinkWriterStreamRequest(
+                    barrier=connector_service_pb2.SinkWriterStreamRequest.Barrier(
+                        epoch=epoch, is_checkpoint=True
+                    )
+                )
+            )
+            epoch_list.append(epoch)
             epoch += 1
             batch_id += 1
-
-        response_iter = stub.SinkStream(iter(request_list))
-        for req in request_list:
-            try:
-                print("REQUEST", req)
-                print("RESPONSE OK:", next(response_iter))
-            except Exception as e:
-                print("Integration test failed: ", e)
-                exit(1)
-
-def test_sink(type, prop, input_file):
-    sink_input = load_input(input_file)
-    with grpc.insecure_channel('localhost:50051') as channel:
-        stub = connector_service_pb2_grpc.ConnectorServiceStub(channel)
-        request_list = [
-            connector_service_pb2.SinkStreamRequest(start=connector_service_pb2.SinkStreamRequest.StartSink(
-                format=connector_service_pb2.SinkPayloadFormat.JSON,
-                sink_config=connector_service_pb2.SinkConfig(
-                    connector_type=type,
-                    properties=prop,
-                    table_schema=make_mock_schema()
-                )
-            ))]
-        epoch = 0
-        batch_id = 1
-        for batch in sink_input:
-            request_list.append(connector_service_pb2.SinkStreamRequest(
-                start_epoch=connector_service_pb2.SinkStreamRequest.StartEpoch(epoch=epoch)))
-            row_ops = []
-            for row in batch:
-                row_ops.append(connector_service_pb2.SinkStreamRequest.WriteBatch.JsonPayload.RowOp(
-                    op_type=1, line=str(row)))
-            request_list.append(connector_service_pb2.SinkStreamRequest(write=connector_service_pb2.SinkStreamRequest.WriteBatch(
-                json_payload=connector_service_pb2.SinkStreamRequest.WriteBatch.JsonPayload(row_ops=row_ops),
-                batch_id=batch_id,
-                epoch=epoch
-            )))
-            request_list.append(connector_service_pb2.SinkStreamRequest(sync=connector_service_pb2.SinkStreamRequest.SyncBatch(epoch=epoch)))
-            epoch += 1
-            batch_id += 1
-
-        response_iter = stub.SinkStream(iter(request_list))
-        for req in request_list:
-            try:
-                print("REQUEST", req)
-                print("RESPONSE OK:", next(response_iter))
-            except Exception as e:
-                print("Integration test failed: ", e)
-                exit(1)
-
-
-def test_file_sink(input_file):
-    test_sink("file", {"output.path": "/tmp/connector",}, input_file)
-
-
-def test_jdbc_sink(input_file):
-    test_sink("jdbc",
-              {"jdbc.url": "jdbc:postgresql://localhost:5432/test?user=test&password=connector",
-               "table.name": "test"},
-              input_file)
-
-    # validate results
-    validate_jdbc_sink(input_file)
-
-
-def validate_jdbc_sink(input_file):
-    conn = psycopg2.connect("dbname=test user=test password=connector host=localhost port=5432")
-    cur = conn.cursor()
-    cur.execute("SELECT * FROM test")
-    rows = cur.fetchall()
-    expected = [list(row.values()) for batch in load_input(input_file) for row in batch]
-    if len(rows) != len(expected):
-        print("Integration test failed: expected {} rows, but got {}".format(len(expected), len(rows)))
-        exit(1)
-    for i in range(len(rows)):
-        if len(rows[i]) != len(expected[i]):
-            print("Integration test failed: expected {} columns, but got {}".format(len(expected[i]), len(rows[i])))
+        # send request
+        response_iter = stub.SinkWriterStream(iter(request_list))
+        metadata_list = []
+        try:
+            response = next(response_iter)
+            assert response.HasField("start")
+            for epoch in epoch_list:
+                response = next(response_iter)
+                assert response.HasField("commit")
+                assert epoch == response.commit.epoch
+                metadata_list.append((epoch, response.commit.metadata))
+        except Exception as e:
+            print("Integration test failed: ", e)
             exit(1)
-        for j in range(len(rows[i])):
-            if rows[i][j] != expected[i][j]:
-                print(
-                    "Integration test failed: expected {} at row {}, column {}, but got {}".format(expected[i][j], i, j,
-                                                                                                   rows[i][j]))
+
+        if is_coordinated:
+            request_list = [
+                connector_service_pb2.SinkCoordinatorStreamRequest(
+                    start=connector_service_pb2.SinkCoordinatorStreamRequest.StartCoordinator(
+                        param=sink_param
+                    )
+                )
+            ]
+            request_list += [
+                connector_service_pb2.SinkCoordinatorStreamRequest(
+                    commit=connector_service_pb2.SinkCoordinatorStreamRequest.CommitMetadata(
+                        epoch=epoch, metadata=[metadata]
+                    )
+                )
+                for (epoch, metadata) in metadata_list
+            ]
+
+            response_iter = stub.SinkCoordinatorStream(iter(request_list))
+            try:
+                response = next(response_iter)
+                assert response.HasField("start")
+                for epoch, _ in metadata_list:
+                    response = next(response_iter)
+                    assert response.HasField("commit")
+                    assert epoch == response.commit.epoch
+            except Exception as e:
+                print("Integration test failed: ", e)
                 exit(1)
 
 
-def test_iceberg_sink(input_file):
-    test_sink("iceberg",
-              {"type":"append-only",
-               "warehouse.path":"s3a://bucket",
-               "s3.endpoint": "http://127.0.0.1:9000",
-               "s3.access.key": "minioadmin",
-               "s3.secret.key": "minioadmin",
-               "database.name":"demo_db",
-               "table.name":"demo_table"},
-              input_file)
+def test_file_sink(param):
+    prop = {
+        "connector": "file",
+        "output.path": "/tmp/connector",
+    }
+    test_sink(prop, **param)
 
-def test_upsert_iceberg_sink(input_file):
-    test_upsert_sink("iceberg",
-              {"type":"upsert",
-               "warehouse.path":"s3a://bucket",
-               "s3.endpoint": "http://127.0.0.1:9000",
-               "s3.access.key": "minioadmin",
-               "s3.secret.key": "minioadmin",
-               "database.name":"demo_db",
-               "table.name":"demo_table"},
-              input_file)
 
-def test_deltalake_sink(input_file):
-    test_sink("deltalake",
-              {
-                "location":"s3a://bucket/delta",
-                "s3.access.key": "minioadmin",
-                "s3.secret.key": "minioadmin",
-                "s3.endpoint": "127.0.0.1:9000",
-              },
-              input_file)
+def test_elasticsearch_sink(param):
+    prop = {
+        "connector": "elasticsearch",
+        "url": "http://127.0.0.1:9200",
+        "index": "test",
+    }
+    test_sink(prop, **param)
+
+
+def test_iceberg_sink(param):
+    prop = {
+        "connector": "iceberg_java",
+        "type": "append-only",
+        "warehouse.path": "s3a://bucket",
+        "s3.endpoint": "http://127.0.0.1:9000",
+        "s3.access.key": "minioadmin",
+        "s3.secret.key": "minioadmin",
+        "database.name": "demo_db",
+        "table.name": "demo_table",
+    }
+    test_sink(prop, is_coordinated=True, **param)
+
+
+def test_upsert_iceberg_sink(param):
+    prop = {
+        "connector": "iceberg_java",
+        "type": "upsert",
+        "warehouse.path": "s3a://bucket",
+        "s3.endpoint": "http://127.0.0.1:9000",
+        "s3.access.key": "minioadmin",
+        "s3.secret.key": "minioadmin",
+        "database.name": "demo_db",
+        "table.name": "demo_table",
+    }
+    type = "iceberg"
+    # need to make sure all ops as Insert
+    test_sink(prop, is_coordinated=True, **param)
+
+
+def test_deltalake_sink(param):
+    prop = {
+        "connector": "deltalake",
+        "location": "s3a://bucket/delta",
+        "s3.access.key": "minioadmin",
+        "s3.secret.key": "minioadmin",
+        "s3.endpoint": "127.0.0.1:9000",
+    }
+    test_sink(prop, **param)
+
+
+def test_stream_chunk_data_format(param):
+    prop = {
+        "connector": "file",
+        "output.path": "/tmp/connector",
+    }
+    test_sink(prop, **param)
+
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument('--file_sink', action='store_true', help="run file sink test")
-    parser.add_argument('--jdbc_sink', action='store_true', help="run jdbc sink test")
-    parser.add_argument('--iceberg_sink', action='store_true', help="run iceberg sink test")
-    parser.add_argument('--upsert_iceberg_sink', action='store_true', help="run upsert iceberg sink test")
-    parser.add_argument('--deltalake_sink', action='store_true', help="run deltalake sink test")
-    parser.add_argument('--input_file', default="./data/sink_input.json", help="input data to run tests")
+    parser = argparse.ArgumentParser(
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+    )
+    parser.add_argument("--file_sink", action="store_true", help="run file sink test")
+    parser.add_argument(
+        "--stream_chunk_format_test",
+        action="store_true",
+        help="run print stream chunk sink test",
+    )
+    parser.add_argument(
+        "--iceberg_sink", action="store_true", help="run iceberg sink test"
+    )
+    parser.add_argument(
+        "--upsert_iceberg_sink",
+        action="store_true",
+        help="run upsert iceberg sink test",
+    )
+    parser.add_argument(
+        "--deltalake_sink", action="store_true", help="run deltalake sink test"
+    )
+    parser.add_argument(
+        "--input_binary_file",
+        default="./data/sink_input",
+        help="input stream chunk data to run tests",
+    )
+    parser.add_argument(
+        "--es_sink", action="store_true", help="run elasticsearch sink test"
+    )
     args = parser.parse_args()
+    payload = load_stream_chunk_payload(args.input_binary_file)
+
+    # stream chunk format
+    if args.stream_chunk_format_test:
+        param = {
+            "payload_input": payload,
+            "table_schema": make_mock_schema_stream_chunk(),
+        }
+        test_stream_chunk_data_format(param)
+
+    param = {
+        "payload_input": payload,
+        "table_schema": make_mock_schema(),
+    }
+
     if args.file_sink:
-        test_file_sink(args.input_file)
-    if args.jdbc_sink:
-        test_jdbc_sink(args.input_file)
+        test_file_sink(param)
     if args.iceberg_sink:
-        test_iceberg_sink(args.input_file)
-    if args.upsert_iceberg_sink:
-        test_upsert_iceberg_sink(args.input_file)
+        test_iceberg_sink(param)
     if args.deltalake_sink:
-        test_deltalake_sink(args.input_file)
+        test_deltalake_sink(param)
+    if args.es_sink:
+        test_elasticsearch_sink(param)
+    if args.upsert_iceberg_sink:
+        test_upsert_iceberg_sink(param)

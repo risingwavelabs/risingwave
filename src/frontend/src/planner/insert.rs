@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,31 +13,32 @@
 // limitations under the License.
 
 use fixedbitset::FixedBitSet;
-use risingwave_common::error::Result;
 
 use crate::binder::BoundInsert;
-use crate::optimizer::plan_node::{LogicalInsert, LogicalProject, PlanRef};
+use crate::error::Result;
+use crate::optimizer::plan_node::{generic, LogicalInsert, LogicalProject, PlanRef};
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::PlanRoot;
 use crate::planner::Planner;
 
 impl Planner {
     pub(super) fn plan_insert(&mut self, insert: BoundInsert) -> Result<PlanRoot> {
-        let mut input = self.plan_query(insert.source)?.into_subplan();
+        let mut input = self.plan_query(insert.source)?.into_unordered_subplan();
         if !insert.cast_exprs.is_empty() {
             input = LogicalProject::create(input, insert.cast_exprs);
         }
         let returning = !insert.returning_list.is_empty();
-        let mut plan: PlanRef = LogicalInsert::create(
+        let mut plan: PlanRef = LogicalInsert::new(generic::Insert::new(
             input,
             insert.table_name.clone(),
             insert.table_id,
             insert.table_version_id,
+            insert.table_visible_columns,
             insert.column_indices,
             insert.default_columns,
             insert.row_id_index,
             returning,
-        )?
+        ))
         .into();
         // If containing RETURNING, add one logicalproject node
         if returning {
@@ -52,7 +53,7 @@ impl Planner {
         } else {
             plan.schema().names()
         };
-        let root = PlanRoot::new(plan, dist, Order::any(), out_fields, out_names);
+        let root = PlanRoot::new_with_logical_plan(plan, dist, Order::any(), out_fields, out_names);
         Ok(root)
     }
 }

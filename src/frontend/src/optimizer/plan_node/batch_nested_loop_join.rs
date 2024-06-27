@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,16 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
-use risingwave_common::catalog::Schema;
-use risingwave_common::error::Result;
+use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::NestedLoopJoinNode;
 
-use super::generic::{self, GenericPlanRef};
-use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary, ToBatchPb, ToDistributedBatch};
-use crate::expr::{Expr, ExprImpl, ExprRewriter};
+use super::batch::prelude::*;
+use super::utils::{childless_record, Distill};
+use super::{
+    generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary, ToBatchPb, ToDistributedBatch,
+};
+use crate::error::Result;
+use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprVisitor};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
@@ -31,15 +33,15 @@ use crate::utils::ConditionDisplay;
 /// against all pairs of rows from inner & outer side within 2 layers of loops.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchNestedLoopJoin {
-    pub base: PlanBase,
-    logical: generic::Join<PlanRef>,
+    pub base: PlanBase<Batch>,
+    core: generic::Join<PlanRef>,
 }
 
 impl BatchNestedLoopJoin {
-    pub fn new(logical: generic::Join<PlanRef>) -> Self {
-        let dist = Self::derive_dist(logical.left.distribution(), logical.right.distribution());
-        let base = PlanBase::new_batch_from_logical(&logical, dist, Order::any());
-        Self { base, logical }
+    pub fn new(core: generic::Join<PlanRef>) -> Self {
+        let dist = Self::derive_dist(core.left.distribution(), core.right.distribution());
+        let base = PlanBase::new_batch_with_core(&core, dist, Order::any());
+        Self { base, core }
     }
 
     fn derive_dist(left: &Distribution, right: &Distribution) -> Distribution {
@@ -50,61 +52,44 @@ impl BatchNestedLoopJoin {
     }
 }
 
-impl fmt::Display for BatchNestedLoopJoin {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let verbose = self.base.ctx.is_explain_verbose();
-        let mut builder = f.debug_struct("BatchNestedLoopJoin");
-        builder.field("type", &self.logical.join_type);
+impl Distill for BatchNestedLoopJoin {
+    fn distill<'a>(&self) -> XmlNode<'a> {
+        let verbose = self.base.ctx().is_explain_verbose();
+        let mut vec = Vec::with_capacity(if verbose { 3 } else { 2 });
+        vec.push(("type", Pretty::debug(&self.core.join_type)));
 
-        let mut concat_schema = self.left().schema().fields.clone();
-        concat_schema.extend(self.right().schema().fields.clone());
-        let concat_schema = Schema::new(concat_schema);
-        builder.field(
+        let concat_schema = self.core.concat_schema();
+        vec.push((
             "predicate",
-            &ConditionDisplay {
-                condition: &self.logical.on,
+            Pretty::debug(&ConditionDisplay {
+                condition: &self.core.on,
                 input_schema: &concat_schema,
-            },
-        );
+            }),
+        ));
 
         if verbose {
-            if self
-                .logical
-                .output_indices
-                .iter()
-                .copied()
-                .eq(0..self.logical.internal_column_num())
-            {
-                builder.field("output", &format_args!("all"));
-            } else {
-                builder.field(
-                    "output",
-                    &IndicesDisplay {
-                        indices: &self.logical.output_indices,
-                        input_schema: &concat_schema,
-                    },
-                );
-            }
+            let data = IndicesDisplay::from_join(&self.core, &concat_schema);
+            vec.push(("output", data));
         }
 
-        builder.finish()
+        childless_record("BatchNestedLoopJoin", vec)
     }
 }
 
 impl PlanTreeNodeBinary for BatchNestedLoopJoin {
     fn left(&self) -> PlanRef {
-        self.logical.left.clone()
+        self.core.left.clone()
     }
 
     fn right(&self) -> PlanRef {
-        self.logical.right.clone()
+        self.core.right.clone()
     }
 
     fn clone_with_left_right(&self, left: PlanRef, right: PlanRef) -> Self {
-        let mut logical = self.logical.clone();
-        logical.left = left;
-        logical.right = right;
-        Self::new(logical)
+        let mut core = self.core.clone();
+        core.left = left;
+        core.right = right;
+        Self::new(core)
     }
 }
 
@@ -126,14 +111,9 @@ impl ToDistributedBatch for BatchNestedLoopJoin {
 impl ToBatchPb for BatchNestedLoopJoin {
     fn to_batch_prost_body(&self) -> NodeBody {
         NodeBody::NestedLoopJoin(NestedLoopJoinNode {
-            join_type: self.logical.join_type as i32,
-            join_cond: Some(ExprImpl::from(self.logical.on.clone()).to_expr_proto()),
-            output_indices: self
-                .logical
-                .output_indices
-                .iter()
-                .map(|&x| x as u32)
-                .collect(),
+            join_type: self.core.join_type as i32,
+            join_cond: Some(ExprImpl::from(self.core.on.clone()).to_expr_proto()),
+            output_indices: self.core.output_indices.iter().map(|&x| x as u32).collect(),
         })
     }
 }
@@ -156,8 +136,14 @@ impl ExprRewritable for BatchNestedLoopJoin {
     }
 
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
-        let mut logical = self.logical.clone();
-        logical.rewrite_exprs(r);
-        Self::new(logical).into()
+        let mut core = self.core.clone();
+        core.rewrite_exprs(r);
+        Self::new(core).into()
+    }
+}
+
+impl ExprVisitable for BatchNestedLoopJoin {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.core.visit_exprs(v);
     }
 }

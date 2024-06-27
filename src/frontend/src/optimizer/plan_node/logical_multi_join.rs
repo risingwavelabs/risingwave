@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,19 +14,21 @@
 
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
-use std::fmt;
 
 use itertools::Itertools;
+use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::plan_common::JoinType;
 
+use super::utils::{childless_record, Distill};
 use super::{
-    ColPrunable, ExprRewritable, LogicalFilter, LogicalJoin, LogicalProject, PlanBase,
+    ColPrunable, ExprRewritable, Logical, LogicalFilter, LogicalJoin, LogicalProject, PlanBase,
     PlanNodeType, PlanRef, PlanTreeNodeBinary, PlanTreeNodeUnary, PredicatePushdown, ToBatch,
     ToStream,
 };
-use crate::expr::{ExprImpl, ExprRewriter, ExprType, FunctionCall};
+use crate::error::{ErrorCode, Result, RwError};
+use crate::expr::{ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PlanTreeNode, PredicatePushdownContext, RewriteStreamContext,
     ToStreamContext,
@@ -45,36 +47,30 @@ use crate::utils::{
 /// expressed as 2-way `LogicalJoin`s.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalMultiJoin {
-    pub base: PlanBase,
+    pub base: PlanBase<Logical>,
     inputs: Vec<PlanRef>,
     on: Condition,
     output_indices: Vec<usize>,
     inner2output: ColIndexMapping,
     // NOTE(st1page): these fields will be used in prune_col and
     // pk_derive soon.
-    /// the mapping output_col_idx -> (input_idx, input_col_idx), **"output_col_idx" is internal,
-    /// not consider output_indices**
+    /// the mapping `output_col_idx` -> (`input_idx`, `input_col_idx`), **"`output_col_idx`" is internal,
+    /// not consider `output_indices`**
     inner_o2i_mapping: Vec<(usize, usize)>,
     inner_i2o_mappings: Vec<ColIndexMapping>,
 }
 
-impl fmt::Display for LogicalMultiJoin {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "LogicalMultiJoin {{ on: {} }}", {
-            let fields = self
-                .inputs
-                .iter()
-                .flat_map(|input| input.schema().fields.clone())
-                .collect_vec();
-            let input_schema = Schema { fields };
-            format!(
-                "{}",
-                ConditionDisplay {
-                    condition: self.on(),
-                    input_schema: &input_schema,
-                }
-            )
-        })
+impl Distill for LogicalMultiJoin {
+    fn distill<'a>(&self) -> XmlNode<'a> {
+        let fields = (self.inputs.iter())
+            .flat_map(|input| input.schema().fields.clone())
+            .collect();
+        let input_schema = Schema { fields };
+        let cond = Pretty::display(&ConditionDisplay {
+            condition: self.on(),
+            input_schema: &input_schema,
+        });
+        childless_record("LogicalMultiJoin", vec![("on", cond)])
     }
 }
 
@@ -92,7 +88,7 @@ impl LogicalMultiJoinBuilder {
     /// add a predicate above the plan, so they will be rewritten from the `output_indices` to the
     /// input indices
     pub fn add_predicate_above(&mut self, exprs: impl Iterator<Item = ExprImpl>) {
-        let mut mapping = ColIndexMapping::with_target_size(
+        let mut mapping = ColIndexMapping::new(
             self.output_indices.iter().map(|i| Some(*i)).collect(),
             self.tot_input_col_num,
         );
@@ -245,23 +241,11 @@ impl LogicalMultiJoin {
 
             i2o_maps
                 .into_iter()
-                .map(|map| ColIndexMapping::with_target_size(map, tot_col_num))
+                .map(|map| ColIndexMapping::new(map, tot_col_num))
                 .collect_vec()
         };
 
-        let pk_indices = {
-            let mut pk_indices = vec![];
-            for (i, input_pk) in inputs.iter().map(|input| input.logical_pk()).enumerate() {
-                for input_pk_idx in input_pk {
-                    pk_indices.push(inner_i2o_mappings[i].map(*input_pk_idx));
-                }
-            }
-            pk_indices
-                .into_iter()
-                .map(|col_idx| inner2output.try_map(col_idx))
-                .collect::<Option<Vec<_>>>()
-                .unwrap_or_default()
-        };
+        let pk_indices = Self::derive_stream_key(&inputs, &inner_i2o_mappings, &inner2output);
         let functional_dependency = {
             let mut fd_set = FunctionalDependencySet::new(tot_col_num);
             let mut column_cnt: usize = 0;
@@ -308,6 +292,25 @@ impl LogicalMultiJoin {
         }
     }
 
+    fn derive_stream_key(
+        inputs: &[PlanRef],
+        inner_i2o_mappings: &[ColIndexMapping],
+        inner2output: &ColIndexMapping,
+    ) -> Option<Vec<usize>> {
+        // TODO(st1page): add JOIN key
+        let mut pk_indices = vec![];
+        for (i, input) in inputs.iter().enumerate() {
+            let input_stream_key = input.stream_key()?;
+            for input_pk_idx in input_stream_key {
+                pk_indices.push(inner_i2o_mappings[i].map(*input_pk_idx));
+            }
+        }
+        pk_indices
+            .into_iter()
+            .map(|col_idx| inner2output.try_map(col_idx))
+            .collect::<Option<Vec<_>>>()
+    }
+
     /// Get a reference to the logical join's on.
     pub fn on(&self) -> &Condition {
         &self.on
@@ -322,7 +325,7 @@ impl LogicalMultiJoin {
 impl PlanTreeNode for LogicalMultiJoin {
     fn inputs(&self) -> smallvec::SmallVec<[crate::optimizer::PlanRef; 2]> {
         let mut vec = smallvec::SmallVec::new();
-        vec.extend(self.inputs.clone().into_iter());
+        vec.extend(self.inputs.clone());
         vec
     }
 
@@ -403,7 +406,7 @@ impl LogicalMultiJoin {
     ///        a. a filter with the non eq conditions
     ///        b. a projection which reorders the output column ordering to agree with the
     ///           original ordering of the joins.
-    ///   The filter will then be pushed down by another filter pushdown pass.
+    ///    The filter will then be pushed down by another filter pushdown pass.
     pub(crate) fn heuristic_ordering(&self) -> Result<Vec<usize>> {
         let mut labeller = ConnectedComponentLabeller::new(self.inputs.len());
 
@@ -491,9 +494,9 @@ impl LogicalMultiJoin {
     /// 2. Second, for every isolated node will create connection to every other nodes.
     /// 3. Third, select and merge one node for a iteration, and use a bfs policy for which node the
     ///    selected node merged with.
-    ///   i. The select node mentioned above is the node with least numer of relations and the
+    ///    i. The select node mentioned above is the node with least number of relations and the
     ///      lowerst join tree.
-    ///   ii. nodes with a join tree higher than the temporal optimal join tree will be pruned.
+    ///    ii. nodes with a join tree higher than the temporal optimal join tree will be pruned.
     pub fn as_bushy_tree_join(&self) -> Result<PlanRef> {
         let (nodes, condition) = self.get_join_graph()?;
 
@@ -837,6 +840,15 @@ impl ExprRewritable for LogicalMultiJoin {
     }
 }
 
+impl ExprVisitable for LogicalMultiJoin {
+    fn visit_exprs(&self, _v: &mut dyn ExprVisitor) {
+        panic!(
+            "Method not available for `LogicalMultiJoin` which is a placeholder node with \
+             a temporary lifetime. It only facilitates join reordering during logical planning."
+        )
+    }
+}
+
 impl PredicatePushdown for LogicalMultiJoin {
     fn predicate_pushdown(
         &self,
@@ -859,8 +871,9 @@ mod test {
     use risingwave_pb::expr::expr_node::Type;
 
     use super::*;
-    use crate::expr::{FunctionCall, InputRef};
+    use crate::expr::InputRef;
     use crate::optimizer::optimizer_context::OptimizerContext;
+    use crate::optimizer::plan_node::generic::GenericPlanRef;
     use crate::optimizer::plan_node::LogicalValues;
     use crate::optimizer::property::FunctionalDependency;
     #[tokio::test]
@@ -881,7 +894,7 @@ mod test {
             // 0 --> 1
             values
                 .base
-                .functional_dependency
+                .functional_dependency_mut()
                 .add_functional_dependency_by_column_indices(&[0], &[1]);
             values
         };
@@ -895,7 +908,7 @@ mod test {
             // 0 --> 1, 2
             values
                 .base
-                .functional_dependency
+                .functional_dependency_mut()
                 .add_functional_dependency_by_column_indices(&[0], &[1, 2]);
             values
         };
@@ -908,7 +921,7 @@ mod test {
             // {} --> 0
             values
                 .base
-                .functional_dependency
+                .functional_dependency_mut()
                 .add_functional_dependency_by_column_indices(&[], &[0]);
             values
         };

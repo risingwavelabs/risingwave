@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,8 +13,6 @@
 // limitations under the License.
 
 use std::fmt::{Debug, Formatter};
-use std::ops::BitAnd;
-use std::option::Option;
 use std::sync::Arc;
 
 use anyhow::anyhow;
@@ -27,13 +25,13 @@ use risingwave_pb::batch_plan::*;
 use tokio::sync::mpsc;
 
 use crate::error::BatchError::{Internal, SenderError};
-use crate::error::{BatchError, BatchSharedResult, Result as BatchResult};
+use crate::error::{BatchError, Result as BatchResult, SharedResult};
 use crate::task::channel::{ChanReceiver, ChanReceiverImpl, ChanSender, ChanSenderImpl};
 use crate::task::data_chunk_in_channel::DataChunkInChannel;
 
 #[derive(Clone)]
 pub struct ConsistentHashShuffleSender {
-    senders: Vec<mpsc::Sender<BatchSharedResult<Option<DataChunkInChannel>>>>,
+    senders: Vec<mpsc::Sender<SharedResult<Option<DataChunkInChannel>>>>,
     consistent_hash_info: ConsistentHashInfo,
     output_count: usize,
 }
@@ -47,7 +45,7 @@ impl Debug for ConsistentHashShuffleSender {
 }
 
 pub struct ConsistentHashShuffleReceiver {
-    receiver: mpsc::Receiver<BatchSharedResult<Option<DataChunkInChannel>>>,
+    receiver: mpsc::Receiver<SharedResult<Option<DataChunkInChannel>>>,
 }
 
 fn generate_hash_values(
@@ -89,12 +87,7 @@ fn generate_new_data_chunks(
     });
     let mut res = Vec::with_capacity(output_count);
     for (sink_id, vis_map_vec) in vis_maps.into_iter().enumerate() {
-        let vis_map: Bitmap = vis_map_vec.into_iter().collect();
-        let vis_map = if let Some(visibility) = chunk.visibility() {
-            vis_map.bitand(visibility)
-        } else {
-            vis_map
-        };
+        let vis_map = Bitmap::from_bool_slice(&vis_map_vec) & chunk.visibility();
         let new_data_chunk = chunk.with_visibility(vis_map);
         trace!(
             "send to sink:{}, cardinality:{}",
@@ -152,7 +145,7 @@ impl ConsistentHashShuffleSender {
 }
 
 impl ChanReceiver for ConsistentHashShuffleReceiver {
-    async fn recv(&mut self) -> BatchSharedResult<Option<DataChunkInChannel>> {
+    async fn recv(&mut self) -> SharedResult<Option<DataChunkInChannel>> {
         match self.receiver.recv().await {
             Some(data_chunk) => data_chunk,
             // Early close should be treated as error.

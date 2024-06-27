@@ -8,7 +8,7 @@ CREATE SOURCE order_events (
     topic = 'nics_metrics',
     properties.bootstrap.server = 'message_queue:29092',
     scan.startup.mode = 'earliest'
-) ROW FORMAT JSON;
+) FORMAT PLAIN ENCODE JSON;
 
 CREATE TABLE order_events (
     order_id VARCHAR,

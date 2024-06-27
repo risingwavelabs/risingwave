@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,11 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::error::ErrorCode::ProtocolError;
-use risingwave_common::error::{Result, RwError};
 use risingwave_connector::source::kafka::PRIVATELINK_CONNECTION;
 use risingwave_pb::catalog::connection::private_link_service::PrivateLinkProvider;
 use risingwave_pb::ddl_service::create_connection_request;
@@ -24,30 +22,35 @@ use risingwave_sqlparser::ast::CreateConnectionStatement;
 
 use super::RwPgResponse;
 use crate::binder::Binder;
+use crate::error::ErrorCode::ProtocolError;
+use crate::error::{Result, RwError};
 use crate::handler::HandlerArgs;
 
 pub(crate) const CONNECTION_TYPE_PROP: &str = "type";
 pub(crate) const CONNECTION_PROVIDER_PROP: &str = "provider";
 pub(crate) const CONNECTION_SERVICE_NAME_PROP: &str = "service.name";
+pub(crate) const CONNECTION_TAGS_PROP: &str = "tags";
 
 pub(crate) const CLOUD_PROVIDER_MOCK: &str = "mock"; // fake privatelink provider for testing
 pub(crate) const CLOUD_PROVIDER_AWS: &str = "aws";
 
 #[inline(always)]
 fn get_connection_property_required(
-    with_properties: &HashMap<String, String>,
+    with_properties: &BTreeMap<String, String>,
     property: &str,
 ) -> Result<String> {
     with_properties
         .get(property)
         .map(|s| s.to_lowercase())
-        .ok_or(RwError::from(ProtocolError(format!(
-            "Required property \"{property}\" is not provided"
-        ))))
+        .ok_or_else(|| {
+            RwError::from(ProtocolError(format!(
+                "Required property \"{property}\" is not provided"
+            )))
+        })
 }
 
 fn resolve_private_link_properties(
-    with_properties: &HashMap<String, String>,
+    with_properties: &BTreeMap<String, String>,
 ) -> Result<create_connection_request::PrivateLink> {
     let provider =
         match get_connection_property_required(with_properties, CONNECTION_PROVIDER_PROP)?.as_str()
@@ -65,6 +68,7 @@ fn resolve_private_link_properties(
         PrivateLinkProvider::Mock => Ok(create_connection_request::PrivateLink {
             provider: provider.into(),
             service_name: String::new(),
+            tags: None,
         }),
         PrivateLinkProvider::Aws => {
             let service_name =
@@ -72,6 +76,7 @@ fn resolve_private_link_properties(
             Ok(create_connection_request::PrivateLink {
                 provider: provider.into(),
                 service_name,
+                tags: with_properties.get(CONNECTION_TAGS_PROP).cloned(),
             })
         }
         PrivateLinkProvider::Unspecified => Err(RwError::from(ProtocolError(
@@ -81,7 +86,7 @@ fn resolve_private_link_properties(
 }
 
 fn resolve_create_connection_payload(
-    with_properties: &HashMap<String, String>,
+    with_properties: &BTreeMap<String, String>,
 ) -> Result<create_connection_request::Payload> {
     let connection_type = get_connection_property_required(with_properties, CONNECTION_TYPE_PROP)?;
     let create_connection_payload = match connection_type.as_str() {
@@ -108,25 +113,22 @@ pub async fn handle_create_connection(
 
     if let Err(e) = session.check_connection_name_duplicated(stmt.connection_name) {
         return if stmt.if_not_exists {
-            Ok(PgResponse::empty_result_with_notice(
-                StatementType::CREATE_CONNECTION,
-                format!("connection \"{}\" exists, skipping", connection_name),
-            ))
+            Ok(PgResponse::builder(StatementType::CREATE_CONNECTION)
+                .notice(format!(
+                    "connection \"{}\" exists, skipping",
+                    connection_name
+                ))
+                .into())
         } else {
             Err(e)
         };
     }
     let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
-    let with_properties = handler_args
-        .with_options
-        .inner()
-        .clone()
-        .into_iter()
-        .collect();
+    let with_properties = handler_args.with_options.clone().into_connector_props();
 
     let create_connection_payload = resolve_create_connection_payload(&with_properties)?;
 
-    let catalog_writer = session.env().catalog_writer();
+    let catalog_writer = session.catalog_writer()?;
     catalog_writer
         .create_connection(
             connection_name,

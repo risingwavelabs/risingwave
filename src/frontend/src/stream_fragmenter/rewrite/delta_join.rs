@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,6 @@
 use std::rc::Rc;
 
 use itertools::Itertools;
-use risingwave_common::error::Result;
 use risingwave_pb::plan_common::PbField;
 use risingwave_pb::stream_plan::lookup_node::ArrangementTableId;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -24,6 +23,7 @@ use risingwave_pb::stream_plan::{
 };
 
 use super::super::{BuildFragmentGraphState, StreamFragment, StreamFragmentEdge};
+use crate::error::Result;
 use crate::stream_fragmenter::build_and_add_fragment;
 
 fn build_no_shuffle_exchange_for_delta_join(
@@ -108,7 +108,7 @@ fn build_lookup_for_delta_join(
 
 fn build_delta_join_inner(
     state: &mut BuildFragmentGraphState,
-    current_fragment: &mut StreamFragment,
+    current_fragment: &StreamFragment,
     arrange_0_frag: Rc<StreamFragment>,
     arrange_1_frag: Rc<StreamFragment>,
     node: &StreamNode,
@@ -315,7 +315,7 @@ fn build_delta_join_inner(
 
 pub(crate) fn build_delta_join_without_arrange(
     state: &mut BuildFragmentGraphState,
-    current_fragment: &mut StreamFragment,
+    current_fragment: &StreamFragment,
     mut node: StreamNode,
 ) -> Result<StreamNode> {
     match &node.node_body {

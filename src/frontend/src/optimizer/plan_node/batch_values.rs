@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,24 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
-use risingwave_common::error::Result;
+use pretty_xmlish::XmlNode;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::values_node::ExprTuple;
 use risingwave_pb::batch_plan::ValuesNode;
 
+use super::batch::prelude::*;
+use super::utils::{childless_record, Distill};
 use super::{
     ExprRewritable, LogicalValues, PlanBase, PlanRef, PlanTreeNodeLeaf, ToBatchPb,
     ToDistributedBatch,
 };
-use crate::expr::{Expr, ExprImpl, ExprRewriter};
+use crate::error::Result;
+use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprVisitor};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, Order};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchValues {
-    pub base: PlanBase,
+    pub base: PlanBase<Batch>,
     logical: LogicalValues,
 }
 
@@ -42,7 +44,7 @@ impl BatchValues {
     }
 
     pub fn with_dist(logical: LogicalValues, dist: Distribution) -> Self {
-        let ctx = logical.base.ctx.clone();
+        let ctx = logical.base.ctx().clone();
         let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any());
         BatchValues { base, logical }
     }
@@ -59,11 +61,10 @@ impl BatchValues {
     }
 }
 
-impl fmt::Display for BatchValues {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("BatchValues")
-            .field("rows", &self.logical.rows())
-            .finish()
+impl Distill for BatchValues {
+    fn distill<'a>(&self) -> XmlNode<'a> {
+        let data = self.logical.rows_pretty();
+        childless_record("BatchValues", vec![("rows", data)])
     }
 }
 
@@ -113,5 +114,15 @@ impl ExprRewritable for BatchValues {
                 .clone(),
         )
         .into()
+    }
+}
+
+impl ExprVisitable for BatchValues {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.logical
+            .rows()
+            .iter()
+            .flatten()
+            .for_each(|e| v.visit_expr(e));
     }
 }

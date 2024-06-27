@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,21 +14,27 @@
 
 mod catalog;
 mod cluster;
+pub mod diagnose;
 mod env;
+pub mod event_log;
 mod id;
 mod idle;
+mod metadata;
 mod notification;
+mod notification_version;
+mod session_params;
+pub mod sink_coordination;
 mod streaming_job;
 mod system_param;
 
-pub(crate) use catalog::*;
-pub use cluster::WorkerKey;
-pub(crate) use cluster::*;
-pub use env::MetaSrvEnv;
-pub(crate) use env::*;
-pub(crate) use id::*;
-pub(crate) use idle::*;
-pub(crate) use notification::*;
-pub use notification::{LocalNotification, MessageStatus, NotificationManagerRef};
-pub(crate) use streaming_job::*;
-pub(crate) use system_param::*;
+pub use catalog::*;
+pub use cluster::{WorkerKey, *};
+pub use env::{MetaSrvEnv, *};
+pub use id::*;
+pub use idle::*;
+pub use metadata::*;
+pub use notification::{LocalNotification, MessageStatus, NotificationManagerRef, *};
+pub use risingwave_meta_model_v2::prelude;
+pub use session_params::*;
+pub use streaming_job::*;
+pub use system_param::*;

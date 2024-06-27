@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,6 +11,8 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
+use std::hash::Hash;
 
 use super::Row;
 use crate::types::DatumRef;
@@ -30,11 +32,6 @@ impl<'i, R: Row> PartialEq for Project<'i, R> {
 impl<'i, R: Row> Eq for Project<'i, R> {}
 
 impl<'i, R: Row> Row for Project<'i, R> {
-    type Iter<'a> = std::iter::Map<std::slice::Iter<'i, usize>, impl FnMut(&'i usize) -> DatumRef<'a>>
-    where
-        R: 'a,
-        'i: 'a;
-
     #[inline]
     fn datum_at(&self, index: usize) -> DatumRef<'_> {
         // SAFETY: we have checked that `self.indices` are all valid in `new`.
@@ -53,10 +50,11 @@ impl<'i, R: Row> Row for Project<'i, R> {
     }
 
     #[inline]
-    fn iter(&self) -> Self::Iter<'_> {
-        self.indices.iter().map(|&i|
-                // SAFETY: we have checked that `self.indices` are all valid in `new`.
-                unsafe { self.row.datum_at_unchecked(i) })
+    fn iter(&self) -> impl ExactSizeIterator<Item = DatumRef<'_>> {
+        self.indices
+            .iter()
+            // SAFETY: we have checked that `self.indices` are all valid in `new`.
+            .map(|&i| unsafe { self.row.datum_at_unchecked(i) })
     }
 }
 
@@ -64,12 +62,23 @@ impl<'i, R: Row> Project<'i, R> {
     pub(crate) fn new(row: R, indices: &'i [usize]) -> Self {
         if let Some(index) = indices.iter().find(|&&i| i >= row.len()) {
             panic!(
-                "index {} out of bounds for row of length {}",
+                "index {} out of bounds for row of length {}, row {:?}",
                 index,
-                row.len()
+                row.len(),
+                row
             );
         }
         Self { row, indices }
+    }
+
+    pub fn row(&self) -> &R {
+        &self.row
+    }
+}
+
+impl<R: Row> Hash for Project<'_, R> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.hash_datums_into(state);
     }
 }
 

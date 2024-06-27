@@ -1,0 +1,72 @@
+query I
+select array_max(array[1, 2, 3]);
+----
+3
+
+query I
+select array_max(array[2, 3, 5, 2, 4]);
+----
+5
+
+query I
+select array_max(array[114514, 114513]);
+----
+114514
+
+query I
+select array_max(array['a', 'b', 'c', 'a']);
+----
+c
+
+query I
+select array_max(array['e💩a', 'f🤔️b', 'c🥵c', 'd🥳d', 'e💩e']);
+----
+f🤔️b
+
+query I
+select array_max(array['2c😅🤔😅️c2', '114🥵514', '30🤣🥳03', '5🥵💩💩🥵5']);
+----
+5🥵💩💩🥵5
+
+query error invalid digit found in string
+select array_max(array['a', 'b', 'c', 114514]);
+
+query error invalid digit found in string
+select array_max(array[114514, 'a', 'b', 'c']);
+
+# i32::MIN & i32::MIN - 1 & i32::MAX
+query I
+select array_max(array[-2147483648, 2147483647, -2147483649]);
+----
+2147483647
+
+# i64::MIN & i64::MIN - 1 & i64::MAX
+query I
+select array_max(array[-9223372036854775808, 9223372036854775807, -9223372036854775809]);
+----
+9223372036854775807
+
+query I
+select array_max(array['a', '', 'c']);
+----
+c
+
+query I
+select array_max(array[3.14, 1.14, 1.14514]);
+----
+3.14
+
+query I
+select array_max(array[3.1415926, 191.14, 114514, 1313.1414]);
+----
+114514
+
+query I
+select array_max(array[1e-4, 1.14514e5, 1.14514e-5]);
+----
+114514
+
+query I
+select array_max(array[date'2002-10-30', date'2023-09-06', date'2017-06-18']);
+----
+2023-09-06

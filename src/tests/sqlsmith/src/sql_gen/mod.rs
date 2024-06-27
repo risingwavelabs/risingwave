@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,10 +23,13 @@ use risingwave_common::types::DataType;
 use risingwave_frontend::bind_data_type;
 use risingwave_sqlparser::ast::{ColumnDef, Expr, Ident, ObjectName, Statement};
 
+mod agg;
+mod cast;
 mod expr;
 pub use expr::print_function_table;
 
-mod insert;
+mod dml;
+mod functions;
 mod query;
 mod relation;
 mod scalar;
@@ -38,11 +41,27 @@ mod utils;
 pub struct Table {
     pub name: String,
     pub columns: Vec<Column>,
+    pub pk_indices: Vec<usize>,
+    pub is_base_table: bool,
 }
 
 impl Table {
     pub fn new(name: String, columns: Vec<Column>) -> Self {
-        Self { name, columns }
+        Self {
+            name,
+            columns,
+            pk_indices: vec![],
+            is_base_table: false,
+        }
+    }
+
+    pub fn new_for_base_table(name: String, columns: Vec<Column>, pk_indices: Vec<usize>) -> Self {
+        Self {
+            name,
+            columns,
+            pk_indices,
+            is_base_table: true,
+        }
     }
 
     pub fn get_qualified_columns(&self) -> Vec<Column> {
@@ -59,8 +78,8 @@ impl Table {
 /// Sqlsmith Column definition
 #[derive(Clone, Debug)]
 pub struct Column {
-    name: String,
-    data_type: DataType,
+    pub(crate) name: String,
+    pub(crate) data_type: DataType,
 }
 
 impl From<ColumnDef> for Column {
@@ -118,41 +137,39 @@ pub(crate) struct SqlGenerator<'a, R: Rng> {
     /// Relation ID used to generate table names and aliases
     relation_id: u32,
 
-    /// is_distinct_allowed - Distinct and Orderby/Approx.. cannot be generated together among agg
-    ///                       having and
-    /// When this variable is true, it means distinct only
-    /// When this variable is false, it means orderby and approx only.
-    is_distinct_allowed: bool,
-
     /// Relations bound in generated query.
     /// We might not read from all tables.
     bound_relations: Vec<Table>,
 
     /// Columns bound in generated query.
-    /// May not contain all columns from Self::bound_relations.
-    /// e.g. GROUP BY clause will constrain bound_columns.
+    /// May not contain all columns from `Self::bound_relations`.
+    /// e.g. GROUP BY clause will constrain `bound_columns`.
     bound_columns: Vec<Column>,
 
-    /// SqlGenerator can be used in two execution modes:
+    /// `SqlGenerator` can be used in two execution modes:
     /// 1. Generating Query Statements.
     /// 2. Generating queries for CREATE MATERIALIZED VIEW.
     ///    Under this mode certain restrictions and workarounds are applied
     ///    for unsupported stream executors.
     is_mview: bool,
+
+    recursion_weight: f64,
+    // /// Count number of subquery.
+    // /// We don't want too many per query otherwise it is hard to debug.
+    // with_statements: u64,
 }
 
 /// Generators
 impl<'a, R: Rng> SqlGenerator<'a, R> {
     pub(crate) fn new(rng: &'a mut R, tables: Vec<Table>) -> Self {
-        let is_distinct_allowed = rng.gen_bool(0.5);
         SqlGenerator {
             tables,
             rng,
             relation_id: 0,
-            is_distinct_allowed,
             bound_relations: vec![],
             bound_columns: vec![],
             is_mview: false,
+            recursion_weight: 0.3,
         }
     }
 
@@ -162,10 +179,10 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             tables,
             rng,
             relation_id: 0,
-            is_distinct_allowed: false,
             bound_relations: vec![],
             bound_columns: vec![],
             is_mview: true,
+            recursion_weight: 0.3,
         }
     }
 
@@ -177,14 +194,12 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     pub(crate) fn gen_mview_stmt(&mut self, name: &str) -> (Statement, Table) {
         let (query, schema) = self.gen_query();
         let query = Box::new(query);
-        let table = Table {
-            name: name.to_string(),
-            columns: schema,
-        };
+        let table = Table::new(name.to_string(), schema);
         let name = ObjectName(vec![Ident::new_unchecked(name)]);
         let mview = Statement::CreateView {
             or_replace: false,
             materialized: true,
+            if_not_exists: false,
             name,
             columns: vec![],
             query,
@@ -201,6 +216,16 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
     /// Provide recursion bounds.
     pub(crate) fn can_recurse(&mut self) -> bool {
-        self.rng.gen_bool(0.3)
+        if self.recursion_weight <= 0.0 {
+            return false;
+        }
+        let can_recurse = self.rng.gen_bool(self.recursion_weight);
+        if can_recurse {
+            self.recursion_weight *= 0.9;
+            if self.recursion_weight < 0.05 {
+                self.recursion_weight = 0.0;
+            }
+        }
+        can_recurse
     }
 }

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,11 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub use builder::*;
 pub use column_mapping::*;
 
-mod builder;
 pub mod cache;
 mod column_mapping;
-pub mod log_store;
+pub mod compact_chunk;
+pub mod log_store_impl;
+pub mod metrics;
+pub mod rate_limit;
 pub mod table;

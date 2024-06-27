@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,21 +12,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
+use itertools::Itertools;
 use parking_lot::RwLock;
+use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeManagerRef;
 use risingwave_common::catalog::CatalogVersion;
-use risingwave_common::hash::ParallelUnitMapping;
+use risingwave_common::hash::WorkerSlotMapping;
+use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManagerRef;
 use risingwave_common_service::observer_manager::{ObserverState, SubscribeFrontend};
 use risingwave_pb::common::WorkerNode;
+use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::meta::relation::RelationInfo;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
-use risingwave_pb::meta::{FragmentParallelUnitMapping, MetaSnapshot, SubscribeResponse};
+use risingwave_pb::meta::{FragmentWorkerSlotMapping, MetaSnapshot, SubscribeResponse};
+use risingwave_rpc_client::ComputeClientPoolRef;
 use tokio::sync::watch::Sender;
 
 use crate::catalog::root_catalog::Catalog;
-use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
+use crate::catalog::{FragmentId, SecretId};
 use crate::scheduler::HummockSnapshotManagerRef;
 use crate::user::user_manager::UserInfoManager;
 use crate::user::UserInfoVersion;
@@ -39,6 +45,8 @@ pub struct FrontendObserverNode {
     user_info_updated_tx: Sender<UserInfoVersion>,
     hummock_snapshot_manager: HummockSnapshotManagerRef,
     system_params_manager: LocalSystemParamsManagerRef,
+    session_params: Arc<RwLock<SessionConfig>>,
+    compute_client_pool: ComputeClientPoolRef,
 }
 
 impl ObserverState for FrontendObserverNode {
@@ -49,11 +57,13 @@ impl ObserverState for FrontendObserverNode {
             return;
         };
 
+        // TODO: this clone can be avoided
         match info.to_owned() {
             Info::Database(_)
             | Info::Schema(_)
             | Info::RelationGroup(_)
             | Info::Function(_)
+            | Info::Secret(_)
             | Info::Connection(_) => {
                 self.handle_catalog_notification(resp);
             }
@@ -63,7 +73,6 @@ impl ObserverState for FrontendObserverNode {
             Info::User(_) => {
                 self.handle_user_notification(resp);
             }
-            Info::ParallelUnitMapping(_) => self.handle_fragment_mapping_notification(resp),
             Info::Snapshot(_) => {
                 panic!(
                     "receiving a snapshot in the middle is unsupported now {:?}",
@@ -85,6 +94,22 @@ impl ObserverState for FrontendObserverNode {
             Info::SystemParams(p) => {
                 self.system_params_manager.try_set_params(p);
             }
+            Info::SessionParam(p) => {
+                self.session_params
+                    .write()
+                    .set(&p.param, p.value().to_string(), &mut ())
+                    .unwrap();
+            }
+            Info::HummockStats(stats) => {
+                self.handle_table_stats_notification(stats);
+            }
+            Info::StreamingWorkerSlotMapping(_) => self.handle_fragment_mapping_notification(resp),
+            Info::ServingWorkerSlotMappings(m) => {
+                self.handle_fragment_serving_mapping_notification(m.mappings, resp.operation())
+            }
+            Info::Recovery(_) => {
+                self.compute_client_pool.invalidate_all();
+            }
         }
     }
 
@@ -105,16 +130,20 @@ impl ObserverState for FrontendObserverNode {
             tables,
             indexes,
             views,
+            subscriptions,
             functions,
             connections,
             users,
-            parallel_unit_mappings,
             nodes,
             hummock_snapshot,
             hummock_version: _,
             meta_backup_manifest_id: _,
             hummock_write_limits: _,
+            streaming_worker_slot_mappings,
+            serving_worker_slot_mappings,
+            session_params,
             version,
+            secrets,
         } = snapshot;
 
         for db in databases {
@@ -128,6 +157,9 @@ impl ObserverState for FrontendObserverNode {
         }
         for sink in sinks {
             catalog_guard.create_sink(&sink)
+        }
+        for subscription in subscriptions {
+            catalog_guard.create_subscription(&subscription)
         }
         for table in tables {
             catalog_guard.create_table(&table)
@@ -144,26 +176,20 @@ impl ObserverState for FrontendObserverNode {
         for connection in connections {
             catalog_guard.create_connection(&connection)
         }
+        for secret in secrets {
+            catalog_guard.create_secret(&secret)
+        }
         for user in users {
             user_guard.create_user(user)
         }
+
         self.worker_node_manager.refresh(
             nodes,
-            parallel_unit_mappings
-                .iter()
-                .map(
-                    |FragmentParallelUnitMapping {
-                         fragment_id,
-                         mapping,
-                     }| {
-                        let mapping = ParallelUnitMapping::from_protobuf(mapping.as_ref().unwrap());
-                        (*fragment_id, mapping)
-                    },
-                )
-                .collect(),
+            convert_worker_slot_mapping(&streaming_worker_slot_mappings),
+            convert_worker_slot_mapping(&serving_worker_slot_mappings),
         );
         self.hummock_snapshot_manager
-            .update_epoch(hummock_snapshot.unwrap());
+            .update(hummock_snapshot.unwrap());
 
         let snapshot_version = version.unwrap();
         catalog_guard.set_version(snapshot_version.catalog_version);
@@ -174,6 +200,8 @@ impl ObserverState for FrontendObserverNode {
         self.user_info_updated_tx
             .send(snapshot_version.catalog_version)
             .unwrap();
+        *self.session_params.write() =
+            serde_json::from_str(&session_params.unwrap().params).unwrap();
     }
 }
 
@@ -186,6 +214,8 @@ impl FrontendObserverNode {
         user_info_updated_tx: Sender<UserInfoVersion>,
         hummock_snapshot_manager: HummockSnapshotManagerRef,
         system_params_manager: LocalSystemParamsManagerRef,
+        session_params: Arc<RwLock<SessionConfig>>,
+        compute_client_pool: ComputeClientPoolRef,
     ) -> Self {
         Self {
             worker_node_manager,
@@ -195,7 +225,14 @@ impl FrontendObserverNode {
             user_info_updated_tx,
             hummock_snapshot_manager,
             system_params_manager,
+            session_params,
+            compute_client_pool,
         }
+    }
+
+    fn handle_table_stats_notification(&mut self, table_stats: HummockVersionStats) {
+        let mut catalog_guard = self.catalog.write();
+        catalog_guard.set_table_stats(table_stats);
     }
 
     fn handle_catalog_notification(&mut self, resp: SubscribeResponse) {
@@ -208,11 +245,13 @@ impl FrontendObserverNode {
             Info::Database(database) => match resp.operation() {
                 Operation::Add => catalog_guard.create_database(database),
                 Operation::Delete => catalog_guard.drop_database(database.id),
+                Operation::Update => catalog_guard.update_database(database),
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },
             Info::Schema(schema) => match resp.operation() {
                 Operation::Add => catalog_guard.create_schema(schema),
                 Operation::Delete => catalog_guard.drop_schema(schema.database_id, schema.id),
+                Operation::Update => catalog_guard.update_schema(schema),
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },
             Info::RelationGroup(relation_group) => {
@@ -261,6 +300,16 @@ impl FrontendObserverNode {
                             Operation::Update => catalog_guard.update_sink(sink),
                             _ => panic!("receive an unsupported notify {:?}", resp),
                         },
+                        RelationInfo::Subscription(subscription) => match resp.operation() {
+                            Operation::Add => catalog_guard.create_subscription(subscription),
+                            Operation::Delete => catalog_guard.drop_subscription(
+                                subscription.database_id,
+                                subscription.schema_id,
+                                subscription.id,
+                            ),
+                            Operation::Update => catalog_guard.update_subscription(subscription),
+                            _ => panic!("receive an unsupported notify {:?}", resp),
+                        },
                         RelationInfo::Index(index) => match resp.operation() {
                             Operation::Add => catalog_guard.create_index(index),
                             Operation::Delete => catalog_guard.drop_index(
@@ -289,6 +338,7 @@ impl FrontendObserverNode {
                     function.schema_id,
                     function.id.into(),
                 ),
+                Operation::Update => catalog_guard.update_function(function),
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },
             Info::Connection(connection) => match resp.operation() {
@@ -298,6 +348,17 @@ impl FrontendObserverNode {
                     connection.schema_id,
                     connection.id,
                 ),
+                Operation::Update => catalog_guard.update_connection(connection),
+                _ => panic!("receive an unsupported notify {:?}", resp),
+            },
+            Info::Secret(secret) => match resp.operation() {
+                Operation::Add => catalog_guard.create_secret(secret),
+                Operation::Delete => catalog_guard.drop_secret(
+                    secret.database_id,
+                    secret.schema_id,
+                    SecretId::new(secret.id),
+                ),
+                Operation::Update => catalog_guard.update_secret(secret),
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },
             _ => unreachable!(),
@@ -342,11 +403,11 @@ impl FrontendObserverNode {
             return;
         };
         match info {
-            Info::ParallelUnitMapping(parallel_unit_mapping) => {
-                let fragment_id = parallel_unit_mapping.fragment_id;
+            Info::StreamingWorkerSlotMapping(streaming_worker_slot_mapping) => {
+                let fragment_id = streaming_worker_slot_mapping.fragment_id;
                 let mapping = || {
-                    ParallelUnitMapping::from_protobuf(
-                        parallel_unit_mapping.mapping.as_ref().unwrap(),
+                    WorkerSlotMapping::from_protobuf(
+                        streaming_worker_slot_mapping.mapping.as_ref().unwrap(),
                     )
                 };
 
@@ -370,6 +431,27 @@ impl FrontendObserverNode {
         }
     }
 
+    fn handle_fragment_serving_mapping_notification(
+        &mut self,
+        mappings: Vec<FragmentWorkerSlotMapping>,
+        op: Operation,
+    ) {
+        match op {
+            Operation::Add | Operation::Update => {
+                self.worker_node_manager
+                    .upsert_serving_fragment_mapping(convert_worker_slot_mapping(&mappings));
+            }
+            Operation::Delete => self.worker_node_manager.remove_serving_fragment_mapping(
+                &mappings.into_iter().map(|m| m.fragment_id).collect_vec(),
+            ),
+            Operation::Snapshot => {
+                self.worker_node_manager
+                    .set_serving_fragment_mapping(convert_worker_slot_mapping(&mappings));
+            }
+            _ => panic!("receive an unsupported notify {:?}", op),
+        }
+    }
+
     /// Update max committed epoch in `HummockSnapshotManager`.
     fn handle_hummock_snapshot_notification(&self, resp: SubscribeResponse) {
         let Some(info) = resp.info.as_ref() else {
@@ -379,7 +461,7 @@ impl FrontendObserverNode {
             Info::HummockSnapshot(hummock_snapshot) => match resp.operation() {
                 Operation::Update => {
                     self.hummock_snapshot_manager
-                        .update_epoch(hummock_snapshot.clone());
+                        .update(hummock_snapshot.clone());
                 }
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },
@@ -402,4 +484,21 @@ impl FrontendObserverNode {
             _ => (),
         }
     }
+}
+
+fn convert_worker_slot_mapping(
+    worker_slot_mappings: &[FragmentWorkerSlotMapping],
+) -> HashMap<FragmentId, WorkerSlotMapping> {
+    worker_slot_mappings
+        .iter()
+        .map(
+            |FragmentWorkerSlotMapping {
+                 fragment_id,
+                 mapping,
+             }| {
+                let mapping = WorkerSlotMapping::from_protobuf(mapping.as_ref().unwrap());
+                (*fragment_id, mapping)
+            },
+        )
+        .collect()
 }

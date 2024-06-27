@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 RisingWave Labs
+ * Copyright 2024 RisingWave Labs
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,34 +30,44 @@ import Head from "next/head"
 import { Fragment, useEffect, useState } from "react"
 import SpinnerOverlay from "../components/SpinnerOverlay"
 import Title from "../components/Title"
+import api from "../lib/api/api"
+import { getClusterInfoComputeNode } from "../lib/api/cluster"
+import useFetch from "../lib/api/fetch"
 import { StackTraceResponse } from "../proto/gen/monitor_service"
-import api from "./api/api"
-import { getClusterInfoComputeNode } from "./api/cluster"
-import useFetch from "./api/fetch"
 
 const SIDEBAR_WIDTH = 200
+const ALL_COMPUTE_NODES = ""
 
 export default function AwaitTreeDump() {
   const { response: computeNodes } = useFetch(getClusterInfoComputeNode)
 
-  const [computeNodeId, setComputeNodeId] = useState<number>()
-  const [dump, setDump] = useState<string | undefined>("")
+  const [computeNodeId, setComputeNodeId] = useState<string>()
+  const [dump, setDump] = useState<string>("")
 
   useEffect(() => {
-    if (computeNodes && !computeNodeId && computeNodes.length > 0) {
-      setComputeNodeId(computeNodes[0].id)
+    if (computeNodes && !computeNodeId) {
+      setComputeNodeId(ALL_COMPUTE_NODES)
     }
   }, [computeNodes, computeNodeId])
 
   const dumpTree = async () => {
-    const title = `Await-Tree Dump of Compute Node ${computeNodeId}:`
-    setDump(undefined)
+    if (computeNodeId === undefined) {
+      return
+    }
+
+    let title
+    if (computeNodeId === ALL_COMPUTE_NODES) {
+      title = "Await-Tree Dump of All Compute Nodes:"
+    } else {
+      title = `Await-Tree Dump of Compute Node ${computeNodeId}:`
+    }
+    setDump("Loading...")
 
     let result
 
     try {
       const response: StackTraceResponse = StackTraceResponse.fromJSON(
-        await api.get(`/api/monitor/await_tree/${computeNodeId}`)
+        await api.get(`/monitor/await_tree/${computeNodeId}`)
       )
 
       const actorTraces = _(response.actorTraces)
@@ -68,10 +78,26 @@ export default function AwaitTreeDump() {
         .entries()
         .map(([k, v]) => `[RPC ${k}]\n${v}`)
         .join("\n")
+      const compactionTraces = _(response.compactionTaskTraces)
+        .entries()
+        .map(([k, v]) => `[Compaction ${k}]\n${v}`)
+        .join("\n")
+      const barrierTraces = _(response.inflightBarrierTraces)
+        .entries()
+        .map(([k, v]) => `[Barrier ${k}]\n${v}`)
+        .join("\n")
+      const barrierWorkerState = _(response.barrierWorkerState)
+        .entries()
+        .map(([k, v]) => `[BarrierWorkerState (Worker ${k})]\n${v}`)
+        .join("\n")
+      const jvmStackTraces = _(response.jvmStackTraces)
+        .entries()
+        .map(([k, v]) => `[JVM (Worker ${k})]\n${v}`)
+        .join("\n")
 
-      result = `${title}\n\n${actorTraces}\n${rpcTraces}`
+      result = `${title}\n\n${actorTraces}\n${rpcTraces}\n${compactionTraces}\n${barrierTraces}\n${barrierWorkerState}\n\n${jvmStackTraces}`
     } catch (e: any) {
-      result = `${title}\n\nError: ${e.message}`
+      result = `${title}\n\nERROR: ${e.message}\n${e.cause}`
     }
 
     setDump(result)
@@ -92,10 +118,13 @@ export default function AwaitTreeDump() {
             <FormLabel>Compute Nodes</FormLabel>
             <VStack>
               <Select
-                onChange={(event) =>
-                  setComputeNodeId(parseInt(event.target.value))
-                }
+                onChange={(event) => setComputeNodeId(event.target.value)}
               >
+                {computeNodes && (
+                  <option value={ALL_COMPUTE_NODES} key={ALL_COMPUTE_NODES}>
+                    All
+                  </option>
+                )}
                 {computeNodes &&
                   computeNodes.map((n) => (
                     <option value={n.id} key={n.id}>

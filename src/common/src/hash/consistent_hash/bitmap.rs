@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,6 +23,11 @@ impl Bitmap {
     /// Enumerates the virtual nodes set to 1 in the bitmap.
     pub fn iter_vnodes(&self) -> impl Iterator<Item = VirtualNode> + '_ {
         self.iter_ones().map(VirtualNode::from_index)
+    }
+
+    /// Enumerates the virtual nodes set to 1 in the bitmap.
+    pub fn iter_vnodes_scalar(&self) -> impl Iterator<Item = i16> + '_ {
+        self.iter_vnodes().map(|vnode| vnode.to_scalar())
     }
 
     /// Returns an iterator which yields the position ranges of continuous virtual nodes set to 1 in

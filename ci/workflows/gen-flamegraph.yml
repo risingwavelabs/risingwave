@@ -8,7 +8,7 @@ steps:
       - seek-oss/aws-sm#v2.3.1:
           env:
             GITHUB_TOKEN: github-token
-      - docker-compose#v4.9.0:
+      - docker-compose#v5.1.0:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -26,7 +26,7 @@ steps:
       - seek-oss/aws-sm#v2.3.1:
           env:
             GITHUB_TOKEN: github-token
-      - docker-compose#v4.9.0:
+      - docker-compose#v5.1.0:
           run: ci-flamegraph-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -36,7 +36,7 @@ steps:
     # - Nexmark event generation: ~3min for 100mil records.
     # - Generate Flamegraph: ~15min (see https://github.com/koute/not-perf/issues/30 on optimizing)
     # - Building RW artifacts: ~8min
-    timeout_in_minutes: 480
+    timeout_in_minutes: 540
 
   # Generates Heap flamegraph if label `HEAP_FLAMEGRAPH=true` is added to env var.
   - label: "Generate Heap flamegraph"
@@ -48,7 +48,7 @@ steps:
       - seek-oss/aws-sm#v2.3.1:
           env:
             GITHUB_TOKEN: github-token
-      - docker-compose#v4.9.0:
+      - docker-compose#v5.1.0:
           run: ci-flamegraph-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
