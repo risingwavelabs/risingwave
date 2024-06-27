@@ -109,7 +109,6 @@ impl<T> From<TableMap<T>> for HashMap<TableId, T> {
 pub(crate) type TableActorMap = TableMap<HashSet<ActorId>>;
 pub(crate) type TableUpstreamMvCountMap = TableMap<HashMap<TableId, usize>>;
 pub(crate) type TableDefinitionMap = TableMap<String>;
-pub(crate) type TableNotifierMap = TableMap<Notifier>;
 pub(crate) type TableFragmentMap = TableMap<TableFragments>;
 pub(crate) type TableStreamJobMap = TableMap<StreamingJob>;
 pub(crate) type TableInternalTableMap = TableMap<Vec<Table>>;
@@ -791,7 +790,7 @@ impl GlobalBarrierManager {
     }
 
     async fn failure_recovery(&mut self, err: MetaError) {
-        self.context.tracker.lock().await.abort_all(&err);
+        self.context.tracker.lock().await.abort_all(&err).await;
         self.checkpoint_control.clear_on_err(&err).await;
         self.pending_non_checkpoint_barriers.clear();
 
@@ -819,7 +818,7 @@ impl GlobalBarrierManager {
 
     async fn adhoc_recovery(&mut self) {
         let err = MetaErrorInner::AdhocRecovery.into();
-        self.context.tracker.lock().await.abort_all(&err);
+        self.context.tracker.lock().await.abort_all(&err).await;
         self.checkpoint_control.clear_on_err(&err).await;
 
         if self.enable_recovery {
@@ -870,7 +869,7 @@ impl GlobalBarrierManagerContext {
             notifier.notify_collected();
         });
         let has_remaining = self
-            .update_tracking_jobs(notifiers, command_ctx.clone(), create_mview_progress)
+            .update_tracking_jobs(command_ctx.clone(), create_mview_progress)
             .await?;
         let duration_sec = enqueue_time.stop_and_record();
         self.report_complete_event(duration_sec, &command_ctx);
@@ -932,7 +931,6 @@ impl GlobalBarrierManagerContext {
 
     async fn update_tracking_jobs(
         &self,
-        notifiers: Vec<Notifier>,
         command_ctx: Arc<CommandContext>,
         create_mview_progress: Vec<CreateMviewProgress>,
     ) -> MetaResult<bool> {
@@ -949,7 +947,6 @@ impl GlobalBarrierManagerContext {
                     if let Some(command) = tracker.add(
                         TrackingCommand {
                             context: command_ctx.clone(),
-                            notifiers,
                         },
                         &version_stats,
                     ) {

@@ -15,7 +15,6 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
-use anyhow::anyhow;
 use futures::future::join_all;
 use itertools::Itertools;
 use risingwave_common::bail;
@@ -31,10 +30,7 @@ use tracing::Instrument;
 
 use super::{Locations, RescheduleOptions, ScaleControllerRef, TableResizePolicy};
 use crate::barrier::{BarrierScheduler, Command, ReplaceTablePlan, StreamRpcManager};
-use crate::manager::{
-    DdlType, MetaSrvEnv, MetadataManager, MetadataManagerV1, MetadataManagerV2,
-    NotificationVersion, StreamingJob,
-};
+use crate::manager::{DdlType, MetaSrvEnv, MetadataManager, NotificationVersion, StreamingJob};
 use crate::model::{ActorId, FragmentId, MetadataModel, TableFragments, TableParallelism};
 use crate::stream::{to_build_actor_info, SourceManagerRef};
 use crate::{MetaError, MetaResult};

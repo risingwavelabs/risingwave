@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::stream_graph_visitor::visit_fragment;
@@ -24,7 +23,6 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::update_mutation::PbMergeUpdate;
 use risingwave_pb::stream_plan::StreamFragmentGraph as StreamFragmentGraphProto;
 use thiserror_ext::AsReport;
-use tokio::sync::oneshot;
 
 use crate::controller::catalog::ReleaseContext;
 use crate::manager::{
@@ -211,16 +209,6 @@ impl DdlController {
             | (CreateType::Foreground, _)
             // FIXME(kwannoel): Unify background stream's creation path with MV below.
             | (CreateType::Background, StreamingJob::Sink(_, _)) => {
-                let replace_table_job_info = ctx.replace_table_job_info.as_ref().map(
-                    |(streaming_job, ctx, table_fragments)| {
-                        (
-                            streaming_job.clone(),
-                            ctx.merge_updates.clone(),
-                            table_fragments.table_id().table_id(),
-                        )
-                    },
-                );
-
                 let version = self.stream_manager
                     .create_streaming_job(table_fragments, ctx)
                     .await?;
@@ -228,7 +216,6 @@ impl DdlController {
             }
             (CreateType::Background, _) => {
                 let ctrl = self.clone();
-                let mgr = mgr.clone();
                 let fut = async move {
                     let _ = ctrl
                         .stream_manager

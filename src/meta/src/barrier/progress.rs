@@ -25,10 +25,9 @@ use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
 
 use super::command::CommandContext;
-use super::notifier::Notifier;
 use crate::barrier::{
     Command, TableActorMap, TableDefinitionMap, TableFragmentMap, TableInternalTableMap,
-    TableNotifierMap, TableStreamJobMap, TableUpstreamMvCountMap,
+    TableStreamJobMap, TableUpstreamMvCountMap,
 };
 use crate::manager::{
     DdlType, MetadataManager, MetadataManagerV1, MetadataManagerV2, StreamingJob,
@@ -236,6 +235,39 @@ impl TrackingJob {
             TrackingJob::RecoveredV2(recovered) => Some((recovered.id as u32).into()),
         }
     }
+
+    pub(crate) async fn notify_finish_failed(&self, err: MetaError) {
+        let id = match self {
+            TrackingJob::New(command) => command.context.table_to_create(),
+            TrackingJob::RecoveredV1(recovered) => Some(recovered.fragments.table_id()),
+            TrackingJob::RecoveredV2(recovered) => Some((recovered.id as u32).into()),
+        };
+        let Some(id) = id else {
+            return;
+        };
+        match self {
+            TrackingJob::New(command) => match command.context.metadata_manager() {
+                MetadataManager::V1(mgr) => {
+                    mgr.notify_finish_failed(id.table_id, err).await;
+                }
+                MetadataManager::V2(mgr) => {
+                    mgr.notify_finish_failed(id.table_id, err).await;
+                }
+            },
+            TrackingJob::RecoveredV1(recovered) => {
+                recovered
+                    .metadata_manager
+                    .notify_finish_failed(id.table_id, err)
+                    .await;
+            }
+            TrackingJob::RecoveredV2(recovered) => {
+                recovered
+                    .metadata_manager
+                    .notify_finish_failed(id.table_id, err)
+                    .await;
+            }
+        }
+    }
 }
 
 impl std::fmt::Debug for TrackingJob {
@@ -276,9 +308,6 @@ pub struct RecoveredTrackingJobV2 {
 pub(super) struct TrackingCommand {
     /// The context of the command.
     pub context: Arc<CommandContext>,
-
-    /// Should be called when the command is finished.
-    pub notifiers: Vec<Notifier>,
 }
 
 /// Tracking is done as follows:
@@ -390,7 +419,7 @@ impl CreateMviewProgressTracker {
         definitions: &mut TableDefinitionMap,
         version_stats: &HummockVersionStats,
     ) -> Progress {
-        let mut states = HashMap::new();
+        let states = HashMap::new();
         let upstream_mv_count = upstream_mv_counts.remove(&creating_table_id).unwrap();
         let upstream_total_key_count = upstream_mv_count
             .iter()
@@ -466,8 +495,14 @@ impl CreateMviewProgressTracker {
     }
 
     /// Notify all tracked commands that error encountered and clear them.
-    pub fn abort_all(&mut self, err: &MetaError) {
+    pub async fn abort_all(&mut self, err: &MetaError) {
         self.actor_map.clear();
+        for job in self.finished_jobs.drain(..) {
+            job.notify_finish_failed(err.clone()).await;
+        }
+        for (_, (_, job)) in self.progress_map.drain() {
+            job.notify_finish_failed(err.clone()).await;
+        }
     }
 
     /// Add a new create-mview DDL command to track.
