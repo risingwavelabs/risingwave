@@ -16,6 +16,9 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 
 use anyhow::anyhow;
 use itertools::Itertools;
+use risingwave_common::buffer::Bitmap;
+use risingwave_common::hash;
+use risingwave_common::hash::{ActorMapping, WorkerSlotId, WorkerSlotMapping};
 use risingwave_meta_model_migration::WithQuery;
 use risingwave_meta_model_v2::actor::ActorStatus;
 use risingwave_meta_model_v2::fragment::DistributionType;
@@ -25,10 +28,12 @@ use risingwave_meta_model_v2::{
     actor, actor_dispatcher, connection, database, fragment, function, index, object,
     object_dependency, schema, secret, sink, source, subscription, table, user, user_privilege,
     view, ActorId, DataTypeArray, DatabaseId, FragmentId, I32Array, ObjectId, PrivilegeId,
-    SchemaId, SourceId, StreamNode, UserId, VnodeBitmap,
+    SchemaId, SourceId, StreamNode, UserId, VnodeBitmap, WorkerId,
 };
 use risingwave_pb::catalog::{PbConnection, PbFunction, PbSecret, PbSubscription};
-use risingwave_pb::meta::{PbFragmentParallelUnitMapping, PbFragmentWorkerSlotMapping};
+use risingwave_pb::meta::{
+    FragmentWorkerSlotMapping, PbFragmentParallelUnitMapping, PbFragmentWorkerSlotMapping,
+};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{PbFragmentTypeFlag, PbStreamNode, StreamSource};
 use risingwave_pb::user::grant_privilege::{PbAction, PbActionWithGrantOption, PbObject};
@@ -841,47 +846,106 @@ pub async fn get_fragment_mappings<C>(
 where
     C: ConnectionTrait,
 {
-    let job_actors: Vec<(ObjectId, ActorId, Option<VnodeBitmap>)> = Actor::find()
+    let job_actors: Vec<(
+        FragmentId,
+        DistributionType,
+        ActorId,
+        Option<VnodeBitmap>,
+        WorkerId,
+    )> = Actor::find()
         .select_only()
-        .column(fragment::Column::JobId)
-        .columns(vec![actor::Column::ActorId, actor::Column::VnodeBitmap])
+        .columns([
+            fragment::Column::FragmentId,
+            fragment::Column::DistributionType,
+        ])
+        .columns([
+            actor::Column::ActorId,
+            actor::Column::VnodeBitmap,
+            actor::Column::WorkerId,
+        ])
         .join(JoinType::InnerJoin, actor::Relation::Fragment.def())
         .filter(fragment::Column::JobId.eq(job_id))
         .into_tuple()
         .all(db)
         .await?;
 
-    todo!()
+    let mut actor_locations = HashMap::new();
+    let mut actor_bitmaps = HashMap::new();
+    let mut fragment_actors = HashMap::new();
+    let mut fragment_dist = HashMap::new();
+
+    for (fragment_id, dist, actor_id, bitmap, worker_id) in job_actors {
+        actor_locations.insert(actor_id as hash::ActorId, worker_id as u32);
+        actor_bitmaps.insert(actor_id, bitmap);
+        fragment_actors
+            .entry(fragment_id)
+            .or_insert_with(Vec::new)
+            .push(actor_id);
+        fragment_dist.insert(fragment_id, dist);
+    }
+
+    let mut result = vec![];
+    for (fragment_id, dist) in fragment_dist {
+        let fragment_worker_slot_mapping = match dist {
+            DistributionType::Single => {
+                let actor = fragment_actors
+                    .remove(&fragment_id)
+                    .unwrap()
+                    .into_iter()
+                    .exactly_one()
+                    .unwrap() as hash::ActorId;
+                let actor_location = actor_locations.remove(&actor).unwrap();
+
+                WorkerSlotMapping::new_single(WorkerSlotId::new(actor_location, 0))
+            }
+            DistributionType::Hash => {
+                let actors = fragment_actors.remove(&fragment_id).unwrap();
+
+                let all_actor_bitmaps: HashMap<_, _> = actors
+                    .iter()
+                    .map(|actor_id| {
+                        let vnode_bitmap = actor_bitmaps
+                            .remove(actor_id)
+                            .flatten()
+                            .expect("actor bitmap shouldn't be none in hash fragment");
+
+                        let bitmap = Bitmap::from(&vnode_bitmap.to_protobuf());
+                        (*actor_id as hash::ActorId, bitmap)
+                    })
+                    .collect();
+
+                let actor_mapping = ActorMapping::from_bitmaps(&all_actor_bitmaps);
+
+                actor_mapping.to_worker_slot(&actor_locations)
+            }
+        };
+
+        result.push(PbFragmentWorkerSlotMapping {
+            fragment_id: fragment_id as u32,
+            mapping: Some(fragment_worker_slot_mapping.to_protobuf()),
+        })
+    }
+
+    Ok(result)
 }
 
 /// `get_fragment_mappings_by_jobs` returns the fragment vnode mappings of the given job list.
-pub async fn get_fragment_mappings_by_jobs<C>(
+pub async fn get_fragment_ids_by_jobs<C>(
     db: &C,
     job_ids: Vec<ObjectId>,
-) -> MetaResult<Vec<PbFragmentParallelUnitMapping>>
+) -> MetaResult<Vec<FragmentId>>
 where
     C: ConnectionTrait,
 {
-    // if job_ids.is_empty() {
-    //     return Ok(vec![]);
-    // }
-    //
-    // let fragment_mappings: Vec<(FragmentId, FragmentVnodeMapping)> = Fragment::find()
-    //     .select_only()
-    //     .columns([fragment::Column::FragmentId, fragment::Column::VnodeMapping])
-    //     .filter(fragment::Column::JobId.is_in(job_ids))
-    //     .into_tuple()
-    //     .all(db)
-    //     .await?;
-    //
-    // Ok(fragment_mappings
-    //     .into_iter()
-    //     .map(|(fragment_id, mapping)| PbFragmentParallelUnitMapping {
-    //         fragment_id: fragment_id as _,
-    //         mapping: Some(mapping.to_protobuf()),
-    //     })
-    //     .collect())
-    todo!()
+    let fragment_ids: Vec<(FragmentId)> = Fragment::find()
+        .select_only()
+        .column(fragment::Column::FragmentId)
+        .filter(fragment::Column::JobId.is_in(job_ids))
+        .into_tuple()
+        .all(db)
+        .await?;
+
+    Ok(fragment_ids)
 }
 
 /// `get_fragment_actor_ids` returns the fragment actor ids of the given fragments.

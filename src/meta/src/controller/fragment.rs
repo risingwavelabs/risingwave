@@ -1719,7 +1719,6 @@ mod tests {
         {
             assert_eq!(actor_id, pb_actor_id as ActorId);
             assert_eq!(fragment_id, pb_fragment_id as FragmentId);
-            // assert_eq!(parallel_unit_id, pb_actor_id as i32);
             let upstream_actor_ids = upstream_actor_ids.into_inner();
 
             assert_eq!(
