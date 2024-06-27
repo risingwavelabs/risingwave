@@ -8,7 +8,7 @@
       let
         rust-toolchain = with pkgs;
           [
-            ((rust-bin.fromRustupToolchainFile ../rust-toolchain).override {
+            ((rust-bin.fromRustupToolchainFile ../../rust-toolchain).override {
               extensions = [ "rust-src" "rust-analyzer" ];
             })
           ] ++ [
