@@ -579,7 +579,6 @@ pub enum ParserFormat {
     DebeziumMongo,
     Upsert,
     Plain,
-    Parquet,
 }
 
 /// `ByteStreamSourceParser` is a new message parser, the parser should consume

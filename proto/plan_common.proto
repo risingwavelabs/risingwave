@@ -165,7 +165,6 @@ enum RowFormatType {
   UPSERT_AVRO = 11;
   DEBEZIUM_MONGO_JSON = 12;
   BYTES = 13;
-  PARQUET = 14;
 }
 
 message IndexAndExpr {

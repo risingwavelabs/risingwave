@@ -433,7 +433,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
 
                 Either::Right(chunk) => {
                     // TODO: confirm when split_offset_mapping is None
-                    let split_offset_mapping: Option<HashMap<Arc<str>, String>> =
+                    let split_offset_mapping =
                         get_split_offset_mapping_from_chunk(&chunk, split_idx, offset_idx);
                     if last_barrier_time.elapsed().as_millis() > max_wait_barrier_time_ms {
                         // Exceeds the max wait barrier time, the source will be paused. Currently

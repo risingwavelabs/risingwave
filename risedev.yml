@@ -113,10 +113,10 @@ profile:
       - use: compactor
       - use: prometheus
       - use: grafana
-      - use: zookeeper
-        persist-data: true
-      - use: kafka
-        persist-data: true
+      # - use: zookeeper
+      #   persist-data: true
+      # - use: kafka
+      #   persist-data: true
 
   standalone-full-peripherals:
     steps:
