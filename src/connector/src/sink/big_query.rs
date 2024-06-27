@@ -40,7 +40,6 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
 use serde_derive::Deserialize;
-use serde_with::{serde_as, DisplayFromStr};
 use tokio::sync::{broadcast, mpsc};
 use url::Url;
 use uuid::Uuid;
@@ -64,7 +63,6 @@ const CONNECT_TIMEOUT: Option<Duration> = Some(Duration::from_secs(30));
 const CONNECTION_TIMEOUT: Option<Duration> = None;
 const BIGQUERY_SEND_FUTURE_BUFFER_MAX_SIZE: usize = 256;
 
-#[serde_as]
 #[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct BigQueryCommon {
     #[serde(rename = "bigquery.local.path")]
@@ -77,20 +75,6 @@ pub struct BigQueryCommon {
     pub dataset: String,
     #[serde(rename = "bigquery.table")]
     pub table: String,
-    #[serde(rename = "bigquery.max_batch_rows", default = "default_max_batch_rows")]
-    #[serde_as(as = "DisplayFromStr")]
-    pub max_batch_rows: usize,
-    #[serde(rename = "bigquery.retry_times", default = "default_retry_times")]
-    #[serde_as(as = "DisplayFromStr")]
-    pub retry_times: usize,
-}
-
-fn default_max_batch_rows() -> usize {
-    1024
-}
-
-fn default_retry_times() -> usize {
-    5
 }
 
 impl BigQueryCommon {
@@ -135,7 +119,6 @@ impl BigQueryCommon {
     }
 }
 
-#[serde_as]
 #[derive(Clone, Debug, Deserialize, WithOptions)]
 pub struct BigQueryConfig {
     #[serde(flatten)]
