@@ -10853,6 +10853,7 @@ dependencies = [
  "risingwave_common_metrics",
  "risingwave_common_proc_macro",
  "risingwave_error",
+ "risingwave_license",
  "risingwave_pb",
  "rust_decimal",
  "rusty-fork",
@@ -11662,6 +11663,18 @@ dependencies = [
  "rw_futures_util",
  "serde",
  "serde_json",
+ "thiserror",
+ "thiserror-ext",
+ "tracing",
+]
+
+[[package]]
+name = "risingwave_license"
+version = "1.11.0-alpha"
+dependencies = [
+ "expect-test",
+ "jsonwebtoken",
+ "serde",
  "thiserror",
  "thiserror-ext",
  "tracing",

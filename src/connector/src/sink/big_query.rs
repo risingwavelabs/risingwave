@@ -18,7 +18,11 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use futures::prelude::TryFuture;
+use gcp_bigquery_client::error::BQError;
 use gcp_bigquery_client::model::query_request::QueryRequest;
+use gcp_bigquery_client::model::table::Table;
+use gcp_bigquery_client::model::table_field_schema::TableFieldSchema;
+use gcp_bigquery_client::model::table_schema::TableSchema;
 use gcp_bigquery_client::Client;
 use google_cloud_bigquery::grpc::apiv1::conn_pool::{WriteConnectionManager, DOMAIN};
 use google_cloud_gax::conn::{ConnectionOptions, Environment};
@@ -37,9 +41,11 @@ use prost_types::{
     FileDescriptorSet,
 };
 use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
 use serde_derive::Deserialize;
+use serde_with::{serde_as, DisplayFromStr};
+use simd_json::prelude::ArrayTrait;
 use tokio::sync::{broadcast, mpsc};
 use url::Url;
 use uuid::Uuid;
@@ -63,6 +69,7 @@ const CONNECT_TIMEOUT: Option<Duration> = Some(Duration::from_secs(30));
 const CONNECTION_TIMEOUT: Option<Duration> = None;
 const BIGQUERY_SEND_FUTURE_BUFFER_MAX_SIZE: usize = 256;
 
+#[serde_as]
 #[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct BigQueryCommon {
     #[serde(rename = "bigquery.local.path")]
@@ -75,6 +82,9 @@ pub struct BigQueryCommon {
     pub dataset: String,
     #[serde(rename = "bigquery.table")]
     pub table: String,
+    #[serde(default)] // default false
+    #[serde_as(as = "DisplayFromStr")]
+    pub auto_create: bool,
 }
 
 impl BigQueryCommon {
@@ -119,6 +129,7 @@ impl BigQueryCommon {
     }
 }
 
+#[serde_as]
 #[derive(Clone, Debug, Deserialize, WithOptions)]
 pub struct BigQueryConfig {
     #[serde(flatten)]
@@ -238,6 +249,79 @@ impl BigQuerySink {
             ))),
         }
     }
+
+    fn map_field(rw_field: &Field) -> Result<TableFieldSchema> {
+        let tfs = match &rw_field.data_type {
+            DataType::Boolean => TableFieldSchema::bool(&rw_field.name),
+            DataType::Int16 | DataType::Int32 | DataType::Int64 | DataType::Serial => {
+                TableFieldSchema::integer(&rw_field.name)
+            }
+            DataType::Float32 => {
+                return Err(SinkError::BigQuery(anyhow::anyhow!(
+                    "Bigquery cannot support real"
+                )))
+            }
+            DataType::Float64 => TableFieldSchema::float(&rw_field.name),
+            DataType::Decimal => TableFieldSchema::numeric(&rw_field.name),
+            DataType::Date => TableFieldSchema::date(&rw_field.name),
+            DataType::Varchar => TableFieldSchema::string(&rw_field.name),
+            DataType::Time => TableFieldSchema::time(&rw_field.name),
+            DataType::Timestamp => TableFieldSchema::date_time(&rw_field.name),
+            DataType::Timestamptz => TableFieldSchema::timestamp(&rw_field.name),
+            DataType::Interval => {
+                return Err(SinkError::BigQuery(anyhow::anyhow!(
+                    "Bigquery cannot support Interval"
+                )))
+            }
+            DataType::Struct(_) => {
+                let mut sub_fields = Vec::with_capacity(rw_field.sub_fields.len());
+                for rw_field in &rw_field.sub_fields {
+                    let field = Self::map_field(rw_field)?;
+                    sub_fields.push(field)
+                }
+                TableFieldSchema::record(&rw_field.name, sub_fields)
+            }
+            DataType::List(dt) => {
+                let inner_field = Self::map_field(&Field::with_name(*dt.clone(), &rw_field.name))?;
+                TableFieldSchema {
+                    mode: Some("REPEATED".to_string()),
+                    ..inner_field
+                }
+            }
+
+            DataType::Bytea => TableFieldSchema::bytes(&rw_field.name),
+            DataType::Jsonb => TableFieldSchema::json(&rw_field.name),
+            DataType::Int256 => {
+                return Err(SinkError::BigQuery(anyhow::anyhow!(
+                    "Bigquery cannot support Int256"
+                )))
+            }
+        };
+        Ok(tfs)
+    }
+
+    async fn create_table(
+        &self,
+        client: &Client,
+        project_id: &str,
+        dataset_id: &str,
+        table_id: &str,
+        fields: &Vec<Field>,
+    ) -> Result<Table> {
+        let dataset = client
+            .dataset()
+            .get(project_id, dataset_id)
+            .await
+            .map_err(|e| SinkError::BigQuery(e.into()))?;
+        let fields: Vec<_> = fields.iter().map(Self::map_field).collect::<Result<_>>()?;
+        let table = Table::from_dataset(&dataset, table_id, TableSchema::new(fields));
+
+        client
+            .table()
+            .create(table)
+            .await
+            .map_err(|e| SinkError::BigQuery(e.into()))
+    }
 }
 
 impl Sink for BigQuerySink {
@@ -267,16 +351,47 @@ impl Sink for BigQuerySink {
             .common
             .build_client(&self.config.aws_auth_props)
             .await?;
+        let BigQueryCommon {
+            project: project_id,
+            dataset: dataset_id,
+            table: table_id,
+            ..
+        } = &self.config.common;
+
+        if self.config.common.auto_create {
+            match client
+                .table()
+                .get(project_id, dataset_id, table_id, None)
+                .await
+            {
+                Err(BQError::RequestError(_)) => {
+                    // early return: no need to query schema to check column and type
+                    return self
+                        .create_table(
+                            &client,
+                            project_id,
+                            dataset_id,
+                            table_id,
+                            &self.schema.fields,
+                        )
+                        .await
+                        .map(|_| ());
+                }
+                Err(e) => return Err(SinkError::BigQuery(e.into())),
+                _ => {}
+            }
+        }
+
         let mut rs = client
-        .job()
-        .query(
-            &self.config.common.project,
-            QueryRequest::new(format!(
-                "SELECT column_name, data_type FROM `{}.{}.INFORMATION_SCHEMA.COLUMNS` WHERE table_name = '{}'"
-                ,self.config.common.project,self.config.common.dataset,self.config.common.table,
-            )),
-        )
-        .await.map_err(|e| SinkError::BigQuery(e.into()))?;
+            .job()
+            .query(
+                &self.config.common.project,
+                QueryRequest::new(format!(
+                    "SELECT column_name, data_type FROM `{}.{}.INFORMATION_SCHEMA.COLUMNS` WHERE table_name = '{}'",
+                    project_id, dataset_id, table_id,
+                )),
+            ).await.map_err(|e| SinkError::BigQuery(e.into()))?;
+
         let mut big_query_schema = HashMap::default();
         while rs.next_row() {
             big_query_schema.insert(
@@ -503,7 +618,7 @@ impl AsyncTruncateSinkWriter for BigQuerySinkWriter {
 struct StorageWriterClient {
     #[expect(dead_code)]
     environment: Environment,
-    sender: mpsc::Sender<AppendRowsRequest>,
+    request_sender: mpsc::Sender<AppendRowsRequest>,
     result_sender: Arc<broadcast::Sender<(Option<String>, u64)>>,
     abort_handle: tokio::task::AbortHandle,
     offset: u64,
@@ -559,7 +674,7 @@ impl StorageWriterClient {
                     Ok(None) => {
                         continue;
                     }
-                    Err(e) => Some(e.to_string()),
+                    Err(e) => Some(e.to_report_string()),
                 };
                 result_sender_clone.send((result, offset)).unwrap();
                 offset += 1;
@@ -569,7 +684,7 @@ impl StorageWriterClient {
 
         Ok(StorageWriterClient {
             environment,
-            sender: tx,
+            request_sender: tx,
             result_sender,
             abort_handle,
             offset: 0,
@@ -593,7 +708,7 @@ impl StorageWriterClient {
             missing_value_interpretations: HashMap::default(),
             rows: Some(row),
         };
-        self.sender
+        self.request_sender
             .send(append_req)
             .await
             .map_err(|e| SinkError::BigQuery(e.into()))?;

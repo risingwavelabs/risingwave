@@ -25,6 +25,10 @@ BigQueryConfig:
     field_type: usize
     required: false
     default: '5'
+  - name: auto_create
+    field_type: bool
+    required: false
+    default: Default::default
   - name: aws.region
     field_type: String
     required: false
