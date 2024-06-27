@@ -2464,7 +2464,8 @@ mod tests {
         }
     }
 
-    fn is_data_chunk_bag_eq(left: &DataChunk, right: &DataChunk) -> bool {
+    /// Sort each row in the data chunk and compare with the rows in the data chunk.
+    fn compare_data_chunk_with_rowsort(left: &DataChunk, right: &DataChunk) -> bool {
         assert!(left.is_compacted());
         assert!(right.is_compacted());
 
@@ -2759,7 +2760,7 @@ mod tests {
 
                 // TODO: Replace this with unsorted comparison
                 // assert_eq!(expected, result_chunk);
-                assert!(is_data_chunk_bag_eq(&expected, &result_chunk));
+                assert!(compare_data_chunk_with_rowsort(&expected, &result_chunk));
             }
 
             assert_eq!(0, parent_mem_context.get_bytes_used());
@@ -3329,7 +3330,7 @@ mod tests {
             has_more_output_rows: true,
             found_matched: false,
         };
-        assert!(is_data_chunk_bag_eq(
+        assert!(compare_data_chunk_with_rowsort(
             &HashJoinExecutor::<Key32>::process_left_outer_join_non_equi_condition(
                 chunk,
                 cond.as_ref(),
@@ -3359,7 +3360,7 @@ mod tests {
         );
         state.first_output_row_id = vec![2, 3];
         state.has_more_output_rows = false;
-        assert!(is_data_chunk_bag_eq(
+        assert!(compare_data_chunk_with_rowsort(
             &HashJoinExecutor::<Key32>::process_left_outer_join_non_equi_condition(
                 chunk,
                 cond.as_ref(),
@@ -3389,7 +3390,7 @@ mod tests {
         );
         state.first_output_row_id = vec![2, 3];
         state.has_more_output_rows = false;
-        assert!(is_data_chunk_bag_eq(
+        assert!(compare_data_chunk_with_rowsort(
             &HashJoinExecutor::<Key32>::process_left_outer_join_non_equi_condition(
                 chunk,
                 cond.as_ref(),
@@ -3429,7 +3430,7 @@ mod tests {
             found_matched: false,
             ..Default::default()
         };
-        assert!(is_data_chunk_bag_eq(
+        assert!(compare_data_chunk_with_rowsort(
             &HashJoinExecutor::<Key32>::process_left_semi_anti_join_non_equi_condition::<false>(
                 chunk,
                 cond.as_ref(),
@@ -3456,7 +3457,7 @@ mod tests {
              4   1.0 4   2.0",
         );
         state.first_output_row_id = vec![2, 3];
-        assert!(is_data_chunk_bag_eq(
+        assert!(compare_data_chunk_with_rowsort(
             &HashJoinExecutor::<Key32>::process_left_semi_anti_join_non_equi_condition::<false>(
                 chunk,
                 cond.as_ref(),
@@ -3483,7 +3484,7 @@ mod tests {
              6   7.0 6   8.0",
         );
         state.first_output_row_id = vec![2, 3];
-        assert!(is_data_chunk_bag_eq(
+        assert!(compare_data_chunk_with_rowsort(
             &HashJoinExecutor::<Key32>::process_left_semi_anti_join_non_equi_condition::<false>(
                 chunk,
                 cond.as_ref(),
@@ -3525,7 +3526,7 @@ mod tests {
             has_more_output_rows: true,
             found_matched: false,
         };
-        assert!(is_data_chunk_bag_eq(
+        assert!(compare_data_chunk_with_rowsort(
             &HashJoinExecutor::<Key32>::process_left_semi_anti_join_non_equi_condition::<true>(
                 chunk,
                 cond.as_ref(),
@@ -3554,7 +3555,7 @@ mod tests {
         );
         state.first_output_row_id = vec![2, 3];
         state.has_more_output_rows = false;
-        assert!(is_data_chunk_bag_eq(
+        assert!(compare_data_chunk_with_rowsort(
             &HashJoinExecutor::<Key32>::process_left_semi_anti_join_non_equi_condition::<true>(
                 chunk,
                 cond.as_ref(),
@@ -3583,7 +3584,7 @@ mod tests {
         );
         state.first_output_row_id = vec![2, 3];
         state.has_more_output_rows = false;
-        assert!(is_data_chunk_bag_eq(
+        assert!(compare_data_chunk_with_rowsort(
             &HashJoinExecutor::<Key32>::process_left_semi_anti_join_non_equi_condition::<true>(
                 chunk,
                 cond.as_ref(),
@@ -3647,7 +3648,7 @@ mod tests {
             ],
             build_row_matched,
         };
-        assert!(is_data_chunk_bag_eq(
+        assert!(compare_data_chunk_with_rowsort(
             &HashJoinExecutor::<Key32>::process_right_outer_join_non_equi_condition(
                 chunk,
                 cond.as_ref(),
@@ -3688,7 +3689,7 @@ mod tests {
             RowId::new(0, 12),
             RowId::new(0, 13),
         ];
-        assert!(is_data_chunk_bag_eq(
+        assert!(compare_data_chunk_with_rowsort(
             &HashJoinExecutor::<Key32>::process_right_outer_join_non_equi_condition(
                 chunk,
                 cond.as_ref(),
@@ -3837,7 +3838,7 @@ mod tests {
             ],
             build_row_matched: ChunkedData::with_chunk_sizes([14].into_iter()).unwrap(),
         };
-        assert!(is_data_chunk_bag_eq(
+        assert!(compare_data_chunk_with_rowsort(
             &HashJoinExecutor::<Key32>::process_full_outer_join_non_equi_condition(
                 chunk,
                 cond.as_ref(),
@@ -3885,7 +3886,7 @@ mod tests {
             RowId::new(0, 12),
             RowId::new(0, 13),
         ];
-        assert!(is_data_chunk_bag_eq(
+        assert!(compare_data_chunk_with_rowsort(
             &HashJoinExecutor::<Key32>::process_full_outer_join_non_equi_condition(
                 chunk,
                 cond.as_ref(),
