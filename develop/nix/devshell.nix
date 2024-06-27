@@ -11,12 +11,6 @@
             ((rust-bin.fromRustupToolchainFile ../../rust-toolchain).override {
               extensions = [ "rust-src" "rust-analyzer" ];
             })
-          ] ++ [
-            cargo-make
-            cargo-nextest
-            cargo-binstall
-            cargo-sort
-            typos
           ];
       in
       {
