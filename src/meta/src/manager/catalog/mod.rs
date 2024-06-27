@@ -1125,7 +1125,7 @@ impl CatalogManager {
         let version = match stream_job {
             StreamingJob::MaterializedView(table) => {
                 creating_internal_table_ids.push(table.id);
-                self.finish_create_table_procedure(internal_tables, table)
+                self.finish_create_materialized_view_procedure(internal_tables, table)
                     .await?
             }
             StreamingJob::Sink(sink, target_table) => {
@@ -1179,6 +1179,54 @@ impl CatalogManager {
     ) -> MetaResult<NotificationVersion> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
+        let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
+        let key = (table.database_id, table.schema_id, table.name.clone());
+        assert!(
+            !tables.contains_key(&table.id)
+                && database_core.in_progress_creation_tracker.contains(&key),
+            "table must be in creating procedure"
+        );
+        database_core.in_progress_creation_tracker.remove(&key);
+        database_core
+            .in_progress_creation_streaming_job
+            .remove(&table.id);
+
+        table.stream_job_status = PbStreamJobStatus::Created.into();
+        tables.insert(table.id, table.clone());
+        for table in &mut internal_tables {
+            table.stream_job_status = PbStreamJobStatus::Created.into();
+            tables.insert(table.id, table.clone());
+        }
+        commit_meta!(self, tables)?;
+
+        tracing::debug!(id = ?table.id, "notifying frontend");
+        let version = self
+            .notify_frontend(
+                Operation::Add,
+                Info::RelationGroup(RelationGroup {
+                    relations: vec![Relation {
+                        relation_info: RelationInfo::Table(table.to_owned()).into(),
+                    }]
+                        .into_iter()
+                        .chain(internal_tables.into_iter().map(|internal_table| Relation {
+                            relation_info: RelationInfo::Table(internal_table).into(),
+                        }))
+                        .collect_vec(),
+                }),
+            )
+            .await;
+
+        Ok(version)
+    }
+
+    /// This is used for both `CREATE TABLE` and `CREATE MATERIALIZED VIEW`.
+    pub async fn finish_create_materialized_view_procedure(
+        &self,
+        mut internal_tables: Vec<Table>,
+        mut table: Table,
+    ) -> MetaResult<NotificationVersion> {
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
         let tables = &mut database_core.tables;
         if cfg!(not(test)) {
             Self::check_table_creating(tables, &table)?;
@@ -1196,7 +1244,7 @@ impl CatalogManager {
         tracing::debug!(id = ?table.id, "notifying frontend");
         let version = self
             .notify_frontend(
-                Operation::Add,
+                Operation::Update,
                 Info::RelationGroup(RelationGroup {
                     relations: vec![Relation {
                         relation_info: RelationInfo::Table(table.to_owned()).into(),
