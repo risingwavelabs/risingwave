@@ -31,9 +31,11 @@ use crate::source::{
 
 pub struct NatsSplitReader {
     consumer: consumer::Consumer<consumer::pull::Config>,
+    #[expect(dead_code)]
     properties: NatsProperties,
     parser_config: ParserConfig,
     source_ctx: SourceContextRef,
+    #[expect(dead_code)]
     start_position: NatsOffset,
     split_id: SplitId,
 }

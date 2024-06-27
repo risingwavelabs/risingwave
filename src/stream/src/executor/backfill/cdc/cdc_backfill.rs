@@ -40,6 +40,7 @@ use crate::executor::backfill::utils::{
     get_cdc_chunk_last_offset, get_new_pos, mapping_chunk, mapping_message, mark_cdc_chunk,
 };
 use crate::executor::backfill::CdcScanOptions;
+use crate::executor::monitor::CdcBackfillMetrics;
 use crate::executor::prelude::*;
 use crate::task::CreateMviewProgress;
 
@@ -68,7 +69,7 @@ pub struct CdcBackfillExecutor<S: StateStore> {
     // This object is just a stub right now
     progress: Option<CreateMviewProgress>,
 
-    metrics: Arc<StreamingMetrics>,
+    metrics: CdcBackfillMetrics,
 
     /// Rate limit in rows/s.
     rate_limit_rps: Option<u32>,
@@ -98,6 +99,8 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             pk_indices.len() + METADATA_STATE_LEN,
         );
 
+        let metrics = metrics.new_cdc_backfill_metrics(external_table.table_id(), actor_ctx.id);
+
         Self {
             actor_ctx,
             external_table,
@@ -113,26 +116,16 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
     }
 
     fn report_metrics(
-        metrics: &Arc<StreamingMetrics>,
-        upstream_table_id: u32,
-        actor_id: u32,
+        metrics: &CdcBackfillMetrics,
         snapshot_processed_row_count: u64,
         upstream_processed_row_count: u64,
     ) {
         metrics
             .cdc_backfill_snapshot_read_row_count
-            .with_label_values(&[
-                upstream_table_id.to_string().as_str(),
-                actor_id.to_string().as_str(),
-            ])
             .inc_by(snapshot_processed_row_count);
 
         metrics
             .cdc_backfill_upstream_output_row_count
-            .with_label_values(&[
-                upstream_table_id.to_string().as_str(),
-                actor_id.to_string().as_str(),
-            ])
             .inc_by(upstream_processed_row_count);
     }
 
@@ -144,6 +137,8 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
 
         let upstream_table_id = self.external_table.table_id().table_id;
         let upstream_table_name = self.external_table.qualified_table_name();
+        let schema_table_name = self.external_table.schema_table_name().clone();
+        let external_database_name = self.external_table.database_name().to_owned();
         let upstream_table_reader = UpstreamTableReader::new(self.external_table);
 
         let additional_columns = self
@@ -271,6 +266,8 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                     self.rate_limit_rps,
                     pk_indices.clone(),
                     additional_columns.clone(),
+                    schema_table_name.clone(),
+                    external_database_name.clone(),
                 );
 
                 let right_snapshot = pin!(upstream_table_reader
@@ -332,8 +329,6 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
 
                                     Self::report_metrics(
                                         &self.metrics,
-                                        upstream_table_id,
-                                        self.actor_ctx.id,
                                         cur_barrier_snapshot_processed_rows,
                                         cur_barrier_upstream_processed_rows,
                                     );
@@ -552,8 +547,6 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
 
                 Self::report_metrics(
                     &self.metrics,
-                    upstream_table_id,
-                    self.actor_ctx.id,
                     cur_barrier_snapshot_processed_rows,
                     cur_barrier_upstream_processed_rows,
                 );

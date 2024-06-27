@@ -57,7 +57,7 @@ impl Rule for ApplyTopNTransposeRule {
             return None;
         }
 
-        let new_apply = LogicalApply::new(
+        let new_apply = LogicalApply::create(
             left,
             topn_input,
             JoinType::Inner,
@@ -65,8 +65,7 @@ impl Rule for ApplyTopNTransposeRule {
             correlated_id,
             correlated_indices,
             false,
-        )
-        .into();
+        );
 
         let new_topn = {
             // shift index of topn's `InputRef` with `apply_left_len`.

@@ -221,7 +221,7 @@ KafkaProperties:
     comments: 'Whether to automatically and periodically commit offsets in the background.   Note that RisingWave does NOT rely on committed offsets. Committing offset is only for exposing the  progress for monitoring. Setting this to false can avoid creating consumer groups.   default: true'
     required: false
   - name: broker.rewrite.endpoints
-    field_type: HashMap<String,String>
+    field_type: BTreeMap<String,String>
     comments: This is generated from `private_link_targets` and `private_link_endpoint` in frontend, instead of given by users.
     required: false
   - name: aws.region
@@ -777,5 +777,5 @@ S3Properties:
 TestSourceProperties:
   fields:
   - name: properties
-    field_type: HashMap<String,String>
-    required: false
+    field_type: BTreeMap<String,String>
+    required: true

@@ -449,7 +449,7 @@ impl StreamSink {
         let (user_defined_append_only, user_force_append_only, syntax_legacy) = match format_desc {
             Some(f) => (
                 f.format == SinkFormat::AppendOnly,
-                Self::is_user_force_append_only(&WithOptions::from_inner(f.options.clone()))?,
+                Self::is_user_force_append_only(&WithOptions::new(f.options.clone()))?,
                 false,
             ),
             None => (
@@ -470,7 +470,11 @@ impl StreamSink {
             (false, true, false) => {
                 Err(ErrorCode::SinkError(Box::new(Error::new(
                     ErrorKind::InvalidInput,
-                    format!("The sink cannot be append-only. Please add \"force_append_only='true'\" in {} options to force the sink to be append-only. Notice that this will cause the sink executor to drop any UPDATE or DELETE message.", if syntax_legacy { "WITH" } else { "FORMAT ENCODE" }),
+                    format!(
+                        "The sink cannot be append-only. Please add \"force_append_only='true'\" in {} options to force the sink to be append-only. \
+                        Notice that this will cause the sink executor to drop DELETE messages and convert UPDATE messages to INSERT.",
+                        if syntax_legacy { "WITH" } else { "FORMAT ENCODE" }
+                    ),
                 )))
                     .into())
             }

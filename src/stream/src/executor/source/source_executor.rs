@@ -20,7 +20,7 @@ use either::Either;
 use futures::TryStreamExt;
 use itertools::Itertools;
 use risingwave_common::array::ArrayRef;
-use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
+use risingwave_common::metrics::{LabelGuardedIntCounter, GLOBAL_ERROR_METRICS};
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::epoch::{Epoch, EpochPair};
@@ -180,17 +180,9 @@ impl<S: StateStore> SourceExecutor<S> {
         stream: &mut StreamReaderWithPause<BIASED, StreamChunk>,
         split_assignment: &HashMap<ActorId, Vec<SplitImpl>>,
         should_trim_state: bool,
+        source_split_change_count_metrics: &LabelGuardedIntCounter<4>,
     ) -> StreamExecutorResult<()> {
-        self.metrics
-            .source_split_change_count
-            .with_label_values(
-                &self
-                    .get_metric_labels()
-                    .iter()
-                    .map(AsRef::as_ref)
-                    .collect::<Vec<&str>>(),
-            )
-            .inc();
+        source_split_change_count_metrics.inc();
         if let Some(target_splits) = split_assignment.get(&self.actor_ctx.id).cloned() {
             if self
                 .update_state_if_changed(target_splits, should_trim_state)
@@ -404,23 +396,21 @@ impl<S: StateStore> SourceExecutor<S> {
         };
 
         let mut boot_state = Vec::default();
-        if let Some(mutation) = barrier.mutation.as_deref() {
-            match mutation {
-                Mutation::Add(AddMutation { splits, .. })
-                | Mutation::Update(UpdateMutation {
-                    actor_splits: splits,
-                    ..
-                }) => {
-                    if let Some(splits) = splits.get(&self.actor_ctx.id) {
-                        tracing::debug!(
-                            "source exector: actor {:?} boot with splits: {:?}",
-                            self.actor_ctx.id,
-                            splits
-                        );
-                        boot_state.clone_from(splits);
-                    }
-                }
-                _ => {}
+        if let Some(
+            Mutation::Add(AddMutation { splits, .. })
+            | Mutation::Update(UpdateMutation {
+                actor_splits: splits,
+                ..
+            }),
+        ) = barrier.mutation.as_deref()
+        {
+            if let Some(splits) = splits.get(&self.actor_ctx.id) {
+                tracing::debug!(
+                    "source exector: actor {:?} boot with splits: {:?}",
+                    self.actor_ctx.id,
+                    splits
+                );
+                boot_state.clone_from(splits);
             }
         }
 
@@ -495,6 +485,16 @@ impl<S: StateStore> SourceExecutor<S> {
         let mut last_barrier_time = Instant::now();
         let mut self_paused = false;
 
+        let source_output_row_count = self
+            .metrics
+            .source_output_row_count
+            .with_guarded_label_values(&self.get_metric_labels().each_ref().map(AsRef::as_ref));
+
+        let source_split_change_count = self
+            .metrics
+            .source_split_change_count
+            .with_guarded_label_values(&self.get_metric_labels().each_ref().map(AsRef::as_ref));
+
         while let Some(msg) = stream.next().await {
             let Ok(msg) = msg else {
                 tokio::time::sleep(Duration::from_millis(1000)).await;
@@ -540,6 +540,7 @@ impl<S: StateStore> SourceExecutor<S> {
                                     &mut stream,
                                     actor_splits,
                                     true,
+                                    &source_split_change_count,
                                 )
                                 .await?;
                             }
@@ -550,6 +551,7 @@ impl<S: StateStore> SourceExecutor<S> {
                                     &mut stream,
                                     actor_splits,
                                     false,
+                                    &source_split_change_count,
                                 )
                                 .await?;
                             }
@@ -641,16 +643,7 @@ impl<S: StateStore> SourceExecutor<S> {
                             .extend(state);
                     }
 
-                    self.metrics
-                        .source_output_row_count
-                        .with_label_values(
-                            &self
-                                .get_metric_labels()
-                                .iter()
-                                .map(AsRef::as_ref)
-                                .collect::<Vec<&str>>(),
-                        )
-                        .inc_by(chunk.cardinality() as u64);
+                    source_output_row_count.inc_by(chunk.cardinality() as u64);
                     let chunk =
                         prune_additional_cols(&chunk, split_idx, offset_idx, &source_desc.columns);
                     yield Message::Chunk(chunk);
@@ -832,7 +825,7 @@ impl<S: StateStore> WaitCheckpointWorker<S> {
 mod tests {
     use std::collections::HashSet;
 
-    use maplit::{convert_args, hashmap};
+    use maplit::{btreemap, convert_args, hashmap};
     use risingwave_common::catalog::{ColumnId, Field, TableId};
     use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
     use risingwave_common::test_prelude::StreamChunkTestExt;
@@ -865,7 +858,7 @@ mod tests {
         let column_ids = vec![0].into_iter().map(ColumnId::from).collect();
 
         // This datagen will generate 3 rows at one time.
-        let properties: HashMap<String, String> = convert_args!(hashmap!(
+        let properties = convert_args!(btreemap!(
             "connector" => "datagen",
             "datagen.rows.per.second" => "3",
             "fields.sequence_int.kind" => "sequence",
@@ -949,7 +942,7 @@ mod tests {
             row_format: PbRowFormatType::Native as i32,
             ..Default::default()
         };
-        let properties = convert_args!(hashmap!(
+        let properties = convert_args!(btreemap!(
             "connector" => "datagen",
             "fields.v1.kind" => "sequence",
             "fields.v1.start" => "11",

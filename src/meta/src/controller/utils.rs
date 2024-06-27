@@ -24,11 +24,11 @@ use risingwave_meta_model_v2::object::ObjectType;
 use risingwave_meta_model_v2::prelude::*;
 use risingwave_meta_model_v2::{
     actor, actor_dispatcher, connection, database, fragment, function, index, object,
-    object_dependency, schema, sink, source, subscription, table, user, user_privilege, view,
-    worker_property, ActorId, DataTypeArray, DatabaseId, FragmentId, FragmentVnodeMapping,
+    object_dependency, schema, secret, sink, source, subscription, table, user, user_privilege,
+    view, worker_property, ActorId, DataTypeArray, DatabaseId, FragmentId, FragmentVnodeMapping,
     I32Array, ObjectId, PrivilegeId, SchemaId, SourceId, StreamNode, UserId, WorkerId,
 };
-use risingwave_pb::catalog::{PbConnection, PbFunction, PbSubscription};
+use risingwave_pb::catalog::{PbConnection, PbFunction, PbSecret, PbSubscription};
 use risingwave_pb::meta::{PbFragmentParallelUnitMapping, PbFragmentWorkerSlotMapping};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{PbFragmentTypeFlag, PbStreamNode, StreamSource};
@@ -411,6 +411,27 @@ where
     Ok(())
 }
 
+pub async fn check_secret_name_duplicate<C>(pb_secret: &PbSecret, db: &C) -> MetaResult<()>
+where
+    C: ConnectionTrait,
+{
+    let count = Secret::find()
+        .inner_join(Object)
+        .filter(
+            object::Column::DatabaseId
+                .eq(pb_secret.database_id as DatabaseId)
+                .and(object::Column::SchemaId.eq(pb_secret.schema_id as SchemaId))
+                .and(secret::Column::Name.eq(&pb_secret.name)),
+        )
+        .count(db)
+        .await?;
+    if count > 0 {
+        assert_eq!(count, 1);
+        return Err(MetaError::catalog_duplicated("secret", &pb_secret.name));
+    }
+    Ok(())
+}
+
 pub async fn check_subscription_name_duplicate<C>(
     pb_subscription: &PbSubscription,
     db: &C,
@@ -762,6 +783,7 @@ where
                 ObjectType::Function => PbObject::FunctionId(oid),
                 ObjectType::Connection => unreachable!("connection is not supported yet"),
                 ObjectType::Subscription => PbObject::SubscriptionId(oid),
+                ObjectType::Secret => unreachable!("secret is not supported yet"),
             };
             PbGrantPrivilege {
                 action_with_opts: vec![PbActionWithGrantOption {

@@ -237,19 +237,19 @@ impl RescheduleContext {
 /// The specific process is as follows
 ///
 /// 1. Calculate the number of target actors, and calculate the average value and the remainder, and
-/// use the average value as expected.
+///    use the average value as expected.
 ///
 /// 2. Filter out the actor to be removed and the actor to be retained, and sort them from largest
-/// to smallest (according to the number of virtual nodes held).
+///    to smallest (according to the number of virtual nodes held).
 ///
 /// 3. Calculate their balance, 1) For the actors to be removed, the number of virtual nodes per
-/// actor is the balance. 2) For retained actors, the number of virtual nodes - expected is the
-/// balance. 3) For newly created actors, -expected is the balance (always negative).
+///    actor is the balance. 2) For retained actors, the number of virtual nodes - expected is the
+///    balance. 3) For newly created actors, -expected is the balance (always negative).
 ///
 /// 4. Allocate the remainder, high priority to newly created nodes.
 ///
 /// 5. After that, merge removed, retained and created into a queue, with the head of the queue
-/// being the source, and move the virtual nodes to the destination at the end of the queue.
+///    being the source, and move the virtual nodes to the destination at the end of the queue.
 ///
 /// This can handle scale in, scale out, migration, and simultaneous scaling with as much affinity
 /// as possible.
@@ -2525,9 +2525,7 @@ impl ScaleController {
         // We trace the upstreams of each downstream under the hierarchy until we reach the top
         // for every no_shuffle relation.
         while let Some(fragment_id) = queue.pop_front() {
-            if !no_shuffle_target_fragment_ids.contains(&fragment_id)
-                && !no_shuffle_source_fragment_ids.contains(&fragment_id)
-            {
+            if !no_shuffle_target_fragment_ids.contains(&fragment_id) {
                 continue;
             }
 

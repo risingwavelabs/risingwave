@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt::Write;
 use std::sync::Arc;
 
@@ -39,7 +39,6 @@ use crate::sink::writer::SinkWriterExt;
 use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkWriter, SinkWriterParam};
 
 pub const SNOWFLAKE_SINK: &str = "snowflake";
-const INITIAL_ROW_CAPACITY: usize = 1024;
 
 #[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct SnowflakeCommon {
@@ -108,7 +107,7 @@ pub struct SnowflakeConfig {
 }
 
 impl SnowflakeConfig {
-    pub fn from_hashmap(properties: HashMap<String, String>) -> Result<Self> {
+    pub fn from_btreemap(properties: BTreeMap<String, String>) -> Result<Self> {
         let config =
             serde_json::from_value::<SnowflakeConfig>(serde_json::to_value(properties).unwrap())
                 .map_err(|e| SinkError::Config(anyhow!(e)))?;
@@ -155,7 +154,7 @@ impl TryFrom<SinkParam> for SnowflakeSink {
 
     fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
         let schema = param.schema();
-        let config = SnowflakeConfig::from_hashmap(param.properties)?;
+        let config = SnowflakeConfig::from_btreemap(param.properties)?;
         Ok(SnowflakeSink {
             config,
             schema,
@@ -166,9 +165,13 @@ impl TryFrom<SinkParam> for SnowflakeSink {
 }
 
 pub struct SnowflakeSinkWriter {
+    #[expect(dead_code)]
     config: SnowflakeConfig,
+    #[expect(dead_code)]
     schema: Schema,
+    #[expect(dead_code)]
     pk_indices: Vec<usize>,
+    #[expect(dead_code)]
     is_append_only: bool,
     /// the client used to send `insertFiles` post request
     http_client: SnowflakeHttpClient,
