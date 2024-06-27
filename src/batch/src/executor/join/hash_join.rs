@@ -265,6 +265,7 @@ pub struct JoinSpillManager {
 /// ```
 impl JoinSpillManager {
     pub fn new(
+        spill_backend: SpillBackend,
         join_identity: &String,
         partition_num: usize,
         probe_side_data_types: Vec<DataType>,
@@ -274,7 +275,7 @@ impl JoinSpillManager {
     ) -> Result<Self> {
         let suffix_uuid = uuid::Uuid::new_v4();
         let dir = format!("/{}-{}/", join_identity, suffix_uuid);
-        let op = SpillOp::create(dir, SpillBackend::Disk)?;
+        let op = SpillOp::create(dir, spill_backend)?;
         let probe_side_writers = Vec::with_capacity(partition_num);
         let build_side_writers = Vec::with_capacity(partition_num);
         let probe_side_chunk_builders = Vec::with_capacity(partition_num);
@@ -554,6 +555,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
                 &self.identity
             );
             let mut join_spill_manager = JoinSpillManager::new(
+                self.spill_backend.clone().unwrap(),
                 &self.identity,
                 DEFAULT_SPILL_PARTITION_NUM,
                 probe_data_types.clone(),
