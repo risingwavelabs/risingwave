@@ -16,12 +16,10 @@ use core::time::Duration;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
-use anyhow::{anyhow, Context};
+use anyhow::anyhow;
 use futures::prelude::TryFuture;
-use futures::{FutureExt};
 use gcp_bigquery_client::model::query_request::QueryRequest;
 use gcp_bigquery_client::Client;
-use google_cloud_bigquery::grpc::apiv1::bigquery_client::StreamingWriteClient;
 use google_cloud_bigquery::grpc::apiv1::conn_pool::{WriteConnectionManager, DOMAIN};
 use google_cloud_gax::conn::{ConnectionOptions, Environment};
 use google_cloud_gax::grpc::Request;
@@ -29,7 +27,7 @@ use google_cloud_googleapis::cloud::bigquery::storage::v1::append_rows_request::
     ProtoData, Rows as AppendRowsRequestRows,
 };
 use google_cloud_googleapis::cloud::bigquery::storage::v1::{
-    AppendRowsRequest, AppendRowsResponse, ProtoRows, ProtoSchema
+    AppendRowsRequest, ProtoRows, ProtoSchema,
 };
 use google_cloud_pubsub::client::google_cloud_auth;
 use google_cloud_pubsub::client::google_cloud_auth::credentials::CredentialsFile;
@@ -43,8 +41,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
 use serde_derive::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
-use tokio::sync::{broadcast, mpsc, Mutex};
-use tonic::Streaming;
+use tokio::sync::{broadcast, mpsc};
 use url::Url;
 use uuid::Uuid;
 use with_options::WithOptions;
@@ -52,13 +49,13 @@ use yup_oauth2::ServiceAccountKey;
 
 use super::encoder::{ProtoEncoder, ProtoHeader, RowEncoder, SerTo};
 use super::log_store::DeliveryFutureManagerAddFuture;
-use super::writer::{AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriter, AsyncTruncateSinkWriterExt};
+use super::writer::{
+    AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriter, AsyncTruncateSinkWriterExt,
+};
 use super::{SinkError, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT};
 use crate::aws_utils::load_file_descriptor_from_s3;
 use crate::connector_common::AwsAuthProps;
-use crate::sink::{
-    DummySinkCommitCoordinator, Result, Sink, SinkParam, SinkWriterParam,
-};
+use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkParam, SinkWriterParam};
 
 pub const BIGQUERY_SINK: &str = "bigquery";
 pub const CHANGE_TYPE: &str = "_CHANGE_TYPE";
@@ -493,21 +490,19 @@ impl AsyncTruncateSinkWriter for BigQuerySinkWriter {
             writer_schema: Some(self.writer_pb_schema.clone()),
             rows: Some(ProtoRows { serialized_rows }),
         });
-        let (expect_offset,mut rx) = self.client
-            .append_rows(rows, self.write_stream.clone())
-            .await?;
-        let future = Box::pin(async move{
+        let (expect_offset, mut rx) = self.client.get_subscribe();
+        let future = Box::pin(async move {
             loop {
                 match rx.recv().await {
-                    Ok((result,offset)) => {
+                    Ok((result, offset)) => {
                         if offset == expect_offset {
                             if let Some(result) = result {
                                 return Err(SinkError::BigQuery(anyhow::anyhow!(result)));
-                            }else{
+                            } else {
                                 return Ok(());
                             }
                         }
-                    },
+                    }
                     Err(e) => {
                         return Err(SinkError::BigQuery(anyhow::anyhow!(e)));
                     }
@@ -515,6 +510,9 @@ impl AsyncTruncateSinkWriter for BigQuerySinkWriter {
             }
         });
         add_future.add_future_may_await(future).await?;
+        self.client
+            .append_rows(rows, self.write_stream.clone())
+            .await?;
         Ok(())
     }
 }
@@ -523,9 +521,9 @@ struct StorageWriterClient {
     #[expect(dead_code)]
     environment: Environment,
     sender: mpsc::Sender<AppendRowsRequest>,
-    result_sender: Arc<broadcast::Sender<(Option<String>, usize)>>,
+    result_sender: Arc<broadcast::Sender<(Option<String>, u64)>>,
     abort_handle: tokio::task::AbortHandle,
-    offset: usize,
+    offset: u64,
 }
 impl StorageWriterClient {
     pub async fn new(credentials: CredentialsFile) -> Result<Self> {
@@ -550,38 +548,41 @@ impl StorageWriterClient {
         .map_err(|e| SinkError::BigQuery(e.into()))?;
         let mut client = conn.conn();
 
-        let (tx,rx) = mpsc::channel(BIGQUERY_SEND_FUTURE_BUFFER_MAX_SIZE);
+        let (tx, rx) = mpsc::channel(BIGQUERY_SEND_FUTURE_BUFFER_MAX_SIZE);
         let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
-        let (result_sender,_) = broadcast::channel(16);
+        let (result_sender, _) = broadcast::channel(BIGQUERY_SEND_FUTURE_BUFFER_MAX_SIZE + 1);
         let result_sender = Arc::new(result_sender);
         let result_sender_clone = result_sender.clone();
         let abort_handle = tokio::spawn(async move {
             let mut resp = client
-            .append_rows(Request::new(stream))
-            .await
-            .map_err(|e| SinkError::BigQuery(e.into())).unwrap()
-            .into_inner();
+                .append_rows(Request::new(stream))
+                .await
+                .map_err(|e| SinkError::BigQuery(e.into()))
+                .unwrap()
+                .into_inner();
             let mut offset = 0;
-            loop{
+            loop {
                 let result = match resp.message().await {
                     Ok(Some(append_rows_response)) => {
                         if !append_rows_response.row_errors.is_empty() {
-                            Some(format!("Insert error {:?}",append_rows_response.row_errors))
-                        }else{
+                            Some(format!(
+                                "Insert error {:?}",
+                                append_rows_response.row_errors
+                            ))
+                        } else {
                             None
                         }
-                    },
-                    Ok(None) => {
-                        None
-                    },
-                    Err(e) => {
-                        Some(e.to_string())
                     }
+                    Ok(None) => {
+                        continue;
+                    }
+                    Err(e) => Some(e.to_string()),
                 };
-                result_sender_clone.send((result,offset)).unwrap();
+                result_sender_clone.send((result, offset)).unwrap();
                 offset += 1;
             }
-        }).abort_handle();
+        })
+        .abort_handle();
 
         Ok(StorageWriterClient {
             environment,
@@ -592,21 +593,28 @@ impl StorageWriterClient {
         })
     }
 
+    pub fn get_subscribe(&mut self) -> (u64, broadcast::Receiver<(Option<String>, u64)>) {
+        self.offset += 1;
+        (self.offset - 1, self.result_sender.subscribe())
+    }
+
     pub async fn append_rows(
         &mut self,
         row: AppendRowsRequestRows,
         write_stream: String,
-    ) -> Result<(usize,broadcast::Receiver<(Option<String>,usize)>)> {
+    ) -> Result<()> {
         let append_req = AppendRowsRequest {
-                write_stream: write_stream.clone(),
-                offset: None,
-                trace_id: Uuid::new_v4().hyphenated().to_string(),
-                missing_value_interpretations: HashMap::default(),
-                rows: Some(row),
-            };
-        self.sender.send(append_req).await.map_err(|e| SinkError::BigQuery(e.into()))?;
-        self.offset += 1;
-        Ok((self.offset - 1, self.result_sender.subscribe()))
+            write_stream: write_stream.clone(),
+            offset: None,
+            trace_id: Uuid::new_v4().hyphenated().to_string(),
+            missing_value_interpretations: HashMap::default(),
+            rows: Some(row),
+        };
+        self.sender
+            .send(append_req)
+            .await
+            .map_err(|e| SinkError::BigQuery(e.into()))?;
+        Ok(())
     }
 
     fn bigquery_grpc_auth_config() -> google_cloud_auth::project::Config<'static> {
@@ -619,7 +627,6 @@ impl StorageWriterClient {
 }
 impl Drop for StorageWriterClient {
     fn drop(&mut self) {
-        println!("abort");
         self.abort_handle.abort();
     }
 }
