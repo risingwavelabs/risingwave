@@ -50,7 +50,6 @@ hex = "0.4"
 icelake = { workspace = true }
 itertools = { workspace = true }
 jsonbb = { workspace = true }
-lazy_static = "1.5.0"
 linkme = { version = "0.3", features = ["used_linker"] }
 md5 = "0.7"
 moka = { version = "0.12", features = ["sync"] }

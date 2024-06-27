@@ -18,6 +18,8 @@ ahash = "0.8"
 anyhow = "1"
 arc-swap = "1"
 arrow-array = { workspace = true }
+arrow-array-deltalake = { workspace = true }
+arrow-array-iceberg = { workspace = true }
 arrow-buffer = { workspace = true }
 arrow-buffer-deltalake = { workspace = true }
 arrow-buffer-iceberg = { workspace = true }

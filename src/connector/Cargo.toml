@@ -17,6 +17,7 @@ normal = ["workspace-hack"]
 anyhow = "1"
 apache-avro = { workspace = true }
 arrow-array = { workspace = true }
+arrow-array-iceberg = { workspace = true }
 arrow-row = { workspace = true }
 arrow-schema = { workspace = true }
 arrow-schema-iceberg = { workspace = true }
