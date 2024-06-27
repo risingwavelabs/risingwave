@@ -89,6 +89,7 @@ pub struct BigQueryCommon {
     #[serde_as(as = "DisplayFromStr")]
     pub retry_times: usize,
     #[serde(default)] // default false
+    #[serde_as(as = "DisplayFromStr")]
     pub auto_create: bool,
 }
 
@@ -377,7 +378,7 @@ impl Sink for BigQuerySink {
                 .get(project_id, dataset_id, table_id, None)
                 .await
             {
-                Err(BQError::ResponseError { error: _ }) => {
+                Err(BQError::RequestError(_)) => {
                     // early return: no need to query schema to check column and type
                     return self
                         .create_table(
