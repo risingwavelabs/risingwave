@@ -107,7 +107,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 If you use nix, you can also enter the nix shell via:
 
 ```shell
-nix develop ./nix.
+nix develop ./develop/nix
 ```
 
 All dependencies will be automatically downloaded and configured.
@@ -117,6 +117,8 @@ You can also use [direnv](https://github.com/direnv/direnv) to automatically ent
 ```shell
 direnv allow
 ```
+
+Check out [flake.nix](../develop/nix/flake.nix) to read more information!
 
 Then you'll be able to compile and start RiseDev!
 
