@@ -3150,6 +3150,12 @@ impl CatalogControllerInner {
     pub(crate) fn table_is_finished(&mut self, id: i32) -> Option<MetaResult<NotificationVersion>> {
         self.table_id_to_version.remove(&id)
     }
+
+    pub(crate) fn notify_finish_failed(&mut self, id: ObjectId, err: MetaError) {
+        assert!(!self.table_id_to_version.contains_key(&id));
+        assert!(!self.table_id_to_tx.contains_key(&id));
+        self.table_id_to_version.insert(id, Err(err));
+    }
 }
 
 #[cfg(test)]

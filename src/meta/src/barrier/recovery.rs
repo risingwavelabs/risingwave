@@ -29,14 +29,12 @@ use risingwave_pb::meta::{PausedReason, Recovery};
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::AddMutation;
 use thiserror_ext::AsReport;
-use tokio::sync::oneshot;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tracing::{debug, warn, Instrument};
 
 use super::TracedEpoch;
 use crate::barrier::command::CommandContext;
 use crate::barrier::info::InflightActorInfo;
-use crate::barrier::notifier::Notifier;
 use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::rpc::ControlStreamManager;
 use crate::barrier::schedule::ScheduledBarriers;
