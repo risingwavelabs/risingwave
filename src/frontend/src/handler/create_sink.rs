@@ -922,7 +922,7 @@ pub mod tests {
 
         // Check table exists.
         let (table, schema_name) = catalog_reader
-            .get_table_by_name(DEFAULT_DATABASE_NAME, schema_path, "mv1")
+            .get_created_table_by_name(DEFAULT_DATABASE_NAME, schema_path, "mv1")
             .unwrap();
         assert_eq!(table.name(), "mv1");
 

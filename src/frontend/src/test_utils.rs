@@ -578,7 +578,9 @@ impl CatalogWriter for MockCatalogWriter {
             for schema in database.iter_schemas() {
                 match object {
                     Object::TableId(table_id) => {
-                        if let Some(table) = schema.get_table_by_id(&TableId::from(table_id)) {
+                        if let Some(table) =
+                            schema.get_created_table_by_id(&TableId::from(table_id))
+                        {
                             let mut pb_table = table.to_prost(schema.id(), database.id());
                             pb_table.owner = owner_id;
                             self.catalog.write().update_table(&pb_table);

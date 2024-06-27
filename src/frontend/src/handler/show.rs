@@ -516,7 +516,7 @@ pub fn handle_show_create_object(
     let sql = match show_create_type {
         ShowCreateType::MaterializedView => {
             let mv = schema
-                .get_table_by_name(&object_name)
+                .get_created_table_by_name(&object_name)
                 .filter(|t| t.is_mview())
                 .ok_or_else(|| CatalogError::NotFound("materialized view", name.to_string()))?;
             mv.create_sql()
@@ -529,7 +529,7 @@ pub fn handle_show_create_object(
         }
         ShowCreateType::Table => {
             let table = schema
-                .get_table_by_name(&object_name)
+                .get_created_table_by_name(&object_name)
                 .filter(|t| t.is_table())
                 .ok_or_else(|| CatalogError::NotFound("table", name.to_string()))?;
             table.create_sql()
@@ -549,7 +549,7 @@ pub fn handle_show_create_object(
         }
         ShowCreateType::Index => {
             let index = schema
-                .get_table_by_name(&object_name)
+                .get_created_table_by_name(&object_name)
                 .filter(|t| t.is_index())
                 .ok_or_else(|| CatalogError::NotFound("index", name.to_string()))?;
             index.create_sql()

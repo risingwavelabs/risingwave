@@ -311,7 +311,7 @@ impl Catalog {
     pub fn update_table(&mut self, proto: &PbTable) {
         let database = self.get_database_mut(proto.database_id).unwrap();
         let schema = database.get_schema_mut(proto.schema_id).unwrap();
-        let table = if schema.get_table_by_id(&proto.id.into()).is_some() {
+        let table = if schema.get_created_table_by_id(&proto.id.into()).is_some() {
             schema.update_table(proto)
         } else {
             // Enter this branch when schema is changed by `ALTER ... SET SCHEMA ...` statement.
@@ -320,7 +320,7 @@ impl Catalog {
                 .iter_schemas_mut()
                 .find(|schema| {
                     schema.id() != proto.schema_id
-                        && schema.get_table_by_id(&proto.id.into()).is_some()
+                        && schema.get_created_table_by_id(&proto.id.into()).is_some()
                 })
                 .unwrap()
                 .drop_table(proto.id.into());
@@ -636,6 +636,7 @@ impl Catalog {
     }
 
     /// Used to get `TableCatalog` for Materialized Views, Tables and Indexes.
+    /// Retrieves all tables, created or creating.
     pub fn get_table_by_name<'a>(
         &self,
         db_name: &str,
@@ -647,6 +648,23 @@ impl Catalog {
                 Ok(self
                     .get_schema_by_name(db_name, schema_name)?
                     .get_table_by_name(table_name))
+            })?
+            .ok_or_else(|| CatalogError::NotFound("table", table_name.to_string()))
+    }
+
+    /// Used to get `TableCatalog` for Materialized Views, Tables and Indexes.
+    /// Retrieves only created tables.
+    pub fn get_created_table_by_name<'a>(
+        &self,
+        db_name: &str,
+        schema_path: SchemaPath<'a>,
+        table_name: &str,
+    ) -> CatalogResult<(&Arc<TableCatalog>, &'a str)> {
+        schema_path
+            .try_find(|schema_name| {
+                Ok(self
+                    .get_schema_by_name(db_name, schema_name)?
+                    .get_created_table_by_name(table_name))
             })?
             .ok_or_else(|| CatalogError::NotFound("table", table_name.to_string()))
     }
@@ -665,7 +683,7 @@ impl Catalog {
     ) -> CatalogResult<&Arc<TableCatalog>> {
         let table_id = TableId::from(table_id);
         for schema in self.get_database_by_name(db_name)?.iter_schemas() {
-            if let Some(table) = schema.get_table_by_id(&table_id) {
+            if let Some(table) = schema.get_created_table_by_id(&table_id) {
                 return Ok(table);
             }
         }
@@ -939,7 +957,7 @@ impl Catalog {
     ) -> CatalogResult<()> {
         let schema = self.get_schema_by_name(db_name, schema_name)?;
 
-        if let Some(table) = schema.get_table_by_name(relation_name) {
+        if let Some(table) = schema.get_created_table_by_name(relation_name) {
             if table.is_index() {
                 Err(CatalogError::Duplicated("index", relation_name.to_string()))
             } else if table.is_mview() {
@@ -1069,7 +1087,7 @@ impl Catalog {
                 #[allow(clippy::manual_map)]
                 if let Some(item) = schema.get_system_table_by_name(class_name) {
                     Ok(Some(item.id().into()))
-                } else if let Some(item) = schema.get_table_by_name(class_name) {
+                } else if let Some(item) = schema.get_created_table_by_name(class_name) {
                     Ok(Some(item.id().into()))
                 } else if let Some(item) = schema.get_index_by_name(class_name) {
                     Ok(Some(item.id.into()))
