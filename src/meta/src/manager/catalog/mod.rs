@@ -847,11 +847,17 @@ impl CatalogManager {
 
         database_core.check_relation_name_duplicated(&key)?;
 
-        for &dependent_relation_id in &table.dependent_relations {
-            database_core.increase_relation_ref_count(dependent_relation_id);
+        if database_core.has_in_progress_creation(&key) {
+            bail!("table is in creating procedure");
+        } else {
+            database_core.mark_creating(&key);
+            database_core.mark_creating_streaming_job(table.id, key);
+            for &dependent_relation_id in &table.dependent_relations {
+                database_core.increase_relation_ref_count(dependent_relation_id);
+            }
+            user_core.increase_ref(table.owner);
+            Ok(())
         }
-        user_core.increase_ref(table.owner);
-        Ok(())
     }
 
     /// This is used for both `CREATE TABLE` and `CREATE MATERIALIZED VIEW`.
