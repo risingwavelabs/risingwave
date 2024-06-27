@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::sync::LazyLock;
 
@@ -30,6 +29,7 @@ use risingwave_common::bail;
 use risingwave_common::catalog::{KAFKA_TIMESTAMP_COLUMN_NAME, TABLE_NAME_COLUMN_NAME};
 use risingwave_common::log::LogSuppresser;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
+use risingwave_common::secret::SECRET_MANAGER;
 use risingwave_common::types::{Datum, DatumCow, DatumRef, ScalarRefImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::tracing::InstrumentStream;
@@ -65,6 +65,7 @@ use crate::source::{
     extract_source_struct, BoxSourceStream, ChunkSourceStream, SourceColumnDesc, SourceColumnType,
     SourceContext, SourceContextRef, SourceEncode, SourceFormat, SourceMessage, SourceMeta,
 };
+use crate::with_options::WithOptionsSecResolved;
 
 pub mod additional_columns;
 mod avro;
@@ -1142,9 +1143,16 @@ impl SpecificParserConfig {
     // The validity of (format, encode) is ensured by `extract_format_encode`
     pub fn new(
         info: &StreamSourceInfo,
-        with_properties: &BTreeMap<String, String>,
+        with_properties: &WithOptionsSecResolved,
     ) -> ConnectorResult<Self> {
         let source_struct = extract_source_struct(info)?;
+        let format_encode_options_with_secret = SECRET_MANAGER.fill_secrets(
+            info.format_encode_options.clone(),
+            info.format_encode_secret_refs.clone(),
+        )?;
+        let (options, secret_refs) = with_properties.clone().into_parts();
+        let options_with_secret =
+            SECRET_MANAGER.fill_secrets(options.clone(), secret_refs.clone())?;
         let format = source_struct.format;
         let encode = source_struct.encode;
         // this transformation is needed since there may be config for the protocol
@@ -1182,19 +1190,23 @@ impl SpecificParserConfig {
                         .unwrap(),
                     use_schema_registry: info.use_schema_registry,
                     row_schema_location: info.row_schema_location.clone(),
-                    map_handling: MapHandling::from_options(&info.format_encode_options)?,
+                    map_handling: MapHandling::from_options(&format_encode_options_with_secret)?,
                     ..Default::default()
                 };
                 if format == SourceFormat::Upsert {
                     config.enable_upsert = true;
                 }
                 if info.use_schema_registry {
-                    config.topic.clone_from(get_kafka_topic(with_properties)?);
-                    config.client_config = SchemaRegistryAuth::from(&info.format_encode_options);
+                    config
+                        .topic
+                        .clone_from(get_kafka_topic(&options_with_secret)?);
+                    config.client_config =
+                        SchemaRegistryAuth::from(&format_encode_options_with_secret);
                 } else {
                     config.aws_auth_props = Some(
                         serde_json::from_value::<AwsAuthProps>(
-                            serde_json::to_value(info.format_encode_options.clone()).unwrap(),
+                            serde_json::to_value(format_encode_options_with_secret.clone())
+                                .unwrap(),
                         )
                         .map_err(|e| anyhow::anyhow!(e))?,
                     );
@@ -1219,12 +1231,16 @@ impl SpecificParserConfig {
                     config.enable_upsert = true;
                 }
                 if info.use_schema_registry {
-                    config.topic.clone_from(get_kafka_topic(with_properties)?);
-                    config.client_config = SchemaRegistryAuth::from(&info.format_encode_options);
+                    config
+                        .topic
+                        .clone_from(get_kafka_topic(&options_with_secret)?);
+                    config.client_config =
+                        SchemaRegistryAuth::from(&format_encode_options_with_secret);
                 } else {
                     config.aws_auth_props = Some(
                         serde_json::from_value::<AwsAuthProps>(
-                            serde_json::to_value(info.format_encode_options.clone()).unwrap(),
+                            serde_json::to_value(format_encode_options_with_secret.clone())
+                                .unwrap(),
                         )
                         .map_err(|e| anyhow::anyhow!(e))?,
                     );
@@ -1242,8 +1258,8 @@ impl SpecificParserConfig {
                         .unwrap(),
                     key_record_name: info.key_message_name.clone(),
                     row_schema_location: info.row_schema_location.clone(),
-                    topic: get_kafka_topic(with_properties).unwrap().clone(),
-                    client_config: SchemaRegistryAuth::from(&info.format_encode_options),
+                    topic: get_kafka_topic(&options_with_secret).unwrap().clone(),
+                    client_config: SchemaRegistryAuth::from(&format_encode_options_with_secret),
                     ..Default::default()
                 })
             }

@@ -648,7 +648,8 @@ pub async fn start_service_as_election_leader(
         hummock_manager.clone(),
         backup_manager.clone(),
         serving_vnode_mapping.clone(),
-    );
+    )
+    .await?;
     let health_srv = HealthServiceImpl::new();
     let backup_srv = BackupServiceImpl::new(backup_manager);
     let telemetry_srv = TelemetryInfoServiceImpl::new(env.meta_store());

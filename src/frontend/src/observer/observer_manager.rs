@@ -20,6 +20,7 @@ use parking_lot::RwLock;
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeManagerRef;
 use risingwave_common::catalog::CatalogVersion;
 use risingwave_common::hash::WorkerSlotMapping;
+use risingwave_common::secret::SECRET_MANAGER;
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManagerRef;
 use risingwave_common_service::observer_manager::{ObserverState, SubscribeFrontend};
@@ -63,9 +64,12 @@ impl ObserverState for FrontendObserverNode {
             | Info::Schema(_)
             | Info::RelationGroup(_)
             | Info::Function(_)
-            | Info::Secret(_)
             | Info::Connection(_) => {
                 self.handle_catalog_notification(resp);
+            }
+            Info::Secret(_) => {
+                self.handle_catalog_notification(resp.clone());
+                self.handle_secret_notification(resp);
             }
             Info::Node(node) => {
                 self.update_worker_node_manager(resp.operation(), node);
@@ -176,8 +180,8 @@ impl ObserverState for FrontendObserverNode {
         for connection in connections {
             catalog_guard.create_connection(&connection)
         }
-        for secret in secrets {
-            catalog_guard.create_secret(&secret)
+        for secret in &secrets {
+            catalog_guard.create_secret(secret)
         }
         for user in users {
             user_guard.create_user(user)
@@ -202,6 +206,7 @@ impl ObserverState for FrontendObserverNode {
             .unwrap();
         *self.session_params.write() =
             serde_json::from_str(&session_params.unwrap().params).unwrap();
+        SECRET_MANAGER.init_secrets(secrets);
     }
 }
 
@@ -351,16 +356,21 @@ impl FrontendObserverNode {
                 Operation::Update => catalog_guard.update_connection(connection),
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },
-            Info::Secret(secret) => match resp.operation() {
-                Operation::Add => catalog_guard.create_secret(secret),
-                Operation::Delete => catalog_guard.drop_secret(
-                    secret.database_id,
-                    secret.schema_id,
-                    SecretId::new(secret.id),
-                ),
-                Operation::Update => catalog_guard.update_secret(secret),
-                _ => panic!("receive an unsupported notify {:?}", resp),
-            },
+            Info::Secret(secret) => {
+                let mut secret = secret.clone();
+                // The secret value should not be revealed to users. So mask it in the frontend catalog.
+                secret.value = "SECRET VALUE SHOULD NOT BE REVEALED".as_bytes().to_vec();
+                match resp.operation() {
+                    Operation::Add => catalog_guard.create_secret(&secret),
+                    Operation::Delete => catalog_guard.drop_secret(
+                        secret.database_id,
+                        secret.schema_id,
+                        SecretId::new(secret.id),
+                    ),
+                    Operation::Update => catalog_guard.update_secret(&secret),
+                    _ => panic!("receive an unsupported notify {:?}", resp),
+                }
+            }
             _ => unreachable!(),
         }
         assert!(
@@ -466,6 +476,24 @@ impl FrontendObserverNode {
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },
             _ => unreachable!(),
+        }
+    }
+
+    fn handle_secret_notification(&mut self, resp: SubscribeResponse) {
+        let resp_op = resp.operation();
+        let Some(Info::Secret(secret)) = resp.info else {
+            unreachable!();
+        };
+        match resp_op {
+            Operation::Add => {
+                SECRET_MANAGER.add_secret(SecretId::new(secret.id), secret.value);
+            }
+            Operation::Delete => {
+                SECRET_MANAGER.remove_secret(SecretId::new(secret.id));
+            }
+            _ => {
+                panic!("error type notification");
+            }
         }
     }
 

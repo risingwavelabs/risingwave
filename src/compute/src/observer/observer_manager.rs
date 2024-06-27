@@ -12,9 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::catalog::SecretId;
+use risingwave_common::secret::SECRET_MANAGER;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManagerRef;
 use risingwave_common_service::observer_manager::{ObserverState, SubscribeCompute};
-use risingwave_pb::meta::subscribe_response::Info;
+use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::SubscribeResponse;
 
 pub struct ComputeObserverNode {
@@ -25,19 +27,33 @@ impl ObserverState for ComputeObserverNode {
     type SubscribeType = SubscribeCompute;
 
     fn handle_notification(&mut self, resp: SubscribeResponse) {
-        let Some(info) = resp.info.as_ref() else {
-            return;
-        };
-
-        match info.to_owned() {
-            Info::SystemParams(p) => self.system_params_manager.try_set_params(p),
-            _ => {
-                panic!("error type notification");
+        if let Some(info) = resp.info.as_ref() {
+            match info.to_owned() {
+                Info::SystemParams(p) => self.system_params_manager.try_set_params(p),
+                Info::Secret(s) => match resp.operation() {
+                    Operation::Add => {
+                        SECRET_MANAGER.add_secret(SecretId::new(s.id), s.value);
+                    }
+                    Operation::Delete => {
+                        SECRET_MANAGER.remove_secret(SecretId::new(s.id));
+                    }
+                    _ => {
+                        panic!("error type notification");
+                    }
+                },
+                _ => {
+                    panic!("error type notification");
+                }
             }
-        }
+        };
     }
 
-    fn handle_initialization_notification(&mut self, _resp: SubscribeResponse) {}
+    fn handle_initialization_notification(&mut self, resp: SubscribeResponse) {
+        let Some(Info::Snapshot(snapshot)) = resp.info else {
+            unreachable!();
+        };
+        SECRET_MANAGER.init_secrets(snapshot.secrets);
+    }
 }
 
 impl ComputeObserverNode {

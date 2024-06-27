@@ -13,8 +13,10 @@
 // limitations under the License.
 
 use risingwave_common::bail;
+use risingwave_pb::catalog::{Sink, Source};
 
 use crate::manager::{ConnectionId, DatabaseManager};
+use crate::MetaResult;
 
 pub fn refcnt_inc_connection(
     database_mgr: &mut DatabaseManager,
@@ -36,5 +38,53 @@ pub fn refcnt_dec_connection(
 ) {
     if let Some(connection_id) = connection_id {
         database_mgr.decrease_connection_ref_count(connection_id);
+    }
+}
+
+pub fn refcnt_inc_source_secret_ref(
+    database_mgr: &mut DatabaseManager,
+    source: &Source,
+) -> MetaResult<()> {
+    for secret_ref in source.get_secret_refs().values() {
+        database_mgr.increase_secret_ref_count(secret_ref.secret_id)
+    }
+    for secret_ref in source.get_info()?.get_format_encode_secret_refs().values() {
+        database_mgr.increase_secret_ref_count(secret_ref.secret_id)
+    }
+    Ok(())
+}
+
+pub fn refcnt_dec_source_secret_ref(
+    database_mgr: &mut DatabaseManager,
+    source: &Source,
+) -> MetaResult<()> {
+    for secret_ref in source.get_secret_refs().values() {
+        database_mgr.decrease_secret_ref_count(secret_ref.secret_id)
+    }
+    for secret_ref in source.get_info()?.get_format_encode_secret_refs().values() {
+        database_mgr.decrease_secret_ref_count(secret_ref.secret_id)
+    }
+    Ok(())
+}
+
+pub fn refcnt_inc_sink_secret_ref(database_mgr: &mut DatabaseManager, sink: &Sink) {
+    for secret_ref in sink.get_secret_refs().values() {
+        database_mgr.increase_secret_ref_count(secret_ref.secret_id)
+    }
+    if let Some(format_desc) = &sink.format_desc {
+        for secret_ref in format_desc.get_secret_refs().values() {
+            database_mgr.increase_secret_ref_count(secret_ref.secret_id)
+        }
+    }
+}
+
+pub fn refcnt_dec_sink_secret_ref(database_mgr: &mut DatabaseManager, sink: &Sink) {
+    for secret_ref in sink.get_secret_refs().values() {
+        database_mgr.decrease_secret_ref_count(secret_ref.secret_id)
+    }
+    if let Some(format_desc) = &sink.format_desc {
+        for secret_ref in format_desc.get_secret_refs().values() {
+            database_mgr.decrease_secret_ref_count(secret_ref.secret_id)
+        }
     }
 }
