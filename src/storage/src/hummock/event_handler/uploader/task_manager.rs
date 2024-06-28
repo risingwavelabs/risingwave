@@ -17,7 +17,7 @@ use super::*;
 #[derive(Debug)]
 pub(super) enum UploadingTaskStatus {
     Spilling(HashSet<TableId>),
-    Sync(HummockEpoch),
+    Sync(SyncId),
 }
 
 #[derive(Debug)]
@@ -49,20 +49,16 @@ impl TaskManager {
         &mut self,
         cx: &mut Context<'_>,
         task_id: UploadingTaskId,
-    ) -> Poll<Result<Arc<StagingSstableInfo>, ErrState>> {
+    ) -> Poll<Result<Arc<StagingSstableInfo>, (SyncId, HummockError)>> {
         let entry = self.tasks.get_mut(&task_id).expect("should exist");
         let result = match &entry.status {
             UploadingTaskStatus::Spilling(_) => {
                 let sst = ready!(entry.task.poll_ok_with_retry(cx));
                 Ok(sst)
             }
-            UploadingTaskStatus::Sync(epoch) => {
-                let epoch = *epoch;
+            UploadingTaskStatus::Sync(sync_id) => {
                 let result = ready!(entry.task.poll_result(cx));
-                result.map_err(|e| ErrState {
-                    failed_epoch: epoch,
-                    reason: e.as_report().to_string(),
-                })
+                result.map_err(|e| (*sync_id, e))
             }
         };
         Poll::Ready(result)
@@ -76,7 +72,7 @@ impl TaskManager {
         Option<(
             UploadingTaskId,
             UploadingTaskStatus,
-            Result<Arc<StagingSstableInfo>, ErrState>,
+            Result<Arc<StagingSstableInfo>, (SyncId, HummockError)>,
         )>,
     > {
         if let Some(task_id) = self.task_order.back() {
@@ -142,7 +138,7 @@ impl TaskManager {
     pub(super) fn sync(
         &mut self,
         context: &UploaderContext,
-        epoch: HummockEpoch,
+        sync_id: SyncId,
         unflushed_payload: UploadTaskInput,
         spill_task_ids: impl Iterator<Item = UploadingTaskId>,
         sync_table_ids: &HashSet<TableId>,
@@ -158,25 +154,20 @@ impl TaskManager {
             must_match!(&entry.status, UploadingTaskStatus::Spilling(table_ids) => {
                 assert!(table_ids.is_subset(sync_table_ids), "spill table_ids: {table_ids:?}, sync_table_ids: {sync_table_ids:?}");
             });
-            entry.status = UploadingTaskStatus::Sync(epoch);
+            entry.status = UploadingTaskStatus::Sync(sync_id);
         }
 
         task.map(|task| {
             let id = task.task_id;
-            self.add_task(task, UploadingTaskStatus::Sync(epoch));
+            self.add_task(task, UploadingTaskStatus::Sync(sync_id));
             id
         })
     }
 
     #[cfg(debug_assertions)]
-    pub(super) fn spilling_task(
-        &self,
-    ) -> impl Iterator<Item = (UploadingTaskId, &HashSet<TableId>)> {
+    pub(super) fn tasks(&self) -> impl Iterator<Item = (UploadingTaskId, &UploadingTaskStatus)> {
         self.tasks
             .iter()
-            .filter_map(|(task_id, entry)| match &entry.status {
-                UploadingTaskStatus::Spilling(table_ids) => Some((*task_id, table_ids)),
-                UploadingTaskStatus::Sync(_) => None,
-            })
+            .map(|(task_id, entry)| (*task_id, &entry.status))
     }
 }

@@ -388,14 +388,7 @@ impl TableUnsyncData {
     }
 }
 
-#[derive(Default)]
-struct SyncDataBuilder {
-    table_watermarks: HashMap<TableId, TableWatermarks>,
-    remaining_uploading_tasks: HashSet<UploadingTaskId>,
-    uploaded: VecDeque<Arc<StagingSstableInfo>>,
-}
-
-impl SyncDataBuilder {
+impl UploaderData {
     fn add_table_watermarks(
         all_table_watermarks: &mut HashMap<TableId, TableWatermarks>,
         table_id: TableId,
@@ -788,7 +781,8 @@ impl UploaderData {
         epoch: HummockEpoch,
         context: &UploaderContext,
         table_ids: HashSet<TableId>,
-    ) -> SyncDataBuilder {
+        sync_result_sender: oneshot::Sender<HummockResult<SyncedData>>,
+    ) {
         // clean old epochs
         let _epochs = take_before_epoch(&mut self.unsync_data.epochs, epoch);
 
@@ -809,7 +803,7 @@ impl UploaderData {
                 }
             }
             if let Some((direction, watermarks)) = table_watermarks {
-                SyncDataBuilder::add_table_watermarks(
+                Self::add_table_watermarks(
                     &mut all_table_watermarks,
                     *table_id,
                     direction,
@@ -825,9 +819,12 @@ impl UploaderData {
             }
         }
 
+        static NEXT_SYNC_ID: LazyLock<AtomicUsize> = LazyLock::new(|| AtomicUsize::new(0));
+        let sync_id = SyncId(NEXT_SYNC_ID.fetch_add(1, Relaxed));
+
         if let Some(extra_flush_task_id) = self.task_manager.sync(
             context,
-            epoch,
+            sync_id,
             flush_payload,
             spilling_tasks.iter().cloned(),
             &table_ids,
@@ -850,13 +847,18 @@ impl UploaderData {
             })
             .collect();
 
-        self.check_spill_task_consistency();
+        self.syncing_data.insert(
+            sync_id,
+            SyncingData {
+                sync_epoch: epoch,
+                remaining_uploading_tasks: spilling_tasks,
+                uploaded,
+                table_watermarks: all_table_watermarks,
+                sync_result_sender,
+            },
+        );
 
-        SyncDataBuilder {
-            table_watermarks: all_table_watermarks,
-            remaining_uploading_tasks: spilling_tasks,
-            uploaded,
-        }
+        self.check_upload_task_consistency();
     }
 }
 
@@ -912,6 +914,9 @@ impl UploaderContext {
     }
 }
 
+#[derive(PartialEq, Eq, Hash, PartialOrd, Ord, Copy, Clone, Debug)]
+struct SyncId(usize);
+
 #[derive(Default)]
 struct UploaderData {
     unsync_data: UnsyncData,
@@ -919,7 +924,7 @@ struct UploaderData {
     /// Data that has started syncing but not synced yet. `epoch` satisfies
     /// `max_synced_epoch < epoch <= max_syncing_epoch`.
     /// Newer epoch at the front
-    syncing_data: BTreeMap<HummockEpoch, SyncingData>,
+    syncing_data: BTreeMap<SyncId, SyncingData>,
 
     task_manager: TaskManager,
     spilled_data: HashMap<UploadingTaskId, (Arc<StagingSstableInfo>, HashSet<TableId>)>,
@@ -1072,28 +1077,7 @@ impl HummockUploader {
 
         self.max_syncing_epoch = epoch;
 
-        let sync_data = data.sync(epoch, &self.context, table_ids);
-
-        let SyncDataBuilder {
-            table_watermarks,
-            remaining_uploading_tasks,
-            uploaded,
-        } = sync_data;
-
-        if let Some((prev_max_epoch, _)) = data.syncing_data.last_key_value() {
-            assert_gt!(epoch, *prev_max_epoch);
-        }
-
-        data.syncing_data.insert(
-            epoch,
-            SyncingData {
-                sync_epoch: epoch,
-                remaining_uploading_tasks,
-                uploaded,
-                table_watermarks,
-                sync_result_sender,
-            },
-        );
+        data.sync(epoch, &self.context, table_ids, sync_result_sender);
 
         data.may_notify_sync_task(&self.context, |new_synced_epoch| {
             Self::set_max_synced_epoch(
@@ -1201,7 +1185,7 @@ impl HummockUploader {
                     curr_batch_flush_size += task_size;
                 }
             }
-            data.check_spill_task_consistency();
+            data.check_upload_task_consistency();
             curr_batch_flush_size > 0
         } else {
             false
@@ -1248,7 +1232,7 @@ impl HummockUploader {
                     }),
             )
         }
-        data.check_spill_task_consistency();
+        data.check_upload_task_consistency();
     }
 }
 
@@ -1286,7 +1270,7 @@ impl UploaderData {
         }
     }
 
-    fn check_spill_task_consistency(&self) {
+    fn check_upload_task_consistency(&self) {
         #[cfg(debug_assertions)]
         {
             let mut spill_task_table_id_from_data: HashMap<_, HashSet<_>> = HashMap::new();
@@ -1302,19 +1286,43 @@ impl UploaderData {
                         .insert(table_data.table_id));
                 }
             }
+            let syncing_task_id_from_data: HashMap<_, HashSet<_>> = self
+                .syncing_data
+                .iter()
+                .filter_map(|(sync_id, data)| {
+                    if data.remaining_uploading_tasks.is_empty() {
+                        None
+                    } else {
+                        Some((*sync_id, data.remaining_uploading_tasks.clone()))
+                    }
+                })
+                .collect();
+
             let mut spill_task_table_id_from_manager: HashMap<_, HashSet<_>> = HashMap::new();
             for (task_id, (_, table_ids)) in &self.spilled_data {
                 spill_task_table_id_from_manager.insert(*task_id, table_ids.clone());
             }
-            for (task_id, table_ids) in self.task_manager.spilling_task() {
-                assert!(spill_task_table_id_from_manager
-                    .insert(task_id, table_ids.clone())
-                    .is_none());
+            let mut syncing_task_from_manager: HashMap<_, HashSet<_>> = HashMap::new();
+            for (task_id, status) in self.task_manager.tasks() {
+                match status {
+                    UploadingTaskStatus::Spilling(table_ids) => {
+                        assert!(spill_task_table_id_from_manager
+                            .insert(task_id, table_ids.clone())
+                            .is_none());
+                    }
+                    UploadingTaskStatus::Sync(sync_id) => {
+                        assert!(syncing_task_from_manager
+                            .entry(*sync_id)
+                            .or_default()
+                            .insert(task_id));
+                    }
+                }
             }
             assert_eq!(
                 spill_task_table_id_from_data,
                 spill_task_table_id_from_manager
             );
+            assert_eq!(syncing_task_id_from_data, syncing_task_from_manager);
         }
     }
 }
@@ -1334,11 +1342,9 @@ impl HummockUploader {
                     Ok(sst) => {
                         data.unsync_data.ack_flushed(&sst);
                         match status {
-                            UploadingTaskStatus::Sync(sync_epoch) => {
-                                let syncing_data = data
-                                    .syncing_data
-                                    .get_mut(&sync_epoch)
-                                    .expect("should exist");
+                            UploadingTaskStatus::Sync(sync_id) => {
+                                let syncing_data =
+                                    data.syncing_data.get_mut(&sync_id).expect("should exist");
                                 syncing_data.uploaded.push_front(sst.clone());
                                 assert!(syncing_data.remaining_uploading_tasks.remove(&task_id));
                                 data.may_notify_sync_task(&self.context, |new_synced_epoch| {
@@ -1353,14 +1359,19 @@ impl HummockUploader {
                                 data.spilled_data.insert(task_id, (sst.clone(), table_ids));
                             }
                         }
-                        data.check_spill_task_consistency();
+                        data.check_upload_task_consistency();
                         Poll::Ready(sst)
                     }
-                    Err(e) => {
-                        let failed_epoch = e.failed_epoch;
+                    Err((sync_id, e)) => {
+                        let syncing_data =
+                            data.syncing_data.remove(&sync_id).expect("should exist");
+                        let failed_epoch = syncing_data.sync_epoch;
                         let data = must_match!(replace(
                             &mut self.state,
-                            UploaderState::Err(e),
+                            UploaderState::Err(ErrState {
+                                failed_epoch,
+                                reason: e.as_report().to_string(),
+                            }),
                         ), UploaderState::Working(data) => data);
 
                         data.abort(|| {
