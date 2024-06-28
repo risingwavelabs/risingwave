@@ -21,7 +21,6 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::WorkerSlotId;
-use risingwave_common::range::RangeBoundsExt;
 use risingwave_meta_model_v2::StreamingParallelism;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
@@ -545,6 +544,7 @@ impl GlobalBarrierManagerContext {
     ) -> MetaResult<InflightActorInfo> {
         let mgr = self.metadata_manager.as_v2_ref();
 
+        // all worker slots used by actors
         let all_inuse_worker_slots: HashSet<_> = mgr
             .catalog_controller
             .all_inuse_worker_slots()
@@ -577,63 +577,62 @@ impl GlobalBarrierManagerContext {
             to_migrate_worker_slots
         );
 
-        // let mut inuse_worker_slots: HashSet<_> = all_inuse_worker_slots
-        //     .intersection(&active_worker_slots)
-        //     .cloned()
-        //     .collect();
-        //
-        // let start = Instant::now();
-        // let mut plan = HashMap::new();
-        // 'discovery: while !to_migrate_worker_slots.is_empty() {
-        //     let new_parallel_units = active_nodes
-        //         .current()
-        //         .values()
-        //         .flat_map(|node| {
-        //             node.parallel_units
-        //                 .iter()
-        //                 .filter(|pu| !inuse_worker_slots.contains(&(pu.id as _)))
-        //         })
-        //         .cloned()
-        //         .collect_vec();
-        //     if !new_parallel_units.is_empty() {
-        //         debug!("new parallel units found: {:#?}", new_parallel_units);
-        //         for target_parallel_unit in new_parallel_units {
-        //             if let Some(from) = to_migrate_worker_slots.pop() {
-        //                 debug!(
-        //                     "plan to migrate from parallel unit {} to {}",
-        //                     from, target_parallel_unit.id
-        //                 );
-        //                 inuse_worker_slots.insert(target_parallel_unit.id as i32);
-        //                 plan.insert(from, target_parallel_unit);
-        //             } else {
-        //                 break 'discovery;
-        //             }
-        //         }
-        //     }
-        //
-        //     if to_migrate_worker_slots.is_empty() {
-        //         break;
-        //     }
-        //
-        //     // wait to get newly joined CN
-        //     let changed = active_nodes
-        //         .wait_changed(Duration::from_millis(5000), |active_nodes| {
-        //             let current_nodes = active_nodes
-        //                 .current()
-        //                 .values()
-        //                 .map(|node| (node.id, &node.host, &node.parallel_units))
-        //                 .collect_vec();
-        //             warn!(
-        //                 current_nodes = ?current_nodes,
-        //                 "waiting for new workers to join, elapsed: {}s",
-        //                 start.elapsed().as_secs()
-        //             );
-        //         })
-        //         .await;
-        //     warn!(?changed, "get worker changed. Retry migrate");
-        // }
-        //
-       // mgr.catalog_controller.migrate_actors(plan).await?;
+        let mut inuse_worker_slots: HashSet<_> = all_inuse_worker_slots
+            .intersection(&active_worker_slots)
+            .cloned()
+            .collect();
+
+        let start = Instant::now();
+        let mut plan = HashMap::new();
+        'discovery: while !to_migrate_worker_slots.is_empty() {
+            let new_worker_slots = active_nodes
+                .current()
+                .values()
+                .flat_map(|node| {
+                    (0..node.parallelism)
+                        .map(|idx| WorkerSlotId::new(node.id, idx as _))
+                        .filter(|worker_slot| !inuse_worker_slots.contains(worker_slot))
+                })
+                .collect_vec();
+            if !new_worker_slots.is_empty() {
+                debug!("new worker slots found: {:#?}", new_worker_slots);
+                for target_worker_slot in new_worker_slots {
+                    if let Some(from) = to_migrate_worker_slots.pop() {
+                        debug!(
+                            "plan to migrate from worker slot {} to {}",
+                            from, target_worker_slot
+                        );
+                        inuse_worker_slots.insert(target_worker_slot);
+                        plan.insert(from, target_worker_slot);
+                    } else {
+                        break 'discovery;
+                    }
+                }
+            }
+
+            if to_migrate_worker_slots.is_empty() {
+                break;
+            }
+
+            // wait to get newly joined CN
+            let changed = active_nodes
+                .wait_changed(Duration::from_millis(5000), |active_nodes| {
+                    let current_nodes = active_nodes
+                        .current()
+                        .values()
+                        .map(|node| (node.id, &node.host, node.parallelism))
+                        .collect_vec();
+                    warn!(
+                        current_nodes = ?current_nodes,
+                        "waiting for new workers to join, elapsed: {}s",
+                        start.elapsed().as_secs()
+                    );
+                })
+                .await;
+            warn!(?changed, "get worker changed. Retry migrate");
+        }
+
+        mgr.catalog_controller.migrate_actors(plan).await?;
 
         debug!("migrate actors succeed.");
 

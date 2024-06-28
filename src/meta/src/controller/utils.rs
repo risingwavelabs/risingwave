@@ -31,7 +31,7 @@ use risingwave_meta_model_v2::{
     SchemaId, SourceId, StreamNode, UserId, VnodeBitmap, WorkerId,
 };
 use risingwave_pb::catalog::{PbConnection, PbFunction, PbSecret, PbSubscription};
-use risingwave_pb::meta::PbFragmentWorkerSlotMapping;
+use risingwave_pb::meta::{FragmentWorkerSlotMapping, PbFragmentWorkerSlotMapping};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{PbFragmentTypeFlag, PbStreamNode, StreamSource};
 use risingwave_pb::user::grant_privilege::{PbAction, PbActionWithGrantOption, PbObject};
@@ -41,8 +41,8 @@ use sea_orm::sea_query::{
     WithClause,
 };
 use sea_orm::{
-    ColumnTrait, ConnectionTrait, DerivePartialModel, EntityOrSelect, EntityTrait, FromQueryResult,
-    JoinType, Order, PaginatorTrait, QueryFilter, QuerySelect, RelationTrait, Statement,
+    ColumnTrait, ConnectionTrait, DerivePartialModel, EntityTrait, FromQueryResult, JoinType,
+    Order, PaginatorTrait, QueryFilter, QuerySelect, RelationTrait, Statement,
 };
 
 use crate::{MetaError, MetaResult};
@@ -867,6 +867,18 @@ where
         .all(db)
         .await?;
 
+    Ok(rebuild_fragment_mapping_from_actors(job_actors))
+}
+
+pub fn rebuild_fragment_mapping_from_actors(
+    job_actors: Vec<(
+        FragmentId,
+        DistributionType,
+        ActorId,
+        Option<VnodeBitmap>,
+        WorkerId,
+    )>,
+) -> Vec<FragmentWorkerSlotMapping> {
     let mut actor_locations = HashMap::new();
     let mut actor_bitmaps = HashMap::new();
     let mut fragment_actors = HashMap::new();
@@ -923,8 +935,7 @@ where
             mapping: Some(fragment_worker_slot_mapping.to_protobuf()),
         })
     }
-
-    Ok(result)
+    result
 }
 
 /// `get_fragment_mappings_by_jobs` returns the fragment vnode mappings of the given job list.

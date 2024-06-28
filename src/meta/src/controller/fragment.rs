@@ -42,19 +42,19 @@ use risingwave_pb::meta::{
 use risingwave_pb::source::PbConnectorSplits;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    PbDispatchStrategy, PbFragmentTypeFlag, PbStreamActor, PbStreamContext,
+    DispatchStrategy, PbDispatchStrategy, PbFragmentTypeFlag, PbStreamActor, PbStreamContext,
 };
 use sea_orm::sea_query::Expr;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, JoinType, ModelTrait, PaginatorTrait, QueryFilter,
-    QuerySelect, RelationTrait, TransactionTrait,
+    ColumnTrait, EntityTrait, JoinType, ModelTrait, PaginatorTrait, QueryFilter, QuerySelect,
+    RelationTrait, TransactionTrait, Value,
 };
 
 use crate::controller::catalog::{CatalogController, CatalogControllerInner};
 use crate::controller::utils::{
-    get_actor_dispatchers, get_fragment_mappings, FragmentDesc, PartialActorLocation,
-    PartialFragmentStateTables,
+    get_actor_dispatchers, get_fragment_mappings, rebuild_fragment_mapping_from_actors,
+    FragmentDesc, PartialActorLocation, PartialFragmentStateTables,
 };
 use crate::manager::{ActorInfos, InflightFragmentInfo, LocalNotification};
 use crate::model::{TableFragments, TableParallelism};
@@ -244,11 +244,7 @@ impl CatalogController {
                 )
             })?;
 
-            let (worker_id, parallel_unit_id) = status
-                .parallel_unit
-                .as_ref()
-                .map(|pu| (pu.worker_node_id as WorkerId, pu.id as i32))
-                .expect("no parallel unit id found in actor_status");
+            let worker_id = status.parallel_unit.clone().unwrap().get_worker_node_id() as WorkerId;
 
             assert_eq!(
                 pb_upstream_actor_id
@@ -268,7 +264,6 @@ impl CatalogController {
                 fragment_id: fragment_id as _,
                 status: status.get_state().unwrap().into(),
                 splits,
-                // parallel_unit_id,
                 worker_id,
                 upstream_actor_ids: upstream_actors.into(),
                 vnode_bitmap: pb_vnode_bitmap.as_ref().map(VnodeBitmap::from),
@@ -391,7 +386,6 @@ impl CatalogController {
                 actor_id,
                 fragment_id,
                 status,
-                //                parallel_unit_id,
                 worker_id,
                 splits,
                 upstream_actor_ids,
@@ -897,61 +891,88 @@ impl CatalogController {
         Ok(ActorInfos::new(fragment_infos))
     }
 
-    pub async fn migrate_actors(&self, plan: HashMap<i32, PbParallelUnit>) -> MetaResult<()> {
-        // let inner = self.inner.read().await;
-        // let txn = inner.db.begin().await?;
-        // for (from_pu_id, to_pu_id) in &plan {
-        //     Actor::update_many()
-        //         .col_expr(
-        //             actor::Column::ParallelUnitId,
-        //             Expr::value(Value::Int(Some(to_pu_id.id as i32))),
-        //         )
-        //         .col_expr(
-        //             actor::Column::WorkerId,
-        //             Expr::value(Value::Int(Some(to_pu_id.worker_node_id as WorkerId))),
-        //         )
-        //         .filter(actor::Column::ParallelUnitId.eq(*from_pu_id))
-        //         .exec(&txn)
-        //         .await?;
-        //        }
+    pub async fn migrate_actors(
+        &self,
+        plan: HashMap<WorkerSlotId, WorkerSlotId>,
+    ) -> MetaResult<()> {
+        let inner = self.inner.read().await;
+        let txn = inner.db.begin().await?;
 
-        todo!()
-        // let fragment_mapping: Vec<(FragmentId, FragmentVnodeMapping)> = Fragment::find()
-        //     .select_only()
-        //     .columns([fragment::Column::FragmentId, fragment::Column::VnodeMapping])
-        //     .join(JoinType::InnerJoin, fragment::Relation::Actor.def())
-        //     .filter(actor::Column::ParallelUnitId.is_in(plan.keys().cloned().collect::<Vec<_>>()))
-        //     .into_tuple()
-        //     .all(&txn)
-        //     .await?;
-        // // TODO: we'd better not store vnode mapping in fragment table and derive it from actors.
-        //
-        // for (fragment_id, vnode_mapping) in &fragment_mapping {
-        //     let mut pb_vnode_mapping = vnode_mapping.to_protobuf();
-        //     pb_vnode_mapping.data.iter_mut().for_each(|id| {
-        //         if let Some(new_id) = plan.get(&(*id as i32)) {
-        //             *id = new_id.id;
-        //         }
-        //     });
-        //     fragment::ActiveModel {
-        //         fragment_id: Set(*fragment_id),
-        //         ..Default::default()
-        //     }
-        //     .update(&txn)
-        //     .await?;
-        // }
+        let actors: Vec<(
+            FragmentId,
+            DistributionType,
+            ActorId,
+            Option<VnodeBitmap>,
+            WorkerId,
+        )> = Actor::find()
+            .select_only()
+            .columns([
+                fragment::Column::FragmentId,
+                fragment::Column::DistributionType,
+            ])
+            .columns([
+                actor::Column::ActorId,
+                actor::Column::VnodeBitmap,
+                actor::Column::WorkerId,
+            ])
+            .join(JoinType::InnerJoin, actor::Relation::Fragment.def())
+            .into_tuple()
+            .all(&txn)
+            .await?;
 
-        // let parallel_unit_to_worker = get_parallel_unit_to_worker_map(&txn).await?;
-        //
-        // let fragment_worker_slot_mapping =
-        //     Self::convert_fragment_mappings(fragment_mapping, &parallel_unit_to_worker)?;
+        let mut actor_locations = HashMap::new();
 
-        // txn.commit().await?;
-        //
-        // self.notify_fragment_mapping(NotificationOperation::Update, fragment_worker_slot_mapping)
-        //     .await;
-        //
-        // Ok(())
+        for (fragment_id, _, actor_id, _, worker_id) in &actors {
+            actor_locations
+                .entry(*worker_id)
+                .or_insert(HashMap::new())
+                .entry(*fragment_id)
+                .or_insert(BTreeSet::new())
+                .insert(*actor_id);
+        }
+
+        let expired_workers: HashSet<_> = plan.keys().map(|k| k.worker_id() as WorkerId).collect();
+
+        let mut actor_migration_plan = HashMap::new();
+        for (worker, fragment) in actor_locations {
+            if expired_workers.contains(&worker) {
+                for (_, actors) in fragment {
+                    let worker_slot_to_actor: HashMap<_, _> = actors
+                        .iter()
+                        .enumerate()
+                        .map(|(idx, actor_id)| {
+                            (WorkerSlotId::new(worker as _, idx as _), *actor_id)
+                        })
+                        .collect();
+
+                    for (worker_slot, actor) in worker_slot_to_actor {
+                        actor_migration_plan
+                            .insert(actor, plan[&worker_slot].worker_id() as WorkerId);
+                    }
+                }
+            }
+        }
+
+        for (actor, worker) in actor_migration_plan {
+            Actor::update_many()
+                .col_expr(
+                    actor::Column::WorkerId,
+                    Expr::value(Value::Int(Some(worker))),
+                )
+                .filter(actor::Column::ActorId.eq(actor))
+                .exec(&txn)
+                .await?;
+        }
+
+        txn.commit().await?;
+
+        self.notify_fragment_mapping(
+            NotificationOperation::Update,
+            rebuild_fragment_mapping_from_actors(actors),
+        )
+        .await;
+
+        Ok(())
     }
 
     pub async fn all_inuse_worker_slots(&self) -> MetaResult<HashSet<WorkerSlotId>> {
@@ -968,21 +989,20 @@ impl CatalogController {
 
         let mut actor_locations = HashMap::new();
 
-        for (fragment_id, actor_id, worker_id) in actors {
+        for (fragment_id, _, worker_id) in actors {
             *actor_locations
                 .entry(worker_id)
                 .or_insert(HashMap::new())
                 .entry(fragment_id)
-                .or_insert(0 as usize) += 1;
+                .or_insert(0_usize) += 1;
         }
 
         let mut result = HashSet::new();
         for (worker_id, mapping) in actor_locations {
             let max_fragment_len = mapping.values().max().unwrap();
 
-            result.extend(
-                (0..*max_fragment_len).map(|idx| WorkerSlotId::new(worker_id as u32, idx as usize)),
-            )
+            result
+                .extend((0..*max_fragment_len).map(|idx| WorkerSlotId::new(worker_id as u32, idx)))
         }
 
         Ok(result)
@@ -1191,7 +1211,10 @@ impl CatalogController {
     pub async fn get_downstream_chain_fragments(
         &self,
         job_id: ObjectId,
-    ) -> MetaResult<Vec<(PbDispatchStrategy, PbFragment)>> {
+    ) -> MetaResult<(
+        Vec<(DispatchStrategy, PbFragment)>,
+        Vec<(ActorId, WorkerId)>,
+    )> {
         let mview_fragment = self.get_mview_fragment(job_id).await?;
         let downstream_dispatches: HashMap<_, _> = mview_fragment.actors[0]
             .dispatcher
@@ -1228,7 +1251,16 @@ impl CatalogController {
             chain_fragments.push((dispatch_strategy, fragment));
         }
 
-        Ok(chain_fragments)
+        let actors: Vec<(ActorId, WorkerId)> = Actor::find()
+            .select_only()
+            .columns([actor::Column::ActorId, actor::Column::WorkerId])
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+
+        // let actors = actors.into_iter().map(|(k, v)| (k as _, v as _)) .collect();
+
+        Ok((chain_fragments, actors))
     }
 
     pub async fn load_source_fragment_ids(
@@ -1371,7 +1403,7 @@ mod tests {
     use std::collections::{BTreeMap, HashMap};
 
     use itertools::Itertools;
-    use risingwave_common::hash::{ParallelUnitId, ParallelUnitMapping};
+    use risingwave_common::hash::ActorMapping;
     use risingwave_common::util::iter_util::ZipEqDebug;
     use risingwave_common::util::stream_graph_visitor::visit_stream_node;
     use risingwave_meta_model_v2::actor::ActorStatus;
@@ -1380,7 +1412,6 @@ mod tests {
         actor, actor_dispatcher, fragment, ActorId, ActorUpstreamActors, ConnectorSplits,
         ExprContext, FragmentId, I32Array, ObjectId, StreamNode, TableId, VnodeBitmap,
     };
-    use risingwave_pb::common::ParallelUnit;
     use risingwave_pb::meta::table_fragments::actor_status::PbActorState;
     use risingwave_pb::meta::table_fragments::fragment::PbFragmentDistributionType;
     use risingwave_pb::meta::table_fragments::{PbActorStatus, PbFragment};
@@ -1402,15 +1433,6 @@ mod tests {
     const TEST_JOB_ID: ObjectId = 1;
 
     const TEST_STATE_TABLE_ID: TableId = 1000;
-
-    fn generate_parallel_units(count: u32) -> Vec<ParallelUnit> {
-        (0..count)
-            .map(|parallel_unit_id| ParallelUnit {
-                id: parallel_unit_id,
-                worker_node_id: 0,
-            })
-            .collect_vec()
-    }
 
     fn generate_dispatchers_for_actor(actor_id: u32) -> Vec<Dispatcher> {
         vec![PbDispatcher {
@@ -1456,10 +1478,6 @@ mod tests {
     #[tokio::test]
     async fn test_extract_fragment() -> MetaResult<()> {
         let actor_count = 3u32;
-        let parallel_units = generate_parallel_units(actor_count);
-        let parallel_unit_mapping = ParallelUnitMapping::build(&parallel_units);
-        let actor_vnode_bitmaps = parallel_unit_mapping.to_bitmaps();
-
         let upstream_actor_ids: HashMap<ActorId, BTreeMap<FragmentId, Vec<ActorId>>> = (0
             ..actor_count)
             .map(|actor_id| {
@@ -1469,6 +1487,9 @@ mod tests {
                 )
             })
             .collect();
+
+        let actor_bitmaps =
+            ActorMapping::new_uniform((0..actor_count).map(|i| i as _)).to_bitmaps();
 
         let pb_actors = (0..actor_count)
             .map(|actor_id| {
@@ -1486,7 +1507,7 @@ mod tests {
                         .flatten()
                         .map(|id| *id as _)
                         .collect(),
-                    vnode_bitmap: actor_vnode_bitmaps
+                    vnode_bitmap: actor_bitmaps
                         .get(&actor_id)
                         .cloned()
                         .map(|bitmap| bitmap.to_protobuf()),
@@ -1503,9 +1524,6 @@ mod tests {
             fragment_type_mask: PbFragmentTypeFlag::Source as _,
             distribution_type: PbFragmentDistributionType::Hash as _,
             actors: pb_actors.clone(),
-            // vnode_mapping: Some(parallel_unit_mapping.to_protobuf()),
-            // vnode_mapping: None,
-            // vnode_mapping_v2: None,
             state_table_ids: vec![TEST_STATE_TABLE_ID as _],
             upstream_fragment_ids: upstream_actor_ids
                 .values()
@@ -1518,7 +1536,7 @@ mod tests {
                 (
                     actor_id,
                     PbActorStatus {
-                        parallel_unit: Some(parallel_units[actor_id as usize].clone()),
+                        parallel_unit: None,
                         state: PbActorState::Running as _,
                     },
                 )
@@ -1572,9 +1590,6 @@ mod tests {
     #[tokio::test]
     async fn test_compose_fragment() -> MetaResult<()> {
         let actor_count = 3u32;
-        let parallel_units = generate_parallel_units(actor_count);
-        let parallel_unit_mapping = ParallelUnitMapping::build(&parallel_units);
-        let mut actor_vnode_bitmaps = parallel_unit_mapping.to_bitmaps();
 
         let upstream_actor_ids: HashMap<ActorId, BTreeMap<FragmentId, Vec<ActorId>>> = (0
             ..actor_count)
@@ -1586,14 +1601,11 @@ mod tests {
             })
             .collect();
 
+        let mut actor_bitmaps =
+            ActorMapping::new_uniform((0..actor_count).map(|i| i as _)).to_bitmaps();
+
         let actors = (0..actor_count)
             .map(|actor_id| {
-                let parallel_unit_id = actor_id as ParallelUnitId;
-
-                let vnode_bitmap = actor_vnode_bitmaps
-                    .remove(&parallel_unit_id)
-                    .map(|m| VnodeBitmap::from(&m.to_protobuf()));
-
                 let actor_splits = Some(ConnectorSplits::from(&PbConnectorSplits {
                     splits: vec![PbConnectorSplit {
                         split_type: "dummy".to_string(),
@@ -1609,10 +1621,13 @@ mod tests {
                     fragment_id: TEST_FRAGMENT_ID,
                     status: ActorStatus::Running,
                     splits: actor_splits,
-                    //                    parallel_unit_id: parallel_unit_id as i32,
                     worker_id: 0,
                     upstream_actor_ids: ActorUpstreamActors(actor_upstream_actor_ids),
-                    vnode_bitmap,
+                    vnode_bitmap: actor_bitmaps
+                        .remove(&actor_id)
+                        .map(|bitmap| bitmap.to_protobuf())
+                        .as_ref()
+                        .map(VnodeBitmap::from),
                     expr_context: ExprContext::from(&PbExprContext {
                         time_zone: String::from("America/New_York"),
                     }),
@@ -1652,7 +1667,6 @@ mod tests {
             fragment_type_mask: 0,
             distribution_type: DistributionType::Hash,
             stream_node: StreamNode::from(&stream_node),
-            //            vnode_mapping: FragmentVnodeMapping::from(&parallel_unit_mapping.to_protobuf()),
             state_table_ids: I32Array(vec![TEST_STATE_TABLE_ID]),
             upstream_fragment_id: I32Array::default(),
         };
@@ -1666,14 +1680,6 @@ mod tests {
 
         assert_eq!(pb_actor_status.len(), actor_count as usize);
         assert_eq!(pb_actor_splits.len(), actor_count as usize);
-
-        for (actor_id, actor_status) in &pb_actor_status {
-            let parallel_unit_id = parallel_units[*actor_id as usize].id;
-            assert_eq!(
-                parallel_unit_id,
-                actor_status.parallel_unit.clone().unwrap().id
-            );
-        }
 
         let pb_actors = pb_fragment.actors.clone();
 
@@ -1696,7 +1702,6 @@ mod tests {
                 fragment_id,
                 status,
                 splits,
-                // parallel_unit_id,
                 worker_id: _,
                 upstream_actor_ids,
                 vnode_bitmap,

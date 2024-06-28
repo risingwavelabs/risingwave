@@ -550,10 +550,17 @@ impl MetadataManager {
                     .await
             }
             MetadataManager::V2(mgr) => {
-                // mgr.catalog_controller
-                //     .get_downstream_chain_fragments(job_id as _)
-                //     .await
-                todo!()
+                let (fragments, actors) = mgr
+                    .catalog_controller
+                    .get_downstream_chain_fragments(job_id as _)
+                    .await?;
+
+                let actors = actors
+                    .into_iter()
+                    .map(|(actor, worker)| (actor as u32, worker as u32))
+                    .collect();
+
+                Ok((fragments, actors))
             }
         }
     }
