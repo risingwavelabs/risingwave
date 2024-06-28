@@ -618,15 +618,20 @@ struct TableUnsyncData {
         BTreeMap<HummockEpoch, (Vec<VnodeWatermark>, BitmapBuilder)>,
     )>,
     spill_tasks: BTreeMap<HummockEpoch, VecDeque<UploadingTaskId>>,
+    // newer epoch at the front
+    syncing_epochs: VecDeque<HummockEpoch>,
+    max_synced_epoch: Option<HummockEpoch>,
 }
 
 impl TableUnsyncData {
-    fn new(table_id: TableId) -> Self {
+    fn new(table_id: TableId, committed_epoch: Option<HummockEpoch>) -> Self {
         Self {
             table_id,
             instance_data: Default::default(),
             table_watermarks: None,
             spill_tasks: Default::default(),
+            syncing_epochs: Default::default(),
+            max_synced_epoch: committed_epoch,
         }
     }
 
@@ -641,6 +646,10 @@ impl TableUnsyncData {
         )>,
         impl Iterator<Item = UploadingTaskId>,
     ) {
+        if let Some(prev_epoch) = self.max_sync_epoch() {
+            assert_gt!(epoch, prev_epoch)
+        }
+        self.syncing_epochs.push_front(epoch);
         (
             self.instance_data
                 .iter_mut()
@@ -662,7 +671,32 @@ impl TableUnsyncData {
         )
     }
 
+    fn ack_synced(&mut self, sync_epoch: HummockEpoch) {
+        let min_sync_epoch = self.syncing_epochs.pop_back().expect("should exist");
+        assert_eq!(sync_epoch, min_sync_epoch);
+        self.max_synced_epoch = Some(sync_epoch);
+    }
+
+    fn ack_committed(&mut self, committed_epoch: HummockEpoch) {
+        let synced_epoch_advanced = {
+            if let Some(max_synced_epoch) = self.max_synced_epoch
+                && max_synced_epoch >= committed_epoch
+            {
+                false
+            } else {
+                true
+            }
+        };
+        if synced_epoch_advanced {
+            self.max_synced_epoch = Some(committed_epoch);
+            self.assert_after_epoch(committed_epoch);
+        }
+    }
+
     fn assert_after_epoch(&self, epoch: HummockEpoch) {
+        if let Some(min_syncing_epoch) = self.syncing_epochs.back() {
+            assert_gt!(*min_syncing_epoch, epoch);
+        }
         self.instance_data
             .values()
             .for_each(|instance_data| instance_data.assert_after_epoch(epoch));
@@ -671,6 +705,13 @@ impl TableUnsyncData {
         {
             assert_gt!(*oldest_epoch, epoch);
         }
+    }
+
+    fn max_sync_epoch(&self) -> Option<HummockEpoch> {
+        self.syncing_epochs
+            .front()
+            .cloned()
+            .or_else(|| self.max_synced_epoch)
     }
 }
 
@@ -694,15 +735,27 @@ impl UnsyncData {
         table_id: TableId,
         instance_id: LocalInstanceId,
         init_epoch: HummockEpoch,
+        context: &UploaderContext,
     ) {
         debug!(
             table_id = table_id.table_id,
             instance_id, init_epoch, "init epoch"
         );
-        let table_data = self
-            .table_data
-            .entry(table_id)
-            .or_insert_with(|| TableUnsyncData::new(table_id));
+        let table_data = self.table_data.entry(table_id).or_insert_with(|| {
+            TableUnsyncData::new(
+                table_id,
+                context
+                    .pinned_version
+                    .version()
+                    .state_table_info
+                    .info()
+                    .get(&table_id)
+                    .map(|info| info.committed_epoch),
+            )
+        });
+        if let Some(max_prev_epoch) = table_data.max_sync_epoch() {
+            assert_gt!(init_epoch, max_prev_epoch);
+        }
         assert!(table_data
             .instance_data
             .insert(
@@ -851,6 +904,7 @@ impl UploaderData {
             sync_id,
             SyncingData {
                 sync_epoch: epoch,
+                table_ids,
                 remaining_uploading_tasks: spilling_tasks,
                 uploaded,
                 table_watermarks: all_table_watermarks,
@@ -875,6 +929,7 @@ impl UnsyncData {
 
 struct SyncingData {
     sync_epoch: HummockEpoch,
+    table_ids: HashSet<TableId>,
     remaining_uploading_tasks: HashSet<UploadingTaskId>,
     // newer data at the front
     uploaded: VecDeque<Arc<StagingSstableInfo>>,
@@ -954,7 +1009,7 @@ enum UploaderState {
 /// Data have 3 sequential stages: unsync (inside each local instance, data can be unsealed, sealed), syncing, synced.
 ///
 /// The 3 stages are divided by 2 marginal epochs: `max_syncing_epoch`,
-/// `max_synced_epoch`. Epochs satisfy the following inequality.
+/// `max_synced_epoch` in each `TableUnSyncData`. Epochs satisfy the following inequality.
 ///
 /// (epochs of `synced_data`) <= `max_synced_epoch` < (epochs of `syncing_data`) <=
 /// `max_syncing_epoch` < (epochs of `unsync_data`)
@@ -962,11 +1017,6 @@ enum UploaderState {
 /// Data are mostly stored in `VecDeque`, and the order stored in the `VecDeque` indicates the data
 /// order. Data at the front represents ***newer*** data.
 pub struct HummockUploader {
-    /// The maximum epoch that has started syncing
-    max_syncing_epoch: HummockEpoch,
-    /// The maximum epoch that has been synced
-    max_synced_epoch: HummockEpoch,
-
     state: UploaderState,
 
     context: UploaderContext,
@@ -980,10 +1030,7 @@ impl HummockUploader {
         buffer_tracker: BufferTracker,
         config: &StorageOpts,
     ) -> Self {
-        let initial_epoch = pinned_version.version().max_committed_epoch;
         Self {
-            max_syncing_epoch: initial_epoch,
-            max_synced_epoch: initial_epoch,
             state: UploaderState::Working(UploaderData::default()),
             context: UploaderContext::new(
                 pinned_version,
@@ -997,10 +1044,6 @@ impl HummockUploader {
 
     pub(super) fn buffer_tracker(&self) -> &BufferTracker {
         &self.context.buffer_tracker
-    }
-
-    pub(super) fn max_synced_epoch(&self) -> HummockEpoch {
-        self.max_synced_epoch
     }
 
     pub(super) fn max_committed_epoch(&self) -> HummockEpoch {
@@ -1028,9 +1071,8 @@ impl HummockUploader {
         let UploaderState::Working(data) = &mut self.state else {
             return;
         };
-        assert_gt!(init_epoch, self.max_syncing_epoch);
         data.unsync_data
-            .init_instance(table_id, instance_id, init_epoch);
+            .init_instance(table_id, instance_id, init_epoch, &self.context);
     }
 
     pub(super) fn local_seal_epoch(
@@ -1042,7 +1084,6 @@ impl HummockUploader {
         let UploaderState::Working(data) = &mut self.state else {
             return;
         };
-        assert_gt!(next_epoch, self.max_syncing_epoch);
         data.unsync_data
             .local_seal_epoch(instance_id, next_epoch, opts);
     }
@@ -1067,25 +1108,11 @@ impl HummockUploader {
                 return;
             }
         };
-        debug!("start sync epoch: {}", epoch);
-        assert!(
-            epoch > self.max_syncing_epoch,
-            "the epoch {} has started syncing already: {}",
-            epoch,
-            self.max_syncing_epoch
-        );
-
-        self.max_syncing_epoch = epoch;
+        debug!(epoch, ?table_ids, "start sync epoch");
 
         data.sync(epoch, &self.context, table_ids, sync_result_sender);
 
-        data.may_notify_sync_task(&self.context, |new_synced_epoch| {
-            Self::set_max_synced_epoch(
-                &mut self.max_synced_epoch,
-                self.max_syncing_epoch,
-                new_synced_epoch,
-            )
-        });
+        data.may_notify_sync_task(&self.context);
 
         self.context
             .stats
@@ -1093,53 +1120,20 @@ impl HummockUploader {
             .set(data.syncing_data.len() as _);
     }
 
-    fn set_max_synced_epoch(
-        max_synced_epoch: &mut HummockEpoch,
-        max_syncing_epoch: HummockEpoch,
-        epoch: HummockEpoch,
-    ) {
-        assert!(
-            epoch <= max_syncing_epoch,
-            "epoch {} that has been synced has not started syncing yet.  previous max syncing epoch {}",
-            epoch,
-            max_syncing_epoch
-        );
-        assert!(
-            epoch > *max_synced_epoch,
-            "epoch {} has been synced. previous max synced epoch: {}",
-            epoch,
-            max_synced_epoch
-        );
-        *max_synced_epoch = epoch;
-    }
-
     pub(crate) fn update_pinned_version(&mut self, pinned_version: PinnedVersion) {
         assert_ge!(
             pinned_version.max_committed_epoch(),
             self.context.pinned_version.max_committed_epoch()
         );
-        let max_committed_epoch = pinned_version.max_committed_epoch();
-        self.context.pinned_version = pinned_version;
-        if self.max_synced_epoch < max_committed_epoch {
-            self.max_synced_epoch = max_committed_epoch;
-        }
-        if self.max_syncing_epoch < max_committed_epoch {
-            self.max_syncing_epoch = max_committed_epoch;
-            if let UploaderState::Working(data) = &self.state {
-                for instance_data in data
-                    .unsync_data
-                    .table_data
-                    .values()
-                    .flat_map(|data| data.instance_data.values())
-                {
-                    if let Some(oldest_epoch) = instance_data.sealed_data.back() {
-                        assert_gt!(oldest_epoch.epoch, max_committed_epoch);
-                    } else if let Some(current_epoch) = &instance_data.current_epoch_data {
-                        assert_gt!(current_epoch.epoch, max_committed_epoch);
-                    }
+        if let UploaderState::Working(data) = &mut self.state {
+            // TODO: may only `ack_committed` on table whose `committed_epoch` is changed.
+            for (table_id, info) in pinned_version.version().state_table_info.info() {
+                if let Some(table_data) = data.unsync_data.table_data.get_mut(table_id) {
+                    table_data.ack_committed(info.committed_epoch);
                 }
             }
         }
+        self.context.pinned_version = pinned_version;
     }
 
     pub(crate) fn may_flush(&mut self) -> bool {
@@ -1193,16 +1187,11 @@ impl HummockUploader {
     }
 
     pub(crate) fn clear(&mut self) {
-        let max_committed_epoch = self.context.pinned_version.max_committed_epoch();
-        self.max_synced_epoch = max_committed_epoch;
-        self.max_syncing_epoch = max_committed_epoch;
         if let UploaderState::Working(data) = replace(
             &mut self.state,
             UploaderState::Working(UploaderData::default()),
         ) {
-            data.abort(|| {
-                HummockError::other(format!("uploader is reset to {}", max_committed_epoch))
-            });
+            data.abort(|| HummockError::other("uploader is reset"));
         }
 
         self.context.stats.uploader_syncing_epoch_count.set(0);
@@ -1239,17 +1228,14 @@ impl HummockUploader {
 impl UploaderData {
     /// Poll the syncing task of the syncing data of the oldest epoch. Return `Poll::Ready(None)` if
     /// there is no syncing data.
-    fn may_notify_sync_task(
-        &mut self,
-        context: &UploaderContext,
-        mut set_max_synced_epoch: impl FnMut(u64),
-    ) {
+    fn may_notify_sync_task(&mut self, context: &UploaderContext) {
         while let Some((_, syncing_data)) = self.syncing_data.first_key_value()
             && syncing_data.remaining_uploading_tasks.is_empty()
         {
             let (_, syncing_data) = self.syncing_data.pop_first().expect("non-empty");
             let SyncingData {
                 sync_epoch,
+                table_ids,
                 remaining_uploading_tasks: _,
                 uploaded,
                 table_watermarks,
@@ -1259,7 +1245,13 @@ impl UploaderData {
                 .stats
                 .uploader_syncing_epoch_count
                 .set(self.syncing_data.len() as _);
-            set_max_synced_epoch(sync_epoch);
+
+            for table_id in table_ids {
+                if let Some(table_data) = self.unsync_data.table_data.get_mut(&table_id) {
+                    table_data.ack_synced(sync_epoch);
+                }
+            }
+
             send_sync_result(
                 sync_result_sender,
                 Ok(SyncedData {
@@ -1347,13 +1339,7 @@ impl HummockUploader {
                                     data.syncing_data.get_mut(&sync_id).expect("should exist");
                                 syncing_data.uploaded.push_front(sst.clone());
                                 assert!(syncing_data.remaining_uploading_tasks.remove(&task_id));
-                                data.may_notify_sync_task(&self.context, |new_synced_epoch| {
-                                    Self::set_max_synced_epoch(
-                                        &mut self.max_synced_epoch,
-                                        self.max_syncing_epoch,
-                                        new_synced_epoch,
-                                    )
-                                });
+                                data.may_notify_sync_task(&self.context);
                             }
                             UploadingTaskStatus::Spilling(table_ids) => {
                                 data.spilled_data.insert(task_id, (sst.clone(), table_ids));
