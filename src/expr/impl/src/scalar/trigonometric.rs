@@ -475,7 +475,7 @@ mod tests {
     #[test]
     fn test_degrees() {
         let d = F64::from(180);
-        let pi = F64::from(PI);
+        let pi = F64::from(core::f64::consts::PI);
 
         // sind
         assert_similar(sin_f64(50_f64.to_radians().into()), sind_f64(F64::from(50)));
