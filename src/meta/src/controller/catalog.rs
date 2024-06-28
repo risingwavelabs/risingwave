@@ -630,6 +630,7 @@ impl CatalogController {
     }
 
     /// `clean_dirty_creating_jobs` cleans up creating jobs that are creating in Foreground mode or in Initial status.
+    /// FIXME(kwannoel): Notify deleted objects to the frontend.
     pub async fn clean_dirty_creating_jobs(&self) -> MetaResult<ReleaseContext> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;

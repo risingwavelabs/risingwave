@@ -943,6 +943,7 @@ impl CatalogManager {
     ///    2. Not belonging to a background stream job.
     ///
     ///    Clean up these hanging tables by the id.
+    /// FIXME(kwannoel): Notify delete for dirty tables.
     pub async fn clean_dirty_tables(&self, fragment_manager: FragmentManagerRef) -> MetaResult<()> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
