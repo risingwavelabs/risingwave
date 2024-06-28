@@ -469,9 +469,9 @@ impl HummockEventHandler {
         table_ids: HashSet<TableId>,
     ) {
         debug!(
-            "awaiting for epoch to be synced: {}, max_synced_epoch: {}",
             new_sync_epoch,
-            self.uploader.max_synced_epoch()
+            ?table_ids,
+            "awaiting for epoch to be synced",
         );
         self.uploader
             .start_sync_epoch(new_sync_epoch, sync_result_sender, table_ids);
@@ -481,7 +481,6 @@ impl HummockEventHandler {
         info!(
             prev_epoch,
             max_committed_epoch = self.uploader.max_committed_epoch(),
-            max_synced_epoch = self.uploader.max_synced_epoch(),
             "handle clear event"
         );
 
