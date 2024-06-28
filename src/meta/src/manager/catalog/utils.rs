@@ -41,15 +41,40 @@ pub fn refcnt_dec_connection(
     }
 }
 
+pub fn get_refed_secret_ids_from_source(source: &Source) -> MetaResult<Vec<u32>> {
+    let mut secret_ids = Vec::new();
+    for secret_ref in source.get_secret_refs().values() {
+        secret_ids.push(secret_ref.secret_id);
+    }
+    // `info` must exist in `Source`
+    for secret_ref in source.get_info()?.get_format_encode_secret_refs().values() {
+        secret_ids.push(secret_ref.secret_id);
+    }
+    secret_ids.dedup();
+    Ok(secret_ids)
+}
+
+pub fn get_refed_secret_ids_from_sink(sink: &Sink) -> Vec<u32> {
+    let mut secret_ids = Vec::new();
+    for secret_ref in sink.get_secret_refs().values() {
+        secret_ids.push(secret_ref.secret_id);
+    }
+    // `format_desc` may not exist in `Sink`
+    if let Some(format_desc) = &sink.format_desc {
+        for secret_ref in format_desc.get_secret_refs().values() {
+            secret_ids.push(secret_ref.secret_id);
+        }
+    }
+    secret_ids.dedup();
+    secret_ids
+}
+
 pub fn refcnt_inc_source_secret_ref(
     database_mgr: &mut DatabaseManager,
     source: &Source,
 ) -> MetaResult<()> {
-    for secret_ref in source.get_secret_refs().values() {
-        database_mgr.increase_secret_ref_count(secret_ref.secret_id)
-    }
-    for secret_ref in source.get_info()?.get_format_encode_secret_refs().values() {
-        database_mgr.increase_secret_ref_count(secret_ref.secret_id)
+    for secret_id in get_refed_secret_ids_from_source(source)? {
+        database_mgr.increase_secret_ref_count(secret_id);
     }
     Ok(())
 }
@@ -58,33 +83,20 @@ pub fn refcnt_dec_source_secret_ref(
     database_mgr: &mut DatabaseManager,
     source: &Source,
 ) -> MetaResult<()> {
-    for secret_ref in source.get_secret_refs().values() {
-        database_mgr.decrease_secret_ref_count(secret_ref.secret_id)
-    }
-    for secret_ref in source.get_info()?.get_format_encode_secret_refs().values() {
-        database_mgr.decrease_secret_ref_count(secret_ref.secret_id)
+    for secret_id in get_refed_secret_ids_from_source(source)? {
+        database_mgr.decrease_secret_ref_count(secret_id);
     }
     Ok(())
 }
 
 pub fn refcnt_inc_sink_secret_ref(database_mgr: &mut DatabaseManager, sink: &Sink) {
-    for secret_ref in sink.get_secret_refs().values() {
-        database_mgr.increase_secret_ref_count(secret_ref.secret_id)
-    }
-    if let Some(format_desc) = &sink.format_desc {
-        for secret_ref in format_desc.get_secret_refs().values() {
-            database_mgr.increase_secret_ref_count(secret_ref.secret_id)
-        }
+    for secret_id in get_refed_secret_ids_from_sink(sink) {
+        database_mgr.increase_secret_ref_count(secret_id);
     }
 }
 
 pub fn refcnt_dec_sink_secret_ref(database_mgr: &mut DatabaseManager, sink: &Sink) {
-    for secret_ref in sink.get_secret_refs().values() {
-        database_mgr.decrease_secret_ref_count(secret_ref.secret_id)
-    }
-    if let Some(format_desc) = &sink.format_desc {
-        for secret_ref in format_desc.get_secret_refs().values() {
-            database_mgr.decrease_secret_ref_count(secret_ref.secret_id)
-        }
+    for secret_id in get_refed_secret_ids_from_sink(sink) {
+        database_mgr.decrease_secret_ref_count(secret_id);
     }
 }

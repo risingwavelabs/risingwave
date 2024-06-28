@@ -511,6 +511,7 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
                         dependent_secret_refs.push(secret_ref.secret_id);
                     }
                 }
+                dependent_secret_refs.dedup();
                 object_dependencies.extend(dependent_secret_refs.into_iter().map(|secret_id| {
                     object_dependency::ActiveModel {
                         id: NotSet,
@@ -583,6 +584,7 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
                         dependent_secret_refs.push(secret_ref.secret_id);
                     }
                 }
+                dependent_secret_refs.dedup();
                 object_dependencies.extend(dependent_secret_refs.into_iter().map(|secret_id| {
                     object_dependency::ActiveModel {
                         id: NotSet,

@@ -27,6 +27,7 @@ use risingwave_pb::catalog::{
 use risingwave_pb::data::DataType;
 use risingwave_pb::user::grant_privilege::PbObject;
 
+use super::utils::{get_refed_secret_ids_from_sink, get_refed_secret_ids_from_source};
 use super::{
     ConnectionId, DatabaseId, FunctionId, RelationId, SchemaId, SecretId, SinkId, SourceId,
     SubscriptionId, ViewId,
@@ -127,11 +128,8 @@ impl DatabaseManager {
             (source.id, source)
         }));
         for source in sources.values() {
-            for secret_ref in source.get_secret_refs().values() {
-                *secret_ref_count.entry(secret_ref.secret_id).or_default() += 1;
-            }
-            for secret_ref in source.get_info()?.get_format_encode_secret_refs().values() {
-                *secret_ref_count.entry(secret_ref.secret_id).or_default() += 1;
+            for secret_id in get_refed_secret_ids_from_source(source)? {
+                *secret_ref_count.entry(secret_id).or_default() += 1;
             }
         }
         let sinks = BTreeMap::from_iter(sinks.into_iter().map(|sink| {
@@ -141,13 +139,8 @@ impl DatabaseManager {
             if let Some(connection_id) = sink.connection_id {
                 *connection_ref_count.entry(connection_id).or_default() += 1;
             }
-            for secret_ref in sink.get_secret_refs().values() {
-                *secret_ref_count.entry(secret_ref.secret_id).or_default() += 1;
-            }
-            if let Some(format_desc) = &sink.format_desc {
-                for secret_ref in format_desc.get_secret_refs().values() {
-                    *secret_ref_count.entry(secret_ref.secret_id).or_default() += 1;
-                }
+            for secret_id in get_refed_secret_ids_from_sink(&sink) {
+                *secret_ref_count.entry(secret_id).or_default() += 1;
             }
             (sink.id, sink)
         }));
