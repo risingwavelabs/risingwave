@@ -107,7 +107,7 @@ impl SourceReader {
     /// Refer to `WaitCheckpointWorker` for more details.
     pub async fn create_wait_checkpoint_task(&self) -> ConnectorResult<Option<WaitCheckpointTask>> {
         Ok(match &self.config {
-            ConnectorProperties::PostgresCdc(_prop) => {
+            ConnectorProperties::PostgresCdc(_) | ConnectorProperties::SqlServerCdc(_) => {
                 Some(WaitCheckpointTask::CommitCdcOffset(None))
             }
             ConnectorProperties::GooglePubsub(prop) => Some(WaitCheckpointTask::AckPubsubMessage(

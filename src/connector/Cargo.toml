@@ -147,8 +147,17 @@ strum = "0.26"
 strum_macros = "0.26"
 tempfile = "3"
 thiserror = "1"
+
 thiserror-ext = { workspace = true }
-tiberius = { version = "0.12", default-features = false, features = ["chrono", "time", "tds73", "rust_decimal", "bigdecimal", "rustls"] }
+tiberius = { git = "https://github.com/risingwavelabs/tiberius.git", rev = "f834f2deeb9e2fb08afaf73865f330cf31a3876a", default-features = false, features = [
+    "chrono",
+    "sql-browser-tokio",
+    "vendored-openssl",
+    "rust_decimal",
+    "bigdecimal",
+    "tds73",
+    "time",
+] }
 time = "0.3.30"
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",

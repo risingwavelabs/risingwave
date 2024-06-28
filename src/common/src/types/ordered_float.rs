@@ -58,7 +58,7 @@ use num_traits::{
     Bounded, CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Num, One, Pow,
     Zero,
 };
-use postgres_types::{accepts, to_sql_checked, IsNull, ToSql, Type};
+use postgres_types::{accepts, to_sql_checked, IsNull, Type};
 
 // masks for the parts of the IEEE 754 float
 const SIGN_MASK: u64 = 0x8000000000000000u64;
@@ -108,7 +108,7 @@ impl<T: Float> OrderedFloat<T> {
     }
 }
 
-impl ToSql for OrderedFloat<f32> {
+impl postgres_types::ToSql for OrderedFloat<f32> {
     accepts!(FLOAT4);
 
     to_sql_checked!();
@@ -121,7 +121,7 @@ impl ToSql for OrderedFloat<f32> {
     }
 }
 
-impl ToSql for OrderedFloat<f64> {
+impl postgres_types::ToSql for OrderedFloat<f64> {
     accepts!(FLOAT8);
 
     to_sql_checked!();

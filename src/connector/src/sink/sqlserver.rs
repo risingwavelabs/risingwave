@@ -15,7 +15,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
-use anyhow::{anyhow, Context};
+use anyhow::anyhow;
 use async_trait::async_trait;
 use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::bitmap::Bitmap;
@@ -159,7 +159,7 @@ impl Sink for SqlServerSink {
 
         // Query table metadata from SQL Server.
         let mut sql_server_table_metadata = HashMap::new();
-        let mut sql_client = SqlClient::new(&self.config).await?;
+        let mut sql_client = SqlServerClient::new(&self.config).await?;
         let query_table_metadata_error = || {
             SinkError::SqlServer(anyhow!(format!(
                 "SQL Server table {} metadata error",
@@ -181,7 +181,7 @@ WHERE
 ORDER BY
     col.column_id;"#;
         let rows = sql_client
-            .client
+            .inner_client
             .query(QUERY_TABLE_METADATA, &[&self.config.table])
             .await?
             .into_results()
@@ -272,7 +272,7 @@ pub struct SqlServerSinkWriter {
     schema: Schema,
     pk_indices: Vec<usize>,
     is_append_only: bool,
-    sql_client: SqlClient,
+    sql_client: SqlServerClient,
     ops: Vec<SqlOp>,
 }
 
@@ -283,7 +283,7 @@ impl SqlServerSinkWriter {
         pk_indices: Vec<usize>,
         is_append_only: bool,
     ) -> Result<Self> {
-        let sql_client = SqlClient::new(&config).await?;
+        let sql_client = SqlServerClient::new(&config).await?;
         let writer = Self {
             config,
             schema,
@@ -444,7 +444,7 @@ impl SqlServerSinkWriter {
                 }
             }
         }
-        query.execute(&mut self.sql_client.client).await?;
+        query.execute(&mut self.sql_client.inner_client).await?;
         Ok(())
     }
 }
@@ -495,11 +495,12 @@ impl SinkWriter for SqlServerSinkWriter {
     }
 }
 
-struct SqlClient {
-    client: Client<tokio_util::compat::Compat<TcpStream>>,
+#[derive(Debug)]
+pub struct SqlServerClient {
+    pub inner_client: Client<tokio_util::compat::Compat<TcpStream>>,
 }
 
-impl SqlClient {
+impl SqlServerClient {
     async fn new(msconfig: &SqlServerConfig) -> Result<Self> {
         let mut config = Config::new();
         config.host(&msconfig.host);
@@ -507,16 +508,30 @@ impl SqlClient {
         config.authentication(AuthMethod::sql_server(&msconfig.user, &msconfig.password));
         config.database(&msconfig.database);
         config.trust_cert();
+        Self::new_with_config(config).await
+    }
 
-        let tcp = TcpStream::connect(config.get_addr())
-            .await
-            .context("failed to connect to sql server")
-            .map_err(SinkError::SqlServer)?;
-        tcp.set_nodelay(true)
-            .context("failed to setting nodelay when connecting to sql server")
-            .map_err(SinkError::SqlServer)?;
-        let client = Client::connect(config, tcp.compat_write()).await?;
-        Ok(Self { client })
+    pub async fn new_with_config(mut config: Config) -> Result<Self> {
+        let tcp = TcpStream::connect(config.get_addr()).await.unwrap();
+        tcp.set_nodelay(true).unwrap();
+
+        let client = match Client::connect(config.clone(), tcp.compat_write()).await {
+            // Connection successful.
+            Ok(client) => Ok(client),
+            // The server wants us to redirect to a different address
+            Err(tiberius::error::Error::Routing { host, port }) => {
+                config.host(&host);
+                config.port(port);
+                let tcp = TcpStream::connect(config.get_addr()).await.unwrap();
+                // we should not have more than one redirect, so we'll short-circuit here.
+                Client::connect(config, tcp.compat_write()).await
+            }
+            Err(e) => Err(e),
+        }?;
+
+        Ok(Self {
+            inner_client: client,
+        })
     }
 }
 

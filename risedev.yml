@@ -36,6 +36,7 @@ profile:
       # - use: grafana     # visualization
 
       - use: meta-node
+        # meta-backend: etcd
       - use: compute-node
       - use: frontend
 

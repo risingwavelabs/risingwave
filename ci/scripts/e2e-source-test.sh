@@ -63,6 +63,14 @@ echo "--- starting risingwave cluster"
 RUST_LOG="debug,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 risedev ci-start ci-1cn-1fe-with-recovery
 
+echo "--- Install sql server client"
+curl https://packages.microsoft.com/keys/microsoft.asc | sudo apt-key add -
+curl https://packages.microsoft.com/config/ubuntu/20.04/prod.list | sudo tee /etc/apt/sources.list.d/msprod.list
+apt-get update -y
+ACCEPT_EULA=Y DEBIAN_FRONTEND=noninteractive apt-get install -y mssql-tools unixodbc-dev
+export PATH="/opt/mssql-tools/bin/:$PATH"
+sleep 2
+
 echo "--- mongodb cdc test"
 # install the mongo shell
 wget http://archive.ubuntu.com/ubuntu/pool/main/o/openssl/libssl1.1_1.1.1f-1ubuntu2_amd64.deb
@@ -79,6 +87,7 @@ risedev slt './e2e_test/source/cdc/mongodb/**/*.slt'
 
 echo "--- inline cdc test"
 export MYSQL_HOST=mysql MYSQL_TCP_PORT=3306 MYSQL_PWD=123456
+export SQLCMDSERVER=sqlserver-server SQLCMDUSER=SA SQLCMDPASSWORD="SomeTestOnly@SA" SQLCMDDBNAME=mydb 
 risedev slt './e2e_test/source/cdc_inline/**/*.slt'
 
 echo "--- opendal source test"
