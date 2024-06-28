@@ -548,7 +548,6 @@ impl PlanRoot {
                     ).into());
                 }
                 let plan = self.gen_optimized_logical_plan_for_stream()?;
-
                 let (plan, out_col_change) = {
                     let (plan, out_col_change) =
                         plan.logical_rewrite_for_stream(&mut Default::default())?;
@@ -879,7 +878,6 @@ impl PlanRoot {
         let stream_plan = self.gen_optimized_stream_plan(emit_on_window_close)?;
         assert_eq!(self.phase, PlanPhase::Stream);
         assert_eq!(stream_plan.convention(), Convention::Stream);
-
         StreamMaterialize::create(
             stream_plan,
             mv_name,

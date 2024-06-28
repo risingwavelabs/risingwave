@@ -118,6 +118,14 @@ static DAG_TO_TREE: LazyLock<OptimizationStage> = LazyLock::new(|| {
     )
 });
 
+static STREAM_GENERATE_SERIES_WITH_NOW: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
+        "Convert GENERATE_SERIES Ends With NOW",
+        vec![GenerateSeriesWithNowRule::create()],
+        ApplyOrder::TopDown,
+    )
+});
+
 static TABLE_FUNCTION_TO_PROJECT_SET: LazyLock<OptimizationStage> = LazyLock::new(|| {
     OptimizationStage::new(
         "Table Function To Project Set",
@@ -572,6 +580,9 @@ impl LogicalOptimizer {
         }
         plan = plan.optimize_by_rules(&SET_OPERATION_MERGE);
         plan = plan.optimize_by_rules(&SET_OPERATION_TO_JOIN);
+        // Convert `generate_series` ends with `now()` to a `Now` source. Only for streaming mode.
+        // Should be applied before converting table function to project set.
+        plan = plan.optimize_by_rules(&STREAM_GENERATE_SERIES_WITH_NOW);
         // In order to unnest a table function, we need to convert it into a `project_set` first.
         plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_PROJECT_SET);
 

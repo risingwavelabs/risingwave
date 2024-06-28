@@ -174,8 +174,12 @@ impl PlanVisitor for CardinalityVisitor {
         }
     }
 
-    fn visit_logical_now(&mut self, _plan: &plan_node::LogicalNow) -> Cardinality {
-        1.into()
+    fn visit_logical_now(&mut self, plan: &plan_node::LogicalNow) -> Cardinality {
+        if plan.max_one_row() {
+            1.into()
+        } else {
+            Cardinality::unknown()
+        }
     }
 
     fn visit_logical_expand(&mut self, plan: &plan_node::LogicalExpand) -> Cardinality {

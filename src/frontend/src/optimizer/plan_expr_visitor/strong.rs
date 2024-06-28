@@ -291,6 +291,7 @@ impl Strong {
             | ExprType::JsonbToRecord
             | ExprType::JsonbSet
             | ExprType::Vnode
+            | ExprType::TestPaidTier
             | ExprType::Proctime
             | ExprType::PgSleep
             | ExprType::PgSleepFor
