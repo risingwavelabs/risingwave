@@ -253,33 +253,33 @@ public class DbzConnectorConfig {
             mongodbProps.setProperty("name", connectorName);
 
             dbzProps.putAll(mongodbProps);
-
         } else if (source == SourceTypeE.SQL_SERVER) {
             var sqlServerProps = initiateDbConfig(SQL_SERVER_CONFIG_FILE, substitutor);
             if (isCdcBackfill) {
-                // skip the initial snapshot for cdc backfill
-                sqlServerProps.setProperty("snapshot.mode", "schema_only");
-
                 // if startOffset is specified, we should continue
                 // reading changes from the given offset
                 if (null != startOffset && !startOffset.isBlank()) {
+                    // skip the initial snapshot for cdc backfill
+                    sqlServerProps.setProperty("snapshot.mode", "recovery");
                     sqlServerProps.setProperty(
                             ConfigurableOffsetBackingStore.OFFSET_STATE_VALUE, startOffset);
+                } else {
+                    sqlServerProps.setProperty("snapshot.mode", "no_data");
                 }
             } else {
                 // if snapshot phase is finished and offset is specified, we will continue reading
                 // changes from the given offset
                 if (snapshotDone && null != startOffset && !startOffset.isBlank()) {
-                    sqlServerProps.setProperty("snapshot.mode", "schema_only");
+                    sqlServerProps.setProperty("snapshot.mode", "recovery");
                     sqlServerProps.setProperty(
                             ConfigurableOffsetBackingStore.OFFSET_STATE_VALUE, startOffset);
                 }
             }
             dbzProps.putAll(sqlServerProps);
             if (isCdcSourceJob) {
-                // remove table filtering for the shared Postgres source, since we
+                // remove table filtering for the shared Sql Server source, since we
                 // allow user to ingest tables in different schemas
-                LOG.info("Disable table filtering for the shared Postgres source");
+                LOG.info("Disable table filtering for the shared Sql Server source");
                 dbzProps.remove("table.include.list");
             }
         } else {
