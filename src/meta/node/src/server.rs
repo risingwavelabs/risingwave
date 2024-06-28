@@ -526,6 +526,25 @@ pub async fn start_service_as_election_leader(
         system_params_reader.checkpoint_frequency() as usize,
     );
 
+    // Initialize services.
+    let backup_manager = BackupManager::new(
+        env.clone(),
+        hummock_manager.clone(),
+        meta_metrics.clone(),
+        system_params_reader.backup_storage_url(),
+        system_params_reader.backup_storage_directory(),
+    )
+    .await?;
+
+    let notification_srv = NotificationServiceImpl::new(
+        env.clone(),
+        metadata_manager.clone(),
+        hummock_manager.clone(),
+        backup_manager.clone(),
+        serving_vnode_mapping.clone(),
+    )
+    .await?;
+
     let source_manager = Arc::new(
         SourceManager::new(
             barrier_scheduler.clone(),
@@ -584,15 +603,6 @@ pub async fn start_service_as_election_leader(
         .await
         .unwrap();
 
-    // Initialize services.
-    let backup_manager = BackupManager::new(
-        env.clone(),
-        hummock_manager.clone(),
-        meta_metrics.clone(),
-        system_params_reader.backup_storage_url(),
-        system_params_reader.backup_storage_directory(),
-    )
-    .await?;
     let vacuum_manager = Arc::new(hummock::VacuumManager::new(
         env.clone(),
         hummock_manager.clone(),
@@ -642,14 +652,7 @@ pub async fn start_service_as_election_leader(
         vacuum_manager.clone(),
         metadata_manager.clone(),
     );
-    let notification_srv = NotificationServiceImpl::new(
-        env.clone(),
-        metadata_manager.clone(),
-        hummock_manager.clone(),
-        backup_manager.clone(),
-        serving_vnode_mapping.clone(),
-    )
-    .await?;
+
     let health_srv = HealthServiceImpl::new();
     let backup_srv = BackupServiceImpl::new(backup_manager);
     let telemetry_srv = TelemetryInfoServiceImpl::new(env.meta_store());
