@@ -584,7 +584,7 @@ impl LocalInstanceUnsyncData {
                 assert!(latest_epoch_data.is_empty());
                 assert!(!latest_epoch_data.has_spilled);
                 if cfg!(debug_assertions) {
-                    panic!("sync epoch exceeds latest epoch, and the current instance should have be archived");
+                    panic!("sync epoch exceeds latest epoch, and the current instance should have been archived");
                 }
                 warn!(
                     instance_id = self.instance_id,
@@ -711,7 +711,7 @@ impl TableUnsyncData {
         self.syncing_epochs
             .front()
             .cloned()
-            .or_else(|| self.max_synced_epoch)
+            .or(self.max_synced_epoch)
     }
 }
 
@@ -1395,10 +1395,11 @@ pub(crate) mod tests {
     use risingwave_common::catalog::TableId;
     use risingwave_common::must_match;
     use risingwave_common::util::epoch::{test_epoch, EpochExt};
+    use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_hummock_sdk::key::{FullKey, TableKey};
     use risingwave_hummock_sdk::version::HummockVersion;
     use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
-    use risingwave_pb::hummock::{KeyRange, SstableInfo};
+    use risingwave_pb::hummock::{KeyRange, SstableInfo, StateTableInfoDelta};
     use spin::Mutex;
     use tokio::spawn;
     use tokio::sync::mpsc::unbounded_channel;
@@ -1408,8 +1409,9 @@ pub(crate) mod tests {
     use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
     use crate::hummock::event_handler::uploader::uploader_imm::UploaderImm;
     use crate::hummock::event_handler::uploader::{
-        get_payload_imm_ids, HummockUploader, SyncedData, UploadTaskInfo, UploadTaskOutput,
-        UploadTaskPayload, UploaderContext, UploaderData, UploaderState, UploadingTask,
+        get_payload_imm_ids, HummockUploader, SyncedData, TableUnsyncData, UploadTaskInfo,
+        UploadTaskOutput, UploadTaskPayload, UploaderContext, UploaderData, UploaderState,
+        UploadingTask,
     };
     use crate::hummock::event_handler::{LocalInstanceId, TEST_LOCAL_INSTANCE_ID};
     use crate::hummock::local_version::pinned_version::PinnedVersion;
@@ -1434,12 +1436,39 @@ pub(crate) mod tests {
         fn data(&self) -> &UploaderData {
             must_match!(&self.state, UploaderState::Working(data) => data)
         }
+
+        fn table_data(&self) -> &TableUnsyncData {
+            self.data()
+                .unsync_data
+                .table_data
+                .get(&TEST_TABLE_ID)
+                .expect("should exist")
+        }
+
+        fn test_max_syncing_epoch(&self) -> HummockEpoch {
+            self.table_data().max_sync_epoch().unwrap()
+        }
+
+        fn test_max_synced_epoch(&self) -> HummockEpoch {
+            self.table_data().max_synced_epoch.unwrap()
+        }
     }
 
     fn test_hummock_version(epoch: HummockEpoch) -> HummockVersion {
         let mut version = HummockVersion::default();
         version.id = epoch;
         version.max_committed_epoch = epoch;
+        version.state_table_info.apply_delta(
+            &HashMap::from_iter([(
+                TEST_TABLE_ID,
+                StateTableInfoDelta {
+                    committed_epoch: epoch,
+                    safe_epoch: epoch,
+                    compaction_group_id: StaticCompactionGroupId::StateDefault as _,
+                },
+            )]),
+            &HashSet::new(),
+        );
         version
     }
 
@@ -1666,7 +1695,7 @@ pub(crate) mod tests {
 
         let (sync_tx, sync_rx) = oneshot::channel();
         uploader.start_sync_epoch(epoch1, sync_tx, HashSet::from_iter([TEST_TABLE_ID]));
-        assert_eq!(epoch1 as HummockEpoch, uploader.max_syncing_epoch);
+        assert_eq!(epoch1 as HummockEpoch, uploader.test_max_syncing_epoch());
         assert_eq!(1, uploader.data().syncing_data.len());
         let (_, syncing_data) = uploader.data().syncing_data.first_key_value().unwrap();
         assert_eq!(epoch1 as HummockEpoch, syncing_data.sync_epoch);
@@ -1705,7 +1734,7 @@ pub(crate) mod tests {
             }
             _ => unreachable!(),
         };
-        assert_eq!(epoch1, uploader.max_synced_epoch());
+        assert_eq!(epoch1, uploader.test_max_synced_epoch());
 
         let new_pinned_version = uploader
             .context
@@ -1721,8 +1750,10 @@ pub(crate) mod tests {
         let epoch1 = INITIAL_EPOCH.next_epoch();
 
         let (sync_tx, sync_rx) = oneshot::channel();
+        uploader.init_instance(TEST_LOCAL_INSTANCE_ID, TEST_TABLE_ID, epoch1);
+        uploader.local_seal_epoch_for_test(TEST_LOCAL_INSTANCE_ID, epoch1);
         uploader.start_sync_epoch(epoch1, sync_tx, HashSet::from_iter([TEST_TABLE_ID]));
-        assert_eq!(epoch1, uploader.max_syncing_epoch);
+        assert_eq!(epoch1, uploader.test_max_syncing_epoch());
 
         assert_uploader_pending(&mut uploader).await;
 
@@ -1732,7 +1763,7 @@ pub(crate) mod tests {
             }
             _ => unreachable!(),
         };
-        assert_eq!(epoch1, uploader.max_synced_epoch());
+        assert_eq!(epoch1, uploader.test_max_synced_epoch());
         let new_pinned_version = uploader
             .context
             .pinned_version
@@ -1755,7 +1786,7 @@ pub(crate) mod tests {
 
         let (sync_tx, sync_rx) = oneshot::channel();
         uploader.start_sync_epoch(epoch1, sync_tx, HashSet::from_iter([TEST_TABLE_ID]));
-        assert_eq!(epoch1, uploader.max_syncing_epoch);
+        assert_eq!(epoch1, uploader.test_max_syncing_epoch());
 
         assert_uploader_pending(&mut uploader).await;
 
@@ -1765,7 +1796,7 @@ pub(crate) mod tests {
             }
             _ => unreachable!(),
         };
-        assert_eq!(epoch1, uploader.max_synced_epoch());
+        assert_eq!(epoch1, uploader.test_max_synced_epoch());
         let new_pinned_version = uploader
             .context
             .pinned_version
@@ -1798,28 +1829,30 @@ pub(crate) mod tests {
         let version3 = initial_pinned_version.new_pin_version(test_hummock_version(epoch3));
         let version4 = initial_pinned_version.new_pin_version(test_hummock_version(epoch4));
         let version5 = initial_pinned_version.new_pin_version(test_hummock_version(epoch5));
-        uploader.update_pinned_version(version1);
-        assert_eq!(epoch1, uploader.max_synced_epoch);
-        assert_eq!(epoch1, uploader.max_syncing_epoch);
 
         uploader.init_instance(TEST_LOCAL_INSTANCE_ID, TEST_TABLE_ID, epoch6);
+
+        uploader.update_pinned_version(version1);
+        assert_eq!(epoch1, uploader.test_max_synced_epoch());
+        assert_eq!(epoch1, uploader.test_max_syncing_epoch());
+
         let imm = gen_imm(epoch6).await;
         uploader.add_imm(TEST_LOCAL_INSTANCE_ID, imm.clone());
         uploader.update_pinned_version(version2);
-        assert_eq!(epoch2, uploader.max_synced_epoch);
-        assert_eq!(epoch2, uploader.max_syncing_epoch);
+        assert_eq!(epoch2, uploader.test_max_synced_epoch());
+        assert_eq!(epoch2, uploader.test_max_syncing_epoch());
 
         uploader.local_seal_epoch_for_test(TEST_LOCAL_INSTANCE_ID, epoch6);
         uploader.update_pinned_version(version3);
-        assert_eq!(epoch3, uploader.max_synced_epoch);
-        assert_eq!(epoch3, uploader.max_syncing_epoch);
+        assert_eq!(epoch3, uploader.test_max_synced_epoch());
+        assert_eq!(epoch3, uploader.test_max_syncing_epoch());
 
         let (sync_tx, sync_rx) = oneshot::channel();
         uploader.start_sync_epoch(epoch6, sync_tx, HashSet::from_iter([TEST_TABLE_ID]));
-        assert_eq!(epoch6, uploader.max_syncing_epoch);
+        assert_eq!(epoch6, uploader.test_max_syncing_epoch());
         uploader.update_pinned_version(version4);
-        assert_eq!(epoch4, uploader.max_synced_epoch);
-        assert_eq!(epoch6, uploader.max_syncing_epoch);
+        assert_eq!(epoch4, uploader.test_max_synced_epoch());
+        assert_eq!(epoch6, uploader.test_max_syncing_epoch());
 
         let sst = uploader.next_uploaded_sst().await;
         assert_eq!(&get_imm_ids([&imm]), sst.imm_ids());
@@ -1834,8 +1867,8 @@ pub(crate) mod tests {
         }
 
         uploader.update_pinned_version(version5);
-        assert_eq!(epoch6, uploader.max_synced_epoch);
-        assert_eq!(epoch6, uploader.max_syncing_epoch);
+        assert_eq!(epoch6, uploader.test_max_synced_epoch());
+        assert_eq!(epoch6, uploader.test_max_syncing_epoch());
     }
 
     fn prepare_uploader_order_test(
@@ -2083,7 +2116,7 @@ pub(crate) mod tests {
         } else {
             unreachable!("should be sync finish");
         }
-        assert_eq!(epoch2, uploader.max_synced_epoch);
+        assert_eq!(epoch2, uploader.test_max_synced_epoch());
 
         // current uploader state:
         // unsealed: epoch4: imm: imm4
@@ -2137,7 +2170,7 @@ pub(crate) mod tests {
         } else {
             unreachable!("should be sync finish");
         }
-        assert_eq!(epoch4, uploader.max_synced_epoch);
+        assert_eq!(epoch4, uploader.test_max_synced_epoch());
 
         // current uploader state:
         // unsealed: empty
