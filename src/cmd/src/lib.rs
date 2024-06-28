@@ -39,6 +39,7 @@ risingwave_expr_impl::enable!();
 
 pub fn compute(opts: ComputeNodeOpts) {
     init_risingwave_logger(LoggerSettings::from_opts(&opts));
+    
     main_okk(risingwave_compute::start(opts));
 }
 
