@@ -17,13 +17,13 @@ use risingwave_common::current_cluster_version;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::catalog::{CreateType, Index, PbSource, Sink, Table};
 use risingwave_pb::ddl_service::TableJobType;
-use strum::{EnumDiscriminants, EnumIs};
+use strum::EnumDiscriminants;
 
 use crate::model::FragmentId;
 
 // This enum is used in order to re-use code in `DdlServiceImpl` for creating MaterializedView and
 // Sink.
-#[derive(Debug, Clone, EnumDiscriminants, EnumIs)]
+#[derive(Debug, Clone, EnumDiscriminants)]
 pub enum StreamingJob {
     MaterializedView(Table),
     Sink(Sink, Option<(Table, Option<PbSource>)>),

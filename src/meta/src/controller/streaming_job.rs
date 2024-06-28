@@ -309,13 +309,12 @@ impl CatalogController {
     pub async fn create_internal_table_catalog(
         &self,
         job_id: ObjectId,
-        is_mv: bool,
         internal_tables: Vec<PbTable>,
     ) -> MetaResult<HashMap<u32, u32>> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
         let mut table_id_map = HashMap::new();
-        for table in &internal_tables {
+        for table in internal_tables {
             let table_id = Self::create_object(
                 &txn,
                 ObjectType::Table,
@@ -326,27 +325,13 @@ impl CatalogController {
             .await?
             .oid;
             table_id_map.insert(table.id, table_id as u32);
-            let mut table: table::ActiveModel = table.clone().into();
+            let mut table: table::ActiveModel = table.into();
             table.table_id = Set(table_id as _);
             table.belongs_to_job_id = Set(Some(job_id as _));
             table.fragment_id = NotSet;
             Table::insert(table).exec(&txn).await?;
         }
         txn.commit().await?;
-        if is_mv {
-            let relations = internal_tables
-                .iter()
-                .map(|table| Relation {
-                    relation_info: Some(RelationInfo::Table(table.to_owned())),
-                })
-                .collect_vec();
-            let _version = self
-                .notify_frontend(
-                    Operation::Delete,
-                    Info::RelationGroup(RelationGroup { relations }),
-                )
-                .await;
-        }
 
         Ok(table_id_map)
     }
