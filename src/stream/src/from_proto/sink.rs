@@ -26,6 +26,7 @@ use risingwave_pb::catalog::Table;
 use risingwave_pb::plan_common::PbColumnCatalog;
 use risingwave_pb::stream_plan::{SinkLogStoreType, SinkNode};
 use risingwave_pb::telemetry::{PbTelemetryConnectorDirection, PbTelemetryEventStage};
+use serde_json::json;
 
 use super::*;
 use crate::common::log_store_impl::in_mem::BoundedInMemLogStoreFactory;
@@ -37,14 +38,21 @@ use crate::telemetry::report_event;
 
 pub struct SinkExecutorBuilder;
 
-fn telemetry_sink_build(sink_id: &SinkId) {
+fn telemetry_sink_build(
+    sink_id: &SinkId,
+    connector_name: &str,
+    sink_format_desc: &Option<SinkFormatDesc>,
+) {
+    let attr = sink_format_desc
+        .as_ref()
+        .map(|f| json!({"format": f.format, "encode": f.encode}).to_string());
     report_event(
         PbTelemetryEventStage::CreateStreamJob,
         "sink".to_string(),
         sink_id.sink_id() as i64,
-        None,
+        Some(connector_name.to_string()),
         Some(PbTelemetryConnectorDirection::Sink),
-        None,
+        attr,
     )
 }
 
