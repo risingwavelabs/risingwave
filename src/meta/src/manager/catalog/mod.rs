@@ -1797,15 +1797,13 @@ impl CatalogManager {
             user_core.decrease_ref(index.owner);
         }
 
-        // `tables_removed` contains both index table and mv.
+        // `tables_removed` contains both index, table and mv.
         for table in &tables_removed {
             user_core.decrease_ref(table.owner);
         }
 
         for source in &sources_removed {
             user_core.decrease_ref(source.owner);
-            refcnt_dec_connection(database_core, source.connection_id);
-            refcnt_dec_source_secret_ref(database_core, source)?;
         }
 
         for view in &views_removed {
@@ -1830,6 +1828,11 @@ impl CatalogManager {
             for dependent_relation_id in &table.dependent_relations {
                 database_core.decrease_relation_ref_count(*dependent_relation_id);
             }
+        }
+
+        for source in &sources_removed {
+            refcnt_dec_connection(database_core, source.connection_id);
+            refcnt_dec_source_secret_ref(database_core, source)?;
         }
 
         for view in &views_removed {
@@ -2952,11 +2955,11 @@ impl CatalogManager {
             database_core.mark_creating(&source_key);
             database_core.mark_creating(&mview_key);
             database_core.mark_creating_streaming_job(table.id, mview_key);
-            refcnt_inc_source_secret_ref(database_core, source)?;
             ensure!(table.dependent_relations.is_empty());
             // source and table
             user_core.increase_ref_count(source.owner, 2);
 
+            refcnt_inc_source_secret_ref(database_core, source)?;
             // We have validate the status of connection before starting the procedure.
             refcnt_inc_connection(database_core, source.connection_id)?;
             Ok(())
@@ -3189,8 +3192,8 @@ impl CatalogManager {
             for &dependent_relation_id in &sink.dependent_relations {
                 database_core.increase_relation_ref_count(dependent_relation_id);
             }
-            refcnt_inc_sink_secret_ref(database_core, sink);
             user_core.increase_ref(sink.owner);
+            refcnt_inc_sink_secret_ref(database_core, sink);
             // We have validate the status of connection before starting the procedure.
             refcnt_inc_connection(database_core, sink.connection_id)?;
             Ok(())
