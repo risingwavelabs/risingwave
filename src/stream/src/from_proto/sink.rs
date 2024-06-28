@@ -18,13 +18,14 @@ use anyhow::anyhow;
 use risingwave_common::catalog::{ColumnCatalog, Schema};
 use risingwave_common::types::DataType;
 use risingwave_connector::match_sink_name_str;
-use risingwave_connector::sink::catalog::{SinkFormatDesc, SinkType};
+use risingwave_connector::sink::catalog::{SinkFormatDesc, SinkId, SinkType};
 use risingwave_connector::sink::{
     SinkError, SinkMetaClient, SinkParam, SinkWriterParam, CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION,
 };
 use risingwave_pb::catalog::Table;
 use risingwave_pb::plan_common::PbColumnCatalog;
 use risingwave_pb::stream_plan::{SinkLogStoreType, SinkNode};
+use risingwave_pb::telemetry::{PbTelemetryConnectorDirection, PbTelemetryEventStage};
 
 use super::*;
 use crate::common::log_store_impl::in_mem::BoundedInMemLogStoreFactory;
@@ -32,8 +33,20 @@ use crate::common::log_store_impl::kv_log_store::{
     KvLogStoreFactory, KvLogStoreMetrics, KvLogStorePkInfo, KV_LOG_STORE_V2_INFO,
 };
 use crate::executor::SinkExecutor;
+use crate::telemetry::report_event;
 
 pub struct SinkExecutorBuilder;
+
+fn telemetry_sink_build(sink_id: &SinkId) {
+    report_event(
+        PbTelemetryEventStage::CreateStreamJob,
+        "sink".to_string(),
+        sink_id.sink_id() as i64,
+        None,
+        Some(PbTelemetryConnectorDirection::Sink),
+        None,
+    )
+}
 
 fn resolve_pk_info(
     input_schema: &Schema,
