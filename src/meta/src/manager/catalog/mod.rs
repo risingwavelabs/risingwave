@@ -1114,6 +1114,18 @@ impl CatalogManager {
                 user_core.decrease_ref(table.owner);
             }
         }
+        // Notify frontend of cleaned tables.
+        let relations = tables_to_clean
+            .into_iter()
+            .map(|table| Relation {
+                relation_info: RelationInfo::Table(table).into(),
+            })
+            .collect_vec();
+        self.notify_frontend(
+            Operation::Delete,
+            Info::RelationGroup(RelationGroup { relations }),
+        )
+        .await;
         Ok(())
     }
 
