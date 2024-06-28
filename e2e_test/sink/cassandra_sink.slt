@@ -24,6 +24,28 @@ statement ok
 FLUSH;
 
 statement ok
+CREATE TABLE t7 ("TEST_V1" int primary key, "TEST_V1" int, "TEST_V1" int);
+
+statement ok
+CREATE SINK s7
+FROM
+    test_uppercase WITH (
+    connector = 'cassandra',
+    type = 'append-only',
+    force_append_only='true',
+    cassandra.url = 'cassandra-server:9042',
+    cassandra.keyspace  = 'demo',
+    cassandra.table = 'test_uppercase',
+    cassandra.datacenter = 'datacenter1',
+);
+
+statement ok
+INSERT INTO t7 VALUES (1, 1, 1);
+
+statement ok
+FLUSH;
+
+statement ok
 DROP SINK s6;
 
 statement ok
@@ -31,3 +53,9 @@ DROP MATERIALIZED VIEW mv6;
 
 statement ok
 DROP TABLE t6;
+
+statement ok
+DROP SINK s7;
+
+statement ok
+DROP TABLE t7;

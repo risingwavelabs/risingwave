@@ -51,15 +51,28 @@ export CQLSH_PORT=9042
 ./cqlsh --request-timeout=20 -e "CREATE KEYSPACE demo WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1};use demo;
 CREATE table demo_bhv_table(v1 int primary key,v2 smallint,v3 bigint,v4 float,v5 double,v6 text,v7 date,v8 timestamp,v9 boolean);"
 
+./cqlsh --request-timeout=20 -e "use demo;CREATE table test_uppercase(\"TEST_V1\" int primary key, \"TEST_V2\" int,\"TEST_V3\" int);"
+
 echo "--- testing sinks"
 cd ../../
 sqllogictest -p 4566 -d dev './e2e_test/sink/cassandra_sink.slt'
 sleep 1
 cd apache-cassandra-4.1.3/bin
 ./cqlsh --request-timeout=20 -e "COPY demo.demo_bhv_table TO './query_result.csv' WITH HEADER = false AND ENCODING = 'UTF-8';"
+./cqlsh --request-timeout=20 -e "COPY demo.test_uppercase TO './query_result2.csv' WITH HEADER = false AND ENCODING = 'UTF-8';"
 
 if cat ./query_result.csv | awk -F "," '{
     exit !($1 == 1 && $2 == 1 && $3 == 1 && $4 == 1.1 && $5 == 1.2 && $6 == "test" && $7 == "2013-01-01" && $8 == "2013-01-01 01:01:01.000+0000" && $9 == "False\r"); }'; then
+  echo "Cassandra sink check passed"
+else
+  echo "The output is not as expected."
+  echo "output:"
+  cat ./query_result.csv
+  exit 1
+fi
+
+if cat ./query_result2.csv | awk -F "," '{
+    exit !($1 == 1 && $2 == 1 && $3 == 1); }'; then
   echo "Cassandra sink check passed"
 else
   echo "The output is not as expected."
