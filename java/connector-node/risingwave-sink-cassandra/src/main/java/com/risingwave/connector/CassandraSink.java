@@ -193,7 +193,10 @@ public class CassandraSink extends SinkWriterBase {
 
     private String createInsertStatement(String tableName, TableSchema tableSchema) {
         String[] columnNames = tableSchema.getColumnNames();
-        String columnNamesString = String.join(", ", columnNames);
+        String columnNamesString =
+                Arrays.stream(columnNames)
+                        .map(columnName -> "\"" + columnName + "\"")
+                        .collect(Collectors.joining(", "));
         String placeholdersString = String.join(", ", Collections.nCopies(columnNames.length, "?"));
         return String.format(
                 "INSERT INTO %s (%s) VALUES (%s)",
@@ -204,11 +207,11 @@ public class CassandraSink extends SinkWriterBase {
         List<String> primaryKeys = tableSchema.getPrimaryKeys();
         String setClause = // cassandra does not allow SET on primary keys
                 nonKeyColumns.stream()
-                        .map(columnName -> columnName + " = ?")
+                        .map(columnName -> "\"" + columnName + "\" = ?")
                         .collect(Collectors.joining(", "));
         String whereClause =
                 primaryKeys.stream()
-                        .map(columnName -> columnName + " = ?")
+                        .map(columnName -> "\"" + columnName + "\" = ?")
                         .collect(Collectors.joining(" AND "));
         return String.format("UPDATE %s SET %s WHERE %s", tableName, setClause, whereClause);
     }
@@ -217,7 +220,7 @@ public class CassandraSink extends SinkWriterBase {
         List<String> primaryKeys = tableSchema.getPrimaryKeys();
         String whereClause =
                 primaryKeys.stream()
-                        .map(columnName -> columnName + " = ?")
+                        .map(columnName -> "\"" + columnName + "\" = ?")
                         .collect(Collectors.joining(" AND "));
         return String.format("DELETE FROM %s WHERE %s", tableName, whereClause);
     }
