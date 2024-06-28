@@ -97,42 +97,46 @@ pub fn atanh_f64(input: F64) -> F64 {
     f64::atanh(input.0).into()
 }
 
+static DEGREE_THIRTY: f64 = 30.0;
+static DEGREE_FORTY_FIVE: f64 = 45.0;
+static DEGREE_SIXTY: f64 = 60.0;
+static DEGREE_ONE_HALF: f64 = 0.5;
+static DEGREE_ONE: f64 = 1.0;
+static RADIANS_PER_DEGREE: f64 = 0.017_453_292_519_943_295_769_2;
+
 // Constants we use to get more accurate results.
 // Depend on the machine and have to be evaluated at runtime
 // See PSQL: https://github.com/postgres/postgres/blob/78ec02d612a9b69039ec2610740f738968fe144d/src/backend/utils/adt/float.c#L2024
 fn sind_30() -> f64 {
-    f64::sin(30.0 * radians_per_degree())
+    f64::sin(DEGREE_THIRTY * RADIANS_PER_DEGREE)
 }
 
 fn one_minus_cosd_60() -> f64 {
-    1.0 - f64::cos(60.0 * radians_per_degree())
+    DEGREE_ONE - f64::cos(DEGREE_SIXTY * RADIANS_PER_DEGREE)
 }
 
 fn tand_45() -> f64 {
-    f64::tan(45.0 * radians_per_degree())
+    f64::tan(DEGREE_FORTY_FIVE * RADIANS_PER_DEGREE)
 }
 
 fn cotd_45() -> f64 {
-    f64::cos(45.0 * radians_per_degree()) / f64::sin(45.0 * radians_per_degree())
+    f64::cos(DEGREE_FORTY_FIVE * RADIANS_PER_DEGREE)
+        / f64::sin(DEGREE_FORTY_FIVE * RADIANS_PER_DEGREE)
 }
 
 fn asin_0_5() -> f64 {
-    f64::asin(0.5)
+    f64::asin(DEGREE_ONE_HALF)
 }
 
 fn acos_0_5() -> f64 {
-    f64::acos(0.5)
-}
-
-fn radians_per_degree() -> f64 {
-    PI / 180.0
+    f64::acos(DEGREE_ONE_HALF)
 }
 
 // returns the cosine of an angle that lies between 0 and 60 degrees. This will return exactly 1
 // when xi s 0, and exactly 0.5 when x is 60 degrees.
 fn cosd_0_to_60(x: f64) -> f64 {
     // https://github.com/postgres/postgres/blob/REL_15_2/src/backend/utils/adt/float.c
-    let one_minus_cos_x: f64 = 1.0 - f64::cos(x * radians_per_degree());
+    let one_minus_cos_x: f64 = 1.0 - f64::cos(x * RADIANS_PER_DEGREE);
     1.0 - (one_minus_cos_x / one_minus_cosd_60()) / 2.0
 }
 
@@ -140,7 +144,7 @@ fn cosd_0_to_60(x: f64) -> f64 {
 // x is 0, and exactly 0.5 when x is 30 degrees.
 fn sind_0_to_30(x: f64) -> f64 {
     // https://github.com/postgres/postgres/blob/REL_15_2/src/backend/utils/adt/float.c
-    let sin_x = f64::sin(x * radians_per_degree());
+    let sin_x = f64::sin(x * RADIANS_PER_DEGREE);
     (sin_x / sind_30()) / 2.0
 }
 
@@ -260,6 +264,20 @@ pub fn cotd_f64(input: F64) -> F64 {
     let mut arg1 = input.0 % 360.0;
     let mut sign = 1.0;
 
+    // hardcoding exact results.
+    if arg1 == 45.0 {
+        return F64::from(1.0);
+    }
+    if arg1 == 135.0 {
+        return F64::from(-1.0);
+    }
+    if arg1 == 225. {
+        return F64::from(1.0);
+    }
+    if arg1 == 315.0 {
+        return F64::from(-1.0);
+    }
+
     if arg1 < 0.0 {
         // cotd(-x) = -cotd(x)
         arg1 = -arg1;
@@ -299,6 +317,20 @@ pub fn tand_f64(input: F64) -> F64 {
 
     let mut arg1 = input.0 % 360.0;
     let mut sign = 1.0;
+
+    // hardcoding exact results.
+    if arg1 == 45.0 {
+        return F64::from(1.0);
+    }
+    if arg1 == 135.0 {
+        return F64::from(-1.0);
+    }
+    if arg1 == 225. {
+        return F64::from(1.0);
+    }
+    if arg1 == 315.0 {
+        return F64::from(-1.0);
+    }
 
     if arg1 < 0.0 {
         // tand(-x) = -tand(x)
@@ -643,5 +675,17 @@ mod tests {
             asinh_f64(F64::from(x.powi(2) - 1.0) / (two * x)),
             atanh_f64(F64::from(x.powi(2) - 1.0) / F64::from(x.powi(2) + 1.0)),
         );
+    }
+
+    #[test]
+    fn test_exact() {
+        assert_eq!(cotd_f64(F64::from(135.0)).0, -1.0);
+        assert_eq!(cotd_f64(F64::from(225.0)).0, 1.0);
+        assert_eq!(cotd_f64(F64::from(315.0)).0, -1.0);
+        assert_eq!(cotd_f64(F64::from(45.0)).0, 1.0);
+        assert_eq!(tand_f64(F64::from(45.0)).0, 1.0);
+        assert_eq!(tand_f64(F64::from(135.0)).0, -1.0);
+        assert_eq!(tand_f64(F64::from(225.0)).0, 1.0);
+        assert_eq!(tand_f64(F64::from(315.0)).0, -1.0);
     }
 }
