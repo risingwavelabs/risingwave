@@ -15,22 +15,40 @@
 //! This module provide jni catalog.
 
 use std::collections::HashMap;
+use std::fmt::Debug;
 use std::sync::Arc;
 
 use anyhow::Context;
 use async_trait::async_trait;
+use iceberg::io::FileIO;
+use iceberg::spec::TableMetadata;
+use iceberg::table::Table as TableV2;
+use iceberg::{
+    Catalog as CatalogV2, Namespace, NamespaceIdent, TableCommit, TableCreation, TableIdent,
+};
 use icelake::catalog::models::{CommitTableRequest, CommitTableResponse, LoadTableResult};
 use icelake::catalog::{
-    BaseCatalogConfig, Catalog, CatalogRef, IcebergTableIoArgs, OperatorCreator, UpdateTable,
+    BaseCatalogConfig, Catalog, IcebergTableIoArgs, OperatorCreator, UpdateTable,
 };
 use icelake::{ErrorKind, Table, TableIdentifier};
+use itertools::Itertools;
 use jni::objects::{GlobalRef, JObject};
 use jni::JavaVM;
 use risingwave_jni_core::call_method;
 use risingwave_jni_core::jvm_runtime::{execute_with_jni_env, jobj_to_str, JVM};
+use serde::Deserialize;
 
 use crate::error::ConnectorResult;
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+struct LoadTableResponse {
+    pub metadata_location: Option<String>,
+    pub metadata: TableMetadata,
+    pub _config: Option<HashMap<String, String>>,
+}
+
+#[derive(Debug)]
 pub struct JniCatalog {
     java_catalog: GlobalRef,
     jvm: &'static JavaVM,
@@ -138,13 +156,140 @@ impl Catalog for JniCatalog {
     }
 }
 
+#[async_trait]
+impl CatalogV2 for JniCatalog {
+    /// List namespaces from table.
+    async fn list_namespaces(
+        &self,
+        _parent: Option<&NamespaceIdent>,
+    ) -> iceberg::Result<Vec<NamespaceIdent>> {
+        todo!()
+    }
+
+    /// Create a new namespace inside the catalog.
+    async fn create_namespace(
+        &self,
+        _namespace: &iceberg::NamespaceIdent,
+        _properties: HashMap<String, String>,
+    ) -> iceberg::Result<iceberg::Namespace> {
+        todo!()
+    }
+
+    /// Get a namespace information from the catalog.
+    async fn get_namespace(&self, _namespace: &NamespaceIdent) -> iceberg::Result<Namespace> {
+        todo!()
+    }
+
+    /// Check if namespace exists in catalog.
+    async fn namespace_exists(&self, _namespace: &NamespaceIdent) -> iceberg::Result<bool> {
+        todo!()
+    }
+
+    /// Drop a namespace from the catalog.
+    async fn drop_namespace(&self, _namespace: &NamespaceIdent) -> iceberg::Result<()> {
+        todo!()
+    }
+
+    /// List tables from namespace.
+    async fn list_tables(&self, _namespace: &NamespaceIdent) -> iceberg::Result<Vec<TableIdent>> {
+        todo!()
+    }
+
+    async fn update_namespace(
+        &self,
+        _namespace: &NamespaceIdent,
+        _properties: HashMap<String, String>,
+    ) -> iceberg::Result<()> {
+        todo!()
+    }
+
+    /// Create a new table inside the namespace.
+    async fn create_table(
+        &self,
+        _namespace: &NamespaceIdent,
+        _creation: TableCreation,
+    ) -> iceberg::Result<TableV2> {
+        todo!()
+    }
+
+    /// Load table from the catalog.
+    async fn load_table(&self, table: &TableIdent) -> iceberg::Result<TableV2> {
+        execute_with_jni_env(self.jvm, |env| {
+            let table_name_str = format!(
+                "{}.{}",
+                table.namespace().clone().inner().into_iter().join("."),
+                table.name()
+            );
+
+            let table_name_jstr = env.new_string(&table_name_str).unwrap();
+
+            let result_json =
+                call_method!(env, self.java_catalog.as_obj(), {String loadTable(String)},
+                &table_name_jstr)
+                .with_context(|| format!("Failed to load iceberg table: {table_name_str}"))?;
+
+            let rust_json_str = jobj_to_str(env, result_json)?;
+
+            let resp: LoadTableResponse = serde_json::from_str(&rust_json_str)?;
+
+            let metadata_location = resp.metadata_location.ok_or_else(|| {
+                icelake::Error::new(
+                    ErrorKind::IcebergFeatureUnsupported,
+                    "Loading uncommitted table is not supported!",
+                )
+            })?;
+
+            tracing::info!("Table metadata location of {table_name_str} is {metadata_location}");
+
+            let table_metadata = resp.metadata;
+
+            let file_io = FileIO::from_path(&metadata_location)?
+                .with_props(self.config.table_io_configs.iter())
+                .build()?;
+
+            Ok(TableV2::builder()
+                .file_io(file_io)
+                .identifier(table.clone())
+                .metadata(table_metadata)
+                .build())
+        })
+        .map_err(|e| {
+            iceberg::Error::new(
+                iceberg::ErrorKind::Unexpected,
+                "Failed to load iceberg table.",
+            )
+            .with_source(e)
+        })
+    }
+
+    /// Drop a table from the catalog.
+    async fn drop_table(&self, _table: &TableIdent) -> iceberg::Result<()> {
+        todo!()
+    }
+
+    /// Check if a table exists in the catalog.
+    async fn table_exists(&self, _table: &TableIdent) -> iceberg::Result<bool> {
+        todo!()
+    }
+
+    /// Rename a table in the catalog.
+    async fn rename_table(&self, _src: &TableIdent, _dest: &TableIdent) -> iceberg::Result<()> {
+        todo!()
+    }
+
+    /// Update a table to the catalog.
+    async fn update_table(&self, _commit: TableCommit) -> iceberg::Result<TableV2> {
+        todo!()
+    }
+}
+
 impl JniCatalog {
-    pub fn build(
+    fn build(
         base_config: BaseCatalogConfig,
         name: impl ToString,
         catalog_impl: impl ToString,
         java_catalog_props: HashMap<String, String>,
-    ) -> ConnectorResult<CatalogRef> {
+    ) -> ConnectorResult<Self> {
         let jvm = JVM.get_or_init()?;
 
         execute_with_jni_env(jvm, |env| {
@@ -175,12 +320,32 @@ impl JniCatalog {
 
             let jni_catalog = env.new_global_ref(jni_catalog_wrapper.l().unwrap())?;
 
-            Ok(Arc::new(Self {
+            Ok(Self {
                 java_catalog: jni_catalog,
                 jvm,
                 config: base_config,
-            }) as CatalogRef)
+            })
         })
         .map_err(Into::into)
+    }
+
+    pub fn build_catalog(
+        base_config: BaseCatalogConfig,
+        name: impl ToString,
+        catalog_impl: impl ToString,
+        java_catalog_props: HashMap<String, String>,
+    ) -> ConnectorResult<Arc<dyn Catalog>> {
+        let catalog = Self::build(base_config, name, catalog_impl, java_catalog_props)?;
+        Ok(Arc::new(catalog) as Arc<dyn Catalog>)
+    }
+
+    pub fn build_catalog_v2(
+        base_config: BaseCatalogConfig,
+        name: impl ToString,
+        catalog_impl: impl ToString,
+        java_catalog_props: HashMap<String, String>,
+    ) -> ConnectorResult<Arc<dyn CatalogV2>> {
+        let catalog = Self::build(base_config, name, catalog_impl, java_catalog_props)?;
+        Ok(Arc::new(catalog) as Arc<dyn CatalogV2>)
     }
 }

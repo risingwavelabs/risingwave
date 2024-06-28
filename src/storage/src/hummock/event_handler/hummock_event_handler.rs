@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::pin::pin;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::Relaxed;
@@ -466,6 +466,7 @@ impl HummockEventHandler {
         &mut self,
         new_sync_epoch: HummockEpoch,
         sync_result_sender: oneshot::Sender<HummockResult<SyncedData>>,
+        table_ids: HashSet<TableId>,
     ) {
         debug!(
             "awaiting for epoch to be synced: {}, max_synced_epoch: {}",
@@ -473,7 +474,7 @@ impl HummockEventHandler {
             self.uploader.max_synced_epoch()
         );
         self.uploader
-            .start_sync_epoch(new_sync_epoch, sync_result_sender);
+            .start_sync_epoch(new_sync_epoch, sync_result_sender, table_ids);
     }
 
     async fn handle_clear(&mut self, notifier: oneshot::Sender<()>, prev_epoch: u64) {
@@ -729,8 +730,9 @@ impl HummockEventHandler {
             HummockEvent::SyncEpoch {
                 new_sync_epoch,
                 sync_result_sender,
+                table_ids,
             } => {
-                self.handle_sync_epoch(new_sync_epoch, sync_result_sender);
+                self.handle_sync_epoch(new_sync_epoch, sync_result_sender, table_ids);
             }
             HummockEvent::Clear(_, _) => {
                 unreachable!("clear is handled in separated async context")
@@ -917,6 +919,7 @@ impl SyncedData {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
     use std::future::{poll_fn, Future};
     use std::sync::Arc;
     use std::task::Poll;
@@ -1188,12 +1191,14 @@ mod tests {
         send_event(HummockEvent::SyncEpoch {
             new_sync_epoch: epoch1,
             sync_result_sender: tx1,
+            table_ids: HashSet::from_iter([TEST_TABLE_ID]),
         });
         assert!(poll_fn(|cx| Poll::Ready(rx1.poll_unpin(cx).is_pending())).await);
         let (tx2, mut rx2) = oneshot::channel();
         send_event(HummockEvent::SyncEpoch {
             new_sync_epoch: epoch2,
             sync_result_sender: tx2,
+            table_ids: HashSet::from_iter([TEST_TABLE_ID]),
         });
         assert!(poll_fn(|cx| Poll::Ready(rx2.poll_unpin(cx).is_pending())).await);
 
