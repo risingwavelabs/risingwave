@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::cmp::min;
+use std::collections::HashSet;
 use std::default::Default;
 use std::fmt::{Debug, Formatter};
 use std::future::Future;
@@ -330,7 +331,7 @@ pub trait StateStore: StateStoreRead + StaticSendSync + Clone {
         epoch: HummockReadEpoch,
     ) -> impl Future<Output = StorageResult<()>> + Send + '_;
 
-    fn sync(&self, epoch: u64) -> impl SyncFuture;
+    fn sync(&self, epoch: u64, table_ids: HashSet<TableId>) -> impl SyncFuture;
 
     /// update max current epoch in storage.
     fn seal_epoch(&self, epoch: u64, is_checkpoint: bool);

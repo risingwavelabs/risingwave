@@ -48,6 +48,7 @@ impl LocalSystemParamsManager {
         let this = Self::new_inner(initial_params.clone());
 
         // Spawn a task to run the common handler.
+        // TODO(bugen): this may be spawned multiple times under standalone deployment, though idempotent.
         tokio::spawn({
             let mut rx = this.tx.subscribe();
             async move {
