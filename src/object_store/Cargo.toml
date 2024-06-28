@@ -33,7 +33,7 @@ itertools = { workspace = true }
 madsim = "0.2.27"
 
 # opendal = { version = "0.47", features = [
-opendal = { git = "https://github.com/apache/opendal.git", rev = "d58dfb75476e11aef0306a57f77ec64de26fba6b", features = [
+opendal = { git = "https://github.com/apache/opendal.git", rev = "b4dda8f3fad8364bafd44c496f17df435f4b7f6c", features = [
     "executors-tokio",
     "services-azblob",
     "services-fs",
