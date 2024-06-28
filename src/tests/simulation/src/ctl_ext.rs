@@ -26,7 +26,7 @@ use itertools::Itertools;
 use rand::seq::{IteratorRandom, SliceRandom};
 use rand::{thread_rng, Rng};
 use risingwave_common::catalog::TableId;
-use risingwave_common::hash::ParallelUnitId;
+use risingwave_common::hash::{ParallelUnitId, WorkerSlotId};
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::PbFragment;
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
@@ -158,6 +158,47 @@ impl Fragment {
         f
     }
 
+    /// Generate a reschedule plan for the fragment.
+    pub fn reschedule_v2(
+        &self,
+        remove: impl AsRef<[WorkerSlotId]>,
+        add: impl AsRef<[WorkerSlotId]>,
+    ) -> String {
+        let remove = remove.as_ref();
+        let add = add.as_ref();
+
+        let mut worker_decreased = HashMap::new();
+        for worker_slot in remove {
+            let worker_id = worker_slot.worker_id();
+            *worker_decreased.entry(worker_id).or_insert(0) += 1;
+        }
+
+        let mut worker_increased = HashMap::new();
+        for worker_slot in add {
+            let worker_id = worker_slot.worker_id();
+            *worker_increased.entry(worker_id).or_insert(0) += 1;
+        }
+
+        let worker_decr_str = worker_decreased
+            .iter()
+            .map(|(work, count)| format!("{}:{}", work, count))
+            .join(",");
+        let worker_incr_str = worker_increased
+            .iter()
+            .map(|(work, count)| format!("{}:{}", work, count))
+            .join(",");
+
+        let mut f = String::new();
+        write!(f, "{}", self.id()).unwrap();
+        if !worker_decr_str.is_empty() {
+            write!(f, " -[{}]", worker_decr_str).unwrap();
+        }
+        if !worker_incr_str.is_empty() {
+            write!(f, " +[{}]", worker_incr_str).unwrap();
+        }
+        f
+    }
+
     /// Generate a random reschedule plan for the fragment.
     ///
     /// Consumes `self` as the actor info will be stale after rescheduling.
@@ -185,6 +226,38 @@ impl Fragment {
             .collect_vec();
 
         self.reschedule(remove, add)
+    }
+
+    /// Generate a random reschedule plan for the fragment.
+    ///
+    /// Consumes `self` as the actor info will be stale after rescheduling.
+    pub fn random_reschedule_v2(self) -> String {
+        let all_worker_slots = self.all_worker_slots();
+        let used_worker_slots = self.used_worker_slots();
+
+        let rng = &mut thread_rng();
+        let target_worker_slot_count = match self.inner.distribution_type() {
+            FragmentDistributionType::Unspecified => unreachable!(),
+            FragmentDistributionType::Single => 1,
+            FragmentDistributionType::Hash => rng.gen_range(1..=all_worker_slots.len()),
+        };
+
+        let target_worker_slots: HashSet<_> = all_worker_slots.into_iter()
+            .choose_multiple(rng, target_worker_slot_count)
+            .into_iter()
+            .collect();
+
+        let remove = used_worker_slots
+            .difference(&target_worker_slots)
+            .copied()
+            .collect_vec();
+
+        let add = target_worker_slots
+            .difference(&used_worker_slots)
+            .copied()
+            .collect_vec();
+
+        self.reschedule_v2(remove, add)
     }
 
     pub fn parallel_unit_usage(&self) -> (Vec<ParallelUnitId>, HashSet<ParallelUnitId>) {
@@ -220,7 +293,7 @@ impl Fragment {
         // (all_parallel_units, current_parallel_units)
     }
 
-    pub fn all_worker_slots(&self) -> HashMap<u32, usize> {
+    pub fn all_worker_count(&self) -> HashMap<u32, usize> {
         self.r
             .worker_nodes
             .iter()
@@ -228,11 +301,18 @@ impl Fragment {
             .collect()
     }
 
+    pub fn all_worker_slots(&self) -> HashSet<WorkerSlotId> {
+        self.all_worker_count()
+            .into_iter()
+            .flat_map(|(k, v)| (0..v).map(move |idx| WorkerSlotId::new(k, idx as _)))
+            .collect()
+    }
+
     pub fn parallelism(&self) -> usize {
         self.inner.actors.len()
     }
 
-    pub fn used_worker_slots(&self) -> HashMap<u32, usize> {
+    pub fn used_worker_count(&self) -> HashMap<u32, usize> {
         let actor_to_worker: HashMap<_, _> = self
             .r
             .table_fragments
@@ -255,6 +335,13 @@ impl Fragment {
                 *acc.entry(num).or_insert(0) += 1;
                 acc
             })
+    }
+
+    pub fn used_worker_slots(&self) -> HashSet<WorkerSlotId> {
+        self.used_worker_count()
+            .into_iter()
+            .flat_map(|(k, v)| (0..v).map(move |idx| WorkerSlotId::new(k, idx as _)))
+            .collect()
     }
 }
 

@@ -14,6 +14,7 @@
 
 use anyhow::Result;
 use itertools::Itertools;
+use risingwave_common::hash::WorkerSlotId;
 use risingwave_simulation::cluster::{Cluster, Configuration};
 use risingwave_simulation::ctl_ext::predicate::{identity_contains, no_identity_contains};
 use risingwave_simulation::utils::AssertResult;
@@ -86,8 +87,12 @@ async fn test_delta_join() -> Result<()> {
 
     test_works!();
 
+    let workers = union_fragment.all_worker_count().into_keys().collect_vec();
     // Scale-in one side
-    cluster.reschedule(format!("{}-[0]", t1.id())).await?;
+    cluster
+        .reschedule(t1.reschedule_v2([WorkerSlotId::new(workers[0], 0)], []))
+        .await?;
+
     test_works!();
 
     // Scale-in both sides together
@@ -137,8 +142,15 @@ async fn test_share_multiple_no_shuffle_upstream() -> Result<()> {
         .locate_one_fragment([identity_contains("hashagg")])
         .await?;
 
-    cluster.reschedule(fragment.reschedule([0], [])).await?;
-    cluster.reschedule(fragment.reschedule([], [0])).await?;
+    let workers = fragment.all_worker_count().into_keys().collect_vec();
+
+    cluster
+        .reschedule(fragment.reschedule_v2([WorkerSlotId::new(workers[0], 0)], []))
+        .await?;
+
+    cluster
+        .reschedule(fragment.reschedule_v2([], [WorkerSlotId::new(workers[0], 0)]))
+        .await?;
 
     Ok(())
 }
@@ -157,15 +169,20 @@ async fn test_resolve_no_shuffle_upstream() -> Result<()> {
         .locate_one_fragment([identity_contains("StreamTableScan")])
         .await?;
 
-    let result = cluster.reschedule(fragment.reschedule([0], [])).await;
+    let workers = fragment.all_worker_count().into_keys().collect_vec();
+
+    let result = cluster
+        .reschedule(fragment.reschedule_v2([WorkerSlotId::new(workers[0], 0)], []))
+        .await;
 
     assert!(result.is_err());
 
     cluster
-        .reschedule_resolve_no_shuffle(fragment.reschedule([0], []))
+        .reschedule(fragment.reschedule_v2([WorkerSlotId::new(workers[0], 0)], []))
         .await?;
+
     cluster
-        .reschedule_resolve_no_shuffle(fragment.reschedule([], [0]))
+        .reschedule(fragment.reschedule_v2([], [WorkerSlotId::new(workers[0], 0)]))
         .await?;
 
     Ok(())

@@ -60,7 +60,7 @@ async fn nexmark_chaos_common_inner(
         let join_plans = |fragments: Vec<Fragment>| {
             fragments
                 .into_iter()
-                .map(|f| f.random_reschedule())
+                .map(|f| f.random_reschedule_v2())
                 .join(";")
         };
 
@@ -75,13 +75,13 @@ async fn nexmark_chaos_common_inner(
     } else {
         let fragment = cluster.locate_random_fragment().await?;
         let id = fragment.id();
-        cluster.reschedule(fragment.random_reschedule()).await?;
+        cluster.reschedule(fragment.random_reschedule_v2()).await?;
 
         sleep(after_scale_duration).await;
         session.run(select).await?.assert_result_ne(&final_result);
 
         let fragment = cluster.locate_fragment_by_id(id).await?;
-        cluster.reschedule(fragment.random_reschedule()).await?;
+        cluster.reschedule(fragment.random_reschedule_v2()).await?;
     }
 
     sleep(Duration::from_secs(50)).await;

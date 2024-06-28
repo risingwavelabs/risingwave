@@ -64,7 +64,7 @@ async fn test_passive_online_and_offline() -> Result<()> {
 
     assert_eq!(single_agg_fragment.parallelism(), 1);
 
-    let used_worker_slots = single_agg_fragment.used_worker_slots();
+    let used_worker_slots = single_agg_fragment.used_worker_count();
 
     let (single_used_worker_id, should_be_one) =
         used_worker_slots.into_iter().exactly_one().unwrap();
@@ -84,8 +84,8 @@ async fn test_passive_online_and_offline() -> Result<()> {
     let host = prev_worker.clone().host.unwrap().host;
     let host_name = format!("compute-{}", host.split('.').last().unwrap());
 
-    let all_worker_slots = table_mat_fragment.all_worker_slots();
-    let used_worker_slots = table_mat_fragment.used_worker_slots();
+    let all_worker_slots = table_mat_fragment.all_worker_count();
+    let used_worker_slots = table_mat_fragment.used_worker_count();
     assert_eq!(all_worker_slots, used_worker_slots);
 
     let initialized_parallelism = table_mat_fragment.parallelism();
@@ -129,7 +129,7 @@ async fn test_passive_online_and_offline() -> Result<()> {
         ])
         .await?;
 
-    let used_worker_slots = single_agg_fragment.used_worker_slots();
+    let used_worker_slots = single_agg_fragment.used_worker_count();
 
     let (curr_used_worker_id, should_be_one) = used_worker_slots.into_iter().exactly_one().unwrap();
     assert_eq!(should_be_one, 1);
@@ -234,9 +234,9 @@ async fn test_active_online() -> Result<()> {
         ])
         .await?;
 
-    let all_worker_slots = table_mat_fragment.all_worker_slots();
+    let all_worker_slots = table_mat_fragment.all_worker_count();
 
-    let used_worker_slots = table_mat_fragment.used_worker_slots();
+    let used_worker_slots = table_mat_fragment.used_worker_count();
 
     assert_eq!(all_worker_slots, used_worker_slots);
 
@@ -258,9 +258,9 @@ async fn test_active_online() -> Result<()> {
         ])
         .await?;
 
-    let all_worker_slots = table_mat_fragment.all_worker_slots();
+    let all_worker_slots = table_mat_fragment.all_worker_count();
 
-    let used_worker_slots = table_mat_fragment.used_worker_slots();
+    let used_worker_slots = table_mat_fragment.used_worker_count();
 
     assert_eq!(all_worker_slots, used_worker_slots);
     assert_eq!(all_worker_slots.len(), config.compute_nodes);
@@ -317,8 +317,8 @@ async fn test_auto_parallelism_control_with_fixed_and_auto_helper(
 
     let table_mat_fragment = locate_table_fragment(&mut cluster).await?;
 
-    let all_worker_slots = table_mat_fragment.all_worker_slots();
-    let used_worker_slots = table_mat_fragment.used_worker_slots();
+    let all_worker_slots = table_mat_fragment.all_worker_count();
+    let used_worker_slots = table_mat_fragment.used_worker_count();
 
     assert_eq!(all_worker_slots, used_worker_slots);
     assert_eq!(all_worker_slots.len(), config.compute_nodes - 1);
@@ -357,7 +357,7 @@ async fn test_auto_parallelism_control_with_fixed_and_auto_helper(
 
     let table_mat_fragment = locate_table_fragment(&mut cluster).await?;
 
-    let used_worker_slots = table_mat_fragment.used_worker_slots();
+    let used_worker_slots = table_mat_fragment.used_worker_count();
 
     assert_eq!(table_mat_fragment.parallelism(), 3);
 
@@ -381,7 +381,7 @@ async fn test_auto_parallelism_control_with_fixed_and_auto_helper(
 
     let table_mat_fragment = locate_table_fragment(&mut cluster).await?;
 
-    let used_worker_slots = table_mat_fragment.used_worker_slots();
+    let used_worker_slots = table_mat_fragment.used_worker_count();
 
     assert_eq!(table_mat_fragment.parallelism(), 3);
 
@@ -400,8 +400,8 @@ async fn test_auto_parallelism_control_with_fixed_and_auto_helper(
 
     let table_mat_fragment = locate_table_fragment(&mut cluster).await?;
 
-    let all_worker_slots = table_mat_fragment.all_worker_slots();
-    let used_worker_slots = table_mat_fragment.used_worker_slots();
+    let all_worker_slots = table_mat_fragment.all_worker_count();
+    let used_worker_slots = table_mat_fragment.used_worker_count();
 
     assert_eq!(all_worker_slots, used_worker_slots);
     assert_eq!(all_worker_slots.len(), config.compute_nodes - 1);
@@ -418,8 +418,8 @@ async fn test_auto_parallelism_control_with_fixed_and_auto_helper(
 
     let table_mat_fragment = locate_table_fragment(&mut cluster).await?;
 
-    let all_worker_slots = table_mat_fragment.all_worker_slots();
-    let used_worker_slots = table_mat_fragment.used_worker_slots();
+    let all_worker_slots = table_mat_fragment.all_worker_count();
+    let used_worker_slots = table_mat_fragment.used_worker_count();
 
     // check auto scale out for auto
     if enable_auto_parallelism_control {
@@ -480,7 +480,7 @@ async fn test_compatibility_with_low_level() -> Result<()> {
         .await?;
 
     let mut all_workers = table_mat_fragment
-        .all_worker_slots()
+        .all_worker_count()
         .into_keys()
         .collect_vec();
 
@@ -614,7 +614,7 @@ async fn test_compatibility_with_low_level_and_arrangement_backfill() -> Result<
         .await?;
 
     let mut all_workers = table_mat_fragment
-        .all_worker_slots()
+        .all_worker_count()
         .into_keys()
         .collect_vec();
 

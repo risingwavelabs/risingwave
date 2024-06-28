@@ -58,7 +58,7 @@ async fn test_dynamic_filter() -> Result<()> {
     let id = fragment.id();
 
     let (worker_1, worker_2, worker_3) = fragment
-        .all_worker_slots()
+        .all_worker_count()
         .into_keys()
         .collect_tuple::<(_, _, _)>()
         .unwrap();

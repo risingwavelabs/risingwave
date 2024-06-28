@@ -48,7 +48,7 @@ async fn test_simple_cascade_materialized_view() -> Result<()> {
 
     let id = fragment.id();
 
-    let all_workers = fragment.all_worker_slots().into_keys().collect_vec();
+    let all_workers = fragment.all_worker_count().into_keys().collect_vec();
 
     cluster
         .reschedule(format!(
@@ -159,7 +159,7 @@ async fn test_diamond_cascade_materialized_view() -> Result<()> {
 
     let id = fragment.id();
 
-    let all_workers = fragment.all_worker_slots().into_keys().collect_vec();
+    let all_workers = fragment.all_worker_count().into_keys().collect_vec();
 
     cluster
         .reschedule(format!(

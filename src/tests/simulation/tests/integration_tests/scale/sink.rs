@@ -17,6 +17,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use futures::StreamExt;
+use itertools::Itertools;
 use rand::prelude::SliceRandom;
 use rand::thread_rng;
 use rdkafka::consumer::{Consumer, StreamConsumer};
@@ -35,6 +36,7 @@ const DEBEZIUM_SINK_CREATE: &str = "create sink s2 from m with (connector='kafka
 const APPEND_ONLY_TOPIC: &str = "t_sink_append_only";
 const DEBEZIUM_TOPIC: &str = "t_sink_debezium";
 
+use risingwave_common::hash::WorkerSlotId;
 use serde_derive::{Deserialize, Serialize};
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -115,10 +117,39 @@ async fn test_sink_append_only() -> Result<()> {
         .await?;
 
     let id = materialize_fragment.id();
+    let workers = materialize_fragment
+        .all_worker_count()
+        .into_keys()
+        .collect_vec();
+
     check_kafka_after_insert(&mut cluster, &mut stream, &[1, 2, 3]).await?;
-    cluster.reschedule(format!("{id}-[1,2,3,4,5]")).await?;
+    cluster
+        .reschedule(materialize_fragment.reschedule_v2(
+            [
+                WorkerSlotId::new(workers[0], 1),
+                WorkerSlotId::new(workers[1], 0),
+                WorkerSlotId::new(workers[1], 1),
+                WorkerSlotId::new(workers[2], 0),
+                WorkerSlotId::new(workers[2], 1),
+            ],
+            [],
+        ))
+        .await?;
+
     check_kafka_after_insert(&mut cluster, &mut stream, &[4, 5, 6]).await?;
-    cluster.reschedule(format!("{id}+[1,2,3,4,5]")).await?;
+    cluster
+        .reschedule(materialize_fragment.reschedule_v2(
+            [],
+            [
+                WorkerSlotId::new(workers[0], 1),
+                WorkerSlotId::new(workers[1], 0),
+                WorkerSlotId::new(workers[1], 1),
+                WorkerSlotId::new(workers[2], 0),
+                WorkerSlotId::new(workers[2], 1),
+            ],
+        ))
+        .await?;
+
     check_kafka_after_insert(&mut cluster, &mut stream, &[7, 8, 9]).await?;
 
     Ok(())
