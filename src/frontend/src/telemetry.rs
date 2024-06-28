@@ -20,7 +20,7 @@ use risingwave_common::telemetry::report::{report_event_common, TelemetryReportC
 use risingwave_common::telemetry::{
     current_timestamp, SystemData, TelemetryNodeType, TelemetryReportBase, TelemetryResult,
 };
-use risingwave_pb::telemetry::PbTelemetryEventStage;
+use risingwave_pb::telemetry::{PbTelemetryConnectorDirection, PbTelemetryEventStage};
 use serde::{Deserialize, Serialize};
 
 const TELEMETRY_FRONTEND_REPORT_TYPE: &str = "frontend";
@@ -45,6 +45,7 @@ pub(crate) fn report_event(
     feature_name: String,
     catalog_id: i64,
     connector_name: Option<String>,
+    source_or_sink: Option<PbTelemetryConnectorDirection>,
     attributes: Option<String>, // any json string
 ) {
     report_event_common(
@@ -53,6 +54,7 @@ pub(crate) fn report_event(
         feature_name,
         catalog_id,
         connector_name,
+        source_or_sink,
         attributes,
         TELEMETRY_FRONTEND_REPORT_TYPE.to_string(),
     );

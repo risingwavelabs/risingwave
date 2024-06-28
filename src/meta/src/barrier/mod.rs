@@ -580,6 +580,7 @@ impl GlobalBarrierManager {
                 0,
                 None,
                 None,
+                None,
             );
 
             let paused = self.take_pause_on_bootstrap().await.unwrap_or(false);
@@ -818,6 +819,7 @@ impl GlobalBarrierManager {
                 0,
                 None,
                 None,
+                None,
             );
 
             // No need to clean dirty tables for barrier recovery,
@@ -849,6 +851,7 @@ impl GlobalBarrierManager {
                 risingwave_pb::telemetry::TelemetryEventStage::Recovery,
                 "adhoc_recovery".to_string(),
                 0,
+                None,
                 None,
                 None,
             );
