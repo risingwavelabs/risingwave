@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::f64::consts::PI;
-
 use risingwave_common::types::F64;
 use risingwave_expr::function;
 
@@ -102,7 +100,7 @@ static DEGREE_FORTY_FIVE: f64 = 45.0;
 static DEGREE_SIXTY: f64 = 60.0;
 static DEGREE_ONE_HALF: f64 = 0.5;
 static DEGREE_ONE: f64 = 1.0;
-static RADIANS_PER_DEGREE: f64 = 0.017_453_292_519_943_295_769_2;
+static RADIANS_PER_DEGREE: f64 = 0.017_453_292_519_943_295;
 
 // Constants we use to get more accurate results.
 // Depend on the machine and have to be evaluated at runtime
