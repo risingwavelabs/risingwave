@@ -311,7 +311,7 @@ impl Catalog {
     pub fn update_table(&mut self, proto: &PbTable) {
         let database = self.get_database_mut(proto.database_id).unwrap();
         let schema = database.get_schema_mut(proto.schema_id).unwrap();
-        let table = if schema.get_created_table_by_id(&proto.id.into()).is_some() {
+        let table = if schema.get_table_by_id(&proto.id.into()).is_some() {
             schema.update_table(proto)
         } else {
             // Enter this branch when schema is changed by `ALTER ... SET SCHEMA ...` statement.
