@@ -901,7 +901,12 @@ impl CatalogManager {
                 Info::RelationGroup(RelationGroup {
                     relations: vec![Relation {
                         relation_info: RelationInfo::Table(table.to_owned()).into(),
-                    }],
+                    }]
+                    .into_iter()
+                    .chain(internal_tables.into_iter().map(|internal_table| Relation {
+                        relation_info: RelationInfo::Table(internal_table).into(),
+                    }))
+                    .collect_vec(),
                 }),
             )
             .await;
@@ -1273,7 +1278,7 @@ impl CatalogManager {
         table_id: TableId,
         internal_table_ids: Vec<TableId>,
     ) -> MetaResult<bool> {
-        let table = {
+        let (table, internal_tables) = {
             let core = &mut self.core.lock().await;
             let database_core = &mut core.database;
             let tables = &mut database_core.tables;
@@ -1284,6 +1289,12 @@ impl CatalogManager {
                 );
                 return Ok(false);
             };
+            let mut internal_tables = vec![];
+            for internal_table_id in &internal_table_ids {
+                if let Some(table) = tables.get(internal_table_id) {
+                    internal_tables.push(table.clone());
+                }
+            }
 
             // `Unspecified` maps to Created state, due to backwards compatibility.
             // `Created` states should not be cancelled.
@@ -1309,7 +1320,7 @@ impl CatalogManager {
                 assert!(res.is_some(), "table_id {} missing", table_id);
             }
             commit_meta!(self, tables)?;
-            table
+            (table, internal_tables)
         };
 
         {
@@ -1334,7 +1345,12 @@ impl CatalogManager {
                 Info::RelationGroup(RelationGroup {
                     relations: vec![Relation {
                         relation_info: RelationInfo::Table(table.to_owned()).into(),
-                    }],
+                    }]
+                    .into_iter()
+                    .chain(internal_tables.into_iter().map(|internal_table| Relation {
+                        relation_info: RelationInfo::Table(internal_table).into(),
+                    }))
+                    .collect_vec(),
                 }),
             )
             .await;
