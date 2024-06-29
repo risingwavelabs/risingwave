@@ -77,7 +77,7 @@ if cat ./query_result2.csv | awk -F "," '{
 else
   echo "The output is not as expected."
   echo "output:"
-  cat ./query_result.csv
+  cat ./query_result2.csv
   exit 1
 fi
 
