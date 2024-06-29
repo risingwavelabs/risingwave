@@ -229,6 +229,10 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             },
         };
 
+        let backend = MetaStoreBackend::Sql {
+            endpoint: "postgres://shanicky@localhost:5432/postgres".to_string(),
+        };
+
         validate_config(&config);
 
         let total_memory_bytes = resource_util::memory::system_memory_available_bytes();

@@ -12,13 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::hash::Hash;
+
 use risingwave_pb::stream_plan::{PbDispatcher, PbDispatcherType};
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::{ActorId, ActorMapping, FragmentId, I32Array};
 
-#[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Deserialize, Serialize)]
+#[derive(
+    Hash, Copy, Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize,
+)]
 #[sea_orm(rs_type = "String", db_type = "String(None)")]
 pub enum DispatcherType {
     #[sea_orm(string_value = "HASH")]

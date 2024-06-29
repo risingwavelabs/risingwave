@@ -30,13 +30,13 @@ use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::{ActorMapping, ParallelUnitId, VirtualNode};
 use risingwave_common::util::iter_util::ZipEqDebug;
-use risingwave_meta_model_v2::StreamingParallelism;
+use risingwave_meta_model_v2::{actor, fragment, ObjectId, StreamingParallelism};
 use risingwave_pb::common::{
-    ActorInfo, Buffer, ParallelUnit, ParallelUnitMapping, WorkerNode, WorkerType,
+    ActorInfo, Buffer, ParallelUnit, ParallelUnitMapping, PbParallelUnit, WorkerNode, WorkerType,
 };
 use risingwave_pb::meta::get_reschedule_plan_request::{Policy, StableResizePolicy};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
-use risingwave_pb::meta::table_fragments::actor_status::ActorState;
+use risingwave_pb::meta::table_fragments::actor_status::{ActorState, PbActorState};
 use risingwave_pb::meta::table_fragments::fragment::{
     FragmentDistributionType, PbFragmentDistributionType,
 };
@@ -44,7 +44,7 @@ use risingwave_pb::meta::table_fragments::{self, ActorStatus, PbFragment, State}
 use risingwave_pb::meta::FragmentWorkerSlotMappings;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    Dispatcher, DispatcherType, FragmentTypeFlag, PbStreamActor, StreamNode,
+    Dispatcher, DispatcherType, FragmentTypeFlag, PbDispatcher, PbStreamActor, StreamNode,
 };
 use risingwave_pb::stream_service::build_actor_info::SubscriptionIds;
 use risingwave_pb::stream_service::BuildActorInfo;
@@ -56,6 +56,7 @@ use tokio::time::{Instant, MissedTickBehavior};
 use tracing::warn;
 
 use crate::barrier::{Command, Reschedule, StreamRpcManager};
+use crate::controller::scale::RescheduleWorkingSet;
 use crate::manager::{
     IdCategory, IdGenManagerImpl, LocalNotification, MetaSrvEnv, MetadataManager, WorkerId,
 };
@@ -126,7 +127,7 @@ pub struct CustomFragmentInfo {
     pub actors: Vec<CustomActorInfo>,
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct CustomActorInfo {
     pub actor_id: u32,
     pub fragment_id: u32,
@@ -594,18 +595,137 @@ impl ScaleController {
                     );
                 }
             }
-            MetadataManager::V2(_) => {
-                let all_table_fragments = self.list_all_table_fragments().await?;
+            MetadataManager::V2(mgr) => {
+                let fragment_ids = reschedule.keys().map(|id| *id as _).collect();
 
-                for table_fragments in &all_table_fragments {
-                    fulfill_index_by_table_fragments_ref(
-                        &mut actor_map,
-                        &mut fragment_map,
-                        &mut actor_status,
-                        &mut fragment_state,
-                        &mut fragment_to_table,
-                        table_fragments,
+                let RescheduleWorkingSet {
+                    fragments,
+                    actors,
+                    mut actor_dispatchers,
+                    fragment_downstreams: _,
+                    fragment_upstreams: _,
+                } = mgr
+                    .catalog_controller
+                    .resolve_working_set_for_reschedule_fragments(fragment_ids)
+                    .await?;
+
+                let mut fragment_actors: HashMap<
+                    risingwave_meta_model_v2::FragmentId,
+                    Vec<CustomActorInfo>,
+                > = HashMap::new();
+
+                let mut expr_contexts = HashMap::new();
+                for (
+                    _,
+                    actor::Model {
+                        actor_id,
+                        fragment_id,
+                        status,
+                        splits: _,
+                        parallel_unit_id,
+                        worker_id,
+                        upstream_actor_ids,
+                        vnode_bitmap,
+                        expr_context,
+                    },
+                ) in actors
+                {
+                    let dispatchers = actor_dispatchers
+                        .remove(&actor_id)
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(PbDispatcher::from)
+                        .collect();
+
+                    let actor_info = CustomActorInfo {
+                        actor_id: actor_id as _,
+                        fragment_id: fragment_id as _,
+                        dispatcher: dispatchers,
+                        upstream_actor_id: upstream_actor_ids
+                            .into_inner()
+                            .values()
+                            .flatten()
+                            .map(|id| *id as _)
+                            .collect(),
+                        vnode_bitmap: vnode_bitmap.map(|bitmap| bitmap.to_protobuf()),
+                    };
+
+                    actor_map.insert(actor_id as _, actor_info.clone());
+
+                    fragment_actors
+                        .entry(fragment_id as _)
+                        .or_default()
+                        .push(actor_info);
+
+                    actor_status.insert(
+                        actor_id as _,
+                        ActorStatus {
+                            parallel_unit: Some(PbParallelUnit {
+                                id: parallel_unit_id as _,
+                                worker_node_id: worker_id as _,
+                            }),
+                            state: PbActorState::from(status) as i32,
+                        },
                     );
+
+                    expr_contexts.insert(actor_id as u32, expr_context);
+                }
+
+                for (
+                    _,
+                    fragment::Model {
+                        fragment_id,
+                        job_id,
+                        fragment_type_mask,
+                        distribution_type,
+                        stream_node,
+                        vnode_mapping,
+                        state_table_ids,
+                        upstream_fragment_id,
+                    },
+                ) in fragments
+                {
+                    let actors = fragment_actors
+                        .remove(&(fragment_id as _))
+                        .unwrap_or_default();
+
+                    let CustomActorInfo {
+                        actor_id,
+                        fragment_id,
+                        dispatcher,
+                        upstream_actor_id,
+                        vnode_bitmap,
+                    } = actors.first().unwrap().clone();
+
+                    let fragment = CustomFragmentInfo {
+                        fragment_id: fragment_id as _,
+                        fragment_type_mask: fragment_type_mask as _,
+                        distribution_type: distribution_type.into(),
+                        vnode_mapping: Some(vnode_mapping.to_protobuf()),
+                        state_table_ids: state_table_ids.into_u32_array(),
+                        upstream_fragment_ids: upstream_fragment_id.into_u32_array(),
+                        actor_template: PbStreamActor {
+                            nodes: Some(stream_node.to_protobuf()),
+                            actor_id,
+                            fragment_id: fragment_id as _,
+                            dispatcher,
+                            upstream_actor_id,
+                            vnode_bitmap,
+                            mview_definition: "".to_string(),
+                            expr_context: expr_contexts
+                                .get(&actor_id)
+                                .cloned()
+                                .map(|expr_context| expr_context.to_protobuf()),
+                        },
+                        actors,
+                    };
+
+                    fragment_map.insert(fragment_id as _, fragment);
+
+                    fragment_to_table.insert(fragment_id as _, TableId::from(job_id as u32));
+
+                    // todo
+                    fragment_state.insert(fragment_id, table_fragments::State::Created);
                 }
             }
         };
@@ -1933,22 +2053,73 @@ impl ScaleController {
                     guard.table_fragments(),
                 )?;
             }
-            MetadataManager::V2(_) => {
-                let all_table_fragments = self.list_all_table_fragments().await?;
-                let all_table_fragments = all_table_fragments
-                    .into_iter()
-                    .map(|table_fragments| (table_fragments.table_id(), table_fragments))
-                    .collect::<BTreeMap<_, _>>();
+            MetadataManager::V2(mgr) => {
+                let table_ids = table_parallelisms
+                    .keys()
+                    .map(|id| *id as ObjectId)
+                    .collect();
 
-                build_index(
-                    &mut no_shuffle_source_fragment_ids,
-                    &mut no_shuffle_target_fragment_ids,
-                    &mut fragment_distribution_map,
-                    &mut actor_status,
-                    &mut table_fragment_id_map,
-                    &mut fragment_actor_id_map,
-                    &all_table_fragments,
-                )?;
+                let RescheduleWorkingSet {
+                    fragments,
+                    actors,
+                    actor_dispatchers: _,
+                    fragment_downstreams,
+                    fragment_upstreams: _,
+                } = mgr
+                    .catalog_controller
+                    .resolve_working_set_for_reschedule_tables(table_ids)
+                    .await?;
+
+                for (fragment_id, downstreams) in fragment_downstreams {
+                    for (downstream_fragment_id, dispatcher_type) in downstreams {
+                        println!(
+                            "fragment_id {} downstream {} dispatcher {:?}",
+                            fragment_id, downstream_fragment_id, dispatcher_type
+                        );
+                        if let risingwave_meta_model_v2::actor_dispatcher::DispatcherType::NoShuffle = dispatcher_type {
+                            no_shuffle_source_fragment_ids.insert(fragment_id as FragmentId);
+                            no_shuffle_target_fragment_ids.insert(downstream_fragment_id as FragmentId);
+                        }
+                    }
+                }
+
+                println!("no shuffle src {:?}", no_shuffle_source_fragment_ids);
+                println!("no shuffle dst {:?}", no_shuffle_target_fragment_ids);
+
+                for (fragment_id, fragment) in fragments {
+                    fragment_distribution_map.insert(
+                        fragment_id as FragmentId,
+                        FragmentDistributionType::from(fragment.distribution_type),
+                    );
+
+                    table_fragment_id_map
+                        .entry(fragment.job_id as u32)
+                        .or_default()
+                        .insert(fragment_id as FragmentId);
+                }
+
+                println!("frag dist map {:#?}", fragment_distribution_map);
+                println!("table frag id map {:?}", table_fragment_id_map);
+
+                for (actor_id, actor) in actors {
+                    actor_status.insert(
+                        actor_id as ActorId,
+                        ActorStatus {
+                            parallel_unit: Some(ParallelUnit {
+                                id: actor.parallel_unit_id as ParallelUnitId,
+                                worker_node_id: actor.worker_id as WorkerId,
+                            }),
+                            state: PbActorState::from(actor.status) as i32,
+                        },
+                    );
+                    fragment_actor_id_map
+                        .entry(actor.fragment_id as FragmentId)
+                        .or_default()
+                        .insert(actor_id as ActorId);
+                }
+
+                println!("actor status {:#?}", actor_status);
+                println!("frag actor {:#?}", fragment_actor_id_map);
             }
         }
 
@@ -2067,6 +2238,8 @@ impl ScaleController {
         target_plan.retain(|_, plan| {
             !(plan.added_parallel_units.is_empty() && plan.removed_parallel_units.is_empty())
         });
+
+        println!("target plan {:#?}", target_plan);
 
         Ok(target_plan)
     }
