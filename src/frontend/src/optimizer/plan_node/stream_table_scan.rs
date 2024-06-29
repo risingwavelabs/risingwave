@@ -248,7 +248,7 @@ impl StreamTableScan {
 
         // The required columns from the table (both scan and upstream).
         let upstream_column_ids = match self.stream_scan_type {
-            // For backfill, we additionally need the primary key columns.
+            // For backfill, we additionally need the upstream table's primary key columns.
             StreamScanType::Backfill | StreamScanType::ArrangementBackfill => {
                 self.core.output_and_pk_column_ids()
             }
@@ -261,8 +261,9 @@ impl StreamTableScan {
         .map(ColumnId::get_id)
         .collect_vec();
 
-        // The schema of the snapshot read stream
-        let snapshot_schema = upstream_column_ids
+        // Backfill has input records coming from upstream and snapshot read.
+        // They have the same `upstream_schema`.
+        let upstream_schema = upstream_column_ids
             .iter()
             .map(|&id| {
                 let col = self
@@ -275,8 +276,6 @@ impl StreamTableScan {
             })
             .collect_vec();
 
-        let upstream_schema = snapshot_schema.clone();
-
         // TODO: snapshot read of upstream mview
         let batch_plan_node = BatchPlanNode {
             table_desc: Some(self.core.table_desc.try_to_protobuf()?),
@@ -287,9 +286,7 @@ impl StreamTableScan {
             .build_backfill_state_catalog(state)
             .to_internal_table_prost();
 
-        // For backfill, we first read pk + output_indices from upstream.
-        // On this, we need to further project `output_indices` to the downstream.
-        // This `output_indices` refers to that.
+        // These are the indices that need to be forwarded to the downstream from backfill.
         let output_indices = self
             .core
             .output_column_ids()
@@ -340,7 +337,7 @@ impl StreamTableScan {
                     node_body: Some(PbNodeBody::BatchPlan(batch_plan_node)),
                     operator_id: self.batch_plan_id.0 as u64,
                     identity: "BatchPlanNode".into(),
-                    fields: snapshot_schema,
+                    fields: upstream_schema,
                     stream_key: vec![], // not used
                     input: vec![],
                     append_only: true,
