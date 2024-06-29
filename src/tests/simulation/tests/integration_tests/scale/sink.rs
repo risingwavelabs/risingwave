@@ -116,7 +116,6 @@ async fn test_sink_append_only() -> Result<()> {
         ])
         .await?;
 
-    let id = materialize_fragment.id();
     let workers = materialize_fragment
         .all_worker_count()
         .into_keys()

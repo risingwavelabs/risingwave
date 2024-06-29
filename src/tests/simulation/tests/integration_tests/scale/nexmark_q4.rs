@@ -172,9 +172,9 @@ async fn nexmark_q4_cascade() -> Result<()> {
         .reschedule(format!(
             "{}-[{}];{}-[{}]",
             fragment_1.id(),
-            format!("{}:2", workers[0]),
+            format_args!("{}:2", workers[0]),
             fragment_2.id(),
-            format!("{}:1,{}:1,{}:1", workers[0], workers[1], workers[2]),
+            format_args!("{}:1,{}:1,{}:1", workers[0], workers[1], workers[2]),
         ))
         .await?;
 
@@ -186,11 +186,11 @@ async fn nexmark_q4_cascade() -> Result<()> {
         .reschedule(format!(
             "{}-[{}]+[{}];{}-[{}]+[{}]",
             id_1,
-            format!("{}:1,{}:1", workers[1], workers[2]),
-            format!("{}:2", workers[0]),
+            format_args!("{}:1,{}:1", workers[1], workers[2]),
+            format_args!("{}:2", workers[0]),
             id_2,
-            format!("{}:1", workers[1]),
-            format!("{}:1,{}:1", workers[0], workers[2]),
+            format_args!("{}:1", workers[1]),
+            format_args!("{}:1,{}:1", workers[0], workers[2]),
         ))
         .await?;
 
@@ -221,7 +221,7 @@ async fn nexmark_q4_materialize_agg_cache_invalidation() -> Result<()> {
         .reschedule(format!(
             "{}-[{}]",
             id,
-            format!("{}:1,{}:2,{}:2", workers[0], workers[1], workers[2]),
+            format_args!("{}:1,{}:2,{}:2", workers[0], workers[1], workers[2]),
         ))
         .await?;
     sleep(Duration::from_secs(7)).await;
@@ -232,7 +232,7 @@ async fn nexmark_q4_materialize_agg_cache_invalidation() -> Result<()> {
         .reschedule(format!(
             "{}+[{}]",
             id,
-            format!("{}:1,{}:2,{}:2", workers[0], workers[1], workers[2]),
+            format_args!("{}:1,{}:2,{}:2", workers[0], workers[1], workers[2]),
         ))
         .await?;
     sleep(Duration::from_secs(7)).await;
@@ -249,7 +249,7 @@ async fn nexmark_q4_materialize_agg_cache_invalidation() -> Result<()> {
         .reschedule(format!(
             "{}-[{}]",
             id,
-            format!("{}:1,{}:2,{}:2", workers[0], workers[1], workers[2]),
+            format_args!("{}:1,{}:2,{}:2", workers[0], workers[1], workers[2]),
         ))
         .await?;
     sleep(Duration::from_secs(20)).await;

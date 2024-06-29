@@ -100,9 +100,9 @@ async fn test_delta_join() -> Result<()> {
         .reschedule(format!(
             "{}-[{}];{}-[{}]",
             t1.id(),
-            format!("{}:1", workers[1]),
+            format_args!("{}:1", workers[1]),
             t2.id(),
-            format!("{}:1, {}:1", workers[0], workers[1])
+            format_args!("{}:1, {}:1", workers[0], workers[1])
         ))
         .await?;
     test_works!();
@@ -118,9 +118,9 @@ async fn test_delta_join() -> Result<()> {
         .reschedule(format!(
             "{}+[{}];{}+[{}]",
             t1.id(),
-            format!("{}:1,{}:1", workers[0], workers[1]),
+            format_args!("{}:1,{}:1", workers[0], workers[1]),
             t2.id(),
-            format!("{}:1", workers[1]),
+            format_args!("{}:1", workers[1]),
         ))
         .await?;
     test_works!();
@@ -130,9 +130,9 @@ async fn test_delta_join() -> Result<()> {
         .reschedule(format!(
             "{}-[{}];{}-[{}]",
             t1.id(),
-            format!("{}:1", workers[2]),
+            format_args!("{}:1", workers[2]),
             t2.id(),
-            format!("{}:1", workers[2])
+            format_args!("{}:1", workers[2])
         ))
         .await?;
     test_works!();
