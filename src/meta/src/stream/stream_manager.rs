@@ -785,7 +785,8 @@ mod tests {
     use std::time::Duration;
 
     use futures::{Stream, TryStreamExt};
-    use risingwave_common::hash::WorkerSlotId;
+    use risingwave_common::hash;
+    use risingwave_common::hash::{ActorMapping, WorkerSlotId};
     use risingwave_common::system_param::reader::SystemParamsRead;
     use risingwave_pb::common::{HostAddress, WorkerType};
     use risingwave_pb::meta::add_worker_node_request::Property;
@@ -1165,9 +1166,17 @@ mod tests {
     }
 
     fn make_mview_stream_actors(table_id: &TableId, count: usize) -> Vec<StreamActor> {
+        let mut actor_bitmaps: HashMap<_, _> =
+            ActorMapping::new_uniform((0..count).map(|i| i as hash::ActorId))
+                .to_bitmaps()
+                .into_iter()
+                .map(|(actor_id, bitmap)| (actor_id, bitmap.to_protobuf()))
+                .collect();
+
         (0..count)
             .map(|i| StreamActor {
                 actor_id: i as u32,
+                vnode_bitmap: actor_bitmaps.remove(&(i as u32)),
                 // A dummy node to avoid panic.
                 nodes: Some(StreamNode {
                     node_body: Some(NodeBody::Materialize(MaterializeNode {

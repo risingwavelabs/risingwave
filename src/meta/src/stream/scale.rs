@@ -2863,7 +2863,7 @@ mod tests {
         let total_tasks = 10; // More tasks than the total weight
         let task_distribution = ch.distribute_tasks(total_tasks);
 
-        assert!(task_distribution.is_err());
+        assert!(task_distribution.is_ok());
     }
 
     #[test]

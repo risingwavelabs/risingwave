@@ -143,6 +143,8 @@ impl ClusterManager {
                         old_worker_parallelism,
                         new_worker_parallelism
                     );
+
+                    new_worker.worker_node.parallelism = new_worker_parallelism as _;
                 }
                 Ordering::Greater => {
                     if !self.env.opts.disable_automatic_parallelism_control {
@@ -153,6 +155,8 @@ impl ClusterManager {
                             old_worker_parallelism,
                             new_worker_parallelism
                         );
+
+                        new_worker.worker_node.parallelism = new_worker_parallelism as _;
                     } else {
                         // Warn and keep the original parallelism if the worker registered with a
                         // smaller parallelism, entering compatibility mode.
