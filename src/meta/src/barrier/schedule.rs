@@ -441,6 +441,7 @@ impl ScheduledBarriers {
                     dropped_actors.extend(actors);
                 }
                 Command::CancelStreamingJob(table_fragments) => {
+                    tracing::trace!(target: "cancel_stream_job", "cancel streaming job: {:?}", table_fragments.table_id());
                     let table_id = table_fragments.table_id();
                     cancel_table_ids.insert(table_id);
                 }
