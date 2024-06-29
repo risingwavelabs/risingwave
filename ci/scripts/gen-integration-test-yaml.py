@@ -37,6 +37,7 @@ CASES_MAP = {
     'vector': ['json'],
     'nats': ['json', 'protobuf'],
     'mqtt': ['json'],
+    'hivemq': ['json'],
     'doris-sink': ['json'],
     'starrocks-sink': ['json'],
     'deltalake-sink': ['json'],
