@@ -30,7 +30,9 @@ use winnow::{PResult, Parser as _};
 use crate::ast::*;
 use crate::keywords::{self, Keyword};
 use crate::parser_v2;
-use crate::parser_v2::{keyword, literal_i64, literal_uint, single_quoted_string, ParserExt as _};
+use crate::parser_v2::{
+    dollar_quoted_string, keyword, literal_i64, literal_uint, single_quoted_string, ParserExt as _,
+};
 use crate::tokenizer::*;
 
 pub(crate) const UPSTREAM_SOURCE_KEY: &str = "connector";
@@ -3550,16 +3552,13 @@ impl Parser<'_> {
     }
 
     pub fn parse_function_definition(&mut self) -> PResult<FunctionDefinition> {
-        let peek_token = self.peek_token();
-        match peek_token.token {
-            Token::DollarQuotedString(value) => {
-                self.next_token();
-                Ok(FunctionDefinition::DoubleDollarDef(value.value))
-            }
-            _ => Ok(FunctionDefinition::SingleQuotedDef(
-                self.parse_literal_string()?,
-            )),
-        }
+        alt((
+            single_quoted_string.map(FunctionDefinition::SingleQuotedDef),
+            dollar_quoted_string.map(FunctionDefinition::DoubleDollarDef),
+            Self::parse_identifier.map(|i| FunctionDefinition::Identifier(i.value)),
+            fail.expect("function definition"),
+        ))
+        .parse_next(self)
     }
 
     /// Parse a literal string
@@ -3567,11 +3566,6 @@ impl Parser<'_> {
         let checkpoint = *self;
         let token = self.next_token();
         match token.token {
-            Token::Word(Word {
-                value,
-                keyword: Keyword::NoKeyword,
-                ..
-            }) => Ok(value),
             Token::SingleQuotedString(s) => Ok(s),
             _ => self.expected_at(checkpoint, "literal string"),
         }
