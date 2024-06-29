@@ -90,35 +90,55 @@ async fn test_delta_join() -> Result<()> {
     let workers = union_fragment.all_worker_count().into_keys().collect_vec();
     // Scale-in one side
     cluster
-        .reschedule(t1.reschedule_v2([WorkerSlotId::new(workers[0], 0)], []))
+        .reschedule(format!("{}-[{}:1]", t1.id(), workers[0]))
         .await?;
 
     test_works!();
 
     // Scale-in both sides together
     cluster
-        .reschedule(format!("{}-[2];{}-[0,2]", t1.id(), t2.id()))
+        .reschedule(format!(
+            "{}-[{}];{}-[{}]",
+            t1.id(),
+            format!("{}:1", workers[1]),
+            t2.id(),
+            format!("{}:1, {}:1", workers[0], workers[1])
+        ))
         .await?;
     test_works!();
 
     // Scale-out one side
-    cluster.reschedule(format!("{}+[0]", t2.id())).await?;
+    cluster
+        .reschedule(format!("{}+[{}:1]", t2.id(), workers[0]))
+        .await?;
     test_works!();
 
     // Scale-out both sides together
     cluster
-        .reschedule(format!("{}+[0,2];{}+[2]", t1.id(), t2.id()))
+        .reschedule(format!(
+            "{}+[{}];{}+[{}]",
+            t1.id(),
+            format!("{}:1,{}:1", workers[0], workers[1]),
+            t2.id(),
+            format!("{}:1", workers[1]),
+        ))
         .await?;
     test_works!();
 
     // Scale-in join with union
     cluster
-        .reschedule(format!("{}-[5];{}-[5]", t1.id(), union_fragment.id()))
+        .reschedule(format!(
+            "{}-[{}];{}-[{}]",
+            t1.id(),
+            format!("{}:1", workers[2]),
+            t2.id(),
+            format!("{}:1", workers[2])
+        ))
         .await?;
     test_works!();
 
     let result = cluster
-        .reschedule(format!("{}-[0]", lookup_fragments[0].id()))
+        .reschedule(format!("{}-[{}:1]", lookup_fragments[0].id(), workers[0]))
         .await;
     assert!(
         result.is_err(),
@@ -178,11 +198,15 @@ async fn test_resolve_no_shuffle_upstream() -> Result<()> {
     assert!(result.is_err());
 
     cluster
-        .reschedule(fragment.reschedule_v2([WorkerSlotId::new(workers[0], 0)], []))
+        .reschedule_resolve_no_shuffle(
+            fragment.reschedule_v2([WorkerSlotId::new(workers[0], 0)], []),
+        )
         .await?;
 
     cluster
-        .reschedule(fragment.reschedule_v2([], [WorkerSlotId::new(workers[0], 0)]))
+        .reschedule_resolve_no_shuffle(
+            fragment.reschedule_v2([], [WorkerSlotId::new(workers[0], 0)]),
+        )
         .await?;
 
     Ok(())

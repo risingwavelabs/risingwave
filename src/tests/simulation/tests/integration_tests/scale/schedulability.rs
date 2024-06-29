@@ -12,14 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
+
 use anyhow::Result;
+use risingwave_common::hash::WorkerSlotId;
 use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_simulation::cluster::{Cluster, Configuration};
 
 #[tokio::test]
 async fn test_cordon_normal() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
-    let session = cluster.start_session();
+    let mut session = cluster.start_session();
 
     let mut workers: Vec<WorkerNode> = cluster
         .get_cluster_info()
@@ -33,43 +36,38 @@ async fn test_cordon_normal() -> Result<()> {
         .collect();
 
     let cordoned_worker = workers.pop().unwrap();
-    // let rest_parallel_unit_ids: HashSet<_> = workers
-    //     .iter()
-    //     .flat_map(|worker| {
-    //         worker
-    //             .parallel_units
-    //             .iter()
-    //             .map(|parallel_unit| parallel_unit.id as ParallelUnitId)
-    //     })
-    //     .collect();
-    //
-    // cluster.cordon_worker(cordoned_worker.id).await?;
-    //
-    // session.run("create table t (v int);").await?;
-    //
-    // let fragments = cluster.locate_fragments([]).await?;
-    //
-    // for fragment in fragments {
-    //     let (_, used) = fragment.parallel_unit_usage();
-    //
-    //     assert_eq!(used, rest_parallel_unit_ids);
-    // }
-    //
-    // session.run("drop table t;").await?;
-    //
-    // cluster.uncordon_worker(cordoned_worker.id).await?;
-    //
-    // session.run("create table t2 (v int);").await?;
-    //
-    // let fragments = cluster.locate_fragments([]).await?;
-    //
-    // for fragment in fragments {
-    //     let (all, used) = fragment.parallel_unit_usage();
-    //
-    //     let all: HashSet<_> = all.into_iter().collect();
-    //
-    //     assert_eq!(used, all);
-    // }
+    let rest_worker_slots: HashSet<_> = workers
+        .iter()
+        .flat_map(|worker| {
+            (0..worker.parallelism).map(|idx| WorkerSlotId::new(worker.id, idx as _))
+        })
+        .collect();
+
+    cluster.cordon_worker(cordoned_worker.id).await?;
+
+    session.run("create table t (v int);").await?;
+
+    let fragments = cluster.locate_fragments([]).await?;
+
+    for fragment in fragments {
+        let used_worker_slots = fragment.used_worker_slots();
+
+        assert_eq!(used_worker_slots, rest_worker_slots);
+    }
+
+    session.run("drop table t;").await?;
+
+    cluster.uncordon_worker(cordoned_worker.id).await?;
+
+    session.run("create table t2 (v int);").await?;
+
+    let fragments = cluster.locate_fragments([]).await?;
+
+    for fragment in fragments {
+        let all_worker_slots = fragment.all_worker_slots();
+        let used_worker_slots = fragment.used_worker_slots();
+        assert_eq!(used_worker_slots, all_worker_slots);
+    }
 
     Ok(())
 }

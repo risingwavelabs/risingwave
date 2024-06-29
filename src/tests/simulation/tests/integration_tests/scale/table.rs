@@ -157,7 +157,7 @@ async fn test_scale_on_schema_change() -> Result<()> {
         .await?;
 
     cluster
-        .reschedule(fragment.reschedule_v2(
+        .reschedule_resolve_no_shuffle(fragment.reschedule_v2(
             [WorkerSlotId::new(workers[0], 1)],
             [
                 WorkerSlotId::new(workers[0], 0),
@@ -169,7 +169,7 @@ async fn test_scale_on_schema_change() -> Result<()> {
     let fragment = cluster
         .locate_one_fragment([identity_contains("materialize"), identity_contains("union")])
         .await?;
-    let used = fragment.used_worker_count();
+    let used = fragment.used_worker_slots();
     assert_eq!(used.len(), 4);
 
     insert_and_flush!(cluster);

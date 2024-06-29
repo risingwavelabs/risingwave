@@ -203,35 +203,6 @@ impl Fragment {
     ///
     /// Consumes `self` as the actor info will be stale after rescheduling.
     pub fn random_reschedule(self) -> String {
-        let (all_parallel_units, current_parallel_units) = self.parallel_unit_usage();
-
-        let rng = &mut thread_rng();
-        let target_parallel_unit_count = match self.inner.distribution_type() {
-            FragmentDistributionType::Unspecified => unreachable!(),
-            FragmentDistributionType::Single => 1,
-            FragmentDistributionType::Hash => rng.gen_range(1..=all_parallel_units.len()),
-        };
-        let target_parallel_units: HashSet<_> = all_parallel_units
-            .choose_multiple(rng, target_parallel_unit_count)
-            .copied()
-            .collect();
-
-        let remove = current_parallel_units
-            .difference(&target_parallel_units)
-            .copied()
-            .collect_vec();
-        let add = target_parallel_units
-            .difference(&current_parallel_units)
-            .copied()
-            .collect_vec();
-
-        self.reschedule(remove, add)
-    }
-
-    /// Generate a random reschedule plan for the fragment.
-    ///
-    /// Consumes `self` as the actor info will be stale after rescheduling.
-    pub fn random_reschedule_v2(self) -> String {
         let all_worker_slots = self.all_worker_slots();
         let used_worker_slots = self.used_worker_slots();
 
@@ -242,7 +213,8 @@ impl Fragment {
             FragmentDistributionType::Hash => rng.gen_range(1..=all_worker_slots.len()),
         };
 
-        let target_worker_slots: HashSet<_> = all_worker_slots.into_iter()
+        let target_worker_slots: HashSet<_> = all_worker_slots
+            .into_iter()
             .choose_multiple(rng, target_worker_slot_count)
             .into_iter()
             .collect();
