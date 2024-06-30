@@ -10,7 +10,16 @@ impl MigrationTrait for Migration {
             .alter_table(
                 Table::alter()
                     .table(WorkerProperty::Table)
-                    .add_column(ColumnDef::new(WorkerProperty::Parallelism).binary())
+                    .add_column(ColumnDef::new(WorkerProperty::Parallelism).integer())
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(WorkerProperty::Table)
+                    .drop_column(WorkerProperty::ParallelUnitIds)
                     .to_owned(),
             )
             .await
@@ -24,6 +33,19 @@ impl MigrationTrait for Migration {
                     .drop_column(WorkerProperty::Parallelism)
                     .to_owned(),
             )
+            .await?;
+
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(WorkerProperty::Table)
+                    .add_column(
+                        ColumnDef::new(WorkerProperty::ParallelUnitIds)
+                            .json_binary()
+                            .not_null(),
+                    )
+                    .to_owned(),
+            )
             .await
     }
 }
@@ -32,4 +54,5 @@ impl MigrationTrait for Migration {
 enum WorkerProperty {
     Table,
     Parallelism,
+    ParallelUnitIds,
 }
