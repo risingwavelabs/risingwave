@@ -879,13 +879,16 @@ pub fn rebuild_fragment_mapping_from_actors(
         WorkerId,
     )>,
 ) -> Vec<FragmentWorkerSlotMapping> {
-    let mut actor_locations = HashMap::new();
+    let mut all_actor_locations = HashMap::new();
     let mut actor_bitmaps = HashMap::new();
     let mut fragment_actors = HashMap::new();
     let mut fragment_dist = HashMap::new();
 
     for (fragment_id, dist, actor_id, bitmap, worker_id) in job_actors {
-        actor_locations.insert(actor_id as hash::ActorId, worker_id as u32);
+        all_actor_locations
+            .entry(fragment_id)
+            .or_insert(HashMap::new())
+            .insert(actor_id as hash::ActorId, worker_id as u32);
         actor_bitmaps.insert(actor_id, bitmap);
         fragment_actors
             .entry(fragment_id)
@@ -896,6 +899,7 @@ pub fn rebuild_fragment_mapping_from_actors(
 
     let mut result = vec![];
     for (fragment_id, dist) in fragment_dist {
+        let mut actor_locations = all_actor_locations.remove(&fragment_id).unwrap();
         let fragment_worker_slot_mapping = match dist {
             DistributionType::Single => {
                 let actor = fragment_actors
