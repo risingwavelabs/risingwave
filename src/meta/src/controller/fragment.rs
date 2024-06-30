@@ -1412,6 +1412,7 @@ mod tests {
         actor, actor_dispatcher, fragment, ActorId, ActorUpstreamActors, ConnectorSplits,
         ExprContext, FragmentId, I32Array, ObjectId, StreamNode, TableId, VnodeBitmap,
     };
+    use risingwave_pb::common::ParallelUnit;
     use risingwave_pb::meta::table_fragments::actor_status::PbActorState;
     use risingwave_pb::meta::table_fragments::fragment::PbFragmentDistributionType;
     use risingwave_pb::meta::table_fragments::{PbActorStatus, PbFragment};
@@ -1536,7 +1537,10 @@ mod tests {
                 (
                     actor_id,
                     PbActorStatus {
-                        parallel_unit: None,
+                        parallel_unit: Some(ParallelUnit {
+                            id: u32::MAX,
+                            worker_node_id: 0,
+                        }),
                         state: PbActorState::Running as _,
                     },
                 )
