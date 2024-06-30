@@ -107,13 +107,15 @@ impl MySqlExternalTable {
         let mut pk_names = vec![];
         for col in columns {
             let data_type = type_to_rw_type(&col.col_type)?;
+            // column name in mysql is case-insensitive, convert to lowercase
+            let col_name = col.name.to_lowercase();
             column_descs.push(ColumnDesc::named(
-                col.name.clone(),
+                col_name.clone(),
                 ColumnId::placeholder(),
                 data_type,
             ));
             if matches!(col.key, ColumnKey::Primary) {
-                pk_names.push(col.name.clone());
+                pk_names.push(col_name);
             }
         }
 

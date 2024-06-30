@@ -68,40 +68,40 @@ sleep 3s
 query TTTT
 describe rw_postgres_types_test;
 ----
-c_boolean boolean false NULL
-c_smallint smallint false NULL
-c_integer integer false NULL
 c_bigint bigint false NULL
-c_decimal numeric false NULL
-c_real real false NULL
-c_double_precision double precision false NULL
-c_varchar character varying false NULL
-c_bytea bytea false NULL
-c_date date false NULL
-c_time time without time zone false NULL
-c_timestamp timestamp without time zone false NULL
-c_timestamptz timestamp with time zone false NULL
-c_interval interval false NULL
-c_jsonb jsonb false NULL
-c_uuid character varying false NULL
-c_enum character varying false NULL
-c_boolean_array boolean[] false NULL
-c_smallint_array smallint[] false NULL
-c_integer_array integer[] false NULL
 c_bigint_array bigint[] false NULL
-c_decimal_array numeric[] false NULL
-c_real_array real[] false NULL
-c_double_precision_array double precision[] false NULL
-c_varchar_array character varying[] false NULL
+c_boolean boolean false NULL
+c_boolean_array boolean[] false NULL
+c_bytea bytea false NULL
 c_bytea_array bytea[] false NULL
+c_date date false NULL
 c_date_array date[] false NULL
-c_time_array time without time zone[] false NULL
-c_timestamp_array timestamp without time zone[] false NULL
-c_timestamptz_array timestamp with time zone[] false NULL
-c_interval_array interval[] false NULL
-c_jsonb_array jsonb[] false NULL
-c_uuid_array character varying[] false NULL
+c_decimal numeric false NULL
+c_decimal_array numeric[] false NULL
+c_double_precision double precision false NULL
+c_double_precision_array double precision[] false NULL
+c_enum character varying false NULL
 c_enum_array character varying[] false NULL
+c_integer integer false NULL
+c_integer_array integer[] false NULL
+c_interval interval false NULL
+c_interval_array interval[] false NULL
+c_jsonb jsonb false NULL
+c_jsonb_array jsonb[] false NULL
+c_real real false NULL
+c_real_array real[] false NULL
+c_smallint smallint false NULL
+c_smallint_array smallint[] false NULL
+c_time time without time zone false NULL
+c_time_array time without time zone[] false NULL
+c_timestamp timestamp without time zone false NULL
+c_timestamp_array timestamp without time zone[] false NULL
+c_timestamptz timestamp with time zone false NULL
+c_timestamptz_array timestamp with time zone[] false NULL
+c_uuid character varying false NULL
+c_uuid_array character varying[] false NULL
+c_varchar character varying false NULL
+c_varchar_array character varying[] false NULL
 primary key c_boolean, c_bigint, c_date NULL NULL
 distribution key c_boolean, c_bigint, c_date NULL NULL
 table description rw_postgres_types_test NULL NULL

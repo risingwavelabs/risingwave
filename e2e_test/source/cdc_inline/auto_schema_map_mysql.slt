@@ -2,7 +2,7 @@ control substitution on
 
 # test case need to cover all data types
 system ok
-mysql -e "DROP DATABASE IF EXISTS mytest; CREATE DATABASE mytest;"
+mysql --protocol=tcp -u root -e "DROP DATABASE IF EXISTS mytest; CREATE DATABASE mytest;"
 
 system ok
 mysql --protocol=tcp -u root mytest -e "
@@ -58,9 +58,9 @@ create table rw_customers (*) from mysql_source table 'mytest.customers';
 query TTTT
 describe rw_customers;
 ----
+custinfo jsonb false NULL
 id bigint false NULL
 modified timestamp without time zone false NULL
-custinfo jsonb false NULL
 primary key id NULL NULL
 distribution key id NULL NULL
 table description rw_customers NULL NULL
@@ -74,28 +74,28 @@ sleep 3s
 query TTTT
 describe rw_mysql_types_test;
 ----
-c_boolean smallint false NULL
-c_bit boolean false NULL
-c_tinyint smallint false NULL
-c_smallint smallint false NULL
-c_mediumint integer false NULL
-c_integer integer false NULL
-c_Bigint bigint false NULL
-c_decimal numeric false NULL
-c_float real false NULL
-c_double double precision false NULL
-c_char_255 character varying false NULL
-c_varchar_10000 character varying false NULL
+c_bigint bigint false NULL
 c_binary_255 bytea false NULL
-c_varbinary_10000 bytea false NULL
+c_bit boolean false NULL
+c_boolean smallint false NULL
+c_char_255 character varying false NULL
 c_date date false NULL
-c_time time without time zone false NULL
 c_datetime timestamp without time zone false NULL
-c_timestamp timestamp with time zone false NULL
+c_decimal numeric false NULL
+c_double double precision false NULL
 c_enum character varying false NULL
+c_float real false NULL
+c_integer integer false NULL
 c_json jsonb false NULL
-primary key c_boolean, c_Bigint, c_date NULL NULL
-distribution key c_boolean, c_Bigint, c_date NULL NULL
+c_mediumint integer false NULL
+c_smallint smallint false NULL
+c_time time without time zone false NULL
+c_timestamp timestamp with time zone false NULL
+c_tinyint smallint false NULL
+c_varbinary_10000 bytea false NULL
+c_varchar_10000 character varying false NULL
+primary key c_boolean, c_bigint, c_date NULL NULL
+distribution key c_boolean, c_bigint, c_date NULL NULL
 table description rw_mysql_types_test NULL NULL
 
 query TTTTTTTTTTTTT
