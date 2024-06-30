@@ -106,7 +106,7 @@ SELECT
     c_smallint,
     c_mediumint,
     c_integer,
-    "c_Bigint",
+    c_bigint,
     c_decimal,
     c_float,
     c_double,
