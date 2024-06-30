@@ -10,7 +10,11 @@ impl MigrationTrait for Migration {
             .alter_table(
                 Table::alter()
                     .table(WorkerProperty::Table)
-                    .add_column(ColumnDef::new(WorkerProperty::Parallelism).integer())
+                    .add_column(
+                        ColumnDef::new(WorkerProperty::Parallelism)
+                            .integer()
+                            .not_null(),
+                    )
                     .to_owned(),
             )
             .await?;
@@ -20,6 +24,24 @@ impl MigrationTrait for Migration {
                 Table::alter()
                     .table(WorkerProperty::Table)
                     .drop_column(WorkerProperty::ParallelUnitIds)
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(Fragment::Table)
+                    .drop_column(Fragment::VnodeMapping)
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(Actor::Table)
+                    .drop_column(Actor::ParallelUnitId)
                     .to_owned(),
             )
             .await
@@ -46,6 +68,24 @@ impl MigrationTrait for Migration {
                     )
                     .to_owned(),
             )
+            .await?;
+
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(Fragment::Table)
+                    .add_column(ColumnDef::new(Fragment::VnodeMapping).binary().not_null())
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(Actor::Table)
+                    .add_column(ColumnDef::new(Actor::ParallelUnitId).integer().not_null())
+                    .to_owned(),
+            )
             .await
     }
 }
@@ -55,4 +95,16 @@ enum WorkerProperty {
     Table,
     Parallelism,
     ParallelUnitIds,
+}
+
+#[derive(DeriveIden)]
+enum Fragment {
+    Table,
+    VnodeMapping,
+}
+
+#[derive(DeriveIden)]
+enum Actor {
+    Table,
+    ParallelUnitId,
 }
