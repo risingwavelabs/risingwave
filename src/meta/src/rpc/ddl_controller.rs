@@ -895,13 +895,26 @@ impl DdlController {
                     fragment_graph,
                     ..
                 } = replace_table_info;
-                let fragment_graph = self
+                let fragment_graph = match self
                     .prepare_replace_table(
                         mgr.catalog_manager.clone(),
                         &mut streaming_job,
                         fragment_graph,
                     )
-                    .await?;
+                    .await
+                {
+                    Ok(fragment_graph) => fragment_graph,
+                    Err(err) => {
+                        tracing::error!(error = %err.as_report(), id = stream_job.id(), "failed to prepare streaming job");
+                        let StreamingJob::Sink(sink, _) = &stream_job else {
+                            unreachable!("unexpected job: {stream_job:?}");
+                        };
+                        mgr.catalog_manager
+                            .cancel_create_sink_procedure(sink, &None)
+                            .await;
+                        return Err(err);
+                    }
+                };
 
                 Some((streaming_job, fragment_graph))
             }
