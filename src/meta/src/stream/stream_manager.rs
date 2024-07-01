@@ -797,7 +797,8 @@ mod tests {
     use std::time::Duration;
 
     use futures::{Stream, TryStreamExt};
-    use risingwave_common::hash::ParallelUnitMapping;
+    use risingwave_common::hash;
+    use risingwave_common::hash::{ActorMapping, WorkerSlotId};
     use risingwave_common::system_param::reader::SystemParamsRead;
     use risingwave_pb::common::{HostAddress, WorkerType};
     use risingwave_pb::meta::add_worker_node_request::Property;
@@ -1099,22 +1100,20 @@ mod tests {
         ) -> MetaResult<()> {
             // Create fake locations where all actors are scheduled to the same parallel unit.
             let locations = {
-                let StreamingClusterInfo {
-                    worker_nodes,
-                    parallel_units,
-                    unschedulable_parallel_units: _,
-                }: StreamingClusterInfo = self
+                let StreamingClusterInfo { worker_nodes, .. }: StreamingClusterInfo = self
                     .global_stream_manager
                     .metadata_manager
                     .get_streaming_cluster_info()
                     .await?;
+
+                let (worker_id, _worker_node) = worker_nodes.iter().exactly_one().unwrap();
 
                 let actor_locations = fragments
                     .values()
                     .flat_map(|f| &f.actors)
                     .sorted_by(|a, b| a.actor_id.cmp(&b.actor_id))
                     .enumerate()
-                    .map(|(idx, a)| (a.actor_id, parallel_units[&(idx as u32)].clone()))
+                    .map(|(idx, a)| (a.actor_id, WorkerSlotId::new(*worker_id, idx)))
                     .collect();
 
                 Locations {
@@ -1179,9 +1178,17 @@ mod tests {
     }
 
     fn make_mview_stream_actors(table_id: &TableId, count: usize) -> Vec<StreamActor> {
+        let mut actor_bitmaps: HashMap<_, _> =
+            ActorMapping::new_uniform((0..count).map(|i| i as hash::ActorId))
+                .to_bitmaps()
+                .into_iter()
+                .map(|(actor_id, bitmap)| (actor_id, bitmap.to_protobuf()))
+                .collect();
+
         (0..count)
             .map(|i| StreamActor {
                 actor_id: i as u32,
+                vnode_bitmap: actor_bitmaps.remove(&(i as u32)),
                 // A dummy node to avoid panic.
                 nodes: Some(StreamNode {
                     node_body: Some(NodeBody::Materialize(MaterializeNode {
@@ -1203,15 +1210,14 @@ mod tests {
         let table_id = TableId::new(0);
         let actors = make_mview_stream_actors(&table_id, 4);
 
-        let StreamingClusterInfo { parallel_units, .. } = services
+        let StreamingClusterInfo { .. } = services
             .global_stream_manager
             .metadata_manager
             .get_streaming_cluster_info()
             .await?;
 
-        let parallel_unit_ids = parallel_units.keys().cloned().sorted().collect_vec();
-
         let mut fragments = BTreeMap::default();
+
         fragments.insert(
             0,
             Fragment {
@@ -1220,12 +1226,10 @@ mod tests {
                 distribution_type: FragmentDistributionType::Hash as i32,
                 actors: actors.clone(),
                 state_table_ids: vec![0],
-                vnode_mapping: Some(
-                    ParallelUnitMapping::new_uniform(parallel_unit_ids.into_iter()).to_protobuf(),
-                ),
                 ..Default::default()
             },
         );
+
         services
             .create_materialized_view(table_id, fragments)
             .await?;
@@ -1280,7 +1284,6 @@ mod tests {
                 distribution_type: FragmentDistributionType::Hash as i32,
                 actors: actors.clone(),
                 state_table_ids: vec![0],
-                vnode_mapping: Some(ParallelUnitMapping::new_single(0).to_protobuf()),
                 ..Default::default()
             },
         );

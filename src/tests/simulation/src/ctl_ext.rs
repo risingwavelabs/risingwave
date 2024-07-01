@@ -26,7 +26,7 @@ use itertools::Itertools;
 use rand::seq::{IteratorRandom, SliceRandom};
 use rand::{thread_rng, Rng};
 use risingwave_common::catalog::TableId;
-use risingwave_common::hash::ParallelUnitId;
+use risingwave_common::hash::{ParallelUnitId, WorkerSlotId};
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::PbFragment;
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
@@ -141,19 +141,40 @@ impl Fragment {
     /// Generate a reschedule plan for the fragment.
     pub fn reschedule(
         &self,
-        remove: impl AsRef<[ParallelUnitId]>,
-        add: impl AsRef<[ParallelUnitId]>,
+        remove: impl AsRef<[WorkerSlotId]>,
+        add: impl AsRef<[WorkerSlotId]>,
     ) -> String {
         let remove = remove.as_ref();
         let add = add.as_ref();
 
+        let mut worker_decreased = HashMap::new();
+        for worker_slot in remove {
+            let worker_id = worker_slot.worker_id();
+            *worker_decreased.entry(worker_id).or_insert(0) += 1;
+        }
+
+        let mut worker_increased = HashMap::new();
+        for worker_slot in add {
+            let worker_id = worker_slot.worker_id();
+            *worker_increased.entry(worker_id).or_insert(0) += 1;
+        }
+
+        let worker_decr_str = worker_decreased
+            .iter()
+            .map(|(work, count)| format!("{}:{}", work, count))
+            .join(",");
+        let worker_incr_str = worker_increased
+            .iter()
+            .map(|(work, count)| format!("{}:{}", work, count))
+            .join(",");
+
         let mut f = String::new();
         write!(f, "{}", self.id()).unwrap();
-        if !remove.is_empty() {
-            write!(f, " -{:?}", remove).unwrap();
+        if !worker_decr_str.is_empty() {
+            write!(f, " -[{}]", worker_decr_str).unwrap();
         }
-        if !add.is_empty() {
-            write!(f, " +{:?}", add).unwrap();
+        if !worker_incr_str.is_empty() {
+            write!(f, " +[{}]", worker_incr_str).unwrap();
         }
         f
     }
@@ -162,33 +183,56 @@ impl Fragment {
     ///
     /// Consumes `self` as the actor info will be stale after rescheduling.
     pub fn random_reschedule(self) -> String {
-        let (all_parallel_units, current_parallel_units) = self.parallel_unit_usage();
+        let all_worker_slots = self.all_worker_slots();
+        let used_worker_slots = self.used_worker_slots();
 
         let rng = &mut thread_rng();
-        let target_parallel_unit_count = match self.inner.distribution_type() {
+        let target_worker_slot_count = match self.inner.distribution_type() {
             FragmentDistributionType::Unspecified => unreachable!(),
             FragmentDistributionType::Single => 1,
-            FragmentDistributionType::Hash => rng.gen_range(1..=all_parallel_units.len()),
+            FragmentDistributionType::Hash => rng.gen_range(1..=all_worker_slots.len()),
         };
-        let target_parallel_units: HashSet<_> = all_parallel_units
-            .choose_multiple(rng, target_parallel_unit_count)
-            .copied()
+
+        let target_worker_slots: HashSet<_> = all_worker_slots
+            .into_iter()
+            .choose_multiple(rng, target_worker_slot_count)
+            .into_iter()
             .collect();
 
-        let remove = current_parallel_units
-            .difference(&target_parallel_units)
+        let remove = used_worker_slots
+            .difference(&target_worker_slots)
             .copied()
             .collect_vec();
-        let add = target_parallel_units
-            .difference(&current_parallel_units)
+
+        let add = target_worker_slots
+            .difference(&used_worker_slots)
             .copied()
             .collect_vec();
 
         self.reschedule(remove, add)
     }
 
-    pub fn parallel_unit_usage(&self) -> (Vec<ParallelUnitId>, HashSet<ParallelUnitId>) {
-        let actor_to_parallel_unit: HashMap<_, _> = self
+    pub fn all_worker_count(&self) -> HashMap<u32, usize> {
+        self.r
+            .worker_nodes
+            .iter()
+            .map(|w| (w.id, w.parallelism as usize))
+            .collect()
+    }
+
+    pub fn all_worker_slots(&self) -> HashSet<WorkerSlotId> {
+        self.all_worker_count()
+            .into_iter()
+            .flat_map(|(k, v)| (0..v).map(move |idx| WorkerSlotId::new(k, idx as _)))
+            .collect()
+    }
+
+    pub fn parallelism(&self) -> usize {
+        self.inner.actors.len()
+    }
+
+    pub fn used_worker_count(&self) -> HashMap<u32, usize> {
+        let actor_to_worker: HashMap<_, _> = self
             .r
             .table_fragments
             .iter()
@@ -196,27 +240,27 @@ impl Fragment {
                 tf.actor_status.iter().map(|(&actor_id, status)| {
                     (
                         actor_id,
-                        status.get_parallel_unit().unwrap().id as ParallelUnitId,
+                        status.get_parallel_unit().unwrap().get_worker_node_id(),
                     )
                 })
             })
             .collect();
 
-        let all_parallel_units = self
-            .r
-            .worker_nodes
-            .iter()
-            .flat_map(|n| n.parallel_units.iter())
-            .map(|p| p.id as ParallelUnitId)
-            .collect_vec();
-        let current_parallel_units: HashSet<_> = self
-            .inner
+        self.inner
             .actors
             .iter()
-            .map(|a| actor_to_parallel_unit[&a.actor_id] as ParallelUnitId)
-            .collect();
+            .map(|a| actor_to_worker[&a.actor_id])
+            .fold(HashMap::<u32, usize>::new(), |mut acc, num| {
+                *acc.entry(num).or_insert(0) += 1;
+                acc
+            })
+    }
 
-        (all_parallel_units, current_parallel_units)
+    pub fn used_worker_slots(&self) -> HashSet<WorkerSlotId> {
+        self.used_worker_count()
+            .into_iter()
+            .flat_map(|(k, v)| (0..v).map(move |idx| WorkerSlotId::new(k, idx as _)))
+            .collect()
     }
 }
 
