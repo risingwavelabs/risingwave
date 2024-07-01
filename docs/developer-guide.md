@@ -17,14 +17,16 @@ http://ecotrust-canada.github.io/markdown-toc/
 - [Read the design docs](#read-the-design-docs)
 - [Learn about the code structure](#learn-about-the-code-structure)
 - [Set up the development environment](#set-up-the-development-environment)
+  * [macOS](#macos)
+  * [Debian-based Linux](#debian-based-linux)
+  * [nix shell](#nix-shell)
 - [Start and monitor a dev cluster](#start-and-monitor-a-dev-cluster)
+  * [Tips for compilation](#tips-for-compilation)
   * [Configure additional components](#configure-additional-components)
   * [Configure system variables](#configure-system-variables)
-  * [Start the playground with RiseDev](#start-the-playground-with-risedev)
-  * [Start the playground with cargo](#start-the-playground-with-cargo)
+  * [Start the playground](#start-the-playground)
 - [Debug playground using vscode](#debug-playground-using-vscode)
 - [Use standalone-mode](#use-standalone-mode)
-- [Develop the dashboard](#develop-the-dashboard)
 - [Observability components](#observability-components)
   * [Cluster Control](#cluster-control)
   * [Monitoring](#monitoring)
@@ -36,38 +38,34 @@ http://ecotrust-canada.github.io/markdown-toc/
   * [Unit tests](#unit-tests)
   * [Planner tests](#planner-tests)
   * [End-to-end tests](#end-to-end-tests)
-  * [End-to-end tests on CI](#end-to-end-tests-on-ci)
   * [Fuzzing tests](#fuzzing-tests)
   * [DocSlt tests](#docslt-tests)
   * [Deterministic simulation tests](#deterministic-simulation-tests)
-- [Miscellaneous checks](#miscellaneous-checks)
+  * [Deterministic Simulation Integration tests](#deterministic-simulation-integration-tests)
+  * [Backwards Compatibility tests](#backwards-compatibility-tests)
 - [Update Grafana dashboard](#update-grafana-dashboard)
 - [Add new files](#add-new-files)
 - [Add new dependencies](#add-new-dependencies)
-- [Submit PRs](#submit-prs)
-- [Profiling](#benchmarking-and-profiling)
-- [Understanding RisingWave Macros](#understanding-risingwave-macros)
+- [Benchmarking and Profiling](#benchmarking-and-profiling)
 - [CI Labels Guide](#ci-labels-guide)
 
 ## Read the design docs
 
 Before you start to make code changes, ensure that you understand the design and implementation of RisingWave. We recommend that you read the design docs listed in [docs/README.md](README.md) first.
 
-You can also read the [crate level documentation](https://risingwavelabs.github.io/risingwave/) for implementation details. You can also run `./risedev doc` to read it locally. Note that you need to [set up the development environment](#set-up-the-development-environment) first.
+You can also read the [crate level documentation](https://risingwavelabs.github.io/risingwave/) for implementation details, or run `./risedev doc` to read it locally. Note that you need to [set up the development environment](#set-up-the-development-environment) first.
 
 ## Learn about the code structure
 
-- The `src` folder contains all of the kernel components, refer to [src/README.md](../src/README.md) for more details.
+- The `src` folder contains all of the kernel components, refer to [src/README.md](../src/README.md) for more details, which contains more details about Design Patterns in RisingWave.
 - The `docker` folder contains Docker files to build and start RisingWave.
 - The `e2e_test` folder contains the latest end-to-end test cases.
 - The `docs` folder contains the design docs. If you want to learn about how RisingWave is designed and implemented, check out the design docs here.
 - The `dashboard` folder contains RisingWave dashboard.
 
-The [src/README.md](../src/README.md) file contains more details about Design Patterns in RisingWave.
-
 ## Set up the development environment
 
-RiseDev is the development mode of RisingWave. To develop RisingWave, you need to build from the source code and run RiseDev. RiseDev can be built on macOS and Linux. It has the following dependencies:
+RisingWave can be built on macOS and Linux. To develop RisingWave, you need the following dependencies:
 
 * Rust toolchain
 * CMake
@@ -75,8 +73,10 @@ RiseDev is the development mode of RisingWave. To develop RisingWave, you need t
 * OpenSSL (>= 3)
 * PostgreSQL (psql) (>= 14.1)
 * Tmux (>= v3.2a)
-* LLVM 16 (For macOS only, to workaround some bugs in macOS toolchain. See https://github.com/risingwavelabs/risingwave/issues/6205)
+* LLVM (For macOS only, to workaround some bugs in macOS toolchain. See https://github.com/risingwavelabs/risingwave/issues/6205)
 * Python (>= 3.12) (Optional, only required by `embedded-python-udf` feature)
+
+### macOS
 
 To install the dependencies on macOS, run:
 
@@ -85,6 +85,8 @@ brew install postgresql cmake protobuf tmux cyrus-sasl llvm openssl@3
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
+### Debian-based Linux
+
 To install the dependencies on Debian-based Linux systems, run:
 
 ```shell
@@ -92,7 +94,25 @@ sudo apt install make build-essential cmake protobuf-compiler curl postgresql-cl
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
-Then you'll be able to compile and start RiseDev!
+### nix shell
+
+If you use nix, you can also enter the nix shell via:
+
+```shell
+nix develop ./develop/nix
+```
+
+All dependencies will be automatically downloaded and configured.
+
+You can also use [direnv](https://github.com/direnv/direnv) to automatically enter the nix shell:
+
+```shell
+direnv allow
+```
+
+Check out [flake.nix](../develop/nix/flake.nix) to read more information!
+
+Then you'll be able to compile and start RisingWave!
 
 > [!NOTE]
 >
@@ -125,16 +145,14 @@ Then you'll be able to compile and start RiseDev!
 
 ## Start and monitor a dev cluster
 
-You can now build RiseDev and start a dev cluster. It is as simple as:
+RiseDev is the RisingWave developers' tool. You can now use RiseDev to start a dev cluster. It is as simple as:
 
 ```shell
 ./risedev d                        # shortcut for ./risedev dev
 psql -h localhost -p 4566 -d dev -U root
 ```
 
-If you detect memory bottlenecks while compiling, either allocate some disk space on your computer as swap memory, or lower the compilation parallelism with [`CARGO_BUILD_JOBS`](https://doc.rust-lang.org/cargo/reference/config.html#buildjobs), e.g. `CARGO_BUILD_JOBS=2`.
-
-The default dev cluster includes metadata-node, compute-node and frontend-node processes, and an embedded volatile in-memory state storage. No data will be persisted. This configuration is intended to make it easier to develop and debug RisingWave.
+The default dev cluster includes meta-node, compute-node and frontend-node processes, and an embedded volatile in-memory state storage. No data will be persisted. This configuration is intended to make it easier to develop and debug RisingWave.
 
 To stop the cluster:
 
@@ -154,11 +172,15 @@ To clean local data and logs:
 ./risedev clean-data
 ```
 
+### Tips for compilation
+
+If you detect memory bottlenecks while compiling, either allocate some disk space on your computer as swap memory, or lower the compilation parallelism with [`CARGO_BUILD_JOBS`](https://doc.rust-lang.org/cargo/reference/config.html#buildjobs), e.g. `CARGO_BUILD_JOBS=2`.
+
 ### Configure additional components
 
-There are a few components that you can configure in RiseDev.
+There are a few additional components supported by RiseDev.
 
-Use the `./risedev configure` command to start the interactive configuration mode, in which you can enable and disable components.
+Use the `./risedev configure` command to enable and disable components.
 
 - Hummock (MinIO + MinIO-CLI): Enable this component to persist state data.
 - Prometheus and Grafana: Enable this component to view RisingWave metrics. You can view the metrics through a built-in Grafana dashboard.
@@ -166,15 +188,9 @@ Use the `./risedev configure` command to start the interactive configuration mod
 - Kafka: Enable this component if you want to create a streaming source from a Kafka topic.
 - Grafana Tempo: Use this component for tracing.
 
-To manually add those components into the cluster, you will need to configure RiseDev to download them first. For example,
-
-```shell
-./risedev configure enable prometheus-and-grafana # enable Prometheus and Grafana
-./risedev configure enable minio                  # enable MinIO
-```
 > [!NOTE]
 >
-> Enabling a component with the `./risedev configure enable` command will only download the component to your environment. To allow it to function, you must revise the corresponding configuration setting in `risedev.yml` and restart the dev cluster.
+> Enabling a component with the `./risedev configure` command will only download the component to your environment. To allow it to function, you must revise the corresponding configuration setting in `risedev.yml` and restart the dev cluster.
 
 For example, you can modify the default section to:
 
@@ -201,7 +217,7 @@ If additional variables are needed,
 include them in the correct sections (such as `[server]` or `[storage]`) in `src/config/risingwave.toml`.
 
 
-### Start the playground with RiseDev
+### Start the playground
 
 If you do not need to start a full cluster to develop, you can issue `./risedev p` to start the playground, where the metadata node, compute nodes and frontend nodes are running in the same process. Logs are printed to stdout instead of separate log files.
 
@@ -211,9 +227,7 @@ If you do not need to start a full cluster to develop, you can issue `./risedev 
 
 For more information, refer to `README.md` under `src/risedevtool`.
 
-### Start the playground with cargo
-
-To start the playground (all-in-one process) from IDE or command line, you can use:
+You can also start the playground with `cargo` directly:
 
 ```shell
 cargo run --bin risingwave -- playground
@@ -232,14 +246,6 @@ To step through risingwave locally with a debugger you can use the `launch.json`
 ## Use standalone-mode
 
 Please refer to [README](../src/cmd_all/src/README.md) for more details.
-
-## Develop the dashboard
-
-Currently, RisingWave has two versions of dashboards. You can use RiseDev config to select which version to use.
-
-The dashboard will be available at `http://127.0.0.1:5691/` on meta node.
-
-The development instructions for dashboard are available [here](../dashboard/README.md).
 
 ## Observability components
 
@@ -275,7 +281,9 @@ Traces are visualized in Grafana. You may also want to uncomment `grafana` servi
 
 ### Dashboard
 
-You may use RisingWave Dashboard to see actors in the system. It will be started along with meta node.
+You may use RisingWave Dashboard to see actors in the system. It will be started along with meta node, and available at `http://127.0.0.1:5691/`.
+
+The development instructions for dashboard are available [here](../dashboard/README.md).
 
 ### Logging
 
@@ -284,7 +292,7 @@ The Rust components use `tokio-tracing` to handle both logging and tracing. The 
 * Third-party libraries: warn
 * Other libraries: debug
 
-If you need to override the default log levels, launch RisingWave with the environment variable `RUST_LOG` set as described [here](https://docs.rs/tracing-subscriber/0.3/tracing_subscriber/filter/struct.EnvFilter.html).
+To configure log levels, launch RisingWave with the environment variable `RUST_LOG` set as described [here](https://docs.rs/tracing-subscriber/0.3/tracing_subscriber/filter/struct.EnvFilter.html).
 
 There're also some logs designated for debugging purposes with target names starting with `events::`.
 For example, by setting `RUST_LOG=events::stream::message::chunk=trace`, all chunk messages will be logged as it passes through the executors in the streaming engine. Search in the codebase to find more of them.
@@ -305,25 +313,16 @@ RisingWave requires all code to pass fmt, clippy, sort and hakari checks. Run th
 ./risedev c             # Run all checks. Shortcut for ./risedev check
 ```
 
+There are also some miscellaneous checks. See `ci/scripts/misc-check.sh`.
+
 ### Unit tests
 
 RiseDev runs unit tests with cargo-nextest. To run unit tests:
 
 ```shell
-./risedev install-tools # Install required tools for running unit tests
 ./risedev test          # Run unit tests
 ```
 
-If you want to see the coverage report, run this command:
-
-```shell
-./risedev test-cov
-```
-
-Some unit tests will not work if the `/tmp` directory is on a TmpFS file system: these unit tests will fail with this
-error message: `Attempting to create cache file on a TmpFS file system. TmpFS cannot be used because it does not support Direct IO.`.
-If this happens you can override the use of `/tmp` by setting the  environment variable `RISINGWAVE_TEST_DIR` to a
-directory that is on a non-TmpFS filesystem, the unit tests will then place temporary files under your specified path.
 
 ### Planner tests
 
@@ -331,13 +330,7 @@ RisingWave's SQL frontend has SQL planner tests. For more information, see [Plan
 
 ### End-to-end tests
 
-Use [sqllogictest-rs](https://github.com/risinglightdb/sqllogictest-rs) to run RisingWave e2e tests.
-
-sqllogictest installation is included when you install test tools with the `./risedev install-tools` command. You may also install it with:
-
-```shell
-cargo install sqllogictest-bin --locked
-```
+We use [sqllogictest-rs](https://github.com/risinglightdb/sqllogictest-rs) to run RisingWave e2e tests.
 
 Before running end-to-end tests, you will need to start a full cluster first:
 
@@ -378,16 +371,6 @@ After running e2e tests, you may kill the cluster and clean data.
 
 RisingWave's codebase is constantly changing. The persistent data might not be stable. In case of unexpected decode errors, try `./risedev clean-data` first.
 
-### End-to-end tests on CI
-
-Basically, CI is using the following two configurations to run the full e2e test suite:
-
-```shell
-./risedev dev ci-3cn-1fe
-```
-
-You can adjust the environment variable to enable some specific code to make all e2e tests pass. Refer to GitHub Action workflow for more information.
-
 ### Fuzzing tests
 
 #### SqlSmith
@@ -416,6 +399,10 @@ These will be run on CI as well.
 
 Deterministic simulation is a powerful tool to efficiently search bugs and reliably reproduce them.
 In case you are not familiar with this technique, here is a [talk](https://www.youtube.com/watch?v=4fFDFbi3toc) and a [blog post](https://sled.rs/simulation.html) for brief introduction.
+
+See also the blog posts for a detailed writeup:
+- [Deterministic Simulation: A New Era of Distributed System Testing (Part 1 of 2)](https://www.risingwave.com/blog/deterministic-simulation-a-new-era-of-distributed-system-testing/)
+- [Applying Deterministic Simulation: The RisingWave Story (Part 2 of 2)](https://www.risingwave.com/blog/applying-deterministic-simulation-the-risingwave-story-part-2-of-2/)
 
 In RisingWave, deterministic simulation is supported in both unit test and end-to-end test. You can run them using the following commands:
 
@@ -496,21 +483,6 @@ You can run it locally with:
 
 In CI, you can make sure the PR runs it by adding the label `ci/run-backwards-compat-tests`.
 
-## Miscellaneous checks
-
-For shell code, please run:
-
-```shell
-brew install shellcheck
-shellcheck <new file>
-```
-
-For Protobufs, we rely on [buf](https://docs.buf.build/installation) for code formatting and linting. Please check out their documents for installation. To check if you violate the rules, please run the commands:
-
-```shell
-buf format -d --exit-code
-buf lint
-```
 
 ## Update Grafana dashboard
 
@@ -535,10 +507,6 @@ after deps get updated.
 `./risedev check-udeps`: Use [cargo-udeps](https://github.com/est31/cargo-udeps) to find unused dependencies in workspace.
 
 `./risedev check-dep-sort`: Use [cargo-sort](https://crates.io/crates/cargo-sort) to ensure all deps are get sorted.
-
-## Submit PRs
-
-Instructions about submitting PRs are included in the [contribution guidelines](../CONTRIBUTING.md).
 
 ## Benchmarking and Profiling
 
