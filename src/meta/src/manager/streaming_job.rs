@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
+
 use risingwave_common::catalog::TableVersionId;
 use risingwave_common::current_cluster_version;
 use risingwave_common::util::epoch::Epoch;
@@ -287,18 +289,18 @@ impl StreamingJob {
         }
     }
 
-    pub fn dependent_secret_refs(&self) -> MetaResult<Vec<u32>> {
+    pub fn dependent_secret_refs(&self) -> MetaResult<HashSet<u32>> {
         match self {
             StreamingJob::Sink(sink, _) => Ok(get_refed_secret_ids_from_sink(sink)),
             StreamingJob::Table(source, _, _) => {
                 if let Some(source) = source {
                     get_refed_secret_ids_from_source(source)
                 } else {
-                    Ok(vec![])
+                    Ok(HashSet::new())
                 }
             }
             StreamingJob::Source(source) => get_refed_secret_ids_from_source(source),
-            StreamingJob::MaterializedView(_) | StreamingJob::Index(_, _) => Ok(vec![]),
+            StreamingJob::MaterializedView(_) | StreamingJob::Index(_, _) => Ok(HashSet::new()),
         }
     }
 

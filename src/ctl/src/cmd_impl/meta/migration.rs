@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::time::Duration;
 
 use anyhow::Context;
@@ -497,22 +497,21 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
         let source_models: Vec<source::ActiveModel> = sources
             .into_iter()
             .map(|mut src| {
-                let mut dependent_secret_refs = vec![];
+                let mut dependent_secret_ids = HashSet::new();
                 if let Some(id) = src.connection_id.as_mut() {
                     *id = *connection_rewrite.get(id).unwrap();
                 }
                 for secret_ref in src.secret_refs.values_mut() {
                     secret_ref.secret_id = *secret_rewrite.get(&secret_ref.secret_id).unwrap();
-                    dependent_secret_refs.push(secret_ref.secret_id);
+                    dependent_secret_ids.insert(secret_ref.secret_id);
                 }
                 if let Some(info) = &mut src.info {
                     for secret_ref in info.format_encode_secret_refs.values_mut() {
                         secret_ref.secret_id = *secret_rewrite.get(&secret_ref.secret_id).unwrap();
-                        dependent_secret_refs.push(secret_ref.secret_id);
+                        dependent_secret_ids.insert(secret_ref.secret_id);
                     }
                 }
-                dependent_secret_refs.dedup();
-                object_dependencies.extend(dependent_secret_refs.into_iter().map(|secret_id| {
+                object_dependencies.extend(dependent_secret_ids.into_iter().map(|secret_id| {
                     object_dependency::ActiveModel {
                         id: NotSet,
                         oid: Set(secret_id as _),
@@ -573,19 +572,18 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
                 if let Some(id) = s.connection_id.as_mut() {
                     *id = *connection_rewrite.get(id).unwrap();
                 }
-                let mut dependent_secret_refs = vec![];
+                let mut dependent_secret_ids = HashSet::new();
                 for secret_ref in s.secret_refs.values_mut() {
                     secret_ref.secret_id = *secret_rewrite.get(&secret_ref.secret_id).unwrap();
-                    dependent_secret_refs.push(secret_ref.secret_id);
+                    dependent_secret_ids.insert(secret_ref.secret_id);
                 }
                 if let Some(desc) = &mut s.format_desc {
                     for secret_ref in desc.secret_refs.values_mut() {
                         secret_ref.secret_id = *secret_rewrite.get(&secret_ref.secret_id).unwrap();
-                        dependent_secret_refs.push(secret_ref.secret_id);
+                        dependent_secret_ids.insert(secret_ref.secret_id);
                     }
                 }
-                dependent_secret_refs.dedup();
-                object_dependencies.extend(dependent_secret_refs.into_iter().map(|secret_id| {
+                object_dependencies.extend(dependent_secret_ids.into_iter().map(|secret_id| {
                     object_dependency::ActiveModel {
                         id: NotSet,
                         oid: Set(secret_id as _),
