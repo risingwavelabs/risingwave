@@ -1,7 +1,7 @@
 control substitution on
 
 system ok
-rpk topic delete sr_pb_test || true; \\
+rpk topic delete sr_pb_test || true; \
 (rpk sr subject delete 'sr_pb_test-value' && rpk sr subject delete 'sr_pb_test-value' --permanent) || true;
 
 system ok
@@ -9,7 +9,7 @@ python3 e2e_test/source_inline/kafka/protobuf/pb.py "${RISEDEV_KAFKA_BOOTSTRAP_S
 
 # make sure google/protobuf/source_context.proto is NOT in schema registry
 system ok
-curl --silent '${RISEDEV_SCHEMA_REGISTRY_URL}' | grep -v 'google/protobuf/source_context.proto'
+curl --silent "${RISEDEV_SCHEMA_REGISTRY_URL}/subjects" | grep -v 'google/protobuf/source_context.proto'
 
 # Create a table.
 statement ok
