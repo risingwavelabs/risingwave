@@ -529,12 +529,17 @@ pub fn trigger_write_stop_stats(
 pub fn trigger_split_stat(metrics: &MetaMetrics, version: &HummockVersion) {
     let branched_ssts = version.build_branched_sst_info();
 
-    for (compaction_group_id, group) in &version.levels {
+    for compaction_group_id in version.levels.keys() {
         let group_label = compaction_group_id.to_string();
         metrics
             .state_table_count
             .with_label_values(&[&group_label])
-            .set(group.member_table_ids.len() as _);
+            .set(
+                version
+                    .state_table_info
+                    .compaction_group_member_table_ids(*compaction_group_id)
+                    .len() as _,
+            );
 
         let branched_sst_count: usize = branched_ssts
             .values()

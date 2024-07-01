@@ -24,14 +24,12 @@
 use std::collections::BTreeMap;
 
 use anyhow::Context as _;
-use apache_avro::Schema;
-use jst::{convert_avro, Context};
+use risingwave_connector_codec::JsonSchema;
 use risingwave_pb::plan_common::ColumnDesc;
 
 use super::util::{bytes_from_url, get_kafka_topic};
 use super::{JsonProperties, SchemaRegistryAuth};
 use crate::error::ConnectorResult;
-use crate::parser::avro::util::avro_schema_to_column_descs;
 use crate::parser::unified::json::{JsonAccess, JsonParseOptions};
 use crate::parser::unified::AccessImpl;
 use crate::parser::AccessBuilder;
@@ -80,7 +78,7 @@ impl JsonAccessBuilder {
     }
 }
 
-pub async fn schema_to_columns(
+pub async fn fetch_json_schema_and_map_to_columns(
     schema_location: &str,
     schema_registry_auth: Option<SchemaRegistryAuth>,
     props: &BTreeMap<String, String>,
@@ -92,17 +90,13 @@ pub async fn schema_to_columns(
         let schema = client
             .get_schema_by_subject(&format!("{}-value", topic))
             .await?;
-        serde_json::from_str(&schema.content)?
+        JsonSchema::parse_str(&schema.content)?
     } else {
         let url = url.first().unwrap();
         let bytes = bytes_from_url(url, None).await?;
-        serde_json::from_slice(&bytes)?
+        JsonSchema::parse_bytes(&bytes)?
     };
-    let context = Context::default();
-    let avro_schema = convert_avro(&json_schema, context).to_string();
-    let schema = Schema::parse_str(&avro_schema).context("failed to parse avro schema")?;
-    // TODO: do we need to support map type here?
-    avro_schema_to_column_descs(&schema, None).map_err(Into::into)
+    json_schema.json_schema_to_columns().map_err(Into::into)
 }
 
 #[cfg(test)]

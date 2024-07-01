@@ -23,15 +23,15 @@ use risingwave_common::array::ListValue;
 use risingwave_common::catalog::{INFORMATION_SCHEMA_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
 use risingwave_common::types::{data_types, DataType, ScalarImpl, Timestamptz};
-use risingwave_common::{bail_not_implemented, current_cluster_version, no_function};
+use risingwave_common::{bail_not_implemented, current_cluster_version, must_match, no_function};
 use risingwave_expr::aggregate::{agg_kinds, AggKind};
 use risingwave_expr::window_function::{
     Frame, FrameBound, FrameBounds, FrameExclusion, RangeFrameBounds, RangeFrameOffset,
-    RowsFrameBounds, WindowFuncKind,
+    RowsFrameBounds, SessionFrameBounds, SessionFrameGap, WindowFuncKind,
 };
 use risingwave_sqlparser::ast::{
-    self, Function, FunctionArg, FunctionArgExpr, Ident, WindowFrameBound, WindowFrameExclusion,
-    WindowFrameUnits, WindowSpec,
+    self, Function, FunctionArg, FunctionArgExpr, Ident, WindowFrameBound, WindowFrameBounds,
+    WindowFrameExclusion, WindowFrameUnits, WindowSpec,
 };
 use risingwave_sqlparser::parser::ParserError;
 use thiserror_ext::AsReport;
@@ -630,34 +630,35 @@ impl Binder {
             };
             let bounds = match frame.units {
                 WindowFrameUnits::Rows => {
-                    let (start, end) =
-                        self.bind_window_frame_usize_bounds(frame.start_bound, frame.end_bound)?;
+                    let (start, end) = must_match!(frame.bounds, WindowFrameBounds::Bounds { start, end } => (start, end));
+                    let (start, end) = self.bind_window_frame_usize_bounds(start, end)?;
                     FrameBounds::Rows(RowsFrameBounds { start, end })
                 }
-                WindowFrameUnits::Range => {
+                unit @ (WindowFrameUnits::Range | WindowFrameUnits::Session) => {
                     let order_by_expr = order_by
                         .sort_exprs
                         .iter()
-                        // for `RANGE` frame, there should be exactly one `ORDER BY` column
+                        // for `RANGE | SESSION` frame, there should be exactly one `ORDER BY` column
                         .exactly_one()
                         .map_err(|_| {
-                            ErrorCode::InvalidInputSyntax(
-                                "there should be exactly one ordering column for `RANGE` frame"
-                                    .to_string(),
-                            )
+                            ErrorCode::InvalidInputSyntax(format!(
+                                "there should be exactly one ordering column for `{}` frame",
+                                unit
+                            ))
                         })?;
                     let order_data_type = order_by_expr.expr.return_type();
                     let order_type = order_by_expr.order_type;
 
                     let offset_data_type = match &order_data_type {
-                        // for numeric ordering columns, `offset` should be the same type
+                        // for numeric ordering columns, `offset`/`gap` should be the same type
                         // NOTE: actually in PG it can be a larger type, but we don't support this here
                         t @ data_types::range_frame_numeric!() => t.clone(),
-                        // for datetime ordering columns, `offset` should be interval
+                        // for datetime ordering columns, `offset`/`gap` should be interval
                         t @ data_types::range_frame_datetime!() => {
                             if matches!(t, DataType::Date | DataType::Time) {
                                 bail_not_implemented!(
-                                    "`RANGE` frame with offset of type `{}` is not implemented yet, please manually cast the `ORDER BY` column to `timestamp`",
+                                    "`{}` frame with offset of type `{}` is not implemented yet, please manually cast the `ORDER BY` column to `timestamp`",
+                                    unit,
                                     t
                                 );
                             }
@@ -667,8 +668,8 @@ impl Binder {
                         t => {
                             return Err(ErrorCode::NotSupported(
                                 format!(
-                                    "`RANGE` frame with offset of type `{}` is not supported",
-                                    t
+                                    "`{}` frame with offset of type `{}` is not supported",
+                                    unit, t
                                 ),
                                 "Please re-consider the `ORDER BY` column".to_string(),
                             )
@@ -676,18 +677,31 @@ impl Binder {
                         }
                     };
 
-                    let (start, end) = self.bind_window_frame_scalar_impl_bounds(
-                        frame.start_bound,
-                        frame.end_bound,
-                        &offset_data_type,
-                    )?;
-                    FrameBounds::Range(RangeFrameBounds {
-                        order_data_type,
-                        order_type,
-                        offset_data_type,
-                        start: start.map(RangeFrameOffset::new),
-                        end: end.map(RangeFrameOffset::new),
-                    })
+                    if unit == WindowFrameUnits::Range {
+                        let (start, end) = must_match!(frame.bounds, WindowFrameBounds::Bounds { start, end } => (start, end));
+                        let (start, end) = self.bind_window_frame_scalar_impl_bounds(
+                            start,
+                            end,
+                            &offset_data_type,
+                        )?;
+                        FrameBounds::Range(RangeFrameBounds {
+                            order_data_type,
+                            order_type,
+                            offset_data_type,
+                            start: start.map(RangeFrameOffset::new),
+                            end: end.map(RangeFrameOffset::new),
+                        })
+                    } else {
+                        let gap = must_match!(frame.bounds, WindowFrameBounds::Gap(gap) => gap);
+                        let gap_value =
+                            self.bind_window_frame_bound_offset(*gap, offset_data_type.clone())?;
+                        FrameBounds::Session(SessionFrameBounds {
+                            order_data_type,
+                            order_type,
+                            gap_data_type: offset_data_type,
+                            gap: SessionFrameGap::new(gap_value),
+                        })
+                    }
                 }
                 WindowFrameUnits::Groups => {
                     bail_not_implemented!(
@@ -782,13 +796,13 @@ impl Binder {
         let mut offset = self.bind_expr(offset)?;
         if !offset.is_const() {
             return Err(ErrorCode::InvalidInputSyntax(
-                "offset in window frame bounds must be constant".to_string(),
+                "offset/gap in window frame bounds must be constant".to_string(),
             )
             .into());
         }
         if offset.cast_implicit_mut(cast_to.clone()).is_err() {
             return Err(ErrorCode::InvalidInputSyntax(format!(
-                "offset in window frame bounds must be castable to {}",
+                "offset/gap in window frame bounds must be castable to {}",
                 cast_to
             ))
             .into());
@@ -796,7 +810,7 @@ impl Binder {
         let offset = offset.fold_const()?;
         let Some(offset) = offset else {
             return Err(ErrorCode::InvalidInputSyntax(
-                "offset in window frame bounds must not be NULL".to_string(),
+                "offset/gap in window frame bounds must not be NULL".to_string(),
             )
             .into());
         };
@@ -1242,6 +1256,7 @@ impl Binder {
                 ("pg_get_userbyid", raw_call(ExprType::PgGetUserbyid)),
                 ("pg_get_indexdef", raw_call(ExprType::PgGetIndexdef)),
                 ("pg_get_viewdef", raw_call(ExprType::PgGetViewdef)),
+                ("pg_index_column_has_property", raw_call(ExprType::PgIndexColumnHasProperty)),
                 ("pg_relation_size", raw(|_binder, mut inputs|{
                     if inputs.is_empty() {
                         return Err(ErrorCode::ExprError(
@@ -1411,6 +1426,7 @@ impl Binder {
                 ("pg_is_in_recovery", raw_literal(ExprImpl::literal_bool(false))),
                 // internal
                 ("rw_vnode", raw_call(ExprType::Vnode)),
+                ("rw_test_paid_tier", raw_call(ExprType::TestPaidTier)), // for testing purposes
                 // TODO: choose which pg version we should return.
                 ("version", raw_literal(ExprImpl::literal_varchar(current_cluster_version()))),
                 // non-deterministic
@@ -1557,11 +1573,15 @@ impl Binder {
         if self.is_for_stream()
             && !matches!(
                 self.context.clause,
-                Some(Clause::Where) | Some(Clause::Having) | Some(Clause::JoinOn)
+                Some(Clause::Where)
+                    | Some(Clause::Having)
+                    | Some(Clause::JoinOn)
+                    | Some(Clause::From)
             )
         {
             return Err(ErrorCode::InvalidInputSyntax(format!(
-                "For streaming queries, `NOW()` function is only allowed in `WHERE`, `HAVING` and `ON`. Found in clause: {:?}. Please please refer to https://www.risingwave.dev/docs/current/sql-pattern-temporal-filters/ for more information",
+                "For streaming queries, `NOW()` function is only allowed in `WHERE`, `HAVING`, `ON` and `FROM`. Found in clause: {:?}. \
+                Please please refer to https://www.risingwave.dev/docs/current/sql-pattern-temporal-filters/ for more information",
                 self.context.clause
             ))
             .into());

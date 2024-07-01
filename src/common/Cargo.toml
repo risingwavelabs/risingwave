@@ -19,12 +19,16 @@ anyhow = "1"
 arc-swap = "1"
 arrow-array = { workspace = true }
 arrow-array-deltalake = { workspace = true }
+arrow-array-iceberg = { workspace = true }
 arrow-buffer = { workspace = true }
 arrow-buffer-deltalake = { workspace = true }
+arrow-buffer-iceberg = { workspace = true }
 arrow-cast = { workspace = true }
 arrow-cast-deltalake = { workspace = true }
+arrow-cast-iceberg = { workspace = true }
 arrow-schema = { workspace = true }
 arrow-schema-deltalake = { workspace = true }
+arrow-schema-iceberg = { workspace = true }
 async-trait = "0.1"
 auto_enums = { workspace = true }
 auto_impl = "1"
@@ -83,6 +87,7 @@ risingwave_common_estimate_size = { workspace = true }
 risingwave_common_metrics = { path = "./metrics" }
 risingwave_common_proc_macro = { workspace = true }
 risingwave_error = { workspace = true }
+risingwave_license = { workspace = true }
 risingwave_pb = { workspace = true }
 rust_decimal = { version = "1", features = ["db-postgres", "maths"] }
 rw_iter_util = { workspace = true }

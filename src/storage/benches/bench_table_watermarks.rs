@@ -25,6 +25,7 @@ use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::test_epoch;
+use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::table_watermark::{
     TableWatermarks, TableWatermarksIndex, VnodeWatermark, WatermarkDirection,
 };
@@ -132,6 +133,7 @@ fn gen_version(
                     StateTableInfoDelta {
                         committed_epoch,
                         safe_epoch: test_epoch(old_epoch_idx as _),
+                        compaction_group_id: StaticCompactionGroupId::StateDefault as _,
                     },
                 )
             })

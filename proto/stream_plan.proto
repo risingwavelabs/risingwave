@@ -287,6 +287,10 @@ message FilterNode {
   expr.ExprNode search_condition = 1;
 }
 
+message ChangeLogNode {
+  bool need_op = 1;
+}
+
 message CdcFilterNode {
   expr.ExprNode search_condition = 1;
   uint32 upstream_source_id = 2;
@@ -725,9 +729,21 @@ message RowIdGenNode {
   uint64 row_id_index = 1;
 }
 
+message NowModeUpdateCurrent {}
+
+message NowModeGenerateSeries {
+  data.Datum start_timestamp = 1;
+  data.Datum interval = 2;
+}
+
 message NowNode {
   // Persists emitted 'now'.
   catalog.Table state_table = 1;
+
+  oneof mode {
+    NowModeUpdateCurrent update_current = 101;
+    NowModeGenerateSeries generate_series = 102;
+  }
 }
 
 message ValuesNode {
@@ -812,6 +828,7 @@ message StreamNode {
     StreamCdcScanNode stream_cdc_scan = 139;
     CdcFilterNode cdc_filter = 140;
     SourceBackfillNode source_backfill = 142;
+    ChangeLogNode changelog = 143;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.

@@ -21,6 +21,14 @@ BigQueryConfig:
     field_type: usize
     required: false
     default: '1024'
+  - name: bigquery.retry_times
+    field_type: usize
+    required: false
+    default: '5'
+  - name: auto_create
+    field_type: bool
+    required: false
+    default: Default::default
   - name: aws.region
     field_type: String
     required: false
@@ -84,6 +92,14 @@ ClickHouseConfig:
   - name: clickhouse.table
     field_type: String
     required: true
+  - name: clickhouse.delete.column
+    field_type: String
+    required: false
+  - name: commit_checkpoint_interval
+    field_type: u64
+    comments: Commit every n(>0) checkpoints, if n is not set, we will commit every checkpoint.
+    required: false
+    default: Default::default
   - name: r#type
     field_type: String
     required: true
@@ -132,6 +148,9 @@ DorisConfig:
   - name: doris.table
     field_type: String
     required: true
+  - name: doris.partial_update
+    field_type: String
+    required: false
   - name: r#type
     field_type: String
     required: true
@@ -511,6 +530,33 @@ KinesisSinkConfig:
     required: false
     alias:
     - kinesis.assumerole.external_id
+MongodbConfig:
+  fields:
+  - name: mongodb.url
+    field_type: String
+    comments: The URL of MongoDB
+    required: true
+  - name: collection.name
+    field_type: String
+    comments: The collection name where data should be written to or read from. For sinks, the format is  `db_name.collection_name`. Data can also be written to dynamic collections, see `collection.name.field`  for more information.
+    required: true
+  - name: r#type
+    field_type: String
+    required: true
+  - name: collection.name.field
+    field_type: String
+    comments: The dynamic collection name where data should be sunk to. If specified, the field value will be used  as the collection name. The collection name format is same as `collection.name`. If the field value is  null or an empty string, then the `collection.name` will be used as a fallback destination.
+    required: false
+  - name: collection.name.field.drop
+    field_type: bool
+    comments: Controls whether the field value of `collection.name.field` should be dropped when sinking.  Set this option to true to avoid the duplicate values of `collection.name.field` being written to the  result collection.
+    required: false
+    default: Default::default
+  - name: mongodb.bulk_write.max_entries
+    field_type: usize
+    comments: The maximum entries will accumulate before performing the bulk write, defaults to 1024.
+    required: false
+    default: '1024'
 MqttConfig:
   fields:
   - name: url
@@ -750,6 +796,33 @@ SnowflakeConfig:
   - name: snowflake.aws_region
     field_type: String
     comments: The s3 region, e.g., us-east-2
+    required: true
+SqlServerConfig:
+  fields:
+  - name: sqlserver.host
+    field_type: String
+    required: true
+  - name: sqlserver.port
+    field_type: u16
+    required: true
+  - name: sqlserver.user
+    field_type: String
+    required: true
+  - name: sqlserver.password
+    field_type: String
+    required: true
+  - name: sqlserver.database
+    field_type: String
+    required: true
+  - name: sqlserver.table
+    field_type: String
+    required: true
+  - name: sqlserver.max_batch_rows
+    field_type: usize
+    required: false
+    default: '1024'
+  - name: r#type
+    field_type: String
     required: true
 StarrocksConfig:
   fields:

@@ -165,11 +165,10 @@ impl Sink for MqttSink {
 
     const SINK_NAME: &'static str = MQTT_SINK;
 
-    fn is_sink_decouple(desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
+    fn is_sink_decouple(_desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
         match user_specified {
-            SinkDecouple::Default => Ok(desc.sink_type.is_append_only()),
+            SinkDecouple::Default | SinkDecouple::Enable => Ok(true),
             SinkDecouple::Disable => Ok(false),
-            SinkDecouple::Enable => Ok(true),
         }
     }
 
@@ -289,7 +288,7 @@ impl MqttSinkWriter {
                         }
                         err => {
                             tracing::error!("Failed to poll mqtt eventloop: {}", err.as_report());
-                            std::thread::sleep(std::time::Duration::from_secs(1));
+                            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                         }
                     },
                 }

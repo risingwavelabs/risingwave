@@ -42,8 +42,9 @@ use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
     WrapStreamExecutor,
 };
+use crate::monitor::BatchSpillMetrics;
 use crate::spill::spill_op::{
-    SpillBuildHasher, SpillOp, DEFAULT_SPILL_PARTITION_NUM, SPILL_AT_LEAST_MEMORY,
+    SpillBackend, SpillBuildHasher, SpillOp, DEFAULT_SPILL_PARTITION_NUM, SPILL_AT_LEAST_MEMORY,
 };
 use crate::task::{BatchTaskContext, ShutdownToken, TaskId};
 
@@ -64,6 +65,7 @@ impl HashKeyDispatcher for HashAggExecutorBuilder {
             self.chunk_size,
             self.mem_context,
             self.enable_spill,
+            self.spill_metrics,
             self.shutdown_rx,
         ))
     }
@@ -85,6 +87,7 @@ pub struct HashAggExecutorBuilder {
     chunk_size: usize,
     mem_context: MemoryContext,
     enable_spill: bool,
+    spill_metrics: Arc<BatchSpillMetrics>,
     shutdown_rx: ShutdownToken,
 }
 
@@ -97,6 +100,7 @@ impl HashAggExecutorBuilder {
         chunk_size: usize,
         mem_context: MemoryContext,
         enable_spill: bool,
+        spill_metrics: Arc<BatchSpillMetrics>,
         shutdown_rx: ShutdownToken,
     ) -> Result<BoxedExecutor> {
         let aggs: Vec<_> = hash_agg_node
@@ -136,6 +140,7 @@ impl HashAggExecutorBuilder {
             chunk_size,
             mem_context,
             enable_spill,
+            spill_metrics,
             shutdown_rx,
         };
 
@@ -158,6 +163,8 @@ impl BoxedExecutorBuilder for HashAggExecutorBuilder {
 
         let identity = source.plan_node().get_identity();
 
+        let spill_metrics = source.context.spill_metrics();
+
         Self::deserialize(
             hash_agg_node,
             child,
@@ -166,6 +173,7 @@ impl BoxedExecutorBuilder for HashAggExecutorBuilder {
             source.context.get_config().developer.chunk_size,
             source.context.create_executor_mem_context(identity),
             source.context.get_config().enable_spill,
+            spill_metrics,
             source.shutdown_rx.clone(),
         )
     }
@@ -188,6 +196,7 @@ pub struct HashAggExecutor<K> {
     chunk_size: usize,
     mem_context: MemoryContext,
     enable_spill: bool,
+    spill_metrics: Arc<BatchSpillMetrics>,
     /// The upper bound of memory usage for this executor.
     memory_upper_bound: Option<u64>,
     shutdown_rx: ShutdownToken,
@@ -195,6 +204,7 @@ pub struct HashAggExecutor<K> {
 }
 
 impl<K> HashAggExecutor<K> {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         aggs: Arc<Vec<BoxedAggregateFunction>>,
         group_key_columns: Vec<usize>,
@@ -205,6 +215,7 @@ impl<K> HashAggExecutor<K> {
         chunk_size: usize,
         mem_context: MemoryContext,
         enable_spill: bool,
+        spill_metrics: Arc<BatchSpillMetrics>,
         shutdown_rx: ShutdownToken,
     ) -> Self {
         Self::new_inner(
@@ -218,6 +229,7 @@ impl<K> HashAggExecutor<K> {
             chunk_size,
             mem_context,
             enable_spill,
+            spill_metrics,
             None,
             shutdown_rx,
         )
@@ -235,6 +247,7 @@ impl<K> HashAggExecutor<K> {
         chunk_size: usize,
         mem_context: MemoryContext,
         enable_spill: bool,
+        spill_metrics: Arc<BatchSpillMetrics>,
         memory_upper_bound: Option<u64>,
         shutdown_rx: ShutdownToken,
     ) -> Self {
@@ -249,6 +262,7 @@ impl<K> HashAggExecutor<K> {
             chunk_size,
             mem_context,
             enable_spill,
+            spill_metrics,
             memory_upper_bound,
             shutdown_rx,
             _phantom: PhantomData,
@@ -296,6 +310,7 @@ pub struct AggSpillManager {
     child_data_types: Vec<DataType>,
     agg_data_types: Vec<DataType>,
     spill_chunk_size: usize,
+    spill_metrics: Arc<BatchSpillMetrics>,
 }
 
 impl AggSpillManager {
@@ -306,10 +321,11 @@ impl AggSpillManager {
         agg_data_types: Vec<DataType>,
         child_data_types: Vec<DataType>,
         spill_chunk_size: usize,
+        spill_metrics: Arc<BatchSpillMetrics>,
     ) -> Result<Self> {
         let suffix_uuid = uuid::Uuid::new_v4();
         let dir = format!("/{}-{}/", agg_identity, suffix_uuid);
-        let op = SpillOp::create(dir)?;
+        let op = SpillOp::create(dir, SpillBackend::Disk)?;
         let agg_state_writers = Vec::with_capacity(partition_num);
         let agg_state_chunk_builder = Vec::with_capacity(partition_num);
         let input_writers = Vec::with_capacity(partition_num);
@@ -328,6 +344,7 @@ impl AggSpillManager {
             child_data_types,
             agg_data_types,
             spill_chunk_size,
+            spill_metrics,
         })
     }
 
@@ -362,6 +379,9 @@ impl AggSpillManager {
             let chunk_pb: PbDataChunk = output_chunk.to_protobuf();
             let buf = Message::encode_to_vec(&chunk_pb);
             let len_bytes = Bytes::copy_from_slice(&(buf.len() as u32).to_le_bytes());
+            self.spill_metrics
+                .batch_spill_write_bytes
+                .inc_by((buf.len() + len_bytes.len()) as u64);
             self.agg_state_writers[partition].write(len_bytes).await?;
             self.agg_state_writers[partition].write(buf).await?;
         }
@@ -382,6 +402,9 @@ impl AggSpillManager {
                 let chunk_pb: PbDataChunk = output_chunk.to_protobuf();
                 let buf = Message::encode_to_vec(&chunk_pb);
                 let len_bytes = Bytes::copy_from_slice(&(buf.len() as u32).to_le_bytes());
+                self.spill_metrics
+                    .batch_spill_write_bytes
+                    .inc_by((buf.len() + len_bytes.len()) as u64);
                 self.input_writers[partition].write(len_bytes).await?;
                 self.input_writers[partition].write(buf).await?;
             }
@@ -395,6 +418,9 @@ impl AggSpillManager {
                 let chunk_pb: PbDataChunk = output_chunk.to_protobuf();
                 let buf = Message::encode_to_vec(&chunk_pb);
                 let len_bytes = Bytes::copy_from_slice(&(buf.len() as u32).to_le_bytes());
+                self.spill_metrics
+                    .batch_spill_write_bytes
+                    .inc_by((buf.len() + len_bytes.len()) as u64);
                 self.agg_state_writers[partition].write(len_bytes).await?;
                 self.agg_state_writers[partition].write(buf).await?;
             }
@@ -403,6 +429,9 @@ impl AggSpillManager {
                 let chunk_pb: PbDataChunk = output_chunk.to_protobuf();
                 let buf = Message::encode_to_vec(&chunk_pb);
                 let len_bytes = Bytes::copy_from_slice(&(buf.len() as u32).to_le_bytes());
+                self.spill_metrics
+                    .batch_spill_write_bytes
+                    .inc_by((buf.len() + len_bytes.len()) as u64);
                 self.input_writers[partition].write(len_bytes).await?;
                 self.input_writers[partition].write(buf).await?;
             }
@@ -420,13 +449,13 @@ impl AggSpillManager {
     async fn read_agg_state_partition(&mut self, partition: usize) -> Result<BoxedDataChunkStream> {
         let agg_state_partition_file_name = format!("agg-state-p{}", partition);
         let r = self.op.reader_with(&agg_state_partition_file_name).await?;
-        Ok(SpillOp::read_stream(r))
+        Ok(SpillOp::read_stream(r, self.spill_metrics.clone()))
     }
 
     async fn read_input_partition(&mut self, partition: usize) -> Result<BoxedDataChunkStream> {
         let input_partition_file_name = format!("input-chunks-p{}", partition);
         let r = self.op.reader_with(&input_partition_file_name).await?;
-        Ok(SpillOp::read_stream(r))
+        Ok(SpillOp::read_stream(r, self.spill_metrics.clone()))
     }
 
     async fn estimate_partition_size(&self, partition: usize) -> Result<u64> {
@@ -560,6 +589,10 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
             // Finally, we would get e.g. 20 partitions. Each partition should contain a portion of the original hash table and input data.
             // A sub HashAggExecutor would be used to consume each partition one by one.
             // If memory is still not enough in the sub HashAggExecutor, it will spill its hash table and input recursively.
+            info!(
+                "batch hash agg executor {} starts to spill out",
+                &self.identity
+            );
             let mut agg_spill_manager = AggSpillManager::new(
                 &self.identity,
                 DEFAULT_SPILL_PARTITION_NUM,
@@ -567,6 +600,7 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
                 self.aggs.iter().map(|agg| agg.return_type()).collect(),
                 child_schema.data_types(),
                 self.chunk_size,
+                self.spill_metrics.clone(),
             )?;
             agg_spill_manager.init_writers().await?;
 
@@ -632,6 +666,7 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
                     self.chunk_size,
                     self.mem_context.clone(),
                     self.enable_spill,
+                    self.spill_metrics.clone(),
                     Some(partition_size),
                     self.shutdown_rx.clone(),
                 );
@@ -780,6 +815,7 @@ mod tests {
                 CHUNK_SIZE,
                 mem_context.clone(),
                 false,
+                BatchSpillMetrics::for_test(),
                 ShutdownToken::empty(),
             )
             .unwrap();
@@ -853,6 +889,7 @@ mod tests {
             CHUNK_SIZE,
             MemoryContext::none(),
             false,
+            BatchSpillMetrics::for_test(),
             ShutdownToken::empty(),
         )
         .unwrap();
@@ -970,6 +1007,7 @@ mod tests {
             CHUNK_SIZE,
             MemoryContext::none(),
             false,
+            BatchSpillMetrics::for_test(),
             shutdown_rx,
         )
         .unwrap();

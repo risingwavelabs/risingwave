@@ -209,7 +209,6 @@ impl MockDatagenSource {
         .unwrap();
         let parser_config = ParserConfig {
             specific: SpecificParserConfig {
-                key_encoding_config: None,
                 encoding_config: EncodingProperties::Native,
                 protocol_config: ProtocolProperties::Native,
             },
