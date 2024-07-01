@@ -63,7 +63,7 @@ jobs:
           cargo install mdbook mdbook-toc
           cd docs/dev
           mdbook build
-          cp -R book ../../artifact
+          cp -R book/* ../../artifact
       - name: Upload artifacts
         uses: actions/upload-pages-artifact@v1
         with:
