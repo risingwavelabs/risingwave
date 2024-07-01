@@ -65,8 +65,9 @@ use crate::barrier::Reschedule;
 use crate::controller::catalog::CatalogController;
 use crate::controller::rename::ReplaceTableExprRewriter;
 use crate::controller::utils::{
-    check_relation_name_duplicate, check_sink_into_table_cycle, ensure_object_id, ensure_user_id,
-    get_fragment_actor_ids, get_fragment_mappings, get_parallel_unit_to_worker_map,
+    build_relation_group, check_relation_name_duplicate, check_sink_into_table_cycle,
+    ensure_object_id, ensure_user_id, get_fragment_actor_ids, get_fragment_mappings,
+    get_parallel_unit_to_worker_map, PartialObject,
 };
 use crate::controller::ObjectModel;
 use crate::manager::{NotificationVersion, SinkId, StreamingJob};
@@ -552,6 +553,43 @@ impl CatalogController {
         if let Some(source_id) = associated_source_id {
             Object::delete_by_id(source_id).exec(&txn).await?;
         }
+        let mut objs = vec![];
+        let obj: PartialObject = Object::find_by_id(job_id)
+            .select_only()
+            .column(object::Column::ObjType)
+            .into_partial_model()
+            .one(&txn)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("streaming job", job_id))?;
+        objs.push(obj);
+        let internal_table_objs: Vec<PartialObject> = Object::find()
+            .select_only()
+            .columns([
+                object::Column::Oid,
+                object::Column::ObjType,
+                object::Column::SchemaId,
+                object::Column::DatabaseId,
+            ])
+            .join(JoinType::InnerJoin, object::Relation::Table.def())
+            .filter(table::Column::BelongsToJobId.is_in(internal_table_ids.clone()))
+            .into_partial_model()
+            .all(&txn)
+            .await?;
+        objs.extend(internal_table_objs);
+        if let Some(source_id) = associated_source_id {
+            let source_obj = Object::find_by_id(source_id)
+                .select_only()
+                .column(object::Column::ObjType)
+                .into_partial_model()
+                .one(&txn)
+                .await?
+                .ok_or_else(|| MetaError::catalog_id_not_found("source", source_id))?;
+            objs.push(source_obj);
+        }
+        let relation_group = build_relation_group(objs);
+        let _version = self
+            .notify_frontend(Operation::Delete, relation_group)
+            .await;
         txn.commit().await?;
 
         Ok(true)

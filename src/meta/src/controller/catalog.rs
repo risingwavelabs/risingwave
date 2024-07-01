@@ -63,7 +63,7 @@ use tokio::sync::{RwLock, RwLockReadGuard};
 use super::utils::check_subscription_name_duplicate;
 use crate::controller::rename::{alter_relation_rename, alter_relation_rename_refs};
 use crate::controller::utils::{
-    check_connection_name_duplicate, check_database_name_duplicate,
+    build_relation_group, check_connection_name_duplicate, check_database_name_duplicate,
     check_function_signature_duplicate, check_relation_name_duplicate, check_schema_name_duplicate,
     check_secret_name_duplicate, ensure_object_id, ensure_object_not_refer, ensure_schema_empty,
     ensure_user_id, get_fragment_mappings_by_jobs, get_referring_objects,
@@ -3092,74 +3092,6 @@ impl CatalogControllerInner {
             .map(|(func, obj)| ObjectModel(func, obj.unwrap()).into())
             .collect())
     }
-}
-
-fn build_relation_group(relation_objects: Vec<PartialObject>) -> NotificationInfo {
-    let mut relations = vec![];
-    for obj in relation_objects {
-        match obj.obj_type {
-            ObjectType::Table => relations.push(PbRelation {
-                relation_info: Some(PbRelationInfo::Table(PbTable {
-                    id: obj.oid as _,
-                    schema_id: obj.schema_id.unwrap() as _,
-                    database_id: obj.database_id.unwrap() as _,
-                    ..Default::default()
-                })),
-            }),
-            ObjectType::Source => relations.push(PbRelation {
-                relation_info: Some(PbRelationInfo::Source(PbSource {
-                    id: obj.oid as _,
-                    schema_id: obj.schema_id.unwrap() as _,
-                    database_id: obj.database_id.unwrap() as _,
-                    ..Default::default()
-                })),
-            }),
-            ObjectType::Sink => relations.push(PbRelation {
-                relation_info: Some(PbRelationInfo::Sink(PbSink {
-                    id: obj.oid as _,
-                    schema_id: obj.schema_id.unwrap() as _,
-                    database_id: obj.database_id.unwrap() as _,
-                    ..Default::default()
-                })),
-            }),
-            ObjectType::Subscription => relations.push(PbRelation {
-                relation_info: Some(PbRelationInfo::Subscription(PbSubscription {
-                    id: obj.oid as _,
-                    schema_id: obj.schema_id.unwrap() as _,
-                    database_id: obj.database_id.unwrap() as _,
-                    ..Default::default()
-                })),
-            }),
-            ObjectType::View => relations.push(PbRelation {
-                relation_info: Some(PbRelationInfo::View(PbView {
-                    id: obj.oid as _,
-                    schema_id: obj.schema_id.unwrap() as _,
-                    database_id: obj.database_id.unwrap() as _,
-                    ..Default::default()
-                })),
-            }),
-            ObjectType::Index => {
-                relations.push(PbRelation {
-                    relation_info: Some(PbRelationInfo::Index(PbIndex {
-                        id: obj.oid as _,
-                        schema_id: obj.schema_id.unwrap() as _,
-                        database_id: obj.database_id.unwrap() as _,
-                        ..Default::default()
-                    })),
-                });
-                relations.push(PbRelation {
-                    relation_info: Some(PbRelationInfo::Table(PbTable {
-                        id: obj.oid as _,
-                        schema_id: obj.schema_id.unwrap() as _,
-                        database_id: obj.database_id.unwrap() as _,
-                        ..Default::default()
-                    })),
-                });
-            }
-            _ => unreachable!("only relations will be dropped."),
-        }
-    }
-    NotificationInfo::RelationGroup(PbRelationGroup { relations })
 }
 
 #[cfg(test)]
