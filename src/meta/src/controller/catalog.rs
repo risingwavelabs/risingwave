@@ -71,9 +71,7 @@ use crate::controller::utils::{
     resolve_source_register_info_for_jobs, PartialObject,
 };
 use crate::controller::ObjectModel;
-use crate::manager::{
-    Catalog, MetaSrvEnv, NotificationVersion, IGNORED_NOTIFICATION_VERSION,
-};
+use crate::manager::{Catalog, MetaSrvEnv, NotificationVersion, IGNORED_NOTIFICATION_VERSION};
 use crate::rpc::ddl_controller::DropMode;
 use crate::stream::SourceManagerRef;
 use crate::telemetry::MetaTelemetryJobDesc;
@@ -668,95 +666,9 @@ impl CatalogController {
             return Ok(ReleaseContext::default());
         }
 
-        // Record cleaned streaming jobs in event logs.
-        let mut dirty_table_ids = vec![];
-        let mut dirty_source_ids = vec![];
-        let mut dirty_sink_ids = vec![];
-        let mut dirty_job_ids = vec![];
-        for dirty_job_obj in &dirty_objs {
-            let job_id = dirty_job_obj.oid;
-            let job_type = dirty_job_obj.obj_type;
-            dirty_job_ids.push(job_id);
-            match job_type {
-                ObjectType::Table | ObjectType::Index => dirty_table_ids.push(job_id),
-                ObjectType::Source => dirty_source_ids.push(job_id),
-                ObjectType::Sink => dirty_sink_ids.push(job_id),
-                _ => unreachable!("unexpected streaming job type"),
-            }
-        }
-        let mut event_logs = vec![];
-        if !dirty_table_ids.is_empty() {
-            let table_info: Vec<(TableId, String, String)> = Table::find()
-                .select_only()
-                .columns([
-                    table::Column::TableId,
-                    table::Column::Name,
-                    table::Column::Definition,
-                ])
-                .filter(table::Column::TableId.is_in(dirty_table_ids))
-                .into_tuple()
-                .all(&txn)
-                .await?;
-            for (table_id, name, definition) in table_info {
-                let event = risingwave_pb::meta::event_log::EventDirtyStreamJobClear {
-                    id: table_id as _,
-                    name,
-                    definition,
-                    error: "clear during recovery".to_string(),
-                };
-                event_logs.push(risingwave_pb::meta::event_log::Event::DirtyStreamJobClear(
-                    event,
-                ));
-            }
-        }
-        if !dirty_source_ids.is_empty() {
-            let source_info: Vec<(SourceId, String, String)> = Source::find()
-                .select_only()
-                .columns([
-                    source::Column::SourceId,
-                    source::Column::Name,
-                    source::Column::Definition,
-                ])
-                .filter(source::Column::SourceId.is_in(dirty_source_ids))
-                .into_tuple()
-                .all(&txn)
-                .await?;
-            for (source_id, name, definition) in source_info {
-                let event = risingwave_pb::meta::event_log::EventDirtyStreamJobClear {
-                    id: source_id as _,
-                    name,
-                    definition,
-                    error: "clear during recovery".to_string(),
-                };
-                event_logs.push(risingwave_pb::meta::event_log::Event::DirtyStreamJobClear(
-                    event,
-                ));
-            }
-        }
-        if !dirty_sink_ids.is_empty() {
-            let sink_info: Vec<(SinkId, String, String)> = Sink::find()
-                .select_only()
-                .columns([
-                    sink::Column::SinkId,
-                    sink::Column::Name,
-                    sink::Column::Definition,
-                ])
-                .filter(sink::Column::SinkId.is_in(dirty_sink_ids))
-                .into_tuple()
-                .all(&txn)
-                .await?;
-            for (sink_id, name, definition) in sink_info {
-                let event = risingwave_pb::meta::event_log::EventDirtyStreamJobClear {
-                    id: sink_id as _,
-                    name,
-                    definition,
-                    error: "clear during recovery".to_string(),
-                };
-                event_logs.push(risingwave_pb::meta::event_log::Event::DirtyStreamJobClear(
-                    event,
-                ));
-            }
-        }
+        self.log_cleaned_dirty_jobs(&dirty_objs, &txn).await?;
+
+        let dirty_job_ids = dirty_objs.iter().map(|obj| obj.oid).collect::<Vec<_>>();
 
         let associated_source_ids: Vec<SourceId> = Table::find()
             .select_only()
@@ -808,8 +720,6 @@ impl CatalogController {
 
         txn.commit().await?;
 
-        self.env.event_log_manager_ref().add_event_logs(event_logs);
-
         let relation_group = build_relation_group(dirty_objs);
 
         let _version = self
@@ -821,6 +731,103 @@ impl CatalogController {
             source_ids: associated_source_ids,
             ..Default::default()
         })
+    }
+
+    async fn log_cleaned_dirty_jobs(
+        &self,
+        dirty_objs: &[PartialObject],
+        txn: &DatabaseTransaction,
+    ) -> MetaResult<()> {
+        // Record cleaned streaming jobs in event logs.
+        let mut dirty_table_ids = vec![];
+        let mut dirty_source_ids = vec![];
+        let mut dirty_sink_ids = vec![];
+        for dirty_job_obj in dirty_objs {
+            let job_id = dirty_job_obj.oid;
+            let job_type = dirty_job_obj.obj_type;
+            match job_type {
+                ObjectType::Table | ObjectType::Index => dirty_table_ids.push(job_id),
+                ObjectType::Source => dirty_source_ids.push(job_id),
+                ObjectType::Sink => dirty_sink_ids.push(job_id),
+                _ => unreachable!("unexpected streaming job type"),
+            }
+        }
+
+        let mut event_logs = vec![];
+        if !dirty_table_ids.is_empty() {
+            let table_info: Vec<(TableId, String, String)> = Table::find()
+                .select_only()
+                .columns([
+                    table::Column::TableId,
+                    table::Column::Name,
+                    table::Column::Definition,
+                ])
+                .filter(table::Column::TableId.is_in(dirty_table_ids))
+                .into_tuple()
+                .all(txn)
+                .await?;
+            for (table_id, name, definition) in table_info {
+                let event = risingwave_pb::meta::event_log::EventDirtyStreamJobClear {
+                    id: table_id as _,
+                    name,
+                    definition,
+                    error: "clear during recovery".to_string(),
+                };
+                event_logs.push(risingwave_pb::meta::event_log::Event::DirtyStreamJobClear(
+                    event,
+                ));
+            }
+        }
+        if !dirty_source_ids.is_empty() {
+            let source_info: Vec<(SourceId, String, String)> = Source::find()
+                .select_only()
+                .columns([
+                    source::Column::SourceId,
+                    source::Column::Name,
+                    source::Column::Definition,
+                ])
+                .filter(source::Column::SourceId.is_in(dirty_source_ids))
+                .into_tuple()
+                .all(txn)
+                .await?;
+            for (source_id, name, definition) in source_info {
+                let event = risingwave_pb::meta::event_log::EventDirtyStreamJobClear {
+                    id: source_id as _,
+                    name,
+                    definition,
+                    error: "clear during recovery".to_string(),
+                };
+                event_logs.push(risingwave_pb::meta::event_log::Event::DirtyStreamJobClear(
+                    event,
+                ));
+            }
+        }
+        if !dirty_sink_ids.is_empty() {
+            let sink_info: Vec<(SinkId, String, String)> = Sink::find()
+                .select_only()
+                .columns([
+                    sink::Column::SinkId,
+                    sink::Column::Name,
+                    sink::Column::Definition,
+                ])
+                .filter(sink::Column::SinkId.is_in(dirty_sink_ids))
+                .into_tuple()
+                .all(txn)
+                .await?;
+            for (sink_id, name, definition) in sink_info {
+                let event = risingwave_pb::meta::event_log::EventDirtyStreamJobClear {
+                    id: sink_id as _,
+                    name,
+                    definition,
+                    error: "clear during recovery".to_string(),
+                };
+                event_logs.push(risingwave_pb::meta::event_log::Event::DirtyStreamJobClear(
+                    event,
+                ));
+            }
+        }
+        self.env.event_log_manager_ref().add_event_logs(event_logs);
+        Ok(())
     }
 
     async fn clean_dirty_sink_downstreams(txn: &DatabaseTransaction) -> MetaResult<bool> {
