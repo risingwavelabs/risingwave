@@ -38,15 +38,15 @@ impl OpendalObjectStore {
 
         let endpoint = std::env::var("OSS_ENDPOINT")
             .unwrap_or_else(|_| panic!("OSS_ENDPOINT not found from environment variables"));
-        let access_key_id = std::env::var("OSS_ACCESS_KEY_ID")
-            .unwrap_or_else(|_| panic!("OSS_ACCESS_KEY_ID not found from environment variables"));
-        let access_key_secret = std::env::var("OSS_ACCESS_KEY_SECRET").unwrap_or_else(|_| {
-            panic!("OSS_ACCESS_KEY_SECRET not found from environment variables")
-        });
+        // let access_key_id = std::env::var("OSS_ACCESS_KEY_ID")
+        //     .unwrap_or_else(|_| panic!("OSS_ACCESS_KEY_ID not found from environment variables"));
+        // let access_key_secret = std::env::var("OSS_ACCESS_KEY_SECRET").unwrap_or_else(|_| {
+        //     panic!("OSS_ACCESS_KEY_SECRET not found from environment variables")
+        // });
 
         builder.endpoint(&endpoint);
-        builder.access_key_id(&access_key_id);
-        builder.access_key_secret(&access_key_secret);
+        // builder.access_key_id(&access_key_id);
+        // builder.access_key_secret(&access_key_secret);
 
         let op: Operator = Operator::new(builder)?
             .layer(LoggingLayer::default())
