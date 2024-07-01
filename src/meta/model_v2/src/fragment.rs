@@ -16,7 +16,7 @@ use risingwave_pb::meta::table_fragments::fragment::PbFragmentDistributionType;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::{FragmentId, FragmentVnodeMapping, I32Array, ObjectId, StreamNode};
+use crate::{FragmentId, I32Array, ObjectId, StreamNode};
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize)]
 #[sea_orm(table_name = "fragment")]
@@ -27,7 +27,6 @@ pub struct Model {
     pub fragment_type_mask: i32,
     pub distribution_type: DistributionType,
     pub stream_node: StreamNode,
-    pub vnode_mapping: FragmentVnodeMapping,
     pub state_table_ids: I32Array,
     pub upstream_fragment_id: I32Array,
 }

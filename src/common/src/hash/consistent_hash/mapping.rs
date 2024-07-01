@@ -33,7 +33,7 @@ use crate::util::iter_util::ZipEqDebug;
 // TODO: find a better place for this.
 pub type ActorId = u32;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub struct WorkerSlotId(u64);
 
 impl WorkerSlotId {
@@ -63,6 +63,12 @@ impl From<u64> for WorkerSlotId {
 }
 
 impl Display for WorkerSlotId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!("[{}:{}]", self.worker_id(), self.slot_idx()))
+    }
+}
+
+impl Debug for WorkerSlotId {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.write_fmt(format_args!("[{}:{}]", self.worker_id(), self.slot_idx()))
     }
@@ -282,12 +288,14 @@ pub mod marker {
 
     /// A marker type for items of [`ActorId`].
     pub struct Actor;
+
     impl VnodeMappingItem for Actor {
         type Item = ActorId;
     }
 
     /// A marker type for items of [`ParallelUnitId`].
     pub struct ParallelUnit;
+
     impl VnodeMappingItem for ParallelUnit {
         type Item = ParallelUnitId;
     }
@@ -321,6 +329,26 @@ impl ActorMapping {
         M: for<'a> Index<&'a ActorId, Output = ParallelUnitId>,
     {
         self.transform(to_map)
+    }
+
+    /// Transform the actor mapping to the worker slot mapping. Note that the parameter is a mapping from actor to worker.
+    pub fn to_worker_slot(&self, actor_to_worker: &HashMap<ActorId, u32>) -> WorkerSlotMapping {
+        let mut worker_actors = HashMap::new();
+        for (actor_id, worker_id) in actor_to_worker {
+            worker_actors
+                .entry(worker_id)
+                .or_insert(BTreeSet::new())
+                .insert(actor_id);
+        }
+
+        let mut actor_location = HashMap::new();
+        for (worker, actors) in worker_actors {
+            for (idx, &actor) in actors.iter().enumerate() {
+                actor_location.insert(*actor, WorkerSlotId::new(*worker, idx));
+            }
+        }
+
+        self.transform(&actor_location)
     }
 
     /// Create an actor mapping from the protobuf representation.
@@ -441,6 +469,13 @@ impl ParallelUnitMapping {
     }
 }
 
+impl WorkerSlotMapping {
+    /// Transform this parallel unit mapping to an actor mapping, essentially `transform`.
+    pub fn to_actor(&self, to_map: &HashMap<WorkerSlotId, ActorId>) -> ActorMapping {
+        self.transform(to_map)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::iter::repeat_with;
@@ -450,11 +485,13 @@ mod tests {
     use super::*;
 
     struct Test;
+
     impl VnodeMappingItem for Test {
         type Item = u32;
     }
 
     struct Test2;
+
     impl VnodeMappingItem for Test2 {
         type Item = u32;
     }

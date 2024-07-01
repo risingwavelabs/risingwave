@@ -24,15 +24,16 @@ use aes_siv::{Aes128SivAead, KeyInit};
 use anyhow::Context;
 use itertools::Itertools;
 use rand::{Rng, RngCore};
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::config::DefaultParallelism;
-use risingwave_common::hash::{ParallelUnitMapping, VirtualNode};
+use risingwave_common::hash::{ActorId, ActorMapping, VirtualNode};
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::stream_graph_visitor::{
     visit_fragment, visit_stream_node, visit_stream_node_cont_mut,
 };
-use risingwave_common::{bail, current_cluster_version};
+use risingwave_common::{bail, current_cluster_version, hash};
 use risingwave_connector::dispatch_source_prop;
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::source::cdc::CdcSourceType;
@@ -54,6 +55,7 @@ use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::{
     alter_name_request, alter_set_schema_request, DdlProgress, TableJobType,
 };
+use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::PbFragment;
 use risingwave_pb::meta::PbTableParallelism;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -1204,19 +1206,40 @@ impl DdlController {
 
         let dist_key_indices = table.distribution_key.iter().map(|i| *i as _).collect_vec();
 
-        let mapping = downstream_actor_ids
-            .iter()
-            .map(|id| {
-                let actor_status = table_fragments.actor_status.get(id).unwrap();
-                let parallel_unit_id = actor_status.parallel_unit.as_ref().unwrap().id;
+        let mut actor_location = HashMap::new();
 
-                (parallel_unit_id, *id)
-            })
-            .collect();
+        for actor in union_fragment.get_actors() {
+            let worker_id = table_fragments
+                .actor_status
+                .get(&actor.actor_id)
+                .expect("actor status not found")
+                .parallel_unit
+                .as_ref()
+                .expect("parallel unit not found")
+                .worker_node_id;
 
-        let actor_mapping =
-            ParallelUnitMapping::from_protobuf(union_fragment.vnode_mapping.as_ref().unwrap())
-                .to_actor(&mapping);
+            actor_location.insert(actor.actor_id as ActorId, worker_id);
+        }
+
+        let mapping = match union_fragment.get_distribution_type().unwrap() {
+            FragmentDistributionType::Unspecified => unreachable!(),
+            FragmentDistributionType::Single => None,
+            FragmentDistributionType::Hash => {
+                let actor_bitmaps: HashMap<_, _> = union_fragment
+                    .actors
+                    .iter()
+                    .map(|actor| {
+                        (
+                            actor.actor_id as hash::ActorId,
+                            Bitmap::from(actor.vnode_bitmap.as_ref().unwrap()),
+                        )
+                    })
+                    .collect();
+
+                let actor_mapping = ActorMapping::from_bitmaps(&actor_bitmaps);
+                Some(actor_mapping)
+            }
+        };
 
         let upstream_actors = sink_fragment.get_actors();
 
@@ -1227,7 +1250,7 @@ impl DdlController {
                     r#type: DispatcherType::Hash as _,
                     dist_key_indices: dist_key_indices.clone(),
                     output_indices: output_indices.clone(),
-                    hash_mapping: Some(actor_mapping.to_protobuf()),
+                    hash_mapping: mapping.as_ref().map(|m| m.to_protobuf()),
                     dispatcher_id: union_fragment.fragment_id as _,
                     downstream_actor_id: downstream_actor_ids.clone(),
                 }],
@@ -1503,14 +1526,19 @@ impl DdlController {
     ) -> MetaResult<NonZeroUsize> {
         const MAX_PARALLELISM: NonZeroUsize = NonZeroUsize::new(VirtualNode::COUNT).unwrap();
 
-        if cluster_info.parallel_units.is_empty() {
+        let available_parallelism = cluster_info
+            .worker_nodes
+            .values()
+            .map(|worker| worker.parallelism as usize)
+            .sum::<usize>();
+
+        if available_parallelism == 0 {
             return Err(MetaError::unavailable(
                 "No available parallel units to schedule",
             ));
         }
 
-        let available_parallel_units =
-            NonZeroUsize::new(cluster_info.parallel_units.len()).unwrap();
+        let available_parallel_units = NonZeroUsize::new(available_parallelism).unwrap();
 
         // Use configured parallel units if no default parallelism is specified.
         let parallelism =
@@ -1553,7 +1581,7 @@ impl DdlController {
         // 1. Resolve the upstream fragments, extend the fragment graph to a complete graph that
         // contains all information needed for building the actor graph.
 
-        let upstream_root_fragments = self
+        let (upstream_root_fragments, existing_actor_location) = self
             .metadata_manager
             .get_upstream_root_fragments(fragment_graph.dependent_table_ids())
             .await?;
@@ -1571,6 +1599,7 @@ impl DdlController {
         let complete_graph = CompleteStreamFragmentGraph::with_upstreams(
             fragment_graph,
             upstream_root_fragments,
+            existing_actor_location,
             stream_job.into(),
         )?;
 
@@ -1930,7 +1959,11 @@ impl DdlController {
             .expect("mview fragment not found");
 
         // Map the column indices in the dispatchers with the given mapping.
-        let downstream_fragments = self.metadata_manager.get_downstream_chain_fragments(id).await?
+        let (downstream_fragments, downstream_actor_locations) = self
+            .metadata_manager
+            .get_downstream_chain_fragments(id)
+            .await?;
+        let downstream_fragments = downstream_fragments
             .into_iter()
             .map(|(d, f)|
                 if let Some(mapping) = &table_col_index_mapping {
@@ -1950,6 +1983,7 @@ impl DdlController {
             fragment_graph,
             original_table_fragment.fragment_id,
             downstream_fragments,
+            downstream_actor_locations,
             stream_job.into(),
         )?;
 

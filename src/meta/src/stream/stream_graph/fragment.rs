@@ -39,7 +39,7 @@ use risingwave_pb::stream_plan::{
 };
 
 use crate::manager::{DdlType, IdGenManagerImpl, MetaSrvEnv, StreamingJob};
-use crate::model::FragmentId;
+use crate::model::{ActorId, FragmentId};
 use crate::stream::stream_graph::id::{GlobalFragmentId, GlobalFragmentIdGen, GlobalTableIdGen};
 use crate::stream::stream_graph::schedule::Distribution;
 use crate::MetaResult;
@@ -539,6 +539,9 @@ pub struct CompleteStreamFragmentGraph {
     /// The required information of existing fragments.
     existing_fragments: HashMap<GlobalFragmentId, Fragment>,
 
+    /// The location of the actors in the existing fragments.
+    existing_actor_location: HashMap<u32, u32>,
+
     /// Extra edges between existing fragments and the building fragments.
     extra_downstreams: HashMap<GlobalFragmentId, HashMap<GlobalFragmentId, StreamFragmentEdge>>,
 
@@ -550,11 +553,13 @@ pub struct FragmentGraphUpstreamContext {
     /// Root fragment is the root of upstream stream graph, which can be a
     /// mview fragment or source fragment for cdc source job
     upstream_root_fragments: HashMap<TableId, Fragment>,
+    upstream_actor_location: HashMap<ActorId, u32>,
 }
 
 pub struct FragmentGraphDownstreamContext {
     original_table_fragment_id: FragmentId,
     downstream_fragments: Vec<(DispatchStrategy, Fragment)>,
+    downstream_actor_location: HashMap<ActorId, u32>,
 }
 
 impl CompleteStreamFragmentGraph {
@@ -565,6 +570,7 @@ impl CompleteStreamFragmentGraph {
         Self {
             building_graph: graph,
             existing_fragments: Default::default(),
+            existing_actor_location: Default::default(),
             extra_downstreams: Default::default(),
             extra_upstreams: Default::default(),
         }
@@ -575,12 +581,14 @@ impl CompleteStreamFragmentGraph {
     pub fn with_upstreams(
         graph: StreamFragmentGraph,
         upstream_root_fragments: HashMap<TableId, Fragment>,
+        existing_actor_location: HashMap<ActorId, u32>,
         ddl_type: DdlType,
     ) -> MetaResult<Self> {
         Self::build_helper(
             graph,
             Some(FragmentGraphUpstreamContext {
                 upstream_root_fragments,
+                upstream_actor_location: existing_actor_location,
             }),
             None,
             ddl_type,
@@ -593,6 +601,7 @@ impl CompleteStreamFragmentGraph {
         graph: StreamFragmentGraph,
         original_table_fragment_id: FragmentId,
         downstream_fragments: Vec<(DispatchStrategy, Fragment)>,
+        existing_actor_location: HashMap<ActorId, u32>,
         ddl_type: DdlType,
     ) -> MetaResult<Self> {
         Self::build_helper(
@@ -601,6 +610,7 @@ impl CompleteStreamFragmentGraph {
             Some(FragmentGraphDownstreamContext {
                 original_table_fragment_id,
                 downstream_fragments,
+                downstream_actor_location: existing_actor_location,
             }),
             ddl_type,
         )
@@ -617,8 +627,11 @@ impl CompleteStreamFragmentGraph {
         let mut extra_upstreams = HashMap::new();
         let mut existing_fragments = HashMap::new();
 
+        let mut existing_actor_location = HashMap::new();
+
         if let Some(FragmentGraphUpstreamContext {
             upstream_root_fragments,
+            upstream_actor_location,
         }) = upstream_ctx
         {
             for (&id, fragment) in &mut graph.fragments {
@@ -781,11 +794,14 @@ impl CompleteStreamFragmentGraph {
                     .into_values()
                     .map(|f| (GlobalFragmentId::new(f.fragment_id), f)),
             );
+
+            existing_actor_location.extend(upstream_actor_location);
         }
 
         if let Some(FragmentGraphDownstreamContext {
             original_table_fragment_id,
             downstream_fragments,
+            downstream_actor_location,
         }) = downstream_ctx
         {
             let original_table_fragment_id = GlobalFragmentId::new(original_table_fragment_id);
@@ -821,11 +837,14 @@ impl CompleteStreamFragmentGraph {
                     .into_iter()
                     .map(|(_, f)| (GlobalFragmentId::new(f.fragment_id), f)),
             );
+
+            existing_actor_location.extend(downstream_actor_location);
         }
 
         Ok(Self {
             building_graph: graph,
             existing_fragments,
+            existing_actor_location,
             extra_downstreams,
             extra_upstreams,
         })
@@ -886,7 +905,12 @@ impl CompleteStreamFragmentGraph {
     pub(super) fn existing_distribution(&self) -> HashMap<GlobalFragmentId, Distribution> {
         self.existing_fragments
             .iter()
-            .map(|(&id, f)| (id, Distribution::from_fragment(f)))
+            .map(|(&id, f)| {
+                (
+                    id,
+                    Distribution::from_fragment(f, &self.existing_actor_location),
+                )
+            })
             .collect()
     }
 
@@ -973,7 +997,6 @@ impl CompleteStreamFragmentGraph {
             fragment_type_mask: inner.fragment_type_mask,
             distribution_type,
             actors,
-            vnode_mapping: Some(distribution.into_mapping().to_protobuf()),
             state_table_ids,
             upstream_fragment_ids,
         }
