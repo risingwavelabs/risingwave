@@ -1174,7 +1174,7 @@ impl CatalogController {
     pub async fn get_upstream_root_fragments(
         &self,
         upstream_job_ids: Vec<ObjectId>,
-    ) -> MetaResult<HashMap<ObjectId, PbFragment>> {
+    ) -> MetaResult<(HashMap<ObjectId, PbFragment>, Vec<(ActorId, WorkerId)>)> {
         let inner = self.inner.read().await;
 
         let all_upstream_fragments = Fragment::find()
@@ -1207,7 +1207,14 @@ impl CatalogController {
             );
         }
 
-        Ok(root_fragments)
+        let actors: Vec<(ActorId, WorkerId)> = Actor::find()
+            .select_only()
+            .columns([actor::Column::ActorId, actor::Column::WorkerId])
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+
+        Ok((root_fragments, actors))
     }
 
     /// Get the downstream `Chain` fragments of the specified table.
@@ -1260,8 +1267,6 @@ impl CatalogController {
             .into_tuple()
             .all(&inner.db)
             .await?;
-
-        // let actors = actors.into_iter().map(|(k, v)| (k as _, v as _)) .collect();
 
         Ok((chain_fragments, actors))
     }

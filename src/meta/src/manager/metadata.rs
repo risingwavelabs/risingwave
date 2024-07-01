@@ -463,7 +463,7 @@ impl MetadataManager {
                     .await
             }
             MetadataManager::V2(mgr) => {
-                let upstream_root_fragments = mgr
+                let (upstream_root_fragments, actors) = mgr
                     .catalog_controller
                     .get_upstream_root_fragments(
                         upstream_table_ids
@@ -473,13 +473,17 @@ impl MetadataManager {
                     )
                     .await?;
 
-                // todo
+                let actors = actors
+                    .into_iter()
+                    .map(|(actor, worker)| (actor as u32, worker as u32))
+                    .collect();
+
                 Ok((
                     upstream_root_fragments
                         .into_iter()
                         .map(|(id, fragment)| ((id as u32).into(), fragment))
                         .collect(),
-                    HashMap::new(),
+                    actors,
                 ))
             }
         }
