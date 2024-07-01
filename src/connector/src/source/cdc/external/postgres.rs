@@ -130,10 +130,6 @@ impl PostgresExternalTable {
             pk_names.extend(pk.columns.clone());
         });
 
-        // sort columns by name, to make sure cdc tables with exact same columns can be UNION
-        // e.g. MySQL table t1 (a, b) and table t2 (b, a) will be mapped to t1 (a, b) and t2 (a, b) in RisingWave
-        column_descs.sort_by(|a, b| a.name.cmp(&b.name));
-
         Ok(Self {
             column_descs,
             pk_names,
