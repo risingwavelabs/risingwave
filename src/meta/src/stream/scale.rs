@@ -1111,7 +1111,7 @@ impl ScaleController {
             }
         }
 
-        println!("actor group map {:?}", actor_group_map);
+        tracing::debug!("actor group map {:?}", actor_group_map);
 
         let mut new_created_actors = HashMap::new();
         for fragment_id in reschedules.keys() {
