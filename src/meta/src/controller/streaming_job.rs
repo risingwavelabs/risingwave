@@ -361,6 +361,7 @@ impl CatalogController {
             .await?
             .oid;
             table_id_map.insert(table.id, table_id as u32);
+            table.id = table_id as _;
             let mut table_model: table::ActiveModel = table.clone().into();
             table_model.table_id = Set(table_id as _);
             table_model.belongs_to_job_id = Set(Some(job_id as _));
