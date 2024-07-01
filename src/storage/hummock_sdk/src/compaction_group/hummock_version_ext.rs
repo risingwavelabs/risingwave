@@ -178,6 +178,26 @@ impl HummockVersion {
             .collect()
     }
 
+    pub fn get_sst_ids(&self) -> HashSet<HummockSstableObjectId> {
+        self.get_combined_levels()
+            .flat_map(|level| {
+                level
+                    .table_infos
+                    .iter()
+                    .map(|table_info| table_info.get_sst_id())
+            })
+            .chain(self.table_change_log.values().flat_map(|change_log| {
+                change_log.0.iter().flat_map(|epoch_change_log| {
+                    epoch_change_log
+                        .old_value
+                        .iter()
+                        .map(|sst| sst.sst_id)
+                        .chain(epoch_change_log.new_value.iter().map(|sst| sst.sst_id))
+                })
+            }))
+            .collect()
+    }
+
     pub fn level_iter<F: FnMut(&Level) -> bool>(
         &self,
         compaction_group_id: CompactionGroupId,

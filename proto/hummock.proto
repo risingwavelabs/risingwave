@@ -104,7 +104,7 @@ message GroupDelta {
     IntraLevelDelta intra_level = 1;
     GroupConstruct group_construct = 2;
     GroupDestroy group_destroy = 3;
-    GroupMetaChange group_meta_change = 4;
+    GroupMetaChange group_meta_change = 4 [deprecated = true];
     GroupTableChange group_table_change = 5 [deprecated = true];
   }
 }
@@ -821,6 +821,14 @@ message CancelCompactTaskResponse {
   bool ret = 1;
 }
 
+message GetVersionByEpochRequest {
+  uint64 epoch = 1;
+}
+
+message GetVersionByEpochResponse {
+  HummockVersion version = 1;
+}
+
 service HummockManagerService {
   rpc UnpinVersionBefore(UnpinVersionBeforeRequest) returns (UnpinVersionBeforeResponse);
   rpc GetCurrentVersion(GetCurrentVersionRequest) returns (GetCurrentVersionResponse);
@@ -861,6 +869,7 @@ service HummockManagerService {
   rpc ListCompactTaskProgress(ListCompactTaskProgressRequest) returns (ListCompactTaskProgressResponse);
   rpc CancelCompactTask(CancelCompactTaskRequest) returns (CancelCompactTaskResponse);
   rpc ListChangeLogEpochs(ListChangeLogEpochsRequest) returns (ListChangeLogEpochsResponse);
+  rpc GetVersionByEpoch(GetVersionByEpochRequest) returns (GetVersionByEpochResponse);
 }
 
 message CompactionConfig {

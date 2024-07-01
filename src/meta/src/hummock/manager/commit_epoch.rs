@@ -285,7 +285,6 @@ impl HummockManager {
                 sstables.push(original_sstable);
             }
         }
-
         let mut modified_compaction_groups = vec![];
         // Append SSTs to a new version.
         for (compaction_group_id, sstables) in &sstables
@@ -361,6 +360,11 @@ impl HummockManager {
             }
         });
 
+        // TODO: circumvent the clone
+        let newly_added_sst_infos = new_version_delta
+            .newly_added_sst_infos()
+            .cloned()
+            .collect::<Vec<_>>();
         new_version_delta.pre_apply();
 
         // TODO: remove the sanity check when supporting partial checkpoint
@@ -410,6 +414,17 @@ impl HummockManager {
                 &mut versioning.local_metrics,
             );
             table_metrics.inc_write_throughput(stats_value as u64);
+        }
+        if self.env.opts.enable_hummock_time_travel {
+            // TODO: either make these writes and the following `commit_multi_var` transactional,
+            // or support GC the dirty data from these writes when `commit_epoch` fails.
+            self.write_sstable_infos(newly_added_sst_infos.iter())
+                .await?;
+            self.write_epoch_to_version(
+                version.latest_version().max_committed_epoch,
+                version.latest_version().id,
+            )
+            .await?;
         }
         commit_multi_var!(self.meta_store_ref(), version, version_stats)?;
 

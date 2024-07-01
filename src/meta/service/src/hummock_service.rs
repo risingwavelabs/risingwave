@@ -682,6 +682,17 @@ impl HummockManagerService for HummockServiceImpl {
             .await;
         Ok(Response::new(ListChangeLogEpochsResponse { epochs }))
     }
+
+    async fn get_version_by_epoch(
+        &self,
+        request: Request<GetVersionByEpochRequest>,
+    ) -> Result<Response<GetVersionByEpochResponse>, Status> {
+        let GetVersionByEpochRequest { epoch } = request.into_inner();
+        let version = self.hummock_manager.epoch_to_version(epoch).await?;
+        Ok(Response::new(GetVersionByEpochResponse {
+            version: Some(version.to_protobuf()),
+        }))
+    }
 }
 
 #[cfg(test)]

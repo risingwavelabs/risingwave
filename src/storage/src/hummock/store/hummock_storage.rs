@@ -33,6 +33,7 @@ use risingwave_hummock_sdk::table_watermark::TableWatermarksIndex;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::hummock::SstableInfo;
 use risingwave_rpc_client::HummockMetaClient;
+use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio::sync::oneshot;
 use tracing::error;
@@ -115,6 +116,8 @@ pub struct HummockStorage {
     write_limiter: WriteLimiterRef,
 
     compact_await_tree_reg: Option<CompactionAwaitTreeRegRef>,
+
+    hummock_meta_client: Arc<dyn HummockMetaClient>,
 }
 
 pub type ReadVersionTuple = (Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion);
@@ -232,6 +235,7 @@ impl HummockStorage {
             min_current_epoch,
             write_limiter,
             compact_await_tree_reg: await_tree_reg,
+            hummock_meta_client,
         };
 
         tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
@@ -306,34 +310,60 @@ impl HummockStorage {
             .await
     }
 
+    async fn build_read_version_by_time_travel(
+        &self,
+        epoch: u64,
+        table_id: TableId,
+        key_range: TableKeyRange,
+    ) -> StorageResult<(TableKeyRange, ReadVersionTuple)> {
+        let pb_version = self
+            .hummock_meta_client
+            .get_version_by_epoch(epoch)
+            .await
+            .inspect_err(|e| tracing::error!("{}", e.to_report_string()))
+            .map_err(HummockError::meta_error)?;
+        let version = HummockVersion::from_rpc_protobuf(&pb_version);
+        validate_safe_epoch(&version, table_id, epoch)?;
+        let (tx, _rx) = unbounded_channel();
+        Ok(get_committed_read_version_tuple(
+            PinnedVersion::new(version, tx),
+            table_id,
+            key_range,
+            epoch,
+        ))
+    }
+
     async fn build_read_version_tuple_from_backup(
         &self,
         epoch: u64,
         table_id: TableId,
         key_range: TableKeyRange,
     ) -> StorageResult<(TableKeyRange, ReadVersionTuple)> {
-        match self
-            .backup_reader
-            .try_get_hummock_version(table_id, epoch)
+        // TODO: revert
+        self.build_read_version_by_time_travel(epoch, table_id, key_range)
             .await
-        {
-            Ok(Some(backup_version)) => {
-                validate_safe_epoch(backup_version.version(), table_id, epoch)?;
-
-                Ok(get_committed_read_version_tuple(
-                    backup_version,
-                    table_id,
-                    key_range,
-                    epoch,
-                ))
-            }
-            Ok(None) => Err(HummockError::read_backup_error(format!(
-                "backup include epoch {} not found",
-                epoch
-            ))
-            .into()),
-            Err(e) => Err(e),
-        }
+        // match self
+        //     .backup_reader
+        //     .try_get_hummock_version(table_id, epoch)
+        //     .await
+        // {
+        //     Ok(Some(backup_version)) => {
+        //         validate_safe_epoch(backup_version.version(), table_id, epoch)?;
+        //
+        //         Ok(get_committed_read_version_tuple(
+        //             backup_version,
+        //             table_id,
+        //             key_range,
+        //             epoch,
+        //         ))
+        //     }
+        //     Ok(None) => Err(HummockError::read_backup_error(format!(
+        //         "backup include epoch {} not found",
+        //         epoch
+        //     ))
+        //     .into()),
+        //     Err(e) => Err(e),
+        // }
     }
 
     fn build_read_version_tuple(

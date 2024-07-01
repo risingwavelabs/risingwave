@@ -137,7 +137,7 @@ fn init_selectors() -> HashMap<compact_task::TaskType, Box<dyn CompactionSelecto
 }
 
 impl<'a> HummockVersionTransaction<'a> {
-    fn apply_compact_task(&mut self, compact_task: &CompactTask) {
+    fn apply_compact_task(&mut self, compact_task: &CompactTask) -> Vec<SstableInfo> {
         let mut version_delta = self.new_delta();
         let trivial_move = CompactStatus::is_trivial_move_task(compact_task);
         version_delta.trivial_move = trivial_move;
@@ -214,7 +214,10 @@ impl<'a> HummockVersionTransaction<'a> {
                 }
             });
         }
+        // TODO: circumvent the clone
+        let newly_added_sst_infos = version_delta.newly_added_sst_infos().cloned().collect();
         version_delta.pre_apply();
+        newly_added_sst_infos
     }
 }
 
@@ -1204,6 +1207,7 @@ impl HummockManager {
             &mut versioning.version_stats,
             self.env.notification_manager(),
         );
+        let mut newly_added_sst_infos = vec![];
         let mut success_count = 0;
         for (idx, task) in report_tasks.into_iter().enumerate() {
             rets[idx] = true;
@@ -1270,7 +1274,8 @@ impl HummockManager {
             };
             if is_success {
                 success_count += 1;
-                version.apply_compact_task(&compact_task);
+                let newly_added_sst_infos_in_task = version.apply_compact_task(&compact_task);
+                newly_added_sst_infos.extend(newly_added_sst_infos_in_task);
                 if purge_prost_table_stats(&mut version_stats.table_stats, version.latest_version())
                 {
                     self.metrics.version_stats.reset();
@@ -1287,6 +1292,12 @@ impl HummockManager {
             tasks.push(compact_task);
         }
         if success_count > 0 {
+            if self.env.opts.enable_hummock_time_travel {
+                // TODO: either make these writes and the following `commit_multi_var` transactional,
+                // or support GC the dirty data from these writes when `commit_epoch` fails.
+                self.write_sstable_infos(newly_added_sst_infos.iter())
+                    .await?;
+            }
             commit_multi_var!(
                 self.meta_store_ref(),
                 compact_statuses,

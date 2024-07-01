@@ -537,4 +537,57 @@ impl HummockVersionDelta {
             }))
             .collect()
     }
+
+    pub fn newly_added_sst_ids(&self) -> HashSet<HummockSstableObjectId> {
+        self.group_deltas
+            .values()
+            .flat_map(|group_deltas| {
+                group_deltas.group_deltas.iter().flat_map(|group_delta| {
+                    group_delta.delta_type.iter().flat_map(|delta_type| {
+                        static EMPTY_VEC: Vec<SstableInfo> = Vec::new();
+                        let sst_slice = match delta_type {
+                            DeltaType::IntraLevel(level_delta) => &level_delta.inserted_table_infos,
+                            DeltaType::GroupConstruct(_)
+                            | DeltaType::GroupDestroy(_)
+                            | DeltaType::GroupMetaChange(_)
+                            | DeltaType::GroupTableChange(_) => &EMPTY_VEC,
+                        };
+                        sst_slice.iter().map(|sst| sst.sst_id)
+                    })
+                })
+            })
+            .chain(self.change_log_delta.values().flat_map(|delta| {
+                let new_log = delta.new_log.as_ref().unwrap();
+                new_log
+                    .new_value
+                    .iter()
+                    .map(|sst| sst.sst_id)
+                    .chain(new_log.old_value.iter().map(|sst| sst.sst_id))
+            }))
+            .collect()
+    }
+
+    pub fn newly_added_sst_infos(&self) -> impl Iterator<Item = &SstableInfo> {
+        self.group_deltas
+            .values()
+            .flat_map(|group_deltas| {
+                group_deltas.group_deltas.iter().flat_map(|group_delta| {
+                    group_delta.delta_type.iter().flat_map(|delta_type| {
+                        static EMPTY_VEC: Vec<SstableInfo> = Vec::new();
+                        let sst_slice = match delta_type {
+                            DeltaType::IntraLevel(level_delta) => &level_delta.inserted_table_infos,
+                            DeltaType::GroupConstruct(_)
+                            | DeltaType::GroupDestroy(_)
+                            | DeltaType::GroupMetaChange(_)
+                            | DeltaType::GroupTableChange(_) => &EMPTY_VEC,
+                        };
+                        sst_slice.iter()
+                    })
+                })
+            })
+            .chain(self.change_log_delta.values().flat_map(|delta| {
+                let new_log = delta.new_log.as_ref().unwrap();
+                new_log.new_value.iter().chain(new_log.old_value.iter())
+            }))
+    }
 }
