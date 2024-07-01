@@ -351,6 +351,11 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                     .meta
                     .hummock_version_checkpoint_interval_sec,
                 enable_hummock_data_archive: config.meta.enable_hummock_data_archive,
+                enable_hummock_time_travel: config.meta.enable_hummock_time_travel,
+                hummock_time_travel_retention_ms: config.meta.hummock_time_travel_retention_ms,
+                hummock_time_travel_snapshot_interval: config
+                    .meta
+                    .hummock_time_travel_snapshot_interval,
                 min_delta_log_num_for_hummock_version_checkpoint: config
                     .meta
                     .min_delta_log_num_for_hummock_version_checkpoint,

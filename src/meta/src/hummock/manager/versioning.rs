@@ -56,6 +56,7 @@ pub struct Versioning {
     /// Latest hummock version
     pub current_version: HummockVersion,
     pub local_metrics: HashMap<u32, LocalTableMetrics>,
+    pub time_travel_snapshot_interval_counter: u64,
 
     // Persistent states below
     pub hummock_version_deltas: BTreeMap<HummockVersionId, HummockVersionDelta>,
@@ -94,6 +95,10 @@ impl Versioning {
                 .filter(|(version_id, _)| **version_id <= min_pinned_version_id)
                 .flat_map(|(_, stale_objects)| stale_objects.id.iter().cloned()),
         );
+    }
+
+    pub(super) fn mark_next_time_travel_version_snapshot(&mut self) {
+        self.time_travel_snapshot_interval_counter = u64::MAX;
     }
 }
 

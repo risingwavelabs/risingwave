@@ -205,6 +205,11 @@ impl HummockManager {
                     .collect(),
             });
         }
+        if self.env.opts.enable_hummock_data_archive || self.env.opts.enable_hummock_time_travel {
+            let context_info = self.context_info.read().await;
+            let min_pinned_version_id = context_info.min_pinned_version_id();
+            stale_objects.retain(|version_id, _| *version_id >= min_pinned_version_id);
+        }
         let new_checkpoint = HummockVersionCheckpoint {
             version: current_version.clone(),
             stale_objects,
@@ -227,8 +232,8 @@ impl HummockManager {
         let context_info = self.context_info.read().await;
         assert!(new_checkpoint.version.id > versioning.checkpoint.version.id);
         versioning.checkpoint = new_checkpoint;
-        // Not delete stale objects when archive is enabled
-        if !self.env.opts.enable_hummock_data_archive {
+        // Not delete stale objects when archive or time travel is enabled
+        if !self.env.opts.enable_hummock_data_archive && !self.env.opts.enable_hummock_time_travel {
             versioning.mark_objects_for_deletion(&context_info, &self.delete_object_tracker);
         }
 

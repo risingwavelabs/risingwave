@@ -293,6 +293,11 @@ impl PlanRoot {
     /// Optimize and generate a singleton batch physical plan without exchange nodes.
     pub fn gen_batch_plan(&mut self) -> Result<PlanRef> {
         assert_eq!(self.plan.convention(), Convention::Logical);
+        let is_streaming = match &self.phase {
+            PlanPhase::OptimizedLogicalForBatch | PlanPhase::Batch => Some(false),
+            PlanPhase::OptimizedLogicalForStream | PlanPhase::Stream => Some(true),
+            PlanPhase::Logical => None,
+        };
         let mut plan = match self.phase {
             PlanPhase::Logical => {
                 // Logical optimization
@@ -304,7 +309,9 @@ impl PlanRoot {
             }
         };
 
-        if TemporalJoinValidator::exist_dangling_temporal_scan(plan.clone()) {
+        if is_streaming.unwrap_or(false)
+            && TemporalJoinValidator::exist_dangling_temporal_scan(plan.clone())
+        {
             return Err(ErrorCode::NotSupported(
                 "do not support temporal join for batch queries".to_string(),
                 "please use temporal join in streaming queries".to_string(),

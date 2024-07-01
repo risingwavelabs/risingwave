@@ -28,6 +28,7 @@ use risingwave_pb::hummock::compact_task::{self};
 use risingwave_pb::hummock::group_delta::DeltaType;
 use risingwave_pb::hummock::hummock_version_delta::ChangeLogDelta;
 use risingwave_pb::hummock::{GroupDelta, HummockSnapshot, IntraLevelDelta, StateTableInfoDelta};
+use sea_orm::TransactionTrait;
 
 use crate::hummock::error::{Error, Result};
 use crate::hummock::manager::transaction::{
@@ -38,7 +39,10 @@ use crate::hummock::metrics_utils::{
     get_or_create_local_table_stat, trigger_local_table_stat, trigger_sst_stat,
 };
 use crate::hummock::sequence::next_sstable_object_id;
-use crate::hummock::{commit_multi_var, start_measure_real_process_timer, HummockManager};
+use crate::hummock::{
+    commit_multi_var, commit_multi_var_with_provided_txn, start_measure_real_process_timer,
+    HummockManager,
+};
 
 #[derive(Debug, Clone)]
 pub struct NewTableFragmentInfo {
@@ -285,7 +289,6 @@ impl HummockManager {
                 sstables.push(original_sstable);
             }
         }
-
         let mut modified_compaction_groups = vec![];
         // Append SSTs to a new version.
         for (compaction_group_id, sstables) in &sstables
@@ -360,7 +363,7 @@ impl HummockManager {
                 );
             }
         });
-
+        let time_travel_delta = (*new_version_delta).clone();
         new_version_delta.pre_apply();
 
         // TODO: remove the sanity check when supporting partial checkpoint
@@ -411,7 +414,37 @@ impl HummockManager {
             );
             table_metrics.inc_write_throughput(stats_value as u64);
         }
-        commit_multi_var!(self.meta_store_ref(), version, version_stats)?;
+        if self.env.opts.enable_hummock_time_travel {
+            let mut time_travel_version = None;
+            if versioning.time_travel_snapshot_interval_counter
+                >= self.env.opts.hummock_time_travel_snapshot_interval
+            {
+                versioning.time_travel_snapshot_interval_counter = 0;
+                time_travel_version = Some(version.latest_version());
+            } else {
+                let _ = versioning
+                    .time_travel_snapshot_interval_counter
+                    .saturating_add(1);
+            }
+            let group_parents = version
+                .latest_version()
+                .levels
+                .values()
+                .map(|g| (g.group_id, g.parent_group_id))
+                .collect();
+            let sql_store = self.sql_store()?;
+            let mut txn = sql_store.conn.begin().await?;
+            self.write_time_travel_metadata(
+                &txn,
+                time_travel_version,
+                time_travel_delta,
+                &group_parents,
+            )
+            .await?;
+            commit_multi_var_with_provided_txn!(txn, version, version_stats)?;
+        } else {
+            commit_multi_var!(self.meta_store_ref(), version, version_stats)?;
+        }
 
         let snapshot = HummockSnapshot {
             committed_epoch: epoch,

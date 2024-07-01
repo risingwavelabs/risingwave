@@ -178,6 +178,61 @@ impl HummockVersion {
             .collect()
     }
 
+    pub fn get_sst_ids(&self) -> HashSet<HummockSstableObjectId> {
+        self.get_combined_levels()
+            .flat_map(|level| {
+                level
+                    .table_infos
+                    .iter()
+                    .map(|table_info| table_info.get_sst_id())
+            })
+            .chain(self.table_change_log.values().flat_map(|change_log| {
+                change_log.0.iter().flat_map(|epoch_change_log| {
+                    epoch_change_log
+                        .old_value
+                        .iter()
+                        .map(|sst| sst.sst_id)
+                        .chain(epoch_change_log.new_value.iter().map(|sst| sst.sst_id))
+                })
+            }))
+            .collect()
+    }
+
+    pub fn get_sst_infos<'a>(
+        &'a self,
+        select_group: &'a HashSet<CompactionGroupId>,
+    ) -> impl Iterator<Item = &SstableInfo> + 'a {
+        self.levels
+            .iter()
+            .filter_map(|(cg_id, level)| {
+                if select_group.contains(cg_id) {
+                    Some(level)
+                } else {
+                    None
+                }
+            })
+            .flat_map(|level| {
+                level
+                    .l0
+                    .as_ref()
+                    .unwrap()
+                    .sub_levels
+                    .iter()
+                    .rev()
+                    .chain(level.levels.iter())
+            })
+            .flat_map(|level| level.table_infos.iter())
+            .chain(self.table_change_log.values().flat_map(|change_log| {
+                // TODO: optimization: strip table change log
+                change_log.0.iter().flat_map(|epoch_change_log| {
+                    epoch_change_log
+                        .old_value
+                        .iter()
+                        .chain(epoch_change_log.new_value.iter())
+                })
+            }))
+    }
+
     pub fn level_iter<F: FnMut(&Level) -> bool>(
         &self,
         compaction_group_id: CompactionGroupId,
