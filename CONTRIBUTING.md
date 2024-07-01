@@ -1,6 +1,6 @@
 # Contributing to RisingWave
 
-Contributing documentation has moved to the **[RisingWave Developer Guide](https://risingwave.github.io/risingwave/)**.
+Contributing documentation has moved to the **[RisingWave Developer Guide](https://risingwavelabs.github.io/risingwave/)**.
 
 
 ## Before hacking on RisingWave
@@ -13,4 +13,4 @@ Please read [the process] of how to submit your change to RisingWave.
 
 [Community Slack]: https://risingwave.com/slack
 [file an issue]: https://github.com/rust-lang/cargo/issues
-[the process]: https://risingwave.github.io/risingwave/contribution
+[the process]: https://risingwavelabs.github.io/risingwave/contribution
