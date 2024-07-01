@@ -11,5 +11,15 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+use crate::binder::Relation;
+use crate::error::Result;
+use crate::optimizer::plan_node::LogicalChangeLog;
+use crate::{PlanRef, Planner};
 
-pub use risingwave_connector_codec::decoder::avro::*;
+impl Planner {
+    pub(super) fn plan_changelog(&mut self, relation: Relation) -> Result<PlanRef> {
+        let root = self.plan_relation(relation)?;
+        let plan = LogicalChangeLog::create(root);
+        Ok(plan)
+    }
+}

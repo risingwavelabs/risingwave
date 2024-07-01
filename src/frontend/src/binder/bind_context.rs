@@ -23,6 +23,7 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::TableAlias;
 
+use crate::binder::Relation;
 use crate::error::{ErrorCode, Result};
 
 type LiteResult<T> = std::result::Result<T, ErrorCode>;
@@ -94,10 +95,16 @@ pub enum BindingCteState {
     #[default]
     Init,
     /// We know the schema form after the base term resolved.
-    BaseResolved { base: BoundSetExpr },
+    BaseResolved {
+        base: BoundSetExpr,
+    },
     /// We get the whole bound result of the (recursive) CTE.
     Bound {
         query: Either<BoundQuery, RecursiveUnion>,
+    },
+
+    ChangeLog {
+        table: Relation,
     },
 }
 

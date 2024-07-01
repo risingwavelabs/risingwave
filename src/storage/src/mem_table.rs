@@ -433,6 +433,7 @@ pub(crate) async fn merge_stream<'a>(
     inner_stream: impl Stream<Item = StorageResult<StateStoreIterItem>> + 'static,
     table_id: TableId,
     epoch: u64,
+    rev: bool,
 ) {
     let inner_stream = inner_stream.peekable();
     pin_mut!(inner_stream);
@@ -459,7 +460,11 @@ pub(crate) async fn merge_stream<'a>(
             }
             (Some(Ok((inner_key, _))), Some((mem_table_key, _))) => {
                 debug_assert_eq!(inner_key.user_key.table_id, table_id);
-                match inner_key.user_key.table_key.cmp(mem_table_key) {
+                let mut ret = inner_key.user_key.table_key.cmp(mem_table_key);
+                if rev {
+                    ret = ret.reverse();
+                }
+                match ret {
                     Ordering::Less => {
                         // yield data from storage
                         let (key, value) = inner_stream.next().await.unwrap()?;
@@ -580,6 +585,7 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
                 iter.into_stream(to_owned_item),
                 self.table_id,
                 self.epoch(),
+                false,
             ))))
         }
     }
@@ -600,6 +606,7 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
                 iter.into_stream(to_owned_item),
                 self.table_id,
                 self.epoch(),
+                true,
             ))))
         }
     }

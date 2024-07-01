@@ -202,11 +202,15 @@ public class DbzChangeEventConsumer
                         byte[] key =
                                 keyConverter.fromConnectData(
                                         record.topic(), record.keySchema(), record.key());
+                        String msgPayload =
+                                payload == null ? "" : new String(payload, StandardCharsets.UTF_8);
+                        // key can be null if the table has no primary key
+                        String msgKey = key == null ? "" : new String(key, StandardCharsets.UTF_8);
                         var message =
                                 msgBuilder
                                         .setFullTableName(fullTableName)
-                                        .setPayload(new String(payload, StandardCharsets.UTF_8))
-                                        .setKey(new String(key, StandardCharsets.UTF_8))
+                                        .setPayload(msgPayload)
+                                        .setKey(msgKey)
                                         .setSourceTsMs(sourceTsMs)
                                         .build();
                         LOG.debug(

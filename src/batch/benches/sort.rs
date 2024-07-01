@@ -64,7 +64,7 @@ fn create_order_by_executor(
         "SortExecutor".into(),
         CHUNK_SIZE,
         MemoryContext::none(),
-        false,
+        None,
         BatchSpillMetrics::for_test(),
     ))
 }

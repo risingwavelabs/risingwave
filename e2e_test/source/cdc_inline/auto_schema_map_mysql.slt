@@ -2,11 +2,17 @@ control substitution on
 
 # test case need to cover all data types
 system ok
-mysql -e "DROP DATABASE IF EXISTS mytest; CREATE DATABASE mytest;"
+mysql --protocol=tcp -u root -e "DROP DATABASE IF EXISTS mytest; CREATE DATABASE mytest;"
 
 system ok
 mysql --protocol=tcp -u root mytest -e "
     DROP TABLE IF EXISTS mysql_types_test;
+    CREATE TABLE customers(
+         id BIGINT PRIMARY KEY,
+         modified DATETIME,
+         custinfo JSON
+    );
+    ALTER TABLE customers ADD INDEX zipsa( (CAST(custinfo->'zipcode' AS UNSIGNED ARRAY)) );
     CREATE TABLE IF NOT EXISTS mysql_types_test(
         c_boolean boolean,
         c_bit bit,
@@ -34,7 +40,6 @@ mysql --protocol=tcp -u root mytest -e "
     INSERT INTO mysql_types_test VALUES ( True, 1, -128, -32767, -8388608, -2147483647, -9223372036854775807, -10.0, -9999.999999, -10000.0, 'a', 'b', '', '', '1001-01-01', '00:00:00', '1998-01-01 00:00:00.000000', '1970-01-01 00:00:01', 'sad', '[3,4]');
     "
 
-
 statement ok
 create source mysql_source with (
  connector = 'mysql-cdc',
@@ -46,6 +51,19 @@ create source mysql_source with (
  server.id = '5601'
 );
 
+statement ok
+create table rw_customers (*) from mysql_source table 'mytest.customers';
+
+# Name, Type, Is Hidden, Description
+query TTTT
+describe rw_customers;
+----
+id bigint false NULL
+modified timestamp without time zone false NULL
+custinfo jsonb false NULL
+primary key id NULL NULL
+distribution key id NULL NULL
+table description rw_customers NULL NULL
 
 statement ok
 create table rw_mysql_types_test (*) from mysql_source table 'mytest.mysql_types_test';
@@ -62,7 +80,7 @@ c_tinyint smallint false NULL
 c_smallint smallint false NULL
 c_mediumint integer false NULL
 c_integer integer false NULL
-c_Bigint bigint false NULL
+c_bigint bigint false NULL
 c_decimal numeric false NULL
 c_float real false NULL
 c_double double precision false NULL
@@ -76,8 +94,8 @@ c_datetime timestamp without time zone false NULL
 c_timestamp timestamp with time zone false NULL
 c_enum character varying false NULL
 c_json jsonb false NULL
-primary key c_boolean, c_Bigint, c_date NULL NULL
-distribution key c_boolean, c_Bigint, c_date NULL NULL
+primary key c_boolean, c_bigint, c_date NULL NULL
+distribution key c_boolean, c_bigint, c_date NULL NULL
 table description rw_mysql_types_test NULL NULL
 
 query TTTTTTTTTTTTT
@@ -88,7 +106,7 @@ SELECT
     c_smallint,
     c_mediumint,
     c_integer,
-    "c_Bigint",
+    c_bigint,
     c_decimal,
     c_float,
     c_double,

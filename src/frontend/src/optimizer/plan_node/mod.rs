@@ -850,6 +850,7 @@ mod batch_values;
 mod logical_agg;
 mod logical_apply;
 mod logical_cdc_scan;
+mod logical_changelog;
 mod logical_cte_ref;
 mod logical_dedup;
 mod logical_delete;
@@ -878,6 +879,7 @@ mod logical_topn;
 mod logical_union;
 mod logical_update;
 mod logical_values;
+mod stream_changelog;
 mod stream_dedup;
 mod stream_delta_join;
 mod stream_dml;
@@ -951,6 +953,7 @@ pub use batch_values::BatchValues;
 pub use logical_agg::LogicalAgg;
 pub use logical_apply::LogicalApply;
 pub use logical_cdc_scan::LogicalCdcScan;
+pub use logical_changelog::LogicalChangeLog;
 pub use logical_cte_ref::LogicalCteRef;
 pub use logical_dedup::LogicalDedup;
 pub use logical_delete::LogicalDelete;
@@ -981,6 +984,7 @@ pub use logical_union::LogicalUnion;
 pub use logical_update::LogicalUpdate;
 pub use logical_values::LogicalValues;
 pub use stream_cdc_table_scan::StreamCdcTableScan;
+pub use stream_changelog::StreamChangeLog;
 pub use stream_dedup::StreamDedup;
 pub use stream_delta_join::StreamDeltaJoin;
 pub use stream_dml::StreamDml;
@@ -1071,6 +1075,7 @@ macro_rules! for_all_plan_nodes {
             , { Logical, IcebergScan }
             , { Logical, RecursiveUnion }
             , { Logical, CteRef }
+            , { Logical, ChangeLog }
             , { Batch, SimpleAgg }
             , { Batch, HashAgg }
             , { Batch, SortAgg }
@@ -1134,6 +1139,7 @@ macro_rules! for_all_plan_nodes {
             , { Stream, EowcSort }
             , { Stream, OverWindow }
             , { Stream, FsFetch }
+            , { Stream, ChangeLog }
         }
     };
 }
@@ -1175,6 +1181,7 @@ macro_rules! for_logical_plan_nodes {
             , { Logical, IcebergScan }
             , { Logical, RecursiveUnion }
             , { Logical, CteRef }
+            , { Logical, ChangeLog }
         }
     };
 }
@@ -1256,6 +1263,7 @@ macro_rules! for_stream_plan_nodes {
             , { Stream, EowcSort }
             , { Stream, OverWindow }
             , { Stream, FsFetch }
+            , { Stream, ChangeLog }
         }
     };
 }

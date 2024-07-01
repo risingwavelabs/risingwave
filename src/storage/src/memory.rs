@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::{Bound, RangeBounds};
 use std::sync::{Arc, LazyLock};
@@ -337,7 +337,6 @@ pub mod sled {
 }
 
 mod batched_iter {
-    use itertools::Itertools;
 
     use super::*;
 
@@ -378,13 +377,10 @@ mod batched_iter {
                     Some(Self::BATCH_SIZE),
                 )?
             } else {
-                self.inner
-                    .range(
-                        (self.range.0.clone(), self.range.1.clone()),
-                        Some(Self::BATCH_SIZE),
-                    )?
-                    .into_iter()
-                    .collect_vec()
+                self.inner.range(
+                    (self.range.0.clone(), self.range.1.clone()),
+                    Some(Self::BATCH_SIZE),
+                )?
             };
 
             if let Some((last_key, _)) = batch.last() {
@@ -609,7 +605,7 @@ impl<R: RangeKv> RangeKvStateStore<R> {
 impl<R: RangeKv> StateStoreRead for RangeKvStateStore<R> {
     type ChangeLogIter = RangeKvStateStoreChangeLogIter<R>;
     type Iter = RangeKvStateStoreIter<R>;
-    type RevIter = RangeKvStateStoreIter<R>;
+    type RevIter = RangeKvStateStoreRevIter<R>;
 
     #[allow(clippy::unused_async)]
     async fn get(
@@ -654,7 +650,7 @@ impl<R: RangeKv> StateStoreRead for RangeKvStateStore<R> {
         epoch: u64,
         read_options: ReadOptions,
     ) -> StorageResult<Self::RevIter> {
-        Ok(RangeKvStateStoreIter::new(
+        Ok(RangeKvStateStoreRevIter::new(
             batched_iter::Iter::new(
                 self.inner.clone(),
                 to_full_key_range(read_options.table_id, key_range),
@@ -745,7 +741,7 @@ impl<R: RangeKv> StateStore for RangeKvStateStore<R> {
     }
 
     #[allow(clippy::unused_async)]
-    fn sync(&self, _epoch: u64) -> impl SyncFuture {
+    fn sync(&self, _epoch: u64, _table_ids: HashSet<TableId>) -> impl SyncFuture {
         let result = self.inner.flush();
         // memory backend doesn't need to push to S3, so this is a no-op
         async move {
@@ -828,6 +824,81 @@ impl<R: RangeKv> RangeKvStateStoreIter<R> {
                     self.item_buffer = Some((key, value));
                     break;
                 }
+            }
+        }
+        Ok(())
+    }
+}
+
+pub struct RangeKvStateStoreRevIter<R: RangeKv> {
+    inner: batched_iter::Iter<R>,
+
+    epoch: HummockEpoch,
+    is_inclusive_epoch: bool,
+
+    item_buffer: VecDeque<StateStoreIterItem>,
+}
+
+impl<R: RangeKv> RangeKvStateStoreRevIter<R> {
+    pub fn new(
+        inner: batched_iter::Iter<R>,
+        epoch: HummockEpoch,
+        is_inclusive_epoch: bool,
+    ) -> Self {
+        Self {
+            inner,
+            epoch,
+            is_inclusive_epoch,
+            item_buffer: VecDeque::default(),
+        }
+    }
+}
+
+impl<R: RangeKv> StateStoreIter for RangeKvStateStoreRevIter<R> {
+    #[allow(clippy::unused_async)]
+    async fn try_next(&mut self) -> StorageResult<Option<StateStoreIterItemRef<'_>>> {
+        self.next_inner()?;
+        Ok(self
+            .item_buffer
+            .back()
+            .map(|(key, value)| (key.to_ref(), value.as_ref())))
+    }
+}
+
+impl<R: RangeKv> RangeKvStateStoreRevIter<R> {
+    fn next_inner(&mut self) -> StorageResult<()> {
+        self.item_buffer.pop_back();
+        while let Some((key, value)) = self.inner.next()? {
+            let epoch = key.epoch_with_gap.pure_epoch();
+            if epoch > self.epoch {
+                continue;
+            }
+            if epoch == self.epoch && !self.is_inclusive_epoch {
+                continue;
+            }
+
+            let v = match value {
+                Some(v) => v,
+                None => {
+                    if let Some(last_key) = self.item_buffer.front()
+                        && key.user_key.as_ref() == last_key.0.user_key.as_ref()
+                    {
+                        self.item_buffer.clear();
+                    }
+                    continue;
+                }
+            };
+
+            if let Some(last_key) = self.item_buffer.front() {
+                if key.user_key.as_ref() != last_key.0.user_key.as_ref() {
+                    self.item_buffer.push_front((key, v));
+                    break;
+                } else {
+                    self.item_buffer.pop_front();
+                    self.item_buffer.push_front((key, v));
+                }
+            } else {
+                self.item_buffer.push_front((key, v));
             }
         }
         Ok(())
