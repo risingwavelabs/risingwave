@@ -122,6 +122,7 @@ stream_memory_controller_sequence_tls_step = 128
 stream_memory_controller_sequence_tls_lag = 32
 stream_enable_arrangement_backfill = true
 stream_high_join_amplification_threshold = 2048
+stream_enable_actor_tokio_metrics = false
 
 [storage]
 share_buffers_sync_parallelism = 1
