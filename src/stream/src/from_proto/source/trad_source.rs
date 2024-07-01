@@ -12,13 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
-
 use risingwave_common::catalog::{
     default_key_column_name_version_mapping, TableId, KAFKA_TIMESTAMP_COLUMN_NAME,
 };
 use risingwave_connector::source::reader::desc::SourceDescBuilder;
-use risingwave_connector::source::{should_copy_to_format_encode_options, UPSTREAM_SOURCE_KEY};
+use risingwave_connector::source::should_copy_to_format_encode_options;
 use risingwave_connector::WithPropertiesExt;
 use risingwave_pb::catalog::PbStreamSourceInfo;
 use risingwave_pb::data::data_type::TypeName as PbTypeName;

@@ -26,8 +26,9 @@ use risingwave_common::telemetry::{
 };
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_pb::common::WorkerType;
-use risingwave_pb::telemetry::PbTelemetryClusterType;
-use risingwave_pb::telemetry::{PbTelemetryConnectorDirection, PbTelemetryEventStage};
+use risingwave_pb::telemetry::{
+    PbTelemetryClusterType, PbTelemetryConnectorDirection, PbTelemetryEventStage,
+};
 use serde::{Deserialize, Serialize};
 use thiserror_ext::AsReport;
 
