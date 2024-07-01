@@ -904,6 +904,7 @@ impl CatalogController {
             ActorId,
             Option<VnodeBitmap>,
             WorkerId,
+            ActorStatus,
         )> = Actor::find()
             .select_only()
             .columns([
@@ -914,6 +915,7 @@ impl CatalogController {
                 actor::Column::ActorId,
                 actor::Column::VnodeBitmap,
                 actor::Column::WorkerId,
+                actor::Column::Status,
             ])
             .join(JoinType::InnerJoin, actor::Relation::Fragment.def())
             .into_tuple()
@@ -922,7 +924,8 @@ impl CatalogController {
 
         let mut actor_locations = HashMap::new();
 
-        for (fragment_id, _, actor_id, _, worker_id) in &actors {
+        for (fragment_id, _, actor_id, _, worker_id, _) in &actors {
+            // question: shall we check if the actor is Inactive?
             actor_locations
                 .entry(*worker_id)
                 .or_insert(HashMap::new())

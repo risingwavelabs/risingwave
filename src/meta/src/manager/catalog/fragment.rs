@@ -103,6 +103,13 @@ impl FragmentManagerCore {
                     for actor in &fragment.actors {
                         let status = table_fragment.actor_status.get(&actor.actor_id).unwrap();
 
+                        match status.state() {
+                            ActorState::Unspecified => unreachable!(),
+                            // skip inactive actors
+                            ActorState::Inactive => continue,
+                            ActorState::Running => {}
+                        }
+
                         let worker_id = status.get_parallel_unit().unwrap().get_worker_node_id();
                         actor_bitmaps.insert(
                             actor.actor_id as ActorId,

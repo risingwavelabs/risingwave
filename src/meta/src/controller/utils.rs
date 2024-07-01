@@ -850,6 +850,7 @@ where
         ActorId,
         Option<VnodeBitmap>,
         WorkerId,
+        ActorStatus,
     )> = Actor::find()
         .select_only()
         .columns([
@@ -860,6 +861,7 @@ where
             actor::Column::ActorId,
             actor::Column::VnodeBitmap,
             actor::Column::WorkerId,
+            actor::Column::Status,
         ])
         .join(JoinType::InnerJoin, actor::Relation::Fragment.def())
         .filter(fragment::Column::JobId.eq(job_id))
@@ -877,6 +879,7 @@ pub fn rebuild_fragment_mapping_from_actors(
         ActorId,
         Option<VnodeBitmap>,
         WorkerId,
+        ActorStatus,
     )>,
 ) -> Vec<FragmentWorkerSlotMapping> {
     let mut all_actor_locations = HashMap::new();
@@ -884,7 +887,11 @@ pub fn rebuild_fragment_mapping_from_actors(
     let mut fragment_actors = HashMap::new();
     let mut fragment_dist = HashMap::new();
 
-    for (fragment_id, dist, actor_id, bitmap, worker_id) in job_actors {
+    for (fragment_id, dist, actor_id, bitmap, worker_id, actor_status) in job_actors {
+        if actor_status == ActorStatus::Inactive {
+            continue;
+        }
+
         all_actor_locations
             .entry(fragment_id)
             .or_insert(HashMap::new())
