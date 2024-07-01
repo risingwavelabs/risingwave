@@ -9706,7 +9706,7 @@ dependencies = [
 [[package]]
 name = "reqsign"
 version = "0.14.9"
-source = "git+https://github.com/wcy-fdu/reqsign.git?rev=617b1b6#617b1b6af6eadde079f7125b2cb6706f8fb20bbf"
+source = "git+https://github.com/wcy-fdu/reqsign.git?rev=7086b75#7086b7588ad9fc9388b28836574bca9188ab2a5d"
 dependencies = [
  "anyhow",
  "async-trait",
