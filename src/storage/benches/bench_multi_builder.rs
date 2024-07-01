@@ -151,6 +151,8 @@ async fn generate_sstable_store(object_store: Arc<ObjectStoreImpl>) -> Arc<Sstab
         use_new_object_prefix_strategy: true,
         meta_cache,
         block_cache,
+        fetch_unit: 1,
+        fetch_waiter_shards: 1,
     }))
 }
 

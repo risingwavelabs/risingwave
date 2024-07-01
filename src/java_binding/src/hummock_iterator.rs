@@ -109,6 +109,8 @@ pub(crate) async fn new_hummock_java_binding_iter(
             use_new_object_prefix_strategy: read_plan.use_new_object_prefix_strategy,
             meta_cache,
             block_cache,
+            fetch_unit: 1,
+            fetch_waiter_shards: 1,
         }));
         let reader = HummockVersionReader::new(
             sstable_store,

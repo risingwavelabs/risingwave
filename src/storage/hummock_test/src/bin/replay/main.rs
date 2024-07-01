@@ -138,6 +138,8 @@ async fn create_replay_hummock(r: Record, args: &Args) -> Result<impl GlobalRepl
         use_new_object_prefix_strategy: args.use_new_object_prefix_strategy,
         meta_cache,
         block_cache,
+        fetch_unit: 1,
+        fetch_waiter_shards: 1,
     }));
 
     let (hummock_meta_client, notification_client, notifier) = {

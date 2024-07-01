@@ -777,6 +777,11 @@ pub struct StorageConfig {
     /// 3. Retry and timeout configuration
     #[serde(default)]
     pub object_store: ObjectStoreConfig,
+
+    #[serde(default = "default::storage::fetch_unit")]
+    pub fetch_unit: usize,
+    #[serde(default = "default::storage::fetch_waiter_shards")]
+    pub fetch_waiter_shards: usize,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
@@ -1587,6 +1592,14 @@ pub mod default {
 
         pub fn table_info_statistic_history_times() -> usize {
             240
+        }
+
+        pub fn fetch_unit() -> usize {
+            64
+        }
+
+        pub fn fetch_waiter_shards() -> usize {
+            64
         }
     }
 
