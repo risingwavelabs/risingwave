@@ -926,9 +926,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "76cb6d108605c5489fff1ef9c520656946ad05ed0de3ea6d26d56bcb34bdb8c5"
 dependencies = [
  "anyhow",
- "arrow-array 50.0.0",
- "arrow-buffer 50.0.0",
- "arrow-schema 50.0.0",
+ "arrow-array 52.0.0",
+ "arrow-buffer 52.0.0",
+ "arrow-schema 52.0.0",
  "atomic-time",
  "rquickjs",
 ]
@@ -939,10 +939,10 @@ version = "0.0.1"
 source = "git+https://github.com/risingwavelabs/arrow-udf.git?rev=fa36365#fa3636559de986aa592da6e8b3fbfac7bdd4bb78"
 dependencies = [
  "anyhow",
- "arrow-array 50.0.0",
- "arrow-buffer 50.0.0",
- "arrow-data 50.0.0",
- "arrow-schema 50.0.0",
+ "arrow-array 52.0.0",
+ "arrow-buffer 52.0.0",
+ "arrow-data 52.0.0",
+ "arrow-schema 52.0.0",
  "arrow-udf-js-deno-runtime",
  "async-trait",
  "deno_core",
@@ -990,10 +990,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4506efc6fbc200c083add2a7ed4e3616a859941a745e922320ae7051d90d12ec"
 dependencies = [
  "anyhow",
- "arrow-array 50.0.0",
- "arrow-buffer 50.0.0",
- "arrow-ipc 50.0.0",
- "arrow-schema 50.0.0",
+ "arrow-array 52.0.0",
+ "arrow-buffer 52.0.0",
+ "arrow-ipc 52.0.0",
+ "arrow-schema 52.0.0",
  "lazy_static",
  "pyo3",
  "pyo3-build-config",
@@ -1006,9 +1006,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eb829e25925161d93617d4b053bae03fe51e708f2cce088d85df856011d4f369"
 dependencies = [
  "anyhow",
- "arrow-array 50.0.0",
- "arrow-ipc 50.0.0",
- "arrow-schema 50.0.0",
+ "arrow-array 52.0.0",
+ "arrow-ipc 52.0.0",
+ "arrow-schema 52.0.0",
  "async-trait",
  "base64 0.22.0",
  "genawaiter",
@@ -1350,7 +1350,7 @@ dependencies = [
  "flexstr",
  "indextree",
  "itertools 0.12.1",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.3",
  "pin-project",
  "tokio",
  "tracing",
@@ -2604,7 +2604,7 @@ dependencies = [
  "num-traits",
  "serde",
  "wasm-bindgen",
- "windows-targets 0.52.0",
+ "windows-targets 0.52.5",
 ]
 
 [[package]]
@@ -3324,7 +3324,7 @@ dependencies = [
  "crossterm_winapi",
  "libc",
  "mio",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.3",
  "signal-hook",
  "signal-hook-mio",
  "winapi",
@@ -3339,7 +3339,7 @@ dependencies = [
  "bitflags 2.5.0",
  "crossterm_winapi",
  "libc",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.3",
  "winapi",
 ]
 
@@ -3678,7 +3678,7 @@ dependencies = [
  "log",
  "num_cpus",
  "object_store",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.3",
  "parquet 48.0.1",
  "pin-project-lite",
  "rand",
@@ -3726,7 +3726,7 @@ dependencies = [
  "hashbrown 0.14.3",
  "log",
  "object_store",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.3",
  "rand",
  "tempfile",
  "url",
@@ -3824,7 +3824,7 @@ dependencies = [
  "itertools 0.11.0",
  "log",
  "once_cell",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.3",
  "pin-project-lite",
  "rand",
  "tokio",
@@ -3950,7 +3950,7 @@ dependencies = [
  "num_cpus",
  "object_store",
  "once_cell",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.3",
  "parquet 48.0.1",
  "percent-encoding",
  "rand",
@@ -4033,7 +4033,7 @@ dependencies = [
  "libc",
  "log",
  "memoffset",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.3",
  "pin-project",
  "serde",
  "serde_json",
@@ -5397,7 +5397,7 @@ dependencies = [
  "madsim-tokio",
  "metrics",
  "nix 0.29.0",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.3",
  "rustversion",
  "serde",
 ]
@@ -5428,7 +5428,7 @@ dependencies = [
  "itertools 0.13.0",
  "libc",
  "madsim-tokio",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.3",
  "serde",
  "tracing",
 ]
@@ -5456,7 +5456,7 @@ dependencies = [
  "libc",
  "lz4",
  "madsim-tokio",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.3",
  "pin-project",
  "rand",
  "serde",
@@ -5685,7 +5685,7 @@ checksum = "1d930c203dd0b6ff06e0201a4a2fe9149b43c684fd4420555b26d21b1a02956f"
 dependencies = [
  "futures-core",
  "lock_api",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.3",
 ]
 
 [[package]]
@@ -5843,6 +5843,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "generator"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "186014d53bc231d0090ef8d6f03e0920c54d85a5ed22f4f2f74315ec56cf83fb"
+dependencies = [
+ "cc",
+ "cfg-if",
+ "libc",
+ "log",
+ "rustversion",
+ "windows 0.54.0",
+]
+
+[[package]]
 name = "generic-array"
 version = "0.14.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5897,7 +5911,7 @@ dependencies = [
  "http 0.2.9",
  "thiserror",
  "tokio",
- "tonic 0.10.2",
+ "tonic 0.11.0",
  "tower",
  "tracing",
  "trust-dns-resolver 0.23.2",
@@ -6048,7 +6062,7 @@ dependencies = [
  "futures-timer",
  "no-std-compat",
  "nonzero_ext",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.3",
  "rand",
  "smallvec",
 ]
@@ -7352,6 +7366,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "loom"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "419e0dc8046cb947daa77eb95ae174acfbddb7673b4151f56d1eed8e93fbfaca"
+dependencies = [
+ "cfg-if",
+ "generator",
+ "pin-utils",
+ "scoped-tls",
+ "serde",
+ "serde_json",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "lru"
 version = "0.7.6"
 source = "git+https://github.com/risingwavelabs/lru-rs.git?rev=2682b85#2682b855ff04128ed50ae44dfdac25b83c7f790a"
@@ -7805,7 +7835,7 @@ dependencies = [
  "crossbeam-utils",
  "futures-util",
  "once_cell",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.3",
  "quanta",
  "rustc_version 0.4.0",
  "skeptic",
@@ -8341,7 +8371,7 @@ dependencies = [
  "humantime",
  "hyper 0.14.27",
  "itertools 0.11.0",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.3",
  "percent-encoding",
  "quick-xml 0.30.0",
  "rand",
@@ -8780,9 +8810,9 @@ dependencies = [
 
 [[package]]
 name = "parking_lot"
-version = "0.12.1"
+version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3742b2c103b9f06bc9fff0a37ff4912935851bee6d36f3c02bcc755bcfec228f"
+checksum = "f1bf18183cf54e8d6059647fc3063646a1801cf30896933ec2311622cc4b9a27"
 dependencies = [
  "lock_api",
  "parking_lot_core 0.9.8",
@@ -9097,7 +9127,7 @@ dependencies = [
  "madsim-tokio",
  "openssl",
  "panic-message",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.3",
  "reqwest 0.12.4",
  "risingwave_common",
  "risingwave_sqlparser",
@@ -9403,7 +9433,7 @@ dependencies = [
  "log",
  "nix 0.26.4",
  "once_cell",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.3",
  "smallvec",
  "symbolic-demangle",
  "tempfile",
@@ -9657,7 +9687,7 @@ dependencies = [
  "lazy_static",
  "libc",
  "memchr",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.3",
  "procfs 0.14.2",
  "protobuf",
  "thiserror",
@@ -10608,7 +10638,7 @@ dependencies = [
  "bincode 1.3.3",
  "bytes",
  "itertools 0.12.1",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.3",
  "prost 0.12.1",
  "risingwave_common",
  "risingwave_hummock_sdk",
@@ -10647,7 +10677,7 @@ dependencies = [
  "madsim-tonic",
  "memcomparable",
  "opendal 0.45.1",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.3",
  "paste",
  "prometheus",
  "prost 0.12.1",
@@ -10700,7 +10730,7 @@ dependencies = [
  "madsim-tokio",
  "nix 0.29.0",
  "opentelemetry",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.3",
  "prometheus",
  "rand",
  "risingwave_common",
@@ -10836,7 +10866,7 @@ dependencies = [
  "number_prefix",
  "opentelemetry",
  "opentelemetry_sdk",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.3",
  "parse-display",
  "paste",
  "pin-project-lite",
@@ -10911,7 +10941,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "madsim-tokio",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.3",
  "risingwave_common",
  "thiserror",
  "thiserror-ext",
@@ -10937,7 +10967,7 @@ dependencies = [
  "mach2",
  "madsim-tokio",
  "madsim-tonic",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.3",
  "pin-project-lite",
  "procfs 0.16.0",
  "prometheus",
@@ -11022,7 +11052,7 @@ dependencies = [
  "clap",
  "madsim-tokio",
  "madsim-tonic",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.3",
  "prost 0.12.1",
  "risingwave_common",
  "risingwave_common_heap_profiling",
@@ -11152,7 +11182,7 @@ dependencies = [
  "num-bigint",
  "opendal 0.47.0",
  "openssl",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.3",
  "parquet 50.0.0",
  "paste",
  "pg_bigdecimal",
@@ -11292,7 +11322,7 @@ dependencies = [
  "futures-async-stream",
  "itertools 0.12.1",
  "madsim-tokio",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.3",
  "paste",
  "rand",
  "risingwave_common",
@@ -11485,7 +11515,7 @@ dependencies = [
  "md5",
  "memcomparable",
  "num-integer",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.3",
  "parse-display",
  "paste",
  "petgraph",
@@ -11539,6 +11569,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "risingwave_hummock_memory_limiter"
+version = "1.11.0-alpha"
+dependencies = [
+ "futures",
+ "loom",
+ "madsim-tokio",
+ "parking_lot 0.12.3",
+ "rand",
+ "tokio",
+ "workspace-hack",
+]
+
+[[package]]
 name = "risingwave_hummock_sdk"
 version = "1.11.0-alpha"
 dependencies = [
@@ -11572,7 +11615,7 @@ dependencies = [
  "futures-async-stream",
  "itertools 0.12.1",
  "madsim-tokio",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.3",
  "rand",
  "risingwave_common",
  "risingwave_common_service",
@@ -11604,7 +11647,7 @@ dependencies = [
  "itertools 0.12.1",
  "madsim-tokio",
  "mockall",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.3",
  "prost 0.12.1",
  "risingwave_common",
  "risingwave_hummock_sdk",
@@ -11721,7 +11764,7 @@ dependencies = [
  "num-integer",
  "num-traits",
  "otlp-embedded",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.3",
  "prometheus",
  "prometheus-http-query",
  "prost 0.12.1",
@@ -12003,7 +12046,7 @@ dependencies = [
  "opentelemetry-otlp",
  "opentelemetry-semantic-conventions",
  "opentelemetry_sdk",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.3",
  "pprof",
  "risingwave_common",
  "risingwave_variables",
@@ -12176,7 +12219,7 @@ dependencies = [
  "more-asserts",
  "nix 0.29.0",
  "num-integer",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.3",
  "procfs 0.16.0",
  "prometheus",
  "prost 0.12.1",
@@ -12186,6 +12229,7 @@ dependencies = [
  "risingwave_common_estimate_size",
  "risingwave_common_service",
  "risingwave_expr",
+ "risingwave_hummock_memory_limiter",
  "risingwave_hummock_sdk",
  "risingwave_hummock_trace",
  "risingwave_object_store",
@@ -12243,7 +12287,7 @@ dependencies = [
  "maplit",
  "memcomparable",
  "multimap 0.10.0",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.3",
  "pin-project",
  "prehash",
  "prometheus",
@@ -13410,7 +13454,7 @@ dependencies = [
  "futures",
  "log",
  "once_cell",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.3",
  "scc",
  "serial_test_derive",
 ]
@@ -15051,7 +15095,7 @@ dependencies = [
  "libc",
  "mio",
  "num_cpus",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.3",
  "pin-project-lite",
  "signal-hook-registry",
  "socket2 0.5.6",
@@ -15128,7 +15172,7 @@ dependencies = [
  "futures-util",
  "log",
  "madsim-tokio",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.3",
  "percent-encoding",
  "phf",
  "pin-project-lite",
@@ -15379,7 +15423,10 @@ dependencies = [
  "percent-encoding",
  "pin-project",
  "prost 0.12.1",
+ "rustls-pemfile 2.1.1",
+ "rustls-pki-types",
  "tokio",
+ "tokio-rustls 0.25.0",
  "tokio-stream",
  "tower",
  "tower-layer",
@@ -15563,7 +15610,7 @@ dependencies = [
  "matchers",
  "nu-ansi-term",
  "once_cell",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.3",
  "regex",
  "serde",
  "serde_json",
@@ -15710,7 +15757,7 @@ dependencies = [
  "lazy_static",
  "log",
  "lru-cache",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.3",
  "resolv-conf",
  "smallvec",
  "thiserror",
@@ -15729,7 +15776,7 @@ dependencies = [
  "ipconfig",
  "lazy_static",
  "lru-cache",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.3",
  "resolv-conf",
  "serde",
  "smallvec",
@@ -15750,7 +15797,7 @@ dependencies = [
  "ipconfig",
  "lru-cache",
  "once_cell",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.3",
  "rand",
  "resolv-conf",
  "smallvec",
@@ -16846,7 +16893,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e48a53791691ab099e5e2ad123536d0fff50652600abaf43bbf952894110d0be"
 dependencies = [
  "windows-core 0.52.0",
- "windows-targets 0.52.0",
+ "windows-targets 0.52.5",
+]
+
+[[package]]
+name = "windows"
+version = "0.54.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9252e5725dbed82865af151df558e754e4a3c2c30818359eb17465f1346a1b49"
+dependencies = [
+ "windows-core 0.54.0",
+ "windows-targets 0.52.5",
 ]
 
 [[package]]
@@ -16864,7 +16921,26 @@ version = "0.52.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "33ab640c8d7e35bf8ba19b884ba838ceb4fba93a4e8c65a9059d08afcfc683d9"
 dependencies = [
- "windows-targets 0.52.0",
+ "windows-targets 0.52.5",
+]
+
+[[package]]
+name = "windows-core"
+version = "0.54.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "12661b9c89351d684a50a8a643ce5f608e20243b9fb84687800163429f161d65"
+dependencies = [
+ "windows-result",
+ "windows-targets 0.52.5",
+]
+
+[[package]]
+name = "windows-result"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5e383302e8ec8515204254685643de10811af0ed97ea37210dc26fb0032647f8"
+dependencies = [
+ "windows-targets 0.52.5",
 ]
 
 [[package]]
@@ -16891,7 +16967,7 @@ version = "0.52.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "282be5f36a8ce781fad8c8ae18fa3f9beff57ec1b52cb3de0789201425d9a33d"
 dependencies = [
- "windows-targets 0.52.0",
+ "windows-targets 0.52.5",
 ]
 
 [[package]]
@@ -16926,17 +17002,18 @@ dependencies = [
 
 [[package]]
 name = "windows-targets"
-version = "0.52.0"
+version = "0.52.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8a18201040b24831fbb9e4eb208f8892e1f50a37feb53cc7ff887feb8f50e7cd"
+checksum = "6f0713a46559409d202e70e28227288446bf7841d3211583a4b53e3f6d96e7eb"
 dependencies = [
- "windows_aarch64_gnullvm 0.52.0",
- "windows_aarch64_msvc 0.52.0",
- "windows_i686_gnu 0.52.0",
- "windows_i686_msvc 0.52.0",
- "windows_x86_64_gnu 0.52.0",
- "windows_x86_64_gnullvm 0.52.0",
- "windows_x86_64_msvc 0.52.0",
+ "windows_aarch64_gnullvm 0.52.5",
+ "windows_aarch64_msvc 0.52.5",
+ "windows_i686_gnu 0.52.5",
+ "windows_i686_gnullvm",
+ "windows_i686_msvc 0.52.5",
+ "windows_x86_64_gnu 0.52.5",
+ "windows_x86_64_gnullvm 0.52.5",
+ "windows_x86_64_msvc 0.52.5",
 ]
 
 [[package]]
@@ -16953,9 +17030,9 @@ checksum = "2b38e32f0abccf9987a4e3079dfb67dcd799fb61361e53e2882c3cbaf0d905d8"
 
 [[package]]
 name = "windows_aarch64_gnullvm"
-version = "0.52.0"
+version = "0.52.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cb7764e35d4db8a7921e09562a0304bf2f93e0a51bfccee0bd0bb0b666b015ea"
+checksum = "7088eed71e8b8dda258ecc8bac5fb1153c5cffaf2578fc8ff5d61e23578d3263"
 
 [[package]]
 name = "windows_aarch64_msvc"
@@ -16971,9 +17048,9 @@ checksum = "dc35310971f3b2dbbf3f0690a219f40e2d9afcf64f9ab7cc1be722937c26b4bc"
 
 [[package]]
 name = "windows_aarch64_msvc"
-version = "0.52.0"
+version = "0.52.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bbaa0368d4f1d2aaefc55b6fcfee13f41544ddf36801e793edbbfd7d7df075ef"
+checksum = "9985fd1504e250c615ca5f281c3f7a6da76213ebd5ccc9561496568a2752afb6"
 
 [[package]]
 name = "windows_i686_gnu"
@@ -16989,9 +17066,15 @@ checksum = "a75915e7def60c94dcef72200b9a8e58e5091744960da64ec734a6c6e9b3743e"
 
 [[package]]
 name = "windows_i686_gnu"
-version = "0.52.0"
+version = "0.52.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a28637cb1fa3560a16915793afb20081aba2c92ee8af57b4d5f28e4b3e7df313"
+checksum = "88ba073cf16d5372720ec942a8ccbf61626074c6d4dd2e745299726ce8b89670"
+
+[[package]]
+name = "windows_i686_gnullvm"
+version = "0.52.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "87f4261229030a858f36b459e748ae97545d6f1ec60e5e0d6a3d32e0dc232ee9"
 
 [[package]]
 name = "windows_i686_msvc"
@@ -17007,9 +17090,9 @@ checksum = "8f55c233f70c4b27f66c523580f78f1004e8b5a8b659e05a4eb49d4166cca406"
 
 [[package]]
 name = "windows_i686_msvc"
-version = "0.52.0"
+version = "0.52.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ffe5e8e31046ce6230cc7215707b816e339ff4d4d67c65dffa206fd0f7aa7b9a"
+checksum = "db3c2bf3d13d5b658be73463284eaf12830ac9a26a90c717b7f771dfe97487bf"
 
 [[package]]
 name = "windows_x86_64_gnu"
@@ -17025,9 +17108,9 @@ checksum = "53d40abd2583d23e4718fddf1ebec84dbff8381c07cae67ff7768bbf19c6718e"
 
 [[package]]
 name = "windows_x86_64_gnu"
-version = "0.52.0"
+version = "0.52.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3d6fa32db2bc4a2f5abeacf2b69f7992cd09dca97498da74a151a3132c26befd"
+checksum = "4e4246f76bdeff09eb48875a0fd3e2af6aada79d409d33011886d3e1581517d9"
 
 [[package]]
 name = "windows_x86_64_gnullvm"
@@ -17043,9 +17126,9 @@ checksum = "0b7b52767868a23d5bab768e390dc5f5c55825b6d30b86c844ff2dc7414044cc"
 
 [[package]]
 name = "windows_x86_64_gnullvm"
-version = "0.52.0"
+version = "0.52.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a657e1e9d3f514745a572a6846d3c7aa7dbe1658c056ed9c3344c4109a6949e"
+checksum = "852298e482cd67c356ddd9570386e2862b5673c85bd5f88df9ab6802b334c596"
 
 [[package]]
 name = "windows_x86_64_msvc"
@@ -17061,9 +17144,9 @@ checksum = "ed94fce61571a4006852b7389a063ab983c02eb1bb37b47f8272ce92d06d9538"
 
 [[package]]
 name = "windows_x86_64_msvc"
-version = "0.52.0"
+version = "0.52.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dff9641d1cd4be8d1a070daf9e3773c5f67e78b4d9d42263020c057706765c04"
+checksum = "bec47e5bfd1bff0eeaf6d8b485cc1074891a197ab4225d504cb7a1ab88b02bf0"
 
 [[package]]
 name = "winnow"

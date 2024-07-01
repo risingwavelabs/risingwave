@@ -13,17 +13,13 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
-use std::collections::VecDeque;
-use std::fmt::{Debug, Formatter};
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::{Bound, RangeBounds};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering as AtomicOrdering};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
 use std::time::Duration;
 
 use bytes::Bytes;
 use foyer::CacheContext;
-use parking_lot::Mutex;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_hummock_sdk::key::{
     bound_table_key_range, EmptySliceRef, FullKey, TableKey, UserKey,
@@ -31,13 +27,14 @@ use risingwave_hummock_sdk::key::{
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{can_concat, HummockEpoch};
 use risingwave_pb::hummock::SstableInfo;
-use tokio::sync::oneshot::{channel, Receiver, Sender};
 
 use super::{HummockError, HummockResult};
 use crate::error::StorageResult;
 use crate::hummock::CachePolicy;
 use crate::mem_table::{KeyOp, MemTableError};
 use crate::store::{OpConsistencyLevel, ReadOptions, StateStoreRead};
+
+pub(crate) use risingwave_hummock_memory_limiter::{MemoryLimiter, MemoryTracker};
 
 pub fn range_overlap<R, B>(
     search_key_range: &R,
@@ -175,207 +172,6 @@ pub fn prune_nonoverlapping_ssts<'a>(
         _ => ssts.len().saturating_sub(1),
     };
     ssts[start_table_idx..=end_table_idx].iter()
-}
-
-type RequestQueue = VecDeque<(Sender<MemoryTracker>, u64)>;
-enum MemoryRequest {
-    Ready(MemoryTracker),
-    Pending(Receiver<MemoryTracker>),
-}
-
-struct MemoryLimiterInner {
-    total_size: AtomicU64,
-    controller: Mutex<RequestQueue>,
-    has_waiter: AtomicBool,
-    quota: u64,
-}
-
-impl MemoryLimiterInner {
-    fn release_quota(&self, quota: u64) {
-        self.total_size.fetch_sub(quota, AtomicOrdering::SeqCst);
-    }
-
-    fn add_memory(&self, quota: u64) {
-        self.total_size.fetch_add(quota, AtomicOrdering::SeqCst);
-    }
-
-    fn may_notify_waiters(self: &Arc<Self>) {
-        // check `has_waiter` to avoid access lock every times drop `MemoryTracker`.
-        if !self.has_waiter.load(AtomicOrdering::Acquire) {
-            return;
-        }
-        let mut notify_waiters = vec![];
-        {
-            let mut waiters = self.controller.lock();
-            while let Some((_, quota)) = waiters.front() {
-                if !self.try_require_memory(*quota) {
-                    break;
-                }
-                let (tx, quota) = waiters.pop_front().unwrap();
-                notify_waiters.push((tx, quota));
-            }
-
-            if waiters.is_empty() {
-                self.has_waiter.store(false, AtomicOrdering::Release);
-            }
-        }
-
-        for (tx, quota) in notify_waiters {
-            let _ = tx.send(MemoryTracker::new(self.clone(), quota));
-        }
-    }
-
-    fn try_require_memory(&self, quota: u64) -> bool {
-        let mut current_quota = self.total_size.load(AtomicOrdering::Acquire);
-        while self.permit_quota(current_quota, quota) {
-            match self.total_size.compare_exchange(
-                current_quota,
-                current_quota + quota,
-                AtomicOrdering::SeqCst,
-                AtomicOrdering::SeqCst,
-            ) {
-                Ok(_) => {
-                    return true;
-                }
-                Err(old_quota) => {
-                    current_quota = old_quota;
-                }
-            }
-        }
-        false
-    }
-
-    fn require_memory(self: &Arc<Self>, quota: u64) -> MemoryRequest {
-        let mut waiters = self.controller.lock();
-        let first_req = waiters.is_empty();
-        if first_req {
-            // When this request is the first waiter but the previous `MemoryTracker` is just release a large quota, it may skip notifying this waiter because it has checked `has_waiter` and found it was false. So we must set it one and retry `try_require_memory` again to avoid deadlock.
-            self.has_waiter.store(true, AtomicOrdering::Release);
-        }
-        // We must require again with lock because some other MemoryTracker may drop just after this thread gets mutex but before it enters queue.
-        if self.try_require_memory(quota) {
-            if first_req {
-                self.has_waiter.store(false, AtomicOrdering::Release);
-            }
-            return MemoryRequest::Ready(MemoryTracker::new(self.clone(), quota));
-        }
-        let (tx, rx) = channel();
-        waiters.push_back((tx, quota));
-        MemoryRequest::Pending(rx)
-    }
-
-    fn permit_quota(&self, current_quota: u64, _request_quota: u64) -> bool {
-        current_quota <= self.quota
-    }
-}
-
-pub struct MemoryLimiter {
-    inner: Arc<MemoryLimiterInner>,
-}
-
-impl Debug for MemoryLimiter {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("MemoryLimiter")
-            .field("quota", &self.inner.quota)
-            .field("usage", &self.inner.total_size)
-            .finish()
-    }
-}
-
-pub struct MemoryTracker {
-    limiter: Arc<MemoryLimiterInner>,
-    quota: Option<u64>,
-}
-impl MemoryTracker {
-    fn new(limiter: Arc<MemoryLimiterInner>, quota: u64) -> Self {
-        Self {
-            limiter,
-            quota: Some(quota),
-        }
-    }
-}
-
-impl Debug for MemoryTracker {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("MemoryTracker")
-            .field("quota", &self.quota)
-            .finish()
-    }
-}
-
-impl MemoryLimiter {
-    pub fn unlimit() -> Arc<Self> {
-        Arc::new(Self::new(u64::MAX))
-    }
-
-    pub fn new(quota: u64) -> Self {
-        Self {
-            inner: Arc::new(MemoryLimiterInner {
-                total_size: AtomicU64::new(0),
-                controller: Mutex::new(VecDeque::default()),
-                has_waiter: AtomicBool::new(false),
-                quota,
-            }),
-        }
-    }
-
-    pub fn try_require_memory(&self, quota: u64) -> Option<MemoryTracker> {
-        if self.inner.try_require_memory(quota) {
-            Some(MemoryTracker::new(self.inner.clone(), quota))
-        } else {
-            None
-        }
-    }
-
-    pub fn get_memory_usage(&self) -> u64 {
-        self.inner.total_size.load(AtomicOrdering::Acquire)
-    }
-
-    pub fn quota(&self) -> u64 {
-        self.inner.quota
-    }
-
-    pub fn must_require_memory(&self, quota: u64) -> MemoryTracker {
-        if !self.inner.try_require_memory(quota) {
-            self.inner.add_memory(quota);
-        }
-
-        MemoryTracker::new(self.inner.clone(), quota)
-    }
-}
-
-impl MemoryLimiter {
-    pub async fn require_memory(&self, quota: u64) -> MemoryTracker {
-        match self.inner.require_memory(quota) {
-            MemoryRequest::Ready(tracker) => tracker,
-            MemoryRequest::Pending(rx) => rx.await.unwrap(),
-        }
-    }
-}
-
-impl MemoryTracker {
-    pub fn try_increase_memory(&mut self, target: u64) -> bool {
-        let quota = self.quota.unwrap();
-        if quota >= target {
-            return true;
-        }
-        if self.limiter.try_require_memory(target - quota) {
-            self.quota = Some(target);
-            true
-        } else {
-            false
-        }
-    }
-}
-
-// We must notify waiters outside `MemoryTracker` to avoid dead-lock and loop-owner.
-impl Drop for MemoryTracker {
-    fn drop(&mut self) {
-        if let Some(quota) = self.quota.take() {
-            self.limiter.release_quota(quota);
-            self.limiter.may_notify_waiters();
-        }
-    }
 }
 
 /// Check whether the items in `sub_iter` is a subset of the items in `full_iter`, and meanwhile
@@ -654,85 +450,5 @@ pub(crate) async fn wait_for_epoch(
                 }
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::future::{poll_fn, Future};
-    use std::sync::Arc;
-    use std::task::Poll;
-
-    use futures::future::join_all;
-    use futures::FutureExt;
-    use rand::random;
-
-    use crate::hummock::utils::MemoryLimiter;
-
-    async fn assert_pending(future: &mut (impl Future + Unpin)) {
-        for _ in 0..10 {
-            assert!(poll_fn(|cx| Poll::Ready(future.poll_unpin(cx)))
-                .await
-                .is_pending());
-        }
-    }
-
-    #[tokio::test]
-    async fn test_loose_memory_limiter() {
-        let quota = 5;
-        let memory_limiter = MemoryLimiter::new(quota);
-        drop(memory_limiter.require_memory(6).await);
-        let tracker1 = memory_limiter.require_memory(3).await;
-        assert_eq!(3, memory_limiter.get_memory_usage());
-        let tracker2 = memory_limiter.require_memory(4).await;
-        assert_eq!(7, memory_limiter.get_memory_usage());
-        let mut future = memory_limiter.require_memory(5).boxed();
-        assert_pending(&mut future).await;
-        assert_eq!(7, memory_limiter.get_memory_usage());
-        drop(tracker1);
-        let tracker3 = future.await;
-        assert_eq!(9, memory_limiter.get_memory_usage());
-        drop(tracker2);
-        assert_eq!(5, memory_limiter.get_memory_usage());
-        drop(tracker3);
-        assert_eq!(0, memory_limiter.get_memory_usage());
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-    async fn test_multi_thread_acquire_memory() {
-        const QUOTA: u64 = 10;
-        let memory_limiter = Arc::new(MemoryLimiter::new(200));
-        let mut handles = vec![];
-        for _ in 0..40 {
-            let limiter = memory_limiter.clone();
-            let h = tokio::spawn(async move {
-                let mut buffers = vec![];
-                let mut current_buffer_usage = (random::<usize>() % 8) + 2;
-                for _ in 0..1000 {
-                    if buffers.len() < current_buffer_usage
-                        && let Some(tracker) = limiter.try_require_memory(QUOTA)
-                    {
-                        buffers.push(tracker);
-                    } else {
-                        buffers.clear();
-                        current_buffer_usage = (random::<usize>() % 8) + 2;
-                        let req = limiter.require_memory(QUOTA);
-                        match tokio::time::timeout(std::time::Duration::from_millis(1), req).await {
-                            Ok(tracker) => {
-                                buffers.push(tracker);
-                            }
-                            Err(_) => {
-                                continue;
-                            }
-                        }
-                    }
-                    let sleep_time = random::<u64>() % 3 + 1;
-                    tokio::time::sleep(std::time::Duration::from_millis(sleep_time)).await;
-                }
-            });
-            handles.push(h);
-        }
-        let h = join_all(handles);
-        let _ = h.await;
     }
 }

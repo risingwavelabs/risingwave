@@ -38,7 +38,7 @@ pub mod sstable_store;
 #[cfg(any(test, feature = "test"))]
 pub mod test_utils;
 pub mod utils;
-pub use utils::MemoryLimiter;
+pub(crate) use utils::MemoryLimiter;
 pub mod backup_reader;
 pub mod event_handler;
 pub mod local_version;
