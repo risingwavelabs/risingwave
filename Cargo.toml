@@ -346,6 +346,8 @@ deno_web = { git = "https://github.com/bakjos/deno", rev = "787a232" }
 deno_websocket = { git = "https://github.com/bakjos/deno", rev = "787a232" }
 # patch to remove preserve_order from serde_json
 bson = { git = "https://github.com/risingwavelabs/bson-rust", rev = "e5175ec" }
+# patch foyer unitl new version release
+foyer = { git = "https://github.com/mrcroxx/foyer", rev = "1c20d09a52a38f09988f1d33f119087bab13f384" }
 
 [workspace.metadata.dylint]
 libraries = [{ path = "./lints" }]

@@ -5372,8 +5372,7 @@ dependencies = [
 [[package]]
 name = "foyer"
 version = "0.9.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0720e9cc504174e952382345ea25fe887fbd4c1761dccdd4c5276c6d1a93dbc5"
+source = "git+https://github.com/mrcroxx/foyer?rev=1c20d09a52a38f09988f1d33f119087bab13f384#1c20d09a52a38f09988f1d33f119087bab13f384"
 dependencies = [
  "ahash 0.8.11",
  "anyhow",
@@ -5381,14 +5380,14 @@ dependencies = [
  "foyer-memory",
  "foyer-storage",
  "madsim-tokio",
+ "pin-project",
  "tracing",
 ]
 
 [[package]]
 name = "foyer-common"
 version = "0.7.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8a823da3228992cc6392ddac757e0ed44fa4923588b03fcbbba4bad1ebfea7b2"
+source = "git+https://github.com/mrcroxx/foyer?rev=1c20d09a52a38f09988f1d33f119087bab13f384#1c20d09a52a38f09988f1d33f119087bab13f384"
 dependencies = [
  "bytes",
  "cfg-if",
@@ -5406,8 +5405,7 @@ dependencies = [
 [[package]]
 name = "foyer-intrusive"
 version = "0.7.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5168b34c3e6369a4c6055f08c6b37e416910652bfdd9a84de55a602f2aa3dcea"
+source = "git+https://github.com/mrcroxx/foyer?rev=1c20d09a52a38f09988f1d33f119087bab13f384#1c20d09a52a38f09988f1d33f119087bab13f384"
 dependencies = [
  "foyer-common",
  "itertools 0.13.0",
@@ -5416,8 +5414,7 @@ dependencies = [
 [[package]]
 name = "foyer-memory"
 version = "0.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "56055774fa6ed25d0affe30c04e6a3f18fc00713a42ef6a3dbd96e72fe31a3eb"
+source = "git+https://github.com/mrcroxx/foyer?rev=1c20d09a52a38f09988f1d33f119087bab13f384#1c20d09a52a38f09988f1d33f119087bab13f384"
 dependencies = [
  "ahash 0.8.11",
  "bitflags 2.5.0",
@@ -5437,8 +5434,7 @@ dependencies = [
 [[package]]
 name = "foyer-storage"
 version = "0.8.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "74811aec3df193b9c304d031e9f4879c4aab86cb78ff6e4cadf1188d014e7069"
+source = "git+https://github.com/mrcroxx/foyer?rev=1c20d09a52a38f09988f1d33f119087bab13f384#1c20d09a52a38f09988f1d33f119087bab13f384"
 dependencies = [
  "ahash 0.8.11",
  "allocator-api2",
