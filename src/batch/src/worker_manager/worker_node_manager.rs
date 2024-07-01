@@ -18,6 +18,7 @@ use std::time::Duration;
 
 use rand::seq::SliceRandom;
 use risingwave_common::bail;
+use risingwave_common::catalog::OBJECT_ID_PLACEHOLDER;
 use risingwave_common::hash::{WorkerSlotId, WorkerSlotMapping};
 use risingwave_common::vnode_mapping::vnode_placement::place_vnode;
 use risingwave_pb::common::{WorkerNode, WorkerType};
@@ -220,10 +221,19 @@ impl WorkerNodeManager {
 
     pub fn remove_streaming_fragment_mapping(&self, fragment_id: &FragmentId) {
         let mut guard = self.inner.write().unwrap();
-        guard
+
+        let res = guard
             .streaming_fragment_vnode_mapping
-            .remove(fragment_id)
-            .unwrap();
+            .remove(fragment_id);
+        match &res {
+            Some(_) => {},
+            None if OBJECT_ID_PLACEHOLDER == *fragment_id => {
+                // Do nothing for placeholder fragment.
+            },
+            None => {
+                panic!("Streaming vnode mapping not found for fragment_id: {}", fragment_id)
+            }
+        };
     }
 
     /// Returns fragment's vnode mapping for serving.
