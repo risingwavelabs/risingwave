@@ -46,7 +46,7 @@ jobs:
       - name: Install tools for building docs
         uses: taiki-e/install-action@v2
         with:
-          tool: cargo-docset,mdbook,mdbook-toc
+          tool: cargo-docset,mdbook,mdbook-toc,mdbook-linkcheck
       - name: build docsets
         run: |
           cargo docset --no-clean --docset-name RisingWave
