@@ -23,7 +23,7 @@ struct RwActor {
     #[primary_key]
     actor_id: i32,
     fragment_id: i32,
-    parallel_unit_id: i32,
+    worker_id: i32,
     state: String,
 }
 
@@ -36,7 +36,7 @@ async fn read_rw_actors(reader: &SysCatalogReaderImpl) -> Result<Vec<RwActor>> {
         .map(|state| RwActor {
             actor_id: state.actor_id as i32,
             fragment_id: state.fragment_id as i32,
-            parallel_unit_id: state.parallel_unit_id as i32,
+            worker_id: state.worker_id as i32,
             state: state.state().as_str_name().into(),
         })
         .collect())

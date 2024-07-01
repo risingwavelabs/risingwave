@@ -160,7 +160,7 @@ impl WorkerNodeManager {
             .worker_nodes
             .iter()
             .flat_map(|worker| {
-                (0..worker.parallel_units.len())
+                (0..worker.parallelism as usize)
                     .map(move |i| (WorkerSlotId::new(worker.id, i), worker))
             })
             .collect();
@@ -337,7 +337,7 @@ impl WorkerNodeSelector {
         };
         worker_nodes
             .iter()
-            .map(|node| node.parallel_units.len())
+            .map(|node| node.parallelism as usize)
             .sum()
     }
 
@@ -424,7 +424,7 @@ mod tests {
                 r#type: WorkerType::ComputeNode as i32,
                 host: Some(HostAddr::try_from("127.0.0.1:1234").unwrap().to_protobuf()),
                 state: worker_node::State::Running as i32,
-                parallel_units: vec![],
+                parallelism: 0,
                 property: Some(Property {
                     is_unschedulable: false,
                     is_serving: true,
@@ -438,7 +438,7 @@ mod tests {
                 r#type: WorkerType::ComputeNode as i32,
                 host: Some(HostAddr::try_from("127.0.0.1:1235").unwrap().to_protobuf()),
                 state: worker_node::State::Running as i32,
-                parallel_units: vec![],
+                parallelism: 0,
                 property: Some(Property {
                     is_unschedulable: false,
                     is_serving: true,
