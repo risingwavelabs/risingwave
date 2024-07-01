@@ -28,7 +28,7 @@ jobs:
       - uses: actions/checkout@v3
       - name: Setup Rust toolchain
         run: rustup show
-      - name: Install dependencies
+      - name: Install dependencies for compiling RisingWave
         run: sudo apt-get update && sudo apt-get install -y make build-essential cmake protobuf-compiler curl openssl libssl-dev libsasl2-dev libcurl4-openssl-dev pkg-config postgresql-client tmux lld
       - name: Run sccache-cache
         uses: mozilla-actions/sccache-action@v0.0.3
@@ -43,10 +43,10 @@ jobs:
           cp -R target/doc/* artifact/rustdoc
       - name: Show available storage
         run: df -h
-      - name: Install cargo-docset
+      - name: Install tools for building docs
         uses: taiki-e/install-action@v2
         with:
-          tool: cargo-docset
+          tool: cargo-docset,mdbook,mdbook-toc
       - name: build docsets
         run: |
           cargo docset --no-clean --docset-name RisingWave
@@ -60,7 +60,6 @@ jobs:
           cp -t artifact "risingwave.docset.tgz" "RisingWave.xml"
       - name: build developer doc
         run: |
-          cargo install mdbook mdbook-toc
           cd docs/dev
           mdbook build
           cp -R book/* ../../artifact
