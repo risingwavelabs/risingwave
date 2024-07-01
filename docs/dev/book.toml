@@ -1,0 +1,7 @@
+[book]
+authors = ["xxchan"]
+title = "RisingWave Dev Guide"
+
+[preprocessor.toc]
+command = "mdbook-toc"
+renderer = ["html"]

@@ -39,8 +39,8 @@ jobs:
           cargo doc --workspace --no-deps --document-private-items
           cp docs/rustdoc/rust.css target/doc/rust.css
 
-          mkdir artifact
-          cp -R target/doc/* artifact
+          mkdir -p artifact/rustdoc
+          cp -R target/doc/* artifact/rustdoc
       - name: Show available storage
         run: df -h
       - name: Install cargo-docset
@@ -58,6 +58,12 @@ jobs:
           </entry>" > RisingWave.xml
 
           cp -t artifact "risingwave.docset.tgz" "RisingWave.xml"
+      - name: build developer doc
+        run: |
+          cargo install mdbook mdbook-toc
+          cd docs/dev
+          mdbook build
+          cp -R book ../artifact
       - name: Upload artifacts
         uses: actions/upload-pages-artifact@v1
         with:
