@@ -156,19 +156,12 @@ impl WorkerNodeManager {
 
         let guard = self.inner.read().unwrap();
 
-        let worker_slot_index: HashMap<_, _> = guard
-            .worker_nodes
-            .iter()
-            .flat_map(|worker| {
-                (0..worker.parallelism as usize)
-                    .map(move |i| (WorkerSlotId::new(worker.id, i), worker))
-            })
-            .collect();
+        let worker_index: HashMap<_, _> = guard.worker_nodes.iter().map(|w| (w.id, w)).collect();
 
         let mut workers = Vec::with_capacity(worker_slot_ids.len());
 
         for worker_slot_id in worker_slot_ids {
-            match worker_slot_index.get(worker_slot_id) {
+            match worker_index.get(&worker_slot_id.worker_id()) {
                 Some(worker) => workers.push((*worker).clone()),
                 None => bail!(
                     "No worker node found for worker slot id: {}",

@@ -1538,24 +1538,24 @@ impl DdlController {
             ));
         }
 
-        let available_parallel_units = NonZeroUsize::new(available_parallelism).unwrap();
+        let available_parallelism = NonZeroUsize::new(available_parallelism).unwrap();
 
         // Use configured parallel units if no default parallelism is specified.
         let parallelism =
             specified_parallelism.unwrap_or_else(|| match &self.env.opts.default_parallelism {
-                DefaultParallelism::Full => available_parallel_units,
+                DefaultParallelism::Full => available_parallelism,
                 DefaultParallelism::Default(num) => *num,
             });
 
-        if parallelism > available_parallel_units {
+        if parallelism > available_parallelism {
             return Err(MetaError::unavailable(format!(
-                "Not enough parallel units to schedule, required: {}, available: {}",
-                parallelism, available_parallel_units
+                "Not enough parallelism to schedule, required: {}, available: {}",
+                parallelism, available_parallelism
             )));
         }
 
-        if available_parallel_units > MAX_PARALLELISM {
-            tracing::warn!("Too many parallel units, use {} instead", MAX_PARALLELISM);
+        if available_parallelism > MAX_PARALLELISM {
+            tracing::warn!("Too many parallelism, use {} instead", MAX_PARALLELISM);
             Ok(MAX_PARALLELISM)
         } else {
             Ok(parallelism)
