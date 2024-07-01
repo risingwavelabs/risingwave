@@ -60,7 +60,7 @@ async fn test_singleton_migration() -> Result<()> {
     assert_ne!(target_slot, source_slot);
 
     cluster
-        .reschedule(fragment.reschedule_v2([source_slot], [target_slot]))
+        .reschedule(fragment.reschedule([source_slot], [target_slot]))
         .await?;
 
     sleep(Duration::from_secs(3)).await;
@@ -83,7 +83,7 @@ async fn test_singleton_migration() -> Result<()> {
     let target_slot = target_worker_slots.next().unwrap();
 
     cluster
-        .reschedule(fragment.reschedule_v2([source_slot], [target_slot]))
+        .reschedule(fragment.reschedule([source_slot], [target_slot]))
         .await?;
 
     sleep(Duration::from_secs(3)).await;

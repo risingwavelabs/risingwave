@@ -80,7 +80,7 @@ async fn nexmark_q4_common(predicates: impl IntoIterator<Item = BoxedPredicate>)
 
     // 0~10s
     cluster
-        .reschedule(fragment.reschedule_v2(
+        .reschedule(fragment.reschedule(
             [
                 WorkerSlotId::new(workers[0], 0),
                 WorkerSlotId::new(workers[0], 1),
@@ -94,7 +94,7 @@ async fn nexmark_q4_common(predicates: impl IntoIterator<Item = BoxedPredicate>)
     // 5~15s
     cluster.run(SELECT).await?.assert_result_ne(RESULT);
     cluster
-        .reschedule(fragment.reschedule_v2(
+        .reschedule(fragment.reschedule(
             [
                 WorkerSlotId::new(workers[1], 0),
                 WorkerSlotId::new(workers[1], 1),

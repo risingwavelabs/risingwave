@@ -93,7 +93,7 @@ async fn scale_test_inner(is_decouple: bool) -> Result<()> {
         vec![
             // (format!("{id}-[1,2,3]"), 3),
             (
-                fragment.reschedule_v2(
+                fragment.reschedule(
                     [
                         WorkerSlotId::new(workers[0], 0),
                         WorkerSlotId::new(workers[1], 0),
@@ -105,7 +105,7 @@ async fn scale_test_inner(is_decouple: bool) -> Result<()> {
             ),
             // (format!("{id}-[4,5]+[1,2]"), 3)
             (
-                fragment.reschedule_v2(
+                fragment.reschedule(
                     [
                         WorkerSlotId::new(workers[2], 0),
                         WorkerSlotId::new(workers[2], 1),
@@ -119,7 +119,7 @@ async fn scale_test_inner(is_decouple: bool) -> Result<()> {
             ),
             // (format!("{id}+[3,4,5]"), 6),
             (
-                fragment.reschedule_v2(
+                fragment.reschedule(
                     [],
                     [
                         WorkerSlotId::new(workers[1], 1),

@@ -174,11 +174,9 @@ impl MetadataModel for TableFragments {
             parallelism: Some(Parallelism::Custom(PbCustomParallelism {})),
         };
 
-        let state = prost.state();
-
         Self {
             table_id: TableId::new(prost.table_id),
-            state,
+            state: prost.state(),
             fragments: prost.fragments.into_iter().collect(),
             actor_status: prost.actor_status.into_iter().collect(),
             actor_splits: build_actor_split_impls(&prost.actor_splits),
@@ -216,14 +214,12 @@ impl TableFragments {
         let actor_status = actor_locations
             .iter()
             .map(|(&actor_id, worker_slot_id)| {
-                let worker_id = worker_slot_id.worker_id();
-                let slot_id = worker_slot_id.slot_idx();
                 (
                     actor_id,
                     ActorStatus {
                         parallel_unit: Some(ParallelUnit {
-                            id: worker_id << 10 | slot_id,
-                            worker_node_id: worker_id,
+                            id: u32::MAX,
+                            worker_node_id: worker_slot_id.worker_id(),
                         }),
                         state: ActorState::Inactive as i32,
                     },

@@ -35,7 +35,7 @@ use risingwave_pb::stream_plan::DispatcherType::{self, *};
 
 use crate::manager::{WorkerId, WorkerLocations};
 use crate::model::ActorId;
-use crate::stream::schedule_units_for_slots_v2;
+use crate::stream::schedule_units_for_slots;
 use crate::stream::stream_graph::fragment::CompleteStreamFragmentGraph;
 use crate::stream::stream_graph::id::GlobalFragmentId as Id;
 use crate::MetaResult;
@@ -223,7 +223,7 @@ impl Scheduler {
             .collect();
 
         let parallelism = default_parallelism.get();
-        let scheduled = schedule_units_for_slots_v2(&slots, parallelism, streaming_job_id)?;
+        let scheduled = schedule_units_for_slots(&slots, parallelism, streaming_job_id)?;
 
         let scheduled_worker_slots = scheduled
             .into_iter()
@@ -237,7 +237,7 @@ impl Scheduler {
         // Build the default hash mapping uniformly.
         let default_hash_mapping = WorkerSlotMapping::build_from_ids(&scheduled_worker_slots);
 
-        let single_scheduled = schedule_units_for_slots_v2(&slots, 1, streaming_job_id)?;
+        let single_scheduled = schedule_units_for_slots(&slots, 1, streaming_job_id)?;
         let default_single_worker_id = single_scheduled.keys().exactly_one().cloned().unwrap();
 
         let default_singleton_worker_slot = WorkerSlotId::new(default_single_worker_id, 0);

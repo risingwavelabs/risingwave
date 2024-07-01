@@ -51,7 +51,7 @@ async fn test_table() -> Result<()> {
     let workers = fragment.all_worker_count().into_keys().collect_vec();
 
     cluster
-        .reschedule(fragment.reschedule_v2(
+        .reschedule(fragment.reschedule(
             [
                 WorkerSlotId::new(workers[0], 0),
                 WorkerSlotId::new(workers[1], 0),
@@ -64,7 +64,7 @@ async fn test_table() -> Result<()> {
     insert_and_flush!(cluster);
 
     cluster
-        .reschedule(fragment.reschedule_v2(
+        .reschedule(fragment.reschedule(
             [WorkerSlotId::new(workers[0], 1)],
             [
                 WorkerSlotId::new(workers[0], 0),
@@ -90,7 +90,7 @@ async fn test_mv_on_scaled_table() -> Result<()> {
     let workers = fragment.all_worker_count().into_keys().collect_vec();
 
     cluster
-        .reschedule(fragment.reschedule_v2(
+        .reschedule(fragment.reschedule(
             [
                 WorkerSlotId::new(workers[0], 0),
                 WorkerSlotId::new(workers[1], 0),
@@ -103,7 +103,7 @@ async fn test_mv_on_scaled_table() -> Result<()> {
     insert_and_flush!(cluster);
 
     cluster
-        .reschedule(fragment.reschedule_v2(
+        .reschedule(fragment.reschedule(
             [WorkerSlotId::new(workers[0], 1)],
             [
                 WorkerSlotId::new(workers[0], 0),
@@ -135,7 +135,7 @@ async fn test_scale_on_schema_change() -> Result<()> {
     let workers = fragment.all_worker_count().into_keys().collect_vec();
 
     cluster
-        .reschedule(fragment.reschedule_v2(
+        .reschedule(fragment.reschedule(
             [
                 WorkerSlotId::new(workers[0], 0),
                 WorkerSlotId::new(workers[1], 0),
@@ -157,7 +157,7 @@ async fn test_scale_on_schema_change() -> Result<()> {
         .await?;
 
     cluster
-        .reschedule_resolve_no_shuffle(fragment.reschedule_v2(
+        .reschedule_resolve_no_shuffle(fragment.reschedule(
             [WorkerSlotId::new(workers[0], 1)],
             [
                 WorkerSlotId::new(workers[0], 0),

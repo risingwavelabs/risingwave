@@ -179,7 +179,7 @@ impl CustomFragmentInfo {
     }
 }
 
-pub struct RescheduleContextV2 {
+pub struct RescheduleContext {
     /// Meta information for all Actors
     actor_map: HashMap<ActorId, CustomActorInfo>,
     /// Status of all Actors, used to find the location of the `Actor`
@@ -200,7 +200,7 @@ pub struct RescheduleContextV2 {
     fragment_dispatcher_map: HashMap<FragmentId, HashMap<FragmentId, DispatcherType>>,
 }
 
-impl RescheduleContextV2 {
+impl RescheduleContext {
     fn actor_id_to_worker_id(&self, actor_id: &ActorId) -> MetaResult<WorkerId> {
         self.actor_status
             .get(actor_id)
@@ -455,12 +455,12 @@ impl ScaleController {
     }
 
     /// Build the context for rescheduling and do some validation for the request.
-    async fn build_reschedule_context_v2(
+    async fn build_reschedule_context(
         &self,
         reschedule: &mut HashMap<FragmentId, WorkerReschedule>,
         options: RescheduleOptions,
         table_parallelisms: Option<&mut HashMap<TableId, TableParallelism>>,
-    ) -> MetaResult<RescheduleContextV2> {
+    ) -> MetaResult<RescheduleContext> {
         let worker_nodes: HashMap<WorkerId, WorkerNode> = self
             .metadata_manager
             .list_active_streaming_compute_nodes()
@@ -760,7 +760,7 @@ impl ScaleController {
         // Modifications for NoShuffle downstream.
         reschedule.extend(no_shuffle_reschedule.into_iter());
 
-        Ok(RescheduleContextV2 {
+        Ok(RescheduleContext {
             actor_map,
             actor_status,
             fragment_map,
@@ -810,7 +810,7 @@ impl ScaleController {
     }
 
     // Results are the generated reschedule plan and the changes that need to be updated to the meta store.
-    pub(crate) async fn prepare_reschedule_command_v2(
+    pub(crate) async fn prepare_reschedule_command(
         &self,
         mut reschedules: HashMap<FragmentId, WorkerReschedule>,
         options: RescheduleOptions,
@@ -820,13 +820,13 @@ impl ScaleController {
         HashMap<FragmentId, HashSet<ActorId>>,
     )> {
         let ctx = self
-            .build_reschedule_context_v2(&mut reschedules, options, table_parallelisms)
+            .build_reschedule_context(&mut reschedules, options, table_parallelisms)
             .await?;
 
         // Index of actors to create/remove
         // Fragment Id => ( Actor Id => Worker Id )
         let (fragment_actors_to_remove, fragment_actors_to_create) =
-            self.arrange_reschedules_v2(&reschedules, &ctx).await?;
+            self.arrange_reschedules(&reschedules, &ctx).await?;
 
         let mut fragment_actor_bitmap = HashMap::new();
         for fragment_id in reschedules.keys() {
@@ -909,8 +909,8 @@ impl ScaleController {
         // the parallel unit, and then copy the Bitmap to the corresponding actor. At the
         // same time, we need to sort out the relationship between upstream and downstream
         // actors
-        fn arrange_no_shuffle_relation_v2(
-            ctx: &RescheduleContextV2,
+        fn arrange_no_shuffle_relation(
+            ctx: &RescheduleContext,
             fragment_id: &FragmentId,
             upstream_fragment_id: &FragmentId,
             fragment_actors_after_reschedule: &HashMap<FragmentId, BTreeMap<ActorId, WorkerId>>,
@@ -1071,7 +1071,7 @@ impl ScaleController {
                     .map(|(fragment_id, _)| fragment_id);
 
                 for downstream_fragment_id in no_shuffle_downstreams {
-                    arrange_no_shuffle_relation_v2(
+                    arrange_no_shuffle_relation(
                         ctx,
                         downstream_fragment_id,
                         fragment_id,
@@ -1096,7 +1096,7 @@ impl ScaleController {
             {
                 if let Some(downstream_fragments) = ctx.fragment_dispatcher_map.get(fragment_id) {
                     for downstream_fragment_id in downstream_fragments.keys() {
-                        arrange_no_shuffle_relation_v2(
+                        arrange_no_shuffle_relation(
                             &ctx,
                             downstream_fragment_id,
                             fragment_id,
@@ -1136,7 +1136,7 @@ impl ScaleController {
                 // downstream in the NoShuffle relationship
                 new_actor.actor_id = *new_actor_id;
 
-                Self::modify_actor_upstream_and_downstream_v2(
+                Self::modify_actor_upstream_and_downstream(
                     &ctx,
                     &fragment_actors_to_remove,
                     &fragment_actors_to_create,
@@ -1488,10 +1488,10 @@ impl ScaleController {
         Ok((reschedule_fragment, applied_reschedules))
     }
 
-    async fn arrange_reschedules_v2(
+    async fn arrange_reschedules(
         &self,
         reschedule: &HashMap<FragmentId, WorkerReschedule>,
-        ctx: &RescheduleContextV2,
+        ctx: &RescheduleContext,
     ) -> MetaResult<(
         HashMap<FragmentId, BTreeMap<ActorId, WorkerId>>,
         HashMap<FragmentId, BTreeMap<ActorId, WorkerId>>,
@@ -1582,8 +1582,8 @@ impl ScaleController {
 
     /// Modifies the upstream and downstream actors of the new created actor according to the
     /// overall changes, and is used to handle cascading updates
-    fn modify_actor_upstream_and_downstream_v2(
-        ctx: &RescheduleContextV2,
+    fn modify_actor_upstream_and_downstream(
+        ctx: &RescheduleContext,
         fragment_actors_to_remove: &HashMap<FragmentId, BTreeMap<ActorId, WorkerId>>,
         fragment_actors_to_create: &HashMap<FragmentId, BTreeMap<ActorId, WorkerId>>,
         fragment_actor_bitmap: &HashMap<FragmentId, HashMap<ActorId, Bitmap>>,
@@ -1824,7 +1824,7 @@ impl ScaleController {
         Ok(all_table_fragments)
     }
 
-    pub async fn generate_table_resize_plan_v2(
+    pub async fn generate_table_resize_plan(
         &self,
         policy: TableResizePolicy,
     ) -> MetaResult<HashMap<FragmentId, WorkerReschedule>> {
@@ -2031,7 +2031,7 @@ impl ScaleController {
                             continue;
                         }
 
-                        let units = schedule_units_for_slots_v2(&worker_slots, 1, table_id)?;
+                        let units = schedule_units_for_slots(&worker_slots, 1, table_id)?;
 
                         let (chosen_target_worker_id, should_be_one) =
                             units.iter().exactly_one().ok().with_context(|| {
@@ -2065,7 +2065,7 @@ impl ScaleController {
                         }
                         TableParallelism::Fixed(n) => {
                             let target_worker_slots =
-                                schedule_units_for_slots_v2(&worker_slots, n, table_id)?;
+                                schedule_units_for_slots(&worker_slots, n, table_id)?;
 
                             target_plan.insert(
                                 fragment_id,
@@ -2316,7 +2316,7 @@ impl GlobalStreamManager {
         self.scale_controller.reschedule_lock.write().await
     }
 
-    pub async fn reschedule_actors_v2(
+    pub async fn reschedule_actors(
         &self,
         reschedules: HashMap<FragmentId, WorkerReschedule>,
         options: RescheduleOptions,
@@ -2324,7 +2324,7 @@ impl GlobalStreamManager {
     ) -> MetaResult<()> {
         let mut revert_funcs = vec![];
         if let Err(e) = self
-            .reschedule_actors_impl_v2(&mut revert_funcs, reschedules, options, table_parallelism)
+            .reschedule_actors_impl(&mut revert_funcs, reschedules, options, table_parallelism)
             .await
         {
             for revert_func in revert_funcs.into_iter().rev() {
@@ -2336,7 +2336,7 @@ impl GlobalStreamManager {
         Ok(())
     }
 
-    async fn reschedule_actors_impl_v2(
+    async fn reschedule_actors_impl(
         &self,
         revert_funcs: &mut Vec<BoxFuture<'_, ()>>,
         reschedules: HashMap<FragmentId, WorkerReschedule>,
@@ -2347,7 +2347,7 @@ impl GlobalStreamManager {
 
         let (reschedule_fragment, applied_reschedules) = self
             .scale_controller
-            .prepare_reschedule_command_v2(reschedules, options, table_parallelism.as_mut())
+            .prepare_reschedule_command(reschedules, options, table_parallelism.as_mut())
             .await?;
 
         tracing::debug!("reschedule plan: {:?}", reschedule_fragment);
@@ -2532,7 +2532,7 @@ impl GlobalStreamManager {
 
             let plan = self
                 .scale_controller
-                .generate_table_resize_plan_v2(TableResizePolicy {
+                .generate_table_resize_plan(TableResizePolicy {
                     worker_ids: schedulable_worker_ids.clone(),
                     table_parallelisms: parallelisms.clone(),
                 })
@@ -2553,7 +2553,7 @@ impl GlobalStreamManager {
             return Ok(false);
         };
 
-        self.reschedule_actors_v2(
+        self.reschedule_actors(
             reschedules,
             RescheduleOptions {
                 resolve_no_shuffle_upstream: false,
@@ -2693,12 +2693,12 @@ impl GlobalStreamManager {
     }
 }
 
-pub fn schedule_units_for_slots_v2(
+pub fn schedule_units_for_slots(
     slots: &BTreeMap<WorkerId, usize>,
     total_unit_size: usize,
     salt: u32,
 ) -> MetaResult<BTreeMap<WorkerId, usize>> {
-    let mut ch = ConsistentHashRingV2::new(salt);
+    let mut ch = ConsistentHashRing::new(salt);
 
     for (worker_id, parallelism) in slots {
         ch.add_worker(*worker_id, *parallelism as u32);
@@ -2712,16 +2712,16 @@ pub fn schedule_units_for_slots_v2(
         .collect())
 }
 
-pub struct ConsistentHashRingV2 {
+pub struct ConsistentHashRing {
     ring: BTreeMap<u64, u32>,
     weights: BTreeMap<u32, u32>,
     virtual_nodes: u32,
     salt: u32,
 }
 
-impl ConsistentHashRingV2 {
+impl ConsistentHashRing {
     fn new(salt: u32) -> Self {
-        ConsistentHashRingV2 {
+        ConsistentHashRing {
             ring: BTreeMap::new(),
             weights: BTreeMap::new(),
             virtual_nodes: 1024,
@@ -2811,7 +2811,7 @@ mod tests {
 
     #[test]
     fn test_single_worker_capacity() {
-        let mut ch = ConsistentHashRingV2::new(DEFAULT_SALT);
+        let mut ch = ConsistentHashRing::new(DEFAULT_SALT);
         ch.add_worker(1, 10);
 
         let total_tasks = 5;
@@ -2822,7 +2822,7 @@ mod tests {
 
     #[test]
     fn test_multiple_workers_even_distribution() {
-        let mut ch = ConsistentHashRingV2::new(DEFAULT_SALT);
+        let mut ch = ConsistentHashRing::new(DEFAULT_SALT);
 
         ch.add_worker(1, 1);
         ch.add_worker(2, 1);
@@ -2838,7 +2838,7 @@ mod tests {
 
     #[test]
     fn test_weighted_distribution() {
-        let mut ch = ConsistentHashRingV2::new(DEFAULT_SALT);
+        let mut ch = ConsistentHashRing::new(DEFAULT_SALT);
 
         ch.add_worker(1, 2);
         ch.add_worker(2, 3);
@@ -2854,7 +2854,7 @@ mod tests {
 
     #[test]
     fn test_over_capacity() {
-        let mut ch = ConsistentHashRingV2::new(DEFAULT_SALT);
+        let mut ch = ConsistentHashRing::new(DEFAULT_SALT);
 
         ch.add_worker(1, 1);
         ch.add_worker(2, 2);
@@ -2870,7 +2870,7 @@ mod tests {
     fn test_balance_distribution() {
         for mut worker_capacity in 1..10 {
             for workers in 3..10 {
-                let mut ring = ConsistentHashRingV2::new(DEFAULT_SALT);
+                let mut ring = ConsistentHashRing::new(DEFAULT_SALT);
 
                 for worker_id in 0..workers {
                     ring.add_worker(worker_id, worker_capacity);

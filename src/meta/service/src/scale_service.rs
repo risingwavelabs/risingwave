@@ -188,7 +188,7 @@ impl ScaleService for ScaleServiceImpl {
         };
 
         self.stream_manager
-            .reschedule_actors_v2(
+            .reschedule_actors(
                 worker_reschedules
                     .into_iter()
                     .map(|(fragment_id, reschedule)| {

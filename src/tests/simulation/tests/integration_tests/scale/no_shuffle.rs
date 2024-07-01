@@ -165,11 +165,11 @@ async fn test_share_multiple_no_shuffle_upstream() -> Result<()> {
     let workers = fragment.all_worker_count().into_keys().collect_vec();
 
     cluster
-        .reschedule(fragment.reschedule_v2([WorkerSlotId::new(workers[0], 0)], []))
+        .reschedule(fragment.reschedule([WorkerSlotId::new(workers[0], 0)], []))
         .await?;
 
     cluster
-        .reschedule(fragment.reschedule_v2([], [WorkerSlotId::new(workers[0], 0)]))
+        .reschedule(fragment.reschedule([], [WorkerSlotId::new(workers[0], 0)]))
         .await?;
 
     Ok(())
@@ -192,21 +192,17 @@ async fn test_resolve_no_shuffle_upstream() -> Result<()> {
     let workers = fragment.all_worker_count().into_keys().collect_vec();
 
     let result = cluster
-        .reschedule(fragment.reschedule_v2([WorkerSlotId::new(workers[0], 0)], []))
+        .reschedule(fragment.reschedule([WorkerSlotId::new(workers[0], 0)], []))
         .await;
 
     assert!(result.is_err());
 
     cluster
-        .reschedule_resolve_no_shuffle(
-            fragment.reschedule_v2([WorkerSlotId::new(workers[0], 0)], []),
-        )
+        .reschedule_resolve_no_shuffle(fragment.reschedule([WorkerSlotId::new(workers[0], 0)], []))
         .await?;
 
     cluster
-        .reschedule_resolve_no_shuffle(
-            fragment.reschedule_v2([], [WorkerSlotId::new(workers[0], 0)]),
-        )
+        .reschedule_resolve_no_shuffle(fragment.reschedule([], [WorkerSlotId::new(workers[0], 0)]))
         .await?;
 
     Ok(())

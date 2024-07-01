@@ -752,7 +752,7 @@ impl GlobalBarrierManagerContext {
 
         let plan = self
             .scale_controller
-            .generate_table_resize_plan_v2(TableResizePolicy {
+            .generate_table_resize_plan(TableResizePolicy {
                 worker_ids: schedulable_worker_ids,
                 table_parallelisms: table_parallelisms.clone(),
             })
@@ -774,7 +774,7 @@ impl GlobalBarrierManagerContext {
         } else {
             let (reschedule_fragment, _) = self
                 .scale_controller
-                .prepare_reschedule_command_v2(
+                .prepare_reschedule_command(
                     plan,
                     RescheduleOptions {
                         resolve_no_shuffle_upstream: true,
@@ -908,7 +908,7 @@ impl GlobalBarrierManagerContext {
         for (table_id, table_parallelism) in all_table_parallelisms {
             let plan = self
                 .scale_controller
-                .generate_table_resize_plan_v2(TableResizePolicy {
+                .generate_table_resize_plan(TableResizePolicy {
                     worker_ids: schedulable_worker_ids.clone(),
                     table_parallelisms: HashMap::from([(table_id.table_id, table_parallelism)]),
                 })
@@ -924,7 +924,7 @@ impl GlobalBarrierManagerContext {
 
             let (reschedule_fragment, applied_reschedules) = self
                 .scale_controller
-                .prepare_reschedule_command_v2(
+                .prepare_reschedule_command(
                     plan,
                     RescheduleOptions {
                         resolve_no_shuffle_upstream: true,

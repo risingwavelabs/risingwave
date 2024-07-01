@@ -123,7 +123,7 @@ async fn test_sink_append_only() -> Result<()> {
 
     check_kafka_after_insert(&mut cluster, &mut stream, &[1, 2, 3]).await?;
     cluster
-        .reschedule(materialize_fragment.reschedule_v2(
+        .reschedule(materialize_fragment.reschedule(
             [
                 WorkerSlotId::new(workers[0], 1),
                 WorkerSlotId::new(workers[1], 0),
@@ -137,7 +137,7 @@ async fn test_sink_append_only() -> Result<()> {
 
     check_kafka_after_insert(&mut cluster, &mut stream, &[4, 5, 6]).await?;
     cluster
-        .reschedule(materialize_fragment.reschedule_v2(
+        .reschedule(materialize_fragment.reschedule(
             [],
             [
                 WorkerSlotId::new(workers[0], 1),
@@ -217,7 +217,7 @@ async fn test_sink_debezium() -> Result<()> {
     let source_slot = used_worker_slots.iter().next().cloned().unwrap();
     let target_slot = target_worker_slots.next().unwrap();
     cluster
-        .reschedule(materialize_fragment.reschedule_v2([source_slot], [target_slot]))
+        .reschedule(materialize_fragment.reschedule([source_slot], [target_slot]))
         .await?;
     check_kafka_after_insert(&mut cluster, &mut stream, &[4, 5, 6]).await?;
 
@@ -225,7 +225,7 @@ async fn test_sink_debezium() -> Result<()> {
     let target_slot = target_worker_slots.next().unwrap();
 
     cluster
-        .reschedule(materialize_fragment.reschedule_v2([source_slot], [target_slot]))
+        .reschedule(materialize_fragment.reschedule([source_slot], [target_slot]))
         .await?;
     check_kafka_after_insert(&mut cluster, &mut stream, &[7, 8, 9]).await?;
 
