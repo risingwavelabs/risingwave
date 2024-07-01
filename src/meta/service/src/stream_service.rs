@@ -374,7 +374,7 @@ impl StreamManagerService for StreamServiceImpl {
                                 actor_id,
                                 fragment_id: actor_to_fragment[&actor_id],
                                 state: status.state,
-                                parallel_unit_id: status.parallel_unit.as_ref().unwrap().id,
+                                worker_id: status.parallel_unit.as_ref().unwrap().worker_node_id,
                             }
                         })
                     })
@@ -388,7 +388,7 @@ impl StreamManagerService for StreamServiceImpl {
                         actor_id: actor_location.actor_id as _,
                         fragment_id: actor_location.fragment_id as _,
                         state: PbActorState::from(actor_location.status) as _,
-                        parallel_unit_id: actor_location.parallel_unit_id as _,
+                        worker_id: actor_location.worker_id,
                     })
                     .collect_vec()
             }
