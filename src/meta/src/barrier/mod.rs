@@ -633,7 +633,7 @@ impl GlobalBarrierManager {
                                             id: node.id,
                                             r#type: node.r#type,
                                             host: node.host.clone(),
-                                            parallel_units: node.parallel_units.clone(),
+                                            parallelism: node.parallelism,
                                             property: node.property.clone(),
                                             resource: node.resource.clone(),
                                             ..Default::default()

@@ -15,7 +15,7 @@
 use std::collections::HashSet;
 
 use anyhow::Result;
-use risingwave_common::hash::ParallelUnitId;
+use risingwave_common::hash::WorkerSlotId;
 use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_simulation::cluster::{Cluster, Configuration};
 
@@ -36,14 +36,10 @@ async fn test_cordon_normal() -> Result<()> {
         .collect();
 
     let cordoned_worker = workers.pop().unwrap();
-
-    let rest_parallel_unit_ids: HashSet<_> = workers
+    let rest_worker_slots: HashSet<_> = workers
         .iter()
         .flat_map(|worker| {
-            worker
-                .parallel_units
-                .iter()
-                .map(|parallel_unit| parallel_unit.id as ParallelUnitId)
+            (0..worker.parallelism).map(|idx| WorkerSlotId::new(worker.id, idx as _))
         })
         .collect();
 
@@ -54,9 +50,9 @@ async fn test_cordon_normal() -> Result<()> {
     let fragments = cluster.locate_fragments([]).await?;
 
     for fragment in fragments {
-        let (_, used) = fragment.parallel_unit_usage();
+        let used_worker_slots = fragment.used_worker_slots();
 
-        assert_eq!(used, rest_parallel_unit_ids);
+        assert_eq!(used_worker_slots, rest_worker_slots);
     }
 
     session.run("drop table t;").await?;
@@ -68,11 +64,9 @@ async fn test_cordon_normal() -> Result<()> {
     let fragments = cluster.locate_fragments([]).await?;
 
     for fragment in fragments {
-        let (all, used) = fragment.parallel_unit_usage();
-
-        let all: HashSet<_> = all.into_iter().collect();
-
-        assert_eq!(used, all);
+        let all_worker_slots = fragment.all_worker_slots();
+        let used_worker_slots = fragment.used_worker_slots();
+        assert_eq!(used_worker_slots, all_worker_slots);
     }
 
     Ok(())
