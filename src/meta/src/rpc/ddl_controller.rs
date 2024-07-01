@@ -1519,30 +1519,31 @@ impl DdlController {
     ) -> MetaResult<NonZeroUsize> {
         const MAX_PARALLELISM: NonZeroUsize = NonZeroUsize::new(VirtualNode::COUNT).unwrap();
 
-        if cluster_info.parallelism() == 0 {
+        let available_parallelism = cluster_info.parallelism();
+        if available_parallelism == 0 {
             return Err(MetaError::unavailable(
                 "No available parallel units to schedule",
             ));
         }
 
-        let available_parallel_units = NonZeroUsize::new(cluster_info.parallelism()).unwrap();
+        let available_parallelism = NonZeroUsize::new(available_parallelism).unwrap();
 
         // Use configured parallelism if no default parallelism is specified.
         let parallelism =
             specified_parallelism.unwrap_or_else(|| match &self.env.opts.default_parallelism {
-                DefaultParallelism::Full => available_parallel_units,
+                DefaultParallelism::Full => available_parallelism,
                 DefaultParallelism::Default(num) => *num,
             });
 
-        if parallelism > available_parallel_units {
+        if parallelism > available_parallelism {
             return Err(MetaError::unavailable(format!(
-                "Not enough parallel units to schedule, required: {}, available: {}",
-                parallelism, available_parallel_units
+                "Not enough parallelism to schedule, required: {}, available: {}",
+                parallelism, available_parallelism
             )));
         }
 
-        if available_parallel_units > MAX_PARALLELISM {
-            tracing::warn!("Too many parallel units, use {} instead", MAX_PARALLELISM);
+        if available_parallelism > MAX_PARALLELISM {
+            tracing::warn!("Too many parallelism, use {} instead", MAX_PARALLELISM);
             Ok(MAX_PARALLELISM)
         } else {
             Ok(parallelism)
