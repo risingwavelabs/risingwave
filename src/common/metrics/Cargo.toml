@@ -19,7 +19,7 @@ bytes = "1"
 clap = { workspace = true }
 easy-ext = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-http = "0.2"
+http = "1.1"
 hyper = { version = "0.14", features = ["client"] }                           # used by tonic
 hytra = { workspace = true }
 itertools = { workspace = true }
