@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use comfy_table::{Attribute, Cell, Row, Table};
 use itertools::Itertools;
@@ -88,7 +88,7 @@ pub async fn cluster_info(context: &CtlContext) -> anyhow::Result<()> {
         revision,
     } = get_cluster_info(context).await?;
 
-    // Fragment ID -> [Parallel Unit ID -> (Parallel Unit, Actor)]
+    // Fragment ID -> [Worker ID -> [Actor ID]]
     let mut fragments = BTreeMap::new();
     // Fragment ID -> Table Fragments' State
     let mut fragment_states = HashMap::new();
@@ -96,31 +96,24 @@ pub async fn cluster_info(context: &CtlContext) -> anyhow::Result<()> {
     for table_fragment in &table_fragments {
         for (&id, fragment) in &table_fragment.fragments {
             for actor in &fragment.actors {
-                let parallel_unit = table_fragment
+                let worker_id = table_fragment
                     .actor_status
                     .get(&actor.actor_id)
                     .unwrap()
                     .get_parallel_unit()
-                    .unwrap();
+                    .unwrap()
+                    .get_worker_node_id();
+
                 fragments
                     .entry(id)
-                    .or_insert_with(HashMap::new)
-                    .insert(parallel_unit.id, (parallel_unit, actor));
+                    .or_insert_with(BTreeMap::new)
+                    .entry(worker_id)
+                    .or_insert(BTreeSet::new())
+                    .insert(actor.actor_id);
             }
             fragment_states.insert(id, table_fragment.state());
         }
     }
-
-    // Parallel Unit ID -> Worker Node
-    let all_parallel_units: BTreeMap<_, _> = worker_nodes
-        .iter()
-        .flat_map(|worker_node| {
-            worker_node
-                .parallel_units
-                .iter()
-                .map(|parallel_unit| (parallel_unit.id, worker_node.clone()))
-        })
-        .collect();
 
     let mut table = Table::new();
 
@@ -132,11 +125,10 @@ pub async fn cluster_info(context: &CtlContext) -> anyhow::Result<()> {
         }
     };
 
-    // Compute Node, Parallel Unit, Frag 1, Frag 2, ..., Frag N
+    // Compute Node, Frag 1, Frag 2, ..., Frag N
     table.set_header({
         let mut row = Row::new();
         row.add_cell("Compute Node".into());
-        row.add_cell("Parallel Unit".into());
         for &fid in fragments.keys() {
             let cell = Cell::new(format!("Frag {fid}"));
             let cell = cross_out_if_creating(cell, fid);
@@ -146,8 +138,8 @@ pub async fn cluster_info(context: &CtlContext) -> anyhow::Result<()> {
     });
 
     let mut last_worker_id = None;
-    for (pu, worker) in all_parallel_units {
-        // Compute Node, Parallel Unit, Actor 1, Actor 11, -, ..., Actor N
+    for worker in worker_nodes {
+        // Compute Node,  Actor 1, Actor 11, -, ..., Actor N
         let mut row = Row::new();
         row.add_cell(if last_worker_id == Some(worker.id) {
             "".into()
@@ -166,14 +158,17 @@ pub async fn cluster_info(context: &CtlContext) -> anyhow::Result<()> {
             ))
             .add_attribute(Attribute::Bold)
         });
-        row.add_cell(pu.into());
-        for (&fid, f) in &fragments {
-            let cell = if let Some((_pu, actor)) = f.get(&pu) {
-                actor.actor_id.into()
+        for (&fragment_id, worker_actors) in &fragments {
+            let cell = if let Some(actors) = worker_actors.get(&worker.id) {
+                actors
+                    .iter()
+                    .map(|actor| format!("{}", actor))
+                    .join(",")
+                    .into()
             } else {
                 "-".into()
             };
-            let cell = cross_out_if_creating(cell, fid);
+            let cell = cross_out_if_creating(cell, fragment_id);
             row.add_cell(cell);
         }
         table.add_row(row);

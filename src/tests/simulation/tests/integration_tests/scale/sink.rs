@@ -17,6 +17,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use futures::StreamExt;
+use itertools::Itertools;
 use rand::prelude::SliceRandom;
 use rand::thread_rng;
 use rdkafka::consumer::{Consumer, StreamConsumer};
@@ -35,6 +36,7 @@ const DEBEZIUM_SINK_CREATE: &str = "create sink s2 from m with (connector='kafka
 const APPEND_ONLY_TOPIC: &str = "t_sink_append_only";
 const DEBEZIUM_TOPIC: &str = "t_sink_debezium";
 
+use risingwave_common::hash::WorkerSlotId;
 use serde_derive::{Deserialize, Serialize};
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -114,11 +116,39 @@ async fn test_sink_append_only() -> Result<()> {
         ])
         .await?;
 
-    let id = materialize_fragment.id();
+    let workers = materialize_fragment
+        .all_worker_count()
+        .into_keys()
+        .collect_vec();
+
     check_kafka_after_insert(&mut cluster, &mut stream, &[1, 2, 3]).await?;
-    cluster.reschedule(format!("{id}-[1,2,3,4,5]")).await?;
+    cluster
+        .reschedule(materialize_fragment.reschedule(
+            [
+                WorkerSlotId::new(workers[0], 1),
+                WorkerSlotId::new(workers[1], 0),
+                WorkerSlotId::new(workers[1], 1),
+                WorkerSlotId::new(workers[2], 0),
+                WorkerSlotId::new(workers[2], 1),
+            ],
+            [],
+        ))
+        .await?;
+
     check_kafka_after_insert(&mut cluster, &mut stream, &[4, 5, 6]).await?;
-    cluster.reschedule(format!("{id}+[1,2,3,4,5]")).await?;
+    cluster
+        .reschedule(materialize_fragment.reschedule(
+            [],
+            [
+                WorkerSlotId::new(workers[0], 1),
+                WorkerSlotId::new(workers[1], 0),
+                WorkerSlotId::new(workers[1], 1),
+                WorkerSlotId::new(workers[2], 0),
+                WorkerSlotId::new(workers[2], 1),
+            ],
+        ))
+        .await?;
+
     check_kafka_after_insert(&mut cluster, &mut stream, &[7, 8, 9]).await?;
 
     Ok(())
@@ -168,36 +198,34 @@ async fn test_sink_debezium() -> Result<()> {
         ])
         .await?;
 
-    let (mut all, used) = materialize_fragment.parallel_unit_usage();
-
-    assert_eq!(used.len(), 1);
-
-    all.shuffle(&mut thread_rng());
-
-    let mut target_parallel_units = all
+    let mut all_worker_slots = materialize_fragment
+        .all_worker_slots()
         .into_iter()
-        .filter(|parallel_unit_id| !used.contains(parallel_unit_id));
+        .collect_vec();
+    let used_worker_slots = materialize_fragment.used_worker_slots();
 
-    let id = materialize_fragment.id();
+    assert_eq!(used_worker_slots.len(), 1);
+
+    all_worker_slots.shuffle(&mut thread_rng());
+
+    let mut target_worker_slots = all_worker_slots
+        .into_iter()
+        .filter(|worker_slot| !used_worker_slots.contains(worker_slot));
 
     check_kafka_after_insert(&mut cluster, &mut stream, &[1, 2, 3]).await?;
 
-    let source_parallel_unit = used.iter().next().cloned().unwrap();
-    let target_parallel_unit = target_parallel_units.next().unwrap();
+    let source_slot = used_worker_slots.iter().next().cloned().unwrap();
+    let target_slot = target_worker_slots.next().unwrap();
     cluster
-        .reschedule(format!(
-            "{id}-[{source_parallel_unit}]+[{target_parallel_unit}]"
-        ))
+        .reschedule(materialize_fragment.reschedule([source_slot], [target_slot]))
         .await?;
     check_kafka_after_insert(&mut cluster, &mut stream, &[4, 5, 6]).await?;
 
-    let source_parallel_unit = target_parallel_unit;
-    let target_parallel_unit = target_parallel_units.next().unwrap();
+    let source_slot = target_slot;
+    let target_slot = target_worker_slots.next().unwrap();
 
     cluster
-        .reschedule(format!(
-            "{id}-[{source_parallel_unit}]+[{target_parallel_unit}]"
-        ))
+        .reschedule(materialize_fragment.reschedule([source_slot], [target_slot]))
         .await?;
     check_kafka_after_insert(&mut cluster, &mut stream, &[7, 8, 9]).await?;
 
