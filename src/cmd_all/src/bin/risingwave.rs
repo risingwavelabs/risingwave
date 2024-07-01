@@ -15,6 +15,7 @@
 #![feature(assert_matches)]
 #![cfg_attr(coverage, feature(coverage_attribute))]
 
+use std::env;
 use std::ffi::OsString;
 use std::str::FromStr;
 
@@ -23,6 +24,7 @@ use clap::{command, ArgMatches, Args, Command, CommandFactory, FromArgMatches};
 use risingwave_cmd::{compactor, compute, ctl, frontend, meta};
 use risingwave_cmd_all::{SingleNodeOpts, StandaloneOpts};
 use risingwave_common::git_sha;
+use risingwave_common::telemetry::{TELEMETRY_CLUSTER_TYPE, TELEMETRY_CLUSTER_TYPE_SINGLE_NODE};
 use risingwave_compactor::CompactorOpts;
 use risingwave_compute::ComputeNodeOpts;
 use risingwave_ctl::CliOpts as CtlOpts;
@@ -235,6 +237,9 @@ fn standalone(opts: StandaloneOpts) {
 /// high level options to standalone mode node-level options.
 /// We will start a standalone instance, with all nodes in the same process.
 fn single_node(opts: SingleNodeOpts) {
+    if env::var(TELEMETRY_CLUSTER_TYPE).is_err() {
+        env::set_var(TELEMETRY_CLUSTER_TYPE, TELEMETRY_CLUSTER_TYPE_SINGLE_NODE);
+    }
     let opts = risingwave_cmd_all::map_single_node_opts_to_standalone_opts(opts);
     let settings = risingwave_rt::LoggerSettings::from_opts(&opts)
         .with_target("risingwave_storage", Level::WARN)

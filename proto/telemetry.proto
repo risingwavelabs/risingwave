@@ -19,6 +19,14 @@ enum TelemetryNodeType {
   TELEMETRY_NODE_TYPE_COMPACTOR = 4;
 }
 
+enum TelemetryClusterType {
+  TELEMETRY_CLUSTER_TYPE_UNSPECIFIED = 0;
+  TELEMETRY_CLUSTER_TYPE_SINGLE_NODE = 1;
+  TELEMETRY_CLUSTER_TYPE_DOCKER_COMPOSE = 2;
+  TELEMETRY_CLUSTER_TYPE_KUBERNETES = 3;
+  TELEMETRY_CLUSTER_TYPE_CLOUD_HOSTED = 4;
+}
+
 message SystemMemory {
   uint64 used = 1;
   uint64 total = 2;
@@ -88,6 +96,9 @@ message MetaReport {
   // stream_jobs is the list of running streaming jobs
   // and is used to collect the table_id, connector_name and table_optimizations
   repeated StreamJobDesc stream_jobs = 6;
+
+  // How the cluster is deployed
+  TelemetryClusterType cluster_type = 7;
 }
 
 enum PlanOptimization {
