@@ -1355,7 +1355,6 @@ impl CatalogController {
                     fragment_id: Set(fragment_id as _),
                     status: Set(ActorStatus::Running),
                     splits: Set(splits.map(|splits| (&PbConnectorSplits { splits }).into())),
-                    //                    parallel_unit_id: Set(parallel_unit.id as _),
                     worker_id: Set(parallel_unit.worker_node_id as _),
                     upstream_actor_ids: Set(actor_upstreams),
                     vnode_bitmap: Set(vnode_bitmap.as_ref().map(|bitmap| bitmap.into())),
@@ -1413,35 +1412,13 @@ impl CatalogController {
 
             let fragment_actors = fragment.find_related(Actor).all(&txn).await?;
 
-            //            let mut actor_to_parallel_unit = HashMap::with_capacity(fragment_actors.len());
             let mut actor_to_vnode_bitmap = HashMap::with_capacity(fragment_actors.len());
             for actor in &fragment_actors {
-                // actor_to_parallel_unit.insert(actor.actor_id as u32, actor.parallel_unit_id as _);
                 if let Some(vnode_bitmap) = &actor.vnode_bitmap {
                     let bitmap = Bitmap::from(&vnode_bitmap.to_protobuf());
                     actor_to_vnode_bitmap.insert(actor.actor_id as u32, bitmap);
                 }
             }
-
-            // let vnode_mapping = if actor_to_vnode_bitmap.is_empty() {
-            //     let parallel_unit = *actor_to_parallel_unit.values().exactly_one().unwrap();
-            //     ParallelUnitMapping::new_single(parallel_unit as ParallelUnitId)
-            // } else {
-            //     // Generate the parallel unit mapping from the fragment's actor bitmaps.
-            //     assert_eq!(actor_to_vnode_bitmap.len(), actor_to_parallel_unit.len());
-            //     ActorMapping::from_bitmaps(&actor_to_vnode_bitmap)
-            //         .to_parallel_unit(&actor_to_parallel_unit)
-            // }
-            // .to_protobuf();
-            //
-            // let worker_slot_mapping = ParallelUnitMapping::from_protobuf(&vnode_mapping)
-            //     .to_worker_slot(&parallel_unit_to_worker)?
-            //     .to_protobuf();
-            //
-            // fragment_mapping_to_notify.push(FragmentWorkerSlotMapping {
-            //     fragment_id: fragment_id as u32,
-            //     mapping: Some(worker_slot_mapping),
-            // });
 
             // for downstream and upstream
             let removed_actor_ids: HashSet<_> = removed_actors

@@ -722,15 +722,6 @@ impl ScaleController {
                     );
                 }
             }
-            // for (added, _) in added_actors {
-            //     if current_worker_ids.contains(added) && !removed_actors.contains_key(added) {
-            //         bail!(
-            //             "worker {} of fragment {} is already in use",
-            //             added,
-            //             fragment_id
-            //         );
-            //     }
-            // }
 
             let added_actor_count: usize = increased_actor_count.values().cloned().sum();
             let removed_actor_count: usize = decreased_actor_count.values().cloned().sum();
@@ -1541,19 +1532,6 @@ impl ScaleController {
 
             for (created_worker, n) in increased_actor_count {
                 for _ in 0..*n {
-                    // let id = match self.env.id_gen_manager() {
-                    //     None => {
-                    //         self.env
-                    //             .id_gen_manager()
-                    //             .generate::<{ IdCategory::Actor }>()
-                    //             .await? as ActorId
-                    //     }
-                    //     Some(id_gen) => {
-                    //         let id = mgr.generate_interval::<{ IdCategory::Actor }>(1);
-                    //         id as ActorId
-                    //     }
-                    // };
-
                     let id = match self.env.id_gen_manager() {
                         IdGenManagerImpl::Kv(mgr) => {
                             mgr.generate::<{ IdCategory::Actor }>().await? as ActorId
@@ -2751,10 +2729,6 @@ impl ConsistentHashRing {
     fn distribute_tasks(&self, total_tasks: u32) -> MetaResult<BTreeMap<u32, u32>> {
         let total_weight = self.weights.values().sum::<u32>();
 
-        // if total_weight < total_tasks {
-        //     bail!("Total tasks exceed the total weight of all workers.");
-        // }
-
         let mut soft_limits = HashMap::new();
         for (worker_id, worker_capacity) in &self.weights {
             soft_limits.insert(
@@ -2779,11 +2753,7 @@ impl ConsistentHashRing {
             let ring_range = self.ring.range(task_hash..).chain(self.ring.iter());
 
             for (_, &worker_id) in ring_range {
-                // let worker_capacity = self.weights.get(&worker_id).unwrap();
-                let worker_soft_limit = soft_limits.get(&worker_id).unwrap();
-
-                // let task_limit = min(*worker_capacity, *worker_soft_limit);
-                let task_limit = *worker_soft_limit;
+                let task_limit = *soft_limits.get(&worker_id).unwrap();
 
                 let worker_task_count = task_distribution.entry(worker_id).or_insert(0);
 

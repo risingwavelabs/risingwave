@@ -499,11 +499,6 @@ message GetClusterInfoResponse {
   uint64 revision = 5;
 }
 
-message Reschedule {
-  repeated uint32 added_parallel_units = 1;
-  repeated uint32 removed_parallel_units = 2;
-}
-
 message WorkerReschedule {
   map<uint32, uint32> increased_actor_count = 1;
   map<uint32, uint32> decreased_actor_count = 2;
