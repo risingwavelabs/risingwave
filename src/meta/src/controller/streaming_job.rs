@@ -900,7 +900,7 @@ impl CatalogController {
 
         let mut version = self
             .notify_frontend(
-                NotificationOperation::Add,
+                NotificationOperation::Update,
                 NotificationInfo::RelationGroup(PbRelationGroup { relations }),
             )
             .await;
