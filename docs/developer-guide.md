@@ -17,6 +17,9 @@ http://ecotrust-canada.github.io/markdown-toc/
 - [Read the design docs](#read-the-design-docs)
 - [Learn about the code structure](#learn-about-the-code-structure)
 - [Set up the development environment](#set-up-the-development-environment)
+  * [macOS](#macos)
+  * [Debian-based Linux](#debian-based-linux)
+  * [nix shell](#nix-shell)
 - [Start and monitor a dev cluster](#start-and-monitor-a-dev-cluster)
   * [Tips for compilation](#tips-for-compilation)
   * [Configure additional components](#configure-additional-components)
@@ -73,6 +76,8 @@ RisingWave can be built on macOS and Linux. To develop RisingWave, you need the 
 * LLVM (For macOS only, to workaround some bugs in macOS toolchain. See https://github.com/risingwavelabs/risingwave/issues/6205)
 * Python (>= 3.12) (Optional, only required by `embedded-python-udf` feature)
 
+### macOS
+
 To install the dependencies on macOS, run:
 
 ```shell
@@ -80,12 +85,32 @@ brew install postgresql cmake protobuf tmux cyrus-sasl llvm openssl@3
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
+### Debian-based Linux
+
 To install the dependencies on Debian-based Linux systems, run:
 
 ```shell
 sudo apt install make build-essential cmake protobuf-compiler curl postgresql-client tmux lld pkg-config libssl-dev libsasl2-dev
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
+
+### nix shell
+
+If you use nix, you can also enter the nix shell via:
+
+```shell
+nix develop ./develop/nix
+```
+
+All dependencies will be automatically downloaded and configured.
+
+You can also use [direnv](https://github.com/direnv/direnv) to automatically enter the nix shell:
+
+```shell
+direnv allow
+```
+
+Check out [flake.nix](../develop/nix/flake.nix) to read more information!
 
 Then you'll be able to compile and start RisingWave!
 

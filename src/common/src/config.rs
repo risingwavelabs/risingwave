@@ -991,6 +991,10 @@ pub struct StreamingDeveloperConfig {
     /// If number of hash join matches exceeds this threshold number,
     /// it will be logged.
     pub high_join_amplification_threshold: usize,
+
+    /// Actor tokio metrics is enabled if `enable_actor_tokio_metrics` is set or metrics level >= Debug.
+    #[serde(default = "default::developer::enable_actor_tokio_metrics")]
+    pub enable_actor_tokio_metrics: bool,
 }
 
 /// The subsections `[batch.developer]`.
@@ -1801,6 +1805,10 @@ pub mod default {
 
         pub fn stream_high_join_amplification_threshold() -> usize {
             2048
+        }
+
+        pub fn enable_actor_tokio_metrics() -> bool {
+            false
         }
     }
 

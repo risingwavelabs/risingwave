@@ -2626,7 +2626,7 @@ impl CatalogController {
         let inner = self.inner.read().await;
         let table_obj = Table::find()
             .find_also_related(Object)
-            .join(JoinType::InnerJoin, object::Relation::Database.def())
+            .join(JoinType::InnerJoin, object::Relation::Database2.def())
             .filter(
                 table::Column::Name
                     .eq(table_name)
