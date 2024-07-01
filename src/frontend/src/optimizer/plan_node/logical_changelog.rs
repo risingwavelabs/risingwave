@@ -80,7 +80,7 @@ impl PlanTreeNodeUnary for LogicalChangeLog {
         let len = out_col_change.to_parts().1;
         let out_col_change = if self.base.stream_key().is_none() {
             ColIndexMapping::new(output_vec, len + 1)
-        }else{
+        } else {
             output_vec.push(Some(len));
             ColIndexMapping::new(output_vec, len + 1)
         };
