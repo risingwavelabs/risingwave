@@ -17,9 +17,9 @@ use std::ops::AddAssign;
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::hash::ParallelUnitId;
+use risingwave_common::hash::WorkerSlotId;
 use risingwave_connector::source::SplitImpl;
-use risingwave_pb::common::{ParallelUnit, ParallelUnitMapping};
+use risingwave_pb::common::ParallelUnit;
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::{ActorStatus, Fragment, State};
 use risingwave_pb::meta::table_parallelism::{
@@ -207,17 +207,20 @@ impl TableFragments {
     pub fn new(
         table_id: TableId,
         fragments: BTreeMap<FragmentId, Fragment>,
-        actor_locations: &BTreeMap<ActorId, ParallelUnit>,
+        actor_locations: &BTreeMap<ActorId, WorkerSlotId>,
         ctx: StreamContext,
         table_parallelism: TableParallelism,
     ) -> Self {
         let actor_status = actor_locations
             .iter()
-            .map(|(&actor_id, parallel_unit)| {
+            .map(|(&actor_id, worker_slot_id)| {
                 (
                     actor_id,
                     ActorStatus {
-                        parallel_unit: Some(parallel_unit.clone()),
+                        parallel_unit: Some(ParallelUnit {
+                            id: u32::MAX,
+                            worker_node_id: worker_slot_id.worker_id(),
+                        }),
                         state: ActorState::Inactive as i32,
                     },
                 )
@@ -277,24 +280,6 @@ impl TableFragments {
     /// Set the state of the table fragments.
     pub fn set_state(&mut self, state: State) {
         self.state = state;
-    }
-
-    /// Returns mview fragment vnode mapping.
-    /// Note that: the sink fragment is also stored as `TableFragments`, it's possible that
-    /// there's no fragment with `FragmentTypeFlag::Mview` exists.
-    pub fn mview_vnode_mapping(&self) -> Option<(FragmentId, ParallelUnitMapping)> {
-        self.fragments
-            .values()
-            .find(|fragment| {
-                (fragment.get_fragment_type_mask() & FragmentTypeFlag::Mview as u32) != 0
-            })
-            .map(|fragment| {
-                (
-                    fragment.fragment_id,
-                    // vnode mapping is always `Some`, even for singletons.
-                    fragment.vnode_mapping.clone().unwrap(),
-                )
-            })
     }
 
     /// Update state of all actors
@@ -509,28 +494,6 @@ impl TableFragments {
             map.entry(node_id).or_insert_with(Vec::new).push(actor_id);
         }
         map
-    }
-
-    pub fn worker_parallel_units(&self) -> HashMap<WorkerId, HashSet<ParallelUnitId>> {
-        let mut map = HashMap::new();
-        for actor_status in self.actor_status.values() {
-            map.entry(actor_status.get_parallel_unit().unwrap().worker_node_id)
-                .or_insert_with(HashSet::new)
-                .insert(actor_status.get_parallel_unit().unwrap().id);
-        }
-        map
-    }
-
-    pub fn update_vnode_mapping(&mut self, migrate_map: &HashMap<ParallelUnitId, ParallelUnit>) {
-        for fragment in self.fragments.values_mut() {
-            if let Some(mapping) = &mut fragment.vnode_mapping {
-                mapping.data.iter_mut().for_each(|id| {
-                    if migrate_map.contains_key(id) {
-                        *id = migrate_map.get(id).unwrap().id;
-                    }
-                });
-            }
-        }
     }
 
     /// Returns the status of actors group by worker id.

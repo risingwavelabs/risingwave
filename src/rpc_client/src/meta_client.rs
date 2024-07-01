@@ -962,14 +962,14 @@ impl MetaClient {
 
     pub async fn reschedule(
         &self,
-        reschedules: HashMap<u32, PbReschedule>,
+        worker_reschedules: HashMap<u32, PbWorkerReschedule>,
         revision: u64,
         resolve_no_shuffle_upstream: bool,
     ) -> Result<(bool, u64)> {
         let request = RescheduleRequest {
-            reschedules,
             revision,
             resolve_no_shuffle_upstream,
+            worker_reschedules,
         };
         let resp = self.inner.reschedule(request).await?;
         Ok((resp.success, resp.revision))

@@ -16,6 +16,7 @@ use std::iter::repeat_with;
 
 use anyhow::Result;
 use itertools::Itertools;
+use risingwave_common::hash::WorkerSlotId;
 use risingwave_simulation::cluster::{Cluster, Configuration};
 use risingwave_simulation::ctl_ext::predicate::identity_contains;
 
@@ -47,13 +48,30 @@ async fn test_table() -> Result<()> {
 
     insert_and_flush!(cluster);
 
+    let workers = fragment.all_worker_count().into_keys().collect_vec();
+
     cluster
-        .reschedule(fragment.reschedule([0, 2, 4], []))
+        .reschedule(fragment.reschedule(
+            [
+                WorkerSlotId::new(workers[0], 0),
+                WorkerSlotId::new(workers[1], 0),
+                WorkerSlotId::new(workers[2], 0),
+            ],
+            [],
+        ))
         .await?;
 
     insert_and_flush!(cluster);
 
-    cluster.reschedule(fragment.reschedule([1], [0, 4])).await?;
+    cluster
+        .reschedule(fragment.reschedule(
+            [WorkerSlotId::new(workers[0], 1)],
+            [
+                WorkerSlotId::new(workers[0], 0),
+                WorkerSlotId::new(workers[2], 0),
+            ],
+        ))
+        .await?;
 
     insert_and_flush!(cluster);
 
@@ -69,13 +87,30 @@ async fn test_mv_on_scaled_table() -> Result<()> {
         .locate_one_fragment([identity_contains("materialize")])
         .await?;
 
+    let workers = fragment.all_worker_count().into_keys().collect_vec();
+
     cluster
-        .reschedule(fragment.reschedule([0, 2, 4], []))
+        .reschedule(fragment.reschedule(
+            [
+                WorkerSlotId::new(workers[0], 0),
+                WorkerSlotId::new(workers[1], 0),
+                WorkerSlotId::new(workers[2], 0),
+            ],
+            [],
+        ))
         .await?;
 
     insert_and_flush!(cluster);
 
-    cluster.reschedule(fragment.reschedule([1], [0, 4])).await?;
+    cluster
+        .reschedule(fragment.reschedule(
+            [WorkerSlotId::new(workers[0], 1)],
+            [
+                WorkerSlotId::new(workers[0], 0),
+                WorkerSlotId::new(workers[2], 0),
+            ],
+        ))
+        .await?;
 
     insert_and_flush!(cluster);
 
@@ -97,8 +132,17 @@ async fn test_scale_on_schema_change() -> Result<()> {
         .locate_one_fragment([identity_contains("materialize"), identity_contains("union")])
         .await?;
 
+    let workers = fragment.all_worker_count().into_keys().collect_vec();
+
     cluster
-        .reschedule(fragment.reschedule([0, 2, 4], []))
+        .reschedule(fragment.reschedule(
+            [
+                WorkerSlotId::new(workers[0], 0),
+                WorkerSlotId::new(workers[1], 0),
+                WorkerSlotId::new(workers[2], 0),
+            ],
+            [],
+        ))
         .await?;
 
     insert_and_flush!(cluster);
@@ -113,13 +157,19 @@ async fn test_scale_on_schema_change() -> Result<()> {
         .await?;
 
     cluster
-        .reschedule_resolve_no_shuffle(fragment.reschedule([1], [0, 4]))
+        .reschedule_resolve_no_shuffle(fragment.reschedule(
+            [WorkerSlotId::new(workers[0], 1)],
+            [
+                WorkerSlotId::new(workers[0], 0),
+                WorkerSlotId::new(workers[2], 0),
+            ],
+        ))
         .await?;
 
     let fragment = cluster
         .locate_one_fragment([identity_contains("materialize"), identity_contains("union")])
         .await?;
-    let (_, used) = fragment.parallel_unit_usage();
+    let used = fragment.used_worker_slots();
     assert_eq!(used.len(), 4);
 
     insert_and_flush!(cluster);
