@@ -988,10 +988,11 @@ impl SessionImpl {
         min_epoch: u64,
         max_count: u32,
     ) -> Result<Vec<u64>> {
-        self.env
-            .catalog_writer
+        Ok(self
+            .env
+            .meta_client()
             .list_change_log_epochs(table_id, min_epoch, max_count)
-            .await
+            .await?)
     }
 
     pub fn clear_cancel_query_flag(&self) {
