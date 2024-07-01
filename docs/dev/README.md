@@ -12,8 +12,19 @@ This is published via GitHub Actions to GitHub Pages.
 
 Edit `SUMMARY.md` to add new chapters.
 
+Install tools:
+
+```
+> cargo binstall mdbook mdbook-linkcheck mdbook-toc mdbook-mermaid
+```
 
 ## Table of Contents
 
 We use `mdbook-toc` to auto-generate TOCs for long sections. You can invoke the preprocessor by
 including the `<!-- toc -->` marker at the place where you want the TOC.
+
+
+### Link Validations
+
+We use `mdbook-linkcheck` to validate URLs included in our documentation.
+`linkcheck` will be run automatically when you build with the instructions in the section above.

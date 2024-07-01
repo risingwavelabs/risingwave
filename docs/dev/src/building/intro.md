@@ -100,8 +100,6 @@ Use the `./risedev configure` command to enable and disable components.
 - Kafka: Enable this component if you want to create a streaming source from a Kafka topic.
 - Grafana Tempo: Use this component for tracing.
 
-> [!NOTE]
->
 > Enabling a component with the `./risedev configure` command will only download the component to your environment. To allow it to function, you must revise the corresponding configuration setting in `risedev.yml` and restart the dev cluster.
 
 For example, you can modify the default section to:

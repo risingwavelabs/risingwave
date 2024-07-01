@@ -2,7 +2,8 @@
 
 Thanks for your interest in contributing to RisingWave! We welcome and appreciate contributions.
 
-This document describes how to submit your code changes. To learn about the development process, see the [developer guide](docs/developer-guide.md). To understand the design and implementation of RisingWave, refer to the design docs listed in [docs/README.md](docs/README.md).
+This document describes how to submit your code changes. To learn about the development process, see other chapters of the book. To understand the design and implementation of RisingWave, refer to the design docs listed in [docs/README.md](https://github.com/risingwavelabs/risingwave/blob/fb60113c2e8a7f0676af545c99f073a335c255f3/docs/README.md).
+<!-- TODO: merge design docs into the book? -->
 
 If you have questions, you can search for existing discussions or start a new discussion in the [Discussions forum of RisingWave](https://github.com/risingwavelabs/risingwave/discussions), or ask in the RisingWave Community channel on Slack. Please use the [invitation link](https://risingwave.com/slack) to join the channel.
 
@@ -12,7 +13,7 @@ To report bugs, create a [GitHub issue](https://github.com/risingwavelabs/rising
 
 ## Tests and miscellaneous checks
 
-Before submitting your code changes, ensure you fully test them and perform necessary checks. The testing instructions and necessary checks are detailed in the [developer guide](docs/developer-guide.md#test-your-code-changes).
+Before submitting your code changes, ensure you fully test them and perform necessary checks. The testing instructions and necessary checks are detailed in other sections of the book.
 
 ## Submit a PR
 
@@ -27,8 +28,8 @@ As described in [here](https://github.com/commitizen/conventional-commit-types/b
 - `style`: A refactoring that improves code style
 - `perf`: A code change that improves performance
 - `test`: Adding missing tests or correcting existing tests
-- `build`: Changes that affect the build system or external dependencies (example scopes: `.config`, `.cargo`, `Cargo.toml`)
-- `ci`: Changes to RisingWave CI configuration files and scripts (example scopes: `.github`, `ci` (Buildkite))
+- `build`: Changes that affect the build system or external dependencies (example scopes: `.config`,  `.cargo`,  `Cargo.toml`)
+- `ci`: Changes to RisingWave CI configuration files and scripts (example scopes: `.github`,  `ci` (Buildkite))
 - `chore`: Other changes that don't modify src or test files
 - `revert`: Reverts a previous commit
 
@@ -49,6 +50,7 @@ You may also check out previous PRs in the [PR list](https://github.com/risingwa
 Contributors will need to sign RisingWave Labs' CLA.
 
 ### Cherry pick the commit to release candidate branch
+
 We have a GitHub Action to help cherry-pick commits from `main` branch to a `release candidate` branch, such as `v*.*.*-rc` where `*` is a number.
 
 Checkout details at: <https://github.com/risingwavelabs/risingwave/blob/main/.github/workflows/cherry-pick-to-release-branch.yml>

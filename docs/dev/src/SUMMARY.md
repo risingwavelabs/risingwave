@@ -14,6 +14,14 @@
 
 ---
 
+## Benchmarking and Profiling
+
+- [CPU Profiling Guide](./benchmark-and-profile/cpu-profiling.md)
+- [Memory (Heap) Profiling Guide](./benchmark-and-profile/memory-profiling.md)
+- [Microbench Guide](./benchmark-and-profile/microbenchmarks.md)
+
+---
+
 # Specialized topics
 
 - [CI](./ci.md)
@@ -30,3 +38,4 @@ TODO:
 - [Compile time]()
     - [Crate organization]()
     - [Optimize for compile time]()
+- [Adding dependencies]

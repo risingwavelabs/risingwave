@@ -29,7 +29,10 @@ RiseDev runs unit tests with cargo-nextest. To run unit tests:
 
 ## Planner tests
 
-RisingWave's SQL frontend has SQL planner tests. For more information, see [Planner Test Guide](../src/frontend/planner_test/README.md).
+RisingWave's SQL frontend has SQL planner tests.
+
+<!-- For more information, see [Planner Test Guide](../src/frontend/planner_test/README.md). -->
+<!-- TODO: migrate here -->
 
 ## End-to-end tests
 
@@ -52,8 +55,6 @@ Then to run the end-to-end tests, you can use one of the following commands acco
 ./risedev slt-all -p 4566 -d dev -j 1
 ```
 
-> [!NOTE]
->
 > Use `-j 1` to create a separate database for each test case, which can ensure that previous test case failure won't affect other tests due to table cleanups.
 
 Alternatively, you can also run some specific tests:
@@ -78,7 +79,9 @@ RisingWave's codebase is constantly changing. The persistent data might not be s
 
 ### SqlSmith
 
-Currently, SqlSmith supports for e2e and frontend fuzzing. Take a look at [Fuzzing tests](../src/tests/sqlsmith/README.md) for more details on running it locally.
+Currently, SqlSmith supports for e2e and frontend fuzzing. Take a look at [Fuzzing tests](https://github.com/risingwavelabs/risingwave/blob/fb60113c2e8a7f0676af545c99f073a335c255f3/src/tests/sqlsmith/README.md#L1) for more details on running it locally.
+
+<!-- TODO: migrate here -->
 
 ## DocSlt tests
 
@@ -147,7 +150,7 @@ MADSIM_TEST_NUM=100 ./risedev sslt --release -- './e2e_test/path/to/directory/**
 ./risedev sslt -- --help
 ```
 
-Deterministic test is included in CI as well. See [CI script](../ci/scripts/deterministic-e2e-test.sh) for details.
+Deterministic test is included in CI as well. See [CI script](https://github.com/risingwavelabs/risingwave/blob/fb60113c2e8a7f0676af545c99f073a335c255f3/ci/scripts/deterministic-e2e-test.sh) for details.
 
 ## Deterministic Simulation Integration tests
 
