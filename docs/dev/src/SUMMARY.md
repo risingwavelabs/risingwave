@@ -7,7 +7,7 @@
 
 # Building and debugging RisingWave
 
-- [How to build and run RisingWave](./building/intro.md)
+- [How to build and run RisingWave](./build-and-run/intro.md)
 - [Testing](./tests/intro.md)
 - [Debugging](./debugging.md)
 - [Observability](./observability.md)

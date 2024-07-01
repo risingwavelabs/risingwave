@@ -82,5 +82,7 @@ e2e_test/iceberg/spark-*-bin*
 
 *.slt.temp
 
+.direnv/
+
 # mdbook
 book
