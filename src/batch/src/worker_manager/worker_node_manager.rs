@@ -222,16 +222,17 @@ impl WorkerNodeManager {
     pub fn remove_streaming_fragment_mapping(&self, fragment_id: &FragmentId) {
         let mut guard = self.inner.write().unwrap();
 
-        let res = guard
-            .streaming_fragment_vnode_mapping
-            .remove(fragment_id);
+        let res = guard.streaming_fragment_vnode_mapping.remove(fragment_id);
         match &res {
-            Some(_) => {},
+            Some(_) => {}
             None if OBJECT_ID_PLACEHOLDER == *fragment_id => {
                 // Do nothing for placeholder fragment.
-            },
+            }
             None => {
-                panic!("Streaming vnode mapping not found for fragment_id: {}", fragment_id)
+                panic!(
+                    "Streaming vnode mapping not found for fragment_id: {}",
+                    fragment_id
+                )
             }
         };
     }
