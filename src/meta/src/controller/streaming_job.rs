@@ -360,7 +360,6 @@ impl CatalogController {
             )
             .await?
             .oid;
-            table.id = table_id as _;
             table_id_map.insert(table.id, table_id as u32);
             let mut table_model: table::ActiveModel = table.clone().into();
             table_model.table_id = Set(table_id as _);
