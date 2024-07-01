@@ -380,13 +380,12 @@ impl CatalogController {
     pub async fn create_internal_table_catalog(
         &self,
         job_id: ObjectId,
-        is_mv: bool,
-        internal_tables: Vec<PbTable>,
+        mut internal_tables: Vec<PbTable>,
     ) -> MetaResult<HashMap<u32, u32>> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
         let mut table_id_map = HashMap::new();
-        for table in &internal_tables {
+        for table in &mut internal_tables {
             let table_id = Self::create_object(
                 &txn,
                 ObjectType::Table,
@@ -396,29 +395,28 @@ impl CatalogController {
             )
             .await?
             .oid;
+            table.id = table_id as _;
             table_id_map.insert(table.id, table_id as u32);
-            let mut table: table::ActiveModel = table.clone().into();
-            table.table_id = Set(table_id as _);
-            table.belongs_to_job_id = Set(Some(job_id as _));
-            table.fragment_id = NotSet;
-            Table::insert(table).exec(&txn).await?;
+            let mut table_model: table::ActiveModel = table.clone().into();
+            table_model.table_id = Set(table_id as _);
+            table_model.belongs_to_job_id = Set(Some(job_id as _));
+            table_model.fragment_id = NotSet;
+            Table::insert(table_model).exec(&txn).await?;
         }
         txn.commit().await?;
-        if is_mv {
-            let relations = internal_tables
-                .iter()
-                .map(|table| Relation {
-                    relation_info: Some(RelationInfo::Table(table.to_owned())),
-                })
-                .collect_vec();
-            let _version = self
-                .notify_frontend(
-                    Operation::Delete,
-                    Info::RelationGroup(RelationGroup { relations }),
-                )
-                .await;
-        }
-
+        let _version = self
+            .notify_frontend(
+                Operation::Add,
+                Info::RelationGroup(RelationGroup {
+                    relations: internal_tables
+                        .iter()
+                        .map(|table| Relation {
+                            relation_info: Some(RelationInfo::Table(table.clone())),
+                        })
+                        .collect(),
+                }),
+            )
+            .await;
         Ok(table_id_map)
     }
 

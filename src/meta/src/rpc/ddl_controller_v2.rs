@@ -139,11 +139,7 @@ impl DdlController {
         let internal_tables = fragment_graph.internal_tables().into_values().collect_vec();
         let table_id_map = mgr
             .catalog_controller
-            .create_internal_table_catalog(
-                streaming_job.id() as _,
-                streaming_job.is_materialized_view(),
-                internal_tables,
-            )
+            .create_internal_table_catalog(streaming_job.id() as _, internal_tables)
             .await?;
         fragment_graph.refill_internal_table_ids(table_id_map);
 
