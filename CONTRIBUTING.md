@@ -12,5 +12,5 @@ a pull request.
 Please read [the process] of how to submit your change to RisingWave.
 
 [Community Slack]: https://risingwave.com/slack
-[file an issue]: https://github.com/rust-lang/cargo/issues
+[file an issue]: https://github.com/risingwavelabs/risingwave/issues/new/choose
 [the process]: https://risingwavelabs.github.io/risingwave/contribution
