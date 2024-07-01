@@ -14,7 +14,7 @@
 
 ---
 
-## Benchmarking and Profiling
+# Benchmarking and Profiling
 
 - [CPU Profiling Guide](./benchmark-and-profile/cpu-profiling.md)
 - [Memory (Heap) Profiling Guide](./benchmark-and-profile/memory-profiling.md)
