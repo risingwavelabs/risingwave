@@ -72,7 +72,7 @@ else
 fi
 
 if cat ./query_result2.csv | awk -F "," '{
-    exit !($1 == 1 && $2 == 1 && $3 == 1); }'; then
+    exit !($1 == 1 && $2 == 1 && $3 == "1\r"); }'; then
   echo "Cassandra sink check passed"
 else
   echo "The output is not as expected."
