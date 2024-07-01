@@ -158,6 +158,8 @@ impl CatalogController {
             }
         }
 
+        let mut relations = vec![];
+
         match streaming_job {
             StreamingJob::MaterializedView(table) => {
                 let table_obj = Self::create_streaming_job_obj(
@@ -175,16 +177,9 @@ impl CatalogController {
                 table.id = job_id as _;
                 let table_model: table::ActiveModel = table.clone().into();
                 Table::insert(table_model).exec(&txn).await?;
-                let _version = self
-                    .notify_frontend(
-                        Operation::Add,
-                        Info::RelationGroup(RelationGroup {
-                            relations: vec![Relation {
-                                relation_info: Some(RelationInfo::Table(table.to_owned())),
-                            }],
-                        }),
-                    )
-                    .await;
+                relations.push(Relation {
+                    relation_info: Some(RelationInfo::Table(table.to_owned())),
+                });
             }
             StreamingJob::Sink(sink, _) => {
                 if let Some(target_table_id) = sink.target_table {
@@ -217,16 +212,9 @@ impl CatalogController {
                 sink.id = job_id as _;
                 let sink_model: sink::ActiveModel = sink.clone().into();
                 Sink::insert(sink_model).exec(&txn).await?;
-                let _version = self
-                    .notify_frontend(
-                        Operation::Add,
-                        Info::RelationGroup(RelationGroup {
-                            relations: vec![Relation {
-                                relation_info: Some(RelationInfo::Sink(sink.to_owned())),
-                            }],
-                        }),
-                    )
-                    .await;
+                relations.push(Relation {
+                    relation_info: Some(RelationInfo::Sink(sink.to_owned())),
+                });
             }
             StreamingJob::Table(src, table, _) => {
                 let job_id = Self::create_streaming_job_obj(
@@ -259,29 +247,15 @@ impl CatalogController {
                     );
                     let source: source::ActiveModel = src.clone().into();
                     Source::insert(source).exec(&txn).await?;
-                    let _version = self
-                        .notify_frontend(
-                            Operation::Add,
-                            Info::RelationGroup(RelationGroup {
-                                relations: vec![Relation {
-                                    relation_info: Some(RelationInfo::Source(src.to_owned())),
-                                }],
-                            }),
-                        )
-                        .await;
+                    relations.push(Relation {
+                        relation_info: Some(RelationInfo::Source(src.to_owned())),
+                    });
                 }
                 let table_model: table::ActiveModel = table.clone().into();
                 Table::insert(table_model).exec(&txn).await?;
-                let _version = self
-                    .notify_frontend(
-                        Operation::Add,
-                        Info::RelationGroup(RelationGroup {
-                            relations: vec![Relation {
-                                relation_info: Some(RelationInfo::Table(table.to_owned())),
-                            }],
-                        }),
-                    )
-                    .await;
+                relations.push(Relation {
+                    relation_info: Some(RelationInfo::Table(table.to_owned())),
+                });
             }
             StreamingJob::Index(index, table) => {
                 ensure_object_id(ObjectType::Table, index.primary_table_id as _, &txn).await?;
@@ -314,21 +288,12 @@ impl CatalogController {
                 Table::insert(table_model).exec(&txn).await?;
                 let index_model: index::ActiveModel = index.clone().into();
                 Index::insert(index_model).exec(&txn).await?;
-                let _version = self
-                    .notify_frontend(
-                        Operation::Add,
-                        Info::RelationGroup(RelationGroup {
-                            relations: vec![
-                                Relation {
-                                    relation_info: Some(RelationInfo::Table(table.to_owned())),
-                                },
-                                Relation {
-                                    relation_info: Some(RelationInfo::Index(index.to_owned())),
-                                },
-                            ],
-                        }),
-                    )
-                    .await;
+                relations.push(Relation {
+                    relation_info: Some(RelationInfo::Table(table.to_owned())),
+                });
+                relations.push(Relation {
+                    relation_info: Some(RelationInfo::Index(index.to_owned())),
+                });
             }
             StreamingJob::Source(src) => {
                 let job_id = Self::create_streaming_job_obj(
@@ -346,16 +311,9 @@ impl CatalogController {
                 src.id = job_id as _;
                 let source_model: source::ActiveModel = src.clone().into();
                 Source::insert(source_model).exec(&txn).await?;
-                let _version = self
-                    .notify_frontend(
-                        Operation::Add,
-                        Info::RelationGroup(RelationGroup {
-                            relations: vec![Relation {
-                                relation_info: Some(RelationInfo::Source(src.to_owned())),
-                            }],
-                        }),
-                    )
-                    .await;
+                relations.push(Relation {
+                    relation_info: Some(RelationInfo::Source(src.to_owned())),
+                });
             }
         }
 
@@ -373,6 +331,13 @@ impl CatalogController {
         }
 
         txn.commit().await?;
+
+        let _version = self
+            .notify_frontend(
+                Operation::Add,
+                Info::RelationGroup(RelationGroup { relations }),
+            )
+            .await;
 
         Ok(())
     }
