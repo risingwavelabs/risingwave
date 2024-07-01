@@ -62,7 +62,7 @@ jobs:
         run: |
           cd docs/dev
           mdbook build
-          cp -R book/* ../../artifact
+          cp -R book/html/* ../../artifact
       - name: Upload artifacts
         uses: actions/upload-pages-artifact@v1
         with:
