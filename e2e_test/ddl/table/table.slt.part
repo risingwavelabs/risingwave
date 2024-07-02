@@ -123,8 +123,12 @@ insert into "T2" ("V1") values (1);
 statement ok
 drop table "T2"
 
-statement error
+# The length of varchar will be ignored
+statement ok
 create table C1 (c1 varchar(5));
+
+statement ok
+drop table C1;
 
 statement error
 create table t (v1 int not null);

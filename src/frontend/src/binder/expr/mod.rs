@@ -28,6 +28,7 @@ use crate::binder::Binder;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall, InputRef, Parameter, SubqueryKind};
 use crate::handler::create_sql_function::SQL_UDF_PATTERN;
+use crate::session::current;
 
 mod binary_op;
 mod column;
@@ -985,7 +986,15 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
         AstDataType::Double | AstDataType::Float(Some(25..=53) | None) => DataType::Float64,
         AstDataType::Float(Some(0 | 54..)) => unreachable!(),
         AstDataType::Decimal(None, None) => DataType::Decimal,
-        AstDataType::Varchar | AstDataType::Text => DataType::Varchar,
+        AstDataType::Varchar(size) => {
+            if size.is_some() {
+                current::notice_to_user(
+                    "CHARACTER VARYING with length is not supported. The length is ignored.",
+                );
+            }
+            DataType::Varchar
+        }
+        AstDataType::Text => DataType::Varchar,
         AstDataType::Date => DataType::Date,
         AstDataType::Time(false) => DataType::Time,
         AstDataType::Timestamp(false) => DataType::Timestamp,

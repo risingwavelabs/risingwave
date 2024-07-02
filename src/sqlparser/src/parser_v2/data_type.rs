@@ -194,9 +194,9 @@ where
         Keyword::SMALLINT => empty.value(DataType::SmallInt),
         Keyword::INT | Keyword::INTEGER => empty.value(DataType::Int),
         Keyword::BIGINT => empty.value(DataType::BigInt),
-        Keyword::STRING | Keyword::VARCHAR => empty.value(DataType::Varchar),
+        Keyword::STRING | Keyword::VARCHAR => opt(precision_in_range(..)).map(DataType::Varchar),
         Keyword::CHAR | Keyword::CHARACTER => dispatch! {keyword;
-            Keyword::VARYING => empty.value(DataType::Varchar),
+            Keyword::VARYING => opt(precision_in_range(..)).map(DataType::Varchar),
             _ => opt(precision_in_range(..)).map(DataType::Char),
         },
         Keyword::UUID => empty.value(DataType::Uuid),

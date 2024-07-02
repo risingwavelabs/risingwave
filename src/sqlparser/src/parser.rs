@@ -2576,7 +2576,7 @@ impl Parser<'_> {
                             self.next_token();
                         }
                         Keyword::VARCHAR => {
-                            header_inner_expect_type = Some(DataType::Varchar);
+                            header_inner_expect_type = Some(DataType::Varchar(None));
                             self.next_token();
                         }
                         _ => {

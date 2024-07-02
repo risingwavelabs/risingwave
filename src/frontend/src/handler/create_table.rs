@@ -181,7 +181,7 @@ pub fn bind_sql_columns(column_defs: &[ColumnDef]) -> Result<Vec<ColumnCatalog>>
             }
 
             match data_type {
-                AstDataType::Text | AstDataType::Varchar | AstDataType::Char(_) => {}
+                AstDataType::Text | AstDataType::Varchar(_) | AstDataType::Char(_) => {}
                 _ => {
                     return Err(ErrorCode::NotSupported(
                         format!("{} is not a collatable data type", data_type),

@@ -1313,7 +1313,7 @@ fn parse_create_table() {
                 vec![
                     ColumnDef::new(
                         "name".into(),
-                        DataType::Varchar,
+                        DataType::Varchar(None),
                         None,
                         vec![ColumnOptionDef {
                             name: None,

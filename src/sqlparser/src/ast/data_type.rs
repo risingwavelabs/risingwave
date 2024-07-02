@@ -26,8 +26,8 @@ pub enum DataType {
     /// Fixed-length character type e.g. CHAR(10)
     Char(Option<u64>),
     /// Variable-length character type.
-    /// We diverge from postgres by disallowing Varchar(n).
-    Varchar,
+    /// The length is only for compatibility with PostgreSQL. RisingWave ignores it.
+    Varchar(Option<u64>),
     /// Uuid type
     Uuid,
     /// Decimal type with optional precision and scale e.g. DECIMAL(10,2)
@@ -76,7 +76,9 @@ impl fmt::Display for DataType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             DataType::Char(size) => format_type_with_optional_length(f, "CHAR", size),
-            DataType::Varchar => write!(f, "CHARACTER VARYING"),
+            DataType::Varchar(size) => {
+                format_type_with_optional_length(f, "CHARACTER VARYING", size)
+            }
             DataType::Uuid => write!(f, "UUID"),
             DataType::Decimal(precision, scale) => {
                 if let Some(scale) = scale {
