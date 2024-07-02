@@ -45,6 +45,7 @@ mod rw_relations;
 mod rw_schemas;
 mod rw_sinks;
 mod rw_sources;
+mod rw_streaming_graph;
 mod rw_streaming_parallelism;
 mod rw_subscriptions;
 mod rw_system_tables;
