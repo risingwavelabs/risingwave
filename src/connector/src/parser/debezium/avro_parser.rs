@@ -149,6 +149,14 @@ impl DebeziumAvroParserConfig {
         //     "default": null
         // },
         // ...]
+
+        // Other fields are:
+        // - source: describes the source metadata for the event
+        // - op
+        // - ts_ms
+        // - transaction
+        // See <https://debezium.io/documentation/reference/stable/connectors/mysql.html#mysql-events>
+
         avro_schema_to_column_descs(
             avro_schema_skip_nullable_union(avro_extract_field_schema(
                 // FIXME: use resolved schema here.
