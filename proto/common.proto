@@ -75,6 +75,10 @@ message WorkerNode {
   // It's populated by meta node, when the worker node is added by meta node.
   // It's not persistent in meta store.
   optional uint64 started_at = 9;
+
+  // Meta may assign labels to worker nodes to partition workload by label.
+  // This is used for serverless backfilling of MVs. 
+  optional string label = 10;
 }
 
 message Buffer {
