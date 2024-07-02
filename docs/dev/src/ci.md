@@ -1,4 +1,4 @@
-# CI
+# Continuous Integration
 
 <!-- TODO: How to debug CI -->
 

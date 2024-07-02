@@ -24,7 +24,7 @@
 
 # Specialized topics
 
-- [CI](./ci.md)
+- [Continuous Integration](./ci.md)
 
 <!--
 

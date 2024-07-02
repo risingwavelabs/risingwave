@@ -4,7 +4,7 @@ This directory contains RisingWave design documents that are intended to be used
 
 ## Developer guide
 
-After you learn about the basics of RisingWave, take a look at our [developer guide](https://risingwavelabs.github.io/risingwave/). It'll help you up to speed with the development process.
+After you learn about the basics of RisingWave, take a look at our [developer guide](https://risingwavelabs.github.io/risingwave/) to get up to speed with the development process.
 
 ## Table of Contents
 
