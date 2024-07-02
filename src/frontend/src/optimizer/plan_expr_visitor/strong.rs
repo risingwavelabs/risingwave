@@ -188,6 +188,7 @@ impl Strong {
             | ExprType::Cot
             | ExprType::Asin
             | ExprType::Acos
+            | ExprType::Acosd
             | ExprType::Atan
             | ExprType::Atan2
             | ExprType::Sind
