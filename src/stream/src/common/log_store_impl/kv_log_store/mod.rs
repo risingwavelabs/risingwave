@@ -438,7 +438,7 @@ mod tests {
     use risingwave_connector::sink::log_store::{
         ChunkId, LogReader, LogStoreFactory, LogStoreReadItem, LogWriter, TruncateOffset,
     };
-    use risingwave_hummock_sdk::{HummockReadEpoch, SyncResult};
+    use risingwave_hummock_sdk::HummockReadEpoch;
     use risingwave_hummock_test::test_utils::prepare_hummock_test_env;
     use risingwave_storage::hummock::HummockStorage;
     use risingwave_storage::StateStore;
@@ -507,8 +507,7 @@ mod tests {
         writer.flush_current_epoch(epoch3, true).await.unwrap();
 
         test_env.storage.seal_epoch(epoch1, false);
-        test_env.storage.seal_epoch(epoch2, true);
-        let sync_result: SyncResult = test_env.storage.sync(epoch2).await.unwrap();
+        let sync_result = test_env.storage.seal_and_sync_epoch(epoch2).await.unwrap();
         assert!(!sync_result.uncommitted_ssts.is_empty());
 
         reader.init().await.unwrap();

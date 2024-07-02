@@ -30,6 +30,7 @@ use std::ops::RangeBounds;
 use std::str::FromStr;
 
 use paste::paste;
+use risingwave_license::TEST_PAID_LICENSE_KEY;
 use risingwave_pb::meta::PbSystemParams;
 
 use self::diff::SystemParamsDiff;
@@ -60,6 +61,15 @@ impl_param_value!(u64);
 impl_param_value!(f64);
 impl_param_value!(String => &'a str);
 
+/// Set the default value of `license_key` to [`TEST_PAID_LICENSE_KEY`] in debug mode.
+fn default_license_key() -> String {
+    if cfg!(debug_assertions) {
+        TEST_PAID_LICENSE_KEY.to_owned()
+    } else {
+        "".to_owned()
+    }
+}
+
 /// Define all system parameters here.
 ///
 /// To match all these information, write the match arm as follows:
@@ -88,8 +98,9 @@ macro_rules! for_all_params {
             { pause_on_next_bootstrap,                  bool,   Some(false),                                true,   "Whether to pause all data sources on next bootstrap.", },
             { enable_tracing,                           bool,   Some(false),                                true,   "Whether to enable distributed tracing.", },
             { use_new_object_prefix_strategy,           bool,   None,                                       false,  "Whether to split object prefix.", },
-            { tracing_threshold_tiered_cache_read_ms,           u32,    Some(1000),                                 true,   "Threshold to record tiered cache read with minitrace.", },
-            { tracing_threshold_tiered_cache_write_ms,          u32,    Some(1000),                                 true,   "Threshold to record tiered cache write with minitrace.", },
+            { license_key,                              String, Some(default_license_key()),                true,   "The license key to activate enterprise features.", },
+            { tracing_threshold_tiered_cache_read_ms,   u32,    Some(1000),                                 true,   "Threshold to record tiered cache read with minitrace.", },
+            { tracing_threshold_tiered_cache_write_ms,  u32,    Some(1000),                                 true,   "Threshold to record tiered cache write with minitrace.", },
         }
     };
 }
@@ -149,6 +160,8 @@ macro_rules! def_default {
 /// Default values for all parameters.
 pub mod default {
     use std::sync::LazyLock;
+
+    use super::*;
 
     for_all_params!(def_default_opt);
     for_all_params!(def_default);
@@ -448,6 +461,7 @@ mod tests {
             (USE_NEW_OBJECT_PREFIX_STRATEGY_KEY, "false"),
             (TRACING_THRESHOLD_TIERED_CACHE_READ_MS_KEY, "1000"),
             (TRACING_THRESHOLD_TIERED_CACHE_WRITE_MS_KEY, "1000"),
+            (LICENSE_KEY_KEY, "foo"),
             ("a_deprecated_param", "foo"),
         ];
 

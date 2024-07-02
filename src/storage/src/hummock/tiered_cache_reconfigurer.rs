@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::atomic::Ordering;
+use std::time::Duration;
 
 use foyer::HybridCache;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
@@ -41,7 +41,7 @@ impl TieredCacheReconfigurer {
 
     pub async fn run(self, mut rx: watch::Receiver<SystemParamsReaderRef>) {
         loop {
-            if let Err(_) = rx.changed().await {
+            if rx.changed().await.is_err() {
                 tracing::warn!("Tiered cache reconfigurer get updates error.");
                 continue;
             }
@@ -65,42 +65,32 @@ impl TieredCacheReconfigurer {
                 write
             );
 
-            let meta_cache_trace_config = self.meta_cache.trace_config();
-            let block_cache_trace_config = self.meta_cache.trace_config();
+            let meta_cache_trace_config = self.meta_cache.tracing_config();
+            let block_cache_trace_config = self.meta_cache.tracing_config();
 
             meta_cache_trace_config
-                .record_hybrid_get_threshold_us
-                .store(read as usize * 1000, Ordering::Relaxed);
+                .set_record_hybrid_get_threshold(Duration::from_millis(read as _));
             meta_cache_trace_config
-                .record_hybrid_obtain_threshold_us
-                .store(read as usize * 1000, Ordering::Relaxed);
+                .set_record_hybrid_obtain_threshold(Duration::from_millis(read as _));
             meta_cache_trace_config
-                .record_hybrid_fetch_threshold_us
-                .store(read as usize * 1000, Ordering::Relaxed);
+                .set_record_hybrid_fetch_threshold(Duration::from_millis(read as _));
 
             meta_cache_trace_config
-                .record_hybrid_insert_threshold_us
-                .store(write as usize * 1000, Ordering::Relaxed);
+                .set_record_hybrid_insert_threshold(Duration::from_millis(write as _));
             meta_cache_trace_config
-                .record_hybrid_remove_threshold_us
-                .store(write as usize * 1000, Ordering::Relaxed);
+                .set_record_hybrid_remove_threshold(Duration::from_millis(write as _));
 
             block_cache_trace_config
-                .record_hybrid_get_threshold_us
-                .store(read as usize * 1000, Ordering::Relaxed);
+                .set_record_hybrid_get_threshold(Duration::from_millis(read as _));
             block_cache_trace_config
-                .record_hybrid_obtain_threshold_us
-                .store(read as usize * 1000, Ordering::Relaxed);
+                .set_record_hybrid_obtain_threshold(Duration::from_millis(read as _));
             block_cache_trace_config
-                .record_hybrid_fetch_threshold_us
-                .store(read as usize * 1000, Ordering::Relaxed);
+                .set_record_hybrid_fetch_threshold(Duration::from_millis(read as _));
 
             block_cache_trace_config
-                .record_hybrid_insert_threshold_us
-                .store(write as usize * 1000, Ordering::Relaxed);
+                .set_record_hybrid_insert_threshold(Duration::from_millis(write as _));
             block_cache_trace_config
-                .record_hybrid_remove_threshold_us
-                .store(write as usize * 1000, Ordering::Relaxed);
+                .set_record_hybrid_remove_threshold(Duration::from_millis(write as _));
         }
     }
 }

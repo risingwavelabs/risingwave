@@ -25,6 +25,7 @@ members = [
     "src/frontend/planner_test",
     "src/java_binding",
     "src/jni_core",
+    "src/license",
     "src/meta",
     "src/meta/dashboard",
     "src/meta/model_v2",
@@ -76,7 +77,7 @@ license = "Apache-2.0"
 repository = "https://github.com/risingwavelabs/risingwave"
 
 [workspace.dependencies]
-foyer = { version = "0.9.4", features = ["nightly", "mtrace"] }
+foyer = { version = "0.10.0", features = ["nightly"] }
 apache-avro = { git = "https://github.com/risingwavelabs/avro", rev = "25113ba88234a9ae23296e981d8302c290fdaa4b", features = [
     "snappy",
     "zstandard",
@@ -138,6 +139,10 @@ arrow-array-iceberg = { package = "arrow-array", version = "52" }
 arrow-schema-iceberg = { package = "arrow-schema", version = "52" }
 arrow-buffer-iceberg = { package = "arrow-buffer", version = "52" }
 arrow-cast-iceberg = { package = "arrow-cast", version = "52" }
+# TODO
+# After apache/iceberg-rust#411 is merged, we move to the upstream version.
+iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "0c6e133e6f4655ff9ce4ad57b577dc7f692dd902" }
+iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "0c6e133e6f4655ff9ce4ad57b577dc7f692dd902" }
 arrow-array = "50"
 arrow-arith = "50"
 arrow-cast = "50"
@@ -213,6 +218,7 @@ risingwave_frontend = { path = "./src/frontend" }
 risingwave_hummock_sdk = { path = "./src/storage/hummock_sdk" }
 risingwave_hummock_test = { path = "./src/storage/hummock_test" }
 risingwave_hummock_trace = { path = "./src/storage/hummock_trace" }
+risingwave_license = { path = "./src/license" }
 risingwave_mem_table_spill_test = { path = "./src/stream/spill_test" }
 risingwave_meta = { path = "./src/meta" }
 risingwave_meta_dashboard = { path = "./src/meta/dashboard" }
@@ -340,8 +346,6 @@ deno_web = { git = "https://github.com/bakjos/deno", rev = "787a232" }
 deno_websocket = { git = "https://github.com/bakjos/deno", rev = "787a232" }
 # patch to remove preserve_order from serde_json
 bson = { git = "https://github.com/risingwavelabs/bson-rust", rev = "e5175ec" }
-# temporarily patch until foyer release v0.10
-foyer = { git = "https://github.com/MrCroxx/foyer", rev = "c764af3" }
 
 [workspace.metadata.dylint]
 libraries = [{ path = "./lints" }]
