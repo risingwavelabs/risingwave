@@ -160,7 +160,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 tokio-postgres = { version = "0.7", features = ["with-uuid-1"] }
 tokio-retry = "0.3"
 tokio-stream = "0.1"
-tokio-util = { version = "0.7", features = ["codec", "io"] }
+tokio-util = { workspace = true, features = ["codec", "io"] }
 tonic = { workspace = true }
 tracing = "0.1"
 typed-builder = "^0.18"
