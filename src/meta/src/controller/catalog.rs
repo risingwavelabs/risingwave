@@ -114,6 +114,11 @@ impl CatalogController {
         }
     }
 
+    pub async fn init(&self) -> MetaResult<()> {
+        let inner = self.inner.write().await;
+        inner.init().await
+    }
+
     /// Used in `NotificationService::subscribe`.
     /// Need to pay attention to the order of acquiring locks to prevent deadlock problems.
     pub async fn get_inner_read_guard(&self) -> RwLockReadGuard<'_, CatalogControllerInner> {
@@ -123,6 +128,54 @@ impl CatalogController {
 
 pub struct CatalogControllerInner {
     pub(crate) db: DatabaseConnection,
+}
+
+impl CatalogControllerInner {
+    pub(crate) async fn init(&self) -> MetaResult<()> {
+        self.adhoc_update_table_sink_catalog().await?;
+        Ok(())
+    }
+
+    async fn adhoc_update_table_sink_catalog(&self) -> MetaResult<()> {
+        let txn = self.db.begin().await?;
+
+        let sinks: Vec<(SinkId, Option<TableId>, ColumnCatalogArray)> = Sink::find()
+            .select_only()
+            .columns([
+                sink::Column::SinkId,
+                sink::Column::TargetTable,
+                sink::Column::OriginalTargetColumns,
+            ])
+            .filter(sink::Column::TargetTable.is_not_null())
+            .into_tuple()
+            .all(&txn)
+            .await?;
+
+        for (sink_id, target_table, original_target_columns) in sinks {
+            if original_target_columns.to_protobuf().is_empty() {
+                let table = Table::find_by_id(target_table.unwrap())
+                    .one(&txn)
+                    .await?
+                    .ok_or_else(|| {
+                        MetaError::catalog_id_not_found("table", target_table.unwrap())
+                    })?;
+
+                tracing::info!("updating sink original table columns: sink_id: {}, table_id: {}, columns: {:?}", sink_id, table.table_id, table.columns);
+
+                sink::ActiveModel {
+                    sink_id: Set(sink_id as _),
+                    original_target_columns: Set(table.columns),
+                    ..Default::default()
+                }
+                .update(&txn)
+                .await?;
+            }
+        }
+
+        txn.commit().await?;
+
+        Ok(())
+    }
 }
 
 impl CatalogController {
@@ -3151,6 +3204,7 @@ mod tests {
     #[tokio::test]
     async fn test_database_func() -> MetaResult<()> {
         let mgr = CatalogController::new(MetaSrvEnv::for_test_with_sql_meta_store().await);
+        mgr.init().await?;
         let pb_database = PbDatabase {
             name: "db1".to_string(),
             owner: TEST_OWNER_ID as _,
@@ -3183,6 +3237,7 @@ mod tests {
     #[tokio::test]
     async fn test_schema_func() -> MetaResult<()> {
         let mgr = CatalogController::new(MetaSrvEnv::for_test_with_sql_meta_store().await);
+        mgr.init().await?;
         let pb_schema = PbSchema {
             database_id: TEST_DATABASE_ID as _,
             name: "schema1".to_string(),
@@ -3216,6 +3271,7 @@ mod tests {
     #[tokio::test]
     async fn test_create_view() -> MetaResult<()> {
         let mgr = CatalogController::new(MetaSrvEnv::for_test_with_sql_meta_store().await);
+        mgr.init().await?;
         let pb_view = PbView {
             schema_id: TEST_SCHEMA_ID as _,
             database_id: TEST_DATABASE_ID as _,
@@ -3241,6 +3297,7 @@ mod tests {
     #[tokio::test]
     async fn test_create_function() -> MetaResult<()> {
         let mgr = CatalogController::new(MetaSrvEnv::for_test_with_sql_meta_store().await);
+        mgr.init().await?;
         let test_data_type = risingwave_pb::data::DataType {
             type_name: risingwave_pb::data::data_type::TypeName::Int32 as _,
             ..Default::default()
@@ -3289,6 +3346,7 @@ mod tests {
     #[tokio::test]
     async fn test_alter_relation_rename() -> MetaResult<()> {
         let mgr = CatalogController::new(MetaSrvEnv::for_test_with_sql_meta_store().await);
+        mgr.init().await?;
         let pb_source = PbSource {
             schema_id: TEST_SCHEMA_ID as _,
             database_id: TEST_DATABASE_ID as _,
