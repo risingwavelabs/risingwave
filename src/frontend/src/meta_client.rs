@@ -124,6 +124,8 @@ pub trait FrontendMetaClient: Send + Sync {
         id: u32,
         rate_limit: Option<u32>,
     ) -> Result<()>;
+
+    async fn check_cluster_in_recovery(&self) -> Result<bool>;
 }
 
 pub struct FrontendMetaClientImpl(pub MetaClient);
@@ -311,5 +313,9 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
             .apply_throttle(kind, id, rate_limit)
             .await
             .map(|_| ())
+    }
+
+    async fn check_cluster_in_recovery(&self) -> Result<bool> {
+        self.0.check_cluster_in_recovery().await
     }
 }

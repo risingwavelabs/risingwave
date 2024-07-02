@@ -275,7 +275,8 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::HasTablePrivilege
             | Type::HasAnyColumnPrivilege
             | Type::HasSchemaPrivilege
-            | Type::MakeTimestamptz => self.impure = true,
+            | Type::MakeTimestamptz
+            | Type::PgIsInRecovery => self.impure = true,
         }
     }
 }

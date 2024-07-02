@@ -19,9 +19,9 @@ use risingwave_pb::common::HostAddress;
 use risingwave_pb::meta::cluster_service_server::ClusterService;
 use risingwave_pb::meta::{
     ActivateWorkerNodeRequest, ActivateWorkerNodeResponse, AddWorkerNodeRequest,
-    AddWorkerNodeResponse, DeleteWorkerNodeRequest, DeleteWorkerNodeResponse, ListAllNodesRequest,
-    ListAllNodesResponse, UpdateWorkerNodeSchedulabilityRequest,
-    UpdateWorkerNodeSchedulabilityResponse,
+    AddWorkerNodeResponse, CheckClusterInRecoveryRequest, CheckClusterInRecoveryResponse,
+    DeleteWorkerNodeRequest, DeleteWorkerNodeResponse, ListAllNodesRequest, ListAllNodesResponse,
+    UpdateWorkerNodeSchedulabilityRequest, UpdateWorkerNodeSchedulabilityResponse,
 };
 use thiserror_ext::AsReport;
 use tonic::{Request, Response, Status};
@@ -172,5 +172,12 @@ impl ClusterService for ClusterServiceImpl {
             status: None,
             nodes: node_list,
         }))
+    }
+
+    async fn check_cluster_in_recovery(
+        &self,
+        _request: Request<CheckClusterInRecoveryRequest>,
+    ) -> Result<Response<CheckClusterInRecoveryResponse>, Status> {
+        todo!()
     }
 }

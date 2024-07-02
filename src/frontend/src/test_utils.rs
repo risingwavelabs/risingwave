@@ -1084,6 +1084,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
     ) -> RpcResult<()> {
         unimplemented!()
     }
+
+    async fn check_cluster_in_recovery(&self) -> RpcResult<bool> {
+        Ok(false)
+    }
 }
 
 #[cfg(test)]

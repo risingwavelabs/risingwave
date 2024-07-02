@@ -14,17 +14,20 @@
 
 use std::sync::Arc;
 
-use risingwave_common::session_config::SearchPath;
-use risingwave_expr::define_context;
+use risingwave_expr::{capture_context, function, Result};
 
-use crate::session::AuthContext;
+use super::context::META_CLIENT;
+use crate::meta_client::FrontendMetaClient;
 
-// Only for local mode.
-define_context! {
-    pub(super) CATALOG_READER: crate::catalog::CatalogReader,
-    pub(super) USER_INFO_READER: crate::user::user_service::UserInfoReader,
-    pub(super) AUTH_CONTEXT: Arc<AuthContext>,
-    pub(super) DB_NAME: String,
-    pub(super) SEARCH_PATH: SearchPath,
-    pub(super) META_CLIENT: Arc<dyn crate::meta_client::FrontendMetaClient>,
+#[function("pg_is_in_recovery() -> boolean", volatile)]
+async fn pg_is_in_recovery() -> Result<bool> {
+    pg_is_in_recovery_impl_captured().await
+}
+
+#[capture_context(META_CLIENT)]
+async fn pg_is_in_recovery_impl(meta_client: &Arc<dyn FrontendMetaClient>) -> Result<bool> {
+    Ok(meta_client
+        .check_cluster_in_recovery()
+        .await
+        .unwrap_or(true))
 }
