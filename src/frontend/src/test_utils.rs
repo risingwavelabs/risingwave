@@ -35,8 +35,8 @@ use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_pb::backup_service::MetaSnapshotMetadata;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{
-    PbComment, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbSubscription,
-    PbTable, PbView, Table,
+    PbComment, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbStreamJobStatus,
+    PbSubscription, PbTable, PbView, Table,
 };
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::alter_owner_request::Object;
@@ -274,6 +274,7 @@ impl CatalogWriter for MockCatalogWriter {
         _graph: StreamFragmentGraph,
     ) -> Result<()> {
         table.id = self.gen_id();
+        table.stream_job_status = PbStreamJobStatus::Created as _;
         self.catalog.write().create_table(&table);
         self.add_table_or_source_id(table.id, table.schema_id, table.database_id);
         Ok(())
@@ -305,10 +306,11 @@ impl CatalogWriter for MockCatalogWriter {
     async fn replace_table(
         &self,
         _source: Option<PbSource>,
-        table: PbTable,
+        mut table: PbTable,
         _graph: StreamFragmentGraph,
         _mapping: ColIndexMapping,
     ) -> Result<()> {
+        table.stream_job_status = PbStreamJobStatus::Created as _;
         self.catalog.write().update_table(&table);
         Ok(())
     }
@@ -345,6 +347,7 @@ impl CatalogWriter for MockCatalogWriter {
         _graph: StreamFragmentGraph,
     ) -> Result<()> {
         index_table.id = self.gen_id();
+        index_table.stream_job_status = PbStreamJobStatus::Created as _;
         self.catalog.write().create_table(&index_table);
         self.add_table_or_index_id(
             index_table.id,

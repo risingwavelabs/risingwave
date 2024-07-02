@@ -612,7 +612,7 @@ impl SchemaCatalog {
     pub fn get_created_table_by_name(&self, table_name: &str) -> Option<&Arc<TableCatalog>> {
         self.table_by_name
             .get(table_name)
-            .filter(|&table| table.stream_job_status != StreamJobStatus::Creating)
+            .filter(|&table| table.stream_job_status == StreamJobStatus::Created)
     }
 
     pub fn get_table_by_id(&self, table_id: &TableId) -> Option<&Arc<TableCatalog>> {
@@ -622,7 +622,7 @@ impl SchemaCatalog {
     pub fn get_created_table_by_id(&self, table_id: &TableId) -> Option<&Arc<TableCatalog>> {
         self.table_by_id
             .get(table_id)
-            .filter(|&table| table.stream_job_status != StreamJobStatus::Creating)
+            .filter(|&table| table.stream_job_status == StreamJobStatus::Created)
     }
 
     pub fn get_view_by_name(&self, view_name: &str) -> Option<&Arc<ViewCatalog>> {

@@ -332,7 +332,6 @@ pub async fn handle_rename_database(
 
 #[cfg(test)]
 mod tests {
-
     use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
 
     use crate::catalog::root_catalog::SchemaPath;
