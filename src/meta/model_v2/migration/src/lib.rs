@@ -13,6 +13,8 @@ mod m20240506_112555_subscription_partial_ckpt;
 mod m20240525_090457_secret;
 mod m20240617_070131_index_column_properties;
 mod m20240618_072634_function_compressed_binary;
+mod m20240702_080451_system_param_value;
+mod m20240702_084927_unnecessary_fk;
 
 pub struct Migrator;
 
@@ -31,6 +33,8 @@ impl MigratorTrait for Migrator {
             Box::new(m20240525_090457_secret::Migration),
             Box::new(m20240618_072634_function_compressed_binary::Migration),
             Box::new(m20240617_070131_index_column_properties::Migration),
+            Box::new(m20240702_080451_system_param_value::Migration),
+            Box::new(m20240702_084927_unnecessary_fk::Migration),
         ]
     }
 }
