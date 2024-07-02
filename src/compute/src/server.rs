@@ -55,7 +55,7 @@ use risingwave_storage::hummock::compactor::{
     new_compaction_await_tree_reg_ref, start_compactor, CompactionExecutor, CompactorContext,
 };
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
-use risingwave_storage::hummock::{HummockMemoryCollector, MemoryLimiter};
+use risingwave_storage::hummock::{HummockMemoryCollector, MemoryLimiter, TieredCacheReconfigurer};
 use risingwave_storage::monitor::{
     global_hummock_state_store_metrics, global_storage_metrics, monitor_cache,
     GLOBAL_COMPACTOR_METRICS, GLOBAL_HUMMOCK_METRICS, GLOBAL_OBJECT_STORE_METRICS,
@@ -266,6 +266,15 @@ pub async fn compute_node_serve(
         tokio::spawn(async move {
             backup_reader
                 .watch_config_change(system_params_mgr.watch_params())
+                .await;
+        });
+
+        let meta_cache = storage.sstable_store().meta_cache().clone();
+        let block_cache = storage.sstable_store().block_cache().clone();
+        let system_params_mgr = system_params_manager.clone();
+        tokio::spawn(async move {
+            TieredCacheReconfigurer::new(meta_cache, block_cache)
+                .run(system_params_mgr.watch_params())
                 .await;
         });
     }

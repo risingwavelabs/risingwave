@@ -99,6 +99,8 @@ macro_rules! for_all_params {
             { enable_tracing,                           bool,   Some(false),                                true,   "Whether to enable distributed tracing.", },
             { use_new_object_prefix_strategy,           bool,   None,                                       false,  "Whether to split object prefix.", },
             { license_key,                              String, Some(default_license_key()),                true,   "The license key to activate enterprise features.", },
+            { tracing_threshold_tiered_cache_read_ms,   u32,    Some(1000),                                 true,   "Threshold to record tiered cache read with minitrace.", },
+            { tracing_threshold_tiered_cache_write_ms,  u32,    Some(1000),                                 true,   "Threshold to record tiered cache write with minitrace.", },
         }
     };
 }
@@ -457,6 +459,8 @@ mod tests {
             (PAUSE_ON_NEXT_BOOTSTRAP_KEY, "false"),
             (ENABLE_TRACING_KEY, "true"),
             (USE_NEW_OBJECT_PREFIX_STRATEGY_KEY, "false"),
+            (TRACING_THRESHOLD_TIERED_CACHE_READ_MS_KEY, "1000"),
+            (TRACING_THRESHOLD_TIERED_CACHE_WRITE_MS_KEY, "1000"),
             (LICENSE_KEY_KEY, "foo"),
             ("a_deprecated_param", "foo"),
         ];

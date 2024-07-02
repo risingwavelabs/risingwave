@@ -172,4 +172,16 @@ where
     fn license_key(&self) -> &str {
         self.inner().license_key.as_deref().unwrap_or_default()
     }
+
+    fn tracing_threshold_tiered_cache_read_ms(&self) -> u32 {
+        self.inner()
+            .tracing_threshold_tiered_cache_read_ms
+            .unwrap_or_else(default::tracing_threshold_tiered_cache_read_ms)
+    }
+
+    fn tracing_threshold_tiered_cache_write_ms(&self) -> u32 {
+        self.inner()
+            .tracing_threshold_tiered_cache_write_ms
+            .unwrap_or_else(default::tracing_threshold_tiered_cache_write_ms)
+    }
 }

@@ -53,6 +53,9 @@ pub mod write_limiter;
 pub mod recent_filter;
 pub use recent_filter::*;
 
+pub mod tiered_cache_reconfigurer;
+pub use tiered_cache_reconfigurer::*;
+
 pub mod block_stream;
 
 pub use error::*;
