@@ -820,17 +820,14 @@ pub async fn refresh_fragment_info_metrics_v2(
         }
     };
 
-    let pu_addr_mapping: HashMap<u32, String> = worker_nodes
+    let worker_addr_mapping: HashMap<u32, String> = worker_nodes
         .into_iter()
-        .flat_map(|worker_node| {
+        .map(|worker_node| {
             let addr = match worker_node.host {
                 Some(host) => format!("{}:{}", host.host, host.port),
                 None => "".to_owned(),
             };
-            worker_node
-                .parallel_units
-                .into_iter()
-                .map(move |pu| (pu.id, addr.clone()))
+            (worker_node.id, addr)
         })
         .collect();
     let table_compaction_group_id_mapping = hummock_manager
@@ -847,7 +844,7 @@ pub async fn refresh_fragment_info_metrics_v2(
         let fragment_id_str = actor_location.fragment_id.to_string();
         // Report a dummy gauge metrics with (fragment id, actor id, node
         // address) as its label
-        if let Some(address) = pu_addr_mapping.get(&(actor_location.parallel_unit_id as u32)) {
+        if let Some(address) = worker_addr_mapping.get(&{ actor_location.worker_id }) {
             meta_metrics
                 .actor_info
                 .with_label_values(&[&actor_id_str, &fragment_id_str, address])

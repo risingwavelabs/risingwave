@@ -61,8 +61,10 @@ message WorkerNode {
   WorkerType type = 2;
   HostAddress host = 3;
   State state = 4;
-  // TODO #8940 `parallel_units` should be moved into `Property`
-  repeated ParallelUnit parallel_units = 5;
+
+  reserved 5;
+  reserved "parallel_units";
+
   Property property = 6;
 
   // Ranges from 0 to 1023, used to generate the machine ID field in the global unique ID.
@@ -75,6 +77,8 @@ message WorkerNode {
   // It's populated by meta node, when the worker node is added by meta node.
   // It's not persistent in meta store.
   optional uint64 started_at = 9;
+
+  uint32 parallelism = 10;
 }
 
 message Buffer {

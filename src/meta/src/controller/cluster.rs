@@ -20,6 +20,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use itertools::Itertools;
+use risingwave_common::hash::WorkerSlotId;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::resource_util::cpu::total_cpu_available;
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
@@ -27,12 +28,9 @@ use risingwave_common::RW_VERSION;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_meta_model_v2::prelude::{Worker, WorkerProperty};
 use risingwave_meta_model_v2::worker::{WorkerStatus, WorkerType};
-use risingwave_meta_model_v2::{worker, worker_property, I32Array, TransactionId, WorkerId};
+use risingwave_meta_model_v2::{worker, worker_property, TransactionId, WorkerId};
 use risingwave_pb::common::worker_node::{PbProperty, PbResource, PbState};
-use risingwave_pb::common::{
-    HostAddress, ParallelUnit, PbHostAddress, PbParallelUnit, PbWorkerNode, PbWorkerType,
-    WorkerNode,
-};
+use risingwave_pb::common::{HostAddress, PbHostAddress, PbWorkerNode, PbWorkerType, WorkerNode};
 use risingwave_pb::meta::add_worker_node_request::Property as AddNodeProperty;
 use risingwave_pb::meta::heartbeat_request;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
@@ -80,20 +78,7 @@ impl From<WorkerInfo> for PbWorkerNode {
                 port: info.0.port,
             }),
             state: PbState::from(info.0.status) as _,
-            parallel_units: info
-                .1
-                .as_ref()
-                .map(|p| {
-                    p.parallel_unit_ids
-                        .0
-                        .iter()
-                        .map(|&id| PbParallelUnit {
-                            id: id as _,
-                            worker_node_id: info.0.worker_id as _,
-                        })
-                        .collect_vec()
-                })
-                .unwrap_or_default(),
+            parallelism: info.1.as_ref().map(|p| p.parallelism).unwrap_or_default() as u32,
             property: info.1.as_ref().map(|p| PbProperty {
                 is_streaming: p.is_streaming,
                 is_serving: p.is_serving,
@@ -367,8 +352,8 @@ impl ClusterController {
             .await
     }
 
-    pub async fn list_active_parallel_units(&self) -> MetaResult<Vec<ParallelUnit>> {
-        self.inner.read().await.list_active_parallel_units().await
+    pub async fn list_active_worker_slots(&self) -> MetaResult<Vec<WorkerSlotId>> {
+        self.inner.read().await.list_active_worker_slots().await
     }
 
     /// Get the cluster info used for scheduling a streaming job, containing all nodes that are
@@ -466,7 +451,7 @@ fn meta_node_info(host: &str, started_at: Option<u64>) -> PbWorkerNode {
             .map(HostAddr::to_protobuf)
             .ok(),
         state: PbState::Running as _,
-        parallel_units: vec![],
+        parallelism: 0,
         property: None,
         transactional_id: None,
         resource: Some(risingwave_pb::common::worker_node::Resource {
@@ -599,13 +584,6 @@ impl ClusterControllerInner {
     ) -> MetaResult<WorkerId> {
         let txn = self.db.begin().await?;
 
-        // TODO: remove this workaround when we deprecate parallel unit ids.
-        let derive_parallel_units = |txn_id: TransactionId, start: i32, end: i32| {
-            (start..end)
-                .map(|idx| (idx << Self::MAX_WORKER_REUSABLE_ID_BITS) + txn_id)
-                .collect_vec()
-        };
-
         let worker = Worker::find()
             .filter(
                 worker::Column::Host
@@ -620,28 +598,26 @@ impl ClusterControllerInner {
             assert_eq!(worker.worker_type, r#type.into());
             return if worker.worker_type == WorkerType::ComputeNode {
                 let property = property.unwrap();
-                let txn_id = worker.transaction_id.unwrap();
-                let mut current_parallelism = property.parallel_unit_ids.0.clone();
+                let mut current_parallelism = property.parallelism as usize;
                 let new_parallelism = add_property.worker_node_parallelism as usize;
-
-                match new_parallelism.cmp(&current_parallelism.len()) {
+                match new_parallelism.cmp(&current_parallelism) {
                     Ordering::Less => {
                         if !self.disable_automatic_parallelism_control {
                             // Handing over to the subsequent recovery loop for a forced reschedule.
                             tracing::info!(
                                 "worker {} parallelism reduced from {} to {}",
                                 worker.worker_id,
-                                current_parallelism.len(),
+                                current_parallelism,
                                 new_parallelism
                             );
-                            current_parallelism.truncate(new_parallelism);
+                            current_parallelism = new_parallelism;
                         } else {
                             // Warn and keep the original parallelism if the worker registered with a
                             // smaller parallelism.
                             tracing::warn!(
                                 "worker {} parallelism is less than current, current is {}, but received {}",
                                 worker.worker_id,
-                                current_parallelism.len(),
+                                current_parallelism,
                                 new_parallelism
                             );
                         }
@@ -650,14 +626,10 @@ impl ClusterControllerInner {
                         tracing::info!(
                             "worker {} parallelism updated from {} to {}",
                             worker.worker_id,
-                            current_parallelism.len(),
+                            current_parallelism,
                             new_parallelism
                         );
-                        current_parallelism.extend(derive_parallel_units(
-                            txn_id,
-                            current_parallelism.len() as _,
-                            new_parallelism as _,
-                        ));
+                        current_parallelism = new_parallelism;
                     }
                     Ordering::Equal => {}
                 }
@@ -666,7 +638,7 @@ impl ClusterControllerInner {
                 // keep `is_unschedulable` unchanged.
                 property.is_streaming = Set(add_property.is_streaming);
                 property.is_serving = Set(add_property.is_serving);
-                property.parallel_unit_ids = Set(I32Array(current_parallelism));
+                property.parallelism = Set(current_parallelism as _);
 
                 WorkerProperty::update(property).exec(&txn).await?;
                 txn.commit().await?;
@@ -694,11 +666,10 @@ impl ClusterControllerInner {
         if r#type == PbWorkerType::ComputeNode {
             let property = worker_property::ActiveModel {
                 worker_id: Set(worker_id),
-                parallel_unit_ids: Set(I32Array(derive_parallel_units(
-                    *txn_id.as_ref().unwrap(),
-                    0,
-                    add_property.worker_node_parallelism as _,
-                ))),
+                parallelism: Set(add_property
+                    .worker_node_parallelism
+                    .try_into()
+                    .expect("invalid parallelism")),
                 is_streaming: Set(add_property.is_streaming),
                 is_serving: Set(add_property.is_serving),
                 is_unschedulable: Set(add_property.is_unschedulable),
@@ -843,23 +814,20 @@ impl ClusterControllerInner {
             .collect_vec())
     }
 
-    pub async fn list_active_parallel_units(&self) -> MetaResult<Vec<ParallelUnit>> {
-        let parallel_units: Vec<(WorkerId, I32Array)> = WorkerProperty::find()
+    pub async fn list_active_worker_slots(&self) -> MetaResult<Vec<WorkerSlotId>> {
+        let worker_parallelisms: Vec<(WorkerId, i32)> = WorkerProperty::find()
             .select_only()
             .column(worker_property::Column::WorkerId)
-            .column(worker_property::Column::ParallelUnitIds)
+            .column(worker_property::Column::Parallelism)
             .inner_join(Worker)
             .filter(worker::Column::Status.eq(WorkerStatus::Running))
             .into_tuple()
             .all(&self.db)
             .await?;
-        Ok(parallel_units
+        Ok(worker_parallelisms
             .into_iter()
-            .flat_map(|(id, pu)| {
-                pu.0.into_iter().map(move |parallel_unit_id| ParallelUnit {
-                    id: parallel_unit_id as _,
-                    worker_node_id: id as _,
-                })
+            .flat_map(|(worker_id, parallelism)| {
+                (0..parallelism).map(move |idx| WorkerSlotId::new(worker_id as u32, idx as usize))
             })
             .collect_vec())
     }
@@ -889,32 +857,22 @@ impl ClusterControllerInner {
     pub async fn get_streaming_cluster_info(&self) -> MetaResult<StreamingClusterInfo> {
         let mut streaming_workers = self.list_active_streaming_workers().await?;
 
-        let unschedulable_worker_node = streaming_workers
+        let unschedulable_workers = streaming_workers
             .extract_if(|worker| {
                 worker
                     .property
                     .as_ref()
                     .map_or(false, |p| p.is_unschedulable)
             })
-            .collect_vec();
+            .map(|w| w.id)
+            .collect();
 
         let active_workers: HashMap<_, _> =
             streaming_workers.into_iter().map(|w| (w.id, w)).collect();
 
-        let active_parallel_units = active_workers
-            .values()
-            .flat_map(|worker| worker.parallel_units.iter().map(|p| (p.id, p.clone())))
-            .collect();
-
-        let unschedulable_parallel_units = unschedulable_worker_node
-            .iter()
-            .flat_map(|worker| worker.parallel_units.iter().map(|p| (p.id, p.clone())))
-            .collect();
-
         Ok(StreamingClusterInfo {
             worker_nodes: active_workers,
-            parallel_units: active_parallel_units,
-            unschedulable_parallel_units,
+            unschedulable_workers,
         })
     }
 
@@ -978,7 +936,7 @@ mod tests {
         }
 
         // Since no worker is active, the parallel unit count should be 0.
-        assert_eq!(cluster_ctl.list_active_parallel_units().await?.len(), 0);
+        assert_eq!(cluster_ctl.list_active_worker_slots().await?.len(), 0);
 
         for id in &worker_ids {
             cluster_ctl.activate_worker(*id).await?;
@@ -997,7 +955,7 @@ mod tests {
             worker_count
         );
         assert_eq!(
-            cluster_ctl.list_active_parallel_units().await?.len(),
+            cluster_ctl.list_active_worker_slots().await?.len(),
             parallelism_num * worker_count
         );
 
@@ -1022,9 +980,9 @@ mod tests {
             cluster_ctl.list_active_serving_workers().await?.len(),
             worker_count - 1
         );
-        let parallel_units = cluster_ctl.list_active_parallel_units().await?;
-        assert!(parallel_units.iter().map(|pu| pu.id).all_unique());
-        assert_eq!(parallel_units.len(), parallelism_num * (worker_count + 1));
+        let worker_slots = cluster_ctl.list_active_worker_slots().await?;
+        assert!(worker_slots.iter().all_unique());
+        assert_eq!(worker_slots.len(), parallelism_num * (worker_count + 1));
 
         // delete workers.
         for host in hosts {
@@ -1032,7 +990,7 @@ mod tests {
         }
         assert_eq!(cluster_ctl.list_active_streaming_workers().await?.len(), 0);
         assert_eq!(cluster_ctl.list_active_serving_workers().await?.len(), 0);
-        assert_eq!(cluster_ctl.list_active_parallel_units().await?.len(), 0);
+        assert_eq!(cluster_ctl.list_active_worker_slots().await?.len(), 0);
 
         Ok(())
     }
