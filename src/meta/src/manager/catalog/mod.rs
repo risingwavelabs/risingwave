@@ -178,6 +178,7 @@ impl CatalogManager {
         self.init_user().await?;
         self.init_database().await?;
         self.source_backward_compat_check().await?;
+        self.table_sink_catalog_update().await?;
         Ok(())
     }
 
@@ -228,6 +229,36 @@ impl CatalogManager {
             sources.insert(source.id, source);
         }
         commit_meta!(self, sources)?;
+        Ok(())
+    }
+
+    async fn table_sink_catalog_update(&self) -> MetaResult<()> {
+        let core = &mut *self.core.lock().await;
+        let mut sinks = BTreeMapTransaction::new(&mut core.database.sinks);
+        let tables = BTreeMapTransaction::new(&mut core.database.tables);
+        let legacy_sinks = sinks
+            .tree_ref()
+            .iter()
+            .filter(|(_, sink)| {
+                sink.target_table.is_some() && sink.original_target_columns.is_empty()
+            })
+            .map(|(_, sink)| sink.clone())
+            .collect_vec();
+
+        for mut sink in legacy_sinks {
+            let target_table = sink.target_table();
+            sink.original_target_columns
+                .clone_from(&tables.get(&target_table).unwrap().columns);
+            tracing::info!(
+                "updating sink {} target table columns {:?}",
+                sink.id,
+                sink.original_target_columns
+            );
+
+            sinks.insert(sink.id, sink);
+        }
+        commit_meta!(self, sinks)?;
+
         Ok(())
     }
 }
@@ -1105,7 +1136,14 @@ impl CatalogManager {
 
                 if let Some((table, source)) = target_table {
                     version = self
-                        .finish_replace_table_procedure(&source, &table, None, Some(sink_id), None)
+                        .finish_replace_table_procedure(
+                            &source,
+                            &table,
+                            None,
+                            Some(sink_id),
+                            None,
+                            vec![],
+                        )
                         .await?;
                 }
 
@@ -3457,12 +3495,14 @@ impl CatalogManager {
         table_col_index_mapping: Option<ColIndexMapping>,
         creating_sink_id: Option<SinkId>,
         dropping_sink_id: Option<SinkId>,
+        updated_sink_ids: Vec<SinkId>,
     ) -> MetaResult<NotificationVersion> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
         let mut sources = BTreeMapTransaction::new(&mut database_core.sources);
         let mut indexes = BTreeMapTransaction::new(&mut database_core.indexes);
+        let mut sinks = BTreeMapTransaction::new(&mut database_core.sinks);
         let key = (table.database_id, table.schema_id, table.name.clone());
 
         assert!(
@@ -3470,6 +3510,15 @@ impl CatalogManager {
                 && database_core.in_progress_creation_tracker.contains(&key),
             "table must exist and be in altering procedure"
         );
+
+        let original_table = tables.get(&table.id).unwrap();
+        let mut updated_sinks = vec![];
+        for sink_id in updated_sink_ids {
+            let mut sink = sinks.get_mut(sink_id).unwrap();
+            sink.original_target_columns
+                .clone_from(&original_table.columns);
+            updated_sinks.push(sink.clone());
+        }
 
         if let Some(source) = source {
             let source_key = (source.database_id, source.schema_id, source.name.clone());
@@ -3528,7 +3577,7 @@ impl CatalogManager {
 
         tables.insert(table.id, table.clone());
 
-        commit_meta!(self, tables, indexes, sources)?;
+        commit_meta!(self, tables, indexes, sources, sinks)?;
 
         // Group notification
         let version = self
@@ -3544,6 +3593,9 @@ impl CatalogManager {
                     }))
                     .chain(updated_indexes.into_iter().map(|index| Relation {
                         relation_info: RelationInfo::Index(index).into(),
+                    }))
+                    .chain(updated_sinks.into_iter().map(|sink| Relation {
+                        relation_info: RelationInfo::Sink(sink).into(),
                     }))
                     .collect_vec(),
                 }),
@@ -3895,6 +3947,17 @@ impl CatalogManager {
             .get(&subscription_id)
             .ok_or_else(|| MetaError::catalog_id_not_found("subscription", subscription_id))?;
         Ok(subscription.clone())
+    }
+
+    pub async fn get_sinks(&self, sink_ids: &[SinkId]) -> Vec<Sink> {
+        let mut sinks = vec![];
+        let guard = self.core.lock().await;
+        for sink_id in sink_ids {
+            if let Some(sink) = guard.database.sinks.get(sink_id) {
+                sinks.push(sink.clone());
+            }
+        }
+        sinks
     }
 
     pub async fn get_created_table_ids(&self) -> Vec<u32> {

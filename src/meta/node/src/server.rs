@@ -443,7 +443,9 @@ pub async fn start_service_as_election_leader(
                     .await
                     .unwrap(),
             );
-            let catalog_controller = Arc::new(CatalogController::new(env.clone()));
+            let controller = CatalogController::new(env.clone());
+            controller.init().await?;
+            let catalog_controller = Arc::new(controller);
             MetadataManager::new_v2(cluster_controller, catalog_controller)
         }
     };
