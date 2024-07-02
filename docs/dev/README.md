@@ -2,7 +2,9 @@
 
 This is the source of the RisingWave Developer guide, published at
 <https://risingwavelabs.github.io/risingwave/> (via GitHub Actions to GitHub Pages).
-It is written in Markdown, using the [mdbook](https://rust-lang.github.io/mdBook/) tool to convert to HTML.
+(Note: the url was previously for the crate rustdocs, and now they are moved to <https://risingwavelabs.github.io/risingwave/rustdoc>)
+
+The book is written in Markdown, using the [mdbook](https://rust-lang.github.io/mdBook/) tool to convert to HTML.
 
 Edit `SUMMARY.md` to add new chapters.
 

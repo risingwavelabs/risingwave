@@ -1,13 +1,13 @@
 # Summary
 
 [Introduction](./intro.md)
-[Contribution Procedure](./contribution.md)
+[Contribution Guidelines](./contributing.md)
 
 ---
 
 # Building and debugging RisingWave
 
-- [How to build and run RisingWave](./build-and-run/intro.md)
+- [Building and Running](./build-and-run/intro.md)
 - [Testing](./tests/intro.md)
 - [Debugging](./debugging.md)
 - [Observability](./observability.md)
@@ -16,9 +16,9 @@
 
 # Benchmarking and Profiling
 
-- [CPU Profiling Guide](./benchmark-and-profile/cpu-profiling.md)
-- [Memory (Heap) Profiling Guide](./benchmark-and-profile/memory-profiling.md)
-- [Microbench Guide](./benchmark-and-profile/microbenchmarks.md)
+- [CPU Profiling](./benchmark-and-profile/cpu-profiling.md)
+- [Memory (Heap) Profiling](./benchmark-and-profile/memory-profiling.md)
+- [Microbench](./benchmark-and-profile/microbenchmarks.md)
 
 ---
 

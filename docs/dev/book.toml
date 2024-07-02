@@ -1,6 +1,6 @@
 [book]
 authors = ["xxchan"]
-title = "RisingWave Dev Guide"
+title = "RisingWave Developer Guide"
 
 [preprocessor.toc]
 command = "mdbook-toc"
