@@ -2993,7 +2993,6 @@ impl CatalogManager {
             database_core.mark_creating(&source_key);
             database_core.mark_creating(&mview_key);
             database_core.mark_creating_streaming_job(table.id, mview_key);
-            refcnt_inc_source_secret_ref(database_core, source)?;
             ensure!(table.dependent_relations.is_empty());
             // source and table
             user_core.increase_ref_count(source.owner, 2);
@@ -3231,7 +3230,6 @@ impl CatalogManager {
             for &dependent_relation_id in &sink.dependent_relations {
                 database_core.increase_relation_ref_count(dependent_relation_id);
             }
-            refcnt_inc_sink_secret_ref(database_core, sink);
             user_core.increase_ref(sink.owner);
             refcnt_inc_sink_secret_ref(database_core, sink);
             // We have validate the status of connection before starting the procedure.
