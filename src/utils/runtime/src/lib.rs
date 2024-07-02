@@ -46,6 +46,10 @@ use prof::*;
 /// Users may also send a second `SIGINT` signal to force shutdown. In this case, this function
 /// won't return and the process will exit with code 1.
 ///
+/// When `f` returns, this function will assume that the component has finished its work and it's
+/// safe to exit. Therefore, the main runtime to drive the future will be shutdown **without**
+/// waiting for background tasks to finish. Then, the output of `f` will be returned.
+///
 /// # Environment variables
 ///
 /// Currently, the following environment variables will be read and used to configure the runtime.
