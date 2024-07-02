@@ -467,7 +467,8 @@ impl DdlController {
     async fn create_source(&self, mut source: Source) -> MetaResult<NotificationVersion> {
         match &self.metadata_manager {
             MetadataManager::V1(mgr) => {
-                source.id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
+                let source_id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
+                source.id = source_id;
                 // set the initialized_at_epoch to the current epoch.
                 source.initialized_at_epoch = Some(Epoch::now().0);
                 source.initialized_at_cluster_version = Some(current_cluster_version());
@@ -485,7 +486,8 @@ impl DdlController {
 
                 mgr.catalog_manager
                     .finish_create_source_procedure(source, vec![])
-                    .await
+                    .await?;
+                mgr.wait_streaming_job_finished(source_id).await
             }
             MetadataManager::V2(mgr) => {
                 mgr.catalog_controller
@@ -1288,7 +1290,7 @@ impl DdlController {
         let job_id = stream_job.id();
         tracing::debug!(id = job_id, "creating stream job");
 
-        let result: MetaResult<()> = try {
+        let result: MetaResult<NotificationVersion> = try {
             // Add table fragments to meta store with state: `State::Initial`.
             mgr.fragment_manager
                 .start_create_table_fragments(table_fragments.clone())
@@ -1299,44 +1301,41 @@ impl DdlController {
                 .await?
         };
 
-        if let Err(e) = result {
-            match stream_job.create_type() {
-                CreateType::Background => {
-                    tracing::error!(id = job_id, error = %e.as_report(), "finish stream job failed");
-                    let should_cancel = match mgr
-                        .fragment_manager
-                        .select_table_fragments_by_table_id(&job_id.into())
-                        .await
-                    {
-                        Err(err) => err.is_fragment_not_found(),
-                        Ok(table_fragments) => table_fragments.is_initial(),
-                    };
-                    if should_cancel {
-                        // If the table fragments are not found or in initial state, it means that the stream job has not been created.
-                        // We need to cancel the stream job.
+        match result {
+            Err(e) => {
+                match stream_job.create_type() {
+                    CreateType::Background => {
+                        tracing::error!(id = job_id, error = %e.as_report(), "finish stream job failed");
+                        let should_cancel = match mgr
+                            .fragment_manager
+                            .select_table_fragments_by_table_id(&job_id.into())
+                            .await
+                        {
+                            Err(err) => err.is_fragment_not_found(),
+                            Ok(table_fragments) => table_fragments.is_initial(),
+                        };
+                        if should_cancel {
+                            // If the table fragments are not found or in initial state, it means that the stream job has not been created.
+                            // We need to cancel the stream job.
+                            self.cancel_stream_job(&stream_job, internal_tables, Some(&e))
+                                .await?;
+                        } else {
+                            // NOTE: This assumes that we will trigger recovery,
+                            // and recover stream job progress.
+                        }
+                    }
+                    _ => {
                         self.cancel_stream_job(&stream_job, internal_tables, Some(&e))
                             .await?;
-                    } else {
-                        // NOTE: This assumes that we will trigger recovery,
-                        // and recover stream job progress.
                     }
                 }
-                _ => {
-                    self.cancel_stream_job(&stream_job, internal_tables, Some(&e))
-                        .await?;
-                }
+                Err(e)
             }
-            return Err(e);
-        };
-
-        tracing::debug!(id = job_id, "finishing stream job");
-        let version = mgr
-            .catalog_manager
-            .finish_stream_job(stream_job, internal_tables)
-            .await?;
-        tracing::debug!(id = job_id, "finished stream job");
-
-        Ok(version)
+            Ok(version) => {
+                tracing::info!(id = job_id, "finish stream job succeeded");
+                Ok(version)
+            }
+        }
     }
 
     async fn drop_streaming_job(
@@ -1667,6 +1666,7 @@ impl DdlController {
             mv_table_id: stream_job.mv_table(),
             create_type: stream_job.create_type(),
             ddl_type: stream_job.into(),
+            streaming_job: stream_job.clone(),
             replace_table_job_info,
             option: CreateStreamingJobOption {},
         };
@@ -1990,6 +1990,8 @@ impl DdlController {
             dispatchers,
             building_locations,
             existing_locations,
+            streaming_job: stream_job.clone(),
+            dummy_id: dummy_table_id,
         };
 
         Ok((ctx, table_fragments))

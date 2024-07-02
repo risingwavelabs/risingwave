@@ -21,6 +21,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::DefaultParallelism;
 use risingwave_meta_model_v2::StreamingParallelism;
+use risingwave_pb::catalog::Table;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::State;
@@ -28,21 +29,19 @@ use risingwave_pb::meta::{PausedReason, Recovery};
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::AddMutation;
 use thiserror_ext::AsReport;
-use tokio::sync::oneshot;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tracing::{debug, warn, Instrument};
 
 use super::TracedEpoch;
 use crate::barrier::command::CommandContext;
 use crate::barrier::info::InflightActorInfo;
-use crate::barrier::notifier::Notifier;
 use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::rpc::ControlStreamManager;
 use crate::barrier::schedule::ScheduledBarriers;
 use crate::barrier::state::BarrierManagerState;
 use crate::barrier::{BarrierKind, Command, GlobalBarrierManager, GlobalBarrierManagerContext};
 use crate::controller::catalog::ReleaseContext;
-use crate::manager::{ActiveStreamingWorkerNodes, MetadataManager, WorkerId};
+use crate::manager::{ActiveStreamingWorkerNodes, MetadataManager, StreamingJob, WorkerId};
 use crate::model::{MetadataModel, MigrationPlan, TableFragments, TableParallelism};
 use crate::stream::{build_actor_connector_splits, RescheduleOptions, TableResizePolicy};
 use crate::{model, MetaResult};
@@ -131,12 +130,14 @@ impl GlobalBarrierManagerContext {
         let mgr = self.metadata_manager.as_v1_ref();
         let mviews = mgr.catalog_manager.list_creating_background_mvs().await;
 
+        // TODO: Since we already have streaming job which contains definitions,
+        // perhaps we can just remove this.
         let mut mview_definitions = HashMap::new();
         let mut table_map = HashMap::new();
         let mut table_fragment_map = HashMap::new();
         let mut upstream_mv_counts = HashMap::new();
-        let mut senders = HashMap::new();
-        let mut receivers = Vec::new();
+        let mut table_internal_table_map: HashMap<TableId, Vec<Table>> = HashMap::new();
+        let mut table_stream_job_map = HashMap::new();
         for mview in mviews {
             let table_id = TableId::new(mview.id);
             let fragments = mgr
@@ -145,6 +146,7 @@ impl GlobalBarrierManagerContext {
                 .await?;
             let internal_table_ids = fragments.internal_table_ids();
             let internal_tables = mgr.catalog_manager.get_tables(&internal_table_ids).await;
+            let stream_job = StreamingJob::MaterializedView(mview.clone());
             if fragments.is_created() {
                 // If the mview is already created, we don't need to recover it.
                 mgr.catalog_manager
@@ -156,15 +158,8 @@ impl GlobalBarrierManagerContext {
                 mview_definitions.insert(table_id, mview.definition.clone());
                 upstream_mv_counts.insert(table_id, fragments.dependent_table_ids());
                 table_fragment_map.insert(table_id, fragments);
-                let (finished_tx, finished_rx) = oneshot::channel();
-                senders.insert(
-                    table_id,
-                    Notifier {
-                        finished: Some(finished_tx),
-                        ..Default::default()
-                    },
-                );
-                receivers.push((mview, internal_tables, finished_rx));
+                table_internal_table_map.insert(table_id, internal_tables);
+                table_stream_job_map.insert(table_id, stream_job);
             }
         }
 
@@ -172,45 +167,16 @@ impl GlobalBarrierManagerContext {
         // If failed, enter recovery mode.
         {
             let mut tracker = self.tracker.lock().await;
-            *tracker = CreateMviewProgressTracker::recover(
+            *tracker = CreateMviewProgressTracker::recover_v1(
                 table_map.into(),
                 upstream_mv_counts.into(),
                 mview_definitions.into(),
                 version_stats,
-                senders.into(),
                 table_fragment_map.into(),
-                self.metadata_manager.clone(),
+                table_internal_table_map.into(),
+                table_stream_job_map.into(),
+                mgr.clone(),
             );
-        }
-        for (table, internal_tables, finished) in receivers {
-            let catalog_manager = mgr.catalog_manager.clone();
-            tokio::spawn(async move {
-                let res: MetaResult<()> = try {
-                    tracing::debug!("recovering stream job {}", table.id);
-                    finished.await.ok().context("failed to finish command")??;
-
-                    tracing::debug!("finished stream job {}", table.id);
-                    // Once notified that job is finished we need to notify frontend.
-                    // and mark catalog as created and commit to meta.
-                    // both of these are done by catalog manager.
-                    catalog_manager
-                        .finish_create_table_procedure(internal_tables, table.clone())
-                        .await?;
-                    tracing::debug!("notified frontend for stream job {}", table.id);
-                };
-                if let Err(e) = res.as_ref() {
-                    tracing::error!(
-                        id = table.id,
-                        error = %e.as_report(),
-                        "stream job interrupted, will retry after recovery",
-                    );
-                    // NOTE(kwannoel): We should not cleanup stream jobs,
-                    // we don't know if it's just due to CN killed,
-                    // or the job has actually failed.
-                    // Users have to manually cancel the stream jobs,
-                    // if they want to clean it.
-                }
-            });
         }
         Ok(())
     }
@@ -222,23 +188,12 @@ impl GlobalBarrierManagerContext {
             .list_background_creating_mviews()
             .await?;
 
-        let mut senders = HashMap::new();
-        let mut receivers = Vec::new();
         let mut table_fragment_map = HashMap::new();
         let mut mview_definitions = HashMap::new();
         let mut table_map = HashMap::new();
         let mut upstream_mv_counts = HashMap::new();
         for mview in &mviews {
-            let (finished_tx, finished_rx) = oneshot::channel();
             let table_id = TableId::new(mview.table_id as _);
-            senders.insert(
-                table_id,
-                Notifier {
-                    finished: Some(finished_tx),
-                    ..Default::default()
-                },
-            );
-
             let table_fragments = mgr
                 .catalog_controller
                 .get_job_fragments_by_id(mview.table_id)
@@ -248,47 +203,20 @@ impl GlobalBarrierManagerContext {
             table_map.insert(table_id, table_fragments.backfill_actor_ids());
             table_fragment_map.insert(table_id, table_fragments);
             mview_definitions.insert(table_id, mview.definition.clone());
-            receivers.push((mview.table_id, finished_rx));
         }
 
         let version_stats = self.hummock_manager.get_version_stats().await;
         // If failed, enter recovery mode.
         {
             let mut tracker = self.tracker.lock().await;
-            *tracker = CreateMviewProgressTracker::recover(
+            *tracker = CreateMviewProgressTracker::recover_v2(
                 table_map.into(),
                 upstream_mv_counts.into(),
                 mview_definitions.into(),
                 version_stats,
-                senders.into(),
-                table_fragment_map.into(),
-                self.metadata_manager.clone(),
+                mgr.clone(),
             );
         }
-        for (id, finished) in receivers {
-            let catalog_controller = mgr.catalog_controller.clone();
-            tokio::spawn(async move {
-                let res: MetaResult<()> = try {
-                    tracing::debug!("recovering stream job {}", id);
-                    finished.await.ok().context("failed to finish command")??;
-                    tracing::debug!(id, "finished stream job");
-                    catalog_controller.finish_streaming_job(id, None).await?;
-                };
-                if let Err(e) = &res {
-                    tracing::error!(
-                        id,
-                        error = %e.as_report(),
-                        "stream job interrupted, will retry after recovery",
-                    );
-                    // NOTE(kwannoel): We should not cleanup stream jobs,
-                    // we don't know if it's just due to CN killed,
-                    // or the job has actually failed.
-                    // Users have to manually cancel the stream jobs,
-                    // if they want to clean it.
-                }
-            });
-        }
-
         Ok(())
     }
 

@@ -58,7 +58,8 @@ use sea_orm::{
     IntoActiveModel, JoinType, PaginatorTrait, QueryFilter, QuerySelect, RelationTrait,
     TransactionTrait, Value,
 };
-use tokio::sync::{RwLock, RwLockReadGuard};
+use tokio::sync::oneshot::Sender;
+use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use super::utils::check_subscription_name_duplicate;
 use crate::controller::rename::{alter_relation_rename, alter_relation_rename_refs};
@@ -110,6 +111,8 @@ impl CatalogController {
             env,
             inner: RwLock::new(CatalogControllerInner {
                 db: meta_store.conn,
+                table_id_to_tx: HashMap::new(),
+                table_id_to_version: HashMap::new(),
             }),
         }
     }
@@ -119,10 +122,21 @@ impl CatalogController {
     pub async fn get_inner_read_guard(&self) -> RwLockReadGuard<'_, CatalogControllerInner> {
         self.inner.read().await
     }
+
+    pub async fn get_inner_write_guard(&self) -> RwLockWriteGuard<'_, CatalogControllerInner> {
+        self.inner.write().await
+    }
 }
 
 pub struct CatalogControllerInner {
     pub(crate) db: DatabaseConnection,
+    /// `DdlController` will update this map, and pass the `tx` side to `CatalogController`.
+    /// On notifying, we can remove the entry from this map.
+    pub table_id_to_tx: HashMap<ObjectId, Sender<MetaResult<NotificationVersion>>>,
+    /// Catalogs which were marked as finished and committed.
+    /// But the `DdlController` has not instantiated notification channel.
+    /// Once notified, we can remove the entry from this map.
+    pub table_id_to_version: HashMap<ObjectId, MetaResult<NotificationVersion>>,
 }
 
 impl CatalogController {
@@ -3122,6 +3136,24 @@ impl CatalogControllerInner {
             .into_iter()
             .map(|(func, obj)| ObjectModel(func, obj.unwrap()).into())
             .collect())
+    }
+
+    pub(crate) fn register_finish_notifier(
+        &mut self,
+        id: i32,
+        sender: Sender<MetaResult<NotificationVersion>>,
+    ) {
+        self.table_id_to_tx.insert(id, sender);
+    }
+
+    pub(crate) fn table_is_finished(&mut self, id: i32) -> Option<MetaResult<NotificationVersion>> {
+        self.table_id_to_version.remove(&id)
+    }
+
+    pub(crate) fn notify_finish_failed(&mut self, id: ObjectId, err: MetaError) {
+        assert!(!self.table_id_to_version.contains_key(&id));
+        assert!(!self.table_id_to_tx.contains_key(&id));
+        self.table_id_to_version.insert(id, Err(err));
     }
 }
 

@@ -259,16 +259,14 @@ impl BarrierScheduler {
         for command in commands {
             let (started_tx, started_rx) = oneshot::channel();
             let (collect_tx, collect_rx) = oneshot::channel();
-            let (finish_tx, finish_rx) = oneshot::channel();
 
-            contexts.push((started_rx, collect_rx, finish_rx));
+            contexts.push((started_rx, collect_rx));
             scheduleds.push(self.inner.new_scheduled(
                 command.need_checkpoint(),
                 command,
                 once(Notifier {
                     started: Some(started_tx),
                     collected: Some(collect_tx),
-                    finished: Some(finish_tx),
                 }),
             ));
         }
@@ -277,7 +275,7 @@ impl BarrierScheduler {
 
         let mut infos = Vec::with_capacity(contexts.len());
 
-        for (injected_rx, collect_rx, finish_rx) in contexts {
+        for (injected_rx, collect_rx) in contexts {
             // Wait for this command to be injected, and record the result.
             tracing::trace!("waiting for injected_rx");
             let info = injected_rx.await.ok().context("failed to inject barrier")?;
@@ -289,10 +287,6 @@ impl BarrierScheduler {
                 .await
                 .ok()
                 .context("failed to collect barrier")??;
-
-            tracing::trace!("waiting for finish_rx");
-            // Wait for this command to be finished.
-            finish_rx.await.ok().context("failed to finish command")??;
         }
 
         Ok(infos)
@@ -450,7 +444,6 @@ impl ScheduledBarriers {
             }
             notifiers.into_iter().for_each(|mut notify| {
                 notify.notify_collected();
-                notify.notify_finished();
             });
         }
         (dropped_actors, cancel_table_ids)

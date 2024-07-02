@@ -204,50 +204,25 @@ impl DdlController {
 
         // create streaming jobs.
         let stream_job_id = streaming_job.id();
-        match (streaming_job.create_type(), streaming_job) {
+        match (streaming_job.create_type(), &streaming_job) {
             (CreateType::Unspecified, _)
             | (CreateType::Foreground, _)
             // FIXME(kwannoel): Unify background stream's creation path with MV below.
             | (CreateType::Background, StreamingJob::Sink(_, _)) => {
-                let replace_table_job_info = ctx.replace_table_job_info.as_ref().map(
-                    |(streaming_job, ctx, table_fragments)| {
-                        (
-                            streaming_job.clone(),
-                            ctx.merge_updates.clone(),
-                            table_fragments.table_id().table_id(),
-                        )
-                    },
-                );
-
-                self.stream_manager
+                let version = self.stream_manager
                     .create_streaming_job(table_fragments, ctx)
                     .await?;
-
-                let version = mgr
-                    .catalog_controller
-                    .finish_streaming_job(stream_job_id as _, replace_table_job_info)
-                    .await?;
-
                 Ok(version)
             }
             (CreateType::Background, _) => {
                 let ctrl = self.clone();
-                let mgr = mgr.clone();
                 let fut = async move {
-                    let result = ctrl
+                    let _ = ctrl
                         .stream_manager
                         .create_streaming_job(table_fragments, ctx)
                         .await.inspect_err(|err| {
                             tracing::error!(id = stream_job_id, error = ?err.as_report(), "failed to create background streaming job");
                         });
-                    if result.is_ok() {
-                        let _ = mgr
-                            .catalog_controller
-                            .finish_streaming_job(stream_job_id as _, None)
-                            .await.inspect_err(|err| {
-                                tracing::error!(id = stream_job_id, error = ?err.as_report(), "failed to finish background streaming job");
-                            });
-                    }
                 };
                 tokio::spawn(fut);
                 Ok(IGNORED_NOTIFICATION_VERSION)

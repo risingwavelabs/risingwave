@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 use futures::future::join_all;
 use itertools::Itertools;
+use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
 use risingwave_meta_model_v2::ObjectId;
 use risingwave_pb::catalog::{CreateType, Subscription, Table};
@@ -29,7 +30,7 @@ use tracing::Instrument;
 
 use super::{Locations, RescheduleOptions, ScaleControllerRef, TableResizePolicy};
 use crate::barrier::{BarrierScheduler, Command, ReplaceTablePlan, StreamRpcManager};
-use crate::manager::{DdlType, MetaSrvEnv, MetadataManager, StreamingJob};
+use crate::manager::{DdlType, MetaSrvEnv, MetadataManager, NotificationVersion, StreamingJob};
 use crate::model::{ActorId, FragmentId, MetadataModel, TableFragments, TableParallelism};
 use crate::stream::{to_build_actor_info, SourceManagerRef};
 use crate::{MetaError, MetaResult};
@@ -76,6 +77,8 @@ pub struct CreateStreamingJobContext {
     pub replace_table_job_info: Option<(StreamingJob, ReplaceTableContext, TableFragments)>,
 
     pub option: CreateStreamingJobOption,
+
+    pub streaming_job: StreamingJob,
 }
 
 impl CreateStreamingJobContext {
@@ -88,7 +91,7 @@ pub enum CreatingState {
     Failed { reason: MetaError },
     // sender is used to notify the canceling result.
     Canceling { finish_tx: oneshot::Sender<()> },
-    Created,
+    Created { version: NotificationVersion },
 }
 
 struct StreamingJobExecution {
@@ -174,6 +177,10 @@ pub struct ReplaceTableContext {
 
     /// The locations of the existing actors, essentially the downstream chain actors to update.
     pub existing_locations: Locations,
+
+    pub streaming_job: StreamingJob,
+
+    pub dummy_id: u32,
 }
 
 /// `GlobalStreamManager` manages all the streams in the system.
@@ -228,7 +235,7 @@ impl GlobalStreamManager {
         self: &Arc<Self>,
         table_fragments: TableFragments,
         ctx: CreateStreamingJobContext,
-    ) -> MetaResult<()> {
+    ) -> MetaResult<NotificationVersion> {
         let table_id = table_fragments.table_id();
         let (sender, mut receiver) = tokio::sync::mpsc::channel(10);
         let execution = StreamingJobExecution::new(table_id, sender.clone());
@@ -237,12 +244,12 @@ impl GlobalStreamManager {
         let stream_manager = self.clone();
         let fut = async move {
             let res = stream_manager
-                .create_streaming_job_impl( table_fragments, ctx)
+                .create_streaming_job_impl(table_fragments, ctx)
                 .await;
             match res {
-                Ok(_) => {
+                Ok(version) => {
                     let _ = sender
-                        .send(CreatingState::Created)
+                        .send(CreatingState::Created { version })
                         .await
                         .inspect_err(|_| tracing::warn!("failed to notify created: {table_id}"));
                 }
@@ -261,72 +268,66 @@ impl GlobalStreamManager {
         .in_current_span();
         tokio::spawn(fut);
 
-        let res = try {
-            while let Some(state) = receiver.recv().await {
-                match state {
-                    CreatingState::Failed { reason } => {
-                        tracing::debug!(id=?table_id, "stream job failed");
-                        self.creating_job_info.delete_job(table_id).await;
-                        return Err(reason);
-                    }
-                    CreatingState::Canceling { finish_tx } => {
-                        tracing::debug!(id=?table_id, "cancelling streaming job");
-                        if let Ok(table_fragments) = self
-                            .metadata_manager
-                            .get_job_fragments_by_id(&table_id)
-                            .await
-                        {
-                            // try to cancel buffered creating command.
-                            if self.barrier_scheduler.try_cancel_scheduled_create(table_id) {
-                                tracing::debug!(
-                                    "cancelling streaming job {table_id} in buffer queue."
-                                );
-                                let node_actors = table_fragments.worker_actor_ids();
-                                let cluster_info =
-                                    self.metadata_manager.get_streaming_cluster_info().await?;
-                                self.stream_rpc_manager
-                                    .drop_actors(
-                                        &cluster_info.worker_nodes,
-                                        node_actors.into_iter(),
-                                    )
-                                    .await?;
+        while let Some(state) = receiver.recv().await {
+            match state {
+                CreatingState::Failed { reason } => {
+                    tracing::debug!(id=?table_id, "stream job failed");
+                    // FIXME(kwannoel): For creating stream jobs
+                    // we need to clean up the resources in the stream manager.
+                    self.creating_job_info.delete_job(table_id).await;
+                    return Err(reason);
+                }
+                CreatingState::Canceling { finish_tx } => {
+                    tracing::debug!(id=?table_id, "cancelling streaming job");
+                    if let Ok(table_fragments) = self
+                        .metadata_manager
+                        .get_job_fragments_by_id(&table_id)
+                        .await
+                    {
+                        // try to cancel buffered creating command.
+                        if self.barrier_scheduler.try_cancel_scheduled_create(table_id) {
+                            tracing::debug!("cancelling streaming job {table_id} in buffer queue.");
+                            let node_actors = table_fragments.worker_actor_ids();
+                            let cluster_info =
+                                self.metadata_manager.get_streaming_cluster_info().await?;
+                            self.stream_rpc_manager
+                                .drop_actors(&cluster_info.worker_nodes, node_actors.into_iter())
+                                .await?;
 
-                                if let MetadataManager::V1(mgr) = &self.metadata_manager {
-                                    mgr.fragment_manager
-                                        .drop_table_fragments_vec(&HashSet::from_iter(
-                                            std::iter::once(table_id),
-                                        ))
-                                        .await?;
-                                }
-                            } else if !table_fragments.is_created() {
-                                tracing::debug!(
-                                    "cancelling streaming job {table_id} by issue cancel command."
-                                );
-
-                                self.barrier_scheduler
-                                    .run_command(Command::CancelStreamingJob(table_fragments))
+                            if let MetadataManager::V1(mgr) = &self.metadata_manager {
+                                mgr.fragment_manager
+                                    .drop_table_fragments_vec(&HashSet::from_iter(std::iter::once(
+                                        table_id,
+                                    )))
                                     .await?;
-                            } else {
-                                // streaming job is already completed.
-                                continue;
                             }
-                            let _ = finish_tx.send(()).inspect_err(|_| {
-                                tracing::warn!("failed to notify cancelled: {table_id}")
-                            });
-                            self.creating_job_info.delete_job(table_id).await;
-                            return Err(MetaError::cancelled("create"));
+                        } else if !table_fragments.is_created() {
+                            tracing::debug!(
+                                "cancelling streaming job {table_id} by issue cancel command."
+                            );
+
+                            self.barrier_scheduler
+                                .run_command(Command::CancelStreamingJob(table_fragments))
+                                .await?;
+                        } else {
+                            // streaming job is already completed.
+                            continue;
                         }
-                    }
-                    CreatingState::Created => {
+                        let _ = finish_tx.send(()).inspect_err(|_| {
+                            tracing::warn!("failed to notify cancelled: {table_id}")
+                        });
                         self.creating_job_info.delete_job(table_id).await;
-                        return Ok(());
+                        return Err(MetaError::cancelled("create"));
                     }
                 }
+                CreatingState::Created { version } => {
+                    self.creating_job_info.delete_job(table_id).await;
+                    return Ok(version);
+                }
             }
-        };
-
+        }
         self.creating_job_info.delete_job(table_id).await;
-        res
+        bail!("receiver failed to get notification version for finished stream job")
     }
 
     async fn build_actors(
@@ -392,6 +393,7 @@ impl GlobalStreamManager {
         &self,
         table_fragments: TableFragments,
         CreateStreamingJobContext {
+            streaming_job,
             dispatchers,
             upstream_root_actors,
             building_locations,
@@ -400,9 +402,10 @@ impl GlobalStreamManager {
             create_type,
             ddl_type,
             replace_table_job_info,
+            internal_tables,
             ..
         }: CreateStreamingJobContext,
-    ) -> MetaResult<()> {
+    ) -> MetaResult<NotificationVersion> {
         let mut replace_table_command = None;
         let mut replace_table_id = None;
 
@@ -439,15 +442,17 @@ impl GlobalStreamManager {
             let init_split_assignment =
                 self.source_manager.allocate_splits(&dummy_table_id).await?;
 
+            replace_table_id = Some(dummy_table_id);
+
             replace_table_command = Some(ReplaceTablePlan {
                 old_table_fragments: context.old_table_fragments,
                 new_table_fragments: table_fragments,
                 merge_updates: context.merge_updates,
                 dispatchers: context.dispatchers,
                 init_split_assignment,
+                streaming_job,
+                dummy_id: dummy_table_id.table_id,
             });
-
-            replace_table_id = Some(dummy_table_id);
         }
 
         let table_id = table_fragments.table_id();
@@ -469,28 +474,37 @@ impl GlobalStreamManager {
             dispatchers,
             init_split_assignment,
             definition: definition.to_string(),
+            streaming_job,
+            internal_tables: internal_tables.into_values().collect_vec(),
             ddl_type,
             replace_table: replace_table_command,
             create_type,
         };
         tracing::debug!("sending Command::CreateStreamingJob");
-        if let Err(err) = self.barrier_scheduler.run_command(command).await {
-            if create_type == CreateType::Foreground || err.is_cancelled() {
-                let mut table_ids = HashSet::from_iter(std::iter::once(table_id));
-                if let Some(dummy_table_id) = replace_table_id {
-                    table_ids.insert(dummy_table_id);
+        let result: MetaResult<NotificationVersion> = try {
+            self.barrier_scheduler.run_command(command).await?;
+            self.metadata_manager
+                .wait_streaming_job_finished(table_id)
+                .await?
+        };
+        match result {
+            Err(err) => {
+                if create_type == CreateType::Foreground || err.is_cancelled() {
+                    let mut table_ids = HashSet::from_iter(std::iter::once(table_id));
+                    if let Some(dummy_table_id) = replace_table_id {
+                        table_ids.insert(dummy_table_id);
+                    }
+                    if let MetadataManager::V1(mgr) = &self.metadata_manager {
+                        mgr.fragment_manager
+                            .drop_table_fragments_vec(&table_ids)
+                            .await?;
+                    }
                 }
-                if let MetadataManager::V1(mgr) = &self.metadata_manager {
-                    mgr.fragment_manager
-                        .drop_table_fragments_vec(&table_ids)
-                        .await?;
-                }
+
+                Err(err)
             }
-
-            return Err(err);
+            Ok(version) => Ok(version),
         }
-
-        Ok(())
     }
 
     pub async fn replace_table(
@@ -502,6 +516,8 @@ impl GlobalStreamManager {
             dispatchers,
             building_locations,
             existing_locations,
+            dummy_id,
+            streaming_job,
         }: ReplaceTableContext,
     ) -> MetaResult<()> {
         self.build_actors(&table_fragments, &building_locations, &existing_locations)
@@ -518,6 +534,8 @@ impl GlobalStreamManager {
                 merge_updates,
                 dispatchers,
                 init_split_assignment,
+                dummy_id,
+                streaming_job,
             }))
             .await
             && let MetadataManager::V1(mgr) = &self.metadata_manager
@@ -1115,6 +1133,7 @@ mod tests {
                 id: table_id.table_id(),
                 ..Default::default()
             };
+            let streaming_job = StreamingJob::MaterializedView(table.clone());
             let table_fragments = TableFragments::new(
                 table_id,
                 fragments,
