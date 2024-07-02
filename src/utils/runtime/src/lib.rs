@@ -30,6 +30,7 @@ mod panic_hook;
 pub use panic_hook::*;
 mod prof;
 use prof::*;
+use tokio_util::sync::CancellationToken;
 
 /// Start RisingWave components with configs from environment variable.
 ///
@@ -42,9 +43,10 @@ use prof::*;
 ///   debug mode, and disable in release mode.
 /// * `RW_PROFILE_PATH`: the path to generate flamegraph. If set, then profiling is automatically
 ///   enabled.
-pub fn main_okk<F>(f: F) -> F::Output
+pub fn main_okk<F, Fut>(f: F) -> Fut::Output
 where
-    F: Future + Send + 'static,
+    F: FnOnce(CancellationToken) -> Fut,
+    Fut: Future + Send + 'static,
 {
     set_panic_hook();
 
@@ -73,10 +75,12 @@ where
         spawn_prof_thread(profile_path);
     }
 
+    let token = CancellationToken::new();
+
     tokio::runtime::Builder::new_multi_thread()
         .thread_name("rw-main")
         .enable_all()
         .build()
         .unwrap()
-        .block_on(f)
+        .block_on(f(token))
 }

@@ -39,25 +39,25 @@ risingwave_expr_impl::enable!();
 
 pub fn compute(opts: ComputeNodeOpts) {
     init_risingwave_logger(LoggerSettings::from_opts(&opts));
-    main_okk(risingwave_compute::start(opts));
+    main_okk(|_| risingwave_compute::start(opts));
 }
 
 pub fn meta(opts: MetaNodeOpts) {
     init_risingwave_logger(LoggerSettings::from_opts(&opts));
-    main_okk(risingwave_meta_node::start(opts));
+    main_okk(|_| risingwave_meta_node::start(opts));
 }
 
 pub fn frontend(opts: FrontendOpts) {
     init_risingwave_logger(LoggerSettings::from_opts(&opts));
-    main_okk(risingwave_frontend::start(opts));
+    main_okk(|_| risingwave_frontend::start(opts));
 }
 
 pub fn compactor(opts: CompactorOpts) {
     init_risingwave_logger(LoggerSettings::from_opts(&opts));
-    main_okk(risingwave_compactor::start(opts));
+    main_okk(|_| risingwave_compactor::start(opts));
 }
 
 pub fn ctl(opts: CtlOpts) {
     init_risingwave_logger(LoggerSettings::new("ctl").stderr(true));
-    main_okk(risingwave_ctl::start(opts));
+    main_okk(|_| risingwave_ctl::start(opts));
 }
