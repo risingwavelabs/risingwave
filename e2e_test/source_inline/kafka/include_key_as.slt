@@ -7,7 +7,7 @@ system ok
 rpk topic create 'test_include_key'
 
 system ok
-cat <<EOF | rpk topic produce 'test_include_key' -f "%k^%v\\n"
+cat <<EOF | rpk topic produce 'test_include_key' -f "%k^%v\n"
 {"ID": 1}^{"ID": 1, "firstName": "John", "lastName": "Doe", "age": 18, "height": 5.10, "weight": 150}
 {"ID": 2}^{"ID": 2, "firstName": "Sarah", "lastName": "Smith", "age": 19, "height": 5.5, "weight": 120}
 {"ID": 3}^{"ID": 3, "firstName": "Ben", "lastName": "Johnson", "age": 21, "height": 6.0, "weight": 175}
@@ -182,10 +182,8 @@ rpk topic delete 'test_additional_columns' || true;
 system ok
 rpk topic create 'test_additional_columns'
 
-# Note: `sh` doesn't have {..} brace expansion
 system ok
-bash -c 'for i in {0..10}; do echo "key\$i:{\\"a\\": \$i}" | rpk topic produce test_additional_columns -f "%k:%v\\n" -H "header1=v1" -H "header2=v2"; done'
-
+for i in {0..10}; do echo "key$i:{\"a\": $i}" | rpk topic produce test_additional_columns -f "%k:%v\n" -H "header1=v1" -H "header2=v2"; done
 
 statement error
 create table additional_columns (a int)
