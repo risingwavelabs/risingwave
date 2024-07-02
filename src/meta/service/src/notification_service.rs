@@ -261,7 +261,7 @@ impl NotificationServiceImpl {
                         sink.id,
                         table.columns
                     );
-                    sink.original_target_columns = table.columns.clone();
+                    sink.original_target_columns.clone_from(&table.columns);
                 }
             }
         }
