@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::{HashSet, VecDeque};
+use std::iter;
 use std::iter::once;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -24,6 +25,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_pb::hummock::HummockSnapshot;
 use risingwave_pb::meta::PausedReason;
 use tokio::select;
+use tokio::sync::oneshot::Receiver;
 use tokio::sync::{oneshot, watch};
 use tokio::time::Interval;
 
@@ -313,6 +315,33 @@ impl BarrierScheduler {
         ])
         .await
         .map(|i| i[1])
+    }
+
+    pub async fn run_command_until_collected(
+        &self,
+        command: Command,
+    ) -> MetaResult<(BarrierInfo, Receiver<MetaResult<()>>)> {
+        let (started_tx, started_rx) = oneshot::channel();
+        let (collect_tx, collect_rx) = oneshot::channel();
+        let (finish_tx, finish_rx) = oneshot::channel();
+        let scheduled = self.inner.new_scheduled(
+            command.need_checkpoint(),
+            command,
+            once(Notifier {
+                started: Some(started_tx),
+                collected: Some(collect_tx),
+                finished: Some(finish_tx),
+            }),
+        );
+
+        self.push(iter::once(scheduled))?;
+        let info = started_rx.await.ok().context("failed to inject barrier")?;
+        collect_rx
+            .await
+            .ok()
+            .context("failed to collect barrier")??;
+
+        Ok((info, finish_rx))
     }
 
     /// Run a command and return when it's completely finished.
