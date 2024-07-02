@@ -432,6 +432,8 @@ message AggCall {
     LAST_VALUE = 25;
     GROUPING = 26;
     INTERNAL_LAST_SEEN_VALUE = 27;
+    APPROX_PERCENTILE = 28;
+
     // user defined aggregate function
     USER_DEFINED = 100;
   }

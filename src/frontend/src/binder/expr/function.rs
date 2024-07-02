@@ -551,7 +551,10 @@ impl Binder {
         );
 
         if f.distinct {
-            if kind == AggKind::ApproxCountDistinct {
+            if matches!(
+                kind,
+                AggKind::ApproxCountDistinct | AggKind::ApproxPercentile
+            ) {
                 return Err(ErrorCode::InvalidInputSyntax(format!(
                     "DISTINCT is not allowed for approximate aggregation `{}`",
                     kind

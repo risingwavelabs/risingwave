@@ -227,6 +227,7 @@ pub enum AggKind {
     Avg,
     StringAgg,
     ApproxCountDistinct,
+    ApproxPercentile,
     ArrayAgg,
     JsonbAgg,
     JsonbObjectAgg,
@@ -262,6 +263,7 @@ impl AggKind {
             PbType::Count => Ok(AggKind::Count),
             PbType::StringAgg => Ok(AggKind::StringAgg),
             PbType::ApproxCountDistinct => Ok(AggKind::ApproxCountDistinct),
+            PbType::ApproxPercentile => Ok(AggKind::ApproxPercentile),
             PbType::ArrayAgg => Ok(AggKind::ArrayAgg),
             PbType::JsonbAgg => Ok(AggKind::JsonbAgg),
             PbType::JsonbObjectAgg => Ok(AggKind::JsonbObjectAgg),
@@ -311,6 +313,7 @@ impl AggKind {
             Self::Grouping => PbType::Grouping,
             Self::InternalLastSeenValue => PbType::InternalLastSeenValue,
             Self::UserDefined => PbType::UserDefined,
+            Self::ApproxPercentile => PbType::ApproxPercentile,
         }
     }
 }
@@ -339,6 +342,9 @@ pub mod agg_kinds {
                 | AggKind::VarPop
                 | AggKind::VarSamp
                 | AggKind::Grouping
+                // ApproxPercentile always uses custom agg executors,
+                // rather than an aggregation operator
+                | AggKind::ApproxPercentile
         };
     }
     pub use rewritten;
