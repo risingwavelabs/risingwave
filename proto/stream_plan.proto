@@ -288,6 +288,7 @@ message FilterNode {
 }
 
 message ChangeLogNode {
+  // Whether or not there is an op in the final output.
   bool need_op = 1;
 }
 

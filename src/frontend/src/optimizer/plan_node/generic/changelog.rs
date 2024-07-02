@@ -30,7 +30,8 @@ pub struct ChangeLog<PlanRef> {
     pub input: PlanRef,
     // If there is no op in the output result, it is false, example 'create materialized view mv1 as with sub as changelog from t1 select v1 from sub;'
     pub need_op: bool,
-    // False before rewrite, true after rewrite
+    // Before rewrite. If there is no changelog_row_id in the output result, it is false.
+    // After rewrite. It is always true.
     pub need_changelog_row_id: bool,
 }
 impl<PlanRef: GenericPlanRef> DistillUnit for ChangeLog<PlanRef> {

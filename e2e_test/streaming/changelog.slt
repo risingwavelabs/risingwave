@@ -34,6 +34,9 @@ statement ok
 create materialized view mv7(col1,col2,col3) as with sub as changelog from t3 select * from sub;
 
 statement ok
+create materialized view mv8 as with sub as changelog from t2 select *, _changelog_row_id as row_id from sub;
+
+statement ok
 insert into t1 values(1,1),(2,2);
 
 statement ok
@@ -132,6 +135,17 @@ select * from mv7_rename order by col1;
 5 5 4
 5 500 3
 6 6 1
+
+query III rowsort
+select v1 from mv8 order by v1;
+----
+1
+1
+1
+2
+
+statement ok
+drop materialized view mv8;
 
 statement ok
 drop materialized view mv7_rename;
