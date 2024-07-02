@@ -167,4 +167,8 @@ public class CassandraUtil {
                         .asRuntimeException();
         }
     }
+
+    public static String convertCQLIdentifiers(String identifier) {
+        return "\"" + identifier + "\"";
+    }
 }
