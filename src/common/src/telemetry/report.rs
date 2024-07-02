@@ -148,7 +148,7 @@ pub fn report_event_common(
     let event = PbEventMessage {
         tracking_id: event_tracking_id,
         session_id: event_session_id,
-        event_time: current_timestamp(),
+        event_time_sec: current_timestamp(),
         event_stage: event_stage as i32,
         feature_name,
         connector_name,
@@ -157,9 +157,14 @@ pub fn report_event_common(
         attributes,
         node,
     };
-    let _report_bytes = event.encode_to_vec();
+    let report_bytes = event.encode_to_vec();
 
     tokio::spawn(async move {
-        // send report
+        const TELEMETRY_EVENT_REPORT_TYPE: &str = "event";
+        let url = (TELEMETRY_REPORT_URL.to_owned() + "/" + TELEMETRY_EVENT_REPORT_TYPE).to_owned();
+
+        post_telemetry_report_pb(&url, report_bytes)
+            .await
+            .unwrap_or_else(|e| tracing::warn!("{}", e))
     });
 }
