@@ -162,4 +162,6 @@ message EventMessage {
   optional string attributes = 8;
   // node is the node that creates the event
   string node = 9;
+  // mark the event is a test message
+  bool is_test = 11;
 }

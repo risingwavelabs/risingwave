@@ -156,6 +156,7 @@ pub fn report_event_common(
         catalog_id,
         attributes,
         node,
+        is_test: false,
     };
     let report_bytes = event.encode_to_vec();
 
