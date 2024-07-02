@@ -177,6 +177,7 @@ impl CatalogController {
                 table.id = job_id as _;
                 let table_model: table::ActiveModel = table.clone().into();
                 Table::insert(table_model).exec(&txn).await?;
+
                 relations.push(Relation {
                     relation_info: Some(RelationInfo::Table(table.to_owned())),
                 });
@@ -506,24 +507,20 @@ impl CatalogController {
             .one(&txn)
             .await?;
 
-        Object::delete_by_id(job_id).exec(&txn).await?;
-        if !internal_table_ids.is_empty() {
-            Object::delete_many()
-                .filter(object::Column::Oid.is_in(internal_table_ids.iter().cloned()))
-                .exec(&txn)
-                .await?;
-        }
-        if let Some(source_id) = associated_source_id {
-            Object::delete_by_id(source_id).exec(&txn).await?;
-        }
+        // Get notification info
         let mut objs = vec![];
-        let obj: PartialObject = Object::find_by_id(job_id)
+        let obj: Option<PartialObject> = Object::find_by_id(job_id)
             .select_only()
-            .column(object::Column::ObjType)
+            .columns([
+                object::Column::Oid,
+                object::Column::ObjType,
+                object::Column::SchemaId,
+                object::Column::DatabaseId,
+            ])
             .into_partial_model()
             .one(&txn)
-            .await?
-            .ok_or_else(|| MetaError::catalog_id_not_found("streaming job", job_id))?;
+            .await?;
+        let obj = obj.ok_or_else(|| MetaError::catalog_id_not_found("streaming job", job_id))?;
         objs.push(obj);
         let internal_table_objs: Vec<PartialObject> = Object::find()
             .select_only()
@@ -550,11 +547,24 @@ impl CatalogController {
             objs.push(source_obj);
         }
         let relation_group = build_relation_group(objs);
+
+        // Can delete objects after queried notification info
+        Object::delete_by_id(job_id).exec(&txn).await?;
+        if !internal_table_ids.is_empty() {
+            Object::delete_many()
+                .filter(object::Column::Oid.is_in(internal_table_ids.iter().cloned()))
+                .exec(&txn)
+                .await?;
+        }
+        if let Some(source_id) = associated_source_id {
+            Object::delete_by_id(source_id).exec(&txn).await?;
+        }
+
+        txn.commit().await?;
+
         let _version = self
             .notify_frontend(Operation::Delete, relation_group)
             .await;
-        txn.commit().await?;
-
         Ok(true)
     }
 
