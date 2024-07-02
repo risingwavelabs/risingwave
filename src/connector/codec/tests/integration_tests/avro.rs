@@ -71,6 +71,7 @@ struct Config {
 /// ## Why test schema mapping and data mapping together?
 ///
 /// Because the expected data type for data mapping comes from the schema mapping.
+#[track_caller]
 fn check(
     avro_schema: &str,
     avro_data: &[&str],
@@ -108,16 +109,18 @@ fn check(
                         .expect("failed to parse Avro data");
                 let access = AvroAccess::new(&avro_data, parser);
 
+                let mut row = vec![];
                 for col in &rw_schema {
                     let rw_data = access
                         .access(&[&col.name], &col.data_type)
                         .expect("failed to access");
-                    data_str.push(format!("{:?}", rw_data));
+                    row.push(format!("{:#?}", DatumCowTestDisplay(&rw_data)));
                 }
+                data_str.push(format!("{}", row.iter().format("\n")));
             }
         }
     }
-    expected_risingwave_data.assert_eq(&format!("{}", data_str.iter().format("\n")));
+    expected_risingwave_data.assert_eq(&format!("{}", data_str.iter().format("\n----\n")));
 }
 
 #[test]
@@ -215,17 +218,17 @@ fn test_simple() {
                 bytes(#11): Bytea,
             ]"#]],
         expect![[r#"
-            Owned(Some(Int32(32)))
-            Owned(Some(Int64(64)))
-            Borrowed(Some(Utf8("str_value")))
-            Owned(Some(Float32(OrderedFloat(32.0))))
-            Owned(Some(Float64(OrderedFloat(64.0))))
-            Owned(Some(Bool(true)))
-            Owned(Some(Date(Date(1970-01-01))))
-            Owned(Some(Timestamptz(Timestamptz(0))))
-            Owned(Some(Timestamptz(Timestamptz(0))))
-            Owned(Some(Interval(Interval { months: 1, days: 1, usecs: 1000000 })))
-            Borrowed(Some(Bytea([1, 2, 3, 4, 5])))"#]],
+            Owned(Int32(32))
+            Owned(Int64(64))
+            Borrowed(Utf8("str_value"))
+            Owned(Float32(OrderedFloat(32.0)))
+            Owned(Float64(OrderedFloat(64.0)))
+            Owned(Bool(true))
+            Owned(Date(Date(1970-01-01)))
+            Owned(Timestamptz(Timestamptz(0)))
+            Owned(Timestamptz(Timestamptz(0)))
+            Owned(Interval(Interval { months: 1, days: 1, usecs: 1000000 }))
+            Borrowed(Bytea([1, 2, 3, 4, 5]))"#]],
     )
 }
 
@@ -389,25 +392,25 @@ fn test_1() {
                 UNIT_INFO(#8): Varchar,
                 UPD_TIME(#9): Varchar,
                 DEC_VAL(#10): Decimal,
-                REFERRED(#11): Struct(StructType { field_names: ["a"], field_types: [Varchar] }),
-                REF(#12): Struct(StructType { field_names: ["a"], field_types: [Varchar] }),
+                REFERRED(#11): Struct { a: Varchar },
+                REF(#12): Struct { a: Varchar },
                 uuid(#13): Varchar,
                 rate(#14): Float64,
             ]"#]],
         expect![[r#"
-            Borrowed(Some(Utf8("update")))
-            Borrowed(Some(Utf8("id1")))
-            Borrowed(Some(Utf8("1")))
-            Borrowed(Some(Utf8("6768")))
-            Borrowed(Some(Utf8("6970")))
-            Borrowed(Some(Utf8("value9")))
-            Borrowed(Some(Utf8("7172")))
-            Borrowed(Some(Utf8("info9")))
-            Borrowed(Some(Utf8("2021-05-18T07:59:58.714Z")))
-            Owned(Some(Decimal(Normalized(99999999.99))))
-            Owned(None)
-            Owned(None)
-            Owned(None)
-            Owned(Some(Float64(OrderedFloat(NaN))))"#]],
+            Borrowed(Utf8("update"))
+            Borrowed(Utf8("id1"))
+            Borrowed(Utf8("1"))
+            Borrowed(Utf8("6768"))
+            Borrowed(Utf8("6970"))
+            Borrowed(Utf8("value9"))
+            Borrowed(Utf8("7172"))
+            Borrowed(Utf8("info9"))
+            Borrowed(Utf8("2021-05-18T07:59:58.714Z"))
+            Owned(Decimal(Normalized(99999999.99)))
+            Owned(null)
+            Owned(null)
+            Owned(null)
+            Owned(Float64(OrderedFloat(NaN)))"#]],
     );
 }
