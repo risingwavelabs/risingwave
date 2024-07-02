@@ -15,7 +15,7 @@
 mod schema;
 use std::sync::LazyLock;
 
-use apache_avro::schema::{DecimalSchema, RecordSchema};
+use apache_avro::schema::{DecimalSchema, RecordSchema, UnionSchema};
 use apache_avro::types::{Value, ValueKind};
 use apache_avro::{Decimal as AvroDecimal, Schema};
 use chrono::Datelike;
@@ -33,6 +33,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 pub use self::schema::{avro_schema_to_column_descs, MapHandling, ResolvedAvroSchema};
 use super::utils::extract_decimal;
 use super::{bail_uncategorized, uncategorized, Access, AccessError, AccessResult};
+use crate::decoder::avro::schema::avro_schema_to_struct_field_name;
 
 #[derive(Clone)]
 /// Options for parsing an `AvroValue` into Datum, with an optional avro schema.
@@ -107,6 +108,51 @@ impl<'a> AvroParseOptions<'a> {
 
         let v: ScalarImpl = match (type_expected, value) {
             (_, Value::Null) => return Ok(DatumCow::NULL),
+            // ---- Union (with >=2 non null variants) -----
+            (DataType::Struct(struct_type_info), Value::Union(variant, v)) => match self.schema {
+                Some(Schema::Union(u)) => {
+                    if let Some(inner) = get_nullable_union_inner(u) {
+                        // nullable Union ([null, record])
+                        return Self {
+                            schema: Some(inner),
+                            relax_numeric: self.relax_numeric,
+                        }
+                        .convert_to_datum(v, type_expected);
+                    }
+                    let variant_schema = &u.variants()[*variant as usize];
+
+                    if matches!(variant_schema, &Schema::Null) {
+                        return Ok(DatumCow::NULL);
+                    }
+
+                    // XXX: can we use the variant idx to find the field idx?
+                    // We will need to get the index of the "null" variant, and then re-map the variant index to the field index.
+                    // Which way is better?
+                    let expected_field_name = avro_schema_to_struct_field_name(variant_schema);
+
+                    let mut fields = Vec::with_capacity(struct_type_info.len());
+                    for (field_name, field_type) in struct_type_info
+                        .names()
+                        .zip_eq_fast(struct_type_info.types())
+                    {
+                        if field_name == expected_field_name {
+                            let datum = Self {
+                                schema: Some(variant_schema),
+                                relax_numeric: self.relax_numeric,
+                            }
+                            .convert_to_datum(v, field_type)?
+                            .to_owned_datum();
+
+                            fields.push(datum)
+                        } else {
+                            fields.push(None)
+                        }
+                    }
+                    StructValue::new(fields).into()
+                }
+                _ => Err(create_error())?,
+            },
+            // nullable Union ([null, T])
             (_, Value::Union(_, v)) => {
                 let schema = self.extract_inner_schema(None);
                 return Self {
@@ -290,6 +336,12 @@ impl Access for AvroAccess<'_> {
         let mut value = self.value;
         let mut options: AvroParseOptions<'_> = self.options.clone();
 
+        debug_assert!(
+            path.len() == 1
+                || (path.len() == 2 && matches!(path[0], "before" | "after" | "source")),
+            "unexpected path access: {:?}",
+            path
+        );
         let mut i = 0;
         while i < path.len() {
             let key = path[i];
@@ -299,6 +351,29 @@ impl Access for AvroAccess<'_> {
             };
             match value {
                 Value::Union(_, v) => {
+                    // The debezium "before" field is a nullable union.
+                    // "fields": [
+                    // {
+                    //     "name": "before",
+                    //     "type": [
+                    //         "null",
+                    //         {
+                    //             "type": "record",
+                    //             "name": "Value",
+                    //             "fields": [...],
+                    //         }
+                    //     ],
+                    //     "default": null
+                    // },
+                    // {
+                    //     "name": "after",
+                    //     "type": [
+                    //         "null",
+                    //         "Value"
+                    //     ],
+                    //     "default": null
+                    // },
+                    // ...]
                     value = v;
                     options.schema = options.extract_inner_schema(None);
                     continue;
@@ -338,18 +413,30 @@ pub(crate) fn avro_decimal_to_rust_decimal(
     ))
 }
 
-pub fn avro_schema_skip_union(schema: &Schema) -> anyhow::Result<&Schema> {
+/// If the union schema is `[null, T]` or `[T, null]`, returns `Some(T)`; otherwise returns `None`.
+fn get_nullable_union_inner(union_schema: &UnionSchema) -> Option<&'_ Schema> {
+    let variants = union_schema.variants();
+    // Note: `[null, null] is invalid`, we don't need to worry about that.
+    if variants.len() == 2 && variants.contains(&Schema::Null) {
+        let inner_schema = variants
+            .iter()
+            .find(|s| !matches!(s, &&Schema::Null))
+            .unwrap();
+        Some(inner_schema)
+    } else {
+        None
+    }
+}
+
+pub fn avro_schema_skip_nullable_union(schema: &Schema) -> anyhow::Result<&Schema> {
     match schema {
-        Schema::Union(union_schema) => {
-            let inner_schema = union_schema
-                .variants()
-                .iter()
-                .find(|s| !matches!(s, &&Schema::Null))
-                .ok_or_else(|| {
-                    anyhow::format_err!("illegal avro record schema {:?}", union_schema)
-                })?;
-            Ok(inner_schema)
-        }
+        Schema::Union(union_schema) => match get_nullable_union_inner(union_schema) {
+            Some(s) => Ok(s),
+            None => Err(anyhow::format_err!(
+                "illegal avro union schema, expected [null, T], got {:?}",
+                union_schema
+            )),
+        },
         other => Ok(other),
     }
 }
@@ -372,7 +459,9 @@ pub fn avro_extract_field_schema<'a>(
             Ok(&field.schema)
         }
         Schema::Array(schema) => Ok(schema),
-        Schema::Union(_) => avro_schema_skip_union(schema),
+        // Only nullable union should be handled here.
+        // We will not extract inner schema for real union (and it's not extractable).
+        Schema::Union(_) => avro_schema_skip_nullable_union(schema),
         Schema::Map(schema) => Ok(schema),
         _ => bail!("avro schema does not have inner item, schema: {:?}", schema),
     }
@@ -477,9 +566,119 @@ mod tests {
     use std::str::FromStr;
 
     use apache_avro::Decimal as AvroDecimal;
+    use expect_test::expect;
     use risingwave_common::types::{Datum, Decimal};
 
     use super::*;
+
+    /// Test the behavior of the Rust Avro lib for handling union with logical type.
+    #[test]
+    fn test_avro_lib_union() {
+        // duplicate types
+        let s = Schema::parse_str(r#"["null", "null"]"#);
+        expect![[r#"
+            Err(
+                Unions cannot contain duplicate types,
+            )
+        "#]]
+        .assert_debug_eq(&s);
+        let s = Schema::parse_str(r#"["int", "int"]"#);
+        expect![[r#"
+            Err(
+                Unions cannot contain duplicate types,
+            )
+        "#]]
+        .assert_debug_eq(&s);
+        // multiple map/array are considered as the same type, regardless of the element type!
+        let s = Schema::parse_str(
+            r#"[
+"null",
+{
+    "type": "map",
+    "values" : "long",
+    "default": {}
+},
+{
+    "type": "map",
+    "values" : "int",
+    "default": {}
+}
+]
+"#,
+        );
+        expect![[r#"
+            Err(
+                Unions cannot contain duplicate types,
+            )
+        "#]]
+        .assert_debug_eq(&s);
+        let s = Schema::parse_str(
+            r#"[
+"null",
+{
+    "type": "array",
+    "items" : "long",
+    "default": {}
+},
+{
+    "type": "array",
+    "items" : "int",
+    "default": {}
+}
+]
+"#,
+        );
+        expect![[r#"
+        Err(
+            Unions cannot contain duplicate types,
+        )
+    "#]]
+        .assert_debug_eq(&s);
+
+        // union in union
+        let s = Schema::parse_str(r#"["int", ["null", "int"]]"#);
+        expect![[r#"
+            Err(
+                Unions may not directly contain a union,
+            )
+        "#]]
+        .assert_debug_eq(&s);
+
+        // logical type
+        let s = Schema::parse_str(r#"["null", {"type":"string","logicalType":"uuid"}]"#).unwrap();
+        expect![[r#"
+            Union(
+                UnionSchema {
+                    schemas: [
+                        Null,
+                        Uuid,
+                    ],
+                    variant_index: {
+                        Null: 0,
+                        Uuid: 1,
+                    },
+                },
+            )
+        "#]]
+        .assert_debug_eq(&s);
+
+        let s = Schema::parse_str(r#"["string", {"type":"string","logicalType":"uuid"}]"#).unwrap();
+        expect![[r#"
+            Union(
+                UnionSchema {
+                    schemas: [
+                        String,
+                        Uuid,
+                    ],
+                    variant_index: {
+                        String: 0,
+                        Uuid: 1,
+                    },
+                },
+            )
+        "#]]
+        .assert_debug_eq(&s);
+    }
 
     #[test]
     fn test_convert_decimal() {
