@@ -86,6 +86,7 @@ pub async fn handle_refresh_schema(
         table_name,
         definition,
         &original_table,
+        vec![],
         Some(connector_schema),
     )
     .await?;

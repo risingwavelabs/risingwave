@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_pb::ddl_service::ReplaceTablePlan;
+use risingwave_pb::ddl_service::{ReplaceTablePlan, TableJobType};
 use risingwave_sqlparser::ast::ObjectName;
 
 use super::RwPgResponse;
@@ -89,6 +89,7 @@ pub async fn handle_drop_sink(
             table: Some(table),
             fragment_graph: Some(graph),
             table_col_index_mapping: None,
+            job_type: TableJobType::General as _,
         });
     }
 

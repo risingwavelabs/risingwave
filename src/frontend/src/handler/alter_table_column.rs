@@ -18,6 +18,7 @@ use anyhow::Context;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::bail_not_implemented;
+use risingwave_common::catalog::ColumnCatalog;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_sqlparser::ast::{
     AlterTableOperation, ColumnOption, ConnectorSchema, Encode, ObjectName, Statement,
@@ -25,7 +26,7 @@ use risingwave_sqlparser::ast::{
 use risingwave_sqlparser::parser::Parser;
 
 use super::create_source::get_json_schema_location;
-use super::create_table::{generate_stream_graph_for_table, ColumnIdGenerator};
+use super::create_table::{bind_sql_columns, generate_stream_graph_for_table, ColumnIdGenerator};
 use super::util::SourceSchemaCompatExt;
 use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::root_catalog::SchemaPath;
@@ -39,6 +40,7 @@ pub async fn replace_table_with_definition(
     table_name: ObjectName,
     definition: Statement,
     original_catalog: &Arc<TableCatalog>,
+    columns_altered: Vec<ColumnCatalog>,
     source_schema: Option<ConnectorSchema>,
 ) -> Result<()> {
     // Create handler args as if we're creating a new table with the altered definition.
@@ -52,13 +54,14 @@ pub async fn replace_table_with_definition(
         on_conflict,
         with_version_column,
         wildcard_idx,
+        cdc_table_info,
         ..
     } = definition
     else {
         panic!("unexpected statement type: {:?}", definition);
     };
 
-    let (graph, table, source) = generate_stream_graph_for_table(
+    let (graph, table, source, job_type) = generate_stream_graph_for_table(
         session,
         table_name,
         original_catalog,
@@ -66,12 +69,14 @@ pub async fn replace_table_with_definition(
         handler_args,
         col_id_gen,
         columns,
+        columns_altered,
         wildcard_idx,
         constraints,
         source_watermarks,
         append_only,
         on_conflict,
         with_version_column,
+        cdc_table_info,
     )
     .await?;
 
@@ -92,7 +97,7 @@ pub async fn replace_table_with_definition(
     let catalog_writer = session.catalog_writer()?;
 
     catalog_writer
-        .replace_table(source, table, graph, col_index_mapping)
+        .replace_table(source, table, graph, col_index_mapping, job_type)
         .await?;
     Ok(())
 }
@@ -145,6 +150,7 @@ pub async fn handle_alter_table_column(
         }
     }
 
+    let mut columns_altered = original_catalog.columns.clone();
     match operation {
         AlterTableOperation::AddColumn {
             column_def: new_column,
@@ -152,9 +158,9 @@ pub async fn handle_alter_table_column(
             // Duplicated names can actually be checked by `StreamMaterialize`. We do here for
             // better error reporting.
             let new_column_name = new_column.name.real_value();
-            if columns
+            if columns_altered
                 .iter()
-                .any(|c| c.name.real_value() == new_column_name)
+                .any(|c| c.name() == new_column_name.as_str())
             {
                 Err(ErrorCode::InvalidInputSyntax(format!(
                     "column \"{new_column_name}\" of table \"{table_name}\" already exists"
@@ -171,8 +177,11 @@ pub async fn handle_alter_table_column(
                 ))?
             }
 
-            // Add the new column to the table definition.
-            columns.push(new_column);
+            // Add the new column to the table definition if it is not created by `create table (*)` syntax.
+            if !columns.is_empty() {
+                columns.push(new_column.clone());
+            }
+            columns_altered.extend(bind_sql_columns(vec![new_column].as_slice())?)
         }
 
         AlterTableOperation::DropColumn {
@@ -186,14 +195,20 @@ pub async fn handle_alter_table_column(
 
             // Locate the column by name and remove it.
             let column_name = column_name.real_value();
-            let removed_column = columns
-                .extract_if(|c| c.name.real_value() == column_name)
+            let removed_column = columns_altered
+                .extract_if(|c| c.name() == column_name.as_str())
                 .at_most_one()
                 .ok()
                 .unwrap();
 
             if removed_column.is_some() {
                 // PASS
+                // remove from table definition
+                columns
+                    .extract_if(|c| c.name.real_value() == column_name)
+                    .at_most_one()
+                    .ok()
+                    .unwrap();
             } else if if_exists {
                 return Ok(PgResponse::builder(StatementType::ALTER_TABLE)
                     .notice(format!(
@@ -210,13 +225,14 @@ pub async fn handle_alter_table_column(
         }
 
         _ => unreachable!(),
-    }
+    };
 
     replace_table_with_definition(
         &session,
         table_name,
         definition,
         &original_catalog,
+        columns_altered,
         source_schema,
     )
     .await?;
