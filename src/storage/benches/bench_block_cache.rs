@@ -165,7 +165,7 @@ impl CacheBase for FoyerCache {
                 async move {
                     get_fake_block(sst_object_id, block_idx, latency)
                         .await
-                        .map(|block| Arc::new(block))
+                        .map(Arc::new)
                 }
             })
             .await?;
@@ -229,7 +229,7 @@ impl CacheBase for FoyerHybridCache {
                 async move {
                     get_fake_block(sst_object_id, block_idx, latency)
                         .await
-                        .map(|block| Arc::new(block))
+                        .map(block)
                         .map_err(anyhow::Error::from)
                 }
             })
