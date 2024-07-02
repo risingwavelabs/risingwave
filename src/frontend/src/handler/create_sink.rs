@@ -22,7 +22,7 @@ use either::Either;
 use itertools::Itertools;
 use maplit::{convert_args, hashmap};
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::array::arrow::{IcebergArrowConvert};
+use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::catalog::{
     ColumnCatalog, ConnectionId, DatabaseId, Schema, SchemaId, TableId, UserId,
 };

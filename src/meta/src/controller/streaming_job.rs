@@ -871,6 +871,7 @@ impl CatalogController {
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("table", job_id))?;
 
+        // For sinks created in earlier versions, we need to set the original_target_columns.
         for sink_id in updated_sink_catalogs {
             sink::ActiveModel {
                 sink_id: Set(sink_id as _),

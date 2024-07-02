@@ -343,6 +343,7 @@ pub struct SinkCatalog {
     /// The secret reference for the sink, mapping from property name to secret id.
     pub secret_refs: BTreeMap<String, PbSecretRef>,
 
+    /// Only for the sink whose target is a table. Columns of the target table when the sink is created. At this point all the default columns of the target table are all handled by the project operator in the sink plan.
     pub original_target_columns: Vec<ColumnCatalog>,
 }
 

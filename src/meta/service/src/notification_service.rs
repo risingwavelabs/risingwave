@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 use anyhow::Context;
 use itertools::Itertools;
 use risingwave_meta::manager::{MetadataManager, SessionParamsManagerImpl};
@@ -246,6 +248,23 @@ impl NotificationServiceImpl {
             users,
             catalog_version,
         ) = self.get_catalog_snapshot().await?;
+
+        let table_index: HashMap<_, _> = tables.iter().map(|table| (table.id, table)).collect();
+        let mut sinks = sinks;
+        for sink in &mut sinks {
+            if let Some(target_table) = sink.target_table
+                && sink.original_target_columns.is_empty()
+            {
+                if let Some(table) = table_index.get(&target_table) {
+                    tracing::info!(
+                        "updating sink {} target table columns {:?}",
+                        sink.id,
+                        table.columns
+                    );
+                    sink.original_target_columns = table.columns.clone();
+                }
+            }
+        }
 
         let (streaming_worker_slot_mappings, streaming_worker_slot_mapping_version) =
             self.get_worker_slot_mapping_snapshot().await?;

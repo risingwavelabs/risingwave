@@ -97,7 +97,12 @@ pub async fn replace_table_with_definition(
     );
 
     let incoming_sink_ids: HashSet<_> = original_catalog.incoming_sinks.iter().copied().collect();
-    let target_columns = bind_sql_columns(&columns)?;
+
+    let target_columns = table
+        .columns
+        .iter()
+        .map(|col| ColumnCatalog::from(col.clone()))
+        .collect_vec();
 
     for sink in fetch_incoming_sinks(session, &incoming_sink_ids)? {
         hijack_merger_for_target_table(&mut graph, &target_columns, &sink)?;
@@ -120,6 +125,10 @@ pub(crate) fn hijack_merger_for_target_table(
 ) -> Result<()> {
     let mut sink_columns = sink.original_target_columns.clone();
     if sink_columns.is_empty() {
+        // This is due to the fact that the value did not exist in earlier versions,
+        // which means no schema changes such as `ADD/DROP COLUMN` have been made to the table.
+        // Therefore the columns of the table at this point are `original_target_columns`.
+        // This value of sink will be filled on the meta.
         sink_columns = target_columns.to_vec();
     }
 
