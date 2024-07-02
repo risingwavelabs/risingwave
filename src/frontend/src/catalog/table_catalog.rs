@@ -493,6 +493,10 @@ impl TableCatalog {
                 .collect(),
         )
     }
+
+    pub fn is_created(&self) -> bool {
+        self.stream_job_status == StreamJobStatus::Created
+    }
 }
 
 impl From<PbTable> for TableCatalog {

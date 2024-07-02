@@ -71,7 +71,8 @@ fn make_prost_privilege(
                     Binder::resolve_schema_qualified_name(db_name, name)?;
                 let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
-                let (table, _) = reader.get_table_by_name(db_name, schema_path, &table_name)?;
+                let (table, _) =
+                    reader.get_created_table_by_name(db_name, schema_path, &table_name)?;
                 match table.table_type() {
                     TableType::MaterializedView => {}
                     _ => {
@@ -94,7 +95,7 @@ fn make_prost_privilege(
                     Binder::resolve_schema_qualified_name(db_name, name)?;
                 let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
-                match reader.get_table_by_name(db_name, schema_path, &table_name) {
+                match reader.get_created_table_by_name(db_name, schema_path, &table_name) {
                     Ok((table, _)) => {
                         match table.table_type() {
                             TableType::Table => {

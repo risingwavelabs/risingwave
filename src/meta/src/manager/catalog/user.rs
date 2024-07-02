@@ -216,14 +216,12 @@ mod tests {
             owner: DEFAULT_SUPER_USER_ID,
             ..Default::default()
         };
-        catalog_manager
-            .start_create_table_procedure(&table, vec![])
-            .await?;
+        catalog_manager.start_create_table_procedure(&table).await?;
         catalog_manager
             .finish_create_table_procedure(vec![], table)
             .await?;
         catalog_manager
-            .start_create_table_procedure(&other_table, vec![])
+            .start_create_table_procedure(&other_table)
             .await?;
         catalog_manager
             .finish_create_table_procedure(vec![], other_table)

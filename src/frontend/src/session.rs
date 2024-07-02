@@ -962,7 +962,7 @@ impl SessionImpl {
         let catalog_reader = self.env().catalog_reader().read_guard();
         let table = catalog_reader
             .get_schema_by_id(&DatabaseId::from(db_id), &SchemaId::from(schema_id))?
-            .get_table_by_name(table_name)
+            .get_created_table_by_name(table_name)
             .ok_or_else(|| {
                 Error::new(
                     ErrorKind::InvalidInput,

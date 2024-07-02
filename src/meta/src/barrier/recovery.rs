@@ -148,7 +148,7 @@ impl GlobalBarrierManagerContext {
             if fragments.is_created() {
                 // If the mview is already created, we don't need to recover it.
                 mgr.catalog_manager
-                    .finish_create_table_procedure(internal_tables, mview)
+                    .finish_create_materialized_view_procedure(internal_tables, mview)
                     .await?;
                 tracing::debug!("notified frontend for stream job {}", table_id.table_id);
             } else {
@@ -194,7 +194,7 @@ impl GlobalBarrierManagerContext {
                     // and mark catalog as created and commit to meta.
                     // both of these are done by catalog manager.
                     catalog_manager
-                        .finish_create_table_procedure(internal_tables, table.clone())
+                        .finish_create_materialized_view_procedure(internal_tables, table.clone())
                         .await?;
                     tracing::debug!("notified frontend for stream job {}", table.id);
                 };
