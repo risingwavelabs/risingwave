@@ -4,9 +4,10 @@ import csv
 import json
 import random
 import psycopg2
+import gzip
 
 from time import sleep
-from io import StringIO
+from io import StringIO, BytesIO
 from minio import Minio
 from functools import partial
 
@@ -29,6 +30,11 @@ def format_json(data):
         for file in data
     ]
 
+def format_json_gzip(data):
+    return [
+        '\n'.join([json.dumps(item) for item in file])
+        for file in data
+    ]
 
 def format_csv(data, with_header):
     csv_files = []
@@ -71,7 +77,7 @@ def do_test(config, file_num, item_num_per_file, prefix, fmt):
         mark int,
     ) WITH (
         connector = 's3_v2',
-        match_pattern = '{prefix}*.{fmt}',
+        match_pattern = '{prefix}*.gz',
         s3.region_name = '{config['S3_REGION']}',
         s3.bucket_name = '{config['S3_BUCKET']}',
         s3.credentials.access = '{config['S3_ACCESS_KEY']}',
@@ -133,20 +139,24 @@ if __name__ == "__main__":
         secure=True,
     )
     run_id = str(random.randint(1000, 9999))
-    _local = lambda idx: f'data_{idx}.{fmt}'
-    _s3 = lambda idx: f"{run_id}_data_{idx}.{fmt}"
+    _local = lambda idx: f'data_{idx}.{fmt}.gz'  # Modified file extension
+    _s3 = lambda idx: f"{run_id}_data_{idx}.{fmt}.gz"  # Modified file extension
 
     # put s3 files
     for idx, file_str in enumerate(formatted_files):
-        with open(_local(idx), "w") as f:
+        with gzip.open(_local(idx), "wt") as f:  # Use gzip.open to write gzip compressed file
             f.write(file_str)
+            f.flush()
             os.fsync(f.fileno())
 
-        client.fput_object(
-            config["S3_BUCKET"],
-            _s3(idx),
-            _local(idx)
-        )
+        with open(_local(idx), "rb") as f:
+            client.put_object(
+                config["S3_BUCKET"],
+                _s3(idx),
+                f,
+                length=os.fstat(f.fileno()).st_size,
+                content_type="application/gzip"  # Set content type to gzip
+            )
 
     # do test
     do_test(config, FILE_NUM, ITEM_NUM_PER_FILE, run_id, fmt)

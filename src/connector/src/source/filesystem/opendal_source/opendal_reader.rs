@@ -13,19 +13,23 @@
 // limitations under the License.
 
 use std::future::IntoFuture;
+use std::io;
+use std::pin::Pin;
 
+use async_compression::tokio::bufread::GzipDecoder;
 use async_trait::async_trait;
 use futures::TryStreamExt;
 use futures_async_stream::try_stream;
 use opendal::Operator;
 use risingwave_common::array::StreamChunk;
-use tokio::io::BufReader;
+use tokio::io::{AsyncRead, BufReader};
 use tokio_util::io::{ReaderStream, StreamReader};
 
 use super::opendal_enumerator::OpendalEnumerator;
 use super::OpendalSource;
 use crate::error::ConnectorResult;
 use crate::parser::ParserConfig;
+use crate::source::filesystem::file_common::DecompressionFormat;
 use crate::source::filesystem::nd_streaming::need_nd_streaming;
 use crate::source::filesystem::{nd_streaming, OpendalFsSplit};
 use crate::source::{
@@ -34,6 +38,7 @@ use crate::source::{
 };
 
 const STREAM_READER_CAPACITY: usize = 4096;
+
 #[derive(Debug, Clone)]
 pub struct OpendalReader<Src: OpendalSource> {
     connector: OpendalEnumerator<Src>,
@@ -72,8 +77,13 @@ impl<Src: OpendalSource> OpendalReader<Src> {
     #[try_stream(boxed, ok = StreamChunk, error = crate::error::ConnectorError)]
     async fn into_stream_inner(self) {
         for split in self.splits {
-            let data_stream =
-                Self::stream_read_object(self.connector.op.clone(), split, self.source_ctx.clone());
+            let data_stream = Self::stream_read_object(
+                self.connector.op.clone(),
+                split,
+                self.source_ctx.clone(),
+                self.connector.compression_format.clone(),
+            );
+
             let data_stream = if need_nd_streaming(&self.parser_config.specific.encoding_config) {
                 nd_streaming::split_stream(data_stream)
             } else {
@@ -98,6 +108,7 @@ impl<Src: OpendalSource> OpendalReader<Src> {
         op: Operator,
         split: OpendalFsSplit<Src>,
         source_ctx: SourceContextRef,
+        compression_format: Option<DecompressionFormat>,
     ) {
         let actor_id = source_ctx.actor_id.to_string();
         let fragment_id = source_ctx.fragment_id.to_string();
@@ -117,7 +128,27 @@ impl<Src: OpendalSource> OpendalReader<Src> {
         let stream_reader = StreamReader::new(
             reader.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)),
         );
-        let buf_reader = BufReader::new(stream_reader);
+
+        let buf_reader: Pin<Box<dyn AsyncRead + Send>> = match compression_format {
+            Some(DecompressionFormat::Gzip) => {
+                let gzip_decoder = GzipDecoder::new(stream_reader);
+                Box::pin(BufReader::new(gzip_decoder)) as Pin<Box<dyn AsyncRead + Send>>
+            }
+            None => {
+                // todo: support automatic decompression of more compression types.
+                if object_name.ends_with(".gz") || object_name.ends_with(".gzip") {
+                    let gzip_decoder = GzipDecoder::new(stream_reader);
+                    Box::pin(BufReader::new(gzip_decoder)) as Pin<Box<dyn AsyncRead + Send>>
+                } else {
+                    Box::pin(BufReader::new(stream_reader)) as Pin<Box<dyn AsyncRead + Send>>
+                }
+            }
+            Some(format) => {
+                let error_message = format!("The input compression format '{}' is not supported. Currently, only gzip format compression is supported.", format);
+                return Err(io::Error::new(io::ErrorKind::InvalidInput, error_message).into());
+            }
+        };
+
         let stream = ReaderStream::with_capacity(buf_reader, STREAM_READER_CAPACITY);
 
         let mut offset: usize = split.offset;
