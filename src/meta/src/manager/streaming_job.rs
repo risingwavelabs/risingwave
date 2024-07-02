@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
+
 use risingwave_common::catalog::TableVersionId;
 use risingwave_common::current_cluster_version;
 use risingwave_common::util::epoch::Epoch;
@@ -19,7 +21,9 @@ use risingwave_pb::catalog::{CreateType, Index, PbSource, Sink, Table};
 use risingwave_pb::ddl_service::TableJobType;
 use strum::EnumDiscriminants;
 
+use super::{get_refed_secret_ids_from_sink, get_refed_secret_ids_from_source};
 use crate::model::FragmentId;
+use crate::MetaResult;
 
 // This enum is used in order to re-use code in `DdlServiceImpl` for creating MaterializedView and
 // Sink.
@@ -285,42 +289,18 @@ impl StreamingJob {
         }
     }
 
-    pub fn dependent_secret_refs(&self) -> Vec<u32> {
+    pub fn dependent_secret_refs(&self) -> MetaResult<HashSet<u32>> {
         match self {
-            StreamingJob::Sink(sink, _) => {
-                let mut dependents = vec![];
-                for secret_ref in sink.secret_refs.values() {
-                    dependents.push(secret_ref.secret_id);
-                }
-                if let Some(format_desc) = &sink.format_desc {
-                    for secret_ref in format_desc.secret_refs.values() {
-                        dependents.push(secret_ref.secret_id);
-                    }
-                }
-                dependents
-            }
+            StreamingJob::Sink(sink, _) => Ok(get_refed_secret_ids_from_sink(sink)),
             StreamingJob::Table(source, _, _) => {
-                let mut dependents = vec![];
                 if let Some(source) = source {
-                    for secret_ref in source.secret_refs.values() {
-                        dependents.push(secret_ref.secret_id);
-                    }
-                    if let Some(info) = source.info.as_ref() {
-                        for secret_ref in info.format_encode_secret_refs.values() {
-                            dependents.push(secret_ref.secret_id);
-                        }
-                    }
+                    get_refed_secret_ids_from_source(source)
+                } else {
+                    Ok(HashSet::new())
                 }
-                dependents
             }
-            StreamingJob::Source(source) => source
-                .secret_refs
-                .values()
-                .map(|secret_ref| secret_ref.secret_id)
-                .collect(),
-            StreamingJob::MaterializedView(_) | StreamingJob::Index(_, _) => {
-                vec![]
-            }
+            StreamingJob::Source(source) => get_refed_secret_ids_from_source(source),
+            StreamingJob::MaterializedView(_) | StreamingJob::Index(_, _) => Ok(HashSet::new()),
         }
     }
 

@@ -289,8 +289,7 @@ impl CatalogController {
         }
 
         // get dependent secret ref.
-        // XXX: A relation can ref a secret more than 1 time.
-        let dependent_secret_refs = streaming_job.dependent_secret_refs();
+        let dependent_secret_refs = streaming_job.dependent_secret_refs()?;
 
         let dependent_objs = dependent_relations
             .iter()
