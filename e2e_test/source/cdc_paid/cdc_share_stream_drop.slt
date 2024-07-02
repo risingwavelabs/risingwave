@@ -1,0 +1,13 @@
+# drop relations created in cdc_share_stream.slt
+
+statement ok
+drop source shared_source cascade;
+
+statement ok
+drop table orders cascade;
+
+statement ok
+drop table single_type cascade;
+
+statement ok
+drop table sqlserver_all_data_types cascade;

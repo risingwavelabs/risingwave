@@ -1,0 +1,73 @@
+# CDC source basic test
+control substitution on
+
+# Some columns missing and reordered (sql-server-cdc)
+
+statement ok
+CREATE TABLE orders (
+  order_id INT PRIMARY KEY,
+  order_date BIGINT,
+  customer_name VARCHAR,
+  price DECIMAL,
+  product_id INT,
+  order_status SMALLINT
+) WITH (
+  connector = 'sqlserver-cdc',
+  hostname = '${MSSQL_HOST:sqlserver-server}',
+  port = '${MSSQL_PORT:1433}',
+  username = '${MSSQL_USER:$USER}',
+  password = '${MSSQL_PASSWORD}',
+  table.name = 'orders',
+  database.name = 'mydb',
+);
+
+statement ok
+CREATE TABLE single_type (
+  id INT,
+  c_time time,
+  PRIMARY KEY (id)
+)  WITH (
+  connector = 'sqlserver-cdc',
+  hostname = '${MSSQL_HOST:sqlserver-server}',
+  port = '${MSSQL_PORT:1433}',
+  username = '${MSSQL_USER:$USER}',
+  password = '${MSSQL_PASSWORD}',
+  table.name = 'single_type',
+  database.name = 'mydb',
+);
+
+statement ok
+CREATE TABLE sqlserver_all_data_types (
+  id INT PRIMARY KEY,
+  c_bit BOOLEAN,
+  c_tinyint SMALLINT,
+  c_smallint SMALLINT,
+  c_int INTEGER,
+  c_bigint BIGINT,
+  c_decimal DECIMAL,
+  c_real REAL,
+  c_float FLOAT,
+  c_varchar VARCHAR,
+  c_varbinary BYTEA,
+  c_date DATE,
+  c_time TIME,
+  c_datetime2 TIMESTAMP,
+  c_datetimeoffset TIMESTAMPTZ
+) WITH (
+  connector = 'sqlserver-cdc',
+  hostname = '${MSSQL_HOST:sqlserver-server}',
+  port = '${MSSQL_PORT:1433}',
+  username = '${MSSQL_USER:$USER}',
+  password = '${MSSQL_PASSWORD}',
+  table.name = 'sqlserver_all_data_types',
+  database.name = 'mydb',
+);
+
+statement ok
+create materialized view orders_cnt as select count(*) as cnt from orders;
+
+statement ok
+create materialized view single_type_cnt as select count(*) as cnt from single_type;
+
+statement ok
+create materialized view sqlserver_all_data_types_cnt as select count(*) as cnt from sqlserver_all_data_types;

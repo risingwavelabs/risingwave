@@ -107,6 +107,15 @@ strum_macros = "0.26"
 sysinfo = { version = "0.30", default-features = false }
 thiserror = "1"
 thiserror-ext = { workspace = true }
+tiberius = { git = "https://github.com/risingwavelabs/tiberius.git", rev = "f834f2deeb9e2fb08afaf73865f330cf31a3876a", default-features = false, features = [
+    "chrono",
+    "sql-browser-tokio",
+    "vendored-openssl",
+    "rust_decimal",
+    "bigdecimal",
+    "tds73",
+    "time",
+] }
 tinyvec = { version = "1", features = ["rustc_1_55", "grab_spare_slice"] }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",

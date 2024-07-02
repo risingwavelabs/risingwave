@@ -79,6 +79,8 @@ impl MockOffsetGenExecutor {
                 lsn: None,
                 txid: None,
                 tx_usec: None,
+                change_lsn: None,
+                commit_lsn: None,
             },
             is_heartbeat: false,
         };

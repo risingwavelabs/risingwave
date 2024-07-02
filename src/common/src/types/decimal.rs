@@ -21,7 +21,7 @@ use bytes::{BufMut, Bytes, BytesMut};
 use num_traits::{
     CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Num, One, Zero,
 };
-use postgres_types::{accepts, to_sql_checked, FromSql, IsNull, ToSql, Type};
+use postgres_types::{accepts, to_sql_checked, IsNull, ToSql};
 use risingwave_common_estimate_size::ZeroHeapSize;
 use rust_decimal::prelude::FromStr;
 use rust_decimal::{Decimal as RustDecimal, Error, MathematicalOps as _, RoundingStrategy};
@@ -95,7 +95,8 @@ impl ToBinary for Decimal {
         match ty {
             DataType::Decimal => {
                 let mut output = BytesMut::new();
-                self.to_sql(&Type::NUMERIC, &mut output).unwrap();
+                self.to_sql(&postgres_types::Type::NUMERIC, &mut output)
+                    .unwrap();
                 Ok(Some(output.freeze()))
             }
             _ => unreachable!(),
@@ -110,7 +111,7 @@ impl ToSql for Decimal {
 
     fn to_sql(
         &self,
-        ty: &Type,
+        ty: &postgres_types::Type,
         out: &mut BytesMut,
     ) -> Result<IsNull, Box<dyn std::error::Error + Sync + Send>>
     where
@@ -146,9 +147,9 @@ impl ToSql for Decimal {
     }
 }
 
-impl<'a> FromSql<'a> for Decimal {
+impl<'a> postgres_types::FromSql<'a> for Decimal {
     fn from_sql(
-        ty: &Type,
+        ty: &postgres_types::Type,
         raw: &'a [u8],
     ) -> Result<Self, Box<dyn std::error::Error + 'static + Sync + Send>> {
         let mut rdr = Cursor::new(raw);
@@ -159,12 +160,32 @@ impl<'a> FromSql<'a> for Decimal {
             0xC000 => Ok(Self::NaN),
             0xD000 => Ok(Self::PositiveInf),
             0xF000 => Ok(Self::NegativeInf),
-            _ => RustDecimal::from_sql(ty, raw).map(Self::Normalized),
+            _ => <RustDecimal as postgres_types::FromSql>::from_sql(ty, raw).map(Self::Normalized),
         }
     }
 
-    fn accepts(ty: &Type) -> bool {
-        matches!(*ty, Type::NUMERIC)
+    fn accepts(ty: &postgres_types::Type) -> bool {
+        matches!(*ty, postgres_types::Type::NUMERIC)
+    }
+}
+
+impl<'a> tiberius::IntoSql<'a> for Decimal {
+    fn into_sql(self) -> tiberius::ColumnData<'a> {
+        match self {
+            Decimal::Normalized(d) => d.into_sql(),
+            Decimal::NaN => tiberius::ColumnData::Numeric(None),
+            Decimal::PositiveInf => tiberius::ColumnData::Numeric(None),
+            Decimal::NegativeInf => tiberius::ColumnData::Numeric(None),
+        }
+    }
+}
+
+impl<'a> tiberius::FromSql<'a> for Decimal {
+    // TODO(kexiang): will sql server have inf/-inf/nan for decimal?ƒ
+    fn from_sql(value: &'a tiberius::ColumnData<'static>) -> tiberius::Result<Option<Self>> {
+        tiberius::Result::Ok(
+            <RustDecimal as tiberius::FromSql>::from_sql(value)?.map(Decimal::Normalized),
+        )
     }
 }
 

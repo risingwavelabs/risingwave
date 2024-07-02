@@ -46,6 +46,7 @@ pub use self::mysql::mysql_row_to_owned_row;
 use self::plain_parser::PlainParser;
 pub use self::postgres::postgres_row_to_owned_row;
 use self::simd_json_parser::DebeziumJsonAccessBuilder;
+pub use self::sql_server::sql_server_row_to_owned_row;
 pub use self::unified::json::{JsonAccess, TimestamptzHandling};
 pub use self::unified::Access;
 use self::unified::AccessImpl;
@@ -78,6 +79,7 @@ mod maxwell;
 mod mysql;
 pub mod plain_parser;
 mod postgres;
+mod sql_server;
 
 mod protobuf;
 pub mod scalar_adapter;

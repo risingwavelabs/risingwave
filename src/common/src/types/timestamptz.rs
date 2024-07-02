@@ -19,7 +19,7 @@ use std::str::FromStr;
 use bytes::{Bytes, BytesMut};
 use chrono::{DateTime, Datelike, TimeZone, Utc};
 use chrono_tz::Tz;
-use postgres_types::{accepts, to_sql_checked, FromSql, IsNull, ToSql, Type};
+use postgres_types::{accepts, to_sql_checked, IsNull, Type};
 use risingwave_common_estimate_size::ZeroHeapSize;
 use serde::{Deserialize, Serialize};
 
@@ -37,7 +37,7 @@ pub struct Timestamptz(i64);
 
 impl ZeroHeapSize for Timestamptz {}
 
-impl ToSql for Timestamptz {
+impl postgres_types::ToSql for Timestamptz {
     accepts!(TIMESTAMPTZ);
 
     to_sql_checked!();
@@ -51,12 +51,12 @@ impl ToSql for Timestamptz {
     }
 }
 
-impl<'a> FromSql<'a> for Timestamptz {
+impl<'a> postgres_types::FromSql<'a> for Timestamptz {
     fn from_sql(
         ty: &Type,
         raw: &'a [u8],
     ) -> Result<Self, Box<dyn std::error::Error + Sync + Send>> {
-        let instant = DateTime::<Utc>::from_sql(ty, raw)?;
+        let instant = <DateTime<Utc> as postgres_types::FromSql>::from_sql(ty, raw)?;
         Ok(Self::from(instant))
     }
 
@@ -65,14 +65,26 @@ impl<'a> FromSql<'a> for Timestamptz {
     }
 }
 
+impl<'a> tiberius::IntoSql<'a> for Timestamptz {
+    fn into_sql(self) -> tiberius::ColumnData<'a> {
+        self.0.into_sql()
+    }
+}
+
+impl<'a> tiberius::FromSql<'a> for Timestamptz {
+    fn from_sql(value: &'a tiberius::ColumnData<'static>) -> tiberius::Result<Option<Self>> {
+        let instant = <DateTime<Utc> as tiberius::FromSql>::from_sql(value)?;
+        let time = instant.map(Timestamptz::from);
+        tiberius::Result::Ok(time)
+    }
+}
+
 impl ToBinary for Timestamptz {
     fn to_binary_with_type(&self, _ty: &DataType) -> super::to_binary::Result<Option<Bytes>> {
         let instant = self.to_datetime_utc();
         let mut out = BytesMut::new();
         // postgres_types::Type::ANY is only used as a placeholder.
-        instant
-            .to_sql(&postgres_types::Type::ANY, &mut out)
-            .unwrap();
+        postgres_types::ToSql::to_sql(&instant, &postgres_types::Type::ANY, &mut out).unwrap();
         Ok(Some(out.freeze()))
     }
 }
