@@ -13,18 +13,31 @@
 // limitations under the License.
 
 use super::{DefaultBehavior, Merge};
+use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{BatchLimit, BatchSeqScan, BatchValues, PlanTreeNodeUnary};
 use crate::optimizer::plan_visitor::PlanVisitor;
 use crate::PlanRef;
 
+const DISTRIBUTED_IO_THRESHOLD: i64 = 64 * 1024 * 1024;
+
 #[derive(Debug, Clone, Default)]
-pub struct ExecutionModeDecider {}
+pub struct ExecutionModeDecider {
+    estimated_scan_io_bytes: i64,
+}
 
 impl ExecutionModeDecider {
     /// If the plan should run in local mode, return true; otherwise, return false.
     pub fn run_in_local_mode(plan: PlanRef) -> bool {
-        let mut decider = ExecutionModeDecider {};
-        decider.visit(plan)
+        let mut decider = ExecutionModeDecider {
+            estimated_scan_io_bytes: 0,
+        };
+        let local_based_on_query_structure = decider.visit(plan);
+        if local_based_on_query_structure {
+            true
+        } else {
+            // The query should be executed in distributed mode only if the expected IO is sufficiently high.
+            decider.estimated_scan_io_bytes < DISTRIBUTED_IO_THRESHOLD
+        }
     }
 }
 
@@ -42,6 +55,22 @@ impl PlanVisitor for ExecutionModeDecider {
     /// select * from t where k = 1
     /// select * from t where id between 1 and 5
     fn visit_batch_seq_scan(&mut self, batch_seq_scan: &BatchSeqScan) -> bool {
+        let reader = batch_seq_scan
+            .base
+            .ctx()
+            .session_ctx()
+            .env()
+            .catalog_reader()
+            .read_guard();
+        if let Some(table_stat) = reader
+            .table_stats()
+            .table_stats
+            .get(&batch_seq_scan.core().table_catalog.id().table_id())
+        {
+            self.estimated_scan_io_bytes += table_stat.total_key_size;
+            self.estimated_scan_io_bytes += table_stat.total_value_size;
+        }
+
         !batch_seq_scan.scan_ranges().is_empty()
             && batch_seq_scan
                 .scan_ranges()
