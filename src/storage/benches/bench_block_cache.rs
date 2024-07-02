@@ -229,7 +229,7 @@ impl CacheBase for FoyerHybridCache {
                 async move {
                     get_fake_block(sst_object_id, block_idx, latency)
                         .await
-                        .map(block)
+                        .map(Arc::new)
                         .map_err(anyhow::Error::from)
                 }
             })
