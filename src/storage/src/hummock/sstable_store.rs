@@ -595,7 +595,6 @@ impl SstableStore {
         });
 
         if matches! { entry.state(), FetchState::Wait | FetchState::Miss } {
-            tracing::info!("LI)K meta block miss object_id {}", object_id);
             stats.cache_meta_block_miss += 1;
         }
 
@@ -1012,7 +1011,6 @@ impl SstableWriter for StreamingUploadWriter {
             self.object_uploader.finish().await?;
             // Add meta cache.
             self.sstable_store.insert_meta_cache(self.object_id, meta);
-            tracing::info!("LI)K insert_meta_cache object_id: {}", self.object_id,);
 
             // Add block cache.
             if let CachePolicy::Fill(fill_high_priority_cache) = self.policy

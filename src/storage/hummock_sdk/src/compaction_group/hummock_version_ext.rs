@@ -399,7 +399,6 @@ impl HummockVersion {
 
     pub fn build_sst_delta_infos(&self, version_delta: &HummockVersionDelta) -> Vec<SstDeltaInfo> {
         let mut infos = vec![];
-        let mut refill_object_id_for_log = vec![];
 
         for (group_id, group_deltas) in &version_delta.group_deltas {
             let mut info = SstDeltaInfo::default();
@@ -422,13 +421,6 @@ impl HummockVersion {
                         info.insert_sst_level = delta.level_idx;
                         info.insert_sst_infos
                             .extend(delta.inserted_table_infos.iter().cloned());
-
-                        refill_object_id_for_log.extend(
-                            delta
-                                .inserted_table_infos
-                                .iter()
-                                .map(|sst| sst.get_object_id()),
-                        );
                     }
                     if !delta.removed_table_ids.is_empty() {
                         for id in &delta.removed_table_ids {
@@ -479,11 +471,6 @@ impl HummockVersion {
 
             infos.push(info);
         }
-
-        tracing::info!(
-            "LI)K refill_object_id_for_log {:?}",
-            refill_object_id_for_log
-        );
         infos
     }
 
