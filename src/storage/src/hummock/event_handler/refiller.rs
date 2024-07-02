@@ -39,7 +39,6 @@ use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::{
     Block, HummockError, HummockResult, Sstable, SstableBlockIndex, SstableStoreRef, TableHolder,
 };
-use crate::monitor::StoreLocalStatistic;
 use crate::opts::StorageOpts;
 
 pub static GLOBAL_CACHE_REFILL_METRICS: LazyLock<CacheRefillMetrics> =
@@ -367,11 +366,10 @@ impl CacheRefillTask {
             .insert_sst_infos
             .iter()
             .map(|info| async {
-                let mut stats = StoreLocalStatistic::default();
                 GLOBAL_CACHE_REFILL_METRICS.meta_refill_attempts_total.inc();
-
                 let now = Instant::now();
-                let res = context.sstable_store.sstable(info, &mut stats).await;
+                let res = context.sstable_store.sstable_for_refill(info).await;
+                tracing::info!("LI)K meta cache refill object_id {}", info.get_object_id());
                 GLOBAL_CACHE_REFILL_METRICS
                     .meta_refill_success_duration
                     .observe(now.elapsed().as_secs_f64());

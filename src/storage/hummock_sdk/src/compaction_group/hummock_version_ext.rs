@@ -399,6 +399,7 @@ impl HummockVersion {
 
     pub fn build_sst_delta_infos(&self, version_delta: &HummockVersionDelta) -> Vec<SstDeltaInfo> {
         let mut infos = vec![];
+        let mut refill_object_id_for_log = vec![];
 
         for (group_id, group_deltas) in &version_delta.group_deltas {
             let mut info = SstDeltaInfo::default();
@@ -407,13 +408,10 @@ impl HummockVersion {
             let mut removed_ssts: BTreeMap<u32, BTreeSet<u64>> = BTreeMap::new();
 
             // Build only if all deltas are intra level deltas.
-            if !group_deltas
+            assert!(group_deltas
                 .group_deltas
                 .iter()
-                .all(|delta| matches!(delta.get_delta_type().unwrap(), DeltaType::IntraLevel(..)))
-            {
-                continue;
-            }
+                .all(|delta| matches!(delta.get_delta_type().unwrap(), DeltaType::IntraLevel(..))));
 
             // TODO(MrCroxx): At most one insert delta is allowed here. It's okay for now with the
             // current `hummock::manager::gen_version_delta` implementation. Better refactor the
@@ -424,6 +422,13 @@ impl HummockVersion {
                         info.insert_sst_level = delta.level_idx;
                         info.insert_sst_infos
                             .extend(delta.inserted_table_infos.iter().cloned());
+
+                        refill_object_id_for_log.extend(
+                            delta
+                                .inserted_table_infos
+                                .iter()
+                                .map(|sst| sst.get_object_id()),
+                        );
                     }
                     if !delta.removed_table_ids.is_empty() {
                         for id in &delta.removed_table_ids {
@@ -475,6 +480,10 @@ impl HummockVersion {
             infos.push(info);
         }
 
+        tracing::info!(
+            "LI)K refill_object_id_for_log {:?}",
+            refill_object_id_for_log
+        );
         infos
     }
 

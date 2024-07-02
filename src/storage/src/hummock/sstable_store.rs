@@ -595,10 +595,33 @@ impl SstableStore {
         });
 
         if matches! { entry.state(), FetchState::Wait | FetchState::Miss } {
+            tracing::info!("LI)K meta block miss object_id {}", object_id);
             stats.cache_meta_block_miss += 1;
         }
 
         stats.cache_meta_block_total += 1;
+
+        async move { entry.await.map_err(HummockError::foyer_error) }
+    }
+
+    /// Returns `table_holder`
+    pub fn sstable_for_refill(
+        &self,
+        sst: &SstableInfo,
+    ) -> impl Future<Output = HummockResult<TableHolder>> + Send + 'static {
+        let object_id = sst.get_object_id();
+
+        let entry = self.meta_cache.fetch(object_id, || {
+            let store = self.store.clone();
+            let meta_path = self.get_sst_data_path(object_id);
+            let range = sst.meta_offset as usize..sst.file_size as usize;
+            async move {
+                let buf = store.read(&meta_path, range).await?;
+                let meta = SstableMeta::decode(&buf[..])?;
+                let sst = Sstable::new(object_id, meta);
+                Ok((Box::new(sst), CacheContext::Default))
+            }
+        });
 
         async move { entry.await.map_err(HummockError::foyer_error) }
     }
@@ -989,6 +1012,7 @@ impl SstableWriter for StreamingUploadWriter {
             self.object_uploader.finish().await?;
             // Add meta cache.
             self.sstable_store.insert_meta_cache(self.object_id, meta);
+            tracing::info!("LI)K insert_meta_cache object_id: {}", self.object_id,);
 
             // Add block cache.
             if let CachePolicy::Fill(fill_high_priority_cache) = self.policy
