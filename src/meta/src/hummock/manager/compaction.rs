@@ -78,7 +78,7 @@ use crate::hummock::compaction::selector::level_selector::PickerInfo;
 use crate::hummock::compaction::selector::{
     DynamicLevelSelector, DynamicLevelSelectorCore, LocalSelectorStatistic, ManualCompactionOption,
     ManualCompactionSelector, SpaceReclaimCompactionSelector, TombstoneCompactionSelector,
-    TtlCompactionSelector,
+    TtlCompactionSelector, VnodeWatermarkCompactionSelector,
 };
 use crate::hummock::compaction::{CompactStatus, CompactionDeveloperConfig, CompactionSelector};
 use crate::hummock::error::{Error, Result};
@@ -132,6 +132,10 @@ fn init_selectors() -> HashMap<compact_task::TaskType, Box<dyn CompactionSelecto
     compaction_selectors.insert(
         compact_task::TaskType::Tombstone,
         Box::<TombstoneCompactionSelector>::default(),
+    );
+    compaction_selectors.insert(
+        compact_task::TaskType::VnodeWatermark,
+        Box::<VnodeWatermarkCompactionSelector>::default(),
     );
     compaction_selectors
 }
@@ -764,8 +768,10 @@ impl HummockManager {
                 &group_config,
                 &mut stats,
                 selector,
-                table_id_to_option.clone(),
+                &table_id_to_option,
                 developer_config.clone(),
+                &version.latest_version().table_watermarks,
+                &version.latest_version().state_table_info,
             ) {
                 let target_level_id = compact_task.input.target_level as u32;
 
@@ -1766,6 +1772,8 @@ impl CompactionState {
             Some(compact_task::TaskType::Ttl)
         } else if guard.contains(&(group, compact_task::TaskType::Tombstone)) {
             Some(compact_task::TaskType::Tombstone)
+        } else if guard.contains(&(group, compact_task::TaskType::VnodeWatermark)) {
+            Some(compact_task::TaskType::VnodeWatermark)
         } else {
             None
         }

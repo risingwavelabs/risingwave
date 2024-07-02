@@ -13,23 +13,16 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::sync::Arc;
 
-use risingwave_common::catalog::TableOption;
 use risingwave_hummock_sdk::HummockCompactionTaskId;
 use risingwave_pb::hummock::compact_task;
-use risingwave_pb::hummock::hummock_version::Levels;
 
 use super::{CompactionSelector, DynamicLevelSelectorCore};
 use crate::hummock::compaction::picker::{
     TombstoneReclaimCompactionPicker, TombstoneReclaimPickerState,
 };
-use crate::hummock::compaction::{
-    create_compaction_task, create_overlap_strategy, CompactionDeveloperConfig, CompactionTask,
-    LocalSelectorStatistic,
-};
-use crate::hummock::level_handler::LevelHandler;
-use crate::hummock::model::CompactionGroup;
+use crate::hummock::compaction::selector::CompactionSelectorContext;
+use crate::hummock::compaction::{create_compaction_task, create_overlap_strategy, CompactionTask};
 
 #[derive(Default)]
 pub struct TombstoneCompactionSelector {
@@ -40,14 +33,15 @@ impl CompactionSelector for TombstoneCompactionSelector {
     fn pick_compaction(
         &mut self,
         task_id: HummockCompactionTaskId,
-        group: &CompactionGroup,
-        levels: &Levels,
-        _member_table_ids: &std::collections::BTreeSet<risingwave_common::catalog::TableId>,
-        level_handlers: &mut [LevelHandler],
-        _selector_stats: &mut LocalSelectorStatistic,
-        _table_id_to_options: HashMap<u32, TableOption>,
-        developer_config: Arc<CompactionDeveloperConfig>,
+        context: CompactionSelectorContext<'_>,
     ) -> Option<CompactionTask> {
+        let CompactionSelectorContext {
+            group,
+            levels,
+            level_handlers,
+            developer_config,
+            ..
+        } = context;
         if group.compaction_config.tombstone_reclaim_ratio == 0 {
             // it might cause full-compaction when tombstone_reclaim_ratio == 0
             return None;
