@@ -178,6 +178,7 @@ impl CatalogManager {
         self.init_user().await?;
         self.init_database().await?;
         self.source_backward_compat_check().await?;
+        self.table_sink_catalog_update().await?;
         Ok(())
     }
 
@@ -228,6 +229,36 @@ impl CatalogManager {
             sources.insert(source.id, source);
         }
         commit_meta!(self, sources)?;
+        Ok(())
+    }
+
+    async fn table_sink_catalog_update(&self) -> MetaResult<()> {
+        let core = &mut *self.core.lock().await;
+        let mut sinks = BTreeMapTransaction::new(&mut core.database.sinks);
+        let tables = BTreeMapTransaction::new(&mut core.database.tables);
+        let legacy_sinks = sinks
+            .tree_ref()
+            .iter()
+            .filter(|(_, sink)| {
+                sink.target_table.is_some() && sink.original_target_columns.is_empty()
+            })
+            .map(|(_, sink)| sink.clone())
+            .collect_vec();
+
+        for mut sink in legacy_sinks {
+            let target_table = sink.target_table();
+            sink.original_target_columns
+                .clone_from(&tables.get(&target_table).unwrap().columns);
+            tracing::info!(
+                "updating sink {} target table columns {:?}",
+                sink.id,
+                sink.original_target_columns
+            );
+
+            sinks.insert(sink.id, sink);
+        }
+        commit_meta!(self, sinks)?;
+
         Ok(())
     }
 }
