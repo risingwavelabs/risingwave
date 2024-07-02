@@ -28,6 +28,7 @@ use risingwave_pb::catalog::{
     PbCreateType, PbSink, PbSinkFormatDesc, PbSinkType, PbStreamJobStatus,
 };
 use risingwave_pb::secret::PbSecretRef;
+use serde_derive::Serialize;
 
 use super::{
     SinkError, CONNECTOR_TYPE_KEY, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION,
@@ -125,7 +126,7 @@ pub struct SinkFormatDesc {
 }
 
 /// TODO: consolidate with [`crate::source::SourceFormat`] and [`crate::parser::ProtocolProperties`].
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub enum SinkFormat {
     AppendOnly,
     Upsert,
@@ -133,7 +134,7 @@ pub enum SinkFormat {
 }
 
 /// TODO: consolidate with [`crate::source::SourceEncode`] and [`crate::parser::EncodingProperties`].
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub enum SinkEncode {
     Json,
     Protobuf,

@@ -59,7 +59,9 @@ use tracing::info;
 
 use super::compactor_observer::observer_manager::CompactorObserverNode;
 use crate::rpc::{CompactorServiceImpl, MonitorServiceImpl};
-use crate::telemetry::CompactorTelemetryCreator;
+use crate::telemetry::{
+    set_compactor_telemetry_tracking_id_and_session_id, CompactorTelemetryCreator,
+};
 use crate::CompactorOpts;
 
 const ENDPOINT_KEEP_ALIVE_INTERVAL_SEC: u64 = 60;
@@ -276,6 +278,7 @@ pub async fn compactor_serve(
     let telemetry_manager = TelemetryManager::new(
         Arc::new(meta_client.clone()),
         Arc::new(CompactorTelemetryCreator::new()),
+        Arc::new(set_compactor_telemetry_tracking_id_and_session_id),
     );
     // if the toml config file or env variable disables telemetry, do not watch system params change
     // because if any of configs disable telemetry, we should never start it

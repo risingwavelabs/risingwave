@@ -12,17 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::OnceLock;
+
 use prost::Message;
 use risingwave_common::config::MetaBackend;
 use risingwave_common::telemetry::pb_compatible::TelemetryToProtobuf;
-use risingwave_common::telemetry::report::{TelemetryInfoFetcher, TelemetryReportCreator};
+use risingwave_common::telemetry::report::{
+    report_event_common, TelemetryInfoFetcher, TelemetryReportCreator,
+};
 use risingwave_common::telemetry::{
     current_timestamp, telemetry_cluster_type_from_env_var, SystemData, TelemetryNodeType,
     TelemetryReportBase, TelemetryResult,
 };
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_pb::common::WorkerType;
-use risingwave_pb::telemetry::PbTelemetryClusterType;
+use risingwave_pb::telemetry::{
+    PbTelemetryClusterType, PbTelemetryDatabaseComponents, PbTelemetryEventStage,
+};
 use serde::{Deserialize, Serialize};
 use thiserror_ext::AsReport;
 
@@ -30,6 +36,41 @@ use crate::manager::MetadataManager;
 use crate::model::ClusterId;
 
 const TELEMETRY_META_REPORT_TYPE: &str = "meta";
+
+static META_TELEMETRY_SESSION_ID: OnceLock<String> = OnceLock::new();
+static META_TELEMETRY_TRACKING_ID: OnceLock<String> = OnceLock::new();
+
+pub fn set_meta_telemetry_tracking_id_and_session_id(tracking_id: String, session_id: String) {
+    META_TELEMETRY_TRACKING_ID.set(tracking_id).unwrap();
+    META_TELEMETRY_SESSION_ID.set(session_id).unwrap();
+}
+
+fn get_meta_telemetry_tracking_id_and_session_id() -> (Option<String>, Option<String>) {
+    (
+        META_TELEMETRY_TRACKING_ID.get().cloned(),
+        META_TELEMETRY_SESSION_ID.get().cloned(),
+    )
+}
+
+pub(crate) fn report_event(
+    event_stage: PbTelemetryEventStage,
+    feature_name: String,
+    catalog_id: i64,
+    connector_name: Option<String>,
+    component: Option<PbTelemetryDatabaseComponents>,
+    attributes: Option<String>, // any json string
+) {
+    report_event_common(
+        Box::new(get_meta_telemetry_tracking_id_and_session_id),
+        event_stage,
+        feature_name,
+        catalog_id,
+        connector_name,
+        component,
+        attributes,
+        TELEMETRY_META_REPORT_TYPE.to_string(),
+    );
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 struct NodeCount {
