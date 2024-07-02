@@ -30,7 +30,7 @@ pub struct BarrierInfo {
 
 /// Used for notifying the status of a scheduled command/barrier.
 #[derive(Debug, Default)]
-pub(crate) struct Notifier {
+pub struct Notifier {
     /// Get notified when scheduled barrier has started to be handled.
     pub started: Option<oneshot::Sender<BarrierInfo>>,
 
