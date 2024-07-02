@@ -23,6 +23,7 @@
 use std::pin::pin;
 
 use futures::Future;
+use risingwave_common::util::tokio_util::sync::CancellationToken;
 
 mod logger;
 pub use logger::*;
@@ -32,7 +33,6 @@ mod panic_hook;
 pub use panic_hook::*;
 mod prof;
 use prof::*;
-use tokio_util::sync::CancellationToken;
 
 /// Start RisingWave components with configs from environment variable.
 ///
@@ -96,17 +96,16 @@ where
         tokio::select! {
             biased;
             result = tokio::signal::ctrl_c() => {
-                let _ = result.expect("failed to receive ctrl-c signal");
-
-                // Send cancel signal.
+                result.expect("failed to receive ctrl-c signal");
                 tracing::info!("received ctrl-c, shutting down... (press ctrl-c again to force shutdown)");
-                shutdown.cancel();
 
-                // Handle forced shutdown.
+                // Send shutdown signal.
+                shutdown.cancel();
+                // While waiting for the future to finish, listen for the second ctrl-c signal.
                 tokio::select! {
                     biased;
                     result = tokio::signal::ctrl_c() => {
-                        let _ = result.expect("failed to receive ctrl-c signal");
+                        result.expect("failed to receive ctrl-c signal");
                         tracing::warn!("forced shutdown");
                         std::process::exit(1);
                     }

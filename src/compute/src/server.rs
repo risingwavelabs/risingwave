@@ -444,7 +444,13 @@ pub async fn compute_node_serve(
     meta_client.activate(&advertise_addr).await.unwrap();
     // Wait for the shutdown signal.
     let _ = shutdown.cancelled().await;
+
     // TODO(shutdown): gracefully unregister from the meta service.
+
+    // NOTE(shutdown): We can't simply join the tonic server here because it only returns when all
+    // existing connections are closed, while we have long-running streaming calls that never
+    // close. From the other side, there's also no need to gracefully shutdown them if we have
+    // unregistered from the meta service.
 }
 
 /// Check whether the compute node has enough memory to perform computing tasks. Apart from storage,

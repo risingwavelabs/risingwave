@@ -9109,7 +9109,6 @@ dependencies = [
  "thiserror-ext",
  "tokio-openssl",
  "tokio-postgres",
- "tokio-util",
  "tracing",
  "workspace-hack",
 ]
@@ -11533,7 +11532,6 @@ dependencies = [
  "thiserror",
  "thiserror-ext",
  "tokio-stream",
- "tokio-util",
  "tracing",
  "uuid",
  "workspace-hack",
@@ -12033,7 +12031,6 @@ dependencies = [
  "rlimit",
  "thiserror-ext",
  "time",
- "tokio-util",
  "tracing",
  "tracing-opentelemetry",
  "tracing-subscriber",

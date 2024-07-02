@@ -37,7 +37,6 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "signal",
     "fs",
 ] }
-tokio-util = { workspace = true }
 tracing = "0.1"
 tracing-opentelemetry = { workspace = true }
 tracing-subscriber = { version = "0.3", features = [

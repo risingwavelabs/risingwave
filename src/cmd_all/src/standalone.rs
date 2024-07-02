@@ -216,6 +216,7 @@ pub async fn standalone(
     }
     if let Some(opts) = compute_opts {
         tracing::info!("starting compute-node thread with cli args: {:?}", opts);
+        // TODO(shutdown): pass the shutdown token
         let _compute_handle =
             tokio::spawn(
                 async move { risingwave_compute::start(opts, CancellationToken::new()).await },
