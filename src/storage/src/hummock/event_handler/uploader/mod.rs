@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod spiller;
 mod task_manager;
 
 use std::cmp::Ordering;
@@ -43,6 +44,7 @@ use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
 
 use crate::hummock::event_handler::hummock_event_handler::{send_sync_result, BufferTracker};
+use crate::hummock::event_handler::uploader::spiller::Spiller;
 use crate::hummock::event_handler::uploader::uploader_imm::UploaderImm;
 use crate::hummock::event_handler::LocalInstanceId;
 use crate::hummock::local_version::pinned_version::PinnedVersion;
@@ -604,6 +606,22 @@ impl LocalInstanceUnsyncData {
             }
         }
     }
+
+    fn spillable_data_info(&self) -> Option<(HummockEpoch, usize)> {
+        self.sealed_data
+            .back()
+            .or(self.current_epoch_data.as_ref())
+            .and_then(|epoch_data| {
+                if !epoch_data.is_empty() {
+                    Some((
+                        epoch_data.epoch,
+                        epoch_data.imms.iter().map(|imm| imm.size()).sum(),
+                    ))
+                } else {
+                    None
+                }
+            })
+    }
 }
 
 struct TableUnsyncData {
@@ -721,9 +739,6 @@ struct UnsyncData {
     table_data: HashMap<TableId, TableUnsyncData>,
     // An index as a mapping from instance id to its table id
     instance_table_id: HashMap<LocalInstanceId, TableId>,
-    // TODO: this is only used in spill to get existing epochs and can be removed
-    // when we support spill not based on epoch
-    epochs: BTreeMap<HummockEpoch, ()>,
 }
 
 impl UnsyncData {
@@ -764,7 +779,6 @@ impl UnsyncData {
             .instance_table_id
             .insert(instance_id, table_id)
             .is_none());
-        self.epochs.insert(init_epoch, ());
     }
 
     fn instance_data(
@@ -803,7 +817,6 @@ impl UnsyncData {
             .get_mut(&instance_id)
             .expect("should exist");
         let epoch = instance_data.local_seal_epoch(next_epoch);
-        self.epochs.insert(next_epoch, ());
         if let Some((direction, table_watermarks)) = opts.table_watermarks {
             table_data.add_table_watermarks(epoch, table_watermarks, direction);
         }
@@ -833,9 +846,6 @@ impl UploaderData {
         table_ids: HashSet<TableId>,
         sync_result_sender: oneshot::Sender<HummockResult<SyncedData>>,
     ) {
-        // clean old epochs
-        let _epochs = take_before_epoch(&mut self.unsync_data.epochs, epoch);
-
         let mut all_table_watermarks = HashMap::new();
         let mut uploading_tasks = HashSet::new();
         let mut spilled_tasks = BTreeSet::new();
@@ -1139,38 +1149,28 @@ impl HummockUploader {
             return false;
         };
         if self.context.buffer_tracker.need_flush() {
+            let mut spiller = Spiller::new(&mut data.unsync_data);
             let mut curr_batch_flush_size = 0;
             // iterate from older epoch to newer epoch
-            for epoch in &mut data.unsync_data.epochs.keys() {
-                if !self
-                    .context
-                    .buffer_tracker
-                    .need_more_flush(curr_batch_flush_size)
+            while self
+                .context
+                .buffer_tracker
+                .need_more_flush(curr_batch_flush_size)
+                && let Some((epoch, payload, spilled_table_ids)) = spiller.next_spilled_payload()
+            {
+                assert!(!payload.is_empty());
                 {
-                    break;
-                }
-                let mut spilled_table_ids = HashSet::new();
-                let mut payload = HashMap::new();
-                for (table_id, table_data) in &mut data.unsync_data.table_data {
-                    for (instance_id, instance_data) in &mut table_data.instance_data {
-                        let instance_payload = instance_data.spill(*epoch);
-                        if !instance_payload.is_empty() {
-                            payload.insert(*instance_id, instance_payload);
-                            spilled_table_ids.insert(*table_id);
-                        }
-                    }
-                }
-                if !payload.is_empty() {
                     let (task_id, task_size, spilled_table_ids) =
                         data.task_manager
                             .spill(&self.context, spilled_table_ids, payload);
                     for table_id in spilled_table_ids {
-                        data.unsync_data
+                        spiller
+                            .unsync_data()
                             .table_data
                             .get_mut(table_id)
                             .expect("should exist")
                             .spill_tasks
-                            .entry(*epoch)
+                            .entry(epoch)
                             .or_default()
                             .push_front(task_id);
                     }
