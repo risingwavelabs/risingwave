@@ -1,5 +1,5 @@
 [meta]
-disable_recovery = true
+disable_recovery = false
 max_heartbeat_interval_secs = 60
 
 [meta.compaction_config]
