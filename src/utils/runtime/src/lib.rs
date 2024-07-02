@@ -20,6 +20,8 @@
 #![feature(panic_update_hook)]
 #![feature(let_chains)]
 
+use std::pin::pin;
+
 use futures::Future;
 
 mod logger;
@@ -34,7 +36,19 @@ use tokio_util::sync::CancellationToken;
 
 /// Start RisingWave components with configs from environment variable.
 ///
-/// Currently, the following env variables will be read:
+/// # Shutdown on Ctrl-C
+///
+/// The given closure `f` will take a [`CancellationToken`] as an argument. When a `SIGINT` signal
+/// is received (typically by pressing `Ctrl-C`), [`CancellationToken::cancel`] will be called to
+/// notify all subscribers to shutdown. You can use [`.cancelled()`](CancellationToken::cancelled)
+/// to get notified on this.
+///
+/// Users may also send a second `SIGINT` signal to force shutdown. In this case, this function
+/// won't return and the process will exit with code 1.
+///
+/// # Environment variables
+///
+/// Currently, the following environment variables will be read and used to configure the runtime.
 ///
 /// * `RW_WORKER_THREADS` (alias of `TOKIO_WORKER_THREADS`): number of tokio worker threads. If
 ///   not set, it will be decided by tokio. Note that this can still be overridden by per-module
@@ -75,12 +89,41 @@ where
         spawn_prof_thread(profile_path);
     }
 
-    let token = CancellationToken::new();
+    let future_with_shutdown = async move {
+        let shutdown = CancellationToken::new();
+        let mut fut = pin!(f(shutdown.clone()));
 
-    tokio::runtime::Builder::new_multi_thread()
+        tokio::select! {
+            biased;
+            result = tokio::signal::ctrl_c() => {
+                let _ = result.expect("failed to receive ctrl-c signal");
+
+                // Send cancel signal.
+                tracing::info!("received ctrl-c, shutting down... (press ctrl-c again to force shutdown)");
+                shutdown.cancel();
+
+                // Handle forced shutdown.
+                tokio::select! {
+                    biased;
+                    result = tokio::signal::ctrl_c() => {
+                        let _ = result.expect("failed to receive ctrl-c signal");
+                        tracing::warn!("forced shutdown");
+                        std::process::exit(1);
+                    }
+                    output = &mut fut => output
+                }
+            }
+            output = &mut fut => output,
+        }
+    };
+
+    let runtime = tokio::runtime::Builder::new_multi_thread()
         .thread_name("rw-main")
         .enable_all()
         .build()
-        .unwrap()
-        .block_on(f(token))
+        .unwrap();
+
+    let output = runtime.block_on(future_with_shutdown);
+    runtime.shutdown_background(); // do not wait for background tasks to finish
+    output
 }

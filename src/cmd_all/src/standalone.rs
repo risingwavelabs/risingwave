@@ -16,6 +16,7 @@ use anyhow::Result;
 use clap::Parser;
 use risingwave_common::config::MetaBackend;
 use risingwave_common::util::meta_addr::MetaAddressStrategy;
+use risingwave_common::util::tokio_util::sync::CancellationToken;
 use risingwave_compactor::CompactorOpts;
 use risingwave_compute::ComputeNodeOpts;
 use risingwave_frontend::FrontendOpts;
@@ -215,7 +216,10 @@ pub async fn standalone(
     }
     if let Some(opts) = compute_opts {
         tracing::info!("starting compute-node thread with cli args: {:?}", opts);
-        let _compute_handle = tokio::spawn(async move { risingwave_compute::start(opts).await });
+        let _compute_handle =
+            tokio::spawn(
+                async move { risingwave_compute::start(opts, CancellationToken::new()).await },
+            );
     }
     if let Some(opts) = frontend_opts.clone() {
         tracing::info!("starting frontend-node thread with cli args: {:?}", opts);

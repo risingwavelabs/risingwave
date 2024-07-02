@@ -10885,6 +10885,7 @@ dependencies = [
  "thiserror-ext",
  "tinyvec",
  "tokio-retry",
+ "tokio-util",
  "toml 0.8.12",
  "tower-layer",
  "tower-service",
