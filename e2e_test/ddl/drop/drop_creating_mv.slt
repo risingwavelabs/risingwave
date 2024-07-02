@@ -13,7 +13,7 @@ set streaming_rate_limit=1;
 ############## Test drop foreground mv
 skipif in-memory
 system ok
-risedev psql -c 'create materialized view m1 as select * from t;' &
+psql -h localhost -p 4566 -d dev -U root -c 'create materialized view m1 as select * from t;' &
 
 skipif in-memory
 sleep 5s
