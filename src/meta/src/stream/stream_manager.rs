@@ -1128,7 +1128,7 @@ mod tests {
             };
 
             self.catalog_manager
-                .start_create_table_procedure(&table, vec![])
+                .start_create_table_procedure(&table)
                 .await?;
             self.fragment_manager
                 .start_create_table_fragments(table_fragments.clone())
