@@ -416,7 +416,7 @@ impl SstableStore {
         };
 
         // future: fetch block if hybrid cache miss
-        let fetch_block = move |context: CacheContext| {
+        let fetch_block = move || {
             let range = range.clone();
 
             async move {
@@ -440,7 +440,7 @@ impl SstableStore {
                     Block::decode(block_data, uncompressed_capacity)
                         .map_err(anyhow::Error::from)?,
                 );
-                Ok((block, context))
+                Ok(block)
             }
         };
 
@@ -450,12 +450,13 @@ impl SstableStore {
 
         match policy {
             CachePolicy::Fill(context) => {
-                let entry = self.block_cache_v2.fetch(
+                let entry = self.block_cache_v2.fetch_with_context(
                     SstableBlockIndex {
                         sst_id: object_id,
                         block_idx: block_index as _,
                     },
-                    move || fetch_block(context),
+                    context,
+                    fetch_block,
                 );
                 if matches!(entry.state(), FetchState::Miss) {
                     stats.cache_data_block_miss += 1;
@@ -476,16 +477,12 @@ impl SstableStore {
                         entry,
                     )))
                 } else {
-                    let (block, _) = fetch_block(CacheContext::default())
-                        .await
-                        .map_err(HummockError::foyer_error)?;
+                    let block = fetch_block().await.map_err(HummockError::foyer_error)?;
                     Ok(BlockResponse::Block(BlockHolder::from_owned_block(block)))
                 }
             }
             CachePolicy::Disable => {
-                let (block, _) = fetch_block(CacheContext::default())
-                    .await
-                    .map_err(HummockError::foyer_error)?;
+                let block = fetch_block().await.map_err(HummockError::foyer_error)?;
                 Ok(BlockResponse::Block(BlockHolder::from_owned_block(block)))
             }
         }
@@ -575,7 +572,7 @@ impl SstableStore {
                 let sst = Sstable::new(object_id, meta);
                 let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
                 stats_ptr.fetch_add(add as u64, Ordering::Relaxed);
-                Ok((Box::new(sst), CacheContext::Default))
+                Ok(Box::new(sst))
             }
         });
 
