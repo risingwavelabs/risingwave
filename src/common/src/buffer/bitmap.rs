@@ -39,6 +39,7 @@
 use std::iter::{self, TrustedLen};
 use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, Not, Range, RangeInclusive};
 
+use fixedbitset::FixedBitSet;
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::common::buffer::CompressionType;
 use risingwave_pb::common::PbBuffer;
@@ -459,6 +460,12 @@ impl Bitmap {
             num_bits,
             count_ones: range.len(),
         }
+    }
+
+    /// Used to convert to a mutable bitmap.
+    pub fn to_fixed_bitset(&self) -> FixedBitSet {
+        let iter = self.iter_ones();
+        FixedBitSet::from_iter(iter)
     }
 }
 

@@ -11,7 +11,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
 use std::collections::HashMap;
 
 use either::Either;
@@ -21,6 +20,7 @@ use itertools::Itertools;
 use risingwave_common::array::{DataChunk, Op};
 use risingwave_common::bail;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
+use risingwave_common::row::RowExt;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::store::PrefetchOptions;
@@ -109,6 +109,7 @@ where
         let upstream_table_id = self.upstream_table.table_id();
         let mut upstream_table = self.upstream_table;
         let vnodes = upstream_table.vnodes().clone();
+        let vnode_bitset = vnodes.to_fixed_bitset();
         let mut rate_limit = self.rate_limit;
 
         // These builders will build data chunks.
@@ -139,7 +140,8 @@ where
         let first_epoch = first_barrier.epoch;
         self.state_table.init_epoch(first_barrier.epoch);
 
-        let progress_per_vnode = get_progress_per_vnode(&self.state_table).await?;
+        let progress_per_vnode =
+            get_progress_per_vnode(&self.state_table, pk_in_output_indices.len()).await?;
 
         let is_completely_finished = progress_per_vnode.iter().all(|(_, p)| {
             matches!(
@@ -344,6 +346,12 @@ where
                     if !has_snapshot_read && !paused && rate_limit_ready {
                         debug_assert!(builders.values().all(|b| b.is_empty()));
                         let (_, snapshot) = backfill_stream.into_inner();
+                        let mut remaining_vnodes = vnode_bitset.clone();
+                        // Records which were purely used to update the current pos,
+                        // to persist the tombstone iteration progress.
+                        // They need to be buffered in case the snapshot read completes,
+                        // Then we must yield them downstream.
+
                         #[for_await]
                         for msg in snapshot {
                             let Either::Right(msg) = msg else {
@@ -358,20 +366,31 @@ where
                                     break;
                                 }
                                 Some((vnode, row)) => {
-                                    let builder = builders.get_mut(&vnode).unwrap();
-                                    if let Some(chunk) = builder.append_one_row(row) {
-                                        yield Message::Chunk(Self::handle_snapshot_chunk(
-                                            chunk,
+                                    // FIXME(kwannoel):
+                                    // Perhaps we should introduce a custom stream combinator,
+                                    // so we can iterate on individual streams here.
+                                    // Otherwise here we will continue iterating across all vnodes,
+                                    // even if some vnode is already done.
+                                    // We could actually drop the snapshot iteration stream
+                                    // for that vnode once we have read at least 1 record from it.
+                                    let vnode_idx = vnode.to_index();
+                                    if remaining_vnodes.contains(vnode_idx) {
+                                        let new_pos = row.project(&pk_in_output_indices);
+                                        assert_eq!(new_pos.len(), pk_in_output_indices.len());
+                                        backfill_state.update_progress(
                                             vnode,
-                                            &pk_in_output_indices,
-                                            &mut backfill_state,
-                                            &mut cur_barrier_snapshot_processed_rows,
-                                            &mut total_snapshot_processed_rows,
-                                            &self.output_indices,
-                                        )?);
-                                    }
+                                            new_pos.to_owned_row(),
+                                            false,
+                                            0,
+                                        )?;
 
-                                    break;
+                                        remaining_vnodes.set(vnode_idx, false);
+                                        if remaining_vnodes.is_empty() {
+                                            break;
+                                        }
+                                    } else {
+                                        continue;
+                                    }
                                 }
                             }
                         }
@@ -388,10 +407,44 @@ where
                 };
 
                 // Process barrier:
+                // - snapshot read if we forced tombstone iteration progress.
                 // - consume snapshot rows left in builder.
                 // - consume upstream buffer chunk
                 // - handle mutations
                 // - switch snapshot
+
+                // snapshot read if we forced tombstone iteration progress.
+                if snapshot_read_complete {
+                    let snapshot = Self::make_snapshot_stream(
+                        &upstream_table,
+                        backfill_state.clone(),
+                        paused,
+                        &rate_limiter,
+                    );
+                    #[for_await]
+                    for msg in snapshot {
+                        let msg = msg?;
+                        match msg {
+                            None => {
+                                break;
+                            }
+                            Some((vnode, row)) => {
+                                let builder = builders.get_mut(&vnode).unwrap();
+                                if let Some(chunk) = builder.append_one_row(row) {
+                                    yield Message::Chunk(Self::handle_snapshot_chunk(
+                                        chunk,
+                                        vnode,
+                                        &pk_in_output_indices,
+                                        &mut backfill_state,
+                                        &mut cur_barrier_snapshot_processed_rows,
+                                        &mut total_snapshot_processed_rows,
+                                        &self.output_indices,
+                                    )?);
+                                }
+                            }
+                        }
+                    }
+                }
 
                 // consume snapshot rows left in builder.
                 // NOTE(kwannoel): `zip_eq_debug` does not work here,
@@ -562,7 +615,7 @@ where
                         // (there's no epoch before the first epoch).
                         for vnode in upstream_table.vnodes().iter_vnodes() {
                             backfill_state
-                                .finish_progress(vnode, upstream_table.pk_indices().len());
+                                .finish_progress(vnode, upstream_table.pk_indices().len())?;
                         }
 
                         persist_state_per_vnode(
@@ -674,9 +727,6 @@ where
     /// The `StreamChunk` is the chunk that contains the rows from the vnode.
     /// If it's `None`, it means the vnode has no more rows for this snapshot read.
     ///
-    /// The `snapshot_read_epoch` is supplied as a parameter for `state_table`.
-    /// It is required to ensure we read a fully-checkpointed snapshot the **first time**.
-    ///
     /// The rows from upstream snapshot read will be buffered inside the `builder`.
     /// If snapshot is dropped before its rows are consumed,
     /// remaining data in `builder` must be flushed manually.
@@ -690,15 +740,20 @@ where
         let mut iterators = vec![];
         for vnode in upstream_table.vnodes().iter_vnodes() {
             let backfill_progress = backfill_state.get_progress(&vnode)?;
-            let current_pos = match backfill_progress {
-                BackfillProgressPerVnode::NotStarted => None,
-                BackfillProgressPerVnode::Completed { current_pos, .. }
-                | BackfillProgressPerVnode::InProgress { current_pos, .. } => {
-                    Some(current_pos.clone())
+            let (current_pos, exclusive) = match backfill_progress {
+                BackfillProgressPerVnode::NotStarted => (None, false),
+                BackfillProgressPerVnode::Completed { .. } => {
+                    continue;
                 }
+                BackfillProgressPerVnode::InProgress {
+                    current_pos,
+                    yielded,
+                    ..
+                } => (Some(current_pos.clone()), *yielded),
             };
 
-            let range_bounds = compute_bounds(upstream_table.pk_indices(), current_pos.clone());
+            let range_bounds =
+                compute_bounds(upstream_table.pk_indices(), exclusive, current_pos.clone());
             if range_bounds.is_none() {
                 continue;
             }
