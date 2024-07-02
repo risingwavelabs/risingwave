@@ -489,15 +489,35 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
     }
     println!("table fragments migrated");
 
+    let mut object_dependencies = vec![];
+
     // catalogs.
     // source
     if !sources.is_empty() {
         let source_models: Vec<source::ActiveModel> = sources
             .into_iter()
             .map(|mut src| {
+                let mut dependent_secret_refs = vec![];
                 if let Some(id) = src.connection_id.as_mut() {
                     *id = *connection_rewrite.get(id).unwrap();
                 }
+                for secret_ref in src.secret_refs.values_mut() {
+                    secret_ref.secret_id = *secret_rewrite.get(&secret_ref.secret_id).unwrap();
+                    dependent_secret_refs.push(secret_ref.secret_id);
+                }
+                if let Some(info) = &mut src.info {
+                    for secret_ref in info.format_encode_secret_refs.values_mut() {
+                        secret_ref.secret_id = *secret_rewrite.get(&secret_ref.secret_id).unwrap();
+                        dependent_secret_refs.push(secret_ref.secret_id);
+                    }
+                }
+                object_dependencies.extend(dependent_secret_refs.into_iter().map(|secret_id| {
+                    object_dependency::ActiveModel {
+                        id: NotSet,
+                        oid: Set(secret_id as _),
+                        used_by: Set(src.id as _),
+                    }
+                }));
                 src.into()
             })
             .collect();
@@ -506,8 +526,6 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
             .await?;
     }
     println!("sources migrated");
-
-    let mut object_dependencies = vec![];
 
     // table
     for table in tables {
@@ -554,13 +572,21 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
                 if let Some(id) = s.connection_id.as_mut() {
                     *id = *connection_rewrite.get(id).unwrap();
                 }
-                for secret_id in s.secret_ref.values_mut() {
-                    secret_id.secret_id = *secret_rewrite.get(&secret_id.secret_id).unwrap();
+                let mut dependent_secret_refs = vec![];
+                for secret_ref in s.secret_refs.values_mut() {
+                    secret_ref.secret_id = *secret_rewrite.get(&secret_ref.secret_id).unwrap();
+                    dependent_secret_refs.push(secret_ref.secret_id);
                 }
-                object_dependencies.extend(s.secret_ref.values().map(|id| {
+                if let Some(desc) = &mut s.format_desc {
+                    for secret_ref in desc.secret_refs.values_mut() {
+                        secret_ref.secret_id = *secret_rewrite.get(&secret_ref.secret_id).unwrap();
+                        dependent_secret_refs.push(secret_ref.secret_id);
+                    }
+                }
+                object_dependencies.extend(dependent_secret_refs.into_iter().map(|secret_id| {
                     object_dependency::ActiveModel {
                         id: NotSet,
-                        oid: Set(id.secret_id as _),
+                        oid: Set(secret_id as _),
                         used_by: Set(s.id as _),
                     }
                 }));

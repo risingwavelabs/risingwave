@@ -120,7 +120,7 @@ impl<T: CdcSourceTypeTrait> TryFromBTreeMap for CdcProperties<T> {
         properties: BTreeMap<String, String>,
         _deny_unknown_fields: bool,
     ) -> ConnectorResult<Self> {
-        let is_share_source = properties
+        let is_share_source: bool = properties
             .get(CDC_SHARING_MODE_KEY)
             .is_some_and(|v| v == "true");
         Ok(CdcProperties {
@@ -180,8 +180,6 @@ where
     }
 
     fn init_from_pb_cdc_table_desc(&mut self, table_desc: &ExternalTableDesc) {
-        let properties = table_desc.connect_properties.clone();
-
         let table_schema = TableSchema {
             columns: table_desc
                 .columns
@@ -197,7 +195,6 @@ where
             pk_indices: table_desc.stream_key.clone(),
         };
 
-        self.properties = properties;
         self.table_schema = table_schema;
         self.is_cdc_source_job = false;
         self.is_backfill_table = true;

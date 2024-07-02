@@ -36,7 +36,7 @@ use risingwave_frontend::session::SessionImpl;
 use risingwave_frontend::test_utils::{create_proto_file, get_explain_output, LocalFrontend};
 use risingwave_frontend::{
     build_graph, explain_stream_graph, Binder, Explain, FrontendOpts, OptimizerContext,
-    OptimizerContextRef, PlanRef, Planner, WithOptions,
+    OptimizerContextRef, PlanRef, Planner, WithOptionsSecResolved,
 };
 use risingwave_sqlparser::ast::{
     AstOption, DropMode, EmitMode, ExplainOptions, ObjectName, Statement,
@@ -836,7 +836,8 @@ impl TestCase {
                 let mut options = BTreeMap::new();
                 options.insert("connector".to_string(), "blackhole".to_string());
                 options.insert("type".to_string(), "append-only".to_string());
-                let options = WithOptions::new(options);
+                // let options = WithOptionsSecResolved::without_secrets(options);
+                let options = WithOptionsSecResolved::without_secrets(options);
                 let format_desc = (&options).try_into().unwrap();
                 match plan_root.gen_sink_plan(
                     sink_name.to_string(),

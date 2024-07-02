@@ -12,11 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
-
 use risingwave_common::catalog::{ColumnCatalog, SourceVersionId};
 use risingwave_common::util::epoch::Epoch;
-use risingwave_connector::WithPropertiesExt;
+use risingwave_connector::{WithOptionsSecResolved, WithPropertiesExt};
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::{PbSource, StreamSourceInfo, WatermarkDesc};
 
@@ -36,7 +34,7 @@ pub struct SourceCatalog {
     pub owner: UserId,
     pub info: StreamSourceInfo,
     pub row_id_index: Option<usize>,
-    pub with_properties: BTreeMap<String, String>,
+    pub with_properties: WithOptionsSecResolved,
     pub watermark_descs: Vec<WatermarkDesc>,
     pub associated_table_id: Option<TableId>,
     pub definition: String,
@@ -55,6 +53,7 @@ impl SourceCatalog {
     }
 
     pub fn to_prost(&self, schema_id: SchemaId, database_id: DatabaseId) -> PbSource {
+        let (with_properties, secret_refs) = self.with_properties.clone().into_parts();
         PbSource {
             id: self.id,
             schema_id,
@@ -63,7 +62,7 @@ impl SourceCatalog {
             row_id_index: self.row_id_index.map(|idx| idx as _),
             columns: self.columns.iter().map(|c| c.to_protobuf()).collect(),
             pk_column_ids: self.pk_col_ids.iter().map(Into::into).collect(),
-            with_properties: self.with_properties.clone().into_iter().collect(),
+            with_properties,
             owner: self.owner,
             info: Some(self.info.clone()),
             watermark_descs: self.watermark_descs.clone(),
@@ -77,6 +76,7 @@ impl SourceCatalog {
             version: self.version,
             created_at_cluster_version: self.created_at_cluster_version.clone(),
             initialized_at_cluster_version: self.initialized_at_cluster_version.clone(),
+            secret_refs,
         }
     }
 
@@ -103,7 +103,8 @@ impl From<&PbSource> for SourceCatalog {
             .into_iter()
             .map(Into::into)
             .collect();
-        let with_properties = prost.with_properties.clone().into_iter().collect();
+        let options_with_secrets =
+            WithOptionsSecResolved::new(prost.with_properties.clone(), prost.secret_refs.clone());
         let columns = prost_columns.into_iter().map(ColumnCatalog::from).collect();
         let row_id_index = prost.row_id_index.map(|idx| idx as _);
 
@@ -130,7 +131,7 @@ impl From<&PbSource> for SourceCatalog {
             owner,
             info: prost.info.clone().unwrap(),
             row_id_index,
-            with_properties,
+            with_properties: options_with_secrets,
             watermark_descs,
             associated_table_id: associated_table_id.map(|x| x.into()),
             definition: prost.definition.clone(),

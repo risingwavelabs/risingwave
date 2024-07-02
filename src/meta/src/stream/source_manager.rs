@@ -23,12 +23,12 @@ use std::time::Duration;
 use anyhow::Context;
 use risingwave_common::catalog::TableId;
 use risingwave_common::metrics::LabelGuardedIntGauge;
-use risingwave_connector::dispatch_source_prop;
 use risingwave_connector::error::ConnectorResult;
 use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, SourceEnumeratorInfo, SourceProperties,
     SplitEnumerator, SplitId, SplitImpl, SplitMetaData,
 };
+use risingwave_connector::{dispatch_source_prop, WithOptionsSecResolved};
 use risingwave_pb::catalog::Source;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use risingwave_pb::stream_plan::Dispatcher;
@@ -81,12 +81,16 @@ struct ConnectorSourceWorker<P: SourceProperties> {
 }
 
 fn extract_prop_from_existing_source(source: &Source) -> ConnectorResult<ConnectorProperties> {
-    let mut properties = ConnectorProperties::extract(source.with_properties.clone(), false)?;
+    let options_with_secret =
+        WithOptionsSecResolved::new(source.with_properties.clone(), source.secret_refs.clone());
+    let mut properties = ConnectorProperties::extract(options_with_secret, false)?;
     properties.init_from_pb_source(source);
     Ok(properties)
 }
 fn extract_prop_from_new_source(source: &Source) -> ConnectorResult<ConnectorProperties> {
-    let mut properties = ConnectorProperties::extract(source.with_properties.clone(), true)?;
+    let options_with_secret =
+        WithOptionsSecResolved::new(source.with_properties.clone(), source.secret_refs.clone());
+    let mut properties = ConnectorProperties::extract(options_with_secret, true)?;
     properties.init_from_pb_source(source);
     Ok(properties)
 }

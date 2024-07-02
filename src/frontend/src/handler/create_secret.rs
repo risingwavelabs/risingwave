@@ -45,15 +45,17 @@ pub async fn handle_create_secret(
         };
     }
 
+    let secret = secret_to_str(&stmt.credential)?.as_bytes().to_vec();
+
     // check if the secret backend is supported
     let with_props = WithOptions::try_from(stmt.with_properties.0.as_ref() as &[SqlOption])?;
     let secret_payload: Vec<u8> = {
-        if let Some(backend) = with_props.inner().get(SECRET_BACKEND_KEY) {
+        if let Some(backend) = with_props.get(SECRET_BACKEND_KEY) {
             match backend.to_lowercase().as_ref() {
                 SECRET_BACKEND_META => {
                     let backend = risingwave_pb::secret::Secret {
                         secret_backend: Some(risingwave_pb::secret::secret::SecretBackend::Meta(
-                            risingwave_pb::secret::SecretMetaBackend { value: vec![] },
+                            risingwave_pb::secret::SecretMetaBackend { value: secret },
                         )),
                     };
                     backend.encode_to_vec()
@@ -99,4 +101,14 @@ pub async fn handle_create_secret(
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_SECRET))
+}
+
+fn secret_to_str(value: &Value) -> Result<String> {
+    match value {
+        Value::DoubleQuotedString(s) | Value::SingleQuotedString(s) => Ok(s.to_string()),
+        _ => Err(ErrorCode::InvalidInputSyntax(
+            "secret value should be quoted by ' or \" ".to_string(),
+        )
+        .into()),
+    }
 }

@@ -30,6 +30,7 @@ use risingwave_common::catalog::{
     DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_FOR_PG,
     DEFAULT_SUPER_USER_FOR_PG_ID, DEFAULT_SUPER_USER_ID, SYSTEM_SCHEMAS,
 };
+use risingwave_common::secret::SECRET_MANAGER;
 use risingwave_common::{bail, current_cluster_version, ensure};
 use risingwave_connector::source::{should_copy_to_format_encode_options, UPSTREAM_SOURCE_KEY};
 use risingwave_pb::catalog::subscription::PbSubscriptionState;
@@ -128,6 +129,10 @@ use risingwave_pb::meta::relation::RelationInfo;
 use risingwave_pb::meta::{Relation, RelationGroup};
 pub(crate) use {commit_meta, commit_meta_with_trx};
 
+use self::utils::{
+    refcnt_dec_sink_secret_ref, refcnt_dec_source_secret_ref, refcnt_inc_sink_secret_ref,
+    refcnt_inc_source_secret_ref,
+};
 use crate::controller::rename::{
     alter_relation_rename, alter_relation_rename_refs, ReplaceTableExprRewriter,
 };
@@ -482,7 +487,11 @@ impl CatalogManager {
         }
     }
 
-    pub async fn create_secret(&self, secret: Secret) -> MetaResult<NotificationVersion> {
+    pub async fn create_secret(
+        &self,
+        secret: Secret,
+        secret_plain_payload: Vec<u8>,
+    ) -> MetaResult<NotificationVersion> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         let user_core = &mut core.user;
@@ -499,14 +508,28 @@ impl CatalogManager {
 
         let secret_id = secret.id;
         let mut secret_entry = BTreeMapTransaction::new(&mut database_core.secrets);
+
         secret_entry.insert(secret_id, secret.to_owned());
         commit_meta!(self, secret_entry)?;
 
         user_core.increase_ref(secret.owner);
 
+        // Notify the compute and frontend node plain secret
+        let mut secret_plain = secret;
+        secret_plain.value.clone_from(&secret_plain_payload);
+
+        SECRET_MANAGER.add_secret(
+            risingwave_common::catalog::SecretId::new(secret_id),
+            secret_plain_payload,
+        );
+        self.env
+            .notification_manager()
+            .notify_compute_without_version(Operation::Add, Info::Secret(secret_plain.clone()));
+
         let version = self
-            .notify_frontend(Operation::Add, Info::Secret(secret))
+            .notify_frontend(Operation::Add, Info::Secret(secret_plain))
             .await;
+
         Ok(version)
     }
 
@@ -516,21 +539,40 @@ impl CatalogManager {
         let user_core = &mut core.user;
         let mut secrets = BTreeMapTransaction::new(&mut database_core.secrets);
 
-        // todo: impl a ref count check for secret
-        // if secret is used by other relations, not found in the catalog or do not have the privilege to drop, return error
-        // else: commit the change and notify frontend
+        match database_core.secret_ref_count.get(&secret_id) {
+            Some(ref_count) => {
+                let secret_name = secrets
+                    .get(&secret_id)
+                    .ok_or_else(|| MetaError::catalog_id_not_found("connection", secret_id))?
+                    .name
+                    .clone();
+                Err(MetaError::permission_denied(format!(
+                    "Fail to delete secret {} because {} other relation(s) depend on it",
+                    secret_name, ref_count
+                )))
+            }
+            None => {
+                let secret = secrets
+                    .remove(secret_id)
+                    .ok_or_else(|| anyhow!("secret not found"))?;
 
-        let secret = secrets
-            .remove(secret_id)
-            .ok_or_else(|| anyhow!("secret not found"))?;
+                commit_meta!(self, secrets)?;
+                user_core.decrease_ref(secret.owner);
 
-        commit_meta!(self, secrets)?;
-        user_core.decrease_ref(secret.owner);
+                SECRET_MANAGER.remove_secret(risingwave_common::catalog::SecretId::new(secret.id));
+                self.env
+                    .notification_manager()
+                    .notify_compute_without_version(
+                        Operation::Delete,
+                        Info::Secret(secret.clone()),
+                    );
 
-        let version = self
-            .notify_frontend(Operation::Delete, Info::Secret(secret))
-            .await;
-        Ok(version)
+                let version = self
+                    .notify_frontend(Operation::Delete, Info::Secret(secret))
+                    .await;
+                Ok(version)
+            }
+        }
     }
 
     pub async fn create_connection(
@@ -1800,6 +1842,7 @@ impl CatalogManager {
         for source in &sources_removed {
             user_core.decrease_ref(source.owner);
             refcnt_dec_connection(database_core, source.connection_id);
+            refcnt_dec_source_secret_ref(database_core, source)?;
         }
 
         for view in &views_removed {
@@ -1837,6 +1880,7 @@ impl CatalogManager {
             for dependent_relation_id in &sink.dependent_relations {
                 database_core.decrease_relation_ref_count(*dependent_relation_id);
             }
+            refcnt_dec_sink_secret_ref(database_core, sink);
         }
 
         for subscription in &subscriptions_removed {
@@ -2840,6 +2884,7 @@ impl CatalogManager {
         } else {
             database_core.mark_creating(&key);
             user_core.increase_ref(source.owner);
+            refcnt_inc_source_secret_ref(database_core, source)?;
             // We have validate the status of connection before starting the procedure.
             refcnt_inc_connection(database_core, source.connection_id)?;
             Ok(())
@@ -2915,6 +2960,7 @@ impl CatalogManager {
         database_core.unmark_creating(&key);
         user_core.decrease_ref(source.owner);
         refcnt_dec_connection(database_core, source.connection_id);
+        refcnt_dec_source_secret_ref(database_core, source)?;
         Ok(())
     }
 
@@ -2943,6 +2989,7 @@ impl CatalogManager {
             database_core.mark_creating(&source_key);
             database_core.mark_creating(&mview_key);
             database_core.mark_creating_streaming_job(table.id, mview_key);
+            refcnt_inc_source_secret_ref(database_core, source)?;
             ensure!(table.dependent_relations.is_empty());
             // source and table
             user_core.increase_ref_count(source.owner, 2);
@@ -3020,7 +3067,11 @@ impl CatalogManager {
         Ok(version)
     }
 
-    pub async fn cancel_create_table_procedure_with_source(&self, source: &Source, table: &Table) {
+    pub async fn cancel_create_table_procedure_with_source(
+        &self,
+        source: &Source,
+        table: &Table,
+    ) -> MetaResult<()> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         let user_core = &mut core.user;
@@ -3037,6 +3088,8 @@ impl CatalogManager {
         database_core.unmark_creating_streaming_job(table.id);
         user_core.decrease_ref_count(source.owner, 2); // source and table
         refcnt_dec_connection(database_core, source.connection_id);
+        refcnt_dec_source_secret_ref(database_core, source)?;
+        Ok(())
     }
 
     pub async fn start_create_index_procedure(
@@ -3173,6 +3226,7 @@ impl CatalogManager {
             for &dependent_relation_id in &sink.dependent_relations {
                 database_core.increase_relation_ref_count(dependent_relation_id);
             }
+            refcnt_inc_sink_secret_ref(database_core, sink);
             user_core.increase_ref(sink.owner);
             // We have validate the status of connection before starting the procedure.
             refcnt_inc_connection(database_core, sink.connection_id)?;
@@ -3249,6 +3303,7 @@ impl CatalogManager {
         }
         user_core.decrease_ref(sink.owner);
         refcnt_dec_connection(database_core, sink.connection_id);
+        refcnt_dec_sink_secret_ref(database_core, sink);
 
         if let Some((table, source)) = target_table {
             Self::cancel_replace_table_procedure_inner(source, table, core);

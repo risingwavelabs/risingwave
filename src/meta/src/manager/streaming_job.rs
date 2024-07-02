@@ -285,6 +285,45 @@ impl StreamingJob {
         }
     }
 
+    pub fn dependent_secret_refs(&self) -> Vec<u32> {
+        match self {
+            StreamingJob::Sink(sink, _) => {
+                let mut dependents = vec![];
+                for secret_ref in sink.secret_refs.values() {
+                    dependents.push(secret_ref.secret_id);
+                }
+                if let Some(format_desc) = &sink.format_desc {
+                    for secret_ref in format_desc.secret_refs.values() {
+                        dependents.push(secret_ref.secret_id);
+                    }
+                }
+                dependents
+            }
+            StreamingJob::Table(source, _, _) => {
+                let mut dependents = vec![];
+                if let Some(source) = source {
+                    for secret_ref in source.secret_refs.values() {
+                        dependents.push(secret_ref.secret_id);
+                    }
+                    if let Some(info) = source.info.as_ref() {
+                        for secret_ref in info.format_encode_secret_refs.values() {
+                            dependents.push(secret_ref.secret_id);
+                        }
+                    }
+                }
+                dependents
+            }
+            StreamingJob::Source(source) => source
+                .secret_refs
+                .values()
+                .map(|secret_ref| secret_ref.secret_id)
+                .collect(),
+            StreamingJob::MaterializedView(_) | StreamingJob::Index(_, _) => {
+                vec![]
+            }
+        }
+    }
+
     pub fn is_source_job(&self) -> bool {
         matches!(self, StreamingJob::Source(_))
     }

@@ -402,6 +402,7 @@ fn mock_from_legacy_type(
             format,
             encode: SinkEncode::Json,
             options: Default::default(),
+            secret_refs: Default::default(),
             key_encode: None,
         }))
     } else {

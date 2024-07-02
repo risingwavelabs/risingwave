@@ -16,9 +16,11 @@ normal = ["workspace-hack"]
 [dependencies]
 anyhow = "1"
 clap = { workspace = true }
+educe = "0.6"
 either = "1"
 etcd-client = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
+hex = "0.4"
 itertools = { workspace = true }
 otlp-embedded = { workspace = true }
 prometheus-http-query = "0.8"

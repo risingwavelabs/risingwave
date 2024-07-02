@@ -52,13 +52,11 @@ pub async fn handle_drop_secret(
             };
         session.check_privilege_for_drop_alter(schema_name, &**secret)?;
 
-        secret.secret_id
+        secret.id
     };
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer.drop_secret(secret_id).await?;
 
-    Ok(RwPgResponse::builder(StatementType::DROP_SECRET)
-        .notice(format!("dropped secret \"{}\"", secret_name))
-        .into())
+    Ok(RwPgResponse::empty_result(StatementType::DROP_SECRET))
 }

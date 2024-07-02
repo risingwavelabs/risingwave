@@ -98,6 +98,7 @@ impl ToDistributedBatch for BatchIcebergScan {
 impl ToBatchPb for BatchIcebergScan {
     fn to_batch_prost_body(&self) -> NodeBody {
         let source_catalog = self.source_catalog().unwrap();
+        let (with_properties, secret_refs) = source_catalog.with_properties.clone().into_parts();
         NodeBody::Source(SourceNode {
             source_id: source_catalog.id,
             info: Some(source_catalog.info.clone()),
@@ -107,8 +108,9 @@ impl ToBatchPb for BatchIcebergScan {
                 .iter()
                 .map(|c| c.to_protobuf())
                 .collect(),
-            with_properties: source_catalog.with_properties.clone().into_iter().collect(),
+            with_properties,
             split: vec![],
+            secret_refs,
         })
     }
 }

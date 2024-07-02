@@ -86,6 +86,7 @@ use crate::binder::{Binder, BoundStatement, ResolveQualifiedNameError};
 use crate::catalog::catalog_service::{CatalogReader, CatalogWriter, CatalogWriterImpl};
 use crate::catalog::connection_catalog::ConnectionCatalog;
 use crate::catalog::root_catalog::Catalog;
+use crate::catalog::secret_catalog::SecretCatalog;
 use crate::catalog::subscription_catalog::SubscriptionCatalog;
 use crate::catalog::{
     check_schema_writable, CatalogError, DatabaseId, OwnedByUserCatalog, SchemaId, TableId,
@@ -970,6 +971,30 @@ impl SessionImpl {
                 )
             })?;
         Ok(table.clone())
+    }
+
+    pub fn get_secret_by_name(
+        &self,
+        schema_name: Option<String>,
+        secret_name: &str,
+    ) -> Result<Arc<SecretCatalog>> {
+        let db_name = self.database();
+        let search_path = self.config().search_path();
+        let user_name = &self.auth_context().user_name;
+
+        let catalog_reader = self.env().catalog_reader().read_guard();
+        let schema = match schema_name {
+            Some(schema_name) => catalog_reader.get_schema_by_name(db_name, &schema_name)?,
+            None => catalog_reader.first_valid_schema(db_name, &search_path, user_name)?,
+        };
+        let schema = catalog_reader.get_schema_by_name(db_name, schema.name().as_str())?;
+        let secret = schema.get_secret_by_name(secret_name).ok_or_else(|| {
+            RwError::from(ErrorCode::ItemNotFound(format!(
+                "secret {} not found",
+                secret_name
+            )))
+        })?;
+        Ok(secret.clone())
     }
 
     pub async fn list_change_log_epochs(

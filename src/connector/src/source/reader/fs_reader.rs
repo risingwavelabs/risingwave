@@ -14,7 +14,6 @@
 
 #![deprecated = "will be replaced by new fs source (list + fetch)"]
 
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use anyhow::Context;
@@ -22,26 +21,26 @@ use futures::stream::pending;
 use futures::StreamExt;
 use risingwave_common::catalog::ColumnId;
 
-use crate::dispatch_source_prop;
 use crate::error::ConnectorResult;
 use crate::parser::{CommonParserConfig, ParserConfig, SpecificParserConfig};
 use crate::source::{
     create_split_reader, BoxChunkSourceStream, ConnectorProperties, ConnectorState,
     SourceColumnDesc, SourceContext, SplitReader,
 };
+use crate::{dispatch_source_prop, WithOptionsSecResolved};
 
 #[derive(Clone, Debug)]
 pub struct FsSourceReader {
     pub config: ConnectorProperties,
     pub columns: Vec<SourceColumnDesc>,
-    pub properties: BTreeMap<String, String>,
+    pub properties: WithOptionsSecResolved,
     pub parser_config: SpecificParserConfig,
 }
 
 impl FsSourceReader {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        properties: BTreeMap<String, String>,
+        properties: WithOptionsSecResolved,
         columns: Vec<SourceColumnDesc>,
         parser_config: SpecificParserConfig,
     ) -> ConnectorResult<Self> {

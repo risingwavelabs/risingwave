@@ -36,7 +36,7 @@ impl From<&PbView> for ViewCatalog {
             id: view.id,
             name: view.name.clone(),
             owner: view.owner,
-            properties: WithOptions::new(view.properties.clone()),
+            properties: WithOptions::new_with_options(view.properties.clone()),
             sql: view.sql.clone(),
             columns: view.columns.iter().map(|f| f.into()).collect(),
         }

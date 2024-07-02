@@ -40,10 +40,7 @@ impl DistributedDmlVisitor {
     }
 
     fn is_iceberg_source(source_catalog: &Rc<SourceCatalog>) -> bool {
-        let property = ConnectorProperties::extract(
-            source_catalog.with_properties.clone().into_iter().collect(),
-            false,
-        );
+        let property = ConnectorProperties::extract(source_catalog.with_properties.clone(), false);
         if let Ok(property) = property {
             matches!(property, ConnectorProperties::Iceberg(_))
         } else {

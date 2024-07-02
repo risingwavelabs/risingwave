@@ -63,7 +63,7 @@ use risingwave_common::config::{MetricLevel, OverrideConfig};
 use risingwave_common::util::meta_addr::MetaAddressStrategy;
 pub use stream_fragmenter::build_graph;
 mod utils;
-pub use utils::{explain_stream_graph, WithOptions};
+pub use utils::{explain_stream_graph, WithOptions, WithOptionsSecResolved};
 pub(crate) mod error;
 mod meta_client;
 pub mod test_utils;

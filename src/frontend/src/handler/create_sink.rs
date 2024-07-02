@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::rc::Rc;
 use std::sync::{Arc, LazyLock};
 
 use anyhow::Context;
@@ -24,6 +23,7 @@ use maplit::{convert_args, hashmap};
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::catalog::{ConnectionId, DatabaseId, Schema, SchemaId, TableId, UserId};
+use risingwave_common::secret::SECRET_MANAGER;
 use risingwave_common::types::DataType;
 use risingwave_common::{bail, catalog};
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkFormatDesc, SinkType};
@@ -37,7 +37,8 @@ use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{DispatcherType, MergeNode, StreamFragmentGraph, StreamNode};
 use risingwave_sqlparser::ast::{
-    ConnectorSchema, CreateSink, CreateSinkStatement, EmitMode, Encode, Format, Query, Statement,
+    ConnectorSchema, CreateSink, CreateSinkStatement, EmitMode, Encode, ExplainOptions, Format,
+    Query, Statement,
 };
 use risingwave_sqlparser::parser::Parser;
 
@@ -60,12 +61,12 @@ use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::{
     generic, IcebergPartitionInfo, LogicalSource, PartitionComputeInfo, StreamProject,
 };
-use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, RelationCollectorVisitor};
+use crate::optimizer::{OptimizerContext, PlanRef, RelationCollectorVisitor};
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
-use crate::utils::{resolve_privatelink_in_with_option, resolve_secret_in_with_options};
-use crate::{Explain, Planner, TableCatalog, WithOptions};
+use crate::utils::{resolve_privatelink_in_with_option, resolve_secret_ref_in_with_options};
+use crate::{Explain, Planner, TableCatalog, WithOptions, WithOptionsSecResolved};
 
 // used to store result of `gen_sink_plan`
 pub struct SinkPlanContext {
@@ -75,16 +76,35 @@ pub struct SinkPlanContext {
     pub target_table_catalog: Option<Arc<TableCatalog>>,
 }
 
-pub fn gen_sink_plan(
-    session: &SessionImpl,
-    context: OptimizerContextRef,
+pub async fn gen_sink_plan(
+    handler_args: HandlerArgs,
     stmt: CreateSinkStatement,
-    partition_info: Option<PartitionComputeInfo>,
+    explain_options: Option<ExplainOptions>,
 ) -> Result<SinkPlanContext> {
+    let session = handler_args.session.clone();
+    let session = session.as_ref();
     let user_specified_columns = !stmt.columns.is_empty();
     let db_name = session.database();
     let (sink_schema_name, sink_table_name) =
         Binder::resolve_schema_qualified_name(db_name, stmt.sink_name.clone())?;
+
+    let mut with_options = handler_args.with_options.clone();
+
+    let connection_id = {
+        let conn_id =
+            resolve_privatelink_in_with_option(&mut with_options, &sink_schema_name, session)?;
+        conn_id.map(ConnectionId)
+    };
+
+    let mut resolved_with_options = resolve_secret_ref_in_with_options(with_options, session)?;
+
+    let partition_info = get_partition_compute_info(&resolved_with_options).await?;
+
+    let context = if let Some(explain_options) = explain_options {
+        OptimizerContext::new(handler_args.clone(), explain_options)
+    } else {
+        OptimizerContext::from_handler_args(handler_args.clone())
+    };
 
     // Used for debezium's table name
     let sink_from_table_name;
@@ -109,8 +129,6 @@ pub fn gen_sink_plan(
     let (sink_database_id, sink_schema_id) =
         session.get_database_and_schema_id_for_create(sink_schema_name.clone())?;
 
-    let definition = context.normalized_sql().to_owned();
-
     let (dependent_relations, bound) = {
         let mut binder = Binder::new_for_stream(session);
         let bound = binder.bind_query(*query.clone())?;
@@ -127,12 +145,9 @@ pub fn gen_sink_plan(
         get_column_names(&bound, session, stmt.columns)?
     };
 
-    let mut with_options = context.with_options().clone();
-
     if sink_into_table_name.is_some() {
-        let prev = with_options
-            .inner_mut()
-            .insert(CONNECTOR_TYPE_KEY.to_string(), "table".to_string());
+        let prev =
+            resolved_with_options.insert(CONNECTOR_TYPE_KEY.to_string(), "table".to_string());
 
         if prev.is_some() {
             return Err(RwError::from(ErrorCode::BindError(
@@ -141,19 +156,12 @@ pub fn gen_sink_plan(
         }
     }
 
-    let connection_id = {
-        let conn_id =
-            resolve_privatelink_in_with_option(&mut with_options, &sink_schema_name, session)?;
-        conn_id.map(ConnectionId)
-    };
-    let secret_ref = resolve_secret_in_with_options(&mut with_options, session)?;
-
     let emit_on_window_close = stmt.emit_mode == Some(EmitMode::OnWindowClose);
     if emit_on_window_close {
         context.warn_to_user("EMIT ON WINDOW CLOSE is currently an experimental feature. Please use it with caution.");
     }
 
-    let connector = with_options
+    let connector = resolved_with_options
         .get(CONNECTOR_TYPE_KEY)
         .cloned()
         .ok_or_else(|| ErrorCode::BindError(format!("missing field '{CONNECTOR_TYPE_KEY}'")))?;
@@ -162,13 +170,13 @@ pub fn gen_sink_plan(
         // Case A: new syntax `format ... encode ...`
         Some(f) => {
             validate_compatibility(&connector, &f)?;
-            Some(bind_sink_format_desc(f)?)
+            Some(bind_sink_format_desc(session,f)?)
         }
-        None => match with_options.get(SINK_TYPE_OPTION) {
+        None => match resolved_with_options.get(SINK_TYPE_OPTION) {
             // Case B: old syntax `type = '...'`
             Some(t) => SinkFormatDesc::from_legacy_type(&connector, t)?.map(|mut f| {
                 session.notice_to_user("Consider using the newer syntax `FORMAT ... ENCODE ...` instead of `type = '...'`.");
-                if let Some(v) = with_options.get(SINK_USER_FORCE_APPEND_ONLY_OPTION) {
+                if let Some(v) = resolved_with_options.get(SINK_USER_FORCE_APPEND_ONLY_OPTION) {
                     f.options.insert(SINK_USER_FORCE_APPEND_ONLY_OPTION.into(), v.into());
                 }
                 f
@@ -178,12 +186,13 @@ pub fn gen_sink_plan(
         },
     };
 
-    let mut plan_root = Planner::new(context).plan_query(bound)?;
+    let definition = context.normalized_sql().to_owned();
+    let mut plan_root = Planner::new(context.into()).plan_query(bound)?;
     if let Some(col_names) = &col_names {
         plan_root.set_out_names(col_names.clone())?;
     };
 
-    let without_backfill = match with_options.remove(SINK_WITHOUT_BACKFILL) {
+    let without_backfill = match resolved_with_options.remove(SINK_WITHOUT_BACKFILL) {
         Some(flag) if flag.eq_ignore_ascii_case("false") => {
             if direct_sink {
                 true
@@ -227,7 +236,7 @@ pub fn gen_sink_plan(
     let sink_plan = plan_root.gen_sink_plan(
         sink_table_name,
         definition,
-        with_options,
+        resolved_with_options,
         emit_on_window_close,
         db_name.to_owned(),
         sink_from_table_name,
@@ -236,6 +245,7 @@ pub fn gen_sink_plan(
         target_table,
         partition_info,
     )?;
+
     let sink_desc = sink_plan.sink_desc().clone();
 
     let mut sink_plan: PlanRef = sink_plan.into();
@@ -256,7 +266,6 @@ pub fn gen_sink_plan(
         UserId::new(session.user_id()),
         connection_id,
         dependent_relations.into_iter().collect_vec(),
-        secret_ref,
     );
 
     if let Some(table_catalog) = &target_table_catalog {
@@ -310,12 +319,13 @@ pub fn gen_sink_plan(
 // `Some(PartitionComputeInfo)` if the sink need to compute partition.
 // `None` if the sink does not need to compute partition.
 pub async fn get_partition_compute_info(
-    with_options: &WithOptions,
+    with_options: &WithOptionsSecResolved,
 ) -> Result<Option<PartitionComputeInfo>> {
-    let properties = with_options.clone().into_inner();
-    let Some(connector) = properties.get(UPSTREAM_SOURCE_KEY) else {
+    let (options, secret_refs) = with_options.clone().into_parts();
+    let Some(connector) = options.get(UPSTREAM_SOURCE_KEY).cloned() else {
         return Ok(None);
     };
+    let properties = SECRET_MANAGER.fill_secrets(options, secret_refs)?;
     match connector.as_str() {
         ICEBERG_SINK => {
             let iceberg_config = IcebergConfig::from_btreemap(properties)?;
@@ -409,21 +419,17 @@ pub async fn handle_create_sink(
         return Ok(resp);
     }
 
-    let partition_info = get_partition_compute_info(&handle_args.with_options).await?;
-
     let (sink, graph, target_table_catalog) = {
-        let context = Rc::new(OptimizerContext::from_handler_args(handle_args));
-
         let SinkPlanContext {
             query,
             sink_plan: plan,
             sink_catalog: sink,
             target_table_catalog,
-        } = gen_sink_plan(&session, context.clone(), stmt, partition_info)?;
+        } = gen_sink_plan(handle_args, stmt, None).await?;
 
         let has_order_by = !query.order_by.is_empty();
         if has_order_by {
-            context.warn_to_user(
+            plan.ctx().warn_to_user(
                 r#"The ORDER BY clause in the CREATE SINK statement has no effect at all."#
                     .to_string(),
             );
@@ -755,7 +761,7 @@ fn derive_default_column_project_for_sink(
 /// Transforms the (format, encode, options) from sqlparser AST into an internal struct `SinkFormatDesc`.
 /// This is an analogy to (part of) [`crate::handler::create_source::bind_columns_from_source`]
 /// which transforms sqlparser AST `SourceSchemaV2` into `StreamSourceInfo`.
-fn bind_sink_format_desc(value: ConnectorSchema) -> Result<SinkFormatDesc> {
+fn bind_sink_format_desc(session: &SessionImpl, value: ConnectorSchema) -> Result<SinkFormatDesc> {
     use risingwave_connector::sink::catalog::{SinkEncode, SinkFormat};
     use risingwave_connector::sink::encoder::TimestamptzHandlingMode;
     use risingwave_sqlparser::ast::{Encode as E, Format as F};
@@ -790,7 +796,11 @@ fn bind_sink_format_desc(value: ConnectorSchema) -> Result<SinkFormatDesc> {
         }
     }
 
-    let mut options = WithOptions::try_from(value.row_options.as_slice())?.into_inner();
+    let (mut options, secret_refs) = resolve_secret_ref_in_with_options(
+        WithOptions::try_from(value.row_options.as_slice())?,
+        session,
+    )?
+    .into_parts();
 
     options
         .entry(TimestamptzHandlingMode::OPTION_KEY.to_owned())
@@ -800,6 +810,7 @@ fn bind_sink_format_desc(value: ConnectorSchema) -> Result<SinkFormatDesc> {
         format,
         encode,
         options,
+        secret_refs,
         key_encode,
     })
 }
@@ -866,20 +877,6 @@ pub fn validate_compatibility(connector: &str, format_desc: &ConnectorSchema) ->
         .into());
     }
     Ok(())
-}
-
-/// For `planner_test` crate so that it does not depend directly on `connector` crate just for `SinkFormatDesc`.
-impl TryFrom<&WithOptions> for Option<SinkFormatDesc> {
-    type Error = risingwave_connector::sink::SinkError;
-
-    fn try_from(value: &WithOptions) -> std::result::Result<Self, Self::Error> {
-        let connector = value.get(CONNECTOR_TYPE_KEY);
-        let r#type = value.get(SINK_TYPE_OPTION);
-        match (connector, r#type) {
-            (Some(c), Some(t)) => SinkFormatDesc::from_legacy_type(c, t),
-            _ => Ok(None),
-        }
-    }
 }
 
 #[cfg(test)]

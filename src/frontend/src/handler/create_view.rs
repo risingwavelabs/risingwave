@@ -87,12 +87,20 @@ pub async fn handle_create_view(
             .collect()
     };
 
+    let (properties, secret_refs) = properties.into_parts();
+    if !secret_refs.is_empty() {
+        return Err(crate::error::ErrorCode::InvalidParameterValue(
+            "Secret reference is not allowed in create view options".to_string(),
+        )
+        .into());
+    }
+
     let view = PbView {
         id: 0,
         schema_id,
         database_id,
         name: view_name,
-        properties: properties.inner().clone().into_iter().collect(),
+        properties,
         owner: session.user_id(),
         dependent_relations: dependent_relations
             .into_iter()

@@ -22,7 +22,7 @@ use crate::MetaResult;
 
 pub async fn validate_sink(prost_sink_catalog: &PbSink) -> MetaResult<()> {
     let sink_catalog = SinkCatalog::from(prost_sink_catalog);
-    let param = SinkParam::from(sink_catalog);
+    let param = SinkParam::try_from_sink_catalog(sink_catalog)?;
 
     let sink = build_sink(param)?;
 

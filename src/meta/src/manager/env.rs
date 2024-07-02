@@ -283,7 +283,7 @@ pub struct MetaOpts {
     pub compact_task_table_size_partition_threshold_high: u64,
 
     // The private key for the secret store, used when the secret is stored in the meta.
-    pub secret_store_private_key: Vec<u8>,
+    pub secret_store_private_key: Option<Vec<u8>>,
 
     pub table_info_statistic_history_times: usize,
 }
@@ -346,7 +346,7 @@ impl MetaOpts {
             object_store_config: ObjectStoreConfig::default(),
             max_trivial_move_task_count_per_loop: 256,
             max_get_task_probe_times: 5,
-            secret_store_private_key: "demo-secret-private-key".as_bytes().to_vec(),
+            secret_store_private_key: Some("0123456789abcdef".as_bytes().to_vec()),
             table_info_statistic_history_times: 240,
         }
     }

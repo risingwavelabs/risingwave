@@ -129,7 +129,7 @@ impl From<PbSink> for ActiveModel {
             sink_from_name: Set(pb_sink.sink_from_name),
             sink_format_desc: Set(pb_sink.format_desc.as_ref().map(|x| x.into())),
             target_table: Set(pb_sink.target_table.map(|x| x as _)),
-            secret_ref: Set(Some(SecretRef::from(pb_sink.secret_ref))),
+            secret_ref: Set(Some(SecretRef::from(pb_sink.secret_refs))),
         }
     }
 }

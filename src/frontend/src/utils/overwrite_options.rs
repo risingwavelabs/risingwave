@@ -25,11 +25,7 @@ impl OverwriteOptions {
     pub fn new(args: &mut HandlerArgs) -> Self {
         let streaming_rate_limit = {
             // CREATE MATERIALIZED VIEW m1 WITH (rate_limit = N) ...
-            if let Some(x) = args
-                .with_options
-                .inner_mut()
-                .remove(Self::STREAMING_RATE_LIMIT_KEY)
-            {
+            if let Some(x) = args.with_options.remove(Self::STREAMING_RATE_LIMIT_KEY) {
                 // FIXME(tabVersion): validate the value
                 Some(x.parse::<u32>().unwrap())
             } else {

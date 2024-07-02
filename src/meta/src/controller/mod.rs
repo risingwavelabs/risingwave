@@ -167,6 +167,10 @@ impl From<ObjectModel<table::Model>> for PbTable {
 
 impl From<ObjectModel<source::Model>> for PbSource {
     fn from(value: ObjectModel<source::Model>) -> Self {
+        let mut secret_ref_map = BTreeMap::new();
+        if let Some(secret_ref) = value.0.secret_ref {
+            secret_ref_map = secret_ref.to_protobuf();
+        }
         Self {
             id: value.0.source_id as _,
             schema_id: value.1.schema_id.unwrap() as _,
@@ -195,6 +199,7 @@ impl From<ObjectModel<source::Model>> for PbSource {
                 .map(|id| PbOptionalAssociatedTableId::AssociatedTableId(id as _)),
             initialized_at_cluster_version: value.1.initialized_at_cluster_version,
             created_at_cluster_version: value.1.created_at_cluster_version,
+            secret_refs: secret_ref_map,
         }
     }
 }
@@ -234,7 +239,7 @@ impl From<ObjectModel<sink::Model>> for PbSink {
             initialized_at_cluster_version: value.1.initialized_at_cluster_version,
             created_at_cluster_version: value.1.created_at_cluster_version,
             create_type: PbCreateType::Foreground as _,
-            secret_ref: secret_ref_map,
+            secret_refs: secret_ref_map,
         }
     }
 }
