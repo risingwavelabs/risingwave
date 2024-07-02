@@ -25,7 +25,7 @@ use risingwave_connector::sink::{
 use risingwave_pb::catalog::Table;
 use risingwave_pb::plan_common::PbColumnCatalog;
 use risingwave_pb::stream_plan::{SinkLogStoreType, SinkNode};
-use risingwave_pb::telemetry::{PbTelemetryConnectorDirection, PbTelemetryEventStage};
+use risingwave_pb::telemetry::{PbTelemetryDatabaseComponents, PbTelemetryEventStage};
 use serde_json::json;
 
 use super::*;
@@ -51,7 +51,7 @@ fn telemetry_sink_build(
         "sink".to_string(),
         sink_id.sink_id() as i64,
         Some(connector_name.to_string()),
-        Some(PbTelemetryConnectorDirection::Sink),
+        Some(PbTelemetryDatabaseComponents::Sink),
         attr,
     )
 }
@@ -212,6 +212,8 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             "sink[{}]-[{}]-executor[{}]",
             connector, sink_id.sink_id, params.executor_id
         );
+
+        telemetry_sink_build(&sink_id, connector, &sink_param.format_desc);
 
         let exec = match node.log_store_type() {
             // Default value is the normal in memory log store to be backward compatible with the

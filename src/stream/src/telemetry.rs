@@ -15,7 +15,7 @@
 use std::sync::OnceLock;
 
 use risingwave_common::telemetry::report::report_event_common;
-use risingwave_pb::telemetry::{PbTelemetryConnectorDirection, PbTelemetryEventStage};
+use risingwave_pb::telemetry::{PbTelemetryDatabaseComponents, PbTelemetryEventStage};
 
 const TELEMETRY_COMPUTE_REPORT_TYPE: &str = "compute";
 static COMPUTE_TELEMETRY_SESSION_ID: OnceLock<String> = OnceLock::new();
@@ -39,7 +39,7 @@ pub fn report_event(
     feature_name: String,
     catalog_id: i64,
     connector_name: Option<String>,
-    source_or_sink: Option<PbTelemetryConnectorDirection>,
+    component: Option<PbTelemetryDatabaseComponents>,
     attributes: Option<String>, // any json string
 ) {
     report_event_common(
@@ -48,7 +48,7 @@ pub fn report_event(
         feature_name,
         catalog_id,
         connector_name,
-        source_or_sink,
+        component,
         attributes,
         TELEMETRY_COMPUTE_REPORT_TYPE.to_string(),
     );

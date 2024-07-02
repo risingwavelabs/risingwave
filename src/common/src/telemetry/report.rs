@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use prost::Message;
 use risingwave_pb::telemetry::{
-    EventMessage as PbEventMessage, PbTelemetryConnectorDirection,
+    EventMessage as PbEventMessage, PbTelemetryDatabaseComponents,
     TelemetryEventStage as PbTelemetryEventStage,
 };
 use tokio::sync::oneshot::Sender;
@@ -126,7 +126,7 @@ pub fn report_event_common(
     feature_name: String,
     catalog_id: i64,
     connector_name: Option<String>,
-    source_or_sink: Option<PbTelemetryConnectorDirection>,
+    components: Option<PbTelemetryDatabaseComponents>,
     attributes: Option<String>, // any json string
     node: String,
 ) {
@@ -152,7 +152,7 @@ pub fn report_event_common(
         event_stage: event_stage as i32,
         feature_name,
         connector_name,
-        connector_direction: source_or_sink.map(|d| d as i32),
+        component: components.map(|c| c as i32),
         catalog_id,
         attributes,
         node,

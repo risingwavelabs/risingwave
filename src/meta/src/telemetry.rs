@@ -27,7 +27,7 @@ use risingwave_common::telemetry::{
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::telemetry::{
-    PbTelemetryClusterType, PbTelemetryConnectorDirection, PbTelemetryEventStage,
+    PbTelemetryClusterType, PbTelemetryDatabaseComponents, PbTelemetryEventStage,
 };
 use serde::{Deserialize, Serialize};
 use thiserror_ext::AsReport;
@@ -57,7 +57,7 @@ pub(crate) fn report_event(
     feature_name: String,
     catalog_id: i64,
     connector_name: Option<String>,
-    source_or_sink: Option<PbTelemetryConnectorDirection>,
+    component: Option<PbTelemetryDatabaseComponents>,
     attributes: Option<String>, // any json string
 ) {
     report_event_common(
@@ -66,7 +66,7 @@ pub(crate) fn report_event(
         feature_name,
         catalog_id,
         connector_name,
-        source_or_sink,
+        component,
         attributes,
         TELEMETRY_META_REPORT_TYPE.to_string(),
     );

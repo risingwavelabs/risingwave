@@ -13,12 +13,11 @@
 // limitations under the License.
 
 use risingwave_common::catalog::{
-    default_key_column_name_version_mapping, TableId, KAFKA_TIMESTAMP_COLUMN_NAME,
+    default_key_column_name_version_mapping, KAFKA_TIMESTAMP_COLUMN_NAME,
 };
 use risingwave_connector::source::reader::desc::SourceDescBuilder;
 use risingwave_connector::source::should_copy_to_format_encode_options;
 use risingwave_connector::WithPropertiesExt;
-use risingwave_pb::catalog::PbStreamSourceInfo;
 use risingwave_pb::data::data_type::TypeName as PbTypeName;
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
 use risingwave_pb::plan_common::{

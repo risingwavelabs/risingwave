@@ -12,13 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::OnceLock;
-
 use prost::Message;
 use risingwave_common::telemetry::pb_compatible::TelemetryToProtobuf;
-use risingwave_common::telemetry::report::{
-    report_event_common, TelemetryInfoFetcher, TelemetryReportCreator,
-};
+use risingwave_common::telemetry::report::TelemetryReportCreator;
 use risingwave_common::telemetry::{
     current_timestamp, SystemData, TelemetryNodeType, TelemetryReportBase, TelemetryResult,
 };

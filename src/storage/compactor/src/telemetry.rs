@@ -20,7 +20,7 @@ use risingwave_common::telemetry::report::{report_event_common, TelemetryReportC
 use risingwave_common::telemetry::{
     current_timestamp, SystemData, TelemetryNodeType, TelemetryReportBase, TelemetryResult,
 };
-use risingwave_pb::telemetry::{PbTelemetryConnectorDirection, PbTelemetryEventStage};
+use risingwave_pb::telemetry::{PbTelemetryDatabaseComponents, PbTelemetryEventStage};
 use serde::{Deserialize, Serialize};
 
 const TELEMETRY_COMPACTOR_REPORT_TYPE: &str = "compactor";
@@ -36,28 +36,28 @@ pub(crate) fn set_compactor_telemetry_tracking_id_and_session_id(
     COMPACTOR_TELEMETRY_SESSION_ID.set(session_id).unwrap();
 }
 
-fn get_compactor_telemetry_tracking_id_and_session_id() -> (Option<String>, Option<String>) {
+fn _get_compactor_telemetry_tracking_id_and_session_id() -> (Option<String>, Option<String>) {
     (
         COMPACTOR_TELEMETRY_TRACKING_ID.get().cloned(),
         COMPACTOR_TELEMETRY_SESSION_ID.get().cloned(),
     )
 }
 
-pub(crate) fn report_event(
+pub(crate) fn _report_event(
     event_stage: PbTelemetryEventStage,
     feature_name: String,
     catalog_id: i64,
     connector_name: Option<String>,
-    source_or_sink: Option<PbTelemetryConnectorDirection>,
+    component: Option<PbTelemetryDatabaseComponents>,
     attributes: Option<String>, // any json string
 ) {
     report_event_common(
-        Box::new(get_compactor_telemetry_tracking_id_and_session_id),
+        Box::new(_get_compactor_telemetry_tracking_id_and_session_id),
         event_stage,
         feature_name,
         catalog_id,
         connector_name,
-        source_or_sink,
+        component,
         attributes,
         TELEMETRY_COMPACTOR_REPORT_TYPE.to_string(),
     );

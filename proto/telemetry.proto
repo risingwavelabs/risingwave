@@ -132,10 +132,13 @@ enum TelemetryEventStage {
   Telemetry_Event_Stage_Recovery = 5;
 }
 
-enum TelemetryConnectorDirection {
-  Telemetry_Connector_Direction_UNSPECIFIED = 0;
-  Telemetry_Connector_Direction_Source = 1;
-  Telemetry_Connector_Direction_Sink = 2;
+enum TelemetryDatabaseComponents {
+  Telemetry_Database_Components_UNSPECIFIED = 0;
+  Telemetry_Database_Components_Source = 1;
+  Telemetry_Database_Components_Mv = 2;
+  Telemetry_Database_Components_Table = 3;
+  Telemetry_Database_Components_Sink = 4;
+  Telemetry_Database_Components_Index = 5;
 }
 
 message EventMessage {
@@ -152,7 +155,7 @@ message EventMessage {
   // connector_name is the name of the connector involves
   optional string connector_name = 6;
   // connector_direction is the direction of data flow, can be source or sink
-  optional TelemetryConnectorDirection connector_direction = 10;
+  optional TelemetryDatabaseComponents component = 10;
   // catalog_id is the id of the catalog involves (table_id/source_id/...)
   int64 catalog_id = 7;
   // attributes is the additional information of the event: json format ser to string
