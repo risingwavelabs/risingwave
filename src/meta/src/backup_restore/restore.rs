@@ -43,6 +43,15 @@ pub struct RestoreOpts {
     pub meta_store_type: MetaBackend,
     #[clap(long, default_value_t = String::from(""))]
     pub sql_endpoint: String,
+    /// Username of sql backend, required when meta backend set to MySQL or PostgreSQL.
+    #[clap(long, default_value = "")]
+    pub sql_username: String,
+    /// Password of sql backend, required when meta backend set to MySQL or PostgreSQL.
+    #[clap(long, default_value = "")]
+    pub sql_password: String,
+    /// Database of sql backend, required when meta backend set to MySQL or PostgreSQL.
+    #[clap(long, default_value = "")]
+    pub sql_database: String,
     /// Etcd endpoints.
     #[clap(long, default_value_t = String::from(""))]
     pub etcd_endpoints: String,
