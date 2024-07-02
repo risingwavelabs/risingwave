@@ -20,9 +20,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::fmt::{Debug, Display, Formatter};
 use std::future::{poll_fn, Future};
 use std::mem::{replace, swap, take};
-use std::sync::atomic::AtomicUsize;
-use std::sync::atomic::Ordering::Relaxed;
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 use std::task::{ready, Context, Poll};
 
 use futures::FutureExt;
@@ -227,7 +225,7 @@ impl UploadingTask {
             .collect()
     }
 
-    fn new(input: UploadTaskInput, context: &UploaderContext) -> Self {
+    fn new(task_id: UploadingTaskId, input: UploadTaskInput, context: &UploaderContext) -> Self {
         assert!(!input.is_empty());
         let mut epochs = input
             .iter()
@@ -261,9 +259,8 @@ impl UploadingTask {
         }
         let join_handle = (context.spawn_upload_task)(payload, task_info.clone());
         context.stats.uploader_uploading_task_count.inc();
-        static NEXT_TASK_ID: LazyLock<AtomicUsize> = LazyLock::new(|| AtomicUsize::new(0));
         Self {
-            task_id: UploadingTaskId(NEXT_TASK_ID.fetch_add(1, Relaxed)),
+            task_id,
             input,
             join_handle,
             task_info,
@@ -840,7 +837,7 @@ impl UploaderData {
         let _epochs = take_before_epoch(&mut self.unsync_data.epochs, epoch);
 
         let mut all_table_watermarks = HashMap::new();
-        let mut spilling_tasks = HashSet::new();
+        let mut uploading_tasks = HashSet::new();
         let mut spilled_tasks = BTreeSet::new();
 
         let mut flush_payload = HashMap::new();
@@ -867,22 +864,25 @@ impl UploaderData {
                 if self.spilled_data.contains_key(&task_id) {
                     spilled_tasks.insert(task_id);
                 } else {
-                    spilling_tasks.insert(task_id);
+                    uploading_tasks.insert(task_id);
                 }
             }
         }
 
-        static NEXT_SYNC_ID: LazyLock<AtomicUsize> = LazyLock::new(|| AtomicUsize::new(0));
-        let sync_id = SyncId(NEXT_SYNC_ID.fetch_add(1, Relaxed));
+        let sync_id = {
+            let sync_id = self.next_sync_id;
+            self.next_sync_id += 1;
+            SyncId(sync_id)
+        };
 
         if let Some(extra_flush_task_id) = self.task_manager.sync(
             context,
             sync_id,
             flush_payload,
-            spilling_tasks.iter().cloned(),
+            uploading_tasks.iter().cloned(),
             &table_ids,
         ) {
-            spilling_tasks.insert(extra_flush_task_id);
+            uploading_tasks.insert(extra_flush_task_id);
         }
 
         // iter from large task_id to small one so that newer data at the front
@@ -905,7 +905,7 @@ impl UploaderData {
             SyncingData {
                 sync_epoch: epoch,
                 table_ids,
-                remaining_uploading_tasks: spilling_tasks,
+                remaining_uploading_tasks: uploading_tasks,
                 uploaded,
                 table_watermarks: all_table_watermarks,
                 sync_result_sender,
@@ -976,13 +976,11 @@ struct SyncId(usize);
 struct UploaderData {
     unsync_data: UnsyncData,
 
-    /// Data that has started syncing but not synced yet. `epoch` satisfies
-    /// `max_synced_epoch < epoch <= max_syncing_epoch`.
-    /// Newer epoch at the front
     syncing_data: BTreeMap<SyncId, SyncingData>,
 
     task_manager: TaskManager,
     spilled_data: HashMap<UploadingTaskId, (Arc<StagingSstableInfo>, HashSet<TableId>)>,
+    next_sync_id: usize,
 }
 
 impl UploaderData {
@@ -1226,8 +1224,6 @@ impl HummockUploader {
 }
 
 impl UploaderData {
-    /// Poll the syncing task of the syncing data of the oldest epoch. Return `Poll::Ready(None)` if
-    /// there is no syncing data.
     fn may_notify_sync_task(&mut self, context: &UploaderContext) {
         while let Some((_, syncing_data)) = self.syncing_data.first_key_value()
             && syncing_data.remaining_uploading_tasks.is_empty()
@@ -1360,6 +1356,13 @@ impl HummockUploader {
                             }),
                         ), UploaderState::Working(data) => data);
 
+                        let _ = syncing_data
+                            .sync_result_sender
+                            .send(Err(HummockError::other(format!(
+                                "failed to sync: {:?}",
+                                e.as_report()
+                            ))));
+
                         data.abort(|| {
                             HummockError::other(format!(
                                 "previous epoch {} failed to sync",
@@ -1383,8 +1386,8 @@ pub(crate) mod tests {
     use std::ops::Deref;
     use std::pin::pin;
     use std::sync::atomic::AtomicUsize;
-    use std::sync::atomic::Ordering::SeqCst;
-    use std::sync::Arc;
+    use std::sync::atomic::Ordering::{Relaxed, SeqCst};
+    use std::sync::{Arc, LazyLock};
     use std::task::Poll;
 
     use bytes::Bytes;
@@ -1411,7 +1414,7 @@ pub(crate) mod tests {
     use crate::hummock::event_handler::uploader::{
         get_payload_imm_ids, HummockUploader, SyncedData, TableUnsyncData, UploadTaskInfo,
         UploadTaskOutput, UploadTaskPayload, UploaderContext, UploaderData, UploaderState,
-        UploadingTask,
+        UploadingTask, UploadingTaskId,
     };
     use crate::hummock::event_handler::{LocalInstanceId, TEST_LOCAL_INSTANCE_ID};
     use crate::hummock::local_version::pinned_version::PinnedVersion;
@@ -1590,7 +1593,12 @@ pub(crate) mod tests {
                 TEST_LOCAL_INSTANCE_ID,
                 imms.into_iter().map(UploaderImm::for_test).collect_vec(),
             )]);
-            Self::new(input, context)
+            static NEXT_TASK_ID: LazyLock<AtomicUsize> = LazyLock::new(|| AtomicUsize::new(0));
+            Self::new(
+                UploadingTaskId(NEXT_TASK_ID.fetch_add(1, Relaxed)),
+                input,
+                context,
+            )
         }
     }
 

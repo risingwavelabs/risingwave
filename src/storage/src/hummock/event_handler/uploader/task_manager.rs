@@ -31,6 +31,7 @@ pub(super) struct TaskManager {
     tasks: HashMap<UploadingTaskId, TaskEntry>,
     // newer task at the front
     task_order: VecDeque<UploadingTaskId>,
+    next_task_id: usize,
 }
 
 impl TaskManager {
@@ -41,7 +42,10 @@ impl TaskManager {
     ) -> &UploadingTaskStatus {
         let task_id = task.task_id;
         self.task_order.push_front(task.task_id);
-        self.tasks.insert(task.task_id, TaskEntry { task, status });
+        assert!(self
+            .tasks
+            .insert(task.task_id, TaskEntry { task, status })
+            .is_none());
         &self.tasks.get(&task_id).expect("should exist").status
     }
 
@@ -62,6 +66,12 @@ impl TaskManager {
             }
         };
         Poll::Ready(result)
+    }
+
+    fn get_next_task_id(&mut self) -> UploadingTaskId {
+        let task_id = self.next_task_id;
+        self.next_task_id += 1;
+        UploadingTaskId(task_id)
     }
 
     #[expect(clippy::type_complexity)]
@@ -100,7 +110,7 @@ impl TaskManager {
         imms: HashMap<LocalInstanceId, Vec<UploaderImm>>,
     ) -> (UploadingTaskId, usize, &HashSet<TableId>) {
         assert!(!imms.is_empty());
-        let task = UploadingTask::new(imms, context);
+        let task = UploadingTask::new(self.get_next_task_id(), imms, context);
         context.stats.spill_task_counts_from_unsealed.inc();
         context
             .stats
@@ -146,7 +156,11 @@ impl TaskManager {
         let task = if unflushed_payload.is_empty() {
             None
         } else {
-            Some(UploadingTask::new(unflushed_payload, context))
+            Some(UploadingTask::new(
+                self.get_next_task_id(),
+                unflushed_payload,
+                context,
+            ))
         };
 
         for task_id in spill_task_ids {
