@@ -198,8 +198,10 @@ pub struct RescheduleContext {
     worker_nodes: HashMap<WorkerId, WorkerNode>,
     /// Index of all `Actor` upstreams, specific to `Dispatcher`
     upstream_dispatchers: HashMap<ActorId, Vec<(FragmentId, DispatcherId, DispatcherType)>>,
-    /// Fragments with stream source
+    /// Fragments with `StreamSource`
     stream_source_fragment_ids: HashSet<FragmentId>,
+    /// Fragments with `StreamSourceBackfill`
+    stream_source_backfill_fragment_ids: HashSet<FragmentId>,
     /// Target fragments in `NoShuffle` relation
     no_shuffle_target_fragment_ids: HashSet<FragmentId>,
     /// Source fragments in `NoShuffle` relation
@@ -667,6 +669,7 @@ impl ScaleController {
         }
 
         let mut stream_source_fragment_ids = HashSet::new();
+        let mut stream_source_backfill_fragment_ids = HashSet::new();
         let mut no_shuffle_reschedule = HashMap::new();
         for (
             fragment_id,
@@ -738,6 +741,12 @@ impl ScaleController {
                 let stream_node = fragment.actor_template.nodes.as_ref().unwrap();
                 if stream_node.find_stream_source().is_some() {
                     stream_source_fragment_ids.insert(*fragment_id);
+                }
+            }
+            if (fragment.get_fragment_type_mask() & FragmentTypeFlag::SourceScan as u32) != 0 {
+                let stream_node = fragment.actor_template.nodes.as_ref().unwrap();
+                if stream_node.find_source_backfill().is_some() {
+                    stream_source_backfill_fragment_ids.insert(*fragment_id);
                 }
             }
 
@@ -815,6 +824,7 @@ impl ScaleController {
             worker_nodes,
             upstream_dispatchers,
             stream_source_fragment_ids,
+            stream_source_backfill_fragment_ids,
             no_shuffle_target_fragment_ids,
             no_shuffle_source_fragment_ids,
             fragment_dispatcher_map,
@@ -857,7 +867,10 @@ impl ScaleController {
         Ok(())
     }
 
-    // Results are the generated reschedule plan and the changes that need to be updated to the meta store.
+    /// Results are the generated reschedule plan and the changes that need to be updated to the meta store.
+    ///
+    /// XXX: Why this is also used in recovery?
+    /// Should other modules use only `reschedule_actors_impl`, but not this internal method?
     pub(crate) async fn prepare_reschedule_command(
         &self,
         mut reschedules: HashMap<FragmentId, ParallelUnitReschedule>,
@@ -1232,9 +1245,9 @@ impl ScaleController {
             .await?;
         }
 
-        // For stream source fragments, we need to reallocate the splits.
+        // For stream source & source backfill fragments, we need to reallocate the splits.
         // Because we are in the Pause state, so it's no problem to reallocate
-        let mut fragment_stream_source_actor_splits = HashMap::new();
+        let mut fragment_actor_splits = HashMap::new();
         for fragment_id in reschedules.keys() {
             let actors_after_reschedule =
                 fragment_actors_after_reschedule.get(fragment_id).unwrap();
@@ -1252,10 +1265,39 @@ impl ScaleController {
 
                 let actor_splits = self
                     .source_manager
-                    .migrate_splits(*fragment_id, &prev_actor_ids, &curr_actor_ids)
+                    .migrate_splits_for_source_actors(
+                        *fragment_id,
+                        &prev_actor_ids,
+                        &curr_actor_ids,
+                    )
                     .await?;
 
-                fragment_stream_source_actor_splits.insert(*fragment_id, actor_splits);
+                fragment_actor_splits.insert(*fragment_id, actor_splits);
+            }
+        }
+        // We use 2 iterations to make sure source actors are migrated first, and then align backfill actors
+        if !ctx.stream_source_backfill_fragment_ids.is_empty() {
+            for fragment_id in reschedules.keys() {
+                let actors_after_reschedule =
+                    fragment_actors_after_reschedule.get(fragment_id).unwrap();
+
+                if ctx
+                    .stream_source_backfill_fragment_ids
+                    .contains(fragment_id)
+                {
+                    let fragment = ctx.fragment_map.get(fragment_id).unwrap();
+
+                    let curr_actor_ids = actors_after_reschedule.keys().cloned().collect_vec();
+
+                    let actor_splits = self.source_manager.migrate_splits_for_backfill_actors(
+                        *fragment_id,
+                        &fragment.upstream_fragment_ids,
+                        &curr_actor_ids,
+                        &fragment_actor_splits,
+                        &no_shuffle_upstream_actor_map,
+                    )?;
+                    fragment_actor_splits.insert(*fragment_id, actor_splits);
+                }
             }
         }
         // TODO: support migrate splits for SourceBackfill
@@ -1410,7 +1452,7 @@ impl ScaleController {
             let upstream_fragment_dispatcher_ids =
                 upstream_fragment_dispatcher_set.into_iter().collect_vec();
 
-            let actor_splits = fragment_stream_source_actor_splits
+            let actor_splits = fragment_actor_splits
                 .get(&fragment_id)
                 .cloned()
                 .unwrap_or_default();
@@ -2628,8 +2670,8 @@ impl ScaleController {
     }
 }
 
-// At present, for table level scaling, we use the strategy TableResizePolicy.
-// Currently, this is used as an internal interface, so it won’t be included in Protobuf for the time being.
+/// At present, for table level scaling, we use the strategy TableResizePolicy.
+/// Currently, this is used as an internal interface, so it won’t be included in Protobuf for the time being.
 pub struct TableResizePolicy {
     pub(crate) worker_ids: BTreeSet<WorkerId>,
     pub(crate) table_parallelisms: HashMap<u32, TableParallelism>,
@@ -2644,6 +2686,11 @@ impl GlobalStreamManager {
         self.scale_controller.reschedule_lock.write().await
     }
 
+    /// The entrypoint of rescheduling actors.
+    ///
+    /// Used by:
+    /// - `risectl scale` (`risingwave_meta_service::scale_service::ScaleService`)
+    /// - `ALTER [TABLE | INDEX | MATERIALIZED VIEW | SINK] SET PARALLELISM`
     pub async fn reschedule_actors(
         &self,
         reschedules: HashMap<FragmentId, ParallelUnitReschedule>,
@@ -2736,6 +2783,14 @@ impl GlobalStreamManager {
         Ok(())
     }
 
+    /// When new worker nodes joined, or the parallelism of existing worker nodes changed,
+    /// examines if there are any jobs can be scaled, and scales them if found.
+    ///
+    /// This method will iterate over all `CREATED` jobs, and can be repeatedly called.
+    ///
+    /// Returns
+    /// - `Ok(false)` if no jobs can be scaled;
+    /// - `Ok(true)` if some jobs are scaled, and it is possible that there are more jobs can be scaled.
     async fn trigger_parallelism_control(&self) -> MetaResult<bool> {
         let background_streaming_jobs = self
             .metadata_manager
@@ -2857,7 +2912,9 @@ impl GlobalStreamManager {
 
         for batch in batches {
             let parallelisms: HashMap<_, _> = batch.into_iter().collect();
-
+            // `table_parallelisms` contains ALL created jobs.
+            // We rely on `generate_table_resize_plan` to check if there are
+            // any jobs that can be scaled.
             let plan = self
                 .scale_controller
                 .generate_table_resize_plan(TableResizePolicy {
@@ -2894,6 +2951,7 @@ impl GlobalStreamManager {
         Ok(true)
     }
 
+    /// Handles notification of worker node activation and deletion, and triggers parallelism control.
     async fn run(&self, mut shutdown_rx: Receiver<()>) {
         tracing::info!("starting automatic parallelism control monitor");
 
