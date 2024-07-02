@@ -20,11 +20,10 @@ mod test;
 
 use std::collections::VecDeque;
 use std::fmt::{Debug, Formatter};
-use std::time::Instant;
 
 use tokio::sync::oneshot::{channel, Receiver, Sender};
 
-use crate::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use crate::sync::atomic::{AtomicBool, AtomicU64, Ordering as AtomicOrdering};
 use crate::sync::{Arc, Mutex};
 
 type RequestQueue = VecDeque<(Sender<MemoryTracker>, u64)>;
@@ -42,16 +41,16 @@ struct MemoryLimiterInner {
 
 impl MemoryLimiterInner {
     fn release_quota(&self, quota: u64) {
-        self.total_size.fetch_sub(quota, Ordering::AcqRel);
+        self.total_size.fetch_sub(quota, AtomicOrdering::SeqCst);
     }
 
     fn add_memory(&self, quota: u64) {
-        self.total_size.fetch_add(quota, Ordering::AcqRel);
+        self.total_size.fetch_add(quota, AtomicOrdering::SeqCst);
     }
 
-    fn may_notify_waiters(self: &Arc<MemoryLimiterInner>) {
+    fn may_notify_waiters(self: &Arc<Self>) {
         // check `has_waiter` to avoid access lock every times drop `MemoryTracker`.
-        if !self.has_waiter.load(Ordering::Acquire) {
+        if !self.has_waiter.load(AtomicOrdering::Acquire) {
             return;
         }
         {
@@ -67,26 +66,21 @@ impl MemoryLimiterInner {
             }
 
             if waiters.is_empty() {
-                self.has_waiter.store(false, Ordering::Release);
+                self.has_waiter.store(false, AtomicOrdering::Release);
             }
         }
     }
 
     fn try_require_memory(&self, quota: u64) -> bool {
-        let time = Instant::now();
-        println!("in try require memory: {:?}", time);
-        let mut current_quota = self.total_size.load(Ordering::AcqRel);
-        println!("after load memory: {:?}", time);
+        let mut current_quota = self.total_size.load(AtomicOrdering::Acquire);
         while self.permit_quota(current_quota, quota) {
-            println!("trying require memory cas: {:?}", time);
             match self.total_size.compare_exchange(
                 current_quota,
                 current_quota + quota,
-                Ordering::AcqRel,
-                Ordering::AcqRel,
+                AtomicOrdering::SeqCst,
+                AtomicOrdering::SeqCst,
             ) {
                 Ok(_) => {
-                    println!("trying require memory success: {:?}", time);
                     return true;
                 }
                 Err(old_quota) => {
@@ -94,30 +88,23 @@ impl MemoryLimiterInner {
                 }
             }
         }
-        println!("after try require memory: {:?}", time);
         false
     }
 
-    fn require_memory(self: &Arc<MemoryLimiterInner>, quota: u64) -> MemoryRequest {
-        let time = Instant::now();
-        println!("before lock require memory: {:?}", time);
+    fn require_memory(self: &Arc<Self>, quota: u64) -> MemoryRequest {
         let mut waiters = self.controller.lock();
-        println!("after lock require memory: {:?}", time);
         let first_req = waiters.is_empty();
         if first_req {
             // When this request is the first waiter but the previous `MemoryTracker` is just release a large quota, it may skip notifying this waiter because it has checked `has_waiter` and found it was false. So we must set it one and retry `try_require_memory` again to avoid deadlock.
-            self.has_waiter.store(true, Ordering::Release);
+            self.has_waiter.store(true, AtomicOrdering::Release);
         }
-        println!("before try require memory: {:?}", time);
         // We must require again with lock because some other MemoryTracker may drop just after this thread gets mutex but before it enters queue.
         if self.try_require_memory(quota) {
             if first_req {
-                self.has_waiter.store(false, Ordering::Release);
+                self.has_waiter.store(false, AtomicOrdering::Release);
             }
-            println!("after try require memory success: {:?}", time);
             return MemoryRequest::Ready(MemoryTracker::new(self.clone(), quota));
         }
-        println!("after try require memory fail: {:?}", time);
         let (tx, rx) = channel();
         waiters.push_back((tx, quota));
         MemoryRequest::Pending(rx)
@@ -187,7 +174,7 @@ impl MemoryLimiter {
     }
 
     pub fn get_memory_usage(&self) -> u64 {
-        self.inner.total_size.load(Ordering::Acquire)
+        self.inner.total_size.load(AtomicOrdering::Acquire)
     }
 
     pub fn quota(&self) -> u64 {

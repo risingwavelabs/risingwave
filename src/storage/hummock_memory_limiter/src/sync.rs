@@ -14,7 +14,6 @@
 
 #[cfg(loom)]
 mod inner {
-    use std::time::Instant;
     pub(crate) use loom::sync::*;
 
     pub(crate) struct Mutex<T> {
@@ -24,20 +23,12 @@ mod inner {
     impl<T> Mutex<T> {
         pub(crate) fn new(value: T) -> Self {
             Self {
-                inner: loom::sync::Mutex::new(value)
+                inner: loom::sync::Mutex::new(value),
             }
         }
 
         pub(crate) fn lock(&self) -> loom::sync::MutexGuard<'_, T> {
-            loop {
-                let time = Instant::now();
-                println!("try lock: {:?}", time);
-                if let Ok(guard) = self.inner.try_lock() {
-                    println!("lock success: {:?}", time);
-                    return guard;
-                }
-            }
-            // self.inner.lock().expect("should not fail")
+            self.inner.lock().expect("should not fail")
         }
     }
 }
@@ -45,6 +36,7 @@ mod inner {
 #[cfg(not(loom))]
 mod inner {
     pub(crate) use std::sync::*;
+
     pub(crate) use parking_lot::Mutex;
 }
 

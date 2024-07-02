@@ -21,11 +21,11 @@ futures = { version = "0.3" }
 tokio = { version = "0.2", package = "madsim-tokio", features = ["sync"]}
 
 [target.'cfg(not(madsim))'.dependencies]
-tokio = {version = "^1.36.0", features = ["sync", "rt", "rt-multi-thread", "time", "macros"]}
+tokio = { version = "1.38.0", features = ["sync", "rt", "rt-multi-thread", "time", "macros"]}
 workspace-hack = { path = "../../workspace-hack" }
 
 [target."cfg(not(loom))".dependencies]
-parking_lot = { version = "0.12.3", features = ["deadlock_detection"] }
+parking_lot = { version = "0.12", features = ["deadlock_detection"] }
 
 [target."cfg(loom)".dependencies]
 loom = { version = "0.7" , features = ["futures", "checkpoint"]}

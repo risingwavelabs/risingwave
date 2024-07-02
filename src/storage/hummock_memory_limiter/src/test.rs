@@ -82,44 +82,32 @@ mod normal_test {
 
 #[cfg(loom)]
 mod loom_test {
-    use std::future::poll_fn;
     use std::pin::pin;
-    use std::task::Poll;
-    use std::time::{Duration, Instant};
 
     use ::loom::future::block_on;
-    use futures::Future;
-    use tokio::sync::oneshot;
+    use futures::FutureExt;
 
     use crate::MemoryLimiter;
 
     #[test]
     fn test_memory_limiter_drop() {
         let mut builder = loom::model::Builder::new();
-        builder.preemption_bound = Some(2);
-        builder.max_threads = 3;
+        builder.preemption_bound = Some(4);
         builder.check(|| {
             let memory_limiter = MemoryLimiter::new(1);
             let initial_holder = block_on(memory_limiter.require_memory(2));
             let (tx, rx) = tokio::sync::oneshot::channel();
 
             let join_handle1 = loom::thread::spawn(move || {
-                block_on(async move {
-                    let time = Instant::now();
-                    println!("enter: {:?}", time);
-                    let fut = memory_limiter.require_memory(1);
-                    let mut fut = pin!(fut);
-                    println!("before poll: {:?}", time);
-                    assert!(poll_fn(|cx| Poll::Ready(fut.as_mut().poll(cx).is_pending())).await);
-                    println!("after poll: {:?}", time);
-                    tx.send(()).unwrap();
-                    drop(fut);
-                    println!("finish: {:?}", time);
-                });
+                let fut = memory_limiter.require_memory(1);
+                let mut fut = pin!(fut);
+                assert!(fut.as_mut().now_or_never().is_none());
+                tx.send(()).unwrap();
+                drop(fut);
             });
 
             let join_handle2 = loom::thread::spawn(move || {
-                rx.blocking_recv().unwrap();
+                block_on(rx).unwrap();
                 drop(initial_holder);
             });
 

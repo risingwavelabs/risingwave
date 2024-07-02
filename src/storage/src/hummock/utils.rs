@@ -21,6 +21,7 @@ use std::time::Duration;
 use bytes::Bytes;
 use foyer::CacheContext;
 use risingwave_common::catalog::{TableId, TableOption};
+pub use risingwave_hummock_memory_limiter::{MemoryLimiter, MemoryTracker};
 use risingwave_hummock_sdk::key::{
     bound_table_key_range, EmptySliceRef, FullKey, TableKey, UserKey,
 };
@@ -33,8 +34,6 @@ use crate::error::StorageResult;
 use crate::hummock::CachePolicy;
 use crate::mem_table::{KeyOp, MemTableError};
 use crate::store::{OpConsistencyLevel, ReadOptions, StateStoreRead};
-
-pub(crate) use risingwave_hummock_memory_limiter::{MemoryLimiter, MemoryTracker};
 
 pub fn range_overlap<R, B>(
     search_key_range: &R,
