@@ -27,8 +27,14 @@ use risingwave_meta_model_v2::{
     view, worker_property, ActorId, DataTypeArray, DatabaseId, FragmentId, FragmentVnodeMapping,
     I32Array, ObjectId, PrivilegeId, SchemaId, SourceId, StreamNode, UserId, WorkerId,
 };
-use risingwave_pb::catalog::{PbConnection, PbFunction, PbSecret, PbSubscription};
-use risingwave_pb::meta::{PbFragmentParallelUnitMapping, PbFragmentWorkerSlotMapping};
+use risingwave_pb::catalog::{
+    PbConnection, PbFunction, PbIndex, PbSecret, PbSink, PbSource, PbSubscription, PbTable, PbView,
+};
+use risingwave_pb::meta::relation::PbRelationInfo;
+use risingwave_pb::meta::subscribe_response::Info as NotificationInfo;
+use risingwave_pb::meta::{
+    PbFragmentParallelUnitMapping, PbFragmentWorkerSlotMapping, PbRelation, PbRelationGroup,
+};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{PbFragmentTypeFlag, PbStreamNode, StreamSource};
 use risingwave_pb::user::grant_privilege::{PbAction, PbActionWithGrantOption, PbObject};
@@ -44,7 +50,6 @@ use sea_orm::{
 
 use crate::controller::catalog::CatalogController;
 use crate::{MetaError, MetaResult};
-
 /// This function will construct a query using recursive cte to find all objects[(id, `obj_type`)] that are used by the given object.
 ///
 /// # Examples
@@ -1007,4 +1012,72 @@ where
         .collect::<HashMap<_, _>>();
 
     Ok(parallel_unit_to_worker)
+}
+
+pub(crate) fn build_relation_group(relation_objects: Vec<PartialObject>) -> NotificationInfo {
+    let mut relations = vec![];
+    for obj in relation_objects {
+        match obj.obj_type {
+            ObjectType::Table => relations.push(PbRelation {
+                relation_info: Some(PbRelationInfo::Table(PbTable {
+                    id: obj.oid as _,
+                    schema_id: obj.schema_id.unwrap() as _,
+                    database_id: obj.database_id.unwrap() as _,
+                    ..Default::default()
+                })),
+            }),
+            ObjectType::Source => relations.push(PbRelation {
+                relation_info: Some(PbRelationInfo::Source(PbSource {
+                    id: obj.oid as _,
+                    schema_id: obj.schema_id.unwrap() as _,
+                    database_id: obj.database_id.unwrap() as _,
+                    ..Default::default()
+                })),
+            }),
+            ObjectType::Sink => relations.push(PbRelation {
+                relation_info: Some(PbRelationInfo::Sink(PbSink {
+                    id: obj.oid as _,
+                    schema_id: obj.schema_id.unwrap() as _,
+                    database_id: obj.database_id.unwrap() as _,
+                    ..Default::default()
+                })),
+            }),
+            ObjectType::Subscription => relations.push(PbRelation {
+                relation_info: Some(PbRelationInfo::Subscription(PbSubscription {
+                    id: obj.oid as _,
+                    schema_id: obj.schema_id.unwrap() as _,
+                    database_id: obj.database_id.unwrap() as _,
+                    ..Default::default()
+                })),
+            }),
+            ObjectType::View => relations.push(PbRelation {
+                relation_info: Some(PbRelationInfo::View(PbView {
+                    id: obj.oid as _,
+                    schema_id: obj.schema_id.unwrap() as _,
+                    database_id: obj.database_id.unwrap() as _,
+                    ..Default::default()
+                })),
+            }),
+            ObjectType::Index => {
+                relations.push(PbRelation {
+                    relation_info: Some(PbRelationInfo::Index(PbIndex {
+                        id: obj.oid as _,
+                        schema_id: obj.schema_id.unwrap() as _,
+                        database_id: obj.database_id.unwrap() as _,
+                        ..Default::default()
+                    })),
+                });
+                relations.push(PbRelation {
+                    relation_info: Some(PbRelationInfo::Table(PbTable {
+                        id: obj.oid as _,
+                        schema_id: obj.schema_id.unwrap() as _,
+                        database_id: obj.database_id.unwrap() as _,
+                        ..Default::default()
+                    })),
+                });
+            }
+            _ => unreachable!("only relations will be dropped."),
+        }
+    }
+    NotificationInfo::RelationGroup(PbRelationGroup { relations })
 }
