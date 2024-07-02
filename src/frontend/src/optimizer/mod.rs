@@ -797,11 +797,6 @@ impl PlanRoot {
         )
         .into();
 
-        // Add WatermarkFilter node.
-        if !watermark_descs.is_empty() {
-            stream_plan = StreamWatermarkFilter::new(stream_plan, watermark_descs).into();
-        }
-
         // Add RowIDGen node if needed.
         if let Some(row_id_index) = row_id_index {
             match kind {
@@ -817,6 +812,11 @@ impl PlanRoot {
                     .into();
                 }
             }
+        }
+
+        // Add WatermarkFilter node.
+        if !watermark_descs.is_empty() {
+            stream_plan = StreamWatermarkFilter::new(stream_plan, watermark_descs).into();
         }
 
         let conflict_behavior = match on_conflict {
