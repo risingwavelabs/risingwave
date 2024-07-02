@@ -337,7 +337,8 @@ impl Access for AvroAccess<'_> {
         let mut options: AvroParseOptions<'_> = self.options.clone();
 
         debug_assert!(
-            path.len() == 1 || (path.len() == 2 && path[0] == "before"),
+            path.len() == 1
+                || (path.len() == 2 && matches!(path[0], "before" | "after" | "source")),
             "unexpected path access: {:?}",
             path
         );

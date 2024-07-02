@@ -67,7 +67,9 @@ pub trait Access {
     ///
     /// What `path` to access is decided by the CDC layer, i.e., the `FORMAT ...` part (`ChangeEvent`).
     /// e.g.,
-    /// - `DebeziumChangeEvent` accesses `["before", "col_name"]` for value, `["op"]` for op type.
+    /// - `DebeziumChangeEvent` accesses `["before", "col_name"]` for value,
+    ///   `["source", "db"]`, `["source", "table"]` etc. for additional columns' values,
+    ///   `["op"]` for op type.
     /// - `MaxwellChangeEvent` accesses `["data", "col_name"]` for value, `["type"]` for op type.
     /// - In the simplest case, for `FORMAT PLAIN/UPSERT` (`KvEvent`), they just access `["col_name"]` for value, and op type is derived.
     ///
