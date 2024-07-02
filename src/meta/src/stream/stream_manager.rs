@@ -713,7 +713,7 @@ impl GlobalStreamManager {
         } else {
             let reschedules = self
                 .scale_controller
-                .generate_table_resize_plan(TableResizePolicy {
+                .generate_table_resize_plan_v2(TableResizePolicy {
                     worker_ids,
                     table_parallelisms: table_parallelism_assignment
                         .iter()
@@ -728,7 +728,7 @@ impl GlobalStreamManager {
                     .post_apply_reschedule(&HashMap::new(), &table_parallelism_assignment)
                     .await?;
             } else {
-                self.reschedule_actors(
+                self.reschedule_actors_v2(
                     reschedules,
                     RescheduleOptions {
                         resolve_no_shuffle_upstream: false,
