@@ -5817,17 +5817,17 @@ dependencies = [
 
 [[package]]
 name = "gcp-bigquery-client"
-version = "0.18.0"
+version = "0.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b0ce6fcbdaca0a4521a734f2bc7f2f6bd872fe40576e24f8bd0b05732c19a74f"
+checksum = "a7fe3895eb99784b8ad2776688b41e068e918d18ebb736dafb1a321bce46c749"
 dependencies = [
  "async-stream",
  "async-trait",
  "dyn-clone",
  "hyper 0.14.27",
- "hyper-rustls 0.24.2",
+ "hyper-rustls 0.25.0",
  "log",
- "reqwest 0.11.20",
+ "reqwest 0.12.2",
  "serde",
  "serde_json",
  "thiserror",
@@ -6464,6 +6464,23 @@ dependencies = [
  "tokio",
  "tokio-rustls 0.24.1",
  "webpki-roots 0.25.2",
+]
+
+[[package]]
+name = "hyper-rustls"
+version = "0.25.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "399c78f9338483cb7e630c8474b07268983c6bd5acee012e4211f9f7bb21b070"
+dependencies = [
+ "futures-util",
+ "http 0.2.9",
+ "hyper 0.14.27",
+ "log",
+ "rustls 0.22.4",
+ "rustls-native-certs 0.7.0",
+ "rustls-pki-types",
+ "tokio",
+ "tokio-rustls 0.25.0",
 ]
 
 [[package]]
