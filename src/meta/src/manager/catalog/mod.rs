@@ -831,7 +831,7 @@ impl CatalogManager {
             .await;
     }
 
-    /// This is used for both `CREATE TABLE` and `CREATE MATERIALIZED VIEW`.
+    /// This is used for both `CREATE TABLE`
     pub async fn start_create_table_procedure(&self, table: &Table) -> MetaResult<()> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
@@ -860,7 +860,7 @@ impl CatalogManager {
         }
     }
 
-    /// This is used for both `CREATE TABLE` and `CREATE MATERIALIZED VIEW`.
+    /// This is used for `CREATE MATERIALIZED VIEW`.
     pub async fn start_create_materialized_view_procedure(
         &self,
         table: &Table,
