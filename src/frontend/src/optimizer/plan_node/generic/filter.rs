@@ -22,10 +22,6 @@ use crate::optimizer::plan_node::utils::childless_record;
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{Condition, ConditionDisplay};
 
-/// [`Filter`] iterates over its input and returns elements for which `predicate` evaluates to
-/// true, filtering out the others.
-///
-/// If the condition allows nulls, then a null value is treated the same as false.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Filter<PlanRef> {
     pub predicate: Condition,

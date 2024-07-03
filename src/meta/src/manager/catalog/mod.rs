@@ -46,6 +46,7 @@ use risingwave_pb::user::{GrantPrivilege, UserInfo};
 use tokio::sync::{Mutex, MutexGuard};
 use user::*;
 
+pub use self::utils::{get_refed_secret_ids_from_sink, get_refed_secret_ids_from_source};
 use crate::manager::{
     IdCategory, MetaSrvEnv, NotificationVersion, StreamingJob, IGNORED_NOTIFICATION_VERSION,
 };
@@ -128,6 +129,10 @@ use risingwave_pb::meta::relation::RelationInfo;
 use risingwave_pb::meta::{Relation, RelationGroup};
 pub(crate) use {commit_meta, commit_meta_with_trx};
 
+use self::utils::{
+    refcnt_dec_sink_secret_ref, refcnt_dec_source_secret_ref, refcnt_inc_sink_secret_ref,
+    refcnt_inc_source_secret_ref,
+};
 use crate::controller::rename::{
     alter_relation_rename, alter_relation_rename_refs, ReplaceTableExprRewriter,
 };
@@ -1073,6 +1078,67 @@ impl CatalogManager {
         Ok(())
     }
 
+    /// `finish_stream_job` finishes a stream job and clean some states.
+    pub async fn finish_stream_job(
+        &self,
+        mut stream_job: StreamingJob,
+        internal_tables: Vec<Table>,
+    ) -> MetaResult<u64> {
+        // 1. finish procedure.
+        let mut creating_internal_table_ids = internal_tables.iter().map(|t| t.id).collect_vec();
+
+        // Update the corresponding 'created_at' field.
+        stream_job.mark_created();
+
+        let version = match stream_job {
+            StreamingJob::MaterializedView(table) => {
+                creating_internal_table_ids.push(table.id);
+                self.finish_create_table_procedure(internal_tables, table)
+                    .await?
+            }
+            StreamingJob::Sink(sink, target_table) => {
+                let sink_id = sink.id;
+
+                let mut version = self
+                    .finish_create_sink_procedure(internal_tables, sink)
+                    .await?;
+
+                if let Some((table, source)) = target_table {
+                    version = self
+                        .finish_replace_table_procedure(&source, &table, None, Some(sink_id), None)
+                        .await?;
+                }
+
+                version
+            }
+            StreamingJob::Table(source, table, ..) => {
+                creating_internal_table_ids.push(table.id);
+                if let Some(source) = source {
+                    self.finish_create_table_procedure_with_source(source, table, internal_tables)
+                        .await?
+                } else {
+                    self.finish_create_table_procedure(internal_tables, table)
+                        .await?
+                }
+            }
+            StreamingJob::Index(index, table) => {
+                creating_internal_table_ids.push(table.id);
+                self.finish_create_index_procedure(internal_tables, index, table)
+                    .await?
+            }
+            StreamingJob::Source(source) => {
+                self.finish_create_source_procedure(source, internal_tables)
+                    .await?
+            }
+        };
+
+        // 2. unmark creating tables.
+        self.unmark_creating_tables(&creating_internal_table_ids, false)
+            .await;
+
+        Ok(version)
+    }
+
     /// This is used for both `CREATE TABLE` and `CREATE MATERIALIZED VIEW`.
     pub async fn finish_create_table_procedure(
         &self,
@@ -1731,14 +1797,13 @@ impl CatalogManager {
             user_core.decrease_ref(index.owner);
         }
 
-        // `tables_removed` contains both index table and mv.
+        // `tables_removed` contains both index, table and mv.
         for table in &tables_removed {
             user_core.decrease_ref(table.owner);
         }
 
         for source in &sources_removed {
             user_core.decrease_ref(source.owner);
-            refcnt_dec_connection(database_core, source.connection_id);
         }
 
         for view in &views_removed {
@@ -1765,6 +1830,11 @@ impl CatalogManager {
             }
         }
 
+        for source in &sources_removed {
+            refcnt_dec_connection(database_core, source.connection_id);
+            refcnt_dec_source_secret_ref(database_core, source)?;
+        }
+
         for view in &views_removed {
             for dependent_relation_id in &view.dependent_relations {
                 database_core.decrease_relation_ref_count(*dependent_relation_id);
@@ -1776,6 +1846,7 @@ impl CatalogManager {
             for dependent_relation_id in &sink.dependent_relations {
                 database_core.decrease_relation_ref_count(*dependent_relation_id);
             }
+            refcnt_dec_sink_secret_ref(database_core, sink);
         }
 
         for subscription in &subscriptions_removed {
@@ -2779,6 +2850,7 @@ impl CatalogManager {
         } else {
             database_core.mark_creating(&key);
             user_core.increase_ref(source.owner);
+            refcnt_inc_source_secret_ref(database_core, source)?;
             // We have validate the status of connection before starting the procedure.
             refcnt_inc_connection(database_core, source.connection_id)?;
             Ok(())
@@ -2854,6 +2926,7 @@ impl CatalogManager {
         database_core.unmark_creating(&key);
         user_core.decrease_ref(source.owner);
         refcnt_dec_connection(database_core, source.connection_id);
+        refcnt_dec_source_secret_ref(database_core, source)?;
         Ok(())
     }
 
@@ -2886,6 +2959,7 @@ impl CatalogManager {
             // source and table
             user_core.increase_ref_count(source.owner, 2);
 
+            refcnt_inc_source_secret_ref(database_core, source)?;
             // We have validate the status of connection before starting the procedure.
             refcnt_inc_connection(database_core, source.connection_id)?;
             Ok(())
@@ -2959,7 +3033,11 @@ impl CatalogManager {
         Ok(version)
     }
 
-    pub async fn cancel_create_table_procedure_with_source(&self, source: &Source, table: &Table) {
+    pub async fn cancel_create_table_procedure_with_source(
+        &self,
+        source: &Source,
+        table: &Table,
+    ) -> MetaResult<()> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         let user_core = &mut core.user;
@@ -2976,6 +3054,8 @@ impl CatalogManager {
         database_core.unmark_creating_streaming_job(table.id);
         user_core.decrease_ref_count(source.owner, 2); // source and table
         refcnt_dec_connection(database_core, source.connection_id);
+        refcnt_dec_source_secret_ref(database_core, source)?;
+        Ok(())
     }
 
     pub async fn start_create_index_procedure(
@@ -3113,6 +3193,7 @@ impl CatalogManager {
                 database_core.increase_relation_ref_count(dependent_relation_id);
             }
             user_core.increase_ref(sink.owner);
+            refcnt_inc_sink_secret_ref(database_core, sink);
             // We have validate the status of connection before starting the procedure.
             refcnt_inc_connection(database_core, sink.connection_id)?;
             Ok(())
@@ -3188,6 +3269,7 @@ impl CatalogManager {
         }
         user_core.decrease_ref(sink.owner);
         refcnt_dec_connection(database_core, sink.connection_id);
+        refcnt_dec_sink_secret_ref(database_core, sink);
 
         if let Some((table, source)) = target_table {
             Self::cancel_replace_table_procedure_inner(source, table, core);

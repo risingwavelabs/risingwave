@@ -19,7 +19,6 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::catalog::{TableOption, DEFAULT_SCHEMA_NAME, SYSTEM_SCHEMAS};
-use risingwave_common::hash::ParallelUnitMapping;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont_mut;
 use risingwave_common::{bail, current_cluster_version};
 use risingwave_connector::source::UPSTREAM_SOURCE_KEY;
@@ -67,9 +66,9 @@ use crate::controller::utils::{
     check_connection_name_duplicate, check_database_name_duplicate,
     check_function_signature_duplicate, check_relation_name_duplicate, check_schema_name_duplicate,
     check_secret_name_duplicate, ensure_object_id, ensure_object_not_refer, ensure_schema_empty,
-    ensure_user_id, get_fragment_mappings_by_jobs, get_parallel_unit_to_worker_map,
-    get_referring_objects, get_referring_objects_cascade, get_user_privilege,
-    list_user_info_by_ids, resolve_source_register_info_for_jobs, PartialObject,
+    ensure_user_id, get_fragment_mappings_by_jobs, get_referring_objects,
+    get_referring_objects_cascade, get_user_privilege, list_user_info_by_ids,
+    resolve_source_register_info_for_jobs, PartialObject,
 };
 use crate::controller::ObjectModel;
 use crate::manager::{Catalog, MetaSrvEnv, NotificationVersion, IGNORED_NOTIFICATION_VERSION};
@@ -281,25 +280,13 @@ impl CatalogController {
             .all(&txn)
             .await?;
 
-        let parallel_unit_to_worker = get_parallel_unit_to_worker_map(&txn).await?;
-
-        let fragment_mappings = get_fragment_mappings_by_jobs(&txn, streaming_jobs.clone()).await?;
-
-        let fragment_mappings = fragment_mappings
+        let fragment_mappings = get_fragment_mappings_by_jobs(&txn, streaming_jobs.clone())
+            .await?
             .into_iter()
             .map(
-                |FragmentParallelUnitMapping {
-                     fragment_id,
-                     mapping,
-                 }| {
-                    PbFragmentWorkerSlotMapping {
-                        fragment_id,
-                        mapping: Some(
-                            ParallelUnitMapping::from_protobuf(&mapping.unwrap())
-                                .to_worker_slot(&parallel_unit_to_worker)
-                                .to_protobuf(),
-                        ),
-                    }
+                |FragmentParallelUnitMapping { fragment_id, .. }| PbFragmentWorkerSlotMapping {
+                    fragment_id,
+                    mapping: None,
                 },
             )
             .collect();
@@ -2111,8 +2098,6 @@ impl CatalogController {
         }
         let user_infos = list_user_info_by_ids(to_update_user_ids, &txn).await?;
 
-        let parallel_unit_to_worker = get_parallel_unit_to_worker_map(&txn).await?;
-
         txn.commit().await?;
 
         // notify about them.
@@ -2191,18 +2176,9 @@ impl CatalogController {
         let fragment_mappings = fragment_mappings
             .into_iter()
             .map(
-                |FragmentParallelUnitMapping {
-                     fragment_id,
-                     mapping,
-                 }| {
-                    PbFragmentWorkerSlotMapping {
-                        fragment_id,
-                        mapping: Some(
-                            ParallelUnitMapping::from_protobuf(&mapping.unwrap())
-                                .to_worker_slot(&parallel_unit_to_worker)
-                                .to_protobuf(),
-                        ),
-                    }
+                |FragmentParallelUnitMapping { fragment_id, .. }| PbFragmentWorkerSlotMapping {
+                    fragment_id,
+                    mapping: None,
                 },
             )
             .collect();
@@ -2658,7 +2634,7 @@ impl CatalogController {
         let inner = self.inner.read().await;
         let table_obj = Table::find()
             .find_also_related(Object)
-            .join(JoinType::InnerJoin, object::Relation::Database.def())
+            .join(JoinType::InnerJoin, object::Relation::Database2.def())
             .filter(
                 table::Column::Name
                     .eq(table_name)

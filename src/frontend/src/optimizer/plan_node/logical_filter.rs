@@ -64,27 +64,17 @@ impl LogicalFilter {
         }
     }
 
-    /// Create a `LogicalFilter` to filter the rows with all keys are null.
-    pub fn filter_if_keys_all_null(input: PlanRef, key: &[usize]) -> PlanRef {
+    /// Create a `LogicalFilter` to filter out rows where all keys are null.
+    pub fn filter_out_all_null_keys(input: PlanRef, key: &[usize]) -> PlanRef {
         let schema = input.schema();
-        let cond = key.iter().fold(ExprImpl::literal_bool(false), |expr, i| {
-            ExprImpl::FunctionCall(
-                FunctionCall::new_unchecked(
-                    ExprType::Or,
-                    vec![
-                        expr,
-                        FunctionCall::new_unchecked(
-                            ExprType::IsNotNull,
-                            vec![InputRef::new(*i, schema.fields()[*i].data_type.clone()).into()],
-                            DataType::Boolean,
-                        )
-                        .into(),
-                    ],
-                    DataType::Boolean,
-                )
-                .into(),
+        let cond = ExprImpl::or(key.iter().unique().map(|&i| {
+            FunctionCall::new_unchecked(
+                ExprType::IsNotNull,
+                vec![InputRef::new(i, schema.fields()[i].data_type.clone()).into()],
+                DataType::Boolean,
             )
-        });
+            .into()
+        }));
         LogicalFilter::create_with_expr(input, cond)
     }
 
