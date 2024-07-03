@@ -203,6 +203,3 @@ jeprof --collapsed target/release/risingwave compute-node.10404.2466.i2466.heap 
 ```
 
 </details>
-
-
-
