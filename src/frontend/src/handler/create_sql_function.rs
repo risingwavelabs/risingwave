@@ -150,6 +150,9 @@ pub async fn handle_create_sql_function(
     let body = match &params.as_ {
         Some(FunctionDefinition::SingleQuotedDef(s)) => s.clone(),
         Some(FunctionDefinition::DoubleDollarDef(s)) => s.clone(),
+        Some(FunctionDefinition::Identifier(_)) => {
+            return Err(ErrorCode::InvalidParameterValue("expect quoted string".to_string()).into())
+        }
         None => {
             if params.return_.is_none() {
                 return Err(ErrorCode::InvalidParameterValue(

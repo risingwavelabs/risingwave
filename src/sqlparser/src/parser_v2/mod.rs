@@ -129,6 +129,19 @@ where
         .parse_next(input)
 }
 
+/// Consume an $$ dollar-quoted string $$.
+pub fn dollar_quoted_string<S>(input: &mut S) -> PResult<String>
+where
+    S: TokenStream,
+{
+    token
+        .verify_map(|t| match &t.token {
+            Token::DollarQuotedString(s) => Some(s.value.clone()),
+            _ => None,
+        })
+        .parse_next(input)
+}
+
 /// Consume an object name.
 ///
 /// FIXME: Object name is extremely complex, we only handle a subset here.

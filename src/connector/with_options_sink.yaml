@@ -25,6 +25,10 @@ BigQueryConfig:
     field_type: usize
     required: false
     default: '5'
+  - name: auto_create
+    field_type: bool
+    required: false
+    default: Default::default
   - name: aws.region
     field_type: String
     required: false
@@ -91,6 +95,11 @@ ClickHouseConfig:
   - name: clickhouse.delete.column
     field_type: String
     required: false
+  - name: commit_checkpoint_interval
+    field_type: u64
+    comments: Commit every n(>0) checkpoints, if n is not set, we will commit every checkpoint.
+    required: false
+    default: Default::default
   - name: r#type
     field_type: String
     required: true

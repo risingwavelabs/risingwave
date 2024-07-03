@@ -345,7 +345,7 @@ impl PostgresExternalTableReader {
                 schema_name: config.schema.clone(),
                 table_name: config.table.clone(),
             };
-            let order_key = primary_keys.iter().join(",");
+            let order_key = Self::get_order_key(&primary_keys);
             let scan_sql = format!(
                 "SELECT {} FROM {} WHERE {} ORDER BY {} LIMIT {scan_limit}",
                 field_names,
@@ -387,7 +387,7 @@ impl PostgresExternalTableReader {
         primary_keys: Vec<String>,
         limit: u32,
     ) {
-        let order_key = primary_keys.iter().join(",");
+        let order_key = Self::get_order_key(&primary_keys);
         let client = self.client.lock().await;
         client.execute("set time zone '+00:00'", &[]).await?;
 
@@ -443,6 +443,13 @@ impl PostgresExternalTableReader {
             arg_expr.push_str(format!("${}", i + 1).as_str());
         }
         format!("({}) > ({})", col_expr, arg_expr)
+    }
+
+    fn get_order_key(primary_keys: &Vec<String>) -> String {
+        primary_keys
+            .iter()
+            .map(|col| Self::quote_column(col))
+            .join(",")
     }
 
     fn quote_column(column: &str) -> String {
