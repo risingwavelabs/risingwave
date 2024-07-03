@@ -19,17 +19,15 @@ use crate::catalog::system_catalog::SysCatalogReaderImpl;
 use crate::error::Result;
 
 #[derive(Fields)]
+#[primary_key(worker_id, slot_id)]
 struct RwWorkerSlot {
-    #[primary_key]
     slot_id: i32,
-    #[primary_key]
     worker_id: i32,
 }
 
-#[system_catalog(table, "rw_catalog.rw_parallel_units")]
-fn read_rw_parallel_units(reader: &SysCatalogReaderImpl) -> Result<Vec<RwWorkerSlot>> {
+#[system_catalog(table, "rw_catalog.rw_worker_slots")]
+fn read_rw_worker_slots(reader: &SysCatalogReaderImpl) -> Result<Vec<RwWorkerSlot>> {
     let workers = reader.worker_node_manager.list_worker_nodes();
-
     Ok(workers
         .into_iter()
         .flat_map(|worker| {
