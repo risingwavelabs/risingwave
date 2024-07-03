@@ -344,6 +344,7 @@ mod test {
                             heap_profiling_dir: None,
                             dangerous_max_idle_secs: None,
                             connector_rpc_endpoint: None,
+                            temp_secret_file_dir: None,
                         },
                     ),
                     compute_opts: Some(
@@ -367,6 +368,7 @@ mod test {
                             async_stack_trace: None,
                             heap_profiling_dir: None,
                             connector_rpc_endpoint: None,
+                            temp_secret_file_dir: None,
                         },
                     ),
                     frontend_opts: Some(
@@ -383,6 +385,7 @@ mod test {
                             config_path: "src/config/test.toml",
                             metrics_level: None,
                             enable_barrier_read: None,
+                            temp_secret_file_dir: None,
                         },
                     ),
                     compactor_opts: None,

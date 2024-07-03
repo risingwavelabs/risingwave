@@ -33,6 +33,7 @@ static INSTANCE: std::sync::OnceLock<LocalSecretManager> = std::sync::OnceLock::
 #[derive(Debug)]
 pub struct LocalSecretManager {
     secrets: RwLock<HashMap<SecretId, Vec<u8>>>,
+    /// The local directory used to write secrets into file, so that it can be passed into some libararies
     secret_file_dir: PathBuf,
 }
 
@@ -59,6 +60,10 @@ impl LocalSecretManager {
     /// # Panics
     /// Panics if the secret manager is not initialized.
     pub fn global() -> &'static LocalSecretManager {
+        // Initialize the secret manager for unit tests.
+        #[cfg(debug_assertions)]
+        LocalSecretManager::init(None);
+
         INSTANCE.get().unwrap()
     }
 
