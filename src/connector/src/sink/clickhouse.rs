@@ -13,13 +13,16 @@
 // limitations under the License.
 
 use core::fmt::Debug;
+use core::num::NonZeroU64;
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::sync::Arc;
 
 use anyhow::anyhow;
 use clickhouse::insert::Insert;
 use clickhouse::{Client as ClickHouseClient, Row as ClickHouseRow};
 use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
 use risingwave_common::session_config::sink_decouple::SinkDecouple;
@@ -29,16 +32,16 @@ use serde::Serialize;
 use serde_derive::Deserialize;
 use serde_with::serde_as;
 use thiserror_ext::AsReport;
+use tonic::async_trait;
 use tracing::warn;
 use with_options::WithOptions;
 
+use super::decouple_checkpoint_log_sink::DecoupleCheckpointLogSinkerOf;
+use super::writer::SinkWriter;
 use super::{DummySinkCommitCoordinator, SinkWriterParam};
+use crate::deserialize_optional_u64_from_string;
 use crate::error::ConnectorResult;
 use crate::sink::catalog::desc::SinkDesc;
-use crate::sink::log_store::DeliveryFutureManagerAddFuture;
-use crate::sink::writer::{
-    AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriter, AsyncTruncateSinkWriterExt,
-};
 use crate::sink::{
     Result, Sink, SinkError, SinkParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
 };
@@ -61,20 +64,25 @@ pub struct ClickHouseCommon {
     pub database: String,
     #[serde(rename = "clickhouse.table")]
     pub table: String,
+    #[serde(rename = "clickhouse.delete.column")]
+    pub delete_column: Option<String>,
+    /// Commit every n(>0) checkpoints, if n is not set, we will commit every checkpoint.
+    #[serde(default, deserialize_with = "deserialize_optional_u64_from_string")]
+    pub commit_checkpoint_interval: Option<u64>,
 }
 
 #[allow(clippy::enum_variant_names)]
 #[derive(Debug)]
 enum ClickHouseEngine {
     MergeTree,
-    ReplacingMergeTree,
+    ReplacingMergeTree(Option<String>),
     SummingMergeTree,
     AggregatingMergeTree,
     CollapsingMergeTree(String),
     VersionedCollapsingMergeTree(String),
     GraphiteMergeTree,
     ReplicatedMergeTree,
-    ReplicatedReplacingMergeTree,
+    ReplicatedReplacingMergeTree(Option<String>),
     ReplicatedSummingMergeTree,
     ReplicatedAggregatingMergeTree,
     #[expect(dead_code)]
@@ -94,6 +102,24 @@ impl ClickHouseEngine {
         )
     }
 
+    pub fn is_delete_replacing_engine(&self) -> bool {
+        match self {
+            ClickHouseEngine::ReplacingMergeTree(delete_col) => delete_col.is_some(),
+            ClickHouseEngine::ReplicatedReplacingMergeTree(delete_col) => delete_col.is_some(),
+            _ => false,
+        }
+    }
+
+    pub fn get_delete_col(&self) -> Option<String> {
+        match self {
+            ClickHouseEngine::ReplacingMergeTree(Some(delete_col)) => Some(delete_col.to_string()),
+            ClickHouseEngine::ReplicatedReplacingMergeTree(Some(delete_col)) => {
+                Some(delete_col.to_string())
+            }
+            _ => None,
+        }
+    }
+
     pub fn get_sign_name(&self) -> Option<String> {
         match self {
             ClickHouseEngine::CollapsingMergeTree(sign_name) => Some(sign_name.to_string()),
@@ -110,10 +136,16 @@ impl ClickHouseEngine {
         }
     }
 
-    pub fn from_query_engine(engine_name: &ClickhouseQueryEngine) -> Result<Self> {
+    pub fn from_query_engine(
+        engine_name: &ClickhouseQueryEngine,
+        config: &ClickHouseConfig,
+    ) -> Result<Self> {
         match engine_name.engine.as_str() {
             "MergeTree" => Ok(ClickHouseEngine::MergeTree),
-            "ReplacingMergeTree" => Ok(ClickHouseEngine::ReplacingMergeTree),
+            "ReplacingMergeTree" => {
+                let delete_column = config.common.delete_column.clone();
+                Ok(ClickHouseEngine::ReplacingMergeTree(delete_column))
+            }
             "SummingMergeTree" => Ok(ClickHouseEngine::SummingMergeTree),
             "AggregatingMergeTree" => Ok(ClickHouseEngine::AggregatingMergeTree),
             // VersionedCollapsingMergeTree(sign_name,"a")
@@ -146,7 +178,12 @@ impl ClickHouseEngine {
             }
             "GraphiteMergeTree" => Ok(ClickHouseEngine::GraphiteMergeTree),
             "ReplicatedMergeTree" => Ok(ClickHouseEngine::ReplicatedMergeTree),
-            "ReplicatedReplacingMergeTree" => Ok(ClickHouseEngine::ReplicatedReplacingMergeTree),
+            "ReplicatedReplacingMergeTree" => {
+                let delete_column = config.common.delete_column.clone();
+                Ok(ClickHouseEngine::ReplicatedReplacingMergeTree(
+                    delete_column,
+                ))
+            }
             "ReplicatedSummingMergeTree" => Ok(ClickHouseEngine::ReplicatedSummingMergeTree),
             "ReplicatedAggregatingMergeTree" => {
                 Ok(ClickHouseEngine::ReplicatedAggregatingMergeTree)
@@ -262,7 +299,7 @@ impl ClickHouseSink {
             .collect();
 
         if rw_fields_name.len().gt(&clickhouse_columns_desc.len()) {
-            return Err(SinkError::ClickHouse("The nums of the RisingWave column must be greater than/equal to the length of the Clickhouse column".to_string()));
+            return Err(SinkError::ClickHouse("The columns of the sink must be equal to or a superset of the target table's columns.".to_string()));
         }
 
         for i in rw_fields_name {
@@ -375,14 +412,31 @@ impl ClickHouseSink {
 }
 impl Sink for ClickHouseSink {
     type Coordinator = DummySinkCommitCoordinator;
-    type LogSinker = AsyncTruncateLogSinkerOf<ClickHouseSinkWriter>;
+    type LogSinker = DecoupleCheckpointLogSinkerOf<ClickHouseSinkWriter>;
 
     const SINK_NAME: &'static str = CLICKHOUSE_SINK;
 
-    fn is_sink_decouple(_desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
+    fn is_sink_decouple(desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
+        let config_decouple = if let Some(interval) =
+            desc.properties.get("commit_checkpoint_interval")
+            && interval.parse::<u64>().unwrap_or(0) > 1
+        {
+            true
+        } else {
+            false
+        };
+
         match user_specified {
-            SinkDecouple::Default | SinkDecouple::Enable => Ok(true),
-            SinkDecouple::Disable => Ok(false),
+            SinkDecouple::Default => Ok(config_decouple),
+            SinkDecouple::Disable => {
+                if config_decouple {
+                    return Err(SinkError::Config(anyhow!(
+                        "config conflict: Clickhouse config `commit_checkpoint_interval` larger than 1 means that sink decouple must be enabled, but session config sink_decouple is disabled"
+                    )));
+                }
+                Ok(false)
+            }
+            SinkDecouple::Enable => Ok(true),
         }
     }
 
@@ -399,27 +453,49 @@ impl Sink for ClickHouseSink {
         let (clickhouse_column, clickhouse_engine) =
             query_column_engine_from_ck(client, &self.config).await?;
 
-        if !self.is_append_only && !clickhouse_engine.is_collapsing_engine() {
-            return Err(SinkError::ClickHouse(
-                "If you want to use upsert, please modify your engine is `VersionedCollapsingMergeTree` or `CollapsingMergeTree` in ClickHouse".to_owned()));
+        if !self.is_append_only
+            && !clickhouse_engine.is_collapsing_engine()
+            && !clickhouse_engine.is_delete_replacing_engine()
+        {
+            return match clickhouse_engine {
+                ClickHouseEngine::ReplicatedReplacingMergeTree(None) | ClickHouseEngine::ReplacingMergeTree(None) =>  {
+                    Err(SinkError::ClickHouse("To enable upsert with a `ReplacingMergeTree`, you must set a `clickhouse.delete.column` to the UInt8 column in ClickHouse used to signify deletes. See https://clickhouse.com/docs/en/engines/table-engines/mergetree-family/replacingmergetree#is_deleted for more information".to_owned()))
+                }
+                _ => Err(SinkError::ClickHouse("If you want to use upsert, please use either `VersionedCollapsingMergeTree`, `CollapsingMergeTree` or the `ReplacingMergeTree` in ClickHouse".to_owned()))
+            };
         }
 
         self.check_column_name_and_type(&clickhouse_column)?;
         if !self.is_append_only {
             self.check_pk_match(&clickhouse_column)?;
         }
+
+        if self.config.common.commit_checkpoint_interval == Some(0) {
+            return Err(SinkError::Config(anyhow!(
+                "commit_checkpoint_interval must be greater than 0"
+            )));
+        }
         Ok(())
     }
 
-    async fn new_log_sinker(&self, _writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
-        Ok(ClickHouseSinkWriter::new(
+    async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
+        let writer = ClickHouseSinkWriter::new(
             self.config.clone(),
             self.schema.clone(),
             self.pk_indices.clone(),
             self.is_append_only,
         )
-        .await?
-        .into_log_sinker(usize::MAX))
+        .await?;
+        let commit_checkpoint_interval =
+    NonZeroU64::new(self.config.common.commit_checkpoint_interval.unwrap_or(1)).expect(
+        "commit_checkpoint_interval should be greater than 0, and it should be checked in config validation",
+    );
+
+        Ok(DecoupleCheckpointLogSinkerOf::new(
+            writer,
+            writer_param.sink_metrics,
+            commit_checkpoint_interval,
+        ))
     }
 }
 pub struct ClickHouseSinkWriter {
@@ -469,6 +545,9 @@ impl ClickHouseSinkWriter {
 
         if let Some(sign) = clickhouse_engine.get_sign_name() {
             rw_fields_name_after_calibration.push(sign);
+        }
+        if let Some(delete_col) = clickhouse_engine.get_delete_col() {
+            rw_fields_name_after_calibration.push(delete_col);
         }
         Ok(Self {
             config,
@@ -562,21 +641,35 @@ impl ClickHouseSinkWriter {
             }
             match op {
                 Op::Insert | Op::UpdateInsert => {
-                    if self.clickhouse_engine.get_sign_name().is_some() {
+                    if self.clickhouse_engine.is_collapsing_engine() {
                         clickhouse_filed_vec.push(ClickHouseFieldWithNull::WithoutSome(
                             ClickHouseField::Int8(1),
                         ));
                     }
+                    if self.clickhouse_engine.is_delete_replacing_engine() {
+                        clickhouse_filed_vec.push(ClickHouseFieldWithNull::WithoutSome(
+                            ClickHouseField::Int8(0),
+                        ))
+                    }
                 }
                 Op::Delete | Op::UpdateDelete => {
-                    if !self.clickhouse_engine.is_collapsing_engine() {
+                    if !self.clickhouse_engine.is_collapsing_engine()
+                        && !self.clickhouse_engine.is_delete_replacing_engine()
+                    {
                         return Err(SinkError::ClickHouse(
                             "Clickhouse engine don't support upsert".to_string(),
                         ));
                     }
-                    clickhouse_filed_vec.push(ClickHouseFieldWithNull::WithoutSome(
-                        ClickHouseField::Int8(-1),
-                    ))
+                    if self.clickhouse_engine.is_collapsing_engine() {
+                        clickhouse_filed_vec.push(ClickHouseFieldWithNull::WithoutSome(
+                            ClickHouseField::Int8(-1),
+                        ));
+                    }
+                    if self.clickhouse_engine.is_delete_replacing_engine() {
+                        clickhouse_filed_vec.push(ClickHouseFieldWithNull::WithoutSome(
+                            ClickHouseField::Int8(1),
+                        ))
+                    }
                 }
             }
             let clickhouse_column = ClickHouseColumn {
@@ -592,21 +685,28 @@ impl ClickHouseSinkWriter {
     }
 }
 
-impl AsyncTruncateSinkWriter for ClickHouseSinkWriter {
-    async fn write_chunk<'a>(
-        &'a mut self,
-        chunk: StreamChunk,
-        _add_future: DeliveryFutureManagerAddFuture<'a, Self::DeliveryFuture>,
-    ) -> Result<()> {
+#[async_trait]
+impl SinkWriter for ClickHouseSinkWriter {
+    async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
         self.write(chunk).await
     }
 
+    async fn begin_epoch(&mut self, _epoch: u64) -> Result<()> {
+        Ok(())
+    }
+
+    async fn abort(&mut self) -> Result<()> {
+        Ok(())
+    }
+
     async fn barrier(&mut self, is_checkpoint: bool) -> Result<()> {
-        if let Some(inserter) = self.inserter.take()
-            && is_checkpoint
-        {
+        if is_checkpoint && let Some(inserter) = self.inserter.take() {
             inserter.end().await?;
         }
+        Ok(())
+    }
+
+    async fn update_vnode_bitmap(&mut self, _vnode_bitmap: Arc<Bitmap>) -> Result<()> {
         Ok(())
     }
 }
@@ -654,11 +754,16 @@ async fn query_column_engine_from_ck(
     }
 
     let clickhouse_engine =
-        ClickHouseEngine::from_query_engine(clickhouse_engine.first().unwrap())?;
+        ClickHouseEngine::from_query_engine(clickhouse_engine.first().unwrap(), config)?;
 
     if let Some(sign) = &clickhouse_engine.get_sign_name() {
         clickhouse_column.retain(|a| sign.ne(&a.name))
     }
+
+    if let Some(delete_col) = &clickhouse_engine.get_delete_col() {
+        clickhouse_column.retain(|a| delete_col.ne(&a.name))
+    }
+
     Ok((clickhouse_column, clickhouse_engine))
 }
 

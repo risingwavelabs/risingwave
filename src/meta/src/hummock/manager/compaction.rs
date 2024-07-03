@@ -27,7 +27,7 @@
 // limitations under the License.
 
 use std::cmp::min;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::sync::{Arc, LazyLock};
 use std::time::{Instant, SystemTime};
 
@@ -42,6 +42,7 @@ use rand::seq::SliceRandom;
 use rand::thread_rng;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockLevelsExt;
+use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::table_stats::{
     add_prost_table_stats_map, purge_prost_table_stats, PbTableStatsMap,
 };
@@ -469,9 +470,9 @@ impl HummockManager {
                                 let cancel_tasks = compactor_manager.update_task_heartbeats(&progress).into_iter().map(|task|task.task_id).collect::<Vec<_>>();
                                 if !cancel_tasks.is_empty() {
                                     tracing::info!(
-                                        "Tasks cancel with task_ids {:?} with context_id {} has expired due to lack of visible progress",
-                                        cancel_tasks,
+                                        ?cancel_tasks,
                                         context_id,
+                                        "Tasks cancel has expired due to lack of visible progress",
                                     );
 
                                     if let Err(e) = hummock_manager
@@ -490,12 +491,14 @@ impl HummockManager {
                                     // Forcefully cancel the task so that it terminates
                                     // early on the compactor
                                     // node.
-                                    let _ = compactor.cancel_tasks(&cancel_tasks);
-                                    tracing::info!(
-                                        "CancelTask operation for task_id {:?} has been sent to node with context_id {}",
-                                        cancel_tasks,
-                                        context_id
-                                    );
+                                    if !cancel_tasks.is_empty() {
+                                        let _ = compactor.cancel_tasks(&cancel_tasks);
+                                        tracing::info!(
+                                            ?cancel_tasks,
+                                            context_id,
+                                            "CancelTask operation has been sent to compactor node",
+                                        );
+                                    }
                                 } else {
                                     // Determine the validity of the compactor streaming rpc. When the compactor no longer exists in the manager, the stream will be removed.
                                     // Tip: Connectivity to the compactor will be determined through the `send_event` operation. When send fails, it will be removed from the manager
@@ -515,7 +518,7 @@ impl HummockManager {
                         if compactor_alive {
                             push_stream(context_id, stream, &mut compactor_request_streams);
                         } else {
-                            tracing::warn!("compactor stream {} error, send stream may be destroyed", context_id);
+                            tracing::warn!(context_id, "compactor stream error, send stream may be destroyed");
                         }
                     },
                 }
@@ -1555,6 +1558,80 @@ impl HummockManager {
             compact_task
                 .table_vnode_partition
                 .retain(|table_id, _| compact_task.existing_table_ids.contains(table_id));
+        }
+    }
+
+    pub async fn try_move_table_to_dedicated_cg(
+        &self,
+        table_write_throughput: &HashMap<u32, VecDeque<u64>>,
+        table_id: &u32,
+        table_size: &u64,
+        is_creating_table: bool,
+        checkpoint_secs: u64,
+        parent_group_id: u64,
+        group_size: u64,
+    ) {
+        let default_group_id: CompactionGroupId = StaticCompactionGroupId::StateDefault.into();
+        let mv_group_id: CompactionGroupId = StaticCompactionGroupId::MaterializedView.into();
+        let partition_vnode_count = self.env.opts.partition_vnode_count;
+        let window_size =
+            self.env.opts.table_info_statistic_history_times / (checkpoint_secs as usize);
+
+        let mut is_high_write_throughput = false;
+        let mut is_low_write_throughput = true;
+        if let Some(history) = table_write_throughput.get(table_id) {
+            if history.len() >= window_size {
+                is_high_write_throughput = history.iter().all(|throughput| {
+                    *throughput / checkpoint_secs > self.env.opts.table_write_throughput_threshold
+                });
+                is_low_write_throughput = history.iter().any(|throughput| {
+                    *throughput / checkpoint_secs < self.env.opts.min_table_split_write_throughput
+                });
+            }
+        }
+
+        let state_table_size = *table_size;
+
+        // 1. Avoid splitting a creating table
+        // 2. Avoid splitting a is_low_write_throughput creating table
+        // 3. Avoid splitting a non-high throughput medium-sized table
+        if is_creating_table
+            || (is_low_write_throughput)
+            || (state_table_size < self.env.opts.min_table_split_size && !is_high_write_throughput)
+        {
+            return;
+        }
+
+        // do not split a large table and a small table because it would increase IOPS
+        // of small table.
+        if parent_group_id != default_group_id && parent_group_id != mv_group_id {
+            let rest_group_size = group_size - state_table_size;
+            if rest_group_size < state_table_size
+                && rest_group_size < self.env.opts.min_table_split_size
+            {
+                return;
+            }
+        }
+
+        let ret = self
+            .move_state_table_to_compaction_group(
+                parent_group_id,
+                &[*table_id],
+                partition_vnode_count,
+            )
+            .await;
+        match ret {
+            Ok(new_group_id) => {
+                tracing::info!("move state table [{}] from group-{} to group-{} success table_vnode_partition_count {:?}", table_id, parent_group_id, new_group_id, partition_vnode_count);
+            }
+            Err(e) => {
+                tracing::info!(
+                    error = %e.as_report(),
+                    "failed to move state table [{}] from group-{}",
+                    table_id,
+                    parent_group_id,
+                )
+            }
         }
     }
 }

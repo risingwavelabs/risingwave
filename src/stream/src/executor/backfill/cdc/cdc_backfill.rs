@@ -641,7 +641,6 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
 #[try_stream(ok = Message, error = StreamExecutorError)]
 pub async fn transform_upstream(upstream: BoxedMessageStream, output_columns: &[ColumnDesc]) {
     let props = SpecificParserConfig {
-        key_encoding_config: None,
         encoding_config: EncodingProperties::Json(JsonProperties {
             use_schema_registry: false,
             timestamptz_handling: None,

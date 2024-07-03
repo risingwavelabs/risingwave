@@ -22,8 +22,8 @@ use risingwave_common::types::{DataType, Interval, ScalarImpl};
 use risingwave_sqlparser::ast::AsOf;
 
 use crate::binder::{
-    BoundBackCteRef, BoundBaseTable, BoundJoin, BoundShare, BoundSource, BoundSystemTable,
-    BoundWatermark, BoundWindowTableFunction, Relation, WindowTableFunctionKind,
+    BoundBackCteRef, BoundBaseTable, BoundJoin, BoundShare, BoundShareInput, BoundSource,
+    BoundSystemTable, BoundWatermark, BoundWindowTableFunction, Relation, WindowTableFunctionKind,
 };
 use crate::error::{ErrorCode, Result};
 use crate::expr::{Expr, ExprImpl, ExprType, FunctionCall, InputRef};
@@ -224,7 +224,7 @@ impl Planner {
 
     pub(super) fn plan_share(&mut self, share: BoundShare) -> Result<PlanRef> {
         match share.input {
-            Either::Left(nonrecursive_query) => {
+            BoundShareInput::Query(Either::Left(nonrecursive_query)) => {
                 let id = share.share_id;
                 match self.share_cache.get(&id) {
                     None => {
@@ -239,11 +239,18 @@ impl Planner {
                 }
             }
             // for the recursive union in rcte
-            Either::Right(recursive_union) => self.plan_recursive_union(
+            BoundShareInput::Query(Either::Right(recursive_union)) => self.plan_recursive_union(
                 *recursive_union.base,
                 *recursive_union.recursive,
                 share.share_id,
             ),
+            BoundShareInput::ChangeLog(relation) => {
+                let id = share.share_id;
+                let result = self.plan_changelog(relation)?;
+                let logical_share = LogicalShare::create(result);
+                self.share_cache.insert(id, logical_share.clone());
+                Ok(logical_share)
+            }
         }
     }
 
@@ -272,10 +279,12 @@ impl Planner {
                 .map(|col| col.data_type().clone())
                 .collect(),
             Relation::Subquery(q) => q.query.schema().data_types(),
-            Relation::Share(share) => match &share.input {
-                Either::Left(nonrecursive) => nonrecursive.schema().data_types(),
-                Either::Right(recursive) => recursive.schema.data_types(),
-            },
+            Relation::Share(share) => share
+                .input
+                .fields()?
+                .into_iter()
+                .map(|(_, f)| f.data_type)
+                .collect(),
             r => {
                 return Err(ErrorCode::BindError(format!(
                     "Invalid input relation to tumble: {r:?}"

@@ -496,7 +496,9 @@ impl JsonParseOptions {
                     .as_str()
                     .unwrap()
                     .parse::<Timestamp>()
-                    .map(|naive_utc| Timestamptz::from_micros(naive_utc.0.timestamp_micros()))
+                    .map(|naive_utc| {
+                        Timestamptz::from_micros(naive_utc.0.and_utc().timestamp_micros())
+                    })
                     .map_err(|_| create_error())?
                     .into(),
                 // Unless explicitly requested `utc_without_utc`, we parse string with `YYYY-MM-DDTHH:MM:SSZ`.

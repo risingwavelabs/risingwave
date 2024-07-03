@@ -1028,6 +1028,7 @@ pub mod test_utils {
     }
 }
 
+/// Note: this is created in `SourceReader::build_stream`
 #[derive(Debug, Clone, Default)]
 pub struct ParserConfig {
     pub common: CommonParserConfig,
@@ -1042,12 +1043,12 @@ impl ParserConfig {
 
 #[derive(Debug, Clone, Default)]
 pub struct CommonParserConfig {
+    /// Note: this is created by `SourceDescBuilder::builder`
     pub rw_columns: Vec<SourceColumnDesc>,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct SpecificParserConfig {
-    pub key_encoding_config: Option<EncodingProperties>,
     pub encoding_config: EncodingProperties,
     pub protocol_config: ProtocolProperties,
 }
@@ -1055,7 +1056,6 @@ pub struct SpecificParserConfig {
 impl SpecificParserConfig {
     // for test only
     pub const DEFAULT_PLAIN_JSON: SpecificParserConfig = SpecificParserConfig {
-        key_encoding_config: None,
         encoding_config: EncodingProperties::Json(JsonProperties {
             use_schema_registry: false,
             timestamptz_handling: None,
@@ -1276,7 +1276,6 @@ impl SpecificParserConfig {
             }
         };
         Ok(Self {
-            key_encoding_config: None,
             encoding_config,
             protocol_config,
         })

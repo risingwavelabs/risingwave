@@ -12,14 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::future;
 use std::hash::{DefaultHasher, Hash, Hasher};
 
 use anyhow::anyhow;
-use arrow_array::RecordBatch;
 use futures_async_stream::try_stream;
 use futures_util::stream::StreamExt;
-use icelake::io::{FileScan, TableScan};
-use risingwave_common::array::arrow::{FromArrow, IcebergArrowConvert};
+use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::catalog::Schema;
 use risingwave_connector::sink::iceberg::IcebergConfig;
 
@@ -116,44 +115,60 @@ impl IcebergScanExecutor {
 
     #[try_stream(ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
-        let table = self.iceberg_config.load_table().await?;
+        let table = self.iceberg_config.load_table_v2().await?;
 
-        let table_scan: TableScan = table
-            .new_scan_builder()
-            .with_snapshot_id(
-                self.snapshot_id
-                    .unwrap_or_else(|| table.current_table_metadata().current_snapshot_id.unwrap()),
-            )
-            .with_batch_size(self.batch_size)
-            .with_column_names(self.schema.names())
+        let snapshot_id = if let Some(snapshot_id) = self.snapshot_id {
+            snapshot_id
+        } else {
+            table
+                .metadata()
+                .current_snapshot()
+                .ok_or_else(|| {
+                    BatchError::Internal(anyhow!("No snapshot found for iceberg table"))
+                })?
+                .snapshot_id()
+        };
+        let scan = table
+            .scan()
+            .snapshot_id(snapshot_id)
+            .with_batch_size(Some(self.batch_size))
+            .select(self.schema.names())
             .build()
             .map_err(|e| BatchError::Internal(anyhow!(e)))?;
-        let file_scan_stream: icelake::io::FileScanStream =
-            table_scan.scan(&table).await.map_err(BatchError::Iceberg)?;
+
+        let file_selector = self.file_selector.clone();
+        let file_scan_stream = scan
+            .plan_files()
+            .await
+            .map_err(BatchError::Iceberg)?
+            .filter(move |task| {
+                let res = task
+                    .as_ref()
+                    .map(|task| file_selector.select(task.data_file_path()))
+                    .unwrap_or(true);
+                future::ready(res)
+            });
+
+        let reader = table
+            .reader_builder()
+            .with_batch_size(self.batch_size)
+            .build();
+
+        let record_batch_stream = reader
+            .read(Box::pin(file_scan_stream))
+            .map_err(BatchError::Iceberg)?;
 
         #[for_await]
-        for file_scan in file_scan_stream {
-            let file_scan: FileScan = file_scan.map_err(BatchError::Iceberg)?;
-            if !self.file_selector.select(file_scan.path()) {
-                continue;
-            }
-            let record_batch_stream = file_scan.scan().await.map_err(BatchError::Iceberg)?;
-
-            #[for_await]
-            for record_batch in record_batch_stream {
-                let record_batch: RecordBatch = record_batch.map_err(BatchError::Iceberg)?;
-                let chunk = Self::record_batch_to_chunk(record_batch)?;
-                debug_assert_eq!(chunk.data_types(), self.schema.data_types());
-                yield chunk;
-            }
+        for record_batch in record_batch_stream {
+            let record_batch = record_batch.map_err(BatchError::Iceberg)?;
+            let chunk = IcebergArrowConvert.chunk_from_record_batch(&record_batch)?;
+            debug_assert_eq!(chunk.data_types(), self.schema.data_types());
+            yield chunk;
         }
-    }
-
-    fn record_batch_to_chunk(record_batch: RecordBatch) -> Result<DataChunk, BatchError> {
-        Ok(IcebergArrowConvert.from_record_batch(&record_batch)?)
     }
 }
 
+#[derive(Clone)]
 pub enum FileSelector {
     // File paths to be scanned by this executor are specified.
     FileList(Vec<String>),

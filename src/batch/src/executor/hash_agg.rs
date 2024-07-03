@@ -43,8 +43,9 @@ use crate::executor::{
     WrapStreamExecutor,
 };
 use crate::monitor::BatchSpillMetrics;
+use crate::spill::spill_op::SpillBackend::Disk;
 use crate::spill::spill_op::{
-    SpillBuildHasher, SpillOp, DEFAULT_SPILL_PARTITION_NUM, SPILL_AT_LEAST_MEMORY,
+    SpillBackend, SpillBuildHasher, SpillOp, DEFAULT_SPILL_PARTITION_NUM, SPILL_AT_LEAST_MEMORY,
 };
 use crate::task::{BatchTaskContext, ShutdownToken, TaskId};
 
@@ -64,7 +65,7 @@ impl HashKeyDispatcher for HashAggExecutorBuilder {
             self.identity,
             self.chunk_size,
             self.mem_context,
-            self.enable_spill,
+            self.spill_backend,
             self.spill_metrics,
             self.shutdown_rx,
         ))
@@ -86,7 +87,7 @@ pub struct HashAggExecutorBuilder {
     identity: String,
     chunk_size: usize,
     mem_context: MemoryContext,
-    enable_spill: bool,
+    spill_backend: Option<SpillBackend>,
     spill_metrics: Arc<BatchSpillMetrics>,
     shutdown_rx: ShutdownToken,
 }
@@ -99,7 +100,7 @@ impl HashAggExecutorBuilder {
         identity: String,
         chunk_size: usize,
         mem_context: MemoryContext,
-        enable_spill: bool,
+        spill_backend: Option<SpillBackend>,
         spill_metrics: Arc<BatchSpillMetrics>,
         shutdown_rx: ShutdownToken,
     ) -> Result<BoxedExecutor> {
@@ -139,7 +140,7 @@ impl HashAggExecutorBuilder {
             identity,
             chunk_size,
             mem_context,
-            enable_spill,
+            spill_backend,
             spill_metrics,
             shutdown_rx,
         };
@@ -172,7 +173,11 @@ impl BoxedExecutorBuilder for HashAggExecutorBuilder {
             identity.clone(),
             source.context.get_config().developer.chunk_size,
             source.context.create_executor_mem_context(identity),
-            source.context.get_config().enable_spill,
+            if source.context.get_config().enable_spill {
+                Some(Disk)
+            } else {
+                None
+            },
             spill_metrics,
             source.shutdown_rx.clone(),
         )
@@ -195,7 +200,7 @@ pub struct HashAggExecutor<K> {
     identity: String,
     chunk_size: usize,
     mem_context: MemoryContext,
-    enable_spill: bool,
+    spill_backend: Option<SpillBackend>,
     spill_metrics: Arc<BatchSpillMetrics>,
     /// The upper bound of memory usage for this executor.
     memory_upper_bound: Option<u64>,
@@ -214,7 +219,7 @@ impl<K> HashAggExecutor<K> {
         identity: String,
         chunk_size: usize,
         mem_context: MemoryContext,
-        enable_spill: bool,
+        spill_backend: Option<SpillBackend>,
         spill_metrics: Arc<BatchSpillMetrics>,
         shutdown_rx: ShutdownToken,
     ) -> Self {
@@ -228,7 +233,7 @@ impl<K> HashAggExecutor<K> {
             identity,
             chunk_size,
             mem_context,
-            enable_spill,
+            spill_backend,
             spill_metrics,
             None,
             shutdown_rx,
@@ -246,7 +251,7 @@ impl<K> HashAggExecutor<K> {
         identity: String,
         chunk_size: usize,
         mem_context: MemoryContext,
-        enable_spill: bool,
+        spill_backend: Option<SpillBackend>,
         spill_metrics: Arc<BatchSpillMetrics>,
         memory_upper_bound: Option<u64>,
         shutdown_rx: ShutdownToken,
@@ -261,7 +266,7 @@ impl<K> HashAggExecutor<K> {
             identity,
             chunk_size,
             mem_context,
-            enable_spill,
+            spill_backend,
             spill_metrics,
             memory_upper_bound,
             shutdown_rx,
@@ -315,6 +320,7 @@ pub struct AggSpillManager {
 
 impl AggSpillManager {
     fn new(
+        spill_backend: SpillBackend,
         agg_identity: &String,
         partition_num: usize,
         group_key_types: Vec<DataType>,
@@ -325,7 +331,7 @@ impl AggSpillManager {
     ) -> Result<Self> {
         let suffix_uuid = uuid::Uuid::new_v4();
         let dir = format!("/{}-{}/", agg_identity, suffix_uuid);
-        let op = SpillOp::create(dir)?;
+        let op = SpillOp::create(dir, spill_backend)?;
         let agg_state_writers = Vec::with_capacity(partition_num);
         let agg_state_chunk_builder = Vec::with_capacity(partition_num);
         let input_writers = Vec::with_capacity(partition_num);
@@ -572,7 +578,7 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
             }
             // update memory usage
             if !self.mem_context.add(memory_usage_diff) && check_memory {
-                if self.enable_spill {
+                if self.spill_backend.is_some() {
                     need_to_spill = true;
                     break;
                 } else {
@@ -589,7 +595,12 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
             // Finally, we would get e.g. 20 partitions. Each partition should contain a portion of the original hash table and input data.
             // A sub HashAggExecutor would be used to consume each partition one by one.
             // If memory is still not enough in the sub HashAggExecutor, it will spill its hash table and input recursively.
+            info!(
+                "batch hash agg executor {} starts to spill out",
+                &self.identity
+            );
             let mut agg_spill_manager = AggSpillManager::new(
+                self.spill_backend.clone().unwrap(),
                 &self.identity,
                 DEFAULT_SPILL_PARTITION_NUM,
                 self.group_key_types.clone(),
@@ -661,7 +672,7 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
                     format!("{}-sub{}", self.identity.clone(), i),
                     self.chunk_size,
                     self.mem_context.clone(),
-                    self.enable_spill,
+                    self.spill_backend.clone(),
                     self.spill_metrics.clone(),
                     Some(partition_size),
                     self.shutdown_rx.clone(),
@@ -741,6 +752,7 @@ mod tests {
     use futures_async_stream::for_await;
     use risingwave_common::metrics::LabelGuardedIntGauge;
     use risingwave_common::test_prelude::DataChunkTestExt;
+    use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::data::PbDataType;
     use risingwave_pb::expr::agg_call::Type;
@@ -748,6 +760,7 @@ mod tests {
 
     use super::*;
     use crate::executor::test_utils::{diff_executor_output, MockExecutor};
+    use crate::executor::SortExecutor;
 
     const CHUNK_SIZE: usize = 1024;
 
@@ -810,7 +823,7 @@ mod tests {
                 "HashAggExecutor".to_string(),
                 CHUNK_SIZE,
                 mem_context.clone(),
-                false,
+                None,
                 BatchSpillMetrics::for_test(),
                 ShutdownToken::empty(),
             )
@@ -884,7 +897,7 @@ mod tests {
             "HashAggExecutor".to_string(),
             CHUNK_SIZE,
             MemoryContext::none(),
-            false,
+            None,
             BatchSpillMetrics::for_test(),
             ShutdownToken::empty(),
         )
@@ -1002,7 +1015,7 @@ mod tests {
             "HashAggExecutor".to_string(),
             CHUNK_SIZE,
             MemoryContext::none(),
-            false,
+            None,
             BatchSpillMetrics::for_test(),
             shutdown_rx,
         )
@@ -1015,5 +1028,110 @@ mod tests {
             assert!(data.is_err());
             break;
         }
+    }
+
+    fn create_order_by_executor(child: BoxedExecutor) -> BoxedExecutor {
+        let column_orders = child
+            .schema()
+            .fields
+            .iter()
+            .enumerate()
+            .map(|(i, _)| ColumnOrder {
+                column_index: i,
+                order_type: OrderType::ascending(),
+            })
+            .collect_vec();
+
+        Box::new(SortExecutor::new(
+            child,
+            Arc::new(column_orders),
+            "SortExecutor".into(),
+            CHUNK_SIZE,
+            MemoryContext::none(),
+            None,
+            BatchSpillMetrics::for_test(),
+        ))
+    }
+
+    #[tokio::test]
+    async fn test_spill_hash_agg() {
+        let src_exec = Box::new(MockExecutor::with_chunk(
+            DataChunk::from_pretty(
+                "i i i
+                 0 1 1
+                 1 1 1
+                 0 0 1
+                 1 1 2
+                 1 0 1
+                 0 0 2
+                 1 1 3
+                 0 1 2",
+            ),
+            Schema::new(vec![
+                Field::unnamed(DataType::Int32),
+                Field::unnamed(DataType::Int32),
+                Field::unnamed(DataType::Int64),
+            ]),
+        ));
+
+        let agg_call = AggCall {
+            r#type: Type::Sum as i32,
+            args: vec![InputRef {
+                index: 2,
+                r#type: Some(PbDataType {
+                    type_name: TypeName::Int32 as i32,
+                    ..Default::default()
+                }),
+            }],
+            return_type: Some(PbDataType {
+                type_name: TypeName::Int64 as i32,
+                ..Default::default()
+            }),
+            distinct: false,
+            order_by: vec![],
+            filter: None,
+            direct_args: vec![],
+            udf: None,
+        };
+
+        let agg_prost = HashAggNode {
+            group_key: vec![0, 1],
+            agg_calls: vec![agg_call],
+        };
+
+        let mem_context =
+            MemoryContext::new_with_mem_limit(None, LabelGuardedIntGauge::<4>::test_int_gauge(), 0);
+        let actual_exec = HashAggExecutorBuilder::deserialize(
+            &agg_prost,
+            src_exec,
+            TaskId::default(),
+            "HashAggExecutor".to_string(),
+            CHUNK_SIZE,
+            mem_context.clone(),
+            Some(SpillBackend::Memory),
+            BatchSpillMetrics::for_test(),
+            ShutdownToken::empty(),
+        )
+        .unwrap();
+
+        let actual_exec = create_order_by_executor(actual_exec);
+
+        let expect_exec = Box::new(MockExecutor::with_chunk(
+            DataChunk::from_pretty(
+                "i i I
+                 1 0 1
+                 0 0 3
+                 0 1 3
+                 1 1 6",
+            ),
+            Schema::new(vec![
+                Field::unnamed(DataType::Int32),
+                Field::unnamed(DataType::Int32),
+                Field::unnamed(DataType::Int64),
+            ]),
+        ));
+
+        let expect_exec = create_order_by_executor(expect_exec);
+        diff_executor_output(actual_exec, expect_exec).await;
     }
 }

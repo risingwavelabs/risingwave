@@ -193,6 +193,9 @@ enum HummockCommands {
 
         // data directory for hummock state store. None: use default
         data_dir: Option<String>,
+
+        #[clap(short, long = "use-new-object-prefix-strategy", default_value = "true")]
+        use_new_object_prefix_strategy: bool,
     },
     SstDump(SstDumpArgs),
     /// trigger a targeted compaction through `compaction_group_id`
@@ -302,6 +305,8 @@ enum HummockCommands {
         /// KVs that are matched with the user key are printed.
         #[clap(long)]
         user_key: String,
+        #[clap(short, long = "use-new-object-prefix-strategy", default_value = "true")]
+        use_new_object_prefix_strategy: bool,
     },
     PrintVersionDeltaInArchive {
         /// The ident of the archive file in object store. It's also the first Hummock version id of this archive.
@@ -313,6 +318,8 @@ enum HummockCommands {
         /// Version deltas that are related to the SST id are printed.
         #[clap(long)]
         sst_id: u64,
+        #[clap(short, long = "use-new-object-prefix-strategy", default_value = "true")]
+        use_new_object_prefix_strategy: bool,
     },
 }
 
@@ -324,6 +331,9 @@ enum TableCommands {
         mv_name: String,
         // data directory for hummock state store. None: use default
         data_dir: Option<String>,
+
+        #[clap(short, long = "use-new-object-prefix-strategy", default_value = "true")]
+        use_new_object_prefix_strategy: bool,
     },
     /// scan a state table using Id
     ScanById {
@@ -331,6 +341,8 @@ enum TableCommands {
         table_id: u32,
         // data directory for hummock state store. None: use default
         data_dir: Option<String>,
+        #[clap(short, long = "use-new-object-prefix-strategy", default_value = "true")]
+        use_new_object_prefix_strategy: bool,
     },
     /// list all state tables
     List,
@@ -448,6 +460,7 @@ enum ScaleCommands {
 }
 
 #[derive(Subcommand)]
+#[allow(clippy::large_enum_variant)]
 enum MetaCommands {
     /// pause the stream graph
     Pause,
@@ -640,8 +653,16 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             epoch,
             table_id,
             data_dir,
+            use_new_object_prefix_strategy,
         }) => {
-            cmd_impl::hummock::list_kv(context, epoch, table_id, data_dir).await?;
+            cmd_impl::hummock::list_kv(
+                context,
+                epoch,
+                table_id,
+                data_dir,
+                use_new_object_prefix_strategy,
+            )
+            .await?;
         }
         Commands::Hummock(HummockCommands::SstDump(args)) => {
             cmd_impl::hummock::sst_dump(context, args).await.unwrap()
@@ -764,12 +785,14 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             archive_ids,
             data_dir,
             sst_id,
+            use_new_object_prefix_strategy,
         }) => {
             cmd_impl::hummock::print_version_delta_in_archive(
                 context,
                 archive_ids,
                 data_dir,
                 sst_id,
+                use_new_object_prefix_strategy,
             )
             .await?;
         }
@@ -777,15 +800,32 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             archive_ids,
             data_dir,
             user_key,
+            use_new_object_prefix_strategy,
         }) => {
-            cmd_impl::hummock::print_user_key_in_archive(context, archive_ids, data_dir, user_key)
-                .await?;
+            cmd_impl::hummock::print_user_key_in_archive(
+                context,
+                archive_ids,
+                data_dir,
+                user_key,
+                use_new_object_prefix_strategy,
+            )
+            .await?;
         }
-        Commands::Table(TableCommands::Scan { mv_name, data_dir }) => {
-            cmd_impl::table::scan(context, mv_name, data_dir).await?
+        Commands::Table(TableCommands::Scan {
+            mv_name,
+            data_dir,
+            use_new_object_prefix_strategy,
+        }) => {
+            cmd_impl::table::scan(context, mv_name, data_dir, use_new_object_prefix_strategy)
+                .await?
         }
-        Commands::Table(TableCommands::ScanById { table_id, data_dir }) => {
-            cmd_impl::table::scan_id(context, table_id, data_dir).await?
+        Commands::Table(TableCommands::ScanById {
+            table_id,
+            data_dir,
+            use_new_object_prefix_strategy,
+        }) => {
+            cmd_impl::table::scan_id(context, table_id, data_dir, use_new_object_prefix_strategy)
+                .await?
         }
         Commands::Table(TableCommands::List) => cmd_impl::table::list(context).await?,
         Commands::Bench(cmd) => cmd_impl::bench::do_bench(context, cmd).await?,
