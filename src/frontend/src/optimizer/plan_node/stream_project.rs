@@ -20,10 +20,9 @@ use risingwave_pb::stream_plan::ProjectNode;
 use super::stream::prelude::*;
 use super::utils::{childless_record, watermark_pretty, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
-use crate::expr::{
-    try_derive_watermark, Expr, ExprImpl, ExprRewriter, ExprVisitor, WatermarkDerivation,
-};
+use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
+use crate::optimizer::property::{analyze_monotonicity, Monotonicity};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::ColIndexMappingRewriteExt;
 
@@ -84,21 +83,22 @@ impl StreamProject {
         let mut nondecreasing_exprs = vec![];
         let mut watermark_columns = FixedBitSet::with_capacity(core.exprs.len());
         for (expr_idx, expr) in core.exprs.iter().enumerate() {
-            match try_derive_watermark(expr) {
-                WatermarkDerivation::Watermark(input_idx) => {
+            use Monotonicity::*;
+            match analyze_monotonicity(expr) {
+                FollowingInput(input_idx) => {
                     if input.watermark_columns().contains(input_idx) {
                         watermark_derivations.push((input_idx, expr_idx));
                         watermark_columns.insert(expr_idx);
                     }
                 }
-                WatermarkDerivation::Nondecreasing => {
+                Increasing => {
                     nondecreasing_exprs.push(expr_idx);
                     watermark_columns.insert(expr_idx);
                 }
-                WatermarkDerivation::Constant => {
+                Constant => {
                     // XXX(rc): we can produce one watermark on each recovery for this case.
                 }
-                WatermarkDerivation::None => {}
+                Decreasing | _IncreasingByWatermark | FollowingInputInversely(_) | Unknown => {}
             }
         }
         // Project executor won't change the append-only behavior of the stream, so it depends on
