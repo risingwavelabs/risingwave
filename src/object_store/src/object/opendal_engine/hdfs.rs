@@ -31,6 +31,14 @@ impl OpendalObjectStore {
         config: Arc<ObjectStoreConfig>,
         metrics: Arc<ObjectStoreMetrics>,
     ) -> ObjectResult<Self> {
+        // Init the jvm explicitly to avoid duplicate JVM creatation by hdfs client
+        use risingwave_jni_core::jvm_runtime::JVM;
+        let _ = JVM
+            .get_or_init()
+            .inspect_err(|e| tracing::error!("Failed to init JVM: {:?}", e))
+            .unwrap();
+
+            
         // Create hdfs backend builder.
         let mut builder = Hdfs::default();
         // Set the name node for hdfs.
