@@ -609,7 +609,7 @@ impl CatalogWriter for MockCatalogWriter {
                 let database_id = self.get_database_id_by_schema(schema_id);
                 let pb_table = {
                     let reader = self.catalog.read();
-                    let table = reader.get_table_by_id(&table_id.into())?.to_owned();
+                    let table = reader.get_any_table_by_id(&table_id.into())?.to_owned();
                     table.to_prost(new_schema_id, database_id)
                 };
                 self.catalog.write().update_table(&pb_table);

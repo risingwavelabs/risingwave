@@ -950,7 +950,7 @@ impl SessionImpl {
 
     pub fn get_table_by_id(&self, table_id: &TableId) -> Result<Arc<TableCatalog>> {
         let catalog_reader = self.env().catalog_reader().read_guard();
-        Ok(catalog_reader.get_table_by_id(table_id)?.clone())
+        Ok(catalog_reader.get_any_table_by_id(table_id)?.clone())
     }
 
     pub fn get_table_by_name(

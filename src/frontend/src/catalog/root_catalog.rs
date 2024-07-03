@@ -587,7 +587,7 @@ impl Catalog {
     }
 
     pub fn get_table_name_by_id(&self, table_id: TableId) -> CatalogResult<String> {
-        self.get_table_by_id(&table_id)
+        self.get_any_table_by_id(&table_id)
             .map(|table| table.name.clone())
     }
 
@@ -637,7 +637,7 @@ impl Catalog {
 
     /// Used to get `TableCatalog` for Materialized Views, Tables and Indexes.
     /// Retrieves all tables, created or creating.
-    pub fn get_table_by_name<'a>(
+    pub fn get_any_table_by_name<'a>(
         &self,
         db_name: &str,
         schema_path: SchemaPath<'a>,
@@ -669,7 +669,7 @@ impl Catalog {
             .ok_or_else(|| CatalogError::NotFound("table", table_name.to_string()))
     }
 
-    pub fn get_table_by_id(&self, table_id: &TableId) -> CatalogResult<&Arc<TableCatalog>> {
+    pub fn get_any_table_by_id(&self, table_id: &TableId) -> CatalogResult<&Arc<TableCatalog>> {
         self.table_by_id
             .get(table_id)
             .ok_or_else(|| CatalogError::NotFound("table id", table_id.to_string()))
@@ -720,7 +720,7 @@ impl Catalog {
 
         if found {
             let mut table = self
-                .get_table_by_id(table_id)
+                .get_any_table_by_id(table_id)
                 .unwrap()
                 .to_prost(schema_id, database_id);
             table.name = table_name.to_string();

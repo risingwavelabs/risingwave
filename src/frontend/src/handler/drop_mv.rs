@@ -42,7 +42,7 @@ pub async fn handle_drop_mv(
     let (table_id, status) = {
         let reader = session.env().catalog_reader().read_guard();
         let (table, schema_name) =
-            match reader.get_table_by_name(session.database(), schema_path, &table_name) {
+            match reader.get_any_table_by_name(session.database(), schema_path, &table_name) {
                 Ok((t, s)) => (t, s),
                 Err(e) => {
                     return if if_exists {

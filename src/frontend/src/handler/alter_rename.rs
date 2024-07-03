@@ -361,7 +361,7 @@ mod tests {
 
         let catalog_reader = session.env().catalog_reader().read_guard();
         let altered_table_name = catalog_reader
-            .get_table_by_id(&table_id)
+            .get_any_table_by_id(&table_id)
             .unwrap()
             .name()
             .to_string();

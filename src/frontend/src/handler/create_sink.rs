@@ -561,7 +561,7 @@ fn check_cycle_for_sink(
             path: &mut Vec<String>,
         ) -> Result<()> {
             for table_id in dependent_jobs {
-                if let Ok(table) = self.reader.get_table_by_id(table_id) {
+                if let Ok(table) = self.reader.get_any_table_by_id(table_id) {
                     path.push(table.name.clone());
                     self.visit_table(table.as_ref(), target_table_id, path)?;
                     path.pop();

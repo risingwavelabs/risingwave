@@ -206,7 +206,7 @@ impl Distribution {
     fn get_fragment_id(catalog_reader: &CatalogReader, table_id: &TableId) -> Result<FragmentId> {
         catalog_reader
             .read_guard()
-            .get_table_by_id(table_id)
+            .get_any_table_by_id(table_id)
             .map(|table| table.fragment_id)
             .map_err(Into::into)
     }
