@@ -22,6 +22,8 @@ Reference: for the full explanations of the difficulies and the design of our so
 The following sections first walk you through what is the development workflow for
 existing connectors, and finally explain how to extend the development framework to support a new connector.
 
+<!-- toc -->
+
 ## Set up the development environment
 
 RiseDev supports starting external connector systems (e.g., Kafka, MySQL) just like how it starts the RisingWave cluster, and other standard systems used as part of the RisingWave Cluster (e.g., MinIO, etcd, Grafana).
@@ -86,13 +88,15 @@ Refer to the [sqllogictest-rs documentation](https://github.com/risinglightdb/sq
 
 Take Kafka as an example about how to the tests are written:
 
-When you use `risedev d` to start the external services, related environment variables for Kafka will be available when you run `risedev slt` :
+When you use `risedev d` to start the external services, related environment variables for Kafka will be available when you run `risedev slt`:
 
 ```sh
 RISEDEV_KAFKA_BOOTSTRAP_SERVERS="127.0.0.1:9092"
 RISEDEV_KAFKA_WITH_OPTIONS_COMMON="connector='kafka',properties.bootstrap.server='127.0.0.1:9092'"
 RPK_BROKERS="127.0.0.1:9092"
 ```
+
+The `slt` test case looks like this:
 
 ```
 control substitution on
@@ -102,6 +106,7 @@ control substitution on
 system ok
 RPK_BROKERS=$RISEDEV_KAFKA_BOOTSTRAP_SERVERS rpk topic create my_source -p 4
 
+# Prepared test topic above, and produce test data now
 system ok
 cat << EOF | rpk topic produce my_source -f "%p %v\n" -p 0
 0 {"v1": 1, "v2": "a"}
@@ -110,6 +115,7 @@ cat << EOF | rpk topic produce my_source -f "%p %v\n" -p 0
 3 {"v1": 4, "v2": "d"}
 EOF
 
+# Create the source, connecting to the Kafka started by RiseDev
 statement ok
 create source s0 (v1 int, v2 varchar) with (
   ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
