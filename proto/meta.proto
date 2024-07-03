@@ -81,6 +81,8 @@ message TableFragments {
     uint32 fragment_type_mask = 2;
     FragmentDistributionType distribution_type = 3;
     repeated stream_plan.StreamActor actors = 4;
+
+    // NOTE: vnode_mapping is deprecated, we will generate the vnode_mapping by actors' bitmaps
     // Vnode mapping (which should be set in upstream dispatcher) of the fragment.
     // This field is always set to `Some`. For singleton, the parallel unit for all vnodes will be the same.
     reserved 5;
@@ -130,10 +132,12 @@ message ActorLocation {
 }
 
 message MigrationPlan {
+  // NOTE: parallel_unit_migration_plan is deprecated, using worker_slot_migration_plan instead
   // map<parallel_unit_id, parallel_unit>, the plan indicates that the actors will be migrated from old parallel unit to the new one.
   reserved 1;
   reserved "parallel_unit_migration_plan";
 
+  // map<src_worker_slot_id, dst_worker_slot_id>, the plan indicates that the actors will be migrated from old worker_slot to the new one.
   map<uint64, uint64> worker_slot_migration_plan = 2;
 }
 
