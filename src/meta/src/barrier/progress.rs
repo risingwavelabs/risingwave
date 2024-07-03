@@ -357,6 +357,7 @@ impl CreateMviewProgressTracker {
             }
 
             let progress = Self::recover_progress(
+                states,
                 creating_table_id,
                 &mut upstream_mv_counts,
                 &mut definitions,
@@ -397,6 +398,7 @@ impl CreateMviewProgressTracker {
             }
 
             let progress = Self::recover_progress(
+                states,
                 creating_table_id,
                 &mut upstream_mv_counts,
                 &mut definitions,
@@ -415,13 +417,13 @@ impl CreateMviewProgressTracker {
         }
     }
 
-    pub fn recover_progress(
+    fn recover_progress(
+        states: HashMap<ActorId, BackfillState>,
         creating_table_id: TableId,
         upstream_mv_counts: &mut TableUpstreamMvCountMap,
         definitions: &mut TableDefinitionMap,
         version_stats: &HummockVersionStats,
     ) -> Progress {
-        let states = HashMap::new();
         let upstream_mv_count = upstream_mv_counts.remove(&creating_table_id).unwrap();
         let upstream_total_key_count = upstream_mv_count
             .iter()
