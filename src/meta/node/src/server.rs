@@ -22,6 +22,7 @@ use futures::future::join_all;
 use otlp_embedded::TraceServiceServer;
 use regex::Regex;
 use risingwave_common::monitor::connection::{RouterExt, TcpConfig};
+use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::telemetry::manager::TelemetryManager;
@@ -535,6 +536,8 @@ pub async fn start_service_as_election_leader(
         system_params_reader.backup_storage_directory(),
     )
     .await?;
+
+    LocalSecretManager::init(opts.temp_secret_file_dir);
 
     let notification_srv = NotificationServiceImpl::new(
         env.clone(),

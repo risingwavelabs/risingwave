@@ -14,7 +14,7 @@
 
 use anyhow::{anyhow, Context};
 use itertools::Itertools;
-use risingwave_common::secret::{SecretEncryption, SECRET_MANAGER};
+use risingwave_common::secret::{LocalSecretManager, SecretEncryption};
 use risingwave_meta::manager::{MetadataManager, SessionParamsManagerImpl};
 use risingwave_meta::MetaResult;
 use risingwave_pb::backup_service::MetaBackupManifestId;
@@ -63,7 +63,7 @@ impl NotificationServiceImpl {
             serving_vnode_mapping,
         };
         let (secrets, _catalog_version) = service.get_decrypted_secret_snapshot().await?;
-        SECRET_MANAGER.init_secrets(secrets);
+        LocalSecretManager::global().init_secrets(secrets);
         Ok(service)
     }
 

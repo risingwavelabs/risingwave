@@ -30,7 +30,7 @@ use risingwave_common::catalog::{
     DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_FOR_PG,
     DEFAULT_SUPER_USER_FOR_PG_ID, DEFAULT_SUPER_USER_ID, SYSTEM_SCHEMAS,
 };
-use risingwave_common::secret::SECRET_MANAGER;
+use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::{bail, current_cluster_version, ensure};
 use risingwave_connector::source::{should_copy_to_format_encode_options, UPSTREAM_SOURCE_KEY};
 use risingwave_pb::catalog::subscription::PbSubscriptionState;
@@ -519,7 +519,7 @@ impl CatalogManager {
         let mut secret_plain = secret;
         secret_plain.value.clone_from(&secret_plain_payload);
 
-        SECRET_MANAGER.add_secret(secret_id, secret_plain_payload);
+        LocalSecretManager::global().add_secret(secret_id, secret_plain_payload);
         self.env
             .notification_manager()
             .notify_compute_without_version(Operation::Add, Info::Secret(secret_plain.clone()));
@@ -557,7 +557,7 @@ impl CatalogManager {
                 commit_meta!(self, secrets)?;
                 user_core.decrease_ref(secret.owner);
 
-                SECRET_MANAGER.remove_secret(secret.id);
+                LocalSecretManager::global().remove_secret(secret.id);
                 self.env
                     .notification_manager()
                     .notify_compute_without_version(

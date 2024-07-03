@@ -29,7 +29,7 @@ use risingwave_common::bail;
 use risingwave_common::catalog::{KAFKA_TIMESTAMP_COLUMN_NAME, TABLE_NAME_COLUMN_NAME};
 use risingwave_common::log::LogSuppresser;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
-use risingwave_common::secret::SECRET_MANAGER;
+use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::{Datum, DatumCow, DatumRef, ScalarRefImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::tracing::InstrumentStream;
@@ -1146,13 +1146,13 @@ impl SpecificParserConfig {
         with_properties: &WithOptionsSecResolved,
     ) -> ConnectorResult<Self> {
         let source_struct = extract_source_struct(info)?;
-        let format_encode_options_with_secret = SECRET_MANAGER.fill_secrets(
+        let format_encode_options_with_secret = LocalSecretManager::global().fill_secrets(
             info.format_encode_options.clone(),
             info.format_encode_secret_refs.clone(),
         )?;
         let (options, secret_refs) = with_properties.clone().into_parts();
         let options_with_secret =
-            SECRET_MANAGER.fill_secrets(options.clone(), secret_refs.clone())?;
+            LocalSecretManager::global().fill_secrets(options.clone(), secret_refs.clone())?;
         let format = source_struct.format;
         let encode = source_struct.encode;
         // this transformation is needed since there may be config for the protocol

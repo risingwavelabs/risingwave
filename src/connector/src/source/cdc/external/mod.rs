@@ -29,7 +29,7 @@ use futures_async_stream::try_stream;
 use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnDesc, Schema};
 use risingwave_common::row::OwnedRow;
-use risingwave_common::secret::SECRET_MANAGER;
+use risingwave_common::secret::LocalSecretManager;
 use risingwave_pb::secret::PbSecretRef;
 use serde_derive::{Deserialize, Serialize};
 
@@ -219,7 +219,8 @@ impl ExternalTableConfig {
         connect_properties: BTreeMap<String, String>,
         secret_refs: BTreeMap<String, PbSecretRef>,
     ) -> ConnectorResult<Self> {
-        let options_with_secret = SECRET_MANAGER.fill_secrets(connect_properties, secret_refs)?;
+        let options_with_secret =
+            LocalSecretManager::global().fill_secrets(connect_properties, secret_refs)?;
         let json_value = serde_json::to_value(options_with_secret)?;
         let config = serde_json::from_value::<ExternalTableConfig>(json_value)?;
         Ok(config)

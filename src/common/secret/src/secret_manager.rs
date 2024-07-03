@@ -16,7 +16,6 @@ use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
 use parking_lot::RwLock;
@@ -29,8 +28,7 @@ use thiserror_ext::AsReport;
 use super::error::{SecretError, SecretResult};
 use super::SecretId;
 
-pub static SECRET_MANAGER: std::sync::LazyLock<LocalSecretManager> =
-    std::sync::LazyLock::new(LocalSecretManager::new);
+static INSTANCE: std::sync::OnceLock<LocalSecretManager> = std::sync::OnceLock::new();
 
 #[derive(Debug)]
 pub struct LocalSecretManager {
@@ -38,19 +36,30 @@ pub struct LocalSecretManager {
     secret_file_dir: PathBuf,
 }
 
-pub type LocalSecretManagerRef = Arc<LocalSecretManager>;
-
 impl LocalSecretManager {
-    fn new() -> Self {
-        let path_string =
-            std::env::var("RW_SECRET_TEMP_FILE_PATH").unwrap_or_else(|_e| "./secrets".to_string());
-        let secret_file_dir = PathBuf::from(path_string);
-        std::fs::remove_dir_all(&secret_file_dir).ok();
-        std::fs::create_dir_all(&secret_file_dir).unwrap();
-        Self {
-            secrets: RwLock::new(HashMap::new()),
-            secret_file_dir,
-        }
+    /// Initialize the secret manager with the given temp file path, cluster id, and encryption key.
+    /// # Panics
+    /// Panics if fail to create the secret file directory.
+    pub fn init(temp_file_dir: Option<String>) {
+        // use `get_or_init` to handle concurrent initialization in single node mode.
+        INSTANCE.get_or_init(|| {
+            let temp_file_dir = temp_file_dir.unwrap_or_else(|| "./secrets".to_string());
+            let secret_file_dir = PathBuf::from(temp_file_dir);
+            std::fs::remove_dir_all(&secret_file_dir).ok();
+            std::fs::create_dir_all(&secret_file_dir).unwrap();
+
+            Self {
+                secrets: RwLock::new(HashMap::new()),
+                secret_file_dir,
+            }
+        });
+    }
+
+    /// Get the global secret manager instance.
+    /// # Panics
+    /// Panics if the secret manager is not initialized.
+    pub fn global() -> &'static LocalSecretManager {
+        INSTANCE.get().unwrap()
     }
 
     pub fn add_secret(&self, secret_id: SecretId, secret: Vec<u8>) {

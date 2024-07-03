@@ -26,7 +26,7 @@ use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
-use risingwave_common::secret::SECRET_MANAGER;
+use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::{JsonbVal, Scalar};
 use risingwave_pb::catalog::{PbSource, PbStreamSourceInfo};
 use risingwave_pb::plan_common::ExternalTableDesc;
@@ -388,7 +388,8 @@ impl ConnectorProperties {
         deny_unknown_fields: bool,
     ) -> Result<Self> {
         let (options, secret_refs) = with_properties.into_parts();
-        let mut options_with_secret = SECRET_MANAGER.fill_secrets(options, secret_refs)?;
+        let mut options_with_secret =
+            LocalSecretManager::global().fill_secrets(options, secret_refs)?;
         let connector = options_with_secret
             .remove(UPSTREAM_SOURCE_KEY)
             .ok_or_else(|| anyhow!("Must specify 'connector' in WITH clause"))?;

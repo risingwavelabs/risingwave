@@ -20,7 +20,7 @@ use parking_lot::RwLock;
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeManagerRef;
 use risingwave_common::catalog::CatalogVersion;
 use risingwave_common::hash::WorkerSlotMapping;
-use risingwave_common::secret::SECRET_MANAGER;
+use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManagerRef;
 use risingwave_common_service::observer_manager::{ObserverState, SubscribeFrontend};
@@ -206,7 +206,7 @@ impl ObserverState for FrontendObserverNode {
             .unwrap();
         *self.session_params.write() =
             serde_json::from_str(&session_params.unwrap().params).unwrap();
-        SECRET_MANAGER.init_secrets(secrets);
+        LocalSecretManager::global().init_secrets(secrets);
     }
 }
 
@@ -486,10 +486,10 @@ impl FrontendObserverNode {
         };
         match resp_op {
             Operation::Add => {
-                SECRET_MANAGER.add_secret(secret.id, secret.value);
+                LocalSecretManager::global().add_secret(secret.id, secret.value);
             }
             Operation::Delete => {
-                SECRET_MANAGER.remove_secret(secret.id);
+                LocalSecretManager::global().remove_secret(secret.id);
             }
             _ => {
                 panic!("error type notification");

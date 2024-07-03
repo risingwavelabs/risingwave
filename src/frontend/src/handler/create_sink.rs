@@ -23,7 +23,7 @@ use maplit::{convert_args, hashmap};
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::catalog::{ConnectionId, DatabaseId, Schema, SchemaId, TableId, UserId};
-use risingwave_common::secret::SECRET_MANAGER;
+use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::DataType;
 use risingwave_common::{bail, catalog};
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkFormatDesc, SinkType};
@@ -325,7 +325,7 @@ pub async fn get_partition_compute_info(
     let Some(connector) = options.get(UPSTREAM_SOURCE_KEY).cloned() else {
         return Ok(None);
     };
-    let properties = SECRET_MANAGER.fill_secrets(options, secret_refs)?;
+    let properties = LocalSecretManager::global().fill_secrets(options, secret_refs)?;
     match connector.as_str() {
         ICEBERG_SINK => {
             let iceberg_config = IcebergConfig::from_btreemap(properties)?;

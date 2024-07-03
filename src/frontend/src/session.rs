@@ -51,6 +51,7 @@ use risingwave_common::config::{
     load_config, BatchConfig, MetaConfig, MetricLevel, StreamingConfig,
 };
 use risingwave_common::memory::MemoryContext;
+use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::session_config::{ConfigReporter, SessionConfig, VisibilityMode};
 use risingwave_common::system_param::local_manager::{
     LocalSystemParamsManager, LocalSystemParamsManagerRef,
@@ -318,6 +319,8 @@ impl FrontendEnv {
 
         let system_params_manager =
             Arc::new(LocalSystemParamsManager::new(system_params_reader.clone()));
+
+        LocalSecretManager::init(opts.temp_secret_file_dir);
 
         // This `session_params` should be initialized during the initial notification in `observer_manager`
         let session_params = Arc::new(RwLock::new(SessionConfig::default()));

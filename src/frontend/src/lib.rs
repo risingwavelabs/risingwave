@@ -141,6 +141,10 @@ pub struct FrontendOpts {
     #[clap(long, hide = true, env = "RW_ENABLE_BARRIER_READ")]
     #[override_opts(path = batch.enable_barrier_read)]
     pub enable_barrier_read: Option<bool>,
+
+    /// The path of the temp secret file directory.
+    #[clap(long, hide = true, env = "RW_TEMP_SECRET_FILE_DIR")]
+    pub temp_secret_file_dir: Option<String>,
 }
 
 impl risingwave_common::opts::Opts for FrontendOpts {

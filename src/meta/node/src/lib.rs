@@ -178,6 +178,10 @@ pub struct MetaNodeOpts {
     #[educe(Debug(ignore))]
     #[clap(long, hide = true, env = "RW_SECRET_STORE_PRIVATE_KEY_HEX")]
     pub secret_store_private_key_hex: Option<String>,
+
+    /// The path of the temp secret file directory.
+    #[clap(long, hide = true, env = "RW_TEMP_SECRET_FILE_DIR")]
+    pub temp_secret_file_dir: Option<String>,
 }
 
 impl risingwave_common::opts::Opts for MetaNodeOpts {
@@ -390,6 +394,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                     .max_trivial_move_task_count_per_loop,
                 max_get_task_probe_times: config.meta.developer.max_get_task_probe_times,
                 secret_store_private_key,
+                temp_secret_file_dir: opts.temp_secret_file_dir,
                 table_info_statistic_history_times: config
                     .storage
                     .table_info_statistic_history_times,

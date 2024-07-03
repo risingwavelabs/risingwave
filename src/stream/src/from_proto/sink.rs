@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use risingwave_common::catalog::{ColumnCatalog, Schema};
-use risingwave_common::secret::SECRET_MANAGER;
+use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::DataType;
 use risingwave_connector::match_sink_name_str;
 use risingwave_connector::sink::catalog::{SinkFormatDesc, SinkType};
@@ -157,7 +157,8 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             },
         };
 
-        let properties_with_secret = SECRET_MANAGER.fill_secrets(properties, secret_refs)?;
+        let properties_with_secret =
+            LocalSecretManager::global().fill_secrets(properties, secret_refs)?;
 
         let format_desc_with_secret = SinkParam::fill_secret_for_format_desc(format_desc)?;
 

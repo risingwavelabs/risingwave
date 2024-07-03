@@ -27,7 +27,7 @@ use risingwave_common::catalog::{
     debug_assert_column_ids_distinct, ColumnCatalog, ColumnDesc, ColumnId, Schema, TableId,
     INITIAL_SOURCE_VERSION_ID, KAFKA_TIMESTAMP_COLUMN_NAME,
 };
-use risingwave_common::secret::SECRET_MANAGER;
+use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::DataType;
 use risingwave_connector::parser::additional_columns::{
     build_additional_column_desc, get_supported_additional_columns,
@@ -316,7 +316,7 @@ pub(crate) async fn bind_columns_from_source(
     )?
     .into_parts();
     // Need real secret to access the schema registry
-    let mut format_encode_options_to_consume = SECRET_MANAGER.fill_secrets(
+    let mut format_encode_options_to_consume = LocalSecretManager::global().fill_secrets(
         format_encode_options.clone(),
         format_encode_secret_refs.clone(),
     )?;
@@ -534,7 +534,7 @@ fn bind_columns_from_source_for_cdc(
     .into_parts();
 
     // Need real secret to access the schema registry
-    let mut format_encode_options_to_consume = SECRET_MANAGER.fill_secrets(
+    let mut format_encode_options_to_consume = LocalSecretManager::global().fill_secrets(
         format_encode_options.clone(),
         format_encode_secret_refs.clone(),
     )?;

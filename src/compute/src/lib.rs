@@ -135,6 +135,10 @@ pub struct ComputeNodeOpts {
     #[deprecated = "connector node has been deprecated."]
     #[clap(long, hide = true, env = "RW_CONNECTOR_RPC_ENDPOINT")]
     pub connector_rpc_endpoint: Option<String>,
+
+    /// The path of the temp secret file directory.
+    #[clap(long, hide = true, env = "RW_TEMP_SECRET_FILE_DIR")]
+    pub temp_secret_file_dir: Option<String>,
 }
 
 impl risingwave_common::opts::Opts for ComputeNodeOpts {

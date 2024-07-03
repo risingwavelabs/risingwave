@@ -59,7 +59,7 @@ use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::metrics::{
     LabelGuardedHistogram, LabelGuardedIntCounter, LabelGuardedIntGauge,
 };
-use risingwave_common::secret::{SecretError, SECRET_MANAGER};
+use risingwave_common::secret::{LocalSecretManager, SecretError};
 use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use risingwave_pb::catalog::PbSinkType;
 use risingwave_pb::connector_service::{PbSinkParam, SinkMetadata, TableSchema};
@@ -240,7 +240,7 @@ impl SinkParam {
     ) -> Result<Option<SinkFormatDesc>> {
         match format_desc {
             Some(mut format_desc) => {
-                format_desc.options = SECRET_MANAGER
+                format_desc.options = LocalSecretManager::global()
                     .fill_secrets(format_desc.options, format_desc.secret_refs.clone())?;
                 Ok(Some(format_desc))
             }
@@ -254,8 +254,8 @@ impl SinkParam {
             .visible_columns()
             .map(|col| col.column_desc.clone())
             .collect();
-        let properties_with_secret =
-            SECRET_MANAGER.fill_secrets(sink_catalog.properties, sink_catalog.secret_refs)?;
+        let properties_with_secret = LocalSecretManager::global()
+            .fill_secrets(sink_catalog.properties, sink_catalog.secret_refs)?;
         let format_desc_with_secret = Self::fill_secret_for_format_desc(sink_catalog.format_desc)?;
         Ok(Self {
             sink_id: sink_catalog.id,
