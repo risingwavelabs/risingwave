@@ -17,10 +17,8 @@ normal = ["workspace-hack"]
 anyhow = "1"
 apache-avro = { workspace = true }
 arrow-array = { workspace = true }
-arrow-array-iceberg = { workspace = true }
 arrow-row = { workspace = true }
 arrow-schema = { workspace = true }
-arrow-schema-iceberg = { workspace = true }
 arrow-select = { workspace = true }
 assert_matches = "1"
 async-nats = "0.35"

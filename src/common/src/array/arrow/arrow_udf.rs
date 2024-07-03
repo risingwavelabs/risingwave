@@ -28,7 +28,7 @@ use crate::array::{ArrayError, ArrayImpl, DataType, DecimalArray, JsonbArray};
 
 #[expect(clippy::duplicate_mod)]
 #[path = "./arrow_impl.rs"]
-mod arrow_impl;
+pub mod arrow_impl;
 
 /// Arrow conversion for UDF.
 #[derive(Default, Debug)]

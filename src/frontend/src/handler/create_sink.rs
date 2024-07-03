@@ -17,7 +17,7 @@ use std::rc::Rc;
 use std::sync::{Arc, LazyLock};
 
 use anyhow::Context;
-use arrow_schema_iceberg::DataType as ArrowDataType;
+use arrow_schema::DataType as ArrowDataType;
 use either::Either;
 use itertools::Itertools;
 use maplit::{convert_args, hashmap};

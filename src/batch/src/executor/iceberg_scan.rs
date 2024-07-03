@@ -15,7 +15,7 @@
 use std::hash::{DefaultHasher, Hash, Hasher};
 
 use anyhow::anyhow;
-use arrow_array_iceberg::RecordBatch;
+use arrow_array::RecordBatch;
 use futures_async_stream::try_stream;
 use futures_util::stream::StreamExt;
 use icelake::io::{FileScan, TableScan};

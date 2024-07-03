@@ -15,13 +15,10 @@
 use std::ops::{Div, Mul};
 use std::sync::Arc;
 
-use arrow_array_iceberg::{self as arrow_array, ArrayRef};
-use arrow_buffer_iceberg::IntervalMonthDayNano as ArrowIntervalType;
+use arrow_array::{self, ArrayRef};
+use arrow_buffer::IntervalMonthDayNano as ArrowIntervalType;
 use num_traits::abs;
-use {
-    arrow_buffer_iceberg as arrow_buffer, arrow_cast_iceberg as arrow_cast,
-    arrow_schema_iceberg as arrow_schema,
-};
+use {arrow_buffer, arrow_cast, arrow_schema};
 
 use crate::array::{Array, ArrayError, ArrayImpl, DataChunk, DataType, DecimalArray};
 use crate::types::{Interval, StructType};
@@ -49,11 +46,7 @@ impl ArrowIntervalTypeTrait for ArrowIntervalType {
     }
 }
 
-#[path = "./arrow_impl.rs"]
-mod arrow_impl;
-
-use arrow_impl::{FromArrow, ToArrow};
-
+use super::arrow_udf::arrow_impl::{FromArrow, ToArrow};
 use crate::array::arrow::ArrowIntervalTypeTrait;
 
 pub struct IcebergArrowConvert;
@@ -175,11 +168,11 @@ impl FromArrow for IcebergArrowConvert {}
 mod test {
     use std::sync::Arc;
 
-    use arrow_array_iceberg::{ArrayRef, Decimal128Array};
-    use arrow_schema_iceberg::DataType;
+    use arrow_array::{ArrayRef, Decimal128Array};
+    use arrow_schema::DataType;
 
-    use super::arrow_impl::ToArrow;
     use super::IcebergArrowConvert;
+    use crate::array::arrow::ToArrow;
     use crate::array::{Decimal, DecimalArray};
 
     #[test]

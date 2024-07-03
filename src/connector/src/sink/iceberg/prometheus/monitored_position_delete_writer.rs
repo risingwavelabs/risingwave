@@ -43,7 +43,7 @@ impl<B: FileWriterBuilder> IcebergWriterBuilder<PositionDeleteInput>
 {
     type R = MonitoredPositionDeleteWriter<B>;
 
-    async fn build(self, schema: &arrow_schema_iceberg::SchemaRef) -> Result<Self::R> {
+    async fn build(self, schema: &arrow_schema::SchemaRef) -> Result<Self::R> {
         let writer = self.inner.build(schema).await?;
         Ok(MonitoredPositionDeleteWriter {
             writer,

@@ -34,8 +34,8 @@ use thiserror_ext::AsReport;
 pub struct IcebergTransform {
     child: BoxedExpression,
     transform: BoxedTransformFunction,
-    input_arrow_type: arrow_schema_iceberg::DataType,
-    output_arrow_field: arrow_schema_iceberg::Field,
+    input_arrow_type: arrow_schema::DataType,
+    output_arrow_field: arrow_schema::Field,
     return_type: DataType,
 }
 

@@ -24,7 +24,7 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
-use arrow_schema_iceberg::{
+use arrow_schema::{
     DataType as ArrowDataType, Field as ArrowField, Fields, Schema as ArrowSchema, SchemaRef,
 };
 use async_trait::async_trait;
@@ -1162,7 +1162,7 @@ mod test {
 
     #[test]
     fn test_compatible_arrow_schema() {
-        use arrow_schema_iceberg::{DataType as ArrowDataType, Field as ArrowField};
+        use arrow_schema::{DataType as ArrowDataType, Field as ArrowField};
 
         use super::*;
         let risingwave_schema = Schema::new(vec![

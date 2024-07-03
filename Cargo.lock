@@ -620,26 +620,6 @@ dependencies = [
 
 [[package]]
 name = "arrow-flight"
-version = "50.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d7f215461ad6346f2e4cc853e377d4e076d533e1ed78d327debe83023e3601f"
-dependencies = [
- "arrow-array 50.0.0",
- "arrow-buffer 50.0.0",
- "arrow-cast 50.0.0",
- "arrow-ipc 50.0.0",
- "arrow-schema 50.0.0",
- "base64 0.21.7",
- "bytes",
- "futures",
- "paste",
- "prost 0.12.6",
- "tokio",
- "tonic 0.10.2",
-]
-
-[[package]]
-name = "arrow-flight"
 version = "52.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cdd624aafd1f34710a1d6ed44ea0e9b06f7b75adc4277c53bac4a2d23229030b"
@@ -925,11 +905,12 @@ dependencies = [
 
 [[package]]
 name = "arrow-udf-flight"
-version = "0.1.0"
-source = "git+https://github.com/risingwavelabs/arrow-udf?rev=54f6d69#54f6d69c618bfb749abddc507e46ee06497c71b2"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a419f7d50bfd3d80f06c138f7e7e56526177eb2bedf2029f20543373299cb57c"
 dependencies = [
  "arrow-array 52.0.0",
- "arrow-flight 52.0.0",
+ "arrow-flight",
  "arrow-schema 52.0.0",
  "arrow-select 52.0.0",
  "futures-util",
@@ -946,9 +927,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "76cb6d108605c5489fff1ef9c520656946ad05ed0de3ea6d26d56bcb34bdb8c5"
 dependencies = [
  "anyhow",
- "arrow-array 50.0.0",
- "arrow-buffer 50.0.0",
- "arrow-schema 50.0.0",
+ "arrow-array 52.0.0",
+ "arrow-buffer 52.0.0",
+ "arrow-schema 52.0.0",
  "atomic-time",
  "rquickjs",
 ]
@@ -959,10 +940,10 @@ version = "0.0.1"
 source = "git+https://github.com/risingwavelabs/arrow-udf.git?rev=fa36365#fa3636559de986aa592da6e8b3fbfac7bdd4bb78"
 dependencies = [
  "anyhow",
- "arrow-array 50.0.0",
- "arrow-buffer 50.0.0",
- "arrow-data 50.0.0",
- "arrow-schema 50.0.0",
+ "arrow-array 52.0.0",
+ "arrow-buffer 52.0.0",
+ "arrow-data 52.0.0",
+ "arrow-schema 52.0.0",
  "arrow-udf-js-deno-runtime",
  "async-trait",
  "deno_core",
@@ -1010,10 +991,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4506efc6fbc200c083add2a7ed4e3616a859941a745e922320ae7051d90d12ec"
 dependencies = [
  "anyhow",
- "arrow-array 50.0.0",
- "arrow-buffer 50.0.0",
- "arrow-ipc 50.0.0",
- "arrow-schema 50.0.0",
+ "arrow-array 52.0.0",
+ "arrow-buffer 52.0.0",
+ "arrow-ipc 52.0.0",
+ "arrow-schema 52.0.0",
  "lazy_static",
  "pyo3",
  "pyo3-build-config",
@@ -1026,9 +1007,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eb829e25925161d93617d4b053bae03fe51e708f2cce088d85df856011d4f369"
 dependencies = [
  "anyhow",
- "arrow-array 50.0.0",
- "arrow-ipc 50.0.0",
- "arrow-schema 50.0.0",
+ "arrow-array 52.0.0",
+ "arrow-ipc 52.0.0",
+ "arrow-schema 52.0.0",
  "async-trait",
  "base64 0.22.0",
  "genawaiter",
@@ -5943,7 +5924,7 @@ dependencies = [
  "http 0.2.9",
  "thiserror",
  "tokio",
- "tonic 0.10.2",
+ "tonic 0.11.0",
  "tower",
  "tracing",
  "trust-dns-resolver 0.23.2",
@@ -8937,38 +8918,6 @@ dependencies = [
 
 [[package]]
 name = "parquet"
-version = "50.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "547b92ebf0c1177e3892f44c8f79757ee62e678d564a9834189725f2c5b7a750"
-dependencies = [
- "ahash 0.8.11",
- "arrow-array 50.0.0",
- "arrow-buffer 50.0.0",
- "arrow-cast 50.0.0",
- "arrow-data 50.0.0",
- "arrow-ipc 50.0.0",
- "arrow-schema 50.0.0",
- "arrow-select 50.0.0",
- "base64 0.21.7",
- "brotli 3.5.0",
- "bytes",
- "chrono",
- "flate2",
- "half 2.3.1",
- "hashbrown 0.14.3",
- "lz4_flex",
- "num",
- "num-bigint",
- "paste",
- "seq-macro",
- "snap",
- "thrift",
- "twox-hash",
- "zstd 0.13.0",
-]
-
-[[package]]
-name = "parquet"
 version = "52.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29c3b5322cc1bbf67f11c079c42be41a55949099b78732f7dba9e15edde40eab"
@@ -9816,7 +9765,7 @@ checksum = "8bdf592881d821b83d471f8af290226c8d51402259e9bb5be7f9f8bdebbb11ac"
 dependencies = [
  "bytes",
  "heck 0.4.1",
- "itertools 0.10.5",
+ "itertools 0.11.0",
  "log",
  "multimap 0.8.3",
  "once_cell",
@@ -9850,7 +9799,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "81bddcdb20abf9501610992b6759a4c888aef7d1a7247ef75e2404275ac24af1"
 dependencies = [
  "anyhow",
- "itertools 0.10.5",
+ "itertools 0.12.1",
  "proc-macro2",
  "quote",
  "syn 2.0.66",
@@ -10715,9 +10664,8 @@ name = "risingwave_batch"
 version = "1.11.0-alpha"
 dependencies = [
  "anyhow",
- "arrow-array 50.0.0",
  "arrow-array 52.0.0",
- "arrow-schema 50.0.0",
+ "arrow-schema 52.0.0",
  "assert_matches",
  "async-recursion",
  "async-trait",
@@ -10869,16 +10817,12 @@ dependencies = [
  "anyhow",
  "arc-swap",
  "arrow-array 48.0.1",
- "arrow-array 50.0.0",
  "arrow-array 52.0.0",
  "arrow-buffer 48.0.1",
- "arrow-buffer 50.0.0",
  "arrow-buffer 52.0.0",
  "arrow-cast 48.0.1",
- "arrow-cast 50.0.0",
  "arrow-cast 52.0.0",
  "arrow-schema 48.0.1",
- "arrow-schema 50.0.0",
  "arrow-schema 52.0.0",
  "async-trait",
  "auto_enums",
@@ -11177,12 +11121,10 @@ version = "1.11.0-alpha"
 dependencies = [
  "anyhow",
  "apache-avro 0.16.0",
- "arrow-array 50.0.0",
  "arrow-array 52.0.0",
- "arrow-row 50.0.0",
- "arrow-schema 50.0.0",
+ "arrow-row 52.0.0",
  "arrow-schema 52.0.0",
- "arrow-select 50.0.0",
+ "arrow-select 52.0.0",
  "assert_matches",
  "async-nats",
  "async-trait",
@@ -11243,7 +11185,7 @@ dependencies = [
  "opendal 0.47.0",
  "openssl",
  "parking_lot 0.12.1",
- "parquet 50.0.0",
+ "parquet 52.0.0",
  "paste",
  "pg_bigdecimal",
  "postgres-openssl",
@@ -11432,8 +11374,8 @@ name = "risingwave_expr"
 version = "1.11.0-alpha"
 dependencies = [
  "anyhow",
- "arrow-array 50.0.0",
- "arrow-schema 50.0.0",
+ "arrow-array 52.0.0",
+ "arrow-schema 52.0.0",
  "async-trait",
  "auto_impl",
  "await-tree",
@@ -11474,9 +11416,8 @@ version = "1.11.0-alpha"
 dependencies = [
  "aho-corasick",
  "anyhow",
- "arrow-array 50.0.0",
- "arrow-flight 50.0.0",
- "arrow-schema 50.0.0",
+ "arrow-array 52.0.0",
+ "arrow-flight",
  "arrow-schema 52.0.0",
  "arrow-udf-flight",
  "arrow-udf-js",
@@ -11542,7 +11483,6 @@ version = "1.11.0-alpha"
 dependencies = [
  "anyhow",
  "arc-swap",
- "arrow-schema 50.0.0",
  "arrow-schema 52.0.0",
  "assert_matches",
  "async-recursion",
@@ -15490,7 +15430,10 @@ dependencies = [
  "percent-encoding",
  "pin-project",
  "prost 0.12.6",
+ "rustls-pemfile 2.1.1",
+ "rustls-pki-types",
  "tokio",
+ "tokio-rustls 0.25.0",
  "tokio-stream",
  "tower",
  "tower-layer",
