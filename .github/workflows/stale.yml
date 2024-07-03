@@ -48,5 +48,5 @@ jobs:
         stale-pr-label: 'no-pr-activity'
         days-before-close: -1
         days-before-pr-close: 7
-        operations-per-run: ${{ github.event.inputs.operationsPerRun }}
+        operations-per-run: ${{ github.event.inputs.operationsPerRun || 30 }}
         enable-statistics: true
