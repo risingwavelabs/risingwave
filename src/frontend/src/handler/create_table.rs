@@ -1230,8 +1230,7 @@ pub async fn generate_stream_graph_for_table(
     source_schema: Option<ConnectorSchema>,
     handler_args: HandlerArgs,
     col_id_gen: ColumnIdGenerator,
-    columns: Vec<ColumnDef>,
-    column_catalogs: Vec<ColumnCatalog>,
+    column_defs: Vec<ColumnDef>,
     wildcard_idx: Option<usize>,
     constraints: Vec<TableConstraint>,
     source_watermarks: Vec<SourceWatermark>,
@@ -1249,7 +1248,7 @@ pub async fn generate_stream_graph_for_table(
                     handler_args,
                     ExplainOptions::default(),
                     table_name,
-                    columns,
+                    column_defs,
                     wildcard_idx,
                     constraints,
                     source_schema,
@@ -1268,7 +1267,7 @@ pub async fn generate_stream_graph_for_table(
                 let (plan, table) = gen_create_table_plan(
                     context,
                     table_name,
-                    columns,
+                    column_defs,
                     constraints,
                     col_id_gen,
                     source_watermarks,
@@ -1307,18 +1306,20 @@ pub async fn generate_stream_graph_for_table(
                     cdc_table.external_table_name.clone(),
                 )?;
 
-                let pk_names = original_catalog
-                    .stream_key
-                    .iter()
-                    .map(|pk_index| original_catalog.columns[*pk_index].name().to_string())
-                    .collect();
+                let (columns, pk_names) = derive_schema_for_cdc_table(
+                    &column_defs,
+                    &constraints,
+                    connect_properties.clone(),
+                    false,
+                )
+                .await?;
 
                 let (plan, table) = gen_create_table_plan_for_cdc_table(
                     handler_args,
                     ExplainOptions::default(),
                     source,
                     cdc_table.external_table_name.clone(),
-                    column_catalogs,
+                    columns,
                     pk_names,
                     connect_properties,
                     col_id_gen,

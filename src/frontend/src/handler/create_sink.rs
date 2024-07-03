@@ -643,7 +643,6 @@ pub(crate) async fn reparse_table_for_sink(
         handler_args,
         col_id_gen,
         columns,
-        vec![],
         wildcard_idx,
         constraints,
         source_watermarks,

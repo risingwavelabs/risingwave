@@ -19,6 +19,7 @@ use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::ColumnCatalog;
+use risingwave_common::range::RangeBoundsExt;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_sqlparser::ast::{
     AlterTableOperation, ColumnOption, ConnectorSchema, Encode, ObjectName, Statement,
@@ -40,7 +41,6 @@ pub async fn replace_table_with_definition(
     table_name: ObjectName,
     definition: Statement,
     original_catalog: &Arc<TableCatalog>,
-    columns_altered: Vec<ColumnCatalog>,
     source_schema: Option<ConnectorSchema>,
 ) -> Result<()> {
     // Create handler args as if we're creating a new table with the altered definition.
@@ -69,7 +69,6 @@ pub async fn replace_table_with_definition(
         handler_args,
         col_id_gen,
         columns,
-        columns_altered,
         wildcard_idx,
         constraints,
         source_watermarks,
@@ -150,7 +149,13 @@ pub async fn handle_alter_table_column(
         }
     }
 
-    let mut columns_altered = original_catalog.columns.clone();
+    if columns.is_empty() {
+        Err(ErrorCode::NotSupported(
+            "alter a table with empty column definitions".to_string(),
+            "Please recreate the table with column definitions.".to_string(),
+        ))?
+    }
+
     match operation {
         AlterTableOperation::AddColumn {
             column_def: new_column,
@@ -158,9 +163,9 @@ pub async fn handle_alter_table_column(
             // Duplicated names can actually be checked by `StreamMaterialize`. We do here for
             // better error reporting.
             let new_column_name = new_column.name.real_value();
-            if columns_altered
+            if columns
                 .iter()
-                .any(|c| c.name() == new_column_name.as_str())
+                .any(|c| c.name.real_value() == new_column_name)
             {
                 Err(ErrorCode::InvalidInputSyntax(format!(
                     "column \"{new_column_name}\" of table \"{table_name}\" already exists"
@@ -178,10 +183,7 @@ pub async fn handle_alter_table_column(
             }
 
             // Add the new column to the table definition if it is not created by `create table (*)` syntax.
-            if !columns.is_empty() {
-                columns.push(new_column.clone());
-            }
-            columns_altered.extend(bind_sql_columns(vec![new_column].as_slice())?)
+            columns.push(new_column);
         }
 
         AlterTableOperation::DropColumn {
@@ -195,20 +197,14 @@ pub async fn handle_alter_table_column(
 
             // Locate the column by name and remove it.
             let column_name = column_name.real_value();
-            let removed_column = columns_altered
-                .extract_if(|c| c.name() == column_name.as_str())
+            let removed_column = columns
+                .extract_if(|c| c.name.real_value() == column_name)
                 .at_most_one()
                 .ok()
                 .unwrap();
 
             if removed_column.is_some() {
                 // PASS
-                // remove from table definition
-                columns
-                    .extract_if(|c| c.name.real_value() == column_name)
-                    .at_most_one()
-                    .ok()
-                    .unwrap();
             } else if if_exists {
                 return Ok(PgResponse::builder(StatementType::ALTER_TABLE)
                     .notice(format!(
@@ -232,7 +228,6 @@ pub async fn handle_alter_table_column(
         table_name,
         definition,
         &original_catalog,
-        columns_altered,
         source_schema,
     )
     .await?;

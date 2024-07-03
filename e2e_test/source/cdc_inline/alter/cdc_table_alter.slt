@@ -1,12 +1,14 @@
 control substitution on
 
+# mysql env vars will be read from the `.risingwave/config/risedev-env` file
+
 system ok
-mysql -u root --protocol='tcp' -e "
+mysql -e "
     SET GLOBAL time_zone = '+00:00';
 "
 
 system ok
-mysql -u root --protocol='tcp' -e "
+mysql -e "
   DROP DATABASE IF EXISTS testdb1;
   CREATE DATABASE testdb1;
   USE testdb1;
@@ -43,10 +45,10 @@ mysql -u root --protocol='tcp' -e "
 statement ok
 create source mysql_source with (
   connector = 'mysql-cdc',
-  hostname = '${MYSQL_HOST:localhost}',
-  port = '${MYSQL_TCP_PORT:8306}',
+  hostname = '${MYSQL_HOST}',
+  port = '${MYSQL_TCP_PORT}',
   username = 'root',
-  password = '123456',
+  password = '${MYSQL_PWD}',
   database.name = 'testdb1',
   server.id = '5185'
 );
@@ -59,7 +61,15 @@ create table products_1 ( id INT,
 ) from mysql_source table 'testdb1.products';
 
 statement ok
-create table orders_1 (*) from mysql_source table 'testdb1.orders';
+create table orders_1 (
+   order_id int,
+   order_date timestamp,
+   customer_name string,
+   price decimal,
+   product_id int,
+   order_status smallint,
+   PRIMARY KEY (order_id)
+) from mysql_source table 'testdb1.orders';
 
 system ok
 psql -c "
@@ -145,7 +155,7 @@ SELECT id,name,description,weight FROM products_1 order by id limit 3
 
 # update mysql tables
 system ok
-mysql -u root --protocol='tcp' -e "
+mysql -e "
   USE testdb1;
   UPDATE products SET weight = 10.5 WHERE id = 101;
   UPDATE products SET weight = 12.5 WHERE id = 102;
@@ -170,7 +180,7 @@ SELECT order_id,order_date,customer_name,product_id,order_status,order_comment F
 
 # alter mysql tables
 system ok
-mysql -u root --protocol='tcp' -e "
+mysql -e "
   USE testdb1;
   ALTER TABLE products DROP COLUMN weight;
 "
@@ -199,7 +209,7 @@ psql -c "
   ALTER TABLE shipments1 DROP COLUMN destination;
 "
 
-statement error
+statement error unable to drop the column due to being referenced by downstream materialized views or sinks
 ALTER TABLE shipments_1 DROP COLUMN destination;
 
 # wait alter ddl
@@ -215,6 +225,15 @@ select order_id, product_id, shipment_id from enriched_orders order by order_id;
 
 statement ok
 drop materialized view enriched_orders;
+
+statement ok
+drop table orders_1;
+
+statement ok
+create table orders_2 (*) from mysql_source table 'testdb1.orders';
+
+statement error Not supported: alter a table with empty column definitions
+ALTER TABLE orders_2 ADD COLUMN order_comment VARCHAR;
 
 statement ok
 drop source mysql_source cascade;
