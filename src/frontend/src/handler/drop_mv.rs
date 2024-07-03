@@ -88,7 +88,7 @@ pub async fn handle_drop_mv(
                     job_ids: vec![table_id.table_id],
                 }))
                 .await?;
-            tracing::info!("canceled jobs: {:?}", canceled_jobs);
+            tracing::info!(?canceled_jobs, "cancelled creating jobs");
         }
     }
 
