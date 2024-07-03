@@ -58,30 +58,38 @@ pub async fn compact(
     payload: Vec<ImmutableMemtable>,
     filter_key_extractor_manager: FilterKeyExtractorManager,
 ) -> HummockResult<UploadTaskOutput> {
-    let new_value_ssts = compact_shared_buffer::<true>(
-        context.clone(),
-        sstable_object_id_manager.clone(),
-        filter_key_extractor_manager.clone(),
-        payload.clone(),
-    )
-    .await?;
+    use futures::future::try_join;
+    let new_value_payload = payload.clone();
+    let new_value_future = async {
+        compact_shared_buffer::<true>(
+            context.clone(),
+            sstable_object_id_manager.clone(),
+            filter_key_extractor_manager.clone(),
+            new_value_payload,
+        )
+        .await
+    };
 
     let old_value_payload = payload
         .into_iter()
         .filter(|imm| imm.has_old_value())
         .collect_vec();
 
-    let old_value_ssts = if old_value_payload.is_empty() {
-        vec![]
-    } else {
-        compact_shared_buffer::<false>(
-            context.clone(),
-            sstable_object_id_manager,
-            filter_key_extractor_manager,
-            old_value_payload,
-        )
-        .await?
+    let old_value_future = async {
+        if old_value_payload.is_empty() {
+            Ok(vec![])
+        } else {
+            compact_shared_buffer::<false>(
+                context.clone(),
+                sstable_object_id_manager.clone(),
+                filter_key_extractor_manager.clone(),
+                old_value_payload,
+            )
+            .await
+        }
     };
+
+    let (new_value_ssts, old_value_ssts) = try_join(new_value_future, old_value_future).await?;
 
     Ok(UploadTaskOutput {
         new_value_ssts,

@@ -584,7 +584,6 @@ impl LocalBarrierWorker {
                                  }| GroupedSstableInfo {
                                     sst: Some(sst_info),
                                     table_stats_map: to_prost_table_stats_map(table_stats),
-                                    ..Default::default()
                                 },
                             )
                             .collect_vec(),
