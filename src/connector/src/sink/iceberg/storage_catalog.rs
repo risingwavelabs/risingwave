@@ -36,6 +36,7 @@ pub struct StorageCatalogConfig {
     secret_key: String,
     endpoint: Option<String>,
     region: Option<String>,
+    path_style_access: bool,
 }
 
 /// File system catalog.
@@ -61,6 +62,8 @@ impl StorageCatalog {
         } else {
             file_io_builder
         };
+        file_io_builder =
+            file_io_builder.with_prop("path_style_access", &config.path_style_access.to_string());
 
         Ok(StorageCatalog {
             warehouse: config.warehouse.clone(),
