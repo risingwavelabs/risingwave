@@ -16,7 +16,7 @@ pub use anyhow::anyhow;
 use thiserror::Error;
 use thiserror_ext::Construct;
 
-use crate::catalog::SecretId;
+use super::SecretId;
 
 pub type SecretResult<T> = Result<T, SecretError>;
 

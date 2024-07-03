@@ -486,10 +486,10 @@ impl FrontendObserverNode {
         };
         match resp_op {
             Operation::Add => {
-                SECRET_MANAGER.add_secret(SecretId::new(secret.id), secret.value);
+                SECRET_MANAGER.add_secret(secret.id, secret.value);
             }
             Operation::Delete => {
-                SECRET_MANAGER.remove_secret(SecretId::new(secret.id));
+                SECRET_MANAGER.remove_secret(secret.id);
             }
             _ => {
                 panic!("error type notification");

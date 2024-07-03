@@ -10809,7 +10809,6 @@ dependencies = [
 name = "risingwave_common"
 version = "1.11.0-alpha"
 dependencies = [
- "aes-gcm",
  "ahash 0.8.11",
  "anyhow",
  "arc-swap",
@@ -10828,7 +10827,6 @@ dependencies = [
  "async-trait",
  "auto_enums",
  "auto_impl",
- "bincode 1.3.3",
  "bitflags 2.5.0",
  "byteorder",
  "bytes",
@@ -10887,6 +10885,7 @@ dependencies = [
  "risingwave_common_estimate_size",
  "risingwave_common_metrics",
  "risingwave_common_proc_macro",
+ "risingwave_common_secret",
  "risingwave_error",
  "risingwave_license",
  "risingwave_pb",
@@ -10997,6 +10996,23 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "risingwave_common_secret"
+version = "1.11.0-alpha"
+dependencies = [
+ "aes-gcm",
+ "anyhow",
+ "bincode 1.3.3",
+ "parking_lot 0.12.1",
+ "prost 0.12.1",
+ "risingwave_common_estimate_size",
+ "risingwave_pb",
+ "serde",
+ "thiserror",
+ "thiserror-ext",
+ "tracing",
 ]
 
 [[package]]

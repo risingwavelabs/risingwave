@@ -14,7 +14,6 @@ ignored = ["workspace-hack"]
 normal = ["workspace-hack"]
 
 [dependencies]
-aes-gcm = "0.10"
 ahash = "0.8"
 anyhow = "1"
 arc-swap = "1"
@@ -33,7 +32,6 @@ arrow-schema-iceberg = { workspace = true }
 async-trait = "0.1"
 auto_enums = { workspace = true }
 auto_impl = "1"
-bincode = "1"
 bitflags = "2"
 byteorder = "1"
 bytes = "1"
@@ -88,6 +86,7 @@ risingwave-fields-derive = { path = "./fields-derive" }
 risingwave_common_estimate_size = { workspace = true }
 risingwave_common_metrics = { path = "./metrics" }
 risingwave_common_proc_macro = { workspace = true }
+risingwave_common_secret = { path = "./secret" }
 risingwave_error = { workspace = true }
 risingwave_license = { workspace = true }
 risingwave_pb = { workspace = true }

@@ -18,16 +18,16 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use parking_lot::RwLock;
 use prost::Message;
-use risingwave_common::catalog::SecretId;
 use risingwave_pb::catalog::PbSecret;
 use risingwave_pb::secret::secret_ref::RefAsType;
 use risingwave_pb::secret::PbSecretRef;
 use thiserror_ext::AsReport;
 
 use super::error::{SecretError, SecretResult};
+use super::SecretId;
 
 pub static SECRET_MANAGER: std::sync::LazyLock<LocalSecretManager> =
     std::sync::LazyLock::new(LocalSecretManager::new);
@@ -65,7 +65,7 @@ impl LocalSecretManager {
         std::fs::remove_dir_all(&self.secret_file_dir).unwrap();
         std::fs::create_dir_all(&self.secret_file_dir).unwrap();
         for secret in secrets {
-            secret_guard.insert(SecretId::new(secret.id), secret.value);
+            secret_guard.insert(secret.id, secret.value);
         }
     }
 
@@ -87,7 +87,7 @@ impl LocalSecretManager {
     ) -> SecretResult<BTreeMap<String, String>> {
         let secret_guard = self.secrets.read();
         for (option_key, secret_ref) in secret_refs {
-            let secret_id = SecretId::new(secret_ref.secret_id);
+            let secret_id = secret_ref.secret_id;
             let pb_secret_bytes = secret_guard
                 .get(&secret_id)
                 .ok_or(SecretError::ItemNotFound(secret_id))?;
@@ -141,7 +141,7 @@ impl LocalSecretManager {
         let secret_value = match pb_secret.get_secret_backend().unwrap() {
             risingwave_pb::secret::secret::SecretBackend::Meta(backend) => backend.value.clone(),
             risingwave_pb::secret::secret::SecretBackend::HashicorpVault(_) => {
-                bail!("hashicorp_vault backend is not implemented yet")
+                return Err(anyhow!("hashicorp_vault backend is not implemented yet").into())
             }
         };
         Ok(secret_value)

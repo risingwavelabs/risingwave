@@ -519,10 +519,7 @@ impl CatalogManager {
         let mut secret_plain = secret;
         secret_plain.value.clone_from(&secret_plain_payload);
 
-        SECRET_MANAGER.add_secret(
-            risingwave_common::catalog::SecretId::new(secret_id),
-            secret_plain_payload,
-        );
+        SECRET_MANAGER.add_secret(secret_id, secret_plain_payload);
         self.env
             .notification_manager()
             .notify_compute_without_version(Operation::Add, Info::Secret(secret_plain.clone()));
@@ -560,7 +557,7 @@ impl CatalogManager {
                 commit_meta!(self, secrets)?;
                 user_core.decrease_ref(secret.owner);
 
-                SECRET_MANAGER.remove_secret(risingwave_common::catalog::SecretId::new(secret.id));
+                SECRET_MANAGER.remove_secret(secret.id);
                 self.env
                     .notification_manager()
                     .notify_compute_without_version(
