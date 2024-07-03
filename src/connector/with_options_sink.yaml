@@ -21,6 +21,14 @@ BigQueryConfig:
     field_type: usize
     required: false
     default: '1024'
+  - name: bigquery.retry_times
+    field_type: usize
+    required: false
+    default: '5'
+  - name: auto_create
+    field_type: bool
+    required: false
+    default: Default::default
   - name: aws.region
     field_type: String
     required: false
@@ -84,6 +92,14 @@ ClickHouseConfig:
   - name: clickhouse.table
     field_type: String
     required: true
+  - name: clickhouse.delete.column
+    field_type: String
+    required: false
+  - name: commit_checkpoint_interval
+    field_type: u64
+    comments: Commit every n(>0) checkpoints, if n is not set, we will commit every checkpoint.
+    required: false
+    default: Default::default
   - name: r#type
     field_type: String
     required: true
@@ -109,6 +125,7 @@ DeltaLakeConfig:
     required: false
   - name: commit_checkpoint_interval
     field_type: u64
+    comments: Commit every n(>0) checkpoints, if n is not set, we will commit every checkpoint.
     required: false
     default: Default::default
   - name: r#type
@@ -131,9 +148,66 @@ DorisConfig:
   - name: doris.table
     field_type: String
     required: true
+  - name: doris.partial_update
+    field_type: String
+    required: false
   - name: r#type
     field_type: String
     required: true
+DynamoDbConfig:
+  fields:
+  - name: table
+    field_type: String
+    required: true
+    alias:
+    - dynamodb.table
+  - name: dynamodb.max_batch_rows
+    field_type: usize
+    required: false
+    default: '1024'
+  - name: aws.region
+    field_type: String
+    required: false
+    alias:
+    - region
+  - name: aws.endpoint_url
+    field_type: String
+    required: false
+    alias:
+    - endpoint_url
+    - endpoint
+  - name: aws.credentials.access_key_id
+    field_type: String
+    required: false
+    alias:
+    - access_key
+  - name: aws.credentials.secret_access_key
+    field_type: String
+    required: false
+    alias:
+    - secret_key
+  - name: aws.credentials.session_token
+    field_type: String
+    required: false
+    alias:
+    - session_token
+  - name: aws.credentials.role.arn
+    field_type: String
+    comments: IAM role
+    required: false
+    alias:
+    - arn
+  - name: aws.credentials.role.external_id
+    field_type: String
+    comments: external ID in IAM role trust policy
+    required: false
+    alias:
+    - external_id
+  - name: aws.profile
+    field_type: String
+    required: false
+    alias:
+    - profile
 GooglePubSubConfig:
   fields:
   - name: pubsub.project_id
@@ -368,7 +442,7 @@ KafkaConfig:
     field_type: i32
     required: false
   - name: broker.rewrite.endpoints
-    field_type: HashMap<String,String>
+    field_type: BTreeMap<String,String>
     comments: This is generated from `private_link_targets` and `private_link_endpoint` in frontend, instead of given by users.
     required: false
   - name: aws.region
@@ -456,6 +530,33 @@ KinesisSinkConfig:
     required: false
     alias:
     - kinesis.assumerole.external_id
+MongodbConfig:
+  fields:
+  - name: mongodb.url
+    field_type: String
+    comments: The URL of MongoDB
+    required: true
+  - name: collection.name
+    field_type: String
+    comments: The collection name where data should be written to or read from. For sinks, the format is  `db_name.collection_name`. Data can also be written to dynamic collections, see `collection.name.field`  for more information.
+    required: true
+  - name: r#type
+    field_type: String
+    required: true
+  - name: collection.name.field
+    field_type: String
+    comments: The dynamic collection name where data should be sunk to. If specified, the field value will be used  as the collection name. The collection name format is same as `collection.name`. If the field value is  null or an empty string, then the `collection.name` will be used as a fallback destination.
+    required: false
+  - name: collection.name.field.drop
+    field_type: bool
+    comments: Controls whether the field value of `collection.name.field` should be dropped when sinking.  Set this option to true to avoid the duplicate values of `collection.name.field` being written to the  result collection.
+    required: false
+    default: Default::default
+  - name: mongodb.bulk_write.max_entries
+    field_type: usize
+    comments: The maximum entries will accumulate before performing the bulk write, defaults to 1024.
+    required: false
+    default: '1024'
 MqttConfig:
   fields:
   - name: url
@@ -696,6 +797,33 @@ SnowflakeConfig:
     field_type: String
     comments: The s3 region, e.g., us-east-2
     required: true
+SqlServerConfig:
+  fields:
+  - name: sqlserver.host
+    field_type: String
+    required: true
+  - name: sqlserver.port
+    field_type: u16
+    required: true
+  - name: sqlserver.user
+    field_type: String
+    required: true
+  - name: sqlserver.password
+    field_type: String
+    required: true
+  - name: sqlserver.database
+    field_type: String
+    required: true
+  - name: sqlserver.table
+    field_type: String
+    required: true
+  - name: sqlserver.max_batch_rows
+    field_type: usize
+    required: false
+    default: '1024'
+  - name: r#type
+    field_type: String
+    required: true
 StarrocksConfig:
   fields:
   - name: starrocks.host
@@ -730,8 +858,19 @@ StarrocksConfig:
     field_type: String
     comments: The `StarRocks` table you want to sink data to.
     required: true
+  - name: starrocks.stream_load.http.timeout.ms
+    field_type: u64
+    comments: The timeout in milliseconds for stream load http request, defaults to 10 seconds.
+    required: false
+    default: 30 * 1000
+  - name: commit_checkpoint_interval
+    field_type: u64
+    comments: Set this option to a positive integer n, RisingWave will try to commit data  to Starrocks at every n checkpoints by leveraging the  [StreamLoad Transaction API](https://docs.starrocks.io/docs/loading/Stream_Load_transaction_interface/),  also, in this time, the `sink_decouple` option should be enabled as well.  Defaults to 1 if commit_checkpoint_interval <= 0
+    required: false
+    default: Default::default
   - name: starrocks.partial_update
     field_type: String
+    comments: Enable partial update
     required: false
   - name: r#type
     field_type: String

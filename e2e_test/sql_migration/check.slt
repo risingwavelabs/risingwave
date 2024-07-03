@@ -64,6 +64,14 @@ create materialized view mv3 as select * from mv2;
 statement ok
 REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA schema1 FROM user1;
 
+query T
+show secrets;
+----
+secret_1
+
+statement ok
+drop secret secret_1;
+
 statement error Permission denied
 drop source src;
 

@@ -568,7 +568,7 @@ impl ClusterManagerCore {
     pub const MAX_WORKER_REUSABLE_ID_COUNT: usize = 1 << Self::MAX_WORKER_REUSABLE_ID_BITS;
 
     async fn new(env: MetaSrvEnv) -> MetaResult<Self> {
-        let meta_store = env.meta_store().as_kv();
+        let meta_store = env.meta_store_ref().as_kv();
         let mut workers = Worker::list(meta_store).await?;
 
         let used_transactional_ids: HashSet<_> = workers

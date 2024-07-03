@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 
 use anyhow::Context;
-use arrow_array::{Int32Array, Int64Array, RecordBatch};
+use arrow_array_iceberg::{Int32Array, Int64Array, RecordBatch};
 use async_trait::async_trait;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
@@ -27,7 +27,7 @@ use itertools::Itertools;
 use pulsar::consumer::InitialPosition;
 use pulsar::message::proto::MessageIdData;
 use pulsar::{Consumer, ConsumerBuilder, ConsumerOptions, Pulsar, SubType, TokioExecutor};
-use risingwave_common::array::arrow::{FromArrow, IcebergArrowConvert};
+use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::ROWID_PREFIX;
 use risingwave_common::{bail, ensure};
@@ -102,10 +102,12 @@ impl SplitReader for PulsarSplitReader {
 
 /// This reader reads from pulsar broker
 pub struct PulsarBrokerReader {
+    #[expect(dead_code)]
     pulsar: Pulsar<TokioExecutor>,
     consumer: Consumer<Vec<u8>, TokioExecutor>,
+    #[expect(dead_code)]
     split: PulsarSplit,
-
+    #[expect(dead_code)]
     split_id: SplitId,
     parser_config: ParserConfig,
     source_ctx: SourceContextRef,
@@ -185,12 +187,16 @@ impl SplitReader for PulsarBrokerReader {
                     )
                 } else {
                     builder.with_options(
-                        ConsumerOptions::default().with_initial_position(InitialPosition::Earliest),
+                        ConsumerOptions::default()
+                            .with_initial_position(InitialPosition::Earliest)
+                            .durable(false),
                     )
                 }
             }
             PulsarEnumeratorOffset::Latest => builder.with_options(
-                ConsumerOptions::default().with_initial_position(InitialPosition::Latest),
+                ConsumerOptions::default()
+                    .with_initial_position(InitialPosition::Latest)
+                    .durable(false),
             ),
             PulsarEnumeratorOffset::MessageId(m) => {
                 if topic.starts_with("non-persistent://") {
@@ -251,7 +257,9 @@ impl PulsarBrokerReader {
     }
 }
 
+#[expect(dead_code)]
 const META_COLUMN_TOPIC: &str = "__topic";
+#[expect(dead_code)]
 const META_COLUMN_KEY: &str = "__key";
 const META_COLUMN_LEDGER_ID: &str = "__ledgerId";
 const META_COLUMN_ENTRY_ID: &str = "__entryId";
@@ -514,7 +522,7 @@ impl PulsarIcebergReader {
         }
 
         let data_chunk = IcebergArrowConvert
-            .from_record_batch(&record_batch.project(&field_indices)?)
+            .chunk_from_record_batch(&record_batch.project(&field_indices)?)
             .context("failed to convert arrow record batch to data chunk")?;
 
         let stream_chunk = StreamChunk::from(data_chunk);

@@ -70,6 +70,12 @@ impl LogicalSource {
         ctx: OptimizerContextRef,
         as_of: Option<AsOf>,
     ) -> Result<Self> {
+        // XXX: should we reorder the columns?
+        // The order may be strange if the schema is changed, e.g., [foo:Varchar, _rw_kafka_timestamp:Timestamptz, _row_id:Serial, bar:Int32]
+        // related: https://github.com/risingwavelabs/risingwave/issues/16486
+        // The order does not matter much. The columns field is essentially a map indexed by the column id.
+        // It will affect what users will see in `SELECT *`.
+        // But not sure if we rely on the position of hidden column like `_row_id` somewhere. For `projected_row_id` we do so...
         let core = generic::Source {
             catalog: source_catalog,
             column_catalog,

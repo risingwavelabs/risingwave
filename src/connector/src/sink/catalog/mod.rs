@@ -14,7 +14,7 @@
 
 pub mod desc;
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 
 use anyhow::anyhow;
 use itertools::Itertools;
@@ -27,6 +27,7 @@ use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::catalog::{
     PbCreateType, PbSink, PbSinkFormatDesc, PbSinkType, PbStreamJobStatus,
 };
+use risingwave_pb::secret::PbSecretRef;
 
 use super::{
     SinkError, CONNECTOR_TYPE_KEY, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION,
@@ -202,6 +203,7 @@ impl SinkFormatDesc {
             encode: encode.into(),
             options,
             key_encode,
+            secret_refs: Default::default(),
         }
     }
 }
@@ -303,7 +305,7 @@ pub struct SinkCatalog {
     pub distribution_key: Vec<usize>,
 
     /// The properties of the sink.
-    pub properties: HashMap<String, String>,
+    pub properties: BTreeMap<String, String>,
 
     /// Owner of the sink.
     pub owner: UserId,
@@ -339,7 +341,7 @@ pub struct SinkCatalog {
     pub create_type: CreateType,
 
     /// The secret reference for the sink, mapping from property name to secret id.
-    pub secret_ref: HashMap<String, u32>,
+    pub secret_refs: BTreeMap<String, PbSecretRef>,
 }
 
 impl SinkCatalog {
@@ -381,7 +383,7 @@ impl SinkCatalog {
             created_at_cluster_version: self.created_at_cluster_version.clone(),
             initialized_at_cluster_version: self.initialized_at_cluster_version.clone(),
             create_type: self.create_type.to_proto() as i32,
-            secret_ref: self.secret_ref.clone(),
+            secret_refs: self.secret_refs.clone(),
         }
     }
 
@@ -475,7 +477,7 @@ impl From<PbSink> for SinkCatalog {
             initialized_at_cluster_version: pb.initialized_at_cluster_version,
             created_at_cluster_version: pb.created_at_cluster_version,
             create_type: CreateType::from_proto(create_type),
-            secret_ref: pb.secret_ref,
+            secret_refs: pb.secret_refs,
         }
     }
 }

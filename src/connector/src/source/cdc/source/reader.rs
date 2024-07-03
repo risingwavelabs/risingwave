@@ -39,13 +39,17 @@ use crate::source::{
 
 pub struct CdcSplitReader<T: CdcSourceTypeTrait> {
     source_id: u64,
+    #[expect(dead_code)]
     start_offset: Option<String>,
     // host address of worker node for a Citus cluster
+    #[expect(dead_code)]
     server_addr: Option<String>,
+    #[expect(dead_code)]
     conn_props: CdcProperties<T>,
-
+    #[expect(dead_code)]
     split_id: SplitId,
     // whether the full snapshot phase is done
+    #[expect(dead_code)]
     snapshot_done: bool,
     parser_config: ParserConfig,
     source_ctx: SourceContextRef,

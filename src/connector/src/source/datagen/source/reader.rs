@@ -33,6 +33,7 @@ use crate::source::{
 
 pub struct DatagenSplitReader {
     generator: DatagenEventGenerator,
+    #[expect(dead_code)]
     assigned_split: DatagenSplit,
 
     split_id: SplitId,
@@ -398,7 +399,6 @@ mod tests {
             state,
             ParserConfig {
                 specific: SpecificParserConfig {
-                    key_encoding_config: None,
                     encoding_config: EncodingProperties::Native,
                     protocol_config: ProtocolProperties::Native,
                 },
@@ -456,7 +456,6 @@ mod tests {
         };
         let parser_config = ParserConfig {
             specific: SpecificParserConfig {
-                key_encoding_config: None,
                 encoding_config: EncodingProperties::Native,
                 protocol_config: ProtocolProperties::Native,
             },

@@ -20,7 +20,9 @@ use std::sync::Arc;
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use fail::fail_point;
-use foyer::{CacheContext, EntryState, HybridCache, HybridCacheBuilder, HybridCacheEntry};
+use foyer::{
+    CacheContext, EventListener, FetchState, HybridCache, HybridCacheBuilder, HybridCacheEntry,
+};
 use futures::{future, StreamExt};
 use itertools::Itertools;
 use risingwave_common::config::StorageMemoryConfig;
@@ -51,6 +53,31 @@ pub type TableHolder = HybridCacheEntry<HummockSstableObjectId, Box<Sstable>>;
 pub struct SstableBlockIndex {
     pub sst_id: HummockSstableObjectId,
     pub block_idx: u64,
+}
+
+pub struct BlockCacheEventListener {
+    metrics: Arc<HummockStateStoreMetrics>,
+}
+
+impl BlockCacheEventListener {
+    pub fn new(metrics: Arc<HummockStateStoreMetrics>) -> Self {
+        Self { metrics }
+    }
+}
+
+impl EventListener for BlockCacheEventListener {
+    type Key = SstableBlockIndex;
+    type Value = Box<Block>;
+
+    fn on_memory_release(&self, _key: Self::Key, value: Self::Value)
+    where
+        Self::Key: foyer::Key,
+        Self::Value: foyer::Value,
+    {
+        self.metrics
+            .block_efficiency_histogram
+            .observe(value.efficiency());
+    }
 }
 
 // TODO: Define policy based on use cases (read / compaction / ...).
@@ -98,17 +125,18 @@ pub struct SstableStoreConfig {
     pub max_prefetch_block_number: usize,
     pub recent_filter: Option<Arc<RecentFilter<(HummockSstableObjectId, usize)>>>,
     pub state_store_metrics: Arc<HummockStateStoreMetrics>,
+    pub use_new_object_prefix_strategy: bool,
 
-    pub meta_cache_v2: HybridCache<HummockSstableObjectId, Box<Sstable>>,
-    pub block_cache_v2: HybridCache<SstableBlockIndex, Box<Block>>,
+    pub meta_cache: HybridCache<HummockSstableObjectId, Box<Sstable>>,
+    pub block_cache: HybridCache<SstableBlockIndex, Box<Block>>,
 }
 
 pub struct SstableStore {
     path: String,
     store: ObjectStoreRef,
 
-    meta_cache_v2: HybridCache<HummockSstableObjectId, Box<Sstable>>,
-    block_cache_v2: HybridCache<SstableBlockIndex, Box<Block>>,
+    meta_cache: HybridCache<HummockSstableObjectId, Box<Sstable>>,
+    block_cache: HybridCache<SstableBlockIndex, Box<Block>>,
 
     /// Recent filter for `(sst_obj_id, blk_idx)`.
     ///
@@ -117,6 +145,15 @@ pub struct SstableStore {
     prefetch_buffer_usage: Arc<AtomicUsize>,
     prefetch_buffer_capacity: usize,
     max_prefetch_block_number: usize,
+    /// Whether the object store is divided into prefixes depends on two factors:
+    ///   1. The specific object store type.
+    ///   2. Whether the existing cluster is a new cluster.
+    ///
+    /// The value of `use_new_object_prefix_strategy` is determined by the `use_new_object_prefix_strategy` field in the system parameters.
+    /// For a new cluster, `use_new_object_prefix_strategy` is set to True.
+    /// For an old cluster, `use_new_object_prefix_strategy` is set to False.
+    /// The final decision of whether to divide prefixes is based on this field and the specific object store type, this approach is implemented to ensure backward compatibility.
+    use_new_object_prefix_strategy: bool,
 }
 
 impl SstableStore {
@@ -128,13 +165,14 @@ impl SstableStore {
             path: config.path,
             store: config.store,
 
-            meta_cache_v2: config.meta_cache_v2,
-            block_cache_v2: config.block_cache_v2,
+            meta_cache: config.meta_cache,
+            block_cache: config.block_cache,
 
             recent_filter: config.recent_filter,
             prefetch_buffer_usage: Arc::new(AtomicUsize::new(0)),
             prefetch_buffer_capacity: config.prefetch_buffer_capacity,
             max_prefetch_block_number: config.max_prefetch_block_number,
+            use_new_object_prefix_strategy: config.use_new_object_prefix_strategy,
         }
     }
 
@@ -146,8 +184,9 @@ impl SstableStore {
         path: String,
         block_cache_capacity: usize,
         meta_cache_capacity: usize,
+        use_new_object_prefix_strategy: bool,
     ) -> HummockResult<Self> {
-        let meta_cache_v2 = HybridCacheBuilder::new()
+        let meta_cache = HybridCacheBuilder::new()
             .memory(meta_cache_capacity)
             .with_shards(1)
             .with_weighter(|_: &HummockSstableObjectId, value: &Box<Sstable>| {
@@ -158,7 +197,7 @@ impl SstableStore {
             .await
             .map_err(HummockError::foyer_error)?;
 
-        let block_cache_v2 = HybridCacheBuilder::new()
+        let block_cache = HybridCacheBuilder::new()
             .memory(block_cache_capacity)
             .with_shards(1)
             .with_weighter(|_: &SstableBlockIndex, value: &Box<Block>| {
@@ -178,9 +217,10 @@ impl SstableStore {
             prefetch_buffer_capacity: block_cache_capacity,
             max_prefetch_block_number: 16, /* compactor won't use this parameter, so just assign a default value. */
             recent_filter: None,
+            use_new_object_prefix_strategy,
 
-            meta_cache_v2,
-            block_cache_v2,
+            meta_cache,
+            block_cache,
         })
     }
 
@@ -188,9 +228,7 @@ impl SstableStore {
         self.store
             .delete(self.get_sst_data_path(object_id).as_str())
             .await?;
-        self.meta_cache_v2
-            .remove(&object_id)
-            .map_err(HummockError::foyer_error)?;
+        self.meta_cache.remove(&object_id);
         // TODO(MrCroxx): support group remove in foyer.
         Ok(())
     }
@@ -210,19 +248,15 @@ impl SstableStore {
 
         // Delete from cache.
         for object_id in object_id_list {
-            self.meta_cache_v2
-                .remove(object_id)
-                .map_err(HummockError::foyer_error)?;
+            self.meta_cache.remove(object_id);
         }
 
         Ok(())
     }
 
     pub fn delete_cache(&self, object_id: HummockSstableObjectId) -> HummockResult<()> {
-        self.meta_cache_v2
-            .remove(&object_id)
-            .map(|_| ())
-            .map_err(HummockError::foyer_error)
+        self.meta_cache.remove(&object_id);
+        Ok(())
     }
 
     async fn put_sst_data(
@@ -256,7 +290,7 @@ impl SstableStore {
         }
         stats.cache_data_block_total += 1;
         if let Some(entry) = self
-            .block_cache_v2
+            .block_cache
             .get(&SstableBlockIndex {
                 sst_id: object_id,
                 block_idx: block_index as _,
@@ -277,14 +311,10 @@ impl SstableStore {
         let mut min_hit_index = end_index;
         let mut hit_count = 0;
         for idx in block_index..end_index {
-            if self
-                .block_cache_v2
-                .contains(&SstableBlockIndex {
-                    sst_id: object_id,
-                    block_idx: idx as _,
-                })
-                .map_err(HummockError::foyer_error)?
-            {
+            if self.block_cache.contains(&SstableBlockIndex {
+                sst_id: object_id,
+                block_idx: idx as _,
+            }) {
                 if min_hit_index > idx && idx > block_index {
                     min_hit_index = idx;
                 }
@@ -347,9 +377,9 @@ impl SstableStore {
                 let cache_priority = if idx == block_index {
                     priority
                 } else {
-                    CacheContext::LruPriorityLow
+                    CacheContext::LowPriority
                 };
-                let entry = self.block_cache_v2.insert_with_context(
+                let entry = self.block_cache.insert_with_context(
                     SstableBlockIndex {
                         sst_id: object_id,
                         block_idx: idx as _,
@@ -399,7 +429,7 @@ impl SstableStore {
         };
 
         // future: fetch block if hybrid cache miss
-        let fetch_block = move |context: CacheContext| {
+        let fetch_block = move || {
             let range = range.clone();
 
             async move {
@@ -423,7 +453,7 @@ impl SstableStore {
                     Block::decode(block_data, uncompressed_capacity)
                         .map_err(anyhow::Error::from)?,
                 );
-                Ok((block, context))
+                Ok(block)
             }
         };
 
@@ -433,21 +463,22 @@ impl SstableStore {
 
         match policy {
             CachePolicy::Fill(context) => {
-                let entry = self.block_cache_v2.entry(
+                let entry = self.block_cache.fetch_with_context(
                     SstableBlockIndex {
                         sst_id: object_id,
                         block_idx: block_index as _,
                     },
-                    move || fetch_block(context),
+                    context,
+                    fetch_block,
                 );
-                if matches!(entry.state(), EntryState::Miss) {
+                if matches!(entry.state(), FetchState::Miss) {
                     stats.cache_data_block_miss += 1;
                 }
                 Ok(BlockResponse::Entry(entry))
             }
             CachePolicy::NotFill => {
                 if let Some(entry) = self
-                    .block_cache_v2
+                    .block_cache
                     .get(&SstableBlockIndex {
                         sst_id: object_id,
                         block_idx: block_index as _,
@@ -459,16 +490,12 @@ impl SstableStore {
                         entry,
                     )))
                 } else {
-                    let (block, _) = fetch_block(CacheContext::default())
-                        .await
-                        .map_err(HummockError::foyer_error)?;
+                    let block = fetch_block().await.map_err(HummockError::foyer_error)?;
                     Ok(BlockResponse::Block(BlockHolder::from_owned_block(block)))
                 }
             }
             CachePolicy::Disable => {
-                let (block, _) = fetch_block(CacheContext::default())
-                    .await
-                    .map_err(HummockError::foyer_error)?;
+                let block = fetch_block().await.map_err(HummockError::foyer_error)?;
                 Ok(BlockResponse::Block(BlockHolder::from_owned_block(block)))
             }
         }
@@ -491,7 +518,9 @@ impl SstableStore {
     }
 
     pub fn get_sst_data_path(&self, object_id: HummockSstableObjectId) -> String {
-        let obj_prefix = self.store.get_object_prefix(object_id);
+        let obj_prefix = self
+            .store
+            .get_object_prefix(object_id, self.use_new_object_prefix_strategy);
         format!(
             "{}/{}{}.{}",
             self.path, obj_prefix, object_id, OBJECT_SUFFIX
@@ -512,16 +541,18 @@ impl SstableStore {
     }
 
     #[cfg(any(test, feature = "test"))]
-    pub fn clear_block_cache(&self) -> HummockResult<()> {
-        self.block_cache_v2
+    pub async fn clear_block_cache(&self) -> HummockResult<()> {
+        self.block_cache
             .clear()
+            .await
             .map_err(HummockError::foyer_error)
     }
 
     #[cfg(any(test, feature = "test"))]
-    pub fn clear_meta_cache(&self) -> HummockResult<()> {
-        self.meta_cache_v2
+    pub async fn clear_meta_cache(&self) -> HummockResult<()> {
+        self.meta_cache
             .clear()
+            .await
             .map_err(HummockError::foyer_error)
     }
 
@@ -529,7 +560,7 @@ impl SstableStore {
         &self,
         sst_obj_id: HummockSstableObjectId,
     ) -> HummockResult<Option<HybridCacheEntry<HummockSstableObjectId, Box<Sstable>>>> {
-        self.meta_cache_v2
+        self.meta_cache
             .get(&sst_obj_id)
             .await
             .map_err(HummockError::foyer_error)
@@ -543,7 +574,7 @@ impl SstableStore {
     ) -> impl Future<Output = HummockResult<TableHolder>> + Send + 'static {
         let object_id = sst.get_object_id();
 
-        let entry = self.meta_cache_v2.entry(object_id, || {
+        let entry = self.meta_cache.fetch(object_id, || {
             let store = self.store.clone();
             let meta_path = self.get_sst_data_path(object_id);
             let stats_ptr = stats.remote_io_time.clone();
@@ -556,11 +587,11 @@ impl SstableStore {
                 let sst = Sstable::new(object_id, meta);
                 let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
                 stats_ptr.fetch_add(add as u64, Ordering::Relaxed);
-                Ok((Box::new(sst), CacheContext::Default))
+                Ok(Box::new(sst))
             }
         });
 
-        if matches! { entry.state(), EntryState::Wait | EntryState::Miss } {
+        if matches! { entry.state(), FetchState::Wait | FetchState::Miss } {
             stats.cache_meta_block_miss += 1;
         }
 
@@ -590,7 +621,7 @@ impl SstableStore {
 
     pub fn insert_meta_cache(&self, object_id: HummockSstableObjectId, meta: SstableMeta) {
         let sst = Sstable::new(object_id, meta);
-        self.meta_cache_v2.insert(object_id, Box::new(sst));
+        self.meta_cache.insert(object_id, Box::new(sst));
     }
 
     pub fn insert_block_cache(
@@ -599,7 +630,7 @@ impl SstableStore {
         block_index: u64,
         block: Box<Block>,
     ) {
-        self.block_cache_v2.insert(
+        self.block_cache.insert(
             SstableBlockIndex {
                 sst_id: object_id,
                 block_idx: block_index,
@@ -609,7 +640,7 @@ impl SstableStore {
     }
 
     pub fn get_meta_memory_usage(&self) -> u64 {
-        self.meta_cache_v2.cache().usage() as _
+        self.meta_cache.memory().usage() as _
     }
 
     pub fn get_prefetch_memory_usage(&self) -> usize {
@@ -651,11 +682,11 @@ impl SstableStore {
     }
 
     pub fn meta_cache(&self) -> &HybridCache<HummockSstableObjectId, Box<Sstable>> {
-        &self.meta_cache_v2
+        &self.meta_cache
     }
 
     pub fn block_cache(&self) -> &HybridCache<SstableBlockIndex, Box<Block>> {
-        &self.block_cache_v2
+        &self.block_cache
     }
 }
 
@@ -687,7 +718,7 @@ impl MemoryCollector for HummockMemoryCollector {
     }
 
     fn get_data_memory_usage(&self) -> u64 {
-        self.sstable_store.block_cache_v2.cache().usage() as _
+        self.sstable_store.block_cache.memory().usage() as _
     }
 
     fn get_uploading_memory_usage(&self) -> u64 {
@@ -850,7 +881,7 @@ impl SstableWriter for BatchUploadWriter {
                 // The `block_info` may be empty when there is only range-tombstones, because we
                 //  store them in meta-block.
                 for (block_idx, block) in self.block_info.into_iter().enumerate() {
-                    self.sstable_store.block_cache_v2.insert_with_context(
+                    self.sstable_store.block_cache.insert_with_context(
                         SstableBlockIndex {
                             sst_id: self.object_id,
                             block_idx: block_idx as _,
@@ -961,7 +992,7 @@ impl SstableWriter for StreamingUploadWriter {
                 && !self.blocks.is_empty()
             {
                 for (block_idx, block) in self.blocks.into_iter().enumerate() {
-                    self.sstable_store.block_cache_v2.insert_with_context(
+                    self.sstable_store.block_cache.insert_with_context(
                         SstableBlockIndex {
                             sst_id: self.object_id,
                             block_idx: block_idx as _,

@@ -209,6 +209,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::JsonbPathMatch
             | Type::JsonbPathQueryArray
             | Type::JsonbPathQueryFirst
+            | Type::JsonbSet
             | Type::IsJson
             | Type::ToJsonb
             | Type::Sind
@@ -257,6 +258,7 @@ impl ExprVisitor for ImpureAnalyzer {
             }
             // expression output is not deterministic
             Type::Vnode
+            | Type::TestPaidTier
             | Type::Proctime
             | Type::PgSleep
             | Type::PgSleepFor
@@ -269,6 +271,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::PgIndexesSize
             | Type::PgRelationSize
             | Type::PgGetSerialSequence
+            | Type::PgIndexColumnHasProperty
             | Type::HasTablePrivilege
             | Type::HasAnyColumnPrivilege
             | Type::HasSchemaPrivilege

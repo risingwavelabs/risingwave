@@ -21,8 +21,6 @@ use std::time::Duration;
 
 use criterion::{criterion_group, criterion_main, Criterion};
 use foyer::HybridCacheBuilder;
-use futures::future::try_join_all;
-use itertools::Itertools;
 use rand::random;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::{MetricLevel, ObjectStoreConfig};
@@ -118,28 +116,25 @@ async fn build_tables<F: SstableWriterFactory>(
             .await
             .unwrap();
     }
-    let split_table_outputs = builder.finish().await.unwrap();
-    let ssts = split_table_outputs
-        .iter()
-        .map(|handle| handle.sst_info.sst_info.clone())
-        .collect_vec();
-    let join_handles = split_table_outputs
+
+    builder
+        .finish()
+        .await
+        .unwrap()
         .into_iter()
-        .map(|o| o.upload_join_handle)
-        .collect_vec();
-    try_join_all(join_handles).await.unwrap();
-    ssts
+        .map(|info| info.sst_info)
+        .collect()
 }
 
 async fn generate_sstable_store(object_store: Arc<ObjectStoreImpl>) -> Arc<SstableStore> {
-    let meta_cache_v2 = HybridCacheBuilder::new()
+    let meta_cache = HybridCacheBuilder::new()
         .memory(64 << 20)
         .with_shards(2)
         .storage()
         .build()
         .await
         .unwrap();
-    let block_cache_v2 = HybridCacheBuilder::new()
+    let block_cache = HybridCacheBuilder::new()
         .memory(128 << 20)
         .with_shards(2)
         .storage()
@@ -153,16 +148,17 @@ async fn generate_sstable_store(object_store: Arc<ObjectStoreImpl>) -> Arc<Sstab
         max_prefetch_block_number: 16,
         recent_filter: None,
         state_store_metrics: Arc::new(global_hummock_state_store_metrics(MetricLevel::Disabled)),
-        meta_cache_v2,
-        block_cache_v2,
+        use_new_object_prefix_strategy: true,
+        meta_cache,
+        block_cache,
     }))
 }
 
 fn bench_builder(
     c: &mut Criterion,
-    bucket: &str,
     capacity_mb: usize,
     enable_streaming_upload: bool,
+    local: bool,
 ) {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -170,13 +166,28 @@ fn bench_builder(
         .unwrap();
 
     let metrics = Arc::new(ObjectStoreMetrics::unused());
-
     let default_config = Arc::new(ObjectStoreConfig::default());
+
     let object_store = runtime.block_on(async {
-        S3ObjectStore::new_with_config(bucket.to_string(), metrics.clone(), default_config.clone())
+        if local {
+            S3ObjectStore::new_minio_engine(
+                "minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001",
+                metrics.clone(),
+                default_config.clone(),
+            )
             .await
             .monitored(metrics, default_config)
+        } else {
+            S3ObjectStore::new_with_config(
+                env::var("S3_BUCKET").unwrap(),
+                metrics.clone(),
+                default_config.clone(),
+            )
+            .await
+            .monitored(metrics, default_config)
+        }
     });
+
     let object_store = Arc::new(ObjectStoreImpl::S3(object_store));
 
     let sstable_store = runtime.block_on(async { generate_sstable_store(object_store).await });
@@ -216,10 +227,11 @@ fn bench_builder(
 // SST size: 4, 32, 64, 128, 256MiB
 fn bench_multi_builder(c: &mut Criterion) {
     let sst_capacities = vec![4, 32, 64, 128, 256];
-    let bucket = env::var("S3_BUCKET").unwrap();
+    let is_local_test = env::var("LOCAL_TEST").is_ok();
+
     for capacity in sst_capacities {
-        bench_builder(c, &bucket, capacity, false);
-        bench_builder(c, &bucket, capacity, true);
+        bench_builder(c, capacity, false, is_local_test);
+        bench_builder(c, capacity, true, is_local_test);
     }
 }
 

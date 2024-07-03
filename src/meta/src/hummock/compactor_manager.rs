@@ -101,6 +101,13 @@ impl Compactor {
         Ok(())
     }
 
+    pub fn cancel_tasks(&self, task_ids: &Vec<u64>) -> MetaResult<()> {
+        for task_id in task_ids {
+            self.cancel_task(*task_id)?;
+        }
+        Ok(())
+    }
+
     pub fn context_id(&self) -> HummockContextId {
         self.context_id
     }
@@ -111,12 +118,12 @@ impl Compactor {
 /// `CompactTaskAssignment`.
 ///
 /// A compact task can be in one of these states:
-/// - 1. Success: an assigned task is reported as success via `CompactStatus::report_compact_task`.
-///   It's the final state.
-/// - 2. Failed: an Failed task is reported as success via `CompactStatus::report_compact_task`.
-///   It's the final state.
-/// - 3. Cancelled: a task is reported as cancelled via `CompactStatus::report_compact_task`. It's
-///   the final state.
+/// 1. Success: an assigned task is reported as success via `CompactStatus::report_compact_task`.
+///    It's the final state.
+/// 2. Failed: an Failed task is reported as success via `CompactStatus::report_compact_task`.
+///    It's the final state.
+/// 3. Cancelled: a task is reported as cancelled via `CompactStatus::report_compact_task`. It's
+///    the final state.
 pub struct CompactorManagerInner {
     pub task_expired_seconds: u64,
     pub heartbeat_expired_seconds: u64,
@@ -131,7 +138,7 @@ impl CompactorManagerInner {
         use risingwave_meta_model_v2::compaction_task;
         use sea_orm::EntityTrait;
         // Retrieve the existing task assignments from metastore.
-        let task_assignment: Vec<CompactTaskAssignment> = match env.meta_store() {
+        let task_assignment: Vec<CompactTaskAssignment> = match env.meta_store_ref() {
             MetaStoreImpl::Kv(meta_store) => CompactTaskAssignment::list(meta_store).await?,
             MetaStoreImpl::Sql(sql_meta_store) => compaction_task::Entity::find()
                 .all(&sql_meta_store.conn)

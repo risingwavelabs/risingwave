@@ -137,6 +137,8 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
 
         let upstream_table_id = self.external_table.table_id().table_id;
         let upstream_table_name = self.external_table.qualified_table_name();
+        let schema_table_name = self.external_table.schema_table_name().clone();
+        let external_database_name = self.external_table.database_name().to_owned();
         let upstream_table_reader = UpstreamTableReader::new(self.external_table);
 
         let additional_columns = self
@@ -264,6 +266,8 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                     self.rate_limit_rps,
                     pk_indices.clone(),
                     additional_columns.clone(),
+                    schema_table_name.clone(),
+                    external_database_name.clone(),
                 );
 
                 let right_snapshot = pin!(upstream_table_reader
@@ -637,7 +641,6 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
 #[try_stream(ok = Message, error = StreamExecutorError)]
 pub async fn transform_upstream(upstream: BoxedMessageStream, output_columns: &[ColumnDesc]) {
     let props = SpecificParserConfig {
-        key_encoding_config: None,
         encoding_config: EncodingProperties::Json(JsonProperties {
             use_schema_registry: false,
             timestamptz_handling: None,

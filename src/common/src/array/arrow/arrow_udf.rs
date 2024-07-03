@@ -22,6 +22,7 @@ use std::sync::Arc;
 
 pub use arrow_impl::{FromArrow, ToArrow};
 use {arrow_array, arrow_buffer, arrow_cast, arrow_schema};
+type ArrowIntervalType = i128;
 
 use crate::array::{ArrayError, ArrayImpl, DataType, DecimalArray, JsonbArray};
 

@@ -41,7 +41,7 @@ impl DebeziumJsonAccessBuilder {
 
 impl AccessBuilder for DebeziumJsonAccessBuilder {
     #[allow(clippy::unused_async)]
-    async fn generate_accessor(&mut self, payload: Vec<u8>) -> ConnectorResult<AccessImpl<'_, '_>> {
+    async fn generate_accessor(&mut self, payload: Vec<u8>) -> ConnectorResult<AccessImpl<'_>> {
         self.value = Some(payload);
         let mut event: BorrowedValue<'_> =
             simd_json::to_borrowed_value(self.value.as_mut().unwrap())
@@ -79,7 +79,7 @@ impl DebeziumMongoJsonAccessBuilder {
 
 impl AccessBuilder for DebeziumMongoJsonAccessBuilder {
     #[allow(clippy::unused_async)]
-    async fn generate_accessor(&mut self, payload: Vec<u8>) -> ConnectorResult<AccessImpl<'_, '_>> {
+    async fn generate_accessor(&mut self, payload: Vec<u8>) -> ConnectorResult<AccessImpl<'_>> {
         self.value = Some(payload);
         let mut event: BorrowedValue<'_> =
             simd_json::to_borrowed_value(self.value.as_mut().unwrap())
@@ -130,7 +130,6 @@ mod tests {
 
     async fn build_parser(rw_columns: Vec<SourceColumnDesc>) -> DebeziumParser {
         let props = SpecificParserConfig {
-            key_encoding_config: None,
             encoding_config: EncodingProperties::Json(JsonProperties {
                 use_schema_registry: false,
                 timestamptz_handling: None,

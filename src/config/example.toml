@@ -72,6 +72,7 @@ max_space_reclaim_bytes = 536870912
 level0_max_compact_file_number = 100
 tombstone_reclaim_ratio = 40
 enable_emergency_picker = true
+max_level = 6
 
 [meta.developer]
 meta_cached_traces_num = 256
@@ -121,11 +122,13 @@ stream_memory_controller_sequence_tls_step = 128
 stream_memory_controller_sequence_tls_lag = 32
 stream_enable_arrangement_backfill = true
 stream_high_join_amplification_threshold = 2048
+stream_enable_actor_tokio_metrics = false
 
 [storage]
 share_buffers_sync_parallelism = 1
 share_buffer_compaction_worker_threads_number = 4
 shared_buffer_flush_ratio = 0.800000011920929
+shared_buffer_min_batch_flush_size_mb = 800
 imm_merge_threshold = 0
 write_conflict_detection_enabled = true
 max_prefetch_block_number = 16
@@ -136,7 +139,6 @@ compactor_memory_available_proportion = 0.8
 sstable_id_remote_fetch_number = 10
 min_sstable_size_mb = 32
 min_sst_size_for_streaming_upload = 33554432
-max_sub_compaction = 4
 max_concurrent_compaction_task_number = 16
 max_preload_wait_time_mill = 0
 max_version_pinning_duration_sec = 10800
@@ -149,6 +151,7 @@ max_preload_io_retry_times = 3
 compactor_fast_max_compact_delete_ratio = 40
 compactor_fast_max_compact_task_size = 2147483648
 compactor_iter_max_io_retry_times = 8
+table_info_statistic_history_times = 240
 mem_table_spill_threshold = 4194304
 
 [storage.cache.block_cache_eviction]
@@ -161,30 +164,22 @@ algorithm = "Lru"
 dir = ""
 capacity_mb = 1024
 file_capacity_mb = 64
-device_align = 4096
-device_io_size = 16384
 flushers = 4
 reclaimers = 4
 recover_concurrency = 8
-lfu_window_to_cache_size_ratio = 1
-lfu_tiny_lru_capacity_ratio = 0.01
 insert_rate_limit_mb = 0
-catalog_bits = 6
+indexer_shards = 64
 compression = "none"
 
 [storage.meta_file_cache]
 dir = ""
 capacity_mb = 1024
 file_capacity_mb = 64
-device_align = 4096
-device_io_size = 16384
 flushers = 4
 reclaimers = 4
 recover_concurrency = 8
-lfu_window_to_cache_size_ratio = 1
-lfu_tiny_lru_capacity_ratio = 0.01
 insert_rate_limit_mb = 0
-catalog_bits = 6
+indexer_shards = 64
 compression = "none"
 
 [storage.cache_refill]
@@ -197,7 +192,9 @@ recent_filter_layers = 6
 recent_filter_rotate_interval_ms = 10000
 
 [storage.object_store]
-object_store_set_atomic_write_dir = false
+set_atomic_write_dir = false
+opendal_upload_concurrency = 8
+opendal_writer_abort_on_err = false
 
 [storage.object_store.retry]
 req_backoff_interval_ms = 1000
@@ -221,15 +218,15 @@ list_attempt_timeout_ms = 600000
 list_retry_attempts = 3
 
 [storage.object_store.s3]
-object_store_keepalive_ms = 600000
-object_store_recv_buffer_size = 2097152
-object_store_nodelay = true
+keepalive_ms = 600000
+recv_buffer_size = 2097152
+nodelay = true
 retry_unknown_service_error = false
 identity_resolution_timeout_s = 5
 
 [storage.object_store.s3.developer]
-object_store_retry_unknown_service_error = false
-object_store_retryable_service_error_codes = ["SlowDown", "TooManyRequests"]
+retry_unknown_service_error = false
+retryable_service_error_codes = ["SlowDown", "TooManyRequests"]
 use_opendal = false
 
 [system]
@@ -242,3 +239,4 @@ bloom_false_positive = 0.001
 max_concurrent_creating_streaming_jobs = 1
 pause_on_next_bootstrap = false
 enable_tracing = false
+license_key = ""

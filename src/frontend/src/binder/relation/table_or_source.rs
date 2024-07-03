@@ -17,7 +17,7 @@ use std::sync::Arc;
 use either::Either;
 use itertools::Itertools;
 use risingwave_common::bail_not_implemented;
-use risingwave_common::catalog::{is_system_schema, Field};
+use risingwave_common::catalog::{debug_assert_column_ids_distinct, is_system_schema, Field};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
 use risingwave_connector::WithPropertiesExt;
 use risingwave_sqlparser::ast::{AsOf, Statement, TableAlias};
@@ -25,6 +25,7 @@ use risingwave_sqlparser::parser::Parser;
 use thiserror_ext::AsReport;
 
 use super::BoundShare;
+use crate::binder::relation::BoundShareInput;
 use crate::binder::{Binder, Relation};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::source_catalog::SourceCatalog;
@@ -221,6 +222,7 @@ impl Binder {
         source_catalog: &SourceCatalog,
         as_of: Option<AsOf>,
     ) -> (Relation, Vec<(bool, Field)>) {
+        debug_assert_column_ids_distinct(&source_catalog.columns);
         self.included_relations.insert(source_catalog.id.into());
         (
             Relation::Source(Box::new(BoundSource {
@@ -280,7 +282,10 @@ impl Binder {
         };
         let input = Either::Left(query);
         Ok((
-            Relation::Share(Box::new(BoundShare { share_id, input })),
+            Relation::Share(Box::new(BoundShare {
+                share_id,
+                input: BoundShareInput::Query(input),
+            })),
             columns.iter().map(|c| (false, c.clone())).collect_vec(),
         ))
     }

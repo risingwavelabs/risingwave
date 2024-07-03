@@ -45,6 +45,7 @@ CASES_MAP = {
     'client-library': ['none'],
     'kafka-cdc': ['json'],
     'pubsub': ['json'],
+    'dynamodb': ['json'],
 }
 
 def gen_pipeline_steps():

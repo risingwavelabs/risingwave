@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::cmp::min;
+use std::collections::HashSet;
 use std::default::Default;
 use std::fmt::{Debug, Formatter};
 use std::future::Future;
@@ -318,6 +319,8 @@ pub trait StateStoreWrite: StaticSendSync {
     ) -> StorageResult<usize>;
 }
 
+pub trait SyncFuture = Future<Output = StorageResult<SyncResult>> + Send + 'static;
+
 pub trait StateStore: StateStoreRead + StaticSendSync + Clone {
     type Local: LocalStateStore;
 
@@ -328,7 +331,7 @@ pub trait StateStore: StateStoreRead + StaticSendSync + Clone {
         epoch: HummockReadEpoch,
     ) -> impl Future<Output = StorageResult<()>> + Send + '_;
 
-    fn sync(&self, epoch: u64) -> impl Future<Output = StorageResult<SyncResult>> + Send + '_;
+    fn sync(&self, epoch: u64, table_ids: HashSet<TableId>) -> impl SyncFuture;
 
     /// update max current epoch in storage.
     fn seal_epoch(&self, epoch: u64, is_checkpoint: bool);
@@ -628,10 +631,10 @@ pub struct NewLocalOptions {
     /// Whether the operation is consistent. The term `consistent` requires the following:
     ///
     /// 1. A key cannot be inserted or deleted for more than once, i.e. inserting to an existing
-    /// key or deleting an non-existing key is not allowed.
+    ///    key or deleting an non-existing key is not allowed.
     ///
     /// 2. The old value passed from
-    /// `update` and `delete` should match the original stored value.
+    ///    `update` and `delete` should match the original stored value.
     pub op_consistency_level: OpConsistencyLevel,
     pub table_option: TableOption,
 

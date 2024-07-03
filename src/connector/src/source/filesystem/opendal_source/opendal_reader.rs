@@ -33,7 +33,6 @@ use crate::source::{
     SplitMetaData, SplitReader,
 };
 
-const MAX_CHANNEL_BUFFER_SIZE: usize = 2048;
 const STREAM_READER_CAPACITY: usize = 4096;
 #[derive(Debug, Clone)]
 pub struct OpendalReader<Src: OpendalSource> {
@@ -110,7 +109,7 @@ impl<Src: OpendalSource> OpendalReader<Src> {
         let object_name = split.name.clone();
 
         let reader = op
-            .reader_with(&object_name)
+            .read_with(&object_name)
             .range(split.offset as u64..)
             .into_future() // Unlike `rustc`, `try_stream` seems require manual `into_future`.
             .await?;

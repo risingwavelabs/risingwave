@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::borrow::Cow;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::io::Write;
 use std::time::Duration;
 
@@ -238,7 +238,7 @@ pub struct KafkaPrivateLinkCommon {
     /// This is generated from `private_link_targets` and `private_link_endpoint` in frontend, instead of given by users.
     #[serde(rename = "broker.rewrite.endpoints")]
     #[serde_as(as = "Option<JsonString>")]
-    pub broker_rewrite_map: Option<HashMap<String, String>>,
+    pub broker_rewrite_map: Option<BTreeMap<String, String>>,
 }
 
 const fn default_kafka_sync_call_timeout() -> Duration {
@@ -743,4 +743,25 @@ pub(crate) fn load_private_key(
         .next()
         .ok_or_else(|| anyhow!("No private key found"))?;
     Ok(cert?.into())
+}
+
+#[serde_as]
+#[derive(Deserialize, Debug, Clone, WithOptions)]
+pub struct MongodbCommon {
+    /// The URL of MongoDB
+    #[serde(rename = "mongodb.url")]
+    pub connect_uri: String,
+    /// The collection name where data should be written to or read from. For sinks, the format is
+    /// `db_name.collection_name`. Data can also be written to dynamic collections, see `collection.name.field`
+    /// for more information.
+    #[serde(rename = "collection.name")]
+    pub collection_name: String,
+}
+
+impl MongodbCommon {
+    pub(crate) async fn build_client(&self) -> ConnectorResult<mongodb::Client> {
+        let client = mongodb::Client::with_uri_str(&self.connect_uri).await?;
+
+        Ok(client)
+    }
 }

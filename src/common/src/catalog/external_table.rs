@@ -65,6 +65,7 @@ impl CdcTableDesc {
             table_name: self.external_table_name.clone(),
             stream_key: self.stream_key.iter().map(|k| *k as _).collect(),
             connect_properties: self.connect_properties.clone(),
+            secret_refs: Default::default(),
         }
     }
 

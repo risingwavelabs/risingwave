@@ -24,6 +24,7 @@ use risingwave_common::hash::{ActorMapping, ParallelUnitId, ParallelUnitMapping}
 use risingwave_common::util::stream_graph_visitor::{
     visit_stream_node, visit_stream_node_cont, visit_stream_node_cont_mut,
 };
+use risingwave_common::util::worker_util::WorkerNodeId;
 use risingwave_connector::source::SplitImpl;
 use risingwave_meta_model_v2::SourceId;
 use risingwave_pb::common::{PbParallelUnitMapping, PbWorkerSlotMapping};
@@ -69,10 +70,13 @@ impl FragmentManagerCore {
                     .values()
                     .map(move |fragment| FragmentWorkerSlotMapping {
                         fragment_id: fragment.fragment_id,
-                        mapping: Some(FragmentManager::convert_mapping(
-                            &table_fragments.actor_status,
-                            fragment.vnode_mapping.as_ref().unwrap(),
-                        )),
+                        mapping: Some(
+                            FragmentManager::convert_mapping(
+                                &table_fragments.actor_status,
+                                fragment.vnode_mapping.as_ref().unwrap(),
+                            )
+                            .unwrap(),
+                        ),
                     })
             })
     }
@@ -119,12 +123,21 @@ pub struct FragmentManager {
     core: RwLock<FragmentManagerCore>,
 }
 
-pub struct ActorInfos {
-    /// `node_id` => `actor_ids`
-    pub actor_maps: HashMap<WorkerId, Vec<ActorId>>,
+#[derive(Clone)]
+pub struct InflightFragmentInfo {
+    pub actors: HashMap<ActorId, WorkerNodeId>,
+    pub state_table_ids: HashSet<TableId>,
+    pub is_injectable: bool,
+}
 
-    /// all reachable barrier inject actors
-    pub barrier_inject_actor_maps: HashMap<WorkerId, Vec<ActorId>>,
+pub struct ActorInfos {
+    pub fragment_infos: HashMap<FragmentId, InflightFragmentInfo>,
+}
+
+impl ActorInfos {
+    pub fn new(fragment_infos: HashMap<FragmentId, InflightFragmentInfo>) -> Self {
+        Self { fragment_infos }
+    }
 }
 
 pub type FragmentManagerRef = Arc<FragmentManager>;
@@ -198,15 +211,23 @@ impl FragmentManager {
     async fn notify_fragment_mapping(&self, table_fragment: &TableFragments, operation: Operation) {
         // Notify all fragment mapping to frontend nodes
         for fragment in table_fragment.fragments.values() {
-            let fragment_mapping = FragmentWorkerSlotMapping {
-                fragment_id: fragment.fragment_id,
-                mapping: Some(Self::convert_mapping(
-                    &table_fragment.actor_status,
-                    fragment
-                        .vnode_mapping
-                        .as_ref()
-                        .expect("no data distribution found"),
-                )),
+            let vnode_mapping = fragment
+                .vnode_mapping
+                .as_ref()
+                .expect("no data distribution found");
+
+            let fragment_mapping = if let Operation::Delete = operation {
+                FragmentWorkerSlotMapping {
+                    fragment_id: fragment.fragment_id,
+                    mapping: None,
+                }
+            } else {
+                FragmentWorkerSlotMapping {
+                    fragment_id: fragment.fragment_id,
+                    mapping: Some(
+                        Self::convert_mapping(&table_fragment.actor_status, vnode_mapping).unwrap(),
+                    ),
+                }
             };
 
             self.env
@@ -726,39 +747,45 @@ impl FragmentManager {
     /// Used in [`crate::barrier::GlobalBarrierManager`], load all running actor that need to be sent or
     /// collected
     pub async fn load_all_actors(&self) -> ActorInfos {
-        let mut actor_maps = HashMap::new();
-        let mut barrier_inject_actor_maps = HashMap::new();
+        let mut fragment_infos = HashMap::new();
 
         let map = &self.core.read().await.table_fragments;
         for fragments in map.values() {
-            for (worker_id, actor_states) in fragments.worker_actor_states() {
-                for (actor_id, actor_state) in actor_states {
-                    if actor_state == ActorState::Running {
-                        actor_maps
-                            .entry(worker_id)
-                            .or_insert_with(Vec::new)
-                            .push(actor_id);
-                    }
-                }
-            }
-
-            let barrier_inject_actors = fragments.worker_barrier_inject_actor_states();
-            for (worker_id, actor_states) in barrier_inject_actors {
-                for (actor_id, actor_state) in actor_states {
-                    if actor_state == ActorState::Running {
-                        barrier_inject_actor_maps
-                            .entry(worker_id)
-                            .or_insert_with(Vec::new)
-                            .push(actor_id);
-                    }
-                }
+            for fragment in fragments.fragments.values() {
+                let info = InflightFragmentInfo {
+                    actors: fragment
+                        .actors
+                        .iter()
+                        .filter_map(|actor| {
+                            let status = fragments
+                                .actor_status
+                                .get(&actor.actor_id)
+                                .expect("should exist");
+                            if status.state == ActorState::Running as i32 {
+                                Some((
+                                    actor.actor_id,
+                                    status
+                                        .get_parallel_unit()
+                                        .expect("should set")
+                                        .worker_node_id,
+                                ))
+                            } else {
+                                None
+                            }
+                        })
+                        .collect(),
+                    state_table_ids: fragment
+                        .state_table_ids
+                        .iter()
+                        .map(|table_id| TableId::new(*table_id))
+                        .collect(),
+                    is_injectable: TableFragments::is_injectable(fragment.fragment_type_mask),
+                };
+                assert!(fragment_infos.insert(fragment.fragment_id, info,).is_none());
             }
         }
 
-        ActorInfos {
-            actor_maps,
-            barrier_inject_actor_maps,
-        }
+        ActorInfos::new(fragment_infos)
     }
 
     async fn migrate_fragment_actors_inner(
@@ -1273,7 +1300,7 @@ impl FragmentManager {
 
                 *fragment.vnode_mapping.as_mut().unwrap() = vnode_mapping.clone();
 
-                let worker_slot_mapping = Self::convert_mapping(&actor_status, &vnode_mapping);
+                let worker_slot_mapping = Self::convert_mapping(&actor_status, &vnode_mapping)?;
 
                 // Notify fragment mapping to frontend nodes.
                 let fragment_mapping = FragmentWorkerSlotMapping {
@@ -1410,7 +1437,7 @@ impl FragmentManager {
     fn convert_mapping(
         actor_status: &BTreeMap<ActorId, ActorStatus>,
         vnode_mapping: &PbParallelUnitMapping,
-    ) -> PbWorkerSlotMapping {
+    ) -> MetaResult<PbWorkerSlotMapping> {
         let parallel_unit_to_worker = actor_status
             .values()
             .map(|actor_status| {
@@ -1419,9 +1446,9 @@ impl FragmentManager {
             })
             .collect();
 
-        ParallelUnitMapping::from_protobuf(vnode_mapping)
-            .to_worker_slot(&parallel_unit_to_worker)
-            .to_protobuf()
+        Ok(ParallelUnitMapping::from_protobuf(vnode_mapping)
+            .to_worker_slot(&parallel_unit_to_worker)?
+            .to_protobuf())
     }
 
     pub async fn table_node_actors(

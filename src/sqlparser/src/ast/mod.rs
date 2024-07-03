@@ -33,6 +33,7 @@ use std::sync::Arc;
 use itertools::Itertools;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
+use winnow::PResult;
 
 pub use self::data_type::{DataType, StructField};
 pub use self::ddl::{
@@ -45,9 +46,9 @@ pub use self::legacy_source::{
 };
 pub use self::operator::{BinaryOperator, QualifiedOperator, UnaryOperator};
 pub use self::query::{
-    Cte, Distinct, Fetch, Join, JoinConstraint, JoinOperator, LateralView, OrderByExpr, Query,
-    Select, SelectItem, SetExpr, SetOperator, TableAlias, TableFactor, TableWithJoins, Top, Values,
-    With,
+    Cte, CteInner, Distinct, Fetch, Join, JoinConstraint, JoinOperator, LateralView, OrderByExpr,
+    Query, Select, SelectItem, SetExpr, SetOperator, TableAlias, TableFactor, TableWithJoins, Top,
+    Values, With,
 };
 pub use self::statement::*;
 pub use self::value::{
@@ -59,7 +60,7 @@ pub use crate::ast::ddl::{
     AlterViewOperation,
 };
 use crate::keywords::Keyword;
-use crate::parser::{IncludeOption, IncludeOptionItem, Parser, ParserError};
+use crate::parser::{IncludeOption, IncludeOptionItem, Parser, ParserError, StrError};
 
 pub type RedactSqlOptionKeywordsRef = Arc<HashSet<String>>;
 
@@ -191,7 +192,7 @@ impl From<&str> for Ident {
 }
 
 impl ParseTo for Ident {
-    fn parse_to(parser: &mut Parser) -> Result<Self, ParserError> {
+    fn parse_to(parser: &mut Parser<'_>) -> PResult<Self> {
         parser.parse_identifier()
     }
 }
@@ -235,7 +236,7 @@ impl fmt::Display for ObjectName {
 }
 
 impl ParseTo for ObjectName {
-    fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
+    fn parse_to(p: &mut Parser<'_>) -> PResult<Self> {
         p.parse_object_name()
     }
 }
@@ -416,7 +417,7 @@ pub enum Expr {
     /// explicitly specified zone
     AtTimeZone {
         timestamp: Box<Expr>,
-        time_zone: String,
+        time_zone: Box<Expr>,
     },
     /// `EXTRACT(DateTimeField FROM <expr>)`
     Extract {
@@ -666,7 +667,7 @@ impl fmt::Display for Expr {
             Expr::AtTimeZone {
                 timestamp,
                 time_zone,
-            } => write!(f, "{} AT TIME ZONE '{}'", timestamp, time_zone),
+            } => write!(f, "{} AT TIME ZONE {}", timestamp, time_zone),
             Expr::Extract { field, expr } => write!(f, "EXTRACT({} FROM {})", field, expr),
             Expr::Collate { expr, collation } => write!(f, "{} COLLATE {}", expr, collation),
             Expr::Nested(ast) => write!(f, "({})", ast),
@@ -868,11 +869,7 @@ impl fmt::Display for WindowSpec {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct WindowFrame {
     pub units: WindowFrameUnits,
-    pub start_bound: WindowFrameBound,
-    /// The right bound of the `BETWEEN .. AND` clause. The end bound of `None`
-    /// indicates the shorthand form (e.g. `ROWS 1 PRECEDING`), which must
-    /// behave the same as `end_bound = WindowFrameBound::CurrentRow`.
-    pub end_bound: Option<WindowFrameBound>,
+    pub bounds: WindowFrameBounds,
     pub exclusion: Option<WindowFrameExclusion>,
 }
 
@@ -882,18 +879,36 @@ pub enum WindowFrameUnits {
     Rows,
     Range,
     Groups,
+    Session,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum WindowFrameBounds {
+    Bounds {
+        start: WindowFrameBound,
+        /// The right bound of the `BETWEEN .. AND` clause. The end bound of `None`
+        /// indicates the shorthand form (e.g. `ROWS 1 PRECEDING`), which must
+        /// behave the same as `end_bound = WindowFrameBound::CurrentRow`.
+        end: Option<WindowFrameBound>,
+    },
+    Gap(Box<Expr>),
 }
 
 impl fmt::Display for WindowFrame {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if let Some(end_bound) = &self.end_bound {
-            write!(
-                f,
-                "{} BETWEEN {} AND {}",
-                self.units, self.start_bound, end_bound
-            )
-        } else {
-            write!(f, "{} {}", self.units, self.start_bound)
+        write!(f, "{} ", self.units)?;
+        match &self.bounds {
+            WindowFrameBounds::Bounds { start, end } => {
+                if let Some(end) = end {
+                    write!(f, "BETWEEN {} AND {}", start, end)
+                } else {
+                    write!(f, "{}", start)
+                }
+            }
+            WindowFrameBounds::Gap(gap) => {
+                write!(f, "WITH GAP {}", gap)
+            }
         }
     }
 }
@@ -904,6 +919,7 @@ impl fmt::Display for WindowFrameUnits {
             WindowFrameUnits::Rows => "ROWS",
             WindowFrameUnits::Range => "RANGE",
             WindowFrameUnits::Groups => "GROUPS",
+            WindowFrameUnits::Session => "SESSION",
         })
     }
 }
@@ -2560,7 +2576,7 @@ impl fmt::Display for ObjectType {
 }
 
 impl ParseTo for ObjectType {
-    fn parse_to(parser: &mut Parser) -> Result<Self, ParserError> {
+    fn parse_to(parser: &mut Parser<'_>) -> PResult<Self> {
         let object_type = if parser.parse_keyword(Keyword::TABLE) {
             ObjectType::Table
         } else if parser.parse_keyword(Keyword::VIEW) {
@@ -2588,7 +2604,6 @@ impl ParseTo for ObjectType {
         } else {
             return parser.expected(
                 "TABLE, VIEW, INDEX, MATERIALIZED VIEW, SOURCE, SINK, SUBSCRIPTION, SCHEMA, DATABASE, USER, SECRET or CONNECTION after DROP",
-                parser.peek_token(),
             );
         };
         Ok(object_type)
@@ -2766,7 +2781,6 @@ impl fmt::Display for DropFunctionOption {
 /// Function describe in DROP FUNCTION.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
 pub struct FunctionDesc {
     pub name: ObjectName,
     pub args: Option<Vec<OperateFunctionArg>>,
@@ -2871,6 +2885,7 @@ impl fmt::Display for FunctionBehavior {
 #[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum FunctionDefinition {
+    Identifier(String),
     SingleQuotedDef(String),
     DoubleDollarDef(String),
 }
@@ -2878,6 +2893,7 @@ pub enum FunctionDefinition {
 impl fmt::Display for FunctionDefinition {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            FunctionDefinition::Identifier(s) => write!(f, "{s}")?,
             FunctionDefinition::SingleQuotedDef(s) => write!(f, "'{s}'")?,
             FunctionDefinition::DoubleDollarDef(s) => write!(f, "$${s}$$")?,
         }
@@ -2889,6 +2905,7 @@ impl FunctionDefinition {
     /// Returns the function definition as a string slice.
     pub fn as_str(&self) -> &str {
         match self {
+            FunctionDefinition::Identifier(s) => s,
             FunctionDefinition::SingleQuotedDef(s) => s,
             FunctionDefinition::DoubleDollarDef(s) => s,
         }
@@ -2897,6 +2914,7 @@ impl FunctionDefinition {
     /// Returns the function definition as a string.
     pub fn into_string(self) -> String {
         match self {
+            FunctionDefinition::Identifier(s) => s,
             FunctionDefinition::SingleQuotedDef(s) => s,
             FunctionDefinition::DoubleDollarDef(s) => s,
         }
@@ -3007,7 +3025,7 @@ impl CreateFunctionWithOptions {
 
 /// TODO(kwannoel): Generate from the struct definition instead.
 impl TryFrom<Vec<SqlOption>> for CreateFunctionWithOptions {
-    type Error = ParserError;
+    type Error = StrError;
 
     fn try_from(with_options: Vec<SqlOption>) -> Result<Self, Self::Error> {
         let mut always_retry_on_network_error = None;
@@ -3015,10 +3033,7 @@ impl TryFrom<Vec<SqlOption>> for CreateFunctionWithOptions {
             if option.name.to_string().to_lowercase() == "always_retry_on_network_error" {
                 always_retry_on_network_error = Some(option.value == Value::Boolean(true));
             } else {
-                return Err(ParserError::ParserError(format!(
-                    "Unsupported option: {}",
-                    option.name
-                )));
+                return Err(StrError(format!("Unsupported option: {}", option.name)));
             }
         }
         Ok(Self {

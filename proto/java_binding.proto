@@ -34,4 +34,5 @@ message ReadPlan {
   catalog.Table table_catalog = 7;
 
   repeated uint32 vnode_ids = 8;
+  bool use_new_object_prefix_strategy = 9;
 }

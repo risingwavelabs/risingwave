@@ -18,6 +18,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, Context};
 use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
+use object_metrics::GLOBAL_OBJECT_STORE_METRICS;
 use reqwest::{header, Client, RequestBuilder, StatusCode};
 use risingwave_object_store::object::*;
 use serde::{Deserialize, Serialize};
@@ -55,6 +56,7 @@ pub struct SnowflakeHttpClient {
     account: String,
     user: String,
     private_key: String,
+    #[expect(dead_code)]
     header: HashMap<String, String>,
     s3_path: Option<String>,
 }
@@ -179,6 +181,7 @@ impl SnowflakeHttpClient {
 
 /// todo: refactor this part after s3 sink is available
 pub struct SnowflakeS3Client {
+    #[expect(dead_code)]
     s3_bucket: String,
     s3_path: Option<String>,
     pub opendal_s3_engine: OpendalObjectStore,
@@ -195,11 +198,13 @@ impl SnowflakeS3Client {
         // FIXME: we should use the `ObjectStoreConfig` instead of default
         // just use default configuration here for opendal s3 engine
         let config = ObjectStoreConfig::default();
+        let metrics = Arc::new(GLOBAL_OBJECT_STORE_METRICS.clone());
 
         // create the s3 engine for streaming upload to the intermediate s3 bucket
         let opendal_s3_engine = OpendalObjectStore::new_s3_engine_with_credentials(
             &s3_bucket,
             Arc::new(config),
+            metrics,
             &aws_access_key_id,
             &aws_secret_access_key,
             &aws_region,

@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use core::num::NonZeroU64;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
@@ -69,7 +69,7 @@ pub struct DeltaLakeCommon {
     pub s3_endpoint: Option<String>,
     #[serde(rename = "gcs.service.account")]
     pub gcs_service_account: Option<String>,
-    // Commit every n(>0) checkpoints, if n is not set, we will commit every checkpoint.
+    /// Commit every n(>0) checkpoints, if n is not set, we will commit every checkpoint.
     #[serde(default, deserialize_with = "deserialize_optional_u64_from_string")]
     pub commit_checkpoint_interval: Option<u64>,
 }
@@ -157,7 +157,7 @@ pub struct DeltaLakeConfig {
 }
 
 impl DeltaLakeConfig {
-    pub fn from_hashmap(properties: HashMap<String, String>) -> Result<Self> {
+    pub fn from_btreemap(properties: BTreeMap<String, String>) -> Result<Self> {
         let config = serde_json::from_value::<DeltaLakeConfig>(
             serde_json::to_value(properties).map_err(|e| SinkError::DeltaLake(e.into()))?,
         )
@@ -295,7 +295,7 @@ impl Sink for DeltaLakeSink {
             SinkDecouple::Disable => {
                 if config_decouple {
                     return Err(SinkError::Config(anyhow!(
-                        "config conflict: DeltaLake config `commit_checkpoint_interval` bigger than 1 which means that must enable sink decouple, but session config sink decouple is disabled"
+                        "config conflict: DeltaLake config `commit_checkpoint_interval` larger than 1 means that sink decouple must be enabled, but session config sink_decouple is disabled"
                     )));
                 }
                 Ok(false)
@@ -380,6 +380,11 @@ impl Sink for DeltaLakeSink {
                 )));
             }
         }
+        if self.config.common.commit_checkpoint_interval == Some(0) {
+            return Err(SinkError::Config(anyhow!(
+                "commit_checkpoint_interval must be greater than 0"
+            )));
+        }
         Ok(())
     }
 
@@ -394,17 +399,20 @@ impl TryFrom<SinkParam> for DeltaLakeSink {
     type Error = SinkError;
 
     fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
-        let config = DeltaLakeConfig::from_hashmap(param.properties.clone())?;
+        let config = DeltaLakeConfig::from_btreemap(param.properties.clone())?;
         DeltaLakeSink::new(config, param)
     }
 }
 
 pub struct DeltaLakeSinkWriter {
     pub config: DeltaLakeConfig,
+    #[expect(dead_code)]
     schema: Schema,
+    #[expect(dead_code)]
     pk_indices: Vec<usize>,
     writer: RecordBatchWriter,
     dl_schema: Arc<deltalake::arrow::datatypes::Schema>,
+    #[expect(dead_code)]
     dl_table: DeltaTable,
 }
 
@@ -573,7 +581,7 @@ impl DeltaLakeWriteResult {
 mod test {
     use deltalake::kernel::DataType as SchemaDataType;
     use deltalake::operations::create::CreateBuilder;
-    use maplit::hashmap;
+    use maplit::btreemap;
     use risingwave_common::array::{Array, I32Array, Op, StreamChunk, Utf8Array};
     use risingwave_common::catalog::{Field, Schema};
 
@@ -594,7 +602,7 @@ mod test {
             .await
             .unwrap();
 
-        let properties = hashmap! {
+        let properties = btreemap! {
             "connector".to_string() => "deltalake".to_string(),
             "force_append_only".to_string() => "true".to_string(),
             "type".to_string() => "append-only".to_string(),
@@ -616,7 +624,7 @@ mod test {
             },
         ]);
 
-        let deltalake_config = DeltaLakeConfig::from_hashmap(properties).unwrap();
+        let deltalake_config = DeltaLakeConfig::from_btreemap(properties).unwrap();
         let deltalake_table = deltalake_config
             .common
             .create_deltalake_client()

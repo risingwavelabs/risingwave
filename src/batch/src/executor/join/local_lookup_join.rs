@@ -62,6 +62,7 @@ struct InnerSideExecutorBuilder<C> {
     epoch: BatchQueryEpoch,
     worker_slot_mapping: HashMap<WorkerSlotId, WorkerNode>,
     worker_slot_to_scan_range_mapping: HashMap<WorkerSlotId, Vec<(ScanRange, VirtualNode)>>,
+    #[expect(dead_code)]
     chunk_size: usize,
     shutdown_rx: ShutdownToken,
     next_stage_id: usize,
@@ -486,6 +487,8 @@ impl HashKeyDispatcher for LocalLookupJoinExecutorArgs {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use risingwave_common::array::{DataChunk, DataChunkTestExt};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::hash::HashKeyDispatcher;
@@ -501,13 +504,10 @@ mod tests {
         diff_executor_output, FakeInnerSideExecutorBuilder, MockExecutor,
     };
     use crate::executor::{BoxedExecutor, SortExecutor};
+    use crate::monitor::BatchSpillMetrics;
     use crate::task::ShutdownToken;
 
     const CHUNK_SIZE: usize = 1024;
-
-    pub struct MockGatherExecutor {
-        chunks: Vec<DataChunk>,
-    }
 
     fn create_outer_side_input() -> BoxedExecutor {
         let schema = Schema {
@@ -597,10 +597,12 @@ mod tests {
 
         Box::new(SortExecutor::new(
             child,
-            column_orders,
+            Arc::new(column_orders),
             "SortExecutor".into(),
             CHUNK_SIZE,
             MemoryContext::none(),
+            None,
+            BatchSpillMetrics::for_test(),
         ))
     }
 
