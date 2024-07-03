@@ -38,7 +38,6 @@ impl OpendalObjectStore {
             .inspect_err(|e| tracing::error!("Failed to init JVM: {:?}", e))
             .unwrap();
 
-            
         // Create hdfs backend builder.
         let mut builder = Hdfs::default();
         // Set the name node for hdfs.
