@@ -99,7 +99,10 @@ impl TelemetryToProtobuf for MetaTelemetryReport {
             meta_backend: match self.meta_backend {
                 MetaBackend::Etcd => risingwave_pb::telemetry::MetaBackend::Etcd as i32,
                 MetaBackend::Mem => risingwave_pb::telemetry::MetaBackend::Memory as i32,
-                MetaBackend::Sql => risingwave_pb::telemetry::MetaBackend::Rdb as i32,
+                MetaBackend::Sql
+                | MetaBackend::Sqlite
+                | MetaBackend::Postgres
+                | MetaBackend::Mysql => risingwave_pb::telemetry::MetaBackend::Rdb as i32,
             },
             node_count: Some(risingwave_pb::telemetry::NodeCount {
                 meta: self.node_count.meta_count as u32,
