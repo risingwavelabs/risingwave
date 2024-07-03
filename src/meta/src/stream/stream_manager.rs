@@ -1134,7 +1134,6 @@ mod tests {
                 id: table_id.table_id(),
                 ..Default::default()
             };
-            let streaming_job = StreamingJob::MaterializedView(table.clone());
             let table_fragments = TableFragments::new(
                 table_id,
                 fragments,
@@ -1144,6 +1143,7 @@ mod tests {
             );
             let ctx = CreateStreamingJobContext {
                 building_locations: locations,
+                streaming_job: StreamingJob::MaterializedView(table.clone()),
                 ..Default::default()
             };
 

@@ -36,6 +36,13 @@ pub enum StreamingJob {
     Source(PbSource),
 }
 
+#[cfg(test)]
+impl Default for StreamingJob {
+    fn default() -> Self {
+        StreamingJob::MaterializedView(Table::default())
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum DdlType {
     MaterializedView,
