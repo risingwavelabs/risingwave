@@ -14,7 +14,6 @@
 
 use std::collections::HashMap;
 use std::future::Future;
-use std::io;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Instant;
@@ -23,6 +22,7 @@ use bytes::Bytes;
 use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, Validation};
 use parking_lot::Mutex;
 use risingwave_common::types::DataType;
+use risingwave_common::util::tokio_util::sync::CancellationToken;
 use risingwave_sqlparser::ast::{RedactSqlOptionKeywordsRef, Statement};
 use serde::Deserialize;
 use thiserror_ext::AsReport;
@@ -58,6 +58,10 @@ pub trait SessionManager: Send + Sync + 'static {
     fn cancel_creating_jobs_in_session(&self, session_id: SessionId);
 
     fn end_session(&self, session: &Self::Session);
+
+    fn close(&self) -> impl Future<Output = Result<(), BoxedError>> + Send {
+        async { Ok(()) }
+    }
 }
 
 /// A psql connection. Each connection binds with a database. Switching database will need to
@@ -247,12 +251,15 @@ impl UserAuthenticator {
 }
 
 /// Binds a Tcp or Unix listener at `addr`. Spawn a coroutine to serve every new connection.
+///
+/// TODO: only return...
 pub async fn pg_serve(
     addr: &str,
-    session_mgr: Arc<impl SessionManager>,
+    session_mgr: impl SessionManager,
     tls_config: Option<TlsConfig>,
     redact_sql_option_keywords: Option<RedactSqlOptionKeywordsRef>,
-) -> io::Result<()> {
+    shutdown: CancellationToken,
+) -> Result<(), BoxedError> {
     let listener = Listener::bind(addr).await?;
     tracing::info!(addr, "server started");
 
@@ -271,28 +278,39 @@ pub async fn pg_serve(
     #[cfg(madsim)]
     let worker_runtime = tokio::runtime::Builder::new_multi_thread().build().unwrap();
 
-    let f = async move {
-        loop {
-            let conn_ret = listener.accept().await;
-            match conn_ret {
-                Ok((stream, peer_addr)) => {
-                    tracing::info!(%peer_addr, "accept connection");
-                    worker_runtime.spawn(handle_connection(
-                        stream,
-                        session_mgr.clone(),
-                        tls_config.clone(),
-                        Arc::new(peer_addr),
-                        redact_sql_option_keywords.clone(),
-                    ));
-                }
+    let session_mgr = Arc::new(session_mgr);
+    let f = {
+        let session_mgr = session_mgr.clone();
+        async move {
+            loop {
+                let conn_ret = listener.accept().await;
+                match conn_ret {
+                    Ok((stream, peer_addr)) => {
+                        tracing::info!(%peer_addr, "accept connection");
+                        worker_runtime.spawn(handle_connection(
+                            stream,
+                            session_mgr.clone(),
+                            tls_config.clone(),
+                            Arc::new(peer_addr),
+                            redact_sql_option_keywords.clone(),
+                        ));
+                    }
 
-                Err(e) => {
-                    tracing::error!(error = %e.as_report(), "failed to accept connection",);
+                    Err(e) => {
+                        tracing::error!(error = %e.as_report(), "failed to accept connection",);
+                    }
                 }
             }
         }
     };
-    acceptor_runtime.spawn(f).await?;
+
+    let _acceptor_handle = acceptor_runtime.spawn(f);
+
+    shutdown.cancelled().await;
+
+    acceptor_runtime.shutdown_background();
+    session_mgr.close().await?;
+
     Ok(())
 }
 
@@ -339,6 +357,7 @@ mod tests {
     use futures::stream::BoxStream;
     use futures::StreamExt;
     use risingwave_common::types::DataType;
+    use risingwave_common::util::tokio_util::sync::CancellationToken;
     use risingwave_sqlparser::ast::Statement;
     use tokio_postgres::NoTls;
 
@@ -495,7 +514,16 @@ mod tests {
         let pg_config = pg_config.into();
 
         let session_mgr = Arc::new(MockSessionManager {});
-        tokio::spawn(async move { pg_serve(&bind_addr, session_mgr, None, None).await });
+        tokio::spawn(async move {
+            pg_serve(
+                &bind_addr,
+                session_mgr,
+                None,
+                None,
+                CancellationToken::new(), // dummy
+            )
+            .await
+        });
         // wait for server to start
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
