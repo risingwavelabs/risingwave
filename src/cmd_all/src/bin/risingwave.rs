@@ -110,7 +110,7 @@ enum Component {
 
 impl Component {
     /// Start the component from the given `args` without `argv[0]`.
-    fn start(self, matches: &ArgMatches) {
+    fn start(self, matches: &ArgMatches) -> ! {
         eprintln!("launching `{}`", self);
 
         fn parse_opts<T: FromArgMatches>(matches: &ArgMatches) -> T {
@@ -224,7 +224,7 @@ fn main() {
     component.start(&matches);
 }
 
-fn standalone(opts: StandaloneOpts) {
+fn standalone(opts: StandaloneOpts) -> ! {
     let opts = risingwave_cmd_all::parse_standalone_opt_args(&opts);
     let settings = risingwave_rt::LoggerSettings::from_opts(&opts)
         .with_target("risingwave_storage", Level::WARN)
@@ -237,7 +237,7 @@ fn standalone(opts: StandaloneOpts) {
 /// For single node, the internals are just a config mapping from its
 /// high level options to standalone mode node-level options.
 /// We will start a standalone instance, with all nodes in the same process.
-fn single_node(opts: SingleNodeOpts) {
+fn single_node(opts: SingleNodeOpts) -> ! {
     if env::var(TELEMETRY_CLUSTER_TYPE).is_err() {
         env::set_var(TELEMETRY_CLUSTER_TYPE, TELEMETRY_CLUSTER_TYPE_SINGLE_NODE);
     }

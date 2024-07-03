@@ -19,8 +19,10 @@
 
 #![feature(panic_update_hook)]
 #![feature(let_chains)]
+#![feature(exitcode_exit_method)]
 
 use std::pin::pin;
+use std::process::ExitCode;
 
 use futures::Future;
 use risingwave_common::util::tokio_util::sync::CancellationToken;
@@ -44,11 +46,12 @@ use prof::*;
 /// to get notified on this.
 ///
 /// Users may also send a second `SIGINT` signal to force shutdown. In this case, this function
-/// won't return and the process will exit with code 1.
+/// will exit the process with a non-zero exit code.
 ///
 /// When `f` returns, this function will assume that the component has finished its work and it's
-/// safe to exit. Therefore, the main runtime to drive the future will be shutdown **without**
-/// waiting for background tasks to finish. Then, this function will also return.
+/// safe to exit. Therefore, this function will exit the process with exit code 0 **without**
+/// waiting for background tasks to finish. In other words, it's the responsibility of `f` to
+/// ensure that all essential background tasks are finished before returning.
 ///
 /// # Environment variables
 ///
@@ -61,10 +64,10 @@ use prof::*;
 ///   debug mode, and disable in release mode.
 /// * `RW_PROFILE_PATH`: the path to generate flamegraph. If set, then profiling is automatically
 ///   enabled.
-pub fn main_okk<F, Fut>(f: F) -> Fut::Output
+pub fn main_okk<F, Fut>(f: F) -> !
 where
     F: FnOnce(CancellationToken) -> Fut,
-    Fut: Future + Send + 'static,
+    Fut: Future<Output = ()> + Send + 'static,
 {
     set_panic_hook();
 
@@ -105,18 +108,22 @@ where
 
                 // Send shutdown signal.
                 shutdown.cancel();
+
                 // While waiting for the future to finish, listen for the second ctrl-c signal.
                 tokio::select! {
                     biased;
                     result = tokio::signal::ctrl_c() => {
                         result.expect("failed to receive ctrl-c signal");
                         tracing::warn!("forced shutdown");
-                        std::process::exit(1);
+
+                        // Directly exit the process **here** instead of returning from the future, since
+                        // we don't even want to run destructors but only exit as soon as possible.
+                        ExitCode::FAILURE.exit_process();
                     }
-                    output = &mut fut => output
+                    _ = &mut fut => {},
                 }
             }
-            output = &mut fut => output,
+            _ = &mut fut => {},
         }
     };
 
@@ -126,7 +133,11 @@ where
         .build()
         .unwrap();
 
-    let output = runtime.block_on(future_with_shutdown);
-    runtime.shutdown_background(); // do not wait for background tasks to finish
-    output
+    runtime.block_on(future_with_shutdown);
+
+    // Shutdown the runtime and exit the process, without waiting for background tasks to finish.
+    // See the doc on this function for more details.
+    // TODO(shutdown): is it necessary to shutdown here as we're going to exit?
+    runtime.shutdown_background();
+    ExitCode::SUCCESS.exit_process();
 }
