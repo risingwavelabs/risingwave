@@ -10710,7 +10710,7 @@ dependencies = [
  "futures-util",
  "hashbrown 0.14.3",
  "hytra",
- "icelake",
+ "iceberg",
  "itertools 0.12.1",
  "madsim-tokio",
  "madsim-tonic",
