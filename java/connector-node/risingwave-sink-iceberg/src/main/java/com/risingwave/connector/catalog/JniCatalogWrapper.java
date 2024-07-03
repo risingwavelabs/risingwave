@@ -43,9 +43,6 @@ public class JniCatalogWrapper {
      * @throws Exception
      */
     public String loadTable(String tableIdentifier) throws Exception {
-        // For jni.rs
-        java.lang.Thread.currentThread()
-                .setContextClassLoader(java.lang.ClassLoader.getSystemClassLoader());
         TableIdentifier id = TableIdentifier.parse(tableIdentifier);
         LoadTableResponse resp = CatalogHandlers.loadTable(catalog, id);
         return RESTObjectMapper.mapper().writer().writeValueAsString(resp);
@@ -59,9 +56,6 @@ public class JniCatalogWrapper {
      * @throws Exception
      */
     public String updateTable(String updateTableRequest) throws Exception {
-        // For jni.rs
-        java.lang.Thread.currentThread()
-                .setContextClassLoader(java.lang.ClassLoader.getSystemClassLoader());
         UpdateTableRequest req =
                 RESTObjectMapper.mapper().readValue(updateTableRequest, UpdateTableRequest.class);
         LoadTableResponse resp = CatalogHandlers.updateTable(catalog, req.identifier(), req);
@@ -80,9 +74,6 @@ public class JniCatalogWrapper {
         checkArgument(
                 props.length % 2 == 0,
                 "props should be key-value pairs, but length is: " + props.length);
-        // For jni.rs
-        java.lang.Thread.currentThread()
-                .setContextClassLoader(java.lang.ClassLoader.getSystemClassLoader());
         try {
             HashMap<String, String> config = new HashMap<>(props.length / 2);
             for (int i = 0; i < props.length; i += 2) {
