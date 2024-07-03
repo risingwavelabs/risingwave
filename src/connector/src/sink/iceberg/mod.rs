@@ -423,6 +423,10 @@ impl IcebergConfig {
                 "s3.secret-access-key".to_string(),
                 self.secret_key.clone().to_string(),
             );
+            java_catalog_configs.insert(
+                "s3.path-style-access".to_string(),
+                self.s3_path_style_access.to_string(),
+            );
 
             if matches!(self.catalog_type.as_deref(), Some("glue")) {
                 java_catalog_configs.insert(
