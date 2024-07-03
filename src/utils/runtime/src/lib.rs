@@ -48,7 +48,7 @@ use prof::*;
 ///
 /// When `f` returns, this function will assume that the component has finished its work and it's
 /// safe to exit. Therefore, the main runtime to drive the future will be shutdown **without**
-/// waiting for background tasks to finish. Then, the output of `f` will be returned.
+/// waiting for background tasks to finish. Then, this function will also return.
 ///
 /// # Environment variables
 ///

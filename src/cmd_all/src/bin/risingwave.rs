@@ -231,7 +231,7 @@ fn standalone(opts: StandaloneOpts) {
         .with_thread_name(true);
     risingwave_rt::init_risingwave_logger(settings);
     // TODO(shutdown): pass the shutdown token
-    risingwave_rt::main_okk(|_| risingwave_cmd_all::standalone(opts)).unwrap();
+    risingwave_rt::main_okk(|_| risingwave_cmd_all::standalone(opts));
 }
 
 /// For single node, the internals are just a config mapping from its
@@ -247,7 +247,7 @@ fn single_node(opts: SingleNodeOpts) {
         .with_thread_name(true);
     risingwave_rt::init_risingwave_logger(settings);
     // TODO(shutdown): pass the shutdown token
-    risingwave_rt::main_okk(|_| risingwave_cmd_all::standalone(opts)).unwrap();
+    risingwave_rt::main_okk(|_| risingwave_cmd_all::standalone(opts));
 }
 
 #[cfg(test)]

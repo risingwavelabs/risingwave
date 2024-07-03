@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::Result;
 use clap::Parser;
 use risingwave_common::config::MetaBackend;
 use risingwave_common::util::meta_addr::MetaAddressStrategy;
@@ -184,7 +183,7 @@ pub async fn standalone(
         frontend_opts,
         compactor_opts,
     }: ParsedStandaloneOpts,
-) -> Result<()> {
+) {
     tracing::info!("launching Risingwave in standalone mode");
 
     let mut is_in_memory = false;
@@ -270,8 +269,6 @@ It SHOULD NEVER be used in benchmarks and production environment!!!"
     // support it?
     signal::ctrl_c().await.unwrap();
     tracing::info!("Ctrl+C received, now exiting");
-
-    Ok(())
 }
 
 #[cfg(test)]
