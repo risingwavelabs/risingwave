@@ -67,7 +67,7 @@ impl Rule for FilterWithNowToJoinRule {
                 LogicalNow::new(generic::Now::update_current(plan.ctx())).into(),
                 JoinType::LeftSemi,
                 Condition {
-                    conjunctions: vec![now_filter.into()],
+                    conjunctions: vec![now_filter],
                 },
             )
             .into()

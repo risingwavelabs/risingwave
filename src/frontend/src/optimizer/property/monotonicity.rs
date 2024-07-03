@@ -113,6 +113,7 @@ impl MonotonicityAnalyzer {
         use Monotonicity::*;
 
         fn time_zone_is_without_dst(time_zone: Option<&str>) -> bool {
+            #[allow(clippy::let_and_return)] // to make it more readable
             let tz_is_utc = time_zone.map_or(
                 false, // conservative
                 |time_zone| time_zone.eq_ignore_ascii_case("UTC"),
