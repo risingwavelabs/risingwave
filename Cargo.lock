@@ -11751,7 +11751,6 @@ dependencies = [
 name = "risingwave_meta"
 version = "1.11.0-alpha"
 dependencies = [
- "aes-gcm",
  "anyhow",
  "arc-swap",
  "assert_matches",
