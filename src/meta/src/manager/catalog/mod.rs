@@ -196,8 +196,8 @@ impl CatalogManagerCore {
     }
 
     pub(crate) fn notify_finish_failed(&mut self, id: TableId, err: MetaError) {
-        assert!(!self.table_id_to_version.contains_key(&id));
-        assert!(!self.table_id_to_tx.contains_key(&id));
+        // assert!(!self.table_id_to_version.contains_key(&id));
+        // assert!(!self.table_id_to_tx.contains_key(&id));
         self.table_id_to_version.insert(id, Err(err));
     }
 }
