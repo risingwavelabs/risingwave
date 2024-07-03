@@ -21,26 +21,28 @@ use risingwave_common::catalog::{
 use risingwave_common::types::DataType;
 use risingwave_pb::plan_common::{AdditionalColumn, ColumnDescVersion};
 
-/// `SourceColumnDesc` is used to describe a column in the Source and is used as the column
-/// counterpart in `StreamScan`
+/// `SourceColumnDesc` is used to describe a column in the Source.
+///
+/// See the implementation of `From<&ColumnDesc>` for the difference between `SourceColumnDesc` and [`ColumnDesc`].
 #[derive(Clone, Debug)]
 pub struct SourceColumnDesc {
     pub name: String,
     pub data_type: DataType,
     pub column_id: ColumnId,
     pub fields: Vec<ColumnDesc>,
-    pub column_type: SourceColumnType,
-
-    /// `is_pk` is used to indicate whether the column is part of the primary key columns.
-    pub is_pk: bool,
-
-    /// `is_hidden_addition_col` is used to indicate whether the column is a hidden addition column.
-    pub is_hidden_addition_col: bool,
-
     /// `additional_column` and `column_type` are orthogonal
     /// `additional_column` is used to indicate the column is from which part of the message
     /// `column_type` is used to indicate the type of the column, only used in cdc scenario
     pub additional_column: AdditionalColumn,
+    // ------
+    // Fields above are the same in `ColumnDesc`.
+    // Fields below are specific to `SourceColumnDesc`.
+    // ------
+    pub column_type: SourceColumnType,
+    /// `is_pk` is used to indicate whether the column is part of the primary key columns.
+    pub is_pk: bool,
+    /// `is_hidden_addition_col` is used to indicate whether the column is a hidden addition column.
+    pub is_hidden_addition_col: bool,
 }
 
 /// `SourceColumnType` is used to indicate the type of a column emitted by the Source.
@@ -121,32 +123,63 @@ impl SourceColumnDesc {
 }
 
 impl From<&ColumnDesc> for SourceColumnDesc {
-    fn from(c: &ColumnDesc) -> Self {
-        let column_type = SourceColumnType::from_name(c.name.as_str());
+    fn from(
+        ColumnDesc {
+            data_type,
+            column_id,
+            name,
+            field_descs,
+            additional_column,
+            // ignored fields below
+            generated_or_default_column,
+            type_name: _,
+            description: _,
+            version: _,
+        }: &ColumnDesc,
+    ) -> Self {
+        debug_assert!(
+            generated_or_default_column.is_none(),
+            "source column should not be generated or default: {:?}",
+            generated_or_default_column.as_ref().unwrap()
+        );
         Self {
-            name: c.name.clone(),
-            data_type: c.data_type.clone(),
-            column_id: c.column_id,
-            fields: c.field_descs.clone(),
-            column_type,
+            name: name.clone(),
+            data_type: data_type.clone(),
+            column_id: *column_id,
+            fields: field_descs.clone(),
+            additional_column: additional_column.clone(),
+            // additional fields below
+            column_type: SourceColumnType::from_name(name),
             is_pk: false,
             is_hidden_addition_col: false,
-            additional_column: c.additional_column.clone(),
         }
     }
 }
 
 impl From<&SourceColumnDesc> for ColumnDesc {
-    fn from(s: &SourceColumnDesc) -> Self {
+    fn from(
+        SourceColumnDesc {
+            name,
+            data_type,
+            column_id,
+            fields,
+            additional_column,
+            // ignored fields below
+            column_type: _,
+            is_pk: _,
+            is_hidden_addition_col: _,
+        }: &SourceColumnDesc,
+    ) -> Self {
         ColumnDesc {
-            data_type: s.data_type.clone(),
-            column_id: s.column_id,
-            name: s.name.clone(),
-            field_descs: s.fields.clone(),
+            data_type: data_type.clone(),
+            column_id: *column_id,
+            name: name.clone(),
+            field_descs: fields.clone(),
+            additional_column: additional_column.clone(),
+            // additional fields below
             type_name: "".to_string(),
             generated_or_default_column: None,
             description: None,
-            additional_column: s.additional_column.clone(),
             version: ColumnDescVersion::Pr13707,
         }
     }

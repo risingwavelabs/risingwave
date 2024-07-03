@@ -7,6 +7,7 @@ import "common.proto";
 import "data.proto";
 import "expr.proto";
 import "plan_common.proto";
+import "secret.proto";
 
 option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
@@ -61,6 +62,7 @@ message SourceNode {
   map<string, string> with_properties = 3;
   repeated bytes split = 4;
   catalog.StreamSourceInfo info = 5;
+  map<string, secret.SecretRef> secret_refs = 6;
 }
 
 message ProjectNode {

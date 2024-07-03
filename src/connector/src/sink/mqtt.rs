@@ -288,7 +288,7 @@ impl MqttSinkWriter {
                         }
                         err => {
                             tracing::error!("Failed to poll mqtt eventloop: {}", err.as_report());
-                            std::thread::sleep(std::time::Duration::from_secs(1));
+                            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                         }
                     },
                 }

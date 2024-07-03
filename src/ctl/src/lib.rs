@@ -460,6 +460,7 @@ enum ScaleCommands {
 }
 
 #[derive(Subcommand)]
+#[allow(clippy::large_enum_variant)]
 enum MetaCommands {
     /// pause the stream graph
     Pause,

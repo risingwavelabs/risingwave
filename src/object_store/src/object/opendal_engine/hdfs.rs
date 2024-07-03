@@ -12,13 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use opendal::layers::LoggingLayer;
 use opendal::services::Hdfs;
 use opendal::Operator;
 use risingwave_common::config::ObjectStoreConfig;
 
 use super::{EngineType, OpendalObjectStore};
-use crate::object::object_metrics::ObjectStoreMetrics;
 use crate::object::opendal_engine::ATOMIC_WRITE_DIR;
 use crate::object::ObjectResult;
 
@@ -35,7 +36,7 @@ impl OpendalObjectStore {
         // Set the name node for hdfs.
         builder.name_node(&namenode);
         builder.root(&root);
-        if config.retry.set_atomic_write_dir {
+        if config.set_atomic_write_dir {
             let atomic_write_dir = format!("{}/{}", root, ATOMIC_WRITE_DIR);
             builder.atomic_write_dir(&atomic_write_dir);
         }

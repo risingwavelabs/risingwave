@@ -12,6 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub use risingwave_connector_codec::decoder::avro::{
-    avro_schema_to_column_descs, ResolvedAvroSchema,
-};
+#![feature(lazy_cell)]
+
+mod feature;
+mod manager;
+
+pub use feature::*;
+pub use manager::*;
