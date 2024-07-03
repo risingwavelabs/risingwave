@@ -483,6 +483,7 @@ impl GlobalStreamManager {
         tracing::debug!("sending Command::CreateStreamingJob");
         let result: MetaResult<NotificationVersion> = try {
             self.barrier_scheduler.run_command(command).await?;
+            tracing::debug!("first barrier collected for stream job");
             self.metadata_manager
                 .wait_streaming_job_finished(table_id)
                 .await?
