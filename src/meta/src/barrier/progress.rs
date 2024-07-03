@@ -94,7 +94,7 @@ impl Progress {
     fn update(&mut self, actor: ActorId, new_state: BackfillState, upstream_total_key_count: u64) {
         self.upstream_total_key_count = upstream_total_key_count;
         let total_actors = self.states.len();
-        tracing::debug!(?actor, "update progress for actor");
+        tracing::debug!(?actor, states = ?self.states, "update progress for actor");
         match self.states.remove(&actor).unwrap() {
             BackfillState::Init => {}
             BackfillState::ConsumingUpstream(_, old_consumed_rows) => {
@@ -350,7 +350,7 @@ impl CreateMviewProgressTracker {
         let table_map: HashMap<_, HashSet<ActorId>> = table_map.into();
         for (creating_table_id, actors) in table_map {
             let mut states = HashMap::new();
-            tracing::debug!(?actors, "recover progress for actors");
+            tracing::debug!(?actors, ?creating_table_id, "recover progress for actors");
             for actor in actors {
                 actor_map.insert(actor, creating_table_id);
                 states.insert(actor, BackfillState::ConsumingUpstream(Epoch(0), 0));
@@ -644,6 +644,7 @@ impl CreateMviewProgressTracker {
                     })
                     .sum();
 
+                tracing::debug!(?table_id, "updating progress for table");
                 progress.update(actor, new_state, upstream_total_key_count);
 
                 if progress.is_done() {
