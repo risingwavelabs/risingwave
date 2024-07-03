@@ -31,7 +31,7 @@ impl OpendalObjectStore {
         config: Arc<ObjectStoreConfig>,
         metrics: Arc<ObjectStoreMetrics>,
     ) -> ObjectResult<Self> {
-        // Init the jvm explicitly to avoid duplicate JVM creatation by hdfs client
+        // Init the jvm explicitly to avoid duplicate JVM creation by hdfs client
         use risingwave_jni_core::jvm_runtime::JVM;
         let _ = JVM
             .get_or_init()
