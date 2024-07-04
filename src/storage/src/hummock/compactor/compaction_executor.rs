@@ -14,6 +14,7 @@
 
 use std::future::Future;
 
+use more_asserts::assert_gt;
 use risingwave_common::util::resource_util;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use tokio::task::JoinHandle;
@@ -35,6 +36,7 @@ impl CompactionExecutor {
                 builder.worker_threads(worker_threads_num);
                 worker_num = worker_threads_num;
             }
+            assert_gt!(worker_num, 0);
             builder.enable_all().build().unwrap()
         };
 
