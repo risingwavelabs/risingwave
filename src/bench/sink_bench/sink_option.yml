@@ -24,7 +24,7 @@ Pulsar:
 Iceberg:
   connector: 'iceberg'
   type: 'append-only'
-  warehouse.path: 's3a://iceberg-data'
+  warehouse.path: 's3://iceberg-data'
   s3.endpoint: 'http://127.0.0.1:9301'
   s3.access.key: 'hummockadmin'
   s3.secret.key: 'hummockadmin'
