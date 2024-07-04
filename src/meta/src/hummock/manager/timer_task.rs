@@ -440,6 +440,8 @@ impl HummockManager {
     /// * For state-table whose throughput less than `min_table_split_write_throughput`, do not
     ///   increase it size of base-level.
     async fn on_handle_check_split_multi_group(&self) {
+        use rand::seq::SliceRandom;
+
         let params = self.env.system_params_reader().await;
         let barrier_interval_ms = params.barrier_interval_ms() as u64;
         let checkpoint_secs = std::cmp::max(
@@ -465,18 +467,44 @@ impl HummockManager {
                 continue;
             }
 
-            for (table_id, table_size) in &group.table_statistic {
-                self.try_move_table_to_dedicated_cg(
-                    &table_write_throughput,
-                    table_id,
-                    table_size,
-                    !created_tables.contains(table_id),
-                    checkpoint_secs,
-                    group.group_id,
-                    group.group_size,
-                )
-                .await;
+            let mut table_ids = group.table_statistic.keys().cloned().collect_vec();
+            let parent_group_id = group.group_id;
+            table_ids.shuffle(&mut rand::thread_rng());
+            let table_count = table_ids.len();
+            for (idx, move_table_id) in table_ids.into_iter().enumerate() {
+                if idx == table_count - 1 {
+                    break;
+                }
+                let ret = self
+                    .move_state_table_to_compaction_group(parent_group_id, &[move_table_id], 0)
+                    .await;
+                match ret {
+                    Ok(new_group_id) => {
+                        tracing::info!("move state table [{}] from group-{} to group-{} success table_vnode_partition_count {:?}", move_table_id, parent_group_id, new_group_id, 0);
+                    }
+                    Err(e) => {
+                        tracing::info!(
+                            error = %e.as_report(),
+                            "failed to move state table [{}] from group-{}",
+                            move_table_id,
+                            parent_group_id,
+                        )
+                    }
+                }
             }
+
+            // for (table_id, table_size) in &group.table_statistic {
+            //     self.try_move_table_to_dedicated_cg(
+            //         &table_write_throughput,
+            //         table_id,
+            //         table_size,
+            //         !created_tables.contains(table_id),
+            //         checkpoint_secs,
+            //         group.group_id,
+            //         group.group_size,
+            //     )
+            //     .await;
+            // }
         }
     }
 
