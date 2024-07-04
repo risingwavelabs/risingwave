@@ -130,12 +130,10 @@ impl<Src: OpendalSource> OpendalReader<Src> {
 
         let buf_reader: Pin<Box<dyn AsyncRead + Send>> = match compression_format {
             CompressionFormat::Gzip => {
-                println!("这里11object_name = {:?}", object_name);
                 let gzip_decoder = GzipDecoder::new(stream_reader);
                 Box::pin(BufReader::new(gzip_decoder)) as Pin<Box<dyn AsyncRead + Send>>
             }
             CompressionFormat::None => {
-                println!("这里object_name = {:?}", object_name);
                 // todo: support automatic decompression of more compression types.
                 if object_name.ends_with(".gz") || object_name.ends_with(".gzip") {
                     let gzip_decoder = GzipDecoder::new(stream_reader);
