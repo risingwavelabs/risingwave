@@ -32,7 +32,7 @@ hytra = "0.1.2"
 iceberg = { workspace = true }
 itertools = { workspace = true }
 memcomparable = "0.2"
-opendal = "0.45.1"
+opendal = "0.47"
 parking_lot = { workspace = true }
 paste = "1"
 prometheus = { version = "0.13", features = ["process"] }
