@@ -209,7 +209,7 @@ impl IcebergSplitEnumerator {
         let snapshot = table
             .metadata()
             .snapshot_by_id(snapshot_id)
-            .expect("snapshot must exists");
+            .expect("snapshot must exist");
 
         let manifest_list: ManifestList = snapshot
             .load_manifest_list(table.file_io(), table.metadata())
