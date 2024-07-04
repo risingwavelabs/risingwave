@@ -35,6 +35,7 @@ opendal = "0.45.1"
 prometheus = { version = "0.13", features = ["process"] }
 reqwest = "0.11"                                                              # required by opendal
 risingwave_common = { workspace = true }
+risingwave_jni_core = { workspace = true, optional = true }
 rustls = "0.23.5"
 spin = "0.9"
 thiserror = "1"
@@ -52,4 +53,4 @@ tracing = "0.1"
 # normal = ["workspace-hack"]
 
 # [features]
-# hdfs-backend = ["opendal/services-hdfs"]
+# hdfs-backend = ["opendal/services-hdfs", "dep:risingwave_jni_core"]
