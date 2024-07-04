@@ -18,7 +18,7 @@ normal = ["workspace-hack", "ctor"]
 [features]
 external-udf = ["arrow-udf-flight", "arrow-flight", "tonic"]
 js-udf = ["arrow-udf-js"]
-deno-udf = ["arrow-udf-js-deno", "zstd"]
+# deno-udf = ["arrow-udf-js-deno", "zstd"]
 python-udf = ["arrow-udf-python"]
 wasm-udf = ["arrow-udf-wasm", "zstd"]
 
@@ -30,7 +30,7 @@ arrow-flight = { workspace = true, optional = true }
 arrow-schema = { workspace = true }
 arrow-udf-flight = { workspace = true, optional = true }
 arrow-udf-js = { workspace = true, optional = true }
-arrow-udf-js-deno = { workspace = true, optional = true }
+# arrow-udf-js-deno = { workspace = true, optional = true }
 arrow-udf-python = { workspace = true, optional = true }
 arrow-udf-wasm = { workspace = true, optional = true }
 async-trait = "0.1"

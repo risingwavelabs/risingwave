@@ -128,7 +128,7 @@ rdkafka = { package = "madsim-rdkafka", version = "0.4.1", features = [
 ] }
 hashbrown = { version = "0.14", features = ["ahash", "inline-more", "nightly"] }
 criterion = { version = "0.5", features = ["async_futures"] }
-tonic = { package = "madsim-tonic", version = "0.4.1" }
+tonic = { package = "madsim-tonic", version = "0.4.2" }
 tonic-build = { package = "madsim-tonic-build", version = "0.4.2" }
 otlp-embedded = { git = "https://github.com/risingwavelabs/otlp-embedded", rev = "492c244e0be91feb659c0cd48a624bbd96045a33" }
 prost = { version = "0.12" }
@@ -150,7 +150,7 @@ arrow-select = "52"
 arrow-ord = "52"
 arrow-row = "52"
 arrow-udf-js = "0.3.1"
-arrow-udf-js-deno = { git = "https://github.com/risingwavelabs/arrow-udf.git", rev = "d248f21" }
+# arrow-udf-js-deno = { git = "https://github.com/risingwavelabs/arrow-udf.git", rev = "d248f21" }
 arrow-udf-wasm = { version = "0.2.2", features = ["build"] }
 arrow-udf-python = "0.2"
 arrow-udf-flight = "0.2"
@@ -326,21 +326,21 @@ debug = 1
 # Patch third-party crates for deterministic simulation.
 quanta = { git = "https://github.com/madsim-rs/quanta.git", rev = "948bdc3" }
 getrandom = { git = "https://github.com/madsim-rs/getrandom.git", rev = "e79a7ae" }
-tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "fe39bb8e" }
+tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "0dd10556" }
 tokio-retry = { git = "https://github.com/madsim-rs/rust-tokio-retry.git", rev = "95e2fd3" }
 tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "ac00d88" }
 futures-timer = { git = "https://github.com/madsim-rs/futures-timer.git", rev = "05b33b4" }
 # patch: unlimit 4MB message size for grpc client
 etcd-client = { git = "https://github.com/risingwavelabs/etcd-client.git", rev = "4e84d40" }
-# patch to remove preserve_order from serde_json
-deno_core = { git = "https://github.com/bakjos/deno_core", rev = "9b241c6" }
-# patch to user reqwest 0.12.2
-deno_fetch = { git = "https://github.com/bakjos/deno", rev = "787a232" }
-deno_http = { git = "https://github.com/bakjos/deno", rev = "787a232" }
-deno_net = { git = "https://github.com/bakjos/deno", rev = "787a232" }
-deno_tls = { git = "https://github.com/bakjos/deno", rev = "787a232" }
-deno_web = { git = "https://github.com/bakjos/deno", rev = "787a232" }
-deno_websocket = { git = "https://github.com/bakjos/deno", rev = "787a232" }
+# # patch to remove preserve_order from serde_json
+# deno_core = { git = "https://github.com/bakjos/deno_core", rev = "9b241c6" }
+# # patch to user reqwest 0.12.2
+# deno_fetch = { git = "https://github.com/bakjos/deno", rev = "787a232" }
+# deno_http = { git = "https://github.com/bakjos/deno", rev = "787a232" }
+# deno_net = { git = "https://github.com/bakjos/deno", rev = "787a232" }
+# deno_tls = { git = "https://github.com/bakjos/deno", rev = "787a232" }
+# deno_web = { git = "https://github.com/bakjos/deno", rev = "787a232" }
+# deno_websocket = { git = "https://github.com/bakjos/deno", rev = "787a232" }
 # patch to remove preserve_order from serde_json
 bson = { git = "https://github.com/risingwavelabs/bson-rust", rev = "e5175ec" }
 
