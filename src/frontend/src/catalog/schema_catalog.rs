@@ -81,6 +81,7 @@ pub struct SchemaCatalog {
 
 impl SchemaCatalog {
     pub fn create_table(&mut self, prost: &PbTable) -> Arc<TableCatalog> {
+        tracing::debug!("create table: {:?}", prost.id);
         let name = prost.name.clone();
         let id = prost.id.into();
         let table: TableCatalog = prost.into();
@@ -160,6 +161,7 @@ impl SchemaCatalog {
     }
 
     pub fn drop_table(&mut self, id: TableId) {
+        tracing::debug!("drop table: {:?}", id);
         let table_ref = self.table_by_id.remove(&id).unwrap();
         self.table_by_name.remove(&table_ref.name).unwrap();
         self.indexes_by_table_id.remove(&table_ref.id);
