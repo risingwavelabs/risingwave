@@ -558,6 +558,10 @@ impl HummockManager {
     pub fn metadata_manager(&self) -> &MetadataManager {
         &self.metadata_manager
     }
+
+    pub fn object_store_media_type(&self) -> &'static str {
+        self.object_store.media_type()
+    }
 }
 
 async fn write_exclusive_cluster_id(
