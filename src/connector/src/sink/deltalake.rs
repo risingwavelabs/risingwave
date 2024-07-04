@@ -380,6 +380,11 @@ impl Sink for DeltaLakeSink {
                 )));
             }
         }
+        if self.config.common.commit_checkpoint_interval == Some(0) {
+            return Err(SinkError::Config(anyhow!(
+                "commit_checkpoint_interval must be greater than 0"
+            )));
+        }
         Ok(())
     }
 

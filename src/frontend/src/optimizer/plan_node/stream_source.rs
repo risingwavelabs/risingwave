@@ -109,6 +109,7 @@ impl StreamNode for StreamSource {
                 .collect_vec(),
             with_properties: source_catalog.with_properties.clone().into_iter().collect(),
             rate_limit: self.base.ctx().overwrite_options().streaming_rate_limit,
+            secret_refs: Default::default(),
         });
         PbNodeBody::Source(SourceNode { source_inner })
     }

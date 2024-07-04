@@ -38,7 +38,7 @@ use risingwave_pb::batch_plan::exchange_info::DistributionMode;
 use risingwave_pb::batch_plan::exchange_source::LocalExecutePlan::Plan;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{
-    ExchangeInfo, ExchangeSource, LocalExecutePlan, PbTaskId, PlanFragment, PlanNode as PlanNodePb,
+    ExchangeInfo, ExchangeSource, LocalExecutePlan, PbTaskId, PlanFragment, PlanNode as PbPlanNode,
     TaskOutputId,
 };
 use risingwave_pb::common::WorkerNode;
@@ -274,7 +274,7 @@ impl LocalQueryExecution {
         second_stages: &mut Option<HashMap<StageId, QueryStageRef>>,
         partition: Option<PartitionInfo>,
         next_executor_id: Arc<AtomicU32>,
-    ) -> SchedulerResult<PlanNodePb> {
+    ) -> SchedulerResult<PbPlanNode> {
         let identity = format!(
             "{:?}-{}",
             execution_plan_node.plan_node_type,
@@ -443,7 +443,7 @@ impl LocalQueryExecution {
                         .collect();
                 }
 
-                Ok(PlanNodePb {
+                Ok(PbPlanNode {
                     // Since all the rest plan is embedded into the exchange node,
                     // there is no children any more.
                     children: vec![],
@@ -467,7 +467,7 @@ impl LocalQueryExecution {
                     _ => unreachable!(),
                 }
 
-                Ok(PlanNodePb {
+                Ok(PbPlanNode {
                     children: vec![],
                     identity,
                     node_body: Some(node_body),
@@ -487,7 +487,7 @@ impl LocalQueryExecution {
                     _ => unreachable!(),
                 }
 
-                Ok(PlanNodePb {
+                Ok(PbPlanNode {
                     children: vec![],
                     identity,
                     node_body: Some(node_body),
@@ -512,7 +512,7 @@ impl LocalQueryExecution {
                     _ => unreachable!(),
                 }
 
-                Ok(PlanNodePb {
+                Ok(PbPlanNode {
                     children: vec![],
                     identity,
                     node_body: Some(node_body),
@@ -545,7 +545,7 @@ impl LocalQueryExecution {
                     next_executor_id,
                 )?;
 
-                Ok(PlanNodePb {
+                Ok(PbPlanNode {
                     children: vec![left_child],
                     identity,
                     node_body: Some(node_body),
@@ -563,9 +563,9 @@ impl LocalQueryExecution {
                             next_executor_id.clone(),
                         )
                     })
-                    .collect::<SchedulerResult<Vec<PlanNodePb>>>()?;
+                    .collect::<SchedulerResult<Vec<PbPlanNode>>>()?;
 
-                Ok(PlanNodePb {
+                Ok(PbPlanNode {
                     children,
                     identity,
                     node_body: Some(execution_plan_node.node.clone()),

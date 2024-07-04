@@ -25,6 +25,7 @@ pub mod opendal_reader;
 
 use self::opendal_enumerator::OpendalEnumerator;
 use self::opendal_reader::OpendalReader;
+use super::file_common::CompressionFormat;
 use super::s3::S3PropertiesCommon;
 use super::OpendalFsSplit;
 use crate::error::ConnectorResult;
@@ -53,6 +54,9 @@ pub struct GcsProperties {
 
     #[serde(flatten)]
     pub unknown_fields: HashMap<String, String>,
+
+    #[serde(rename = "compression_format", default = "Default::default")]
+    pub compression_format: CompressionFormat,
 }
 
 impl UnknownFields for GcsProperties {
@@ -147,6 +151,8 @@ pub struct PosixFsProperties {
 
     #[serde(flatten)]
     pub unknown_fields: HashMap<String, String>,
+    #[serde(rename = "compression_format", default = "Default::default")]
+    pub compression_format: CompressionFormat,
 }
 
 impl UnknownFields for PosixFsProperties {

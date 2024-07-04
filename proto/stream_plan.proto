@@ -7,6 +7,7 @@ import "common.proto";
 import "data.proto";
 import "expr.proto";
 import "plan_common.proto";
+import "secret.proto";
 import "source.proto";
 
 option java_package = "com.risingwave.proto";
@@ -188,6 +189,7 @@ message StreamSource {
   string source_name = 8;
   // Streaming rate limit
   optional uint32 rate_limit = 9;
+  map<string, secret.SecretRef> secret_refs = 10;
 }
 
 // copy contents from StreamSource to prevent compatibility issues in the future
@@ -203,6 +205,7 @@ message StreamFsFetch {
   string source_name = 8;
   // Streaming rate limit
   optional uint32 rate_limit = 9;
+  map<string, secret.SecretRef> secret_refs = 10;
 }
 
 // The executor only for receiving barrier from the meta service. It always resides in the leaves
@@ -233,6 +236,7 @@ message SourceBackfillNode {
 
   // `| partition_id | backfill_progress |`
   catalog.Table state_table = 8;
+  map<string, secret.SecretRef> secret_refs = 9;
 }
 
 message SinkDesc {
@@ -254,6 +258,7 @@ message SinkDesc {
   catalog.SinkFormatDesc format_desc = 13;
   optional uint32 target_table = 14;
   optional uint64 extra_partition_col_idx = 15;
+  map<string, secret.SecretRef> secret_refs = 16;
 }
 
 enum SinkLogStoreType {
@@ -288,6 +293,7 @@ message FilterNode {
 }
 
 message ChangeLogNode {
+  // Whether or not there is an op in the final output.
   bool need_op = 1;
 }
 

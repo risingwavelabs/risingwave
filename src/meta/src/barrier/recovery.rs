@@ -1070,16 +1070,6 @@ impl GlobalBarrierManagerContext {
             new_plan.parallel_unit_plan.insert(*from, to);
         }
 
-        assert!(
-            new_plan
-                .parallel_unit_plan
-                .values()
-                .map(|pu| pu.id)
-                .all_unique(),
-            "target parallel units must be unique: {:?}",
-            new_plan.parallel_unit_plan
-        );
-
         new_plan.insert(self.env.meta_store().as_kv()).await?;
         Ok(new_plan)
     }

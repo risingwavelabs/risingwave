@@ -318,11 +318,17 @@ impl CatalogController {
             }
         }
 
+        // get dependent secret ref.
+        let dependent_secret_refs = streaming_job.dependent_secret_refs()?;
+
+        let dependent_objs = dependent_relations
+            .iter()
+            .chain(dependent_secret_refs.iter());
         // record object dependency.
-        if !dependent_relations.is_empty() {
-            ObjectDependency::insert_many(dependent_relations.into_iter().map(|id| {
+        if !dependent_secret_refs.is_empty() || !dependent_relations.is_empty() {
+            ObjectDependency::insert_many(dependent_objs.map(|id| {
                 object_dependency::ActiveModel {
-                    oid: Set(id as _),
+                    oid: Set(*id as _),
                     used_by: Set(streaming_job.id() as _),
                     ..Default::default()
                 }

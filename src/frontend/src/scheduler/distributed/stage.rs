@@ -40,7 +40,7 @@ use risingwave_expr::expr_context::expr_context_scope;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{
     DistributedLookupJoinNode, ExchangeNode, ExchangeSource, MergeSortExchangeNode, PlanFragment,
-    PlanNode as PlanNodePb, PlanNode, TaskId as TaskIdPb, TaskOutputId,
+    PlanNode as PbPlanNode, PlanNode, TaskId as PbTaskId, TaskOutputId,
 };
 use risingwave_pb::common::{BatchQueryEpoch, HostAddress, WorkerNode};
 use risingwave_pb::plan_common::ExprContext;
@@ -294,7 +294,7 @@ impl StageExecution {
             .iter()
             .map(|(task_id, status_holder)| {
                 let task_output_id = TaskOutputId {
-                    task_id: Some(TaskIdPb {
+                    task_id: Some(PbTaskId {
                         query_id: self.stage.query_id.id.clone(),
                         stage_id: self.stage.id,
                         task_id: *task_id,
@@ -364,7 +364,7 @@ impl StageRunner {
                 .zip_eq_fast(workers.into_iter())
                 .enumerate()
             {
-                let task_id = TaskIdPb {
+                let task_id = PbTaskId {
                     query_id: self.stage.query_id.id.clone(),
                     stage_id: self.stage.id,
                     task_id: i as u64,
@@ -389,7 +389,7 @@ impl StageRunner {
                 .chunks(chunk_size)
                 .enumerate()
             {
-                let task_id = TaskIdPb {
+                let task_id = PbTaskId {
                     query_id: self.stage.query_id.id.clone(),
                     stage_id: self.stage.id,
                     task_id: id as u64,
@@ -407,7 +407,7 @@ impl StageRunner {
             }
         } else {
             for id in 0..self.stage.parallelism.unwrap() {
-                let task_id = TaskIdPb {
+                let task_id = PbTaskId {
                     query_id: self.stage.query_id.id.clone(),
                     stage_id: self.stage.id,
                     task_id: id as u64,
@@ -439,9 +439,9 @@ impl StageRunner {
         while let Some(status_res_inner) = all_streams.next().await {
             match status_res_inner {
                 Ok(status) => {
-                    use risingwave_pb::task_service::task_info_response::TaskStatus as TaskStatusPb;
-                    match TaskStatusPb::try_from(status.task_status).unwrap() {
-                        TaskStatusPb::Running => {
+                    use risingwave_pb::task_service::task_info_response::TaskStatus as PbTaskStatus;
+                    match PbTaskStatus::try_from(status.task_status).unwrap() {
+                        PbTaskStatus::Running => {
                             running_task_cnt += 1;
                             // The task running count should always less or equal than the
                             // registered tasks number.
@@ -457,7 +457,7 @@ impl StageRunner {
                             }
                         }
 
-                        TaskStatusPb::Finished => {
+                        PbTaskStatus::Finished => {
                             finished_task_cnt += 1;
                             assert!(finished_task_cnt <= self.tasks.keys().len());
                             assert!(running_task_cnt >= finished_task_cnt);
@@ -469,7 +469,7 @@ impl StageRunner {
                                 break;
                             }
                         }
-                        TaskStatusPb::Aborted => {
+                        PbTaskStatus::Aborted => {
                             // Currently, the only reason that we receive an abort status is that
                             // the task's memory usage is too high so
                             // it's aborted.
@@ -488,7 +488,7 @@ impl StageRunner {
                             sent_signal_to_next = true;
                             break;
                         }
-                        TaskStatusPb::Failed => {
+                        PbTaskStatus::Failed => {
                             // Task failed, we should fail whole query
                             error!(
                                 "Task {:?} failed, reason: {:?}",
@@ -506,7 +506,7 @@ impl StageRunner {
                             sent_signal_to_next = true;
                             break;
                         }
-                        TaskStatusPb::Ping => {
+                        PbTaskStatus::Ping => {
                             debug!("Receive ping from task {:?}", status.task_id.unwrap());
                         }
                         status => {
@@ -870,7 +870,7 @@ impl StageRunner {
 
     async fn schedule_task(
         &self,
-        task_id: TaskIdPb,
+        task_id: PbTaskId,
         plan_fragment: PlanFragment,
         worker: Option<WorkerNode>,
         expr_context: ExprContext,
@@ -925,7 +925,7 @@ impl StageRunner {
         task_id: TaskId,
         partition: Option<PartitionInfo>,
         identity_id: Rc<RefCell<u64>>,
-    ) -> PlanNodePb {
+    ) -> PbPlanNode {
         // Generate identity
         let identity = {
             let identity_type = execution_plan_node.plan_node_type;
@@ -947,7 +947,7 @@ impl StageRunner {
                 let exchange_sources = child_stage.all_exchange_sources_for(task_id);
 
                 match &execution_plan_node.node {
-                    NodeBody::Exchange(exchange_node) => PlanNodePb {
+                    NodeBody::Exchange(exchange_node) => PbPlanNode {
                         children: vec![],
                         identity,
                         node_body: Some(NodeBody::Exchange(ExchangeNode {
@@ -956,7 +956,7 @@ impl StageRunner {
                             input_schema: execution_plan_node.schema.clone(),
                         })),
                     },
-                    NodeBody::MergeSortExchange(sort_merge_exchange_node) => PlanNodePb {
+                    NodeBody::MergeSortExchange(sort_merge_exchange_node) => PbPlanNode {
                         children: vec![],
                         identity,
                         node_body: Some(NodeBody::MergeSortExchange(MergeSortExchangeNode {
@@ -982,7 +982,7 @@ impl StageRunner {
                     .expect("PartitionInfo should be TablePartitionInfo");
                 scan_node.vnode_bitmap = Some(partition.vnode_bitmap);
                 scan_node.scan_ranges = partition.scan_ranges;
-                PlanNodePb {
+                PbPlanNode {
                     children: vec![],
                     identity,
                     node_body: Some(NodeBody::RowSeqScan(scan_node)),
@@ -998,7 +998,7 @@ impl StageRunner {
                     .into_table()
                     .expect("PartitionInfo should be TablePartitionInfo");
                 scan_node.vnode_bitmap = Some(partition.vnode_bitmap);
-                PlanNodePb {
+                PbPlanNode {
                     children: vec![],
                     identity,
                     node_body: Some(NodeBody::LogRowSeqScan(scan_node)),
@@ -1020,7 +1020,7 @@ impl StageRunner {
                     .into_iter()
                     .map(|split| split.encode_to_bytes().into())
                     .collect_vec();
-                PlanNodePb {
+                PbPlanNode {
                     children: vec![],
                     identity,
                     node_body: Some(NodeBody::Source(source_node)),
@@ -1035,7 +1035,7 @@ impl StageRunner {
                     })
                     .collect();
 
-                PlanNodePb {
+                PbPlanNode {
                     children,
                     identity,
                     node_body: Some(execution_plan_node.node.clone()),

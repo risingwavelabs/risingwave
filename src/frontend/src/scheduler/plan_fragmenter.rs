@@ -43,7 +43,7 @@ use risingwave_connector::source::{
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{ExchangeInfo, ScanRange as ScanRangeProto};
 use risingwave_pb::common::Buffer;
-use risingwave_pb::plan_common::Field as FieldPb;
+use risingwave_pb::plan_common::Field as PbField;
 use risingwave_sqlparser::ast::AsOf;
 use serde::ser::SerializeStruct;
 use serde::Serialize;
@@ -86,7 +86,7 @@ pub struct ExecutionPlanNode {
     pub plan_node_id: PlanNodeId,
     pub plan_node_type: PlanNodeType,
     pub node: NodeBody,
-    pub schema: Vec<FieldPb>,
+    pub schema: Vec<PbField>,
 
     pub children: Vec<Arc<ExecutionPlanNode>>,
 

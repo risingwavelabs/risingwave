@@ -157,6 +157,7 @@ impl StreamSourceScan {
                 .collect_vec(),
             with_properties: source_catalog.with_properties.clone().into_iter().collect(),
             rate_limit: self.base.ctx().overwrite_options().streaming_rate_limit,
+            secret_refs: Default::default(),
         };
 
         let fields = self.schema().to_prost();

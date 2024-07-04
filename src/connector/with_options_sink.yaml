@@ -95,6 +95,11 @@ ClickHouseConfig:
   - name: clickhouse.delete.column
     field_type: String
     required: false
+  - name: commit_checkpoint_interval
+    field_type: u64
+    comments: Commit every n(>0) checkpoints, if n is not set, we will commit every checkpoint.
+    required: false
+    default: Default::default
   - name: r#type
     field_type: String
     required: true
