@@ -158,17 +158,21 @@ For more complex cases, you can write a test script, and invoke it in `slt`.
 - For general scripts that can be used under many situations, put it in `e2e_test/commands/`. This directory will be loaded in `PATH` by `risedev slt`, and thus function as kind of "built-in" commands.
 
 ---
-Tips for debugging: You can use `echo` to check whether the environment is correctly set.
+Tips for debugging:
 
-```
-system ok
-echo $PGPORT
-----
-placeholder
-```
+- Use `echo` to check whether the environment is correctly set.
 
-Then running `risedev slt` will return error "result mismatch", and shows what's the output
-of the `echo` command, i.e., the value of `PGPORT`.
+    ```
+    system ok
+    echo $PGPORT
+    ----
+    placeholder
+    ```
+
+    Then running `risedev slt` will return error "result mismatch", and shows what's the output
+    of the `echo` command, i.e., the value of `PGPORT`.
+
+- Use `risedev show-risedev-env` to see the environment variables available for `risedev slt`, after you starting the cluster with `risedev d`.
 
 ## Adding a new connector to the development framework
 
