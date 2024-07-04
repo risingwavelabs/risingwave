@@ -20,6 +20,7 @@ use opendal::Operator;
 use risingwave_common::config::ObjectStoreConfig;
 
 use super::{EngineType, OpendalObjectStore};
+use crate::object::object_metrics::ObjectStoreMetrics;
 use crate::object::ObjectResult;
 
 const AZBLOB_ENDPOINT: &str = "AZBLOB_ENDPOINT";
@@ -29,6 +30,7 @@ impl OpendalObjectStore {
         container_name: String,
         root: String,
         config: Arc<ObjectStoreConfig>,
+        metrics: Arc<ObjectStoreMetrics>,
     ) -> ObjectResult<Self> {
         // Create azblob backend builder.
         let mut builder = Azblob::default();
@@ -47,6 +49,7 @@ impl OpendalObjectStore {
             op,
             engine_type: EngineType::Azblob,
             config,
+            metrics,
         })
     }
 }
