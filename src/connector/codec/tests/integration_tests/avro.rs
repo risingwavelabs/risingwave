@@ -123,6 +123,7 @@ fn check(
     expected_risingwave_data.assert_eq(&format!("{}", data_str.iter().format("\n----\n")));
 }
 
+// This corresponds to legacy `scripts/source/test_data/avro_simple_schema_bin.1`. TODO: remove that file.
 #[test]
 fn test_simple() {
     check(
@@ -229,6 +230,145 @@ fn test_simple() {
             Owned(Timestamptz(Timestamptz(0)))
             Owned(Interval(Interval { months: 1, days: 1, usecs: 1000000 }))
             Borrowed(Bytea([1, 2, 3, 4, 5]))"#]],
+    )
+}
+
+#[test]
+fn test_nullable_union() {
+    check(
+        r#"
+{
+  "name": "test_student",
+  "type": "record",
+  "fields": [
+    {
+      "name": "id",
+      "type": "int",
+      "default": 0
+    },
+    {
+      "name": "age",
+      "type": ["null", "int"]
+    },
+    {
+      "name": "sequence_id",
+      "type": ["null", "long"]
+    },
+    {
+      "name": "name",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "score",
+      "type": [ "float", "null" ],
+      "default": 1.0
+    },
+    {
+      "name": "avg_score",
+      "type": ["null", "double"]
+    },
+    {
+      "name": "is_lasted",
+      "type": ["null", "boolean"]
+    },
+    {
+      "name": "entrance_date",
+      "type": [
+        "null",
+        {
+          "type": "int",
+          "logicalType": "date",
+          "arg.properties": {
+            "range": {
+              "min": 1,
+              "max": 19374
+            }
+          }
+        }
+      ],
+      "default": null
+    },
+    {
+      "name": "birthday",
+      "type": [
+        "null",
+          {
+            "type": "long",
+            "logicalType": "timestamp-millis",
+            "arg.properties": {
+              "range": {
+                "min": 1,
+                "max": 1673970376213
+              }
+            }
+          }
+      ],
+      "default": null
+    },
+    {
+      "name": "anniversary",
+      "type": [
+        "null",
+        {
+          "type" : "long",
+          "logicalType": "timestamp-micros",
+          "arg.properties": {
+            "range": {
+              "min": 1,
+              "max": 1673970376213000
+            }
+          }
+        }
+      ],
+      "default": null
+    }
+  ]
+}
+        "#,
+        &[
+            // {
+            //   "id": 5,
+            //   "age": null,
+            //   "sequence_id": null,
+            //   "name": null,
+            //   "score": null,
+            //   "avg_score": null,
+            //   "is_lasted": null,
+            //   "entrance_date": null,
+            //   "birthday": null,
+            //   "anniversary": null
+            // }
+            "0a000000020000000000",
+        ],
+        Config {
+            map_handling: None,
+            data_encoding: TestDataEncoding::HexBinary,
+        },
+        expect![[r#"
+            [
+                id(#1): Int32,
+                age(#2): Int32,
+                sequence_id(#3): Int64,
+                name(#4): Varchar,
+                score(#5): Float32,
+                avg_score(#6): Float64,
+                is_lasted(#7): Boolean,
+                entrance_date(#8): Date,
+                birthday(#9): Timestamptz,
+                anniversary(#10): Timestamptz,
+            ]"#]],
+        expect![[r#"
+            Owned(Int32(5))
+            Owned(null)
+            Owned(null)
+            Owned(null)
+            Owned(null)
+            Owned(null)
+            Owned(null)
+            Owned(null)
+            Owned(null)
+            Owned(null)"#]],
     )
 }
 
