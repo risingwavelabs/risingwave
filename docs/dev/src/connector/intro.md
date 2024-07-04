@@ -156,11 +156,13 @@ cat << EOF | rpk topic produce my_source -f "%p %v\n" -p 0
 EOF
 ```
 
-For more complex cases, you can write a test script, and invoke it in `slt`.
+For more complex cases, you can write a test script, and invoke it in `slt`. Scripts can be written in any language you like, but kindly write a `README.md` to help other developers get started more easily.
 - For ad-hoc scripts (only used for one test), it's better to put next to the test file.
 
   e.g., [`e2e_test/source_inline/kafka/consumer_group.mjs`](https://github.com/risingwavelabs/risingwave/blob/c22c4265052c2a4f2876132a10a0b522ec7c03c9/e2e_test/source_inline/kafka/consumer_group.mjs), which is invoked by [`consumer_group.slt`](https://github.com/risingwavelabs/risingwave/blob/c22c4265052c2a4f2876132a10a0b522ec7c03c9/e2e_test/source_inline/kafka/consumer_group.slt) next to it.
 - For general scripts that can be used under many situations, put it in `e2e_test/commands/`. This directory will be loaded in `PATH` by `risedev slt`, and thus function as kind of "built-in" commands.
+
+  A common scenario is when a CLI tool does not accept envvars as arguments. In such cases, instead of manually specifying the arguments each time invoking it in `slt`, you can create a wrapper to handle this implicitly, making it more concise. [`e2e_test/commands/mysql`](https://github.com/risingwavelabs/risingwave/blob/c22c4265052c2a4f2876132a10a0b522ec7c03c9/e2e_test/commands/mysql) is a good demonstration.
 
 ---
 Tips for debugging:
