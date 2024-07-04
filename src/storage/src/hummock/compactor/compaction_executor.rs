@@ -14,6 +14,7 @@
 
 use std::future::Future;
 
+use more_asserts::assert_gt;
 use risingwave_common::util::resource_util;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use tokio::task::JoinHandle;
@@ -27,7 +28,7 @@ pub struct CompactionExecutor {
 
 impl CompactionExecutor {
     pub fn new(worker_threads_num: Option<usize>) -> Self {
-        let mut worker_num = resource_util::cpu::total_cpu_available() as usize;
+        let mut worker_num = resource_util::cpu::total_cpu_available().ceil() as usize;
         let runtime = {
             let mut builder = tokio::runtime::Builder::new_multi_thread();
             builder.thread_name("rw-compaction");
@@ -35,6 +36,7 @@ impl CompactionExecutor {
                 builder.worker_threads(worker_threads_num);
                 worker_num = worker_threads_num;
             }
+            assert_gt!(worker_num, 0);
             builder.enable_all().build().unwrap()
         };
 

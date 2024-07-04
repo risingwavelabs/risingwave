@@ -250,7 +250,7 @@ pub fn fetch_table_catalog_for_alter(
     let original_catalog = {
         let reader = session.env().catalog_reader().read_guard();
         let (table, schema_name) =
-            reader.get_table_by_name(db_name, schema_path, &real_table_name)?;
+            reader.get_created_table_by_name(db_name, schema_path, &real_table_name)?;
 
         match table.table_type() {
             TableType::Table => {}
@@ -290,7 +290,7 @@ mod tests {
         let get_table = || {
             let catalog_reader = session.env().catalog_reader().read_guard();
             catalog_reader
-                .get_table_by_name(DEFAULT_DATABASE_NAME, schema_path, "t")
+                .get_created_table_by_name(DEFAULT_DATABASE_NAME, schema_path, "t")
                 .unwrap()
                 .0
                 .clone()

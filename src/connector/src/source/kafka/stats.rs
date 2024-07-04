@@ -13,30 +13,10 @@
 // limitations under the License.
 
 use prometheus::core::{AtomicU64, GenericGaugeVec};
-use prometheus::{opts, register_int_gauge_vec_with_registry, IntGaugeVec, Registry};
+use prometheus::{register_int_gauge_vec_with_registry, IntGaugeVec, Registry};
 use rdkafka::statistics::{Broker, ConsumerGroup, Partition, Topic, Window};
 use rdkafka::Statistics;
-
-type UintGaugeVec = GenericGaugeVec<AtomicU64>;
-
-macro_rules! register_gauge_vec {
-    ($TYPE:ident, $OPTS:expr, $LABELS_NAMES:expr, $REGISTRY:expr $(,)?) => {{
-        let gauge_vec = $TYPE::new($OPTS, $LABELS_NAMES).unwrap();
-        $REGISTRY
-            .register(Box::new(gauge_vec.clone()))
-            .map(|_| gauge_vec)
-    }};
-}
-
-macro_rules! register_uint_gauge_vec_with_registry {
-    ($OPTS:expr, $LABELS_NAMES:expr, $REGISTRY:expr $(,)?) => {{
-        register_gauge_vec!(UintGaugeVec, $OPTS, $LABELS_NAMES, $REGISTRY)
-    }};
-
-    ($NAME:expr, $HELP:expr, $LABELS_NAMES:expr, $REGISTRY:expr $(,)?) => {{
-        register_uint_gauge_vec_with_registry!(opts!($NAME, $HELP), $LABELS_NAMES, $REGISTRY)
-    }};
-}
+use risingwave_common::metrics::register_uint_gauge_vec_with_registry;
 
 #[derive(Debug, Clone)]
 pub struct RdKafkaStats {
