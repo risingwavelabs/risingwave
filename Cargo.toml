@@ -150,7 +150,7 @@ arrow-select = "52"
 arrow-ord = "52"
 arrow-row = "52"
 arrow-udf-js = "0.3.1"
-arrow-udf-js-deno = { git = "https://github.com/risingwavelabs/arrow-udf.git", rev = "fa36365" }
+arrow-udf-js-deno = { git = "https://github.com/risingwavelabs/arrow-udf.git", rev = "d248f21" }
 arrow-udf-wasm = { version = "0.2.2", features = ["build"] }
 arrow-udf-python = "0.2"
 arrow-udf-flight = "0.2"
