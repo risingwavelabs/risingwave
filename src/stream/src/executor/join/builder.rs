@@ -148,7 +148,7 @@ impl JoinStreamChunkBuilder {
 
 pub struct JoinChunkBuilder<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> {
     stream_chunk_builder: JoinStreamChunkBuilder,
-    /// Decide whether to perform a compact on the last chunk based on the data that has already been inserted, to avoid this issue https://github.com/risingwavelabs/risingwave/issues/17450
+    /// Decide whether to perform a compact on the last chunk based on the data that has already been inserted, to avoid this issue <https://github.com/risingwavelabs/risingwave/issues/17450>
     need_compact: bool,
     stream_key: Vec<usize>,
 }
