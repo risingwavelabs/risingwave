@@ -89,18 +89,18 @@ impl HummockManager {
             let dynamic_tick_trigger = IntervalStream::new(min_trigger_interval)
                 .map(|_| HummockTimerEvent::DynamicCompactionTrigger);
 
-            let mut min_space_reclaim_trigger_interval =
-                tokio::time::interval(Duration::from_secs(
-                    hummock_manager
-                        .env
-                        .opts
-                        .periodic_space_reclaim_compaction_interval_sec,
-                ));
-            min_space_reclaim_trigger_interval
-                .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-            min_space_reclaim_trigger_interval.reset();
-            let space_reclaim_trigger = IntervalStream::new(min_space_reclaim_trigger_interval)
-                .map(|_| HummockTimerEvent::SpaceReclaimCompactionTrigger);
+            // let mut min_space_reclaim_trigger_interval =
+            //     tokio::time::interval(Duration::from_secs(
+            //         hummock_manager
+            //             .env
+            //             .opts
+            //             .periodic_space_reclaim_compaction_interval_sec,
+            //     ));
+            // min_space_reclaim_trigger_interval
+            //     .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            // min_space_reclaim_trigger_interval.reset();
+            // let space_reclaim_trigger = IntervalStream::new(min_space_reclaim_trigger_interval)
+            //     .map(|_| HummockTimerEvent::SpaceReclaimCompactionTrigger);
 
             let mut min_ttl_reclaim_trigger_interval = tokio::time::interval(Duration::from_secs(
                 hummock_manager
@@ -140,7 +140,7 @@ impl HummockManager {
                 Box::pin(stat_report_trigger),
                 Box::pin(compaction_heartbeat_trigger),
                 Box::pin(dynamic_tick_trigger),
-                Box::pin(space_reclaim_trigger),
+                // Box::pin(space_reclaim_trigger),
                 Box::pin(ttl_reclaim_trigger),
                 Box::pin(full_gc_trigger),
                 Box::pin(tombstone_reclaim_trigger),
