@@ -18,7 +18,31 @@ use risingwave_pb::expr::expr_node::Type as ExprType;
 
 use crate::expr::{Expr, ExprImpl, FunctionCall, TableFunction};
 
-/// Represents the monotonicity of a column. This enum aims to unify the "non-decreasing analysis" and watermark derivation.
+/// Represents the derivation of the monotonicity of a column.
+/// This enum aims to unify the "non-decreasing analysis" and watermark derivation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumAsInner)]
+pub enum MonotonicityDerivation {
+    /// The monotonicity of the column is inherent, meaning that it is derived from the column itself.
+    Inherent(Monotonicity),
+    /// The monotonicity of the column follows the monotonicity of the specified column in the input.
+    FollowingInput(usize),
+    /// The monotonicity of the column INVERSELY follows the monotonicity of the specified column in the input.
+    /// This is not used currently.
+    _FollowingInputInversely(usize),
+}
+
+impl MonotonicityDerivation {
+    fn inverse(self) -> Self {
+        use MonotonicityDerivation::*;
+        match self {
+            Inherent(monotonicity) => Inherent(monotonicity.inverse()),
+            FollowingInput(idx) => _FollowingInputInversely(idx),
+            _FollowingInputInversely(idx) => FollowingInput(idx),
+        }
+    }
+}
+
+/// Represents the monotonicity of a column.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumAsInner)]
 pub enum Monotonicity {
     /// The column is constant.
@@ -32,10 +56,6 @@ pub enum Monotonicity {
     /// forwarded to downstream with necessary transformation in other operators like `Project(Set)`.
     /// This is not used currently.
     _IncreasingByWatermark,
-    /// The monotonicity of the column follows the monotonicity of the specified column in the input.
-    FollowingInput(usize),
-    /// The monotonicity of the column INVERSELY follows the monotonicity of the specified column in the input.
-    FollowingInputInversely(usize),
     /// The monotonicity of the column is unknown, meaning that we have to do everything conservatively for this column.
     Unknown,
 }
@@ -48,15 +68,18 @@ impl Monotonicity {
             Increasing => Decreasing,
             Decreasing => Increasing,
             _IncreasingByWatermark => Unknown,
-            FollowingInput(idx) => FollowingInputInversely(idx),
-            FollowingInputInversely(idx) => FollowingInput(idx),
             Unknown => Unknown,
         }
     }
 }
 
+pub mod monotonicity_variants {
+    pub use super::Monotonicity::*;
+    pub use super::MonotonicityDerivation::*;
+}
+
 /// Analyze the monotonicity of an expression.
-pub fn analyze_monotonicity(expr: &ExprImpl) -> Monotonicity {
+pub fn analyze_monotonicity(expr: &ExprImpl) -> MonotonicityDerivation {
     let analyzer = MonotonicityAnalyzer {};
     analyzer.visit_expr(expr)
 }
@@ -64,14 +87,14 @@ pub fn analyze_monotonicity(expr: &ExprImpl) -> Monotonicity {
 struct MonotonicityAnalyzer {}
 
 impl MonotonicityAnalyzer {
-    fn visit_expr(&self, expr: &ExprImpl) -> Monotonicity {
-        use Monotonicity::*;
+    fn visit_expr(&self, expr: &ExprImpl) -> MonotonicityDerivation {
+        use monotonicity_variants::*;
         match expr {
             // recursion base
             ExprImpl::InputRef(inner) => FollowingInput(inner.index()),
-            ExprImpl::Literal(_) => Constant,
-            ExprImpl::Now(_) => Increasing,
-            ExprImpl::UserDefinedFunction(_) => Unknown,
+            ExprImpl::Literal(_) => Inherent(Constant),
+            ExprImpl::Now(_) => Inherent(Increasing),
+            ExprImpl::UserDefinedFunction(_) => Inherent(Unknown),
 
             // recursively visit children
             ExprImpl::FunctionCall(inner) => self.visit_function_call(inner),
@@ -90,17 +113,27 @@ impl MonotonicityAnalyzer {
         }
     }
 
-    fn visit_unary_op(&self, inputs: &[ExprImpl]) -> Monotonicity {
+    fn visit_unary_op(&self, inputs: &[ExprImpl]) -> MonotonicityDerivation {
         assert_eq!(inputs.len(), 1);
         self.visit_expr(&inputs[0])
     }
 
-    fn visit_binary_op(&self, inputs: &[ExprImpl]) -> (Monotonicity, Monotonicity) {
+    fn visit_binary_op(
+        &self,
+        inputs: &[ExprImpl],
+    ) -> (MonotonicityDerivation, MonotonicityDerivation) {
         assert_eq!(inputs.len(), 2);
         (self.visit_expr(&inputs[0]), self.visit_expr(&inputs[1]))
     }
 
-    fn visit_ternary_op(&self, inputs: &[ExprImpl]) -> (Monotonicity, Monotonicity, Monotonicity) {
+    fn visit_ternary_op(
+        &self,
+        inputs: &[ExprImpl],
+    ) -> (
+        MonotonicityDerivation,
+        MonotonicityDerivation,
+        MonotonicityDerivation,
+    ) {
         assert_eq!(inputs.len(), 3);
         (
             self.visit_expr(&inputs[0]),
@@ -109,8 +142,8 @@ impl MonotonicityAnalyzer {
         )
     }
 
-    fn visit_function_call(&self, func_call: &FunctionCall) -> Monotonicity {
-        use Monotonicity::*;
+    fn visit_function_call(&self, func_call: &FunctionCall) -> MonotonicityDerivation {
+        use monotonicity_variants::*;
 
         fn time_zone_is_without_dst(time_zone: Option<&str>) -> bool {
             #[allow(clippy::let_and_return)] // to make it more readable
@@ -124,41 +157,41 @@ impl MonotonicityAnalyzer {
         match func_call.func_type() {
             ExprType::Unspecified => unreachable!(),
             ExprType::Add => match self.visit_binary_op(func_call.inputs()) {
-                (Constant, any) | (any, Constant) => any,
-                (Increasing, Increasing) => Increasing,
-                (Decreasing, Decreasing) => Decreasing,
-                _ => Unknown,
+                (Inherent(Constant), any) | (any, Inherent(Constant)) => any,
+                (Inherent(Increasing), Inherent(Increasing)) => Inherent(Increasing),
+                (Inherent(Decreasing), Inherent(Decreasing)) => Inherent(Decreasing),
+                _ => Inherent(Unknown),
             },
             ExprType::Subtract => match self.visit_binary_op(func_call.inputs()) {
-                (any, Constant) => any,
-                (Constant, any) => any.inverse(),
-                _ => Unknown,
+                (any, Inherent(Constant)) => any,
+                (Inherent(Constant), any) => any.inverse(),
+                _ => Inherent(Unknown),
             },
             ExprType::Multiply | ExprType::Divide | ExprType::Modulus => {
                 match self.visit_binary_op(func_call.inputs()) {
-                    (Constant, Constant) => Constant,
-                    _ => Unknown, // let's be lazy here
+                    (Inherent(Constant), Inherent(Constant)) => Inherent(Constant),
+                    _ => Inherent(Unknown), // let's be lazy here
                 }
             }
             ExprType::TumbleStart => {
                 if func_call.inputs().len() == 2 {
                     // without `offset`, args: `(start, interval)`
                     match self.visit_binary_op(func_call.inputs()) {
-                        (any, Constant) => any,
-                        _ => Unknown,
+                        (any, Inherent(Constant)) => any,
+                        _ => Inherent(Unknown),
                     }
                 } else {
                     // with `offset`, args: `(start, interval, offset)`
                     assert_eq!(ExprType::TumbleStart, func_call.func_type());
                     match self.visit_ternary_op(func_call.inputs()) {
-                        (any, Constant, Constant) => any,
-                        _ => Unknown,
+                        (any, Inherent(Constant), Inherent(Constant)) => any,
+                        _ => Inherent(Unknown),
                     }
                 }
             }
             ExprType::AtTimeZone => match self.visit_binary_op(func_call.inputs()) {
-                (Constant, Constant) => Constant,
-                (any, Constant) => {
+                (Inherent(Constant), Inherent(Constant)) => Inherent(Constant),
+                (any, Inherent(Constant)) => {
                     let time_zone = func_call.inputs()[1]
                         .as_literal()
                         .and_then(|literal| literal.get_data().as_ref())
@@ -173,19 +206,21 @@ impl MonotonicityAnalyzer {
                     {
                         any
                     } else {
-                        Unknown
+                        Inherent(Unknown)
                     }
                 }
-                _ => Unknown,
+                _ => Inherent(Unknown),
             },
             ExprType::DateTrunc => match func_call.inputs().len() {
                 2 => match self.visit_binary_op(func_call.inputs()) {
-                    (Constant, any) => any,
-                    _ => Unknown,
+                    (Inherent(Constant), any) => any,
+                    _ => Inherent(Unknown),
                 },
                 3 => match self.visit_ternary_op(func_call.inputs()) {
-                    (Constant, Constant, Constant) => Constant,
-                    (Constant, any, Constant) => {
+                    (Inherent(Constant), Inherent(Constant), Inherent(Constant)) => {
+                        Inherent(Constant)
+                    }
+                    (Inherent(Constant), any, Inherent(Constant)) => {
                         let time_zone = func_call.inputs()[2]
                             .as_literal()
                             .and_then(|literal| literal.get_data().as_ref())
@@ -193,10 +228,10 @@ impl MonotonicityAnalyzer {
                         if time_zone_is_without_dst(time_zone) {
                             any
                         } else {
-                            Unknown
+                            Inherent(Unknown)
                         }
                     }
-                    _ => Unknown,
+                    _ => Inherent(Unknown),
                 },
                 _ => unreachable!(),
             },
@@ -206,42 +241,43 @@ impl MonotonicityAnalyzer {
                     ExprImpl::Literal(lit) => {
                         lit.get_data().as_ref().map(|tz| tz.as_utf8().as_ref())
                     }
-                    _ => return Unknown,
+                    _ => return Inherent(Unknown),
                 };
                 let interval = match &func_call.inputs()[1] {
                     ExprImpl::Literal(lit) => lit
                         .get_data()
                         .as_ref()
                         .map(|interval| interval.as_interval()),
-                    _ => return Unknown,
+                    _ => return Inherent(Unknown),
                 };
                 let quantitative_only = interval.map_or(
                     true, // null interval is treated as `interval '1' second`
                     |v| v.months() == 0 && (v.days() == 0 || time_zone_is_without_dst(time_zone)),
                 );
                 match (self.visit_expr(&func_call.inputs()[0]), quantitative_only) {
-                    (Constant, _) => Constant,
+                    (Inherent(Constant), _) => Inherent(Constant),
                     (any, true) => any,
-                    _ => Unknown,
+                    _ => Inherent(Unknown),
                 }
             }
             ExprType::SecToTimestamptz => self.visit_unary_op(func_call.inputs()),
-            ExprType::CharToTimestamptz => Unknown,
+            ExprType::CharToTimestamptz => Inherent(Unknown),
             ExprType::Cast => {
                 // TODO: need more derivation
-                Unknown
+                Inherent(Unknown)
             }
             ExprType::Case => {
                 // TODO: do we need derive watermark when every case can derive a common watermark?
-                Unknown
+                Inherent(Unknown)
             }
-            ExprType::Proctime => Increasing,
-            _ => Unknown,
+            ExprType::Proctime => Inherent(Increasing),
+            _ => Inherent(Unknown),
         }
     }
 
-    fn visit_table_function(&self, _table_func: &TableFunction) -> Monotonicity {
+    fn visit_table_function(&self, _table_func: &TableFunction) -> MonotonicityDerivation {
         // TODO: derive monotonicity for table funcs like `generate_series`
-        Monotonicity::Unknown
+        use monotonicity_variants::*;
+        Inherent(Unknown)
     }
 }

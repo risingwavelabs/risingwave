@@ -18,7 +18,7 @@ use risingwave_pb::plan_common::JoinType;
 use crate::expr::{ExprRewriter, FunctionCall, InputRef};
 use crate::optimizer::plan_node::generic::{self, GenericPlanRef};
 use crate::optimizer::plan_node::{LogicalFilter, LogicalJoin, LogicalNow};
-use crate::optimizer::property::analyze_monotonicity;
+use crate::optimizer::property::{analyze_monotonicity, monotonicity_variants};
 use crate::optimizer::rule::{BoxedRule, Rule};
 use crate::optimizer::PlanRef;
 use crate::utils::Condition;
@@ -39,7 +39,8 @@ impl Rule for FilterWithNowToJoinRule {
         filter.predicate().conjunctions.iter().for_each(|expr| {
             if let Some((input_expr, cmp, now_expr)) = expr.as_now_comparison_cond() {
                 // ensure that this expression is increasing
-                if analyze_monotonicity(&now_expr).is_increasing() {
+                use monotonicity_variants::*;
+                if matches!(analyze_monotonicity(&now_expr), Inherent(Increasing)) {
                     now_filters.push(
                         FunctionCall::new(cmp, vec![input_expr, now_expr])
                             .unwrap()
