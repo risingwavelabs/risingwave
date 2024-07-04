@@ -20,6 +20,7 @@ use clap::{Args, Parser, Subcommand};
 use cmd_impl::bench::BenchCommands;
 use cmd_impl::hummock::SstDumpArgs;
 use itertools::Itertools;
+use risingwave_common::util::tokio_util::sync::CancellationToken;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_meta::backup_restore::RestoreOpts;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::CompressionAlgorithm;
@@ -614,22 +615,33 @@ pub enum ProfileCommands {
 }
 
 /// Start `risectl` with the given options.
+/// Cancel the operation when the given `shutdown` token triggers.
 /// Log and abort the process if any error occurs.
 ///
 /// Note: use [`start_fallible`] if you want to call functionalities of `risectl`
 /// in an embedded manner.
-pub async fn start(opts: CliOpts) {
-    if let Err(e) = start_fallible(opts).await {
-        eprintln!("Error: {:#?}", e.as_report()); // pretty with backtrace
-        std::process::exit(1);
+pub async fn start(opts: CliOpts, shutdown: CancellationToken) {
+    let context = CtlContext::default();
+
+    tokio::select! {
+        _ = shutdown.cancelled() => {
+            // Shutdown requested, clean up the context and return.
+            context.try_close().await;
+        }
+
+        result = start_fallible(opts, &context) => {
+            if let Err(e) = result {
+                eprintln!("Error: {:#?}", e.as_report()); // pretty with backtrace
+                std::process::exit(1);
+            }
+        }
     }
 }
 
 /// Start `risectl` with the given options.
 /// Return `Err` if any error occurs.
-pub async fn start_fallible(opts: CliOpts) -> Result<()> {
-    let context = CtlContext::default();
-    let result = start_impl(opts, &context).await;
+pub async fn start_fallible(opts: CliOpts, context: &CtlContext) -> Result<()> {
+    let result = start_impl(opts, context).await;
     context.try_close().await;
     result
 }
