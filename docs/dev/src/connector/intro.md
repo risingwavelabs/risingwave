@@ -103,10 +103,9 @@ The `slt` test case looks like this:
 ```
 control substitution on
 
-# Note: specifying RPK_BROKERS is unnecessary, since it's already set.
-# Just for demonstrating you can also use envvars in `system` commands.
+# Note: you can also use envvars in `system` commands, but usually it's not necessary since the CLI tools can load envvars themselves.
 system ok
-RPK_BROKERS=$RISEDEV_KAFKA_BOOTSTRAP_SERVERS rpk topic create my_source -p 4
+rpk topic create my_source -p 4
 
 # Prepared test topic above, and produce test data now
 system ok
@@ -114,7 +113,6 @@ cat << EOF | rpk topic produce my_source -f "%p %v\n" -p 0
 0 {"v1": 1, "v2": "a"}
 1 {"v1": 2, "v2": "b"}
 2 {"v1": 3, "v2": "c"}
-3 {"v1": 4, "v2": "d"}
 EOF
 
 # Create the source, connecting to the Kafka started by RiseDev
@@ -152,7 +150,6 @@ cat << EOF | rpk topic produce my_source -f "%p %v\n" -p 0
 0 {"v1": 1, "v2": "a"}
 1 {"v1": 2, "v2": "b"}
 2 {"v1": 3, "v2": "c"}
-3 {"v1": 4, "v2": "d"}
 EOF
 ```
 
