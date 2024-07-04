@@ -1197,7 +1197,8 @@ impl CatalogManager {
                     .await?;
 
                 if let Some((table, source)) = target_table {
-                    let version: MetaResult<NotificationVersion> = self.finish_replace_table_procedure(&source, &table, None, Some(sink_id), None)
+                    let version: MetaResult<NotificationVersion> = self
+                        .finish_replace_table_procedure(&source, &table, None, Some(sink_id), None)
                         .await;
 
                     let core = &mut *self.core.lock().await;
