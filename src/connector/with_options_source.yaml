@@ -34,8 +34,9 @@ GcsProperties:
     required: false
     default: Default::default
   - name: compression_format
-    field_type: DecompressionFormat
+    field_type: CompressionFormat
     required: false
+    default: Default::default
 IcebergProperties:
   fields:
   - name: catalog.type
@@ -620,8 +621,9 @@ OpendalS3Properties:
     field_type: String
     required: false
   - name: compression_format
-    field_type: DecompressionFormat
+    field_type: CompressionFormat
     required: false
+    default: Default::default
   - name: s3.assume_role
     field_type: String
     comments: The following are only supported by `s3_v2` (opendal) source.
@@ -639,8 +641,9 @@ PosixFsProperties:
     required: false
     default: Default::default
   - name: compression_format
-    field_type: DecompressionFormat
+    field_type: CompressionFormat
     required: false
+    default: Default::default
 PubsubProperties:
   fields:
   - name: pubsub.subscription
@@ -779,8 +782,9 @@ S3Properties:
     field_type: String
     required: false
   - name: compression_format
-    field_type: DecompressionFormat
+    field_type: CompressionFormat
     required: false
+    default: Default::default
 TestSourceProperties:
   fields:
   - name: properties

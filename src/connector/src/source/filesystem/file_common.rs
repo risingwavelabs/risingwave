@@ -143,8 +143,9 @@ pub struct FsPageItem {
 
 pub type FsPage = Vec<FsPageItem>;
 
-#[derive(Debug, Clone, PartialEq, Display, Deserialize)]
-pub enum DecompressionFormat {
+#[derive(Debug, Default, Clone, PartialEq, Display, Deserialize)]
+pub enum CompressionFormat {
+    #[default]
     None,
 
     #[serde(rename = "gzip", alias = "gz")]

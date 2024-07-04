@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::future::IntoFuture;
-use std::io;
 use std::pin::Pin;
 
 use async_compression::tokio::bufread::GzipDecoder;
@@ -29,7 +28,7 @@ use super::opendal_enumerator::OpendalEnumerator;
 use super::OpendalSource;
 use crate::error::ConnectorResult;
 use crate::parser::ParserConfig;
-use crate::source::filesystem::file_common::DecompressionFormat;
+use crate::source::filesystem::file_common::CompressionFormat;
 use crate::source::filesystem::nd_streaming::need_nd_streaming;
 use crate::source::filesystem::{nd_streaming, OpendalFsSplit};
 use crate::source::{
@@ -108,7 +107,7 @@ impl<Src: OpendalSource> OpendalReader<Src> {
         op: Operator,
         split: OpendalFsSplit<Src>,
         source_ctx: SourceContextRef,
-        compression_format: Option<DecompressionFormat>,
+        compression_format: CompressionFormat,
     ) {
         let actor_id = source_ctx.actor_id.to_string();
         let fragment_id = source_ctx.fragment_id.to_string();
@@ -130,11 +129,13 @@ impl<Src: OpendalSource> OpendalReader<Src> {
         );
 
         let buf_reader: Pin<Box<dyn AsyncRead + Send>> = match compression_format {
-            Some(DecompressionFormat::Gzip) => {
+            CompressionFormat::Gzip => {
+                println!("这里11object_name = {:?}", object_name);
                 let gzip_decoder = GzipDecoder::new(stream_reader);
                 Box::pin(BufReader::new(gzip_decoder)) as Pin<Box<dyn AsyncRead + Send>>
             }
-            None => {
+            CompressionFormat::None => {
+                println!("这里object_name = {:?}", object_name);
                 // todo: support automatic decompression of more compression types.
                 if object_name.ends_with(".gz") || object_name.ends_with(".gzip") {
                     let gzip_decoder = GzipDecoder::new(stream_reader);
@@ -142,10 +143,6 @@ impl<Src: OpendalSource> OpendalReader<Src> {
                 } else {
                     Box::pin(BufReader::new(stream_reader)) as Pin<Box<dyn AsyncRead + Send>>
                 }
-            }
-            Some(format) => {
-                let error_message = format!("The input compression format '{}' is not supported. Currently, only gzip format compression is supported.", format);
-                return Err(io::Error::new(io::ErrorKind::InvalidInput, error_message).into());
             }
         };
 

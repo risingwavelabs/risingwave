@@ -16,7 +16,7 @@ use std::collections::HashMap;
 
 pub use enumerator::S3SplitEnumerator;
 
-use crate::source::filesystem::file_common::DecompressionFormat;
+use crate::source::filesystem::file_common::CompressionFormat;
 mod source;
 use serde::Deserialize;
 pub use source::S3FileReader;
@@ -42,8 +42,8 @@ pub struct S3PropertiesCommon {
     pub secret: Option<String>,
     #[serde(rename = "s3.endpoint_url")]
     pub endpoint_url: Option<String>,
-    #[serde(rename = "compression_format")]
-    pub compression_format: Option<DecompressionFormat>,
+    #[serde(rename = "compression_format", default = "Default::default")]
+    pub compression_format: CompressionFormat,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, with_options::WithOptions)]

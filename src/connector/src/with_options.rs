@@ -62,7 +62,7 @@ impl WithOptions for f64 {}
 impl WithOptions for std::time::Duration {}
 impl WithOptions for crate::connector_common::mqtt_common::QualityOfService {}
 impl WithOptions for crate::sink::kafka::CompressionCodec {}
-impl WithOptions for crate::source::filesystem::file_common::DecompressionFormat {}
+impl WithOptions for crate::source::filesystem::file_common::CompressionFormat {}
 impl WithOptions for nexmark::config::RateShape {}
 impl WithOptions for nexmark::event::EventType {}
 

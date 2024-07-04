@@ -23,7 +23,7 @@ use risingwave_common::types::Timestamptz;
 
 use super::OpendalSource;
 use crate::error::ConnectorResult;
-use crate::source::filesystem::file_common::DecompressionFormat;
+use crate::source::filesystem::file_common::CompressionFormat;
 use crate::source::filesystem::{FsPageItem, OpendalFsSplit};
 use crate::source::{SourceEnumeratorContextRef, SplitEnumerator};
 
@@ -34,7 +34,7 @@ pub struct OpendalEnumerator<Src: OpendalSource> {
     pub(crate) prefix: Option<String>,
     pub(crate) matcher: Option<glob::Pattern>,
     pub(crate) marker: PhantomData<Src>,
-    pub(crate) compression_format: Option<DecompressionFormat>,
+    pub(crate) compression_format: CompressionFormat,
 }
 
 #[async_trait]
