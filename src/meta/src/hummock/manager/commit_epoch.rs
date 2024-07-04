@@ -307,21 +307,16 @@ impl HummockManager {
         table_compaction_group_mapping: &HashMap<TableId, CompactionGroupId>,
     ) -> Result<BTreeMap<CompactionGroupId, Vec<SstableInfo>>> {
         let mut new_sst_id_number = 0;
-        let mut cg_to_sst: BTreeMap<CompactionGroupId, HashMap<u64, SstableInfo>> =
-            BTreeMap::default();
-        // Group SSTs by compaction group
+        let mut sst_to_cg_vec = Vec::with_capacity(sstables.len());
         for commit_sst in sstables {
+            let mut group_table_ids: BTreeMap<u64, Vec<u32>> = BTreeMap::new();
             for table_id in commit_sst.sst_info.get_table_ids() {
                 match table_compaction_group_mapping.get(&TableId::new(*table_id)) {
                     Some(cg_id_from_meta) => {
-                        if cg_to_sst
+                        group_table_ids
                             .entry(*cg_id_from_meta)
                             .or_default()
-                            .insert(commit_sst.sst_info.sst_id, commit_sst.sst_info.clone())
-                            .is_none()
-                        {
-                            new_sst_id_number += 1;
-                        }
+                            .push(*table_id);
                     }
                     None => {
                         tracing::warn!(
@@ -332,17 +327,20 @@ impl HummockManager {
                     }
                 }
             }
+
+            new_sst_id_number += group_table_ids.len();
+            sst_to_cg_vec.push((commit_sst, group_table_ids));
         }
 
         // Generate new SST IDs for each compaction group
         // `next_sstable_object_id` will update the global SST ID and reserve the new SST IDs
         // So we need to get the new SST ID first and then split the SSTs
         let mut new_sst_id = next_sstable_object_id(&self.env, new_sst_id_number).await?;
-        let mut commit_sstables: BTreeMap<CompactionGroupId, Vec<SstableInfo>> = BTreeMap::new();
-        for (group_id, ssts) in cg_to_sst {
-            for (_, mut sst) in ssts {
-                // Since, hummock may mix data from different cg's in the same object when committing epoch, so we rewrite the sst_id's of all sstable's by split_sst for convenience.
-                let branch_sst = split_sst(&mut sst, &mut new_sst_id);
+        let mut commit_sstables: BTreeMap<u64, Vec<SstableInfo>> = BTreeMap::new();
+
+        for (mut sst, group_table_ids) in sst_to_cg_vec {
+            for (group_id, _match_ids) in group_table_ids {
+                let branch_sst = split_sst(&mut sst.sst_info, &mut new_sst_id);
                 commit_sstables
                     .entry(group_id)
                     .or_default()
