@@ -12,13 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::ops::{Deref, DerefMut};
 
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::build_version_delta_after_version;
+use risingwave_common::catalog::TableId;
+use risingwave_hummock_sdk::table_watermark::TableWatermarks;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
-use risingwave_hummock_sdk::HummockVersionId;
-use risingwave_pb::hummock::HummockVersionStats;
+use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, HummockVersionId};
+use risingwave_pb::hummock::group_delta::DeltaType;
+use risingwave_pb::hummock::hummock_version_delta::ChangeLogDelta;
+use risingwave_pb::hummock::{
+    GroupDelta, HummockVersionStats, IntraLevelDelta, SstableInfo, StateTableInfoDelta,
+};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 
 use crate::manager::NotificationManager;
@@ -38,7 +43,9 @@ fn trigger_version_stat(metrics: &MetaMetrics, current_version: &HummockVersion)
     metrics
         .version_size
         .set(current_version.estimated_encode_len() as i64);
-    metrics.safe_epoch.set(current_version.safe_epoch as i64);
+    metrics
+        .safe_epoch
+        .set(current_version.visible_table_safe_epoch() as i64);
     metrics.current_version_id.set(current_version.id as i64);
 }
 
@@ -86,7 +93,7 @@ impl<'a> HummockVersionTransaction<'a> {
     }
 
     pub(super) fn new_delta<'b>(&'b mut self) -> SingleDeltaTransaction<'a, 'b> {
-        let delta = build_version_delta_after_version(self.latest_version());
+        let delta = self.latest_version().version_delta_after();
         SingleDeltaTransaction {
             version_txn: self,
             delta: Some(delta),
@@ -99,6 +106,75 @@ impl<'a> HummockVersionTransaction<'a> {
             .get_or_insert_with(|| (self.orig_version.clone(), Vec::with_capacity(1)));
         version.apply_version_delta(&delta);
         deltas.push(delta);
+    }
+
+    pub(super) fn pre_commit_sst(
+        &mut self,
+        epoch: HummockEpoch,
+        commit_sstables: BTreeMap<CompactionGroupId, Vec<SstableInfo>>,
+        new_table_ids: HashMap<TableId, CompactionGroupId>,
+        modified_compaction_groups: &mut Vec<CompactionGroupId>,
+        new_table_watermarks: HashMap<TableId, TableWatermarks>,
+        change_log_delta: HashMap<TableId, ChangeLogDelta>,
+    ) {
+        let mut new_version_delta = self.new_delta();
+        new_version_delta.max_committed_epoch = epoch;
+        new_version_delta.new_table_watermarks = new_table_watermarks;
+        new_version_delta.change_log_delta = change_log_delta;
+
+        // Append SSTs to a new version.
+        for (compaction_group_id, inserted_table_infos) in commit_sstables {
+            modified_compaction_groups.push(compaction_group_id);
+            let group_deltas = &mut new_version_delta
+                .group_deltas
+                .entry(compaction_group_id)
+                .or_default()
+                .group_deltas;
+            let l0_sub_level_id = epoch;
+            let group_delta = GroupDelta {
+                delta_type: Some(DeltaType::IntraLevel(IntraLevelDelta {
+                    level_idx: 0,
+                    inserted_table_infos,
+                    l0_sub_level_id,
+                    ..Default::default()
+                })),
+            };
+            group_deltas.push(group_delta);
+        }
+
+        // update state table info
+        new_version_delta.with_latest_version(|version, delta| {
+            for (table_id, cg_id) in new_table_ids {
+                delta.state_table_info_delta.insert(
+                    table_id,
+                    StateTableInfoDelta {
+                        committed_epoch: epoch,
+                        safe_epoch: epoch,
+                        compaction_group_id: cg_id,
+                    },
+                );
+            }
+
+            for (table_id, info) in version.state_table_info.info() {
+                assert!(
+                    delta
+                        .state_table_info_delta
+                        .insert(
+                            *table_id,
+                            StateTableInfoDelta {
+                                committed_epoch: epoch,
+                                safe_epoch: info.safe_epoch,
+                                compaction_group_id: info.compaction_group_id,
+                            }
+                        )
+                        .is_none(),
+                    "newly added table exists previously: {:?}",
+                    table_id
+                );
+            }
+        });
+
+        new_version_delta.pre_apply();
     }
 }
 
@@ -157,6 +233,16 @@ impl<'a, 'b> SingleDeltaTransaction<'a, 'b> {
 
     pub(super) fn pre_apply(mut self) {
         self.version_txn.pre_apply(self.delta.take().unwrap());
+    }
+
+    pub(super) fn with_latest_version(
+        &mut self,
+        f: impl FnOnce(&HummockVersion, &mut HummockVersionDelta),
+    ) {
+        f(
+            self.version_txn.latest_version(),
+            self.delta.as_mut().expect("should exist"),
+        )
     }
 }
 

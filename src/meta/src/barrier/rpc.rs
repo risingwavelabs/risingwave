@@ -294,6 +294,12 @@ impl ControlStreamManager {
                                         barrier: Some(barrier),
                                         actor_ids_to_send,
                                         actor_ids_to_collect,
+                                        table_ids_to_sync: command_context
+                                            .info
+                                            .existing_table_ids()
+                                            .iter()
+                                            .map(|table_id| table_id.table_id)
+                                            .collect(),
                                     },
                                 ),
                             ),

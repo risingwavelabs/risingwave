@@ -98,7 +98,9 @@ pub fn mysql_row_to_owned_row(mysql_row: &mut MysqlRow, schema: &Schema) -> Owne
                         .unwrap_or(Ok(None));
                     match res {
                         Ok(val) => val.map(|v| {
-                            ScalarImpl::from(Timestamptz::from_micros(v.timestamp_micros()))
+                            ScalarImpl::from(Timestamptz::from_micros(
+                                v.and_utc().timestamp_micros(),
+                            ))
                         }),
                         Err(err) => {
                             log_error!(name, err, "parse column failed");

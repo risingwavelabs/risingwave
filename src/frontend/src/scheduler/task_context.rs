@@ -94,6 +94,10 @@ impl BatchTaskContext for FrontendBatchTaskContext {
         self.session.env().source_metrics()
     }
 
+    fn spill_metrics(&self) -> Arc<risingwave_batch::monitor::BatchSpillMetrics> {
+        self.session.env().spill_metrics()
+    }
+
     fn create_executor_mem_context(&self, _executor_id: &str) -> MemoryContext {
         MemoryContext::new(Some(self.mem_context.clone()), TrAdderAtomic::new(0))
     }

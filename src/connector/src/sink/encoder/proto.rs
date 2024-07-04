@@ -205,6 +205,7 @@ impl MaybeData for () {
 /// * Top level is always a message.
 /// * All message fields can be omitted in proto3.
 /// * All repeated elements must have a value.
+///
 /// So we handle [`ScalarRefImpl`] rather than [`DatumRef`] here.
 impl MaybeData for ScalarRefImpl<'_> {
     type Out = Value;

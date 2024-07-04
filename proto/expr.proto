@@ -280,11 +280,13 @@ message ExprNode {
     JSONB_PATH_QUERY_FIRST = 623;
     JSONB_POPULATE_RECORD = 629;
     JSONB_TO_RECORD = 630;
+    JSONB_SET = 631;
 
     // Non-pure functions below (> 1000)
     // ------------------------
     // Internal functions
     VNODE = 1101;
+    TEST_PAID_TIER = 1102;
     // Non-deterministic functions
     PROCTIME = 2023;
     PG_SLEEP = 2024;
@@ -301,6 +303,7 @@ message ExprNode {
     PG_INDEXES_SIZE = 2404;
     PG_RELATION_SIZE = 2405;
     PG_GET_SERIAL_SEQUENCE = 2406;
+    PG_INDEX_COLUMN_HAS_PROPERTY = 2410;
     HAS_TABLE_PRIVILEGE = 2407;
     HAS_ANY_COLUMN_PRIVILEGE = 2408;
     HAS_SCHEMA_PRIVILEGE = 2409;
@@ -451,6 +454,7 @@ message WindowFrame {
 
     TYPE_ROWS = 5;
     TYPE_RANGE = 10;
+    TYPE_SESSION = 15;
   }
   enum BoundType {
     BOUND_TYPE_UNSPECIFIED = 0;
@@ -496,6 +500,13 @@ message WindowFrame {
     BoundType type = 1;
     optional data.Datum offset = 3;
   }
+  message SessionFrameBounds {
+    data.Datum gap = 1;
+
+    data.DataType order_data_type = 10;
+    common.OrderType order_type = 15;
+    data.DataType gap_data_type = 20;
+  }
 
   Type type = 1;
 
@@ -507,6 +518,7 @@ message WindowFrame {
   oneof bounds {
     RowsFrameBounds rows = 10;
     RangeFrameBounds range = 15;
+    SessionFrameBounds session = 20;
   }
 }
 

@@ -16,10 +16,8 @@ use std::hash::BuildHasher;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use anyhow::anyhow;
 use bytes::Bytes;
 use futures_async_stream::try_stream;
-use futures_util::AsyncReadExt;
 use hashbrown::hash_map::Entry;
 use itertools::Itertools;
 use prost::Message;
@@ -37,7 +35,6 @@ use risingwave_expr::aggregate::{AggCall, AggregateState, BoxedAggregateFunction
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::HashAggNode;
 use risingwave_pb::data::DataChunk as PbDataChunk;
-use twox_hash::XxHash64;
 
 use crate::error::{BatchError, Result};
 use crate::executor::aggregation::build as build_agg;
@@ -45,7 +42,11 @@ use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
     WrapStreamExecutor,
 };
-use crate::spill::spill_op::{SpillOp, DEFAULT_SPILL_PARTITION_NUM};
+use crate::monitor::BatchSpillMetrics;
+use crate::spill::spill_op::SpillBackend::Disk;
+use crate::spill::spill_op::{
+    SpillBackend, SpillBuildHasher, SpillOp, DEFAULT_SPILL_PARTITION_NUM, SPILL_AT_LEAST_MEMORY,
+};
 use crate::task::{BatchTaskContext, ShutdownToken, TaskId};
 
 type AggHashMap<K, A> = hashbrown::HashMap<K, Vec<AggregateState>, PrecomputedBuildHasher, A>;
@@ -64,7 +65,8 @@ impl HashKeyDispatcher for HashAggExecutorBuilder {
             self.identity,
             self.chunk_size,
             self.mem_context,
-            self.enable_spill,
+            self.spill_backend,
+            self.spill_metrics,
             self.shutdown_rx,
         ))
     }
@@ -85,7 +87,8 @@ pub struct HashAggExecutorBuilder {
     identity: String,
     chunk_size: usize,
     mem_context: MemoryContext,
-    enable_spill: bool,
+    spill_backend: Option<SpillBackend>,
+    spill_metrics: Arc<BatchSpillMetrics>,
     shutdown_rx: ShutdownToken,
 }
 
@@ -97,7 +100,8 @@ impl HashAggExecutorBuilder {
         identity: String,
         chunk_size: usize,
         mem_context: MemoryContext,
-        enable_spill: bool,
+        spill_backend: Option<SpillBackend>,
+        spill_metrics: Arc<BatchSpillMetrics>,
         shutdown_rx: ShutdownToken,
     ) -> Result<BoxedExecutor> {
         let aggs: Vec<_> = hash_agg_node
@@ -136,7 +140,8 @@ impl HashAggExecutorBuilder {
             identity,
             chunk_size,
             mem_context,
-            enable_spill,
+            spill_backend,
+            spill_metrics,
             shutdown_rx,
         };
 
@@ -159,6 +164,8 @@ impl BoxedExecutorBuilder for HashAggExecutorBuilder {
 
         let identity = source.plan_node().get_identity();
 
+        let spill_metrics = source.context.spill_metrics();
+
         Self::deserialize(
             hash_agg_node,
             child,
@@ -166,7 +173,12 @@ impl BoxedExecutorBuilder for HashAggExecutorBuilder {
             identity.clone(),
             source.context.get_config().developer.chunk_size,
             source.context.create_executor_mem_context(identity),
-            source.context.get_config().enable_spill,
+            if source.context.get_config().enable_spill {
+                Some(Disk)
+            } else {
+                None
+            },
+            spill_metrics,
             source.shutdown_rx.clone(),
         )
     }
@@ -188,7 +200,8 @@ pub struct HashAggExecutor<K> {
     identity: String,
     chunk_size: usize,
     mem_context: MemoryContext,
-    enable_spill: bool,
+    spill_backend: Option<SpillBackend>,
+    spill_metrics: Arc<BatchSpillMetrics>,
     /// The upper bound of memory usage for this executor.
     memory_upper_bound: Option<u64>,
     shutdown_rx: ShutdownToken,
@@ -196,6 +209,7 @@ pub struct HashAggExecutor<K> {
 }
 
 impl<K> HashAggExecutor<K> {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         aggs: Arc<Vec<BoxedAggregateFunction>>,
         group_key_columns: Vec<usize>,
@@ -205,7 +219,8 @@ impl<K> HashAggExecutor<K> {
         identity: String,
         chunk_size: usize,
         mem_context: MemoryContext,
-        enable_spill: bool,
+        spill_backend: Option<SpillBackend>,
+        spill_metrics: Arc<BatchSpillMetrics>,
         shutdown_rx: ShutdownToken,
     ) -> Self {
         Self::new_inner(
@@ -218,7 +233,8 @@ impl<K> HashAggExecutor<K> {
             identity,
             chunk_size,
             mem_context,
-            enable_spill,
+            spill_backend,
+            spill_metrics,
             None,
             shutdown_rx,
         )
@@ -235,7 +251,8 @@ impl<K> HashAggExecutor<K> {
         identity: String,
         chunk_size: usize,
         mem_context: MemoryContext,
-        enable_spill: bool,
+        spill_backend: Option<SpillBackend>,
+        spill_metrics: Arc<BatchSpillMetrics>,
         memory_upper_bound: Option<u64>,
         shutdown_rx: ShutdownToken,
     ) -> Self {
@@ -249,7 +266,8 @@ impl<K> HashAggExecutor<K> {
             identity,
             chunk_size,
             mem_context,
-            enable_spill,
+            spill_backend,
+            spill_metrics,
             memory_upper_bound,
             shutdown_rx,
             _phantom: PhantomData,
@@ -271,17 +289,6 @@ impl<K: HashKey + Send + Sync> Executor for HashAggExecutor<K> {
     }
 }
 
-#[derive(Default, Clone, Copy)]
-pub struct SpillBuildHasher(u64);
-
-impl BuildHasher for SpillBuildHasher {
-    type Hasher = XxHash64;
-
-    fn build_hasher(&self) -> Self::Hasher {
-        XxHash64::with_seed(self.0)
-    }
-}
-
 /// `AggSpillManager` is used to manage how to write spill data file and read them back.
 /// The spill data first need to be partitioned. Each partition contains 2 files: `agg_state_file` and `input_chunks_file`.
 /// The spill file consume a data chunk and serialize the chunk into a protobuf bytes.
@@ -300,37 +307,34 @@ pub struct AggSpillManager {
     op: SpillOp,
     partition_num: usize,
     agg_state_writers: Vec<opendal::Writer>,
-    #[expect(dead_code)]
-    agg_state_readers: Vec<opendal::Reader>,
     agg_state_chunk_builder: Vec<DataChunkBuilder>,
     input_writers: Vec<opendal::Writer>,
-    #[expect(dead_code)]
-    input_readers: Vec<opendal::Reader>,
     input_chunk_builders: Vec<DataChunkBuilder>,
     spill_build_hasher: SpillBuildHasher,
     group_key_types: Vec<DataType>,
     child_data_types: Vec<DataType>,
     agg_data_types: Vec<DataType>,
     spill_chunk_size: usize,
+    spill_metrics: Arc<BatchSpillMetrics>,
 }
 
 impl AggSpillManager {
     fn new(
+        spill_backend: SpillBackend,
         agg_identity: &String,
         partition_num: usize,
         group_key_types: Vec<DataType>,
         agg_data_types: Vec<DataType>,
         child_data_types: Vec<DataType>,
         spill_chunk_size: usize,
+        spill_metrics: Arc<BatchSpillMetrics>,
     ) -> Result<Self> {
         let suffix_uuid = uuid::Uuid::new_v4();
         let dir = format!("/{}-{}/", agg_identity, suffix_uuid);
-        let op = SpillOp::create(dir)?;
+        let op = SpillOp::create(dir, spill_backend)?;
         let agg_state_writers = Vec::with_capacity(partition_num);
-        let agg_state_readers = Vec::with_capacity(partition_num);
         let agg_state_chunk_builder = Vec::with_capacity(partition_num);
         let input_writers = Vec::with_capacity(partition_num);
-        let input_readers = Vec::with_capacity(partition_num);
         let input_chunk_builders = Vec::with_capacity(partition_num);
         // Use uuid to generate an unique hasher so that when recursive spilling happens they would use a different hasher to avoid data skew.
         let spill_build_hasher = SpillBuildHasher(suffix_uuid.as_u64_pair().1);
@@ -338,16 +342,15 @@ impl AggSpillManager {
             op,
             partition_num,
             agg_state_writers,
-            agg_state_readers,
             agg_state_chunk_builder,
             input_writers,
-            input_readers,
             input_chunk_builders,
             spill_build_hasher,
             group_key_types,
             child_data_types,
             agg_data_types,
             spill_chunk_size,
+            spill_metrics,
         })
     }
 
@@ -382,6 +385,9 @@ impl AggSpillManager {
             let chunk_pb: PbDataChunk = output_chunk.to_protobuf();
             let buf = Message::encode_to_vec(&chunk_pb);
             let len_bytes = Bytes::copy_from_slice(&(buf.len() as u32).to_le_bytes());
+            self.spill_metrics
+                .batch_spill_write_bytes
+                .inc_by((buf.len() + len_bytes.len()) as u64);
             self.agg_state_writers[partition].write(len_bytes).await?;
             self.agg_state_writers[partition].write(buf).await?;
         }
@@ -402,6 +408,9 @@ impl AggSpillManager {
                 let chunk_pb: PbDataChunk = output_chunk.to_protobuf();
                 let buf = Message::encode_to_vec(&chunk_pb);
                 let len_bytes = Bytes::copy_from_slice(&(buf.len() as u32).to_le_bytes());
+                self.spill_metrics
+                    .batch_spill_write_bytes
+                    .inc_by((buf.len() + len_bytes.len()) as u64);
                 self.input_writers[partition].write(len_bytes).await?;
                 self.input_writers[partition].write(buf).await?;
             }
@@ -415,6 +424,9 @@ impl AggSpillManager {
                 let chunk_pb: PbDataChunk = output_chunk.to_protobuf();
                 let buf = Message::encode_to_vec(&chunk_pb);
                 let len_bytes = Bytes::copy_from_slice(&(buf.len() as u32).to_le_bytes());
+                self.spill_metrics
+                    .batch_spill_write_bytes
+                    .inc_by((buf.len() + len_bytes.len()) as u64);
                 self.agg_state_writers[partition].write(len_bytes).await?;
                 self.agg_state_writers[partition].write(buf).await?;
             }
@@ -423,6 +435,9 @@ impl AggSpillManager {
                 let chunk_pb: PbDataChunk = output_chunk.to_protobuf();
                 let buf = Message::encode_to_vec(&chunk_pb);
                 let len_bytes = Bytes::copy_from_slice(&(buf.len() as u32).to_le_bytes());
+                self.spill_metrics
+                    .batch_spill_write_bytes
+                    .inc_by((buf.len() + len_bytes.len()) as u64);
                 self.input_writers[partition].write(len_bytes).await?;
                 self.input_writers[partition].write(buf).await?;
             }
@@ -437,36 +452,16 @@ impl AggSpillManager {
         Ok(())
     }
 
-    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
-    async fn read_stream(mut reader: opendal::Reader) {
-        let mut buf = [0u8; 4];
-        loop {
-            if let Err(err) = reader.read_exact(&mut buf).await {
-                if err.kind() == std::io::ErrorKind::UnexpectedEof {
-                    break;
-                } else {
-                    return Err(anyhow!(err).into());
-                }
-            }
-            let len = u32::from_le_bytes(buf) as usize;
-            let mut buf = vec![0u8; len];
-            reader.read_exact(&mut buf).await.map_err(|e| anyhow!(e))?;
-            let chunk_pb: PbDataChunk = Message::decode(buf.as_slice()).map_err(|e| anyhow!(e))?;
-            let chunk = DataChunk::from_protobuf(&chunk_pb)?;
-            yield chunk;
-        }
-    }
-
     async fn read_agg_state_partition(&mut self, partition: usize) -> Result<BoxedDataChunkStream> {
         let agg_state_partition_file_name = format!("agg-state-p{}", partition);
         let r = self.op.reader_with(&agg_state_partition_file_name).await?;
-        Ok(Self::read_stream(r))
+        Ok(SpillOp::read_stream(r, self.spill_metrics.clone()))
     }
 
     async fn read_input_partition(&mut self, partition: usize) -> Result<BoxedDataChunkStream> {
         let input_partition_file_name = format!("input-chunks-p{}", partition);
         let r = self.op.reader_with(&input_partition_file_name).await?;
-        Ok(Self::read_stream(r))
+        Ok(SpillOp::read_stream(r, self.spill_metrics.clone()))
     }
 
     async fn estimate_partition_size(&self, partition: usize) -> Result<u64> {
@@ -493,8 +488,6 @@ impl AggSpillManager {
         Ok(())
     }
 }
-
-const SPILL_AT_LEAST_MEMORY: u64 = 1024 * 1024;
 
 impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
     #[try_stream(boxed, ok = DataChunk, error = BatchError)]
@@ -585,7 +578,7 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
             }
             // update memory usage
             if !self.mem_context.add(memory_usage_diff) && check_memory {
-                if self.enable_spill {
+                if self.spill_backend.is_some() {
                     need_to_spill = true;
                     break;
                 } else {
@@ -601,14 +594,20 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
             // partition and spill to disk with the same hash function as the hash table spilling.
             // Finally, we would get e.g. 20 partitions. Each partition should contain a portion of the original hash table and input data.
             // A sub HashAggExecutor would be used to consume each partition one by one.
-            // If memory is still not enough in the sub HashAggExecutor, it will partition its hash table and input recursively.
+            // If memory is still not enough in the sub HashAggExecutor, it will spill its hash table and input recursively.
+            info!(
+                "batch hash agg executor {} starts to spill out",
+                &self.identity
+            );
             let mut agg_spill_manager = AggSpillManager::new(
+                self.spill_backend.clone().unwrap(),
                 &self.identity,
                 DEFAULT_SPILL_PARTITION_NUM,
                 self.group_key_types.clone(),
                 self.aggs.iter().map(|agg| agg.return_type()).collect(),
                 child_schema.data_types(),
                 self.chunk_size,
+                self.spill_metrics.clone(),
             )?;
             agg_spill_manager.init_writers().await?;
 
@@ -673,7 +672,8 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
                     format!("{}-sub{}", self.identity.clone(), i),
                     self.chunk_size,
                     self.mem_context.clone(),
-                    self.enable_spill,
+                    self.spill_backend.clone(),
+                    self.spill_metrics.clone(),
                     Some(partition_size),
                     self.shutdown_rx.clone(),
                 );
@@ -752,6 +752,7 @@ mod tests {
     use futures_async_stream::for_await;
     use risingwave_common::metrics::LabelGuardedIntGauge;
     use risingwave_common::test_prelude::DataChunkTestExt;
+    use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::data::PbDataType;
     use risingwave_pb::expr::agg_call::Type;
@@ -759,6 +760,7 @@ mod tests {
 
     use super::*;
     use crate::executor::test_utils::{diff_executor_output, MockExecutor};
+    use crate::executor::SortExecutor;
 
     const CHUNK_SIZE: usize = 1024;
 
@@ -821,7 +823,8 @@ mod tests {
                 "HashAggExecutor".to_string(),
                 CHUNK_SIZE,
                 mem_context.clone(),
-                false,
+                None,
+                BatchSpillMetrics::for_test(),
                 ShutdownToken::empty(),
             )
             .unwrap();
@@ -894,7 +897,8 @@ mod tests {
             "HashAggExecutor".to_string(),
             CHUNK_SIZE,
             MemoryContext::none(),
-            false,
+            None,
+            BatchSpillMetrics::for_test(),
             ShutdownToken::empty(),
         )
         .unwrap();
@@ -1011,7 +1015,8 @@ mod tests {
             "HashAggExecutor".to_string(),
             CHUNK_SIZE,
             MemoryContext::none(),
-            false,
+            None,
+            BatchSpillMetrics::for_test(),
             shutdown_rx,
         )
         .unwrap();
@@ -1023,5 +1028,110 @@ mod tests {
             assert!(data.is_err());
             break;
         }
+    }
+
+    fn create_order_by_executor(child: BoxedExecutor) -> BoxedExecutor {
+        let column_orders = child
+            .schema()
+            .fields
+            .iter()
+            .enumerate()
+            .map(|(i, _)| ColumnOrder {
+                column_index: i,
+                order_type: OrderType::ascending(),
+            })
+            .collect_vec();
+
+        Box::new(SortExecutor::new(
+            child,
+            Arc::new(column_orders),
+            "SortExecutor".into(),
+            CHUNK_SIZE,
+            MemoryContext::none(),
+            None,
+            BatchSpillMetrics::for_test(),
+        ))
+    }
+
+    #[tokio::test]
+    async fn test_spill_hash_agg() {
+        let src_exec = Box::new(MockExecutor::with_chunk(
+            DataChunk::from_pretty(
+                "i i i
+                 0 1 1
+                 1 1 1
+                 0 0 1
+                 1 1 2
+                 1 0 1
+                 0 0 2
+                 1 1 3
+                 0 1 2",
+            ),
+            Schema::new(vec![
+                Field::unnamed(DataType::Int32),
+                Field::unnamed(DataType::Int32),
+                Field::unnamed(DataType::Int64),
+            ]),
+        ));
+
+        let agg_call = AggCall {
+            r#type: Type::Sum as i32,
+            args: vec![InputRef {
+                index: 2,
+                r#type: Some(PbDataType {
+                    type_name: TypeName::Int32 as i32,
+                    ..Default::default()
+                }),
+            }],
+            return_type: Some(PbDataType {
+                type_name: TypeName::Int64 as i32,
+                ..Default::default()
+            }),
+            distinct: false,
+            order_by: vec![],
+            filter: None,
+            direct_args: vec![],
+            udf: None,
+        };
+
+        let agg_prost = HashAggNode {
+            group_key: vec![0, 1],
+            agg_calls: vec![agg_call],
+        };
+
+        let mem_context =
+            MemoryContext::new_with_mem_limit(None, LabelGuardedIntGauge::<4>::test_int_gauge(), 0);
+        let actual_exec = HashAggExecutorBuilder::deserialize(
+            &agg_prost,
+            src_exec,
+            TaskId::default(),
+            "HashAggExecutor".to_string(),
+            CHUNK_SIZE,
+            mem_context.clone(),
+            Some(SpillBackend::Memory),
+            BatchSpillMetrics::for_test(),
+            ShutdownToken::empty(),
+        )
+        .unwrap();
+
+        let actual_exec = create_order_by_executor(actual_exec);
+
+        let expect_exec = Box::new(MockExecutor::with_chunk(
+            DataChunk::from_pretty(
+                "i i I
+                 1 0 1
+                 0 0 3
+                 0 1 3
+                 1 1 6",
+            ),
+            Schema::new(vec![
+                Field::unnamed(DataType::Int32),
+                Field::unnamed(DataType::Int32),
+                Field::unnamed(DataType::Int64),
+            ]),
+        ));
+
+        let expect_exec = create_order_by_executor(expect_exec);
+        diff_executor_output(actual_exec, expect_exec).await;
     }
 }

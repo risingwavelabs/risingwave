@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use risingwave_common::catalog::{ColumnCatalog, SourceVersionId};
 use risingwave_common::util::epoch::Epoch;
@@ -26,7 +26,7 @@ use crate::user::UserId;
 
 /// This struct `SourceCatalog` is used in frontend.
 /// Compared with `PbSource`, it only maintains information used during optimization.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct SourceCatalog {
     pub id: SourceId,
     pub name: String,
@@ -36,7 +36,7 @@ pub struct SourceCatalog {
     pub owner: UserId,
     pub info: StreamSourceInfo,
     pub row_id_index: Option<usize>,
-    pub with_properties: HashMap<String, String>,
+    pub with_properties: BTreeMap<String, String>,
     pub watermark_descs: Vec<WatermarkDesc>,
     pub associated_table_id: Option<TableId>,
     pub definition: String,
@@ -77,6 +77,7 @@ impl SourceCatalog {
             version: self.version,
             created_at_cluster_version: self.created_at_cluster_version.clone(),
             initialized_at_cluster_version: self.initialized_at_cluster_version.clone(),
+            secret_refs: Default::default(),
         }
     }
 
@@ -147,11 +148,5 @@ impl From<&PbSource> for SourceCatalog {
 impl OwnedByUserCatalog for SourceCatalog {
     fn owner(&self) -> UserId {
         self.owner
-    }
-}
-
-impl std::hash::Hash for SourceCatalog {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.id.hash(state);
     }
 }

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -22,8 +22,6 @@ use futures::{FutureExt, StreamExt};
 use itertools::Itertools;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::get_compaction_group_ids;
-use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_pb::hummock::compact_task::{self, TaskStatus};
 use risingwave_pb::hummock::level_handler::RunningCompactTask;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
@@ -34,7 +32,6 @@ use tokio::task::JoinHandle;
 use tokio_stream::wrappers::IntervalStream;
 use tracing::warn;
 
-use crate::hummock::manager::HISTORY_TABLE_INFO_STATISTIC_TIME;
 use crate::hummock::metrics_utils::{trigger_lsm_stat, trigger_mv_stat};
 use crate::hummock::{HummockManager, TASK_NORMAL};
 
@@ -258,16 +255,25 @@ impl HummockManager {
                                     // progress (meta + compactor)
                                     // 2. meta periodically scans the task and performs a cancel on
                                     // the meta side for tasks that are not updated by heartbeat
-                                    for task in compactor_manager.get_heartbeat_expired_tasks() {
+                                    let expired_tasks: Vec<u64> = compactor_manager
+                                        .get_heartbeat_expired_tasks()
+                                        .into_iter()
+                                        .map(|task| task.task_id)
+                                        .collect();
+                                    if !expired_tasks.is_empty() {
+                                        tracing::info!(
+                                            expired_tasks = ?expired_tasks,
+                                            "Heartbeat expired compaction tasks detected. Attempting to cancel tasks.",
+                                        );
                                         if let Err(e) = hummock_manager
-                                            .cancel_compact_task(
-                                                task.task_id,
+                                            .cancel_compact_tasks(
+                                                expired_tasks.clone(),
                                                 TaskStatus::HeartbeatCanceled,
                                             )
                                             .await
                                         {
                                             tracing::error!(
-                                                task_id = task.task_id,
+                                                expired_tasks = ?expired_tasks,
                                                 error = %e.as_report(),
                                                 "Attempt to remove compaction task due to elapsed heartbeat failed. We will continue to track its heartbeat
                                                 until we can successfully report its status",

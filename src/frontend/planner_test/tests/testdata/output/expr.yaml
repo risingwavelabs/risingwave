@@ -543,7 +543,7 @@
     Failed to bind expression: v1 >= now()
 
     Caused by:
-      Invalid input syntax: For streaming queries, `NOW()` function is only allowed in `WHERE`, `HAVING` and `ON`. Found in clause: Some(GroupBy). Please please refer to https://www.risingwave.dev/docs/current/sql-pattern-temporal-filters/ for more information
+      Invalid input syntax: For streaming queries, `NOW()` function is only allowed in `WHERE`, `HAVING`, `ON` and `FROM`. Found in clause: Some(GroupBy). Please please refer to https://www.risingwave.dev/docs/current/sql-pattern-temporal-filters/ for more information
 - name: forbid now in select for stream
   sql: |
     create table t (v1 timestamp with time zone, v2 timestamp with time zone);
@@ -552,7 +552,7 @@
     Failed to bind expression: now()
 
     Caused by:
-      Invalid input syntax: For streaming queries, `NOW()` function is only allowed in `WHERE`, `HAVING` and `ON`. Found in clause: None. Please please refer to https://www.risingwave.dev/docs/current/sql-pattern-temporal-filters/ for more information
+      Invalid input syntax: For streaming queries, `NOW()` function is only allowed in `WHERE`, `HAVING`, `ON` and `FROM`. Found in clause: None. Please please refer to https://www.risingwave.dev/docs/current/sql-pattern-temporal-filters/ for more information
 - name: forbid now in agg filter for stream
   sql: |
     create table t (v1 timestamp with time zone, v2 int);
@@ -561,7 +561,7 @@
     Failed to bind expression: sum(v2) FILTER(WHERE v1 >= now())
 
     Caused by:
-      Invalid input syntax: For streaming queries, `NOW()` function is only allowed in `WHERE`, `HAVING` and `ON`. Found in clause: Some(Filter). Please please refer to https://www.risingwave.dev/docs/current/sql-pattern-temporal-filters/ for more information
+      Invalid input syntax: For streaming queries, `NOW()` function is only allowed in `WHERE`, `HAVING`, `ON` and `FROM`. Found in clause: Some(Filter). Please please refer to https://www.risingwave.dev/docs/current/sql-pattern-temporal-filters/ for more information
 - name: typo pg_teminate_backend
   sql: |
     select pg_teminate_backend(1);
@@ -593,8 +593,9 @@
   batch_error: |
     Expr error
 
-    Caused by:
-      Division by zero
+    Caused by these errors (recent errors listed first):
+      1: error while evaluating expression `general_div('1', '0')`
+      2: Division by zero
 - sql: |
     select * from abs(-1);
   batch_plan: 'BatchValues { rows: [[1:Int32]] }'

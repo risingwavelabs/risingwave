@@ -269,7 +269,7 @@ fn datum_to_json_object(
             }
         },
         (DataType::Timestamp, ScalarRefImpl::Timestamp(v)) => match timestamp_handling_mode {
-            TimestampHandlingMode::Milli => json!(v.0.timestamp_millis()),
+            TimestampHandlingMode::Milli => json!(v.0.and_utc().timestamp_millis()),
             TimestampHandlingMode::String => json!(v.0.format("%Y-%m-%d %H:%M:%S%.6f").to_string()),
         },
         (DataType::Bytea, ScalarRefImpl::Bytea(v)) => {

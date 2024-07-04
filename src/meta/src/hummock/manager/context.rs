@@ -19,7 +19,7 @@ use itertools::Itertools;
 use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{
-    ExtendedSstableInfo, HummockContextId, HummockEpoch, HummockSstableObjectId, HummockVersionId,
+    HummockContextId, HummockEpoch, HummockSstableObjectId, HummockVersionId, LocalSstableInfo,
     INVALID_VERSION_ID,
 };
 use risingwave_pb::hummock::{
@@ -99,7 +99,7 @@ impl HummockManager {
     ) -> Result<()> {
         let mut context_info = self.context_info.write().await;
         context_info
-            .release_contexts(context_ids, self.meta_store_ref())
+            .release_contexts(context_ids, self.env.meta_store())
             .await?;
         #[cfg(test)]
         {
@@ -188,7 +188,7 @@ impl HummockManager {
         }
 
         context_info
-            .release_contexts(&invalid_context_ids, self.meta_store_ref())
+            .release_contexts(&invalid_context_ids, self.env.meta_store())
             .await?;
 
         Ok(invalid_context_ids)
@@ -197,7 +197,7 @@ impl HummockManager {
     pub async fn commit_epoch_sanity_check(
         &self,
         epoch: HummockEpoch,
-        sstables: &[ExtendedSstableInfo],
+        sstables: &[LocalSstableInfo],
         sst_to_context: &HashMap<HummockSstableObjectId, HummockContextId>,
         current_version: &HummockVersion,
     ) -> Result<()> {
@@ -246,7 +246,7 @@ impl HummockManager {
             };
             let sst_infos = sstables
                 .iter()
-                .map(|ExtendedSstableInfo { sst_info, .. }| sst_info.clone())
+                .map(|LocalSstableInfo { sst_info, .. }| sst_info.clone())
                 .collect_vec();
             if compactor
                 .send_event(ResponseEvent::ValidationTask(ValidationTask {

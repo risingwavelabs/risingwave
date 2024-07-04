@@ -498,7 +498,10 @@ where
                 // If not finished then we need to update state, otherwise no need.
                 if let Message::Barrier(barrier) = &msg {
                     if is_finished {
-                        // If already finished, no need persist any state.
+                        // If already finished, no need persist any state, but we need to advance the epoch of the state table anyway.
+                        if let Some(table) = &mut self.state_table {
+                            table.commit(barrier.epoch).await?;
+                        }
                     } else {
                         // If snapshot was empty, we do not need to backfill,
                         // but we still need to persist the finished state.
@@ -564,6 +567,13 @@ where
         #[for_await]
         for msg in upstream {
             if let Some(msg) = mapping_message(msg?, &self.output_indices) {
+                if let Message::Barrier(barrier) = &msg {
+                    // If already finished, no need persist any state, but we need to advance the epoch of the state table anyway.
+                    if let Some(table) = &mut self.state_table {
+                        table.commit(barrier.epoch).await?;
+                    }
+                }
+
                 yield msg;
             }
         }

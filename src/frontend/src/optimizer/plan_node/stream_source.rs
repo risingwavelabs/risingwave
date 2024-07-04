@@ -17,6 +17,7 @@ use std::rc::Rc;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
+use risingwave_common::catalog::ColumnCatalog;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector::parser::additional_columns::source_add_partition_offset_cols;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
@@ -50,10 +51,9 @@ impl StreamSource {
                 &core.column_catalog,
                 &source_catalog.connector_name(),
             );
-            for (existed, mut c) in columns_exist.into_iter().zip_eq_fast(additional_columns) {
-                c.is_hidden = true;
+            for (existed, c) in columns_exist.into_iter().zip_eq_fast(additional_columns) {
                 if !existed {
-                    core.column_catalog.push(c);
+                    core.column_catalog.push(ColumnCatalog::hidden(c));
                 }
             }
         }
@@ -109,6 +109,7 @@ impl StreamNode for StreamSource {
                 .collect_vec(),
             with_properties: source_catalog.with_properties.clone().into_iter().collect(),
             rate_limit: self.base.ctx().overwrite_options().streaming_rate_limit,
+            secret_refs: Default::default(),
         });
         PbNodeBody::Source(SourceNode { source_inner })
     }

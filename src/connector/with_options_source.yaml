@@ -44,15 +44,12 @@ IcebergProperties:
   - name: s3.endpoint
     field_type: String
     required: false
-    default: Default::default
   - name: s3.access.key
     field_type: String
-    required: false
-    default: Default::default
+    required: true
   - name: s3.secret.key
     field_type: String
-    required: false
-    default: Default::default
+    required: true
   - name: warehouse.path
     field_type: String
     required: true
@@ -218,7 +215,7 @@ KafkaProperties:
     comments: 'Whether to automatically and periodically commit offsets in the background.   Note that RisingWave does NOT rely on committed offsets. Committing offset is only for exposing the  progress for monitoring. Setting this to false can avoid creating consumer groups.   default: true'
     required: false
   - name: broker.rewrite.endpoints
-    field_type: HashMap<String,String>
+    field_type: BTreeMap<String,String>
     comments: This is generated from `private_link_targets` and `private_link_endpoint` in frontend, instead of given by users.
     required: false
   - name: aws.region
@@ -314,6 +311,16 @@ KinesisProperties:
     required: false
     alias:
     - kinesis.assumerole.external_id
+MongodbCommon:
+  fields:
+  - name: mongodb.url
+    field_type: String
+    comments: The URL of MongoDB
+    required: true
+  - name: collection.name
+    field_type: String
+    comments: The collection name where data should be written to or read from. For sinks, the format is  `db_name.collection_name`. Data can also be written to dynamic collections, see `collection.name.field`  for more information.
+    required: true
 MqttProperties:
   fields:
   - name: url
@@ -765,5 +772,5 @@ S3Properties:
 TestSourceProperties:
   fields:
   - name: properties
-    field_type: HashMap<String,String>
-    required: false
+    field_type: BTreeMap<String,String>
+    required: true

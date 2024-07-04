@@ -17,12 +17,12 @@ use std::rc::Rc;
 use std::sync::{Arc, LazyLock};
 
 use anyhow::Context;
-use arrow_schema::DataType as ArrowDataType;
+use arrow_schema_iceberg::DataType as ArrowDataType;
 use either::Either;
 use itertools::Itertools;
 use maplit::{convert_args, hashmap};
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::array::arrow::{FromArrow, IcebergArrowConvert};
+use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::catalog::{ConnectionId, DatabaseId, Schema, SchemaId, TableId, UserId};
 use risingwave_common::types::DataType;
 use risingwave_common::{bail, catalog};
@@ -50,7 +50,7 @@ use crate::catalog::catalog_service::CatalogReadGuard;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::view_catalog::ViewCatalog;
 use crate::error::{ErrorCode, Result, RwError};
-use crate::expr::{ExprImpl, InputRef};
+use crate::expr::{rewrite_now_to_proctime, ExprImpl, InputRef};
 use crate::handler::alter_table_column::fetch_table_catalog_for_alter;
 use crate::handler::create_mv::parse_column_names;
 use crate::handler::create_table::{generate_stream_graph_for_table, ColumnIdGenerator};
@@ -312,13 +312,13 @@ pub fn gen_sink_plan(
 pub async fn get_partition_compute_info(
     with_options: &WithOptions,
 ) -> Result<Option<PartitionComputeInfo>> {
-    let properties = HashMap::from_iter(with_options.clone().into_inner().into_iter());
+    let properties = with_options.clone().into_inner();
     let Some(connector) = properties.get(UPSTREAM_SOURCE_KEY) else {
         return Ok(None);
     };
     match connector.as_str() {
         ICEBERG_SINK => {
-            let iceberg_config = IcebergConfig::from_hashmap(properties)?;
+            let iceberg_config = IcebergConfig::from_btreemap(properties)?;
             get_partition_compute_info_for_iceberg(&iceberg_config).await
         }
         _ => Ok(None),
@@ -390,7 +390,7 @@ async fn get_partition_compute_info_for_iceberg(
     };
 
     Ok(Some(PartitionComputeInfo::Iceberg(IcebergPartitionInfo {
-        partition_type: IcebergArrowConvert.from_fields(&partition_type)?,
+        partition_type: IcebergArrowConvert.struct_from_fields(&partition_type)?,
         partition_fields,
     })))
 }
@@ -723,7 +723,10 @@ fn derive_default_column_project_for_sink(
             continue;
         }
 
-        let default_col_expr = || -> ExprImpl { target_table_catalog.default_column_expr(idx) };
+        let default_col_expr = || -> ExprImpl {
+            rewrite_now_to_proctime(target_table_catalog.default_column_expr(idx))
+        };
+
         let sink_col_expr = |sink_col_idx: usize| -> Result<ExprImpl> {
             derive_sink_to_table_expr(sink_schema, sink_col_idx, table_column.data_type())
         };
@@ -792,7 +795,6 @@ fn bind_sink_format_desc(value: ConnectorSchema) -> Result<SinkFormatDesc> {
     options
         .entry(TimestamptzHandlingMode::OPTION_KEY.to_owned())
         .or_insert(TimestamptzHandlingMode::FRONTEND_DEFAULT.to_owned());
-    let options = options.into_iter().collect();
 
     Ok(SinkFormatDesc {
         format,
@@ -817,7 +819,7 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                     Format::Plain => vec![Encode::Json],
                 ),
                 KafkaSink::SINK_NAME => hashmap!(
-                    Format::Plain => vec![Encode::Json, Encode::Protobuf],
+                    Format::Plain => vec![Encode::Json, Encode::Avro, Encode::Protobuf],
                     Format::Upsert => vec![Encode::Json, Encode::Avro],
                     Format::Debezium => vec![Encode::Json],
                 ),

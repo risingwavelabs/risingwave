@@ -33,8 +33,9 @@ use risingwave_common::types::{Datum, JsonbVal};
 use risingwave_common::util::epoch::{test_epoch, EpochExt};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_connector::source::cdc::external::mock_external_table::MockExternalTableReader;
+use risingwave_connector::source::cdc::external::mysql::MySqlOffset;
 use risingwave_connector::source::cdc::external::{
-    DebeziumOffset, DebeziumSourceOffset, ExternalTableReaderImpl, MySqlOffset, SchemaTableName,
+    DebeziumOffset, DebeziumSourceOffset, ExternalTableReaderImpl, SchemaTableName,
 };
 use risingwave_connector::source::cdc::DebeziumCdcSplit;
 use risingwave_connector::source::SplitImpl;
@@ -169,7 +170,10 @@ async fn test_cdc_backfill() -> StreamResult<()> {
         MySqlOffset::new(binlog_file.clone(), 10),
     ];
 
-    let table_name = SchemaTableName::new("mock_table".to_string(), "public".to_string());
+    let table_name = SchemaTableName {
+        schema_name: "public".to_string(),
+        table_name: "mock_table".to_string(),
+    };
     let table_schema = Schema::new(vec![
         Field::with_name(DataType::Int64, "id"), // primary key
         Field::with_name(DataType::Float64, "price"),
@@ -179,6 +183,7 @@ async fn test_cdc_backfill() -> StreamResult<()> {
     let external_table = ExternalStorageTable::new(
         TableId::new(1234),
         table_name,
+        "mydb".to_string(),
         ExternalTableReaderImpl::Mock(MockExternalTableReader::new(binlog_watermarks)),
         table_schema.clone(),
         table_pk_order_types,

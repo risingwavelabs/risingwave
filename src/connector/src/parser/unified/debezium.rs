@@ -12,7 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::types::{DataType, Datum, Scalar, ScalarImpl, Timestamptz};
+use risingwave_common::types::{
+    DataType, Datum, DatumCow, Scalar, ScalarImpl, ScalarRefImpl, Timestamptz, ToDatumRef,
+};
+use risingwave_connector_codec::decoder::AccessExt;
 use risingwave_pb::plan_common::additional_column::ColumnType;
 
 use super::{Access, AccessError, AccessResult, ChangeEvent, ChangeEventOperation};
@@ -60,8 +63,14 @@ pub struct DebeziumChangeEvent<A> {
 
 const BEFORE: &str = "before";
 const AFTER: &str = "after";
+
 const SOURCE: &str = "source";
 const SOURCE_TS_MS: &str = "ts_ms";
+const SOURCE_DB: &str = "db";
+const SOURCE_SCHEMA: &str = "schema";
+const SOURCE_TABLE: &str = "table";
+const SOURCE_COLLECTION: &str = "collection";
+
 const OP: &str = "op";
 pub const TRANSACTION_STATUS: &str = "status";
 pub const TRANSACTION_ID: &str = "id";
@@ -78,20 +87,26 @@ pub fn parse_transaction_meta(
     accessor: &impl Access,
     connector_props: &ConnectorProperties,
 ) -> AccessResult<TransactionControl> {
-    if let (Some(ScalarImpl::Utf8(status)), Some(ScalarImpl::Utf8(id))) = (
-        accessor.access(&[TRANSACTION_STATUS], &DataType::Varchar)?,
-        accessor.access(&[TRANSACTION_ID], &DataType::Varchar)?,
+    if let (Some(ScalarRefImpl::Utf8(status)), Some(ScalarRefImpl::Utf8(id))) = (
+        accessor
+            .access(&[TRANSACTION_STATUS], &DataType::Varchar)?
+            .to_datum_ref(),
+        accessor
+            .access(&[TRANSACTION_ID], &DataType::Varchar)?
+            .to_datum_ref(),
     ) {
         // The id field has different meanings for different databases:
         // PG: txID:LSN
         // MySQL: source_id:transaction_id (e.g. 3E11FA47-71CA-11E1-9E33-C80AA9429562:23)
-        match status.as_ref() {
+        match status {
             DEBEZIUM_TRANSACTION_STATUS_BEGIN => match *connector_props {
                 ConnectorProperties::PostgresCdc(_) => {
                     let (tx_id, _) = id.split_once(':').unwrap();
                     return Ok(TransactionControl::Begin { id: tx_id.into() });
                 }
-                ConnectorProperties::MysqlCdc(_) => return Ok(TransactionControl::Begin { id }),
+                ConnectorProperties::MysqlCdc(_) => {
+                    return Ok(TransactionControl::Begin { id: id.into() })
+                }
                 _ => {}
             },
             DEBEZIUM_TRANSACTION_STATUS_COMMIT => match *connector_props {
@@ -99,7 +114,9 @@ pub fn parse_transaction_meta(
                     let (tx_id, _) = id.split_once(':').unwrap();
                     return Ok(TransactionControl::Commit { id: tx_id.into() });
                 }
-                ConnectorProperties::MysqlCdc(_) => return Ok(TransactionControl::Commit { id }),
+                ConnectorProperties::MysqlCdc(_) => {
+                    return Ok(TransactionControl::Commit { id: id.into() })
+                }
                 _ => {}
             },
             _ => {}
@@ -154,7 +171,7 @@ impl<A> ChangeEvent for DebeziumChangeEvent<A>
 where
     A: Access,
 {
-    fn access_field(&self, desc: &SourceColumnDesc) -> super::AccessResult {
+    fn access_field(&self, desc: &SourceColumnDesc) -> super::AccessResult<DatumCow<'_>> {
         match self.op()? {
             ChangeEventOperation::Delete => {
                 // For delete events of MongoDB, the "before" and "after" field both are null in the value,
@@ -188,20 +205,40 @@ where
                             .access(&[AFTER, &desc.name], &desc.data_type)
                     },
                     |additional_column_type| {
-                        match additional_column_type {
-                            &ColumnType::Timestamp(_) => {
+                        match *additional_column_type {
+                            ColumnType::Timestamp(_) => {
                                 // access payload.source.ts_ms
                                 let ts_ms = self
                                     .value_accessor
                                     .as_ref()
                                     .expect("value_accessor must be provided for upsert operation")
-                                    .access(&[SOURCE, SOURCE_TS_MS], &DataType::Int64)?;
-                                Ok(ts_ms.map(|scalar| {
+                                    .access_owned(&[SOURCE, SOURCE_TS_MS], &DataType::Int64)?;
+                                Ok(DatumCow::Owned(ts_ms.map(|scalar| {
                                     Timestamptz::from_millis(scalar.into_int64())
                                         .expect("source.ts_ms must in millisecond")
                                         .to_scalar_value()
-                                }))
+                                })))
                             }
+                            ColumnType::DatabaseName(_) => self
+                                .value_accessor
+                                .as_ref()
+                                .expect("value_accessor must be provided for upsert operation")
+                                .access(&[SOURCE, SOURCE_DB], &desc.data_type),
+                            ColumnType::SchemaName(_) => self
+                                .value_accessor
+                                .as_ref()
+                                .expect("value_accessor must be provided for upsert operation")
+                                .access(&[SOURCE, SOURCE_SCHEMA], &desc.data_type),
+                            ColumnType::TableName(_) => self
+                                .value_accessor
+                                .as_ref()
+                                .expect("value_accessor must be provided for upsert operation")
+                                .access(&[SOURCE, SOURCE_TABLE], &desc.data_type),
+                            ColumnType::CollectionName(_) => self
+                                .value_accessor
+                                .as_ref()
+                                .expect("value_accessor must be provided for upsert operation")
+                                .access(&[SOURCE, SOURCE_COLLECTION], &desc.data_type),
                             _ => Err(AccessError::UnsupportedAdditionalColumn {
                                 name: desc.name.clone(),
                             }),
@@ -214,8 +251,10 @@ where
 
     fn op(&self) -> Result<ChangeEventOperation, AccessError> {
         if let Some(accessor) = &self.value_accessor {
-            if let Some(ScalarImpl::Utf8(op)) = accessor.access(&[OP], &DataType::Varchar)? {
-                match op.as_ref() {
+            if let Some(ScalarRefImpl::Utf8(op)) =
+                accessor.access(&[OP], &DataType::Varchar)?.to_datum_ref()
+            {
+                match op {
                     DEBEZIUM_READ_OP | DEBEZIUM_CREATE_OP | DEBEZIUM_UPDATE_OP => {
                         return Ok(ChangeEventOperation::Upsert)
                     }
@@ -301,12 +340,12 @@ impl<A> Access for MongoJsonAccess<A>
 where
     A: Access,
 {
-    fn access(&self, path: &[&str], type_expected: &DataType) -> super::AccessResult {
+    fn access<'a>(&'a self, path: &[&str], type_expected: &DataType) -> AccessResult<DatumCow<'a>> {
         match path {
             ["after" | "before", "_id"] => {
-                let payload = self.access(&[path[0]], &DataType::Jsonb)?;
+                let payload = self.access_owned(&[path[0]], &DataType::Jsonb)?;
                 if let Some(ScalarImpl::Jsonb(bson_doc)) = payload {
-                    Ok(extract_bson_id(type_expected, &bson_doc.take())?)
+                    Ok(extract_bson_id(type_expected, &bson_doc.take())?.into())
                 } else {
                     // fail to extract the "_id" field from the message payload
                     Err(AccessError::Undefined {
@@ -322,9 +361,9 @@ where
             ["_id"] => {
                 let ret = self.accessor.access(path, type_expected);
                 if matches!(ret, Err(AccessError::Undefined { .. })) {
-                    let id_bson = self.accessor.access(&["id"], &DataType::Jsonb)?;
+                    let id_bson = self.accessor.access_owned(&["id"], &DataType::Jsonb)?;
                     if let Some(ScalarImpl::Jsonb(bson_doc)) = id_bson {
-                        Ok(extract_bson_id(type_expected, &bson_doc.take())?)
+                        Ok(extract_bson_id(type_expected, &bson_doc.take())?.into())
                     } else {
                         // fail to extract the "_id" field from the message key
                         Err(AccessError::Undefined {

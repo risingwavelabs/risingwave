@@ -87,8 +87,6 @@ pub struct StorageOpts {
     pub data_file_cache_flushers: usize,
     pub data_file_cache_reclaimers: usize,
     pub data_file_cache_recover_concurrency: usize,
-    pub data_file_cache_lfu_window_to_cache_size_ratio: usize,
-    pub data_file_cache_lfu_tiny_lru_capacity_ratio: f64,
     pub data_file_cache_insert_rate_limit_mb: usize,
     pub data_file_cache_indexer_shards: usize,
     pub data_file_cache_compression: String,
@@ -107,8 +105,6 @@ pub struct StorageOpts {
     pub meta_file_cache_flushers: usize,
     pub meta_file_cache_reclaimers: usize,
     pub meta_file_cache_recover_concurrency: usize,
-    pub meta_file_cache_lfu_window_to_cache_size_ratio: usize,
-    pub meta_file_cache_lfu_tiny_lru_capacity_ratio: f64,
     pub meta_file_cache_insert_rate_limit_mb: usize,
     pub meta_file_cache_indexer_shards: usize,
     pub meta_file_cache_compression: String,
@@ -133,6 +129,8 @@ pub struct StorageOpts {
     pub compactor_max_pull_task_per_round: usize,
 
     pub mem_table_spill_threshold: usize,
+
+    pub compactor_concurrent_uploading_sst_count: Option<usize>,
 
     pub object_store_config: ObjectStoreConfig,
 }
@@ -184,14 +182,6 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             data_file_cache_flushers: c.storage.data_file_cache.flushers,
             data_file_cache_reclaimers: c.storage.data_file_cache.reclaimers,
             data_file_cache_recover_concurrency: c.storage.data_file_cache.recover_concurrency,
-            data_file_cache_lfu_window_to_cache_size_ratio: c
-                .storage
-                .data_file_cache
-                .lfu_window_to_cache_size_ratio,
-            data_file_cache_lfu_tiny_lru_capacity_ratio: c
-                .storage
-                .data_file_cache
-                .lfu_tiny_lru_capacity_ratio,
             data_file_cache_insert_rate_limit_mb: c.storage.data_file_cache.insert_rate_limit_mb,
             data_file_cache_indexer_shards: c.storage.data_file_cache.indexer_shards,
             data_file_cache_compression: c.storage.data_file_cache.compression.clone(),
@@ -201,14 +191,6 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             meta_file_cache_flushers: c.storage.meta_file_cache.flushers,
             meta_file_cache_reclaimers: c.storage.meta_file_cache.reclaimers,
             meta_file_cache_recover_concurrency: c.storage.meta_file_cache.recover_concurrency,
-            meta_file_cache_lfu_window_to_cache_size_ratio: c
-                .storage
-                .meta_file_cache
-                .lfu_window_to_cache_size_ratio,
-            meta_file_cache_lfu_tiny_lru_capacity_ratio: c
-                .storage
-                .meta_file_cache
-                .lfu_tiny_lru_capacity_ratio,
             meta_file_cache_insert_rate_limit_mb: c.storage.meta_file_cache.insert_rate_limit_mb,
             meta_file_cache_indexer_shards: c.storage.meta_file_cache.indexer_shards,
             meta_file_cache_compression: c.storage.meta_file_cache.compression.clone(),
@@ -241,6 +223,9 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             compactor_fast_max_compact_task_size: c.storage.compactor_fast_max_compact_task_size,
             compactor_iter_max_io_retry_times: c.storage.compactor_iter_max_io_retry_times,
             compactor_max_pull_task_per_round: c.storage.compactor_max_pull_task_per_round,
+            compactor_concurrent_uploading_sst_count: c
+                .storage
+                .compactor_concurrent_uploading_sst_count,
         }
     }
 }

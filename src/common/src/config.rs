@@ -175,7 +175,10 @@ pub enum MetaBackend {
     #[default]
     Mem,
     Etcd,
-    Sql,
+    Sql, // keep for backward compatibility
+    Sqlite,
+    Postgres,
+    Mysql,
 }
 
 /// The section `[meta]` in `risingwave.toml`.
@@ -757,6 +760,9 @@ pub struct StorageConfig {
 
     #[serde(default = "default::storage::compactor_max_pull_task_per_round")]
     pub compactor_max_pull_task_per_round: usize,
+    /// The window size of table info statistic history.
+    #[serde(default = "default::storage::table_info_statistic_history_times")]
+    pub table_info_statistic_history_times: usize,
 
     #[serde(default, flatten)]
     #[config_doc(omitted)]
@@ -766,6 +772,14 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::mem_table_spill_threshold")]
     pub mem_table_spill_threshold: usize,
 
+    /// The concurrent uploading number of `SSTables` of buidler
+    #[serde(default = "default::storage::compactor_concurrent_uploading_sst_count")]
+    pub compactor_concurrent_uploading_sst_count: Option<usize>,
+
+    /// Object storage configuration
+    /// 1. General configuration
+    /// 2. Some special configuration of Backend
+    /// 3. Retry and timeout configuration
     #[serde(default)]
     pub object_store: ObjectStoreConfig,
 }
@@ -829,12 +843,6 @@ pub struct FileCacheConfig {
 
     #[serde(default = "default::file_cache::recover_concurrency")]
     pub recover_concurrency: usize,
-
-    #[serde(default = "default::file_cache::lfu_window_to_cache_size_ratio")]
-    pub lfu_window_to_cache_size_ratio: usize,
-
-    #[serde(default = "default::file_cache::lfu_tiny_lru_capacity_ratio")]
-    pub lfu_tiny_lru_capacity_ratio: f64,
 
     #[serde(default = "default::file_cache::insert_rate_limit_mb")]
     pub insert_rate_limit_mb: usize,
@@ -978,14 +986,20 @@ pub struct StreamingDeveloperConfig {
 
     #[serde(default = "default::developer::stream_enable_arrangement_backfill")]
     /// Enable arrangement backfill
-    /// If true, the arrangement backfill will be disabled,
+    /// If false, the arrangement backfill will be disabled,
     /// even if session variable set.
+    /// If true, it will be enabled by default, but session variable
+    /// can override it.
     pub enable_arrangement_backfill: bool,
 
     #[serde(default = "default::developer::stream_high_join_amplification_threshold")]
     /// If number of hash join matches exceeds this threshold number,
     /// it will be logged.
     pub high_join_amplification_threshold: usize,
+
+    /// Actor tokio metrics is enabled if `enable_actor_tokio_metrics` is set or metrics level >= Debug.
+    #[serde(default = "default::developer::enable_actor_tokio_metrics")]
+    pub enable_actor_tokio_metrics: bool,
 }
 
 /// The subsections `[batch.developer]`.
@@ -1030,37 +1044,64 @@ for_all_params!(define_system_config);
 /// The subsections `[storage.object_store]`.
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
 pub struct ObjectStoreConfig {
-    #[serde(default = "default::object_store_config::object_store_set_atomic_write_dir")]
-    pub object_store_set_atomic_write_dir: bool,
+    // alias is for backward compatibility
+    #[serde(
+        default = "default::object_store_config::set_atomic_write_dir",
+        alias = "object_store_set_atomic_write_dir"
+    )]
+    pub set_atomic_write_dir: bool,
 
+    /// Retry and timeout configuration
+    /// Description retry strategy driven by exponential back-off
+    /// Exposes the timeout and retries of each Object store interface. Therefore, the total timeout for each interface is determined based on the interface's timeout/retry configuration and the exponential back-off policy.
     #[serde(default)]
     pub retry: ObjectStoreRetryConfig,
 
+    /// Some special configuration of S3 Backend
     #[serde(default)]
     pub s3: S3ObjectStoreConfig,
+
+    // TODO: the following field will be deprecated after opendal is stablized
+    #[serde(default = "default::object_store_config::opendal_upload_concurrency")]
+    pub opendal_upload_concurrency: usize,
+
+    // TODO: the following field will be deprecated after opendal is stablized
+    #[serde(default)]
+    pub opendal_writer_abort_on_err: bool,
 }
 
 impl ObjectStoreConfig {
     pub fn set_atomic_write_dir(&mut self) {
-        self.object_store_set_atomic_write_dir = true;
+        self.set_atomic_write_dir = true;
     }
 }
 
 /// The subsections `[storage.object_store.s3]`.
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
 pub struct S3ObjectStoreConfig {
-    #[serde(default = "default::object_store_config::s3::object_store_keepalive_ms")]
-    pub object_store_keepalive_ms: Option<u64>,
-    #[serde(default = "default::object_store_config::s3::object_store_recv_buffer_size")]
-    pub object_store_recv_buffer_size: Option<usize>,
-    #[serde(default = "default::object_store_config::s3::object_store_send_buffer_size")]
-    pub object_store_send_buffer_size: Option<usize>,
-    #[serde(default = "default::object_store_config::s3::object_store_nodelay")]
-    pub object_store_nodelay: Option<bool>,
-    /// For backwards compatibility, users should use `S3ObjectStoreDeveloperConfig` instead.
+    // alias is for backward compatibility
     #[serde(
-        default = "default::object_store_config::s3::developer::object_store_retry_unknown_service_error"
+        default = "default::object_store_config::s3::keepalive_ms",
+        alias = "object_store_keepalive_ms"
     )]
+    pub keepalive_ms: Option<u64>,
+    #[serde(
+        default = "default::object_store_config::s3::recv_buffer_size",
+        alias = "object_store_recv_buffer_size"
+    )]
+    pub recv_buffer_size: Option<usize>,
+    #[serde(
+        default = "default::object_store_config::s3::send_buffer_size",
+        alias = "object_store_send_buffer_size"
+    )]
+    pub send_buffer_size: Option<usize>,
+    #[serde(
+        default = "default::object_store_config::s3::nodelay",
+        alias = "object_store_nodelay"
+    )]
+    pub nodelay: Option<bool>,
+    /// For backwards compatibility, users should use `S3ObjectStoreDeveloperConfig` instead.
+    #[serde(default = "default::object_store_config::s3::developer::retry_unknown_service_error")]
     pub retry_unknown_service_error: bool,
     #[serde(default = "default::object_store_config::s3::identity_resolution_timeout_s")]
     pub identity_resolution_timeout_s: u64,
@@ -1073,82 +1114,108 @@ pub struct S3ObjectStoreConfig {
 pub struct S3ObjectStoreDeveloperConfig {
     /// Whether to retry s3 sdk error from which no error metadata is provided.
     #[serde(
-        default = "default::object_store_config::s3::developer::object_store_retry_unknown_service_error"
+        default = "default::object_store_config::s3::developer::retry_unknown_service_error",
+        alias = "object_store_retry_unknown_service_error"
     )]
-    pub object_store_retry_unknown_service_error: bool,
+    pub retry_unknown_service_error: bool,
     /// An array of error codes that should be retried.
     /// e.g. `["SlowDown", "TooManyRequests"]`
     #[serde(
-        default = "default::object_store_config::s3::developer::object_store_retryable_service_error_codes"
+        default = "default::object_store_config::s3::developer::retryable_service_error_codes",
+        alias = "object_store_retryable_service_error_codes"
     )]
-    pub object_store_retryable_service_error_codes: Vec<String>,
+    pub retryable_service_error_codes: Vec<String>,
 
+    // TODO: the following field will be deprecated after opendal is stablized
     #[serde(default = "default::object_store_config::s3::developer::use_opendal")]
     pub use_opendal: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
 pub struct ObjectStoreRetryConfig {
+    // A retry strategy driven by exponential back-off.
+    // The retry strategy is used for all object store operations.
+    /// Given a base duration for retry strategy in milliseconds.
     #[serde(default = "default::object_store_config::object_store_req_backoff_interval_ms")]
     pub req_backoff_interval_ms: u64,
+
+    /// The max delay interval for the retry strategy. No retry delay will be longer than this `Duration`.
     #[serde(default = "default::object_store_config::object_store_req_backoff_max_delay_ms")]
     pub req_backoff_max_delay_ms: u64,
+
+    /// A multiplicative factor that will be applied to the exponential back-off retry delay.
     #[serde(default = "default::object_store_config::object_store_req_backoff_factor")]
     pub req_backoff_factor: u64,
 
-    // upload
+    /// Maximum timeout for `upload` operation
     #[serde(default = "default::object_store_config::object_store_upload_attempt_timeout_ms")]
     pub upload_attempt_timeout_ms: u64,
+
+    /// Total counts of `upload` operation retries
     #[serde(default = "default::object_store_config::object_store_upload_retry_attempts")]
     pub upload_retry_attempts: usize,
 
-    // streaming_upload_init + streaming_upload
+    /// Maximum timeout for `streaming_upload_init` and `streaming_upload`
     #[serde(
         default = "default::object_store_config::object_store_streaming_upload_attempt_timeout_ms"
     )]
     pub streaming_upload_attempt_timeout_ms: u64,
+
+    /// Total counts of `streaming_upload` operation retries
     #[serde(
         default = "default::object_store_config::object_store_streaming_upload_retry_attempts"
     )]
     pub streaming_upload_retry_attempts: usize,
 
-    // read
+    /// Maximum timeout for `read` operation
     #[serde(default = "default::object_store_config::object_store_read_attempt_timeout_ms")]
     pub read_attempt_timeout_ms: u64,
+
+    /// Total counts of `read` operation retries
     #[serde(default = "default::object_store_config::object_store_read_retry_attempts")]
     pub read_retry_attempts: usize,
 
-    // streaming_read_init + streaming_read
+    /// Maximum timeout for `streaming_read_init` and `streaming_read` operation
     #[serde(
         default = "default::object_store_config::object_store_streaming_read_attempt_timeout_ms"
     )]
     pub streaming_read_attempt_timeout_ms: u64,
+
+    /// Total counts of `streaming_read operation` retries
     #[serde(default = "default::object_store_config::object_store_streaming_read_retry_attempts")]
     pub streaming_read_retry_attempts: usize,
 
-    // metadata
+    /// Maximum timeout for `metadata` operation
     #[serde(default = "default::object_store_config::object_store_metadata_attempt_timeout_ms")]
     pub metadata_attempt_timeout_ms: u64,
+
+    /// Total counts of `metadata` operation retries
     #[serde(default = "default::object_store_config::object_store_metadata_retry_attempts")]
     pub metadata_retry_attempts: usize,
 
-    // delete
+    /// Maximum timeout for `delete` operation
     #[serde(default = "default::object_store_config::object_store_delete_attempt_timeout_ms")]
     pub delete_attempt_timeout_ms: u64,
+
+    /// Total counts of `delete` operation retries
     #[serde(default = "default::object_store_config::object_store_delete_retry_attempts")]
     pub delete_retry_attempts: usize,
 
-    // delete_object
+    /// Maximum timeout for `delete_object` operation
     #[serde(
         default = "default::object_store_config::object_store_delete_objects_attempt_timeout_ms"
     )]
     pub delete_objects_attempt_timeout_ms: u64,
+
+    /// Total counts of `delete_object` operation retries
     #[serde(default = "default::object_store_config::object_store_delete_objects_retry_attempts")]
     pub delete_objects_retry_attempts: usize,
 
-    // list
+    /// Maximum timeout for `list` operation
     #[serde(default = "default::object_store_config::object_store_list_attempt_timeout_ms")]
     pub list_attempt_timeout_ms: u64,
+
+    /// Total counts of `list` operation retries
     #[serde(default = "default::object_store_config::object_store_list_retry_attempts")]
     pub list_retry_attempts: usize,
 }
@@ -1522,6 +1589,14 @@ pub mod default {
         pub fn max_prefetch_block_number() -> usize {
             16
         }
+
+        pub fn compactor_concurrent_uploading_sst_count() -> Option<usize> {
+            None
+        }
+
+        pub fn table_info_statistic_history_times() -> usize {
+            240
+        }
     }
 
     pub mod streaming {
@@ -1569,14 +1644,6 @@ pub mod default {
 
         pub fn recover_concurrency() -> usize {
             8
-        }
-
-        pub fn lfu_window_to_cache_size_ratio() -> usize {
-            1
-        }
-
-        pub fn lfu_tiny_lru_capacity_ratio() -> f64 {
-            0.01
         }
 
         pub fn insert_rate_limit_mb() -> usize {
@@ -1748,6 +1815,10 @@ pub mod default {
         pub fn stream_high_join_amplification_threshold() -> usize {
             2048
         }
+
+        pub fn enable_actor_tokio_metrics() -> bool {
+            false
+        }
     }
 
     pub use crate::system_param::default as system;
@@ -1807,6 +1878,8 @@ pub mod default {
         const DEFAULT_MIN_OVERLAPPING_SUB_LEVEL_COMPACT_LEVEL_COUNT: u32 = 36;
         const DEFAULT_TOMBSTONE_RATIO_PERCENT: u32 = 40;
         const DEFAULT_EMERGENCY_PICKER: bool = true;
+        const DEFAULT_MAX_LEVEL: u32 = 6;
+        const DEFAULT_MAX_L0_COMPACT_LEVEL_COUNT: u32 = 42;
 
         use crate::catalog::hummock::CompactionFilterFlag;
 
@@ -1869,6 +1942,14 @@ pub mod default {
         pub fn enable_emergency_picker() -> bool {
             DEFAULT_EMERGENCY_PICKER
         }
+
+        pub fn max_level() -> u32 {
+            DEFAULT_MAX_LEVEL
+        }
+
+        pub fn max_l0_compact_level_count() -> u32 {
+            DEFAULT_MAX_L0_COMPACT_LEVEL_COUNT
+        }
     }
 
     pub mod object_store_config {
@@ -1876,7 +1957,7 @@ pub mod default {
         const DEFAULT_REQ_BACKOFF_MAX_DELAY_MS: u64 = 10 * 1000; // 10s
         const DEFAULT_REQ_MAX_RETRY_ATTEMPTS: usize = 3;
 
-        pub fn object_store_set_atomic_write_dir() -> bool {
+        pub fn set_atomic_write_dir() -> bool {
             false
         }
 
@@ -1959,24 +2040,28 @@ pub mod default {
             DEFAULT_REQ_MAX_RETRY_ATTEMPTS
         }
 
+        pub fn opendal_upload_concurrency() -> usize {
+            8
+        }
+
         pub mod s3 {
             const DEFAULT_IDENTITY_RESOLUTION_TIMEOUT_S: u64 = 5;
 
             const DEFAULT_KEEPALIVE_MS: u64 = 600 * 1000; // 10min
 
-            pub fn object_store_keepalive_ms() -> Option<u64> {
+            pub fn keepalive_ms() -> Option<u64> {
                 Some(DEFAULT_KEEPALIVE_MS) // 10min
             }
 
-            pub fn object_store_recv_buffer_size() -> Option<usize> {
+            pub fn recv_buffer_size() -> Option<usize> {
                 Some(1 << 21) // 2m
             }
 
-            pub fn object_store_send_buffer_size() -> Option<usize> {
+            pub fn send_buffer_size() -> Option<usize> {
                 None
             }
 
-            pub fn object_store_nodelay() -> Option<bool> {
+            pub fn nodelay() -> Option<bool> {
                 Some(true)
             }
 
@@ -1989,11 +2074,11 @@ pub mod default {
 
                 const RW_USE_OPENDAL_FOR_S3: &str = "RW_USE_OPENDAL_FOR_S3";
 
-                pub fn object_store_retry_unknown_service_error() -> bool {
+                pub fn retry_unknown_service_error() -> bool {
                     false
                 }
 
-                pub fn object_store_retryable_service_error_codes() -> Vec<String> {
+                pub fn retryable_service_error_codes() -> Vec<String> {
                     vec!["SlowDown".into(), "TooManyRequests".into()]
                 }
 
@@ -2202,11 +2287,20 @@ pub struct CompactionConfig {
     pub tombstone_reclaim_ratio: u32,
     #[serde(default = "default::compaction_config::enable_emergency_picker")]
     pub enable_emergency_picker: bool,
+    #[serde(default = "default::compaction_config::max_level")]
+    pub max_level: u32,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn default_config_for_docs() -> RwConfig {
+        let mut config = RwConfig::default();
+        // Set `license_key` to empty to avoid showing the test-only license key in the docs.
+        config.system.license_key = Some("".to_owned());
+        config
+    }
 
     /// This test ensures that `config/example.toml` is up-to-date with the default values specified
     /// in this file. Developer should run `./risedev generate-example-config` to update it if this
@@ -2217,7 +2311,7 @@ mod tests {
 # Check detailed comments in src/common/src/config.rs";
 
         let actual = expect_test::expect_file!["../../config/example.toml"];
-        let default = toml::to_string(&RwConfig::default()).expect("failed to serialize");
+        let default = toml::to_string(&default_config_for_docs()).expect("failed to serialize");
 
         let expected = format!("{HEADER}\n\n{default}");
         actual.assert_eq(&expected);
@@ -2258,7 +2352,7 @@ mod tests {
             .collect();
 
         let toml_doc: BTreeMap<String, toml::Value> =
-            toml::from_str(&toml::to_string(&RwConfig::default()).unwrap()).unwrap();
+            toml::from_str(&toml::to_string(&default_config_for_docs()).unwrap()).unwrap();
         toml_doc.into_iter().for_each(|(name, value)| {
             set_default_values("".to_string(), name, value, &mut configs);
         });
@@ -2304,6 +2398,101 @@ mod tests {
             if let Some(item_doc) = t.get_mut(&name) {
                 item_doc.default = format!("{}", value);
             }
+        }
+    }
+
+    #[test]
+    fn test_object_store_configs_backward_compatibility() {
+        // Define configs with the old name and make sure it still works
+        {
+            let config: RwConfig = toml::from_str(
+                r#"
+            [storage.object_store]
+            object_store_set_atomic_write_dir = true
+
+            [storage.object_store.s3]
+            object_store_keepalive_ms = 1
+            object_store_send_buffer_size = 1
+            object_store_recv_buffer_size = 1
+            object_store_nodelay = false
+
+            [storage.object_store.s3.developer]
+            object_store_retry_unknown_service_error = true
+            object_store_retryable_service_error_codes = ['dummy']
+
+
+            "#,
+            )
+            .unwrap();
+
+            assert!(config.storage.object_store.set_atomic_write_dir);
+            assert_eq!(config.storage.object_store.s3.keepalive_ms, Some(1));
+            assert_eq!(config.storage.object_store.s3.send_buffer_size, Some(1));
+            assert_eq!(config.storage.object_store.s3.recv_buffer_size, Some(1));
+            assert_eq!(config.storage.object_store.s3.nodelay, Some(false));
+            assert!(
+                config
+                    .storage
+                    .object_store
+                    .s3
+                    .developer
+                    .retry_unknown_service_error
+            );
+            assert_eq!(
+                config
+                    .storage
+                    .object_store
+                    .s3
+                    .developer
+                    .retryable_service_error_codes,
+                vec!["dummy".to_string()]
+            );
+        }
+
+        // Define configs with the new name and make sure it works
+        {
+            let config: RwConfig = toml::from_str(
+                r#"
+            [storage.object_store]
+            set_atomic_write_dir = true
+
+            [storage.object_store.s3]
+            keepalive_ms = 1
+            send_buffer_size = 1
+            recv_buffer_size = 1
+            nodelay = false
+
+            [storage.object_store.s3.developer]
+            retry_unknown_service_error = true
+            retryable_service_error_codes = ['dummy']
+
+
+            "#,
+            )
+            .unwrap();
+
+            assert!(config.storage.object_store.set_atomic_write_dir);
+            assert_eq!(config.storage.object_store.s3.keepalive_ms, Some(1));
+            assert_eq!(config.storage.object_store.s3.send_buffer_size, Some(1));
+            assert_eq!(config.storage.object_store.s3.recv_buffer_size, Some(1));
+            assert_eq!(config.storage.object_store.s3.nodelay, Some(false));
+            assert!(
+                config
+                    .storage
+                    .object_store
+                    .s3
+                    .developer
+                    .retry_unknown_service_error
+            );
+            assert_eq!(
+                config
+                    .storage
+                    .object_store
+                    .s3
+                    .developer
+                    .retryable_service_error_codes,
+                vec!["dummy".to_string()]
+            );
         }
     }
 }

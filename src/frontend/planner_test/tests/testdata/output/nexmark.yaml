@@ -107,20 +107,20 @@
   sql: SELECT auction, price FROM bid WHERE auction = 1007 OR auction = 1020 OR auction = 2001 OR auction = 2019 OR auction = 2087;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchFilter { predicate: (((((bid.auction = 1007:Int32) OR (bid.auction = 1020:Int32)) OR (bid.auction = 2001:Int32)) OR (bid.auction = 2019:Int32)) OR (bid.auction = 2087:Int32)) }
+    └─BatchFilter { predicate: ((((bid.auction = 1007:Int32) OR (bid.auction = 1020:Int32)) OR ((bid.auction = 2001:Int32) OR (bid.auction = 2019:Int32))) OR (bid.auction = 2087:Int32)) }
       └─BatchScan { table: bid, columns: [bid.auction, bid.price], distribution: SomeShard }
   sink_plan: |-
     StreamSink { type: append-only, columns: [auction, price, bid._row_id(hidden)] }
-    └─StreamFilter { predicate: (((((bid.auction = 1007:Int32) OR (bid.auction = 1020:Int32)) OR (bid.auction = 2001:Int32)) OR (bid.auction = 2019:Int32)) OR (bid.auction = 2087:Int32)) }
+    └─StreamFilter { predicate: ((((bid.auction = 1007:Int32) OR (bid.auction = 1020:Int32)) OR ((bid.auction = 2001:Int32) OR (bid.auction = 2019:Int32))) OR (bid.auction = 2087:Int32)) }
       └─StreamTableScan { table: bid, columns: [bid.auction, bid.price, bid._row_id], stream_scan_type: ArrangementBackfill, stream_key: [bid._row_id], pk: [_row_id], dist: UpstreamHashShard(bid._row_id) }
   stream_plan: |-
     StreamMaterialize { columns: [auction, price, bid._row_id(hidden)], stream_key: [bid._row_id], pk_columns: [bid._row_id], pk_conflict: NoCheck }
-    └─StreamFilter { predicate: (((((bid.auction = 1007:Int32) OR (bid.auction = 1020:Int32)) OR (bid.auction = 2001:Int32)) OR (bid.auction = 2019:Int32)) OR (bid.auction = 2087:Int32)) }
+    └─StreamFilter { predicate: ((((bid.auction = 1007:Int32) OR (bid.auction = 1020:Int32)) OR ((bid.auction = 2001:Int32) OR (bid.auction = 2019:Int32))) OR (bid.auction = 2087:Int32)) }
       └─StreamTableScan { table: bid, columns: [bid.auction, bid.price, bid._row_id], stream_scan_type: ArrangementBackfill, stream_key: [bid._row_id], pk: [_row_id], dist: UpstreamHashShard(bid._row_id) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [auction, price, bid._row_id(hidden)], stream_key: [bid._row_id], pk_columns: [bid._row_id], pk_conflict: NoCheck } { tables: [ Materialize: 4294967294 ] }
-    └── StreamFilter { predicate: (((((bid.auction = 1007:Int32) OR (bid.auction = 1020:Int32)) OR (bid.auction = 2001:Int32)) OR (bid.auction = 2019:Int32)) OR (bid.auction = 2087:Int32)) }
+    └── StreamFilter { predicate: ((((bid.auction = 1007:Int32) OR (bid.auction = 1020:Int32)) OR ((bid.auction = 2001:Int32) OR (bid.auction = 2019:Int32))) OR (bid.auction = 2087:Int32)) }
         └── StreamTableScan { table: bid, columns: [bid.auction, bid.price, bid._row_id], stream_scan_type: ArrangementBackfill, stream_key: [bid._row_id], pk: [_row_id], dist: UpstreamHashShard(bid._row_id) }
             ├── tables: [ StreamScan: 0 ]
             ├── Upstream

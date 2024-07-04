@@ -30,7 +30,9 @@ use winnow::{PResult, Parser as _};
 use crate::ast::*;
 use crate::keywords::{self, Keyword};
 use crate::parser_v2;
-use crate::parser_v2::{keyword, literal_i64, literal_uint, single_quoted_string, ParserExt as _};
+use crate::parser_v2::{
+    dollar_quoted_string, keyword, literal_i64, literal_uint, single_quoted_string, ParserExt as _,
+};
 use crate::tokenizer::*;
 
 pub(crate) const UPSTREAM_SOURCE_KEY: &str = "connector";
@@ -185,6 +187,8 @@ pub enum Precedence {
     PlusMinus, // 30 in upstream
     MulDiv,    // 40 in upstream
     Exp,
+    At,
+    Collate,
     UnaryPosNeg,
     PostfixFactorial,
     Array,
@@ -820,7 +824,7 @@ impl Parser<'_> {
         let distinct = self.parse_all_or_distinct()?;
         let (args, order_by, variadic) = self.parse_optional_args()?;
         let over = if self.parse_keyword(Keyword::OVER) {
-            // TBD: support window names (`OVER mywin`) in place of inline specification
+            // TODO: support window names (`OVER mywin`) in place of inline specification
             self.expect_token(&Token::LParen)?;
             let partition_by = if self.parse_keywords(&[Keyword::PARTITION, Keyword::BY]) {
                 // a list of possibly-qualified column names
@@ -887,6 +891,7 @@ impl Parser<'_> {
             Keyword::ROWS => keyword.value(WindowFrameUnits::Rows),
             Keyword::RANGE => keyword.value(WindowFrameUnits::Range),
             Keyword::GROUPS => keyword.value(WindowFrameUnits::Groups),
+            Keyword::SESSION => keyword.value(WindowFrameUnits::Session),
             _ => fail,
         }
         .expect("ROWS, RANGE, or GROUPS")
@@ -895,13 +900,21 @@ impl Parser<'_> {
 
     pub fn parse_window_frame(&mut self) -> PResult<WindowFrame> {
         let units = self.parse_window_frame_units()?;
-        let (start_bound, end_bound) = if self.parse_keyword(Keyword::BETWEEN) {
-            let start_bound = self.parse_window_frame_bound()?;
+        let bounds = if self.parse_keyword(Keyword::BETWEEN) {
+            // `BETWEEN <frame_start> AND <frame_end>`
+            let start = self.parse_window_frame_bound()?;
             self.expect_keyword(Keyword::AND)?;
-            let end_bound = Some(self.parse_window_frame_bound()?);
-            (start_bound, end_bound)
+            let end = Some(self.parse_window_frame_bound()?);
+            WindowFrameBounds::Bounds { start, end }
+        } else if self.parse_keywords(&[Keyword::WITH, Keyword::GAP]) {
+            // `WITH GAP <gap>`, only for session frames
+            WindowFrameBounds::Gap(Box::new(self.parse_expr()?))
         } else {
-            (self.parse_window_frame_bound()?, None)
+            // `<frame_start>`
+            WindowFrameBounds::Bounds {
+                start: self.parse_window_frame_bound()?,
+                end: None,
+            }
         };
         let exclusion = if self.parse_keyword(Keyword::EXCLUDE) {
             Some(self.parse_window_frame_exclusion()?)
@@ -910,8 +923,7 @@ impl Parser<'_> {
         };
         Ok(WindowFrame {
             units,
-            start_bound,
-            end_bound,
+            bounds,
             exclusion,
         })
     }
@@ -1388,11 +1400,14 @@ impl Parser<'_> {
                     }
                 }
                 Keyword::AT => {
-                    let time_zone = preceded(
-                        (Keyword::TIME, Keyword::ZONE),
-                        cut_err(Self::parse_literal_string),
-                    )
-                    .parse_next(self)?;
+                    assert_eq!(precedence, Precedence::At);
+                    let time_zone = Box::new(
+                        preceded(
+                            (Keyword::TIME, Keyword::ZONE),
+                            cut_err(|p: &mut Self| p.parse_subexpr(precedence)),
+                        )
+                        .parse_next(self)?,
+                    );
                     Ok(Expr::AtTimeZone {
                         timestamp: Box::new(expr),
                         time_zone,
@@ -1649,7 +1664,7 @@ impl Parser<'_> {
                     (Token::Word(w), Token::Word(w2))
                         if w.keyword == Keyword::TIME && w2.keyword == Keyword::ZONE =>
                     {
-                        Ok(P::Other)
+                        Ok(P::At)
                     }
                     _ => Ok(P::Zero),
                 }
@@ -3480,10 +3495,6 @@ impl Parser<'_> {
                     Some('\'') => Ok(Value::SingleQuotedString(w.value)),
                     _ => self.expected_at(checkpoint, "A value")?,
                 },
-                Keyword::REF => {
-                    self.expect_keyword(Keyword::SECRET)?;
-                    Ok(Value::Ref(self.parse_object_name()?))
-                }
                 _ => self.expected_at(checkpoint, "a concrete value"),
             },
             Token::Number(ref n) => Ok(Value::Number(n.clone())),
@@ -3541,16 +3552,13 @@ impl Parser<'_> {
     }
 
     pub fn parse_function_definition(&mut self) -> PResult<FunctionDefinition> {
-        let peek_token = self.peek_token();
-        match peek_token.token {
-            Token::DollarQuotedString(value) => {
-                self.next_token();
-                Ok(FunctionDefinition::DoubleDollarDef(value.value))
-            }
-            _ => Ok(FunctionDefinition::SingleQuotedDef(
-                self.parse_literal_string()?,
-            )),
-        }
+        alt((
+            single_quoted_string.map(FunctionDefinition::SingleQuotedDef),
+            dollar_quoted_string.map(FunctionDefinition::DoubleDollarDef),
+            Self::parse_identifier.map(|i| FunctionDefinition::Identifier(i.value)),
+            fail.expect("function definition"),
+        ))
+        .parse_next(self)
     }
 
     /// Parse a literal string
@@ -3558,11 +3566,6 @@ impl Parser<'_> {
         let checkpoint = *self;
         let token = self.next_token();
         match token.token {
-            Token::Word(Word {
-                value,
-                keyword: Keyword::NoKeyword,
-                ..
-            }) => Ok(value),
             Token::SingleQuotedString(s) => Ok(s),
             _ => self.expected_at(checkpoint, "literal string"),
         }
@@ -3969,37 +3972,36 @@ impl Parser<'_> {
     /// Parse a CTE (`alias [( col1, col2, ... )] AS (subquery)`)
     fn parse_cte(&mut self) -> PResult<Cte> {
         let name = self.parse_identifier_non_reserved()?;
-
-        let mut cte = if self.parse_keyword(Keyword::AS) {
-            self.expect_token(&Token::LParen)?;
-            let query = self.parse_query()?;
-            self.expect_token(&Token::RParen)?;
+        let cte = if self.parse_keyword(Keyword::AS) {
+            let cte_inner = self.parse_cte_inner()?;
             let alias = TableAlias {
                 name,
                 columns: vec![],
             };
-            Cte {
-                alias,
-                query,
-                from: None,
-            }
+            Cte { alias, cte_inner }
         } else {
             let columns = self.parse_parenthesized_column_list(Optional)?;
             self.expect_keyword(Keyword::AS)?;
-            self.expect_token(&Token::LParen)?;
+            let cte_inner = self.parse_cte_inner()?;
+            let alias = TableAlias { name, columns };
+            Cte { alias, cte_inner }
+        };
+        Ok(cte)
+    }
+
+    fn parse_cte_inner(&mut self) -> PResult<CteInner> {
+        if let Ok(()) = self.expect_token(&Token::LParen) {
             let query = self.parse_query()?;
             self.expect_token(&Token::RParen)?;
-            let alias = TableAlias { name, columns };
-            Cte {
-                alias,
-                query,
-                from: None,
+            Ok(CteInner::Query(query))
+        } else {
+            let changelog = self.parse_identifier_non_reserved()?;
+            if changelog.to_string().to_lowercase() != "changelog" {
+                parser_err!("Expected 'changelog' but found '{}'", changelog);
             }
-        };
-        if self.parse_keyword(Keyword::FROM) {
-            cte.from = Some(self.parse_identifier()?);
+            self.expect_keyword(Keyword::FROM)?;
+            Ok(CteInner::ChangeLog(self.parse_identifier()?))
         }
-        Ok(cte)
     }
 
     /// Parse a "query body", which is an expression with roughly the

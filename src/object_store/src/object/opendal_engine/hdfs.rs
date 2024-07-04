@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use opendal::layers::LoggingLayer;
 use opendal::services::Hdfs;
 use opendal::Operator;
@@ -26,14 +28,15 @@ impl OpendalObjectStore {
     pub fn new_hdfs_engine(
         namenode: String,
         root: String,
-        config: ObjectStoreConfig,
+        config: Arc<ObjectStoreConfig>,
+        metrics: Arc<ObjectStoreMetrics>,
     ) -> ObjectResult<Self> {
         // Create hdfs backend builder.
         let mut builder = Hdfs::default();
         // Set the name node for hdfs.
         builder.name_node(&namenode);
         builder.root(&root);
-        if config.retry.set_atomic_write_dir {
+        if config.set_atomic_write_dir {
             let atomic_write_dir = format!("{}/{}", root, ATOMIC_WRITE_DIR);
             builder.atomic_write_dir(&atomic_write_dir);
         }
@@ -43,6 +46,8 @@ impl OpendalObjectStore {
         Ok(Self {
             op,
             engine_type: EngineType::Hdfs,
+            config,
+            metrics,
         })
     }
 }

@@ -21,6 +21,7 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use prometheus::Registry;
+use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::{test_epoch, EpochExt, INVALID_EPOCH};
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::get_compaction_group_ssts;
@@ -28,8 +29,8 @@ use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::table_stats::{to_prost_table_stats_map, TableStats, TableStatsMap};
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{
-    CompactionGroupId, ExtendedSstableInfo, HummockContextId, HummockEpoch, HummockSstableObjectId,
-    HummockVersionId, LocalSstableInfo, FIRST_VERSION_ID,
+    CompactionGroupId, HummockContextId, HummockEpoch, HummockSstableObjectId, HummockVersionId,
+    LocalSstableInfo, FIRST_VERSION_ID,
 };
 use risingwave_pb::common::{HostAddress, WorkerType};
 use risingwave_pb::hummock::compact_task::TaskStatus;
@@ -46,7 +47,7 @@ use crate::hummock::compaction::selector::{
 };
 use crate::hummock::error::Error;
 use crate::hummock::test_utils::*;
-use crate::hummock::{CommitEpochInfo, HummockManager, HummockManagerRef};
+use crate::hummock::{HummockManager, HummockManagerRef};
 use crate::manager::{MetaSrvEnv, MetaStoreImpl, WorkerId};
 use crate::model::MetadataModel;
 use crate::rpc::metrics::MetaMetrics;
@@ -78,14 +79,8 @@ fn gen_sstable_info(sst_id: u64, idx: usize, table_ids: Vec<u32>) -> SstableInfo
     }
 }
 
-fn gen_extend_sstable_info(
-    sst_id: u64,
-    group_id: u64,
-    idx: usize,
-    table_ids: Vec<u32>,
-) -> ExtendedSstableInfo {
-    ExtendedSstableInfo {
-        compaction_group_id: group_id,
+fn gen_local_sstable_info(sst_id: u64, idx: usize, table_ids: Vec<u32>) -> LocalSstableInfo {
+    LocalSstableInfo {
         sst_info: gen_sstable_info(sst_id, idx, table_ids),
         table_stats: Default::default(),
     }
@@ -100,7 +95,7 @@ fn get_compaction_group_object_ids(
 }
 
 async fn list_pinned_snapshot_from_meta_store(env: &MetaSrvEnv) -> Vec<HummockPinnedSnapshot> {
-    match env.meta_store() {
+    match env.meta_store_ref() {
         MetaStoreImpl::Kv(meta_store) => HummockPinnedSnapshot::list(meta_store).await.unwrap(),
         MetaStoreImpl::Sql(sql_meta_store) => {
             use risingwave_meta_model_v2::hummock_pinned_snapshot;
@@ -117,7 +112,7 @@ async fn list_pinned_snapshot_from_meta_store(env: &MetaSrvEnv) -> Vec<HummockPi
 }
 
 async fn list_pinned_version_from_meta_store(env: &MetaSrvEnv) -> Vec<HummockPinnedVersion> {
-    match env.meta_store() {
+    match env.meta_store_ref() {
         MetaStoreImpl::Kv(meta_store) => HummockPinnedVersion::list(meta_store).await.unwrap(),
         MetaStoreImpl::Sql(sql_meta_store) => {
             use risingwave_meta_model_v2::hummock_pinned_version;
@@ -801,10 +796,7 @@ async fn test_invalid_sst_id() {
         .map(|LocalSstableInfo { sst_info, .. }| (sst_info.get_object_id(), WorkerId::MAX))
         .collect();
     let error = hummock_manager
-        .commit_epoch(
-            epoch,
-            CommitEpochInfo::for_test(ssts.clone(), sst_to_worker),
-        )
+        .commit_epoch_for_test(epoch, ssts.clone(), sst_to_worker)
         .await
         .unwrap_err();
     assert!(matches!(error, Error::InvalidSst(1)));
@@ -814,7 +806,7 @@ async fn test_invalid_sst_id() {
         .map(|LocalSstableInfo { sst_info, .. }| (sst_info.get_object_id(), context_id))
         .collect();
     hummock_manager
-        .commit_epoch(epoch, CommitEpochInfo::for_test(ssts, sst_to_worker))
+        .commit_epoch_for_test(epoch, ssts, sst_to_worker)
         .await
         .unwrap();
 }
@@ -1188,9 +1180,10 @@ async fn test_extend_objects_to_delete() {
     assert_eq!(objects_to_delete.len(), orphan_sst_num as usize);
     let new_epoch = pinned_version2.max_committed_epoch.next_epoch();
     hummock_manager
-        .commit_epoch(
+        .commit_epoch_for_test(
             new_epoch,
-            CommitEpochInfo::for_test(Vec::<ExtendedSstableInfo>::new(), Default::default()),
+            Vec::<LocalSstableInfo>::new(),
+            Default::default(),
         )
         .await
         .unwrap();
@@ -1237,7 +1230,6 @@ async fn test_version_stats() {
         .into_iter()
         .enumerate()
         .map(|(idx, table_ids)| LocalSstableInfo {
-            compaction_group_id: StaticCompactionGroupId::StateDefault as _,
             sst_info: SstableInfo {
                 object_id: sst_ids[idx],
                 sst_id: sst_ids[idx],
@@ -1261,7 +1253,7 @@ async fn test_version_stats() {
         .map(|LocalSstableInfo { sst_info, .. }| (sst_info.get_object_id(), worker_node.id))
         .collect();
     hummock_manager
-        .commit_epoch(epoch, CommitEpochInfo::for_test(ssts, sst_to_worker))
+        .commit_epoch_for_test(epoch, ssts, sst_to_worker)
         .await
         .unwrap();
 
@@ -1339,15 +1331,14 @@ async fn test_split_compaction_group_on_commit() {
     let (_env, hummock_manager, _, worker_node) = setup_compute_env(80).await;
     let context_id = worker_node.id;
     hummock_manager
-        .register_table_ids(&[(100, 2)])
+        .register_table_ids_for_test(&[(100, 2)])
         .await
         .unwrap();
     hummock_manager
-        .register_table_ids(&[(101, 3)])
+        .register_table_ids_for_test(&[(101, 3)])
         .await
         .unwrap();
-    let sst_1 = ExtendedSstableInfo {
-        compaction_group_id: 2,
+    let sst_1 = LocalSstableInfo {
         sst_info: SstableInfo {
             object_id: 10,
             sst_id: 10,
@@ -1360,10 +1351,7 @@ async fn test_split_compaction_group_on_commit() {
         table_stats: Default::default(),
     };
     hummock_manager
-        .commit_epoch(
-            30,
-            CommitEpochInfo::for_test(vec![sst_1], HashMap::from([(10, context_id)])),
-        )
+        .commit_epoch_for_test(30, vec![sst_1], HashMap::from([(10, context_id)]))
         .await
         .unwrap();
     let current_version = hummock_manager.get_current_version().await;
@@ -1378,14 +1366,20 @@ async fn test_split_compaction_group_on_commit() {
     );
     assert_eq!(
         current_version
-            .get_compaction_group_levels(2)
-            .member_table_ids,
+            .state_table_info
+            .compaction_group_member_table_ids(2)
+            .iter()
+            .map(|table_id| table_id.table_id)
+            .collect_vec(),
         vec![100]
     );
     assert_eq!(
         current_version
-            .get_compaction_group_levels(3)
-            .member_table_ids,
+            .state_table_info
+            .compaction_group_member_table_ids(3)
+            .iter()
+            .map(|table_id| table_id.table_id)
+            .collect_vec(),
         vec![101]
     );
 }
@@ -1425,15 +1419,14 @@ async fn test_split_compaction_group_on_demand_basic() {
     );
 
     hummock_manager
-        .register_table_ids(&[(100, 2)])
+        .register_table_ids_for_test(&[(100, 2)])
         .await
         .unwrap();
     hummock_manager
-        .register_table_ids(&[(101, 2)])
+        .register_table_ids_for_test(&[(101, 2)])
         .await
         .unwrap();
-    let sst_1 = ExtendedSstableInfo {
-        compaction_group_id: 2,
+    let sst_1 = LocalSstableInfo {
         sst_info: SstableInfo {
             object_id: 10,
             sst_id: 10,
@@ -1449,8 +1442,7 @@ async fn test_split_compaction_group_on_demand_basic() {
         },
         table_stats: Default::default(),
     };
-    let sst_2 = ExtendedSstableInfo {
-        compaction_group_id: 2,
+    let sst_2 = LocalSstableInfo {
         sst_info: SstableInfo {
             object_id: 11,
             sst_id: 11,
@@ -1467,12 +1459,10 @@ async fn test_split_compaction_group_on_demand_basic() {
         table_stats: Default::default(),
     };
     hummock_manager
-        .commit_epoch(
+        .commit_epoch_for_test(
             30,
-            CommitEpochInfo::for_test(
-                vec![sst_1, sst_2],
-                HashMap::from([(10, context_id), (11, context_id)]),
-            ),
+            vec![sst_1, sst_2],
+            HashMap::from([(10, context_id), (11, context_id)]),
         )
         .await
         .unwrap();
@@ -1489,7 +1479,7 @@ async fn test_split_compaction_group_on_demand_basic() {
     // Now group 2 has member tables [100,101,102], so split [100, 101] can succeed even though
     // there is no data of 102.
     hummock_manager
-        .register_table_ids(&[(102, 2)])
+        .register_table_ids_for_test(&[(102, 2)])
         .await
         .unwrap();
 
@@ -1511,14 +1501,21 @@ async fn test_split_compaction_group_on_demand_basic() {
     );
     assert_eq!(
         current_version
-            .get_compaction_group_levels(2)
-            .member_table_ids,
+            .state_table_info
+            .compaction_group_member_table_ids(2)
+            .iter()
+            .map(|table_id| table_id.table_id)
+            .collect_vec(),
         vec![102]
     );
     assert_eq!(
         current_version
-            .get_compaction_group_levels(new_group_id)
-            .member_table_ids,
+            .state_table_info
+            .compaction_group_member_table_ids(new_group_id)
+            .iter()
+            .map(|table_id| table_id.table_id)
+            .sorted()
+            .collect_vec(),
         vec![100, 101]
     );
 }
@@ -1527,8 +1524,7 @@ async fn test_split_compaction_group_on_demand_basic() {
 async fn test_split_compaction_group_on_demand_non_trivial() {
     let (_env, hummock_manager, _, worker_node) = setup_compute_env(80).await;
     let context_id = worker_node.id;
-    let sst_1 = ExtendedSstableInfo {
-        compaction_group_id: 2,
+    let sst_1 = LocalSstableInfo {
         sst_info: SstableInfo {
             object_id: 10,
             sst_id: 10,
@@ -1541,18 +1537,15 @@ async fn test_split_compaction_group_on_demand_non_trivial() {
         table_stats: Default::default(),
     };
     hummock_manager
-        .register_table_ids(&[(100, 2)])
+        .register_table_ids_for_test(&[(100, 2)])
         .await
         .unwrap();
     hummock_manager
-        .register_table_ids(&[(101, 2)])
+        .register_table_ids_for_test(&[(101, 2)])
         .await
         .unwrap();
     hummock_manager
-        .commit_epoch(
-            30,
-            CommitEpochInfo::for_test(vec![sst_1], HashMap::from([(10, context_id)])),
-        )
+        .commit_epoch_for_test(30, vec![sst_1], HashMap::from([(10, context_id)]))
         .await
         .unwrap();
 
@@ -1575,14 +1568,20 @@ async fn test_split_compaction_group_on_demand_non_trivial() {
     );
     assert_eq!(
         current_version
-            .get_compaction_group_levels(2)
-            .member_table_ids,
+            .state_table_info
+            .compaction_group_member_table_ids(2)
+            .iter()
+            .map(|table_id| table_id.table_id)
+            .collect_vec(),
         vec![101]
     );
     assert_eq!(
         current_version
-            .get_compaction_group_levels(new_group_id)
-            .member_table_ids,
+            .state_table_info
+            .compaction_group_member_table_ids(new_group_id)
+            .iter()
+            .map(|table_id| table_id.table_id)
+            .collect_vec(),
         vec![100]
     );
 }
@@ -1603,15 +1602,14 @@ async fn test_split_compaction_group_trivial_expired() {
     hummock_manager.compactor_manager.add_compactor(context_id);
 
     hummock_manager
-        .register_table_ids(&[(100, 2)])
+        .register_table_ids_for_test(&[(100, 2)])
         .await
         .unwrap();
     hummock_manager
-        .register_table_ids(&[(101, 2)])
+        .register_table_ids_for_test(&[(101, 2)])
         .await
         .unwrap();
-    let sst_1 = ExtendedSstableInfo {
-        compaction_group_id: 2,
+    let sst_1 = LocalSstableInfo {
         sst_info: SstableInfo {
             object_id: 10,
             sst_id: 10,
@@ -1627,8 +1625,7 @@ async fn test_split_compaction_group_trivial_expired() {
         },
         table_stats: Default::default(),
     };
-    let sst_2 = ExtendedSstableInfo {
-        compaction_group_id: 2,
+    let sst_2 = LocalSstableInfo {
         sst_info: SstableInfo {
             object_id: 11,
             sst_id: 11,
@@ -1651,17 +1648,15 @@ async fn test_split_compaction_group_trivial_expired() {
     sst_4.sst_info.sst_id = 9;
     sst_4.sst_info.object_id = 9;
     hummock_manager
-        .commit_epoch(
+        .commit_epoch_for_test(
             30,
-            CommitEpochInfo::for_test(
-                vec![sst_1, sst_2, sst_3, sst_4],
-                HashMap::from([
-                    (10, context_id),
-                    (11, context_id),
-                    (9, context_id),
-                    (8, context_id),
-                ]),
-            ),
+            vec![sst_1, sst_2, sst_3, sst_4],
+            HashMap::from([
+                (10, context_id),
+                (11, context_id),
+                (9, context_id),
+                (8, context_id),
+            ]),
         )
         .await
         .unwrap();
@@ -1669,7 +1664,7 @@ async fn test_split_compaction_group_trivial_expired() {
     // Now group 2 has member tables [100,101,102], so split [100, 101] can succeed even though
     // there is no data of 102.
     hummock_manager
-        .register_table_ids(&[(102, 2)])
+        .register_table_ids_for_test(&[(102, 2)])
         .await
         .unwrap();
     let task = hummock_manager
@@ -1698,14 +1693,21 @@ async fn test_split_compaction_group_trivial_expired() {
     assert!(new_group_id > StaticCompactionGroupId::End as u64);
     assert_eq!(
         current_version
-            .get_compaction_group_levels(2)
-            .member_table_ids,
+            .state_table_info
+            .compaction_group_member_table_ids(2)
+            .iter()
+            .map(|table_id| table_id.table_id)
+            .sorted()
+            .collect_vec(),
         vec![101, 102]
     );
     assert_eq!(
         current_version
-            .get_compaction_group_levels(new_group_id)
-            .member_table_ids,
+            .state_table_info
+            .compaction_group_member_table_ids(new_group_id)
+            .iter()
+            .map(|table_id| table_id.table_id)
+            .collect_vec(),
         vec![100]
     );
 
@@ -1765,16 +1767,15 @@ async fn test_split_compaction_group_on_demand_bottom_levels() {
     let context_id = worker_node.id;
 
     hummock_manager
-        .register_table_ids(&[(100, 2)])
+        .register_table_ids_for_test(&[(100, 2)])
         .await
         .unwrap();
     hummock_manager
-        .register_table_ids(&[(101, 2)])
+        .register_table_ids_for_test(&[(101, 2)])
         .await
         .unwrap();
 
-    let sst_1 = ExtendedSstableInfo {
-        compaction_group_id: 2,
+    let sst_1 = LocalSstableInfo {
         sst_info: SstableInfo {
             object_id: 10,
             sst_id: 10,
@@ -1791,10 +1792,7 @@ async fn test_split_compaction_group_on_demand_bottom_levels() {
         table_stats: Default::default(),
     };
     hummock_manager
-        .commit_epoch(
-            30,
-            CommitEpochInfo::for_test(vec![sst_1.clone()], HashMap::from([(10, context_id)])),
-        )
+        .commit_epoch_for_test(30, vec![sst_1.clone()], HashMap::from([(10, context_id)]))
         .await
         .unwrap();
     // Construct data via manual compaction
@@ -1905,15 +1903,14 @@ async fn test_compaction_task_expiration_due_to_split_group() {
     let context_id = worker_node.id;
 
     hummock_manager
-        .register_table_ids(&[(100, 2)])
+        .register_table_ids_for_test(&[(100, 2)])
         .await
         .unwrap();
     hummock_manager
-        .register_table_ids(&[(101, 2)])
+        .register_table_ids_for_test(&[(101, 2)])
         .await
         .unwrap();
-    let sst_1 = ExtendedSstableInfo {
-        compaction_group_id: 2,
+    let sst_1 = LocalSstableInfo {
         sst_info: SstableInfo {
             object_id: 10,
             sst_id: 10,
@@ -1929,8 +1926,7 @@ async fn test_compaction_task_expiration_due_to_split_group() {
         },
         table_stats: Default::default(),
     };
-    let sst_2 = ExtendedSstableInfo {
-        compaction_group_id: 2,
+    let sst_2 = LocalSstableInfo {
         sst_info: SstableInfo {
             object_id: 11,
             sst_id: 11,
@@ -1947,12 +1943,10 @@ async fn test_compaction_task_expiration_due_to_split_group() {
         table_stats: Default::default(),
     };
     hummock_manager
-        .commit_epoch(
+        .commit_epoch_for_test(
             30,
-            CommitEpochInfo::for_test(
-                vec![sst_1, sst_2],
-                HashMap::from([(10, context_id), (11, context_id)]),
-            ),
+            vec![sst_1, sst_2],
+            HashMap::from([(10, context_id), (11, context_id)]),
         )
         .await
         .unwrap();
@@ -1996,23 +1990,20 @@ async fn test_move_tables_between_compaction_group() {
     let context_id = worker_node.id;
 
     hummock_manager
-        .register_table_ids(&[(100, 2)])
+        .register_table_ids_for_test(&[(100, 2)])
         .await
         .unwrap();
     hummock_manager
-        .register_table_ids(&[(101, 2)])
+        .register_table_ids_for_test(&[(101, 2)])
         .await
         .unwrap();
     hummock_manager
-        .register_table_ids(&[(102, 2)])
+        .register_table_ids_for_test(&[(102, 2)])
         .await
         .unwrap();
-    let sst_1 = gen_extend_sstable_info(10, 2, 1, vec![100, 101, 102]);
+    let sst_1 = gen_local_sstable_info(10, 1, vec![100, 101, 102]);
     hummock_manager
-        .commit_epoch(
-            30,
-            CommitEpochInfo::for_test(vec![sst_1.clone()], HashMap::from([(10, context_id)])),
-        )
+        .commit_epoch_for_test(30, vec![sst_1.clone()], HashMap::from([(10, context_id)]))
         .await
         .unwrap();
     // Construct data via manual compaction
@@ -2033,12 +2024,9 @@ async fn test_move_tables_between_compaction_group() {
         )
         .await
         .unwrap());
-    let sst_2 = gen_extend_sstable_info(14, 2, 1, vec![101, 102]);
+    let sst_2 = gen_local_sstable_info(14, 1, vec![101, 102]);
     hummock_manager
-        .commit_epoch(
-            31,
-            CommitEpochInfo::for_test(vec![sst_2.clone()], HashMap::from([(14, context_id)])),
-        )
+        .commit_epoch_for_test(31, vec![sst_2.clone()], HashMap::from([(14, context_id)]))
         .await
         .unwrap();
     let current_version = hummock_manager.get_current_version().await;
@@ -2178,19 +2166,16 @@ async fn test_partition_level() {
     let context_id = worker_node.id;
 
     hummock_manager
-        .register_table_ids(&[(100, 2)])
+        .register_table_ids_for_test(&[(100, 2)])
         .await
         .unwrap();
     hummock_manager
-        .register_table_ids(&[(101, 2)])
+        .register_table_ids_for_test(&[(101, 2)])
         .await
         .unwrap();
-    let sst_1 = gen_extend_sstable_info(10, 2, 1, vec![100, 101]);
+    let sst_1 = gen_local_sstable_info(10, 1, vec![100, 101]);
     hummock_manager
-        .commit_epoch(
-            30,
-            CommitEpochInfo::for_test(vec![sst_1.clone()], HashMap::from([(10, context_id)])),
-        )
+        .commit_epoch_for_test(30, vec![sst_1.clone()], HashMap::from([(10, context_id)]))
         .await
         .unwrap();
     // Construct data via manual compaction
@@ -2225,17 +2210,19 @@ async fn test_partition_level() {
             .len(),
         1
     );
+
     let mut global_sst_id = 13;
     const MB: u64 = 1024 * 1024;
     let mut selector = default_compaction_selector();
     for epoch in 31..100 {
-        let mut sst = gen_extend_sstable_info(global_sst_id, new_group_id, 10, vec![100]);
+        let mut sst = gen_local_sstable_info(global_sst_id, 10, vec![100]);
         sst.sst_info.file_size = 10 * MB;
         sst.sst_info.uncompressed_file_size = 10 * MB;
         hummock_manager
-            .commit_epoch(
+            .commit_epoch_for_test(
                 epoch,
-                CommitEpochInfo::for_test(vec![sst], HashMap::from([(global_sst_id, context_id)])),
+                vec![sst],
+                HashMap::from([(global_sst_id, context_id)]),
             )
             .await
             .unwrap();
@@ -2295,15 +2282,14 @@ async fn test_unregister_moved_table() {
     );
 
     hummock_manager
-        .register_table_ids(&[(100, 2)])
+        .register_table_ids_for_test(&[(100, 2)])
         .await
         .unwrap();
     hummock_manager
-        .register_table_ids(&[(101, 2)])
+        .register_table_ids_for_test(&[(101, 2)])
         .await
         .unwrap();
-    let sst_1 = ExtendedSstableInfo {
-        compaction_group_id: 2,
+    let sst_1 = LocalSstableInfo {
         sst_info: SstableInfo {
             object_id: 10,
             sst_id: 10,
@@ -2319,8 +2305,7 @@ async fn test_unregister_moved_table() {
         },
         table_stats: Default::default(),
     };
-    let sst_2 = ExtendedSstableInfo {
-        compaction_group_id: 2,
+    let sst_2 = LocalSstableInfo {
         sst_info: SstableInfo {
             object_id: 11,
             sst_id: 11,
@@ -2337,12 +2322,10 @@ async fn test_unregister_moved_table() {
         table_stats: Default::default(),
     };
     hummock_manager
-        .commit_epoch(
+        .commit_epoch_for_test(
             30,
-            CommitEpochInfo::for_test(
-                vec![sst_1, sst_2],
-                HashMap::from([(10, context_id), (11, context_id)]),
-            ),
+            vec![sst_1, sst_2],
+            HashMap::from([(10, context_id), (11, context_id)]),
         )
         .await
         .unwrap();
@@ -2370,18 +2353,27 @@ async fn test_unregister_moved_table() {
     );
     assert_eq!(
         current_version
-            .get_compaction_group_levels(2)
-            .member_table_ids,
+            .state_table_info
+            .compaction_group_member_table_ids(2)
+            .iter()
+            .map(|table_id| table_id.table_id)
+            .collect_vec(),
         vec![101]
     );
     assert_eq!(
         current_version
-            .get_compaction_group_levels(new_group_id)
-            .member_table_ids,
+            .state_table_info
+            .compaction_group_member_table_ids(new_group_id)
+            .iter()
+            .map(|table_id| table_id.table_id)
+            .collect_vec(),
         vec![100]
     );
 
-    hummock_manager.unregister_table_ids(&[100]).await.unwrap();
+    hummock_manager
+        .unregister_table_ids([TableId::new(100)])
+        .await
+        .unwrap();
     let current_version = hummock_manager.get_current_version().await;
     assert_eq!(current_version.levels.len(), 2);
     assert!(!current_version.levels.contains_key(&new_group_id));
@@ -2391,8 +2383,11 @@ async fn test_unregister_moved_table() {
     );
     assert_eq!(
         current_version
-            .get_compaction_group_levels(2)
-            .member_table_ids,
+            .state_table_info
+            .compaction_group_member_table_ids(2)
+            .iter()
+            .map(|table_id| table_id.table_id)
+            .collect_vec(),
         vec![101]
     );
 }

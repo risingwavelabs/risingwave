@@ -1,0 +1,31 @@
+control substitution on
+
+statement ok
+create materialized view mv as
+select * from generate_series(
+    -- $__NOW__ is in nanoseconds, `to_timestamp` expects seconds
+    to_timestamp($__NOW__ / 1000.0 / 1000.0 / 1000.0) - interval '10 second',
+    now(),
+    interval '1 second'
+);
+
+statement ok
+flush;
+
+query I
+select count(*) >= 10 from mv;
+----
+t
+
+sleep 2s
+
+statement ok
+flush;
+
+query I
+select count(*) >= 12 from mv;
+----
+t
+
+statement ok
+drop materialized view mv;
