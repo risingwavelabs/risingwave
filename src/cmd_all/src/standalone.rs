@@ -230,8 +230,9 @@ pub async fn standalone(
     }
     if let Some(opts) = compactor_opts {
         tracing::info!("starting compactor-node thread with cli args: {:?}", opts);
+        let shutdown = shutdown.clone();
         let _compactor_handle =
-            tokio::spawn(async move { risingwave_compactor::start(opts).await });
+            tokio::spawn(async move { risingwave_compactor::start(opts, shutdown).await });
     }
 
     // wait for log messages to be flushed
