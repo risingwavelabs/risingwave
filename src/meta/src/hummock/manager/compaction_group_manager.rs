@@ -707,7 +707,7 @@ impl CompactionGroupManager {
     }
 }
 
-fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfig]) {
+pub fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfig]) {
     for item in items {
         match item {
             MutableConfig::MaxBytesForLevelBase(c) => {

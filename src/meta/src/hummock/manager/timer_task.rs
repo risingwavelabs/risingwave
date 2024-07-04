@@ -24,7 +24,7 @@ use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::get_compaction_group_ids;
 use risingwave_pb::hummock::compact_task::{self, TaskStatus};
 use risingwave_pb::hummock::level_handler::RunningCompactTask;
-use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
+// use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
 use rw_futures_util::select_all;
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Sender;
@@ -460,22 +460,13 @@ impl HummockManager {
         group_infos.reverse();
 
         for group in &group_infos {
+            if group.table_statistic.len() == 1 {
+                // no need to handle the separate compaciton group
+                continue;
+            }
+
             for (table_id, table_size) in &group.table_statistic {
-                self.rewrite_cg_config(
-                    &table_write_throughput,
-                    table_id,
-                    table_size,
-                    checkpoint_secs,
-                    group.group_id,
-                )
-                .await;
-
-                if group.table_statistic.len() == 1 {
-                    // no need to handle the separate compaciton group
-                    continue;
-                }
-
-                self.calculate_table_align_rule(
+                self.try_move_table_to_dedicated_cg(
                     &table_write_throughput,
                     table_id,
                     table_size,
@@ -502,152 +493,70 @@ impl HummockManager {
         }
     }
 
-    async fn calculate_table_align_rule(
-        &self,
-        table_write_throughput: &HashMap<u32, VecDeque<u64>>,
-        table_id: &u32,
-        table_size: &u64,
-        is_creating_table: bool,
-        checkpoint_secs: u64,
-        parent_group_id: u64,
-        group_size: u64,
-    ) {
-        let default_group_id: CompactionGroupId = StaticCompactionGroupId::StateDefault.into();
-        let mv_group_id: CompactionGroupId = StaticCompactionGroupId::MaterializedView.into();
-        let partition_vnode_count = self.env.opts.partition_vnode_count;
-        let window_size = HISTORY_TABLE_INFO_STATISTIC_TIME / (checkpoint_secs as usize);
+    // async fn rewrite_cg_config(
+    //     &self,
+    //     table_write_throughput: &HashMap<u32, VecDeque<u64>>,
+    //     table_id: &u32,
+    //     table_size: &u64,
+    //     checkpoint_secs: u64,
+    //     compaction_group_id: u64,
+    // ) {
+    //     // let window_size = HISTORY_TABLE_INFO_STATISTIC_TIME / 4 / (checkpoint_secs as usize);
+    //     let window_size =
+    //         self.env.opts.table_info_statistic_history_times / (checkpoint_secs as usize);
 
-        let mut is_high_write_throughput = false;
-        let mut is_low_write_throughput = true;
-        if let Some(history) = table_write_throughput.get(table_id) {
-            if !is_creating_table {
-                if history.len() >= window_size {
-                    is_high_write_throughput = history.iter().all(|throughput| {
-                        *throughput / checkpoint_secs
-                            > self.env.opts.table_write_throughput_threshold
-                    });
-                    is_low_write_throughput = history.iter().any(|throughput| {
-                        *throughput / checkpoint_secs
-                            < self.env.opts.min_table_split_write_throughput
-                    });
-                }
-            } else {
-                // For creating table, relax the checking restrictions to make the data alignment behavior more sensitive.
-                let sum = history.iter().sum::<u64>();
-                is_low_write_throughput = sum
-                    < self.env.opts.min_table_split_write_throughput
-                        * history.len() as u64
-                        * checkpoint_secs;
-            }
-        }
+    //     let mut is_high_write_throughput = false;
+    //     let mut is_low_write_throughput = true;
+    //     if let Some(history) = table_write_throughput.get(table_id) {
+    //         if history.len() >= window_size {
+    //             is_high_write_throughput = history.iter().all(|throughput| {
+    //                 *throughput / checkpoint_secs > self.env.opts.table_write_throughput_threshold
+    //             });
+    //             is_low_write_throughput = history.iter().any(|throughput| {
+    //                 *throughput / checkpoint_secs < self.env.opts.min_table_split_write_throughput
+    //             });
+    //         }
+    //     }
 
-        let state_table_size = *table_size;
+    //     let state_table_size = *table_size;
 
-        // 1. Avoid splitting a creating table
-        // 2. Avoid splitting a is_low_write_throughput creating table
-        // 3. Avoid splitting a non-high throughput medium-sized table
-        if is_creating_table
-            || (is_low_write_throughput)
-            || (state_table_size < self.env.opts.min_table_split_size && !is_high_write_throughput)
-        {
-            return;
-        }
+    //     if is_low_write_throughput
+    //         || (state_table_size < self.env.opts.min_table_split_size && !is_high_write_throughput)
+    //     {
+    //         return;
+    //     }
 
-        // do not split a large table and a small table because it would increase IOPS
-        // of small table.
-        if parent_group_id != default_group_id && parent_group_id != mv_group_id {
-            let rest_group_size = group_size - state_table_size;
-            if rest_group_size < state_table_size
-                && rest_group_size < self.env.opts.min_table_split_size
-            {
-                return;
-            }
-        }
-
-        let ret = self
-            .move_state_table_to_compaction_group(
-                parent_group_id,
-                &[*table_id],
-                partition_vnode_count,
-            )
-            .await;
-        match ret {
-            Ok((new_group_id, table_vnode_partition_count)) => {
-                tracing::info!("move state table [{}] from group-{} to group-{} success table_vnode_partition_count {:?}", table_id, parent_group_id, new_group_id, table_vnode_partition_count);
-            }
-            Err(e) => {
-                tracing::info!(
-                    error = %e.as_report(),
-                    "failed to move state table [{}] from group-{}",
-                    table_id,
-                    parent_group_id,
-                )
-            }
-        }
-    }
-
-    async fn rewrite_cg_config(
-        &self,
-        table_write_throughput: &HashMap<u32, VecDeque<u64>>,
-        table_id: &u32,
-        table_size: &u64,
-        checkpoint_secs: u64,
-        compaction_group_id: u64,
-    ) {
-        let window_size = HISTORY_TABLE_INFO_STATISTIC_TIME / 4 / (checkpoint_secs as usize);
-
-        let mut is_high_write_throughput = false;
-        let mut is_low_write_throughput = true;
-        if let Some(history) = table_write_throughput.get(table_id) {
-            if history.len() >= window_size {
-                is_high_write_throughput = history.iter().all(|throughput| {
-                    *throughput / checkpoint_secs > self.env.opts.table_write_throughput_threshold
-                });
-                is_low_write_throughput = history.iter().any(|throughput| {
-                    *throughput / checkpoint_secs < self.env.opts.min_table_split_write_throughput
-                });
-            }
-        }
-
-        let state_table_size = *table_size;
-
-        if is_low_write_throughput
-            || (state_table_size < self.env.opts.min_table_split_size && !is_high_write_throughput)
-        {
-            return;
-        }
-
-        // rewrite compaction config
-        match self
-            .compaction_group_manager
-            .write()
-            .await
-            .update_compaction_config(
-                &[compaction_group_id],
-                &[
-                    MutableConfig::Level0OverlappingSubLevelCompactLevelCount(12),
-                    MutableConfig::Level0TierCompactFileNumber(12),
-                    MutableConfig::Level0SubLevelCompactLevelCount(3),
-                    MutableConfig::Level0MaxCompactFileNumber(100),
-                    MutableConfig::Level0StopWriteThresholdSubLevelNumber(100),
-                    MutableConfig::MaxCompactionBytes(2 * 1024 * 1024 * 1024),
-                ],
-            )
-            .await
-        {
-            Ok(_) => {
-                tracing::info!(
-                    "rewrite compaction config for compaction group-{} success",
-                    compaction_group_id
-                );
-            }
-            Err(err) => {
-                tracing::info!(
-                    error = %err.as_report(),
-                    "failed to rewrite compaction config for compaction group-{}",
-                    compaction_group_id
-                );
-            }
-        }
-    }
+    //     // rewrite compaction config
+    //     match self
+    //         .compaction_group_manager
+    //         .write()
+    //         .await
+    //         .update_compaction_config(
+    //             &[compaction_group_id],
+    //             &[
+    //                 MutableConfig::Level0OverlappingSubLevelCompactLevelCount(12),
+    //                 MutableConfig::Level0TierCompactFileNumber(12),
+    //                 MutableConfig::Level0SubLevelCompactLevelCount(3),
+    //                 MutableConfig::Level0MaxCompactFileNumber(100),
+    //                 MutableConfig::Level0StopWriteThresholdSubLevelNumber(100),
+    //                 MutableConfig::MaxCompactionBytes(2 * 1024 * 1024 * 1024),
+    //             ],
+    //         )
+    //         .await
+    //     {
+    //         Ok(_) => {
+    //             tracing::info!(
+    //                 "rewrite compaction config for compaction group-{} success",
+    //                 compaction_group_id
+    //             );
+    //         }
+    //         Err(err) => {
+    //             tracing::info!(
+    //                 error = %err.as_report(),
+    //                 "failed to rewrite compaction config for compaction group-{}",
+    //                 compaction_group_id
+    //             );
+    //         }
+    //     }
+    // }
 }
