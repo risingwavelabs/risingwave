@@ -511,6 +511,15 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
 
         layers.push(layer.boxed());
 
+        // The reporter is used by minitrace in foyer for dynamically tail-based tracing.
+        //
+        // Code here only setup the OpenTelemetry reporter. To enable/disable the function, please use risectl.
+        //
+        // e.g.
+        //
+        // ```bash
+        // risectl hummock tiered-cache-tracing -h
+        // ```
         let reporter = OpenTelemetryReporter::new(
             exporter,
             SpanKind::Server,
