@@ -54,14 +54,14 @@ create source mysql_source with (
 );
 
 statement ok
-create table products_1 ( id INT,
+create table my_products ( id INT,
  name STRING,
  description STRING,
  PRIMARY KEY (id)
 ) from mysql_source table 'testdb1.products';
 
 statement ok
-create table orders_1 (
+create table my_orders (
    order_id int,
    order_date timestamp,
    customer_name string,
@@ -100,7 +100,7 @@ create source pg_source with (
 );
 
 statement ok
-create table shipments_1 (
+create table pg_shipments (
   shipment_id INTEGER,
   order_id INTEGER,
   origin STRING,
@@ -112,9 +112,9 @@ create table shipments_1 (
 # Create a mview join orders, products and shipments
 statement ok
 create materialized view enriched_orders as SELECT o.*, p.name, p.description, s.shipment_id, s.origin, s.destination, s.is_arrived
- FROM orders_1 AS o
- LEFT JOIN products_1 AS p ON o.product_id = p.id
- LEFT JOIN shipments_1 AS s ON o.order_id = s.order_id;
+ FROM my_orders AS o
+ LEFT JOIN my_products AS p ON o.product_id = p.id
+ LEFT JOIN pg_shipments AS s ON o.order_id = s.order_id;
 
 
 sleep 3s
@@ -137,16 +137,16 @@ mysql -u root --protocol='tcp' -e "
 
 # alter cdc tables
 statement ok
-ALTER TABLE products_1 ADD COLUMN weight DECIMAL;
+ALTER TABLE my_products ADD COLUMN weight DECIMAL;
 
 statement ok
-ALTER TABLE orders_1 ADD COLUMN order_comment VARCHAR;
+ALTER TABLE my_orders ADD COLUMN order_comment VARCHAR;
 
 # wait alter ddl
 sleep 3s
 
 query ITTT
-SELECT id,name,description,weight FROM products_1 order by id limit 3
+SELECT id,name,description,weight FROM my_products order by id limit 3
 ----
 101 scooter Small 2-wheel scooter NULL
 102 car battery 12V car battery NULL
@@ -165,14 +165,14 @@ mysql -e "
 sleep 3s
 
 query ITTT
-SELECT id,name,description,weight FROM products_1 order by id limit 3
+SELECT id,name,description,weight FROM my_products order by id limit 3
 ----
 101 scooter Small 2-wheel scooter 10.50
 102 car battery 12V car battery 12.50
 103 12-pack drill 12-pack of drill bits with sizes ranging from #40 to #3 NULL
 
 query ITTT
-SELECT order_id,order_date,customer_name,product_id,order_status,order_comment FROM orders_1 order by order_id limit 2
+SELECT order_id,order_date,customer_name,product_id,order_status,order_comment FROM my_orders order by order_id limit 2
 ----
 10001 2020-07-30 10:08:22 Jark 102 0 very good
 10002 2020-07-30 10:11:09 Sally 105 0 NULL
@@ -187,20 +187,20 @@ mysql -e "
 
 # alter cdc table to drop column
 statement ok
-ALTER TABLE products_1 DROP COLUMN weight;
+ALTER TABLE my_products DROP COLUMN weight;
 
 # wait alter ddl
 sleep 3s
 
 query TTTT
-describe products_1;
+describe my_products;
 ----
 id integer false NULL
 name character varying false NULL
 description character varying false NULL
 primary key id NULL NULL
 distribution key id NULL NULL
-table description products_1 NULL NULL
+table description my_products NULL NULL
 
 
 # alter pg table
@@ -210,7 +210,7 @@ psql -c "
 "
 
 statement error unable to drop the column due to being referenced by downstream materialized views or sinks
-ALTER TABLE shipments_1 DROP COLUMN destination;
+ALTER TABLE pg_shipments DROP COLUMN destination;
 
 # wait alter ddl
 sleep 3s
@@ -227,13 +227,13 @@ statement ok
 drop materialized view enriched_orders;
 
 statement ok
-drop table orders_1;
+drop table my_orders;
 
 statement ok
-create table orders_2 (*) from mysql_source table 'testdb1.orders';
+create table orders_test (*) from mysql_source table 'testdb1.orders';
 
 statement error Not supported: alter a table with empty column definitions
-ALTER TABLE orders_2 ADD COLUMN order_comment VARCHAR;
+ALTER TABLE orders_test ADD COLUMN order_comment VARCHAR;
 
 statement ok
 drop source mysql_source cascade;
