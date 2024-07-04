@@ -281,25 +281,23 @@ pub async fn pg_serve(
 
     let session_mgr = Arc::new(session_mgr);
     let session_mgr_clone = session_mgr.clone();
-    let f = {
-        async move {
-            loop {
-                let conn_ret = listener.accept().await;
-                match conn_ret {
-                    Ok((stream, peer_addr)) => {
-                        tracing::info!(%peer_addr, "accept connection");
-                        worker_runtime.spawn(handle_connection(
-                            stream,
-                            session_mgr_clone.clone(),
-                            tls_config.clone(),
-                            Arc::new(peer_addr),
-                            redact_sql_option_keywords.clone(),
-                        ));
-                    }
+    let f = async move {
+        loop {
+            let conn_ret = listener.accept().await;
+            match conn_ret {
+                Ok((stream, peer_addr)) => {
+                    tracing::info!(%peer_addr, "accept connection");
+                    worker_runtime.spawn(handle_connection(
+                        stream,
+                        session_mgr_clone.clone(),
+                        tls_config.clone(),
+                        Arc::new(peer_addr),
+                        redact_sql_option_keywords.clone(),
+                    ));
+                }
 
-                    Err(e) => {
-                        tracing::error!(error = %e.as_report(), "failed to accept connection",);
-                    }
+                Err(e) => {
+                    tracing::error!(error = %e.as_report(), "failed to accept connection",);
                 }
             }
         }
