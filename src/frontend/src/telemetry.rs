@@ -12,44 +12,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::OnceLock;
-
 use prost::Message;
 use risingwave_common::telemetry::pb_compatible::TelemetryToProtobuf;
 use risingwave_common::telemetry::report::{report_event_common, TelemetryReportCreator};
 use risingwave_common::telemetry::{
     current_timestamp, SystemData, TelemetryNodeType, TelemetryReportBase, TelemetryResult,
 };
-use risingwave_pb::telemetry::{PbTelemetryDatabaseComponents, PbTelemetryEventStage};
+use risingwave_pb::telemetry::{PbTelemetryDatabaseObject, PbTelemetryEventStage};
 use serde::{Deserialize, Serialize};
 
 const TELEMETRY_FRONTEND_REPORT_TYPE: &str = "frontend";
 
-static FRONTEND_TELEMETRY_SESSION_ID: OnceLock<String> = OnceLock::new();
-static FRONTEND_TELEMETRY_TRACKING_ID: OnceLock<String> = OnceLock::new();
-
-pub fn set_frontend_telemetry_tracking_id_and_session_id(tracking_id: String, session_id: String) {
-    FRONTEND_TELEMETRY_TRACKING_ID.set(tracking_id).unwrap();
-    FRONTEND_TELEMETRY_SESSION_ID.set(session_id).unwrap();
-}
-
-fn _get_frontend_telemetry_tracking_id_and_session_id() -> (Option<String>, Option<String>) {
-    (
-        FRONTEND_TELEMETRY_TRACKING_ID.get().cloned(),
-        FRONTEND_TELEMETRY_SESSION_ID.get().cloned(),
-    )
-}
-
-pub(crate) fn _report_event(
+#[allow(dead_code)] // please remove when used
+pub(crate) fn report_event(
     event_stage: PbTelemetryEventStage,
     feature_name: String,
     catalog_id: i64,
     connector_name: Option<String>,
-    component: Option<PbTelemetryDatabaseComponents>,
-    attributes: Option<String>, // any json string
+    component: Option<PbTelemetryDatabaseObject>,
+    attributes: Option<jsonbb::Value>, // any json string
 ) {
     report_event_common(
-        Box::new(_get_frontend_telemetry_tracking_id_and_session_id),
         event_stage,
         feature_name,
         catalog_id,

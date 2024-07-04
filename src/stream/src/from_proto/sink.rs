@@ -25,8 +25,7 @@ use risingwave_connector::sink::{
 use risingwave_pb::catalog::Table;
 use risingwave_pb::plan_common::PbColumnCatalog;
 use risingwave_pb::stream_plan::{SinkLogStoreType, SinkNode};
-use risingwave_pb::telemetry::{PbTelemetryDatabaseComponents, PbTelemetryEventStage};
-use serde_json::json;
+use risingwave_pb::telemetry::{PbTelemetryDatabaseObject, PbTelemetryEventStage};
 
 use super::*;
 use crate::common::log_store_impl::in_mem::BoundedInMemLogStoreFactory;
@@ -43,15 +42,25 @@ fn telemetry_sink_build(
     connector_name: &str,
     sink_format_desc: &Option<SinkFormatDesc>,
 ) {
-    let attr = sink_format_desc
-        .as_ref()
-        .map(|f| json!({"format": f.format, "encode": f.encode}).to_string());
+    let attr = sink_format_desc.as_ref().map(|f| {
+        let mut builder = jsonbb::Builder::<Vec<u8>>::new();
+        builder.begin_object();
+        builder.add_string("format");
+        builder.add_value(jsonbb::ValueRef::String(f.format.to_string().as_str()));
+        builder.end_object();
+
+        builder.add_string("encode");
+        builder.add_value(jsonbb::ValueRef::String(f.encode.to_string().as_str()));
+        builder.end_object();
+        builder.finish()
+    });
+
     report_event(
         PbTelemetryEventStage::CreateStreamJob,
         "sink".to_string(),
         sink_id.sink_id() as i64,
         Some(connector_name.to_string()),
-        Some(PbTelemetryDatabaseComponents::Sink),
+        Some(PbTelemetryDatabaseObject::Sink),
         attr,
     )
 }

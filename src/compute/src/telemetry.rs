@@ -18,7 +18,6 @@ use risingwave_common::telemetry::report::TelemetryReportCreator;
 use risingwave_common::telemetry::{
     current_timestamp, SystemData, TelemetryNodeType, TelemetryReportBase, TelemetryResult,
 };
-pub use risingwave_stream::telemetry::set_compute_telemetry_tracking_id_and_session_id;
 use serde::{Deserialize, Serialize};
 
 const TELEMETRY_COMPUTE_REPORT_TYPE: &str = "compute";

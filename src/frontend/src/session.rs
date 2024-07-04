@@ -109,9 +109,7 @@ use crate::scheduler::{
     DistributedQueryMetrics, HummockSnapshotManager, HummockSnapshotManagerRef, QueryManager,
     GLOBAL_DISTRIBUTED_QUERY_METRICS,
 };
-use crate::telemetry::{
-    set_frontend_telemetry_tracking_id_and_session_id, FrontendTelemetryCreator,
-};
+use crate::telemetry::FrontendTelemetryCreator;
 use crate::user::user_authentication::md5_hash_with_salt;
 use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::{UserInfoReader, UserInfoWriter, UserInfoWriterImpl};
@@ -357,7 +355,6 @@ impl FrontendEnv {
         let telemetry_manager = TelemetryManager::new(
             Arc::new(meta_client.clone()),
             Arc::new(FrontendTelemetryCreator::new()),
-            Arc::new(set_frontend_telemetry_tracking_id_and_session_id),
         );
 
         // if the toml config file or env variable disables telemetry, do not watch system params

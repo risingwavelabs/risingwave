@@ -15,6 +15,7 @@
 pub mod desc;
 
 use std::collections::BTreeMap;
+use std::fmt::{Display, Formatter};
 
 use anyhow::anyhow;
 use itertools::Itertools;
@@ -133,6 +134,12 @@ pub enum SinkFormat {
     Debezium,
 }
 
+impl Display for SinkFormat {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
 /// TODO: consolidate with [`crate::source::SourceEncode`] and [`crate::parser::EncodingProperties`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub enum SinkEncode {
@@ -141,6 +148,12 @@ pub enum SinkEncode {
     Avro,
     Template,
     Text,
+}
+
+impl Display for SinkEncode {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
 }
 
 impl SinkFormatDesc {

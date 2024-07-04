@@ -26,10 +26,6 @@ where
 {
     info_fetcher: Arc<I>,
     report_creator: Arc<F>,
-
-    // This is a function that sets the tracking_id and session_id in different nodes
-    // Tracking_id and Session_id are also used to collect events
-    set_func_tracking_id_and_session_id: Arc<dyn Fn(String, String) + Send + Sync>,
 }
 
 impl<F, I> TelemetryManager<F, I>
@@ -37,24 +33,14 @@ where
     F: TelemetryReportCreator + Send + Sync + 'static,
     I: TelemetryInfoFetcher + Send + Sync + 'static,
 {
-    pub fn new(
-        info_fetcher: Arc<I>,
-        report_creator: Arc<F>,
-        set_func_tracking_id_and_session_id: Arc<dyn Fn(String, String) + Send + Sync>,
-    ) -> Self {
+    pub fn new(info_fetcher: Arc<I>, report_creator: Arc<F>) -> Self {
         Self {
             info_fetcher,
             report_creator,
-            set_func_tracking_id_and_session_id,
         }
     }
 
     pub async fn start(&self) -> (JoinHandle<()>, Sender<()>) {
-        start_telemetry_reporting(
-            self.info_fetcher.clone(),
-            self.report_creator.clone(),
-            self.set_func_tracking_id_and_session_id.clone(),
-        )
-        .await
+        start_telemetry_reporting(self.info_fetcher.clone(), self.report_creator.clone()).await
     }
 }

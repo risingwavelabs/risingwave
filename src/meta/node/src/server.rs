@@ -103,9 +103,7 @@ use crate::rpc::metrics::{
 use crate::serving::ServingVnodeMapping;
 use crate::storage::{EtcdMetaStore, MemStore, MetaStoreBoxExt, WrappedEtcdClient as EtcdClient};
 use crate::stream::{GlobalStreamManager, SourceManager};
-use crate::telemetry::{
-    set_meta_telemetry_tracking_id_and_session_id, MetaReportCreator, MetaTelemetryInfoFetcher,
-};
+use crate::telemetry::{MetaReportCreator, MetaTelemetryInfoFetcher};
 use crate::{hummock, serving, MetaError, MetaResult};
 
 /// Used for standalone mode checking the status of the meta service.
@@ -745,7 +743,6 @@ pub async fn start_service_as_election_leader(
             metadata_manager.clone(),
             env.meta_store().backend(),
         )),
-        Arc::new(set_meta_telemetry_tracking_id_and_session_id),
     );
 
     // May start telemetry reporting
