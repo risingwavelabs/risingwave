@@ -8453,9 +8453,9 @@ checksum = "c08d65885ee38876c4f86fa503fb49d7b507c2b62552df7c70b2fce627e06381"
 
 [[package]]
 name = "opendal"
-version = "0.47.0"
+version = "0.47.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5c3ba698f2258bebdf7a3a38862bb6ef1f96d351627002686dacc228f805bdd6"
+checksum = "ff159a2da374ef2d64848a6547943cf1af7d2ceada5ae77be175e1389aa07ae3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -10891,6 +10891,7 @@ dependencies = [
  "thiserror-ext",
  "tinyvec",
  "tokio-retry",
+ "tokio-util",
  "toml 0.8.12",
  "tower-layer",
  "tower-service",
@@ -11814,6 +11815,8 @@ version = "1.11.0-alpha"
 dependencies = [
  "async-std",
  "sea-orm-migration",
+ "serde",
+ "serde_json",
  "uuid",
 ]
 
@@ -11918,6 +11921,7 @@ dependencies = [
  "prometheus",
  "reqwest 0.12.4",
  "risingwave_common",
+ "risingwave_jni_core",
  "rustls 0.23.5",
  "spin 0.9.8",
  "thiserror",
