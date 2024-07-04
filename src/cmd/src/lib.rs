@@ -50,7 +50,6 @@ pub fn meta(opts: MetaNodeOpts) -> ! {
 
 pub fn frontend(opts: FrontendOpts) -> ! {
     init_risingwave_logger(LoggerSettings::from_opts(&opts));
-    // TODO(shutdown): pass the shutdown token
     main_okk(|shutdown| risingwave_frontend::start(opts, shutdown));
 }
 

@@ -59,7 +59,8 @@ pub trait SessionManager: Send + Sync + 'static {
 
     fn end_session(&self, session: &Self::Session);
 
-    fn close(&self) -> impl Future<Output = Result<(), BoxedError>> + Send {
+    /// Run some cleanup tasks before the server shutdown.
+    fn shutdown(&self) -> impl Future<Output = Result<(), BoxedError>> + Send {
         async { Ok(()) }
     }
 }
@@ -252,7 +253,7 @@ impl UserAuthenticator {
 
 /// Binds a Tcp or Unix listener at `addr`. Spawn a coroutine to serve every new connection.
 ///
-/// TODO: only return...
+/// Returns when the `shutdown` token is triggered.
 pub async fn pg_serve(
     addr: &str,
     session_mgr: impl SessionManager,
@@ -279,8 +280,8 @@ pub async fn pg_serve(
     let worker_runtime = tokio::runtime::Builder::new_multi_thread().build().unwrap();
 
     let session_mgr = Arc::new(session_mgr);
+    let session_mgr_clone = session_mgr.clone();
     let f = {
-        let session_mgr = session_mgr.clone();
         async move {
             loop {
                 let conn_ret = listener.accept().await;
@@ -289,7 +290,7 @@ pub async fn pg_serve(
                         tracing::info!(%peer_addr, "accept connection");
                         worker_runtime.spawn(handle_connection(
                             stream,
-                            session_mgr.clone(),
+                            session_mgr_clone.clone(),
                             tls_config.clone(),
                             Arc::new(peer_addr),
                             redact_sql_option_keywords.clone(),
@@ -303,13 +304,15 @@ pub async fn pg_serve(
             }
         }
     };
+    acceptor_runtime.spawn(f);
 
-    let _acceptor_handle = acceptor_runtime.spawn(f);
-
+    // Wait for the shutdown signal.
     shutdown.cancelled().await;
 
+    // Stop accepting new connections.
     acceptor_runtime.shutdown_background();
-    session_mgr.close().await?;
+    // Shutdown session manager, typically close all existing sessions.
+    session_mgr.shutdown().await?;
 
     Ok(())
 }
