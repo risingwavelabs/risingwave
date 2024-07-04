@@ -11910,6 +11910,7 @@ dependencies = [
  "prometheus",
  "reqwest 0.12.4",
  "risingwave_common",
+ "risingwave_jni_core",
  "rustls 0.23.5",
  "spin 0.9.8",
  "thiserror",
