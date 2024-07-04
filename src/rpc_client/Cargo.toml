@@ -19,7 +19,7 @@ async-trait = "0.1"
 easy-ext = "1"
 either = "1.12.0"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-http = "0.2"
+http = "1.1"
 hyper = "0.14" # required by tonic
 itertools = { workspace = true }
 lru = { workspace = true }
