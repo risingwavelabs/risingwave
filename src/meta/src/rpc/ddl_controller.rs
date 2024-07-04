@@ -926,7 +926,7 @@ impl DdlController {
         // 4. Build and persist stream job.
         let result: MetaResult<_> = try {
             tracing::debug!(id = stream_job.id(), "building stream job");
-            let (ctx, table_fragments) = self
+            let (mut ctx, table_fragments) = self
                 .build_stream_job(
                     stream_ctx,
                     &stream_job,
@@ -954,6 +954,11 @@ impl DdlController {
                         &ctx.replace_table_job_info
                     {
                         *target_table = Some((table.clone(), source.clone()));
+                        if let StreamingJob::Sink(ref sink, ref mut target_table) =
+                            &mut ctx.streaming_job
+                        {
+                            *target_table = Some((table.clone(), source.clone()));
+                        }
                     }
 
                     // Validate the sink on the connector node.
