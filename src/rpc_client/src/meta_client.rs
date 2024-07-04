@@ -732,13 +732,32 @@ impl MetaClient {
         Ok(resp.version)
     }
 
-    /// Unregister the current node to the cluster.
-    pub async fn unregister(&self, addr: HostAddr) -> Result<()> {
+    /// Unregister the current node from the cluster.
+    pub async fn unregister(&self) -> Result<()> {
         let request = DeleteWorkerNodeRequest {
-            host: Some(addr.to_protobuf()),
+            host: Some(self.host_addr.to_protobuf()),
         };
         self.inner.delete_worker_node(request).await?;
         Ok(())
+    }
+
+    /// Try to unregister the current worker from the cluster with best effort. Log the result.
+    pub async fn try_unregister(&self) {
+        match self.unregister().await {
+            Ok(_) => {
+                tracing::info!(
+                    worker_id = self.worker_id(),
+                    "successfully unregistered from meta service",
+                )
+            }
+            Err(e) => {
+                tracing::warn!(
+                    error = %e.as_report(),
+                    worker_id = self.worker_id(),
+                    "failed to unregister from meta service",
+                );
+            }
+        }
     }
 
     pub async fn update_schedulability(

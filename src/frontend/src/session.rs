@@ -1183,10 +1183,11 @@ impl SessionManager for SessionManagerImpl {
         self.delete_session(&session.session_id());
     }
 
-    async fn shutdown(&self) -> std::result::Result<(), BoxedError> {
+    async fn shutdown(&self) {
+        // Clean up the session map.
         self.env.sessions_map().write().clear();
-        // TODO(shutdown): unregister from meta service
-        Ok(())
+        // Unregister from the meta service.
+        self.env.meta_client().try_unregister().await;
     }
 }
 

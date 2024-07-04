@@ -60,8 +60,8 @@ pub trait SessionManager: Send + Sync + 'static {
     fn end_session(&self, session: &Self::Session);
 
     /// Run some cleanup tasks before the server shutdown.
-    fn shutdown(&self) -> impl Future<Output = Result<(), BoxedError>> + Send {
-        async { Ok(()) }
+    fn shutdown(&self) -> impl Future<Output = ()> + Send {
+        async {}
     }
 }
 
@@ -312,7 +312,7 @@ pub async fn pg_serve(
     // Stop accepting new connections.
     acceptor_runtime.shutdown_background();
     // Shutdown session manager, typically close all existing sessions.
-    session_mgr.shutdown().await?;
+    session_mgr.shutdown().await;
 
     Ok(())
 }
@@ -516,7 +516,7 @@ mod tests {
         let bind_addr = bind_addr.into();
         let pg_config = pg_config.into();
 
-        let session_mgr = Arc::new(MockSessionManager {});
+        let session_mgr = MockSessionManager {};
         tokio::spawn(async move {
             pg_serve(
                 &bind_addr,

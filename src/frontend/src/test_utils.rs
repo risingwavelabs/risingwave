@@ -928,6 +928,8 @@ pub struct MockFrontendMetaClient {}
 
 #[async_trait::async_trait]
 impl FrontendMetaClient for MockFrontendMetaClient {
+    async fn try_unregister(&self) {}
+
     async fn pin_snapshot(&self) -> RpcResult<HummockSnapshot> {
         Ok(HummockSnapshot {
             committed_epoch: 0,
