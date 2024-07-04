@@ -93,70 +93,73 @@ impl<Src: OpendalSource> OpendalReader<Src> {
                 .range(split.offset as u64..)
                 .into_future() // Unlike `rustc`, `try_stream` seems require manual `into_future`.
                 .await?;
-            // If the format is "parquet", there is no need to read it as bytes and parse it into a chunk using a parser.
-            // Instead, the Parquet file can be directly read as a `RecordBatch`` and converted into a chunk.
-            // For other formats, the corresponding parser will still be used for parsing.
-            if let EncodingProperties::Parquet = &self.parser_config.specific.encoding_config {
-                let record_batch_stream = Box::pin(
-                    ParquetRecordBatchStreamBuilder::new(file_reader)
-                        .await?
-                        .with_batch_size(self.source_ctx.source_ctrl_opts.chunk_size)
-                        .build()?,
-                );
+            // // If the format is "parquet", there is no need to read it as bytes and parse it into a chunk using a parser.
+            // // Instead, the Parquet file can be directly read as a `RecordBatch`` and converted into a chunk.
+            // // For other formats, the corresponding parser will still be used for parsing.
+            // if let EncodingProperties::Parquet = &self.parser_config.specific.encoding_config {
+            //     let record_batch_stream: std::pin::Pin<Box<parquet::arrow::async_reader::ParquetRecordBatchStream<Reader>>> = Box::pin(
+            //         ParquetRecordBatchStreamBuilder::new(file_reader)
+            //             .await?
+            //             .with_batch_size(self.source_ctx.source_ctrl_opts.chunk_size)
+            //             .build()?,
+            //     );
 
-                #[for_await]
-                for record_batch in record_batch_stream {
-                    let record_batch: RecordBatch = record_batch?;
-                    // Convert each record batch into a stream chunk according to user defined schema.
-                    let chunk: StreamChunk = convert_record_batch_to_stream_chunk(
-                        record_batch,
-                        self.columns.clone(),
-                        split.name.clone(),
-                    )?;
+            //     #[for_await]
+            //     for record_batch in record_batch_stream {
+            //         let record_batch: RecordBatch = record_batch?;
+            //         // Convert each record batch into a stream chunk according to user defined schema.
+            //         let chunk: StreamChunk = convert_record_batch_to_stream_chunk(
+            //             record_batch,
+            //             self.columns.clone(),
+            //             split.name.clone(),
+            //         )?;
 
-                    self.source_ctx
-                        .metrics
-                        .partition_input_count
-                        .with_label_values(&[
-                            &actor_id,
-                            &source_id,
-                            &split_id,
-                            &source_name,
-                            &fragment_id,
-                        ])
-                        .inc_by(chunk.cardinality() as u64);
-                    yield chunk;
-                }
-            } else {
-                let data_stream =
-                    Self::stream_read_object(file_reader, split, self.source_ctx.clone());
+            //         self.source_ctx
+            //             .metrics
+            //             .partition_input_count
+            //             .with_label_values(&[
+            //                 &actor_id,
+            //                 &source_id,
+            //                 &split_id,
+            //                 &source_name,
+            //                 &fragment_id,
+            //             ])
+            //             .inc_by(chunk.cardinality() as u64);
+            //         yield chunk;
+            //     }
+            // } else {
+            let data_stream = Self::stream_read_object(file_reader, split, self.source_ctx.clone());
 
-                let parser =
-                    ByteStreamSourceParserImpl::create(self.parser_config.clone(), source_ctx)
-                        .await?;
-                let msg_stream = if need_nd_streaming(&self.parser_config.specific.encoding_config)
-                {
-                    parser.into_stream(nd_streaming::split_stream(data_stream))
-                } else {
-                    parser.into_stream(data_stream)
-                };
-                #[for_await]
-                for msg in msg_stream {
-                    let msg = msg?;
-                    self.source_ctx
-                        .metrics
-                        .partition_input_count
-                        .with_label_values(&[
-                            &actor_id,
-                            &source_id,
-                            &split_id,
-                            &source_name,
-                            &fragment_id,
-                        ])
-                        .inc_by(msg.cardinality() as u64);
-                    yield msg;
-                }
+            let parser =
+                ByteStreamSourceParserImpl::create(self.parser_config.clone(), source_ctx).await?;
+            match parser{
+                ByteStreamSourceParserImpl::Parquet(parquet_parser) => todo!(),
+                _ => todo!(),
             }
+                
+            }
+            let msg_stream = if need_nd_streaming(&self.parser_config.specific.encoding_config) {
+                parser.into_stream(nd_streaming::split_stream(data_stream))
+            } else {
+                parser.into_stream(data_stream)
+            };
+            #[for_await]
+            for msg in msg_stream {
+                let msg = msg?;
+                self.source_ctx
+                    .metrics
+                    .partition_input_count
+                    .with_label_values(&[
+                        &actor_id,
+                        &source_id,
+                        &split_id,
+                        &source_name,
+                        &fragment_id,
+                    ])
+                    .inc_by(msg.cardinality() as u64);
+                yield msg;
+            }
+            // }
         }
     }
 
