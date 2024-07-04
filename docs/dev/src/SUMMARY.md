@@ -24,6 +24,7 @@
 
 # Specialized topics
 
+- [Develop Connectors](./connector/intro.md)
 - [Continuous Integration](./ci.md)
 
 <!--

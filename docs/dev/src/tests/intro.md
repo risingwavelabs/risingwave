@@ -38,6 +38,8 @@ RisingWave's SQL frontend has SQL planner tests.
 
 We use [sqllogictest-rs](https://github.com/risinglightdb/sqllogictest-rs) to run RisingWave e2e tests.
 
+Refer to Sqllogictest [`.slt` Test File Format Cookbook](https://github.com/risinglightdb/sqllogictest-rs#slt-test-file-format-cookbook) for the syntax.
+
 Before running end-to-end tests, you will need to start a full cluster first:
 
 ```shell
