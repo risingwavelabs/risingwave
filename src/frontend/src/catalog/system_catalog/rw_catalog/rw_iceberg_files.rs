@@ -108,7 +108,7 @@ async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwIcebergFiles>> {
                             file_format: file.file_format().to_string(),
                             record_count: file.record_count() as i64,
                             file_size_in_bytes: file.file_size_in_bytes() as i64,
-                            equality_ids: file.equality_ids().iter().cloned().collect(),
+                            equality_ids: file.equality_ids().to_vec(),
                             sort_order_id: file.sort_order_id(),
                         });
                     }
