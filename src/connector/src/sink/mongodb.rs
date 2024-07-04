@@ -51,7 +51,7 @@ use crate::sink::{
 };
 
 pub const MONGODB_SINK: &str = "mongodb";
-const MONGODB_SEND_FUTURE_BUFFER_MAX_SIZE: usize = 256;
+const MONGODB_SEND_FUTURE_BUFFER_MAX_SIZE: usize = 4096;
 
 pub const MONGODB_PK_NAME: &str = "_id";
 
