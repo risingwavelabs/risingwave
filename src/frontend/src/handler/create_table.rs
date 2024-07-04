@@ -1234,106 +1234,88 @@ pub async fn generate_stream_graph_for_table(
 ) -> Result<(StreamFragmentGraph, Table, Option<PbSource>, TableJobType)> {
     use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 
-    let ((plan, source, table), job_type) =
-        match (source_schema, cdc_table_info.as_ref()) {
-            (Some(source_schema), None) => (
-                gen_create_table_plan_with_source(
-                    handler_args,
-                    ExplainOptions::default(),
-                    table_name,
-                    column_defs,
-                    wildcard_idx,
-                    constraints,
-                    source_schema,
-                    source_watermarks,
-                    col_id_gen,
-                    append_only,
-                    on_conflict,
-                    with_version_column,
-                    vec![],
-                )
-                .await?,
-                TableJobType::General,
-            ),
-            (None, None) => {
-                let context = OptimizerContext::from_handler_args(handler_args);
-                let (plan, table) = gen_create_table_plan(
-                    context,
-                    table_name,
-                    column_defs,
-                    constraints,
-                    col_id_gen,
-                    source_watermarks,
-                    append_only,
-                    on_conflict,
-                    with_version_column,
-                )?;
-                ((plan, None, table), TableJobType::General)
-            }
-            (None, Some(cdc_table)) => {
-                let session = &handler_args.session;
-                let db_name = session.database();
-                let (schema_name, resolved_table_name) =
-                    Binder::resolve_schema_qualified_name(db_name, table_name)?;
-                let (database_id, schema_id) =
-                    session.get_database_and_schema_id_for_create(schema_name.clone())?;
+    let ((plan, source, table), job_type) = match (source_schema, cdc_table_info.as_ref()) {
+        (Some(source_schema), None) => (
+            gen_create_table_plan_with_source(
+                handler_args,
+                ExplainOptions::default(),
+                table_name,
+                column_defs,
+                wildcard_idx,
+                constraints,
+                source_schema,
+                source_watermarks,
+                col_id_gen,
+                append_only,
+                on_conflict,
+                with_version_column,
+                vec![],
+            )
+            .await?,
+            TableJobType::General,
+        ),
+        (None, None) => {
+            let context = OptimizerContext::from_handler_args(handler_args);
+            let (plan, table) = gen_create_table_plan(
+                context,
+                table_name,
+                column_defs,
+                constraints,
+                col_id_gen,
+                source_watermarks,
+                append_only,
+                on_conflict,
+                with_version_column,
+            )?;
+            ((plan, None, table), TableJobType::General)
+        }
+        (None, Some(cdc_table)) => {
+            let session = &handler_args.session;
+            let (source, resolved_table_name, database_id, schema_id) =
+                get_source_and_resolved_table_name(session, cdc_table.clone(), table_name.clone())?;
 
-                let (source_schema, source_name) =
-                    Binder::resolve_schema_qualified_name(db_name, cdc_table.source_name.clone())?;
+            let connect_properties = derive_connect_properties(
+                &source.with_properties,
+                cdc_table.external_table_name.clone(),
+            )?;
 
-                let source = {
-                    let catalog_reader = session.env().catalog_reader().read_guard();
-                    let schema_name = source_schema
-                        .clone()
-                        .unwrap_or(DEFAULT_SCHEMA_NAME.to_string());
-                    let (source, _) = catalog_reader.get_source_by_name(
-                        db_name,
-                        SchemaPath::Name(schema_name.as_str()),
-                        source_name.as_str(),
-                    )?;
-                    source.clone()
-                };
+            let (columns, pk_names) = derive_schema_for_cdc_table(
+                &column_defs,
+                &constraints,
+                connect_properties.clone(),
+                false,
+            )
+            .await?;
 
-                let connect_properties = derive_connect_properties(
-                    &source.with_properties,
-                    cdc_table.external_table_name.clone(),
-                )?;
+            let (plan, table) = gen_create_table_plan_for_cdc_table(
+                handler_args,
+                ExplainOptions::default(),
+                source,
+                cdc_table.external_table_name.clone(),
+                columns,
+                pk_names,
+                connect_properties,
+                col_id_gen,
+                on_conflict,
+                with_version_column,
+                vec![], // empty include options
+                resolved_table_name,
+                database_id,
+                schema_id,
+                original_catalog.id(),
+            )?;
 
-                let (columns, pk_names) = derive_schema_for_cdc_table(
-                    &column_defs,
-                    &constraints,
-                    connect_properties.clone(),
-                    false,
-                )
-                .await?;
-
-                let (plan, table) = gen_create_table_plan_for_cdc_table(
-                    handler_args,
-                    ExplainOptions::default(),
-                    source,
-                    cdc_table.external_table_name.clone(),
-                    columns,
-                    pk_names,
-                    connect_properties,
-                    col_id_gen,
-                    on_conflict,
-                    with_version_column,
-                    vec![], // empty include options
-                    resolved_table_name,
-                    database_id,
-                    schema_id,
-                    original_catalog.id(),
-                )?;
-
-                ((plan, None, table), TableJobType::SharedCdcSource)
-            }
-            (Some(_), Some(_)) => return Err(ErrorCode::NotSupported(
+            ((plan, None, table), TableJobType::SharedCdcSource)
+        }
+        (Some(_), Some(_)) => {
+            return Err(ErrorCode::NotSupported(
                 "Data format and encoding format doesn't apply to table created from a CDC source"
                     .into(),
                 "Remove the FORMAT and ENCODE specification".into(),
             )
-            .into()),
-        };
+            .into())
+        }
+    };
 
     // TODO: avoid this backward conversion.
     if TableCatalog::from(&table).pk_column_ids() != original_catalog.pk_column_ids() {
@@ -1362,6 +1344,34 @@ pub async fn generate_stream_graph_for_table(
     };
 
     Ok((graph, table, source, job_type))
+}
+
+fn get_source_and_resolved_table_name(
+    session: &Arc<SessionImpl>,
+    cdc_table: CdcTableInfo,
+    table_name: ObjectName,
+) -> Result<(Arc<SourceCatalog>, String, DatabaseId, SchemaId)> {
+    let db_name = session.database();
+    let (schema_name, resolved_table_name) =
+        Binder::resolve_schema_qualified_name(db_name, table_name)?;
+    let (database_id, schema_id) =
+        session.get_database_and_schema_id_for_create(schema_name.clone())?;
+
+    let (source_schema, source_name) =
+        Binder::resolve_schema_qualified_name(db_name, cdc_table.source_name.clone())?;
+
+    let source = {
+        let catalog_reader = session.env().catalog_reader().read_guard();
+        let schema_name = source_schema.unwrap_or(DEFAULT_SCHEMA_NAME.to_string());
+        let (source, _) = catalog_reader.get_source_by_name(
+            db_name,
+            SchemaPath::Name(schema_name.as_str()),
+            source_name.as_str(),
+        )?;
+        source.clone()
+    };
+
+    Ok((source, resolved_table_name, database_id, schema_id))
 }
 
 #[cfg(test)]
