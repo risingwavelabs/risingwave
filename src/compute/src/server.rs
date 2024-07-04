@@ -361,7 +361,7 @@ pub async fn compute_node_serve(
         advertise_addr.clone(),
         stream_config,
         worker_id,
-        state_store,
+        state_store.clone(),
         dml_mgr,
         system_params_manager.clone(),
         source_metrics,
@@ -380,7 +380,20 @@ pub async fn compute_node_serve(
     let exchange_srv =
         ExchangeServiceImpl::new(batch_mgr.clone(), stream_mgr.clone(), exchange_srv_metrics);
     let stream_srv = StreamServiceImpl::new(stream_mgr.clone(), stream_env.clone());
-    let monitor_srv = MonitorServiceImpl::new(stream_mgr.clone(), config.server.clone());
+    let (meta_cache, block_cache) = if let Some(hummock) = state_store.as_hummock() {
+        (
+            Some(hummock.sstable_store().meta_cache().clone()),
+            Some(hummock.sstable_store().block_cache().clone()),
+        )
+    } else {
+        (None, None)
+    };
+    let monitor_srv = MonitorServiceImpl::new(
+        stream_mgr.clone(),
+        config.server.clone(),
+        meta_cache,
+        block_cache,
+    );
     let config_srv = ConfigServiceImpl::new(batch_mgr, stream_mgr);
     let health_srv = HealthServiceImpl::new();
 
