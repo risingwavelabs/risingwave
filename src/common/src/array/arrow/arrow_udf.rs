@@ -20,9 +20,9 @@
 
 use std::sync::Arc;
 
+use arrow_buffer::IntervalMonthDayNano as ArrowIntervalType;
 pub use arrow_impl::{FromArrow, ToArrow};
 use {arrow_array, arrow_buffer, arrow_cast, arrow_schema};
-type ArrowIntervalType = i128;
 
 use crate::array::{ArrayError, ArrayImpl, DataType, DecimalArray, JsonbArray};
 

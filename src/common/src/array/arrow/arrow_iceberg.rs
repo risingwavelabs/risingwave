@@ -15,10 +15,9 @@
 use std::ops::{Div, Mul};
 use std::sync::Arc;
 
-use arrow_array::{self, ArrayRef};
+use arrow_array::ArrayRef;
 use arrow_buffer::IntervalMonthDayNano as ArrowIntervalType;
 use num_traits::abs;
-use {arrow_buffer, arrow_cast, arrow_schema};
 
 use crate::array::{Array, ArrayError, ArrayImpl, DataChunk, DataType, DecimalArray};
 use crate::types::{Interval, StructType};
