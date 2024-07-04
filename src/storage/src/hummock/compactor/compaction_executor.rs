@@ -27,7 +27,7 @@ pub struct CompactionExecutor {
 
 impl CompactionExecutor {
     pub fn new(worker_threads_num: Option<usize>) -> Self {
-        let mut worker_num = resource_util::cpu::total_cpu_available() as usize;
+        let mut worker_num = resource_util::cpu::total_cpu_available().ceil() as usize;
         let runtime = {
             let mut builder = tokio::runtime::Builder::new_multi_thread();
             builder.thread_name("rw-compaction");
