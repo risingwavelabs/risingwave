@@ -576,27 +576,34 @@ message GetReschedulePlanResponse {
   bool success = 3;
 }
 
-message ChangeMvNodeLabelRequest {
-  // Id of the MV which label we want to change
-  // contains IDs from catalog.Table.id
-  uint32 mv_id = 1;
+// update the MV or sink with the given id
+message UpdateStreamingJobRequest {
+  // Id of the MV or sink which we want to update
+  uint32 id = 1;
 
-  // The new label value. If set should be a UUID
-  // If omitted, the node_label of the MV is removed
-  // meta can schedule MVs without label on any CN without a label (default behavior)
-  optional string new_label = 2;
+  oneof streaming_job {
+    catalog.Table materialized_views = 2;
+    catalog.Sink sinks = 3;
+  }
 }
 
 // We do not need to add an explicit status field here, we can just use the RPC status
-message ChangeMvNodeLabelResponse {}
+message UpdateStreamingJobResponse {}
+
+message ListStreamingJobsRequest {}
+
+// returns descriptions of MVs and sinks
+message ListStreamingJobResponse {
+  repeated catalog.Table materialized_views = 1;
+  repeated catalog.Sink sinks = 2;
+}
 
 service ScaleService {
-  // For the first version we will use busy wait and just repeatably send GetClusterInfoRequest
-  // rpc SubscribeClusterInfo(GetClusterInfoRequest) returns (stream GetClusterInfoResponse);
   rpc GetClusterInfo(GetClusterInfoRequest) returns (GetClusterInfoResponse);
   rpc Reschedule(RescheduleRequest) returns (RescheduleResponse);
   rpc GetReschedulePlan(GetReschedulePlanRequest) returns (GetReschedulePlanResponse);
-  rpc ChangeMvNodeLabel(ChangeMvNodeLabelRequest) returns (ChangeMvNodeLabelResponse); 
+  rpc UpdateStreamingJob(UpdateStreamingJobRequest) returns (UpdateStreamingJobResponse); 
+  rpc ListStreamingJobs(ListStreamingJobsRequest) returns (ListStreamingJobResponse); 
 }
 
 message MembersRequest {}
