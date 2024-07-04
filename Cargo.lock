@@ -11483,6 +11483,7 @@ dependencies = [
  "futures",
  "futures-async-stream",
  "iana-time-zone",
+ "iceberg",
  "icelake",
  "itertools 0.12.1",
  "jsonbb",
