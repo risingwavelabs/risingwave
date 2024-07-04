@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeMap;
+use std::ops::{Index, IndexMut};
+
 use enum_as_inner::EnumAsInner;
 use risingwave_common::types::DataType;
 use risingwave_pb::expr::expr_node::Type as ExprType;
@@ -269,5 +272,36 @@ impl MonotonicityAnalyzer {
         // TODO: derive monotonicity for table funcs like `generate_series`
         use monotonicity_variants::*;
         Inherent(Unknown)
+    }
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
+pub struct MonotonicityMap(BTreeMap<usize, Monotonicity>);
+
+impl MonotonicityMap {
+    pub fn new() -> Self {
+        MonotonicityMap(BTreeMap::new())
+    }
+
+    pub fn insert(&mut self, idx: usize, monotonicity: Monotonicity) {
+        self.0.insert(idx, monotonicity);
+    }
+
+    pub fn get(&self, idx: usize) -> Monotonicity {
+        self.0.get(&idx).copied().unwrap_or(Monotonicity::Unknown)
+    }
+}
+
+impl Index<usize> for MonotonicityMap {
+    type Output = Monotonicity;
+
+    fn index(&self, idx: usize) -> &Self::Output {
+        self.0.get(&idx).unwrap_or(&Monotonicity::Unknown)
+    }
+}
+
+impl IndexMut<usize> for MonotonicityMap {
+    fn index_mut(&mut self, idx: usize) -> &mut Self::Output {
+        self.0.entry(idx).or_insert(Monotonicity::Unknown)
     }
 }
