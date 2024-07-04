@@ -128,6 +128,48 @@ See `src/risedevtool/src/risedev_env.rs` for variables supported for each servic
 
 > Note again: You need to use `risedev d` to start the cluster, and then use `risedev slt` to run the tests. It doesn't work if you start the cluster by yourself without telling RiseDev, or you use raw `sqllogictest` binary directly.
 
+### Tips for writing `system` commands
+
+Refer to the [sqllogictest-rs documentation](https://github.com/risinglightdb/sqllogictest-rs#extension-run-external-shell-commands) for the syntax.
+
+For simple cases, you can directly write a bash command, e.g.,
+```
+system ok
+mysql -e "
+    DROP DATABASE IF EXISTS testdb1; CREATE DATABASE testdb1;
+    USE testdb1;
+    CREATE TABLE tt1 (v1 int primary key, v2 timestamp);
+    INSERT INTO tt1 VALUES (1, '2023-10-23 10:00:00');
+"
+
+system ok
+cat << EOF | rpk topic produce my_source -f "%p %v\n" -p 0
+0 {"v1": 1, "v2": "a"}
+1 {"v1": 2, "v2": "b"}
+2 {"v1": 3, "v2": "c"}
+3 {"v1": 4, "v2": "d"}
+EOF
+```
+
+For more complex cases, you can write a test script, and invoke it in `slt`.
+- For ad-hoc scripts (only used for one test), it's better to put next to the test file.
+
+  e.g., [`e2e_test/source_inline/kafka/consumer_group.mjs`](https://github.com/risingwavelabs/risingwave/blob/c22c4265052c2a4f2876132a10a0b522ec7c03c9/e2e_test/source_inline/kafka/consumer_group.mjs), which is invoked by [`consumer_group.slt`](https://github.com/risingwavelabs/risingwave/blob/c22c4265052c2a4f2876132a10a0b522ec7c03c9/e2e_test/source_inline/kafka/consumer_group.slt) next to it.
+- For general scripts that can be used under many situations, put it in `e2e_test/commands/`. This directory will be loaded in `PATH` by `risedev slt`, and thus function as kind of "built-in" commands.
+
+---
+Tips for debugging: You can use `echo` to check whether the environment is correctly set.
+
+```
+system ok
+echo $PGPORT
+----
+placeholder
+```
+
+Then running `risedev slt` will return error "result mismatch", and shows what's the output
+of the `echo` command, i.e., the value of `PGPORT`.
+
 ## Adding a new connector to the development framework
 
 Refer to [#16449](https://github.com/risingwavelabs/risingwave/pull/16449) ( `user-managed` only MySQL), and [#16514](https://github.com/risingwavelabs/risingwave/pull/16514) (Docker based MySQL) as examples.
