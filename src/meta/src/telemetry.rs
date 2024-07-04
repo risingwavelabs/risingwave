@@ -261,6 +261,7 @@ mod test {
             },
             job_desc: vec![],
             cluster_type: PbTelemetryClusterType::Unspecified,
+            object_store_media_type: "s3",
         };
 
         let pb_bytes = report.to_pb_bytes();
