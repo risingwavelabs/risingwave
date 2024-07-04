@@ -230,6 +230,8 @@ pub enum SourceFormat {
     Canal,
     Upsert,
     Plain,
+    Dynamodb,
+    DynamodbCdc,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -277,6 +279,8 @@ pub fn extract_source_struct(info: &PbStreamSourceInfo) -> Result<SourceStruct> 
             RowFormatType::UpsertAvro => (SourceFormat::Upsert, SourceEncode::Avro),
             RowFormatType::DebeziumMongoJson => (SourceFormat::DebeziumMongo, SourceEncode::Json),
             RowFormatType::Bytes => (SourceFormat::Plain, SourceEncode::Bytes),
+            RowFormatType::DynamodbJson => (SourceFormat::Dynamodb, SourceEncode::Json),
+            RowFormatType::DynamodbCdcJson => (SourceFormat::DynamodbCdc, SourceEncode::Json),
             RowFormatType::RowUnspecified => unreachable!(),
         };
         return Ok(SourceStruct::new(format, encode));
@@ -308,6 +312,12 @@ pub fn extract_source_struct(info: &PbStreamSourceInfo) -> Result<SourceStruct> 
             (SourceFormat::DebeziumMongo, SourceEncode::Json)
         }
         (PbFormatType::Plain, PbEncodeType::Bytes) => (SourceFormat::Plain, SourceEncode::Bytes),
+        (PbFormatType::Dynamodb, PbEncodeType::Json) => {
+            (SourceFormat::Dynamodb, SourceEncode::Json)
+        }
+        (PbFormatType::DynamodbCdc, PbEncodeType::Json) => {
+            (SourceFormat::DynamodbCdc, SourceEncode::Json)
+        }
         (format, encode) => {
             bail!(
                 "Unsupported combination of format {:?} and encode {:?}",

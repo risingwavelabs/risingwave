@@ -181,6 +181,22 @@ impl JsonParseOptions {
         struct_handling: StructHandling::AllowJsonString,
         ignoring_keycase: true,
     };
+    pub const DYNAMODB: JsonParseOptions = JsonParseOptions {
+        bytea_handling: ByteaHandling::Standard,
+        time_handling: TimeHandling::Micro,
+        timestamptz_handling: TimestamptzHandling::GuessNumberUnit, // backward-compatible
+        json_value_handling: JsonValueHandling::AsValue,
+        numeric_handling: NumericHandling::Relax {
+            string_parsing: true,
+        },
+        boolean_handling: BooleanHandling::Relax {
+            string_parsing: true,
+            string_integer_parsing: true,
+        },
+        varchar_handling: VarcharHandling::Strict,
+        struct_handling: StructHandling::Strict,
+        ignoring_keycase: true,
+    };
 
     pub fn new_for_debezium(timestamptz_handling: TimestamptzHandling) -> Self {
         Self {

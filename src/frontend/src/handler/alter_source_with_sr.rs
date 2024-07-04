@@ -50,6 +50,8 @@ fn format_type_to_format(from: FormatType) -> Option<Format> {
         FormatType::Upsert => Format::Upsert,
         FormatType::Plain => Format::Plain,
         FormatType::None => Format::None,
+        FormatType::Dynamodb => Format::Dynamodb,
+        FormatType::DynamodbCdc => Format::DynamodbCdc,
     })
 }
 

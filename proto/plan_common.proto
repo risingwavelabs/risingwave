@@ -137,6 +137,8 @@ enum FormatType {
   FORMAT_TYPE_UPSERT = 6;
   FORMAT_TYPE_PLAIN = 7;
   FORMAT_TYPE_NONE = 8;
+  FORMAT_TYPE_DYNAMODB = 9;
+  FORMAT_TYPE_DYNAMODB_CDC = 10;
 }
 
 enum EncodeType {
@@ -167,6 +169,8 @@ enum RowFormatType {
   UPSERT_AVRO = 11;
   DEBEZIUM_MONGO_JSON = 12;
   BYTES = 13;
+  DYNAMODB_JSON = 14;
+  DYNAMODB_CDC_JSON = 15;
 }
 
 message IndexAndExpr {

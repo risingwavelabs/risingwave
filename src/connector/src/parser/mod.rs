@@ -21,6 +21,7 @@ pub use avro::AvroParserConfig;
 pub use canal::*;
 use csv_parser::CsvParser;
 pub use debezium::*;
+pub use dynamodb::*;
 use futures::{Future, TryFutureExt};
 use futures_async_stream::try_stream;
 pub use json_parser::*;
@@ -73,6 +74,7 @@ mod canal;
 mod common;
 mod csv_parser;
 mod debezium;
+mod dynamodb;
 mod json_parser;
 mod maxwell;
 mod mysql;
@@ -587,6 +589,8 @@ pub enum ParserFormat {
     DebeziumMongo,
     Upsert,
     Plain,
+    DynamodbJson,
+    DynamodbCdcJson,
 }
 
 /// `ByteStreamSourceParser` is the entrypoint abstraction for parsing messages.
@@ -914,6 +918,8 @@ pub enum ByteStreamSourceParserImpl {
     DebeziumMongoJson(DebeziumMongoJsonParser),
     Maxwell(MaxwellParser),
     CanalJson(CanalJsonParser),
+    DynamodbJson(DynamodbJsonParser),
+    DynamodbCdcJson(DynamodbCdcJsonParser),
 }
 
 impl ByteStreamSourceParserImpl {
@@ -928,6 +934,8 @@ impl ByteStreamSourceParserImpl {
             Self::CanalJson(parser) => parser.into_stream(msg_stream),
             Self::Plain(parser) => parser.into_stream(msg_stream),
             Self::Upsert(parser) => parser.into_stream(msg_stream),
+            Self::DynamodbJson(parser) => parser.into_stream(msg_stream),
+            Self::DynamodbCdcJson(parser) => parser.into_stream(msg_stream),
         };
         Box::pin(stream)
     }
@@ -941,6 +949,7 @@ impl ByteStreamSourceParserImpl {
         let CommonParserConfig { rw_columns } = parser_config.common;
         let protocol = &parser_config.specific.protocol_config;
         let encode = &parser_config.specific.encoding_config;
+        println!("WKXLOG protocol: {:?}, encode: {:?}", protocol, encode);
         match (protocol, encode) {
             (ProtocolProperties::Plain, EncodingProperties::Csv(config)) => {
                 CsvParser::new(rw_columns, *config, source_ctx).map(Self::Csv)
@@ -971,6 +980,17 @@ impl ByteStreamSourceParserImpl {
                 let parser =
                     MaxwellParser::new(parser_config.specific, rw_columns, source_ctx).await?;
                 Ok(Self::Maxwell(parser))
+            }
+            (ProtocolProperties::Dynamodb, _) => {
+                let parser =
+                    DynamodbJsonParser::new(parser_config.specific, rw_columns, source_ctx).await?;
+                Ok(Self::DynamodbJson(parser))
+            }
+            (ProtocolProperties::DynamodbCdc, _) => {
+                let parser =
+                    DynamodbCdcJsonParser::new(parser_config.specific, rw_columns, source_ctx)
+                        .await?;
+                Ok(Self::DynamodbCdcJson(parser))
             }
             _ => unreachable!(),
         }
@@ -1133,6 +1153,8 @@ pub enum ProtocolProperties {
     Plain,
     Upsert,
     Native,
+    Dynamodb,
+    DynamodbCdc,
     /// Protocol can't be specified because the source will determines it. Now only used in Iceberg.
     None,
     #[default]
@@ -1162,6 +1184,8 @@ impl SpecificParserConfig {
             SourceFormat::Canal => ProtocolProperties::Canal,
             SourceFormat::Upsert => ProtocolProperties::Upsert,
             SourceFormat::Plain => ProtocolProperties::Plain,
+            SourceFormat::Dynamodb => ProtocolProperties::Dynamodb,
+            SourceFormat::DynamodbCdc => ProtocolProperties::DynamodbCdc,
             _ => unreachable!(),
         };
 
@@ -1253,7 +1277,9 @@ impl SpecificParserConfig {
                 | SourceFormat::Debezium
                 | SourceFormat::Maxwell
                 | SourceFormat::Canal
-                | SourceFormat::Upsert,
+                | SourceFormat::Upsert
+                | SourceFormat::Dynamodb
+                | SourceFormat::DynamodbCdc,
                 SourceEncode::Json,
             ) => EncodingProperties::Json(JsonProperties {
                 use_schema_registry: info.use_schema_registry,

@@ -443,7 +443,13 @@ pub(crate) async fn bind_columns_from_source(
             None
         }
         (
-            Format::Plain | Format::Upsert | Format::Maxwell | Format::Canal | Format::Debezium,
+            Format::Plain
+            | Format::Upsert
+            | Format::Maxwell
+            | Format::Canal
+            | Format::Debezium
+            | Format::Dynamodb
+            | Format::DynamodbCdc,
             Encode::Json,
         ) => {
             if matches!(
@@ -834,6 +840,48 @@ pub(crate) async fn bind_source_pk(
             }
             sql_defined_pk_names
         }
+        (Format::Dynamodb, Encode::Json) => {
+            if !additional_column_names.is_empty() {
+                return Err(RwError::from(ProtocolError(format!(
+                    "FORMAT DYNAMODB forbids additional columns, but got {:?}",
+                    additional_column_names
+                ))));
+            }
+            if !sql_defined_pk {
+                return Err(RwError::from(ProtocolError(
+                    "Primary key must be specified when creating source with FORMAT DYNAMODB."
+                        .to_string(),
+                )));
+            }
+            if sql_defined_pk_names.len() < 2 {
+                return Err(RwError::from(ProtocolError(
+                    "Primary key must include at least two columns when creating source with FORMAT DYNAMODB."
+                        .to_string(),
+                )));
+            }
+            sql_defined_pk_names
+        }
+        (Format::DynamodbCdc, Encode::Json) => {
+            if !additional_column_names.is_empty() {
+                return Err(RwError::from(ProtocolError(format!(
+                    "FORMAT DYNAMODB_CDC forbids additional columns, but got {:?}",
+                    additional_column_names
+                ))));
+            }
+            if !sql_defined_pk {
+                return Err(RwError::from(ProtocolError(
+                    "Primary key must be specified when creating source with FORMAT DYNAMODB_CDC."
+                        .to_string(),
+                )));
+            }
+            if sql_defined_pk_names.len() < 2 {
+                return Err(RwError::from(ProtocolError(
+                    "Primary key must include at least two columns when creating source with FORMAT DYNAMODB_CDC."
+                        .to_string(),
+                )));
+            }
+            sql_defined_pk_names
+        }
         (Format::Debezium, Encode::Avro) => {
             if !additional_column_names.is_empty() {
                 return Err(RwError::from(ProtocolError(format!(
@@ -998,6 +1046,7 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                     Format::Debezium => vec![Encode::Json],
                     Format::Maxwell => vec![Encode::Json],
                     Format::Canal => vec![Encode::Json],
+                    Format::DynamodbCdc => vec![Encode::Json],
                 ),
                 GOOGLE_PUBSUB_CONNECTOR => hashmap!(
                     Format::Plain => vec![Encode::Json, Encode::Protobuf, Encode::Avro, Encode::Bytes],
@@ -1018,6 +1067,7 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                 ),
                 OPENDAL_S3_CONNECTOR => hashmap!(
                     Format::Plain => vec![Encode::Csv, Encode::Json],
+                    Format::Dynamodb => vec![Encode::Json],
                 ),
                 GCS_CONNECTOR => hashmap!(
                     Format::Plain => vec![Encode::Csv, Encode::Json],
@@ -1594,6 +1644,8 @@ fn format_to_prost(format: &Format) -> FormatType {
         Format::Maxwell => FormatType::Maxwell,
         Format::Canal => FormatType::Canal,
         Format::None => FormatType::None,
+        Format::Dynamodb => FormatType::Dynamodb,
+        Format::DynamodbCdc => FormatType::DynamodbCdc,
     }
 }
 fn row_encode_to_prost(row_encode: &Encode) -> EncodeType {

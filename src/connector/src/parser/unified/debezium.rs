@@ -330,6 +330,7 @@ pub fn extract_bson_id(id_type: &DataType, bson_doc: &serde_json::Value) -> Acce
     };
     Ok(id)
 }
+
 impl<A> MongoJsonAccess<A> {
     pub fn new(accessor: A) -> Self {
         Self { accessor }

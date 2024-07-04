@@ -64,12 +64,14 @@ pub async fn split_stream(data_stream: BoxSourceStream) {
             let mut line = String::new();
             match cursor.read_line(&mut line).await {
                 Ok(0) => {
+                    println!("WKXLOG Read line empty, {:?}", msgs);
                     if !msgs.is_empty() {
                         yield msgs;
                     }
                     break;
                 }
                 Ok(_n) => {
+                    println!("WKXLOG Read line: {:?}", line);
                     if line_cnt == 0 && last_message.is_some() {
                         let msg: SourceMessage = std::mem::take(&mut last_message).unwrap();
                         let last_payload = msg.payload.unwrap();
@@ -116,6 +118,8 @@ pub async fn split_stream(data_stream: BoxSourceStream) {
     }
 
     if let Some(msg) = last_message {
+        println!("WKXLOG last_message msg: {:?}", msg);
+
         yield vec![msg];
     }
 }
