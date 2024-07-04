@@ -954,8 +954,7 @@ impl DdlController {
                         &ctx.replace_table_job_info
                     {
                         *target_table = Some((table.clone(), source.clone()));
-                        if let StreamingJob::Sink(ref sink, ref mut target_table) =
-                            &mut ctx.streaming_job
+                        if let StreamingJob::Sink(_, ref mut target_table) = &mut ctx.streaming_job
                         {
                             *target_table = Some((table.clone(), source.clone()));
                         }
