@@ -126,7 +126,7 @@ test_snapshot_and_upstream_read() {
 
 # Lots of upstream tombstone, backfill should still proceed.
 test_backfill_tombstone() {
-  echo "--- e2e, test_backfill_tombstone"
+  echo "--- e2e, test_backfill_tombstone, streaming_use_arrangement_backfill=$1"
   risedev ci-start $CLUSTER_PROFILE
   risedev psql -c "
   CREATE TABLE tomb (v1 int)
@@ -151,7 +151,7 @@ test_backfill_tombstone() {
     done
   ' 1>deletes.log 2>&1 &
 
-  risedev psql -c "CREATE MATERIALIZED VIEW m1 as select * from tomb;"
+  risedev psql -c "SET STREAMING_USE_ARRANGEMENT_BACKFILL=$1; CREATE MATERIALIZED VIEW m1 as select * from tomb;"
   echo "--- Kill cluster"
   kill_cluster
   wait
@@ -284,7 +284,8 @@ test_backfill_snapshot_with_wider_rows() {
 main() {
   set -euo pipefail
   test_snapshot_and_upstream_read
-  test_backfill_tombstone
+  test_backfill_tombstone "true"
+  test_backfill_tombstone "false"
   test_replication_with_column_pruning
   test_sink_backfill_recovery
 
