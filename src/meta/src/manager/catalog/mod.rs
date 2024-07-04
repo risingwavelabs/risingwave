@@ -1138,12 +1138,20 @@ impl CatalogManager {
             StreamingJob::Sink(sink, target_table) => {
                 let sink_id = sink.id;
 
-                self.finish_create_sink_procedure(internal_tables, sink)
+                self.finish_create_sink_procedure(internal_tables, sink, target_table.is_none())
                     .await?;
 
                 if let Some((table, source)) = target_table {
-                    self.finish_replace_table_procedure(&source, &table, None, Some(sink_id), None)
-                        .await?;
+                    let version: MetaResult<NotificationVersion> = self.finish_replace_table_procedure(&source, &table, None, Some(sink_id), None)
+                        .await;
+
+                    let core = &mut *self.core.lock().await;
+                    if let Some(tx) = core.table_id_to_tx.remove(&sink_id) {
+                        tx.send(version.clone()).unwrap();
+                    } else {
+                        core.table_id_to_version.insert(sink_id, version.clone());
+                    }
+                    version?;
                 }
             }
             StreamingJob::Table(source, table, ..) => {
@@ -3266,10 +3274,11 @@ impl CatalogManager {
         &self,
         mut internal_tables: Vec<Table>,
         mut sink: Sink,
+        notify: bool,
     ) -> MetaResult<()> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
-        let version = try {
+        let version: MetaResult<NotificationVersion> = try {
             let key = (sink.database_id, sink.schema_id, sink.name.clone());
             let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
             let mut sinks = BTreeMapTransaction::new(&mut database_core.sinks);
@@ -3308,11 +3317,14 @@ impl CatalogManager {
             .await
         };
 
-        if let Some(tx) = core.table_id_to_tx.remove(&sink.id) {
-            tx.send(version).unwrap();
-        } else {
-            core.table_id_to_version.insert(sink.id, version);
+        if notify || version.is_err() {
+            if let Some(tx) = core.table_id_to_tx.remove(&sink.id) {
+                tx.send(version).unwrap();
+            } else {
+                core.table_id_to_version.insert(sink.id, version);
+            }
         }
+
         Ok(())
     }
 
@@ -3517,7 +3529,7 @@ impl CatalogManager {
         }
     }
 
-    /// This is used for `ALTER TABLE ADD/DROP COLUMN`.
+    /// This is used for `ALTER TABLE ADD/DROP COLUMN` and `SINK INTO TABLE`.
     pub async fn finish_replace_table_procedure(
         &self,
         source: &Option<Source>,
