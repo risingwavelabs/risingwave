@@ -12,10 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Cow;
 use std::env;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use either::Either;
+use minitrace_opentelemetry::OpenTelemetryReporter;
+use opentelemetry::trace::SpanKind;
+use opentelemetry::InstrumentationLibrary;
+use opentelemetry_sdk::Resource;
 use risingwave_common::metrics::MetricsLayer;
 use risingwave_common::util::deployment::Deployment;
 use risingwave_common::util::env_var::env_var_is_true;
@@ -425,7 +431,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
             std::process::id()
         );
 
-        let otel_tracer = {
+        let (otel_tracer, exporter) = {
             let runtime = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
                 .thread_name("rw-otel")
@@ -437,12 +443,12 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
             // Installing the exporter requires a tokio runtime.
             let _entered = runtime.enter();
 
-            opentelemetry_otlp::new_pipeline()
+            let otel_tracer = opentelemetry_otlp::new_pipeline()
                 .tracing()
                 .with_exporter(
                     opentelemetry_otlp::new_exporter()
                         .tonic()
-                        .with_endpoint(endpoint),
+                        .with_endpoint(&endpoint),
                 )
                 .with_trace_config(sdk::trace::config().with_resource(sdk::Resource::new([
                     KeyValue::new(
@@ -451,12 +457,24 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
                         // https://github.com/jaegertracing/jaeger-ui/issues/336
                         format!("{}-{}", settings.name, id),
                     ),
-                    KeyValue::new(resource::SERVICE_INSTANCE_ID, id),
+                    KeyValue::new(resource::SERVICE_INSTANCE_ID, id.clone()),
                     KeyValue::new(resource::SERVICE_VERSION, env!("CARGO_PKG_VERSION")),
                     KeyValue::new(resource::PROCESS_PID, std::process::id().to_string()),
                 ])))
                 .install_batch(sdk::runtime::Tokio)
-                .unwrap()
+                .unwrap();
+
+            let exporter = opentelemetry_otlp::new_exporter()
+                .tonic()
+                .with_endpoint(&endpoint)
+                .with_protocol(opentelemetry_otlp::Protocol::Grpc)
+                .with_timeout(Duration::from_secs(
+                    opentelemetry_otlp::OTEL_EXPORTER_OTLP_TIMEOUT_DEFAULT,
+                ))
+                .build_span_exporter()
+                .unwrap();
+
+            (otel_tracer, exporter)
         };
 
         // Disable by filtering out all events or spans by default.
@@ -492,6 +510,18 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
             .with_filter(reload_filter);
 
         layers.push(layer.boxed());
+
+        let reporter = OpenTelemetryReporter::new(
+            exporter,
+            SpanKind::Server,
+            Cow::Owned(Resource::new([KeyValue::new(
+                resource::SERVICE_NAME,
+                format!("minitrace-{id}"),
+            )])),
+            InstrumentationLibrary::builder("opentelemetry-instrumentation-foyer").build(),
+        );
+        minitrace::set_reporter(reporter, minitrace::collector::Config::default());
+        tracing::info!("opentelemetry exporter for minitrace is set at {endpoint}");
     }
 
     // Metrics layer
