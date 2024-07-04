@@ -86,6 +86,8 @@ The e2e tests are written in `slt` files. There are 2 main points to note:
 
 Refer to the [sqllogictest-rs documentation](https://github.com/risinglightdb/sqllogictest-rs#extension-run-external-shell-commands) for the details of `system` and `substitution` .
 
+---
+
 Take Kafka as an example about how to the tests are written:
 
 When you use `risedev d` to start the external services, related environment variables for Kafka will be available when you run `risedev slt`:
@@ -127,6 +129,9 @@ create source s0 (v1 int, v2 varchar) with (
 See `src/risedevtool/src/risedev_env.rs` for variables supported for each service.
 
 > Note again: You need to use `risedev d` to start the cluster, and then use `risedev slt` to run the tests. It doesn't work if you start the cluster by yourself without telling RiseDev, or you use raw `sqllogictest` binary directly.
+>
+> How it works: `risedev d` will write env vars to `.risingwave/config/risedev-env`,
+> and `risedev slt` will load env vars from this file.
 
 ### Tips for writing `system` commands
 
