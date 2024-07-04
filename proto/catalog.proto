@@ -406,7 +406,7 @@ message Table {
   // notification service.
   TableVersion version = 100;
 
-  // If a MV/sink has a node_label, its actors can only be scheduled on CNs with 
+  // If a MV/sink/table has a node_label, its actors can only be scheduled on CNs with 
   // that label. If a MV does not have a node_label it can be scheduled on any 
   // CN without a label. The node has to have both a matching key and value.
   // E.g. {"some":"value"} can be scheduled on a node with the labels
@@ -415,7 +415,7 @@ message Table {
   //   "some":"value"
   // }
   // but {"some":"thing"} can not be scheduled on that node.
-  // A MV/sink with an empty node_labels map can only be scheduled on nodes with 
+  // A MV/sink/table with an empty node_labels map can only be scheduled on nodes with 
   // empty node_labels map, but a node with empty node_labels can host anything.
   map<string, string> node_labels = 101;
 }

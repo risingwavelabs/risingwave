@@ -576,13 +576,15 @@ message GetReschedulePlanResponse {
   bool success = 3;
 }
 
-// update the MV or sink with the given id
+// overwrite the MV/table/sink with the given id
+// Change a streaming job in place. You cannot use this to create a new streaming job 
 message UpdateStreamingJobRequest {
   // Id of the MV or sink which we want to update
   uint32 id = 1;
 
   oneof streaming_job {
-    catalog.Table materialized_views = 2;
+    // the new MV or table
+    catalog.Table table = 2;
     catalog.Sink sinks = 3;
   }
 }
