@@ -11868,6 +11868,8 @@ version = "1.11.0-alpha"
 dependencies = [
  "async-std",
  "sea-orm-migration",
+ "serde",
+ "serde_json",
  "uuid",
 ]
 
