@@ -175,7 +175,7 @@ impl HummockManager {
             if let Some(mv_table_id) = new_fragment_table_info.mv_table_id {
                 on_handle_add_new_table(
                     state_table_info,
-                    &vec![mv_table_id],
+                    &[mv_table_id],
                     StaticCompactionGroupId::MaterializedView as u64,
                     &mut table_compaction_group_mapping,
                     &mut new_table_ids,
@@ -183,16 +183,16 @@ impl HummockManager {
             }
         }
 
-        let mut modified_compaction_groups = vec![];
         let commit_sstables = self
             .correct_commit_ssts(sstables, &table_compaction_group_mapping)
             .await?;
 
-        version.pre_commit_sst(
+        let modified_compaction_groups: Vec<_> = commit_sstables.keys().cloned().collect();
+
+        version.pre_commit_epoch(
             epoch,
             commit_sstables,
             new_table_ids,
-            &mut modified_compaction_groups,
             new_table_watermarks,
             change_log_delta,
         );
@@ -305,18 +305,23 @@ impl HummockManager {
         &self,
         sstables: Vec<LocalSstableInfo>,
         table_compaction_group_mapping: &HashMap<TableId, CompactionGroupId>,
-    ) -> Result<BTreeMap<u64, Vec<SstableInfo>>> {
+    ) -> Result<BTreeMap<CompactionGroupId, Vec<SstableInfo>>> {
         let mut new_sst_id_number = 0;
-        let mut sst_to_cg_vec = Vec::with_capacity(sstables.len());
+        let mut cg_to_sst: BTreeMap<CompactionGroupId, HashMap<u64, SstableInfo>> =
+            BTreeMap::default();
+        // Group SSTs by compaction group
         for commit_sst in sstables {
-            let mut group_table_ids: BTreeMap<u64, Vec<u32>> = BTreeMap::new();
             for table_id in commit_sst.sst_info.get_table_ids() {
                 match table_compaction_group_mapping.get(&TableId::new(*table_id)) {
                     Some(cg_id_from_meta) => {
-                        group_table_ids
+                        if cg_to_sst
                             .entry(*cg_id_from_meta)
                             .or_default()
-                            .push(*table_id);
+                            .insert(commit_sst.sst_info.sst_id, commit_sst.sst_info.clone())
+                            .is_none()
+                        {
+                            new_sst_id_number += 1;
+                        }
                     }
                     None => {
                         tracing::warn!(
@@ -327,20 +332,17 @@ impl HummockManager {
                     }
                 }
             }
-
-            new_sst_id_number += group_table_ids.len();
-            sst_to_cg_vec.push((commit_sst, group_table_ids));
         }
 
         // Generate new SST IDs for each compaction group
         // `next_sstable_object_id` will update the global SST ID and reserve the new SST IDs
         // So we need to get the new SST ID first and then split the SSTs
         let mut new_sst_id = next_sstable_object_id(&self.env, new_sst_id_number).await?;
-        let mut commit_sstables: BTreeMap<u64, Vec<SstableInfo>> = BTreeMap::new();
-
-        for (mut sst, group_table_ids) in sst_to_cg_vec {
-            for (group_id, _match_ids) in group_table_ids {
-                let branch_sst = split_sst(&mut sst.sst_info, &mut new_sst_id);
+        let mut commit_sstables: BTreeMap<CompactionGroupId, Vec<SstableInfo>> = BTreeMap::new();
+        for (group_id, ssts) in cg_to_sst {
+            for (_, mut sst) in ssts {
+                // Since, hummock may mix data from different cg's in the same object when committing epoch, so we rewrite the sst_id's of all sstable's by split_sst for convenience.
+                let branch_sst = split_sst(&mut sst, &mut new_sst_id);
                 commit_sstables
                     .entry(group_id)
                     .or_default()
@@ -354,7 +356,7 @@ impl HummockManager {
 
 fn on_handle_add_new_table(
     state_table_info: &HummockVersionStateTableInfo,
-    table_ids: &Vec<TableId>,
+    table_ids: &[TableId],
     compaction_group_id: CompactionGroupId,
     table_compaction_group_mapping: &mut HashMap<TableId, CompactionGroupId>,
     new_table_ids: &mut HashMap<TableId, CompactionGroupId>,

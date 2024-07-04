@@ -108,12 +108,11 @@ impl<'a> HummockVersionTransaction<'a> {
         deltas.push(delta);
     }
 
-    pub(super) fn pre_commit_sst(
+    pub(super) fn pre_commit_epoch(
         &mut self,
         epoch: HummockEpoch,
         commit_sstables: BTreeMap<CompactionGroupId, Vec<SstableInfo>>,
         new_table_ids: HashMap<TableId, CompactionGroupId>,
-        modified_compaction_groups: &mut Vec<CompactionGroupId>,
         new_table_watermarks: HashMap<TableId, TableWatermarks>,
         change_log_delta: HashMap<TableId, ChangeLogDelta>,
     ) {
@@ -124,7 +123,6 @@ impl<'a> HummockVersionTransaction<'a> {
 
         // Append SSTs to a new version.
         for (compaction_group_id, inserted_table_infos) in commit_sstables {
-            modified_compaction_groups.push(compaction_group_id);
             let group_deltas = &mut new_version_delta
                 .group_deltas
                 .entry(compaction_group_id)
