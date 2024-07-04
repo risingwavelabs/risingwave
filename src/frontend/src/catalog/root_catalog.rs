@@ -676,7 +676,7 @@ impl Catalog {
     }
 
     /// This function is similar to `get_table_by_id` expect that a table must be in a given database.
-    pub fn get_table_by_id_with_db(
+    pub fn get_created_table_by_id_with_db(
         &self,
         db_name: &str,
         table_id: u32,

@@ -311,7 +311,7 @@ pub async fn handle_show_object(
         ShowObject::MaterializedView { schema } => catalog_reader
             .read_guard()
             .get_schema_by_name(session.database(), &schema_or_default(&schema))?
-            .iter_mv()
+            .iter_created_mvs()
             .map(|t| t.name.clone())
             .collect(),
         ShowObject::Source { schema } => catalog_reader
