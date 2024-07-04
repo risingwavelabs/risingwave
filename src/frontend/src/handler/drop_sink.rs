@@ -63,7 +63,7 @@ pub async fn handle_drop_sink(
     if let Some(target_table_id) = &sink.target_table {
         let table_catalog = {
             let reader = session.env().catalog_reader().read_guard();
-            let table = reader.get_table_by_id(target_table_id)?;
+            let table = reader.get_any_table_by_id(target_table_id)?;
             table.clone()
         };
 
@@ -123,7 +123,8 @@ mod tests {
         let catalog_reader = session.env().catalog_reader().read_guard();
         let schema_path = SchemaPath::Name(DEFAULT_SCHEMA_NAME);
 
-        let sink = catalog_reader.get_table_by_name(DEFAULT_DATABASE_NAME, schema_path, "snk");
+        let sink =
+            catalog_reader.get_created_table_by_name(DEFAULT_DATABASE_NAME, schema_path, "snk");
         assert!(sink.is_err());
     }
 }
