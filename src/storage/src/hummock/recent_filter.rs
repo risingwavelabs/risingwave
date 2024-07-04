@@ -83,7 +83,7 @@ impl<K> RecentFilterInner<K> {
             if let Some(removed) = self.layers.pop_front() {
                 GLOBAL_RECENT_FILTER_METRICS
                     .recent_filter_items
-                    .add(0 - removed.read().len() as i64);
+                    .sub(removed.read().len() as i64);
             }
 
             if let Some(latest) = self.layers.back() {
