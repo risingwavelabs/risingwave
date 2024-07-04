@@ -28,10 +28,10 @@ futures-async-stream = { workspace = true }
 futures-util = "0.3"
 hashbrown = { workspace = true }
 hytra = "0.1.2"
-icelake = { workspace = true }
+iceberg = { workspace = true }
 itertools = { workspace = true }
 memcomparable = "0.2"
-opendal = "0.45.1"
+opendal = "0.47"
 parking_lot = { workspace = true }
 paste = "1"
 prometheus = { version = "0.13", features = ["process"] }
