@@ -161,8 +161,7 @@ impl WorkerNodeManager {
             .worker_nodes
             .iter()
             .flat_map(|worker| {
-                (0..worker.parallel_units.len())
-                    .map(move |i| (WorkerSlotId::new(worker.id, i), worker))
+                (0..worker.parallelism()).map(move |i| (WorkerSlotId::new(worker.id, i), worker))
             })
             .collect();
 
@@ -346,10 +345,7 @@ impl WorkerNodeSelector {
         } else {
             self.apply_worker_node_mask(self.manager.list_serving_worker_nodes())
         };
-        worker_nodes
-            .iter()
-            .map(|node| node.parallel_units.len())
-            .sum()
+        worker_nodes.iter().map(|node| node.parallelism()).sum()
     }
 
     pub fn fragment_mapping(&self, fragment_id: FragmentId) -> Result<WorkerSlotMapping> {

@@ -15,7 +15,6 @@
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::monitor::MonitoredStateStore;
-use thiserror_ext::AsReport;
 use tokio::sync::OnceCell;
 
 use crate::common::hummock_service::{HummockServiceOpts, Metrics};
@@ -63,17 +62,6 @@ impl CtlContext {
 
     pub async fn try_close(mut self) {
         tracing::info!("clean up context");
-        if let Some(meta_client) = self.meta_client.take() {
-            if let Err(e) = meta_client
-                .unregister(meta_client.host_addr().clone())
-                .await
-            {
-                tracing::warn!(
-                    error = %e.as_report(),
-                    worker_id = %meta_client.worker_id(),
-                    "failed to unregister ctl worker",
-                );
-            }
-        }
+        self.meta_client.take().unwrap().try_unregister().await;
     }
 }

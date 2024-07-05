@@ -242,15 +242,6 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn list_change_log_epochs(
-        &self,
-        _table_id: u32,
-        _min_epoch: u64,
-        _max_count: u32,
-    ) -> Result<Vec<u64>> {
-        unreachable!()
-    }
-
     async fn create_schema(
         &self,
         db_id: DatabaseId,
@@ -933,6 +924,8 @@ pub struct MockFrontendMetaClient {}
 
 #[async_trait::async_trait]
 impl FrontendMetaClient for MockFrontendMetaClient {
+    async fn try_unregister(&self) {}
+
     async fn pin_snapshot(&self) -> RpcResult<HummockSnapshot> {
         Ok(HummockSnapshot {
             committed_epoch: 0,
@@ -1087,6 +1080,15 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         _id: u32,
         _rate_limit: Option<u32>,
     ) -> RpcResult<()> {
+        unimplemented!()
+    }
+
+    async fn list_change_log_epochs(
+        &self,
+        _table_id: u32,
+        _min_epoch: u64,
+        _max_count: u32,
+    ) -> RpcResult<Vec<u64>> {
         unimplemented!()
     }
 }

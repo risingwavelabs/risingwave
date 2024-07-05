@@ -27,11 +27,10 @@ use rand::seq::{IteratorRandom, SliceRandom};
 use rand::{thread_rng, Rng};
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::ParallelUnitId;
-use risingwave_pb::meta::get_reschedule_plan_request::PbPolicy;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::PbFragment;
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
-use risingwave_pb::meta::{GetClusterInfoResponse, GetReschedulePlanResponse};
+use risingwave_pb::meta::GetClusterInfoResponse;
 use risingwave_pb::stream_plan::StreamNode;
 use serde::de::IntoDeserializer;
 
@@ -431,37 +430,6 @@ impl Cluster {
             })
             .await??;
         Ok(())
-    }
-
-    #[cfg_or_panic(madsim)]
-    pub async fn get_reschedule_plan(&self, policy: PbPolicy) -> Result<GetReschedulePlanResponse> {
-        let revision = self
-            .ctl
-            .spawn(async move {
-                let r = risingwave_ctl::cmd_impl::meta::get_cluster_info(
-                    &risingwave_ctl::common::CtlContext::default(),
-                )
-                .await?;
-
-                Ok::<_, anyhow::Error>(r.revision)
-            })
-            .await??;
-
-        let resp = self
-            .ctl
-            .spawn(async move {
-                let r = risingwave_ctl::cmd_impl::meta::get_reschedule_plan(
-                    &risingwave_ctl::common::CtlContext::default(),
-                    policy,
-                    revision,
-                )
-                .await?;
-
-                Ok::<_, anyhow::Error>(r)
-            })
-            .await??;
-
-        Ok(resp)
     }
 }
 
