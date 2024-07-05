@@ -1248,9 +1248,6 @@ impl CatalogManager {
         let database_core = &mut core.database;
         let tables = &mut database_core.tables;
         let version = try {
-            if cfg!(not(test)) {
-                Self::check_table_creating(tables, &table)?;
-            }
             let mut tables = BTreeMapTransaction::new(tables);
 
             table.stream_job_status = PbStreamJobStatus::Created.into();
