@@ -250,6 +250,7 @@ mod tests {
         CommonParserConfig, CsvProperties, EncodingProperties, ProtocolProperties,
         SpecificParserConfig,
     };
+    use crate::source::filesystem::file_common::CompressionFormat;
     use crate::source::filesystem::s3::S3PropertiesCommon;
     use crate::source::filesystem::S3SplitEnumerator;
     use crate::source::{
@@ -266,6 +267,7 @@ mod tests {
             access: None,
             secret: None,
             endpoint_url: None,
+            compression_format: CompressionFormat::None,
         }
         .into();
         let mut enumerator =
@@ -289,7 +291,6 @@ mod tests {
         let config = ParserConfig {
             common: CommonParserConfig { rw_columns: descs },
             specific: SpecificParserConfig {
-                key_encoding_config: None,
                 encoding_config: EncodingProperties::Csv(csv_config),
                 protocol_config: ProtocolProperties::Plain,
             },

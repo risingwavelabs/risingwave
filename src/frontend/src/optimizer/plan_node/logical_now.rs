@@ -14,12 +14,14 @@
 
 use pretty_xmlish::XmlNode;
 use risingwave_common::bail;
+use risingwave_common::catalog::Schema;
 
 use super::generic::{self, GenericPlanRef, Mode};
 use super::utils::{childless_record, Distill};
 use super::{
-    ColPrunable, ColumnPruningContext, ExprRewritable, Logical, LogicalFilter, PlanBase, PlanRef,
-    PredicatePushdown, RewriteStreamContext, StreamNow, ToBatch, ToStream, ToStreamContext,
+    ColPrunable, ColumnPruningContext, ExprRewritable, Logical, LogicalFilter, LogicalValues,
+    PlanBase, PlanRef, PredicatePushdown, RewriteStreamContext, StreamNow, ToBatch, ToStream,
+    ToStreamContext,
 };
 use crate::error::Result;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
@@ -96,7 +98,12 @@ impl ToBatch for LogicalNow {
 
 /// The trait for column pruning, only logical plan node will use it, though all plan node impl it.
 impl ColPrunable for LogicalNow {
-    fn prune_col(&self, _required_cols: &[usize], _ctx: &mut ColumnPruningContext) -> PlanRef {
-        self.clone().into()
+    fn prune_col(&self, required_cols: &[usize], _: &mut ColumnPruningContext) -> PlanRef {
+        if required_cols.is_empty() {
+            LogicalValues::new(vec![], Schema::empty().clone(), self.ctx()).into()
+        } else {
+            assert_eq!(required_cols, &[0], "we only output one column");
+            self.clone().into()
+        }
     }
 }

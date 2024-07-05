@@ -46,9 +46,9 @@ pub use self::legacy_source::{
 };
 pub use self::operator::{BinaryOperator, QualifiedOperator, UnaryOperator};
 pub use self::query::{
-    Cte, Distinct, Fetch, Join, JoinConstraint, JoinOperator, LateralView, OrderByExpr, Query,
-    Select, SelectItem, SetExpr, SetOperator, TableAlias, TableFactor, TableWithJoins, Top, Values,
-    With,
+    Cte, CteInner, Distinct, Fetch, Join, JoinConstraint, JoinOperator, LateralView, OrderByExpr,
+    Query, Select, SelectItem, SetExpr, SetOperator, TableAlias, TableFactor, TableWithJoins, Top,
+    Values, With,
 };
 pub use self::statement::*;
 pub use self::value::{
@@ -2885,6 +2885,7 @@ impl fmt::Display for FunctionBehavior {
 #[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum FunctionDefinition {
+    Identifier(String),
     SingleQuotedDef(String),
     DoubleDollarDef(String),
 }
@@ -2892,6 +2893,7 @@ pub enum FunctionDefinition {
 impl fmt::Display for FunctionDefinition {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            FunctionDefinition::Identifier(s) => write!(f, "{s}")?,
             FunctionDefinition::SingleQuotedDef(s) => write!(f, "'{s}'")?,
             FunctionDefinition::DoubleDollarDef(s) => write!(f, "$${s}$$")?,
         }
@@ -2903,6 +2905,7 @@ impl FunctionDefinition {
     /// Returns the function definition as a string slice.
     pub fn as_str(&self) -> &str {
         match self {
+            FunctionDefinition::Identifier(s) => s,
             FunctionDefinition::SingleQuotedDef(s) => s,
             FunctionDefinition::DoubleDollarDef(s) => s,
         }
@@ -2911,6 +2914,7 @@ impl FunctionDefinition {
     /// Returns the function definition as a string.
     pub fn into_string(self) -> String {
         match self {
+            FunctionDefinition::Identifier(s) => s,
             FunctionDefinition::SingleQuotedDef(s) => s,
             FunctionDefinition::DoubleDollarDef(s) => s,
         }

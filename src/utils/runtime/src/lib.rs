@@ -19,8 +19,13 @@
 
 #![feature(panic_update_hook)]
 #![feature(let_chains)]
+#![feature(exitcode_exit_method)]
+
+use std::pin::pin;
+use std::process::ExitCode;
 
 use futures::Future;
+use risingwave_common::util::tokio_util::sync::CancellationToken;
 
 mod logger;
 pub use logger::*;
@@ -33,7 +38,24 @@ use prof::*;
 
 /// Start RisingWave components with configs from environment variable.
 ///
-/// Currently, the following env variables will be read:
+/// # Shutdown on Ctrl-C
+///
+/// The given closure `f` will take a [`CancellationToken`] as an argument. When a `SIGINT` signal
+/// is received (typically by pressing `Ctrl-C`), [`CancellationToken::cancel`] will be called to
+/// notify all subscribers to shutdown. You can use [`.cancelled()`](CancellationToken::cancelled)
+/// to get notified on this.
+///
+/// Users may also send a second `SIGINT` signal to force shutdown. In this case, this function
+/// will exit the process with a non-zero exit code.
+///
+/// When `f` returns, this function will assume that the component has finished its work and it's
+/// safe to exit. Therefore, this function will exit the process with exit code 0 **without**
+/// waiting for background tasks to finish. In other words, it's the responsibility of `f` to
+/// ensure that all essential background tasks are finished before returning.
+///
+/// # Environment variables
+///
+/// Currently, the following environment variables will be read and used to configure the runtime.
 ///
 /// * `RW_WORKER_THREADS` (alias of `TOKIO_WORKER_THREADS`): number of tokio worker threads. If
 ///   not set, it will be decided by tokio. Note that this can still be overridden by per-module
@@ -42,9 +64,10 @@ use prof::*;
 ///   debug mode, and disable in release mode.
 /// * `RW_PROFILE_PATH`: the path to generate flamegraph. If set, then profiling is automatically
 ///   enabled.
-pub fn main_okk<F>(f: F) -> F::Output
+pub fn main_okk<F, Fut>(f: F) -> !
 where
-    F: Future + Send + 'static,
+    F: FnOnce(CancellationToken) -> Fut,
+    Fut: Future<Output = ()> + Send + 'static,
 {
     set_panic_hook();
 
@@ -73,10 +96,48 @@ where
         spawn_prof_thread(profile_path);
     }
 
-    tokio::runtime::Builder::new_multi_thread()
+    let future_with_shutdown = async move {
+        let shutdown = CancellationToken::new();
+        let mut fut = pin!(f(shutdown.clone()));
+
+        tokio::select! {
+            biased;
+            result = tokio::signal::ctrl_c() => {
+                result.expect("failed to receive ctrl-c signal");
+                tracing::info!("received ctrl-c, shutting down... (press ctrl-c again to force shutdown)");
+
+                // Send shutdown signal.
+                shutdown.cancel();
+
+                // While waiting for the future to finish, listen for the second ctrl-c signal.
+                tokio::select! {
+                    biased;
+                    result = tokio::signal::ctrl_c() => {
+                        result.expect("failed to receive ctrl-c signal");
+                        tracing::warn!("forced shutdown");
+
+                        // Directly exit the process **here** instead of returning from the future, since
+                        // we don't even want to run destructors but only exit as soon as possible.
+                        ExitCode::FAILURE.exit_process();
+                    }
+                    _ = &mut fut => {},
+                }
+            }
+            _ = &mut fut => {},
+        }
+    };
+
+    let runtime = tokio::runtime::Builder::new_multi_thread()
         .thread_name("rw-main")
         .enable_all()
         .build()
-        .unwrap()
-        .block_on(f)
+        .unwrap();
+
+    runtime.block_on(future_with_shutdown);
+
+    // Shutdown the runtime and exit the process, without waiting for background tasks to finish.
+    // See the doc on this function for more details.
+    // TODO(shutdown): is it necessary to shutdown here as we're going to exit?
+    runtime.shutdown_background();
+    ExitCode::SUCCESS.exit_process();
 }

@@ -103,7 +103,7 @@ impl From<PbSource> for ActiveModel {
             optional_associated_table_id: Set(optional_associated_table_id),
             connection_id: Set(source.connection_id.map(|id| id as _)),
             version: Set(source.version as _),
-            secret_ref: Set(None),
+            secret_ref: Set(Some(SecretRef::from(source.secret_refs))),
         }
     }
 }

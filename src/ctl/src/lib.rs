@@ -321,6 +321,20 @@ enum HummockCommands {
         #[clap(short, long = "use-new-object-prefix-strategy", default_value = "true")]
         use_new_object_prefix_strategy: bool,
     },
+    TieredCacheTracing {
+        #[clap(long)]
+        enable: bool,
+        #[clap(long)]
+        record_hybrid_insert_threshold_ms: Option<u32>,
+        #[clap(long)]
+        record_hybrid_get_threshold_ms: Option<u32>,
+        #[clap(long)]
+        record_hybrid_obtain_threshold_ms: Option<u32>,
+        #[clap(long)]
+        record_hybrid_remove_threshold_ms: Option<u32>,
+        #[clap(long)]
+        record_hybrid_fetch_threshold_ms: Option<u32>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -460,6 +474,7 @@ enum ScaleCommands {
 }
 
 #[derive(Subcommand)]
+#[allow(clippy::large_enum_variant)]
 enum MetaCommands {
     /// pause the stream graph
     Pause,
@@ -809,6 +824,25 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                 use_new_object_prefix_strategy,
             )
             .await?;
+        }
+        Commands::Hummock(HummockCommands::TieredCacheTracing {
+            enable,
+            record_hybrid_insert_threshold_ms,
+            record_hybrid_get_threshold_ms,
+            record_hybrid_obtain_threshold_ms,
+            record_hybrid_remove_threshold_ms,
+            record_hybrid_fetch_threshold_ms,
+        }) => {
+            cmd_impl::hummock::tiered_cache_tracing(
+                context,
+                enable,
+                record_hybrid_insert_threshold_ms,
+                record_hybrid_get_threshold_ms,
+                record_hybrid_obtain_threshold_ms,
+                record_hybrid_remove_threshold_ms,
+                record_hybrid_fetch_threshold_ms,
+            )
+            .await?
         }
         Commands::Table(TableCommands::Scan {
             mv_name,
