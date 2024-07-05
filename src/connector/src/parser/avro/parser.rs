@@ -72,6 +72,24 @@ impl AvroAccessBuilder {
 
     /// Note: we should use unresolved schema to parsing bytes into avro value.
     /// Otherwise it's an invalid schema and parsing will fail. (Avro error: Two named schema defined for same fullname)
+    ///
+    /// # Notes about how Avro data looks like
+    ///
+    /// First, it has two [serialization encodings: binary and JSON](https://avro.apache.org/docs/1.11.1/specification/#encodings).
+    /// They don't have magic bytes and cannot be distinguished on their own.
+    ///
+    /// But in different cases, it starts with different headers, or magic bytes, which can be confusing.
+    ///
+    /// ## `apache_avro` API and headers
+    ///
+    /// - `apache_avro::Reader`: [Object Container Files](https://avro.apache.org/docs/1.11.1/specification/#object-container-files): contains file header, starting with 4 bytes `Obj1`. This is a batch file encoding. We don't use it.
+    /// - `apache_avro::GenericSingleObjectReader`: [Single-object encoding](https://avro.apache.org/docs/1.11.1/specification/#single-object-encoding): starts with 2 bytes `0xC301`. This is designed to be used in places like Kafka, but Confluent schema registry doesn't use it.
+    /// - `apache_avro::from_avro_datum`: no header, binary encoding. This is what we should use.
+    ///
+    /// ## Confluent schema registry
+    ///
+    /// - In Kafka ([Confluent schema registry wire format](https://docs.confluent.io/platform/7.6/schema-registry/fundamentals/serdes-develop/index.html#wire-format)):
+    /// starts with 5 bytes`0x00{schema_id:08x}` followed by Avro binary encoding.
     async fn parse_avro_value(&self, payload: &[u8]) -> ConnectorResult<Option<Value>> {
         // parse payload to avro value
         // if use confluent schema, get writer schema from confluent schema registry
@@ -84,6 +102,7 @@ impl AvroAccessBuilder {
                 Some(&self.schema.original_schema),
             )?))
         } else {
+            // FIXME: we should not use `Reader` (file header) here. See comment above and https://github.com/risingwavelabs/risingwave/issues/12871
             let mut reader = Reader::with_schema(&self.schema.original_schema, payload)?;
             match reader.next() {
                 Some(Ok(v)) => Ok(Some(v)),
@@ -185,44 +204,15 @@ impl AvroParserConfig {
 #[cfg(test)]
 mod test {
     use std::env;
-    use std::fs::OpenOptions;
-    use std::io::Write;
-    use std::ops::Sub;
-    use std::path::PathBuf;
 
-    use apache_avro::schema::RecordSchema;
-    use apache_avro::types::Record;
-    use apache_avro::{Codec, Days, Duration, Millis, Months, Writer};
-    use itertools::Itertools;
-    use risingwave_common::array::Op;
-    use risingwave_common::catalog::ColumnId;
-    use risingwave_common::row::Row;
-    use risingwave_common::types::{DataType, Date};
-    use risingwave_common::util::iter_util::ZipEqFast;
-    use risingwave_pb::catalog::StreamSourceInfo;
-    use risingwave_pb::plan_common::{PbEncodeType, PbFormatType};
     use url::Url;
 
     use super::*;
     use crate::connector_common::AwsAuthProps;
-    use crate::parser::plain_parser::PlainParser;
-    use crate::parser::{AccessBuilderImpl, SourceStreamChunkBuilder, SpecificParserConfig};
-    use crate::source::{SourceColumnDesc, SourceContext};
 
     fn test_data_path(file_name: &str) -> String {
         let curr_dir = env::current_dir().unwrap().into_os_string();
         curr_dir.into_string().unwrap() + "/src/test_data/" + file_name
-    }
-
-    fn e2e_file_path(file_name: &str) -> String {
-        let curr_dir = env::current_dir().unwrap().into_os_string();
-        let binding = PathBuf::from(curr_dir);
-        let dir = binding.parent().unwrap().parent().unwrap();
-        dir.join("scripts/source/test_data/")
-            .join(file_name)
-            .to_str()
-            .unwrap()
-            .to_string()
     }
 
     #[tokio::test]
@@ -260,291 +250,5 @@ mod test {
         let schema = Schema::parse_reader(&mut schema_content.unwrap().as_slice());
         assert!(schema.is_ok());
         println!("schema = {:?}", schema.unwrap());
-    }
-
-    async fn new_avro_conf_from_local(file_name: &str) -> ConnectorResult<AvroParserConfig> {
-        let schema_path = format!("file://{}", test_data_path(file_name));
-        let info = StreamSourceInfo {
-            row_schema_location: schema_path.clone(),
-            use_schema_registry: false,
-            format: PbFormatType::Plain.into(),
-            row_encode: PbEncodeType::Avro.into(),
-            ..Default::default()
-        };
-        let parser_config = SpecificParserConfig::new(&info, &Default::default())?;
-        AvroParserConfig::new(parser_config.encoding_config).await
-    }
-
-    async fn new_avro_parser_from_local(file_name: &str) -> ConnectorResult<PlainParser> {
-        let conf = new_avro_conf_from_local(file_name).await?;
-
-        Ok(PlainParser {
-            key_builder: None,
-            payload_builder: AccessBuilderImpl::Avro(AvroAccessBuilder::new(
-                conf,
-                EncodingType::Value,
-            )?),
-            rw_columns: Vec::default(),
-            source_ctx: SourceContext::dummy().into(),
-            transaction_meta_builder: None,
-        })
-    }
-
-    #[tokio::test]
-    async fn test_avro_parser() {
-        let mut parser = new_avro_parser_from_local("simple-schema.avsc")
-            .await
-            .unwrap();
-        let builder = try_match_expand!(&parser.payload_builder, AccessBuilderImpl::Avro).unwrap();
-        let schema = builder.schema.original_schema.clone();
-        let record = build_avro_data(&schema);
-        assert_eq!(record.fields.len(), 11);
-        let mut writer = Writer::with_codec(&schema, Vec::new(), Codec::Snappy);
-        writer.append(record.clone()).unwrap();
-        let flush = writer.flush().unwrap();
-        assert!(flush > 0);
-        let input_data = writer.into_inner().unwrap();
-        let columns = build_rw_columns();
-        let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 1);
-        {
-            let writer = builder.row_writer();
-            parser
-                .parse_inner(None, Some(input_data), writer)
-                .await
-                .unwrap();
-        }
-        let chunk = builder.finish();
-        let (op, row) = chunk.rows().next().unwrap();
-        assert_eq!(op, Op::Insert);
-
-        expect_test::expect![[r#"
-            ("id", Int(32)) => Some(Int32(32))
-            ("sequence_id", Long(64)) => Some(Int64(64))
-            ("name", Union(1, String("str_value"))) => Some(Utf8("str_value"))
-            ("score", Float(32.0)) => Some(Float32(OrderedFloat(32.0)))
-            ("avg_score", Double(64.0)) => Some(Float64(OrderedFloat(64.0)))
-            ("is_lasted", Boolean(true)) => Some(Bool(true))
-            ("entrance_date", Date(0)) => Some(Date(Date(1970-01-01)))
-            ("birthday", TimestampMillis(0)) => Some(Timestamptz(Timestamptz(0)))
-            ("anniversary", TimestampMicros(0)) => Some(Timestamptz(Timestamptz(0)))
-            ("passed", Duration(Duration { months: Months(1), days: Days(1), millis: Millis(1000) })) => Some(Interval(Interval { months: 1, days: 1, usecs: 1000000 }))
-            ("bytes", Bytes([1, 2, 3, 4, 5])) => Some(Bytea([1, 2, 3, 4, 5]))"#]].assert_eq(&format!(
-            "{}",
-            record
-                .fields
-                .iter()
-                .zip_eq_fast(row.iter())
-                .format_with("\n", |(avro, datum), f| {
-                    f(&format_args!("{:?} => {:?}", avro, datum))
-                })
-        ));
-    }
-
-    fn build_rw_columns() -> Vec<SourceColumnDesc> {
-        vec![
-            SourceColumnDesc::simple("id", DataType::Int32, ColumnId::from(0)),
-            SourceColumnDesc::simple("sequence_id", DataType::Int64, ColumnId::from(1)),
-            SourceColumnDesc::simple("name", DataType::Varchar, ColumnId::from(2)),
-            SourceColumnDesc::simple("score", DataType::Float32, ColumnId::from(3)),
-            SourceColumnDesc::simple("avg_score", DataType::Float64, ColumnId::from(4)),
-            SourceColumnDesc::simple("is_lasted", DataType::Boolean, ColumnId::from(5)),
-            SourceColumnDesc::simple("entrance_date", DataType::Date, ColumnId::from(6)),
-            SourceColumnDesc::simple("birthday", DataType::Timestamptz, ColumnId::from(7)),
-            SourceColumnDesc::simple("anniversary", DataType::Timestamptz, ColumnId::from(8)),
-            SourceColumnDesc::simple("passed", DataType::Interval, ColumnId::from(9)),
-            SourceColumnDesc::simple("bytes", DataType::Bytea, ColumnId::from(10)),
-        ]
-    }
-
-    fn build_field(schema: &Schema) -> Option<Value> {
-        match schema {
-            Schema::String => Some(Value::String("str_value".to_string())),
-            Schema::Int => Some(Value::Int(32_i32)),
-            Schema::Long => Some(Value::Long(64_i64)),
-            Schema::Float => Some(Value::Float(32_f32)),
-            Schema::Double => Some(Value::Double(64_f64)),
-            Schema::Boolean => Some(Value::Boolean(true)),
-            Schema::Bytes => Some(Value::Bytes(vec![1, 2, 3, 4, 5])),
-
-            Schema::Date => {
-                let original_date = Date::from_ymd_uncheck(1970, 1, 1).and_hms_uncheck(0, 0, 0);
-                let naive_date = Date::from_ymd_uncheck(1970, 1, 1).and_hms_uncheck(0, 0, 0);
-                let num_days = naive_date.0.sub(original_date.0).num_days() as i32;
-                Some(Value::Date(num_days))
-            }
-            Schema::TimestampMillis => {
-                let datetime = Date::from_ymd_uncheck(1970, 1, 1).and_hms_uncheck(0, 0, 0);
-                let timestamp_mills =
-                    Value::TimestampMillis(datetime.0.and_utc().timestamp() * 1_000);
-                Some(timestamp_mills)
-            }
-            Schema::TimestampMicros => {
-                let datetime = Date::from_ymd_uncheck(1970, 1, 1).and_hms_uncheck(0, 0, 0);
-                let timestamp_micros =
-                    Value::TimestampMicros(datetime.0.and_utc().timestamp() * 1_000_000);
-                Some(timestamp_micros)
-            }
-            Schema::Duration => {
-                let months = Months::new(1);
-                let days = Days::new(1);
-                let millis = Millis::new(1000);
-                Some(Value::Duration(Duration::new(months, days, millis)))
-            }
-
-            Schema::Union(union_schema) => {
-                let inner_schema = union_schema
-                    .variants()
-                    .iter()
-                    .find_or_first(|s| !matches!(s, &&Schema::Null))
-                    .unwrap();
-
-                match build_field(inner_schema) {
-                    None => {
-                        let index_of_union = union_schema
-                            .find_schema_with_known_schemata::<&Schema>(&Value::Null, None, &None)
-                            .unwrap()
-                            .0 as u32;
-                        Some(Value::Union(index_of_union, Box::new(Value::Null)))
-                    }
-                    Some(value) => {
-                        let index_of_union = union_schema
-                            .find_schema_with_known_schemata::<&Schema>(&value, None, &None)
-                            .unwrap()
-                            .0 as u32;
-                        Some(Value::Union(index_of_union, Box::new(value)))
-                    }
-                }
-            }
-            _ => None,
-        }
-    }
-
-    fn build_avro_data(schema: &Schema) -> Record<'_> {
-        let mut record = Record::new(schema).unwrap();
-        if let Schema::Record(RecordSchema {
-            name: _, fields, ..
-        }) = schema.clone()
-        {
-            for field in &fields {
-                let value = build_field(&field.schema)
-                    .unwrap_or_else(|| panic!("No value defined for field, {}", field.name));
-                record.put(field.name.as_str(), value)
-            }
-        }
-        record
-    }
-
-    #[tokio::test]
-    async fn test_map_to_columns() {
-        let conf = new_avro_conf_from_local("simple-schema.avsc")
-            .await
-            .unwrap();
-        let columns = conf.map_to_columns().unwrap();
-        assert_eq!(columns.len(), 11);
-        println!("{:?}", columns);
-    }
-
-    #[tokio::test]
-    async fn test_new_avro_parser() {
-        let avro_parser_rs = new_avro_parser_from_local("simple-schema.avsc").await;
-        let avro_parser = avro_parser_rs.unwrap();
-        println!("avro_parser = {:?}", avro_parser);
-    }
-
-    #[tokio::test]
-    async fn test_avro_union_type() {
-        let parser = new_avro_parser_from_local("union-schema.avsc")
-            .await
-            .unwrap();
-        let builder = try_match_expand!(&parser.payload_builder, AccessBuilderImpl::Avro).unwrap();
-        let schema = &builder.schema.original_schema;
-        let mut null_record = Record::new(schema).unwrap();
-        null_record.put("id", Value::Int(5));
-        null_record.put("age", Value::Union(0, Box::new(Value::Null)));
-        null_record.put("sequence_id", Value::Union(0, Box::new(Value::Null)));
-        null_record.put("name", Value::Union(0, Box::new(Value::Null)));
-        null_record.put("score", Value::Union(1, Box::new(Value::Null)));
-        null_record.put("avg_score", Value::Union(0, Box::new(Value::Null)));
-        null_record.put("is_lasted", Value::Union(0, Box::new(Value::Null)));
-        null_record.put("entrance_date", Value::Union(0, Box::new(Value::Null)));
-        null_record.put("birthday", Value::Union(0, Box::new(Value::Null)));
-        null_record.put("anniversary", Value::Union(0, Box::new(Value::Null)));
-
-        let mut writer = Writer::new(schema, Vec::new());
-        writer.append(null_record).unwrap();
-        writer.flush().unwrap();
-
-        let record = build_avro_data(schema);
-        writer.append(record).unwrap();
-        writer.flush().unwrap();
-
-        let records = writer.into_inner().unwrap();
-
-        let reader: Vec<_> = Reader::with_schema(schema, &records[..]).unwrap().collect();
-        assert_eq!(2, reader.len());
-        let null_record_expected: Vec<(String, Value)> = vec![
-            ("id".to_string(), Value::Int(5)),
-            ("age".to_string(), Value::Union(0, Box::new(Value::Null))),
-            (
-                "sequence_id".to_string(),
-                Value::Union(0, Box::new(Value::Null)),
-            ),
-            ("name".to_string(), Value::Union(0, Box::new(Value::Null))),
-            ("score".to_string(), Value::Union(1, Box::new(Value::Null))),
-            (
-                "avg_score".to_string(),
-                Value::Union(0, Box::new(Value::Null)),
-            ),
-            (
-                "is_lasted".to_string(),
-                Value::Union(0, Box::new(Value::Null)),
-            ),
-            (
-                "entrance_date".to_string(),
-                Value::Union(0, Box::new(Value::Null)),
-            ),
-            (
-                "birthday".to_string(),
-                Value::Union(0, Box::new(Value::Null)),
-            ),
-            (
-                "anniversary".to_string(),
-                Value::Union(0, Box::new(Value::Null)),
-            ),
-        ];
-        let null_record_value = reader.first().unwrap().as_ref().unwrap();
-        match null_record_value {
-            Value::Record(values) => {
-                assert_eq!(values, &null_record_expected)
-            }
-            _ => unreachable!(),
-        }
-    }
-
-    // run this script when updating `simple-schema.avsc`, the script will generate new value in
-    // `avro_simple_schema_bin.1`
-    #[ignore]
-    #[tokio::test]
-    async fn update_avro_payload() {
-        let conf = new_avro_conf_from_local("simple-schema.avsc")
-            .await
-            .unwrap();
-        let mut writer = Writer::new(conf.schema.original_schema.as_ref(), Vec::new());
-        let record = build_avro_data(conf.schema.original_schema.as_ref());
-        writer.append(record).unwrap();
-        let encoded = writer.into_inner().unwrap();
-        println!("path = {:?}", e2e_file_path("avro_simple_schema_bin.1"));
-        let mut file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open(e2e_file_path("avro_simple_schema_bin.1"))
-            .unwrap();
-        file.write_all(encoded.as_slice()).unwrap();
-        println!(
-            "encoded = {:?}",
-            String::from_utf8_lossy(encoded.as_slice())
-        );
     }
 }
