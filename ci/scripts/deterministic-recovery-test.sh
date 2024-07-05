@@ -13,7 +13,9 @@ export RUST_LOG="risingwave_meta::barrier::recovery=debug,\
 risingwave_meta::manager::catalog=debug,\
 risingwave_meta::rpc::ddl_controller=debug,\
 risingwave_meta::barrier::mod=debug,\
-risingwave_simulation=debug"
+risingwave_simulation=debug,\
+risingwave_frontend::catalog::schema_catalog=debug,\
+risingwave_frontend::observer::observer_manager=info"
 
 # Extra logs you can enable if the existing trace does not give enough info.
 #risingwave_stream::executor::backfill=trace,

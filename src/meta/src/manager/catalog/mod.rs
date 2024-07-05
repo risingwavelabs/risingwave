@@ -1337,6 +1337,7 @@ impl CatalogManager {
                 assert!(res.is_some(), "table_id {} missing", table_id);
             }
             commit_meta!(self, tables)?;
+            tracing::debug!(id = ?table.id, internal_table_ids = ?internal_tables.iter().map(|t| t.id).collect_vec(), "cleaned up tables");
             (table, internal_tables)
         };
 

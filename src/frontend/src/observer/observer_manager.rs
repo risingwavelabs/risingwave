@@ -114,6 +114,7 @@ impl ObserverState for FrontendObserverNode {
     }
 
     fn handle_initialization_notification(&mut self, resp: SubscribeResponse) {
+        tracing::info!("handle initialization notification");
         let mut catalog_guard = self.catalog.write();
         let mut user_guard = self.user_info_manager.write();
         catalog_guard.clear();

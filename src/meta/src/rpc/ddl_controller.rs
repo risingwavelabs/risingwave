@@ -1286,7 +1286,7 @@ impl DdlController {
         internal_tables: Vec<Table>,
     ) -> MetaResult<NotificationVersion> {
         let job_id = stream_job.id();
-        tracing::debug!(id = job_id, "creating stream job");
+        tracing::debug!(id = job_id, internal_table_ids = ?internal_tables.iter().map(|t| t.id).collect_vec(), "creating stream job");
 
         let result: MetaResult<()> = try {
             // Add table fragments to meta store with state: `State::Initial`.
