@@ -59,17 +59,17 @@ secret_store_private_key = [100, 101, 109, 111, 45, 115, 101, 99, 114, 101, 116,
 [meta.compaction_config]
 max_bytes_for_level_base = 536870912
 max_bytes_for_level_multiplier = 5
-max_compaction_bytes = 2147483648
+max_compaction_bytes = 4294967296
 sub_level_max_compaction_bytes = 134217728
-level0_tier_compact_file_number = 12
+level0_tier_compact_file_number = 36
 target_file_size_base = 33554432
 compaction_filter_mask = 6
 max_sub_compaction = 4
-level0_stop_write_threshold_sub_level_number = 300
-level0_sub_level_compact_level_count = 3
-level0_overlapping_sub_level_compact_level_count = 12
+level0_stop_write_threshold_sub_level_number = 500
+level0_sub_level_compact_level_count = 12
+level0_overlapping_sub_level_compact_level_count = 36
 max_space_reclaim_bytes = 536870912
-level0_max_compact_file_number = 100
+level0_max_compact_file_number = 300
 tombstone_reclaim_ratio = 40
 enable_emergency_picker = true
 max_level = 6
@@ -79,7 +79,7 @@ meta_cached_traces_num = 256
 meta_cached_traces_memory_limit_bytes = 134217728
 meta_enable_trivial_move = true
 meta_enable_check_task_level_overlap = false
-meta_max_trivial_move_task_count_per_loop = 256
+meta_max_trivial_move_task_count_per_loop = 1024
 meta_max_get_task_probe_times = 5
 
 [batch]
@@ -151,6 +151,7 @@ max_preload_io_retry_times = 3
 compactor_fast_max_compact_delete_ratio = 40
 compactor_fast_max_compact_task_size = 2147483648
 compactor_iter_max_io_retry_times = 8
+compactor_max_pull_task_per_round = 16
 table_info_statistic_history_times = 240
 mem_table_spill_threshold = 4194304
 

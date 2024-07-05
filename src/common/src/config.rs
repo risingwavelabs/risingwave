@@ -758,6 +758,8 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::compactor_iter_max_io_retry_times")]
     pub compactor_iter_max_io_retry_times: usize,
 
+    #[serde(default = "default::storage::compactor_max_pull_task_per_round")]
+    pub compactor_max_pull_task_per_round: usize,
     /// The window size of table info statistic history.
     #[serde(default = "default::storage::table_info_statistic_history_times")]
     pub table_info_statistic_history_times: usize,
@@ -1552,6 +1554,10 @@ pub mod default {
             8
         }
 
+        pub fn compactor_max_pull_task_per_round() -> usize {
+            16
+        }
+
         pub fn compactor_max_sst_size() -> u64 {
             512 * 1024 * 1024 // 512m
         }
@@ -1763,7 +1769,7 @@ pub mod default {
         }
 
         pub fn max_trivial_move_task_count_per_loop() -> usize {
-            256
+            1024
         }
 
         pub fn max_get_task_probe_times() -> usize {
@@ -1855,21 +1861,21 @@ pub mod default {
     }
 
     pub mod compaction_config {
-        const DEFAULT_MAX_COMPACTION_BYTES: u64 = 2 * 1024 * 1024 * 1024; // 2GB
+        const DEFAULT_MAX_COMPACTION_BYTES: u64 = 4 * 1024 * 1024 * 1024; // 4GB
         const DEFAULT_MIN_COMPACTION_BYTES: u64 = 128 * 1024 * 1024; // 128MB
         const DEFAULT_MAX_BYTES_FOR_LEVEL_BASE: u64 = 512 * 1024 * 1024; // 512MB
 
         // decrease this configure when the generation of checkpoint barrier is not frequent.
-        const DEFAULT_TIER_COMPACT_TRIGGER_NUMBER: u64 = 12;
+        const DEFAULT_TIER_COMPACT_TRIGGER_NUMBER: u64 = 36;
         const DEFAULT_TARGET_FILE_SIZE_BASE: u64 = 32 * 1024 * 1024;
         // 32MB
         const DEFAULT_MAX_SUB_COMPACTION: u32 = 4;
         const DEFAULT_LEVEL_MULTIPLIER: u64 = 5;
         const DEFAULT_MAX_SPACE_RECLAIM_BYTES: u64 = 512 * 1024 * 1024; // 512MB;
-        const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_SUB_LEVEL_NUMBER: u64 = 300;
-        const DEFAULT_MAX_COMPACTION_FILE_COUNT: u64 = 100;
-        const DEFAULT_MIN_SUB_LEVEL_COMPACT_LEVEL_COUNT: u32 = 3;
-        const DEFAULT_MIN_OVERLAPPING_SUB_LEVEL_COMPACT_LEVEL_COUNT: u32 = 12;
+        const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_SUB_LEVEL_NUMBER: u64 = 500;
+        const DEFAULT_MAX_COMPACTION_FILE_COUNT: u64 = 300;
+        const DEFAULT_MIN_SUB_LEVEL_COMPACT_LEVEL_COUNT: u32 = 12;
+        const DEFAULT_MIN_OVERLAPPING_SUB_LEVEL_COMPACT_LEVEL_COUNT: u32 = 36;
         const DEFAULT_TOMBSTONE_RATIO_PERCENT: u32 = 40;
         const DEFAULT_EMERGENCY_PICKER: bool = true;
         const DEFAULT_MAX_LEVEL: u32 = 6;
