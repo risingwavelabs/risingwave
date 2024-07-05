@@ -22,6 +22,7 @@ use bytes::Bytes;
 use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, Validation};
 use parking_lot::Mutex;
 use risingwave_common::types::DataType;
+use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_common::util::tokio_util::sync::CancellationToken;
 use risingwave_sqlparser::ast::{RedactSqlOptionKeywordsRef, Statement};
 use serde::Deserialize;
@@ -264,7 +265,7 @@ pub async fn pg_serve(
     let listener = Listener::bind(addr).await?;
     tracing::info!(addr, "server started");
 
-    let acceptor_runtime = {
+    let acceptor_runtime = BackgroundShutdownRuntime::from({
         let mut builder = tokio::runtime::Builder::new_multi_thread();
         builder.worker_threads(1);
         builder
@@ -272,7 +273,7 @@ pub async fn pg_serve(
             .enable_all()
             .build()
             .unwrap()
-    };
+    });
 
     #[cfg(not(madsim))]
     let worker_runtime = tokio::runtime::Handle::current();
@@ -308,7 +309,7 @@ pub async fn pg_serve(
     shutdown.cancelled().await;
 
     // Stop accepting new connections.
-    acceptor_runtime.shutdown_background();
+    drop(acceptor_runtime);
     // Shutdown session manager, typically close all existing sessions.
     session_mgr.shutdown().await;
 
