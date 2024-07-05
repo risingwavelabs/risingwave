@@ -204,10 +204,10 @@ impl stream_plan::MaterializeNode {
     }
 }
 
-// Encapsulating the use of parallel_units.
+// Encapsulating the use of parallelism.
 impl common::WorkerNode {
     pub fn parallelism(&self) -> usize {
-        self.parallel_units.len()
+        self.parallelism as usize
     }
 }
 
