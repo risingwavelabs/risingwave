@@ -39,7 +39,6 @@ use risingwave_pb::meta::relation::{PbRelationInfo, RelationInfo};
 use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Info, Operation as NotificationOperation, Operation,
 };
-use risingwave_pb::meta::table_fragments::PbActorStatus;
 use risingwave_pb::meta::{
     PbFragmentWorkerSlotMapping, PbRelation, PbRelationGroup, PbTableFragments, Relation,
     RelationGroup,
@@ -1426,11 +1425,7 @@ impl CatalogController {
                     expr_context,
                     ..
                 },
-                // actor_status
-                PbActorStatus {
-                    parallel_unit,
-                    state: _,
-                },
+                actor_status,
             ) in newly_created_actors
             {
                 let mut actor_upstreams = BTreeMap::<FragmentId, BTreeSet<ActorId>>::new();
@@ -1467,7 +1462,6 @@ impl CatalogController {
                 );
 
                 let actor_upstreams = ActorUpstreamActors(actor_upstreams);
-                let parallel_unit = parallel_unit.unwrap();
 
                 let splits = actor_splits
                     .get(&actor_id)
@@ -1478,7 +1472,7 @@ impl CatalogController {
                     fragment_id: Set(fragment_id as _),
                     status: Set(ActorStatus::Running),
                     splits: Set(splits.map(|splits| (&PbConnectorSplits { splits }).into())),
-                    worker_id: Set(parallel_unit.worker_node_id as _),
+                    worker_id: Set(actor_status.worker_id() as _),
                     upstream_actor_ids: Set(actor_upstreams),
                     vnode_bitmap: Set(vnode_bitmap.as_ref().map(|bitmap| bitmap.into())),
                     expr_context: Set(expr_context.as_ref().unwrap().into()),

@@ -21,7 +21,6 @@ use itertools::Itertools;
 use regex::Regex;
 use risingwave_meta::manager::WorkerId;
 use risingwave_pb::common::WorkerNode;
-use risingwave_pb::meta::table_fragments::ActorStatus;
 use risingwave_pb::meta::{GetClusterInfoResponse, PbWorkerReschedule};
 use serde::{Deserialize, Serialize};
 use thiserror_ext::AsReport;
@@ -265,9 +264,8 @@ pub async fn unregister_workers(
                     table_fragments
                         .actor_status
                         .get(&actor.actor_id)
-                        .and_then(|ActorStatus { parallel_unit, .. }| parallel_unit.clone())
+                        .map(|actor_status| actor_status.worker_id())
                         .unwrap()
-                        .worker_node_id
                 })
                 .collect();
 

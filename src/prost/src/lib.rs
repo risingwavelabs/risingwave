@@ -224,6 +224,21 @@ impl stream_plan::SourceNode {
     }
 }
 
+impl meta::table_fragments::ActorStatus {
+    pub fn worker_id(&self) -> u32 {
+        self.location
+            .as_ref()
+            .expect("actor location should be exist")
+            .worker_node_id
+    }
+}
+
+impl common::ActorLocation {
+    pub fn from_worker(worker_node_id: u32) -> Option<Self> {
+        Some(Self { worker_node_id })
+    }
+}
+
 impl stream_plan::StreamNode {
     /// Find the external stream source info inside the stream node, if any.
     ///

@@ -374,7 +374,7 @@ impl StreamManagerService for StreamServiceImpl {
                                 actor_id,
                                 fragment_id: actor_to_fragment[&actor_id],
                                 state: status.state,
-                                worker_id: status.parallel_unit.as_ref().unwrap().worker_node_id,
+                                worker_id: status.worker_id(),
                             }
                         })
                     })

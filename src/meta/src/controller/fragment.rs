@@ -29,7 +29,7 @@ use risingwave_meta_model_v2::{
     ConnectorSplits, ExprContext, FragmentId, I32Array, JobStatus, ObjectId, SinkId, SourceId,
     StreamNode, StreamingParallelism, TableId, VnodeBitmap, WorkerId,
 };
-use risingwave_pb::common::PbParallelUnit;
+use risingwave_pb::common::PbActorLocation;
 use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Operation as NotificationOperation,
 };
@@ -244,7 +244,7 @@ impl CatalogController {
                 )
             })?;
 
-            let worker_id = status.parallel_unit.clone().unwrap().get_worker_node_id() as WorkerId;
+            let worker_id = status.worker_id() as _;
 
             assert_eq!(
                 pb_upstream_actor_id
@@ -430,10 +430,7 @@ impl CatalogController {
             pb_actor_status.insert(
                 actor_id as _,
                 PbActorStatus {
-                    parallel_unit: Some(PbParallelUnit {
-                        id: u32::MAX,
-                        worker_node_id: worker_id as _,
-                    }),
+                    location: PbActorLocation::from_worker(worker_id as u32),
                     state: PbActorState::from(status) as _,
                 },
             );
@@ -1059,10 +1056,7 @@ impl CatalogController {
             let (table_fragments, actor_status, _) =
                 Self::compose_fragment(fragment, actors, dispatcher_info)?;
             for actor in table_fragments.actors {
-                let node_id = actor_status[&actor.actor_id]
-                    .get_parallel_unit()
-                    .unwrap()
-                    .worker_node_id as WorkerId;
+                let node_id = actor_status[&actor.actor_id].worker_id() as WorkerId;
                 node_actors
                     .entry(node_id)
                     .or_insert_with(Vec::new)
@@ -1429,7 +1423,7 @@ mod tests {
         actor, actor_dispatcher, fragment, ActorId, ActorUpstreamActors, ConnectorSplits,
         ExprContext, FragmentId, I32Array, ObjectId, StreamNode, TableId, VnodeBitmap,
     };
-    use risingwave_pb::common::ParallelUnit;
+    use risingwave_pb::common::PbActorLocation;
     use risingwave_pb::meta::table_fragments::actor_status::PbActorState;
     use risingwave_pb::meta::table_fragments::fragment::PbFragmentDistributionType;
     use risingwave_pb::meta::table_fragments::{PbActorStatus, PbFragment};
@@ -1554,10 +1548,7 @@ mod tests {
                 (
                     actor_id,
                     PbActorStatus {
-                        parallel_unit: Some(ParallelUnit {
-                            id: u32::MAX,
-                            worker_node_id: 0,
-                        }),
+                        location: PbActorLocation::from_worker(0),
                         state: PbActorState::Running as _,
                     },
                 )
