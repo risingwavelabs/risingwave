@@ -27,8 +27,8 @@ impl<'a> std::fmt::Debug for DataTypeTestDisplay<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.0 {
             DataType::Struct(s) => {
-                // since this is for tests, we don't care about perf here :)
-                if !f.alternate() || s.len() == 1 {
+                if s.len() == 1 {
+                    // avoid multiline display for single field struct
                     let (name, ty) = s.iter().next().unwrap();
                     return write!(f, "Struct {{ {}: {:?} }}", name, &DataTypeTestDisplay(ty));
                 }
@@ -59,8 +59,8 @@ impl<'a> std::fmt::Debug for ScalarRefImplTestDisplay<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.0 {
             ScalarRefImpl::Struct(s) => {
-                // since this is for tests, we don't care about perf here :)
-                if !f.alternate() || s.iter_fields_ref().len() == 1 {
+                if s.iter_fields_ref().len() == 1 {
+                    // avoid multiline display for single field struct
                     let field = s.iter_fields_ref().next().unwrap();
                     return write!(f, "StructValue({:#?})", &DatumRefTestDisplay(field));
                 }
