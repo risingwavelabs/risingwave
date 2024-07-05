@@ -1295,7 +1295,7 @@ impl CatalogManager {
         table_id: TableId,
         internal_table_ids: Vec<TableId>,
     ) -> MetaResult<bool> {
-        let (table, internal_tables) = {
+        let table = {
             let core = &mut self.core.lock().await;
             let database_core = &mut core.database;
             let tables = &mut database_core.tables;
@@ -1337,7 +1337,24 @@ impl CatalogManager {
                 assert!(res.is_some(), "table_id {} missing", table_id);
             }
             commit_meta!(self, tables)?;
-            (table, internal_tables)
+
+            // FIXME(kwannoel): Propagate version to fe
+            let _version = self
+                .notify_frontend(
+                    Operation::Delete,
+                    Info::RelationGroup(RelationGroup {
+                        relations: vec![Relation {
+                            relation_info: RelationInfo::Table(table.to_owned()).into(),
+                        }]
+                        .into_iter()
+                        .chain(internal_tables.into_iter().map(|internal_table| Relation {
+                            relation_info: RelationInfo::Table(internal_table).into(),
+                        }))
+                        .collect_vec(),
+                    }),
+                )
+                .await;
+            table
         };
 
         {
@@ -1355,22 +1372,6 @@ impl CatalogManager {
             }
         }
 
-        // FIXME(kwannoel): Propagate version to fe
-        let _version = self
-            .notify_frontend(
-                Operation::Delete,
-                Info::RelationGroup(RelationGroup {
-                    relations: vec![Relation {
-                        relation_info: RelationInfo::Table(table.to_owned()).into(),
-                    }]
-                    .into_iter()
-                    .chain(internal_tables.into_iter().map(|internal_table| Relation {
-                        relation_info: RelationInfo::Table(internal_table).into(),
-                    }))
-                    .collect_vec(),
-                }),
-            )
-            .await;
         Ok(true)
     }
 
