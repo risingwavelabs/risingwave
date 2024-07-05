@@ -314,6 +314,7 @@ pub async fn compactor_serve(
 
     // Wait for the shutdown signal.
     shutdown.cancelled().await;
+    // Run shutdown logic.
     meta_client.try_unregister().await;
 }
 

@@ -55,7 +55,6 @@ pub fn frontend(opts: FrontendOpts) -> ! {
 
 pub fn compactor(opts: CompactorOpts) -> ! {
     init_risingwave_logger(LoggerSettings::from_opts(&opts));
-    // TODO(shutdown): pass the shutdown token
     main_okk(|shutdown| risingwave_compactor::start(opts, shutdown));
 }
 
