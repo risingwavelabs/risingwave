@@ -1238,12 +1238,6 @@ mod tests {
         let table_id = TableId::new(0);
         let actors = make_mview_stream_actors(&table_id, 4);
 
-        let StreamingClusterInfo { .. } = services
-            .global_stream_manager
-            .metadata_manager
-            .get_streaming_cluster_info()
-            .await?;
-
         let mut fragments = BTreeMap::default();
 
         fragments.insert(
@@ -1257,7 +1251,6 @@ mod tests {
                 ..Default::default()
             },
         );
-
         services
             .create_materialized_view(table_id, fragments)
             .await?;
