@@ -131,6 +131,7 @@ impl ToBatchPb for BatchKafkaScan {
                 .collect(),
             with_properties: source_catalog.with_properties.clone().into_iter().collect(),
             split: vec![],
+            secret_refs: Default::default(),
         })
     }
 }

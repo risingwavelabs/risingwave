@@ -66,15 +66,24 @@ impl PlanTreeNodeUnary for LogicalChangeLog {
         input_col_change: ColIndexMapping,
     ) -> (Self, ColIndexMapping) {
         let changelog = Self::new(input, self.core.need_op, true);
-        if self.core.need_op {
-            let mut output_vec = input_col_change.to_parts().0.to_vec();
-            let len = input_col_change.to_parts().1;
+
+        let out_col_change = if self.core.need_op {
+            let (mut output_vec, len) = input_col_change.into_parts();
             output_vec.push(Some(len));
-            let out_col_change = ColIndexMapping::new(output_vec, len + 1);
-            (changelog, out_col_change)
+            ColIndexMapping::new(output_vec, len + 1)
         } else {
-            (changelog, input_col_change)
-        }
+            input_col_change
+        };
+
+        let (mut output_vec, len) = out_col_change.into_parts();
+        let out_col_change = if self.core.need_changelog_row_id {
+            output_vec.push(Some(len));
+            ColIndexMapping::new(output_vec, len + 1)
+        } else {
+            ColIndexMapping::new(output_vec, len + 1)
+        };
+
+        (changelog, out_col_change)
     }
 }
 
