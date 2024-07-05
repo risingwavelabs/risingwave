@@ -288,14 +288,12 @@ pub mod marker {
 
     /// A marker type for items of [`ActorId`].
     pub struct Actor;
-
     impl VnodeMappingItem for Actor {
         type Item = ActorId;
     }
 
     /// A marker type for items of [`ParallelUnitId`].
     pub struct ParallelUnit;
-
     impl VnodeMappingItem for ParallelUnit {
         type Item = ParallelUnitId;
     }
@@ -470,7 +468,7 @@ impl ParallelUnitMapping {
 }
 
 impl WorkerSlotMapping {
-    /// Transform this parallel unit mapping to an actor mapping, essentially `transform`.
+    /// Transform this worker slot mapping to an actor mapping, essentially `transform`.
     pub fn to_actor(&self, to_map: &HashMap<WorkerSlotId, ActorId>) -> ActorMapping {
         self.transform(to_map)
     }
@@ -485,13 +483,11 @@ mod tests {
     use super::*;
 
     struct Test;
-
     impl VnodeMappingItem for Test {
         type Item = u32;
     }
 
     struct Test2;
-
     impl VnodeMappingItem for Test2 {
         type Item = u32;
     }
