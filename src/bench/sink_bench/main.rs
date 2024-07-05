@@ -367,9 +367,7 @@ where
         sink_writer_param.vnode_bitmap = Some(Bitmap::ones(1));
     }
     let log_sinker = sink.new_log_sinker(sink_writer_param).await.unwrap();
-    if let Err(e) = log_sinker.consume_log_and_sink(&mut log_reader).await {
-        return Err(e.to_report_string());
-    }
+    log_sinker.consume_log_and_sink(&mut log_reader).await.unwrap();
     Err("Stream closed".to_string())
 }
 
