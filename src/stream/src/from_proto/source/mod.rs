@@ -40,13 +40,10 @@ fn telemetry_source_build(
     source_info: &PbStreamSourceInfo,
     with_props: &BTreeMap<String, String>,
 ) {
-    // let attr = json!({"format": source_info.format().as_str_name(), "encode": source_info.row_encode().as_str_name()}).to_string();
     let mut builder = jsonbb::Builder::<Vec<u8>>::new();
     builder.begin_object();
     builder.add_string("format");
     builder.add_value(jsonbb::ValueRef::String(source_info.format().as_str_name()));
-    builder.end_object();
-
     builder.add_string("encode");
     builder.add_value(jsonbb::ValueRef::String(
         source_info.row_encode().as_str_name(),

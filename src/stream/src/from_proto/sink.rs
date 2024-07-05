@@ -47,8 +47,6 @@ fn telemetry_sink_build(
         builder.begin_object();
         builder.add_string("format");
         builder.add_value(jsonbb::ValueRef::String(f.format.to_string().as_str()));
-        builder.end_object();
-
         builder.add_string("encode");
         builder.add_value(jsonbb::ValueRef::String(f.encode.to_string().as_str()));
         builder.end_object();
