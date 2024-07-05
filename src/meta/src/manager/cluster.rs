@@ -127,7 +127,7 @@ impl ClusterManager {
                     .unwrap_or_default();
             }
 
-            let old_worker_parallelism = worker.worker_node.parallel_units.len();
+            let old_worker_parallelism = worker.worker_node.parallelism();
             if old_worker_parallelism == new_worker_parallelism
                 && worker.worker_node.property == property
             {
@@ -554,6 +554,13 @@ pub struct StreamingClusterInfo {
     pub unschedulable_parallel_units: HashMap<ParallelUnitId, ParallelUnit>,
 }
 
+// Encapsulating the use of parallel_units.
+impl StreamingClusterInfo {
+    pub fn parallelism(&self) -> usize {
+        self.parallel_units.len()
+    }
+}
+
 pub struct ClusterManagerCore {
     env: MetaSrvEnv,
     /// Record for workers in the cluster.
@@ -885,7 +892,7 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(worker_node.parallel_units.len(), fake_parallelism + 4);
+        assert_eq!(worker_node.parallelism(), fake_parallelism + 4);
         assert_cluster_manager(&cluster_manager, parallel_count + 4).await;
 
         // re-register existing worker node with smaller parallelism.
@@ -909,11 +916,11 @@ mod tests {
             .unwrap();
 
         if !env.opts.disable_automatic_parallelism_control {
-            assert_eq!(worker_node.parallel_units.len(), fake_parallelism - 2);
+            assert_eq!(worker_node.parallelism(), fake_parallelism - 2);
             assert_cluster_manager(&cluster_manager, parallel_count - 2).await;
         } else {
             // compatibility mode
-            assert_eq!(worker_node.parallel_units.len(), fake_parallelism + 4);
+            assert_eq!(worker_node.parallelism(), fake_parallelism + 4);
             assert_cluster_manager(&cluster_manager, parallel_count + 4).await;
         }
 

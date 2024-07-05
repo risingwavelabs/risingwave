@@ -712,11 +712,11 @@ impl StageRunner {
 
         if let Some(table_id) = dml_table_id {
             let vnode_mapping = self.get_table_dml_vnode_mapping(&table_id)?;
-            let worker_ids = vnode_mapping.iter_unique().collect_vec();
+            let worker_slot_ids = vnode_mapping.iter_unique().collect_vec();
             let candidates = self
                 .worker_node_manager
                 .manager
-                .get_workers_by_worker_slot_ids(&worker_ids)?;
+                .get_workers_by_worker_slot_ids(&worker_slot_ids)?;
             if candidates.is_empty() {
                 return Err(BatchError::EmptyWorkerNodes.into());
             }

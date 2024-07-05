@@ -65,7 +65,6 @@ use risingwave_pb::meta::add_worker_node_request::Property;
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
 use risingwave_pb::meta::event_log_service_client::EventLogServiceClient;
-use risingwave_pb::meta::get_reschedule_plan_request::PbPolicy;
 use risingwave_pb::meta::heartbeat_request::{extra_info, ExtraInfo};
 use risingwave_pb::meta::heartbeat_service_client::HeartbeatServiceClient;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
@@ -958,19 +957,6 @@ impl MetaClient {
         };
         let resp = self.inner.reschedule(request).await?;
         Ok((resp.success, resp.revision))
-    }
-
-    pub async fn get_reschedule_plan(
-        &self,
-        policy: PbPolicy,
-        revision: u64,
-    ) -> Result<GetReschedulePlanResponse> {
-        let request = GetReschedulePlanRequest {
-            revision,
-            policy: Some(policy),
-        };
-        let resp = self.inner.get_reschedule_plan(request).await?;
-        Ok(resp)
     }
 
     pub async fn risectl_get_pinned_versions_summary(
@@ -2045,7 +2031,6 @@ macro_rules! for_all_meta_rpc {
             ,{ user_client, revoke_privilege, RevokePrivilegeRequest, RevokePrivilegeResponse }
             ,{ scale_client, get_cluster_info, GetClusterInfoRequest, GetClusterInfoResponse }
             ,{ scale_client, reschedule, RescheduleRequest, RescheduleResponse }
-            ,{ scale_client, get_reschedule_plan, GetReschedulePlanRequest, GetReschedulePlanResponse }
             ,{ notification_client, subscribe, SubscribeRequest, Streaming<SubscribeResponse> }
             ,{ backup_client, backup_meta, BackupMetaRequest, BackupMetaResponse }
             ,{ backup_client, get_backup_job_status, GetBackupJobStatusRequest, GetBackupJobStatusResponse }
