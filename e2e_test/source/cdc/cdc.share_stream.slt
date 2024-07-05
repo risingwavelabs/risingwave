@@ -23,7 +23,7 @@ create source mysql_mytest with (
  hostname = '${MYSQL_HOST:localhost}',
  port = '${MYSQL_TCP_PORT:8306}',
  username = 'rwcdc',
- password = ref secret mysql_pwd,
+ password = secret mysql_pwd,
  database.name = 'mytest',
  server.id = '5601'
 );
@@ -213,8 +213,8 @@ create source pg_source with (
  connector = 'postgres-cdc',
  hostname = '${PGHOST:localhost}',
  port = '${PGPORT:5432}',
- username = ref secret pg_username,
- password = ref secret pg_pwd,
+ username = secret pg_username,
+ password = secret pg_pwd,
  database.name = '${PGDATABASE:postgres}',
  slot.name = 'pg_slot'
 );

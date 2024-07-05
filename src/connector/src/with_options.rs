@@ -138,7 +138,7 @@ pub trait WithPropertiesExt: Get + Sized {
 
 impl<T: Get> WithPropertiesExt for T {}
 
-/// Options or properties extracted fro m the `WITH` clause of DDLs.
+/// Options or properties extracted from the `WITH` clause of DDLs.
 #[derive(Default, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct WithOptionsSecResolved {
     inner: BTreeMap<String, String>,

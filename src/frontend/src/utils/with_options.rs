@@ -38,7 +38,7 @@ mod options {
     pub const RETENTION_SECONDS: &str = "retention_seconds";
 }
 
-/// Options or properties extracted fro m the `WITH` clause of DDLs.
+/// Options or properties extracted from the `WITH` clause of DDLs.
 #[derive(Default, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct WithOptions {
     inner: BTreeMap<String, String>,

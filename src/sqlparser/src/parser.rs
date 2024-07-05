@@ -3495,8 +3495,7 @@ impl Parser<'_> {
                     Some('\'') => Ok(Value::SingleQuotedString(w.value)),
                     _ => self.expected_at(checkpoint, "A value")?,
                 },
-                Keyword::REF => {
-                    self.expect_keyword(Keyword::SECRET)?;
+                Keyword::SECRET => {
                     let secret_name = self.parse_object_name()?;
                     let ref_as = if self.parse_keywords(&[Keyword::AS, Keyword::FILE]) {
                         SecretRefAsType::File

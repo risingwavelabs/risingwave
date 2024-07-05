@@ -17,7 +17,7 @@ with (
     force_append_only = 'true',
     location = 's3a://deltalake/deltalake-test',
     s3.access.key = 'hummockadmin',
-    s3.secret.key = ref secret deltalake_s3_secret_key,
+    s3.secret.key = secret deltalake_s3_secret_key,
     s3.endpoint = 'http://127.0.0.1:9301'
 );
 

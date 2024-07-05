@@ -147,7 +147,7 @@ impl CloudService for CloudServiceImpl {
             }
         }
 
-        // XXX: We can't use ref secret in cloud validate source.
+        // XXX: We can't use secret in cloud validate source.
         let source_cfg = WithOptionsSecResolved::without_secrets(source_cfg);
 
         // try fetch kafka metadata, return error message on failure

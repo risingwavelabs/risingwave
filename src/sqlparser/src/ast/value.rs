@@ -115,7 +115,7 @@ impl fmt::Display for Value {
                 Ok(())
             }
             Value::Null => write!(f, "NULL"),
-            Value::Ref(v) => write!(f, "ref secret {}", v),
+            Value::Ref(v) => write!(f, "secret {}", v),
         }
     }
 }
