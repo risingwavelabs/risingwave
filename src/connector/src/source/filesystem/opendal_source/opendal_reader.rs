@@ -13,23 +13,20 @@
 // limitations under the License.
 
 use std::future::IntoFuture;
-use std::sync::Arc;
 
-use arrow_array::RecordBatch;
 use async_trait::async_trait;
 use futures::TryStreamExt;
 use futures_async_stream::try_stream;
 use opendal::Reader;
 use parquet::arrow::ParquetRecordBatchStreamBuilder;
-use risingwave_common::array::{ArrayBuilderImpl, DataChunk, StreamChunk};
-use risingwave_common::types::{Datum, ScalarImpl};
+use risingwave_common::array::StreamChunk;
 use tokio::io::BufReader;
 use tokio_util::io::{ReaderStream, StreamReader};
 
 use super::opendal_enumerator::OpendalEnumerator;
 use super::OpendalSource;
 use crate::error::ConnectorResult;
-use crate::parser::{ByteStreamSourceParserImpl, EncodingProperties, ParserConfig};
+use crate::parser::{ByteStreamSourceParserImpl, EncodingProperties, ParquetParser, ParserConfig};
 use crate::source::filesystem::nd_streaming::need_nd_streaming;
 use crate::source::filesystem::{nd_streaming, OpendalFsSplit};
 use crate::source::{
@@ -93,56 +90,32 @@ impl<Src: OpendalSource> OpendalReader<Src> {
                 .range(split.offset as u64..)
                 .into_future() // Unlike `rustc`, `try_stream` seems require manual `into_future`.
                 .await?;
-            // // If the format is "parquet", there is no need to read it as bytes and parse it into a chunk using a parser.
-            // // Instead, the Parquet file can be directly read as a `RecordBatch`` and converted into a chunk.
-            // // For other formats, the corresponding parser will still be used for parsing.
-            // if let EncodingProperties::Parquet = &self.parser_config.specific.encoding_config {
-            //     let record_batch_stream: std::pin::Pin<Box<parquet::arrow::async_reader::ParquetRecordBatchStream<Reader>>> = Box::pin(
-            //         ParquetRecordBatchStreamBuilder::new(file_reader)
-            //             .await?
-            //             .with_batch_size(self.source_ctx.source_ctrl_opts.chunk_size)
-            //             .build()?,
-            //     );
+            let msg_stream;
 
-            //     #[for_await]
-            //     for record_batch in record_batch_stream {
-            //         let record_batch: RecordBatch = record_batch?;
-            //         // Convert each record batch into a stream chunk according to user defined schema.
-            //         let chunk: StreamChunk = convert_record_batch_to_stream_chunk(
-            //             record_batch,
-            //             self.columns.clone(),
-            //             split.name.clone(),
-            //         )?;
+            if let EncodingProperties::Parquet = &self.parser_config.specific.encoding_config {
+                // If the format is "parquet", use `ParquetParser` to convert `record_batch` into stream chunk.
 
-            //         self.source_ctx
-            //             .metrics
-            //             .partition_input_count
-            //             .with_label_values(&[
-            //                 &actor_id,
-            //                 &source_id,
-            //                 &split_id,
-            //                 &source_name,
-            //                 &fragment_id,
-            //             ])
-            //             .inc_by(chunk.cardinality() as u64);
-            //         yield chunk;
-            //     }
-            // } else {
-            let data_stream = Self::stream_read_object(file_reader, split, self.source_ctx.clone());
+                let record_batch_stream = ParquetRecordBatchStreamBuilder::new(file_reader)
+                    .await?
+                    .with_batch_size(self.source_ctx.source_ctrl_opts.chunk_size)
+                    .build()?;
 
-            let parser =
-                ByteStreamSourceParserImpl::create(self.parser_config.clone(), source_ctx).await?;
-            match parser{
-                ByteStreamSourceParserImpl::Parquet(parquet_parser) => todo!(),
-                _ => todo!(),
-            }
-                
-            }
-            let msg_stream = if need_nd_streaming(&self.parser_config.specific.encoding_config) {
-                parser.into_stream(nd_streaming::split_stream(data_stream))
+                let parquet_parser =
+                    ParquetParser::new(self.parser_config.common.rw_columns.clone(), source_ctx)?;
+                msg_stream = parquet_parser.into_stream(record_batch_stream, split.name.clone());
             } else {
-                parser.into_stream(data_stream)
-            };
+                let data_stream =
+                    Self::stream_read_object(file_reader, split, self.source_ctx.clone());
+
+                let parser =
+                    ByteStreamSourceParserImpl::create(self.parser_config.clone(), source_ctx)
+                        .await?;
+                msg_stream = if need_nd_streaming(&self.parser_config.specific.encoding_config) {
+                    Box::pin(parser.into_stream(nd_streaming::split_stream(data_stream)))
+                } else {
+                    Box::pin(parser.into_stream(data_stream))
+                };
+            }
             #[for_await]
             for msg in msg_stream {
                 let msg = msg?;
@@ -159,7 +132,6 @@ impl<Src: OpendalSource> OpendalReader<Src> {
                     .inc_by(msg.cardinality() as u64);
                 yield msg;
             }
-            // }
         }
     }
 
@@ -224,104 +196,6 @@ impl<Src: OpendalSource> OpendalReader<Src> {
                 .with_label_values(&[&actor_id, &source_id, &split_id, &source_name, &fragment_id])
                 .inc_by(batch_size as u64);
             yield batch;
-        }
-    }
-}
-
-/// The function `convert_record_batch_to_stream_chunk` is designed to transform the given `RecordBatch` into a `StreamChunk`.
-///
-/// For each column in the source column:
-/// - If the column's schema matches a column in the `RecordBatch` (both the data type and column name are the same),
-///   the corresponding records are converted into a column of the `StreamChunk`.
-/// - If the column's schema does not match, null values are inserted.
-/// - Hidden columns are handled separately by filling in the appropriate fields to ensure the data chunk maintains the correct format.
-/// - If a column in the Parquet file does not exist in the source schema, it is skipped.
-///
-/// # Arguments
-///
-/// * `record_batch` - The `RecordBatch` to be converted into a `StreamChunk`.
-/// * `source_columns` - User defined source schema.
-///
-/// # Returns
-///
-/// A `StreamChunk` containing the converted data from the `RecordBatch`.
-
-// The hidden columns that must be included here are _rw_file and _rw_offset.
-// Depending on whether the user specifies a primary key (pk), there may be an additional hidden column row_id.
-// Therefore, the maximum number of hidden columns is three.
-const MAX_HIDDEN_COLUMN_NUMS: usize = 3;
-fn convert_record_batch_to_stream_chunk(
-    record_batch: RecordBatch,
-    source_columns: Option<Vec<Column>>,
-    file_name: String,
-) -> Result<StreamChunk, crate::error::ConnectorError> {
-    match source_columns {
-        Some(source_columns) => {
-            let size = source_columns.len();
-            let mut chunk_columns =
-                Vec::with_capacity(source_columns.len() + MAX_HIDDEN_COLUMN_NUMS);
-            for source_column in source_columns {
-                if let Some(parquet_column) = record_batch.column_by_name(&source_column.name) {
-                    let converted_arrow_data_type =
-                        arrow_schema::DataType::try_from(&source_column.data_type)?;
-
-                    if &converted_arrow_data_type == parquet_column.data_type() {
-                        let column = Arc::new(parquet_column.try_into()?);
-                        chunk_columns.push(column);
-                    } else {
-                        // data type mismatch, this column is set to null.
-                        let mut array_builder =
-                            ArrayBuilderImpl::with_type(size, source_column.data_type);
-
-                        array_builder.append_n_null(record_batch.num_rows());
-                        let res = array_builder.finish();
-                        let column = Arc::new(res);
-                        chunk_columns.push(column);
-                    }
-                } else if !source_column.is_visible {
-                    // For hidden columns in the file source:
-                    // - The `row_id` column, which will be filled by the row ID generator, is left as null.
-                    // - The `_rw_file` column is filled with the object name.
-                    // - The `_rw_offset` column is filled with the offset.
-                    let mut array_builder =
-                        ArrayBuilderImpl::with_type(size, source_column.data_type);
-                    // Hidden column naming rules refer to https://github.com/risingwavelabs/risingwave/blob/3736982d6fe648ad32b50e1d3ce97119edcab1a6/src/connector/src/parser/additional_columns.rs#L289
-                    let datum: Datum = if source_column.name.ends_with("file") {
-                        Some(ScalarImpl::Utf8(file_name.clone().into()))
-                    } else if source_column.name.ends_with("offset") {
-                        // `_rw_offset` is not used.
-                        Some(ScalarImpl::Utf8("0".into()))
-                    } else {
-                        // row_id column.
-                        None
-                    };
-
-                    array_builder.append_n(record_batch.num_rows(), datum);
-                    let res = array_builder.finish();
-                    let column = Arc::new(res);
-                    chunk_columns.push(column);
-                } else {
-                    // For columns defined in the source schema but not present in the Parquet file, null values are filled in.
-                    let mut array_builder =
-                        ArrayBuilderImpl::with_type(size, source_column.data_type);
-
-                    array_builder.append_n_null(record_batch.num_rows());
-                    let res = array_builder.finish();
-                    let column = Arc::new(res);
-                    chunk_columns.push(column);
-                }
-            }
-
-            let data_chunk = DataChunk::new(chunk_columns.clone(), record_batch.num_rows());
-            Ok(data_chunk.into())
-        }
-        None => {
-            let mut chunk_columns = Vec::with_capacity(record_batch.num_columns());
-            for array in record_batch.columns() {
-                let column = Arc::new(array.try_into()?);
-                chunk_columns.push(column);
-            }
-            Ok(DataChunk::new(chunk_columns, record_batch.num_rows()).into())
         }
     }
 }

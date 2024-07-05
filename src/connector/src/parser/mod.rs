@@ -24,7 +24,7 @@ pub use debezium::*;
 use futures::{Future, TryFutureExt};
 use futures_async_stream::try_stream;
 pub use json_parser::*;
-use parquet_parser::ParquetParser;
+pub use parquet_parser::ParquetParser;
 pub use protobuf::*;
 use risingwave_common::array::{ArrayBuilderImpl, Op, StreamChunk};
 use risingwave_common::bail;
@@ -74,7 +74,7 @@ mod debezium;
 mod json_parser;
 mod maxwell;
 mod mysql;
-mod parquet_parser;
+pub mod parquet_parser;
 pub mod plain_parser;
 mod postgres;
 mod protobuf;
@@ -907,7 +907,6 @@ impl AccessBuilderImpl {
 pub enum ByteStreamSourceParserImpl {
     Csv(CsvParser),
     Json(JsonParser),
-    Parquet(ParquetParser),
     Debezium(DebeziumParser),
     Plain(PlainParser),
     Upsert(UpsertParser),
@@ -925,7 +924,6 @@ impl ByteStreamSourceParserImpl {
         let stream = match self {
             Self::Csv(parser) => parser.into_stream(msg_stream),
             Self::Json(parser) => parser.into_stream(msg_stream),
-            Self::Parquet(parser) => parser.into_stream(msg_stream),
             Self::Debezium(parser) => parser.into_stream(msg_stream),
             Self::DebeziumMongoJson(parser) => parser.into_stream(msg_stream),
             Self::Maxwell(parser) => parser.into_stream(msg_stream),
@@ -948,9 +946,6 @@ impl ByteStreamSourceParserImpl {
         match (protocol, encode) {
             (ProtocolProperties::Plain, EncodingProperties::Csv(config)) => {
                 CsvParser::new(rw_columns, *config, source_ctx).map(Self::Csv)
-            }
-            (ProtocolProperties::Plain, EncodingProperties::Parquet) => {
-                ParquetParser::new(rw_columns, *config, source_ctx).map(Self::Parquet)
             }
             (ProtocolProperties::DebeziumMongo, EncodingProperties::Json(_)) => {
                 DebeziumMongoJsonParser::new(rw_columns, source_ctx).map(Self::DebeziumMongoJson)
