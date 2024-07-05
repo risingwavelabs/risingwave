@@ -86,7 +86,7 @@ mod upsert_parser;
 mod util;
 
 pub use debezium::DEBEZIUM_IGNORE_KEY;
-use risingwave_common::buffer::BitmapBuilder;
+use risingwave_common::bitmap::BitmapBuilder;
 pub use unified::{AccessError, AccessResult};
 
 /// A builder for building a [`StreamChunk`] from [`SourceColumnDesc`].

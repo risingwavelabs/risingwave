@@ -14,7 +14,7 @@
 
 mod managed_lru;
 pub use managed_lru::*;
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::util::iter_util::ZipEqFast;
 
 /// Returns whether we're unsure about the fressness of the cache after the scaling from the
