@@ -2001,6 +2001,11 @@ impl DdlController {
             .generate_graph(&self.env, stream_job, expr_context)
             .await?;
 
+        // general table job type does not have upstream job, so the dispatchers should be empty
+        if matches!(table_job_type, TableJobType::General) {
+            assert!(dispatchers.is_empty());
+        }
+
         // 3. Build the table fragments structure that will be persisted in the stream manager, and
         // the context that contains all information needed for building the actors on the compute
         // nodes.
