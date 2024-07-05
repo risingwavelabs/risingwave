@@ -806,7 +806,7 @@ impl CatalogManager {
     ) -> MetaResult<()> {
         match stream_job {
             StreamingJob::MaterializedView(table) => {
-                self.start_create_table_procedure(table, internal_tables)
+                self.start_create_materialized_view_procedure(table, internal_tables)
                     .await
             }
             StreamingJob::Sink(sink, _) => self.start_create_sink_procedure(sink).await,
@@ -818,8 +818,7 @@ impl CatalogManager {
                     self.start_create_table_procedure_with_source(source, table)
                         .await
                 } else {
-                    self.start_create_table_procedure(table, internal_tables)
-                        .await
+                    self.start_create_table_procedure(table).await
                 }
             }
             StreamingJob::Source(source) => self.start_create_source_procedure(source).await,
@@ -872,8 +871,37 @@ impl CatalogManager {
             .await;
     }
 
-    /// This is used for both `CREATE TABLE` and `CREATE MATERIALIZED VIEW`.
-    pub async fn start_create_table_procedure(
+    /// This is used for both `CREATE TABLE`
+    pub async fn start_create_table_procedure(&self, table: &Table) -> MetaResult<()> {
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        let user_core = &mut core.user;
+        database_core.ensure_database_id(table.database_id)?;
+        database_core.ensure_schema_id(table.schema_id)?;
+        for dependent_id in &table.dependent_relations {
+            database_core.ensure_table_view_or_source_id(dependent_id)?;
+        }
+        #[cfg(not(test))]
+        user_core.ensure_user_id(table.owner)?;
+        let key = (table.database_id, table.schema_id, table.name.clone());
+
+        database_core.check_relation_name_duplicated(&key)?;
+
+        if database_core.has_in_progress_creation(&key) {
+            bail!("table is in creating procedure");
+        } else {
+            database_core.mark_creating(&key);
+            database_core.mark_creating_streaming_job(table.id, key);
+            for &dependent_relation_id in &table.dependent_relations {
+                database_core.increase_relation_ref_count(dependent_relation_id);
+            }
+            user_core.increase_ref(table.owner);
+            Ok(())
+        }
+    }
+
+    /// This is used for `CREATE MATERIALIZED VIEW`.
+    pub async fn start_create_materialized_view_procedure(
         &self,
         table: &Table,
         internal_tables: Vec<Table>,
@@ -897,8 +925,8 @@ impl CatalogManager {
             !tables.contains_key(&table.id),
             "table must not already exist in meta"
         );
-        for table in internal_tables {
-            tables.insert(table.id, table);
+        for table in &internal_tables {
+            tables.insert(table.id, table.clone());
         }
         tables.insert(table.id, table.clone());
         commit_meta!(self, tables)?;
@@ -907,6 +935,21 @@ impl CatalogManager {
             database_core.increase_relation_ref_count(dependent_relation_id);
         }
         user_core.increase_ref(table.owner);
+        let _version = self
+            .notify_frontend(
+                Operation::Add,
+                Info::RelationGroup(RelationGroup {
+                    relations: vec![Relation {
+                        relation_info: RelationInfo::Table(table.to_owned()).into(),
+                    }]
+                    .into_iter()
+                    .chain(internal_tables.into_iter().map(|internal_table| Relation {
+                        relation_info: RelationInfo::Table(internal_table).into(),
+                    }))
+                    .collect_vec(),
+                }),
+            )
+            .await;
         Ok(())
     }
 
@@ -1110,6 +1153,18 @@ impl CatalogManager {
                 user_core.decrease_ref(table.owner);
             }
         }
+        // Notify frontend of cleaned tables.
+        let relations = tables_to_clean
+            .into_iter()
+            .map(|table| Relation {
+                relation_info: RelationInfo::Table(table).into(),
+            })
+            .collect_vec();
+        self.notify_frontend(
+            Operation::Delete,
+            Info::RelationGroup(RelationGroup { relations }),
+        )
+        .await;
         Ok(())
     }
 
@@ -1128,7 +1183,7 @@ impl CatalogManager {
         let version = match stream_job {
             StreamingJob::MaterializedView(table) => {
                 creating_internal_table_ids.push(table.id);
-                self.finish_create_table_procedure(internal_tables, table)
+                self.finish_create_materialized_view_procedure(internal_tables, table)
                     .await?
             }
             StreamingJob::Sink(sink, target_table) => {
@@ -1174,7 +1229,7 @@ impl CatalogManager {
         Ok(version)
     }
 
-    /// This is used for both `CREATE TABLE` and `CREATE MATERIALIZED VIEW`.
+    /// This is used for `CREATE TABLE`.
     pub async fn finish_create_table_procedure(
         &self,
         mut internal_tables: Vec<Table>,
@@ -1182,11 +1237,17 @@ impl CatalogManager {
     ) -> MetaResult<NotificationVersion> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
-        let tables = &mut database_core.tables;
-        if cfg!(not(test)) {
-            Self::check_table_creating(tables, &table)?;
-        }
-        let mut tables = BTreeMapTransaction::new(tables);
+        let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
+        let key = (table.database_id, table.schema_id, table.name.clone());
+        assert!(
+            !tables.contains_key(&table.id)
+                && database_core.in_progress_creation_tracker.contains(&key),
+            "table must be in creating procedure"
+        );
+        database_core.in_progress_creation_tracker.remove(&key);
+        database_core
+            .in_progress_creation_streaming_job
+            .remove(&table.id);
 
         table.stream_job_status = PbStreamJobStatus::Created.into();
         tables.insert(table.id, table.clone());
@@ -1216,71 +1277,150 @@ impl CatalogManager {
         Ok(version)
     }
 
-    /// Used to cleanup states in stream manager.
+    /// This is used for `CREATE MATERIALIZED VIEW`.
+    pub async fn finish_create_materialized_view_procedure(
+        &self,
+        mut internal_tables: Vec<Table>,
+        mut table: Table,
+    ) -> MetaResult<NotificationVersion> {
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        let tables = &mut database_core.tables;
+        if cfg!(not(test)) {
+            Self::check_table_creating(tables, &table)?;
+        }
+        let mut tables = BTreeMapTransaction::new(tables);
+
+        table.stream_job_status = PbStreamJobStatus::Created.into();
+        tables.insert(table.id, table.clone());
+        for table in &mut internal_tables {
+            table.stream_job_status = PbStreamJobStatus::Created.into();
+            tables.insert(table.id, table.clone());
+        }
+        commit_meta!(self, tables)?;
+
+        tracing::debug!(id = ?table.id, "notifying frontend");
+        let version = self
+            .notify_frontend(
+                Operation::Update,
+                Info::RelationGroup(RelationGroup {
+                    relations: vec![Relation {
+                        relation_info: RelationInfo::Table(table.to_owned()).into(),
+                    }]
+                    .into_iter()
+                    .chain(internal_tables.into_iter().map(|internal_table| Relation {
+                        relation_info: RelationInfo::Table(internal_table).into(),
+                    }))
+                    .collect_vec(),
+                }),
+            )
+            .await;
+
+        Ok(version)
+    }
+
+    /// Used to cleanup `CREATE MATERIALIZED VIEW` state in stream manager.
     /// It is required because failure may not necessarily happen in barrier,
     /// e.g. when cordon nodes.
     /// and we still need some way to cleanup the state.
     ///
     /// Returns false if `table_id` is not found.
-    pub async fn cancel_create_table_procedure(
+    pub async fn cancel_create_materialized_view_procedure(
         &self,
         table_id: TableId,
         internal_table_ids: Vec<TableId>,
     ) -> MetaResult<bool> {
-        let table = {
-            let core = &mut self.core.lock().await;
-            let database_core = &mut core.database;
-            let tables = &mut database_core.tables;
-            let Some(table) = tables.get(&table_id).cloned() else {
-                tracing::warn!(
-                    "table_id {} missing when attempting to cancel job, could be cleaned on recovery",
-                    table_id
-                );
-                return Ok(false);
-            };
-            // `Unspecified` maps to Created state, due to backwards compatibility.
-            // `Created` states should not be cancelled.
-            if table
-                .get_stream_job_status()
-                .unwrap_or(StreamJobStatus::Created)
-                != StreamJobStatus::Creating
-            {
-                return Err(MetaError::invalid_parameter(format!(
-                    "table is not in creating state id={:#?}",
-                    table_id
-                )));
-            }
-
-            tracing::trace!("cleanup tables for {}", table.id);
-            let mut table_ids = vec![table.id];
-            table_ids.extend(internal_table_ids);
-
-            let tables = &mut database_core.tables;
-            let mut tables = BTreeMapTransaction::new(tables);
-            for table_id in table_ids {
-                let res = tables.remove(table_id);
-                assert!(res.is_some(), "table_id {} missing", table_id);
-            }
-            commit_meta!(self, tables)?;
-            table
+        let core = &mut self.core.lock().await;
+        let database_core = &mut core.database;
+        let tables = &mut database_core.tables;
+        let Some(table) = tables.get(&table_id).cloned() else {
+            tracing::warn!(
+                "table_id {} missing when attempting to cancel job, could be cleaned on recovery",
+                table_id
+            );
+            return Ok(false);
         };
-
-        {
-            let core = &mut self.core.lock().await;
-            {
-                let user_core = &mut core.user;
-                user_core.decrease_ref(table.owner);
-            }
-
-            {
-                let database_core = &mut core.database;
-                for &dependent_relation_id in &table.dependent_relations {
-                    database_core.decrease_relation_ref_count(dependent_relation_id);
-                }
+        let mut internal_tables = vec![];
+        for internal_table_id in &internal_table_ids {
+            if let Some(table) = tables.get(internal_table_id) {
+                internal_tables.push(table.clone());
             }
         }
 
+        // `Unspecified` maps to Created state, due to backwards compatibility.
+        // `Created` states should not be cancelled.
+        if table
+            .get_stream_job_status()
+            .unwrap_or(StreamJobStatus::Created)
+            != StreamJobStatus::Creating
+        {
+            return Err(MetaError::invalid_parameter(format!(
+                "table is not in creating state id={:#?}",
+                table_id
+            )));
+        }
+
+        tracing::trace!("cleanup tables for {}", table.id);
+        let mut table_ids = vec![table.id];
+        table_ids.extend(internal_table_ids);
+
+        let tables = &mut database_core.tables;
+        let mut tables = BTreeMapTransaction::new(tables);
+        for table_id in table_ids {
+            let res = tables.remove(table_id);
+            assert!(res.is_some(), "table_id {} missing", table_id);
+        }
+        commit_meta!(self, tables)?;
+
+        {
+            let user_core = &mut core.user;
+            user_core.decrease_ref(table.owner);
+        }
+
+        {
+            let database_core = &mut core.database;
+            for &dependent_relation_id in &table.dependent_relations {
+                database_core.decrease_relation_ref_count(dependent_relation_id);
+            }
+        }
+
+        // FIXME(kwannoel): Propagate version to fe
+        let _version = self
+            .notify_frontend(
+                Operation::Delete,
+                Info::RelationGroup(RelationGroup {
+                    relations: vec![Relation {
+                        relation_info: RelationInfo::Table(table.to_owned()).into(),
+                    }]
+                    .into_iter()
+                    .chain(internal_tables.into_iter().map(|internal_table| Relation {
+                        relation_info: RelationInfo::Table(internal_table).into(),
+                    }))
+                    .collect_vec(),
+                }),
+            )
+            .await;
+
         Ok(true)
+    }
+
+    /// Used to cleanup `CREATE TABLE` state in stream manager.
+    pub async fn cancel_create_table_procedure(&self, table: &Table) {
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        let user_core = &mut core.user;
+        let key = (table.database_id, table.schema_id, table.name.clone());
+        assert!(
+            !database_core.tables.contains_key(&table.id)
+                && database_core.has_in_progress_creation(&key),
+            "table must be in creating procedure"
+        );
+        database_core.unmark_creating(&key);
+        database_core.unmark_creating_streaming_job(table.id);
+        for &dependent_relation_id in &table.dependent_relations {
+            database_core.decrease_relation_ref_count(dependent_relation_id);
+        }
+        user_core.decrease_ref(table.owner);
     }
 
     /// return id of streaming jobs in the database which need to be dropped by stream manager.

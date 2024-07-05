@@ -1490,14 +1490,13 @@ impl DdlController {
     ) -> MetaResult<NonZeroUsize> {
         const MAX_PARALLELISM: NonZeroUsize = NonZeroUsize::new(VirtualNode::COUNT).unwrap();
 
-        if cluster_info.parallel_units.is_empty() {
+        if cluster_info.parallelism() == 0 {
             return Err(MetaError::unavailable(
                 "No available parallel units to schedule",
             ));
         }
 
-        let available_parallel_units =
-            NonZeroUsize::new(cluster_info.parallel_units.len()).unwrap();
+        let available_parallel_units = NonZeroUsize::new(cluster_info.parallelism()).unwrap();
 
         // Use configured parallel units if no default parallelism is specified.
         let parallelism =
@@ -1702,7 +1701,10 @@ impl DdlController {
                 // barrier manager will do the cleanup.
                 let result = mgr
                     .catalog_manager
-                    .cancel_create_table_procedure(table.id, creating_internal_table_ids.clone())
+                    .cancel_create_materialized_view_procedure(
+                        table.id,
+                        creating_internal_table_ids.clone(),
+                    )
                     .await;
                 creating_internal_table_ids.push(table.id);
                 if let Err(e) = result {
@@ -1723,19 +1725,9 @@ impl DdlController {
                         .cancel_create_table_procedure_with_source(source, table)
                         .await?;
                 } else {
-                    let result = mgr
-                        .catalog_manager
-                        .cancel_create_table_procedure(
-                            table.id,
-                            creating_internal_table_ids.clone(),
-                        )
+                    mgr.catalog_manager
+                        .cancel_create_table_procedure(table)
                         .await;
-                    if let Err(e) = result {
-                        tracing::warn!(
-                            error = %e.as_report(),
-                            "Failed to cancel create table procedure, perhaps barrier manager has already cleaned it."
-                        );
-                    }
                 }
                 creating_internal_table_ids.push(table.id);
             }

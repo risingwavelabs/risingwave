@@ -1358,7 +1358,7 @@ mod tests {
 
         // Check table exists.
         let (table, _) = catalog_reader
-            .get_table_by_name(DEFAULT_DATABASE_NAME, schema_path, "t")
+            .get_created_table_by_name(DEFAULT_DATABASE_NAME, schema_path, "t")
             .unwrap();
         assert_eq!(table.name(), "t");
 

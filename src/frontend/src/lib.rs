@@ -61,6 +61,7 @@ pub mod session;
 mod stream_fragmenter;
 use risingwave_common::config::{MetricLevel, OverrideConfig};
 use risingwave_common::util::meta_addr::MetaAddressStrategy;
+use risingwave_common::util::tokio_util::sync::CancellationToken;
 pub use stream_fragmenter::build_graph;
 mod utils;
 pub use utils::{explain_stream_graph, WithOptions, WithOptionsSecResolved};
@@ -169,12 +170,15 @@ use std::pin::Pin;
 use pgwire::pg_protocol::TlsConfig;
 
 /// Start frontend
-pub fn start(opts: FrontendOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+pub fn start(
+    opts: FrontendOpts,
+    shutdown: CancellationToken,
+) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     // WARNING: don't change the function signature. Making it `async fn` will cause
     // slow compile in release mode.
     Box::pin(async move {
         let listen_addr = opts.listen_addr.clone();
-        let session_mgr = Arc::new(SessionManagerImpl::new(opts).await.unwrap());
+        let session_mgr = SessionManagerImpl::new(opts).await.unwrap();
         let redact_sql_option_keywords = Arc::new(
             session_mgr
                 .env()
@@ -184,11 +188,13 @@ pub fn start(opts: FrontendOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 .map(|s| s.to_lowercase())
                 .collect::<HashSet<_>>(),
         );
+
         pg_serve(
             &listen_addr,
             session_mgr,
             TlsConfig::new_default(),
             Some(redact_sql_option_keywords),
+            shutdown,
         )
         .await
         .unwrap()

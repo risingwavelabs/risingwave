@@ -38,6 +38,7 @@ use risingwave_common::config::{AsyncStackTraceOption, MetricLevel, OverrideConf
 use risingwave_common::util::meta_addr::MetaAddressStrategy;
 use risingwave_common::util::resource_util::cpu::total_cpu_available;
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
+use risingwave_common::util::tokio_util::sync::CancellationToken;
 use serde::{Deserialize, Serialize};
 
 /// If `total_memory_bytes` is not specified, the default memory limit will be set to
@@ -202,7 +203,10 @@ fn validate_opts(opts: &ComputeNodeOpts) {
 use crate::server::compute_node_serve;
 
 /// Start compute node
-pub fn start(opts: ComputeNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+pub fn start(
+    opts: ComputeNodeOpts,
+    shutdown: CancellationToken,
+) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     // WARNING: don't change the function signature. Making it `async fn` will cause
     // slow compile in release mode.
     Box::pin(async move {
@@ -222,14 +226,7 @@ pub fn start(opts: ComputeNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> 
             .unwrap();
         tracing::info!("advertise addr is {}", advertise_addr);
 
-        let (join_handle_vec, _shutdown_send) =
-            compute_node_serve(listen_addr, advertise_addr, opts).await;
-
-        tracing::info!("Server listening at {}", listen_addr);
-
-        for join_handle in join_handle_vec {
-            join_handle.await.unwrap();
-        }
+        compute_node_serve(listen_addr, advertise_addr, opts, shutdown).await;
     })
 }
 

@@ -97,7 +97,7 @@ impl DatabaseCatalog {
     pub fn find_schema_containing_table_id(&self, table_id: &TableId) -> Option<&SchemaCatalog> {
         self.schema_by_name
             .values()
-            .find(|schema| schema.get_table_by_id(table_id).is_some())
+            .find(|schema| schema.get_created_table_by_id(table_id).is_some())
     }
 
     pub fn get_grant_object_by_oid(&self, oid: u32) -> Option<Object> {

@@ -479,6 +479,7 @@ pub async fn start_service_as_election_leader(
     )
     .await
     .unwrap();
+    let object_store_media_type = hummock_manager.object_store_media_type();
 
     let meta_member_srv = MetaMemberServiceImpl::new(match election_client.clone() {
         None => Either::Right(address_info.clone()),
@@ -749,6 +750,7 @@ pub async fn start_service_as_election_leader(
         Arc::new(MetaReportCreator::new(
             metadata_manager.clone(),
             env.meta_store().backend(),
+            object_store_media_type,
         )),
     );
 

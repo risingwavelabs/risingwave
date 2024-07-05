@@ -674,7 +674,7 @@ impl StageRunner {
     fn get_fragment_id(&self, table_id: &TableId) -> SchedulerResult<FragmentId> {
         self.catalog_reader
             .read_guard()
-            .get_table_by_id(table_id)
+            .get_any_table_by_id(table_id)
             .map(|table| table.fragment_id)
             .map_err(|e| SchedulerError::Internal(anyhow!(e)))
     }
@@ -687,7 +687,7 @@ impl StageRunner {
         let guard = self.catalog_reader.read_guard();
 
         let table = guard
-            .get_table_by_id(table_id)
+            .get_any_table_by_id(table_id)
             .map_err(|e| SchedulerError::Internal(anyhow!(e)))?;
 
         let fragment_id = match table.dml_fragment_id.as_ref() {
@@ -712,11 +712,11 @@ impl StageRunner {
 
         if let Some(table_id) = dml_table_id {
             let vnode_mapping = self.get_table_dml_vnode_mapping(&table_id)?;
-            let worker_ids = vnode_mapping.iter_unique().collect_vec();
+            let worker_slot_ids = vnode_mapping.iter_unique().collect_vec();
             let candidates = self
                 .worker_node_manager
                 .manager
-                .get_workers_by_worker_slot_ids(&worker_ids)?;
+                .get_workers_by_worker_slot_ids(&worker_slot_ids)?;
             if candidates.is_empty() {
                 return Err(BatchError::EmptyWorkerNodes.into());
             }

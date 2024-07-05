@@ -175,7 +175,10 @@ pub enum MetaBackend {
     #[default]
     Mem,
     Etcd,
-    Sql,
+    Sql, // keep for backward compatibility
+    Sqlite,
+    Postgres,
+    Mysql,
 }
 
 /// The section `[meta]` in `risingwave.toml`.
