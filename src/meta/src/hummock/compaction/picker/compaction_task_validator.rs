@@ -189,6 +189,12 @@ impl CompactionTaskValidationRule for BaseCompactionTaskValidationRule {
             return false;
         }
 
+        // TEST: If the number of levels is less than the number of levels that can be compacted
+        if input.input_levels.len() < self.config.level0_sub_level_compact_level_count as usize {
+            stats.skip_by_count_limit += 1;
+            return false;
+        }
+
         true
     }
 }
