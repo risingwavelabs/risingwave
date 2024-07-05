@@ -11007,7 +11007,6 @@ dependencies = [
  "bincode 1.3.3",
  "parking_lot 0.12.1",
  "prost 0.12.1",
- "risingwave_common_estimate_size",
  "risingwave_pb",
  "serde",
  "thiserror",
