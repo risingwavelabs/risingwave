@@ -217,6 +217,7 @@ impl SinkFormatDesc {
             encode: encode.into(),
             options,
             key_encode,
+            secret_refs: Default::default(),
         }
     }
 }
@@ -354,7 +355,7 @@ pub struct SinkCatalog {
     pub create_type: CreateType,
 
     /// The secret reference for the sink, mapping from property name to secret id.
-    pub secret_ref: BTreeMap<String, PbSecretRef>,
+    pub secret_refs: BTreeMap<String, PbSecretRef>,
 }
 
 impl SinkCatalog {
@@ -396,7 +397,7 @@ impl SinkCatalog {
             created_at_cluster_version: self.created_at_cluster_version.clone(),
             initialized_at_cluster_version: self.initialized_at_cluster_version.clone(),
             create_type: self.create_type.to_proto() as i32,
-            secret_ref: self.secret_ref.clone(),
+            secret_refs: self.secret_refs.clone(),
         }
     }
 
@@ -490,7 +491,7 @@ impl From<PbSink> for SinkCatalog {
             initialized_at_cluster_version: pb.initialized_at_cluster_version,
             created_at_cluster_version: pb.created_at_cluster_version,
             create_type: CreateType::from_proto(create_type),
-            secret_ref: pb.secret_ref,
+            secret_refs: pb.secret_refs,
         }
     }
 }

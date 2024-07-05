@@ -321,6 +321,20 @@ enum HummockCommands {
         #[clap(short, long = "use-new-object-prefix-strategy", default_value = "true")]
         use_new_object_prefix_strategy: bool,
     },
+    TieredCacheTracing {
+        #[clap(long)]
+        enable: bool,
+        #[clap(long)]
+        record_hybrid_insert_threshold_ms: Option<u32>,
+        #[clap(long)]
+        record_hybrid_get_threshold_ms: Option<u32>,
+        #[clap(long)]
+        record_hybrid_obtain_threshold_ms: Option<u32>,
+        #[clap(long)]
+        record_hybrid_remove_threshold_ms: Option<u32>,
+        #[clap(long)]
+        record_hybrid_fetch_threshold_ms: Option<u32>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -425,15 +439,6 @@ pub struct ScaleVerticalCommands {
 
 #[derive(Subcommand, Debug)]
 enum ScaleCommands {
-    /// Scale the compute nodes horizontally, alias of `horizon`
-    Resize(ScaleHorizonCommands),
-
-    /// Scale the compute nodes horizontally
-    Horizon(ScaleHorizonCommands),
-
-    /// Scale the compute nodes vertically
-    Vertical(ScaleVerticalCommands),
-
     /// Mark a compute node as unschedulable
     #[clap(verbatim_doc_comment)]
     Cordon {
@@ -460,6 +465,7 @@ enum ScaleCommands {
 }
 
 #[derive(Subcommand)]
+#[allow(clippy::large_enum_variant)]
 enum MetaCommands {
     /// pause the stream graph
     Pause,
@@ -810,6 +816,25 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             )
             .await?;
         }
+        Commands::Hummock(HummockCommands::TieredCacheTracing {
+            enable,
+            record_hybrid_insert_threshold_ms,
+            record_hybrid_get_threshold_ms,
+            record_hybrid_obtain_threshold_ms,
+            record_hybrid_remove_threshold_ms,
+            record_hybrid_fetch_threshold_ms,
+        }) => {
+            cmd_impl::hummock::tiered_cache_tracing(
+                context,
+                enable,
+                record_hybrid_insert_threshold_ms,
+                record_hybrid_get_threshold_ms,
+                record_hybrid_obtain_threshold_ms,
+                record_hybrid_remove_threshold_ms,
+                record_hybrid_fetch_threshold_ms,
+            )
+            .await?
+        }
         Commands::Table(TableCommands::Scan {
             mv_name,
             data_dir,
@@ -907,13 +932,6 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         }
         Commands::Profile(ProfileCommands::Heap { dir }) => {
             cmd_impl::profile::heap_profile(context, dir).await?
-        }
-        Commands::Scale(ScaleCommands::Horizon(resize))
-        | Commands::Scale(ScaleCommands::Resize(resize)) => {
-            cmd_impl::scale::resize(context, resize.into()).await?
-        }
-        Commands::Scale(ScaleCommands::Vertical(resize)) => {
-            cmd_impl::scale::resize(context, resize.into()).await?
         }
         Commands::Scale(ScaleCommands::Cordon { workers }) => {
             cmd_impl::scale::update_schedulability(context, workers, Schedulability::Unschedulable)

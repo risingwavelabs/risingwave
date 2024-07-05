@@ -2881,6 +2881,26 @@ def section_hummock_tiered_cache(outer_panels):
                         ),
                     ],
                 ),
+                panels.timeseries_count(
+                    "Recent Filter Size",
+                    "Item numbers of the recent filter.",
+                    [
+                        panels.target(
+                            f"sum({metric('recent_filter_items')}) by ({NODE_LABEL})",
+                            "items @ {{%s}}" % NODE_LABEL,
+                        ),
+                    ],
+                ),
+                panels.timeseries_ops(
+                    "Recent Filter Ops",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('recent_filter_ops')}[$__rate_interval])) by (op, {NODE_LABEL})",
+                            "recent filter {{op}} @ {{%s}}" % NODE_LABEL,
+                        ),
+                    ],
+                ),
             ],
         )
     ]

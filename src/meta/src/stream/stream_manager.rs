@@ -656,7 +656,7 @@ impl GlobalStreamManager {
                     )))?;
                 }
                 if let MetadataManager::V1(mgr) = &self.metadata_manager {
-                    mgr.catalog_manager.cancel_create_table_procedure(id.into(), fragment.internal_table_ids()).await?;
+                    mgr.catalog_manager.cancel_create_materialized_view_procedure(id.into(), fragment.internal_table_ids()).await?;
                 }
 
                 self.barrier_scheduler
@@ -1128,7 +1128,7 @@ mod tests {
             };
 
             self.catalog_manager
-                .start_create_table_procedure(&table, vec![])
+                .start_create_table_procedure(&table)
                 .await?;
             self.fragment_manager
                 .start_create_table_fragments(table_fragments.clone())
@@ -1137,7 +1137,7 @@ mod tests {
                 .create_streaming_job(table_fragments, ctx)
                 .await?;
             self.catalog_manager
-                .finish_create_table_procedure(vec![], table)
+                .finish_create_materialized_view_procedure(vec![], table)
                 .await?;
             Ok(())
         }
