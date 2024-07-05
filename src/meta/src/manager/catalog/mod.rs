@@ -1246,9 +1246,18 @@ impl CatalogManager {
     ) -> MetaResult<()> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
-        let tables = &mut database_core.tables;
         let version = try {
-            let mut tables = BTreeMapTransaction::new(tables);
+            let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
+            let key = (table.database_id, table.schema_id, table.name.clone());
+            assert!(
+                !tables.contains_key(&table.id)
+                    && database_core.in_progress_creation_tracker.contains(&key),
+                "table must be in creating procedure"
+            );
+            database_core.in_progress_creation_tracker.remove(&key);
+            database_core
+                .in_progress_creation_streaming_job
+                .remove(&table.id);
 
             table.stream_job_status = PbStreamJobStatus::Created.into();
             tables.insert(table.id, table.clone());
