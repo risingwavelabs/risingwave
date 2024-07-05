@@ -18,6 +18,7 @@ use std::num::NonZeroU32;
 use risingwave_connector::source::kafka::private_link::{
     insert_privatelink_broker_rewrite_map, CONNECTION_NAME_KEY, PRIVATELINK_ENDPOINT_KEY,
 };
+pub use risingwave_connector::WithOptionsSecResolved;
 use risingwave_connector::WithPropertiesExt;
 use risingwave_pb::secret::secret_ref::PbRefAsType;
 use risingwave_pb::secret::PbSecretRef;
@@ -311,5 +312,3 @@ impl TryFrom<&Statement> for WithOptions {
         }
     }
 }
-
-pub use risingwave_connector::WithOptionsSecResolved;
