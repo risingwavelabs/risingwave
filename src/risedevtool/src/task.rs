@@ -138,11 +138,7 @@ where
         if !id.is_empty() {
             self.pb.set_prefix(id.clone());
             self.id = Some(id.clone());
-
-            // Remove the old status file if exists to avoid confusion.
-            let status_file = self.status_dir.path().join(format!("{}.status", id));
-            fs_err::remove_file(&status_file).ok();
-            self.status_file = Some(status_file);
+            self.status_file = Some(self.status_dir.path().join(format!("{}.status", id)));
 
             // Remove the old log file if exists to avoid confusion.
             let log_file = Path::new(&env::var("PREFIX_LOG").unwrap())

@@ -87,7 +87,8 @@ impl LoggerSettings {
         Self {
             name: name.into(),
             enable_tokio_console: false,
-            colorful: console::colors_enabled_stderr() && console::colors_enabled(),
+            colorful: env_var_is_true("RW_LOG_FORCE_COLORFUL")
+                || (console::colors_enabled_stderr() && console::colors_enabled()),
             stderr: false,
             with_thread_name: false,
             targets: vec![],
