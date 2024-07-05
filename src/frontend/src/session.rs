@@ -1182,10 +1182,18 @@ impl SessionManager for SessionManagerImpl {
     fn end_session(&self, session: &Self::Session) {
         self.delete_session(&session.session_id());
     }
+
+    async fn shutdown(&self) {
+        // Clean up the session map.
+        self.env.sessions_map().write().clear();
+        // Unregister from the meta service.
+        self.env.meta_client().try_unregister().await;
+    }
 }
 
 impl SessionManagerImpl {
     pub async fn new(opts: FrontendOpts) -> Result<Self> {
+        // TODO(shutdown): only save join handles that **need** to be shutdown
         let (env, join_handles, shutdown_senders) = FrontendEnv::init(opts).await?;
         Ok(Self {
             env,

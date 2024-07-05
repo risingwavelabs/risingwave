@@ -44,6 +44,8 @@ use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 /// in this trait so that the mocking can be simplified.
 #[async_trait::async_trait]
 pub trait FrontendMetaClient: Send + Sync {
+    async fn try_unregister(&self);
+
     async fn pin_snapshot(&self) -> Result<HummockSnapshot>;
 
     async fn get_snapshot(&self) -> Result<HummockSnapshot>;
@@ -130,6 +132,10 @@ pub struct FrontendMetaClientImpl(pub MetaClient);
 
 #[async_trait::async_trait]
 impl FrontendMetaClient for FrontendMetaClientImpl {
+    async fn try_unregister(&self) {
+        self.0.try_unregister().await;
+    }
+
     async fn pin_snapshot(&self) -> Result<HummockSnapshot> {
         self.0.pin_snapshot().await
     }

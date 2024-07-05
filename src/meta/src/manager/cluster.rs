@@ -321,7 +321,7 @@ impl ClusterManager {
         Ok(())
     }
 
-    pub async fn delete_worker_node(&self, host_address: HostAddress) -> MetaResult<WorkerType> {
+    pub async fn delete_worker_node(&self, host_address: HostAddress) -> MetaResult<WorkerNode> {
         let mut core = self.core.write().await;
         let worker = core.get_worker_by_host_checked(host_address.clone())?;
         let worker_type = worker.worker_type();
@@ -346,10 +346,10 @@ impl ClusterManager {
         // local notification.
         self.env
             .notification_manager()
-            .notify_local_subscribers(LocalNotification::WorkerNodeDeleted(worker_node))
+            .notify_local_subscribers(LocalNotification::WorkerNodeDeleted(worker_node.clone()))
             .await;
 
-        Ok(worker_type)
+        Ok(worker_node)
     }
 
     /// Invoked when it receives a heartbeat from a worker node.
@@ -412,7 +412,8 @@ impl ClusterManager {
                 // 3. Delete expired workers.
                 for (worker_id, key) in workers_to_delete {
                     match cluster_manager.delete_worker_node(key.clone()).await {
-                        Ok(worker_type) => {
+                        Ok(worker_node) => {
+                            let worker_type = worker_node.r#type();
                             match worker_type {
                                 WorkerType::Frontend
                                 | WorkerType::ComputeNode
