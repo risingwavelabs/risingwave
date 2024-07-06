@@ -16,7 +16,6 @@ use risingwave_common::types::DataType;
 use risingwave_expr::aggregate::AggKind;
 
 use super::{infer_type, Expr, ExprImpl, Literal, OrderBy};
-use crate::catalog::function_catalog::FunctionCatalog;
 use crate::error::Result;
 use crate::utils::Condition;
 
@@ -63,9 +62,7 @@ impl AggCall {
     ) -> Result<Self> {
         let return_type = match &agg_kind {
             AggKind::Builtin(kind) => infer_type((*kind).into(), &mut args)?,
-            AggKind::UserDefined(_) => {
-                panic!("User-defined aggregate functions are not supported")
-            }
+            AggKind::UserDefined(udf) => udf.return_type.as_ref().unwrap().into(),
             AggKind::WrapScalar(expr) => expr.return_type.as_ref().unwrap().into(),
         };
         Ok(AggCall {

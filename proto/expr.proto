@@ -579,6 +579,7 @@ message UserDefinedFunction {
 message UserDefinedFunctionMetadata {
   repeated string arg_names = 8;
   repeated data.DataType arg_types = 3;
+  data.DataType return_type = 13;
   string language = 4;
   optional string link = 5;
   optional string identifier = 6;
