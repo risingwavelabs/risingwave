@@ -25,7 +25,7 @@ use risingwave_common::bail;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::util::value_encoding::DatumFromProtoExt;
-use risingwave_pb::expr::agg_call::PbType as PbAggKind;
+pub use risingwave_pb::expr::agg_call::PbType as PbAggKind;
 use risingwave_pb::expr::{PbAggCall, PbExprNode, PbInputRef, PbUserDefinedFunctionMetadata};
 
 use crate::expr::{
@@ -214,7 +214,7 @@ impl<Iter: Iterator<Item = Token>> Parser<Iter> {
 }
 
 /// Aggregate function kind.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum AggKind {
     /// Built-in aggregate function.
     ///

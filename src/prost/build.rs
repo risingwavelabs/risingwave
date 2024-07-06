@@ -119,6 +119,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute("expr.ExprNode.rex_node", "#[derive(Eq, Hash)]")
         .type_attribute("expr.ExprNode.NowRexNode", "#[derive(Eq, Hash)]")
         .type_attribute("expr.InputRef", "#[derive(Eq, Hash)]")
+        .type_attribute("expr.UserDefinedFunctionMetadata", "#[derive(Eq, Hash)]")
         .type_attribute("data.Datum", "#[derive(Eq, Hash)]")
         .type_attribute("expr.FunctionCall", "#[derive(Eq, Hash)]")
         .type_attribute("expr.UserDefinedFunction", "#[derive(Eq, Hash)]")

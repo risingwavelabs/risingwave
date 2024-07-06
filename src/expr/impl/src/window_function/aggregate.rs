@@ -53,7 +53,7 @@ pub(super) fn new(call: &WindowFuncCall) -> Result<BoxedWindowState> {
     let agg_kind = must_match!(&call.kind, WindowFuncKind::Aggregate(agg_kind) => agg_kind);
     let arg_data_types = call.args.arg_types().to_vec();
     let agg_call = AggCall {
-        kind: agg_kind,
+        kind: agg_kind.clone(),
         args: call.args.clone(),
         return_type: call.return_type.clone(),
         column_orders: Vec::new(), // the input is already sorted
@@ -66,7 +66,7 @@ pub(super) fn new(call: &WindowFuncCall) -> Result<BoxedWindowState> {
     // TODO(runji): support UDAF and wrapped scalar function
     let agg_kind = must_match!(agg_kind, AggKind::Builtin(agg_kind) => agg_kind);
     let agg_func_sig = FUNCTION_REGISTRY
-        .get(agg_kind, &arg_data_types, &call.return_type)
+        .get(*agg_kind, &arg_data_types, &call.return_type)
         .expect("the agg func must exist");
     let agg_func = agg_func_sig.build_aggregate(&agg_call)?;
     let (agg_impl, enable_delta) =
