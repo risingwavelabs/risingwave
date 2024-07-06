@@ -22,7 +22,7 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use prost::Message;
 use risingwave_common::array::{Array, DataChunk, RowRef};
-use risingwave_common::buffer::{Bitmap, BitmapBuilder};
+use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::{HashKey, HashKeyDispatcher, PrecomputedBuildHasher};
 use risingwave_common::memory::{MemoryContext, MonitoredGlobalAlloc};

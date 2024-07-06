@@ -22,7 +22,7 @@ use bytes::Bytes;
 use futures::stream;
 use itertools::Itertools;
 use risingwave_common::array::Op;
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, ConflictBehavior, TableId};
 use risingwave_common::row::{CompactedRow, RowDeserializer};
 use risingwave_common::types::DefaultOrd;
