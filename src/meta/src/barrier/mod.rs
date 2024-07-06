@@ -819,24 +819,20 @@ impl GlobalBarrierManager {
         self.context.tracker.lock().await.abort_all(&err);
         self.checkpoint_control.clear_on_err(&err).await;
 
-        if self.enable_recovery {
-            self.context
-                .set_status(BarrierManagerStatus::Recovering(RecoveryReason::Adhoc));
-            let latest_snapshot = self.context.hummock_manager.latest_snapshot();
-            let prev_epoch = TracedEpoch::new(latest_snapshot.committed_epoch.into()); // we can only recover from the committed epoch
-            let span = tracing::info_span!(
-                "adhoc_recovery",
-                error = %err.as_report(),
-                prev_epoch = prev_epoch.value().0
-            );
+        self.context
+            .set_status(BarrierManagerStatus::Recovering(RecoveryReason::Adhoc));
+        let latest_snapshot = self.context.hummock_manager.latest_snapshot();
+        let prev_epoch = TracedEpoch::new(latest_snapshot.committed_epoch.into()); // we can only recover from the committed epoch
+        let span = tracing::info_span!(
+            "adhoc_recovery",
+            error = %err.as_report(),
+            prev_epoch = prev_epoch.value().0
+        );
 
-            // No need to clean dirty tables for barrier recovery,
-            // The foreground stream job should cleanup their own tables.
-            self.recovery(None).instrument(span).await;
-            self.context.set_status(BarrierManagerStatus::Running);
-        } else {
-            panic!("failed to execute barrier: {}", err.as_report());
-        }
+        // No need to clean dirty tables for barrier recovery,
+        // The foreground stream job should cleanup their own tables.
+        self.recovery(None).instrument(span).await;
+        self.context.set_status(BarrierManagerStatus::Running);
     }
 }
 
