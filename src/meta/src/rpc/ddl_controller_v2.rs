@@ -164,7 +164,7 @@ impl DdlController {
 
         // create fragment and actor catalogs.
         tracing::debug!(id = streaming_job.id(), "building streaming job");
-        let (ctx, table_fragments) = self
+        let (mut ctx, table_fragments) = self
             .build_stream_job(
                 ctx,
                 streaming_job,
@@ -186,6 +186,9 @@ impl DdlController {
                     &ctx.replace_table_job_info
                 {
                     *target_table = Some((table.clone(), source.clone()));
+                    if let StreamingJob::Sink(_, ref mut target_table) = &mut ctx.streaming_job {
+                        *target_table = Some((table.clone(), source.clone()));
+                    }
                 }
 
                 // Validate the sink on the connector node.
