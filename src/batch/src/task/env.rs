@@ -112,7 +112,7 @@ impl BatchEnvironment {
                 BatchManagerMetrics::for_test(),
                 u64::MAX,
             )),
-            server_addr: "127.0.0.1:5688".parse().unwrap(),
+            server_addr: "127.0.0.1:2333".parse().unwrap(),
             config: Arc::new(BatchConfig::default()),
             worker_id: WorkerNodeId::default(),
             state_store: StateStoreImpl::shared_in_memory_store(Arc::new(

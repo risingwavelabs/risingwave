@@ -41,9 +41,9 @@ use risingwave_pb::stream_plan::stream_message::StreamMessage;
 use risingwave_pb::stream_plan::update_mutation::{DispatcherUpdate, MergeUpdate};
 use risingwave_pb::stream_plan::{
     BarrierMutation, CombinedMutation, CreateSubscriptionMutation, Dispatchers,
-    DropSubscriptionMutation, PauseMutation, PbAddMutation, PbBarrier, PbDispatcher,
-    PbStreamMessage, PbUpdateMutation, PbWatermark, ResumeMutation, SourceChangeSplitMutation,
-    StopMutation, ThrottleMutation,
+    DropSubscriptionMutation, PauseMutation, PbAddMutation, PbBarrier, PbBarrierMutation,
+    PbDispatcher, PbStreamMessage, PbUpdateMutation, PbWatermark, ResumeMutation,
+    SourceChangeSplitMutation, StopMutation, ThrottleMutation,
 };
 use smallvec::SmallVec;
 
@@ -297,19 +297,23 @@ pub enum Mutation {
 }
 
 #[derive(Debug, Clone)]
-pub struct Barrier {
+pub struct BarrierInner<M> {
     pub epoch: EpochPair,
-    pub mutation: Option<Arc<Mutation>>,
+    pub mutation: M,
     pub kind: BarrierKind,
 
     /// Tracing context for the **current** epoch of this barrier.
-    tracing_context: TracingContext,
+    pub tracing_context: TracingContext,
 
     /// The actors that this barrier has passed locally. Used for debugging only.
     pub passed_actors: Vec<ActorId>,
 }
 
-impl Barrier {
+pub type BarrierMutationType = Option<Arc<Mutation>>;
+pub type Barrier = BarrierInner<BarrierMutationType>;
+pub type DispatcherBarrier = BarrierInner<()>;
+
+impl<M: Default> BarrierInner<M> {
     /// Create a plain barrier.
     pub fn new_test_barrier(epoch: u64) -> Self {
         Self {
@@ -328,6 +332,18 @@ impl Barrier {
             tracing_context: TracingContext::none(),
             mutation: Default::default(),
             passed_actors: Default::default(),
+        }
+    }
+}
+
+impl Barrier {
+    pub fn into_dispatcher(self) -> DispatcherBarrier {
+        DispatcherBarrier {
+            epoch: self.epoch,
+            mutation: (),
+            kind: self.kind,
+            tracing_context: self.tracing_context,
+            passed_actors: self.passed_actors,
         }
     }
 
@@ -492,7 +508,7 @@ impl Barrier {
     }
 }
 
-impl PartialEq for Barrier {
+impl<M: PartialEq> PartialEq for BarrierInner<M> {
     fn eq(&self, other: &Self) -> bool {
         self.epoch == other.epoch && self.mutation == other.mutation
     }
@@ -750,46 +766,63 @@ impl Mutation {
     }
 }
 
-impl Barrier {
-    pub fn to_protobuf(&self) -> PbBarrier {
-        let Barrier {
+impl<M> BarrierInner<M> {
+    fn to_protobuf_inner(&self, barrier_fn: impl FnOnce(&M) -> Option<PbMutation>) -> PbBarrier {
+        let Self {
             epoch,
             mutation,
             kind,
             passed_actors,
             tracing_context,
             ..
-        } = self.clone();
+        } = self;
 
         PbBarrier {
             epoch: Some(PbEpoch {
                 curr: epoch.curr,
                 prev: epoch.prev,
             }),
-            mutation: mutation.map(|m| BarrierMutation {
-                mutation: Some(m.to_protobuf()),
+            mutation: Some(PbBarrierMutation {
+                mutation: barrier_fn(mutation),
             }),
             tracing_context: tracing_context.to_protobuf(),
-            kind: kind as _,
-            passed_actors,
+            kind: *kind as _,
+            passed_actors: passed_actors.clone(),
         }
     }
 
-    pub fn from_protobuf(prost: &PbBarrier) -> StreamExecutorResult<Self> {
-        let mutation = prost
-            .mutation
-            .as_ref()
-            .map(|m| Mutation::from_protobuf(m.mutation.as_ref().unwrap()))
-            .transpose()?
-            .map(Arc::new);
+    fn from_protobuf_inner(
+        prost: &PbBarrier,
+        f: impl FnOnce(Option<&PbMutation>) -> StreamExecutorResult<M>,
+    ) -> StreamExecutorResult<Self> {
         let epoch = prost.get_epoch()?;
 
-        Ok(Barrier {
+        Ok(Self {
             kind: prost.kind(),
             epoch: EpochPair::new(epoch.curr, epoch.prev),
-            mutation,
+            mutation: f(prost.mutation.as_ref().unwrap().mutation.as_ref())?,
             passed_actors: prost.get_passed_actors().clone(),
             tracing_context: TracingContext::from_protobuf(&prost.tracing_context),
+        })
+    }
+}
+
+impl DispatcherBarrier {
+    pub fn to_protobuf(&self) -> PbBarrier {
+        self.to_protobuf_inner(|_| None)
+    }
+}
+
+impl Barrier {
+    pub fn to_protobuf(&self) -> PbBarrier {
+        self.to_protobuf_inner(|mutation| mutation.as_ref().map(|mutation| mutation.to_protobuf()))
+    }
+
+    pub fn from_protobuf(prost: &PbBarrier) -> StreamExecutorResult<Self> {
+        Self::from_protobuf_inner(prost, |mutation| {
+            mutation
+                .map(|m| Mutation::from_protobuf(m).map(Arc::new))
+                .transpose()
         })
     }
 }
@@ -870,11 +903,14 @@ impl Watermark {
 }
 
 #[derive(Debug, EnumAsInner, PartialEq, Clone)]
-pub enum Message {
+pub enum MessageInner<M> {
     Chunk(StreamChunk),
-    Barrier(Barrier),
+    Barrier(BarrierInner<M>),
     Watermark(Watermark),
 }
+
+pub type Message = MessageInner<BarrierMutationType>;
+pub type DispatcherMessage = MessageInner<()>;
 
 impl From<StreamChunk> for Message {
     fn from(chunk: StreamChunk) -> Self {
@@ -909,7 +945,9 @@ impl Message {
             }) if mutation.as_ref().unwrap().is_stop()
         )
     }
+}
 
+impl DispatcherMessage {
     pub fn to_protobuf(&self) -> PbStreamMessage {
         let prost = match self {
             Self::Chunk(stream_chunk) => {
@@ -926,10 +964,21 @@ impl Message {
 
     pub fn from_protobuf(prost: &PbStreamMessage) -> StreamExecutorResult<Self> {
         let res = match prost.get_stream_message()? {
-            StreamMessage::StreamChunk(chunk) => Message::Chunk(StreamChunk::from_protobuf(chunk)?),
-            StreamMessage::Barrier(barrier) => Message::Barrier(Barrier::from_protobuf(barrier)?),
+            StreamMessage::StreamChunk(chunk) => Self::Chunk(StreamChunk::from_protobuf(chunk)?),
+            StreamMessage::Barrier(barrier) => Self::Barrier(
+                DispatcherBarrier::from_protobuf_inner(barrier, |mutation| {
+                    if mutation.is_some() {
+                        if cfg!(debug_assertions) {
+                            panic!("should not receive message of barrier with mutation");
+                        } else {
+                            warn!(?barrier, "receive message of barrier with mutation");
+                        }
+                    }
+                    Ok(())
+                })?,
+            ),
             StreamMessage::Watermark(watermark) => {
-                Message::Watermark(Watermark::from_protobuf(watermark)?)
+                Self::Watermark(Watermark::from_protobuf(watermark)?)
             }
         };
         Ok(res)

@@ -26,6 +26,7 @@ use risingwave_rpc_client::ComputeClientPool;
 use super::error::ExchangeChannelClosed;
 use super::permit::Receiver;
 use crate::executor::prelude::*;
+use crate::executor::DispatcherMessage;
 use crate::task::{
     FragmentId, LocalBarrierManager, SharedContext, UpDownActorIds, UpDownFragmentIds,
 };
@@ -65,17 +66,29 @@ pub struct LocalInput {
 type LocalInputStreamInner = impl MessageStream;
 
 impl LocalInput {
-    pub fn new(channel: Receiver, actor_id: ActorId) -> Self {
+    pub fn new(
+        channel: Receiver,
+        actor_id: ActorId,
+        local_barrier_manager: LocalBarrierManager,
+    ) -> Self {
         Self {
-            inner: Self::run(channel, actor_id),
+            inner: Self::run(channel, actor_id, local_barrier_manager),
             actor_id,
         }
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn run(mut channel: Receiver, actor_id: ActorId) {
+    async fn run(
+        mut channel: Receiver,
+        actor_id: ActorId,
+        local_barrier_manager: LocalBarrierManager,
+    ) {
         let span: await_tree::Span = format!("LocalInput (actor {actor_id})").into();
         while let Some(msg) = channel.recv().verbose_instrument_await(span.clone()).await {
+            let msg = local_barrier_manager
+                .read_barrier_mutation(msg)
+                .await
+                .context("Read barrier mutation error")?;
             yield msg;
         }
         // Always emit an error outside the loop. This is because we use barrier as the control
@@ -168,11 +181,11 @@ impl RemoteInput {
             match data_res {
                 Ok(GetStreamResponse { message, permits }) => {
                     let msg = message.unwrap();
-                    let bytes = Message::get_encoded_len(&msg);
+                    let bytes = DispatcherMessage::get_encoded_len(&msg);
 
                     exchange_frag_recv_size_metrics.inc_by(bytes as u64);
 
-                    let msg_res = Message::from_protobuf(&msg);
+                    let msg_res = DispatcherMessage::from_protobuf(&msg);
                     if let Some(add_back_permits) = match permits.unwrap().value {
                         // For records, batch the permits we received to reduce the backward
                         // `AddPermits` messages.
@@ -194,23 +207,13 @@ impl RemoteInput {
                             .context("RemoteInput backward permits channel closed.")?;
                     }
 
-                    let mut msg = msg_res.context("RemoteInput decode message error")?;
+                    let msg = msg_res.context("RemoteInput decode message error")?;
 
                     // Read barrier mutation from local barrier manager and attach it to the barrier message.
-                    if cfg!(not(test)) {
-                        if let Message::Barrier(barrier) = &mut msg {
-                            assert!(
-                                barrier.mutation.is_none(),
-                                "Mutation should be erased in remote side"
-                            );
-                            let mutation = local_barrier_manager
-                                .read_barrier_mutation(barrier)
-                                .await
-                                .context("Read barrier mutation error")?;
-                            barrier.mutation = mutation;
-                        }
-                    }
-                    yield msg;
+                    yield local_barrier_manager
+                        .read_barrier_mutation(msg)
+                        .await
+                        .context("Read barrier mutation error")?;
                 }
 
                 Err(e) => Err(ExchangeChannelClosed::remote_input(up_down_ids.0, Some(e)))?,
@@ -256,6 +259,7 @@ pub(crate) fn new_input(
         LocalInput::new(
             context.take_receiver((upstream_actor_id, actor_id))?,
             upstream_actor_id,
+            context.local_barrier_manager.clone(),
         )
         .boxed_input()
     } else {
