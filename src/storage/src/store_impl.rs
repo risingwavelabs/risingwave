@@ -655,6 +655,8 @@ impl StateStoreImpl {
                     .with_indexer_shards(opts.meta_file_cache_indexer_shards)
                     .with_flushers(opts.meta_file_cache_flushers)
                     .with_reclaimers(opts.meta_file_cache_reclaimers)
+                    // TODO(MrCroxx): MAKE IT CONFIGURATABLE.
+                    .with_buffer_threshold(128 * 1024 * 1024) // 128 MiB
                     .with_clean_region_threshold(
                         opts.meta_file_cache_reclaimers + opts.meta_file_cache_reclaimers / 2,
                     )
@@ -707,6 +709,8 @@ impl StateStoreImpl {
                     .with_indexer_shards(opts.data_file_cache_indexer_shards)
                     .with_flushers(opts.data_file_cache_flushers)
                     .with_reclaimers(opts.data_file_cache_reclaimers)
+                    // TODO(MrCroxx): MAKE IT CONFIGURATABLE.
+                    .with_buffer_threshold(1024 * 1024 * 1024) // 1 GiB
                     .with_clean_region_threshold(
                         opts.data_file_cache_reclaimers + opts.data_file_cache_reclaimers / 2,
                     )
