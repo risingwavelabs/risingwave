@@ -83,6 +83,6 @@ def run(failing_test_key):
 #     run(failing_test_key)
 
 def main():
-    run_pipeline_on_commit("kwannoel/find-regress", "f0fa34cdeed95a08b2c7d8428a17d6de27b6588d", ["e2e-test"])
+    run_pipeline_on_commit("kwannoel/find-regress", "f0fa34cdeed95a08b2c7d8428a17d6de27b6588d", "e2e-test")
 
 main()
