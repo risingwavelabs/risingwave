@@ -32,7 +32,7 @@ pub enum MonotonicityDerivation {
 }
 
 impl MonotonicityDerivation {
-    fn inverse(self) -> Self {
+    pub fn inverse(self) -> Self {
         use MonotonicityDerivation::*;
         match self {
             Inherent(monotonicity) => Inherent(monotonicity.inverse()),
@@ -45,29 +45,37 @@ impl MonotonicityDerivation {
 /// Represents the monotonicity of a column.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumAsInner)]
 pub enum Monotonicity {
-    /// The column is constant.
+    /// The column is constant. In the future, we may derive watermark messages for this monotonicity.
     Constant,
-    /// The column is strictly non-decreasing. Basically this is similar to `WATERMARK FOR col AS col`, but the `Watermark`
-    /// messages are not supposed to be produced by `WatermarkFilter`.
+    /// The column is strictly non-decreasing. For this monotonicity, a watermark definition should be automatically
+    /// derived. Basically it is similar to `WATERMARK FOR col AS col`, except that the watermark messages are supposed
+    /// to be produced by `Project/ProjectSet` instead of `WatermarkFilter`.
     Increasing,
+    /// The column is GENERALLY non-decreasing, but NOT STRICTLY. The general-non-decreasing property is normally defined
+    /// by user in DDL queries, and should be enforced by `WatermarkFilter`. Watermark messages should be produced by
+    /// `WatermarkFilter` and forwarded to downstream with necessary transformation in other operators like `Project/ProjectSet`.
+    IncreasingByWatermark,
     /// The column is strictly non-increasing.
     Decreasing,
-    /// The column is GENERALLY non-decreasing, but not STRICTLY. Watermarks should be produced by `WatermarkFilter` and
-    /// forwarded to downstream with necessary transformation in other operators like `Project(Set)`.
-    /// This is not used currently.
-    _IncreasingByWatermark,
     /// The monotonicity of the column is unknown, meaning that we have to do everything conservatively for this column.
     Unknown,
 }
 
 impl Monotonicity {
-    fn inverse(self) -> Self {
+    pub fn has_watermark(self) -> bool {
+        matches!(
+            self,
+            Monotonicity::Increasing | Monotonicity::IncreasingByWatermark
+        )
+    }
+
+    pub fn inverse(self) -> Self {
         use Monotonicity::*;
         match self {
             Constant => Constant,
             Increasing => Decreasing,
+            IncreasingByWatermark => Unknown,
             Decreasing => Increasing,
-            _IncreasingByWatermark => Unknown,
             Unknown => Unknown,
         }
     }
