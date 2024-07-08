@@ -44,7 +44,6 @@ pub fn compute(opts: ComputeNodeOpts) -> ! {
 
 pub fn meta(opts: MetaNodeOpts) -> ! {
     init_risingwave_logger(LoggerSettings::from_opts(&opts));
-    // TODO(shutdown): pass the shutdown token
     main_okk(|shutdown| risingwave_meta_node::start(opts, shutdown));
 }
 

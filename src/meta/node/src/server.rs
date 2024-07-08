@@ -252,7 +252,6 @@ pub async fn rpc_serve(
 ///
 /// Returns when the `shutdown` token is triggered, or when leader status is lost, or if the leader
 /// service fails to start.
-#[expect(clippy::type_complexity)]
 pub async fn rpc_serve_with_store(
     meta_store_impl: MetaStoreImpl,
     election_client: ElectionClientRef,
@@ -283,10 +282,10 @@ pub async fn rpc_serve_with_store(
         }
     });
 
+    // Spawn and run the follower service if not the leader.
+    // Watch the leader status and switch to the leader service when elected.
     if !election_client.is_leader() {
-        let mut is_leader_watcher = election_client.subscribe();
-
-        // If not the leader, spawn a follower.
+        // The follower service can be shutdown separately if we're going to be the leader.
         let follower_shutdown = shutdown.child_token();
 
         let follower_handle = tokio::spawn(start_service_as_election_follower(
@@ -296,9 +295,13 @@ pub async fn rpc_serve_with_store(
         ));
 
         // Watch and wait until we become the leader.
+        let mut is_leader_watcher = election_client.subscribe();
+
         while !*is_leader_watcher.borrow_and_update() {
             tokio::select! {
+                // External shutdown signal. Directly return without switching to leader.
                 _ = shutdown.cancelled() => return Ok(()),
+
                 res = is_leader_watcher.changed() => {
                     if res.is_err() {
                         tracing::error!("leader watcher recv failed");
@@ -311,6 +314,7 @@ pub async fn rpc_serve_with_store(
         let _ = follower_handle.await;
     }
 
+    // Run the leader service.
     let result = start_service_as_election_leader(
         meta_store_impl,
         address_info,
@@ -323,7 +327,7 @@ pub async fn rpc_serve_with_store(
     )
     .await;
 
-    // Leader service has stopped, shutdown the election service.
+    // Leader service has stopped, shutdown the election service to gracefully resign.
     election_shutdown_tx.send(()).ok();
     let _ = election_handle.await;
 
@@ -789,7 +793,8 @@ pub async fn start_service_as_election_leader(
 
     // Wait for the shutdown signal.
     shutdown.cancelled().await;
-    // TODO: do we have any other shutdown tasks?
+    // TODO(shutdown): may warn user if there's any other node still running in the cluster.
+    // TODO(shutdown): do we have any other shutdown tasks?
     Ok(())
 }
 

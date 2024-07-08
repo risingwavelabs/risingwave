@@ -36,6 +36,9 @@ pub trait ElectionClient: Send + Sync + 'static {
     }
 
     fn id(&self) -> MetaResult<String>;
+    /// Run the long-running election process.
+    ///
+    /// Returns when the leader status is lost, or the stop signal is received.
     async fn run_once(&self, ttl: i64, stop: Receiver<()>) -> MetaResult<()>;
     fn subscribe(&self) -> Receiver<bool>;
     async fn leader(&self) -> MetaResult<Option<ElectionMember>>;

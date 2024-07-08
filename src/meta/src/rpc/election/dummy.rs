@@ -16,8 +16,14 @@ use tokio::sync::watch::{self, Receiver, Sender};
 
 use crate::{ElectionClient, ElectionMember, MetaResult};
 
+/// A dummy implementation of [`ElectionClient`] for scenarios where only one meta node is running,
+/// typically for testing purposes such as an in-memory meta store.
+///
+/// This can be used to unify the code paths no matter there's HA or not.
 pub struct DummyElectionClient {
     id: String,
+
+    /// A dummy watcher that never changes, indicating we are always the leader.
     dummy_watcher: Sender<bool>,
 }
 
