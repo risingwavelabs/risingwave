@@ -496,7 +496,7 @@ mod tests {
         StreamChunk::new(ops, vec![])
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[tokio::test]
     async fn test_merger() {
         const CHANNEL_NUMBER: usize = 10;
         let mut txs = Vec::with_capacity(CHANNEL_NUMBER);
@@ -511,10 +511,13 @@ mod tests {
         let actor_id = merger.actor_context.id;
         let mut handles = Vec::with_capacity(CHANNEL_NUMBER);
 
-        let epochs = (10..1000u64).step_by(10).map(test_epoch).collect_vec();
+        let epochs = (10..1000u64)
+            .step_by(10)
+            .map(|idx| (idx, test_epoch(idx)))
+            .collect_vec();
         let barriers: HashMap<_, _> = epochs
             .iter()
-            .map(|epoch| {
+            .map(|(_, epoch)| {
                 let barrier = Barrier::new_test_barrier(*epoch);
                 barrier_test_env.inject_barrier(&barrier, [], [actor_id]);
                 (*epoch, barrier)
@@ -529,16 +532,16 @@ mod tests {
             let barriers = barriers.clone();
             let b2 = b2.clone();
             let handle = tokio::spawn(async move {
-                for epoch in epochs {
-                    if epoch % 20 == 0 {
-                        tx.send(Message::Chunk(build_test_chunk(epoch)))
+                for (idx, epoch) in epochs {
+                    if idx % 20 == 0 {
+                        tx.send(Message::Chunk(build_test_chunk(idx)))
                             .await
                             .unwrap();
                     } else {
                         tx.send(Message::Watermark(Watermark {
-                            col_idx: (epoch as usize / 20 + tx_id) % CHANNEL_NUMBER,
+                            col_idx: (idx as usize / 20 + tx_id) % CHANNEL_NUMBER,
                             data_type: DataType::Int64,
-                            val: ScalarImpl::Int64(epoch as i64),
+                            val: ScalarImpl::Int64(idx as i64),
                         }))
                         .await
                         .unwrap();
@@ -556,18 +559,18 @@ mod tests {
         }
 
         let mut merger = merger.boxed().execute();
-        for epoch in epochs {
+        for (idx, epoch) in epochs {
             // expect n chunks
-            if epoch % 20 == 0 {
+            if idx % 20 == 0 {
                 for _ in 0..CHANNEL_NUMBER {
                     assert_matches!(merger.next().await.unwrap().unwrap(), Message::Chunk(chunk) => {
-                        assert_eq!(chunk.ops().len() as u64, epoch);
+                        assert_eq!(chunk.ops().len() as u64, idx);
                     });
                 }
-            } else if epoch as usize / 20 >= CHANNEL_NUMBER - 1 {
+            } else if idx as usize / 20 >= CHANNEL_NUMBER - 1 {
                 for _ in 0..CHANNEL_NUMBER {
                     assert_matches!(merger.next().await.unwrap().unwrap(), Message::Watermark(watermark) => {
-                        assert_eq!(watermark.val, ScalarImpl::Int64((epoch - 20 * (CHANNEL_NUMBER as u64 - 1)) as i64));
+                        assert_eq!(watermark.val, ScalarImpl::Int64((idx - 20 * (CHANNEL_NUMBER as u64 - 1)) as i64));
                     });
                 }
             }

@@ -930,7 +930,6 @@ impl LocalBarrierManager {
             tracing_context: barrier.tracing_context.clone(),
             passed_actors: barrier.passed_actors.clone(),
         };
-        let epoch = barrier.epoch;
         self.send_event(LocalBarrierEvent::ReadBarrierMutation {
             barrier,
             mutation_sender: tx,
@@ -938,7 +937,6 @@ impl LocalBarrierManager {
         ret.mutation = rx
             .await
             .map_err(|_| anyhow!("barrier manager maybe reset"))?;
-        println!("finish barrier mutation: {:?}", epoch);
         Ok(Message::Barrier(ret))
     }
 }
