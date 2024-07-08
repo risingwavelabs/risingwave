@@ -218,7 +218,8 @@ impl<Src: OpendalSource> OpendalReader<Src> {
     }
 }
 
-/// `ParquetFileReader` is a struct that implements `AsyncFileReader` and is used to read parquet files.
+/// Since the `Reader` does not implement `tokio::io::AsyncRead` after `OpenDAL` 0.47, we construct a struct `ParquetFileReader` that implements `AsyncFileReader`, which is used as a parameter of `ParquetRecordBatchStreamBuilder`.
+/// The following code refers to <`https://github.com/icelake-io/icelake/blob/07d53893d7788b4e41fc11efad8a6be828405c31/icelake/src/io/scan.rs#L196`>, we can remove the following implementation after `ParquetFileReader` is changed to a public struct in icelake. 
 pub struct ParquetFileReader {
     op: Operator,
     path: String,
