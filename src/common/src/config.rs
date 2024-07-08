@@ -2251,12 +2251,12 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
                 }
             });
 
-    let block_cache_flush_buffer_threshold_mb = s
+    let block_file_cache_flush_buffer_threshold_mb = s
         .storage
         .data_file_cache
         .flush_buffer_threshold_mb
         .unwrap_or(default::storage::block_file_cache_flush_buffer_threshold_mb());
-    let meta_cache_flush_buffer_threshold_mb = s
+    let meta_file_cache_flush_buffer_threshold_mb = s
         .storage
         .meta_file_cache
         .flush_buffer_threshold_mb
@@ -2272,8 +2272,8 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
         prefetch_buffer_capacity_mb,
         block_cache_eviction_config,
         meta_cache_eviction_config,
-        meta_file_cache_flush_buffer_threshold_mb: meta_cache_flush_buffer_threshold_mb,
-        block_file_cache_flush_buffer_threshold_mb: block_cache_flush_buffer_threshold_mb,
+        meta_file_cache_flush_buffer_threshold_mb,
+        block_file_cache_flush_buffer_threshold_mb,
     }
 }
 
