@@ -82,6 +82,16 @@ def run(failing_test_key):
 #     run(failing_test_key)
 
 def main():
+    start_commit = os.environ['START_COMMIT']
+    end_commit = os.environ['END_COMMIT']
+    branch = os.environ['BUILDKITE_BRANCH']
+    steps = os.environ['BISECT_STEPS']
+    print(f'''
+    START_COMMIT: {start_commit}
+    END_COMMIT: {end_commit}
+    BRANCH: {branch}
+    BISECT_STEPS: {steps}
+    ''')
     run_pipeline_on_commit("kwannoel/find-regress", "f0fa34cdeed95a08b2c7d8428a17d6de27b6588d", "e2e-test")
 
 main()
