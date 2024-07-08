@@ -16,7 +16,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 
 use anyhow::anyhow;
 use itertools::Itertools;
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash;
 use risingwave_common::hash::{ActorMapping, WorkerSlotId, WorkerSlotMapping};
 use risingwave_meta_model_migration::WithQuery;
