@@ -15,7 +15,7 @@
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use anyhow::Context as _;
+use anyhow::{anyhow, Context as _};
 use futures::pin_mut;
 use futures_async_stream::try_stream;
 use pin_project::pin_project;
@@ -133,10 +133,12 @@ impl RemoteInput {
                 up_down_frag,
                 metrics,
                 batched_permits,
+                actor_id,
             ),
         }
     }
 
+    #[expect(clippy::too_many_arguments)]
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn run(
         local_barrier_manager: LocalBarrierManager,
@@ -146,6 +148,7 @@ impl RemoteInput {
         up_down_frag: UpDownFragmentIds,
         metrics: Arc<StreamingMetrics>,
         batched_permits_limit: usize,
+        actor_id: ActorId,
     ) {
         let client = client_pool.get_by_addr(upstream_addr).await?;
         let (stream, permits_tx) = client
@@ -162,6 +165,7 @@ impl RemoteInput {
         let span: await_tree::Span = format!("RemoteInput (actor {up_actor_id})").into();
 
         let mut batched_permits_accumulated = 0;
+        let mut mutation_subscriber = None;
 
         pin_mut!(stream);
         while let Some(data_res) = stream.next().verbose_instrument_await(span.clone()).await {
@@ -203,10 +207,29 @@ impl RemoteInput {
                                 barrier.mutation.is_none(),
                                 "Mutation should be erased in remote side"
                             );
-                            let mutation = local_barrier_manager
-                                .read_barrier_mutation(barrier)
+                            let mutation_subscriber =
+                                mutation_subscriber.get_or_insert_with(|| {
+                                    local_barrier_manager
+                                        .subscribe_barrier_mutation(actor_id, barrier)
+                                });
+
+                            let mutation = mutation_subscriber
+                                .recv()
                                 .await
-                                .context("Read barrier mutation error")?;
+                                .ok_or_else(|| {
+                                    anyhow!("failed to receive mutation of barrier {:?}", barrier)
+                                })
+                                .and_then(|(prev_epoch, mutation)| {
+                                    if prev_epoch != barrier.epoch.prev {
+                                        Err(anyhow!(
+                                            "expect barrier {:?} but get epoch {}",
+                                            barrier,
+                                            prev_epoch
+                                        ))
+                                    } else {
+                                        Ok(mutation)
+                                    }
+                                })?;
                             barrier.mutation = mutation;
                         }
                     }
