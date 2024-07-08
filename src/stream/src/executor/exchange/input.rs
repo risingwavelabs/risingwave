@@ -133,12 +133,10 @@ impl RemoteInput {
                 up_down_frag,
                 metrics,
                 batched_permits,
-                actor_id,
             ),
         }
     }
 
-    #[expect(clippy::too_many_arguments)]
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn run(
         local_barrier_manager: LocalBarrierManager,
@@ -148,8 +146,8 @@ impl RemoteInput {
         up_down_frag: UpDownFragmentIds,
         metrics: Arc<StreamingMetrics>,
         batched_permits_limit: usize,
-        actor_id: ActorId,
     ) {
+        let self_actor_id = up_down_ids.1;
         let client = client_pool.get_by_addr(upstream_addr).await?;
         let (stream, permits_tx) = client
             .get_stream(up_down_ids.0, up_down_ids.1, up_down_frag.0, up_down_frag.1)
@@ -210,7 +208,7 @@ impl RemoteInput {
                             let mutation_subscriber =
                                 mutation_subscriber.get_or_insert_with(|| {
                                     local_barrier_manager
-                                        .subscribe_barrier_mutation(actor_id, barrier)
+                                        .subscribe_barrier_mutation(self_actor_id, barrier)
                                 });
 
                             let mutation = mutation_subscriber
