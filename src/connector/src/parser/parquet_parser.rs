@@ -13,39 +13,33 @@
 // limitations under the License.
 use std::sync::Arc;
 
-use arrow_array::RecordBatch;
+use arrow_array_iceberg::RecordBatch;
 use futures_async_stream::try_stream;
-use opendal::{FuturesAsyncReader, Operator};
+use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::array::{ArrayBuilderImpl, DataChunk, StreamChunk};
 use risingwave_common::types::{Datum, ScalarImpl};
 
 use crate::parser::ConnectorResult;
-use crate::source::{SourceColumnDesc, SourceContextRef};
+use crate::source::filesystem::opendal_source::opendal_reader::ParquetFileReader;
+use crate::source::SourceColumnDesc;
 
 /// `ParquetParser` is responsible for converting the incoming `record_batch_stream`
 /// into a `streamChunk`.
 #[derive(Debug)]
 pub struct ParquetParser {
     rw_columns: Vec<SourceColumnDesc>,
-    source_ctx: SourceContextRef,
 }
 
 impl ParquetParser {
-    pub fn new(
-        rw_columns: Vec<SourceColumnDesc>,
-        source_ctx: SourceContextRef,
-    ) -> ConnectorResult<Self> {
-        Ok(Self {
-            rw_columns,
-            source_ctx,
-        })
+    pub fn new(rw_columns: Vec<SourceColumnDesc>) -> ConnectorResult<Self> {
+        Ok(Self { rw_columns })
     }
 
     #[try_stream(boxed, ok = StreamChunk, error = crate::error::ConnectorError)]
     pub async fn into_stream(
         self,
         record_batch_stream: parquet::arrow::async_reader::ParquetRecordBatchStream<
-            FuturesAsyncReader,
+            ParquetFileReader,
         >,
         file_name: String,
     ) {
@@ -97,19 +91,23 @@ fn convert_record_batch_to_stream_chunk(
             crate::source::SourceColumnType::Normal => {
                 match source_column.is_hidden_addition_col {
                     false => {
-                        if let Some(parquet_column) =
-                            record_batch.column_by_name(&source_column.name)
-                        {
-                            let converted_arrow_data_type =
-                                arrow_schema::DataType::try_from(&source_column.data_type)?;
+                        let rw_data_type = source_column.data_type;
+                        let rw_column_name = source_column.name;
+                        if let Some(parquet_column) = record_batch.column_by_name(&rw_column_name) {
+                            let arrow_field = IcebergArrowConvert
+                                .to_arrow_field(&rw_column_name, &rw_data_type)?;
+                            let converted_arrow_data_type: &arrow_schema_iceberg::DataType =
+                                arrow_field.data_type();
 
-                            if &converted_arrow_data_type == parquet_column.data_type() {
-                                let column = Arc::new(parquet_column.try_into()?);
+                            if converted_arrow_data_type == parquet_column.data_type() {
+                                let array_impl = IcebergArrowConvert
+                                    .array_from_arrow_array(&arrow_field, parquet_column)?;
+                                let column = Arc::new(array_impl);
                                 chunk_columns.push(column);
                             } else {
                                 // data type mismatch, this column is set to null.
                                 let mut array_builder =
-                                    ArrayBuilderImpl::with_type(size, source_column.data_type);
+                                    ArrayBuilderImpl::with_type(size, rw_data_type);
 
                                 array_builder.append_n_null(record_batch.num_rows());
                                 let res = array_builder.finish();
@@ -118,8 +116,7 @@ fn convert_record_batch_to_stream_chunk(
                             }
                         } else {
                             // For columns defined in the source schema but not present in the Parquet file, null values are filled in.
-                            let mut array_builder =
-                                ArrayBuilderImpl::with_type(size, source_column.data_type);
+                            let mut array_builder = ArrayBuilderImpl::with_type(size, rw_data_type);
 
                             array_builder.append_n_null(record_batch.num_rows());
                             let res = array_builder.finish();
