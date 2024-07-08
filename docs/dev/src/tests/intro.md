@@ -18,7 +18,7 @@ RisingWave requires all code to pass fmt, clippy, sort and hakari checks. Run th
 
 There are also some miscellaneous checks. See `ci/scripts/misc-check.sh`.
 
-## Unit tests
+### Unit and integration tests
 
 RiseDev runs unit tests with cargo-nextest. To run unit tests:
 
@@ -26,6 +26,13 @@ RiseDev runs unit tests with cargo-nextest. To run unit tests:
 ./risedev test          # Run unit tests
 ```
 
+Some ideas and caveats for writing tests:
+- Use [expect_test](https://github.com/rust-analyzer/expect-test) to write data driven tests that can automatically update results.
+- It's recommended to write new tests as *integration tests* (i.e. in `tests/` directory) instead of *unit tests* (i.e. in `src/` directory).
+
+  Besides, put integration tests under `tests/integration_tests/*.rs`, instead of `tests/*.rs`. See [Delete Cargo Integration Tests](https://matklad.github.io/2021/02/27/delete-cargo-integration-tests.html) and [#9878](https://github.com/risingwavelabs/risingwave/issues/9878), for more details.
+
+You might want to read [How to Test](https://matklad.github.io/2021/05/31/how-to-test.html) for more good ideas on testing.
 
 ## Planner tests
 

@@ -178,7 +178,7 @@ fn convert_row_to_chunk(
 mod tests {
 
     use risingwave_common::array::{Array, ArrayBuilder, DataChunk, PrimitiveArrayBuilder};
-    use risingwave_common::buffer::Bitmap;
+    use risingwave_common::bitmap::Bitmap;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::row::Row;
     use risingwave_common::types::{DataType, ScalarRefImpl};

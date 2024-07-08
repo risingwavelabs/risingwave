@@ -44,7 +44,7 @@ pub enum AccessError {
 
 pub type AccessResult<T = Datum> = std::result::Result<T, AccessError>;
 
-/// Access to a field in the data structure.
+/// Access to a field in the data structure. Created by `AccessBuilder`.
 pub trait Access {
     /// Accesses `path` in the data structure (*parsed* Avro/JSON/Protobuf data),
     /// and then converts it to RisingWave `Datum`.

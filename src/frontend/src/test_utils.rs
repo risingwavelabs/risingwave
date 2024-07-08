@@ -42,7 +42,7 @@ use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::{
     alter_set_schema_request, create_connection_request, DdlProgress, PbTableJobType,
-    ReplaceTablePlan,
+    ReplaceTablePlan, TableJobType,
 };
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
@@ -242,15 +242,6 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn list_change_log_epochs(
-        &self,
-        _table_id: u32,
-        _min_epoch: u64,
-        _max_count: u32,
-    ) -> Result<Vec<u64>> {
-        unreachable!()
-    }
-
     async fn create_schema(
         &self,
         db_id: DatabaseId,
@@ -309,6 +300,7 @@ impl CatalogWriter for MockCatalogWriter {
         mut table: PbTable,
         _graph: StreamFragmentGraph,
         _mapping: ColIndexMapping,
+        _job_type: TableJobType,
     ) -> Result<()> {
         table.stream_job_status = PbStreamJobStatus::Created as _;
         self.catalog.write().update_table(&table);
@@ -1089,6 +1081,15 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         _id: u32,
         _rate_limit: Option<u32>,
     ) -> RpcResult<()> {
+        unimplemented!()
+    }
+
+    async fn list_change_log_epochs(
+        &self,
+        _table_id: u32,
+        _min_epoch: u64,
+        _max_count: u32,
+    ) -> RpcResult<Vec<u64>> {
         unimplemented!()
     }
 }

@@ -324,6 +324,7 @@ message ReplaceTablePlan {
   catalog.ColIndexMapping table_col_index_mapping = 3;
   // Source catalog of table's associated source
   catalog.Source source = 4;
+  TableJobType job_type = 5;
 }
 
 message ReplaceTablePlanRequest {

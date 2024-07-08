@@ -19,7 +19,7 @@ use std::pin::pin;
 use futures::future::{select, BoxFuture, Either};
 use futures::stream::FuturesUnordered;
 use futures::{FutureExt, Stream, StreamExt, TryStreamExt};
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_connector::sink::catalog::SinkId;
 use risingwave_connector::sink::SinkParam;
 use risingwave_pb::connector_service::coordinate_request::Msg;
@@ -357,7 +357,7 @@ mod tests {
     use futures::{FutureExt, StreamExt};
     use itertools::Itertools;
     use rand::seq::SliceRandom;
-    use risingwave_common::buffer::{Bitmap, BitmapBuilder};
+    use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
     use risingwave_common::hash::VirtualNode;
     use risingwave_connector::sink::catalog::{SinkId, SinkType};
     use risingwave_connector::sink::{SinkCommitCoordinator, SinkError, SinkParam};

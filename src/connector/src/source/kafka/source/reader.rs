@@ -158,7 +158,7 @@ impl KafkaSplitReader {
         self.source_ctx
             .metrics
             .latest_message_id
-            .with_label_values(&[
+            .with_guarded_label_values(&[
                 // source name is not available here
                 &self.source_ctx.source_id.to_string(),
                 &self.source_ctx.actor_id.to_string(),
