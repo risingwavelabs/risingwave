@@ -168,4 +168,8 @@ where
             .enable_tracing
             .unwrap_or_else(default::enable_tracing)
     }
+
+    fn license_key(&self) -> &str {
+        self.inner().license_key.as_deref().unwrap_or_default()
+    }
 }

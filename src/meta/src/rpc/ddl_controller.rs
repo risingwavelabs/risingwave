@@ -1721,7 +1721,7 @@ impl DdlController {
                 if let Some(source) = source {
                     mgr.catalog_manager
                         .cancel_create_table_procedure_with_source(source, table)
-                        .await;
+                        .await?;
                 } else {
                     let result = mgr
                         .catalog_manager

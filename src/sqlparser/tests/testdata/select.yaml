@@ -97,12 +97,10 @@
 - input: SELECT timestamp with time zone '2022-10-01 12:00:00Z' AT TIME ZONE zone
   formatted_sql: SELECT TIMESTAMP WITH TIME ZONE '2022-10-01 12:00:00Z' AT TIME ZONE zone
   formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(AtTimeZone { timestamp: TypedString { data_type: Timestamp(true), value: "2022-10-01 12:00:00Z" }, time_zone: Identifier(Ident { value: "zone", quote_style: None }) })], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })'
-# https://www.postgresql.org/message-id/CADT4RqBPdbsZW7HS1jJP319TMRHs1hzUiP=iRJYR6UqgHCrgNQ@mail.gmail.com
-- input: SELECT now() + INTERVAL '14 days' AT TIME ZONE 'UTC';
+- input: SELECT now() + INTERVAL '14 days' AT TIME ZONE 'UTC'; -- https://www.postgresql.org/message-id/CADT4RqBPdbsZW7HS1jJP319TMRHs1hzUiP=iRJYR6UqgHCrgNQ@mail.gmail.com
   formatted_sql: SELECT now() + INTERVAL '14 days' AT TIME ZONE 'UTC'
   formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(BinaryOp { left: Function(Function { name: ObjectName([Ident { value: "now", quote_style: None }]), args: [], variadic: false, over: None, distinct: false, order_by: [], filter: None, within_group: None }), op: Plus, right: AtTimeZone { timestamp: Value(Interval { value: "14 days", leading_field: None, leading_precision: None, last_field: None, fractional_seconds_precision: None }), time_zone: Value(SingleQuotedString("UTC")) } })], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })'
-# https://github.com/sqlparser-rs/sqlparser-rs/issues/1266
-- input: SELECT c FROM t WHERE c >= '2019-03-27T22:00:00.000Z'::timestamp AT TIME ZONE 'Europe/Brussels';
+- input: SELECT c FROM t WHERE c >= '2019-03-27T22:00:00.000Z'::timestamp AT TIME ZONE 'Europe/Brussels'; -- https://github.com/sqlparser-rs/sqlparser-rs/issues/1266
   formatted_sql: SELECT c FROM t WHERE c >= CAST('2019-03-27T22:00:00.000Z' AS TIMESTAMP) AT TIME ZONE 'Europe/Brussels'
   formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(Identifier(Ident { value: "c", quote_style: None }))], from: [TableWithJoins { relation: Table { name: ObjectName([Ident { value: "t", quote_style: None }]), alias: None, as_of: None }, joins: [] }], lateral_views: [], selection: Some(BinaryOp { left: Identifier(Ident { value: "c", quote_style: None }), op: GtEq, right: AtTimeZone { timestamp: Cast { expr: Value(SingleQuotedString("2019-03-27T22:00:00.000Z")), data_type: Timestamp(false) }, time_zone: Value(SingleQuotedString("Europe/Brussels")) } }), group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })'
 - input: SELECT 0c6
@@ -222,3 +220,14 @@
     sql parser error: expected statement, found: selet
     LINE 1: selet 1;
             ^
+- input: select date t::date; -- https://github.com/risingwavelabs/risingwave/issues/17461
+  error_msg: |-
+    sql parser error: expected end of statement, found: ::
+    LINE 1: select date t::date; -- https://github.com/risingwavelabs/risingwave/issues/17461
+                         ^
+- input: select date 't'::date; -- TypedString higher precedence than Cast
+  formatted_sql: SELECT CAST(DATE 't' AS DATE)
+  formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(Cast { expr: TypedString { data_type: Date, value: "t" }, data_type: Date })], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })'
+- input: select date t; -- A column "date" aliased to "t"
+  formatted_sql: SELECT date AS t
+  formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [ExprWithAlias { expr: Identifier(Ident { value: "date", quote_style: None }), alias: Ident { value: "t", quote_style: None } }], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })'

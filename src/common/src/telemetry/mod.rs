@@ -19,6 +19,7 @@ pub mod report;
 use std::env;
 use std::time::SystemTime;
 
+use risingwave_pb::telemetry::PbTelemetryClusterType;
 use serde::{Deserialize, Serialize};
 use sysinfo::System;
 use thiserror_ext::AsReport;
@@ -29,8 +30,24 @@ use crate::util::resource_util::memory::{system_memory_available_bytes, total_me
 use crate::RW_VERSION;
 
 pub const TELEMETRY_CLUSTER_TYPE: &str = "RW_TELEMETRY_TYPE";
-const TELEMETRY_CLUSTER_TYPE_HOSTED: &str = "hosted"; // hosted on RisingWave Cloud
-const TELEMETRY_CLUSTER_TYPE_TEST: &str = "test"; // test environment, eg. CI & Risedev
+pub const TELEMETRY_CLUSTER_TYPE_HOSTED: &str = "hosted"; // hosted on RisingWave Cloud
+pub const TELEMETRY_CLUSTER_TYPE_KUBERNETES: &str = "kubernetes";
+pub const TELEMETRY_CLUSTER_TYPE_SINGLE_NODE: &str = "single-node";
+pub const TELEMETRY_CLUSTER_TYPE_DOCKER_COMPOSE: &str = "docker-compose";
+
+pub fn telemetry_cluster_type_from_env_var() -> PbTelemetryClusterType {
+    let cluster_type = match env::var(TELEMETRY_CLUSTER_TYPE) {
+        Ok(cluster_type) => cluster_type,
+        Err(_) => return PbTelemetryClusterType::Unspecified,
+    };
+    match cluster_type.as_str() {
+        TELEMETRY_CLUSTER_TYPE_HOSTED => PbTelemetryClusterType::CloudHosted,
+        TELEMETRY_CLUSTER_TYPE_DOCKER_COMPOSE => PbTelemetryClusterType::DockerCompose,
+        TELEMETRY_CLUSTER_TYPE_KUBERNETES => PbTelemetryClusterType::Kubernetes,
+        TELEMETRY_CLUSTER_TYPE_SINGLE_NODE => PbTelemetryClusterType::SingleNode,
+        _ => PbTelemetryClusterType::Unspecified,
+    }
+}
 
 /// Url of telemetry backend
 pub const TELEMETRY_REPORT_URL: &str = "https://telemetry.risingwave.dev/api/v2/report";
@@ -166,12 +183,11 @@ pub fn current_timestamp() -> u64 {
 }
 
 pub fn report_scarf_enabled() -> bool {
-    env::var(TELEMETRY_CLUSTER_TYPE)
-        .map(|deploy_type| {
-            !(deploy_type.eq_ignore_ascii_case(TELEMETRY_CLUSTER_TYPE_HOSTED)
-                || deploy_type.eq_ignore_ascii_case(TELEMETRY_CLUSTER_TYPE_TEST))
-        })
-        .unwrap_or(true)
+    telemetry_env_enabled()
+        && !matches!(
+            telemetry_cluster_type_from_env_var(),
+            PbTelemetryClusterType::CloudHosted
+        )
 }
 
 // impl logic to report to Scarf service, containing RW version and deployment platform
@@ -196,6 +212,22 @@ pub async fn report_to_scarf() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_enable_scarf() {
+        std::env::set_var(TELEMETRY_ENV_ENABLE, "true");
+
+        // setting env var to `Hosted` should disable scarf
+        std::env::set_var(TELEMETRY_CLUSTER_TYPE, TELEMETRY_CLUSTER_TYPE_HOSTED);
+        assert!(!report_scarf_enabled());
+
+        // setting env var to `DockerCompose` should enable scarf
+        std::env::set_var(
+            TELEMETRY_CLUSTER_TYPE,
+            TELEMETRY_CLUSTER_TYPE_DOCKER_COMPOSE,
+        );
+        assert!(report_scarf_enabled());
+    }
 
     #[test]
     fn test_system_data_new() {

@@ -38,11 +38,11 @@ pub struct IcebergProperties {
     pub catalog_type: Option<String>,
     #[serde(rename = "s3.region")]
     pub region: Option<String>,
-    #[serde(rename = "s3.endpoint", default)]
-    pub endpoint: String,
-    #[serde(rename = "s3.access.key", default)]
+    #[serde(rename = "s3.endpoint")]
+    pub endpoint: Option<String>,
+    #[serde(rename = "s3.access.key")]
     pub s3_access: String,
-    #[serde(rename = "s3.secret.key", default)]
+    #[serde(rename = "s3.secret.key")]
     pub s3_secret: String,
     #[serde(rename = "warehouse.path")]
     pub warehouse_path: String,
@@ -82,7 +82,7 @@ impl IcebergProperties {
             catalog_type: self.catalog_type.clone(),
             uri: self.catalog_uri.clone(),
             path: self.warehouse_path.clone(),
-            endpoint: Some(self.endpoint.clone()),
+            endpoint: self.endpoint.clone(),
             access_key: self.s3_access.clone(),
             secret_key: self.s3_secret.clone(),
             region: self.region.clone(),

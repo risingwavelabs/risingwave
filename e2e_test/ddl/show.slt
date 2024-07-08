@@ -102,12 +102,12 @@ show tables from public;
 t3
 
 query T
-show tables from public like "t_";
+show tables from public like 't_';
 ----
 t3
 
 query T
-show tables from public like "_t";
+show tables from public like '_t';
 ----
 
 query T
