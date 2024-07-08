@@ -16,7 +16,7 @@ use std::future::IntoFuture;
 use std::ops::Range;
 use std::pin::Pin;
 use std::sync::Arc;
-
+use thiserror_ext::AsReport;
 use async_compression::tokio::bufread::GzipDecoder;
 use async_trait::async_trait;
 use futures::future::BoxFuture;
@@ -236,7 +236,7 @@ impl AsyncFileReader for ParquetFileReader {
                 .range(range.start as u64..range.end as u64)
                 .await
                 .map(|data| data.to_bytes())
-                .map_err(|e| ParquetError::General(format!("{}", e)))
+                .map_err(|e| ParquetError::General(format!("{}", e.as_report())))
         })
     }
 
@@ -247,7 +247,7 @@ impl AsyncFileReader for ParquetFileReader {
                 .op
                 .stat(&self.path)
                 .await
-                .map_err(|e| ParquetError::General(format!("{}", e)))?
+                .map_err(|e| ParquetError::General(format!("{}", e.as_report())))?
                 .content_length();
 
             if file_size < (FOOTER_SIZE as u64) {
@@ -263,7 +263,7 @@ impl AsyncFileReader for ParquetFileReader {
                     .read_with(&self.path)
                     .range((file_size - (FOOTER_SIZE as u64))..file_size)
                     .await
-                    .map_err(|e| ParquetError::General(format!("{}", e)))?
+                    .map_err(|e| ParquetError::General(format!("{}", e.as_report())))?
                     .to_bytes();
 
                 assert_eq!(footer_buffer.len(), FOOTER_SIZE);
@@ -288,7 +288,7 @@ impl AsyncFileReader for ParquetFileReader {
                 .read_with(&self.path)
                 .range(start..(start + metadata_len as u64))
                 .await
-                .map_err(|e| ParquetError::General(format!("{}", e)))?
+                .map_err(|e| ParquetError::General(format!("{}", e.as_report())))?
                 .to_bytes();
             Ok(Arc::new(decode_metadata(&metadata_bytes)?))
         })
