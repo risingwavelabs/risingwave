@@ -25,8 +25,28 @@ def get_last_passing_build_commit():
 def get_commits_between(last_passing_build_commit, current_build_commit):
     return
 
-def run_pipeline_on_commit(test_commit, failed_test_map):
-    return
+
+def format_step(commit, steps):
+    ci_steps = ",".join(steps)
+    print(f"Running pipeline on commit: {commit} with steps: {ci_steps}")
+    step=f"""
+cat <<- YAML | buildkite-agent pipeline upload
+steps:
+  - trigger: "main-cron"
+    build:
+      commit: {commit}
+    env:
+      CI_STEPS: {ci_steps}
+YAML
+        """
+    return step
+
+
+# Triggers a buildkite job to run the pipeline on the given commit, with the specified tests.
+def run_pipeline_on_commit(commit, steps):
+    step = format_step(commit, steps)
+    print(f"Running upload pipeline: step={step}")
+    subprocess.run(step, shell=True)
 
 def run(failing_test_key):
     test_map = get_test_map()
@@ -54,9 +74,14 @@ def run(failing_test_key):
 
     print(f"Regression found at commit {test_commit}")
 
+# def main():
+#     if len(sys.argv) < 2:
+#         print("Usage: find-regression.py <failing_test_key>")
+#         sys.exit(1)
+#     failing_test_key = os.environ['FAILED_TEST_KEY']
+#     run(failing_test_key)
+
 def main():
-    if len(sys.argv) < 2:
-        print("Usage: find-regression.py <failing_test_key>")
-        sys.exit(1)
-    failing_test_key = os.environ['FAILED_TEST_KEY']
-    run(failing_test_key)
+    run_pipeline_on_commit("f0fa34cdeed95a08b2c7d8428a17d6de27b6588d", ["build"])
+
+main()

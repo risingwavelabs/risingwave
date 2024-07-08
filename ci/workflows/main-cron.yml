@@ -929,7 +929,7 @@ steps:
     key: "e2e-mongodb-sink-tests"
     command: "ci/scripts/e2e-mongodb-sink-test.sh -p ci-release"
     if: |
-      !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
+      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-e2e-mongodb-sink-tests"
       || build.env("CI_STEPS") =~ /(^|,)e2e-mongodb-sink-tests?(,|$$)/
     depends_on:
@@ -1053,15 +1053,30 @@ steps:
     timeout_in_minutes: 10
     retry: *auto-retry
 
+  - label: "find regressed step"
+    key: "find-regressed-step"
+    command: "ci/scripts/notify.py"
+    if: |
+      build.pull_request.labels includes "ci/main-cron/find-regressed-step"
+      || build.env("CI_STEPS") =~ /(^|,)find-regressed-step(,|$$)/
+    plugins:
+      - docker-compose#v5.1.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 10
+    retry: *auto-retry
+
   # Notification test.
   - key: "test-notify"
-    if: build.pull_request.labels includes "ci/main-cron/test-notify"
+    if: build.pull_request.labels includes "ci/main-cron/test-notify" || build.env("CI_STEPS") =~ /(^|,)test_notify(,|$$)/
     command: |
       bash -c 'echo test && exit -1'
 
   # Notification test.
   - key: "test-notify-2"
-    if: build.pull_request.labels includes "ci/main-cron/test-notify"
+    if: build.pull_request.labels includes "ci/main-cron/test-notify" || build.env("CI_STEPS") =~ /(^|,)test_notify(,|$$)/
     command: |
       bash -c 'echo test && exit -1'
 

@@ -53,62 +53,6 @@ MAIN_CRON_TEST_MAP = {
     "connector-node-integration-test": ["siyuan"],
 }
 
-
-# Add new test keys here.
-# Add their corresponding owners (by slack username) here.
-# NOTE(kwannoel): we may have to migrate to use `slack_user_id`.
-# I use `slack_username` since it is more readable, but not officially supported in the docs.
-MAIN_CRON_TEST_MAP = {
-    "test-notify": ["noelkwan", "noelkwan"],
-    "test-notify-2": ["noelkwan", "noelkwan"],
-    "docslt": ["tianxiao"],
-    "e2e-test-release": ["zhi", "Eric"],
-    "e2e-meta-backup-test-release": ["zhi", "Eric"],
-    "e2e-test-release-parallel": ["zhi", "Eric"],
-    "e2e-test-release-parallel-memory": ["zhi", "Eric"],
-    "e2e-test-release-source": ["bohan", "siyuan"],
-    "e2e-test-release-sink": ["bohan", "siyuan"],
-    "fuzz-test": ["noelkwan"],
-    "unit-test": ["zhi", "Eric"],
-    "unit-test-deterministic": ["zhi", "Eric"],
-    "integration-test-deterministic-scale": ["ziqi", "Eric"],
-    "integration-test-deterministic-recovery": ["ziqi", "Eric"],
-    "integration-test-deterministic-backfill": ["ziqi", "Eric"],
-    "integration-test-deterministic-storage": ["ziqi", "Eric"],
-    "integration-test-deterministic-sink": ["ziqi", "Eric"],
-    "e2e-test-deterministic": ["runji", "noelkwan"],
-    "recovery-test-deterministic": ["runji", "noelkwan"],
-    "background-ddl-arrangement-backfill-recovery-test-deterministic": ["runji", "noelkwan"],
-    "background-ddl-recovery-test-deterministic": ["runji", "noelkwan"],
-    "e2e-iceberg-sink-test": ["zilin"],
-    "e2e-iceberg-sink-v2-test": ["zilin"],
-    "e2e-java-binding-tests": ["yiming"],
-    "s3-source-check-aws": ["bohan"],
-    "s3-source-check-aws-json-parser": ["bohan"],
-    "s3-source-check-aws-csv-parser": ["bohan"],
-    "s3-v2-source-check-aws-json-parser": ["bohan"],
-    "s3-v2-source-batch-read-check-aws-json-parser": ["bohan"],
-    "s3-v2-source-check-aws-csv-parser": ["bohan"],
-    "s3-source-test-for-opendal-fs-engine-csv-parser": ["congyi", "kexiang"],
-    "s3-source-test-for-opendal-fs-engine": ["congyi", "kexiang"],
-    "pulsar-source-tests": ["bohan"],
-    "run-micro-benchmarks": ["noelkwan"],
-    "upload-micro-benchmarks": ["noelkwan"],
-    "backwards-compat-tests": ["noelkwan"],
-    "sqlsmith-differential-tests": ["noelkwan"],
-    "backfill-tests": ["noelkwan"],
-    "e2e-standalone-binary-tests": ["noelkwan"],
-    "e2e-single-node-binary-tests": ["pin", "peng", "noelkwan"],
-    "e2e-test-opendal-parallel": ["congyi"],
-    "e2e-deltalake-sink-rust-tests": ["xinhao"],
-    "e2e-redis-sink-tests": ["xinhao"],
-    "e2e-starrocks-sink-tests": ["xinhao"],
-    "e2e-cassandra-sink-tests": ["xinhao"],
-    "e2e-clickhouse-sink-tests": ["bohan","xinhao"],
-    "e2e-pulsar-sink-tests": ["bohan"],
-    "connector-node-integration-test": ["siyuan"],
-}
-
 INTEGRATION_TEST_MAP = {
     "test-notify": ["jianwei"],
     "ad-click-json": ["bohan"],
