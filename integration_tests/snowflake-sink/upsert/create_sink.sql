@@ -13,7 +13,4 @@ CREATE SINK snowflake_sink FROM ss_mv WITH (
     snowflake.aws_secret_access_key = 'EXAMPLE_SECRET_KEY',
     snowflake.aws_region = 'EXAMPLE_REGION',
     snowflake.s3_path = 'EXAMPLE_S3_PATH',
-    -- depends on your mv setup, note that snowflake sink *only* supports
-    -- `append-only` mode at present.
-    force_append_only = 'true'
 );

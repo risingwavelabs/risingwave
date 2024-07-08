@@ -20,7 +20,7 @@ use anyhow::{anyhow, Context};
 use async_trait::async_trait;
 use bytes::{Bytes, BytesMut};
 use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_object_store::object::{ObjectStore, OpendalStreamingUploader, StreamingUploader};
 use serde::Deserialize;

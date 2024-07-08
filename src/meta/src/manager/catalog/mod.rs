@@ -38,7 +38,7 @@ use risingwave_pb::catalog::{
     Comment, Connection, CreateType, Database, Function, Index, PbSource, PbStreamJobStatus,
     Schema, Secret, Sink, Source, StreamJobStatus, Subscription, Table, View,
 };
-use risingwave_pb::ddl_service::{alter_owner_request, alter_set_schema_request};
+use risingwave_pb::ddl_service::{alter_owner_request, alter_set_schema_request, TableJobType};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::user::grant_privilege::{Action, ActionWithGrantOption, Object};
 use risingwave_pb::user::update_user_request::UpdateField;
@@ -1295,63 +1295,57 @@ impl CatalogManager {
         table_id: TableId,
         internal_table_ids: Vec<TableId>,
     ) -> MetaResult<bool> {
-        let (table, internal_tables) = {
-            let core = &mut self.core.lock().await;
-            let database_core = &mut core.database;
-            let tables = &mut database_core.tables;
-            let Some(table) = tables.get(&table_id).cloned() else {
-                tracing::warn!(
-                    "table_id {} missing when attempting to cancel job, could be cleaned on recovery",
-                    table_id
-                );
-                return Ok(false);
-            };
-            let mut internal_tables = vec![];
-            for internal_table_id in &internal_table_ids {
-                if let Some(table) = tables.get(internal_table_id) {
-                    internal_tables.push(table.clone());
-                }
-            }
-
-            // `Unspecified` maps to Created state, due to backwards compatibility.
-            // `Created` states should not be cancelled.
-            if table
-                .get_stream_job_status()
-                .unwrap_or(StreamJobStatus::Created)
-                != StreamJobStatus::Creating
-            {
-                return Err(MetaError::invalid_parameter(format!(
-                    "table is not in creating state id={:#?}",
-                    table_id
-                )));
-            }
-
-            tracing::trace!("cleanup tables for {}", table.id);
-            let mut table_ids = vec![table.id];
-            table_ids.extend(internal_table_ids);
-
-            let tables = &mut database_core.tables;
-            let mut tables = BTreeMapTransaction::new(tables);
-            for table_id in table_ids {
-                let res = tables.remove(table_id);
-                assert!(res.is_some(), "table_id {} missing", table_id);
-            }
-            commit_meta!(self, tables)?;
-            (table, internal_tables)
+        let core = &mut self.core.lock().await;
+        let database_core = &mut core.database;
+        let tables = &mut database_core.tables;
+        let Some(table) = tables.get(&table_id).cloned() else {
+            tracing::warn!(
+                "table_id {} missing when attempting to cancel job, could be cleaned on recovery",
+                table_id
+            );
+            return Ok(false);
         };
+        let mut internal_tables = vec![];
+        for internal_table_id in &internal_table_ids {
+            if let Some(table) = tables.get(internal_table_id) {
+                internal_tables.push(table.clone());
+            }
+        }
+
+        // `Unspecified` maps to Created state, due to backwards compatibility.
+        // `Created` states should not be cancelled.
+        if table
+            .get_stream_job_status()
+            .unwrap_or(StreamJobStatus::Created)
+            != StreamJobStatus::Creating
+        {
+            return Err(MetaError::invalid_parameter(format!(
+                "table is not in creating state id={:#?}",
+                table_id
+            )));
+        }
+
+        tracing::trace!("cleanup tables for {}", table.id);
+        let mut table_ids = vec![table.id];
+        table_ids.extend(internal_table_ids);
+
+        let tables = &mut database_core.tables;
+        let mut tables = BTreeMapTransaction::new(tables);
+        for table_id in table_ids {
+            let res = tables.remove(table_id);
+            assert!(res.is_some(), "table_id {} missing", table_id);
+        }
+        commit_meta!(self, tables)?;
 
         {
-            let core = &mut self.core.lock().await;
-            {
-                let user_core = &mut core.user;
-                user_core.decrease_ref(table.owner);
-            }
+            let user_core = &mut core.user;
+            user_core.decrease_ref(table.owner);
+        }
 
-            {
-                let database_core = &mut core.database;
-                for &dependent_relation_id in &table.dependent_relations {
-                    database_core.decrease_relation_ref_count(dependent_relation_id);
-                }
+        {
+            let database_core = &mut core.database;
+            for &dependent_relation_id in &table.dependent_relations {
+                database_core.decrease_relation_ref_count(dependent_relation_id);
             }
         }
 
@@ -1371,6 +1365,7 @@ impl CatalogManager {
                 }),
             )
             .await;
+
         Ok(true)
     }
 
@@ -3557,7 +3552,7 @@ impl CatalogManager {
 
     /// This is used for `ALTER TABLE ADD/DROP COLUMN`.
     pub async fn start_replace_table_procedure(&self, stream_job: &StreamingJob) -> MetaResult<()> {
-        let StreamingJob::Table(source, table, ..) = stream_job else {
+        let StreamingJob::Table(source, table, job_type) = stream_job else {
             unreachable!("unexpected job: {stream_job:?}")
         };
         let core = &mut *self.core.lock().await;
@@ -3565,7 +3560,10 @@ impl CatalogManager {
         database_core.ensure_database_id(table.database_id)?;
         database_core.ensure_schema_id(table.schema_id)?;
 
-        assert!(table.dependent_relations.is_empty());
+        // general table streaming job should not have dependent relations
+        if matches!(job_type, TableJobType::General) {
+            assert!(table.dependent_relations.is_empty());
+        }
 
         let key = (table.database_id, table.schema_id, table.name.clone());
         let original_table = database_core
@@ -3719,8 +3717,6 @@ impl CatalogManager {
     ) {
         let database_core = &mut core.database;
         let key = (table.database_id, table.schema_id, table.name.clone());
-
-        assert!(table.dependent_relations.is_empty());
 
         assert!(
             database_core.tables.contains_key(&table.id)

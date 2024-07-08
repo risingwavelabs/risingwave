@@ -26,7 +26,7 @@ use risingwave_pb::stream_plan::ActorMapping as ActorMappingProto;
 
 use super::bitmap::VnodeBitmapExt;
 use super::vnode::{ParallelUnitId, VirtualNode};
-use crate::buffer::{Bitmap, BitmapBuilder};
+use crate::bitmap::{Bitmap, BitmapBuilder};
 use crate::util::compress::compress_data;
 use crate::util::iter_util::ZipEqDebug;
 

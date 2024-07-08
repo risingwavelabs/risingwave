@@ -15,8 +15,8 @@
 use core::pin::Pin;
 use core::time::Duration;
 use std::collections::{BTreeMap, HashMap, VecDeque};
-
 use std::pin::pin;
+
 use anyhow::anyhow;
 use futures::prelude::future::{select, Either};
 use futures::prelude::Future;
@@ -126,9 +126,10 @@ impl BigQueryFutureManager {
 
     pub async fn wait_next_offset(&mut self) -> Result<TruncateOffset> {
         loop {
-            self.rx.recv().await.unwrap();
             if let Some(offset) = self.wait_one_offset().await? {
                 return Ok(offset);
+            } else {
+                self.rx.recv().await.unwrap();
             }
         }
     }
@@ -164,7 +165,7 @@ impl BigQueryLogSinker {
 #[async_trait]
 impl LogSinker for BigQueryLogSinker {
     async fn consume_log_and_sink(mut self, log_reader: &mut impl SinkLogReader) -> Result<!> {
-        loop{
+        loop {
             let select_result = drop_either_future(
                 select(
                     pin!(log_reader.next_item()),
@@ -178,10 +179,14 @@ impl LogSinker for BigQueryLogSinker {
                     match item {
                         LogStoreReadItem::StreamChunk { chunk_id, chunk } => {
                             self.writer.write_chunk(chunk).await?;
-                            self.bigquery_future_manager.add_offset(TruncateOffset::Chunk { epoch, chunk_id }).await?;
+                            self.bigquery_future_manager
+                                .add_offset(TruncateOffset::Chunk { epoch, chunk_id })
+                                .await?;
                         }
                         LogStoreReadItem::Barrier { .. } => {
-                            self.bigquery_future_manager.add_offset(TruncateOffset::Barrier { epoch }).await?;
+                            self.bigquery_future_manager
+                                .add_offset(TruncateOffset::Barrier { epoch })
+                                .await?;
                         }
                         LogStoreReadItem::UpdateVnodeBitmap(_) => {}
                     }

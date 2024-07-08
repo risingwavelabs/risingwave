@@ -27,7 +27,7 @@ use pgwire::pg_server::SessionId;
 use risingwave_batch::error::BatchError;
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
 use risingwave_common::bail;
-use risingwave_common::buffer::{Bitmap, BitmapBuilder};
+use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::TableDesc;
 use risingwave_common::hash::table_distribution::TableDistribution;
 use risingwave_common::hash::{VirtualNode, WorkerSlotId, WorkerSlotMapping};

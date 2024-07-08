@@ -168,7 +168,7 @@ impl<Src: OpendalSource> OpendalReader<Src> {
                 source_ctx
                     .metrics
                     .partition_input_bytes
-                    .with_label_values(&[
+                    .with_guarded_label_values(&[
                         &actor_id,
                         &source_id,
                         &split_id,
@@ -185,7 +185,13 @@ impl<Src: OpendalSource> OpendalReader<Src> {
             source_ctx
                 .metrics
                 .partition_input_bytes
-                .with_label_values(&[&actor_id, &source_id, &split_id, &source_name, &fragment_id])
+                .with_guarded_label_values(&[
+                    &actor_id,
+                    &source_id,
+                    &split_id,
+                    &source_name,
+                    &fragment_id,
+                ])
                 .inc_by(batch_size as u64);
             yield batch;
         }
