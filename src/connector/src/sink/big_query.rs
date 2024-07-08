@@ -70,7 +70,7 @@ pub const CHANGE_TYPE: &str = "_CHANGE_TYPE";
 const DEFAULT_GRPC_CHANNEL_NUMS: usize = 4;
 const CONNECT_TIMEOUT: Option<Duration> = Some(Duration::from_secs(30));
 const CONNECTION_TIMEOUT: Option<Duration> = None;
-const BIGQUERY_SEND_FUTURE_BUFFER_MAX_SIZE: usize = 256;
+const BIGQUERY_SEND_FUTURE_BUFFER_MAX_SIZE: usize = 65536;
 
 #[serde_as]
 #[derive(Deserialize, Debug, Clone, WithOptions)]
