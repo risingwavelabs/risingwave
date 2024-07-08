@@ -163,7 +163,7 @@ fn convert_record_batch_to_stream_chunk(
                 let column = Arc::new(res);
                 chunk_columns.push(column);
             }
-            // The following fields is ony used in CDC source
+            // The following fields is only used in CDC source
             crate::source::SourceColumnType::Offset | crate::source::SourceColumnType::Meta => {
                 unreachable!()
             }
