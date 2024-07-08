@@ -11,11 +11,13 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
+pub mod dummy;
 pub mod etcd;
 pub mod sql;
 
 use serde::Serialize;
-use tokio::sync::watch::{self, Receiver};
+use tokio::sync::watch::Receiver;
 
 use crate::MetaResult;
 
@@ -39,54 +41,4 @@ pub trait ElectionClient: Send + Sync + 'static {
     async fn leader(&self) -> MetaResult<Option<ElectionMember>>;
     async fn get_members(&self) -> MetaResult<Vec<ElectionMember>>;
     fn is_leader(&self) -> bool;
-}
-
-pub struct DummyElectionClient {
-    id: String,
-    dummy_channel: watch::Sender<bool>,
-}
-
-impl DummyElectionClient {
-    pub fn new(id: String) -> Self {
-        let dummy_channel = watch::channel(true).0;
-        Self { id, dummy_channel }
-    }
-
-    fn self_member(&self) -> ElectionMember {
-        ElectionMember {
-            id: self.id.clone(),
-            is_leader: true,
-        }
-    }
-}
-
-#[async_trait::async_trait]
-impl ElectionClient for DummyElectionClient {
-    fn id(&self) -> MetaResult<String> {
-        Ok(self.id.clone())
-    }
-
-    async fn run_once(&self, _ttl: i64, mut stop: Receiver<()>) -> MetaResult<()> {
-        tokio::select! {
-            _ = stop.changed() => {}
-            _ = futures::future::pending::<()>() => {}
-        }
-        Ok(())
-    }
-
-    fn subscribe(&self) -> Receiver<bool> {
-        self.dummy_channel.subscribe()
-    }
-
-    async fn leader(&self) -> MetaResult<Option<ElectionMember>> {
-        Ok(Some(self.self_member()))
-    }
-
-    async fn get_members(&self) -> MetaResult<Vec<ElectionMember>> {
-        Ok(vec![self.self_member()])
-    }
-
-    fn is_leader(&self) -> bool {
-        true
-    }
 }

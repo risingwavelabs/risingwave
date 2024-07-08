@@ -31,8 +31,9 @@ use risingwave_meta::barrier::StreamRpcManager;
 use risingwave_meta::controller::catalog::CatalogController;
 use risingwave_meta::controller::cluster::ClusterController;
 use risingwave_meta::manager::{MetaStoreImpl, MetadataManager, SystemParamsManagerImpl};
+use risingwave_meta::rpc::election::dummy::DummyElectionClient;
 use risingwave_meta::rpc::intercept::MetricsMiddlewareLayer;
-use risingwave_meta::rpc::{election, ElectionClientRef};
+use risingwave_meta::rpc::ElectionClientRef;
 use risingwave_meta::stream::ScaleController;
 use risingwave_meta::MetaStoreBackend;
 use risingwave_meta_service::backup_service::BackupServiceImpl;
@@ -182,7 +183,7 @@ pub async fn rpc_serve(
         }
         MetaStoreBackend::Mem => {
             let meta_store = MemStore::new().into_ref();
-            let dummy_election_client = Arc::new(election::DummyElectionClient::new(
+            let dummy_election_client = Arc::new(DummyElectionClient::new(
                 address_info.advertise_addr.clone(),
             ));
             rpc_serve_with_store(
@@ -263,7 +264,7 @@ pub async fn rpc_serve_with_store(
     init_session_config: SessionConfig,
     shutdown: CancellationToken,
 ) -> MetaResult<()> {
-    // TODO(shutdown): use cancellation token
+    // TODO(shutdown): directly use cancellation token
     let (election_shutdown_tx, election_shutdown_rx) = watch::channel(());
 
     let election_handle = tokio::spawn({
@@ -512,7 +513,7 @@ pub async fn start_service_as_election_leader(
     );
 
     let (sink_manager, shutdown_handle) = SinkCoordinatorManager::start_worker();
-    // TODO(shutdown): remove this as there's no need to gracefully shutdown the sub-tasks.
+    // TODO(shutdown): remove this as there's no need to gracefully shutdown some of these sub-tasks.
     let mut sub_tasks = vec![shutdown_handle];
 
     let stream_rpc_manager = StreamRpcManager::new(env.clone());
