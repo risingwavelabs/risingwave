@@ -24,7 +24,7 @@ use aes_siv::{Aes128SivAead, KeyInit};
 use anyhow::Context;
 use itertools::Itertools;
 use rand::{Rng, RngCore};
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::{ActorId, ActorMapping, VirtualNode};
 use risingwave_common::system_param::reader::SystemParamsRead;
