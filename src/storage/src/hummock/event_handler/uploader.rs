@@ -841,6 +841,10 @@ impl TableUnsyncData {
             .cloned()
             .or(self.max_synced_epoch)
     }
+
+    fn is_empty(&self) -> bool {
+        self.instance_data.is_empty() && self.syncing_epochs.is_empty()
+    }
 }
 
 #[derive(Default)]
@@ -943,7 +947,7 @@ impl UnsyncData {
             debug!(instance_id, "destroy instance");
             let table_data = self.table_data.get_mut(&table_id).expect("should exist");
             assert!(table_data.instance_data.remove(&instance_id).is_some());
-            if table_data.instance_data.is_empty() {
+            if table_data.is_empty() {
                 self.table_data.remove(&table_id);
             }
         }
@@ -1335,6 +1339,9 @@ impl UploaderData {
                 for table_id in table_ids {
                     if let Some(table_data) = self.unsync_data.table_data.get_mut(&table_id) {
                         table_data.ack_synced(sync_epoch);
+                        if table_data.is_empty() {
+                            self.unsync_data.table_data.remove(&table_id);
+                        }
                     }
                 }
                 send_sync_result(
