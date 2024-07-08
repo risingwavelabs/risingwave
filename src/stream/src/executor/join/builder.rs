@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::array::stream_chunk::StreamChunkMut;
 use risingwave_common::array::stream_chunk_builder::StreamChunkBuilder;
 use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::row::{OwnedRow, Row};
@@ -157,7 +158,26 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> JoinChunkBuilder
     }
 
     pub fn post_process(c: StreamChunk) -> StreamChunk {
-        todo!()
+        let mut c = StreamChunkMut::from(c);
+
+        // NOTE(st1page): remove the pattern `UpdateDel(k, old), UpdateIns(k, NULL), UpdateDel(k, NULL),  UpdateIns(k, new)`
+        // to avoid this issue <https://github.com/risingwavelabs/risingwave/issues/17450>
+        let mut i = 1;
+        while i < c.capacity() {
+            if c.op(i - 1) == Op::UpdateInsert
+                && c.op(i) == Op::UpdateDelete
+                && c.row_ref(i) == c.row_ref(i - 1)
+            {
+                c.set_op(i - 2, Op::Delete);
+                c.set_vis(i - 1, false);
+                c.set_vis(i, false);
+                c.set_op(i + 1, Op::Insert);
+                i += 3;
+            } else {
+                i += 1;
+            }
+        }
+        c.into()
     }
 
     pub fn with_match_on_insert(
@@ -287,8 +307,6 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> JoinChunkBuilder
 
     #[inline]
     pub fn take(&mut self) -> Option<StreamChunk> {
-        self.stream_chunk_builder
-            .take()
-            .map(Self::post_process)
+        self.stream_chunk_builder.take().map(Self::post_process)
     }
 }
