@@ -76,7 +76,16 @@ impl LocalSecretManager {
         let mut secret_guard = self.secrets.write();
         // Reset the secrets
         secret_guard.clear();
-        std::fs::remove_dir_all(&self.secret_file_dir).unwrap();
+        // Error should only occurs when running simulation tests when we have multiple nodes
+        // in 1 process and can fail .
+        std::fs::remove_dir_all(&self.secret_file_dir)
+            .inspect_err(|e| {
+                tracing::error!(
+            error = %e.as_report(),
+            path = %self.secret_file_dir.to_string_lossy(),
+            "Failed to remove secret directory")
+            })
+            .ok();
         std::fs::create_dir_all(&self.secret_file_dir).unwrap();
         for secret in secrets {
             secret_guard.insert(secret.id, secret.value);
@@ -145,7 +154,14 @@ impl LocalSecretManager {
     fn remove_secret_file_if_exist(&self, secret_id: &SecretId) {
         let path = self.secret_file_dir.join(secret_id.to_string());
         if path.exists() {
-            std::fs::remove_file(&path).inspect_err(|e| tracing::error!(error = %e.as_report(), path = %path.to_string_lossy(),  "Failed to remove secret file")).ok();
+            std::fs::remove_file(&path)
+                .inspect_err(|e| {
+                    tracing::error!(
+                error = %e.as_report(),
+                path = %path.to_string_lossy(),
+                "Failed to remove secret file")
+                })
+                .ok();
         }
     }
 
