@@ -37,8 +37,11 @@ use crate::monitor::StoreLocalStatistic;
 const PROGRESS_KEY_INTERVAL: usize = 100;
 
 /// Iterates over the KV-pairs of an SST while downloading it.
+/// `SstableStreamIterator` encapsulates operations on `sstables`, constructing block streams and accessing the corresponding data via `block_metas`.
+///  Note that a `block_meta` does not necessarily correspond to the entire sstable, but rather to a subset, which is documented via the `block_idx`.
 pub struct SstableStreamIterator {
     sstable_store: SstableStoreRef,
+    /// The block metas subset of the SST.
     block_metas: Vec<BlockMeta>,
     /// The downloading stream.
     block_stream: Option<BlockDataStream>,
@@ -46,6 +49,7 @@ pub struct SstableStreamIterator {
     /// Iterates over the KV-pairs of the current block.
     block_iter: Option<BlockIterator>,
 
+    /// Index of the current block.
     block_idx: usize,
 
     /// Counts the time used for IO.
@@ -343,6 +347,7 @@ impl ConcatSstableIterator {
             (None, true) => None,
             (None, false) => Some(FullKey::decode(&self.key_range.left)),
         };
+
         self.cur_idx = idx;
         while self.cur_idx < self.sstables.len() {
             let table_info = &self.sstables[self.cur_idx];
@@ -360,19 +365,24 @@ impl ConcatSstableIterator {
                 .sstable(table_info, &mut self.stats)
                 .verbose_instrument_await("stream_iter_sstable")
                 .await?;
-            let block_metas = &sstable.meta.block_metas;
-            let (start_index, end_index) = Self::filter_block_metas(
-                block_metas,
-                seek_key,
+
+            let filter_key_range = match seek_key {
+                Some(seek_key) => {
+                    KeyRange::new(seek_key.encode().into(), self.key_range.right.clone())
+                }
+                None => self.key_range.clone(),
+            };
+
+            let block_metas = Self::filter_block_metas(
+                &sstable.meta.block_metas,
                 &self.existing_table_ids,
-                &self.key_range,
+                filter_key_range,
             );
 
-            if start_index > end_index {
+            if block_metas.is_empty() {
                 found = false;
             } else {
                 self.task_progress.inc_num_pending_read_io();
-                let block_metas = block_metas[start_index..=end_index].to_vec();
                 let mut sstable_iter = SstableStreamIterator::new(
                     block_metas,
                     table_info.clone(),
@@ -402,24 +412,23 @@ impl ConcatSstableIterator {
 
     pub fn filter_block_metas(
         block_metas: &Vec<BlockMeta>,
-        seek_key: Option<FullKey<&[u8]>>,
         existing_table_ids: &HashSet<u32>,
-        key_range: &KeyRange,
-    ) -> (usize, usize) {
+        key_range: KeyRange,
+    ) -> Vec<BlockMeta> {
         if block_metas.is_empty() {
-            return (usize::MAX, 0);
+            return vec![];
         }
 
-        let mut start_index = match seek_key {
-            None => 0,
-            Some(seek_key) => {
-                // start_index points to the greatest block whose smallest_key <= seek_key.
-                block_metas
-                    .partition_point(|block| {
-                        seek_key.cmp(&FullKey::decode(&block.smallest_key)) != Ordering::Less
-                    })
-                    .saturating_sub(1)
-            }
+        let mut start_index = if key_range.left.is_empty() {
+            0
+        } else {
+            // start_index points to the greatest block whose smallest_key <= seek_key.
+            block_metas
+                .partition_point(|block| {
+                    KeyComparator::compare_encoded_full_key(&key_range.left, &block.smallest_key)
+                        != Ordering::Less
+                })
+                .saturating_sub(1)
         };
 
         let mut end_index = if key_range.right.is_empty() {
@@ -429,13 +438,13 @@ impl ConcatSstableIterator {
                 KeyComparator::compare_encoded_full_key(&block.smallest_key, &key_range.right)
                     != Ordering::Greater
             })
-        };
+        }
+        .saturating_sub(1);
 
         if end_index == 0 {
-            return (usize::MAX, 0);
+            // not found
+            return vec![];
         }
-
-        end_index = end_index.saturating_sub(1);
 
         // skip blocks that are not in existing_table_ids
         while start_index <= end_index {
@@ -458,31 +467,33 @@ impl ConcatSstableIterator {
             }
         }
 
-        if end_index != 0 {
-            while start_index <= end_index {
-                let end_block_table_id = block_metas[end_index].table_id().table_id();
-                if existing_table_ids.contains(&end_block_table_id) {
-                    break;
-                }
+        while start_index <= end_index {
+            let end_block_table_id = block_metas[end_index].table_id().table_id();
+            if existing_table_ids.contains(&end_block_table_id) {
+                break;
+            }
 
-                let old_end_index = end_index;
-                let block_metas_to_search = &block_metas[start_index..=end_index];
+            let old_end_index = end_index;
+            let block_metas_to_search = &block_metas[start_index..=end_index];
 
-                end_index = start_index
-                    + block_metas_to_search
-                        .partition_point(|block_meta| {
-                            block_meta.table_id().table_id() < end_block_table_id
-                        })
-                        .saturating_sub(1);
+            end_index = start_index
+                + block_metas_to_search
+                    .partition_point(|block_meta| {
+                        block_meta.table_id().table_id() < end_block_table_id
+                    })
+                    .saturating_sub(1);
 
-                if end_index == old_end_index {
-                    // no more blocks with the same table_id
-                    break;
-                }
+            if end_index == old_end_index {
+                // no more blocks with the same table_id
+                break;
             }
         }
 
-        (start_index, end_index)
+        if start_index > end_index {
+            return vec![];
+        }
+
+        block_metas[start_index..=end_index].to_vec()
     }
 }
 
@@ -844,6 +855,7 @@ mod tests {
             .unwrap();
         assert!(iter.is_valid());
         assert_eq!(iter.key(), block_1_second_key.to_ref());
+
         // Use None seek key and result in the second KV of block 1.
         iter.seek_idx(0, None).await.unwrap();
         assert!(iter.is_valid());
@@ -854,17 +866,14 @@ mod tests {
     async fn test_filter_block_metas() {
         {
             let block_metas = Vec::default();
-            let seek_key = None;
 
-            let (start_index, end_index) = ConcatSstableIterator::filter_block_metas(
+            let ret = ConcatSstableIterator::filter_block_metas(
                 &block_metas,
-                seek_key,
                 &HashSet::default(),
-                &KeyRange::default(),
+                KeyRange::default(),
             );
 
-            assert_eq!(usize::MAX, start_index);
-            assert_eq!(0, end_index);
+            assert!(ret.is_empty());
         }
 
         {
@@ -882,17 +891,28 @@ mod tests {
                     ..Default::default()
                 },
             ];
-            let seek_key = None;
 
-            let (start_index, end_index) = ConcatSstableIterator::filter_block_metas(
+            let ret = ConcatSstableIterator::filter_block_metas(
                 &block_metas,
-                seek_key,
                 &HashSet::from_iter(vec![1_u32, 2, 3].into_iter()),
-                &KeyRange::default(),
+                KeyRange::default(),
             );
 
-            assert_eq!(0, start_index);
-            assert_eq!(2, end_index);
+            assert_eq!(3, ret.len());
+            assert_eq!(
+                1,
+                FullKey::decode(&ret[0].smallest_key)
+                    .user_key
+                    .table_id
+                    .table_id()
+            );
+            assert_eq!(
+                3,
+                FullKey::decode(&ret[2].smallest_key)
+                    .user_key
+                    .table_id
+                    .table_id()
+            );
         }
 
         {
@@ -910,17 +930,28 @@ mod tests {
                     ..Default::default()
                 },
             ];
-            let seek_key = None;
 
-            let (start_index, end_index) = ConcatSstableIterator::filter_block_metas(
+            let ret = ConcatSstableIterator::filter_block_metas(
                 &block_metas,
-                seek_key,
                 &HashSet::from_iter(vec![2_u32, 3].into_iter()),
-                &KeyRange::default(),
+                KeyRange::default(),
             );
 
-            assert_eq!(1, start_index);
-            assert_eq!(2, end_index);
+            assert_eq!(2, ret.len());
+            assert_eq!(
+                2,
+                FullKey::decode(&ret[0].smallest_key)
+                    .user_key
+                    .table_id
+                    .table_id()
+            );
+            assert_eq!(
+                3,
+                FullKey::decode(&ret[1].smallest_key)
+                    .user_key
+                    .table_id
+                    .table_id()
+            );
         }
 
         {
@@ -938,17 +969,28 @@ mod tests {
                     ..Default::default()
                 },
             ];
-            let seek_key = None;
 
-            let (start_index, end_index) = ConcatSstableIterator::filter_block_metas(
+            let ret = ConcatSstableIterator::filter_block_metas(
                 &block_metas,
-                seek_key,
                 &HashSet::from_iter(vec![1_u32, 2_u32].into_iter()),
-                &KeyRange::default(),
+                KeyRange::default(),
             );
 
-            assert_eq!(0, start_index);
-            assert_eq!(1, end_index);
+            assert_eq!(2, ret.len());
+            assert_eq!(
+                1,
+                FullKey::decode(&ret[0].smallest_key)
+                    .user_key
+                    .table_id
+                    .table_id()
+            );
+            assert_eq!(
+                2,
+                FullKey::decode(&ret[1].smallest_key)
+                    .user_key
+                    .table_id
+                    .table_id()
+            );
         }
 
         {
@@ -966,17 +1008,20 @@ mod tests {
                     ..Default::default()
                 },
             ];
-            let seek_key = None;
-
-            let (start_index, end_index) = ConcatSstableIterator::filter_block_metas(
+            let ret = ConcatSstableIterator::filter_block_metas(
                 &block_metas,
-                seek_key,
                 &HashSet::from_iter(vec![2_u32].into_iter()),
-                &KeyRange::default(),
+                KeyRange::default(),
             );
 
-            assert_eq!(1, start_index);
-            assert_eq!(1, end_index);
+            assert_eq!(1, ret.len());
+            assert_eq!(
+                2,
+                FullKey::decode(&ret[0].smallest_key)
+                    .user_key
+                    .table_id
+                    .table_id()
+            );
         }
 
         {
@@ -1002,17 +1047,20 @@ mod tests {
                     ..Default::default()
                 },
             ];
-            let seek_key = None;
-
-            let (start_index, end_index) = ConcatSstableIterator::filter_block_metas(
+            let ret = ConcatSstableIterator::filter_block_metas(
                 &block_metas,
-                seek_key,
                 &HashSet::from_iter(vec![2_u32].into_iter()),
-                &KeyRange::default(),
+                KeyRange::default(),
             );
 
-            assert_eq!(3, start_index);
-            assert_eq!(3, end_index);
+            assert_eq!(1, ret.len());
+            assert_eq!(
+                2,
+                FullKey::decode(&ret[0].smallest_key)
+                    .user_key
+                    .table_id
+                    .table_id()
+            );
         }
 
         {
@@ -1038,17 +1086,21 @@ mod tests {
                     ..Default::default()
                 },
             ];
-            let seek_key = None;
 
-            let (start_index, end_index) = ConcatSstableIterator::filter_block_metas(
+            let ret = ConcatSstableIterator::filter_block_metas(
                 &block_metas,
-                seek_key,
                 &HashSet::from_iter(vec![2_u32].into_iter()),
-                &KeyRange::default(),
+                KeyRange::default(),
             );
 
-            assert_eq!(1, start_index);
-            assert_eq!(1, end_index);
+            assert_eq!(1, ret.len());
+            assert_eq!(
+                2,
+                FullKey::decode(&ret[0].smallest_key)
+                    .user_key
+                    .table_id
+                    .table_id()
+            );
         }
     }
 }
