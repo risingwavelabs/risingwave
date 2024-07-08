@@ -15,7 +15,6 @@
 #![feature(lazy_cell)]
 #![feature(type_alias_impl_trait)]
 #![feature(impl_trait_in_assoc_type)]
-#![feature(array_methods)]
 use std::ops::Deref;
 use std::sync::LazyLock;
 
@@ -29,11 +28,13 @@ use tracing_subscriber::Layer;
 
 mod error_metrics;
 mod guarded_metrics;
+mod metrics;
 pub mod monitor;
 mod relabeled_metric;
 
 pub use error_metrics::*;
 pub use guarded_metrics::*;
+pub use metrics::*;
 pub use relabeled_metric::*;
 
 #[derive(Debug)]

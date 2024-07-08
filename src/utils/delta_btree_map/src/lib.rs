@@ -76,16 +76,18 @@ impl<'a, K: Ord, V> DeltaBTreeMap<'a, K, V> {
     pub fn find(&self, key: &K) -> Option<CursorWithDelta<'a, K, V>> {
         let ss_cursor = self.snapshot.lower_bound(Bound::Included(key));
         let dt_cursor = self.delta.lower_bound(Bound::Included(key));
-        let curr_key_value = if dt_cursor.key() == Some(key) {
-            match dt_cursor.key_value().unwrap() {
+        let ss_cursor_kv = ss_cursor.peek_next();
+        let dt_cursor_kv = dt_cursor.peek_next();
+        let curr_key_value = if dt_cursor_kv.map(|(k, _)| k) == Some(key) {
+            match dt_cursor_kv.unwrap() {
                 (key, Change::Insert(value)) => (key, value),
                 (_key, Change::Delete) => {
                     // the key is deleted
                     return None;
                 }
             }
-        } else if ss_cursor.key() == Some(key) {
-            ss_cursor.key_value().unwrap()
+        } else if ss_cursor_kv.map(|(k, _)| k) == Some(key) {
+            ss_cursor_kv.unwrap()
         } else {
             // the key doesn't exist
             return None;
@@ -102,16 +104,8 @@ impl<'a, K: Ord, V> DeltaBTreeMap<'a, K, V> {
         // the implementation is very similar to `CursorWithDelta::peek_next`
         let mut ss_cursor = self.snapshot.lower_bound(bound);
         let mut dt_cursor = self.delta.lower_bound(bound);
-        let next_ss_entry = || {
-            let tmp = ss_cursor.key_value();
-            ss_cursor.move_next();
-            tmp
-        };
-        let next_dt_entry = || {
-            let tmp = dt_cursor.key_value();
-            dt_cursor.move_next();
-            tmp
-        };
+        let next_ss_entry = || ss_cursor.next();
+        let next_dt_entry = || dt_cursor.next();
         let curr_key_value =
             CursorWithDelta::peek_impl(PeekDirection::Next, next_ss_entry, next_dt_entry);
         CursorWithDelta {
@@ -126,16 +120,8 @@ impl<'a, K: Ord, V> DeltaBTreeMap<'a, K, V> {
         // the implementation is very similar to `CursorWithDelta::peek_prev`
         let mut ss_cursor = self.snapshot.upper_bound(bound);
         let mut dt_cursor = self.delta.upper_bound(bound);
-        let prev_ss_entry = || {
-            let tmp = ss_cursor.key_value();
-            ss_cursor.move_prev();
-            tmp
-        };
-        let prev_dt_entry = || {
-            let tmp = dt_cursor.key_value();
-            dt_cursor.move_prev();
-            tmp
-        };
+        let prev_ss_entry = || ss_cursor.prev();
+        let prev_dt_entry = || dt_cursor.prev();
         let curr_key_value =
             CursorWithDelta::peek_impl(PeekDirection::Prev, prev_ss_entry, prev_dt_entry);
         CursorWithDelta {
@@ -244,22 +230,14 @@ impl<'a, K: Ord, V> CursorWithDelta<'a, K, V> {
             let mut ss_cursor = self.snapshot.lower_bound(Bound::Included(key));
             let mut dt_cursor = self.delta.lower_bound(Bound::Included(key));
             // either one of `ss_cursor.key()` and `dt_cursor.key()` == `Some(key)`, or both are
-            if ss_cursor.key() == Some(key) {
-                ss_cursor.move_next();
+            if ss_cursor.peek_next().map(|(k, _)| k) == Some(key) {
+                ss_cursor.next();
             }
-            if dt_cursor.key() == Some(key) {
-                dt_cursor.move_next();
+            if dt_cursor.peek_next().map(|(k, _)| k) == Some(key) {
+                dt_cursor.next();
             }
-            let next_ss_entry = || {
-                let tmp = ss_cursor.key_value();
-                ss_cursor.move_next();
-                tmp
-            };
-            let next_dt_entry = || {
-                let tmp = dt_cursor.key_value();
-                dt_cursor.move_next();
-                tmp
-            };
+            let next_ss_entry = || ss_cursor.next();
+            let next_dt_entry = || dt_cursor.next();
             Self::peek_impl(PeekDirection::Next, next_ss_entry, next_dt_entry)
         } else {
             // we are at the ghost position, now let's go back to the beginning
@@ -275,22 +253,14 @@ impl<'a, K: Ord, V> CursorWithDelta<'a, K, V> {
             let mut ss_cursor = self.snapshot.upper_bound(Bound::Included(key));
             let mut dt_cursor = self.delta.upper_bound(Bound::Included(key));
             // either one of `ss_cursor.key()` and `dt_cursor.key()` == `Some(key)`, or both are
-            if ss_cursor.key() == Some(key) {
-                ss_cursor.move_prev();
+            if ss_cursor.peek_prev().map(|(k, _)| k) == Some(key) {
+                ss_cursor.prev();
             }
-            if dt_cursor.key() == Some(key) {
-                dt_cursor.move_prev();
+            if dt_cursor.peek_prev().map(|(k, _)| k) == Some(key) {
+                dt_cursor.prev();
             }
-            let next_ss_entry = || {
-                let tmp = ss_cursor.key_value();
-                ss_cursor.move_prev();
-                tmp
-            };
-            let next_dt_entry = || {
-                let tmp = dt_cursor.key_value();
-                dt_cursor.move_prev();
-                tmp
-            };
+            let next_ss_entry = || ss_cursor.prev();
+            let next_dt_entry = || dt_cursor.prev();
             Self::peek_impl(PeekDirection::Prev, next_ss_entry, next_dt_entry)
         } else {
             // we are at the ghost position, now let's go back to the end
@@ -317,8 +287,6 @@ impl<'a, K: Ord, V> CursorWithDelta<'a, K, V> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-
     use super::*;
 
     #[test]

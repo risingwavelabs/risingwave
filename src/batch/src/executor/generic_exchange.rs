@@ -45,6 +45,7 @@ pub struct GenericExchangeExecutor<CS, C> {
     context: C,
 
     schema: Schema,
+    #[expect(dead_code)]
     task_id: TaskId,
     identity: String,
 
@@ -277,9 +278,8 @@ impl<CS: 'static + Send + CreateSource, C: BatchTaskContext> GenericExchangeExec
 #[cfg(test)]
 mod tests {
 
-    use futures::StreamExt;
     use rand::Rng;
-    use risingwave_common::array::{Array, DataChunk, I32Array};
+    use risingwave_common::array::{Array, I32Array};
     use risingwave_common::types::DataType;
 
     use super::*;

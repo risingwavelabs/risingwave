@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use arrow_schema::SchemaRef;
+use arrow_schema_iceberg::SchemaRef;
 use icelake::io_v2::{
     FanoutPartitionedWriter, FanoutPartitionedWriterBuilder, FanoutPartitionedWriterMetrics,
     IcebergWriter, IcebergWriterBuilder,
@@ -27,6 +27,7 @@ pub struct MonitoredFanoutPartitionedWriterBuilder<B: IcebergWriterBuilder> {
 }
 
 impl<B: IcebergWriterBuilder> MonitoredFanoutPartitionedWriterBuilder<B> {
+    #[expect(dead_code)]
     pub fn new(
         inner: FanoutPartitionedWriterBuilder<B>,
         partition_num: LabelGuardedIntGauge<2>,
@@ -74,7 +75,7 @@ impl<B: IcebergWriterBuilder> MonitoredFanoutPartitionedWriter<B> {
 impl<B: IcebergWriterBuilder> IcebergWriter for MonitoredFanoutPartitionedWriter<B> {
     type R = <FanoutPartitionedWriter<B> as IcebergWriter>::R;
 
-    async fn write(&mut self, batch: arrow_array::RecordBatch) -> Result<()> {
+    async fn write(&mut self, batch: arrow_array_iceberg::RecordBatch) -> Result<()> {
         self.inner.write(batch).await?;
         self.update_metrics()?;
         Ok(())

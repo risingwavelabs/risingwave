@@ -185,7 +185,6 @@ where
 #[cfg(test)]
 mod tests {
     use assert_matches::assert_matches;
-    use futures::StreamExt;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
@@ -201,7 +200,7 @@ mod tests {
         use risingwave_common::util::epoch::test_epoch;
 
         use super::*;
-        use crate::executor::{ActorContext, Execute};
+
         fn create_stream_chunks() -> Vec<StreamChunk> {
             let chunk1 = StreamChunk::from_pretty(
                 "  I I
@@ -685,8 +684,6 @@ mod tests {
 
         use super::*;
         use crate::executor::test_utils::top_n_executor::create_in_memory_state_table_from_state_store;
-        use crate::executor::{ActorContext, Execute};
-
         fn create_source_new() -> Executor {
             let mut chunks = vec![
                 StreamChunk::from_pretty(
@@ -1002,7 +999,6 @@ mod tests {
 
         use super::*;
         use crate::executor::test_utils::top_n_executor::create_in_memory_state_table_from_state_store;
-        use crate::executor::{ActorContext, Execute};
 
         fn create_source() -> Executor {
             let mut chunks = vec![

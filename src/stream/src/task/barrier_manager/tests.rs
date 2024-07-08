@@ -20,10 +20,8 @@ use std::task::Poll;
 use assert_matches::assert_matches;
 use futures::future::join_all;
 use futures::FutureExt;
-use itertools::Itertools;
 use risingwave_common::util::epoch::test_epoch;
 use risingwave_pb::stream_service::{streaming_control_stream_request, InjectBarrierRequest};
-use tokio::sync::mpsc::unbounded_channel;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use super::*;
@@ -89,6 +87,7 @@ async fn test_managed_barrier_collection() -> StreamResult<()> {
                     barrier: Some(barrier.to_protobuf()),
                     actor_ids_to_send: actor_ids.clone(),
                     actor_ids_to_collect: actor_ids,
+                    table_ids_to_sync: vec![],
                 },
             )),
         }))
@@ -195,6 +194,7 @@ async fn test_managed_barrier_collection_separately() -> StreamResult<()> {
                     barrier: Some(barrier.to_protobuf()),
                     actor_ids_to_send,
                     actor_ids_to_collect,
+                    table_ids_to_sync: vec![],
                 },
             )),
         }))

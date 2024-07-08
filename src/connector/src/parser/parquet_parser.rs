@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 use arrow_array::RecordBatch;
 use futures_async_stream::try_stream;
-use opendal::Reader;
+use opendal::{FuturesAsyncReader, Operator};
 use risingwave_common::array::{ArrayBuilderImpl, DataChunk, StreamChunk};
 use risingwave_common::types::{Datum, ScalarImpl};
 
@@ -44,7 +44,9 @@ impl ParquetParser {
     #[try_stream(boxed, ok = StreamChunk, error = crate::error::ConnectorError)]
     pub async fn into_stream(
         self,
-        record_batch_stream: parquet::arrow::async_reader::ParquetRecordBatchStream<Reader>,
+        record_batch_stream: parquet::arrow::async_reader::ParquetRecordBatchStream<
+            FuturesAsyncReader,
+        >,
         file_name: String,
     ) {
         #[for_await]

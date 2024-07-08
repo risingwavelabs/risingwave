@@ -23,12 +23,12 @@ use risingwave_meta_model_v2::object::ObjectType;
 use risingwave_meta_model_v2::prelude::*;
 use risingwave_meta_model_v2::{
     actor, actor_dispatcher, connection, database, fragment, function, index, object,
-    object_dependency, schema, sink, source, table, user, user_privilege, view, ActorId,
-    DataTypeArray, DatabaseId, FragmentId, FragmentVnodeMapping, I32Array, ObjectId, PrivilegeId,
-    SchemaId, SourceId, StreamNode, UserId,
+    object_dependency, schema, secret, sink, source, subscription, table, user, user_privilege,
+    view, worker_property, ActorId, DataTypeArray, DatabaseId, FragmentId, FragmentVnodeMapping,
+    I32Array, ObjectId, PrivilegeId, SchemaId, SourceId, StreamNode, UserId, WorkerId,
 };
-use risingwave_pb::catalog::{PbConnection, PbFunction};
-use risingwave_pb::meta::PbFragmentParallelUnitMapping;
+use risingwave_pb::catalog::{PbConnection, PbFunction, PbSecret, PbSubscription};
+use risingwave_pb::meta::{PbFragmentParallelUnitMapping, PbFragmentWorkerSlotMapping};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{PbFragmentTypeFlag, PbStreamNode, StreamSource};
 use risingwave_pb::user::grant_privilege::{PbAction, PbActionWithGrantOption, PbObject};
@@ -42,6 +42,7 @@ use sea_orm::{
     Order, PaginatorTrait, QueryFilter, QuerySelect, RelationTrait, Statement,
 };
 
+use crate::controller::catalog::CatalogController;
 use crate::{MetaError, MetaResult};
 
 /// This function will construct a query using recursive cte to find all objects[(id, `obj_type`)] that are used by the given object.
@@ -410,6 +411,54 @@ where
     Ok(())
 }
 
+pub async fn check_secret_name_duplicate<C>(pb_secret: &PbSecret, db: &C) -> MetaResult<()>
+where
+    C: ConnectionTrait,
+{
+    let count = Secret::find()
+        .inner_join(Object)
+        .filter(
+            object::Column::DatabaseId
+                .eq(pb_secret.database_id as DatabaseId)
+                .and(object::Column::SchemaId.eq(pb_secret.schema_id as SchemaId))
+                .and(secret::Column::Name.eq(&pb_secret.name)),
+        )
+        .count(db)
+        .await?;
+    if count > 0 {
+        assert_eq!(count, 1);
+        return Err(MetaError::catalog_duplicated("secret", &pb_secret.name));
+    }
+    Ok(())
+}
+
+pub async fn check_subscription_name_duplicate<C>(
+    pb_subscription: &PbSubscription,
+    db: &C,
+) -> MetaResult<()>
+where
+    C: ConnectionTrait,
+{
+    let count = Subscription::find()
+        .inner_join(Object)
+        .filter(
+            object::Column::DatabaseId
+                .eq(pb_subscription.database_id as DatabaseId)
+                .and(object::Column::SchemaId.eq(pb_subscription.schema_id as SchemaId))
+                .and(subscription::Column::Name.eq(&pb_subscription.name)),
+        )
+        .count(db)
+        .await?;
+    if count > 0 {
+        assert_eq!(count, 1);
+        return Err(MetaError::catalog_duplicated(
+            "subscription",
+            &pb_subscription.name,
+        ));
+    }
+    Ok(())
+}
+
 /// `check_user_name_duplicate` checks whether the user is already existed in the cluster.
 pub async fn check_user_name_duplicate<C>(name: &str, db: &C) -> MetaResult<()>
 where
@@ -727,14 +776,14 @@ where
             let obj = match object.obj_type {
                 ObjectType::Database => PbObject::DatabaseId(oid),
                 ObjectType::Schema => PbObject::SchemaId(oid),
-                ObjectType::Table => PbObject::TableId(oid),
+                ObjectType::Table | ObjectType::Index => PbObject::TableId(oid),
                 ObjectType::Source => PbObject::SourceId(oid),
                 ObjectType::Sink => PbObject::SinkId(oid),
                 ObjectType::View => PbObject::ViewId(oid),
                 ObjectType::Function => PbObject::FunctionId(oid),
-                ObjectType::Index => unreachable!("index is not supported yet"),
                 ObjectType::Connection => unreachable!("connection is not supported yet"),
                 ObjectType::Subscription => PbObject::SubscriptionId(oid),
+                ObjectType::Secret => unreachable!("secret is not supported yet"),
             };
             PbGrantPrivilege {
                 action_with_opts: vec![PbActionWithGrantOption {
@@ -789,10 +838,12 @@ where
 pub async fn get_fragment_mappings<C>(
     db: &C,
     job_id: ObjectId,
-) -> MetaResult<Vec<PbFragmentParallelUnitMapping>>
+) -> MetaResult<Vec<PbFragmentWorkerSlotMapping>>
 where
     C: ConnectionTrait,
 {
+    let parallel_unit_to_worker = get_parallel_unit_to_worker_map(db).await?;
+
     let fragment_mappings: Vec<(FragmentId, FragmentVnodeMapping)> = Fragment::find()
         .select_only()
         .columns([fragment::Column::FragmentId, fragment::Column::VnodeMapping])
@@ -801,13 +852,7 @@ where
         .all(db)
         .await?;
 
-    Ok(fragment_mappings
-        .into_iter()
-        .map(|(fragment_id, mapping)| PbFragmentParallelUnitMapping {
-            fragment_id: fragment_id as _,
-            mapping: Some(mapping.to_protobuf()),
-        })
-        .collect())
+    CatalogController::convert_fragment_mappings(fragment_mappings, &parallel_unit_to_worker)
 }
 
 /// `get_fragment_mappings_by_jobs` returns the fragment vnode mappings of the given job list.
@@ -879,15 +924,19 @@ pub fn find_stream_source(stream_node: &PbStreamNode) -> Option<&StreamSource> {
 pub async fn resolve_source_register_info_for_jobs<C>(
     db: &C,
     streaming_jobs: Vec<ObjectId>,
-) -> MetaResult<(HashMap<SourceId, BTreeSet<FragmentId>>, HashSet<ActorId>)>
+) -> MetaResult<(
+    HashMap<SourceId, BTreeSet<FragmentId>>,
+    HashSet<ActorId>,
+    HashSet<FragmentId>,
+)>
 where
     C: ConnectionTrait,
 {
     if streaming_jobs.is_empty() {
-        return Ok((HashMap::default(), HashSet::default()));
+        return Ok((HashMap::default(), HashSet::default(), HashSet::default()));
     }
 
-    let mut fragments: Vec<(FragmentId, i32, StreamNode)> = Fragment::find()
+    let fragments: Vec<(FragmentId, i32, StreamNode)> = Fragment::find()
         .select_only()
         .columns([
             fragment::Column::FragmentId,
@@ -908,10 +957,16 @@ where
         .all(db)
         .await?;
 
-    fragments.retain(|(_, mask, _)| *mask & PbFragmentTypeFlag::Source as i32 != 0);
+    let removed_fragments = fragments
+        .iter()
+        .map(|(fragment_id, _, _)| *fragment_id)
+        .collect();
 
     let mut source_fragment_ids = HashMap::new();
-    for (fragment_id, _, stream_node) in fragments {
+    for (fragment_id, mask, stream_node) in fragments {
+        if mask & PbFragmentTypeFlag::Source as i32 == 0 {
+            continue;
+        }
         if let Some(source) = find_stream_source(&stream_node.to_protobuf()) {
             source_fragment_ids
                 .entry(source.source_id as SourceId)
@@ -920,5 +975,36 @@ where
         }
     }
 
-    Ok((source_fragment_ids, actors.into_iter().collect()))
+    Ok((
+        source_fragment_ids,
+        actors.into_iter().collect(),
+        removed_fragments,
+    ))
+}
+
+pub(crate) async fn get_parallel_unit_to_worker_map<C>(db: &C) -> MetaResult<HashMap<u32, u32>>
+where
+    C: ConnectionTrait,
+{
+    let worker_parallel_units = WorkerProperty::find()
+        .select_only()
+        .columns([
+            worker_property::Column::WorkerId,
+            worker_property::Column::ParallelUnitIds,
+        ])
+        .into_tuple::<(WorkerId, I32Array)>()
+        .all(db)
+        .await?;
+
+    let parallel_unit_to_worker = worker_parallel_units
+        .into_iter()
+        .flat_map(|(worker_id, parallel_unit_ids)| {
+            parallel_unit_ids
+                .into_inner()
+                .into_iter()
+                .map(move |parallel_unit_id| (parallel_unit_id as u32, worker_id as u32))
+        })
+        .collect::<HashMap<_, _>>();
+
+    Ok(parallel_unit_to_worker)
 }

@@ -137,13 +137,27 @@ impl Source {
         (self, original_row_id_index)
     }
 
-    pub fn infer_internal_table_catalog(require_dist_key: bool) -> TableCatalog {
-        // note that source's internal table is to store partition_id -> offset mapping and its
-        // schema is irrelevant to input schema
-        // On the premise of ensuring that the materialized_source data can be cleaned up, keep the
-        // state in source.
-        // Source state doesn't maintain retention_seconds, internal_table_subset function only
-        // returns retention_seconds so default is used here
+    /// Source's state table is `partition_id -> offset_info`.
+    /// Its schema is irrelevant to the data's schema.
+    ///
+    /// ## Notes on the distribution of the state table (`is_distributed`)
+    ///
+    /// Source executors are always distributed, but their state tables are special.
+    ///
+    /// ### `StreamSourceExecutor`: singleton (only one vnode)
+    ///
+    /// Its states are not sharded by consistent hash.
+    ///
+    /// Each actor accesses (point get) some partitions (a.k.a splits).
+    /// They are assigned by `SourceManager` in meta,
+    /// instead of `vnode` computed from the `partition_id`.
+    ///
+    /// ### `StreamFsFetch`: distributed by `partition_id`
+    ///
+    /// Each actor accesses (range scan) splits according to the `vnode`
+    /// computed from `partition_id`.
+    /// This is a normal distributed table.
+    pub fn infer_internal_table_catalog(is_distributed: bool) -> TableCatalog {
         let mut builder = TableCatalogBuilder::default();
 
         let key = Field {
@@ -164,7 +178,7 @@ impl Source {
         builder.add_order_column(ordered_col_idx, OrderType::ascending());
 
         builder.build(
-            if require_dist_key {
+            if is_distributed {
                 vec![ordered_col_idx]
             } else {
                 vec![]

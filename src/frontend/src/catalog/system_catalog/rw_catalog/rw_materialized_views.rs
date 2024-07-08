@@ -44,7 +44,7 @@ fn read_rw_materialized_views(reader: &SysCatalogReaderImpl) -> Result<Vec<RwMat
 
     Ok(schemas
         .flat_map(|schema| {
-            schema.iter_mv().map(|table| RwMaterializedView {
+            schema.iter_created_mvs().map(|table| RwMaterializedView {
                 id: table.id.table_id as i32,
                 name: table.name().into(),
                 schema_id: schema.id() as i32,

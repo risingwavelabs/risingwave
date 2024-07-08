@@ -33,6 +33,7 @@ use risingwave_pb::catalog::{
 };
 use risingwave_pb::plan_common::ColumnDescVersion;
 pub use schema::{test_utils as schema_test_utils, Field, FieldDisplay, Schema};
+use serde::{Deserialize, Serialize};
 
 use crate::array::DataChunk;
 pub use crate::constants::hummock;
@@ -228,7 +229,20 @@ impl From<SchemaId> for u32 {
     }
 }
 
-#[derive(Clone, Copy, Debug, Display, Default, Hash, PartialOrd, PartialEq, Eq, Ord)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Display,
+    Default,
+    Hash,
+    PartialOrd,
+    PartialEq,
+    Eq,
+    Ord,
+    Serialize,
+    Deserialize,
+)]
 #[display("{table_id}")]
 pub struct TableId {
     pub table_id: u32,
@@ -433,6 +447,41 @@ impl From<&u32> for ConnectionId {
 
 impl From<ConnectionId> for u32 {
     fn from(id: ConnectionId) -> Self {
+        id.0
+    }
+}
+
+#[derive(Clone, Copy, Debug, Display, Default, Hash, PartialOrd, PartialEq, Eq, Ord)]
+pub struct SecretId(pub u32);
+
+impl SecretId {
+    pub const fn new(id: u32) -> Self {
+        SecretId(id)
+    }
+
+    pub const fn placeholder() -> Self {
+        SecretId(OBJECT_ID_PLACEHOLDER)
+    }
+
+    pub fn secret_id(&self) -> u32 {
+        self.0
+    }
+}
+
+impl From<u32> for SecretId {
+    fn from(id: u32) -> Self {
+        Self::new(id)
+    }
+}
+
+impl From<&u32> for SecretId {
+    fn from(id: &u32) -> Self {
+        Self::new(*id)
+    }
+}
+
+impl From<SecretId> for u32 {
+    fn from(id: SecretId) -> Self {
         id.0
     }
 }

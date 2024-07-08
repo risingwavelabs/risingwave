@@ -24,7 +24,8 @@ use risingwave_pb::common::worker_node::{PbResource, State};
 use risingwave_pb::common::{HostAddress, PbWorkerNode, PbWorkerType, WorkerNode, WorkerType};
 use risingwave_pb::meta::add_worker_node_request::Property as AddNodeProperty;
 use risingwave_pb::meta::table_fragments::{ActorStatus, Fragment, PbFragment};
-use risingwave_pb::stream_plan::{PbDispatchStrategy, PbStreamActor, StreamActor};
+use risingwave_pb::stream_plan::{PbDispatchStrategy, StreamActor};
+use risingwave_pb::stream_service::BuildActorInfo;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 use tokio::time::sleep;
 use tracing::warn;
@@ -37,7 +38,7 @@ use crate::manager::{
     StreamingClusterInfo, WorkerId,
 };
 use crate::model::{ActorId, FragmentId, MetadataModel, TableFragments, TableParallelism};
-use crate::stream::SplitAssignment;
+use crate::stream::{to_build_actor_info, SplitAssignment};
 use crate::telemetry::MetaTelemetryJobDesc;
 use crate::MetaResult;
 
@@ -63,6 +64,7 @@ pub struct MetadataManagerV2 {
 #[derive(Debug)]
 pub(crate) enum ActiveStreamingWorkerChange {
     Add(WorkerNode),
+    #[expect(dead_code)]
     Remove(WorkerNode),
     Update(WorkerNode),
 }
@@ -692,19 +694,26 @@ impl MetadataManager {
     pub async fn all_node_actors(
         &self,
         include_inactive: bool,
-    ) -> MetaResult<HashMap<WorkerId, Vec<PbStreamActor>>> {
+    ) -> MetaResult<HashMap<WorkerId, Vec<BuildActorInfo>>> {
+        let subscriptions = self.get_mv_depended_subscriptions().await?;
         match &self {
-            MetadataManager::V1(mgr) => {
-                Ok(mgr.fragment_manager.all_node_actors(include_inactive).await)
-            }
+            MetadataManager::V1(mgr) => Ok(mgr
+                .fragment_manager
+                .all_node_actors(include_inactive, &subscriptions)
+                .await),
             MetadataManager::V2(mgr) => {
                 let table_fragments = mgr.catalog_controller.table_fragments().await?;
                 let mut actor_maps = HashMap::new();
                 for (_, fragments) in table_fragments {
                     let tf = TableFragments::from_protobuf(fragments);
-                    for (node_id, actor_ids) in tf.worker_actors(include_inactive) {
-                        let node_actor_ids = actor_maps.entry(node_id).or_insert_with(Vec::new);
-                        node_actor_ids.extend(actor_ids);
+                    let table_id = tf.table_id();
+                    for (node_id, actors) in tf.worker_actors(include_inactive) {
+                        let node_actors = actor_maps.entry(node_id).or_insert_with(Vec::new);
+                        node_actors.extend(
+                            actors
+                                .into_iter()
+                                .map(|actor| to_build_actor_info(actor, &subscriptions, table_id)),
+                        )
                     }
                 }
                 Ok(actor_maps)
@@ -811,5 +820,13 @@ impl MetadataManager {
                     .await
             }
         }
+    }
+
+    #[expect(clippy::unused_async)]
+    pub async fn get_mv_depended_subscriptions(
+        &self,
+    ) -> MetaResult<HashMap<TableId, HashMap<u32, u64>>> {
+        // TODO(subscription): support the correct logic when supporting L0 log store subscriptions
+        Ok(HashMap::new())
     }
 }

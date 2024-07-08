@@ -25,7 +25,7 @@
 # We use with_config_map to control the config when CREATE SOURCE, and use another SET statement to change the config for CREATE MV
 #
 # batch: All 4 plans should be the same.
-# stream: StreamSourceScan (with backfill) should be used only for the last 1. All other 3 use StreamSource.
+# stream: StreamSourceScan (with backfill) should be used only for the last 2. The first 2 use StreamSource. rw_enable_shared_source changes the behavior of CREATE SOURCE, but not CREATE MATERIALIZED VIEW
 - with_config_map:
     rw_enable_shared_source: false
   before:

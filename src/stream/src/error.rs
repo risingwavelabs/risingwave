@@ -87,7 +87,7 @@ pub enum ErrorKind {
     },
 
     #[error(transparent)]
-    Internal(
+    Uncategorized(
         #[from]
         #[backtrace]
         anyhow::Error,

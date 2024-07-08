@@ -34,7 +34,7 @@ use crate::optimizer::plan_node::utils::{IndicesDisplay, TableCatalogBuilder};
 use crate::optimizer::property::{Distribution, DistributionDisplay};
 use crate::scheduler::SchedulerResult;
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::{Explain, TableCatalog};
+use crate::TableCatalog;
 
 /// `StreamTableScan` is a virtual plan node to represent a stream table scan. It will be converted
 /// to stream scan + merge node (for upstream materialize) + batch table scan when converting to `MView`
@@ -147,6 +147,7 @@ impl StreamTableScan {
     ///        | 1002 | Int64(1) | t                   | 10          |
     ///        | 1003 | Int64(1) | t                   | 10          |
     ///        | 1003 | Int64(1) | t                   | 10          |
+    ///
     /// Eventually we should track progress per vnode, to support scaling with both mview and
     /// the corresponding `no_shuffle_backfill`.
     /// However this is not high priority, since we are working on supporting arrangement backfill,
@@ -240,12 +241,7 @@ impl StreamTableScan {
 
         let stream_key = self
             .stream_key()
-            .unwrap_or_else(|| {
-                panic!(
-                    "should always have a stream key in the stream plan but not, sub plan: {}",
-                    PlanRef::from(self.clone()).explain_to_string()
-                )
-            })
+            .unwrap_or(&[])
             .iter()
             .map(|x| *x as u32)
             .collect_vec();

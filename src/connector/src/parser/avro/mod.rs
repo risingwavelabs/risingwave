@@ -13,7 +13,7 @@
 // limitations under the License.
 
 mod parser;
-pub mod schema_resolver;
-pub mod util;
+mod schema_resolver;
 
-pub use parser::*;
+pub use parser::{AvroAccessBuilder, AvroParserConfig};
+pub use schema_resolver::ConfluentSchemaCache;

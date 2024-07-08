@@ -24,11 +24,11 @@ use fs_err::OpenOptions;
 use indicatif::ProgressBar;
 use risedev::util::{complete_spin, fail_spin};
 use risedev::{
-    generate_risedev_env, preflight_check, AwsS3Config, CompactorService, ComputeNodeService,
-    ConfigExpander, ConfigureTmuxTask, EnsureStopService, ExecuteContext, FrontendService,
-    GrafanaService, KafkaService, MetaNodeService, MinioService, OpendalConfig, PrometheusService,
-    PubsubService, RedisService, ServiceConfig, SqliteConfig, Task, TempoService, ZooKeeperService,
-    RISEDEV_NAME,
+    generate_risedev_env, preflight_check, CompactorService, ComputeNodeService, ConfigExpander,
+    ConfigureTmuxTask, DummyService, EnsureStopService, ExecuteContext, FrontendService,
+    GrafanaService, KafkaService, MetaNodeService, MinioService, MySqlService, PostgresService,
+    PrometheusService, PubsubService, RedisService, SchemaRegistryService, ServiceConfig,
+    SqliteConfig, Task, TempoService, RISEDEV_NAME,
 };
 use tempfile::tempdir;
 use thiserror_ext::AsReport;
@@ -135,8 +135,7 @@ fn task_main(
                 // let mut task = risedev::EtcdReadyCheckTask::new(c.clone())?;
                 // TODO(chi): etcd will set its health check to success only after all nodes are
                 // connected and there's a leader, therefore we cannot do health check for now.
-                let mut task =
-                    risedev::ConfigureGrpcNodeTask::new(c.address.clone(), c.port, false)?;
+                let mut task = risedev::TcpReadyCheckTask::new(c.address.clone(), c.port, false)?;
                 task.execute(&mut ctx)?;
             }
             ServiceConfig::Sqlite(c) => {
@@ -172,8 +171,7 @@ fn task_main(
                     ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
                 let mut service = PrometheusService::new(c.clone())?;
                 service.execute(&mut ctx)?;
-                let mut task =
-                    risedev::ConfigureGrpcNodeTask::new(c.address.clone(), c.port, false)?;
+                let mut task = risedev::TcpReadyCheckTask::new(c.address.clone(), c.port, false)?;
                 task.execute(&mut ctx)?;
                 ctx.pb
                     .set_message(format!("api http://{}:{}/", c.address, c.port));
@@ -185,7 +183,7 @@ fn task_main(
                 service.execute(&mut ctx)?;
 
                 let mut task =
-                    risedev::ConfigureGrpcNodeTask::new(c.address.clone(), c.port, c.user_managed)?;
+                    risedev::TcpReadyCheckTask::new(c.address.clone(), c.port, c.user_managed)?;
                 task.execute(&mut ctx)?;
                 ctx.pb
                     .set_message(format!("api grpc://{}:{}/", c.address, c.port));
@@ -196,7 +194,7 @@ fn task_main(
                 let mut service = MetaNodeService::new(c.clone())?;
                 service.execute(&mut ctx)?;
                 let mut task =
-                    risedev::ConfigureGrpcNodeTask::new(c.address.clone(), c.port, c.user_managed)?;
+                    risedev::TcpReadyCheckTask::new(c.address.clone(), c.port, c.user_managed)?;
                 task.execute(&mut ctx)?;
                 ctx.pb.set_message(format!(
                     "api grpc://{}:{}/, dashboard http://{}:{}/",
@@ -209,7 +207,7 @@ fn task_main(
                 let mut service = FrontendService::new(c.clone())?;
                 service.execute(&mut ctx)?;
                 let mut task =
-                    risedev::ConfigureGrpcNodeTask::new(c.address.clone(), c.port, c.user_managed)?;
+                    risedev::TcpReadyCheckTask::new(c.address.clone(), c.port, c.user_managed)?;
                 task.execute(&mut ctx)?;
                 ctx.pb
                     .set_message(format!("api postgres://{}:{}/", c.address, c.port));
@@ -231,7 +229,7 @@ fn task_main(
                 let mut service = CompactorService::new(c.clone())?;
                 service.execute(&mut ctx)?;
                 let mut task =
-                    risedev::ConfigureGrpcNodeTask::new(c.address.clone(), c.port, c.user_managed)?;
+                    risedev::TcpReadyCheckTask::new(c.address.clone(), c.port, c.user_managed)?;
                 task.execute(&mut ctx)?;
                 ctx.pb
                     .set_message(format!("compactor {}:{}", c.address, c.port));
@@ -241,8 +239,7 @@ fn task_main(
                     ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
                 let mut service = GrafanaService::new(c.clone())?;
                 service.execute(&mut ctx)?;
-                let mut task =
-                    risedev::ConfigureGrpcNodeTask::new(c.address.clone(), c.port, false)?;
+                let mut task = risedev::TcpReadyCheckTask::new(c.address.clone(), c.port, false)?;
                 task.execute(&mut ctx)?;
                 ctx.pb
                     .set_message(format!("dashboard http://{}:{}/", c.address, c.port));
@@ -253,7 +250,7 @@ fn task_main(
                 let mut service = TempoService::new(c.clone())?;
                 service.execute(&mut ctx)?;
                 let mut task =
-                    risedev::ConfigureGrpcNodeTask::new(c.listen_address.clone(), c.port, false)?;
+                    risedev::TcpReadyCheckTask::new(c.listen_address.clone(), c.port, false)?;
                 task.execute(&mut ctx)?;
                 ctx.pb
                     .set_message(format!("api http://{}:{}/", c.listen_address, c.port));
@@ -261,70 +258,39 @@ fn task_main(
             ServiceConfig::AwsS3(c) => {
                 let mut ctx =
                     ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
-
-                struct AwsService(AwsS3Config);
-                impl Task for AwsService {
-                    fn execute(
-                        &mut self,
-                        _ctx: &mut ExecuteContext<impl std::io::Write>,
-                    ) -> anyhow::Result<()> {
-                        Ok(())
-                    }
-
-                    fn id(&self) -> String {
-                        self.0.id.clone()
-                    }
-                }
-
-                ctx.service(&AwsService(c.clone()));
-                ctx.complete_spin();
+                DummyService::new(&c.id).execute(&mut ctx)?;
                 ctx.pb
                     .set_message(format!("using AWS s3 bucket {}", c.bucket));
             }
             ServiceConfig::Opendal(c) => {
                 let mut ctx =
                     ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
-
-                struct OpendalService(OpendalConfig);
-                impl Task for OpendalService {
-                    fn execute(
-                        &mut self,
-                        _ctx: &mut ExecuteContext<impl std::io::Write>,
-                    ) -> anyhow::Result<()> {
-                        Ok(())
-                    }
-
-                    fn id(&self) -> String {
-                        self.0.id.clone()
-                    }
-                }
-
-                ctx.service(&OpendalService(c.clone()));
-                ctx.complete_spin();
+                DummyService::new(&c.id).execute(&mut ctx)?;
                 ctx.pb
                     .set_message(format!("using Opendal, namenode =  {}", c.namenode));
-            }
-            ServiceConfig::ZooKeeper(c) => {
-                let mut ctx =
-                    ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
-                let mut service = ZooKeeperService::new(c.clone())?;
-                service.execute(&mut ctx)?;
-                let mut task =
-                    risedev::ConfigureGrpcNodeTask::new(c.address.clone(), c.port, false)?;
-                task.execute(&mut ctx)?;
-                ctx.pb
-                    .set_message(format!("zookeeper {}:{}", c.address, c.port));
             }
             ServiceConfig::Kafka(c) => {
                 let mut ctx =
                     ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
-                let mut service = KafkaService::new(c.clone())?;
+                let mut service = KafkaService::new(c.clone());
                 service.execute(&mut ctx)?;
                 let mut task = risedev::KafkaReadyCheckTask::new(c.clone())?;
                 task.execute(&mut ctx)?;
                 ctx.pb
                     .set_message(format!("kafka {}:{}", c.address, c.port));
             }
+            ServiceConfig::SchemaRegistry(c) => {
+                let mut ctx =
+                    ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
+                let mut service = SchemaRegistryService::new(c.clone());
+                service.execute(&mut ctx)?;
+                let mut task =
+                    risedev::TcpReadyCheckTask::new(c.address.clone(), c.port, c.user_managed)?;
+                task.execute(&mut ctx)?;
+                ctx.pb
+                    .set_message(format!("schema registry http://{}:{}", c.address, c.port));
+            }
+
             ServiceConfig::Pubsub(c) => {
                 let mut ctx =
                     ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
@@ -347,6 +313,39 @@ fn task_main(
                 task.execute(&mut ctx)?;
                 ctx.pb
                     .set_message(format!("redis {}:{}", c.address, c.port));
+            }
+            ServiceConfig::MySql(c) => {
+                let mut ctx =
+                    ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
+                MySqlService::new(c.clone()).execute(&mut ctx)?;
+                if c.user_managed {
+                    let mut task =
+                        risedev::TcpReadyCheckTask::new(c.address.clone(), c.port, c.user_managed)?;
+                    task.execute(&mut ctx)?;
+                } else {
+                    // When starting a MySQL container, the MySQL process is set as the main process.
+                    // Since the first process in a container always gets PID 1, the MySQL log always shows
+                    // "starting as process 1".
+                    let mut task = risedev::LogReadyCheckTask::new("starting as process 1\n")?;
+                    task.execute(&mut ctx)?;
+                }
+                ctx.pb
+                    .set_message(format!("mysql {}:{}", c.address, c.port));
+            }
+            ServiceConfig::Postgres(c) => {
+                let mut ctx =
+                    ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
+                PostgresService::new(c.clone()).execute(&mut ctx)?;
+                if c.user_managed {
+                    let mut task =
+                        risedev::TcpReadyCheckTask::new(c.address.clone(), c.port, c.user_managed)?;
+                    task.execute(&mut ctx)?;
+                } else {
+                    let mut task = risedev::LogReadyCheckTask::new("ready to accept connections")?;
+                    task.execute(&mut ctx)?;
+                }
+                ctx.pb
+                    .set_message(format!("postgres {}:{}", c.address, c.port));
             }
         }
 

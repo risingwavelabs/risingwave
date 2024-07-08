@@ -13,13 +13,10 @@
 // limitations under the License.
 
 use educe::Educe;
-use fixedbitset::FixedBitSet;
-use risingwave_common::catalog::Schema;
 
 use super::generic::GenericPlanNode;
 use super::*;
-use crate::optimizer::optimizer_context::OptimizerContextRef;
-use crate::optimizer::property::{Distribution, FunctionalDependencySet, Order};
+use crate::optimizer::property::Distribution;
 
 /// No extra fields for logical plan nodes.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]

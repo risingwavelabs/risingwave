@@ -79,14 +79,19 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
 
     @Override
     public void validateDbConfig() {
-        // TODO: check database server version
-        try (var stmt = jdbcConnection.createStatement()) {
-            // check whether wal has been enabled
-            var res = stmt.executeQuery(ValidatorUtils.getSql("postgres.wal"));
-            while (res.next()) {
-                if (!res.getString(1).equals("logical")) {
-                    throw ValidatorUtils.invalidArgument(
-                            "Postgres wal_level should be 'logical'.\nPlease modify the config and restart your Postgres server.");
+        try {
+            if (jdbcConnection.getMetaData().getDatabaseMajorVersion() > 16) {
+                throw ValidatorUtils.failedPrecondition("Postgres version should be less than 16.");
+            }
+
+            try (var stmt = jdbcConnection.createStatement()) {
+                // check whether wal has been enabled
+                var res = stmt.executeQuery(ValidatorUtils.getSql("postgres.wal"));
+                while (res.next()) {
+                    if (!res.getString(1).equals("logical")) {
+                        throw ValidatorUtils.invalidArgument(
+                                "Postgres wal_level should be 'logical'.\nPlease modify the config and restart your Postgres server.");
+                    }
                 }
             }
         } catch (SQLException e) {
@@ -180,11 +185,10 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
             var pkFields = new HashSet<String>();
             while (res.next()) {
                 var name = res.getString(1);
-                // RisingWave always use lower case for column name
-                pkFields.add(name.toLowerCase());
+                pkFields.add(name);
             }
 
-            if (!ValidatorUtils.isPrimaryKeyMatch(tableSchema, pkFields)) {
+            if (!isPrimaryKeyMatch(tableSchema, pkFields)) {
                 throw ValidatorUtils.invalidArgument("Primary key mismatch");
             }
         }
@@ -221,6 +225,19 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                 }
             }
         }
+    }
+
+    private boolean isPrimaryKeyMatch(TableSchema sourceSchema, Set<String> pkFields) {
+        if (sourceSchema.getPrimaryKeys().size() != pkFields.size()) {
+            return false;
+        }
+        // postgres column name is case-sensitive
+        for (var colName : sourceSchema.getPrimaryKeys()) {
+            if (!pkFields.contains(colName)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private void validatePrivileges() throws SQLException {

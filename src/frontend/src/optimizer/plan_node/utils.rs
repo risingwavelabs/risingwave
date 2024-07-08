@@ -31,6 +31,7 @@ use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use crate::catalog::table_catalog::TableType;
 use crate::catalog::{ColumnId, TableCatalog, TableId};
 use crate::optimizer::property::{Cardinality, Order, RequiredDist};
+use crate::optimizer::StreamScanType;
 use crate::utils::{Condition, IndexSet};
 
 #[derive(Default)]
@@ -41,7 +42,6 @@ pub struct TableCatalogBuilder {
     value_indices: Option<Vec<usize>>,
     vnode_col_idx: Option<usize>,
     column_names: HashMap<String, i32>,
-    read_prefix_len_hint: usize,
     watermark_columns: Option<FixedBitSet>,
     dist_key_in_pk: Option<Vec<usize>>,
 }
@@ -136,7 +136,7 @@ impl TableCatalogBuilder {
     /// anticipated read prefix pattern (number of fields) for the table, which can be utilized for
     /// implementing the table's bloom filter or other storage optimization techniques.
     pub fn build(self, distribution_key: Vec<usize>, read_prefix_len_hint: usize) -> TableCatalog {
-        assert!(self.read_prefix_len_hint <= self.pk.len());
+        assert!(read_prefix_len_hint <= self.pk.len());
         let watermark_columns = match self.watermark_columns {
             Some(w) => w,
             None => FixedBitSet::with_capacity(self.columns.len()),
@@ -297,6 +297,7 @@ pub(crate) fn sum_affected_row(dml: PlanRef) -> Result<PlanRef> {
         order_by: vec![],
         filter: Condition::true_cond(),
         direct_args: vec![],
+        user_defined: None,
     };
     let agg = Agg::new(vec![sum_agg], IndexSet::empty(), dml);
     let batch_agg = BatchSimpleAgg::new(agg);
@@ -370,4 +371,20 @@ pub fn infer_kv_log_store_table_catalog_inner(
         .collect_vec();
 
     table_catalog_builder.build(dist_key, read_prefix_len_hint)
+}
+
+/// Check that all leaf nodes must be stream table scan,
+/// since that plan node maps to `backfill` executor, which supports recovery.
+pub(crate) fn plan_has_backfill_leaf_nodes(plan: &PlanRef) -> bool {
+    if plan.inputs().is_empty() {
+        if let Some(scan) = plan.as_stream_table_scan() {
+            scan.stream_scan_type() == StreamScanType::Backfill
+                || scan.stream_scan_type() == StreamScanType::ArrangementBackfill
+        } else {
+            false
+        }
+    } else {
+        assert!(!plan.inputs().is_empty());
+        plan.inputs().iter().all(plan_has_backfill_leaf_nodes)
+    }
 }

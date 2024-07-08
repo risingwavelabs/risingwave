@@ -61,7 +61,7 @@ pub async fn replay_version(context: &CtlContext) -> anyhow::Result<()> {
     println!("replay starts");
     println!("base version {}", base_version.id);
     let delta_fetch_size = 100;
-    let mut current_delta_id = base_version.id + 1;
+    let mut current_delta_id = base_version.next_version_id();
     loop {
         let deltas = meta_client
             .list_version_deltas(current_delta_id, delta_fetch_size, HummockEpoch::MAX)
@@ -78,7 +78,7 @@ pub async fn replay_version(context: &CtlContext) -> anyhow::Result<()> {
             base_version.apply_version_delta(&delta);
             println!("replayed version {}", base_version.id);
         }
-        current_delta_id = base_version.id + 1;
+        current_delta_id = base_version.next_version_id();
     }
     println!("replay ends");
     Ok(())

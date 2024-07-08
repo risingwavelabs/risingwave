@@ -103,7 +103,6 @@ impl Execute for ChainExecutor {
 
 #[cfg(test)]
 mod test {
-    use std::default::Default;
 
     use futures::StreamExt;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;

@@ -14,7 +14,9 @@
 
 package com.risingwave.connector.jdbc;
 
+import java.util.List;
+
 public interface JdbcDialectFactory {
 
-    JdbcDialect create(int[] columnSqlTypes);
+    JdbcDialect create(List<Integer> columnSqlTypes, List<Integer> pkIndices);
 }

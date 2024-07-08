@@ -140,14 +140,17 @@ impl ClusterService for ClusterServiceImpl {
     ) -> Result<Response<DeleteWorkerNodeResponse>, Status> {
         let req = request.into_inner();
         let host = req.get_host()?.clone();
-        match &self.metadata_manager {
-            MetadataManager::V1(mgr) => {
-                let _ = mgr.cluster_manager.delete_worker_node(host).await?;
-            }
-            MetadataManager::V2(mgr) => {
-                let _ = mgr.cluster_controller.delete_worker(host).await?;
-            }
-        }
+
+        let worker_node = match &self.metadata_manager {
+            MetadataManager::V1(mgr) => mgr.cluster_manager.delete_worker_node(host).await?,
+            MetadataManager::V2(mgr) => mgr.cluster_controller.delete_worker(host).await?,
+        };
+        tracing::info!(
+            host = ?worker_node.host,
+            id = worker_node.id,
+            r#type = ?worker_node.r#type(),
+            "deleted worker node",
+        );
 
         Ok(Response::new(DeleteWorkerNodeResponse { status: None }))
     }

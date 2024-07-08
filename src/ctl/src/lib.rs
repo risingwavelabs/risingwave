@@ -20,8 +20,10 @@ use clap::{Args, Parser, Subcommand};
 use cmd_impl::bench::BenchCommands;
 use cmd_impl::hummock::SstDumpArgs;
 use itertools::Itertools;
+use risingwave_common::util::tokio_util::sync::CancellationToken;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_meta::backup_restore::RestoreOpts;
+use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::CompressionAlgorithm;
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
 use thiserror_ext::AsReport;
 
@@ -192,6 +194,9 @@ enum HummockCommands {
 
         // data directory for hummock state store. None: use default
         data_dir: Option<String>,
+
+        #[clap(short, long = "use-new-object-prefix-strategy", default_value = "true")]
+        use_new_object_prefix_strategy: bool,
     },
     SstDump(SstDumpArgs),
     /// trigger a targeted compaction through `compaction_group_id`
@@ -254,6 +259,12 @@ enum HummockCommands {
         enable_emergency_picker: Option<bool>,
         #[clap(long)]
         tombstone_reclaim_ratio: Option<u32>,
+        #[clap(long)]
+        compression_level: Option<u32>,
+        #[clap(long)]
+        compression_algorithm: Option<String>,
+        #[clap(long)]
+        max_l0_compact_level: Option<u32>,
     },
     /// Split given compaction group into two. Moves the given tables to the new group.
     SplitCompactionGroup {
@@ -295,6 +306,8 @@ enum HummockCommands {
         /// KVs that are matched with the user key are printed.
         #[clap(long)]
         user_key: String,
+        #[clap(short, long = "use-new-object-prefix-strategy", default_value = "true")]
+        use_new_object_prefix_strategy: bool,
     },
     PrintVersionDeltaInArchive {
         /// The ident of the archive file in object store. It's also the first Hummock version id of this archive.
@@ -306,6 +319,22 @@ enum HummockCommands {
         /// Version deltas that are related to the SST id are printed.
         #[clap(long)]
         sst_id: u64,
+        #[clap(short, long = "use-new-object-prefix-strategy", default_value = "true")]
+        use_new_object_prefix_strategy: bool,
+    },
+    TieredCacheTracing {
+        #[clap(long)]
+        enable: bool,
+        #[clap(long)]
+        record_hybrid_insert_threshold_ms: Option<u32>,
+        #[clap(long)]
+        record_hybrid_get_threshold_ms: Option<u32>,
+        #[clap(long)]
+        record_hybrid_obtain_threshold_ms: Option<u32>,
+        #[clap(long)]
+        record_hybrid_remove_threshold_ms: Option<u32>,
+        #[clap(long)]
+        record_hybrid_fetch_threshold_ms: Option<u32>,
     },
 }
 
@@ -317,6 +346,9 @@ enum TableCommands {
         mv_name: String,
         // data directory for hummock state store. None: use default
         data_dir: Option<String>,
+
+        #[clap(short, long = "use-new-object-prefix-strategy", default_value = "true")]
+        use_new_object_prefix_strategy: bool,
     },
     /// scan a state table using Id
     ScanById {
@@ -324,6 +356,8 @@ enum TableCommands {
         table_id: u32,
         // data directory for hummock state store. None: use default
         data_dir: Option<String>,
+        #[clap(short, long = "use-new-object-prefix-strategy", default_value = "true")]
+        use_new_object_prefix_strategy: bool,
     },
     /// list all state tables
     List,
@@ -406,15 +440,6 @@ pub struct ScaleVerticalCommands {
 
 #[derive(Subcommand, Debug)]
 enum ScaleCommands {
-    /// Scale the compute nodes horizontally, alias of `horizon`
-    Resize(ScaleHorizonCommands),
-
-    /// Scale the compute nodes horizontally
-    Horizon(ScaleHorizonCommands),
-
-    /// Scale the compute nodes vertically
-    Vertical(ScaleVerticalCommands),
-
     /// Mark a compute node as unschedulable
     #[clap(verbatim_doc_comment)]
     Cordon {
@@ -441,6 +466,7 @@ enum ScaleCommands {
 }
 
 #[derive(Subcommand)]
+#[allow(clippy::large_enum_variant)]
 enum MetaCommands {
     /// pause the stream graph
     Pause,
@@ -589,22 +615,33 @@ pub enum ProfileCommands {
 }
 
 /// Start `risectl` with the given options.
+/// Cancel the operation when the given `shutdown` token triggers.
 /// Log and abort the process if any error occurs.
 ///
 /// Note: use [`start_fallible`] if you want to call functionalities of `risectl`
 /// in an embedded manner.
-pub async fn start(opts: CliOpts) {
-    if let Err(e) = start_fallible(opts).await {
-        eprintln!("Error: {:#?}", e.as_report()); // pretty with backtrace
-        std::process::exit(1);
+pub async fn start(opts: CliOpts, shutdown: CancellationToken) {
+    let context = CtlContext::default();
+
+    tokio::select! {
+        _ = shutdown.cancelled() => {
+            // Shutdown requested, clean up the context and return.
+            context.try_close().await;
+        }
+
+        result = start_fallible(opts, &context) => {
+            if let Err(e) = result {
+                eprintln!("Error: {:#?}", e.as_report()); // pretty with backtrace
+                std::process::exit(1);
+            }
+        }
     }
 }
 
 /// Start `risectl` with the given options.
 /// Return `Err` if any error occurs.
-pub async fn start_fallible(opts: CliOpts) -> Result<()> {
-    let context = CtlContext::default();
-    let result = start_impl(opts, &context).await;
+pub async fn start_fallible(opts: CliOpts, context: &CtlContext) -> Result<()> {
+    let result = start_impl(opts, context).await;
     context.try_close().await;
     result
 }
@@ -633,8 +670,16 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             epoch,
             table_id,
             data_dir,
+            use_new_object_prefix_strategy,
         }) => {
-            cmd_impl::hummock::list_kv(context, epoch, table_id, data_dir).await?;
+            cmd_impl::hummock::list_kv(
+                context,
+                epoch,
+                table_id,
+                data_dir,
+                use_new_object_prefix_strategy,
+            )
+            .await?;
         }
         Commands::Hummock(HummockCommands::SstDump(args)) => {
             cmd_impl::hummock::sst_dump(context, args).await.unwrap()
@@ -683,6 +728,9 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             level0_overlapping_sub_level_compact_level_count,
             enable_emergency_picker,
             tombstone_reclaim_ratio,
+            compression_level,
+            compression_algorithm,
+            max_l0_compact_level,
         }) => {
             cmd_impl::hummock::update_compaction_config(
                 context,
@@ -703,6 +751,16 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                     level0_overlapping_sub_level_compact_level_count,
                     enable_emergency_picker,
                     tombstone_reclaim_ratio,
+                    if let Some(level) = compression_level {
+                        assert!(compression_algorithm.is_some());
+                        Some(CompressionAlgorithm {
+                            level,
+                            compression_algorithm: compression_algorithm.unwrap(),
+                        })
+                    } else {
+                        None
+                    },
+                    max_l0_compact_level,
                 ),
             )
             .await?
@@ -744,12 +802,14 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             archive_ids,
             data_dir,
             sst_id,
+            use_new_object_prefix_strategy,
         }) => {
             cmd_impl::hummock::print_version_delta_in_archive(
                 context,
                 archive_ids,
                 data_dir,
                 sst_id,
+                use_new_object_prefix_strategy,
             )
             .await?;
         }
@@ -757,15 +817,51 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             archive_ids,
             data_dir,
             user_key,
+            use_new_object_prefix_strategy,
         }) => {
-            cmd_impl::hummock::print_user_key_in_archive(context, archive_ids, data_dir, user_key)
-                .await?;
+            cmd_impl::hummock::print_user_key_in_archive(
+                context,
+                archive_ids,
+                data_dir,
+                user_key,
+                use_new_object_prefix_strategy,
+            )
+            .await?;
         }
-        Commands::Table(TableCommands::Scan { mv_name, data_dir }) => {
-            cmd_impl::table::scan(context, mv_name, data_dir).await?
+        Commands::Hummock(HummockCommands::TieredCacheTracing {
+            enable,
+            record_hybrid_insert_threshold_ms,
+            record_hybrid_get_threshold_ms,
+            record_hybrid_obtain_threshold_ms,
+            record_hybrid_remove_threshold_ms,
+            record_hybrid_fetch_threshold_ms,
+        }) => {
+            cmd_impl::hummock::tiered_cache_tracing(
+                context,
+                enable,
+                record_hybrid_insert_threshold_ms,
+                record_hybrid_get_threshold_ms,
+                record_hybrid_obtain_threshold_ms,
+                record_hybrid_remove_threshold_ms,
+                record_hybrid_fetch_threshold_ms,
+            )
+            .await?
         }
-        Commands::Table(TableCommands::ScanById { table_id, data_dir }) => {
-            cmd_impl::table::scan_id(context, table_id, data_dir).await?
+        Commands::Table(TableCommands::Scan {
+            mv_name,
+            data_dir,
+            use_new_object_prefix_strategy,
+        }) => {
+            cmd_impl::table::scan(context, mv_name, data_dir, use_new_object_prefix_strategy)
+                .await?
+        }
+        Commands::Table(TableCommands::ScanById {
+            table_id,
+            data_dir,
+            use_new_object_prefix_strategy,
+        }) => {
+            cmd_impl::table::scan_id(context, table_id, data_dir, use_new_object_prefix_strategy)
+                .await?
         }
         Commands::Table(TableCommands::List) => cmd_impl::table::list(context).await?,
         Commands::Bench(cmd) => cmd_impl::bench::do_bench(context, cmd).await?,
@@ -848,13 +944,6 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         }
         Commands::Profile(ProfileCommands::Heap { dir }) => {
             cmd_impl::profile::heap_profile(context, dir).await?
-        }
-        Commands::Scale(ScaleCommands::Horizon(resize))
-        | Commands::Scale(ScaleCommands::Resize(resize)) => {
-            cmd_impl::scale::resize(context, resize.into()).await?
-        }
-        Commands::Scale(ScaleCommands::Vertical(resize)) => {
-            cmd_impl::scale::resize(context, resize.into()).await?
         }
         Commands::Scale(ScaleCommands::Cordon { workers }) => {
             cmd_impl::scale::update_schedulability(context, workers, Schedulability::Unschedulable)

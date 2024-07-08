@@ -173,7 +173,10 @@ pub fn map_single_node_opts_to_standalone_opts(opts: SingleNodeOpts) -> ParsedSt
     // Set meta store for meta (if not set). It could be set by environment variables before this.
     let meta_backend_is_set = match meta_opts.backend {
         Some(MetaBackend::Etcd) => !meta_opts.etcd_endpoints.is_empty(),
-        Some(MetaBackend::Sql) => meta_opts.sql_endpoint.is_some(),
+        Some(MetaBackend::Sql)
+        | Some(MetaBackend::Sqlite)
+        | Some(MetaBackend::Postgres)
+        | Some(MetaBackend::Mysql) => meta_opts.sql_endpoint.is_some(),
         Some(MetaBackend::Mem) => true,
         None => false,
     };
@@ -181,12 +184,11 @@ pub fn map_single_node_opts_to_standalone_opts(opts: SingleNodeOpts) -> ParsedSt
         if opts.in_memory {
             meta_opts.backend = Some(MetaBackend::Mem);
         } else {
-            meta_opts.backend = Some(MetaBackend::Sql);
+            meta_opts.backend = Some(MetaBackend::Sqlite);
             let meta_store_dir = format!("{}/meta_store", &store_directory);
             std::fs::create_dir_all(&meta_store_dir).unwrap();
-            let meta_store_endpoint =
-                format!("sqlite://{}/single_node.db?mode=rwc", &meta_store_dir);
-            meta_opts.sql_endpoint = Some(meta_store_endpoint);
+            let meta_store_endpoint = format!("{}/single_node.db", &meta_store_dir);
+            meta_opts.sql_endpoint = Some(meta_store_endpoint.into());
         }
     }
 

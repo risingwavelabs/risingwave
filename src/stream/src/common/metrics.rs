@@ -30,13 +30,13 @@ impl MetricsInfo {
         metrics: Arc<StreamingMetrics>,
         table_id: u32,
         actor_id: ActorId,
-        desc: &str,
+        desc: impl Into<String>,
     ) -> Self {
         Self {
             metrics,
             table_id: table_id.to_string(),
             actor_id: actor_id.to_string(),
-            desc: desc.to_string(),
+            desc: desc.into(),
         }
     }
 

@@ -16,7 +16,7 @@ use std::ops::Bound::{self, *};
 
 use futures::{pin_mut, StreamExt};
 use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
 use risingwave_common::row::{self, OwnedRow};
 use risingwave_common::types::{DataType, Scalar, Timestamptz};

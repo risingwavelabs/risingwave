@@ -17,7 +17,6 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::SortOverWindowNode;
 
 use super::batch::prelude::*;
-use super::batch::BatchPlanRef;
 use super::generic::PlanWindowFunction;
 use super::utils::impl_distill_by_unit;
 use super::{

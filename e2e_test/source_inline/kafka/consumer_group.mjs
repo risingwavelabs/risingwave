@@ -3,11 +3,8 @@
 // zx: A tool for writing better scripts
 // https://google.github.io/zx/
 
-const {
-  mv: mv,
-  _: _command,
-} = minimist(process.argv.slice(3), {
-  string: ["mv", "topic"],
+const { mv: mv, _: _command } = minimist(process.argv.slice(3), {
+  string: ["mv"],
   _: ["list-members", "list-lags"],
 });
 const command = _command[0];
@@ -62,7 +59,7 @@ async function list_consumer_group_members(fragment_id) {
   const groups = await list_consumer_groups(fragment_id);
   return Promise.all(
     groups.map(async (group_name) => {
-      return (await describe_consumer_group(group_name))["MEMBERS"]
+      return (await describe_consumer_group(group_name))["MEMBERS"];
     })
   );
 }
@@ -71,14 +68,14 @@ async function list_consumer_group_lags(fragment_id) {
   const groups = await list_consumer_groups(fragment_id);
   return Promise.all(
     groups.map(async (group_name) => {
-      return (await describe_consumer_group(group_name))["TOTAL-LAG"]
+      return (await describe_consumer_group(group_name))["TOTAL-LAG"];
     })
   );
 }
 
 const fragment_id = await get_fragment_id_of_mv(mv);
 if (command == "list-groups") {
-  echo`${(await list_consumer_groups(fragment_id))}`;
+  echo`${await list_consumer_groups(fragment_id)}`;
 } else if (command == "list-members") {
   echo`${await list_consumer_group_members(fragment_id)}`;
 } else if (command == "list-lags") {

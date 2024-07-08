@@ -12,17 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeMap;
+
 use anyhow::anyhow;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_meta_model_v2::{
-    connection, database, function, index, object, schema, sink, source, subscription, table, view,
+    connection, database, function, index, object, schema, secret, sink, source, subscription,
+    table, view,
 };
 use risingwave_pb::catalog::connection::PbInfo as PbConnectionInfo;
 use risingwave_pb::catalog::source::PbOptionalAssociatedTableId;
+use risingwave_pb::catalog::subscription::PbSubscriptionState;
 use risingwave_pb::catalog::table::{PbOptionalAssociatedSourceId, PbTableType};
 use risingwave_pb::catalog::{
     PbConnection, PbCreateType, PbDatabase, PbFunction, PbHandleConflictBehavior, PbIndex,
-    PbSchema, PbSink, PbSinkType, PbSource, PbStreamJobStatus, PbSubscription, PbTable, PbView,
+    PbSchema, PbSecret, PbSink, PbSinkType, PbSource, PbStreamJobStatus, PbSubscription, PbTable,
+    PbView,
 };
 use sea_orm::{DatabaseConnection, ModelTrait};
 
@@ -81,6 +86,19 @@ impl From<ObjectModel<database::Model>> for PbDatabase {
     }
 }
 
+impl From<ObjectModel<secret::Model>> for PbSecret {
+    fn from(value: ObjectModel<secret::Model>) -> Self {
+        Self {
+            id: value.0.secret_id as _,
+            name: value.0.name,
+            database_id: value.1.database_id.unwrap() as _,
+            value: value.0.value,
+            owner: value.1.owner_id as _,
+            schema_id: value.1.schema_id.unwrap() as _,
+        }
+    }
+}
+
 impl From<ObjectModel<schema::Model>> for PbSchema {
     fn from(value: ObjectModel<schema::Model>) -> Self {
         Self {
@@ -125,10 +143,10 @@ impl From<ObjectModel<table::Model>> for PbTable {
                 .cardinality
                 .map(|cardinality| cardinality.to_protobuf()),
             initialized_at_epoch: Some(
-                Epoch::from_unix_millis(value.1.initialized_at.timestamp_millis() as _).0,
+                Epoch::from_unix_millis(value.1.initialized_at.and_utc().timestamp_millis() as _).0,
             ),
             created_at_epoch: Some(
-                Epoch::from_unix_millis(value.1.created_at.timestamp_millis() as _).0,
+                Epoch::from_unix_millis(value.1.created_at.and_utc().timestamp_millis() as _).0,
             ),
             cleaned_by_watermark: value.0.cleaned_by_watermark,
             stream_job_status: PbStreamJobStatus::Created as _, // todo: deprecate it.
@@ -149,6 +167,10 @@ impl From<ObjectModel<table::Model>> for PbTable {
 
 impl From<ObjectModel<source::Model>> for PbSource {
     fn from(value: ObjectModel<source::Model>) -> Self {
+        let mut secret_ref_map = BTreeMap::new();
+        if let Some(secret_ref) = value.0.secret_ref {
+            secret_ref_map = secret_ref.to_protobuf();
+        }
         Self {
             id: value.0.source_id as _,
             schema_id: value.1.schema_id.unwrap() as _,
@@ -165,10 +187,10 @@ impl From<ObjectModel<source::Model>> for PbSource {
             connection_id: value.0.connection_id.map(|id| id as _),
             // todo: using the timestamp from the database directly.
             initialized_at_epoch: Some(
-                Epoch::from_unix_millis(value.1.initialized_at.timestamp_millis() as _).0,
+                Epoch::from_unix_millis(value.1.initialized_at.and_utc().timestamp_millis() as _).0,
             ),
             created_at_epoch: Some(
-                Epoch::from_unix_millis(value.1.created_at.timestamp_millis() as _).0,
+                Epoch::from_unix_millis(value.1.created_at.and_utc().timestamp_millis() as _).0,
             ),
             version: value.0.version as _,
             optional_associated_table_id: value
@@ -177,12 +199,17 @@ impl From<ObjectModel<source::Model>> for PbSource {
                 .map(|id| PbOptionalAssociatedTableId::AssociatedTableId(id as _)),
             initialized_at_cluster_version: value.1.initialized_at_cluster_version,
             created_at_cluster_version: value.1.created_at_cluster_version,
+            secret_refs: secret_ref_map,
         }
     }
 }
 
 impl From<ObjectModel<sink::Model>> for PbSink {
     fn from(value: ObjectModel<sink::Model>) -> Self {
+        let mut secret_ref_map = BTreeMap::new();
+        if let Some(secret_ref) = value.0.secret_ref {
+            secret_ref_map = secret_ref.to_protobuf();
+        }
         Self {
             id: value.0.sink_id as _,
             schema_id: value.1.schema_id.unwrap() as _,
@@ -199,10 +226,10 @@ impl From<ObjectModel<sink::Model>> for PbSink {
             definition: value.0.definition,
             connection_id: value.0.connection_id.map(|id| id as _),
             initialized_at_epoch: Some(
-                Epoch::from_unix_millis(value.1.initialized_at.timestamp_millis() as _).0,
+                Epoch::from_unix_millis(value.1.initialized_at.and_utc().timestamp_millis() as _).0,
             ),
             created_at_epoch: Some(
-                Epoch::from_unix_millis(value.1.created_at.timestamp_millis() as _).0,
+                Epoch::from_unix_millis(value.1.created_at.and_utc().timestamp_millis() as _).0,
             ),
             db_name: value.0.db_name,
             sink_from_name: value.0.sink_from_name,
@@ -212,6 +239,7 @@ impl From<ObjectModel<sink::Model>> for PbSink {
             initialized_at_cluster_version: value.1.initialized_at_cluster_version,
             created_at_cluster_version: value.1.created_at_cluster_version,
             create_type: PbCreateType::Foreground as _,
+            secret_refs: secret_ref_map,
         }
     }
 }
@@ -223,24 +251,19 @@ impl From<ObjectModel<subscription::Model>> for PbSubscription {
             schema_id: value.1.schema_id.unwrap() as _,
             database_id: value.1.database_id.unwrap() as _,
             name: value.0.name,
-            plan_pk: value.0.plan_pk.to_protobuf(),
-            dependent_relations: vec![], // todo: deprecate it.
-            distribution_key: value.0.distribution_key.0,
             owner: value.1.owner_id as _,
-            properties: value.0.properties.0,
+            retention_seconds: value.0.retention_seconds as _,
             definition: value.0.definition,
             initialized_at_epoch: Some(
-                Epoch::from_unix_millis(value.1.initialized_at.timestamp_millis() as _).0,
+                Epoch::from_unix_millis(value.1.initialized_at.and_utc().timestamp_millis() as _).0,
             ),
             created_at_epoch: Some(
-                Epoch::from_unix_millis(value.1.created_at.timestamp_millis() as _).0,
+                Epoch::from_unix_millis(value.1.created_at.and_utc().timestamp_millis() as _).0,
             ),
-            stream_job_status: PbStreamJobStatus::Created as _, // todo: deprecate it.
-            column_catalogs: value.0.columns.to_protobuf(),
-            subscription_from_name: value.0.subscription_from_name,
             initialized_at_cluster_version: value.1.initialized_at_cluster_version,
             created_at_cluster_version: value.1.created_at_cluster_version,
-            subscription_internal_table_name: value.0.subscription_internal_table_name,
+            dependent_table_id: value.0.dependent_table_id as _,
+            subscription_state: PbSubscriptionState::Init as _,
         }
     }
 }
@@ -256,12 +279,13 @@ impl From<ObjectModel<index::Model>> for PbIndex {
             index_table_id: value.0.index_table_id as _,
             primary_table_id: value.0.primary_table_id as _,
             index_item: value.0.index_items.to_protobuf(),
+            index_column_properties: value.0.index_column_properties.to_protobuf(),
             index_columns_len: value.0.index_columns_len as _,
             initialized_at_epoch: Some(
-                Epoch::from_unix_millis(value.1.initialized_at.timestamp_millis() as _).0,
+                Epoch::from_unix_millis(value.1.initialized_at.and_utc().timestamp_millis() as _).0,
             ),
             created_at_epoch: Some(
-                Epoch::from_unix_millis(value.1.created_at.timestamp_millis() as _).0,
+                Epoch::from_unix_millis(value.1.created_at.and_utc().timestamp_millis() as _).0,
             ),
             stream_job_status: PbStreamJobStatus::Created as _, // todo: deprecate it.
             initialized_at_cluster_version: value.1.initialized_at_cluster_version,

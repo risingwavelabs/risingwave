@@ -34,11 +34,12 @@ use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::time::Instant;
 
 use super::executor_core::StreamSourceCore;
-use crate::executor::prelude::*;
-use crate::executor::source::{
+use super::{
     apply_rate_limit, barrier_to_message_stream, get_split_offset_col_idx,
     get_split_offset_mapping_from_chunk, prune_additional_cols,
 };
+use crate::common::rate_limit::limited_chunk_size;
+use crate::executor::prelude::*;
 use crate::executor::stream_reader::StreamReaderWithPause;
 use crate::executor::{AddMutation, UpdateMutation};
 
@@ -63,18 +64,18 @@ pub struct FsSourceExecutor<S: StateStore> {
     /// System parameter reader to read barrier interval
     system_params: SystemParamsReaderRef,
 
-    source_ctrl_opts: SourceCtrlOpts,
+    /// Rate limit in rows/s.
+    rate_limit_rps: Option<u32>,
 }
 
 impl<S: StateStore> FsSourceExecutor<S> {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         actor_ctx: ActorContextRef,
         stream_source_core: StreamSourceCore<S>,
         metrics: Arc<StreamingMetrics>,
         barrier_receiver: UnboundedReceiver<Barrier>,
         system_params: SystemParamsReaderRef,
-        source_ctrl_opts: SourceCtrlOpts,
+        rate_limit_rps: Option<u32>,
     ) -> StreamResult<Self> {
         Ok(Self {
             actor_ctx,
@@ -82,7 +83,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
             metrics,
             barrier_receiver: Some(barrier_receiver),
             system_params,
-            source_ctrl_opts,
+            rate_limit_rps,
         })
     }
 
@@ -102,7 +103,10 @@ impl<S: StateStore> FsSourceExecutor<S> {
             self.actor_ctx.fragment_id,
             self.stream_source_core.source_name.clone(),
             source_desc.metrics.clone(),
-            self.source_ctrl_opts.clone(),
+            SourceCtrlOpts {
+                chunk_size: limited_chunk_size(self.rate_limit_rps),
+                rate_limit: self.rate_limit_rps,
+            },
             source_desc.source.config.clone(),
         );
         let stream = source_desc
@@ -111,7 +115,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
             .await
             .map_err(StreamExecutorError::connector_error)?;
 
-        Ok(apply_rate_limit(stream, self.source_ctrl_opts.rate_limit).boxed())
+        Ok(apply_rate_limit(stream, self.rate_limit_rps).boxed())
     }
 
     async fn rebuild_stream_reader<const BIASED: bool>(
@@ -311,18 +315,16 @@ impl<S: StateStore> FsSourceExecutor<S> {
         let start_with_paused = barrier.is_pause_on_startup();
 
         let mut boot_state = Vec::default();
-        if let Some(mutation) = barrier.mutation.as_deref() {
-            match mutation {
-                Mutation::Add(AddMutation { splits, .. })
-                | Mutation::Update(UpdateMutation {
-                    actor_splits: splits,
-                    ..
-                }) => {
-                    if let Some(splits) = splits.get(&self.actor_ctx.id) {
-                        boot_state.clone_from(splits);
-                    }
-                }
-                _ => {}
+        if let Some(
+            Mutation::Add(AddMutation { splits, .. })
+            | Mutation::Update(UpdateMutation {
+                actor_splits: splits,
+                ..
+            }),
+        ) = barrier.mutation.as_deref()
+        {
+            if let Some(splits) = splits.get(&self.actor_ctx.id) {
+                boot_state.clone_from(splits);
             }
         }
 
@@ -382,6 +384,17 @@ impl<S: StateStore> FsSourceExecutor<S> {
             self.system_params.load().barrier_interval_ms() as u128 * WAIT_BARRIER_MULTIPLE_TIMES;
         let mut last_barrier_time = Instant::now();
         let mut self_paused = false;
+
+        let source_output_row_count = self
+            .metrics
+            .source_output_row_count
+            .with_guarded_label_values(&[
+                self.stream_source_core.source_id.to_string().as_ref(),
+                self.stream_source_core.source_name.as_ref(),
+                self.actor_ctx.id.to_string().as_str(),
+                self.actor_ctx.fragment_id.to_string().as_str(),
+            ]);
+
         while let Some(msg) = stream.next().await {
             match msg? {
                 // This branch will be preferred.
@@ -411,8 +424,11 @@ impl<S: StateStore> FsSourceExecutor<S> {
                                     .await?;
                                 }
                                 Mutation::Throttle(actor_to_apply) => {
-                                    if let Some(throttle) = actor_to_apply.get(&self.actor_ctx.id) {
-                                        self.source_ctrl_opts.rate_limit = *throttle;
+                                    if let Some(new_rate_limit) =
+                                        actor_to_apply.get(&self.actor_ctx.id)
+                                        && *new_rate_limit != self.rate_limit_rps
+                                    {
+                                        self.rate_limit_rps = *new_rate_limit;
                                         self.rebuild_stream_reader(&source_desc, &mut stream)
                                             .await?;
                                     }
@@ -467,15 +483,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
                             .extend(state);
                     }
 
-                    self.metrics
-                        .source_output_row_count
-                        .with_label_values(&[
-                            self.stream_source_core.source_id.to_string().as_ref(),
-                            self.stream_source_core.source_name.as_ref(),
-                            self.actor_ctx.id.to_string().as_str(),
-                            self.actor_ctx.fragment_id.to_string().as_str(),
-                        ])
-                        .inc_by(chunk.cardinality() as u64);
+                    source_output_row_count.inc_by(chunk.cardinality() as u64);
 
                     let chunk =
                         prune_additional_cols(&chunk, split_idx, offset_idx, &source_desc.columns);

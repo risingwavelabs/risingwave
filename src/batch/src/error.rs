@@ -116,7 +116,7 @@ pub enum BatchError {
     Iceberg(
         #[from]
         #[backtrace]
-        icelake::Error,
+        iceberg::Error,
     ),
 
     // Make the ref-counted type to be a variant for easier code structuring.
@@ -136,6 +136,16 @@ pub enum BatchError {
 
     #[error("Streaming vnode mapping not found for fragment {0}")]
     StreamingVnodeMappingNotFound(FragmentId),
+
+    #[error("Not enough memory to run this query, batch memory limit is {0} bytes")]
+    OutOfMemory(u64),
+
+    #[error("Failed to spill out to disk")]
+    Spill(
+        #[from]
+        #[backtrace]
+        opendal::Error,
+    ),
 }
 
 // Serialize/deserialize error.

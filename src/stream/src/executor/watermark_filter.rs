@@ -17,7 +17,7 @@ use std::ops::Deref;
 
 use futures::future::{try_join, try_join_all};
 use risingwave_common::hash::VnodeBitmapExt;
-use risingwave_common::types::{DefaultOrd, ScalarImpl};
+use risingwave_common::types::DefaultOrd;
 use risingwave_common::{bail, row};
 use risingwave_expr::expr::{
     build_func_non_strict, ExpressionBoxExt, InputRefExpression, LiteralExpression,
@@ -349,8 +349,7 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
 #[cfg(test)]
 mod tests {
     use itertools::Itertools;
-    use risingwave_common::array::StreamChunk;
-    use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableDesc};
+    use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, TableDesc};
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::Date;
     use risingwave_common::util::epoch::test_epoch;
@@ -359,12 +358,10 @@ mod tests {
     use risingwave_pb::common::ColumnOrder;
     use risingwave_pb::plan_common::PbColumnCatalog;
     use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::table::TableDistribution;
 
     use super::*;
     use crate::executor::test_utils::expr::build_from_pretty;
     use crate::executor::test_utils::{MessageSender, MockSource};
-    use crate::executor::{ActorContext, ExecutorInfo};
 
     const WATERMARK_TYPE: DataType = DataType::Timestamp;
 

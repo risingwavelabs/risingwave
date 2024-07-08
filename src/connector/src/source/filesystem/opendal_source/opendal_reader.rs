@@ -13,29 +13,32 @@
 // limitations under the License.
 
 use std::future::IntoFuture;
+use std::pin::Pin;
 
+use async_compression::tokio::bufread::GzipDecoder;
 use async_trait::async_trait;
 use futures::TryStreamExt;
 use futures_async_stream::try_stream;
 use opendal::Reader;
 use parquet::arrow::ParquetRecordBatchStreamBuilder;
 use risingwave_common::array::StreamChunk;
-use tokio::io::BufReader;
+use tokio::io::{AsyncRead, BufReader};
 use tokio_util::io::{ReaderStream, StreamReader};
 
 use super::opendal_enumerator::OpendalEnumerator;
 use super::OpendalSource;
 use crate::error::ConnectorResult;
 use crate::parser::{ByteStreamSourceParserImpl, EncodingProperties, ParquetParser, ParserConfig};
+use crate::source::filesystem::file_common::CompressionFormat;
 use crate::source::filesystem::nd_streaming::need_nd_streaming;
 use crate::source::filesystem::{nd_streaming, OpendalFsSplit};
 use crate::source::{
-    BoxChunkSourceStream, Column, SourceContextRef, SourceMessage, SourceMeta, SplitMetaData,
-    SplitReader,
+    into_chunk_stream, BoxChunkSourceStream, Column, SourceContextRef, SourceMessage, SourceMeta,
+    SplitMetaData, SplitReader,
 };
 
-const MAX_CHANNEL_BUFFER_SIZE: usize = 2048;
 const STREAM_READER_CAPACITY: usize = 4096;
+
 #[derive(Debug, Clone)]
 pub struct OpendalReader<Src: OpendalSource> {
     connector: OpendalEnumerator<Src>,
@@ -68,13 +71,13 @@ impl<Src: OpendalSource> SplitReader for OpendalReader<Src> {
     }
 
     fn into_stream(self) -> BoxChunkSourceStream {
-        self.into_chunk_stream()
+        self.into_stream_inner()
     }
 }
 
 impl<Src: OpendalSource> OpendalReader<Src> {
     #[try_stream(boxed, ok = StreamChunk, error = crate::error::ConnectorError)]
-    async fn into_chunk_stream(self) {
+    async fn into_stream_inner(self) {
         let actor_id = self.source_ctx.actor_id.to_string();
         let fragment_id = self.source_ctx.fragment_id.to_string();
         let source_id = self.source_ctx.source_id.to_string();
@@ -87,9 +90,10 @@ impl<Src: OpendalSource> OpendalReader<Src> {
                 .connector
                 .op
                 .reader_with(&split.name.clone())
-                .range(split.offset as u64..)
-                .into_future() // Unlike `rustc`, `try_stream` seems require manual `into_future`.
-                .await?;
+                .await?
+                .into_futures_async_read(split.offset as u64..) .await?;
+            let object_name = split.name.clone();
+
             let msg_stream;
 
             if let EncodingProperties::Parquet = &self.parser_config.specific.encoding_config {
@@ -104,8 +108,12 @@ impl<Src: OpendalSource> OpendalReader<Src> {
                     ParquetParser::new(self.parser_config.common.rw_columns.clone(), source_ctx)?;
                 msg_stream = parquet_parser.into_stream(record_batch_stream, split.name.clone());
             } else {
-                let data_stream =
-                    Self::stream_read_object(file_reader, split, self.source_ctx.clone());
+                let data_stream = Self::stream_read_object(
+                    file_reader,
+                    split,
+                    self.source_ctx.clone(),
+                    self.connector.compression_format,
+                );
 
                 let parser =
                     ByteStreamSourceParserImpl::create(self.parser_config.clone(), source_ctx)
@@ -119,17 +127,6 @@ impl<Src: OpendalSource> OpendalReader<Src> {
             #[for_await]
             for msg in msg_stream {
                 let msg = msg?;
-                self.source_ctx
-                    .metrics
-                    .partition_input_count
-                    .with_label_values(&[
-                        &actor_id,
-                        &source_id,
-                        &split_id,
-                        &source_name,
-                        &fragment_id,
-                    ])
-                    .inc_by(msg.cardinality() as u64);
                 yield msg;
             }
         }
@@ -140,6 +137,7 @@ impl<Src: OpendalSource> OpendalReader<Src> {
         file_reader: Reader,
         split: OpendalFsSplit<Src>,
         source_ctx: SourceContextRef,
+        compression_format: CompressionFormat,
     ) {
         let actor_id = source_ctx.actor_id.to_string();
         let fragment_id = source_ctx.fragment_id.to_string();
@@ -147,16 +145,31 @@ impl<Src: OpendalSource> OpendalReader<Src> {
         let source_name = source_ctx.source_name.to_string();
         let max_chunk_size = source_ctx.source_ctrl_opts.chunk_size;
         let split_id = split.id();
-
+        let object_name = split.name.clone();
         let stream_reader = StreamReader::new(
             file_reader.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)),
         );
-        let buf_reader = BufReader::new(stream_reader);
-        let stream = ReaderStream::with_capacity(buf_reader, STREAM_READER_CAPACITY);
+
+        let buf_reader: Pin<Box<dyn AsyncRead + Send>> = match compression_format {
+            CompressionFormat::Gzip => {
+                let gzip_decoder = GzipDecoder::new(stream_reader);
+                Box::pin(BufReader::new(gzip_decoder)) as Pin<Box<dyn AsyncRead + Send>>
+            }
+            CompressionFormat::None => {
+                // todo: support automatic decompression of more compression types.
+                if object_name.ends_with(".gz") || object_name.ends_with(".gzip") {
+                    let gzip_decoder = GzipDecoder::new(stream_reader);
+                    Box::pin(BufReader::new(gzip_decoder)) as Pin<Box<dyn AsyncRead + Send>>
+                } else {
+                    Box::pin(BufReader::new(stream_reader)) as Pin<Box<dyn AsyncRead + Send>>
+                }
+            }
+        };
 
         let mut offset: usize = split.offset;
         let mut batch_size: usize = 0;
         let mut batch = Vec::new();
+        let stream = ReaderStream::with_capacity(buf_reader, STREAM_READER_CAPACITY);
         #[for_await]
         for read in stream {
             let bytes = read?;

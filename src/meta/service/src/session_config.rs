@@ -19,7 +19,6 @@ use risingwave_pb::meta::{
     GetSessionParamsRequest, GetSessionParamsResponse, SetSessionParamRequest,
     SetSessionParamResponse,
 };
-use serde_json;
 use thiserror_ext::AsReport;
 use tonic::{Request, Response, Status};
 
