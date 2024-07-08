@@ -1054,7 +1054,7 @@ steps:
 
   - label: "find regressed step"
     key: "find-regressed-step"
-    command: "START_COMMIT=$START_COMMIT END_COMMIT=$END_COMMIT BUILDKITE_BRANCH=$BUILDKITE_BRANCH BISECT_STEPS=$BISECT_STEPS ci/scripts/find-regression.py"
+    command: "START_COMMIT=$START_COMMIT END_COMMIT=$END_COMMIT BUILDKITE_BRANCH=$BUILDKITE_BRANCH BISECT_STEPS=$BISECT_STEPS ci/scripts/find-regression.py start"
     if: |
       build.pull_request.labels includes "ci/find-regressed-step"
       || build.env("CI_STEPS") =~ /(^|,)find-regressed-step(,|$$)/
