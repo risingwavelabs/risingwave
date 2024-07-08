@@ -28,15 +28,15 @@ def get_commits_between(last_passing_build_commit, current_build_commit):
 
 def format_step(commit, steps):
     ci_steps = ",".join(steps)
-    print(f"Running pipeline on commit: {commit} with steps: {ci_steps}")
+    print(f"Running pipeline on commit: {commit} with steps: {steps}")
     step=f"""
 cat <<- YAML | buildkite-agent pipeline upload
 steps:
   - trigger: "main-cron"
     build:
       commit: {commit}
-    env:
-      CI_STEPS: {ci_steps}
+      env:
+        CI_STEPS: {steps}
 YAML
         """
     return step
