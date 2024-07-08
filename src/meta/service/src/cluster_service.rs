@@ -56,10 +56,12 @@ impl ClusterService for ClusterServiceImpl {
             .metadata_manager
             .add_worker_node(worker_type, host, property, resource)
             .await;
+        let cluster_id = self.metadata_manager.cluster_id().to_string();
         match result {
             Ok(worker_id) => Ok(Response::new(AddWorkerNodeResponse {
                 status: None,
                 node_id: Some(worker_id),
+                cluster_id,
             })),
             Err(e) => {
                 if e.is_invalid_worker() {
@@ -69,6 +71,7 @@ impl ClusterService for ClusterServiceImpl {
                             message: e.to_report_string(),
                         }),
                         node_id: None,
+                        cluster_id,
                     }));
                 }
                 Err(e.into())

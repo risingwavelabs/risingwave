@@ -218,7 +218,10 @@ pub async fn compute_node_serve(
     .await
     .unwrap();
 
-    LocalSecretManager::init(opts.temp_secret_file_dir);
+    LocalSecretManager::init(
+        opts.temp_secret_file_dir,
+        meta_client.cluster_id().to_string(),
+    );
 
     // Initialize observer manager.
     let system_params_manager = Arc::new(LocalSystemParamsManager::new(system_params.clone()));

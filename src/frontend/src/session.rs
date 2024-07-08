@@ -320,7 +320,10 @@ impl FrontendEnv {
         let system_params_manager =
             Arc::new(LocalSystemParamsManager::new(system_params_reader.clone()));
 
-        LocalSecretManager::init(opts.temp_secret_file_dir);
+        LocalSecretManager::init(
+            opts.temp_secret_file_dir,
+            meta_client.cluster_id().to_string(),
+        );
 
         // This `session_params` should be initialized during the initial notification in `observer_manager`
         let session_params = Arc::new(RwLock::new(SessionConfig::default()));

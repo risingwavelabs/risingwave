@@ -41,11 +41,11 @@ impl LocalSecretManager {
     /// Initialize the secret manager with the given temp file path, cluster id, and encryption key.
     /// # Panics
     /// Panics if fail to create the secret file directory.
-    pub fn init(temp_file_dir: Option<String>) {
+    pub fn init(temp_file_dir: Option<String>, cluster_id: String) {
         // use `get_or_init` to handle concurrent initialization in single node mode.
         INSTANCE.get_or_init(|| {
             let temp_file_dir = temp_file_dir.unwrap_or_else(|| "./secrets".to_string());
-            let secret_file_dir = PathBuf::from(temp_file_dir);
+            let secret_file_dir = PathBuf::from(temp_file_dir).join(cluster_id);
             std::fs::remove_dir_all(&secret_file_dir).ok();
             std::fs::create_dir_all(&secret_file_dir).unwrap();
 
@@ -62,7 +62,7 @@ impl LocalSecretManager {
     pub fn global() -> &'static LocalSecretManager {
         // Initialize the secret manager for unit tests.
         #[cfg(debug_assertions)]
-        LocalSecretManager::init(None);
+        LocalSecretManager::init(None, "test".to_string());
 
         INSTANCE.get().unwrap()
     }

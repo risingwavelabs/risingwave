@@ -316,6 +316,7 @@ message AddWorkerNodeResponse {
   reserved "system_params";
   common.Status status = 1;
   optional uint32 node_id = 2;
+  string cluster_id = 4;
 }
 
 message ActivateWorkerNodeRequest {

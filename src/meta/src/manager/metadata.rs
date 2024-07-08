@@ -37,7 +37,9 @@ use crate::manager::{
     CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, LocalNotification,
     StreamingClusterInfo, WorkerId,
 };
-use crate::model::{ActorId, FragmentId, MetadataModel, TableFragments, TableParallelism};
+use crate::model::{
+    ActorId, ClusterId, FragmentId, MetadataModel, TableFragments, TableParallelism,
+};
 use crate::stream::{to_build_actor_info, SplitAssignment};
 use crate::telemetry::MetaTelemetryJobDesc;
 use crate::MetaResult;
@@ -828,5 +830,12 @@ impl MetadataManager {
     ) -> MetaResult<HashMap<TableId, HashMap<u32, u64>>> {
         // TODO(subscription): support the correct logic when supporting L0 log store subscriptions
         Ok(HashMap::new())
+    }
+
+    pub fn cluster_id(&self) -> &ClusterId {
+        match self {
+            MetadataManager::V1(mgr) => mgr.cluster_manager.cluster_id(),
+            MetadataManager::V2(mgr) => mgr.cluster_controller.cluster_id(),
+        }
     }
 }

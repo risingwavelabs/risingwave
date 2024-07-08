@@ -538,7 +538,7 @@ pub async fn start_service_as_election_leader(
     )
     .await?;
 
-    LocalSecretManager::init(opts.temp_secret_file_dir);
+    LocalSecretManager::init(opts.temp_secret_file_dir, env.cluster_id().to_string());
 
     let notification_srv = NotificationServiceImpl::new(
         env.clone(),
