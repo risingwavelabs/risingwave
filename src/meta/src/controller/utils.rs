@@ -949,25 +949,6 @@ pub fn rebuild_fragment_mapping_from_actors(
     result
 }
 
-/// `get_fragment_mappings_by_jobs` returns the fragment vnode mappings of the given job list.
-pub async fn get_fragment_ids_by_jobs<C>(
-    db: &C,
-    job_ids: Vec<ObjectId>,
-) -> MetaResult<Vec<FragmentId>>
-where
-    C: ConnectionTrait,
-{
-    let fragment_ids: Vec<FragmentId> = Fragment::find()
-        .select_only()
-        .column(fragment::Column::FragmentId)
-        .filter(fragment::Column::JobId.is_in(job_ids))
-        .into_tuple()
-        .all(db)
-        .await?;
-
-    Ok(fragment_ids)
-}
-
 pub async fn get_fragment_ids_by_jobs<C>(
     db: &C,
     job_ids: Vec<ObjectId>,
