@@ -1058,6 +1058,11 @@ steps:
     if: |
       build.pull_request.labels includes "ci/find-regressed-step"
       || build.env("CI_STEPS") =~ /(^|,)find-regressed-step(,|$$)/
+    env:
+      START_COMMIT: $START_COMMIT
+      END_COMMIT: $END_COMMIT
+      BUILDKITE_BRANCH: $BUILDKITE_BRANCH
+      BISECT_STEPS: $BISECT_STEPS
     plugins:
       - docker-compose#v5.1.0:
           run: rw-build-env
