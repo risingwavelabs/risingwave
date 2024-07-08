@@ -214,7 +214,7 @@ pub mod verify {
     use std::sync::Arc;
 
     use bytes::Bytes;
-    use risingwave_common::buffer::Bitmap;
+    use risingwave_common::bitmap::Bitmap;
     use risingwave_common::catalog::TableId;
     use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
     use risingwave_hummock_sdk::HummockReadEpoch;
@@ -836,7 +836,7 @@ pub mod boxed_state_store {
     use dyn_clone::{clone_trait_object, DynClone};
     use futures::future::BoxFuture;
     use futures::FutureExt;
-    use risingwave_common::buffer::Bitmap;
+    use risingwave_common::bitmap::Bitmap;
     use risingwave_common::catalog::TableId;
     use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
     use risingwave_hummock_sdk::{HummockReadEpoch, SyncResult};

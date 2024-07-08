@@ -52,13 +52,14 @@ pub async fn replace_table_with_definition(
         on_conflict,
         with_version_column,
         wildcard_idx,
+        cdc_table_info,
         ..
     } = definition
     else {
         panic!("unexpected statement type: {:?}", definition);
     };
 
-    let (graph, table, source) = generate_stream_graph_for_table(
+    let (graph, table, source, job_type) = generate_stream_graph_for_table(
         session,
         table_name,
         original_catalog,
@@ -72,6 +73,7 @@ pub async fn replace_table_with_definition(
         append_only,
         on_conflict,
         with_version_column,
+        cdc_table_info,
     )
     .await?;
 
@@ -92,7 +94,7 @@ pub async fn replace_table_with_definition(
     let catalog_writer = session.catalog_writer()?;
 
     catalog_writer
-        .replace_table(source, table, graph, col_index_mapping)
+        .replace_table(source, table, graph, col_index_mapping, job_type)
         .await?;
     Ok(())
 }
@@ -145,6 +147,13 @@ pub async fn handle_alter_table_column(
         }
     }
 
+    if columns.is_empty() {
+        Err(ErrorCode::NotSupported(
+            "alter a table with empty column definitions".to_string(),
+            "Please recreate the table with column definitions.".to_string(),
+        ))?
+    }
+
     match operation {
         AlterTableOperation::AddColumn {
             column_def: new_column,
@@ -171,7 +180,7 @@ pub async fn handle_alter_table_column(
                 ))?
             }
 
-            // Add the new column to the table definition.
+            // Add the new column to the table definition if it is not created by `create table (*)` syntax.
             columns.push(new_column);
         }
 
@@ -210,7 +219,7 @@ pub async fn handle_alter_table_column(
         }
 
         _ => unreachable!(),
-    }
+    };
 
     replace_table_with_definition(
         &session,

@@ -60,8 +60,10 @@ impl CtlContext {
             .cloned()
     }
 
-    pub async fn try_close(mut self) {
+    pub async fn try_close(&self) {
         tracing::info!("clean up context");
-        self.meta_client.take().unwrap().try_unregister().await;
+        if let Some(meta_client) = self.meta_client.get() {
+            meta_client.try_unregister().await;
+        }
     }
 }

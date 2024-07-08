@@ -308,7 +308,7 @@ fn build_fragment(
                 // memorize upstream source id for later use
                 state
                     .dependent_table_ids
-                    .insert(TableId::new(node.upstream_source_id));
+                    .insert(node.upstream_source_id.into());
                 current_fragment
                     .upstream_table_ids
                     .push(node.upstream_source_id);

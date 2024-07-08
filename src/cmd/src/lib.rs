@@ -61,6 +61,5 @@ pub fn compactor(opts: CompactorOpts) -> ! {
 
 pub fn ctl(opts: CtlOpts) -> ! {
     init_risingwave_logger(LoggerSettings::new("ctl").stderr(true));
-    // TODO(shutdown): pass the shutdown token
-    main_okk(|_| risingwave_ctl::start(opts));
+    main_okk(|shutdown| risingwave_ctl::start(opts, shutdown));
 }
