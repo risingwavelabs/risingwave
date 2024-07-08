@@ -38,7 +38,7 @@ pub trait ElectionClient: Send + Sync + 'static {
     fn subscribe(&self) -> Receiver<bool>;
     async fn leader(&self) -> MetaResult<Option<ElectionMember>>;
     async fn get_members(&self) -> MetaResult<Vec<ElectionMember>>;
-    async fn is_leader(&self) -> bool;
+    fn is_leader(&self) -> bool;
 }
 
 pub struct DummyElectionClient {
@@ -82,7 +82,7 @@ impl ElectionClient for DummyElectionClient {
         Ok(vec![self.self_member()])
     }
 
-    async fn is_leader(&self) -> bool {
+    fn is_leader(&self) -> bool {
         true
     }
 }

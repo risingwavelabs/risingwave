@@ -36,7 +36,7 @@ pub struct EtcdElectionClient {
 
 #[async_trait::async_trait]
 impl ElectionClient for EtcdElectionClient {
-    async fn is_leader(&self) -> bool {
+    fn is_leader(&self) -> bool {
         *self.is_leader_sender.borrow()
     }
 

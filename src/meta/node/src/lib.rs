@@ -26,6 +26,7 @@ use redact::Secret;
 use risingwave_common::config::OverrideConfig;
 use risingwave_common::util::meta_addr::MetaAddressStrategy;
 use risingwave_common::util::resource_util;
+use risingwave_common::util::tokio_util::sync::CancellationToken;
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_heap_profiling::HeapProfiler;
 use risingwave_meta::*;
@@ -324,7 +325,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             max_timeout_ms / 1000
         } + MIN_TIMEOUT_INTERVAL_SEC;
 
-        let (mut join_handle, leader_lost_handle, shutdown_send) = rpc_serve(
+        rpc_serve(
             add_info,
             backend,
             max_heartbeat_interval,
@@ -428,42 +429,10 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             },
             config.system.into_init_system_params(),
             Default::default(),
+            CancellationToken::new(), // TODO: pass the shutdown token
         )
         .await
         .unwrap();
-
-        tracing::info!("Meta server listening at {}", listen_addr);
-
-        match leader_lost_handle {
-            None => {
-                tokio::select! {
-                    _ = tokio::signal::ctrl_c() => {
-                        tracing::info!("receive ctrl+c");
-                        shutdown_send.send(()).unwrap();
-                        join_handle.await.unwrap()
-                    }
-                    res = &mut join_handle => res.unwrap(),
-                };
-            }
-            Some(mut handle) => {
-                tokio::select! {
-                    _ = &mut handle => {
-                        tracing::info!("receive leader lost signal");
-                        // When we lose leadership, we will exit as soon as possible.
-                    }
-                    _ = tokio::signal::ctrl_c() => {
-                        tracing::info!("receive ctrl+c");
-                        shutdown_send.send(()).unwrap();
-                        join_handle.await.unwrap();
-                        handle.abort();
-                    }
-                    res = &mut join_handle => {
-                        res.unwrap();
-                        handle.abort();
-                    },
-                };
-            }
-        };
     })
 }
 
