@@ -140,6 +140,7 @@ fn make_agg_func(
     };
 
     Function {
+        aggregate: false,
         name: ObjectName(vec![Ident::new_unchecked(func_name)]),
         args,
         variadic: false,
