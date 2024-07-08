@@ -20,11 +20,9 @@ use inquire::Confirm;
 use itertools::Itertools;
 use regex::{Match, Regex};
 use risingwave_pb::common::WorkerNode;
-use risingwave_pb::meta::get_reschedule_plan_request::PbPolicy;
 use risingwave_pb::meta::table_fragments::ActorStatus;
-use risingwave_pb::meta::{GetClusterInfoResponse, GetReschedulePlanResponse, Reschedule};
+use risingwave_pb::meta::{GetClusterInfoResponse, Reschedule};
 use serde::{Deserialize, Serialize};
-use serde_yaml;
 use thiserror_ext::AsReport;
 
 use crate::CtlContext;
@@ -224,16 +222,6 @@ fn parse_plan(mut plan: String) -> Result<HashMap<u32, Reschedule>, Error> {
         }
     }
     Ok(reschedules)
-}
-
-pub async fn get_reschedule_plan(
-    context: &CtlContext,
-    policy: PbPolicy,
-    revision: u64,
-) -> Result<GetReschedulePlanResponse> {
-    let meta_client = context.meta_client().await?;
-    let response = meta_client.get_reschedule_plan(policy, revision).await?;
-    Ok(response)
 }
 
 pub async fn unregister_workers(

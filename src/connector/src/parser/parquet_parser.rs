@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use std::sync::Arc;
-
 use arrow_array::RecordBatch;
 use futures_async_stream::try_stream;
 use opendal::Reader;
@@ -99,10 +98,10 @@ fn convert_record_batch_to_stream_chunk(
                             record_batch.column_by_name(&source_column.name)
                         {
                             let converted_arrow_data_type =
-                                arrow_schema::DataType::try_from(&source_column.data_type)?;
+                                arrow_schema::DataType::try_from(&source_column.data_type).unwrap();
 
                             if &converted_arrow_data_type == parquet_column.data_type() {
-                                let column = Arc::new(parquet_column.try_into()?);
+                                let column = Arc::new(parquet_column.try_into().unwrap());
                                 chunk_columns.push(column);
                             } else {
                                 // data type mismatch, this column is set to null.

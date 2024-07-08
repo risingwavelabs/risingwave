@@ -12,14 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
 use std::marker::PhantomData;
 use std::ops::Bound;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
+use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
-use risingwave_hummock_sdk::{HummockReadEpoch, SyncResult};
+use risingwave_hummock_sdk::HummockReadEpoch;
 
 use crate::error::StorageResult;
 use crate::storage_value::StorageValue;
@@ -33,6 +35,7 @@ pub struct PanicStateStore;
 impl StateStoreRead for PanicStateStore {
     type ChangeLogIter = PanicStateStoreIter<StateStoreReadLogItem>;
     type Iter = PanicStateStoreIter<StateStoreIterItem>;
+    type RevIter = PanicStateStoreIter<StateStoreIterItem>;
 
     #[allow(clippy::unused_async)]
     async fn get(
@@ -51,6 +54,16 @@ impl StateStoreRead for PanicStateStore {
         _epoch: u64,
         _read_options: ReadOptions,
     ) -> StorageResult<Self::Iter> {
+        panic!("should not read from the state store!");
+    }
+
+    #[allow(clippy::unused_async)]
+    async fn rev_iter(
+        &self,
+        _key_range: TableKeyRange,
+        _epoch: u64,
+        _read_options: ReadOptions,
+    ) -> StorageResult<Self::RevIter> {
         panic!("should not read from the state store!");
     }
 
@@ -77,6 +90,7 @@ impl StateStoreWrite for PanicStateStore {
 
 impl LocalStateStore for PanicStateStore {
     type Iter<'a> = PanicStateStoreIter<StateStoreIterItem>;
+    type RevIter<'a> = PanicStateStoreIter<StateStoreIterItem>;
 
     #[allow(clippy::unused_async)]
     async fn may_exist(
@@ -102,6 +116,15 @@ impl LocalStateStore for PanicStateStore {
         _key_range: TableKeyRange,
         _read_options: ReadOptions,
     ) -> StorageResult<Self::Iter<'_>> {
+        panic!("should not operate on the panic state store!");
+    }
+
+    #[allow(clippy::unused_async)]
+    async fn rev_iter(
+        &self,
+        _key_range: TableKeyRange,
+        _read_options: ReadOptions,
+    ) -> StorageResult<Self::RevIter<'_>> {
         panic!("should not operate on the panic state store!");
     }
 
@@ -159,8 +182,8 @@ impl StateStore for PanicStateStore {
     }
 
     #[allow(clippy::unused_async)]
-    async fn sync(&self, _epoch: u64) -> StorageResult<SyncResult> {
-        panic!("should not await sync epoch from the panic state store!");
+    fn sync(&self, _epoch: u64, _table_ids: HashSet<TableId>) -> impl SyncFuture {
+        async { panic!("should not await sync epoch from the panic state store!") }
     }
 
     fn seal_epoch(&self, _epoch: u64, _is_checkpoint: bool) {

@@ -64,27 +64,17 @@ impl LogicalFilter {
         }
     }
 
-    /// Create a `LogicalFilter` to filter the rows with all keys are null.
-    pub fn filter_if_keys_all_null(input: PlanRef, key: &[usize]) -> PlanRef {
+    /// Create a `LogicalFilter` to filter out rows where all keys are null.
+    pub fn filter_out_all_null_keys(input: PlanRef, key: &[usize]) -> PlanRef {
         let schema = input.schema();
-        let cond = key.iter().fold(ExprImpl::literal_bool(false), |expr, i| {
-            ExprImpl::FunctionCall(
-                FunctionCall::new_unchecked(
-                    ExprType::Or,
-                    vec![
-                        expr,
-                        FunctionCall::new_unchecked(
-                            ExprType::IsNotNull,
-                            vec![InputRef::new(*i, schema.fields()[*i].data_type.clone()).into()],
-                            DataType::Boolean,
-                        )
-                        .into(),
-                    ],
-                    DataType::Boolean,
-                )
-                .into(),
+        let cond = ExprImpl::or(key.iter().unique().map(|&i| {
+            FunctionCall::new_unchecked(
+                ExprType::IsNotNull,
+                vec![InputRef::new(i, schema.fields()[i].data_type.clone()).into()],
+                DataType::Boolean,
             )
-        });
+            .into()
+        }));
         LogicalFilter::create_with_expr(input, cond)
     }
 
@@ -247,11 +237,11 @@ mod tests {
     use std::collections::HashSet;
 
     use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::types::{DataType, ScalarImpl};
+    use risingwave_common::types::ScalarImpl;
     use risingwave_pb::expr::expr_node::Type;
 
     use super::*;
-    use crate::expr::{assert_eq_input_ref, FunctionCall, InputRef, Literal};
+    use crate::expr::{assert_eq_input_ref, Literal};
     use crate::optimizer::optimizer_context::OptimizerContext;
     use crate::optimizer::plan_node::LogicalValues;
     use crate::optimizer::property::FunctionalDependency;

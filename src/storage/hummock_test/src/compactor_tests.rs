@@ -17,14 +17,13 @@ pub(crate) mod tests {
 
     use std::collections::{BTreeMap, BTreeSet, VecDeque};
     use std::ops::Bound;
-    use std::sync::atomic::AtomicU32;
     use std::sync::Arc;
 
     use bytes::{BufMut, Bytes, BytesMut};
-    use foyer::memory::CacheContext;
+    use foyer::CacheContext;
     use itertools::Itertools;
     use rand::{Rng, RngCore, SeedableRng};
-    use risingwave_common::buffer::BitmapBuilder;
+    use risingwave_common::bitmap::BitmapBuilder;
     use risingwave_common::catalog::TableId;
     use risingwave_common::constants::hummock::CompactionFilterFlag;
     use risingwave_common::hash::VirtualNode;
@@ -104,7 +103,7 @@ pub(crate) mod tests {
             write_conflict_detection_enabled: true,
             ..Default::default()
         });
-        let sstable_store = mock_sstable_store();
+        let sstable_store = mock_sstable_store().await;
 
         let hummock = GlobalHummockStorage::for_test(
             options,
@@ -138,7 +137,7 @@ pub(crate) mod tests {
             write_conflict_detection_enabled: true,
             ..Default::default()
         });
-        let sstable_store = mock_sstable_store();
+        let sstable_store = mock_sstable_store().await;
 
         GlobalHummockStorage::for_test(
             options,
@@ -200,12 +199,6 @@ pub(crate) mod tests {
         storage_opts: Arc<StorageOpts>,
         sstable_store: SstableStoreRef,
     ) -> CompactorContext {
-        let compaction_executor = Arc::new(CompactionExecutor::new(Some(1)));
-        let max_task_parallelism = Arc::new(AtomicU32::new(
-            (compaction_executor.worker_num() as f32 * storage_opts.compactor_max_task_multiplier)
-                .ceil() as u32,
-        ));
-
         CompactorContext {
             storage_opts,
             sstable_store,
@@ -215,8 +208,6 @@ pub(crate) mod tests {
             memory_limiter: MemoryLimiter::unlimit(),
             task_progress_manager: Default::default(),
             await_tree_reg: None,
-            running_task_parallelism: Arc::new(AtomicU32::new(0)),
-            max_task_parallelism,
         }
     }
 
@@ -730,6 +721,10 @@ pub(crate) mod tests {
             StaticCompactionGroupId::StateDefault.into(),
         )
         .await;
+
+        global_storage
+            .wait_version(hummock_manager_ref.get_current_version().await)
+            .await;
 
         let vnode = VirtualNode::from_index(1);
         for index in 0..kv_count {

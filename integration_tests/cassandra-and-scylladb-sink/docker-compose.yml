@@ -1,5 +1,4 @@
 ---
-version: "3"
 services:
   cassandra:
     image: cassandra:4.0
@@ -22,10 +21,10 @@ services:
     extends:
       file: ../../docker/docker-compose.yml
       service: risingwave-standalone
-  etcd-0:
+  postgres-0:
     extends:
       file: ../../docker/docker-compose.yml
-      service: etcd-0
+      service: postgres-0
   grafana-0:
     extends:
       file: ../../docker/docker-compose.yml
@@ -45,7 +44,7 @@ services:
 volumes:
   risingwave-standalone:
     external: false
-  etcd-0:
+  postgres-0:
     external: false
   grafana-0:
     external: false

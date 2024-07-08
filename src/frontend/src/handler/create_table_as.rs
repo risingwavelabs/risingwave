@@ -22,7 +22,7 @@ use risingwave_sqlparser::ast::{ColumnDef, ObjectName, OnConflict, Query, Statem
 use super::{HandlerArgs, RwPgResponse};
 use crate::binder::BoundStatement;
 use crate::error::{ErrorCode, Result};
-use crate::handler::create_table::{gen_create_table_plan_without_bind, ColumnIdGenerator};
+use crate::handler::create_table::{gen_create_table_plan_without_source, ColumnIdGenerator};
 use crate::handler::query::handle_query;
 use crate::{build_graph, Binder, OptimizerContext};
 pub async fn handle_create_as(
@@ -90,19 +90,12 @@ pub async fn handle_create_as(
 
     let (graph, source, table) = {
         let context = OptimizerContext::from_handler_args(handler_args.clone());
-        let properties = handler_args
-            .with_options
-            .inner()
-            .clone()
-            .into_iter()
-            .collect();
-        let (plan, source, table) = gen_create_table_plan_without_bind(
+        let (plan, table) = gen_create_table_plan_without_source(
             context,
             table_name.clone(),
             columns,
             vec![],
             vec![],
-            properties,
             "".to_owned(), // TODO: support `SHOW CREATE TABLE` for `CREATE TABLE AS`
             vec![],        // No watermark should be defined in for `CREATE TABLE AS`
             append_only,
@@ -118,7 +111,7 @@ pub async fn handle_create_as(
                 .map(|parallelism| Parallelism {
                     parallelism: parallelism.get(),
                 });
-        (graph, source, table)
+        (graph, None, table)
     };
 
     tracing::trace!(

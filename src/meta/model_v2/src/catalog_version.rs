@@ -13,8 +13,9 @@
 // limitations under the License.
 
 use sea_orm::entity::prelude::*;
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
 #[sea_orm(rs_type = "String", db_type = "String(None)")]
 pub enum VersionCategory {
     #[sea_orm(string_value = "NOTIFICATION")]
@@ -23,7 +24,7 @@ pub enum VersionCategory {
     TableRevision,
 }
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize)]
 #[sea_orm(table_name = "catalog_version")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]

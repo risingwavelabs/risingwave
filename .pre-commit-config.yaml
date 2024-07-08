@@ -1,0 +1,26 @@
+# Usage: install pre-commit, and then run `pre-commit install` to install git hooks
+# See https://pre-commit.com for more information
+# See https://pre-commit.com/hooks.html for more hooks
+repos:
+-   repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v2.3.0
+    hooks:
+    -   id: end-of-file-fixer
+    -   id: trailing-whitespace
+-   repo: local
+    hooks:
+    -   id: rustfmt
+        name: rustfmt
+        entry: rustfmt --edition 2021
+        language: system
+        types: [rust]
+    -   id: typos
+        name: typos
+        entry: typos -w
+        language: system
+    -   id: cargo sort
+        name: cargo sort
+        entry: cargo sort -g -w
+        language: system
+        files: 'Cargo.toml'
+        pass_filenames: false

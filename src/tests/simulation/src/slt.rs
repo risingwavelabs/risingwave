@@ -20,7 +20,7 @@ use anyhow::{bail, Result};
 use itertools::Itertools;
 use rand::{thread_rng, Rng, SeedableRng};
 use rand_chacha::ChaChaRng;
-use sqllogictest::{ParallelTestError, QueryExpect, Record, StatementExpect};
+use sqllogictest::{Condition, ParallelTestError, QueryExpect, Record, StatementExpect};
 
 use crate::client::RisingWave;
 use crate::cluster::{Cluster, KillOpts};
@@ -208,6 +208,7 @@ pub async fn run_slt_task(
         // use a session per file
         let mut tester =
             sqllogictest::Runner::new(|| RisingWave::connect("frontend".into(), "dev".into()));
+        tester.add_label("madsim");
 
         let file = file.unwrap();
         let path = file.as_path();
@@ -273,6 +274,11 @@ pub async fn run_slt_task(
             } = &record
                 && matches!(cmd, SqlCmd::CreateMaterializedView { .. })
                 && !manual_background_ddl_enabled
+                && conditions.iter().all(|c| {
+                    *c != Condition::SkipIf {
+                        label: "madsim".to_string(),
+                    }
+                })
             {
                 let background_ddl_setting = rng.gen_bool(background_ddl_rate);
                 let set_background_ddl = Record::Statement {
@@ -461,6 +467,8 @@ pub async fn run_slt_task(
 pub async fn run_parallel_slt_task(glob: &str, jobs: usize) -> Result<(), ParallelTestError> {
     let mut tester =
         sqllogictest::Runner::new(|| RisingWave::connect("frontend".into(), "dev".into()));
+    tester.add_label("madsim");
+
     tester
         .run_parallel_async(
             glob,
@@ -488,6 +496,7 @@ fn hack_kafka_test(path: &Path) -> tempfile::NamedTempFile {
             .expect("failed to get schema path");
     let content = content
         .replace("127.0.0.1:29092", "192.168.11.1:29092")
+        .replace("localhost:29092", "192.168.11.1:29092")
         .replace(
             "/risingwave/avro-simple-schema.avsc",
             simple_avsc_full_path.to_str().unwrap(),

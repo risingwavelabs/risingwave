@@ -77,6 +77,7 @@ impl SourceCatalog {
             version: self.version,
             created_at_cluster_version: self.created_at_cluster_version.clone(),
             initialized_at_cluster_version: self.initialized_at_cluster_version.clone(),
+            secret_refs: Default::default(),
         }
     }
 

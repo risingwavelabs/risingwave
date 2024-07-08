@@ -14,16 +14,19 @@
 
 use std::assert_matches::assert_matches;
 use std::collections::btree_map::Entry;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::fmt::{Debug, Display, Formatter};
 use std::future::Future;
 use std::mem::replace;
 use std::sync::Arc;
 
 use anyhow::anyhow;
 use await_tree::InstrumentAwait;
+use futures::future::BoxFuture;
 use futures::stream::FuturesOrdered;
-use futures::{FutureExt, StreamExt};
+use futures::{FutureExt, StreamExt, TryFutureExt};
 use prometheus::HistogramTimer;
+use risingwave_common::catalog::TableId;
 use risingwave_common::must_match;
 use risingwave_hummock_sdk::SyncResult;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
@@ -40,6 +43,29 @@ use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{Barrier, Mutation};
 use crate::task::{await_tree_key, ActorId};
 
+struct IssuedState {
+    pub mutation: Option<Arc<Mutation>>,
+    /// Actor ids remaining to be collected.
+    pub remaining_actors: BTreeSet<ActorId>,
+
+    pub barrier_inflight_latency: HistogramTimer,
+
+    pub table_ids: HashSet<TableId>,
+
+    pub kind: BarrierKind,
+}
+
+impl Debug for IssuedState {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("IssuedState")
+            .field("mutation", &self.mutation)
+            .field("remaining_actors", &self.remaining_actors)
+            .field("table_ids", &self.table_ids)
+            .field("kind", &self.kind)
+            .finish()
+    }
+}
+
 /// The state machine of local barrier manager.
 #[derive(Debug)]
 enum ManagedBarrierStateInner {
@@ -51,13 +77,7 @@ enum ManagedBarrierStateInner {
     },
 
     /// Meta service has issued a `send_barrier` request. We're collecting barriers now.
-    Issued {
-        mutation: Option<Arc<Mutation>>,
-        /// Actor ids remaining to be collected.
-        remaining_actors: HashSet<ActorId>,
-
-        barrier_inflight_latency: HistogramTimer,
-    },
+    Issued(IssuedState),
 
     /// The barrier has been collected by all remaining actors
     AllCollected,
@@ -71,56 +91,105 @@ enum ManagedBarrierStateInner {
 pub(super) struct BarrierState {
     curr_epoch: u64,
     inner: ManagedBarrierStateInner,
-    kind: BarrierKind,
 }
 
 type AwaitEpochCompletedFuture =
     impl Future<Output = (u64, StreamResult<BarrierCompleteResult>)> + 'static;
 
-fn sync_epoch(
-    state_store: &StateStoreImpl,
+fn sync_epoch<S: StateStore>(
+    state_store: &S,
     streaming_metrics: &StreamingMetrics,
     prev_epoch: u64,
-    kind: BarrierKind,
-) -> impl Future<Output = StreamResult<Option<SyncResult>>> + 'static {
-    let barrier_sync_latency = streaming_metrics.barrier_sync_latency.clone();
-    let state_store = state_store.clone();
+    table_ids: HashSet<TableId>,
+) -> BoxFuture<'static, StreamResult<SyncResult>> {
+    let timer = streaming_metrics.barrier_sync_latency.start_timer();
+    let future = state_store.sync(prev_epoch, table_ids);
+    future
+        .instrument_await(format!("sync_epoch (epoch {})", prev_epoch))
+        .inspect_ok(move |_| {
+            timer.observe_duration();
+        })
+        .map_err(move |e| {
+            tracing::error!(
+                prev_epoch,
+                error = %e.as_report(),
+                "Failed to sync state store",
+            );
+            e.into()
+        })
+        .boxed()
+}
 
-    async move {
-        let sync_result = match kind {
-            BarrierKind::Unspecified => unreachable!(),
-            BarrierKind::Initial => {
-                if let Some(hummock) = state_store.as_hummock() {
-                    let mce = hummock.get_pinned_version().max_committed_epoch();
-                    assert_eq!(
-                        mce, prev_epoch,
-                        "first epoch should match with the current version",
-                    );
+#[derive(Debug)]
+pub(super) struct ManagedBarrierStateDebugInfo<'a> {
+    epoch_barrier_state_map: &'a BTreeMap<u64, BarrierState>,
+
+    create_mview_progress: &'a HashMap<u64, HashMap<ActorId, BackfillState>>,
+}
+
+impl Display for ManagedBarrierStateDebugInfo<'_> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let mut prev_epoch = 0u64;
+        for (epoch, barrier_state) in self.epoch_barrier_state_map {
+            write!(f, "> Epoch {}: ", epoch)?;
+            match &barrier_state.inner {
+                ManagedBarrierStateInner::Stashed { .. } => {
+                    write!(f, "Stashed")?;
                 }
-                tracing::info!(?prev_epoch, "ignored syncing data for the first barrier");
-                None
+                ManagedBarrierStateInner::Issued(state) => {
+                    write!(f, "Issued [{:?}]. Remaining actors: [", state.kind)?;
+                    let mut is_prev_epoch_issued = false;
+                    if prev_epoch != 0 {
+                        let bs = &self.epoch_barrier_state_map[&prev_epoch];
+                        if let ManagedBarrierStateInner::Issued(IssuedState {
+                            remaining_actors: remaining_actors_prev,
+                            ..
+                        }) = &bs.inner
+                        {
+                            // Only show the actors that are not in the previous epoch.
+                            is_prev_epoch_issued = true;
+                            let mut duplicates = 0usize;
+                            for actor_id in &state.remaining_actors {
+                                if !remaining_actors_prev.contains(actor_id) {
+                                    write!(f, "{}, ", actor_id)?;
+                                } else {
+                                    duplicates += 1;
+                                }
+                            }
+                            if duplicates > 0 {
+                                write!(f, "...and {} actors in prev epoch", duplicates)?;
+                            }
+                        }
+                    }
+                    if !is_prev_epoch_issued {
+                        for actor_id in &state.remaining_actors {
+                            write!(f, "{}, ", actor_id)?;
+                        }
+                    }
+                    write!(f, "]")?;
+                }
+                ManagedBarrierStateInner::AllCollected => {
+                    write!(f, "AllCollected")?;
+                }
+                ManagedBarrierStateInner::Completed(_) => {
+                    write!(f, "Completed")?;
+                }
             }
-            BarrierKind::Barrier => None,
-            BarrierKind::Checkpoint => {
-                let timer = barrier_sync_latency.start_timer();
-                let sync_result = dispatch_state_store!(state_store, store, {
-                    store
-                        .sync(prev_epoch)
-                        .instrument_await(format!("sync_epoch (epoch {})", prev_epoch))
-                        .await
-                        .inspect_err(|e| {
-                            tracing::error!(
-                                prev_epoch,
-                                error = %e.as_report(),
-                                "Failed to sync state store",
-                            );
-                        })
-                })?;
-                timer.observe_duration();
-                Some(sync_result)
+            prev_epoch = *epoch;
+            writeln!(f)?;
+        }
+
+        if !self.create_mview_progress.is_empty() {
+            writeln!(f, "Create MView Progress:")?;
+            for (epoch, progress) in self.create_mview_progress {
+                write!(f, "> Epoch {}:", epoch)?;
+                for (actor_id, state) in progress {
+                    write!(f, ">> Actor {}: {}, ", actor_id, state)?;
+                }
             }
-        };
-        Ok(sync_result)
+        }
+
+        Ok(())
     }
 }
 
@@ -170,6 +239,13 @@ impl ManagedBarrierState {
         }
     }
 
+    pub(super) fn to_debug_info(&self) -> ManagedBarrierStateDebugInfo<'_> {
+        ManagedBarrierStateDebugInfo {
+            epoch_barrier_state_map: &self.epoch_barrier_state_map,
+            create_mview_progress: &self.create_mview_progress,
+        }
+    }
+
     pub fn read_barrier_mutation(
         &mut self,
         barrier: &Barrier,
@@ -182,7 +258,6 @@ impl ManagedBarrierState {
                     inner: ManagedBarrierStateInner::Stashed {
                         mutation_senders: vec![sender],
                     },
-                    kind: barrier.kind,
                 });
             }
             Entry::Occupied(mut o) => {
@@ -193,7 +268,7 @@ impl ManagedBarrierState {
                     } => {
                         mutation_senders.push(sender);
                     }
-                    ManagedBarrierStateInner::Issued { mutation, .. } => {
+                    ManagedBarrierStateInner::Issued(IssuedState { mutation, .. }) => {
                         let _ = sender.send(mutation.clone());
                     }
                     _ => {
@@ -219,14 +294,13 @@ impl ManagedBarrierState {
         for (prev_epoch, barrier_state) in &mut self.epoch_barrier_state_map {
             let prev_epoch = *prev_epoch;
             match &barrier_state.inner {
-                ManagedBarrierStateInner::Issued {
+                ManagedBarrierStateInner::Issued(IssuedState {
                     remaining_actors, ..
-                } if remaining_actors.is_empty() => {}
+                }) if remaining_actors.is_empty() => {}
                 ManagedBarrierStateInner::AllCollected | ManagedBarrierStateInner::Completed(_) => {
                     continue;
                 }
-                ManagedBarrierStateInner::Stashed { .. }
-                | ManagedBarrierStateInner::Issued { .. } => {
+                ManagedBarrierStateInner::Stashed { .. } | ManagedBarrierStateInner::Issued(_) => {
                     break;
                 }
             }
@@ -236,11 +310,14 @@ impl ManagedBarrierState {
                 ManagedBarrierStateInner::AllCollected,
             );
 
-            must_match!(prev_state, ManagedBarrierStateInner::Issued {
+            let (kind, table_ids) = must_match!(prev_state, ManagedBarrierStateInner::Issued(IssuedState {
                 barrier_inflight_latency: timer,
+                kind,
+                table_ids,
                 ..
-            } => {
+            }) => {
                 timer.observe_duration();
+                (kind, table_ids)
             });
 
             let create_mview_progress = self
@@ -262,33 +339,60 @@ impl ManagedBarrierState {
                 })
                 .collect();
 
-            let kind = barrier_state.kind;
-            match kind {
+            let complete_barrier_future = match kind {
                 BarrierKind::Unspecified => unreachable!(),
-                BarrierKind::Initial => tracing::info!(
-                    epoch = prev_epoch,
-                    "ignore sealing data for the first barrier"
-                ),
-                BarrierKind::Barrier | BarrierKind::Checkpoint => {
+                BarrierKind::Initial => {
+                    tracing::info!(
+                        epoch = prev_epoch,
+                        "ignore sealing data for the first barrier"
+                    );
+                    if let Some(hummock) = self.state_store.as_hummock() {
+                        let mce = hummock.get_pinned_version().max_committed_epoch();
+                        assert_eq!(
+                            mce, prev_epoch,
+                            "first epoch should match with the current version",
+                        );
+                    }
+                    tracing::info!(?prev_epoch, "ignored syncing data for the first barrier");
+                    None
+                }
+                BarrierKind::Barrier => {
                     dispatch_state_store!(&self.state_store, state_store, {
                         state_store.seal_epoch(prev_epoch, kind.is_checkpoint());
                     });
+                    None
                 }
-            }
+                BarrierKind::Checkpoint => {
+                    dispatch_state_store!(&self.state_store, state_store, {
+                        state_store.seal_epoch(prev_epoch, kind.is_checkpoint());
+                        Some(sync_epoch(
+                            state_store,
+                            &self.streaming_metrics,
+                            prev_epoch,
+                            table_ids,
+                        ))
+                    })
+                }
+            };
 
             self.await_epoch_completed_futures.push_back({
-                let future =
-                    sync_epoch(&self.state_store, &self.streaming_metrics, prev_epoch, kind).map(
-                        move |result| {
-                            (
-                                prev_epoch,
-                                result.map(move |sync_result| BarrierCompleteResult {
-                                    sync_result,
-                                    create_mview_progress,
-                                }),
-                            )
-                        },
-                    );
+                let future = async move {
+                    if let Some(future) = complete_barrier_future {
+                        let result = future.await;
+                        result.map(Some)
+                    } else {
+                        Ok(None)
+                    }
+                }
+                .map(move |result| {
+                    (
+                        prev_epoch,
+                        result.map(|sync_result| BarrierCompleteResult {
+                            sync_result,
+                            create_mview_progress,
+                        }),
+                    )
+                });
                 if let Some(reg) = &self.barrier_await_tree_reg {
                     reg.register(
                         await_tree_key::BarrierAwait { prev_epoch },
@@ -317,10 +421,10 @@ impl ManagedBarrierState {
             .filter_map(move |(prev_epoch, barrier_state)| {
                 #[allow(clippy::single_match)]
                 match barrier_state.inner {
-                    ManagedBarrierStateInner::Issued {
+                    ManagedBarrierStateInner::Issued(IssuedState {
                         ref remaining_actors,
                         ..
-                    } => {
+                    }) => {
                         if remaining_actors.contains(&actor_id) {
                             Some(*prev_epoch)
                         } else {
@@ -357,10 +461,10 @@ impl ManagedBarrierState {
             Some(&mut BarrierState {
                 curr_epoch,
                 inner:
-                    ManagedBarrierStateInner::Issued {
+                    ManagedBarrierStateInner::Issued(IssuedState {
                         ref mut remaining_actors,
                         ..
-                    },
+                    }),
                 ..
             }) => {
                 let exist = remaining_actors.remove(&actor_id);
@@ -387,6 +491,7 @@ impl ManagedBarrierState {
         &mut self,
         barrier: &Barrier,
         actor_ids_to_collect: HashSet<ActorId>,
+        table_ids: HashSet<TableId>,
     ) {
         let timer = self
             .streaming_metrics
@@ -416,12 +521,13 @@ impl ManagedBarrierState {
             barrier.epoch.prev,
             BarrierState {
                 curr_epoch: barrier.epoch.curr,
-                inner: ManagedBarrierStateInner::Issued {
-                    remaining_actors: actor_ids_to_collect,
+                inner: ManagedBarrierStateInner::Issued(IssuedState {
+                    remaining_actors: BTreeSet::from_iter(actor_ids_to_collect),
                     mutation: barrier.mutation.clone(),
                     barrier_inflight_latency: timer,
-                },
-                kind: barrier.kind,
+                    kind: barrier.kind,
+                    table_ids,
+                }),
             },
         );
         self.may_have_collected_all(barrier.epoch.prev);
@@ -505,9 +611,9 @@ mod tests {
         let actor_ids_to_collect1 = HashSet::from([1, 2]);
         let actor_ids_to_collect2 = HashSet::from([1, 2]);
         let actor_ids_to_collect3 = HashSet::from([1, 2, 3]);
-        managed_barrier_state.transform_to_issued(&barrier1, actor_ids_to_collect1);
-        managed_barrier_state.transform_to_issued(&barrier2, actor_ids_to_collect2);
-        managed_barrier_state.transform_to_issued(&barrier3, actor_ids_to_collect3);
+        managed_barrier_state.transform_to_issued(&barrier1, actor_ids_to_collect1, HashSet::new());
+        managed_barrier_state.transform_to_issued(&barrier2, actor_ids_to_collect2, HashSet::new());
+        managed_barrier_state.transform_to_issued(&barrier3, actor_ids_to_collect3, HashSet::new());
         managed_barrier_state.collect(1, &barrier1);
         managed_barrier_state.collect(2, &barrier1);
         assert_eq!(
@@ -555,9 +661,9 @@ mod tests {
         let actor_ids_to_collect1 = HashSet::from([1, 2, 3, 4]);
         let actor_ids_to_collect2 = HashSet::from([1, 2, 3]);
         let actor_ids_to_collect3 = HashSet::from([1, 2]);
-        managed_barrier_state.transform_to_issued(&barrier1, actor_ids_to_collect1);
-        managed_barrier_state.transform_to_issued(&barrier2, actor_ids_to_collect2);
-        managed_barrier_state.transform_to_issued(&barrier3, actor_ids_to_collect3);
+        managed_barrier_state.transform_to_issued(&barrier1, actor_ids_to_collect1, HashSet::new());
+        managed_barrier_state.transform_to_issued(&barrier2, actor_ids_to_collect2, HashSet::new());
+        managed_barrier_state.transform_to_issued(&barrier3, actor_ids_to_collect3, HashSet::new());
 
         managed_barrier_state.collect(1, &barrier1);
         managed_barrier_state.collect(1, &barrier2);

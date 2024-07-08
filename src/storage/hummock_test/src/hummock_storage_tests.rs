@@ -16,10 +16,10 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use bytes::{BufMut, Bytes};
-use foyer::memory::CacheContext;
+use foyer::CacheContext;
 use futures::TryStreamExt;
 use itertools::Itertools;
-use risingwave_common::buffer::BitmapBuilder;
+use risingwave_common::bitmap::BitmapBuilder;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::range::RangeBoundsExt;
@@ -37,7 +37,6 @@ use risingwave_storage::hummock::store::version::read_filter_for_version;
 use risingwave_storage::hummock::{CachePolicy, HummockStorage, LocalHummockStorage};
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::*;
-use risingwave_storage::StateStore;
 
 use crate::local_state_store_test_utils::LocalStateStoreTestExt;
 use crate::test_utils::{gen_key_from_str, prepare_hummock_test_env, TestIngestBatch};
@@ -531,6 +530,9 @@ async fn test_state_store_sync() {
         .await
         .unwrap();
 
+    let epoch3 = epoch2.next_epoch();
+    hummock_storage.seal_current_epoch(epoch3, SealCurrentEpochOptions::for_test());
+
     let res = test_env.storage.seal_and_sync_epoch(epoch1).await.unwrap();
     test_env
         .meta_client
@@ -636,12 +638,36 @@ async fn test_state_store_sync() {
             .into_stream(to_owned_item);
         futures::pin_mut!(iter);
 
+        let rev_iter = test_env
+            .storage
+            .rev_iter(
+                (
+                    Unbounded,
+                    Included(gen_key_from_str(VirtualNode::ZERO, "eeee")),
+                ),
+                epoch1,
+                ReadOptions {
+                    table_id: TEST_TABLE_ID,
+                    cache_policy: CachePolicy::Fill(CacheContext::Default),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap()
+            .into_stream(to_owned_item);
+        futures::pin_mut!(rev_iter);
+        let mut rev_results = vec![];
+        while let Some(result) = rev_iter.try_next().await.unwrap() {
+            rev_results.push(result);
+        }
         let kv_map_batch_1 = [
             (gen_key_from_str(VirtualNode::ZERO, "aaaa"), "1111", epoch1),
             (gen_key_from_str(VirtualNode::ZERO, "bbbb"), "2222", epoch1),
         ];
         for (k, v, e) in kv_map_batch_1 {
             let result = iter.try_next().await.unwrap();
+            let rev_result = rev_results.pop();
+            assert_eq!(result, rev_result);
             assert_eq!(
                 result,
                 Some((
@@ -658,6 +684,8 @@ async fn test_state_store_sync() {
 
         for (k, v, e) in kv_map_batch_2 {
             let result = iter.try_next().await.unwrap();
+            let rev_result = rev_results.pop();
+            assert_eq!(result, rev_result);
             assert_eq!(
                 result,
                 Some((
@@ -691,12 +719,37 @@ async fn test_state_store_sync() {
 
         futures::pin_mut!(iter);
 
+        let rev_iter = test_env
+            .storage
+            .rev_iter(
+                (
+                    Unbounded,
+                    Included(gen_key_from_str(VirtualNode::ZERO, "eeee")),
+                ),
+                epoch2,
+                ReadOptions {
+                    table_id: TEST_TABLE_ID,
+                    cache_policy: CachePolicy::Fill(CacheContext::Default),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap()
+            .into_stream(to_owned_item);
+        futures::pin_mut!(rev_iter);
+        let mut rev_results = vec![];
+        while let Some(result) = rev_iter.try_next().await.unwrap() {
+            rev_results.push(result);
+        }
+
         let kv_map_batch_1 = [("aaaa", "1111", epoch1), ("bbbb", "2222", epoch1)];
 
         let kv_map_batch_2 = [("cccc", "3333", epoch1), ("dddd", "4444", epoch1)];
         let kv_map_batch_3 = [("eeee", "6666", epoch2)];
         for (k, v, e) in kv_map_batch_1 {
             let result = iter.try_next().await.unwrap();
+            let rev_result = rev_results.pop();
+            assert_eq!(result, rev_result);
             assert_eq!(
                 result,
                 Some((
@@ -708,6 +761,8 @@ async fn test_state_store_sync() {
 
         for (k, v, e) in kv_map_batch_2 {
             let result = iter.try_next().await.unwrap();
+            let rev_result = rev_results.pop();
+            assert_eq!(result, rev_result);
             assert_eq!(
                 result,
                 Some((
@@ -777,14 +832,15 @@ async fn test_delete_get() {
         .await
         .unwrap();
 
+    let epoch2 = epoch1.next_epoch();
+    hummock_storage.seal_current_epoch(epoch2, SealCurrentEpochOptions::for_test());
     let res = test_env.storage.seal_and_sync_epoch(epoch1).await.unwrap();
     test_env
         .meta_client
         .commit_epoch(epoch1, res)
         .await
         .unwrap();
-    let epoch2 = epoch1.next_epoch();
-    hummock_storage.seal_current_epoch(epoch2, SealCurrentEpochOptions::for_test());
+
     let batch2 = vec![(
         gen_key_from_str(VirtualNode::ZERO, "bb"),
         StorageValue::new_delete(),
@@ -799,6 +855,7 @@ async fn test_delete_get() {
         )
         .await
         .unwrap();
+    hummock_storage.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
     let res = test_env.storage.seal_and_sync_epoch(epoch2).await.unwrap();
     test_env
         .meta_client
@@ -953,6 +1010,8 @@ async fn test_multiple_epoch_sync() {
     };
     test_get().await;
 
+    let epoch4 = epoch3.next_epoch();
+    hummock_storage.seal_current_epoch(epoch4, SealCurrentEpochOptions::for_test());
     test_env.storage.seal_epoch(epoch1, false);
     let sync_result2 = test_env.storage.seal_and_sync_epoch(epoch2).await.unwrap();
     let sync_result3 = test_env.storage.seal_and_sync_epoch(epoch3).await.unwrap();
@@ -1026,6 +1085,9 @@ async fn test_iter_with_min_epoch() {
         )
         .await
         .unwrap();
+
+    let epoch3 = (33 * 1000) << 16;
+    hummock_storage.seal_current_epoch(epoch3, SealCurrentEpochOptions::for_test());
 
     {
         // test before sync
@@ -1276,6 +1338,9 @@ async fn test_hummock_version_reader() {
             )
             .await
             .unwrap();
+
+        let epoch4 = (34 * 1000) << 16;
+        hummock_storage.seal_current_epoch(epoch4, SealCurrentEpochOptions::for_test());
 
         {
             // test before sync
@@ -1686,6 +1751,8 @@ async fn test_get_with_min_epoch() {
         )
         .await
         .unwrap();
+
+    hummock_storage.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
 
     {
         // test before sync

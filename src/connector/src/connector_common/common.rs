@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::borrow::Cow;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::io::Write;
 use std::time::Duration;
 
@@ -44,6 +44,8 @@ use crate::source::nats::source::NatsOffset;
 pub const PRIVATE_LINK_BROKER_REWRITE_MAP_KEY: &str = "broker.rewrite.endpoints";
 pub const PRIVATE_LINK_TARGETS_KEY: &str = "privatelink.targets";
 
+const AWS_MSK_IAM_AUTH: &str = "AWS_MSK_IAM";
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct AwsPrivateLinkItem {
     pub az_id: Option<String>,
@@ -59,16 +61,28 @@ use aws_types::SdkConfig;
 /// A flatten config map for aws auth.
 #[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct AwsAuthProps {
+    #[serde(rename = "aws.region", alias = "region")]
     pub region: Option<String>,
-    #[serde(alias = "endpoint_url")]
+
+    #[serde(
+        rename = "aws.endpoint_url",
+        alias = "endpoint_url",
+        alias = "endpoint"
+    )]
     pub endpoint: Option<String>,
+    #[serde(rename = "aws.credentials.access_key_id", alias = "access_key")]
     pub access_key: Option<String>,
+    #[serde(rename = "aws.credentials.secret_access_key", alias = "secret_key")]
     pub secret_key: Option<String>,
+    #[serde(rename = "aws.credentials.session_token", alias = "session_token")]
     pub session_token: Option<String>,
+    /// IAM role
+    #[serde(rename = "aws.credentials.role.arn", alias = "arn")]
     pub arn: Option<String>,
-    /// This field was added for kinesis. Not sure if it's useful for other connectors.
-    /// Please ignore it in the documentation for now.
+    /// external ID in IAM role trust policy
+    #[serde(rename = "aws.credentials.role.external_id", alias = "external_id")]
     pub external_id: Option<String>,
+    #[serde(rename = "aws.profile", alias = "profile")]
     pub profile: Option<String>,
 }
 
@@ -181,7 +195,7 @@ pub struct KafkaCommon {
     #[serde(rename = "properties.ssl.key.password")]
     ssl_key_password: Option<String>,
 
-    /// SASL mechanism if SASL is enabled. Currently support PLAIN, SCRAM and GSSAPI.
+    /// SASL mechanism if SASL is enabled. Currently support PLAIN, SCRAM, GSSAPI, and AWS_MSK_IAM.
     #[serde(rename = "properties.sasl.mechanism")]
     sasl_mechanism: Option<String>,
 
@@ -224,7 +238,7 @@ pub struct KafkaPrivateLinkCommon {
     /// This is generated from `private_link_targets` and `private_link_endpoint` in frontend, instead of given by users.
     #[serde(rename = "broker.rewrite.endpoints")]
     #[serde_as(as = "Option<JsonString>")]
-    pub broker_rewrite_map: Option<HashMap<String, String>>,
+    pub broker_rewrite_map: Option<BTreeMap<String, String>>,
 }
 
 const fn default_kafka_sync_call_timeout() -> Duration {
@@ -286,6 +300,13 @@ impl RdKafkaPropertiesCommon {
 
 impl KafkaCommon {
     pub(crate) fn set_security_properties(&self, config: &mut ClientConfig) {
+        // AWS_MSK_IAM
+        if self.is_aws_msk_iam() {
+            config.set("security.protocol", "SASL_SSL");
+            config.set("sasl.mechanism", "OAUTHBEARER");
+            return;
+        }
+
         // Security protocol
         if let Some(security_protocol) = self.security_protocol.as_ref() {
             config.set("security.protocol", security_protocol);
@@ -355,6 +376,16 @@ impl KafkaCommon {
         }
         // Currently, we only support unsecured OAUTH.
         config.set("enable.sasl.oauthbearer.unsecure.jwt", "true");
+    }
+
+    pub(crate) fn is_aws_msk_iam(&self) -> bool {
+        if let Some(sasl_mechanism) = self.sasl_mechanism.as_ref()
+            && sasl_mechanism == AWS_MSK_IAM_AUTH
+        {
+            true
+        } else {
+            false
+        }
     }
 }
 
@@ -712,4 +743,25 @@ pub(crate) fn load_private_key(
         .next()
         .ok_or_else(|| anyhow!("No private key found"))?;
     Ok(cert?.into())
+}
+
+#[serde_as]
+#[derive(Deserialize, Debug, Clone, WithOptions)]
+pub struct MongodbCommon {
+    /// The URL of MongoDB
+    #[serde(rename = "mongodb.url")]
+    pub connect_uri: String,
+    /// The collection name where data should be written to or read from. For sinks, the format is
+    /// `db_name.collection_name`. Data can also be written to dynamic collections, see `collection.name.field`
+    /// for more information.
+    #[serde(rename = "collection.name")]
+    pub collection_name: String,
+}
+
+impl MongodbCommon {
+    pub(crate) async fn build_client(&self) -> ConnectorResult<mongodb::Client> {
+        let client = mongodb::Client::with_uri_str(&self.connect_uri).await?;
+
+        Ok(client)
+    }
 }

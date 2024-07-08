@@ -12,14 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
-use std::convert::TryFrom;
+use std::collections::BTreeMap;
 use std::num::NonZeroU32;
 
-use risingwave_connector::source::kafka::{
+use risingwave_connector::source::kafka::private_link::{
     insert_privatelink_broker_rewrite_map, CONNECTION_NAME_KEY, PRIVATELINK_ENDPOINT_KEY,
 };
 use risingwave_connector::WithPropertiesExt;
+use risingwave_pb::secret::PbSecretRef;
 use risingwave_sqlparser::ast::{
     CreateConnectionStatement, CreateSinkStatement, CreateSourceStatement,
     CreateSubscriptionStatement, SqlOption, Statement, Value,
@@ -36,7 +36,7 @@ mod options {
     pub const RETENTION_SECONDS: &str = "retention_seconds";
 }
 
-/// Options or properties extracted from the `WITH` clause of DDLs.
+/// Options or properties extracted fro m the `WITH` clause of DDLs.
 #[derive(Default, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct WithOptions {
     inner: BTreeMap<String, String>,
@@ -57,15 +57,11 @@ impl std::ops::DerefMut for WithOptions {
 }
 
 impl WithOptions {
-    /// Create a new [`WithOptions`] from a [`HashMap`].
-    pub fn new(inner: HashMap<String, String>) -> Self {
+    /// Create a new [`WithOptions`] from a [`BTreeMap`].
+    pub fn new(inner: BTreeMap<String, String>) -> Self {
         Self {
             inner: inner.into_iter().collect(),
         }
-    }
-
-    pub fn from_inner(inner: BTreeMap<String, String>) -> Self {
-        Self { inner }
     }
 
     /// Get the reference of the inner map.
@@ -83,10 +79,13 @@ impl WithOptions {
     }
 
     /// Convert to connector props, remove the key-value pairs used in the top-level.
-    pub fn into_connector_props(self) -> HashMap<String, String> {
+    pub fn into_connector_props(self) -> BTreeMap<String, String> {
         self.inner
             .into_iter()
-            .filter(|(key, _)| key != OverwriteOptions::STREAMING_RATE_LIMIT_KEY)
+            .filter(|(key, _)| {
+                key != OverwriteOptions::STREAMING_RATE_LIMIT_KEY
+                    && key != options::RETENTION_SECONDS
+            })
             .collect()
     }
 
@@ -119,6 +118,15 @@ impl WithOptions {
         }
         false
     }
+}
+
+pub(crate) fn resolve_secret_in_with_options(
+    _with_options: &mut WithOptions,
+    _session: &SessionImpl,
+) -> RwResult<BTreeMap<String, PbSecretRef>> {
+    // todo: implement the function and take `resolve_privatelink_in_with_option` as reference
+
+    Ok(BTreeMap::new())
 }
 
 pub(crate) fn resolve_privatelink_in_with_option(

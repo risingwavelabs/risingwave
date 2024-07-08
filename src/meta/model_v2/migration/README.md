@@ -9,11 +9,11 @@
 > **DO NOT** modify already published migration files.
 
 ## How to run the migrator CLI
-- Generate a new migration file
+- Generate a new migration file, a database endpoint is required but not used.
     ```sh
-    cargo run -- generate MIGRATION_NAME
+    export DATABASE_URL=sqlite::memory:; cargo run -- generate MIGRATION_NAME
     ```
-- Apply all pending migrations for test purposes, `DATABASE_URL` required.
+- Apply all pending migrations for test purposes, change `DATABASE_URL` to the actual database endpoint.
     ```sh
     cargo run
     ```

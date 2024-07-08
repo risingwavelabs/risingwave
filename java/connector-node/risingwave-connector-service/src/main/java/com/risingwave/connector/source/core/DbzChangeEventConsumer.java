@@ -14,6 +14,7 @@
 
 package com.risingwave.connector.source.core;
 
+import com.risingwave.connector.api.source.SourceTypeE;
 import com.risingwave.connector.cdc.debezium.internal.DebeziumOffset;
 import com.risingwave.connector.cdc.debezium.internal.DebeziumOffsetSerializer;
 import com.risingwave.proto.ConnectorServiceProto.CdcMessage;
@@ -49,6 +50,8 @@ public class DbzChangeEventConsumer
     static final Logger LOG = LoggerFactory.getLogger(DbzChangeEventConsumer.class);
 
     private final BlockingQueue<GetEventStreamResponse> outputChannel;
+
+    private final SourceTypeE connector;
     private final long sourceId;
     private final JsonConverter payloadConverter;
     private final JsonConverter keyConverter;
@@ -59,10 +62,12 @@ public class DbzChangeEventConsumer
             currentRecordCommitter;
 
     DbzChangeEventConsumer(
+            SourceTypeE connector,
             long sourceId,
             String heartbeatTopicPrefix,
             String transactionTopic,
             BlockingQueue<GetEventStreamResponse> queue) {
+        this.connector = connector;
         this.sourceId = sourceId;
         this.outputChannel = queue;
         this.heartbeatTopicPrefix = heartbeatTopicPrefix;
@@ -85,6 +90,14 @@ public class DbzChangeEventConsumer
         configs.put(ConverterConfig.TYPE_CONFIG, ConverterType.KEY.getName());
         keyConverter.configure(configs);
         this.keyConverter = keyConverter;
+    }
+
+    /**
+     * Postgres and Oracle connectors need to commit the offset to the upstream database, so that we
+     * need to wait for the epoch commit before committing the record offset.
+     */
+    private boolean noNeedCommitOffset() {
+        return connector != SourceTypeE.POSTGRES;
     }
 
     private EventType getEventType(SourceRecord record) {
@@ -189,11 +202,15 @@ public class DbzChangeEventConsumer
                         byte[] key =
                                 keyConverter.fromConnectData(
                                         record.topic(), record.keySchema(), record.key());
+                        String msgPayload =
+                                payload == null ? "" : new String(payload, StandardCharsets.UTF_8);
+                        // key can be null if the table has no primary key
+                        String msgKey = key == null ? "" : new String(key, StandardCharsets.UTF_8);
                         var message =
                                 msgBuilder
                                         .setFullTableName(fullTableName)
-                                        .setPayload(new String(payload, StandardCharsets.UTF_8))
-                                        .setKey(new String(key, StandardCharsets.UTF_8))
+                                        .setPayload(msgPayload)
+                                        .setKey(msgKey)
                                         .setSourceTsMs(sourceTsMs)
                                         .build();
                         LOG.debug(
@@ -207,6 +224,9 @@ public class DbzChangeEventConsumer
                 default:
                     break;
             }
+            if (noNeedCommitOffset()) {
+                committer.markProcessed(event);
+            }
         }
 
         LOG.debug("recv {} events", respBuilder.getEventsCount());
@@ -215,6 +235,9 @@ public class DbzChangeEventConsumer
             respBuilder.setSourceId(sourceId);
             var response = respBuilder.build();
             outputChannel.put(response);
+        }
+        if (noNeedCommitOffset()) {
+            committer.markBatchFinished();
         }
     }
 

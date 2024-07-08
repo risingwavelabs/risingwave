@@ -232,15 +232,12 @@ impl<S: StateStore> SimpleAggExecutor<S> {
             table.init_epoch(barrier.epoch);
         });
 
-        let mut distinct_dedup = DistinctDeduplicater::new(
+        let distinct_dedup = DistinctDeduplicater::new(
             &this.agg_calls,
             this.watermark_epoch.clone(),
             &this.distinct_dedup_tables,
-            this.actor_ctx.clone(),
+            &this.actor_ctx,
         );
-        distinct_dedup.dedup_caches_mut().for_each(|cache| {
-            cache.update_epoch(barrier.epoch.curr);
-        });
 
         yield Message::Barrier(barrier);
 
@@ -278,9 +275,6 @@ impl<S: StateStore> SimpleAggExecutor<S> {
                     {
                         yield Message::Chunk(chunk);
                     }
-                    vars.distinct_dedup.dedup_caches_mut().for_each(|cache| {
-                        cache.update_epoch(barrier.epoch.curr);
-                    });
                     yield Message::Barrier(barrier);
                 }
             }
@@ -295,9 +289,7 @@ mod tests {
     use risingwave_common::catalog::Field;
     use risingwave_common::types::*;
     use risingwave_common::util::epoch::test_epoch;
-    use risingwave_expr::aggregate::AggCall;
     use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::StateStore;
 
     use super::*;
     use crate::executor::test_utils::agg_executor::new_boxed_simple_agg_executor;

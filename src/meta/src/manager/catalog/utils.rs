@@ -12,9 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
+
 use risingwave_common::bail;
+use risingwave_pb::catalog::{Sink, Source};
 
 use crate::manager::{ConnectionId, DatabaseManager};
+use crate::MetaResult;
 
 pub fn refcnt_inc_connection(
     database_mgr: &mut DatabaseManager,
@@ -22,8 +26,7 @@ pub fn refcnt_inc_connection(
 ) -> anyhow::Result<()> {
     if let Some(connection_id) = connection_id {
         if let Some(_conn) = database_mgr.get_connection(connection_id) {
-            // TODO(weili): wait for yezizp to refactor ref cnt
-            database_mgr.increase_ref_count(connection_id);
+            database_mgr.increase_connection_ref_count(connection_id);
         } else {
             bail!("connection {} not found.", connection_id);
         }
@@ -36,7 +39,64 @@ pub fn refcnt_dec_connection(
     connection_id: Option<ConnectionId>,
 ) {
     if let Some(connection_id) = connection_id {
-        // TODO: wait for yezizp to refactor ref cnt
-        database_mgr.decrease_ref_count(connection_id);
+        database_mgr.decrease_connection_ref_count(connection_id);
+    }
+}
+
+pub fn get_refed_secret_ids_from_source(source: &Source) -> MetaResult<HashSet<u32>> {
+    let mut secret_ids = HashSet::new();
+    for secret_ref in source.get_secret_refs().values() {
+        secret_ids.insert(secret_ref.secret_id);
+    }
+    // `info` must exist in `Source`
+    for secret_ref in source.get_info()?.get_format_encode_secret_refs().values() {
+        secret_ids.insert(secret_ref.secret_id);
+    }
+    Ok(secret_ids)
+}
+
+pub fn get_refed_secret_ids_from_sink(sink: &Sink) -> HashSet<u32> {
+    let mut secret_ids = HashSet::new();
+    for secret_ref in sink.get_secret_refs().values() {
+        secret_ids.insert(secret_ref.secret_id);
+    }
+    // `format_desc` may not exist in `Sink`
+    if let Some(format_desc) = &sink.format_desc {
+        for secret_ref in format_desc.get_secret_refs().values() {
+            secret_ids.insert(secret_ref.secret_id);
+        }
+    }
+    secret_ids
+}
+
+pub fn refcnt_inc_source_secret_ref(
+    database_mgr: &mut DatabaseManager,
+    source: &Source,
+) -> MetaResult<()> {
+    for secret_id in get_refed_secret_ids_from_source(source)? {
+        database_mgr.increase_secret_ref_count(secret_id);
+    }
+    Ok(())
+}
+
+pub fn refcnt_dec_source_secret_ref(
+    database_mgr: &mut DatabaseManager,
+    source: &Source,
+) -> MetaResult<()> {
+    for secret_id in get_refed_secret_ids_from_source(source)? {
+        database_mgr.decrease_secret_ref_count(secret_id);
+    }
+    Ok(())
+}
+
+pub fn refcnt_inc_sink_secret_ref(database_mgr: &mut DatabaseManager, sink: &Sink) {
+    for secret_id in get_refed_secret_ids_from_sink(sink) {
+        database_mgr.increase_secret_ref_count(secret_id);
+    }
+}
+
+pub fn refcnt_dec_sink_secret_ref(database_mgr: &mut DatabaseManager, sink: &Sink) {
+    for secret_id in get_refed_secret_ids_from_sink(sink) {
+        database_mgr.decrease_secret_ref_count(secret_id);
     }
 }

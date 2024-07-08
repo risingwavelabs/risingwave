@@ -48,8 +48,11 @@ pub async fn handle_alter_set_schema(
 
         match stmt_type {
             StatementType::ALTER_TABLE | StatementType::ALTER_MATERIALIZED_VIEW => {
-                let (table, old_schema_name) =
-                    catalog_reader.get_table_by_name(db_name, schema_path, &real_obj_name)?;
+                let (table, old_schema_name) = catalog_reader.get_created_table_by_name(
+                    db_name,
+                    schema_path,
+                    &real_obj_name,
+                )?;
                 if old_schema_name == new_schema_name {
                     return Ok(RwPgResponse::empty_result(stmt_type));
                 }
@@ -209,7 +212,7 @@ pub mod tests {
             let catalog_reader = session.env().catalog_reader().read_guard();
             let schema_path = SchemaPath::Name(schema_name);
             catalog_reader
-                .get_table_by_name(DEFAULT_DATABASE_NAME, schema_path, "test_table")
+                .get_created_table_by_name(DEFAULT_DATABASE_NAME, schema_path, "test_table")
                 .unwrap()
                 .0
                 .clone()

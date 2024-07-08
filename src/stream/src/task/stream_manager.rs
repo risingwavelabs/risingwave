@@ -13,10 +13,12 @@
 // limitations under the License.
 
 use core::time::Duration;
+use std::collections::HashSet;
 use std::fmt::Debug;
 use std::mem::take;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
+use std::time::Instant;
 
 use anyhow::anyhow;
 use async_recursion::async_recursion;
@@ -24,16 +26,16 @@ use futures::stream::BoxStream;
 use futures::FutureExt;
 use itertools::Itertools;
 use risingwave_common::bail;
-use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::bitmap::Bitmap;
+use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::config::MetricLevel;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::{StreamActor, StreamNode};
+use risingwave_pb::stream_plan::StreamNode;
 use risingwave_pb::stream_service::streaming_control_stream_request::InitRequest;
 use risingwave_pb::stream_service::{
-    StreamingControlStreamRequest, StreamingControlStreamResponse,
+    BuildActorInfo, StreamingControlStreamRequest, StreamingControlStreamResponse,
 };
 use risingwave_storage::monitor::HummockTraceFutureExt;
 use risingwave_storage::{dispatch_state_store, StateStore};
@@ -171,6 +173,12 @@ impl LocalStreamManager {
         await_tree_config: Option<await_tree::Config>,
         watermark_epoch: AtomicU64Ref,
     ) -> Self {
+        if !env.config().unsafe_enable_strict_consistency {
+            // If strict consistency is disabled, should disable storage sanity check.
+            // Since this is a special config, we have to check it here.
+            risingwave_storage::hummock::utils::disable_sanity_check();
+        }
+
         let await_tree_reg = await_tree_config.clone().map(await_tree::Registry::new);
 
         let (actor_op_tx, actor_op_rx) = unbounded_channel();
@@ -219,7 +227,7 @@ impl LocalStreamManager {
             .await
     }
 
-    pub async fn update_actors(&self, actors: Vec<stream_plan::StreamActor>) -> StreamResult<()> {
+    pub async fn update_actors(&self, actors: Vec<BuildActorInfo>) -> StreamResult<()> {
         self.actor_op_tx
             .send_and_await(|result_sender| LocalActorOperation::UpdateActors {
                 actors,
@@ -253,6 +261,21 @@ impl LocalStreamManager {
                 result_sender,
             })
             .await?
+    }
+
+    pub async fn inspect_barrier_state(&self) -> StreamResult<String> {
+        info!("start inspecting barrier state");
+        let start = Instant::now();
+        self.actor_op_tx
+            .send_and_await(|result_sender| LocalActorOperation::InspectState { result_sender })
+            .inspect(|result| {
+                info!(
+                    ok = result.is_ok(),
+                    time = ?start.elapsed(),
+                    "finish inspecting barrier state"
+                );
+            })
+            .await
     }
 }
 
@@ -298,10 +321,7 @@ impl LocalBarrierWorker {
         self.actor_manager.env.dml_manager_ref().clear();
     }
 
-    pub(super) fn update_actors(
-        &mut self,
-        actors: Vec<stream_plan::StreamActor>,
-    ) -> StreamResult<()> {
+    pub(super) fn update_actors(&mut self, actors: Vec<BuildActorInfo>) -> StreamResult<()> {
         self.actor_manager_state.update_actors(actors)
     }
 
@@ -312,7 +332,7 @@ impl LocalBarrierWorker {
         actors: &[ActorId],
         result_sender: oneshot::Sender<StreamResult<()>>,
     ) {
-        let actors = {
+        let actors: Vec<_> = {
             let actor_result = actors
                 .iter()
                 .map(|actor_id| {
@@ -330,6 +350,10 @@ impl LocalBarrierWorker {
                 }
             }
         };
+        let actor_ids = actors
+            .iter()
+            .map(|actor| actor.actor.as_ref().unwrap().actor_id)
+            .collect();
         let actor_manager = self.actor_manager.clone();
         let create_actors_fut = crate::CONFIG.scope(
             self.actor_manager.env.config().clone(),
@@ -338,7 +362,7 @@ impl LocalBarrierWorker {
         let join_handle = self.actor_manager.runtime.spawn(create_actors_fut);
         self.actor_manager_state
             .creating_actors
-            .push(AttachedFuture::new(join_handle, result_sender));
+            .push(AttachedFuture::new(join_handle, (actor_ids, result_sender)));
     }
 }
 
@@ -529,18 +553,32 @@ impl StreamActorManager {
 
     async fn create_actors(
         self: Arc<Self>,
-        actors: Vec<StreamActor>,
+        actors: Vec<BuildActorInfo>,
         shared_context: Arc<SharedContext>,
     ) -> StreamResult<CreateActorOutput> {
         let mut ret = Vec::with_capacity(actors.len());
         let create_actor_context = CreateActorContext::default();
         for actor in actors {
+            let BuildActorInfo {
+                actor,
+                related_subscriptions,
+            } = actor;
+            let actor = actor.unwrap();
             let actor_id = actor.actor_id;
             let actor_context = ActorContext::create(
                 &actor,
                 self.env.total_mem_usage(),
                 self.streaming_metrics.clone(),
                 actor.dispatcher.len(),
+                related_subscriptions
+                    .into_iter()
+                    .map(|(table_id, subscription_ids)| {
+                        (
+                            TableId::new(table_id),
+                            HashSet::from_iter(subscription_ids.subscription_ids),
+                        )
+                    })
+                    .collect(),
             );
             let vnode_bitmap = actor.vnode_bitmap.as_ref().map(|b| b.into());
             let expr_context = actor.expr_context.clone().unwrap();
@@ -618,56 +656,52 @@ impl LocalBarrierWorker {
             };
             self.actor_manager_state.handles.insert(actor_id, handle);
 
-            if self.actor_manager.streaming_metrics.level >= MetricLevel::Debug {
-                tracing::info!("Tokio metrics are enabled because metrics_level >= Debug");
-                let actor_id_str = actor_id.to_string();
-                let metrics = self.actor_manager.streaming_metrics.clone();
+            if self.actor_manager.streaming_metrics.level >= MetricLevel::Debug
+                || self
+                    .actor_manager
+                    .env
+                    .config()
+                    .developer
+                    .enable_actor_tokio_metrics
+            {
+                tracing::info!("Tokio metrics are enabled.");
+                let streaming_metrics = self.actor_manager.streaming_metrics.clone();
                 let actor_monitor_task = self.actor_manager.runtime.spawn(async move {
+                    let metrics = streaming_metrics.new_actor_metrics(actor_id);
                     loop {
                         let task_metrics = monitor.cumulative();
                         metrics
                             .actor_execution_time
-                            .with_label_values(&[&actor_id_str])
                             .set(task_metrics.total_poll_duration.as_secs_f64());
                         metrics
                             .actor_fast_poll_duration
-                            .with_label_values(&[&actor_id_str])
                             .set(task_metrics.total_fast_poll_duration.as_secs_f64());
                         metrics
                             .actor_fast_poll_cnt
-                            .with_label_values(&[&actor_id_str])
                             .set(task_metrics.total_fast_poll_count as i64);
                         metrics
                             .actor_slow_poll_duration
-                            .with_label_values(&[&actor_id_str])
                             .set(task_metrics.total_slow_poll_duration.as_secs_f64());
                         metrics
                             .actor_slow_poll_cnt
-                            .with_label_values(&[&actor_id_str])
                             .set(task_metrics.total_slow_poll_count as i64);
                         metrics
                             .actor_poll_duration
-                            .with_label_values(&[&actor_id_str])
                             .set(task_metrics.total_poll_duration.as_secs_f64());
                         metrics
                             .actor_poll_cnt
-                            .with_label_values(&[&actor_id_str])
                             .set(task_metrics.total_poll_count as i64);
                         metrics
                             .actor_idle_duration
-                            .with_label_values(&[&actor_id_str])
                             .set(task_metrics.total_idle_duration.as_secs_f64());
                         metrics
                             .actor_idle_cnt
-                            .with_label_values(&[&actor_id_str])
                             .set(task_metrics.total_idled_count as i64);
                         metrics
                             .actor_scheduled_duration
-                            .with_label_values(&[&actor_id_str])
                             .set(task_metrics.total_scheduled_duration.as_secs_f64());
                         metrics
                             .actor_scheduled_cnt
-                            .with_label_values(&[&actor_id_str])
                             .set(task_metrics.total_scheduled_count as i64);
                         tokio::time::sleep(Duration::from_secs(1)).await;
                     }
@@ -726,9 +760,9 @@ impl StreamActorManagerState {
         self.actor_monitor_tasks.clear();
     }
 
-    fn update_actors(&mut self, actors: Vec<stream_plan::StreamActor>) -> StreamResult<()> {
+    fn update_actors(&mut self, actors: Vec<BuildActorInfo>) -> StreamResult<()> {
         for actor in actors {
-            let actor_id = actor.get_actor_id();
+            let actor_id = actor.actor.as_ref().unwrap().get_actor_id();
             self.actors
                 .try_insert(actor_id, actor)
                 .map_err(|_| anyhow!("duplicated actor {}", actor_id))?;

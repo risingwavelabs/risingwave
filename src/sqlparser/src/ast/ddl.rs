@@ -28,7 +28,6 @@ use crate::tokenizer::Token;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
 pub enum AlterDatabaseOperation {
     ChangeOwner { new_owner_name: Ident },
     RenameDatabase { database_name: ObjectName },
@@ -36,7 +35,6 @@ pub enum AlterDatabaseOperation {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
 pub enum AlterSchemaOperation {
     ChangeOwner { new_owner_name: Ident },
     RenameSchema { schema_name: ObjectName },
@@ -104,11 +102,14 @@ pub enum AlterTableOperation {
         deferred: bool,
     },
     RefreshSchema,
+    /// `SET STREAMING_RATE_LIMIT TO <rate_limit>`
+    SetStreamingRateLimit {
+        rate_limit: i32,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
 pub enum AlterIndexOperation {
     RenameIndex {
         index_name: ObjectName,
@@ -122,7 +123,6 @@ pub enum AlterIndexOperation {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
 pub enum AlterViewOperation {
     RenameView {
         view_name: ObjectName,
@@ -138,11 +138,14 @@ pub enum AlterViewOperation {
         parallelism: SetVariableValue,
         deferred: bool,
     },
+    /// `SET STREAMING_RATE_LIMIT TO <rate_limit>`
+    SetStreamingRateLimit {
+        rate_limit: i32,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
 pub enum AlterSinkOperation {
     RenameSink {
         sink_name: ObjectName,
@@ -162,27 +165,14 @@ pub enum AlterSinkOperation {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
 pub enum AlterSubscriptionOperation {
-    RenameSubscription {
-        subscription_name: ObjectName,
-    },
-    ChangeOwner {
-        new_owner_name: Ident,
-    },
-    SetSchema {
-        new_schema_name: ObjectName,
-    },
-    /// `SET PARALLELISM TO <parallelism> [ DEFERRED ]`
-    SetParallelism {
-        parallelism: SetVariableValue,
-        deferred: bool,
-    },
+    RenameSubscription { subscription_name: ObjectName },
+    ChangeOwner { new_owner_name: Ident },
+    SetSchema { new_schema_name: ObjectName },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
 pub enum AlterSourceOperation {
     RenameSource { source_name: ObjectName },
     AddColumn { column_def: ColumnDef },
@@ -190,18 +180,17 @@ pub enum AlterSourceOperation {
     SetSchema { new_schema_name: ObjectName },
     FormatEncode { connector_schema: ConnectorSchema },
     RefreshSchema,
+    SetStreamingRateLimit { rate_limit: i32 },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
 pub enum AlterFunctionOperation {
     SetSchema { new_schema_name: ObjectName },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
 pub enum AlterConnectionOperation {
     SetSchema { new_schema_name: ObjectName },
 }
@@ -301,6 +290,9 @@ impl fmt::Display for AlterTableOperation {
             AlterTableOperation::RefreshSchema => {
                 write!(f, "REFRESH SCHEMA")
             }
+            AlterTableOperation::SetStreamingRateLimit { rate_limit } => {
+                write!(f, "SET STREAMING_RATE_LIMIT TO {}", rate_limit)
+            }
         }
     }
 }
@@ -349,6 +341,9 @@ impl fmt::Display for AlterViewOperation {
                     if *deferred { " DEFERRED" } else { "" }
                 )
             }
+            AlterViewOperation::SetStreamingRateLimit { rate_limit } => {
+                write!(f, "SET STREAMING_RATE_LIMIT TO {}", rate_limit)
+            }
         }
     }
 }
@@ -392,17 +387,6 @@ impl fmt::Display for AlterSubscriptionOperation {
             AlterSubscriptionOperation::SetSchema { new_schema_name } => {
                 write!(f, "SET SCHEMA {}", new_schema_name)
             }
-            AlterSubscriptionOperation::SetParallelism {
-                parallelism,
-                deferred,
-            } => {
-                write!(
-                    f,
-                    "SET PARALLELISM TO {} {}",
-                    parallelism,
-                    if *deferred { " DEFERRED" } else { "" }
-                )
-            }
         }
     }
 }
@@ -427,6 +411,9 @@ impl fmt::Display for AlterSourceOperation {
             }
             AlterSourceOperation::RefreshSchema => {
                 write!(f, "REFRESH SCHEMA")
+            }
+            AlterSourceOperation::SetStreamingRateLimit { rate_limit } => {
+                write!(f, "SET STREAMING_RATE_LIMIT TO {}", rate_limit)
             }
         }
     }

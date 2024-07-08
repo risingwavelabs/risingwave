@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use sea_orm::entity::prelude::*;
-
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+use serde::{Deserialize, Serialize};
+#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize)]
 #[sea_orm(table_name = "system_parameter")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]

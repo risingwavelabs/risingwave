@@ -326,10 +326,10 @@ impl CompactionPicker for ManualCompactionPicker {
 
 #[cfg(test)]
 pub mod tests {
-    use std::collections::{HashMap, HashSet};
+    use std::collections::{BTreeSet, HashMap};
 
     use risingwave_pb::hummock::compact_task;
-    pub use risingwave_pb::hummock::{KeyRange, Level, LevelType};
+    pub use risingwave_pb::hummock::KeyRange;
 
     use super::*;
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
@@ -1198,6 +1198,7 @@ pub mod tests {
                     1,
                     &group_config,
                     &levels,
+                    &BTreeSet::new(),
                     &mut levels_handler,
                     &mut local_stats,
                     HashMap::default(),
@@ -1235,6 +1236,7 @@ pub mod tests {
                     2,
                     &group_config,
                     &levels,
+                    &BTreeSet::new(),
                     &mut levels_handler,
                     &mut local_stats,
                     HashMap::default(),
@@ -1308,6 +1310,7 @@ pub mod tests {
                     1,
                     &group_config,
                     &levels,
+                    &BTreeSet::new(),
                     &mut levels_handler,
                     &mut local_stats,
                     HashMap::default(),
@@ -1347,6 +1350,7 @@ pub mod tests {
                     1,
                     &group_config,
                     &levels,
+                    &BTreeSet::new(),
                     &mut levels_handler,
                     &mut local_stats,
                     HashMap::default(),
