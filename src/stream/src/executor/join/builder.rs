@@ -20,7 +20,6 @@ use risingwave_common::types::{DataType, DatumRef};
 use self::row::JoinRow;
 // Re-export `StreamChunkBuilder`.
 use super::*;
-use crate::common::compact_chunk::StreamChunkCompactor;
 
 type IndexMappings = Vec<(usize, usize)>;
 
@@ -171,7 +170,7 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> JoinChunkBuilder
             if matched_row.is_zero_degree() && only_forward_matched_side(T, SIDE) {
                 self.stream_chunk_builder
                     .append_row_matched(Op::Delete, &matched_row.row)
-                    .map(|c| Self::post_process(c))
+                    .map(Self::post_process)
             } else {
                 None
             }
@@ -180,7 +179,7 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> JoinChunkBuilder
             if matched_row.is_zero_degree() && only_forward_matched_side(T, SIDE) {
                 self.stream_chunk_builder
                     .append_row_matched(Op::Insert, &matched_row.row)
-                    .map(|c| Self::post_process(c))
+                    .map(Self::post_process)
             } else {
                 None
             }
@@ -198,12 +197,12 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> JoinChunkBuilder
             }
             self.stream_chunk_builder
                 .append_row(Op::UpdateInsert, row, &matched_row.row)
-                .map(|c| Self::post_process(c))
+                .map(Self::post_process)
         // Inner sides
         } else {
             self.stream_chunk_builder
                 .append_row(Op::Insert, row, &matched_row.row)
-                .map(|c| Self::post_process(c))
+                .map(Self::post_process)
         }
     }
 
@@ -217,7 +216,7 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> JoinChunkBuilder
             if matched_row.is_zero_degree() && only_forward_matched_side(T, SIDE) {
                 self.stream_chunk_builder
                     .append_row_matched(Op::Insert, &matched_row.row)
-                    .map(|c| Self::post_process(c))
+                    .map(Self::post_process)
             } else {
                 None
             }
@@ -226,7 +225,7 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> JoinChunkBuilder
             if matched_row.is_zero_degree() && only_forward_matched_side(T, SIDE) {
                 self.stream_chunk_builder
                     .append_row_matched(Op::Delete, &matched_row.row)
-                    .map(|c| Self::post_process(c))
+                    .map(Self::post_process)
             } else {
                 None
             }
@@ -254,7 +253,7 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> JoinChunkBuilder
             // the assumption for U+ after U-.
             self.stream_chunk_builder
                 .append_row(Op::Delete, row, &matched_row.row)
-                .map(|c| Self::post_process(c))
+                .map(Self::post_process)
         }
     }
 
@@ -268,7 +267,7 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> JoinChunkBuilder
         if is_semi(T) && forward_exactly_once(T, SIDE) {
             self.stream_chunk_builder
                 .append_row_update(op, row)
-                .map(|c| Self::post_process(c))
+                .map(Self::post_process)
         } else {
             None
         }
@@ -280,7 +279,7 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> JoinChunkBuilder
         if (is_anti(T) && forward_exactly_once(T, SIDE)) || is_outer_side(T, SIDE) {
             self.stream_chunk_builder
                 .append_row_update(op, row)
-                .map(|c| Self::post_process(c))
+                .map(Self::post_process)
         } else {
             None
         }
@@ -290,6 +289,6 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> JoinChunkBuilder
     pub fn take(&mut self) -> Option<StreamChunk> {
         self.stream_chunk_builder
             .take()
-            .map(|c| Self::post_process(c))
+            .map(Self::post_process)
     }
 }
