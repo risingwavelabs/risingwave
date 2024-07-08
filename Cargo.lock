@@ -5409,8 +5409,9 @@ dependencies = [
 
 [[package]]
 name = "foyer"
-version = "0.10.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=af970e7#af970e7b73e297f63d03952f05c8ffd3f990cf19"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1b5f358e9b9492a9e9af905934ef4736a97a001fa19232f4a29f42974cf7a24c"
 dependencies = [
  "ahash 0.8.11",
  "anyhow",
@@ -5426,8 +5427,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-common"
-version = "0.8.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=af970e7#af970e7b73e297f63d03952f05c8ffd3f990cf19"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e109f1fd012cc2f0785db5711c73c388fca2d2ac6e2aabb4eaa3a8af98b4dcdb"
 dependencies = [
  "bytes",
  "cfg-if",
@@ -5447,8 +5449,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-intrusive"
-version = "0.8.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=af970e7#af970e7b73e297f63d03952f05c8ffd3f990cf19"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2e7ad91ad11f2c94bb4b3b88acd447f3145224415d776f163d2b06a9ed24e63a"
 dependencies = [
  "foyer-common",
  "itertools 0.13.0",
@@ -5456,8 +5459,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-memory"
-version = "0.6.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=af970e7#af970e7b73e297f63d03952f05c8ffd3f990cf19"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "29273589433f89d61347b196754bfa22357420d1adbf815d354c23512106a194"
 dependencies = [
  "ahash 0.8.11",
  "bitflags 2.5.0",
@@ -5478,8 +5482,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-storage"
-version = "0.9.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=af970e7#af970e7b73e297f63d03952f05c8ffd3f990cf19"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "79c20580e456ea337e4bdefa9fba7ff19b42cd87432bda3ef3579ef9e1057c7e"
 dependencies = [
  "ahash 0.8.11",
  "allocator-api2",
