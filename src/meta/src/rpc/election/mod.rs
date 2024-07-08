@@ -66,8 +66,12 @@ impl ElectionClient for DummyElectionClient {
         Ok(self.id.clone())
     }
 
-    async fn run_once(&self, _ttl: i64, _stop: Receiver<()>) -> MetaResult<()> {
-        futures::future::pending().await
+    async fn run_once(&self, _ttl: i64, mut stop: Receiver<()>) -> MetaResult<()> {
+        tokio::select! {
+            _ = stop.changed() => {}
+            _ = futures::future::pending::<()>() => {}
+        }
+        Ok(())
     }
 
     fn subscribe(&self) -> Receiver<bool> {

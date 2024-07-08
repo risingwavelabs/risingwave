@@ -263,14 +263,16 @@ pub async fn rpc_serve_with_store(
     init_session_config: SessionConfig,
     shutdown: CancellationToken,
 ) -> MetaResult<()> {
-    tokio::spawn({
+    // TODO(shutdown): use cancellation token
+    let (election_shutdown_tx, election_shutdown_rx) = watch::channel(());
+
+    let election_handle = tokio::spawn({
         let shutdown = shutdown.clone();
         let election_client = election_client.clone();
-        let (svc_shutdown_tx, svc_shutdown_rx) = watch::channel(()); // TODO(shutdown): remove me
 
         async move {
             while let Err(e) = election_client
-                .run_once(lease_interval_secs as i64, svc_shutdown_rx.clone())
+                .run_once(lease_interval_secs as i64, election_shutdown_rx.clone())
                 .await
             {
                 tracing::error!(error = %e.as_report(), "election error happened");
@@ -308,7 +310,7 @@ pub async fn rpc_serve_with_store(
         let _ = follower_handle.await;
     }
 
-    start_service_as_election_leader(
+    let result = start_service_as_election_leader(
         meta_store_impl,
         address_info,
         max_cluster_heartbeat_interval,
@@ -318,7 +320,13 @@ pub async fn rpc_serve_with_store(
         election_client,
         shutdown,
     )
-    .await
+    .await;
+
+    // Leader service has stopped, shutdown the election service.
+    election_shutdown_tx.send(()).ok();
+    let _ = election_handle.await;
+
+    result
 }
 
 /// Starts all services needed for the meta follower node.
@@ -699,7 +707,7 @@ pub async fn start_service_as_election_leader(
     let (abort_sender, abort_recv) = tokio::sync::oneshot::channel();
     let notification_mgr = env.notification_manager_ref();
     let stream_abort_handler = tokio::spawn(async move {
-        abort_recv.await.unwrap();
+        let _ = abort_recv.await;
         notification_mgr.abort_all().await;
         compactor_manager.abort_all_compactors();
     });

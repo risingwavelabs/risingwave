@@ -205,7 +205,10 @@ use risingwave_common::config::{load_config, MetaBackend, RwConfig};
 use tracing::info;
 
 /// Start meta node
-pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+pub fn start(
+    opts: MetaNodeOpts,
+    shutdown: CancellationToken,
+) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     // WARNING: don't change the function signature. Making it `async fn` will cause
     // slow compile in release mode.
     Box::pin(async move {
@@ -429,7 +432,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             },
             config.system.into_init_system_params(),
             Default::default(),
-            CancellationToken::new(), // TODO: pass the shutdown token
+            shutdown,
         )
         .await
         .unwrap();
