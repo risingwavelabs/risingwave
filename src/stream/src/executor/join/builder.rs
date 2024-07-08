@@ -148,29 +148,17 @@ impl JoinStreamChunkBuilder {
 
 pub struct JoinChunkBuilder<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> {
     stream_chunk_builder: JoinStreamChunkBuilder,
-    /// Decide whether to perform a compact on the last chunk based on the data that has already been inserted, to avoid this issue <https://github.com/risingwavelabs/risingwave/issues/17450>
-    need_compact: bool,
-    stream_key: Vec<usize>,
 }
 
 impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> JoinChunkBuilder<T, SIDE> {
-    pub fn new(stream_chunk_builder: JoinStreamChunkBuilder, stream_key: Vec<usize>) -> Self {
+    pub fn new(stream_chunk_builder: JoinStreamChunkBuilder) -> Self {
         Self {
-            need_compact: false,
             stream_chunk_builder,
-            stream_key,
         }
     }
 
-    pub fn post_process(c: StreamChunk, need_compact: bool, stream_key: &[usize]) -> StreamChunk {
-        if need_compact {
-            StreamChunkCompactor::new(stream_key.to_vec(), vec![c])
-                .into_compacted_chunks()
-                .next()
-                .unwrap()
-        } else {
-            c
-        }
+    pub fn post_process(c: StreamChunk) -> StreamChunk {
+        todo!()
     }
 
     pub fn with_match_on_insert(
@@ -183,7 +171,7 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> JoinChunkBuilder
             if matched_row.is_zero_degree() && only_forward_matched_side(T, SIDE) {
                 self.stream_chunk_builder
                     .append_row_matched(Op::Delete, &matched_row.row)
-                    .map(|c| Self::post_process(c, self.need_compact, &self.stream_key))
+                    .map(|c| Self::post_process(c))
             } else {
                 None
             }
@@ -192,7 +180,7 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> JoinChunkBuilder
             if matched_row.is_zero_degree() && only_forward_matched_side(T, SIDE) {
                 self.stream_chunk_builder
                     .append_row_matched(Op::Insert, &matched_row.row)
-                    .map(|c| Self::post_process(c, self.need_compact, &self.stream_key))
+                    .map(|c| Self::post_process(c))
             } else {
                 None
             }
@@ -208,16 +196,14 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> JoinChunkBuilder
             {
                 unreachable!("`Op::UpdateDelete` should not yield chunk");
             }
-            let need_compact = self.need_compact;
-            self.need_compact = true;
             self.stream_chunk_builder
                 .append_row(Op::UpdateInsert, row, &matched_row.row)
-                .map(|c| Self::post_process(c, need_compact, &self.stream_key))
+                .map(|c| Self::post_process(c))
         // Inner sides
         } else {
             self.stream_chunk_builder
                 .append_row(Op::Insert, row, &matched_row.row)
-                .map(|c| Self::post_process(c, self.need_compact, &self.stream_key))
+                .map(|c| Self::post_process(c))
         }
     }
 
@@ -231,7 +217,7 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> JoinChunkBuilder
             if matched_row.is_zero_degree() && only_forward_matched_side(T, SIDE) {
                 self.stream_chunk_builder
                     .append_row_matched(Op::Insert, &matched_row.row)
-                    .map(|c| Self::post_process(c, self.need_compact, &self.stream_key))
+                    .map(|c| Self::post_process(c))
             } else {
                 None
             }
@@ -240,7 +226,7 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> JoinChunkBuilder
             if matched_row.is_zero_degree() && only_forward_matched_side(T, SIDE) {
                 self.stream_chunk_builder
                     .append_row_matched(Op::Delete, &matched_row.row)
-                    .map(|c| Self::post_process(c, self.need_compact, &self.stream_key))
+                    .map(|c| Self::post_process(c))
             } else {
                 None
             }
@@ -257,7 +243,7 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> JoinChunkBuilder
             }
             self.stream_chunk_builder
                 .append_row_matched(Op::UpdateInsert, &matched_row.row)
-                .map(|c| Self::post_process(c, self.need_compact, &self.stream_key))
+                .map(|c: StreamChunk| Self::post_process(c))
 
         // Inner sides
         } else {
@@ -268,7 +254,7 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> JoinChunkBuilder
             // the assumption for U+ after U-.
             self.stream_chunk_builder
                 .append_row(Op::Delete, row, &matched_row.row)
-                .map(|c| Self::post_process(c, self.need_compact, &self.stream_key))
+                .map(|c| Self::post_process(c))
         }
     }
 
@@ -282,7 +268,7 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> JoinChunkBuilder
         if is_semi(T) && forward_exactly_once(T, SIDE) {
             self.stream_chunk_builder
                 .append_row_update(op, row)
-                .map(|c| Self::post_process(c, self.need_compact, &self.stream_key))
+                .map(|c| Self::post_process(c))
         } else {
             None
         }
@@ -294,7 +280,7 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> JoinChunkBuilder
         if (is_anti(T) && forward_exactly_once(T, SIDE)) || is_outer_side(T, SIDE) {
             self.stream_chunk_builder
                 .append_row_update(op, row)
-                .map(|c| Self::post_process(c, self.need_compact, &self.stream_key))
+                .map(|c| Self::post_process(c))
         } else {
             None
         }
@@ -304,6 +290,6 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> JoinChunkBuilder
     pub fn take(&mut self) -> Option<StreamChunk> {
         self.stream_chunk_builder
             .take()
-            .map(|c| Self::post_process(c, self.need_compact, &self.stream_key))
+            .map(|c| Self::post_process(c))
     }
 }

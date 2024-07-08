@@ -162,8 +162,6 @@ pub struct HashJoinExecutor<K: HashKey, S: StateStore, const T: JoinTypePrimitiv
     watermark_buffers: BTreeMap<usize, BufferedWatermarks<SideTypePrimitive>>,
 
     high_join_amplification_threshold: usize,
-
-    output_stream_key: Vec<usize>,
 }
 
 impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> std::fmt::Debug
@@ -201,7 +199,6 @@ struct EqJoinArgs<'a, K: HashKey, S: StateStore> {
     chunk_size: usize,
     cnt_rows_received: &'a mut u32,
     high_join_amplification_threshold: usize,
-    output_stream_key: &'a [usize],
 }
 
 impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, S, T> {
@@ -319,17 +316,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
 
         let l2o_indexed = MultiMap::from_iter(left_to_output.iter().copied());
         let r2o_indexed = MultiMap::from_iter(right_to_output.iter().copied());
-
-        // NOTE(st1page): the stream key derived in optimizer should be also include the join key,
-        // but the join key is omitted here, as the data generated within the executor
-        // is in the same parallelism and will not cause disorder problems
-        let output_stream_key = state_pk_indices_l
-            .iter()
-            .map(|idx| l2o_indexed.get(idx))
-            .chain(state_pk_indices_r.iter().map(|idx| r2o_indexed.get(idx)))
-            .flatten()
-            .cloned()
-            .collect();
 
         let left_input_len = input_l.schema().len();
         let right_input_len = input_r.schema().len();
@@ -468,7 +454,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             cnt_rows_received: 0,
             watermark_buffers,
             high_join_amplification_threshold,
-            output_stream_key,
         }
     }
 
@@ -563,7 +548,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         chunk_size: self.chunk_size,
                         cnt_rows_received: &mut self.cnt_rows_received,
                         high_join_amplification_threshold: self.high_join_amplification_threshold,
-                        output_stream_key: &self.output_stream_key,
                     }) {
                         left_time += left_start_time.elapsed();
                         yield Message::Chunk(chunk?);
@@ -589,7 +573,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         chunk_size: self.chunk_size,
                         cnt_rows_received: &mut self.cnt_rows_received,
                         high_join_amplification_threshold: self.high_join_amplification_threshold,
-                        output_stream_key: &self.output_stream_key,
                     }) {
                         right_time += right_start_time.elapsed();
                         yield Message::Chunk(chunk?);
@@ -801,7 +784,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             chunk_size,
             cnt_rows_received,
             high_join_amplification_threshold,
-            output_stream_key,
             ..
         } = args;
 
@@ -821,15 +803,13 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             })
             .collect_vec();
 
-        let mut hashjoin_chunk_builder = JoinChunkBuilder::<T, SIDE>::new(
-            JoinStreamChunkBuilder::new(
+        let mut hashjoin_chunk_builder =
+            JoinChunkBuilder::<T, SIDE>::new(JoinStreamChunkBuilder::new(
                 chunk_size,
                 actual_output_data_types.to_vec(),
                 side_update.i2o_mapping.clone(),
                 side_match.i2o_mapping.clone(),
-            ),
-            output_stream_key.to_vec(),
-        );
+            ));
 
         let join_matched_join_keys = ctx
             .streaming_metrics
