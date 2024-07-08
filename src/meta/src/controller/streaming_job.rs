@@ -85,7 +85,7 @@ impl CatalogController {
         create_type: PbCreateType,
         ctx: &StreamContext,
         streaming_parallelism: StreamingParallelism,
-    ) -> MetaResult<object::Model> {
+    ) -> MetaResult<ObjectId> {
         let obj = Self::create_object(txn, obj_type, owner_id, database_id, schema_id).await?;
         let job = streaming_job::ActiveModel {
             job_id: Set(obj.oid),
@@ -96,7 +96,7 @@ impl CatalogController {
         };
         job.insert(txn).await?;
 
-        Ok(obj)
+        Ok(obj.oid)
     }
 
     pub async fn create_job_catalog(
@@ -162,7 +162,7 @@ impl CatalogController {
 
         match streaming_job {
             StreamingJob::MaterializedView(table) => {
-                let table_obj = Self::create_streaming_job_obj(
+                let job_id = Self::create_streaming_job_obj(
                     &txn,
                     ObjectType::Table,
                     table.owner as _,
@@ -173,7 +173,6 @@ impl CatalogController {
                     streaming_parallelism,
                 )
                 .await?;
-                let job_id = table_obj.oid;
                 table.id = job_id as _;
                 let table_model: table::ActiveModel = table.clone().into();
                 Table::insert(table_model).exec(&txn).await?;
@@ -208,8 +207,7 @@ impl CatalogController {
                     ctx,
                     streaming_parallelism,
                 )
-                .await?
-                .oid;
+                .await?;
                 sink.id = job_id as _;
                 let sink_model: sink::ActiveModel = sink.clone().into();
                 Sink::insert(sink_model).exec(&txn).await?;
@@ -228,8 +226,7 @@ impl CatalogController {
                     ctx,
                     streaming_parallelism,
                 )
-                .await?
-                .oid;
+                .await?;
                 table.id = job_id as _;
                 if let Some(src) = src {
                     let src_obj = Self::create_object(
@@ -270,8 +267,7 @@ impl CatalogController {
                     ctx,
                     streaming_parallelism,
                 )
-                .await?
-                .oid;
+                .await?;
                 // to be compatible with old implementation.
                 index.id = job_id as _;
                 index.index_table_id = job_id as _;
@@ -307,8 +303,7 @@ impl CatalogController {
                     ctx,
                     streaming_parallelism,
                 )
-                .await?
-                .oid;
+                .await?;
                 src.id = job_id as _;
                 let source_model: source::ActiveModel = src.clone().into();
                 Source::insert(source_model).exec(&txn).await?;
@@ -701,8 +696,7 @@ impl CatalogController {
             ctx,
             parallelism,
         )
-        .await?
-        .oid;
+        .await?;
 
         // 4. record dependency for new replace table.
         ObjectDependency::insert(object_dependency::ActiveModel {
