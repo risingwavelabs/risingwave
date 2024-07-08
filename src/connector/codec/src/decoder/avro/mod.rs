@@ -108,50 +108,51 @@ impl<'a> AvroParseOptions<'a> {
 
         let v: ScalarImpl = match (type_expected, value) {
             (_, Value::Null) => return Ok(DatumCow::NULL),
-            // ---- Union (with >=2 non null variants) -----
-            (DataType::Struct(struct_type_info), Value::Union(variant, v)) => match self.schema {
-                Some(Schema::Union(u)) => {
-                    if let Some(inner) = get_nullable_union_inner(u) {
-                        // nullable Union ([null, record])
-                        return Self {
-                            schema: Some(inner),
+            // ---- Union (with >=2 non null variants), and nullable Union ([null, record]) -----
+            (DataType::Struct(struct_type_info), Value::Union(variant, v)) => {
+                let Some(Schema::Union(u)) = self.schema else {
+                    return Err(create_error());
+                };
+
+                if let Some(inner) = get_nullable_union_inner(u) {
+                    // nullable Union ([null, record])
+                    return Self {
+                        schema: Some(inner),
+                        relax_numeric: self.relax_numeric,
+                    }
+                    .convert_to_datum(v, type_expected);
+                }
+                let variant_schema = &u.variants()[*variant as usize];
+
+                if matches!(variant_schema, &Schema::Null) {
+                    return Ok(DatumCow::NULL);
+                }
+
+                // Here we compare the field name, instead of using the variant idx to find the field idx.
+                // The latter approach might also work, but might be more error-prone.
+                // We will need to get the index of the "null" variant, and then re-map the variant index to the field index.
+                let expected_field_name = avro_schema_to_struct_field_name(variant_schema);
+
+                let mut fields = Vec::with_capacity(struct_type_info.len());
+                for (field_name, field_type) in struct_type_info
+                    .names()
+                    .zip_eq_fast(struct_type_info.types())
+                {
+                    if field_name == expected_field_name {
+                        let datum = Self {
+                            schema: Some(variant_schema),
                             relax_numeric: self.relax_numeric,
                         }
-                        .convert_to_datum(v, type_expected);
+                        .convert_to_datum(v, field_type)?
+                        .to_owned_datum();
+
+                        fields.push(datum)
+                    } else {
+                        fields.push(None)
                     }
-                    let variant_schema = &u.variants()[*variant as usize];
-
-                    if matches!(variant_schema, &Schema::Null) {
-                        return Ok(DatumCow::NULL);
-                    }
-
-                    // XXX: can we use the variant idx to find the field idx?
-                    // We will need to get the index of the "null" variant, and then re-map the variant index to the field index.
-                    // Which way is better?
-                    let expected_field_name = avro_schema_to_struct_field_name(variant_schema);
-
-                    let mut fields = Vec::with_capacity(struct_type_info.len());
-                    for (field_name, field_type) in struct_type_info
-                        .names()
-                        .zip_eq_fast(struct_type_info.types())
-                    {
-                        if field_name == expected_field_name {
-                            let datum = Self {
-                                schema: Some(variant_schema),
-                                relax_numeric: self.relax_numeric,
-                            }
-                            .convert_to_datum(v, field_type)?
-                            .to_owned_datum();
-
-                            fields.push(datum)
-                        } else {
-                            fields.push(None)
-                        }
-                    }
-                    StructValue::new(fields).into()
                 }
-                _ => Err(create_error())?,
-            },
+                StructValue::new(fields).into()
+            }
             // nullable Union ([null, T])
             (_, Value::Union(_, v)) => {
                 let schema = self.extract_inner_schema(None);
