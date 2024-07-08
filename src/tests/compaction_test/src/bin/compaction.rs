@@ -22,5 +22,5 @@ fn main() {
 
     risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::default());
 
-    risingwave_rt::main_okk(risingwave_compaction_test::start(opts))
+    risingwave_rt::main_okk(|_| risingwave_compaction_test::start(opts))
 }

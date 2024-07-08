@@ -61,7 +61,8 @@ pub(crate) fn resolve_index_schema(
 
     let catalog_reader = session.env().catalog_reader();
     let read_guard = catalog_reader.read_guard();
-    let (table, schema_name) = read_guard.get_table_by_name(db_name, schema_path, &table_name)?;
+    let (table, schema_name) =
+        read_guard.get_created_table_by_name(db_name, schema_path, &table_name)?;
     Ok((schema_name.to_string(), table.clone(), index_table_name))
 }
 

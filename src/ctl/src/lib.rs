@@ -20,6 +20,7 @@ use clap::{Args, Parser, Subcommand};
 use cmd_impl::bench::BenchCommands;
 use cmd_impl::hummock::SstDumpArgs;
 use itertools::Itertools;
+use risingwave_common::util::tokio_util::sync::CancellationToken;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_meta::backup_restore::RestoreOpts;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::CompressionAlgorithm;
@@ -321,6 +322,20 @@ enum HummockCommands {
         #[clap(short, long = "use-new-object-prefix-strategy", default_value = "true")]
         use_new_object_prefix_strategy: bool,
     },
+    TieredCacheTracing {
+        #[clap(long)]
+        enable: bool,
+        #[clap(long)]
+        record_hybrid_insert_threshold_ms: Option<u32>,
+        #[clap(long)]
+        record_hybrid_get_threshold_ms: Option<u32>,
+        #[clap(long)]
+        record_hybrid_obtain_threshold_ms: Option<u32>,
+        #[clap(long)]
+        record_hybrid_remove_threshold_ms: Option<u32>,
+        #[clap(long)]
+        record_hybrid_fetch_threshold_ms: Option<u32>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -425,15 +440,6 @@ pub struct ScaleVerticalCommands {
 
 #[derive(Subcommand, Debug)]
 enum ScaleCommands {
-    /// Scale the compute nodes horizontally, alias of `horizon`
-    Resize(ScaleHorizonCommands),
-
-    /// Scale the compute nodes horizontally
-    Horizon(ScaleHorizonCommands),
-
-    /// Scale the compute nodes vertically
-    Vertical(ScaleVerticalCommands),
-
     /// Mark a compute node as unschedulable
     #[clap(verbatim_doc_comment)]
     Cordon {
@@ -460,6 +466,7 @@ enum ScaleCommands {
 }
 
 #[derive(Subcommand)]
+#[allow(clippy::large_enum_variant)]
 enum MetaCommands {
     /// pause the stream graph
     Pause,
@@ -608,22 +615,33 @@ pub enum ProfileCommands {
 }
 
 /// Start `risectl` with the given options.
+/// Cancel the operation when the given `shutdown` token triggers.
 /// Log and abort the process if any error occurs.
 ///
 /// Note: use [`start_fallible`] if you want to call functionalities of `risectl`
 /// in an embedded manner.
-pub async fn start(opts: CliOpts) {
-    if let Err(e) = start_fallible(opts).await {
-        eprintln!("Error: {:#?}", e.as_report()); // pretty with backtrace
-        std::process::exit(1);
+pub async fn start(opts: CliOpts, shutdown: CancellationToken) {
+    let context = CtlContext::default();
+
+    tokio::select! {
+        _ = shutdown.cancelled() => {
+            // Shutdown requested, clean up the context and return.
+            context.try_close().await;
+        }
+
+        result = start_fallible(opts, &context) => {
+            if let Err(e) = result {
+                eprintln!("Error: {:#?}", e.as_report()); // pretty with backtrace
+                std::process::exit(1);
+            }
+        }
     }
 }
 
 /// Start `risectl` with the given options.
 /// Return `Err` if any error occurs.
-pub async fn start_fallible(opts: CliOpts) -> Result<()> {
-    let context = CtlContext::default();
-    let result = start_impl(opts, &context).await;
+pub async fn start_fallible(opts: CliOpts, context: &CtlContext) -> Result<()> {
+    let result = start_impl(opts, context).await;
     context.try_close().await;
     result
 }
@@ -810,6 +828,25 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             )
             .await?;
         }
+        Commands::Hummock(HummockCommands::TieredCacheTracing {
+            enable,
+            record_hybrid_insert_threshold_ms,
+            record_hybrid_get_threshold_ms,
+            record_hybrid_obtain_threshold_ms,
+            record_hybrid_remove_threshold_ms,
+            record_hybrid_fetch_threshold_ms,
+        }) => {
+            cmd_impl::hummock::tiered_cache_tracing(
+                context,
+                enable,
+                record_hybrid_insert_threshold_ms,
+                record_hybrid_get_threshold_ms,
+                record_hybrid_obtain_threshold_ms,
+                record_hybrid_remove_threshold_ms,
+                record_hybrid_fetch_threshold_ms,
+            )
+            .await?
+        }
         Commands::Table(TableCommands::Scan {
             mv_name,
             data_dir,
@@ -907,13 +944,6 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         }
         Commands::Profile(ProfileCommands::Heap { dir }) => {
             cmd_impl::profile::heap_profile(context, dir).await?
-        }
-        Commands::Scale(ScaleCommands::Horizon(resize))
-        | Commands::Scale(ScaleCommands::Resize(resize)) => {
-            cmd_impl::scale::resize(context, resize.into()).await?
-        }
-        Commands::Scale(ScaleCommands::Vertical(resize)) => {
-            cmd_impl::scale::resize(context, resize.into()).await?
         }
         Commands::Scale(ScaleCommands::Cordon { workers }) => {
             cmd_impl::scale::update_schedulability(context, workers, Schedulability::Unschedulable)

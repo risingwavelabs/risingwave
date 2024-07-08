@@ -40,8 +40,8 @@ use paste::paste;
 use pretty_xmlish::{Pretty, PrettyConfig};
 use risingwave_common::catalog::Schema;
 use risingwave_common::util::recursive::{self, Recurse};
-use risingwave_pb::batch_plan::PlanNode as BatchPlanPb;
-use risingwave_pb::stream_plan::StreamNode as StreamPlanPb;
+use risingwave_pb::batch_plan::PlanNode as PbBatchPlan;
+use risingwave_pb::stream_plan::StreamNode as PbStreamPlan;
 use serde::Serialize;
 use smallvec::SmallVec;
 
@@ -710,7 +710,7 @@ impl dyn PlanNode {
     pub fn to_stream_prost(
         &self,
         state: &mut BuildFragmentGraphState,
-    ) -> SchedulerResult<StreamPlanPb> {
+    ) -> SchedulerResult<PbStreamPlan> {
         recursive::tracker!().recurse(|t| {
             if t.depth_reaches(PLAN_DEPTH_THRESHOLD) {
                 notice_to_user(PLAN_TOO_DEEP_NOTICE);
@@ -738,7 +738,7 @@ impl dyn PlanNode {
                 .map(|plan| plan.to_stream_prost(state))
                 .try_collect()?;
             // TODO: support pk_indices and operator_id
-            Ok(StreamPlanPb {
+            Ok(PbStreamPlan {
                 input,
                 identity: self.explain_myself_to_string(),
                 node_body: node,
@@ -756,13 +756,13 @@ impl dyn PlanNode {
     }
 
     /// Serialize the plan node and its children to a batch plan proto.
-    pub fn to_batch_prost(&self) -> SchedulerResult<BatchPlanPb> {
+    pub fn to_batch_prost(&self) -> SchedulerResult<PbBatchPlan> {
         self.to_batch_prost_identity(true)
     }
 
     /// Serialize the plan node and its children to a batch plan proto without the identity field
     /// (for testing).
-    pub fn to_batch_prost_identity(&self, identity: bool) -> SchedulerResult<BatchPlanPb> {
+    pub fn to_batch_prost_identity(&self, identity: bool) -> SchedulerResult<PbBatchPlan> {
         recursive::tracker!().recurse(|t| {
             if t.depth_reaches(PLAN_DEPTH_THRESHOLD) {
                 notice_to_user(PLAN_TOO_DEEP_NOTICE);
@@ -774,7 +774,7 @@ impl dyn PlanNode {
                 .into_iter()
                 .map(|plan| plan.to_batch_prost_identity(identity))
                 .try_collect()?;
-            Ok(BatchPlanPb {
+            Ok(PbBatchPlan {
                 children,
                 identity: if identity {
                     self.explain_myself_to_string()

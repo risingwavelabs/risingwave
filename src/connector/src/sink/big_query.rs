@@ -42,7 +42,7 @@ use prost_types::{
     FileDescriptorSet,
 };
 use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
 use serde_derive::Deserialize;

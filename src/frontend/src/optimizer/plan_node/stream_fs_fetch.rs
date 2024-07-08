@@ -115,6 +115,7 @@ impl StreamNode for StreamFsFetch {
                 .collect_vec(),
             with_properties: source_catalog.with_properties.clone().into_iter().collect(),
             rate_limit: self.base.ctx().overwrite_options().streaming_rate_limit,
+            secret_refs: Default::default(),
         });
         NodeBody::StreamFsFetch(StreamFsFetchNode {
             node_inner: source_inner,

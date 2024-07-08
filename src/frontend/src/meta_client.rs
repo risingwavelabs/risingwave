@@ -44,6 +44,8 @@ use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 /// in this trait so that the mocking can be simplified.
 #[async_trait::async_trait]
 pub trait FrontendMetaClient: Send + Sync {
+    async fn try_unregister(&self);
+
     async fn pin_snapshot(&self) -> Result<HummockSnapshot>;
 
     async fn get_snapshot(&self) -> Result<HummockSnapshot>;
@@ -124,12 +126,23 @@ pub trait FrontendMetaClient: Send + Sync {
         id: u32,
         rate_limit: Option<u32>,
     ) -> Result<()>;
+
+    async fn list_change_log_epochs(
+        &self,
+        table_id: u32,
+        min_epoch: u64,
+        max_count: u32,
+    ) -> Result<Vec<u64>>;
 }
 
 pub struct FrontendMetaClientImpl(pub MetaClient);
 
 #[async_trait::async_trait]
 impl FrontendMetaClient for FrontendMetaClientImpl {
+    async fn try_unregister(&self) {
+        self.0.try_unregister().await;
+    }
+
     async fn pin_snapshot(&self) -> Result<HummockSnapshot> {
         self.0.pin_snapshot().await
     }
@@ -311,5 +324,16 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
             .apply_throttle(kind, id, rate_limit)
             .await
             .map(|_| ())
+    }
+
+    async fn list_change_log_epochs(
+        &self,
+        table_id: u32,
+        min_epoch: u64,
+        max_count: u32,
+    ) -> Result<Vec<u64>> {
+        self.0
+            .list_change_log_epochs(table_id, min_epoch, max_count)
+            .await
     }
 }

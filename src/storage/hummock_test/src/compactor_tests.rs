@@ -23,7 +23,7 @@ pub(crate) mod tests {
     use foyer::CacheContext;
     use itertools::Itertools;
     use rand::{Rng, RngCore, SeedableRng};
-    use risingwave_common::buffer::BitmapBuilder;
+    use risingwave_common::bitmap::BitmapBuilder;
     use risingwave_common::catalog::TableId;
     use risingwave_common::constants::hummock::CompactionFilterFlag;
     use risingwave_common::hash::VirtualNode;

@@ -15,8 +15,8 @@
 use std::ops::{Bound, RangeBounds};
 
 use paste::paste;
-use risingwave_pb::batch_plan::scan_range::Bound as BoundPb;
-use risingwave_pb::batch_plan::ScanRange as ScanRangePb;
+use risingwave_pb::batch_plan::scan_range::Bound as PbBound;
+use risingwave_pb::batch_plan::ScanRange as PbScanRange;
 
 use super::value_encoding::serialize_datum;
 use crate::hash::table_distribution::TableDistribution;
@@ -24,20 +24,20 @@ use crate::hash::VirtualNode;
 use crate::types::{Datum, ScalarImpl};
 use crate::util::value_encoding::serialize_datum_into;
 
-/// See also [`ScanRangePb`]
+/// See also [`PbScanRange`]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ScanRange {
     pub eq_conds: Vec<Datum>,
     pub range: (Bound<ScalarImpl>, Bound<ScalarImpl>),
 }
 
-fn bound_to_proto(bound: &Bound<ScalarImpl>) -> Option<BoundPb> {
+fn bound_to_proto(bound: &Bound<ScalarImpl>) -> Option<PbBound> {
     match bound {
-        Bound::Included(literal) => Some(BoundPb {
+        Bound::Included(literal) => Some(PbBound {
             value: serialize_datum(Some(literal)),
             inclusive: true,
         }),
-        Bound::Excluded(literal) => Some(BoundPb {
+        Bound::Excluded(literal) => Some(PbBound {
             value: serialize_datum(Some(literal)),
             inclusive: false,
         }),
@@ -46,8 +46,8 @@ fn bound_to_proto(bound: &Bound<ScalarImpl>) -> Option<BoundPb> {
 }
 
 impl ScanRange {
-    pub fn to_protobuf(&self) -> ScanRangePb {
-        ScanRangePb {
+    pub fn to_protobuf(&self) -> PbScanRange {
+        PbScanRange {
             eq_conds: self
                 .eq_conds
                 .iter()

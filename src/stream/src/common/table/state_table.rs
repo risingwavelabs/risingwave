@@ -25,7 +25,7 @@ use futures_async_stream::for_await;
 use itertools::{izip, Itertools};
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{ArrayImplBuilder, ArrayRef, DataChunk, Op, StreamChunk};
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{
     get_dist_key_in_pk_indices, ColumnDesc, ColumnId, TableId, TableOption,
 };

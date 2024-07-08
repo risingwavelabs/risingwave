@@ -175,7 +175,7 @@ impl ClusterController {
         Ok(())
     }
 
-    pub async fn delete_worker(&self, host_address: HostAddress) -> MetaResult<()> {
+    pub async fn delete_worker(&self, host_address: HostAddress) -> MetaResult<WorkerNode> {
         let mut inner = self.inner.write().await;
         let worker = inner.delete_worker(host_address).await?;
         if worker.r#type() == PbWorkerType::ComputeNode {
@@ -190,10 +190,10 @@ impl ClusterController {
         // local notification.
         self.env
             .notification_manager()
-            .notify_local_subscribers(LocalNotification::WorkerNodeDeleted(worker))
+            .notify_local_subscribers(LocalNotification::WorkerNodeDeleted(worker.clone()))
             .await;
 
-        Ok(())
+        Ok(worker)
     }
 
     pub async fn update_schedulability(
