@@ -10694,6 +10694,7 @@ dependencies = [
  "memcomparable",
  "opendal",
  "parking_lot 0.12.1",
+ "parquet 52.0.0",
  "paste",
  "prometheus",
  "prost 0.12.1",
