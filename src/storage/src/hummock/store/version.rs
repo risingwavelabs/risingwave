@@ -23,7 +23,7 @@ use bytes::Bytes;
 use futures::future::try_join_all;
 use itertools::Itertools;
 use parking_lot::RwLock;
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::MAX_SPILL_TIMES;

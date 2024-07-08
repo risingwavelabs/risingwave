@@ -25,7 +25,7 @@ use bytes::Bytes;
 use futures::{Stream, TryStreamExt};
 use futures_async_stream::try_stream;
 use prost::Message;
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::{Epoch, EpochPair};

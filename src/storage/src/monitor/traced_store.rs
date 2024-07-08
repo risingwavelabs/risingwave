@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use futures::{Future, FutureExt};
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
 use risingwave_hummock_sdk::HummockReadEpoch;

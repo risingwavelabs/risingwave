@@ -20,7 +20,7 @@ use num_integer::Integer;
 use risingwave_common::hash::WorkerSlotId;
 use risingwave_pb::common::WorkerNode;
 
-use crate::buffer::{Bitmap, BitmapBuilder};
+use crate::bitmap::{Bitmap, BitmapBuilder};
 use crate::hash::{VirtualNode, WorkerSlotMapping};
 
 /// Calculate a new vnode mapping, keeping locality and balance on a best effort basis.
