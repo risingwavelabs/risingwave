@@ -27,7 +27,6 @@ def get_commits_between(last_passing_build_commit, current_build_commit):
 
 
 def format_step(branch, commit, steps):
-    ci_steps = ",".join(steps)
     print(f"Running pipeline on commit: {commit} with steps: {steps}")
     step=f"""
 cat <<- YAML | buildkite-agent pipeline upload
