@@ -20,13 +20,12 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Context};
 use itertools::Itertools;
+use rand::{Rng, RngCore};
+use risingwave_common::bitmap::Bitmap;
 
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::{ParallelUnitMapping, VirtualNode};
 use risingwave_common::secret::SecretEncryption;
-
-use rand::{Rng, RngCore};
-use risingwave_common::bitmap::Bitmap;
 
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
