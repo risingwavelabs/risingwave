@@ -216,7 +216,6 @@ fn avro_type_mapping(
                     .is_none(),
                 "Union contains duplicate types: {union_schema:?}",
             );
-            // We only support using union to represent nullable fields, not general unions.
             match get_nullable_union_inner(union_schema) {
                 Some(inner) => avro_type_mapping(inner, map_handling)?,
                 None => {
