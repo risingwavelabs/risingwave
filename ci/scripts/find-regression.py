@@ -26,7 +26,7 @@ def get_commits_between(last_passing_build_commit, current_build_commit):
     return
 
 
-def format_step(commit, steps):
+def format_step(branch, commit, steps):
     ci_steps = ",".join(steps)
     print(f"Running pipeline on commit: {commit} with steps: {steps}")
     step=f"""
@@ -34,6 +34,7 @@ cat <<- YAML | buildkite-agent pipeline upload
 steps:
   - trigger: "main-cron"
     build:
+      branch: {branch}
       commit: {commit}
       env:
         CI_STEPS: {steps}
@@ -43,8 +44,8 @@ YAML
 
 
 # Triggers a buildkite job to run the pipeline on the given commit, with the specified tests.
-def run_pipeline_on_commit(commit, steps):
-    step = format_step(commit, steps)
+def run_pipeline_on_commit(branch, commit, steps):
+    step = format_step(branch, commit, steps)
     print(f"Running upload pipeline: step={step}")
     subprocess.run(step, shell=True)
 
@@ -82,6 +83,6 @@ def run(failing_test_key):
 #     run(failing_test_key)
 
 def main():
-    run_pipeline_on_commit("f0fa34cdeed95a08b2c7d8428a17d6de27b6588d", ["build"])
+    run_pipeline_on_commit("kwannoel/find-regress", "f0fa34cdeed95a08b2c7d8428a17d6de27b6588d", ["e2e-test"])
 
 main()
