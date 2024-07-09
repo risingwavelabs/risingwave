@@ -40,8 +40,8 @@ use crate::binder::bind_context::Clause;
 use crate::binder::{Binder, UdfContext};
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{
-    AggCall, CastContext, Expr, ExprImpl, ExprType, FunctionCall, FunctionCallWithLambda, Literal,
-    Now, OrderBy, TableFunction, TableFunctionType, UserDefinedFunction, WindowFunction,
+    AggCall, CastContext, Expr, ExprImpl, ExprType, FunctionCall, FunctionCallWithLambda, InputRef,
+    Literal, Now, OrderBy, TableFunction, TableFunctionType, UserDefinedFunction, WindowFunction,
 };
 use crate::utils::Condition;
 
@@ -115,6 +115,32 @@ impl Binder {
             .map(|arg| self.bind_function_arg(arg.clone()))
             .flatten_ok()
             .try_collect()?;
+
+        // `aggregate:` on a scalar function
+        if f.aggregate {
+            let mut scalar_inputs = inputs
+                .iter()
+                .enumerate()
+                .map(|(i, expr)| {
+                    InputRef::new(i, DataType::List(Box::new(expr.return_type()))).into()
+                })
+                .collect_vec();
+            let scalar: ExprImpl = if let Ok(schema) = self.first_valid_schema()
+                && let Some(func) =
+                    schema.get_function_by_name_inputs(&function_name, &mut scalar_inputs)
+            {
+                if !func.kind.is_scalar() {
+                    return Err(ErrorCode::InvalidInputSyntax(
+                        "expect a scalar function after `aggregate:`".to_string(),
+                    )
+                    .into());
+                }
+                UserDefinedFunction::new(func.clone(), scalar_inputs).into()
+            } else {
+                self.bind_builtin_scalar_function(&function_name, scalar_inputs, f.variadic)?
+            };
+            return self.bind_agg(f, AggKind::WrapScalar(scalar.to_expr_proto()));
+        }
 
         // user defined function
         // TODO: resolve schema name https://github.com/risingwavelabs/risingwave/issues/12422
