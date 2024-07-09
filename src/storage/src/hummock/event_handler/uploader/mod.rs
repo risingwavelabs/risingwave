@@ -848,7 +848,12 @@ impl UploaderData {
         let epochs = take_before_epoch(&mut self.unsync_data.epochs, epoch);
         if cfg!(debug_assertions) {
             for epoch_table_ids in epochs.into_values() {
-                assert_eq!(epoch_table_ids, table_ids);
+                assert!(
+                    epoch_table_ids.is_subset(&table_ids),
+                    "epoch_table_ids {:?} not a subset of sync_table_ids: {:?}",
+                    epoch_table_ids,
+                    table_ids
+                );
             }
         }
 
