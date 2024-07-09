@@ -1334,7 +1334,7 @@ impl UploaderData {
                 let syncing_data = self.syncing_data.pop_back().expect("non-empty");
                 let SyncingData {
                     sync_epoch,
-                    table_ids: _,
+                    table_ids: _table_ids,
                     table_ids_to_ack,
                     uploading_tasks,
                     uploaded,
