@@ -532,8 +532,8 @@ pub enum SinkError {
     ),
     #[error("Starrocks error: {0}")]
     Starrocks(String),
-    #[error("Opendal error: {0}")]
-    Opendal(String),
+    #[error("File error: {0}")]
+    File(String),
     #[error("Pulsar error: {0}")]
     Pulsar(
         #[source]
@@ -568,19 +568,19 @@ impl From<icelake::Error> for SinkError {
 
 impl From<OpendalError> for SinkError {
     fn from(error: OpendalError) -> Self {
-        SinkError::Opendal(error.to_string())
+        SinkError::File(error.to_string())
     }
 }
 
 impl From<parquet::errors::ParquetError> for SinkError {
     fn from(error: parquet::errors::ParquetError) -> Self {
-        SinkError::Opendal(error.to_string())
+        SinkError::File(error.to_string())
     }
 }
 
 impl From<ArrayError> for SinkError {
     fn from(error: ArrayError) -> Self {
-        SinkError::Opendal(error.to_string())
+        SinkError::File(error.to_string())
     }
 }
 

@@ -775,13 +775,13 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                     Format::Debezium => vec![Encode::Json],
                 ),
                 FileSink::<S3Sink>::SINK_NAME => hashmap!(
-                    Format::Plain => vec![Encode::Json, Encode::Parquet],
+                    Format::Plain => vec![Encode::Parquet],
                 ),
                 FileSink::<GcsSink>::SINK_NAME => hashmap!(
-                    Format::Plain => vec![Encode::Json, Encode::Parquet],
+                    Format::Plain => vec![Encode::Parquet],
                 ),
                 FileSink::<FsSink>::SINK_NAME => hashmap!(
-                    Format::Plain => vec![Encode::Json, Encode::Parquet],
+                    Format::Plain => vec![Encode::Parquet],
                 ),
                 KinesisSink::SINK_NAME => hashmap!(
                     Format::Plain => vec![Encode::Json],

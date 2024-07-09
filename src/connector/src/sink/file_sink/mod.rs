@@ -71,7 +71,7 @@ impl SinkWriter for OpenDalSinkWriter {
         // Note: epoch is used to name the output files.
         // Todo: after enabling sink decouple, use the new naming convention.
         let epoch = self.epoch.ok_or_else(|| {
-            SinkError::Opendal("epoch has not been initialize, call `begin_epoch`".to_string())
+            SinkError::File("epoch has not been initialize, call `begin_epoch`".to_string())
         })?;
         if self.sink_writer.is_none() {
             self.create_sink_writer(epoch).await?;
@@ -141,7 +141,6 @@ impl OpenDalSinkWriter {
     async fn create_object_writer(&mut self, epoch: u64) -> Result<OpendalWriter> {
         // Todo: specify more file suffixes based on encode_type.
         let suffix = match self.encode_type {
-            SinkEncode::Json => "json",
             SinkEncode::Parquet => "parquet",
             _ => unimplemented!(),
         };
@@ -149,7 +148,7 @@ impl OpenDalSinkWriter {
         // Note: sink decoupling is not currently supported, which means that output files will not be batched across checkpoints.
         // The current implementation writes files every time a checkpoint arrives, so the naming convention is `epoch + executor_id + .suffix`.
         let object_name = format!(
-            "{}/epoch_{}_executor_{}.{}",
+            "{}/{}_{}.{}",
             self.write_path, epoch, self.executor_id, suffix,
         );
         Ok(self
@@ -174,10 +173,10 @@ impl OpenDalSinkWriter {
                     )?,
                 ));
             }
-            SinkEncode::Json => {
-                self.sink_writer = Some(FileWriterEnum::FileWriter(object_writer));
-                unimplemented!();
-            }
+            // SinkEncode::Json => {
+            //     self.sink_writer = Some(FileWriterEnum::FileWriter(object_writer));
+            //     unimplemented!();
+            // }
             _ => unimplemented!(),
         }
 
@@ -193,7 +192,7 @@ impl OpenDalSinkWriter {
         match self
             .sink_writer
             .as_mut()
-            .ok_or_else(|| SinkError::Opendal("Sink writer is not created.".to_string()))?
+            .ok_or_else(|| SinkError::File("Sink writer is not created.".to_string()))?
         {
             FileWriterEnum::ParquetFileWriter(w) => {
                 let batch = to_record_batch_with_schema(self.schema.clone(), &chunk.compact())?;

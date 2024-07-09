@@ -22,13 +22,11 @@ use crate::sink::Result;
 
 mod avro;
 mod json;
-// mod parquet;
 mod proto;
 pub mod template;
 
 pub use avro::{AvroEncoder, AvroHeader};
 pub use json::JsonEncoder;
-// pub use parquet::ParquetEncoder;
 pub use proto::ProtoEncoder;
 
 /// Encode a row of a relation into
