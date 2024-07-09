@@ -29,8 +29,6 @@ message SinkParam {
   string sink_name = 8;
 }
 
-
-
 message SinkWriterStreamRequest {
   message StartSink {
     SinkParam sink_param = 1;

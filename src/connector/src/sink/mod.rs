@@ -623,19 +623,19 @@ impl From<icelake::Error> for SinkError {
 
 impl From<OpendalError> for SinkError {
     fn from(error: OpendalError) -> Self {
-        SinkError::File(error.to_string())
+        SinkError::File(error.to_report_string())
     }
 }
 
 impl From<parquet::errors::ParquetError> for SinkError {
     fn from(error: parquet::errors::ParquetError) -> Self {
-        SinkError::File(error.to_string())
+        SinkError::File(error.to_report_string())
     }
 }
 
 impl From<ArrayError> for SinkError {
     fn from(error: ArrayError) -> Self {
-        SinkError::File(error.to_string())
+        SinkError::File(error.to_report_string())
     }
 }
 
