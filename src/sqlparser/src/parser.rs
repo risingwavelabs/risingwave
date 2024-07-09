@@ -647,11 +647,14 @@ impl Parser<'_> {
                 _ => match self.peek_token().token {
                     Token::LParen | Token::Period | Token::Colon => {
                         *self = checkpoint;
-                        alt((
-                            Self::parse_function,
-                            Self::parse_object_name.map(|o| Expr::CompoundIdentifier(o.0)),
-                        ))
-                        .parse_next(self)
+                        if let Ok(object_name) = self.parse_object_name()
+                            && !matches!(self.peek_token().token, Token::LParen | Token::Colon)
+                        {
+                            Ok(Expr::CompoundIdentifier(object_name.0))
+                        } else {
+                            *self = checkpoint;
+                            self.parse_function()
+                        }
                     }
                     _ => Ok(Expr::Identifier(w.to_ident()?)),
                 },
