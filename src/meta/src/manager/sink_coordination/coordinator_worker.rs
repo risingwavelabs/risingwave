@@ -19,7 +19,7 @@ use anyhow::anyhow;
 use futures::future::{select, Either};
 use futures::stream::FuturesUnordered;
 use futures::{StreamExt, TryStreamExt};
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_connector::dispatch_sink;
 use risingwave_connector::sink::{build_sink, Sink, SinkCommitCoordinator, SinkParam};

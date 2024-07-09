@@ -18,7 +18,7 @@ pub use distinct::*;
 use risingwave_common::array::ArrayImpl::Bool;
 use risingwave_common::array::DataChunk;
 use risingwave_common::bail;
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_expr::aggregate::{AggCall, AggKind};
 use risingwave_expr::expr::{LogReport, NonStrictExpression};
 use risingwave_storage::StateStore;

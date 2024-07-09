@@ -18,7 +18,7 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use async_trait::async_trait;
 use risingwave_common::array::{Op, RowRef, StreamChunk};
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, Decimal};

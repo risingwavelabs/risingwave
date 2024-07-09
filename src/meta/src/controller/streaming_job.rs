@@ -16,7 +16,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::num::NonZeroUsize;
 
 use itertools::Itertools;
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash::{ActorMapping, ParallelUnitId, ParallelUnitMapping};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node;

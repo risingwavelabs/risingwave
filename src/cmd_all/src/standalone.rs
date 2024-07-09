@@ -186,6 +186,9 @@ pub async fn standalone(
 ) {
     tracing::info!("launching Risingwave in standalone mode");
 
+    // TODO(shutdown): use the real one passed-in
+    let shutdown = CancellationToken::new();
+
     let mut is_in_memory = false;
     if let Some(opts) = meta_opts {
         is_in_memory = matches!(opts.backend, Some(MetaBackend::Mem));
@@ -215,20 +218,21 @@ pub async fn standalone(
     }
     if let Some(opts) = compute_opts {
         tracing::info!("starting compute-node thread with cli args: {:?}", opts);
-        // TODO(shutdown): pass the shutdown token
+        let shutdown = shutdown.clone();
         let _compute_handle =
-            tokio::spawn(
-                async move { risingwave_compute::start(opts, CancellationToken::new()).await },
-            );
+            tokio::spawn(async move { risingwave_compute::start(opts, shutdown).await });
     }
     if let Some(opts) = frontend_opts.clone() {
         tracing::info!("starting frontend-node thread with cli args: {:?}", opts);
-        let _frontend_handle = tokio::spawn(async move { risingwave_frontend::start(opts).await });
+        let shutdown = shutdown.clone();
+        let _frontend_handle =
+            tokio::spawn(async move { risingwave_frontend::start(opts, shutdown).await });
     }
     if let Some(opts) = compactor_opts {
         tracing::info!("starting compactor-node thread with cli args: {:?}", opts);
+        let shutdown = shutdown.clone();
         let _compactor_handle =
-            tokio::spawn(async move { risingwave_compactor::start(opts).await });
+            tokio::spawn(async move { risingwave_compactor::start(opts, shutdown).await });
     }
 
     // wait for log messages to be flushed

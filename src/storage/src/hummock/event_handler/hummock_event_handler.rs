@@ -923,7 +923,7 @@ mod tests {
 
     use futures::FutureExt;
     use parking_lot::Mutex;
-    use risingwave_common::buffer::BitmapBuilder;
+    use risingwave_common::bitmap::BitmapBuilder;
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::util::epoch::{test_epoch, EpochExt};
     use risingwave_hummock_sdk::version::HummockVersion;

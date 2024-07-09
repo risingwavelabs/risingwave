@@ -1,4 +1,5 @@
 -- PG
+DROP TABLE IF EXISTS shipments;
 CREATE TABLE shipments (
   shipment_id SERIAL NOT NULL PRIMARY KEY,
   order_id SERIAL NOT NULL,
