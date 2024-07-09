@@ -82,7 +82,10 @@ impl MetaNodeService {
 
         match &config.meta_backend {
             MetaBackend::Memory => {
-                cmd.arg("--backend").arg("mem");
+                cmd.arg("--backend")
+                    .arg("sql")
+                    .arg("--sql-endpoint")
+                    .arg("sqlite::memory:");
             }
             MetaBackend::Etcd => {
                 let etcd_config = config.provide_etcd_backend.as_ref().unwrap();

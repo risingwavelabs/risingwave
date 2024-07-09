@@ -281,7 +281,7 @@ pub mod verify {
 
         // TODO: may avoid manual async fn when the bug of rust compiler is fixed. Currently it will
         // fail to compile.
-        #[allow(clippy::manual_async_fn)]
+        #[expect(clippy::manual_async_fn)]
         fn iter(
             &self,
             key_range: TableKeyRange,
@@ -303,7 +303,7 @@ pub mod verify {
             }
         }
 
-        #[allow(clippy::manual_async_fn)]
+        #[expect(clippy::manual_async_fn)]
         fn rev_iter(
             &self,
             key_range: TableKeyRange,
@@ -408,17 +408,6 @@ pub mod verify {
         type Iter<'a> = impl StateStoreIter + 'a;
         type RevIter<'a> = impl StateStoreIter + 'a;
 
-        // We don't verify `may_exist` across different state stores because
-        // the return value of `may_exist` is implementation specific and may not
-        // be consistent across different state store backends.
-        fn may_exist(
-            &self,
-            key_range: TableKeyRange,
-            read_options: ReadOptions,
-        ) -> impl Future<Output = StorageResult<bool>> + Send + '_ {
-            self.actual.may_exist(key_range, read_options)
-        }
-
         async fn get(
             &self,
             key: TableKey<Bytes>,
@@ -432,7 +421,7 @@ pub mod verify {
             actual
         }
 
-        #[allow(clippy::manual_async_fn)]
+        #[expect(clippy::manual_async_fn)]
         fn iter(
             &self,
             key_range: TableKeyRange,
@@ -453,7 +442,7 @@ pub mod verify {
             }
         }
 
-        #[allow(clippy::manual_async_fn)]
+        #[expect(clippy::manual_async_fn)]
         fn rev_iter(
             &self,
             key_range: TableKeyRange,
@@ -655,6 +644,7 @@ impl StateStoreImpl {
                     .with_indexer_shards(opts.meta_file_cache_indexer_shards)
                     .with_flushers(opts.meta_file_cache_flushers)
                     .with_reclaimers(opts.meta_file_cache_reclaimers)
+                    .with_buffer_threshold(opts.meta_file_cache_flush_buffer_threshold_mb * MB) // 128 MiB
                     .with_clean_region_threshold(
                         opts.meta_file_cache_reclaimers + opts.meta_file_cache_reclaimers / 2,
                     )
@@ -707,6 +697,7 @@ impl StateStoreImpl {
                     .with_indexer_shards(opts.data_file_cache_indexer_shards)
                     .with_flushers(opts.data_file_cache_flushers)
                     .with_reclaimers(opts.data_file_cache_reclaimers)
+                    .with_buffer_threshold(opts.data_file_cache_flush_buffer_threshold_mb * MB) // 128 MiB
                     .with_clean_region_threshold(
                         opts.data_file_cache_reclaimers + opts.data_file_cache_reclaimers / 2,
                     )
@@ -948,12 +939,6 @@ pub mod boxed_state_store {
     pub type BoxLocalStateStoreIterStream<'a> = BoxStateStoreIter<'a, StateStoreIterItem>;
     #[async_trait::async_trait]
     pub trait DynamicDispatchedLocalStateStore: StaticSendSync {
-        async fn may_exist(
-            &self,
-            key_range: TableKeyRange,
-            read_options: ReadOptions,
-        ) -> StorageResult<bool>;
-
         async fn get(
             &self,
             key: TableKey<Bytes>,
@@ -998,14 +983,6 @@ pub mod boxed_state_store {
 
     #[async_trait::async_trait]
     impl<S: LocalStateStore> DynamicDispatchedLocalStateStore for S {
-        async fn may_exist(
-            &self,
-            key_range: TableKeyRange,
-            read_options: ReadOptions,
-        ) -> StorageResult<bool> {
-            self.may_exist(key_range, read_options).await
-        }
-
         async fn get(
             &self,
             key: TableKey<Bytes>,
@@ -1077,14 +1054,6 @@ pub mod boxed_state_store {
     impl LocalStateStore for BoxDynamicDispatchedLocalStateStore {
         type Iter<'a> = BoxLocalStateStoreIterStream<'a>;
         type RevIter<'a> = BoxLocalStateStoreIterStream<'a>;
-
-        fn may_exist(
-            &self,
-            key_range: TableKeyRange,
-            read_options: ReadOptions,
-        ) -> impl Future<Output = StorageResult<bool>> + Send + '_ {
-            self.deref().may_exist(key_range, read_options)
-        }
 
         fn get(
             &self,

@@ -42,7 +42,6 @@ opendal = { version = "0.47", features = [
     "services-s3",
     "services-webhdfs",
     "services-azfile",
-    # "service-hdfs",
 ] }
 prometheus = { version = "0.13", features = ["process"] }
 reqwest = "0.12.2" # required by opendal
