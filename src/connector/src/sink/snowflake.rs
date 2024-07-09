@@ -44,29 +44,35 @@ use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkWriter, SinkWrit
 pub const SNOWFLAKE_SINK: &str = "snowflake";
 const S3_INTERMEDIATE_FILE_NAME: &str = "RW_SNOWFLAKE_S3_SINK_FILE";
 
-#[derive(Deserialize, Debug, Clone, WithOptions)]
+#[derive(Debug, Clone, Deserialize, WithOptions)]
 pub struct SnowflakeCommon {
     /// The s3 bucket where intermediate sink files will be stored
-    #[serde(rename = "s3.bucket_name")]
+    #[serde(rename = "snowflake.s3_bucket", alias = "s3.bucket_name")]
     pub s3_bucket: String,
 
     /// The optional s3 path to be specified
     /// the actual file location would be `s3://<s3_bucket>/<s3_path>/<rw_auto_gen_intermediate_file_name>`
     /// if this field is specified by user(s)
     /// otherwise it would be `s3://<s3_bucket>/<rw_auto_gen_intermediate_file_name>`
-    #[serde(rename = "s3.path")]
+    #[serde(rename = "snowflake.s3_path", alias = "s3.path")]
     pub s3_path: Option<String>,
 
     /// s3 credentials
-    #[serde(rename = "s3.credentials.access")]
+    #[serde(
+        rename = "snowflake.aws_access_key_id",
+        alias = "s3.credentials.access"
+    )]
     pub aws_access_key_id: String,
 
     /// s3 credentials
-    #[serde(rename = "s3.credentials.secret")]
+    #[serde(
+        rename = "snowflake.aws_secret_access_key",
+        alias = "s3.credentials.secret"
+    )]
     pub aws_secret_access_key: String,
 
     /// The s3 region, e.g., us-east-2
-    #[serde(rename = "s3.region_name")]
+    #[serde(rename = "snowflake.aws_region", alias = "s3.region_name")]
     pub aws_region: String,
 }
 
