@@ -27,18 +27,18 @@ use parquet::arrow::async_reader::{AsyncFileReader, MetadataLoader};
 use parquet::arrow::ParquetRecordBatchStreamBuilder;
 use parquet::file::metadata::ParquetMetaData;
 
-pub struct ArrowFileReader<R: FileRead> {
+pub struct ParquetFileReader<R: FileRead> {
     meta: FileMetadata,
     r: R,
 }
 
-impl<R: FileRead> ArrowFileReader<R> {
+impl<R: FileRead> ParquetFileReader<R> {
     pub fn new(meta: FileMetadata, r: R) -> Self {
         Self { meta, r }
     }
 }
 
-impl<R: FileRead> AsyncFileReader for ArrowFileReader<R> {
+impl<R: FileRead> AsyncFileReader for ParquetFileReader<R> {
     fn get_bytes(&mut self, range: Range<usize>) -> BoxFuture<'_, parquet::errors::Result<Bytes>> {
         Box::pin(
             self.r
@@ -62,7 +62,7 @@ pub async fn create_parquet_stream_builder(
     s3_access_key: String,
     s3_secret_key: String,
     location: String,
-) -> Result<ParquetRecordBatchStreamBuilder<ArrowFileReader<impl FileRead>>, anyhow::Error> {
+) -> Result<ParquetRecordBatchStreamBuilder<ParquetFileReader<impl FileRead>>, anyhow::Error> {
     let mut props = HashMap::new();
     props.insert(S3_REGION, s3_region.clone());
     props.insert(S3_ACCESS_KEY_ID, s3_access_key.clone());
@@ -77,9 +77,9 @@ pub async fn create_parquet_stream_builder(
 
     let parquet_metadata = parquet_file.metadata().await.map_err(|e| anyhow!(e))?;
     let parquet_reader = parquet_file.reader().await.map_err(|e| anyhow!(e))?;
-    let arrow_file_reader = ArrowFileReader::new(parquet_metadata, parquet_reader);
+    let parquet_file_reader = ParquetFileReader::new(parquet_metadata, parquet_reader);
 
-    ParquetRecordBatchStreamBuilder::new(arrow_file_reader)
+    ParquetRecordBatchStreamBuilder::new(parquet_file_reader)
         .await
         .map_err(|e| anyhow!(e))
 }

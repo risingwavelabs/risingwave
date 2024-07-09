@@ -18,7 +18,7 @@ use futures_util::stream::StreamExt;
 use parquet::arrow::ProjectionMask;
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::catalog::Schema;
-use risingwave_connector::source::iceberg::arrow_file_reader::create_parquet_stream_builder;
+use risingwave_connector::source::iceberg::parquet_file_reader::create_parquet_stream_builder;
 
 use crate::error::BatchError;
 use crate::executor::{DataChunk, Executor};

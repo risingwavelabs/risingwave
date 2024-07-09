@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod arrow_file_reader;
+pub mod parquet_file_reader;
 
 use std::collections::HashMap;
 
 use anyhow::anyhow;
-pub use arrow_file_reader::*;
+pub use parquet_file_reader::*;
 use async_trait::async_trait;
 use futures::StreamExt;
 use iceberg::spec::{DataContentType, ManifestList};
