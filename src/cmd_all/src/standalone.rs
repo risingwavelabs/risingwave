@@ -277,7 +277,9 @@ pub async fn standalone(
 
     let compactor = if let Some(opts) = compactor_opts {
         tracing::info!("starting compactor-node thread with cli args: {:?}", opts);
-        let service = Service::spawn("compactor", |shutdown| risingwave_compactor::start(opts));
+        let service = Service::spawn("compactor", |shutdown| {
+            risingwave_compactor::start(opts, shutdown)
+        });
         Some(service)
     } else {
         None
