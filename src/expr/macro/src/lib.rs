@@ -22,6 +22,8 @@ use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use syn::{Error, ItemFn, Result};
 
+use crate::context::generate_captured_async_function;
+
 mod context;
 mod gen;
 mod parse;
@@ -637,7 +639,16 @@ pub fn capture_context(attr: TokenStream, item: TokenStream) -> TokenStream {
     fn inner(attr: TokenStream, item: TokenStream) -> Result<TokenStream2> {
         let attr: CaptureContextAttr = syn::parse(attr)?;
         let user_fn: ItemFn = syn::parse(item)?;
-        generate_captured_function(attr, user_fn)
+
+        // Check if the function is async
+        let is_async = user_fn.sig.asyncness.is_some();
+
+        // Generate captured function
+        if is_async {
+            generate_captured_async_function(attr, user_fn)
+        } else {
+            generate_captured_function(attr, user_fn)
+        }
     }
     match inner(attr, item) {
         Ok(tokens) => tokens.into(),
