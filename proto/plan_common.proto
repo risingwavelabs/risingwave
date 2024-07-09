@@ -106,7 +106,7 @@ message AsOf {
   message Version {
     int64 version = 1;
   }
-  oneof AsOfType {
+  oneof as_of_type {
     ProcessTime process_time = 1;
     Timestamp timestamp = 2;
     Version version = 3;
