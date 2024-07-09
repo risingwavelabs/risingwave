@@ -454,6 +454,15 @@ impl HummockStorage {
         )
     }
 
+    /// Declare the start of an epoch. This information is provided for spill so that the spill task won't
+    /// include data of two or more syncs.
+    // TODO: remote this method when we support spill task that can include data of more two or more syncs
+    pub fn start_epoch(&self, epoch: HummockEpoch, table_ids: HashSet<TableId>) {
+        let _ = self
+            .hummock_event_sender
+            .send(HummockEvent::StartEpoch { epoch, table_ids });
+    }
+
     pub fn sstable_store(&self) -> SstableStoreRef {
         self.context.sstable_store.clone()
     }

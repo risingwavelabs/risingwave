@@ -15,7 +15,7 @@
 #[cfg(test)]
 pub(crate) mod tests {
 
-    use std::collections::{BTreeMap, BTreeSet, VecDeque};
+    use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
     use std::ops::Bound;
     use std::sync::Arc;
 
@@ -156,6 +156,10 @@ pub(crate) mod tests {
         value_size: usize,
         epochs: Vec<u64>,
     ) {
+        for epoch in &epochs {
+            storage.start_epoch(*epoch, HashSet::from_iter([Default::default()]));
+        }
+        storage.start_epoch(u64::MAX, HashSet::from_iter([Default::default()]));
         let mut local = storage
             .new_local(NewLocalOptions::for_test(TableId::default()))
             .await;
@@ -534,17 +538,16 @@ pub(crate) mod tests {
         existing_table_id: u32,
         keys_per_epoch: usize,
     ) {
+        let table_id = existing_table_id.into();
         let kv_count: u16 = 128;
         let mut epoch = test_epoch(1);
-        let mut local = storage
-            .new_local(NewLocalOptions::for_test(existing_table_id.into()))
-            .await;
+        let mut local = storage.new_local(NewLocalOptions::for_test(table_id)).await;
+
+        storage.start_epoch(epoch, HashSet::from_iter([table_id]));
 
         // 1. add sstables
         let val = Bytes::from(b"0"[..].repeat(1 << 10)); // 1024 Byte value
         for idx in 0..kv_count {
-            epoch.inc_epoch();
-
             if idx == 0 {
                 local.init_for_test(epoch).await.unwrap();
             }
@@ -559,9 +562,11 @@ pub(crate) mod tests {
             }
             local.flush().await.unwrap();
             let next_epoch = epoch.next_epoch();
+            storage.start_epoch(next_epoch, HashSet::from_iter([table_id]));
             local.seal_current_epoch(next_epoch, SealCurrentEpochOptions::for_test());
 
             flush_and_commit(&hummock_meta_client, storage, epoch).await;
+            epoch.inc_epoch();
         }
     }
 
@@ -727,9 +732,10 @@ pub(crate) mod tests {
             .await;
 
         let vnode = VirtualNode::from_index(1);
+        global_storage.start_epoch(epoch, HashSet::from_iter([1.into(), 2.into()]));
         for index in 0..kv_count {
-            epoch.inc_epoch();
             let next_epoch = epoch.next_epoch();
+            global_storage.start_epoch(next_epoch, HashSet::from_iter([1.into(), 2.into()]));
             if index == 0 {
                 storage_1.init_for_test(epoch).await.unwrap();
                 storage_2.init_for_test(epoch).await.unwrap();
@@ -755,6 +761,7 @@ pub(crate) mod tests {
 
             let res = global_storage.seal_and_sync_epoch(epoch).await.unwrap();
             hummock_meta_client.commit_epoch(epoch, res).await.unwrap();
+            epoch.inc_epoch();
         }
 
         // Mimic dropping table
@@ -838,7 +845,6 @@ pub(crate) mod tests {
             .unwrap();
         assert!(compact_task.is_none());
 
-        epoch.inc_epoch();
         // to update version for hummock_storage
         global_storage.wait_version(version).await;
 
@@ -921,12 +927,14 @@ pub(crate) mod tests {
         let vnode = VirtualNode::from_index(1);
         let mut epoch_set = BTreeSet::new();
 
+        storage.start_epoch(epoch, HashSet::from_iter([existing_table_id.into()]));
+
         let mut local = storage
             .new_local(NewLocalOptions::for_test(existing_table_id.into()))
             .await;
         for i in 0..kv_count {
-            epoch += millisec_interval_epoch;
             let next_epoch = epoch + millisec_interval_epoch;
+            storage.start_epoch(next_epoch, HashSet::from_iter([existing_table_id.into()]));
             if i == 0 {
                 local.init_for_test(epoch).await.unwrap();
             }
@@ -944,6 +952,7 @@ pub(crate) mod tests {
 
             let res = storage.seal_and_sync_epoch(epoch).await.unwrap();
             hummock_meta_client.commit_epoch(epoch, res).await.unwrap();
+            epoch += millisec_interval_epoch;
         }
 
         let manual_compcation_option = ManualCompactionOption {
@@ -969,7 +978,10 @@ pub(crate) mod tests {
                 retention_seconds: Some(retention_seconds_expire_second),
             },
         )]);
-        compact_task.current_epoch_time = epoch;
+        compact_task.current_epoch_time = hummock_manager_ref
+            .get_current_version()
+            .await
+            .max_committed_epoch;
 
         // assert compact_task
         assert_eq!(
@@ -1123,12 +1135,13 @@ pub(crate) mod tests {
         let mut local = storage
             .new_local(NewLocalOptions::for_test(existing_table_id.into()))
             .await;
+        storage.start_epoch(epoch, HashSet::from_iter([existing_table_id.into()]));
         for i in 0..kv_count {
-            epoch += millisec_interval_epoch;
             if i == 0 {
                 local.init_for_test(epoch).await.unwrap();
             }
             let next_epoch = epoch + millisec_interval_epoch;
+            storage.start_epoch(next_epoch, HashSet::from_iter([existing_table_id.into()]));
             epoch_set.insert(epoch);
 
             let ramdom_key = [key_prefix.as_ref(), &rand::thread_rng().gen::<[u8; 32]>()].concat();
@@ -1139,6 +1152,7 @@ pub(crate) mod tests {
             local.seal_current_epoch(next_epoch, SealCurrentEpochOptions::for_test());
             let res = storage.seal_and_sync_epoch(epoch).await.unwrap();
             hummock_meta_client.commit_epoch(epoch, res).await.unwrap();
+            epoch += millisec_interval_epoch;
         }
 
         let manual_compcation_option = ManualCompactionOption {
@@ -1166,7 +1180,10 @@ pub(crate) mod tests {
 
         let compaction_filter_flag = CompactionFilterFlag::STATE_CLEAN | CompactionFilterFlag::TTL;
         compact_task.compaction_filter_mask = compaction_filter_flag.bits();
-        compact_task.current_epoch_time = epoch;
+        compact_task.current_epoch_time = hummock_manager_ref
+            .get_current_version()
+            .await
+            .max_committed_epoch;
 
         // 3. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();

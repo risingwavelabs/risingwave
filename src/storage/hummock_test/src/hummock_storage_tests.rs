@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 // Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -101,6 +102,7 @@ async fn test_storage_basic() {
 
     // epoch 0 is reserved by storage service
     let epoch1 = test_epoch(1);
+    test_env.storage.start_epoch(epoch1, HashSet::from_iter([TEST_TABLE_ID]));
     hummock_storage.init_for_test(epoch1).await.unwrap();
 
     // Write the first batch.
@@ -165,6 +167,7 @@ async fn test_storage_basic() {
     assert_eq!(value, None);
 
     let epoch2 = epoch1.next_epoch();
+    test_env.storage.start_epoch(epoch2, HashSet::from_iter([TEST_TABLE_ID]));
     hummock_storage.seal_current_epoch(epoch2, SealCurrentEpochOptions::for_test());
     hummock_storage
         .ingest_batch(
@@ -197,6 +200,7 @@ async fn test_storage_basic() {
 
     // Write the third batch.
     let epoch3 = epoch2.next_epoch();
+    test_env.storage.start_epoch(epoch3, HashSet::from_iter([TEST_TABLE_ID]));
     hummock_storage.seal_current_epoch(epoch3, SealCurrentEpochOptions::for_test());
     hummock_storage
         .ingest_batch(
@@ -457,6 +461,7 @@ async fn test_state_store_sync() {
 
     let base_epoch = read_version.read().committed().max_committed_epoch();
     let epoch1 = test_epoch(base_epoch.next_epoch());
+    test_env.storage.start_epoch(epoch1, HashSet::from_iter([TEST_TABLE_ID]));
     hummock_storage.init_for_test(epoch1).await.unwrap();
 
     // ingest 16B batch
@@ -511,6 +516,7 @@ async fn test_state_store_sync() {
         .unwrap();
 
     let epoch2 = epoch1.next_epoch();
+    test_env.storage.start_epoch(epoch2, HashSet::from_iter([TEST_TABLE_ID]));
     hummock_storage.seal_current_epoch(epoch2, SealCurrentEpochOptions::for_test());
 
     // ingest more 8B then will trigger a sync behind the scene
@@ -531,6 +537,7 @@ async fn test_state_store_sync() {
         .unwrap();
 
     let epoch3 = epoch2.next_epoch();
+    test_env.storage.start_epoch(epoch3, HashSet::from_iter([TEST_TABLE_ID]));
     hummock_storage.seal_current_epoch(epoch3, SealCurrentEpochOptions::for_test());
 
     let res = test_env.storage.seal_and_sync_epoch(epoch1).await.unwrap();
@@ -809,6 +816,7 @@ async fn test_delete_get() {
         .max_committed_epoch();
 
     let epoch1 = initial_epoch.next_epoch();
+    test_env.storage.start_epoch(epoch1, HashSet::from_iter([TEST_TABLE_ID]));
 
     hummock_storage.init_for_test(epoch1).await.unwrap();
     let batch1 = vec![
@@ -833,6 +841,7 @@ async fn test_delete_get() {
         .unwrap();
 
     let epoch2 = epoch1.next_epoch();
+    test_env.storage.start_epoch(epoch2, HashSet::from_iter([TEST_TABLE_ID]));
     hummock_storage.seal_current_epoch(epoch2, SealCurrentEpochOptions::for_test());
     let res = test_env.storage.seal_and_sync_epoch(epoch1).await.unwrap();
     test_env
@@ -855,6 +864,7 @@ async fn test_delete_get() {
         )
         .await
         .unwrap();
+    test_env.storage.start_epoch(u64::MAX, HashSet::from_iter([TEST_TABLE_ID]));
     hummock_storage.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
     let res = test_env.storage.seal_and_sync_epoch(epoch2).await.unwrap();
     test_env
@@ -896,6 +906,7 @@ async fn test_multiple_epoch_sync() {
         .max_committed_epoch();
 
     let epoch1 = initial_epoch.next_epoch();
+    test_env.storage.start_epoch(epoch1, HashSet::from_iter([TEST_TABLE_ID]));
     hummock_storage.init_for_test(epoch1).await.unwrap();
     let batch1 = vec![
         (
@@ -919,6 +930,7 @@ async fn test_multiple_epoch_sync() {
         .unwrap();
 
     let epoch2 = epoch1.next_epoch();
+    test_env.storage.start_epoch(epoch2, HashSet::from_iter([TEST_TABLE_ID]));
     hummock_storage.seal_current_epoch(epoch2, SealCurrentEpochOptions::for_test());
     let batch2 = vec![(
         gen_key_from_str(VirtualNode::ZERO, "bb"),
@@ -936,6 +948,7 @@ async fn test_multiple_epoch_sync() {
         .unwrap();
 
     let epoch3 = epoch2.next_epoch();
+    test_env.storage.start_epoch(epoch3, HashSet::from_iter([TEST_TABLE_ID]));
     hummock_storage.seal_current_epoch(epoch3, SealCurrentEpochOptions::for_test());
     let batch3 = vec![
         (
@@ -1011,6 +1024,7 @@ async fn test_multiple_epoch_sync() {
     test_get().await;
 
     let epoch4 = epoch3.next_epoch();
+    test_env.storage.start_epoch(epoch4, HashSet::from_iter([TEST_TABLE_ID]));
     hummock_storage.seal_current_epoch(epoch4, SealCurrentEpochOptions::for_test());
     test_env.storage.seal_epoch(epoch1, false);
     let sync_result2 = test_env.storage.seal_and_sync_epoch(epoch2).await.unwrap();
@@ -1043,6 +1057,7 @@ async fn test_iter_with_min_epoch() {
         .await;
 
     let epoch1 = (31 * 1000) << 16;
+    test_env.storage.start_epoch(epoch1, HashSet::from_iter([TEST_TABLE_ID]));
 
     let gen_key = |index: usize| -> TableKey<Bytes> {
         gen_key_from_str(VirtualNode::ZERO, format!("\0\0key_{}", index).as_str())
@@ -1069,6 +1084,7 @@ async fn test_iter_with_min_epoch() {
         .unwrap();
 
     let epoch2 = (32 * 1000) << 16;
+    test_env.storage.start_epoch(epoch2, HashSet::from_iter([TEST_TABLE_ID]));
     hummock_storage.seal_current_epoch(epoch2, SealCurrentEpochOptions::for_test());
     // epoch 2 write
     let batch_epoch2: Vec<(TableKey<Bytes>, StorageValue)> = (20..30)
@@ -1087,6 +1103,7 @@ async fn test_iter_with_min_epoch() {
         .unwrap();
 
     let epoch3 = (33 * 1000) << 16;
+    test_env.storage.start_epoch(epoch3, HashSet::from_iter([TEST_TABLE_ID]));
     hummock_storage.seal_current_epoch(epoch3, SealCurrentEpochOptions::for_test());
 
     {
@@ -1279,6 +1296,7 @@ async fn test_hummock_version_reader() {
     let hummock_version_reader = test_env.storage.version_reader();
 
     let epoch1 = (31 * 1000) << 16;
+    test_env.storage.start_epoch(epoch1, HashSet::from_iter([TEST_TABLE_ID]));
 
     let gen_key = |index: usize| -> TableKey<Bytes> {
         gen_key_from_str(VirtualNode::ZERO, format!("\0\0key_{}", index).as_str())
@@ -1292,12 +1310,14 @@ async fn test_hummock_version_reader() {
         .collect();
 
     let epoch2 = (32 * 1000) << 16;
+    test_env.storage.start_epoch(epoch2, HashSet::from_iter([TEST_TABLE_ID]));
     // epoch 2 write
     let batch_epoch2: Vec<(TableKey<Bytes>, StorageValue)> = (20..30)
         .map(|index| (gen_key(index), StorageValue::new_put(gen_val(index))))
         .collect();
 
     let epoch3 = (33 * 1000) << 16;
+    test_env.storage.start_epoch(epoch3, HashSet::from_iter([TEST_TABLE_ID]));
     // epoch 3 write
     let batch_epoch3: Vec<(TableKey<Bytes>, StorageValue)> = (40..50)
         .map(|index| (gen_key(index), StorageValue::new_put(gen_val(index))))
@@ -1340,6 +1360,7 @@ async fn test_hummock_version_reader() {
             .unwrap();
 
         let epoch4 = (34 * 1000) << 16;
+        test_env.storage.start_epoch(epoch4, HashSet::from_iter([TEST_TABLE_ID]));
         hummock_storage.seal_current_epoch(epoch4, SealCurrentEpochOptions::for_test());
 
         {
@@ -1710,6 +1731,7 @@ async fn test_get_with_min_epoch() {
         .await;
 
     let epoch1 = (31 * 1000) << 16;
+    test_env.storage.start_epoch(epoch1, HashSet::from_iter([TEST_TABLE_ID]));
     hummock_storage.init_for_test(epoch1).await.unwrap();
 
     let gen_key = |index: usize| -> TableKey<Bytes> {
@@ -1735,6 +1757,7 @@ async fn test_get_with_min_epoch() {
         .unwrap();
 
     let epoch2 = (32 * 1000) << 16;
+    test_env.storage.start_epoch(epoch2, HashSet::from_iter([TEST_TABLE_ID]));
     hummock_storage.seal_current_epoch(epoch2, SealCurrentEpochOptions::for_test());
     // epoch 2 write
     let batch_epoch2: Vec<(TableKey<Bytes>, StorageValue)> = (20..30)
@@ -1752,6 +1775,7 @@ async fn test_get_with_min_epoch() {
         .await
         .unwrap();
 
+    test_env.storage.start_epoch(u64::MAX, HashSet::from_iter([TEST_TABLE_ID]));
     hummock_storage.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
 
     {
@@ -1969,6 +1993,7 @@ async fn test_table_watermark() {
     });
 
     let epoch1 = (31 * 1000) << 16;
+    test_env.storage.start_epoch(epoch1, HashSet::from_iter([TEST_TABLE_ID]));
     local1.init_for_test(epoch1).await.unwrap();
     local1.update_vnode_bitmap(vnode_bitmap1.clone());
     local2.init_for_test(epoch1).await.unwrap();
@@ -2057,6 +2082,7 @@ async fn test_table_watermark() {
     let watermark1 = 10;
 
     let epoch2 = (32 * 1000) << 16;
+    test_env.storage.start_epoch(epoch2, HashSet::from_iter([TEST_TABLE_ID]));
     for (local, vnode_bitmap) in [
         (&mut local1, vnode_bitmap1.clone()),
         (&mut local2, vnode_bitmap2.clone()),
@@ -2159,6 +2185,7 @@ async fn test_table_watermark() {
     let batch2_epoch2 = gen_batch(vnode2, epoch2_indexes());
 
     let epoch3 = (33 * 1000) << 16;
+    test_env.storage.start_epoch(epoch3, HashSet::from_iter([TEST_TABLE_ID]));
 
     for (local, batch) in [(&mut local1, batch1_epoch2), (&mut local2, batch2_epoch2)] {
         for (key, value) in batch {
@@ -2372,6 +2399,7 @@ async fn test_table_watermark() {
     let (mut local1, mut local2) = test_after_epoch2(local1, local2).await;
 
     let epoch4 = (34 * 1000) << 16;
+    test_env.storage.start_epoch(epoch4, HashSet::from_iter([TEST_TABLE_ID]));
 
     for (local, vnode_bitmap) in [
         (&mut local1, vnode_bitmap1.clone()),

@@ -497,6 +497,9 @@ impl ManagedBarrierState {
             .streaming_metrics
             .barrier_inflight_latency
             .start_timer();
+        if let Some(hummock) = self.state_store.as_hummock() {
+            hummock.start_epoch(barrier.epoch.curr, table_ids.clone());
+        }
         match self.epoch_barrier_state_map.get_mut(&barrier.epoch.prev) {
             Some(&mut BarrierState {
                 inner:
