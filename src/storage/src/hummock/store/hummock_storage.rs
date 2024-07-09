@@ -565,16 +565,14 @@ impl StateStore for HummockStorage {
 
     fn sync(&self, epoch: u64, table_ids: HashSet<TableId>) -> impl SyncFuture {
         let (tx, rx) = oneshot::channel();
-        self.hummock_event_sender
-            .send(HummockEvent::SyncEpoch {
-                new_sync_epoch: epoch,
-                sync_result_sender: tx,
-                table_ids,
-            })
-            .expect("should send success");
+        let _ = self.hummock_event_sender.send(HummockEvent::SyncEpoch {
+            new_sync_epoch: epoch,
+            sync_result_sender: tx,
+            table_ids,
+        });
         rx.map(|recv_result| {
             Ok(recv_result
-                .expect("should wait success")?
+                .map_err(|_| HummockError::other("failed to receive sync result"))??
                 .into_sync_result())
         })
     }
