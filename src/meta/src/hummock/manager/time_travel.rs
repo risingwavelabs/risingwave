@@ -47,7 +47,9 @@ impl HummockManager {
     pub(crate) fn sql_store(&self) -> Result<SqlMetaStore> {
         match self.env.meta_store() {
             MetaStoreImpl::Sql(sql_store) => Ok(sql_store),
-            _ => Err(anyhow!("time travel requires SQL meta store").into()),
+            _ => Err(Error::TimeTravel(anyhow!(
+                "time travel requires SQL meta store"
+            ))),
         }
     }
 
@@ -55,7 +57,15 @@ impl HummockManager {
         &self,
         epoch_watermark: HummockEpoch,
     ) -> Result<()> {
-        let sql_store = self.sql_store()?;
+        let sql_store = match self.sql_store() {
+            Ok(sql_store) => sql_store,
+            Err(e) => {
+                if !matches!(e, Error::TimeTravel(_)) {
+                    return Err(e);
+                }
+                return Ok(());
+            }
+        };
         let txn = sql_store.conn.begin().await?;
 
         let version_watermark = hummock_epoch_to_version::Entity::find()
@@ -217,15 +227,24 @@ impl HummockManager {
 
     pub(crate) async fn all_object_ids_in_time_travel(
         &self,
-    ) -> crate::hummock::error::Result<impl Iterator<Item = HummockSstableId>> {
-        let sql_store = self.sql_store()?;
+    ) -> Result<impl Iterator<Item = HummockSstableId>> {
         let object_ids: Vec<risingwave_meta_model_v2::HummockSstableObjectId> =
-            hummock_sstable_info::Entity::find()
-                .select_only()
-                .column(hummock_sstable_info::Column::ObjectId)
-                .into_tuple()
-                .all(&sql_store.conn)
-                .await?;
+            match self.sql_store() {
+                Ok(sql_store) => {
+                    hummock_sstable_info::Entity::find()
+                        .select_only()
+                        .column(hummock_sstable_info::Column::ObjectId)
+                        .into_tuple()
+                        .all(&sql_store.conn)
+                        .await?
+                }
+                Err(e) => {
+                    if !matches!(e, Error::TimeTravel(_)) {
+                        return Err(e);
+                    }
+                    vec![]
+                }
+            };
         let object_ids = object_ids
             .into_iter()
             .unique()
@@ -238,10 +257,7 @@ impl HummockManager {
     /// The version is retrieved from `hummock_epoch_to_version`, selecting the entry with the largest epoch that's lte `query_epoch`.
     ///
     /// The resulted version is complete, i.e. with correct `SstableInfo`.
-    pub async fn epoch_to_version(
-        &self,
-        query_epoch: HummockEpoch,
-    ) -> crate::hummock::error::Result<HummockVersion> {
+    pub async fn epoch_to_version(&self, query_epoch: HummockEpoch) -> Result<HummockVersion> {
         let sql_store = self.sql_store()?;
         let epoch_to_version = hummock_epoch_to_version::Entity::find()
             .filter(
