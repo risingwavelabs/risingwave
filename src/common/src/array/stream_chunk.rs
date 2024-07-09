@@ -525,6 +525,10 @@ impl OpRowMutRef<'_> {
 }
 
 impl StreamChunkMut {
+    pub fn capacity(&self) -> usize {
+        self.vis.len()
+    }
+
     pub fn vis(&self, i: usize) -> bool {
         self.vis.is_set(i)
     }
