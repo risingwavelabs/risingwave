@@ -1945,7 +1945,7 @@ impl DdlController {
         };
 
         // Map the column indices in the dispatchers with the given mapping.
-        let (downstream_fragments, downstream_actor_locations) = self
+        let (downstream_fragments, downstream_actor_location) = self
             .metadata_manager
             .get_downstream_chain_fragments(id)
             .await?;
@@ -1971,22 +1971,24 @@ impl DdlController {
                 fragment_graph,
                 original_table_fragment.fragment_id,
                 downstream_fragments,
-                downstream_actor_locations,
+                downstream_actor_location,
                 ddl_type,
             )?,
 
             TableJobType::SharedCdcSource => {
                 // get the upstream fragment which should be the cdc source
-                let (upstream_root_fragments, existing_actor_location) = self
+                let (upstream_root_fragments, upstream_actor_location) = self
                     .metadata_manager
                     .get_upstream_root_fragments(fragment_graph.dependent_table_ids())
                     .await?;
+
                 CompleteStreamFragmentGraph::with_upstreams_and_downstreams(
                     fragment_graph,
                     upstream_root_fragments,
+                    upstream_actor_location,
                     original_table_fragment.fragment_id,
                     downstream_fragments,
-                    existing_actor_location,
+                    downstream_actor_location,
                     ddl_type,
                 )?
             }
