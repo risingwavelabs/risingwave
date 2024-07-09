@@ -283,6 +283,8 @@ pub async fn rpc_serve_with_store(
 
     // Spawn and run the follower service if not the leader.
     // Watch the leader status and switch to the leader service when elected.
+    // TODO: the branch seems to be always hit since the default value of `is_leader` is false until
+    // the election is done (unless using `DummyElectionClient`).
     if !election_client.is_leader() {
         // The follower service can be shutdown separately if we're going to be the leader.
         let follower_shutdown = shutdown.child_token();
@@ -309,6 +311,7 @@ pub async fn rpc_serve_with_store(
             }
         }
 
+        tracing::info!("elected as leader, shutting down follower services");
         follower_shutdown.cancel();
         let _ = follower_handle.await;
     }
@@ -341,6 +344,8 @@ pub async fn start_service_as_election_follower(
     address_info: AddressInfo,
     election_client: ElectionClientRef,
 ) {
+    tracing::info!("starting follower services");
+
     let meta_member_srv = MetaMemberServiceImpl::new(election_client);
 
     let health_srv = HealthServiceImpl::new();
@@ -384,7 +389,8 @@ pub async fn start_service_as_election_leader(
     election_client: ElectionClientRef,
     shutdown: CancellationToken,
 ) -> MetaResult<()> {
-    tracing::info!("Defining leader services");
+    tracing::info!("starting leader services");
+
     let env = MetaSrvEnv::new(
         opts.clone(),
         init_system_params,
