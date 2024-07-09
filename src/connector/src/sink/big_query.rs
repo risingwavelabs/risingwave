@@ -52,7 +52,7 @@ use serde_derive::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
 use simd_json::prelude::ArrayTrait;
 use tokio::sync::mpsc;
-use tonic::{async_trait, Response, Status, Streaming};
+use tonic::{async_trait, Response, Status};
 use url::Url;
 use uuid::Uuid;
 use with_options::WithOptions;
@@ -705,7 +705,12 @@ impl BigQuerySinkWriter {
 
 #[try_stream(ok = (), error = SinkError)]
 pub async fn resp_to_stream(
-    resp_stream: impl Future<Output = std::result::Result<Response<Streaming<AppendRowsResponse>>, Status>>
+    resp_stream: impl Future<
+            Output = std::result::Result<
+                Response<google_cloud_gax::grpc::Streaming<AppendRowsResponse>>,
+                Status,
+            >,
+        >
         + 'static
         + Send,
 ) {
