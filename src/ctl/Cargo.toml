@@ -55,6 +55,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "signal",
     "fs",
 ] }
+tonic = { workspace = true }
 tracing = "0.1"
 uuid = { version = "1", features = ["v4"] }
 

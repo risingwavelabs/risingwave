@@ -86,7 +86,7 @@ mod upsert_parser;
 mod util;
 
 pub use debezium::DEBEZIUM_IGNORE_KEY;
-use risingwave_common::buffer::BitmapBuilder;
+use risingwave_common::bitmap::BitmapBuilder;
 pub use unified::{AccessError, AccessResult};
 
 /// A builder for building a [`StreamChunk`] from [`SourceColumnDesc`].
@@ -842,6 +842,7 @@ async fn into_chunk_stream_inner<P: ByteStreamSourceParser>(
     }
 }
 
+/// Parses raw bytes into a specific format (avro, json, protobuf, ...), and then builds an [`Access`] from the parsed data.
 pub trait AccessBuilder {
     async fn generate_accessor(&mut self, payload: Vec<u8>) -> ConnectorResult<AccessImpl<'_>>;
 }

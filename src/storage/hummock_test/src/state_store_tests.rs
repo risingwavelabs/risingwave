@@ -21,7 +21,7 @@ use expect_test::expect;
 use foyer::CacheContext;
 use futures::{pin_mut, StreamExt};
 use itertools::Itertools;
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::hash::table_distribution::TableDistribution;
 use risingwave_common::hash::VirtualNode;

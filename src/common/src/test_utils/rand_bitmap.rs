@@ -16,7 +16,7 @@ use itertools::Itertools;
 use rand::seq::SliceRandom;
 use rand::SeedableRng;
 
-use crate::buffer::{Bitmap, BitmapBuilder};
+use crate::bitmap::{Bitmap, BitmapBuilder};
 
 pub fn gen_rand_bitmap(num_bits: usize, count_ones: usize, seed: u64) -> Bitmap {
     if count_ones == num_bits {

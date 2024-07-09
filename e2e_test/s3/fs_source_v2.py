@@ -29,6 +29,7 @@ def format_json(data):
         for file in data
     ]
 
+
 def format_csv(data, with_header):
     csv_files = []
 

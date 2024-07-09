@@ -27,6 +27,7 @@ use risingwave_pb::catalog::{
 use risingwave_pb::data::DataType;
 use risingwave_pb::user::grant_privilege::PbObject;
 
+use super::utils::{get_refed_secret_ids_from_sink, get_refed_secret_ids_from_source};
 use super::{
     ConnectionId, DatabaseId, FunctionId, RelationId, SchemaId, SecretId, SinkId, SourceId,
     SubscriptionId, ViewId,
@@ -112,7 +113,7 @@ impl DatabaseManager {
 
         let mut relation_ref_count = HashMap::new();
         let mut connection_ref_count = HashMap::new();
-        let mut _secret_ref_count = HashMap::new();
+        let mut secret_ref_count = HashMap::new();
 
         let databases = BTreeMap::from_iter(
             databases
@@ -126,12 +127,20 @@ impl DatabaseManager {
             }
             (source.id, source)
         }));
+        for source in sources.values() {
+            for secret_id in get_refed_secret_ids_from_source(source)? {
+                *secret_ref_count.entry(secret_id).or_default() += 1;
+            }
+        }
         let sinks = BTreeMap::from_iter(sinks.into_iter().map(|sink| {
             for depend_relation_id in &sink.dependent_relations {
                 *relation_ref_count.entry(*depend_relation_id).or_default() += 1;
             }
             if let Some(connection_id) = sink.connection_id {
                 *connection_ref_count.entry(connection_id).or_default() += 1;
+            }
+            for secret_id in get_refed_secret_ids_from_sink(&sink) {
+                *secret_ref_count.entry(secret_id).or_default() += 1;
             }
             (sink.id, sink)
         }));
@@ -174,7 +183,7 @@ impl DatabaseManager {
             relation_ref_count,
             connection_ref_count,
             secrets,
-            secret_ref_count: _secret_ref_count,
+            secret_ref_count,
             in_progress_creation_tracker: HashSet::default(),
             in_progress_creation_streaming_job: HashMap::default(),
             in_progress_creating_tables: HashMap::default(),
@@ -185,14 +194,7 @@ impl DatabaseManager {
         (
             self.databases.values().cloned().collect_vec(),
             self.schemas.values().cloned().collect_vec(),
-            self.tables
-                .values()
-                .filter(|t| {
-                    t.stream_job_status == PbStreamJobStatus::Unspecified as i32
-                        || t.stream_job_status == PbStreamJobStatus::Created as i32
-                })
-                .cloned()
-                .collect_vec(),
+            self.tables.values().cloned().collect_vec(),
             self.sources.values().cloned().collect_vec(),
             self.sinks
                 .values()
@@ -351,6 +353,10 @@ impl DatabaseManager {
 
     pub fn list_tables(&self) -> Vec<Table> {
         self.tables.values().cloned().collect_vec()
+    }
+
+    pub fn list_secrets(&self) -> Vec<Secret> {
+        self.secrets.values().cloned().collect_vec()
     }
 
     pub fn get_table(&self, table_id: TableId) -> Option<&Table> {

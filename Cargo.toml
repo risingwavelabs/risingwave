@@ -77,7 +77,7 @@ license = "Apache-2.0"
 repository = "https://github.com/risingwavelabs/risingwave"
 
 [workspace.dependencies]
-foyer = { version = "0.9.4", features = ["nightly"] }
+foyer = { version = "0.10.0", features = ["nightly", "mtrace"] }
 apache-avro = { git = "https://github.com/risingwavelabs/avro", rev = "25113ba88234a9ae23296e981d8302c290fdaa4b", features = [
     "snappy",
     "zstandard",
@@ -178,10 +178,10 @@ tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git"
     "profiling",
     "stats",
 ], rev = "64a2d9" }
-opentelemetry = "0.21"
-opentelemetry-otlp = "0.14"
-opentelemetry_sdk = { version = "0.21", default-features = false }
-opentelemetry-semantic-conventions = "0.13"
+opentelemetry = "0.23"
+opentelemetry-otlp = "0.16"
+opentelemetry_sdk = { version = "0.23", default-features = false }
+opentelemetry-semantic-conventions = "0.15"
 parking_lot = { version = "0.12", features = [
     "arc_lock",
     "deadlock_detection",
@@ -194,7 +194,7 @@ sea-orm = { version = "0.12.14", features = [
 ] }
 sqlx = "0.7"
 tokio-util = "0.7"
-tracing-opentelemetry = "0.22"
+tracing-opentelemetry = "0.24"
 rand = { version = "0.8", features = ["small_rng"] }
 risingwave_backup = { path = "./src/storage/backup" }
 risingwave_batch = { path = "./src/batch" }
