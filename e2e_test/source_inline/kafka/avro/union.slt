@@ -98,3 +98,78 @@ Tracking issue: https://github.com/risingwavelabs/risingwave/issues/17632
 # Email
 # Fax
 # Fax
+
+
+
+system ok
+rpk topic delete 'avro-union-simple' || true; \
+(rpk sr subject delete 'avro-union-simple-value' && rpk sr subject delete 'avro-union-simple-value' --permanent) || true;
+rpk topic create avro-union-simple
+
+system ok
+sr_register avro-union-simple-value '
+{
+  "type": "record",
+  "name": "Root",
+  "fields": [
+    {
+      "name": "unionType",
+      "type": ["int", "string", "null", "boolean"]
+    }
+  ]
+}
+'
+
+system ok
+cat<<EOF | rpk topic produce avro-union-simple --schema-id=topic
+{"unionType": {"int":1}}
+{"unionType": {"string":"2"}}
+{"unionType": {"boolean": true}}
+{"unionType": null}
+EOF
+
+statement ok
+create source avro_union
+WITH (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'avro-union-simple'
+)
+FORMAT PLAIN ENCODE AVRO (
+    schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}'
+);
+
+
+query ? rowsort
+select * from avro_union
+----
+(,,t)
+(,2,)
+(1,,)
+NULL
+
+# Demonstrate how to access union variants (struct fields) below:
+# Note that we need to use quotes.
+
+query ? rowsort
+select ("unionType")."string" from avro_union;
+----
+2
+NULL
+NULL
+NULL
+
+# To output the union’s tag (i.e. case in protobuf), a case-when can be used.
+query ? rowsort
+select
+case
+  when ("unionType")."int" is not null then 'int'
+  when ("unionType")."string" is not null then 'string'
+  when ("unionType")."boolean"  is not null then 'boolean'
+  else null -- optional
+end
+from avro_union;
+----
+NULL
+boolean
+int
+string
