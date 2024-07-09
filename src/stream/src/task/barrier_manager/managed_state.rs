@@ -50,7 +50,8 @@ struct IssuedState {
 
     pub barrier_inflight_latency: HistogramTimer,
 
-    pub table_ids: HashSet<TableId>,
+    /// Only be `Some(_)` when `kind` is `Checkpoint`
+    pub table_ids: Option<HashSet<TableId>>,
 
     pub kind: BarrierKind,
 }
@@ -199,6 +200,8 @@ pub(super) struct ManagedBarrierState {
     /// The key is `prev_epoch`, and the first value is `curr_epoch`
     epoch_barrier_state_map: BTreeMap<u64, BarrierState>,
 
+    prev_barrier_table_ids: HashSet<TableId>,
+
     /// Record the progress updates of creating mviews for each epoch of concurrent checkpoints.
     pub(super) create_mview_progress: HashMap<u64, HashMap<ActorId, BackfillState>>,
 
@@ -231,6 +234,7 @@ impl ManagedBarrierState {
     ) -> Self {
         Self {
             epoch_barrier_state_map: BTreeMap::default(),
+            prev_barrier_table_ids: HashSet::new(),
             create_mview_progress: Default::default(),
             state_store,
             streaming_metrics,
@@ -369,7 +373,7 @@ impl ManagedBarrierState {
                             state_store,
                             &self.streaming_metrics,
                             prev_epoch,
-                            table_ids,
+                            table_ids.expect("should be Some on BarrierKind::Checkpoint"),
                         ))
                     })
                 }
@@ -500,6 +504,26 @@ impl ManagedBarrierState {
         if let Some(hummock) = self.state_store.as_hummock() {
             hummock.start_epoch(barrier.epoch.curr, table_ids.clone());
         }
+
+        let table_ids = match barrier.kind {
+            BarrierKind::Unspecified => {
+                unreachable!()
+            }
+            BarrierKind::Initial => {
+                assert!(
+                    self.prev_barrier_table_ids.is_empty(),
+                    "non empty table_ids at initial barrier: {:?}",
+                    self.prev_barrier_table_ids
+                );
+                None
+            }
+            BarrierKind::Barrier => {
+                assert_eq!(self.prev_barrier_table_ids, table_ids);
+                None
+            }
+            BarrierKind::Checkpoint => Some(replace(&mut self.prev_barrier_table_ids, table_ids)),
+        };
+
         match self.epoch_barrier_state_map.get_mut(&barrier.epoch.prev) {
             Some(&mut BarrierState {
                 inner:

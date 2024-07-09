@@ -915,10 +915,7 @@ impl UploaderData {
             .map(|task_id| {
                 let (sst, spill_table_ids) =
                     self.spilled_data.remove(task_id).expect("should exist");
-                assert!(
-                    spill_table_ids.is_subset(&table_ids),
-                    "spill_table_ids: {spill_table_ids:?}, table_ids: {table_ids:?}"
-                );
+                assert_eq!(spill_table_ids, table_ids);
                 sst
             })
             .collect();
