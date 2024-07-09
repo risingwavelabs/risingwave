@@ -19,7 +19,7 @@ use arrow_array::ArrayRef;
 use arrow_schema::{Field, Fields, Schema, SchemaRef};
 use risingwave_common::array::arrow::{FromArrow, ToArrow, UdfArrowConvert};
 use risingwave_common::array::Op;
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 
 use super::*;
 use crate::sig::{UdfImpl, UdfKind, UdfOptions};

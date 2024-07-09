@@ -26,7 +26,7 @@ use futures::stream::BoxStream;
 use futures::FutureExt;
 use itertools::Itertools;
 use risingwave_common::bail;
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::config::MetricLevel;
 use risingwave_pb::common::ActorInfo;
@@ -656,8 +656,15 @@ impl LocalBarrierWorker {
             };
             self.actor_manager_state.handles.insert(actor_id, handle);
 
-            if self.actor_manager.streaming_metrics.level >= MetricLevel::Debug {
-                tracing::info!("Tokio metrics are enabled because metrics_level >= Debug");
+            if self.actor_manager.streaming_metrics.level >= MetricLevel::Debug
+                || self
+                    .actor_manager
+                    .env
+                    .config()
+                    .developer
+                    .enable_actor_tokio_metrics
+            {
+                tracing::info!("Tokio metrics are enabled.");
                 let streaming_metrics = self.actor_manager.streaming_metrics.clone();
                 let actor_monitor_task = self.actor_manager.runtime.spawn(async move {
                     let metrics = streaming_metrics.new_actor_metrics(actor_id);

@@ -29,7 +29,7 @@ use itertools::Itertools;
 use more_asserts::{assert_ge, assert_gt};
 use prometheus::core::{AtomicU64, GenericGauge};
 use prometheus::{HistogramTimer, IntGauge};
-use risingwave_common::buffer::BitmapBuilder;
+use risingwave_common::bitmap::BitmapBuilder;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::must_match;
@@ -704,14 +704,14 @@ impl TableUnsyncData {
         };
         if synced_epoch_advanced {
             self.max_synced_epoch = Some(committed_epoch);
+            if let Some(min_syncing_epoch) = self.syncing_epochs.back() {
+                assert_gt!(*min_syncing_epoch, committed_epoch);
+            }
             self.assert_after_epoch(committed_epoch);
         }
     }
 
     fn assert_after_epoch(&self, epoch: HummockEpoch) {
-        if let Some(min_syncing_epoch) = self.syncing_epochs.back() {
-            assert_gt!(*min_syncing_epoch, epoch);
-        }
         self.instance_data
             .values()
             .for_each(|instance_data| instance_data.assert_after_epoch(epoch));
@@ -727,6 +727,10 @@ impl TableUnsyncData {
             .front()
             .cloned()
             .or(self.max_synced_epoch)
+    }
+
+    fn is_empty(&self) -> bool {
+        self.instance_data.is_empty() && self.syncing_epochs.is_empty()
     }
 }
 
@@ -827,7 +831,7 @@ impl UnsyncData {
             debug!(instance_id, "destroy instance");
             let table_data = self.table_data.get_mut(&table_id).expect("should exist");
             assert!(table_data.instance_data.remove(&instance_id).is_some());
-            if table_data.instance_data.is_empty() {
+            if table_data.is_empty() {
                 Some(self.table_data.remove(&table_id).expect("should exist"))
             } else {
                 None
@@ -851,11 +855,13 @@ impl UploaderData {
         let mut spilled_tasks = BTreeSet::new();
 
         let mut flush_payload = HashMap::new();
+        let mut table_ids_to_ack = HashSet::new();
         for (table_id, table_data) in &mut self.unsync_data.table_data {
             if !table_ids.contains(table_id) {
                 table_data.assert_after_epoch(epoch);
                 continue;
             }
+            table_ids_to_ack.insert(*table_id);
             let (unflushed_payload, table_watermarks, task_ids) = table_data.sync(epoch);
             for (instance_id, payload) in unflushed_payload {
                 if !payload.is_empty() {
@@ -915,6 +921,7 @@ impl UploaderData {
             SyncingData {
                 sync_epoch: epoch,
                 table_ids,
+                table_ids_to_ack,
                 remaining_uploading_tasks: uploading_tasks,
                 uploaded,
                 table_watermarks: all_table_watermarks,
@@ -940,6 +947,8 @@ impl UnsyncData {
 struct SyncingData {
     sync_epoch: HummockEpoch,
     table_ids: HashSet<TableId>,
+    /// Subset of `table_ids` that has existing instance
+    table_ids_to_ack: HashSet<TableId>,
     remaining_uploading_tasks: HashSet<UploadingTaskId>,
     // newer data at the front
     uploaded: VecDeque<Arc<StagingSstableInfo>>,
@@ -1231,7 +1240,8 @@ impl UploaderData {
             let (_, syncing_data) = self.syncing_data.pop_first().expect("non-empty");
             let SyncingData {
                 sync_epoch,
-                table_ids,
+                table_ids: _table_ids,
+                table_ids_to_ack,
                 remaining_uploading_tasks: _,
                 uploaded,
                 table_watermarks,
@@ -1242,9 +1252,12 @@ impl UploaderData {
                 .uploader_syncing_epoch_count
                 .set(self.syncing_data.len() as _);
 
-            for table_id in table_ids {
+            for table_id in table_ids_to_ack {
                 if let Some(table_data) = self.unsync_data.table_data.get_mut(&table_id) {
                     table_data.ack_synced(sync_epoch);
+                    if table_data.is_empty() {
+                        self.unsync_data.table_data.remove(&table_id);
+                    }
                 }
             }
 

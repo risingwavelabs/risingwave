@@ -79,6 +79,17 @@ def section_cluster_node(outer_panels):
                         )
                     ],
                 ),
+                panels.timeseries_percentage(
+                    "Node Memory relative",
+                    "Memory usage relative to k8s resource limit of container. Only works in K8s environment",
+                    [
+                        panels.target(
+                            "(avg by(namespace, pod) (container_memory_working_set_bytes{namespace=~\"$namespace\",pod=~\"$pod\",container=~\"$component\"})) / (  sum by(namespace, pod) (kube_pod_container_resource_limits{namespace=~\"$namespace\", pod=~\"$pod\", container=\"$component\", resource=\"memory\", unit=\"byte\"}))",
+                             "avg memory usage @ {{%s}} @ {{%s}}"
+                             % (COMPONENT_LABEL, NODE_LABEL),
+                        )
+                    ],
+                ),
                 panels.timeseries_cpu(
                     "Node CPU",
                     "The CPU usage of each RisingWave component.",
@@ -91,6 +102,17 @@ def section_cluster_node(outer_panels):
                         panels.target(
                             f"sum(rate({metric('process_cpu_seconds_total')}[$__rate_interval])) by ({COMPONENT_LABEL}, {NODE_LABEL}) / avg({metric('process_cpu_core_num')}) by ({COMPONENT_LABEL}, {NODE_LABEL}) > 0",
                             "cpu usage (avg per core) - {{%s}} @ {{%s}}"
+                            % (COMPONENT_LABEL, NODE_LABEL),
+                        ),
+                    ],
+                ),
+                panels.timeseries_cpu(
+                    "Node CPU relative",
+                    "CPU usage relative to k8s resource limit of container. Only works in K8s environment",
+                    [
+                        panels.target(
+                            "(sum(rate(container_cpu_usage_seconds_total{namespace=~\"$namespace\",container=~\"$component\",pod=~\"$pod\"}[$__rate_interval])) by (namespace, pod)) / (sum(kube_pod_container_resource_limits{namespace=~\"$namespace\",pod=~\"$pod\",container=~\"$component\", resource=\"cpu\"}) by (namespace, pod))",
+                            "cpu usage @ {{%s}} @ {{%s}}"
                             % (COMPONENT_LABEL, NODE_LABEL),
                         ),
                     ],
@@ -1210,21 +1232,17 @@ def section_streaming_actors(outer_panels):
                         ),
                     ],
                 ),
-                panels.timeseries_actor_latency(
-                    "Executor Barrier Align",
+                panels.timeseries_percentage(
+                    "Executor Barrier Align Per Second",
                     "",
                     [
-                        *quantile(
-                            lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate({metric('stream_barrier_align_duration_bucket')}[$__rate_interval])) by (le, executor, fragment_id, wait_side, {COMPONENT_LABEL}))",
-                                f"p{legend} - executor {{{{executor}}}} fragment {{{{fragment_id}}}} {{{{wait_side}}}} - {{{{{COMPONENT_LABEL}}}}}",
-                            ),
-                            [90, 99, 999, "max"],
-                        ),
                         panels.target(
-                            f"sum by(le, executor, fragment_id, wait_side, job)(rate({metric('stream_barrier_align_duration_sum')}[$__rate_interval])) / sum by(le,executor,fragment_id,wait_side,{COMPONENT_LABEL}) (rate({metric('stream_barrier_align_duration_count')}[$__rate_interval])) > 0",
-                            "avg - executor {{executor}} fragment {{fragment_id}} {{wait_side}} - {{%s}}"
-                            % COMPONENT_LABEL,
+                            f"avg(rate({metric('stream_barrier_align_duration_ns')}[$__rate_interval]) / 1000000000) by (fragment_id,wait_side, executor)",
+                            "fragment {{fragment_id}} {{wait_side}} {{executor}}",
+                        ),
+                        panels.target_hidden(
+                            f"rate({metric('stream_barrier_align_duration_ns')}[$__rate_interval]) / 1000000000",
+                            "actor {{actor_id}} fragment {{fragment_id}} {{wait_side}} {{executor}}",
                         ),
                     ],
                 ),
@@ -2856,6 +2874,26 @@ def section_hummock_tiered_cache(outer_panels):
                         panels.target(
                             f"sum(rate({metric('refill_total', block_refill_success_filter)}[$__rate_interval])) by ({NODE_LABEL}) / sum(rate({metric('refill_total', block_refill_unfiltered_filter)}[$__rate_interval])) by ({NODE_LABEL}) >= 0",
                             "block refill ratio @ {{%s}}" % NODE_LABEL,
+                        ),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "Recent Filter Size",
+                    "Item numbers of the recent filter.",
+                    [
+                        panels.target(
+                            f"sum({metric('recent_filter_items')}) by ({NODE_LABEL})",
+                            "items @ {{%s}}" % NODE_LABEL,
+                        ),
+                    ],
+                ),
+                panels.timeseries_ops(
+                    "Recent Filter Ops",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('recent_filter_ops')}[$__rate_interval])) by (op, {NODE_LABEL})",
+                            "recent filter {{op}} @ {{%s}}" % NODE_LABEL,
                         ),
                     ],
                 ),

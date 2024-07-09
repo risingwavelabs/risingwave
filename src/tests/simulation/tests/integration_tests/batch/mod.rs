@@ -18,6 +18,7 @@ use std::io::Write;
 
 use clap::Parser;
 use itertools::Itertools;
+use risingwave_common::util::tokio_util::sync::CancellationToken;
 use risingwave_simulation::cluster::{Cluster, ConfigPath, Configuration, Session};
 use tokio::time::Duration;
 
@@ -44,7 +45,7 @@ fn create_compute_node(cluster: &Cluster, idx: usize, role: &str) {
         .name(format!("compute-{idx}"))
         .ip([192, 168, 3, idx as u8].into())
         .cores(config.compute_node_cores)
-        .init(move || risingwave_compute::start(opts.clone()))
+        .init(move || risingwave_compute::start(opts.clone(), CancellationToken::new()))
         .build();
 }
 

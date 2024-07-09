@@ -27,7 +27,7 @@ use risingwave_common::util::value_encoding::DatumToProtoExt;
 use risingwave_expr::aggregate::{agg_kinds, AggKind};
 use risingwave_expr::sig::{FuncBuilder, FUNCTION_REGISTRY};
 use risingwave_pb::expr::{PbAggCall, PbConstant};
-use risingwave_pb::stream_plan::{agg_call_state, AggCallState as AggCallStatePb};
+use risingwave_pb::stream_plan::{agg_call_state, AggCallState as PbAggCallState};
 
 use super::super::utils::TableCatalogBuilder;
 use super::{impl_distill_unit_from_fields, stream, GenericPlanNode, GenericPlanRef};
@@ -229,8 +229,8 @@ pub enum AggCallState {
 }
 
 impl AggCallState {
-    pub fn into_prost(self, state: &mut BuildFragmentGraphState) -> AggCallStatePb {
-        AggCallStatePb {
+    pub fn into_prost(self, state: &mut BuildFragmentGraphState) -> PbAggCallState {
+        PbAggCallState {
             inner: Some(match self {
                 AggCallState::Value => {
                     agg_call_state::Inner::ValueState(agg_call_state::ValueState {})

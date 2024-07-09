@@ -105,6 +105,14 @@ pub enum Relation {
         on_delete = "Cascade"
     )]
     SelfRef1,
+    #[sea_orm(
+        belongs_to = "super::database::Entity",
+        from = "Column::DatabaseId",
+        to = "super::database::Column::DatabaseId",
+        on_update = "NoAction",
+        on_delete = "NoAction"
+    )]
+    Database2,
     #[sea_orm(has_many = "super::schema::Entity")]
     Schema,
     #[sea_orm(has_many = "super::sink::Entity")]

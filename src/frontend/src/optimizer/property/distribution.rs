@@ -53,7 +53,7 @@ use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
 use risingwave_common::catalog::{FieldDisplay, Schema, TableId};
 use risingwave_common::hash::WorkerSlotId;
 use risingwave_pb::batch_plan::exchange_info::{
-    ConsistentHashInfo, Distribution as DistributionPb, DistributionMode, HashInfo,
+    ConsistentHashInfo, Distribution as PbDistribution, DistributionMode, HashInfo,
 };
 use risingwave_pb::batch_plan::ExchangeInfo;
 
@@ -131,7 +131,7 @@ impl Distribution {
                         !key.is_empty(),
                         "hash key should not be empty, use `Single` instead"
                     );
-                    Some(DistributionPb::HashInfo(HashInfo {
+                    Some(PbDistribution::HashInfo(HashInfo {
                         output_count,
                         key: key.iter().map(|num| *num as u32).collect(),
                     }))
@@ -154,7 +154,7 @@ impl Distribution {
                         .map(|(i, worker_slot_id)| (worker_slot_id, i as u32))
                         .collect();
 
-                    Some(DistributionPb::ConsistentHashInfo(ConsistentHashInfo {
+                    Some(PbDistribution::ConsistentHashInfo(ConsistentHashInfo {
                         vmap: vnode_mapping
                             .iter()
                             .map(|id| worker_slot_to_id_map[&id])
@@ -206,7 +206,7 @@ impl Distribution {
     fn get_fragment_id(catalog_reader: &CatalogReader, table_id: &TableId) -> Result<FragmentId> {
         catalog_reader
             .read_guard()
-            .get_table_by_id(table_id)
+            .get_any_table_by_id(table_id)
             .map(|table| table.fragment_id)
             .map_err(Into::into)
     }

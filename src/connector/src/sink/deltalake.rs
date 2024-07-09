@@ -29,7 +29,7 @@ use deltalake::DeltaTable;
 use risingwave_common::array::arrow::DeltaLakeConvert;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use risingwave_common::types::DataType;
@@ -379,6 +379,11 @@ impl Sink for DeltaLakeSink {
                     field.data_type
                 )));
             }
+        }
+        if self.config.common.commit_checkpoint_interval == Some(0) {
+            return Err(SinkError::Config(anyhow!(
+                "commit_checkpoint_interval must be greater than 0"
+            )));
         }
         Ok(())
     }

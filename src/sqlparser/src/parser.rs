@@ -30,7 +30,9 @@ use winnow::{PResult, Parser as _};
 use crate::ast::*;
 use crate::keywords::{self, Keyword};
 use crate::parser_v2;
-use crate::parser_v2::{keyword, literal_i64, literal_uint, single_quoted_string, ParserExt as _};
+use crate::parser_v2::{
+    dollar_quoted_string, keyword, literal_i64, literal_uint, single_quoted_string, ParserExt as _,
+};
 use crate::tokenizer::*;
 
 pub(crate) const UPSTREAM_SOURCE_KEY: &str = "connector";
@@ -3550,16 +3552,13 @@ impl Parser<'_> {
     }
 
     pub fn parse_function_definition(&mut self) -> PResult<FunctionDefinition> {
-        let peek_token = self.peek_token();
-        match peek_token.token {
-            Token::DollarQuotedString(value) => {
-                self.next_token();
-                Ok(FunctionDefinition::DoubleDollarDef(value.value))
-            }
-            _ => Ok(FunctionDefinition::SingleQuotedDef(
-                self.parse_literal_string()?,
-            )),
-        }
+        alt((
+            single_quoted_string.map(FunctionDefinition::SingleQuotedDef),
+            dollar_quoted_string.map(FunctionDefinition::DoubleDollarDef),
+            Self::parse_identifier.map(|i| FunctionDefinition::Identifier(i.value)),
+            fail.expect("function definition"),
+        ))
+        .parse_next(self)
     }
 
     /// Parse a literal string
@@ -3567,11 +3566,6 @@ impl Parser<'_> {
         let checkpoint = *self;
         let token = self.next_token();
         match token.token {
-            Token::Word(Word {
-                value,
-                keyword: Keyword::NoKeyword,
-                ..
-            }) => Ok(value),
             Token::SingleQuotedString(s) => Ok(s),
             _ => self.expected_at(checkpoint, "literal string"),
         }
@@ -3978,37 +3972,36 @@ impl Parser<'_> {
     /// Parse a CTE (`alias [( col1, col2, ... )] AS (subquery)`)
     fn parse_cte(&mut self) -> PResult<Cte> {
         let name = self.parse_identifier_non_reserved()?;
-
-        let mut cte = if self.parse_keyword(Keyword::AS) {
-            self.expect_token(&Token::LParen)?;
-            let query = self.parse_query()?;
-            self.expect_token(&Token::RParen)?;
+        let cte = if self.parse_keyword(Keyword::AS) {
+            let cte_inner = self.parse_cte_inner()?;
             let alias = TableAlias {
                 name,
                 columns: vec![],
             };
-            Cte {
-                alias,
-                query,
-                from: None,
-            }
+            Cte { alias, cte_inner }
         } else {
             let columns = self.parse_parenthesized_column_list(Optional)?;
             self.expect_keyword(Keyword::AS)?;
-            self.expect_token(&Token::LParen)?;
+            let cte_inner = self.parse_cte_inner()?;
+            let alias = TableAlias { name, columns };
+            Cte { alias, cte_inner }
+        };
+        Ok(cte)
+    }
+
+    fn parse_cte_inner(&mut self) -> PResult<CteInner> {
+        if let Ok(()) = self.expect_token(&Token::LParen) {
             let query = self.parse_query()?;
             self.expect_token(&Token::RParen)?;
-            let alias = TableAlias { name, columns };
-            Cte {
-                alias,
-                query,
-                from: None,
+            Ok(CteInner::Query(query))
+        } else {
+            let changelog = self.parse_identifier_non_reserved()?;
+            if changelog.to_string().to_lowercase() != "changelog" {
+                parser_err!("Expected 'changelog' but found '{}'", changelog);
             }
-        };
-        if self.parse_keyword(Keyword::FROM) {
-            cte.from = Some(self.parse_identifier()?);
+            self.expect_keyword(Keyword::FROM)?;
+            Ok(CteInner::ChangeLog(self.parse_identifier()?))
         }
-        Ok(cte)
     }
 
     /// Parse a "query body", which is an expression with roughly the

@@ -175,7 +175,10 @@ pub enum MetaBackend {
     #[default]
     Mem,
     Etcd,
-    Sql,
+    Sql, // keep for backward compatibility
+    Sqlite,
+    Postgres,
+    Mysql,
 }
 
 /// The section `[meta]` in `risingwave.toml`.
@@ -848,6 +851,9 @@ pub struct FileCacheConfig {
     #[serde(default = "default::file_cache::compression")]
     pub compression: String,
 
+    #[serde(default = "default::file_cache::flush_buffer_threshold_mb")]
+    pub flush_buffer_threshold_mb: Option<usize>,
+
     #[serde(default, flatten)]
     #[config_doc(omitted)]
     pub unrecognized: Unrecognized<Self>,
@@ -991,6 +997,10 @@ pub struct StreamingDeveloperConfig {
     /// If number of hash join matches exceeds this threshold number,
     /// it will be logged.
     pub high_join_amplification_threshold: usize,
+
+    /// Actor tokio metrics is enabled if `enable_actor_tokio_metrics` is set or metrics level >= Debug.
+    #[serde(default = "default::developer::enable_actor_tokio_metrics")]
+    pub enable_actor_tokio_metrics: bool,
 }
 
 /// The subsections `[batch.developer]`.
@@ -1584,6 +1594,14 @@ pub mod default {
         pub fn table_info_statistic_history_times() -> usize {
             240
         }
+
+        pub fn block_file_cache_flush_buffer_threshold_mb() -> usize {
+            256
+        }
+
+        pub fn meta_file_cache_flush_buffer_threshold_mb() -> usize {
+            64
+        }
     }
 
     pub mod streaming {
@@ -1643,6 +1661,10 @@ pub mod default {
 
         pub fn compression() -> String {
             "none".to_string()
+        }
+
+        pub fn flush_buffer_threshold_mb() -> Option<usize> {
+            None
         }
     }
 
@@ -1801,6 +1823,10 @@ pub mod default {
 
         pub fn stream_high_join_amplification_threshold() -> usize {
             2048
+        }
+
+        pub fn enable_actor_tokio_metrics() -> bool {
+            false
         }
     }
 
@@ -2112,6 +2138,8 @@ pub struct StorageMemoryConfig {
     pub prefetch_buffer_capacity_mb: usize,
     pub block_cache_eviction_config: EvictionConfig,
     pub meta_cache_eviction_config: EvictionConfig,
+    pub block_file_cache_flush_buffer_threshold_mb: usize,
+    pub meta_file_cache_flush_buffer_threshold_mb: usize,
 }
 
 pub const MAX_META_CACHE_SHARD_BITS: usize = 4;
@@ -2223,6 +2251,17 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
                 }
             });
 
+    let block_file_cache_flush_buffer_threshold_mb = s
+        .storage
+        .data_file_cache
+        .flush_buffer_threshold_mb
+        .unwrap_or(default::storage::block_file_cache_flush_buffer_threshold_mb());
+    let meta_file_cache_flush_buffer_threshold_mb = s
+        .storage
+        .meta_file_cache
+        .flush_buffer_threshold_mb
+        .unwrap_or(default::storage::block_file_cache_flush_buffer_threshold_mb());
+
     StorageMemoryConfig {
         block_cache_capacity_mb,
         block_cache_shard_num,
@@ -2233,6 +2272,8 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
         prefetch_buffer_capacity_mb,
         block_cache_eviction_config,
         meta_cache_eviction_config,
+        block_file_cache_flush_buffer_threshold_mb,
+        meta_file_cache_flush_buffer_threshold_mb,
     }
 }
 
@@ -2278,6 +2319,13 @@ pub struct CompactionConfig {
 mod tests {
     use super::*;
 
+    fn default_config_for_docs() -> RwConfig {
+        let mut config = RwConfig::default();
+        // Set `license_key` to empty to avoid showing the test-only license key in the docs.
+        config.system.license_key = Some("".to_owned());
+        config
+    }
+
     /// This test ensures that `config/example.toml` is up-to-date with the default values specified
     /// in this file. Developer should run `./risedev generate-example-config` to update it if this
     /// test fails.
@@ -2287,7 +2335,7 @@ mod tests {
 # Check detailed comments in src/common/src/config.rs";
 
         let actual = expect_test::expect_file!["../../config/example.toml"];
-        let default = toml::to_string(&RwConfig::default()).expect("failed to serialize");
+        let default = toml::to_string(&default_config_for_docs()).expect("failed to serialize");
 
         let expected = format!("{HEADER}\n\n{default}");
         actual.assert_eq(&expected);
@@ -2328,7 +2376,7 @@ mod tests {
             .collect();
 
         let toml_doc: BTreeMap<String, toml::Value> =
-            toml::from_str(&toml::to_string(&RwConfig::default()).unwrap()).unwrap();
+            toml::from_str(&toml::to_string(&default_config_for_docs()).unwrap()).unwrap();
         toml_doc.into_iter().for_each(|(name, value)| {
             set_default_values("".to_string(), name, value, &mut configs);
         });

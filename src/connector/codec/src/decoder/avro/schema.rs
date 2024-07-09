@@ -74,6 +74,8 @@ impl MapHandling {
 
 /// This function expects resolved schema (no `Ref`).
 /// FIXME: require passing resolved schema here.
+/// TODO: change `map_handling` to some `Config`, and also unify debezium.
+/// TODO: use `ColumnDesc` in common instead of PB.
 pub fn avro_schema_to_column_descs(
     schema: &Schema,
     map_handling: Option<MapHandling>,

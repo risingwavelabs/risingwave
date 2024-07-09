@@ -269,8 +269,10 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             .collect_vec();
 
         // If pk is contained in join key.
-        let pk_contained_in_jk_l = is_subset(state_pk_indices_l, state_join_key_indices_l.clone());
-        let pk_contained_in_jk_r = is_subset(state_pk_indices_r, state_join_key_indices_r.clone());
+        let pk_contained_in_jk_l =
+            is_subset(state_pk_indices_l.clone(), state_join_key_indices_l.clone());
+        let pk_contained_in_jk_r =
+            is_subset(state_pk_indices_r.clone(), state_join_key_indices_r.clone());
 
         // check whether join key contains pk in both side
         let append_only_optimize = is_append_only && pk_contained_in_jk_l && pk_contained_in_jk_r;
@@ -3001,8 +3003,8 @@ mod tests {
             chunk,
             StreamChunk::from_pretty(
                 "  I I I I
-                U- 2 5 . .
-                U+ 2 5 2 7
+                U-  2 5 . .
+                U+  2 5 2 7
                 +  . . 4 8
                 +  . . 6 9"
             )
@@ -3017,6 +3019,67 @@ mod tests {
                 " I I I I
                 + . . 5 10
                 - . . 5 10"
+            )
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_streaming_hash_full_outer_join_update() -> StreamExecutorResult<()> {
+        let (mut tx_l, mut tx_r, mut hash_join) =
+            create_classical_executor::<{ JoinType::FullOuter }>(false, false, None).await;
+
+        // push the init barrier for left and right
+        tx_l.push_barrier(test_epoch(1), false);
+        tx_r.push_barrier(test_epoch(1), false);
+        hash_join.next_unwrap_ready_barrier()?;
+
+        tx_l.push_chunk(StreamChunk::from_pretty(
+            "  I I
+             + 1 1
+            ",
+        ));
+        let chunk = hash_join.next_unwrap_ready_chunk()?;
+        assert_eq!(
+            chunk,
+            StreamChunk::from_pretty(
+                " I I I I
+                + 1 1 . ."
+            )
+        );
+
+        tx_r.push_chunk(StreamChunk::from_pretty(
+            "  I I
+             + 1 1
+            ",
+        ));
+        let chunk = hash_join.next_unwrap_ready_chunk()?;
+
+        assert_eq!(
+            chunk,
+            StreamChunk::from_pretty(
+                " I I I I
+                U- 1 1 . .
+                U+ 1 1 1 1"
+            )
+        );
+
+        tx_l.push_chunk(StreamChunk::from_pretty(
+            "   I I
+              - 1 1
+              + 1 2
+            ",
+        ));
+        let chunk = hash_join.next_unwrap_ready_chunk()?;
+        let chunk = chunk.compact();
+        assert_eq!(
+            chunk,
+            StreamChunk::from_pretty(
+                " I I I I
+                - 1 1 1 1
+                + 1 2 1 1
+                "
             )
         );
 
@@ -3093,8 +3156,8 @@ mod tests {
             chunk,
             StreamChunk::from_pretty(
                 "  I I I I
-                U- 2 5 . .
-                U+ 2 5 2 6
+                U-  2 5 . .
+                U+  2 5 2 6
                 +  . . 4 8
                 +  . . 3 4" /* regression test (#2420): 3 4 should be forwarded only once
                              * despite matching on eq join on 2

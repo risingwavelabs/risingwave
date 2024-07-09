@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::array::stream_chunk::StreamChunkMut;
 use risingwave_common::array::stream_chunk_builder::StreamChunkBuilder;
 use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::row::{OwnedRow, Row};
@@ -156,6 +157,48 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> JoinChunkBuilder
         }
     }
 
+    pub fn post_process(c: StreamChunk) -> StreamChunk {
+        let mut c = StreamChunkMut::from(c);
+
+        // NOTE(st1page): remove the pattern `UpdateDel(k, old), UpdateIns(k, NULL), UpdateDel(k, NULL),  UpdateIns(k, new)`
+        // to avoid this issue <https://github.com/risingwavelabs/risingwave/issues/17450>
+        let mut i = 2;
+        while i < c.capacity() {
+            if c.op(i - 1) == Op::UpdateInsert
+                && c.op(i) == Op::UpdateDelete
+                && c.row_ref(i) == c.row_ref(i - 1)
+            {
+                if c.op(i - 2) == Op::UpdateDelete && c.op(i + 1) == Op::UpdateInsert {
+                    c.set_op(i - 2, Op::Delete);
+                    c.set_vis(i - 1, false);
+                    c.set_vis(i, false);
+                    c.set_op(i + 1, Op::Insert);
+                    i += 3;
+                } else {
+                    debug_assert!(
+                        false,
+                        "unexpected Op sequences {:?}, {:?}, {:?}, {:?}",
+                        c.op(i - 2),
+                        c.op(i - 1),
+                        c.op(i),
+                        c.op(i + 1)
+                    );
+                    warn!(
+                        "unexpected Op sequences {:?}, {:?}, {:?}, {:?}",
+                        c.op(i - 2),
+                        c.op(i - 1),
+                        c.op(i),
+                        c.op(i + 1)
+                    );
+                    i += 1;
+                }
+            } else {
+                i += 1;
+            }
+        }
+        c.into()
+    }
+
     pub fn with_match_on_insert(
         &mut self,
         row: &RowRef<'_>,
@@ -166,6 +209,7 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> JoinChunkBuilder
             if matched_row.is_zero_degree() && only_forward_matched_side(T, SIDE) {
                 self.stream_chunk_builder
                     .append_row_matched(Op::Delete, &matched_row.row)
+                    .map(Self::post_process)
             } else {
                 None
             }
@@ -174,6 +218,7 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> JoinChunkBuilder
             if matched_row.is_zero_degree() && only_forward_matched_side(T, SIDE) {
                 self.stream_chunk_builder
                     .append_row_matched(Op::Insert, &matched_row.row)
+                    .map(Self::post_process)
             } else {
                 None
             }
@@ -191,10 +236,12 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> JoinChunkBuilder
             }
             self.stream_chunk_builder
                 .append_row(Op::UpdateInsert, row, &matched_row.row)
+                .map(Self::post_process)
         // Inner sides
         } else {
             self.stream_chunk_builder
                 .append_row(Op::Insert, row, &matched_row.row)
+                .map(Self::post_process)
         }
     }
 
@@ -208,6 +255,7 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> JoinChunkBuilder
             if matched_row.is_zero_degree() && only_forward_matched_side(T, SIDE) {
                 self.stream_chunk_builder
                     .append_row_matched(Op::Insert, &matched_row.row)
+                    .map(Self::post_process)
             } else {
                 None
             }
@@ -216,6 +264,7 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> JoinChunkBuilder
             if matched_row.is_zero_degree() && only_forward_matched_side(T, SIDE) {
                 self.stream_chunk_builder
                     .append_row_matched(Op::Delete, &matched_row.row)
+                    .map(Self::post_process)
             } else {
                 None
             }
@@ -232,6 +281,8 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> JoinChunkBuilder
             }
             self.stream_chunk_builder
                 .append_row_matched(Op::UpdateInsert, &matched_row.row)
+                .map(|c: StreamChunk| Self::post_process(c))
+
         // Inner sides
         } else {
             // concat with the matched_row and append the new
@@ -241,6 +292,7 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> JoinChunkBuilder
             // the assumption for U+ after U-.
             self.stream_chunk_builder
                 .append_row(Op::Delete, row, &matched_row.row)
+                .map(Self::post_process)
         }
     }
 
@@ -252,7 +304,9 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> JoinChunkBuilder
     ) -> Option<StreamChunk> {
         // if it's a semi join and the side needs to be maintained.
         if is_semi(T) && forward_exactly_once(T, SIDE) {
-            self.stream_chunk_builder.append_row_update(op, row)
+            self.stream_chunk_builder
+                .append_row_update(op, row)
+                .map(Self::post_process)
         } else {
             None
         }
@@ -262,7 +316,9 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> JoinChunkBuilder
     pub fn forward_if_not_matched(&mut self, op: Op, row: RowRef<'_>) -> Option<StreamChunk> {
         // if it's outer join or anti join and the side needs to be maintained.
         if (is_anti(T) && forward_exactly_once(T, SIDE)) || is_outer_side(T, SIDE) {
-            self.stream_chunk_builder.append_row_update(op, row)
+            self.stream_chunk_builder
+                .append_row_update(op, row)
+                .map(Self::post_process)
         } else {
             None
         }
@@ -270,6 +326,6 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> JoinChunkBuilder
 
     #[inline]
     pub fn take(&mut self) -> Option<StreamChunk> {
-        self.stream_chunk_builder.take()
+        self.stream_chunk_builder.take().map(Self::post_process)
     }
 }

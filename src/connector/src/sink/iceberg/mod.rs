@@ -28,6 +28,7 @@ use arrow_schema_iceberg::{
     DataType as ArrowDataType, Field as ArrowField, Fields, Schema as ArrowSchema, SchemaRef,
 };
 use async_trait::async_trait;
+use iceberg::io::{S3_ACCESS_KEY_ID, S3_ENDPOINT, S3_REGION, S3_SECRET_ACCESS_KEY};
 use iceberg::table::Table as TableV2;
 use iceberg::{Catalog as CatalogV2, TableIdent};
 use icelake::catalog::{
@@ -46,7 +47,7 @@ use itertools::Itertools;
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::bail;
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
@@ -307,8 +308,14 @@ impl IcebergConfig {
             iceberg_configs.insert(CATALOG_NAME.to_string(), self.catalog_name());
 
             if let Some(region) = &self.region {
+                // icelake
                 iceberg_configs.insert(
                     "iceberg.table.io.region".to_string(),
+                    region.clone().to_string(),
+                );
+                // iceberg-rust
+                iceberg_configs.insert(
+                    ("iceberg.table.io.".to_string() + S3_REGION).to_string(),
                     region.clone().to_string(),
                 );
             }
@@ -318,14 +325,31 @@ impl IcebergConfig {
                     "iceberg.table.io.endpoint".to_string(),
                     endpoint.clone().to_string(),
                 );
+
+                // iceberg-rust
+                iceberg_configs.insert(
+                    ("iceberg.table.io.".to_string() + S3_ENDPOINT).to_string(),
+                    endpoint.clone().to_string(),
+                );
             }
 
+            // icelake
             iceberg_configs.insert(
                 "iceberg.table.io.access_key_id".to_string(),
                 self.access_key.clone().to_string(),
             );
             iceberg_configs.insert(
                 "iceberg.table.io.secret_access_key".to_string(),
+                self.secret_key.clone().to_string(),
+            );
+
+            // iceberg-rust
+            iceberg_configs.insert(
+                ("iceberg.table.io.".to_string() + S3_ACCESS_KEY_ID).to_string(),
+                self.access_key.clone().to_string(),
+            );
+            iceberg_configs.insert(
+                ("iceberg.table.io.".to_string() + S3_SECRET_ACCESS_KEY).to_string(),
                 self.secret_key.clone().to_string(),
             );
 
@@ -384,6 +408,31 @@ impl IcebergConfig {
                 "s3.secret-access-key".to_string(),
                 self.secret_key.clone().to_string(),
             );
+
+            if matches!(self.catalog_type.as_deref(), Some("glue")) {
+                java_catalog_configs.insert(
+                    "client.credentials-provider".to_string(),
+                    "com.risingwave.connector.catalog.GlueCredentialProvider".to_string(),
+                );
+                // Use S3 ak/sk and region as glue ak/sk and region by default.
+                // TODO: use different ak/sk and region for s3 and glue.
+                java_catalog_configs.insert(
+                    "client.credentials-provider.glue.access-key-id".to_string(),
+                    self.access_key.clone().to_string(),
+                );
+                java_catalog_configs.insert(
+                    "client.credentials-provider.glue.secret-access-key".to_string(),
+                    self.secret_key.clone().to_string(),
+                );
+                if let Some(region) = &self.region {
+                    java_catalog_configs
+                        .insert("client.region".to_string(), region.clone().to_string());
+                    java_catalog_configs.insert(
+                        "glue.endpoint".to_string(),
+                        format!("https://glue.{}.amazonaws.com", region),
+                    );
+                }
+            }
         }
 
         Ok((base_catalog_config, java_catalog_configs))
@@ -396,12 +445,15 @@ impl IcebergConfig {
                 let catalog = load_catalog(&iceberg_configs).await?;
                 Ok(catalog)
             }
-            catalog_type if catalog_type == "hive" || catalog_type == "jdbc" => {
+            catalog_type
+                if catalog_type == "hive" || catalog_type == "jdbc" || catalog_type == "glue" =>
+            {
                 // Create java catalog
                 let (base_catalog_config, java_catalog_props) = self.build_jni_catalog_configs()?;
                 let catalog_impl = match catalog_type {
                     "hive" => "org.apache.iceberg.hive.HiveCatalog",
                     "jdbc" => "org.apache.iceberg.jdbc.JdbcCatalog",
+                    "glue" => "org.apache.iceberg.aws.glue.GlueCatalog",
                     _ => unreachable!(),
                 };
 
@@ -415,7 +467,7 @@ impl IcebergConfig {
             "mock" => Ok(Arc::new(MockCatalog {})),
             _ => {
                 bail!(
-                    "Unsupported catalog type: {}, only support `storage`, `rest`, `hive`, `jdbc`",
+                    "Unsupported catalog type: {}, only support `storage`, `rest`, `hive`, `jdbc`, `glue`",
                     self.catalog_type()
                 )
             }
@@ -470,12 +522,15 @@ impl IcebergConfig {
                 let catalog = iceberg_catalog_rest::RestCatalog::new(config).await?;
                 Ok(Arc::new(catalog))
             }
-            catalog_type if catalog_type == "hive" || catalog_type == "jdbc" => {
+            catalog_type
+                if catalog_type == "hive" || catalog_type == "jdbc" || catalog_type == "glue" =>
+            {
                 // Create java catalog
                 let (base_catalog_config, java_catalog_props) = self.build_jni_catalog_configs()?;
                 let catalog_impl = match catalog_type {
                     "hive" => "org.apache.iceberg.hive.HiveCatalog",
                     "jdbc" => "org.apache.iceberg.jdbc.JdbcCatalog",
+                    "glue" => "org.apache.iceberg.aws.glue.GlueCatalog",
                     _ => unreachable!(),
                 };
 
@@ -488,7 +543,7 @@ impl IcebergConfig {
             }
             _ => {
                 bail!(
-                    "Unsupported catalog type: {}, only support `storage`, `rest`, `hive`, `jdbc`",
+                    "Unsupported catalog type: {}, only support `storage`, `rest`, `hive`, `jdbc`, `glue`",
                     self.catalog_type()
                 )
             }

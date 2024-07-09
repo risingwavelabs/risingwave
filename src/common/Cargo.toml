@@ -87,6 +87,7 @@ risingwave_common_estimate_size = { workspace = true }
 risingwave_common_metrics = { path = "./metrics" }
 risingwave_common_proc_macro = { workspace = true }
 risingwave_error = { workspace = true }
+risingwave_license = { workspace = true }
 risingwave_pb = { workspace = true }
 rust_decimal = { version = "1", features = ["db-postgres", "maths"] }
 rw_iter_util = { workspace = true }
@@ -116,6 +117,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "signal",
 ] }
 tokio-retry = "0.3"
+tokio-util = { workspace = true }
 toml = "0.8"
 tracing = "0.1"
 tracing-futures = { version = "0.2", features = ["futures-03"] }

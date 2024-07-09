@@ -153,7 +153,12 @@ impl QueryRewriter<'_> {
     fn visit_query(&self, query: &mut Query) {
         if let Some(with) = &mut query.with {
             for cte_table in &mut with.cte_tables {
-                self.visit_query(&mut cte_table.query);
+                match &mut cte_table.cte_inner {
+                    risingwave_sqlparser::ast::CteInner::Query(query) => self.visit_query(query),
+                    risingwave_sqlparser::ast::CteInner::ChangeLog(from) => {
+                        *from = Ident::new_unchecked(self.to)
+                    }
+                }
             }
         }
         self.visit_set_expr(&mut query.body);
