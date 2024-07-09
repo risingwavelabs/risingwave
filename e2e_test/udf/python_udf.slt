@@ -263,10 +263,15 @@ def median(values):
         return values[n // 2]
 $$;
 
-query I
+query F
 select aggregate:median(x) from (values (1), (2), (3), (4), (5)) as t(x);
 ----
 3
+
+query F
+select aggregate:median(x) from (values (4), (3), (2), (1)) as t(x);
+----
+2.5
 
 statement ok
 drop function median;
