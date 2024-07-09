@@ -461,6 +461,8 @@ struct SyncDataBuilder {
     spilled_data: SpilledData,
 
     table_watermarks: HashMap<TableId, TableWatermarks>,
+
+    table_ids_to_ack: HashSet<TableId>,
 }
 
 impl SyncDataBuilder {
@@ -800,10 +802,7 @@ impl TableUnsyncData {
     }
 
     fn ack_synced(&mut self, sync_epoch: HummockEpoch) {
-        let min_sync_epoch = self
-            .syncing_epochs
-            .pop_back()
-            .unwrap_or_else(|| panic!("should exist: {}", self.table_id.table_id));
+        let min_sync_epoch = self.syncing_epochs.pop_back().expect("should exist");
         assert_eq!(sync_epoch, min_sync_epoch);
         self.max_synced_epoch = Some(sync_epoch);
     }
@@ -970,11 +969,13 @@ impl UnsyncData {
         }
 
         let mut flush_payload = HashMap::new();
+        let mut table_ids_to_ack = HashSet::new();
         for (table_id, table_data) in &mut self.table_data {
             if !table_ids.contains(table_id) {
                 table_data.assert_after_epoch(epoch);
                 continue;
             }
+            table_ids_to_ack.insert(*table_id);
             let (unflushed_payload, table_watermarks) = table_data.sync(epoch);
             for (instance_id, payload) in unflushed_payload {
                 if !payload.is_empty() {
@@ -986,6 +987,7 @@ impl UnsyncData {
             }
         }
         sync_data.flush(context, flush_payload);
+        sync_data.table_ids_to_ack = table_ids_to_ack;
         sync_data
     }
 
@@ -1002,6 +1004,8 @@ impl UnsyncData {
 struct SyncingData {
     sync_epoch: HummockEpoch,
     table_ids: HashSet<TableId>,
+    /// Subset of `table_ids` that has existing instance
+    table_ids_to_ack: HashSet<TableId>,
     // task of newer data at the front
     uploading_tasks: VecDeque<UploadingTask>,
     // newer data at the front
@@ -1191,12 +1195,14 @@ impl HummockUploader {
                     uploaded_data,
                 },
             table_watermarks,
-            ..
+            table_ids_to_ack,
+            epochs: _,
         } = sync_data;
 
         data.syncing_data.push_front(SyncingData {
             sync_epoch: epoch,
             table_ids,
+            table_ids_to_ack,
             uploading_tasks,
             uploaded: uploaded_data,
             table_watermarks,
@@ -1328,7 +1334,8 @@ impl UploaderData {
                 let syncing_data = self.syncing_data.pop_back().expect("non-empty");
                 let SyncingData {
                     sync_epoch,
-                    table_ids,
+                    table_ids: _,
+                    table_ids_to_ack,
                     uploading_tasks,
                     uploaded,
                     table_watermarks,
@@ -1339,7 +1346,7 @@ impl UploaderData {
                     .stats
                     .uploader_syncing_epoch_count
                     .set(self.syncing_data.len() as _);
-                for table_id in table_ids {
+                for table_id in table_ids_to_ack {
                     if let Some(table_data) = self.unsync_data.table_data.get_mut(&table_id) {
                         table_data.ack_synced(sync_epoch);
                         if table_data.is_empty() {
