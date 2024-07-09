@@ -2272,8 +2272,8 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
         prefetch_buffer_capacity_mb,
         block_cache_eviction_config,
         meta_cache_eviction_config,
-        meta_file_cache_flush_buffer_threshold_mb,
         block_file_cache_flush_buffer_threshold_mb,
+        meta_file_cache_flush_buffer_threshold_mb,
     }
 }
 
