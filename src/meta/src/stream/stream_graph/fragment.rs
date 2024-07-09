@@ -620,21 +620,22 @@ impl CompleteStreamFragmentGraph {
     pub fn with_upstreams_and_downstreams(
         graph: StreamFragmentGraph,
         upstream_root_fragments: HashMap<TableId, Fragment>,
+        upstream_actor_location: HashMap<ActorId, u32>,
         original_table_fragment_id: FragmentId,
         downstream_fragments: Vec<(DispatchStrategy, Fragment)>,
-        existing_actor_location: HashMap<ActorId, u32>,
+        downstream_actor_location: HashMap<ActorId, u32>,
         ddl_type: DdlType,
     ) -> MetaResult<Self> {
         Self::build_helper(
             graph,
             Some(FragmentGraphUpstreamContext {
                 upstream_root_fragments,
-                upstream_actor_location: existing_actor_location.clone(),
+                upstream_actor_location,
             }),
             Some(FragmentGraphDownstreamContext {
                 original_table_fragment_id,
                 downstream_fragments,
-                downstream_actor_location: existing_actor_location,
+                downstream_actor_location,
             }),
             ddl_type,
         )
