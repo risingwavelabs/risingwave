@@ -131,6 +131,24 @@ profile:
       - use: grafana
       - use: kafka
         persist-data: true
+  wtf:
+    steps:
+      - use: meta-node
+      - use: compute-node
+      - use: frontend
+      - use: postgres
+        port: 8432
+        user-managed: true
+        application: "connector"
+        user: myuser
+        password: "123456"
+        database: "mydb"
+      - use: mysql
+        port: 8306
+        user-managed: true
+        user: root
+        password: "123456"
+        database: "mydb"
 
   standalone-minio-etcd:
     steps:
