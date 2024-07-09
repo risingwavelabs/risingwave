@@ -95,9 +95,6 @@ impl Rule for IndexSelectionRule {
         if indexes.is_empty() {
             return None;
         }
-        if logical_scan.as_of().is_some() {
-            return None;
-        }
         let primary_table_row_size = TableScanIoEstimator::estimate_row_size(logical_scan);
         let primary_cost = min(
             self.estimate_table_scan_cost(logical_scan, primary_table_row_size),
@@ -230,7 +227,7 @@ impl IndexSelectionRule {
             index.index_table.clone(),
             vec![],
             logical_scan.ctx(),
-            None,
+            logical_scan.as_of().clone(),
             index.index_table.cardinality,
         );
 
@@ -239,7 +236,7 @@ impl IndexSelectionRule {
             index.primary_table.clone(),
             vec![],
             logical_scan.ctx(),
-            None,
+            logical_scan.as_of().clone(),
             index.primary_table.cardinality,
         );
 
@@ -338,7 +335,7 @@ impl IndexSelectionRule {
             logical_scan.table_catalog(),
             vec![],
             logical_scan.ctx(),
-            None,
+            logical_scan.as_of().clone(),
             logical_scan.table_cardinality(),
         );
 
