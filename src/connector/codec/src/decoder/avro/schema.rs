@@ -333,7 +333,6 @@ pub(super) fn avro_schema_to_struct_field_name(schema: &Schema) -> Result<String
         Schema::Array(_) => "array".to_string(),
         Schema::Map(_) => "map".to_string(),
         // Named Complex types
-        // TODO: Verify is the namespace correct here
         Schema::Enum(_) | Schema::Ref { name: _ } | Schema::Fixed(_) | Schema::Record(_) => {
             schema.name().unwrap().fullname(None)
         }

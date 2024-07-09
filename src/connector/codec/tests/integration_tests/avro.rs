@@ -12,12 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::Context;
 use apache_avro::from_avro_datum;
 use risingwave_connector_codec::decoder::avro::{
     avro_schema_to_column_descs, AvroAccess, AvroParseOptions, MapHandling, ResolvedAvroSchema,
 };
 use risingwave_connector_codec::decoder::Access;
 use risingwave_connector_codec::AvroSchema;
+use thiserror_ext::AsReport;
 
 use crate::utils::*;
 
@@ -42,6 +44,24 @@ struct Config {
     /// TODO: For one test data, we can test all possible config options.
     map_handling: Option<MapHandling>,
     data_encoding: TestDataEncoding,
+}
+
+fn avro_schema_str_to_risingwave_schema(
+    avro_schema: &str,
+    config: &Config,
+) -> anyhow::Result<(ResolvedAvroSchema, Vec<ColumnDesc>)> {
+    // manually implement some logic in AvroParserConfig::map_to_columns
+    let avro_schema = AvroSchema::parse_str(avro_schema).context("failed to parse Avro schema")?;
+    let resolved_schema =
+        ResolvedAvroSchema::create(avro_schema.into()).context("failed to resolve Avro schema")?;
+
+    let rw_schema =
+        avro_schema_to_column_descs(&resolved_schema.resolved_schema, config.map_handling)
+            .context("failed to convert Avro schema to RisingWave schema")?
+            .iter()
+            .map(ColumnDesc::from)
+            .collect_vec();
+    Ok((resolved_schema, rw_schema))
 }
 
 /// Data driven testing for converting Avro Schema to RisingWave Schema, and then converting Avro data into RisingWave data.
@@ -79,17 +99,15 @@ fn check(
     expected_risingwave_schema: expect_test::Expect,
     expected_risingwave_data: expect_test::Expect,
 ) {
-    // manually implement some logic in AvroParserConfig::map_to_columns
-    let avro_schema = AvroSchema::parse_str(avro_schema).expect("failed to parse Avro schema");
-    let resolved_schema =
-        ResolvedAvroSchema::create(avro_schema.into()).expect("failed to resolve Avro schema");
-
-    let rw_schema =
-        avro_schema_to_column_descs(&resolved_schema.resolved_schema, config.map_handling)
-            .expect("failed to convert Avro schema to RisingWave schema")
-            .iter()
-            .map(ColumnDesc::from)
-            .collect_vec();
+    let (resolved_schema, rw_schema) =
+        match avro_schema_str_to_risingwave_schema(avro_schema, &config) {
+            Ok(res) => res,
+            Err(e) => {
+                expected_risingwave_schema.assert_eq(&format!("{}", e.as_report()));
+                expected_risingwave_data.assert_eq("");
+                return;
+            }
+        };
     expected_risingwave_schema.assert_eq(&format!(
         "{:#?}",
         rw_schema.iter().map(ColumnDescTestDisplay).collect_vec()
@@ -557,6 +575,7 @@ fn test_1() {
 
 #[test]
 fn test_union() {
+    // A basic test
     check(
         r#"
 {
@@ -613,7 +632,7 @@ fn test_union() {
             map_handling: None,
             data_encoding: TestDataEncoding::HexBinary,
         },
-        // FIXME: why the struct type doesn't have field_descs?
+        // FIXME: why the struct type doesn't have field_descs? https://github.com/risingwavelabs/risingwave/issues/17128
         expect![[r#"
             [
                 unionType(#1): Struct {
@@ -669,6 +688,128 @@ fn test_union() {
             Owned(null)"#]],
     );
 
+    // logicalType is currently rejected
+    // https://github.com/risingwavelabs/risingwave/issues/17616
+    check(
+        r#"
+{
+"type": "record",
+"name": "Root",
+"fields": [
+  {
+    "name": "unionLogical",
+    "type": ["int", {"type":"int", "logicalType": "date"}]
+  }
+]
+}
+  "#,
+        &[],
+        Config {
+            map_handling: None,
+            data_encoding: TestDataEncoding::HexBinary,
+        },
+        expect![[r#"
+            failed to convert Avro schema to RisingWave schema: failed to convert Avro union to struct: Feature is not yet implemented: Avro logicalType used in Union type: Date
+            Tracking issue: https://github.com/risingwavelabs/risingwave/issues/17616"#]],
+        expect![""],
+    );
+
+    // test named type. Consider namespace.
+    // https://avro.apache.org/docs/1.11.1/specification/_print/#names
+    // List of things to take care:
+    // - Record fields and enum symbols DO NOT have namespace.
+    // - If the name specified contains a dot, then it is assumed to be a fullname, and any namespace also specified is IGNORED.
+    // - If a name doesn't have its own namespace, it will look for its most tightly enclosing named schema.
+    check(
+        r#"
+{
+    "type": "record",
+    "name": "Root",
+    "namespace": "RootNamespace",
+    "fields": [
+        {
+            "name": "littleFieldToMakeNestingLooksBetter",
+            "type": ["null","int"], "default": null
+        },
+        {
+            "name": "recordField",
+            "type": ["null", "int", {
+                "type": "record",
+                "name": "my.name.spaced.record",
+                "namespace": "when.name.contains.dot.namespace.is.ignored",
+                "fields": [
+                    {"name": "hello", "type": {"type": "int", "default": 1}},
+                    {"name": "world", "type": {"type": "double", "default": 1}}
+                ]
+            }],
+            "default": null
+        },
+        {
+            "name": "enumField",
+            "type": ["null", "int", {
+                "type": "enum",
+                "name": "myEnum",
+                "namespace": "my.namespace",
+                "symbols": ["A", "B", "C", "D"]
+            }],
+            "default": null
+        },
+        {
+            "name": "anotherEnumFieldUsingRootNamespace",
+            "type": ["null", "int", {
+                "type": "enum",
+                "name": "myEnum",
+                "symbols": ["A", "B", "C", "D"]
+            }],
+            "default": null
+        }
+    ]
+}
+"#,
+        &[
+            // {
+            //   "enumField":{"my.namespace.myEnum":"A"},
+            //   "anotherEnumFieldUsingRootNamespace":{"RootNamespace.myEnum": "D"}
+            // }
+            "000004000406",
+        ],
+        Config {
+            map_handling: None,
+            data_encoding: TestDataEncoding::HexBinary,
+        },
+        expect![[r#"
+            [
+                littleFieldToMakeNestingLooksBetter(#1): Int32,
+                recordField(#2): Struct {
+                    int: Int32,
+                    my.name.spaced.record: Struct {
+                        hello: Int32,
+                        world: Float64,
+                    },
+                },
+                enumField(#3): Struct {
+                    int: Int32,
+                    my.namespace.myEnum: Varchar,
+                },
+                anotherEnumFieldUsingRootNamespace(#4): Struct {
+                    int: Int32,
+                    RootNamespace.myEnum: Varchar,
+                },
+            ]"#]],
+        expect![[r#"
+            Owned(null)
+            Owned(null)
+            Owned(StructValue(
+                null,
+                Utf8("A"),
+            ))
+            Owned(StructValue(
+                null,
+                Utf8("D"),
+            ))"#]],
+    );
+
+    // This is provided by a user https://github.com/risingwavelabs/risingwave/issues/16273#issuecomment-2051480710
     check(
         r#"
 {
