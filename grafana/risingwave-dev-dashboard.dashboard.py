@@ -1210,21 +1210,17 @@ def section_streaming_actors(outer_panels):
                         ),
                     ],
                 ),
-                panels.timeseries_actor_latency(
-                    "Executor Barrier Align",
+                panels.timeseries_percentage(
+                    "Executor Barrier Align Per Second",
                     "",
                     [
-                        *quantile(
-                            lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate({metric('stream_barrier_align_duration_bucket')}[$__rate_interval])) by (le, executor, fragment_id, wait_side, {COMPONENT_LABEL}))",
-                                f"p{legend} - executor {{{{executor}}}} fragment {{{{fragment_id}}}} {{{{wait_side}}}} - {{{{{COMPONENT_LABEL}}}}}",
-                            ),
-                            [90, 99, 999, "max"],
-                        ),
                         panels.target(
-                            f"sum by(le, executor, fragment_id, wait_side, job)(rate({metric('stream_barrier_align_duration_sum')}[$__rate_interval])) / sum by(le,executor,fragment_id,wait_side,{COMPONENT_LABEL}) (rate({metric('stream_barrier_align_duration_count')}[$__rate_interval])) > 0",
-                            "avg - executor {{executor}} fragment {{fragment_id}} {{wait_side}} - {{%s}}"
-                            % COMPONENT_LABEL,
+                            f"avg(rate({metric('stream_barrier_align_duration_ns')}[$__rate_interval]) / 1000000000) by (fragment_id,wait_side, executor)",
+                            "fragment {{fragment_id}} {{wait_side}} {{executor}}",
+                        ),
+                        panels.target_hidden(
+                            f"rate({metric('stream_barrier_align_duration_ns')}[$__rate_interval]) / 1000000000",
+                            "actor {{actor_id}} fragment {{fragment_id}} {{wait_side}} {{executor}}",
                         ),
                     ],
                 ),
