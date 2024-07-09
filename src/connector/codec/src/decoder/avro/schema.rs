@@ -334,7 +334,11 @@ pub(super) fn avro_schema_to_struct_field_name(schema: &Schema) -> Result<String
         Schema::Map(_) => "map".to_string(),
         // Named Complex types
         Schema::Enum(_) | Schema::Ref { name: _ } | Schema::Fixed(_) | Schema::Record(_) => {
-            schema.name().unwrap().fullname(None)
+            // schema.name().unwrap().fullname(None)
+            // See test_avro_lib_union_record_bug
+            // https://github.com/risingwavelabs/risingwave/issues/17632
+            bail_not_implemented!(issue=17632, "Avro named type used in Union type: {:?}", schema)
+
         }
 
         // Logical types are currently banned. See https://github.com/risingwavelabs/risingwave/issues/17616

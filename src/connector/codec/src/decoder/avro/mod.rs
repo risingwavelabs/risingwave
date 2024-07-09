@@ -568,7 +568,7 @@ pub(crate) fn avro_to_jsonb(avro: &Value, builder: &mut jsonbb::Builder) -> Acce
 mod tests {
     use std::str::FromStr;
 
-    use apache_avro::Decimal as AvroDecimal;
+    use apache_avro::{from_avro_datum, Decimal as AvroDecimal};
     use expect_test::expect;
     use risingwave_common::types::{Datum, Decimal};
 
@@ -759,6 +759,144 @@ mod tests {
             )
         "#]]
         .assert_debug_eq(&s);
+    }
+
+    #[test]
+    fn test_avro_lib_union_record_bug() {
+        // multiple named types (record)
+        let s = Schema::parse_str(
+            r#"
+    {
+      "type": "record",
+      "name": "Root",
+      "fields": [
+        {
+          "name": "unionTypeComplex",
+          "type": [
+            "null",
+            {"type": "record", "name": "Email","fields": [{"name":"inner","type":"string"}]},
+            {"type": "record", "name": "Fax","fields": [{"name":"inner","type":"int"}]},
+            {"type": "record", "name": "Sms","fields": [{"name":"inner","type":"int"}]}
+          ]
+        }
+      ]
+    }
+        "#,
+        )
+        .unwrap();
+
+        let bytes = hex::decode("060c").unwrap();
+        // Correct should be variant 3 (Sms)
+        let correct_value = from_avro_datum(&s, &mut bytes.as_slice(), None);
+        expect![[r#"
+                Ok(
+                    Record(
+                        [
+                            (
+                                "unionTypeComplex",
+                                Union(
+                                    3,
+                                    Record(
+                                        [
+                                            (
+                                                "inner",
+                                                Int(
+                                                    6,
+                                                ),
+                                            ),
+                                        ],
+                                    ),
+                                ),
+                            ),
+                        ],
+                    ),
+                )
+            "#]]
+        .assert_debug_eq(&correct_value);
+        // Bug: We got variant 2 (Fax) here, if we pass the reader schema.
+        let wrong_value = from_avro_datum(&s, &mut bytes.as_slice(), Some(&s));
+        expect![[r#"
+                Ok(
+                    Record(
+                        [
+                            (
+                                "unionTypeComplex",
+                                Union(
+                                    2,
+                                    Record(
+                                        [
+                                            (
+                                                "inner",
+                                                Int(
+                                                    6,
+                                                ),
+                                            ),
+                                        ],
+                                    ),
+                                ),
+                            ),
+                        ],
+                    ),
+                )
+            "#]]
+        .assert_debug_eq(&wrong_value);
+
+        // The bug below can explain what happened.
+        // The two records below are actually incompatible: https://avro.apache.org/docs/1.11.1/specification/_print/#schema-resolution
+        // > both schemas are records with the _same (unqualified) name_
+        // In from_avro_datum, it first reads the value with the writer schema, and then
+        // it just uses the reader schema to interpret the value.
+        // The value doesn't have record "name" information. So it wrongly passed the conversion.
+        // The correct way is that we need to use both the writer and reader schema in the second step to interpret the value.
+
+        let s = Schema::parse_str(
+            r#"
+    {
+      "type": "record",
+      "name": "Root",
+      "fields": [
+        {
+          "name": "a",
+          "type": "int"
+        }
+      ]
+    }
+        "#,
+        )
+        .unwrap();
+        let s2 = Schema::parse_str(
+            r#"
+{
+  "type": "record",
+  "name": "Root222",
+  "fields": [
+    {
+      "name": "a",
+      "type": "int"
+    }
+  ]
+}
+    "#,
+        )
+        .unwrap();
+
+        let bytes = hex::decode("0c").unwrap();
+        let value = from_avro_datum(&s, &mut bytes.as_slice(), Some(&s2));
+        expect![[r#"
+            Ok(
+                Record(
+                    [
+                        (
+                            "a",
+                            Int(
+                                6,
+                            ),
+                        ),
+                    ],
+                ),
+            )
+        "#]]
+        .assert_debug_eq(&value);
     }
 
     #[test]
