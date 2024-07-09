@@ -111,6 +111,7 @@ impl<'a> AvroParseOptions<'a> {
             // ---- Union (with >=2 non null variants), and nullable Union ([null, record]) -----
             (DataType::Struct(struct_type_info), Value::Union(variant, v)) => {
                 let Some(Schema::Union(u)) = self.schema else {
+                    // XXX: Is this branch actually unreachable? (if self.schema is correctly used)
                     return Err(create_error());
                 };
 
@@ -131,7 +132,8 @@ impl<'a> AvroParseOptions<'a> {
                 // Here we compare the field name, instead of using the variant idx to find the field idx.
                 // The latter approach might also work, but might be more error-prone.
                 // We will need to get the index of the "null" variant, and then re-map the variant index to the field index.
-                let expected_field_name = avro_schema_to_struct_field_name(variant_schema);
+                // XXX: probably we can unwrap here (if self.schema is correctly used)
+                let expected_field_name = avro_schema_to_struct_field_name(variant_schema)?;
 
                 let mut fields = Vec::with_capacity(struct_type_info.len());
                 for (field_name, field_type) in struct_type_info
@@ -635,6 +637,54 @@ mod tests {
         )
     "#]]
         .assert_debug_eq(&s);
+        // multiple named types
+        let s = Schema::parse_str(
+            r#"[
+"null",
+{"type":"fixed","name":"a","size":16},
+{"type":"fixed","name":"b","size":32}
+]
+"#,
+        );
+        expect![[r#"
+            Ok(
+                Union(
+                    UnionSchema {
+                        schemas: [
+                            Null,
+                            Fixed(
+                                FixedSchema {
+                                    name: Name {
+                                        name: "a",
+                                        namespace: None,
+                                    },
+                                    aliases: None,
+                                    doc: None,
+                                    size: 16,
+                                    attributes: {},
+                                },
+                            ),
+                            Fixed(
+                                FixedSchema {
+                                    name: Name {
+                                        name: "b",
+                                        namespace: None,
+                                    },
+                                    aliases: None,
+                                    doc: None,
+                                    size: 32,
+                                    attributes: {},
+                                },
+                            ),
+                        ],
+                        variant_index: {
+                            Null: 0,
+                        },
+                    },
+                ),
+            )
+        "#]]
+        .assert_debug_eq(&s);
 
         // union in union
         let s = Schema::parse_str(r#"["int", ["null", "int"]]"#);
@@ -662,7 +712,7 @@ mod tests {
             )
         "#]]
         .assert_debug_eq(&s);
-
+        // Note: Java Avro lib rejects this (logical type unions with its physical type)
         let s = Schema::parse_str(r#"["string", {"type":"string","logicalType":"uuid"}]"#).unwrap();
         expect![[r#"
             Union(
@@ -676,6 +726,36 @@ mod tests {
                         Uuid: 1,
                     },
                 },
+            )
+        "#]]
+        .assert_debug_eq(&s);
+        // Note: Java Avro lib rejects this (logical type unions with its physical type)
+        let s = Schema::parse_str(r#"["int", {"type":"int", "logicalType": "date"}]"#).unwrap();
+        expect![[r#"
+            Union(
+                UnionSchema {
+                    schemas: [
+                        Int,
+                        Date,
+                    ],
+                    variant_index: {
+                        Int: 0,
+                        Date: 1,
+                    },
+                },
+            )
+        "#]]
+        .assert_debug_eq(&s);
+        // Note: Java Avro lib allows this (2 decimal with different "name")
+        let s = Schema::parse_str(
+            r#"[
+{"type":"fixed","name":"Decimal128","size":16,"logicalType":"decimal","precision":38,"scale":2},
+{"type":"fixed","name":"Decimal256","size":32,"logicalType":"decimal","precision":50,"scale":2}
+]"#,
+        );
+        expect![[r#"
+            Err(
+                Unions cannot contain duplicate types,
             )
         "#]]
         .assert_debug_eq(&s);

@@ -16,6 +16,7 @@ pub mod avro;
 pub mod json;
 pub mod utils;
 
+use risingwave_common::error::NotImplemented;
 use risingwave_common::types::{DataType, Datum, DatumCow, ToOwnedDatum};
 use thiserror::Error;
 use thiserror_ext::Macro;
@@ -40,6 +41,9 @@ pub enum AccessError {
     /// Errors that are not categorized into variants above.
     #[error("{message}")]
     Uncategorized { message: String },
+
+    #[error(transparent)]
+    NotImplemented(#[from] NotImplemented),
 }
 
 pub type AccessResult<T = Datum> = std::result::Result<T, AccessError>;

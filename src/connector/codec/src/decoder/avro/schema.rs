@@ -18,9 +18,10 @@ use anyhow::Context;
 use apache_avro::schema::{DecimalSchema, RecordSchema, ResolvedSchema, Schema};
 use apache_avro::AvroResult;
 use itertools::Itertools;
-use risingwave_common::bail;
+use risingwave_common::error::NotImplemented;
 use risingwave_common::log::LogSuppresser;
 use risingwave_common::types::{DataType, Decimal};
+use risingwave_common::{bail, bail_not_implemented};
 use risingwave_pb::plan_common::{AdditionalColumn, ColumnDesc, ColumnDescVersion};
 
 use super::get_nullable_union_inner;
@@ -230,9 +231,9 @@ fn avro_type_mapping(
                         // null will mean the whole struct is null
                         .filter(|variant| !matches!(variant, &&Schema::Null))
                         .map(|variant| {
-                            avro_type_mapping(variant, map_handling).map(|t| {
-                                let name = avro_schema_to_struct_field_name(variant);
-                                (t, name)
+                            avro_type_mapping(variant, map_handling).and_then(|t| {
+                                let name = avro_schema_to_struct_field_name(variant)?;
+                                Ok((t, name))
                             })
                         })
                         .process_results(|it| it.unzip::<_, _, Vec<_>, Vec<_>>())
@@ -248,7 +249,7 @@ fn avro_type_mapping(
             {
                 DataType::Decimal
             } else {
-                bail!("unsupported Avro type: {:?}", schema);
+                bail_not_implemented!("Avro type: {:?}", schema);
             }
         }
         Schema::Map(value_schema) => {
@@ -258,10 +259,11 @@ fn avro_type_mapping(
                     if supported_avro_to_json_type(value_schema) {
                         DataType::Jsonb
                     } else {
-                        bail!(
-                            "unsupported Avro type, cannot convert map to jsonb: {:?}",
+                        bail_not_implemented!(
+                            issue = 16963,
+                            "Avro map type to jsonb: {:?}",
                             schema
-                        )
+                        );
                     }
                 }
                 None => {
@@ -275,7 +277,7 @@ fn avro_type_mapping(
         }
         Schema::Uuid => DataType::Varchar,
         Schema::Null | Schema::Fixed(_) => {
-            bail!("unsupported Avro type: {:?}", schema)
+            bail_not_implemented!("Avro type: {:?}", schema);
         }
     };
 
@@ -315,8 +317,8 @@ fn supported_avro_to_json_type(schema: &Schema) -> bool {
 }
 
 /// The field name when converting Avro union type to RisingWave struct type.
-pub(super) fn avro_schema_to_struct_field_name(schema: &Schema) -> String {
-    match schema {
+pub(super) fn avro_schema_to_struct_field_name(schema: &Schema) -> Result<String, NotImplemented> {
+    Ok(match schema {
         Schema::Null => unreachable!(),
         Schema::Union(_) => unreachable!(),
         // Primitive types
@@ -332,23 +334,24 @@ pub(super) fn avro_schema_to_struct_field_name(schema: &Schema) -> String {
         Schema::Map(_) => "map".to_string(),
         // Named Complex types
         // TODO: Verify is the namespace correct here
-        Schema::Enum(_) | Schema::Ref { name: _ } | Schema::Fixed(_) => todo!(),
-        Schema::Record(_) => schema.name().unwrap().fullname(None),
-        // Logical types
-        // XXX: should we use the real type or the logical type as the field name?
-        // It seems not to matter much, as we always have the index of the field when we get a Union Value.
-        //
-        // Currently choose the logical type because it might be more user-friendly.
-        //
-        // Example about the representation:
-        // schema: ["null", {"type":"string","logicalType":"uuid"}]
-        // data: {"string": "67e55044-10b1-426f-9247-bb680e5fe0c8"}
-        //
-        // Note: for union with logical type AND the real type, e.g., ["string", {"type":"string","logicalType":"uuid"}]
-        // In this case, the uuid cannot be constructed.
-        // Actually this should be an invalid schema according to the spec. https://issues.apache.org/jira/browse/AVRO-2380
-        // But some library like Python and Rust both allow it. See `risingwave_connector_codec::decoder::avro::tests::test_avro_lib_union`
+        Schema::Enum(_) | Schema::Ref { name: _ } | Schema::Fixed(_) | Schema::Record(_) => {
+            schema.name().unwrap().fullname(None)
+        }
+
+        // Logical types are currently banned. See https://github.com/risingwavelabs/risingwave/issues/17616
+
+/*
         Schema::Uuid => "uuid".to_string(),
+        // Decimal is the most tricky. https://avro.apache.org/docs/1.11.1/specification/_print/#decimal
+        // - A decimal logical type annotates Avro bytes _or_ fixed types.
+        // - It has attributes `precision` and `scale`.
+        //  "For the purposes of schema resolution, two schemas that are decimal logical types match if their scales and precisions match."
+        // - When the physical type is fixed, it's a named type. And a schema containing 2 decimals is possible:
+        //   [
+        //     {"type":"fixed","name":"Decimal128","size":16,"logicalType":"decimal","precision":38,"scale":2},
+        //     {"type":"fixed","name":"Decimal256","size":32,"logicalType":"decimal","precision":50,"scale":2}
+        //   ]
+        //   In this case (a logical type's physical type is a named type), perhaps we should use the physical type's `name`.
         Schema::Decimal(_) => "decimal".to_string(),
         Schema::Date => "date".to_string(),
         // Note: in Avro, the name style is "time-millis", etc.
@@ -362,5 +365,18 @@ pub(super) fn avro_schema_to_struct_field_name(schema: &Schema) -> String {
         Schema::LocalTimestampMillis => "local_timestamp_millis".to_string(),
         Schema::LocalTimestampMicros => "local_timestamp_micros".to_string(),
         Schema::Duration => "duration".to_string(),
-    }
+*/
+        Schema::Uuid
+        | Schema::Decimal(_)
+        | Schema::Date
+        | Schema::TimeMillis
+        | Schema::TimeMicros
+        | Schema::TimestampMillis
+        | Schema::TimestampMicros
+        | Schema::LocalTimestampMillis
+        | Schema::LocalTimestampMicros
+        | Schema::Duration => {
+            bail_not_implemented!(issue=17616, "Avro logicalType used in Union type: {:?}", schema)
+        }
+    })
 }
