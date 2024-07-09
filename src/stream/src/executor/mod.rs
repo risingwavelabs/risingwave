@@ -800,7 +800,10 @@ impl<M> BarrierInner<M> {
         Ok(Self {
             kind: prost.kind(),
             epoch: EpochPair::new(epoch.curr, epoch.prev),
-            mutation: f(prost.mutation.as_ref().unwrap().mutation.as_ref())?,
+            mutation: f(prost
+                .mutation
+                .as_ref()
+                .and_then(|mutation| mutation.mutation.as_ref()))?,
             passed_actors: prost.get_passed_actors().clone(),
             tracing_context: TracingContext::from_protobuf(&prost.tracing_context),
         })
