@@ -16,7 +16,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context;
-use either::Either;
 use etcd_client::ConnectOptions;
 use otlp_embedded::TraceServiceServer;
 use regex::Regex;
@@ -291,7 +290,7 @@ pub async fn rpc_serve_with_store(
         let follower_handle = tokio::spawn(start_service_as_election_follower(
             follower_shutdown.clone(),
             address_info.clone(),
-            Some(election_client.clone()),
+            election_client.clone(),
         ));
 
         // Watch and wait until we become the leader.
@@ -340,12 +339,9 @@ pub async fn rpc_serve_with_store(
 pub async fn start_service_as_election_follower(
     shutdown: CancellationToken,
     address_info: AddressInfo,
-    election_client: Option<ElectionClientRef>,
+    election_client: ElectionClientRef,
 ) {
-    let meta_member_srv = MetaMemberServiceImpl::new(match election_client {
-        None => Either::Right(address_info.clone()),
-        Some(election_client) => Either::Left(election_client),
-    });
+    let meta_member_srv = MetaMemberServiceImpl::new(election_client);
 
     let health_srv = HealthServiceImpl::new();
 
@@ -462,7 +458,7 @@ pub async fn start_service_as_election_leader(
     .unwrap();
     let object_store_media_type = hummock_manager.object_store_media_type();
 
-    let meta_member_srv = MetaMemberServiceImpl::new(Either::Left(election_client.clone()));
+    let meta_member_srv = MetaMemberServiceImpl::new(election_client.clone());
 
     let prometheus_client = opts.prometheus_endpoint.as_ref().map(|x| {
         use std::str::FromStr;
