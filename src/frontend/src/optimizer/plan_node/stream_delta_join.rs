@@ -76,6 +76,7 @@ impl StreamDeltaJoin {
             append_only,
             false, // TODO(rc): derive EOWC property from input
             watermark_columns,
+            Default::default(),
         );
 
         Self {

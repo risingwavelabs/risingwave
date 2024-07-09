@@ -45,6 +45,7 @@ impl StreamOverWindow {
             false, // general over window cannot be append-only
             false,
             watermark_columns,
+            Default::default(),
         );
         StreamOverWindow { base, core }
     }

@@ -79,6 +79,7 @@ impl StreamGroupTopN {
             // TODO: https://github.com/risingwavelabs/risingwave/issues/8348
             false,
             watermark_columns,
+            Default::default(),
         );
         StreamGroupTopN {
             base,

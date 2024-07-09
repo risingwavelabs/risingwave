@@ -46,6 +46,7 @@ impl StreamUnion {
     pub fn new_with_dist(core: generic::Union<PlanRef>, dist: Distribution) -> Self {
         let inputs = &core.inputs;
 
+        // FIXME(rc): is this even correct??
         let watermark_columns = inputs.iter().fold(
             {
                 let mut bitset = FixedBitSet::with_capacity(core.schema().len());
@@ -61,6 +62,7 @@ impl StreamUnion {
             inputs.iter().all(|x| x.append_only()),
             inputs.iter().all(|x| x.emit_on_window_close()),
             watermark_columns,
+            Default::default(),
         );
 
         StreamUnion { base, core }

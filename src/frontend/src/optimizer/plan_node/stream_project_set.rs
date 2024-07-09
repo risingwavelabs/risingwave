@@ -22,7 +22,7 @@ use super::utils::impl_distill_by_unit;
 use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::property::{analyze_monotonicity, monotonicity_variants};
+use crate::optimizer::property::{analyze_monotonicity, monotonicity_variants, MonotonicityMap};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::ColIndexMappingRewriteExt;
 
@@ -53,11 +53,9 @@ impl StreamProjectSet {
 
             use monotonicity_variants::*;
             match analyze_monotonicity(expr) {
-                Inherent(Constant) => {
-                    // XXX(rc): we can produce one watermark on each recovery for this case.
-                }
                 Inherent(monotonicity) => {
-                    if monotonicity.is_non_decreasing() {
+                    if monotonicity.is_non_decreasing() && !monotonicity.is_constant() {
+                        // TODO(rc): may be we should also derive watermark for constant later
                         // FIXME(rc): we need to check expr is not table function
                         nondecreasing_exprs.push(expr_idx); // to produce watermarks
                         out_watermark_columns.insert(out_expr_idx);
@@ -81,6 +79,7 @@ impl StreamProjectSet {
             input.append_only(),
             input.emit_on_window_close(),
             out_watermark_columns,
+            MonotonicityMap::new(),
         );
         StreamProjectSet {
             base,

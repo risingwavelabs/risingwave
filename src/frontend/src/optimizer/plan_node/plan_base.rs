@@ -58,7 +58,7 @@ pub struct StreamExtra {
     emit_on_window_close: bool,
     /// The watermark column indices of the `PlanNode`'s output. There could be watermark output from
     /// this stream operator.
-    watermark_columns: FixedBitSet, // TODO(): use `column_monotonicity` instead
+    watermark_columns: FixedBitSet,
     /// The monotonicity of columns in the output.
     columns_monotonicity: MonotonicityMap,
 }

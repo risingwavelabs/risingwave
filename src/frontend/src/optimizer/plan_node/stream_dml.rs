@@ -41,6 +41,7 @@ impl StreamDml {
             append_only,
             false,                                            // TODO(rc): decide EOWC property
             FixedBitSet::with_capacity(input.schema().len()), // no watermark if dml is allowed
+            Default::default(),
         );
 
         Self {

@@ -74,6 +74,7 @@ impl StreamTableScan {
             core.append_only(),
             false,
             core.watermark_columns(),
+            Default::default(),
         );
         Self {
             base,

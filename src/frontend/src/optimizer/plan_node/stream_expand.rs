@@ -52,6 +52,7 @@ impl StreamExpand {
             input.append_only(),
             input.emit_on_window_close(),
             watermark_columns,
+            Default::default(),
         );
         StreamExpand { base, core }
     }

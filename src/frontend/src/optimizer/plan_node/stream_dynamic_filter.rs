@@ -77,6 +77,7 @@ impl StreamDynamicFilter {
             out_append_only,
             false, // TODO(rc): decide EOWC property
             Self::derive_watermark_columns(&core),
+            Default::default(),
         );
         let cleaned_by_watermark = Self::cleaned_by_watermark(&core);
         Self {

@@ -284,11 +284,15 @@ impl MonotonicityMap {
     }
 
     pub fn insert(&mut self, idx: usize, monotonicity: Monotonicity) {
-        self.0.insert(idx, monotonicity);
+        if monotonicity != Monotonicity::Unknown {
+            self.0.insert(idx, monotonicity);
+        }
     }
 
-    pub fn get(&self, idx: usize) -> Monotonicity {
-        self.0.get(&idx).copied().unwrap_or(Monotonicity::Unknown)
+    pub fn iter(&self) -> impl Iterator<Item = (usize, Monotonicity)> + '_ {
+        self.0
+            .iter()
+            .map(|(idx, monotonicity)| (*idx, *monotonicity))
     }
 }
 
@@ -303,5 +307,20 @@ impl Index<usize> for MonotonicityMap {
 impl IndexMut<usize> for MonotonicityMap {
     fn index_mut(&mut self, idx: usize) -> &mut Self::Output {
         self.0.entry(idx).or_insert(Monotonicity::Unknown)
+    }
+}
+
+impl IntoIterator for MonotonicityMap {
+    type IntoIter = std::collections::btree_map::IntoIter<usize, Monotonicity>;
+    type Item = (usize, Monotonicity);
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
+impl FromIterator<(usize, Monotonicity)> for MonotonicityMap {
+    fn from_iter<T: IntoIterator<Item = (usize, Monotonicity)>>(iter: T) -> Self {
+        MonotonicityMap(iter.into_iter().collect())
     }
 }

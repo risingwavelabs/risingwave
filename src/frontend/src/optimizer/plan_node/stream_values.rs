@@ -48,6 +48,7 @@ impl StreamValues {
             true,
             false,
             FixedBitSet::with_capacity(logical.schema().len()),
+            Default::default(),
         );
         Self { base, logical }
     }

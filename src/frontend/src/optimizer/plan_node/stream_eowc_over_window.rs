@@ -58,6 +58,7 @@ impl StreamEowcOverWindow {
             true,
             true,
             watermark_columns,
+            input.columns_monotonicity().clone(),
         );
         StreamEowcOverWindow { base, core }
     }

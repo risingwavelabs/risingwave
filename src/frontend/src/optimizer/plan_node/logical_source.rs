@@ -229,6 +229,7 @@ impl LogicalSource {
                 true, // `list` will keep listing all objects, it must be append-only
                 false,
                 FixedBitSet::with_capacity(logical_source.column_catalog.len()),
+                Default::default(),
             ),
             core: logical_source,
         }

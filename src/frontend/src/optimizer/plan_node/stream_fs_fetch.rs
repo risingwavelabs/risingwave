@@ -55,6 +55,7 @@ impl StreamFsFetch {
             source.catalog.as_ref().map_or(true, |s| s.append_only),
             false,
             FixedBitSet::with_capacity(source.column_catalog.len()),
+            Default::default(),
         );
 
         Self {

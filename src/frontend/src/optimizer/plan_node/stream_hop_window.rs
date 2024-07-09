@@ -62,6 +62,7 @@ impl StreamHopWindow {
             input.append_only(),
             input.emit_on_window_close(),
             internal2output.rewrite_bitset(&watermark_columns),
+            Default::default(), // hop window start/end jumps, so monotonicity is not propagated
         );
         Self {
             base,

@@ -48,6 +48,7 @@ impl StreamChangeLog {
             true,
             input.emit_on_window_close(),
             watermark_columns,
+            Default::default(),
         );
         StreamChangeLog { base, core }
     }

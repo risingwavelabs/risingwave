@@ -64,6 +64,7 @@ impl StreamSource {
             core.catalog.as_ref().map_or(true, |s| s.append_only),
             false,
             FixedBitSet::with_capacity(core.column_catalog.len()),
+            Default::default(),
         );
         Self { base, core }
     }

@@ -93,6 +93,7 @@ impl StreamHashAgg {
             emit_on_window_close, // in EOWC mode, we produce append only output
             emit_on_window_close,
             watermark_columns,
+            Default::default(),
         );
         StreamHashAgg {
             base,
