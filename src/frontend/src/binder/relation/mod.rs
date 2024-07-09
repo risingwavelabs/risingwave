@@ -15,7 +15,6 @@
 use std::collections::hash_map::Entry;
 use std::ops::Deref;
 
-use either::Either;
 use itertools::{EitherOrBoth, Itertools};
 use risingwave_common::bail;
 use risingwave_common::catalog::{Field, TableId, DEFAULT_SCHEMA_NAME};
@@ -44,7 +43,7 @@ mod window_table_function;
 
 pub use cte_ref::BoundBackCteRef;
 pub use join::BoundJoin;
-pub use share::BoundShare;
+pub use share::{BoundShare, BoundShareInput};
 pub use subquery::BoundSubquery;
 pub use table_or_source::{BoundBaseTable, BoundSource, BoundSystemTable};
 pub use watermark::BoundWatermark;
@@ -383,20 +382,25 @@ impl Binder {
                     Ok(Relation::BackCteRef(Box::new(BoundBackCteRef { share_id, base })))
                 }
                 BindingCteState::Bound { query } => {
-                    let schema = match &query {
-                        Either::Left(normal) => normal.schema(),
-                        Either::Right(recursive) => &recursive.schema,
-                    };
+                    let input = BoundShareInput::Query(query);
                     self.bind_table_to_context(
-                        schema.fields.iter().map(|f| (false, f.clone())),
+                        input.fields()?,
                         table_name.clone(),
                         Some(original_alias),
                     )?;
                     // we could always share the cte,
                     // no matter it's recursive or not.
-                    let input = query;
-                    Ok(Relation::Share(Box::new(BoundShare { share_id, input })))
+                    Ok(Relation::Share(Box::new(BoundShare { share_id, input})))
                 }
+                BindingCteState::ChangeLog { table } => {
+                    let input = BoundShareInput::ChangeLog(table);
+                    self.bind_table_to_context(
+                        input.fields()?,
+                        table_name.clone(),
+                        Some(original_alias),
+                    )?;
+                    Ok(Relation::Share(Box::new(BoundShare { share_id, input })))
+                },
             }
         } else {
             self.bind_relation_by_name_inner(schema_name.as_deref(), &table_name, alias, as_of)

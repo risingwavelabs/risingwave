@@ -656,8 +656,15 @@ impl LocalBarrierWorker {
             };
             self.actor_manager_state.handles.insert(actor_id, handle);
 
-            if self.actor_manager.streaming_metrics.level >= MetricLevel::Debug {
-                tracing::info!("Tokio metrics are enabled because metrics_level >= Debug");
+            if self.actor_manager.streaming_metrics.level >= MetricLevel::Debug
+                || self
+                    .actor_manager
+                    .env
+                    .config()
+                    .developer
+                    .enable_actor_tokio_metrics
+            {
+                tracing::info!("Tokio metrics are enabled.");
                 let streaming_metrics = self.actor_manager.streaming_metrics.clone();
                 let actor_monitor_task = self.actor_manager.runtime.spawn(async move {
                     let metrics = streaming_metrics.new_actor_metrics(actor_id);

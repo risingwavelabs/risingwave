@@ -686,14 +686,14 @@ impl TableUnsyncData {
         };
         if synced_epoch_advanced {
             self.max_synced_epoch = Some(committed_epoch);
+            if let Some(min_syncing_epoch) = self.syncing_epochs.back() {
+                assert_gt!(*min_syncing_epoch, committed_epoch);
+            }
             self.assert_after_epoch(committed_epoch);
         }
     }
 
     fn assert_after_epoch(&self, epoch: HummockEpoch) {
-        if let Some(min_syncing_epoch) = self.syncing_epochs.back() {
-            assert_gt!(*min_syncing_epoch, epoch);
-        }
         self.instance_data
             .values()
             .for_each(|instance_data| instance_data.assert_after_epoch(epoch));
@@ -709,6 +709,10 @@ impl TableUnsyncData {
             .front()
             .cloned()
             .or(self.max_synced_epoch)
+    }
+
+    fn is_empty(&self) -> bool {
+        self.instance_data.is_empty() && self.syncing_epochs.is_empty()
     }
 }
 
@@ -814,7 +818,7 @@ impl UnsyncData {
             debug!(instance_id, "destroy instance");
             let table_data = self.table_data.get_mut(&table_id).expect("should exist");
             assert!(table_data.instance_data.remove(&instance_id).is_some());
-            if table_data.instance_data.is_empty() {
+            if table_data.is_empty() {
                 Some(self.table_data.remove(&table_id).expect("should exist"))
             } else {
                 None
@@ -1245,6 +1249,9 @@ impl UploaderData {
             for table_id in table_ids {
                 if let Some(table_data) = self.unsync_data.table_data.get_mut(&table_id) {
                     table_data.ack_synced(sync_epoch);
+                    if table_data.is_empty() {
+                        self.unsync_data.table_data.remove(&table_id);
+                    }
                 }
             }
 

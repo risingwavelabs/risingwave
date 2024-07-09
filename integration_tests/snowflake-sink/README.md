@@ -43,3 +43,27 @@ launch your risingwave cluster, and execute the following sql commands respectiv
 - `create_sink.sql`
 
 note: the column name(s) in your materialized view should be exactly the same as the ones in your pre-defined snowflake table, due to what we specified for snowflake pipe previously in `snowflake_prep.sql`.
+
+## 3. Sink data into snowflake with UPSERT
+
+1. To begin the process of sink data into Snowflake with upsert, we need to set up snowflake and s3 as we did for step 1
+
+2. Execute the following sql commands respectively.
+    - `upsert/create_source.sql`
+    - `upsert/create_mv.sql`
+    - `upsert/create_sink.sql`
+
+    After execution, we will import RisingWave's data change log into the snowflake's table.
+
+3. We then use the following sql statement to create the dynamic table. We can select it to get the result of the upsert
+    ```
+    CREATE OR REPLACE DYNAMIC TABLE user_behaviors
+    TARGET_LAG = '1 minute'
+    WAREHOUSE = test_warehouse
+    AS SELECT *
+        FROM (
+            SELECT *, ROW_NUMBER() OVER (PARTITION BY {primary_key} ORDER BY __row_id DESC) AS dedupe_id
+            FROM t3
+        ) AS subquery
+    WHERE dedupe_id = 1 AND (__op = 1 or __op = 3)
+    ```
