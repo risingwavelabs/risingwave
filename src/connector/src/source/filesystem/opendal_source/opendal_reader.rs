@@ -16,7 +16,7 @@ use std::future::IntoFuture;
 use std::ops::Range;
 use std::pin::Pin;
 use std::sync::Arc;
-use thiserror_ext::AsReport;
+
 use async_compression::tokio::bufread::GzipDecoder;
 use async_trait::async_trait;
 use futures::future::BoxFuture;
@@ -30,6 +30,7 @@ use parquet::file::footer::{decode_footer, decode_metadata};
 use parquet::file::metadata::ParquetMetaData;
 use parquet::file::FOOTER_SIZE;
 use risingwave_common::array::StreamChunk;
+use thiserror_ext::AsReport;
 use tokio::io::{AsyncRead, BufReader};
 use tokio_util::io::{ReaderStream, StreamReader};
 
@@ -219,7 +220,7 @@ impl<Src: OpendalSource> OpendalReader<Src> {
 }
 
 /// Since the `Reader` does not implement `tokio::io::AsyncRead` after `OpenDAL` 0.47, we construct a struct `ParquetFileReader` that implements `AsyncFileReader`, which is used as a parameter of `ParquetRecordBatchStreamBuilder`.
-/// The following code refers to <`https://github.com/icelake-io/icelake/blob/07d53893d7788b4e41fc11efad8a6be828405c31/icelake/src/io/scan.rs#L196`>, we can remove the following implementation after `ParquetFileReader` is changed to a public struct in icelake. 
+/// The following code refers to <`https://github.com/icelake-io/icelake/blob/07d53893d7788b4e41fc11efad8a6be828405c31/icelake/src/io/scan.rs#L196`>, we can remove the following implementation after `ParquetFileReader` is changed to a public struct in icelake.
 pub struct ParquetFileReader {
     op: Operator,
     path: String,
