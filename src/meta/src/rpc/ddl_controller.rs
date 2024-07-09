@@ -1991,6 +1991,9 @@ impl DdlController {
                     .metadata_manager
                     .get_upstream_root_fragments(fragment_graph.dependent_table_ids())
                     .await?;
+
+                println!("downstream {:?}", downstream_actor_locations);
+                println!("existing {:?}", existing_actor_location);
                 CompleteStreamFragmentGraph::with_upstreams_and_downstreams(
                     fragment_graph,
                     upstream_root_fragments,

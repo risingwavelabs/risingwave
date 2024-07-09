@@ -177,6 +177,10 @@ impl Distribution {
                     .collect();
 
                 let actor_mapping = ActorMapping::from_bitmaps(&actor_bitmaps);
+
+                println!("actor_mapping {:?}", actor_mapping);
+                println!("actor location {:#?}", actor_location);
+
                 let mapping = actor_mapping.to_worker_slot(actor_location);
 
                 Distribution::Hash(mapping)
