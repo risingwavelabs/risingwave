@@ -162,17 +162,36 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> JoinChunkBuilder
 
         // NOTE(st1page): remove the pattern `UpdateDel(k, old), UpdateIns(k, NULL), UpdateDel(k, NULL),  UpdateIns(k, new)`
         // to avoid this issue <https://github.com/risingwavelabs/risingwave/issues/17450>
-        let mut i = 1;
+        let mut i = 2;
         while i < c.capacity() {
             if c.op(i - 1) == Op::UpdateInsert
                 && c.op(i) == Op::UpdateDelete
                 && c.row_ref(i) == c.row_ref(i - 1)
             {
-                c.set_op(i - 2, Op::Delete);
-                c.set_vis(i - 1, false);
-                c.set_vis(i, false);
-                c.set_op(i + 1, Op::Insert);
-                i += 3;
+                if c.op(i - 2) == Op::UpdateDelete && c.op(i + 1) == Op::UpdateInsert {
+                    c.set_op(i - 2, Op::Delete);
+                    c.set_vis(i - 1, false);
+                    c.set_vis(i, false);
+                    c.set_op(i + 1, Op::Insert);
+                    i += 3;
+                } else {
+                    debug_assert!(
+                        false,
+                        "unexpected Op sequences {:?}, {:?}, {:?}, {:?}",
+                        c.op(i - 2),
+                        c.op(i - 1),
+                        c.op(i),
+                        c.op(i + 1)
+                    );
+                    warn!(
+                        "unexpected Op sequences {:?}, {:?}, {:?}, {:?}",
+                        c.op(i - 2),
+                        c.op(i - 1),
+                        c.op(i),
+                        c.op(i + 1)
+                    );
+                    i += 1;
+                }
             } else {
                 i += 1;
             }
