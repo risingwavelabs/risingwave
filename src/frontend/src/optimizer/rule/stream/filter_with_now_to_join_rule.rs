@@ -40,7 +40,7 @@ impl Rule for FilterWithNowToJoinRule {
             if let Some((input_expr, cmp, now_expr)) = expr.as_now_comparison_cond() {
                 // ensure that this expression is increasing
                 use monotonicity_variants::*;
-                if matches!(analyze_monotonicity(&now_expr), Inherent(Increasing)) {
+                if matches!(analyze_monotonicity(&now_expr), Inherent(NonDecreasing)) {
                     now_filters.push(
                         FunctionCall::new(cmp, vec![input_expr, now_expr])
                             .unwrap()

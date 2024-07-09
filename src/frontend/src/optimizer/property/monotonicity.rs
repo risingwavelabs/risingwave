@@ -42,40 +42,22 @@ impl MonotonicityDerivation {
     }
 }
 
-/// Represents the monotonicity of a column.
+/// Represents the monotonicity of a column. `NULL`s are considered largest when analyzing monotonicity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumAsInner)]
 pub enum Monotonicity {
-    /// The column is constant. In the future, we may derive watermark messages for this monotonicity.
     Constant,
-    /// The column is strictly non-decreasing. For this monotonicity, a watermark definition should be automatically
-    /// derived. Basically it is similar to `WATERMARK FOR col AS col`, except that the watermark messages are supposed
-    /// to be produced by `Project/ProjectSet` instead of `WatermarkFilter`.
-    Increasing,
-    /// The column is GENERALLY non-decreasing, but NOT STRICTLY. The general-non-decreasing property is normally defined
-    /// by user in DDL queries, and should be enforced by `WatermarkFilter`. Watermark messages should be produced by
-    /// `WatermarkFilter` and forwarded to downstream with necessary transformation in other operators like `Project/ProjectSet`.
-    IncreasingByWatermark,
-    /// The column is strictly non-increasing.
-    Decreasing,
-    /// The monotonicity of the column is unknown, meaning that we have to do everything conservatively for this column.
+    NonDecreasing,
+    NonIncreasing,
     Unknown,
 }
 
 impl Monotonicity {
-    pub fn has_watermark(self) -> bool {
-        matches!(
-            self,
-            Monotonicity::Increasing | Monotonicity::IncreasingByWatermark
-        )
-    }
-
     pub fn inverse(self) -> Self {
         use Monotonicity::*;
         match self {
             Constant => Constant,
-            Increasing => Decreasing,
-            IncreasingByWatermark => Unknown,
-            Decreasing => Increasing,
+            NonDecreasing => NonIncreasing,
+            NonIncreasing => NonDecreasing,
             Unknown => Unknown,
         }
     }
@@ -101,7 +83,7 @@ impl MonotonicityAnalyzer {
             // recursion base
             ExprImpl::InputRef(inner) => FollowingInput(inner.index()),
             ExprImpl::Literal(_) => Inherent(Constant),
-            ExprImpl::Now(_) => Inherent(Increasing),
+            ExprImpl::Now(_) => Inherent(NonDecreasing),
             ExprImpl::UserDefinedFunction(_) => Inherent(Unknown),
 
             // recursively visit children
@@ -166,8 +148,8 @@ impl MonotonicityAnalyzer {
             ExprType::Unspecified => unreachable!(),
             ExprType::Add => match self.visit_binary_op(func_call.inputs()) {
                 (Inherent(Constant), any) | (any, Inherent(Constant)) => any,
-                (Inherent(Increasing), Inherent(Increasing)) => Inherent(Increasing),
-                (Inherent(Decreasing), Inherent(Decreasing)) => Inherent(Decreasing),
+                (Inherent(NonDecreasing), Inherent(NonDecreasing)) => Inherent(NonDecreasing),
+                (Inherent(NonIncreasing), Inherent(NonIncreasing)) => Inherent(NonIncreasing),
                 _ => Inherent(Unknown),
             },
             ExprType::Subtract => match self.visit_binary_op(func_call.inputs()) {
@@ -278,7 +260,7 @@ impl MonotonicityAnalyzer {
                 // TODO: do we need derive watermark when every case can derive a common watermark?
                 Inherent(Unknown)
             }
-            ExprType::Proctime => Inherent(Increasing),
+            ExprType::Proctime => Inherent(NonDecreasing),
             _ => Inherent(Unknown),
         }
     }

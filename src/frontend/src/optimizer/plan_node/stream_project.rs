@@ -91,7 +91,7 @@ impl StreamProject {
                         watermark_columns.insert(expr_idx);
                     }
                 }
-                Inherent(Increasing) => {
+                Inherent(NonDecreasing) => {
                     nondecreasing_exprs.push(expr_idx);
                     watermark_columns.insert(expr_idx);
                 }
