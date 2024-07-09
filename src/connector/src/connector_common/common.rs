@@ -18,7 +18,7 @@ use std::io::Write;
 use std::time::Duration;
 
 use anyhow::{anyhow, Context};
-use async_nats::jetstream::consumer::DeliverPolicy;
+use async_nats::jetstream::consumer::{AckPolicy, DeliverPolicy, ReplayPolicy};
 use async_nats::jetstream::{self};
 use aws_sdk_kinesis::Client as KinesisClient;
 use pulsar::authentication::oauth2::{OAuth2Authentication, OAuth2Params};
@@ -639,6 +639,26 @@ impl NatsCommon {
         stream: String,
         split_id: String,
         start_sequence: NatsOffset,
+        durable_name: Option<String>,
+        description: Option<String>,
+        ack_policy: Option<String>,
+        ack_wait: Option<Duration>,
+        max_deliver: Option<i64>,
+        filter_subject: Option<String>,
+        filter_subjects: Option<Vec<String>>,
+        replay_policy: Option<String>,
+        rate_limit: Option<u64>,
+        sample_frequency: Option<u8>,
+        max_waiting: Option<i64>,
+        max_ack_pending: Option<i64>,
+        _idle_heartbeat: Option<Duration>,
+        max_batch: Option<i64>,
+        max_bytes: Option<i64>,
+        max_expires: Option<Duration>,
+        inactive_threshold: Option<Duration>,
+        num_replicas: Option<usize>,
+        memory_storage: Option<bool>,
+        backoff: Option<Vec<Duration>>,
     ) -> ConnectorResult<
         async_nats::jetstream::consumer::Consumer<async_nats::jetstream::consumer::pull::Config>,
     > {
@@ -650,7 +670,24 @@ impl NatsCommon {
             .replace(['.', '>', '*', ' ', '\t'], "_");
         let name = format!("risingwave-consumer-{}-{}", subject_name, split_id);
         let mut config = jetstream::consumer::pull::Config {
-            ack_policy: jetstream::consumer::AckPolicy::None,
+            durable_name,
+            description,
+            ack_wait: ack_wait.unwrap_or_default(),
+            max_deliver: max_deliver.unwrap_or_default(),
+            filter_subject: filter_subject.unwrap_or_default(),
+            filter_subjects: filter_subjects.unwrap_or_default(),
+            rate_limit: rate_limit.unwrap_or_default(),
+            sample_frequency: sample_frequency.unwrap_or_default(),
+            max_waiting: max_waiting.unwrap_or_default(),
+            max_ack_pending: max_ack_pending.unwrap_or_default(),
+            // idle_heartbeat: idle_heart.unwrap_or_default(),
+            max_batch: max_batch.unwrap_or_default(),
+            max_bytes: max_bytes.unwrap_or_default(),
+            max_expires: max_expires.unwrap_or_default(),
+            inactive_threshold: inactive_threshold.unwrap_or_default(),
+            memory_storage: memory_storage.unwrap_or_default(),
+            backoff: backoff.unwrap_or_default(),
+            num_replicas: num_replicas.unwrap_or_default(),
             ..Default::default()
         };
 
@@ -671,9 +708,24 @@ impl NatsCommon {
             },
             NatsOffset::None => DeliverPolicy::All,
         };
+
+        let ack_policy = match ack_policy.as_deref() {
+            Some("all") => AckPolicy::All,
+            Some("explicit") => AckPolicy::Explicit,
+            _ => AckPolicy::None,
+        };
+
+        let replay_policy = match replay_policy.as_deref() {
+            Some("instant") => ReplayPolicy::Instant,
+            Some("original") => ReplayPolicy::Original,
+            _ => ReplayPolicy::Instant,
+        };
+
         let consumer = stream
             .get_or_create_consumer(&name, {
                 config.deliver_policy = deliver_policy;
+                config.ack_policy = ack_policy;
+                config.replay_policy = replay_policy;
                 config
             })
             .await?;
