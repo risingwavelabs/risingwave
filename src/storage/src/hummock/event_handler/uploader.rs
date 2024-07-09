@@ -817,14 +817,14 @@ impl TableUnsyncData {
         };
         if synced_epoch_advanced {
             self.max_synced_epoch = Some(committed_epoch);
+            if let Some(min_syncing_epoch) = self.syncing_epochs.back() {
+                assert_gt!(*min_syncing_epoch, committed_epoch);
+            }
             self.assert_after_epoch(committed_epoch);
         }
     }
 
     fn assert_after_epoch(&self, epoch: HummockEpoch) {
-        if let Some(min_syncing_epoch) = self.syncing_epochs.back() {
-            assert_gt!(*min_syncing_epoch, epoch);
-        }
         self.instance_data
             .values()
             .for_each(|instance_data| instance_data.assert_after_epoch(epoch));
