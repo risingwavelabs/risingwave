@@ -27,6 +27,7 @@ use risingwave_common::constants::log_store::v2::{
     KV_LOG_STORE_PREDEFINED_COLUMNS, PK_ORDERING, VNODE_COLUMN_INDEX,
 };
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
+use thiserror_ext::AsReport;
 
 use crate::catalog::table_catalog::TableType;
 use crate::catalog::{ColumnId, TableCatalog, TableId};
@@ -324,7 +325,7 @@ macro_rules! plan_node_name {
     };
 }
 pub(crate) use plan_node_name;
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, Interval};
 use risingwave_expr::aggregate::AggKind;
 use risingwave_pb::plan_common::as_of::AsOfType;
 use risingwave_pb::plan_common::{as_of, PbAsOf};
@@ -397,7 +398,13 @@ pub fn to_pb_time_travel_as_of(a: &Option<AsOf>) -> Result<Option<PbAsOf>> {
         return Ok(None);
     };
     let as_of_type = match a {
-        AsOf::ProcessTime => AsOfType::ProcessTime(as_of::ProcessTime {}),
+        AsOf::ProcessTime => {
+            return Err(ErrorCode::NotSupported(
+                "do not support as of proctime".to_string(),
+                "please use as of timestamp".to_string(),
+            )
+            .into());
+        }
         AsOf::TimestampNum(ts) => AsOfType::Timestamp(as_of::Timestamp { timestamp: *ts }),
         AsOf::TimestampString(ts) => AsOfType::Timestamp(as_of::Timestamp {
             // should already have been validated by the parser
@@ -409,6 +416,21 @@ pub fn to_pb_time_travel_as_of(a: &Option<AsOf>) -> Result<Option<PbAsOf>> {
                 "please use as of timestamp".to_string(),
             )
             .into());
+        }
+        AsOf::ProcessTimeWithInterval((value, leading_field)) => {
+            let interval = Interval::parse_with_fields(
+                value,
+                leading_field
+                    .clone()
+                    .map(crate::Binder::bind_date_time_field),
+            )
+            .map_err(|e| ErrorCode::InvalidParameterValue(e.to_report_string()))?;
+            let interval_sec = (interval.epoch_in_micros() / 1_000_000) as i64;
+            let timestamp = chrono::Utc::now()
+                .timestamp()
+                .checked_sub(interval_sec)
+                .ok_or_else(|| ErrorCode::InvalidParameterValue(a.to_string()))?;
+            AsOfType::Timestamp(as_of::Timestamp { timestamp })
         }
     };
     Ok(Some(PbAsOf {

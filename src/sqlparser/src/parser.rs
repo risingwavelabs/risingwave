@@ -3649,6 +3649,40 @@ impl Parser<'_> {
                 (Keyword::SYSTEM_TIME, Keyword::AS, Keyword::OF),
                 cut_err(
                     alt((
+                        preceded(
+                            (
+                                Self::parse_identifier
+                                    .verify(|ident| ident.real_value() == "current"),
+                                cut_err(Token::LParen),
+                                cut_err(Token::RParen),
+                                Token::Minus,
+                            ),
+                            Self::parse_literal_interval.try_map(|e| match e {
+                                Expr::Value(v) => match v {
+                                    Value::Interval {
+                                        value,
+                                        leading_field,
+                                        ..
+                                    } => {
+                                        if leading_field.is_none() {
+                                            return Err(StrError("expect leading_field".into()));
+                                        }
+                                        Ok(AsOf::ProcessTimeWithInterval((value, leading_field)))
+                                    }
+                                    _ => Err(StrError("expect Value::Interval".into())),
+                                },
+                                _ => Err(StrError("expect Expr::Value".into())),
+                            }),
+                        ),
+                        (
+                            Self::parse_identifier.verify(|ident| ident.real_value() == "current"),
+                            cut_err(Token::LParen),
+                            cut_err(Token::RParen),
+                        )
+                            .value(AsOf::ProcessTimeWithInterval((
+                                "0".to_owned(),
+                                Some(DateTimeField::Second),
+                            ))),
                         (
                             Self::parse_identifier.verify(|ident| {
                                 ident.real_value() == "proctime" || ident.real_value() == "now"

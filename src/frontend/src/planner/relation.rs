@@ -20,12 +20,13 @@ use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::{DataType, Interval, ScalarImpl};
 use risingwave_sqlparser::ast::AsOf;
+use thiserror_ext::AsReport;
 
 use crate::binder::{
     BoundBackCteRef, BoundBaseTable, BoundJoin, BoundShare, BoundShareInput, BoundSource,
     BoundSystemTable, BoundWatermark, BoundWindowTableFunction, Relation, WindowTableFunctionKind,
 };
-use crate::error::{ErrorCode, Result};
+use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{Expr, ExprImpl, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::generic::SourceNodeKind;
 use crate::optimizer::plan_node::{
@@ -76,9 +77,17 @@ impl Planner {
         match as_of {
             None | Some(AsOf::ProcessTime) | Some(AsOf::TimestampNum(_)) => {}
             Some(AsOf::TimestampString(ref s)) => {
-                if s.parse::<i64>().is_err() {
-                    return Err(ErrorCode::InvalidParameterValue(s.to_owned()).into());
-                }
+                s.parse::<i64>()
+                    .map_err(|_| RwError::from(ErrorCode::InvalidParameterValue(s.to_owned())))?;
+            }
+            Some(AsOf::ProcessTimeWithInterval((ref value, ref leading_field))) => {
+                Interval::parse_with_fields(
+                    value,
+                    leading_field
+                        .clone()
+                        .map(crate::Binder::bind_date_time_field),
+                )
+                .map_err(|e| ErrorCode::InvalidParameterValue(e.to_report_string()))?;
             }
             Some(AsOf::VersionNum(_)) | Some(AsOf::VersionString(_)) => {
                 bail_not_implemented!("As Of Version is not supported yet.")
@@ -113,7 +122,7 @@ impl Planner {
                 | Some(AsOf::VersionNum(_))
                 | Some(AsOf::TimestampString(_))
                 | Some(AsOf::TimestampNum(_)) => {}
-                Some(AsOf::ProcessTime) => {
+                Some(AsOf::ProcessTime) | Some(AsOf::ProcessTimeWithInterval(_)) => {
                     bail_not_implemented!("As Of ProcessTime() is not supported yet.")
                 }
                 Some(AsOf::VersionString(_)) => {
