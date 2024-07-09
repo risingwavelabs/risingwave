@@ -845,11 +845,13 @@ impl UploaderData {
         let mut spilled_tasks = BTreeSet::new();
 
         let mut flush_payload = HashMap::new();
+        let mut table_ids_to_ack = HashSet::new();
         for (table_id, table_data) in &mut self.unsync_data.table_data {
             if !table_ids.contains(table_id) {
                 table_data.assert_after_epoch(epoch);
                 continue;
             }
+            table_ids_to_ack.insert(*table_id);
             let (unflushed_payload, table_watermarks, task_ids) = table_data.sync(epoch);
             for (instance_id, payload) in unflushed_payload {
                 if !payload.is_empty() {
@@ -909,6 +911,7 @@ impl UploaderData {
             SyncingData {
                 sync_epoch: epoch,
                 table_ids,
+                table_ids_to_ack,
                 remaining_uploading_tasks: uploading_tasks,
                 uploaded,
                 table_watermarks: all_table_watermarks,
@@ -934,6 +937,8 @@ impl UnsyncData {
 struct SyncingData {
     sync_epoch: HummockEpoch,
     table_ids: HashSet<TableId>,
+    /// Subset of `table_ids` that has existing instance
+    table_ids_to_ack: HashSet<TableId>,
     remaining_uploading_tasks: HashSet<UploadingTaskId>,
     // newer data at the front
     uploaded: VecDeque<Arc<StagingSstableInfo>>,
@@ -1235,7 +1240,8 @@ impl UploaderData {
             let (_, syncing_data) = self.syncing_data.pop_first().expect("non-empty");
             let SyncingData {
                 sync_epoch,
-                table_ids,
+                table_ids: _table_ids,
+                table_ids_to_ack,
                 remaining_uploading_tasks: _,
                 uploaded,
                 table_watermarks,
@@ -1246,7 +1252,7 @@ impl UploaderData {
                 .uploader_syncing_epoch_count
                 .set(self.syncing_data.len() as _);
 
-            for table_id in table_ids {
+            for table_id in table_ids_to_ack {
                 if let Some(table_data) = self.unsync_data.table_data.get_mut(&table_id) {
                     table_data.ack_synced(sync_epoch);
                     if table_data.is_empty() {
