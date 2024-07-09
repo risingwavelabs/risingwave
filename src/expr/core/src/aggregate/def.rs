@@ -249,7 +249,7 @@ impl FromStr for AggKind {
 
 impl From<PbAggKind> for AggKind {
     fn from(pb: PbAggKind) -> Self {
-        assert!(matches!(
+        assert!(!matches!(
             pb,
             PbAggKind::Unspecified | PbAggKind::UserDefined | PbAggKind::WrapScalar
         ));
@@ -283,7 +283,7 @@ impl AggKind {
 
     pub fn to_protobuf(&self) -> PbAggKind {
         match self {
-            Self::Builtin(pb) => pb.clone(),
+            Self::Builtin(pb) => *pb,
             Self::UserDefined(_) => PbAggKind::UserDefined,
             Self::WrapScalar(_) => PbAggKind::WrapScalar,
         }

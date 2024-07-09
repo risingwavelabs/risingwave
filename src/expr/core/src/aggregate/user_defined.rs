@@ -153,7 +153,7 @@ pub fn new_user_defined(
     ));
 
     Ok(Box::new(UserDefinedAggregateFunction {
-        return_field: arrow_convert.to_arrow_field("", &return_type)?,
+        return_field: arrow_convert.to_arrow_field("", return_type)?,
         state_field: Field::new("state", arrow_schema::DataType::Binary, true),
         return_type: return_type.clone(),
         arg_schema,
