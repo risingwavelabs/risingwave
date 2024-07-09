@@ -107,9 +107,9 @@ message AsOf {
     int64 version = 1;
   }
   oneof AsOfType {
-      ProcessTime process_time = 1;
-      Timestamp timestamp = 2;
-      Version version = 3;
+    ProcessTime process_time = 1;
+    Timestamp timestamp = 2;
+    Version version = 3;
   }
 }
 
