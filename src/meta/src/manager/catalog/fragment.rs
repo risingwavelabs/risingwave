@@ -1361,7 +1361,6 @@ impl FragmentManager {
                 let mut actor_to_vnode_bitmap = HashMap::with_capacity(fragment.actors.len());
                 for actor in &fragment.actors {
                     let actor_status = &actor_status[&actor.actor_id];
-                    // let parallel_unit_id = actor_status.parallel_unit.as_ref().unwrap().id;
                     let worker_id = actor_status.parallel_unit.as_ref().unwrap().worker_node_id;
                     actor_to_worker.insert(actor.actor_id, worker_id);
 
