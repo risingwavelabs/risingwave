@@ -12,16 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::future::Future;
+
 use clap::Parser;
 use risingwave_common::config::MetaBackend;
 use risingwave_common::util::meta_addr::MetaAddressStrategy;
+use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_common::util::tokio_util::sync::CancellationToken;
 use risingwave_compactor::CompactorOpts;
 use risingwave_compute::ComputeNodeOpts;
 use risingwave_frontend::FrontendOpts;
 use risingwave_meta_node::MetaNodeOpts;
 use shell_words::split;
-use tokio::signal;
 
 use crate::common::osstrs;
 
@@ -173,6 +175,46 @@ pub fn parse_standalone_opt_args(opts: &StandaloneOpts) -> ParsedStandaloneOpts 
     }
 }
 
+struct Service {
+    name: &'static str,
+    runtime: BackgroundShutdownRuntime,
+    main_task: tokio::task::JoinHandle<()>,
+    shutdown: CancellationToken,
+}
+
+impl Service {
+    fn spawn<F, Fut>(name: &'static str, f: F) -> Self
+    where
+        F: FnOnce(CancellationToken) -> Fut,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .thread_name(format!("rw-standalone-{name}"))
+            .enable_all()
+            .build()
+            .unwrap();
+        let shutdown = CancellationToken::new();
+        let main_task = runtime.spawn(f(shutdown.clone()));
+
+        Self {
+            name,
+            runtime: runtime.into(),
+            main_task,
+            shutdown,
+        }
+    }
+
+    async fn shutdown(self) {
+        tracing::info!("stopping {} service...", self.name);
+
+        self.shutdown.cancel();
+        let _ = self.main_task.await;
+        drop(self.runtime);
+
+        tracing::info!("{} service stopped", self.name);
+    }
+}
+
 /// For `standalone` mode, we can configure and start multiple services in one process.
 /// `standalone` mode is meant to be used by our cloud service and docker,
 /// where we can configure and start multiple services in one process.
@@ -183,61 +225,67 @@ pub async fn standalone(
         frontend_opts,
         compactor_opts,
     }: ParsedStandaloneOpts,
+    root_shutdown: CancellationToken,
 ) {
     tracing::info!("launching Risingwave in standalone mode");
 
-    // TODO(shutdown): use the real one passed-in
-    let shutdown = CancellationToken::new();
-
-    let mut is_in_memory = false;
-    if let Some(opts) = meta_opts {
-        is_in_memory = matches!(opts.backend, Some(MetaBackend::Mem));
+    let (meta, is_in_memory) = if let Some(opts) = meta_opts {
+        let is_in_memory = matches!(opts.backend, Some(MetaBackend::Mem));
         tracing::info!("starting meta-node thread with cli args: {:?}", opts);
-
-        let shutdown = shutdown.clone();
-        let _meta_handle = tokio::spawn(async move {
-            let dangerous_max_idle_secs = opts.dangerous_max_idle_secs;
-            risingwave_meta_node::start(opts, shutdown).await;
-            tracing::warn!("meta is stopped, shutdown all nodes");
-            if let Some(idle_exit_secs) = dangerous_max_idle_secs {
-                eprintln!("{}",
-                          console::style(format_args!(
-                              "RisingWave playground exited after being idle for {idle_exit_secs} seconds. Bye!"
-                          )).bold());
-                std::process::exit(0);
-            }
+        let service = Service::spawn("meta", |shutdown| {
+            risingwave_meta_node::start(opts, shutdown)
         });
+
         // wait for the service to be ready
         let mut tries = 0;
         while !risingwave_meta_node::is_server_started() {
             if tries % 50 == 0 {
                 tracing::info!("waiting for meta service to be ready...");
             }
+            if service.main_task.is_finished() {
+                tracing::error!("meta service failed to start, exiting...");
+                return;
+            }
             tries += 1;
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
-    }
-    if let Some(opts) = compute_opts {
+
+        (Some(service), is_in_memory)
+    } else {
+        (None, false)
+    };
+
+    let compute = if let Some(opts) = compute_opts {
         tracing::info!("starting compute-node thread with cli args: {:?}", opts);
-        let shutdown = shutdown.clone();
-        let _compute_handle =
-            tokio::spawn(async move { risingwave_compute::start(opts, shutdown).await });
-    }
-    if let Some(opts) = frontend_opts.clone() {
+        let service = Service::spawn("compute", |shutdown| {
+            risingwave_compute::start(opts, shutdown)
+        });
+        Some(service)
+    } else {
+        None
+    };
+
+    let frontend = if let Some(opts) = frontend_opts.clone() {
         tracing::info!("starting frontend-node thread with cli args: {:?}", opts);
-        let shutdown = shutdown.clone();
-        let _frontend_handle =
-            tokio::spawn(async move { risingwave_frontend::start(opts, shutdown).await });
-    }
-    if let Some(opts) = compactor_opts {
+        let service = Service::spawn("frontend", |shutdown| {
+            risingwave_frontend::start(opts, shutdown)
+        });
+        Some(service)
+    } else {
+        None
+    };
+
+    let compactor = if let Some(opts) = compactor_opts {
         tracing::info!("starting compactor-node thread with cli args: {:?}", opts);
-        let shutdown = shutdown.clone();
-        let _compactor_handle =
-            tokio::spawn(async move { risingwave_compactor::start(opts, shutdown).await });
-    }
+        let service = Service::spawn("compactor", |shutdown| risingwave_compactor::start(opts));
+        Some(service)
+    } else {
+        None
+    };
 
     // wait for log messages to be flushed
     tokio::time::sleep(std::time::Duration::from_millis(5000)).await;
+
     eprintln!("----------------------------------------");
     eprintln!("| RisingWave standalone mode is ready. |");
     eprintln!("----------------------------------------");
@@ -252,6 +300,7 @@ It SHOULD NEVER be used in benchmarks and production environment!!!"
             .bold()
         );
     }
+
     if let Some(opts) = frontend_opts {
         let host = opts.listen_addr.split(':').next().unwrap_or("localhost");
         let port = opts.listen_addr.split(':').last().unwrap_or("4566");
@@ -268,12 +317,20 @@ It SHOULD NEVER be used in benchmarks and production environment!!!"
         );
     }
 
-    // TODO: should we join all handles?
-    // Currently, not all services can be shutdown gracefully, just quit on Ctrl-C now.
-    // TODO(kwannoel): Why can't be shutdown gracefully? Is it that the service just does not
-    // support it?
-    signal::ctrl_c().await.unwrap();
-    tracing::info!("Ctrl+C received, now exiting");
+    // Wait for services to finish.
+    tokio::select! {
+        _ = meta.as_ref().unwrap().shutdown.cancelled(), if meta.is_some() => {
+            tracing::info!("meta service is stopped, terminating...");
+            return;
+        }
+
+        _ = root_shutdown.cancelled() => {
+            for service in [compactor, frontend, compute, meta].into_iter().flatten() {
+                service.shutdown().await;
+            }
+            tracing::info!("all services stopped, bye");
+        }
+    }
 }
 
 #[cfg(test)]

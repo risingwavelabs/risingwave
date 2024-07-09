@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use risingwave_common::catalog::TableId;
 use risingwave_pb::common::PbWorkerNode;
@@ -134,11 +134,26 @@ impl InflightActorInfo {
             .into_iter()
             .map(|node| (node.id, node))
             .collect::<HashMap<_, _>>();
-        for (actor_id, location) in &self.actor_location_map {
-            if !new_node_map.contains_key(location) {
-                warn!(actor_id, location, node = ?self.node_map.get(location), "node with running actors is deleted");
+
+        let mut deleted_actors = BTreeMap::new();
+        for (&actor_id, &location) in &self.actor_location_map {
+            if !new_node_map.contains_key(&location) {
+                deleted_actors
+                    .entry(location)
+                    .or_insert_with(BTreeSet::new)
+                    .insert(actor_id);
             }
         }
+        for (node_id, actors) in deleted_actors {
+            let node = self.node_map.get(&node_id);
+            warn!(
+                node_id,
+                ?node,
+                ?actors,
+                "node with running actors is deleted"
+            );
+        }
+
         self.node_map = new_node_map;
     }
 

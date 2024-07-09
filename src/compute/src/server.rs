@@ -463,6 +463,8 @@ pub async fn compute_node_serve(
     // existing connections are closed, while we have long-running streaming calls that never
     // close. From the other side, there's also no need to gracefully shutdown them if we have
     // unregistered from the meta service.
+
+    meta_client.try_unregister().await;
 }
 
 /// Check whether the compute node has enough memory to perform computing tasks. Apart from storage,
