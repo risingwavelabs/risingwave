@@ -135,6 +135,7 @@ impl OpendalObjectStore {
         builder.access_key_id(aws_access_key_id);
         builder.secret_access_key(aws_secret_access_key);
         builder.region(aws_region);
+        builder.disable_config_load();
 
         let http_client = Self::new_http_client(config.as_ref())?;
         builder.http_client(http_client);
