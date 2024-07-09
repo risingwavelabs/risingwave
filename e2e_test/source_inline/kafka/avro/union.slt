@@ -61,7 +61,7 @@ Caused by these errors (recent errors listed first):
   1: connector error
   2: failed to convert Avro union to struct
   3: Feature is not yet implemented: Avro named type used in Union type: Record(RecordSchema { name: Name { name: "Email", namespace: None }, aliases: None, doc: None, fields: [RecordField { name: "inner", doc: None, aliases: None, default: None, schema: String, order: Ascending, position: 0, custom_attributes: {} }], lookup: {"inner": 0}, attributes: {} })
-Tracking issue: https://github.com/risingwavelabs/risingwave/issues/17616
+Tracking issue: https://github.com/risingwavelabs/risingwave/issues/17632
 
 
 # FIXME: The following is the current buggy result.
