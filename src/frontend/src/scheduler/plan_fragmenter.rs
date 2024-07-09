@@ -27,7 +27,7 @@ use pgwire::pg_server::SessionId;
 use risingwave_batch::error::BatchError;
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
 use risingwave_common::bail;
-use risingwave_common::buffer::{Bitmap, BitmapBuilder};
+use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::TableDesc;
 use risingwave_common::hash::table_distribution::TableDistribution;
 use risingwave_common::hash::{VirtualNode, WorkerSlotId, WorkerSlotMapping};
@@ -43,7 +43,7 @@ use risingwave_connector::source::{
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{ExchangeInfo, ScanRange as ScanRangeProto};
 use risingwave_pb::common::Buffer;
-use risingwave_pb::plan_common::Field as FieldPb;
+use risingwave_pb::plan_common::Field as PbField;
 use risingwave_sqlparser::ast::AsOf;
 use serde::ser::SerializeStruct;
 use serde::Serialize;
@@ -86,7 +86,7 @@ pub struct ExecutionPlanNode {
     pub plan_node_id: PlanNodeId,
     pub plan_node_type: PlanNodeType,
     pub node: NodeBody,
-    pub schema: Vec<FieldPb>,
+    pub schema: Vec<PbField>,
 
     pub children: Vec<Arc<ExecutionPlanNode>>,
 
@@ -1068,7 +1068,7 @@ impl BatchPlanFragmenter {
             let table_catalog = self
                 .catalog_reader
                 .read_guard()
-                .get_table_by_id(&table_desc.table_id)
+                .get_any_table_by_id(&table_desc.table_id)
                 .cloned()
                 .map_err(RwError::from)?;
             let vnode_mapping = self
@@ -1136,7 +1136,7 @@ impl BatchPlanFragmenter {
             let table_catalog = self
                 .catalog_reader
                 .read_guard()
-                .get_table_by_id(&table_desc.table_id)
+                .get_any_table_by_id(&table_desc.table_id)
                 .cloned()
                 .map_err(RwError::from)?;
             let vnode_mapping = self

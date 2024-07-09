@@ -127,7 +127,7 @@ impl ClusterManager {
                     .unwrap_or_default();
             }
 
-            let old_worker_parallelism = worker.worker_node.parallel_units.len();
+            let old_worker_parallelism = worker.worker_node.parallelism();
             if old_worker_parallelism == new_worker_parallelism
                 && worker.worker_node.property == property
             {
@@ -321,7 +321,7 @@ impl ClusterManager {
         Ok(())
     }
 
-    pub async fn delete_worker_node(&self, host_address: HostAddress) -> MetaResult<WorkerType> {
+    pub async fn delete_worker_node(&self, host_address: HostAddress) -> MetaResult<WorkerNode> {
         let mut core = self.core.write().await;
         let worker = core.get_worker_by_host_checked(host_address.clone())?;
         let worker_type = worker.worker_type();
@@ -346,10 +346,10 @@ impl ClusterManager {
         // local notification.
         self.env
             .notification_manager()
-            .notify_local_subscribers(LocalNotification::WorkerNodeDeleted(worker_node))
+            .notify_local_subscribers(LocalNotification::WorkerNodeDeleted(worker_node.clone()))
             .await;
 
-        Ok(worker_type)
+        Ok(worker_node)
     }
 
     /// Invoked when it receives a heartbeat from a worker node.
@@ -412,7 +412,8 @@ impl ClusterManager {
                 // 3. Delete expired workers.
                 for (worker_id, key) in workers_to_delete {
                     match cluster_manager.delete_worker_node(key.clone()).await {
-                        Ok(worker_type) => {
+                        Ok(worker_node) => {
+                            let worker_type = worker_node.r#type();
                             match worker_type {
                                 WorkerType::Frontend
                                 | WorkerType::ComputeNode
@@ -551,6 +552,13 @@ pub struct StreamingClusterInfo {
 
     /// All unschedulable parallel units of compute nodes in the cluster.
     pub unschedulable_parallel_units: HashMap<ParallelUnitId, ParallelUnit>,
+}
+
+// Encapsulating the use of parallel_units.
+impl StreamingClusterInfo {
+    pub fn parallelism(&self) -> usize {
+        self.parallel_units.len()
+    }
 }
 
 pub struct ClusterManagerCore {
@@ -884,7 +892,7 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(worker_node.parallel_units.len(), fake_parallelism + 4);
+        assert_eq!(worker_node.parallelism(), fake_parallelism + 4);
         assert_cluster_manager(&cluster_manager, parallel_count + 4).await;
 
         // re-register existing worker node with smaller parallelism.
@@ -908,11 +916,11 @@ mod tests {
             .unwrap();
 
         if !env.opts.disable_automatic_parallelism_control {
-            assert_eq!(worker_node.parallel_units.len(), fake_parallelism - 2);
+            assert_eq!(worker_node.parallelism(), fake_parallelism - 2);
             assert_cluster_manager(&cluster_manager, parallel_count - 2).await;
         } else {
             // compatibility mode
-            assert_eq!(worker_node.parallel_units.len(), fake_parallelism + 4);
+            assert_eq!(worker_node.parallelism(), fake_parallelism + 4);
             assert_cluster_manager(&cluster_manager, parallel_count + 4).await;
         }
 

@@ -26,7 +26,7 @@ use futures_async_stream::try_stream;
 use itertools::{Either, Itertools};
 use more_asserts::assert_gt;
 use risingwave_common::array::{ArrayBuilderImpl, ArrayRef, DataChunk, Op};
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId, TableOption};
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{self, OwnedRow, Row, RowExt};
