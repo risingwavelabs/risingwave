@@ -19,6 +19,7 @@ use itertools::{EitherOrBoth, Itertools};
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::StreamScanType;
+use risingwave_sqlparser::ast::AsOf;
 
 use super::generic::{
     push_down_into_join, push_down_join_condition, GenericPlanNode, GenericPlanRef,
@@ -932,7 +933,7 @@ impl LogicalJoin {
     fn should_be_temporal_join(&self) -> bool {
         let right = self.right();
         if let Some(logical_scan) = right.as_logical_scan() {
-            logical_scan.for_system_time_as_of_proctime()
+            matches!(logical_scan.as_of(), Some(AsOf::ProcessTime))
         } else {
             false
         }
@@ -999,7 +1000,7 @@ impl LogicalJoin {
             )));
         };
 
-        if !logical_scan.for_system_time_as_of_proctime() {
+        if !matches!(logical_scan.as_of(), Some(AsOf::ProcessTime)) {
             return Err(RwError::from(ErrorCode::NotSupported(
                 "Temporal join requires a table defined as temporal table".into(),
                 "Please use FOR SYSTEM_TIME AS OF PROCTIME() syntax".into(),
@@ -1069,13 +1070,6 @@ impl LogicalJoin {
         let left = self.left().to_stream(ctx)?;
         // Enforce a shuffle for the temporal join LHS to let the scheduler be able to schedule the join fragment together with the RHS with a `no_shuffle` exchange.
         let left = required_dist.enforce(left, &Order::any());
-
-        if !left.append_only() {
-            return Err(RwError::from(ErrorCode::NotSupported(
-                "Temporal join requires an append-only left input".into(),
-                "Please ensure your left input is append-only".into(),
-            )));
-        }
 
         // Extract the predicate from logical scan. Only pure scan is supported.
         let (new_scan, scan_predicate, project_expr) = logical_scan.predicate_pull_up();
@@ -1345,10 +1339,9 @@ impl ToStream for LogicalJoin {
         } else {
             Err(RwError::from(ErrorCode::NotSupported(
                 "streaming nested-loop join".to_string(),
-                // TODO: replace the link with user doc
                 "The non-equal join in the query requires a nested-loop join executor, which could be very expensive to run. \
                  Consider rewriting the query to use dynamic filter as a substitute if possible.\n\
-                 See also: https://github.com/risingwavelabs/rfcs/blob/main/rfcs/0033-dynamic-filter.md".to_owned(),
+                 See also: https://docs.risingwave.com/docs/current/sql-pattern-dynamic-filters/".to_owned(),
             )))
         }
     }
@@ -1458,7 +1451,7 @@ impl ToStream for LogicalJoin {
                 )
                 .collect_vec();
             let plan: PlanRef = join_with_pk.into();
-            LogicalFilter::filter_if_keys_all_null(plan, &left_right_stream_keys)
+            LogicalFilter::filter_out_all_null_keys(plan, &left_right_stream_keys)
         } else {
             join_with_pk.into()
         };
@@ -1478,7 +1471,7 @@ mod tests {
     use risingwave_pb::expr::expr_node::Type;
 
     use super::*;
-    use crate::expr::{assert_eq_input_ref, FunctionCall, InputRef, Literal};
+    use crate::expr::{assert_eq_input_ref, FunctionCall, Literal};
     use crate::optimizer::optimizer_context::OptimizerContext;
     use crate::optimizer::plan_node::LogicalValues;
     use crate::optimizer::property::FunctionalDependency;

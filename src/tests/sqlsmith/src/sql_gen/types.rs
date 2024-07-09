@@ -112,6 +112,10 @@ static FUNC_BAN_LIST: LazyLock<HashSet<ExprType>> = LazyLock::new(|| {
         ExprType::Repeat,
         // The format argument needs to be handled specially. It is still generated in `gen_special_func`.
         ExprType::Decode,
+        // ENABLE: https://github.com/risingwavelabs/risingwave/issues/16293
+        ExprType::Sqrt,
+        // ENABLE: https://github.com/risingwavelabs/risingwave/issues/16293
+        ExprType::Pow,
     ]
     .into_iter()
     .collect()
@@ -181,6 +185,9 @@ pub(crate) static AGG_FUNC_TABLE: LazyLock<HashMap<DataType, Vec<&'static FuncSi
                         AggKind::PercentileCont,
                         AggKind::PercentileDisc,
                         AggKind::Mode,
+                        AggKind::JsonbObjectAgg, // ENABLE: https://github.com/risingwavelabs/risingwave/issues/16293
+                        AggKind::StddevSamp, // ENABLE: https://github.com/risingwavelabs/risingwave/issues/16293
+                        AggKind::VarSamp, // ENABLE: https://github.com/risingwavelabs/risingwave/issues/16293
                     ]
                     .contains(&func.name.as_aggregate())
                     // Exclude 2 phase agg global sum.

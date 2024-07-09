@@ -12,21 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::{Debug, Formatter};
-
-use futures::StreamExt;
-use futures_async_stream::try_stream;
 use multimap::MultiMap;
-use risingwave_common::array::StreamChunk;
-use risingwave_common::row::{Row, RowExt};
-use risingwave_common::types::{ScalarImpl, ToOwnedDatum};
+use risingwave_common::row::RowExt;
+use risingwave_common::types::ToOwnedDatum;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::expr::NonStrictExpression;
 
-use super::{
-    ActorContextRef, BoxedMessageStream, Execute, Executor, Message, StreamExecutorError,
-    StreamExecutorResult, Watermark,
-};
+use crate::executor::prelude::*;
 
 /// `ProjectExecutor` project data with the `expr`. The `expr` takes a chunk of data,
 /// and returns a new data chunk. And then, `ProjectExecutor` will insert, delete
@@ -41,7 +33,7 @@ struct Inner {
 
     /// Expressions of the current projection.
     exprs: Vec<NonStrictExpression>,
-    /// All the watermark derivations, (input_column_index, output_column_index). And the
+    /// All the watermark derivations, (`input_column_index`, `output_column_index`). And the
     /// derivation expression is the project's expression itself.
     watermark_derivations: MultiMap<usize, usize>,
     /// Indices of nondecreasing expressions in the expression list.
@@ -52,6 +44,10 @@ struct Inner {
     /// the selectivity threshold which should be in `[0,1]`. for the chunk with selectivity less
     /// than the threshold, the Project executor will construct a new chunk before expr evaluation,
     materialize_selectivity_threshold: f64,
+
+    /// Whether there are likely no-op updates in the output chunks, so that eliminating them with
+    /// `StreamChunk::eliminate_adjacent_noop_update` could be beneficial.
+    noop_update_hint: bool,
 }
 
 impl ProjectExecutor {
@@ -63,6 +59,7 @@ impl ProjectExecutor {
         watermark_derivations: MultiMap<usize, usize>,
         nondecreasing_expr_indices: Vec<usize>,
         materialize_selectivity_threshold: f64,
+        noop_update_hint: bool,
     ) -> Self {
         let n_nondecreasing_exprs = nondecreasing_expr_indices.len();
         Self {
@@ -74,6 +71,7 @@ impl ProjectExecutor {
                 nondecreasing_expr_indices,
                 last_nondec_expr_values: vec![None; n_nondecreasing_exprs],
                 materialize_selectivity_threshold,
+                noop_update_hint,
             },
         }
     }
@@ -111,7 +109,11 @@ impl Inner {
             projected_columns.push(evaluated_expr);
         }
         let (_, vis) = data_chunk.into_parts();
-        let new_chunk = StreamChunk::with_visibility(ops, projected_columns, vis);
+
+        let mut new_chunk = StreamChunk::with_visibility(ops, projected_columns, vis);
+        if self.noop_update_hint {
+            new_chunk = new_chunk.eliminate_adjacent_noop_update();
+        }
         Ok(Some(new_chunk))
     }
 
@@ -197,12 +199,11 @@ impl Inner {
 mod tests {
     use std::sync::atomic::{self, AtomicI64};
 
-    use futures::StreamExt;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
-    use risingwave_common::array::{DataChunk, StreamChunk};
-    use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::types::{DataType, Datum};
-    use risingwave_expr::expr::{self, Expression, ValueImpl};
+    use risingwave_common::array::DataChunk;
+    use risingwave_common::catalog::Field;
+    use risingwave_common::util::epoch::test_epoch;
+    use risingwave_expr::expr::{self, ValueImpl};
 
     use super::super::test_utils::MockSource;
     use super::super::*;
@@ -242,10 +243,11 @@ mod tests {
             MultiMap::new(),
             vec![],
             0.0,
+            false,
         );
         let mut project = project.boxed().execute();
 
-        tx.push_barrier(1, false);
+        tx.push_barrier(test_epoch(1), false);
         let barrier = project.next().await.unwrap().unwrap();
         barrier.as_barrier().unwrap();
 
@@ -273,7 +275,7 @@ mod tests {
             )
         );
 
-        tx.push_barrier(2, true);
+        tx.push_barrier(test_epoch(2), true);
         assert!(project.next().await.unwrap().unwrap().is_stop());
     }
 
@@ -324,10 +326,11 @@ mod tests {
             MultiMap::from_iter(vec![(0, 0), (0, 1)].into_iter()),
             vec![2],
             0.0,
+            false,
         );
         let mut project = project.boxed().execute();
 
-        tx.push_barrier(1, false);
+        tx.push_barrier(test_epoch(1), false);
         tx.push_int64_watermark(0, 100);
 
         project.expect_barrier().await;
@@ -371,7 +374,7 @@ mod tests {
         ));
         project.expect_chunk().await;
 
-        tx.push_barrier(2, false);
+        tx.push_barrier(test_epoch(2), false);
         let w3 = project.expect_watermark().await;
         project.expect_barrier().await;
 
@@ -383,7 +386,7 @@ mod tests {
         ));
         project.expect_chunk().await;
 
-        tx.push_barrier(3, false);
+        tx.push_barrier(test_epoch(3), false);
         let w4 = project.expect_watermark().await;
         project.expect_barrier().await;
 
@@ -391,7 +394,7 @@ mod tests {
         assert!(w3.val.default_cmp(&w4.val).is_le());
 
         tx.push_int64_watermark(1, 100);
-        tx.push_barrier(4, true);
+        tx.push_barrier(test_epoch(4), true);
 
         assert!(project.next().await.unwrap().unwrap().is_stop());
     }

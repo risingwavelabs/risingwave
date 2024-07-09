@@ -79,3 +79,7 @@ pub fn is_env_set(var: &str) -> bool {
     }
     false
 }
+
+pub fn is_enable_backtrace() -> bool {
+    !is_env_set("DISABLE_BACKTRACE")
+}

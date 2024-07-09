@@ -13,23 +13,23 @@
 // limitations under the License.
 
 use std::borrow::Cow;
+use std::fmt;
 use std::fmt::Display;
 use std::hash::BuildHasher;
 use std::sync::Arc;
-use std::{fmt, usize};
 
 use bytes::Bytes;
 use either::Either;
 use itertools::Itertools;
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::data::PbDataChunk;
 
 use super::{Array, ArrayImpl, ArrayRef, ArrayResult, StructArray};
 use crate::array::data_chunk_iter::RowRef;
 use crate::array::ArrayBuilderImpl;
-use crate::buffer::{Bitmap, BitmapBuilder};
-use crate::estimate_size::EstimateSize;
+use crate::bitmap::{Bitmap, BitmapBuilder};
 use crate::field_generator::{FieldGeneratorImpl, VarcharProperty};
 use crate::hash::HashCode;
 use crate::row::Row;
@@ -140,11 +140,13 @@ impl DataChunk {
         self.columns.len()
     }
 
+    // TODO(rc): shall we rename this to `visible_size`? I sometimes find this confused with `capacity`.
     /// `cardinality` returns the number of visible tuples
     pub fn cardinality(&self) -> usize {
         self.visibility.count_ones()
     }
 
+    // TODO(rc): shall we rename this to `size`?
     /// `capacity` returns physical length of any chunk column
     pub fn capacity(&self) -> usize {
         self.visibility.len()
@@ -247,6 +249,7 @@ impl DataChunk {
         Self::new(columns, Bitmap::ones(cardinality))
     }
 
+    /// Scatter a compacted chunk to a new chunk with the given visibility.
     pub fn uncompact(self, vis: Bitmap) -> Self {
         let mut uncompact_builders: Vec<_> = self
             .columns
@@ -344,18 +347,20 @@ impl DataChunk {
         Ok(outputs)
     }
 
-    /// Compute hash values for each row.
+    /// Compute hash values for each row. The number of the returning `HashCodes` is `self.capacity()`.
+    /// When `skip_invisible_row` is true, the `HashCode` for the invisible rows is arbitrary.
     pub fn get_hash_values<H: BuildHasher>(
         &self,
         column_idxes: &[usize],
         hasher_builder: H,
     ) -> Vec<HashCode<H>> {
-        let mut states = Vec::with_capacity(self.capacity());
-        states.resize_with(self.capacity(), || hasher_builder.build_hasher());
+        let len = self.capacity();
+        let mut states = Vec::with_capacity(len);
+        states.resize_with(len, || hasher_builder.build_hasher());
         // Compute hash for the specified columns.
         for column_idx in column_idxes {
             let array = self.column_at(*column_idx);
-            array.hash_vec(&mut states[..]);
+            array.hash_vec(&mut states[..], self.visibility());
         }
         finalize_hashers(&states[..])
             .into_iter()
@@ -799,7 +804,7 @@ impl DataChunkTestExt for DataChunk {
                 let arr = col;
                 let mut builder = arr.create_builder(n * 2);
                 for v in arr.iter() {
-                    builder.append(&v.to_owned_datum());
+                    builder.append(v.to_owned_datum());
                     builder.append_null();
                 }
 

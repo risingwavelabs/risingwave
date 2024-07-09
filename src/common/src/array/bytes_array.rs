@@ -15,13 +15,13 @@
 use std::iter;
 use std::mem::size_of;
 
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::common::buffer::CompressionType;
 use risingwave_pb::common::Buffer;
 use risingwave_pb::data::{ArrayType, PbArray};
 
 use super::{Array, ArrayBuilder, DataType};
-use crate::buffer::{Bitmap, BitmapBuilder};
-use crate::estimate_size::EstimateSize;
+use crate::bitmap::{Bitmap, BitmapBuilder};
 use crate::util::iter_util::ZipEqDebug;
 
 /// `BytesArray` is a collection of Rust `[u8]`s.
@@ -108,12 +108,6 @@ impl Array for BytesArray {
     }
 }
 
-impl BytesArray {
-    pub(super) fn data(&self) -> &[u8] {
-        &self.data
-    }
-}
-
 impl<'a> FromIterator<Option<&'a [u8]>> for BytesArray {
     fn from_iter<I: IntoIterator<Item = Option<&'a [u8]>>>(iter: I) -> Self {
         let iter = iter.into_iter();
@@ -148,19 +142,24 @@ pub struct BytesArrayBuilder {
 impl ArrayBuilder for BytesArrayBuilder {
     type ArrayType = BytesArray;
 
-    fn new(capacity: usize) -> Self {
-        let mut offset = Vec::with_capacity(capacity + 1);
+    /// Creates a new `BytesArrayBuilder`.
+    ///
+    /// `item_capacity` is the number of items to pre-allocate. The size of the preallocated
+    /// buffer of offsets is the number of items plus one.
+    /// No additional memory is pre-allocated for the data buffer.
+    fn new(item_capacity: usize) -> Self {
+        let mut offset = Vec::with_capacity(item_capacity + 1);
         offset.push(0);
         Self {
             offset,
-            data: Vec::with_capacity(capacity),
-            bitmap: BitmapBuilder::with_capacity(capacity),
+            data: Vec::with_capacity(0),
+            bitmap: BitmapBuilder::with_capacity(item_capacity),
         }
     }
 
-    fn with_type(capacity: usize, ty: DataType) -> Self {
+    fn with_type(item_capacity: usize, ty: DataType) -> Self {
         assert_eq!(ty, DataType::Bytea);
-        Self::new(capacity)
+        Self::new(item_capacity)
     }
 
     fn append_n<'a>(&'a mut self, n: usize, value: Option<&'a [u8]>) {

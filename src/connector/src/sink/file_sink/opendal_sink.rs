@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::marker::PhantomData;
 
 use anyhow::anyhow;
@@ -38,8 +38,7 @@ pub struct FileSink<S: OpendalSinkBackend> {
     /// The schema describing the structure of the data being written to the file sink.
     pub(crate) schema: Schema,
     pub(crate) is_append_only: bool,
-    ///  A vector of indices representing the primary key columns in the schema.
-    pub(crate) pk_indices: Vec<usize>,
+
     /// The description of the sink's format.
     pub(crate) format_desc: SinkFormatDesc,
     pub(crate) marker: PhantomData<S>,
@@ -58,14 +57,14 @@ pub struct FileSink<S: OpendalSinkBackend> {
 ///
 /// # Functions
 ///
-/// - `from_hashmap`: Automatically parse the required parameters from the input create sink statement.
+/// - `from_btreemap`: Automatically parse the required parameters from the input create sink statement.
 /// - `new_operator`: Creates a new operator using the provided backend properties.
 /// - `get_path`: Returns the path of the sink file specified by the user's create sink statement.
 pub trait OpendalSinkBackend: Send + Sync + 'static + Clone + PartialEq {
     type Properties: Send + Sync;
     const SINK_NAME: &'static str;
 
-    fn from_hashmap(hash_map: HashMap<String, String>) -> Result<Self::Properties>;
+    fn from_btreemap(hash_map: BTreeMap<String, String>) -> Result<Self::Properties>;
     fn new_operator(properties: Self::Properties) -> Result<Operator>;
     fn get_path(properties: &Self::Properties) -> String;
 }
@@ -88,7 +87,6 @@ impl<S: OpendalSinkBackend> Sink for FileSink<S> {
             self.op.clone(),
             &self.path,
             self.schema.clone(),
-            self.pk_indices.clone(),
             self.is_append_only,
             writer_param.executor_id,
             self.format_desc.encode.clone(),
@@ -102,7 +100,7 @@ impl<S: OpendalSinkBackend> TryFrom<SinkParam> for FileSink<S> {
 
     fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
         let schema = param.schema();
-        let config = S::from_hashmap(param.properties)?;
+        let config = S::from_btreemap(param.properties)?;
         let path = S::get_path(&config);
         let op = S::new_operator(config)?;
 
@@ -111,7 +109,6 @@ impl<S: OpendalSinkBackend> TryFrom<SinkParam> for FileSink<S> {
             path,
             schema,
             is_append_only: param.sink_type.is_append_only(),
-            pk_indices: param.downstream_pk,
             format_desc: param
                 .format_desc
                 .ok_or_else(|| SinkError::Config(anyhow!("missing FORMAT ... ENCODE ...")))?,

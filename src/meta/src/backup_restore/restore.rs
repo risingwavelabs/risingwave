@@ -35,12 +35,23 @@ use crate::backup_restore::utils::{get_backup_store, get_meta_store, MetaStoreBa
 #[derive(clap::Args, Debug, Clone)]
 pub struct RestoreOpts {
     /// Id of snapshot used to restore. Available snapshots can be found in
-    /// <storage_directory>/manifest.json.
+    /// <`storage_directory>/manifest.json`.
     #[clap(long)]
     pub meta_snapshot_id: u64,
     /// Type of meta store to restore.
     #[clap(long, value_enum, default_value_t = MetaBackend::Etcd)]
     pub meta_store_type: MetaBackend,
+    #[clap(long, default_value_t = String::from(""))]
+    pub sql_endpoint: String,
+    /// Username of sql backend, required when meta backend set to MySQL or PostgreSQL.
+    #[clap(long, default_value = "")]
+    pub sql_username: String,
+    /// Password of sql backend, required when meta backend set to MySQL or PostgreSQL.
+    #[clap(long, default_value = "")]
+    pub sql_password: String,
+    /// Database of sql backend, required when meta backend set to MySQL or PostgreSQL.
+    #[clap(long, default_value = "")]
+    pub sql_database: String,
     /// Etcd endpoints.
     #[clap(long, default_value_t = String::from(""))]
     pub etcd_endpoints: String,
@@ -80,7 +91,7 @@ async fn restore_hummock_version(
             hummock_storage_url,
             Arc::new(ObjectStoreMetrics::unused()),
             "Version Checkpoint",
-            ObjectStoreConfig::default(),
+            Arc::new(ObjectStoreConfig::default()),
         )
         .await,
     );
@@ -140,7 +151,7 @@ async fn restore_impl(
     match &meta_store {
         MetaStoreBackendImpl::Sql(m) => {
             if format_version < 2 {
-                todo!("write model V1 to meta store V2");
+                unimplemented!("not supported: write model V1 to meta store V2");
             } else {
                 dispatch(
                     target_id,
@@ -176,13 +187,14 @@ async fn dispatch<L: Loader<S>, W: Writer<S>, S: Metadata>(
     if opts.dry_run {
         return Ok(());
     }
+    let hummock_version = target_snapshot.metadata.hummock_version_ref().clone();
+    writer.write(target_snapshot).await?;
     restore_hummock_version(
         &opts.hummock_storage_url,
         &opts.hummock_storage_directory,
-        target_snapshot.metadata.hummock_version_ref(),
+        &hummock_version,
     )
     .await?;
-    writer.write(target_snapshot).await?;
     Ok(())
 }
 
@@ -226,6 +238,10 @@ mod tests {
         RestoreOpts {
             meta_snapshot_id: 1,
             meta_store_type: MetaBackend::Mem,
+            sql_endpoint: "".to_string(),
+            sql_username: "".to_string(),
+            sql_password: "".to_string(),
+            sql_database: "".to_string(),
             etcd_endpoints: "".to_string(),
             etcd_auth: false,
             etcd_username: "".to_string(),
@@ -242,6 +258,7 @@ mod tests {
         SystemParams {
             state_store: Some("state_store".into()),
             data_directory: Some("data_directory".into()),
+            use_new_object_prefix_strategy: Some(true),
             backup_storage_url: Some("backup_storage_url".into()),
             backup_storage_directory: Some("backup_storage_directory".into()),
             ..SystemConfig::default().into_init_system_params()
@@ -262,9 +279,10 @@ mod tests {
         let snapshot = MetaSnapshot {
             id: opts.meta_snapshot_id,
             metadata: ClusterMetadata {
-                hummock_version: HummockVersion {
-                    id: 123,
-                    ..Default::default()
+                hummock_version: {
+                    let mut version = HummockVersion::default();
+                    version.id = 123;
+                    version
                 },
                 system_param: system_param.clone(),
                 ..Default::default()
@@ -444,9 +462,10 @@ mod tests {
                         memcomparable::to_vec(&"some_value_2".to_string()).unwrap(),
                     ),
                 ]),
-                hummock_version: HummockVersion {
-                    id: 123,
-                    ..Default::default()
+                hummock_version: {
+                    let mut version = HummockVersion::default();
+                    version.id = 123;
+                    version
                 },
                 system_param: system_param.clone(),
                 ..Default::default()

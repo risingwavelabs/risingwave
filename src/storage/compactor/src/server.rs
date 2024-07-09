@@ -13,11 +13,9 @@
 // limitations under the License.
 
 use std::net::SocketAddr;
-use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 use std::time::Duration;
 
-use parking_lot::RwLock;
 use risingwave_common::config::{
     extract_storage_memory_config, load_config, AsyncStackTraceOption, MetricLevel, RwConfig,
 };
@@ -41,7 +39,10 @@ use risingwave_rpc_client::{GrpcCompactorProxyClient, MetaClient};
 use risingwave_storage::filter_key_extractor::{
     FilterKeyExtractorManager, RemoteTableAccessor, RpcFilterKeyExtractorManager,
 };
-use risingwave_storage::hummock::compactor::{CompactionExecutor, CompactorContext};
+use risingwave_storage::hummock::compactor::{
+    new_compaction_await_tree_reg_ref, CompactionAwaitTreeRegRef, CompactionExecutor,
+    CompactorContext,
+};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::{
     HummockMemoryCollector, MemoryLimiter, SstableObjectIdManager, SstableStore,
@@ -71,7 +72,7 @@ pub async fn prepare_start_parameters(
     Arc<SstableStore>,
     Arc<MemoryLimiter>,
     HeapProfiler,
-    Option<Arc<RwLock<await_tree::Registry<String>>>>,
+    Option<CompactionAwaitTreeRegRef>,
     Arc<StorageOpts>,
     Arc<CompactorMetrics>,
 ) {
@@ -120,17 +121,23 @@ pub async fn prepare_start_parameters(
             .expect("object store must be hummock for compactor server"),
         object_metrics,
         "Hummock",
-        config.storage.object_store.clone(),
+        Arc::new(config.storage.object_store.clone()),
     )
     .await;
 
     let object_store = Arc::new(object_store);
-    let sstable_store = Arc::new(SstableStore::for_compactor(
-        object_store,
-        storage_opts.data_directory.to_string(),
-        1 << 20, // set 1MB memory to avoid panic.
-        meta_cache_capacity_bytes,
-    ));
+    let sstable_store = Arc::new(
+        SstableStore::for_compactor(
+            object_store,
+            storage_opts.data_directory.to_string(),
+            0,
+            meta_cache_capacity_bytes,
+            system_params_reader.use_new_object_prefix_strategy(),
+        )
+        .await
+        // FIXME(MrCroxx): Handle this error.
+        .unwrap(),
+    );
 
     let memory_limiter = Arc::new(MemoryLimiter::new(compactor_memory_limit_bytes));
     let storage_memory_config = extract_storage_memory_config(&config);
@@ -154,8 +161,7 @@ pub async fn prepare_start_parameters(
             .build()
             .ok(),
     };
-    let await_tree_reg =
-        await_tree_config.map(|c| Arc::new(RwLock::new(await_tree::Registry::new(c))));
+    let await_tree_reg = await_tree_config.map(new_compaction_await_tree_reg_ref);
 
     (
         sstable_store,
@@ -241,10 +247,6 @@ pub async fn compactor_serve(
     let compaction_executor = Arc::new(CompactionExecutor::new(
         opts.compaction_worker_threads_number,
     ));
-    let max_task_parallelism = Arc::new(AtomicU32::new(
-        (compaction_executor.worker_num() as f32 * storage_opts.compactor_max_task_multiplier)
-            .ceil() as u32,
-    ));
 
     let compactor_context = CompactorContext {
         storage_opts,
@@ -256,8 +258,6 @@ pub async fn compactor_serve(
 
         task_progress_manager: Default::default(),
         await_tree_reg: await_tree_reg.clone(),
-        running_task_parallelism: Arc::new(AtomicU32::new(0)),
-        max_task_parallelism,
     };
     let mut sub_tasks = vec![
         MetaClient::start_heartbeat_loop(
@@ -377,10 +377,6 @@ pub async fn shared_compactor_serve(
     let compaction_executor = Arc::new(CompactionExecutor::new(
         opts.compaction_worker_threads_number,
     ));
-    let max_task_parallelism = Arc::new(AtomicU32::new(
-        (compaction_executor.worker_num() as f32 * storage_opts.compactor_max_task_multiplier)
-            .ceil() as u32,
-    ));
     let compactor_context = CompactorContext {
         storage_opts,
         sstable_store,
@@ -390,8 +386,6 @@ pub async fn shared_compactor_serve(
         memory_limiter,
         task_progress_manager: Default::default(),
         await_tree_reg,
-        running_task_parallelism: Arc::new(AtomicU32::new(0)),
-        max_task_parallelism,
     };
     let join_handle = tokio::spawn(async move {
         tonic::transport::Server::builder()

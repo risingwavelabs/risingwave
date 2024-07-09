@@ -17,16 +17,10 @@ use std::io::{Cursor, Read};
 use anyhow::Context;
 use byteorder::{BigEndian, ReadBytesExt};
 use paste::paste;
-use risingwave_pb::data::{PbArray, PbArrayType};
+use risingwave_pb::data::PbArrayType;
 
 use super::*;
 use crate::array::value_reader::{PrimitiveValueReader, VarSizedValueReader};
-use crate::array::{
-    Array, ArrayBuilder, ArrayImpl, ArrayResult, BoolArray, DateArrayBuilder, IntervalArrayBuilder,
-    PrimitiveArrayBuilder, PrimitiveArrayItemType, TimeArrayBuilder, TimestampArrayBuilder,
-};
-use crate::buffer::Bitmap;
-use crate::types::{Date, Interval, Time, Timestamp};
 
 impl ArrayImpl {
     pub fn from_protobuf(array: &PbArray, cardinality: usize) -> ArrayResult<Self> {
@@ -252,12 +246,6 @@ fn read_string_array<B: ArrayBuilder, R: VarSizedValueReader<B>>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::array::{
-        Array, ArrayBuilder, BoolArray, BoolArrayBuilder, DateArray, DateArrayBuilder,
-        DecimalArray, DecimalArrayBuilder, I32Array, I32ArrayBuilder, TimeArray, TimeArrayBuilder,
-        TimestampArray, TimestampArrayBuilder, Utf8Array, Utf8ArrayBuilder,
-    };
-    use crate::types::{Date, Decimal, Time, Timestamp};
 
     // Convert a column to protobuf, then convert it back to column, and ensures the two are
     // identical.

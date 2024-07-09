@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use anyhow::anyhow;
 use opendal::layers::{LoggingLayer, RetryLayer};
@@ -104,7 +104,7 @@ impl OpendalSinkBackend for S3Sink {
 
     const SINK_NAME: &'static str = S3_SINK;
 
-    fn from_hashmap(hash_map: HashMap<String, String>) -> Result<Self::Properties> {
+    fn from_btreemap(hash_map: BTreeMap<String, String>) -> Result<Self::Properties> {
         let config = serde_json::from_value::<S3Config>(serde_json::to_value(hash_map).unwrap())
             .map_err(|e| SinkError::Config(anyhow!(e)))?;
         if config.r#type != SINK_TYPE_APPEND_ONLY && config.r#type != SINK_TYPE_UPSERT {

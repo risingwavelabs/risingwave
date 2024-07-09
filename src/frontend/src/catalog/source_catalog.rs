@@ -16,6 +16,7 @@ use std::collections::BTreeMap;
 
 use risingwave_common::catalog::{ColumnCatalog, SourceVersionId};
 use risingwave_common::util::epoch::Epoch;
+use risingwave_connector::WithPropertiesExt;
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::{PbSource, StreamSourceInfo, WatermarkDesc};
 
@@ -76,12 +77,19 @@ impl SourceCatalog {
             version: self.version,
             created_at_cluster_version: self.created_at_cluster_version.clone(),
             initialized_at_cluster_version: self.initialized_at_cluster_version.clone(),
+            secret_refs: Default::default(),
         }
     }
 
     /// Get a reference to the source catalog's version.
     pub fn version(&self) -> SourceVersionId {
         self.version
+    }
+
+    pub fn connector_name(&self) -> String {
+        self.with_properties
+            .get_connector()
+            .expect("connector name is missing")
     }
 }
 

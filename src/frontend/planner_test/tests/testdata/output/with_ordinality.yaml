@@ -28,12 +28,12 @@
     └─StreamProject { exprs: [t.x, t.arr, Unnest($0), (projected_row_id + 1:Int64) as $expr1, t._row_id, projected_row_id] }
       └─StreamHashJoin { type: Inner, predicate: t.arr IS NOT DISTINCT FROM t.arr, output: [t.x, t.arr, projected_row_id, t.arr, Unnest($0), t._row_id] }
         ├─StreamExchange { dist: HashShard(t.arr) }
-        │ └─StreamTableScan { table: t, columns: [t.x, t.arr, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+        │ └─StreamTableScan { table: t, columns: [t.x, t.arr, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
         └─StreamProjectSet { select_list: [$0, Unnest($0)] }
-          └─StreamProject { exprs: [t.arr] }
+          └─StreamProject { exprs: [t.arr], noop_update_hint: true }
             └─StreamHashAgg { group_key: [t.arr], aggs: [count] }
               └─StreamExchange { dist: HashShard(t.arr) }
-                └─StreamTableScan { table: t, columns: [t.arr, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+                └─StreamTableScan { table: t, columns: [t.arr, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t(x int , arr int[]);
     select * from t cross join unnest(arr) WITH ORDINALITY as foo;
@@ -52,12 +52,12 @@
     └─StreamProject { exprs: [t.x, t.arr, Unnest($0), (projected_row_id + 1:Int64) as $expr1, t._row_id, projected_row_id] }
       └─StreamHashJoin { type: Inner, predicate: t.arr IS NOT DISTINCT FROM t.arr, output: [t.x, t.arr, projected_row_id, t.arr, Unnest($0), t._row_id] }
         ├─StreamExchange { dist: HashShard(t.arr) }
-        │ └─StreamTableScan { table: t, columns: [t.x, t.arr, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+        │ └─StreamTableScan { table: t, columns: [t.x, t.arr, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
         └─StreamProjectSet { select_list: [$0, Unnest($0)] }
-          └─StreamProject { exprs: [t.arr] }
+          └─StreamProject { exprs: [t.arr], noop_update_hint: true }
             └─StreamHashAgg { group_key: [t.arr], aggs: [count] }
               └─StreamExchange { dist: HashShard(t.arr) }
-                └─StreamTableScan { table: t, columns: [t.arr, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+                └─StreamTableScan { table: t, columns: [t.arr, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t(x int , arr int[]);
     select * from t cross join unnest(arr) WITH ORDINALITY as foo(a);
@@ -76,12 +76,12 @@
     └─StreamProject { exprs: [t.x, t.arr, Unnest($0), (projected_row_id + 1:Int64) as $expr1, t._row_id, projected_row_id] }
       └─StreamHashJoin { type: Inner, predicate: t.arr IS NOT DISTINCT FROM t.arr, output: [t.x, t.arr, projected_row_id, t.arr, Unnest($0), t._row_id] }
         ├─StreamExchange { dist: HashShard(t.arr) }
-        │ └─StreamTableScan { table: t, columns: [t.x, t.arr, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+        │ └─StreamTableScan { table: t, columns: [t.x, t.arr, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
         └─StreamProjectSet { select_list: [$0, Unnest($0)] }
-          └─StreamProject { exprs: [t.arr] }
+          └─StreamProject { exprs: [t.arr], noop_update_hint: true }
             └─StreamHashAgg { group_key: [t.arr], aggs: [count] }
               └─StreamExchange { dist: HashShard(t.arr) }
-                └─StreamTableScan { table: t, columns: [t.arr, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+                └─StreamTableScan { table: t, columns: [t.arr, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t(x int , arr int[]);
     select * from t cross join unnest(arr) WITH ORDINALITY as foo(a,ord);
@@ -100,12 +100,12 @@
     └─StreamProject { exprs: [t.x, t.arr, Unnest($0), (projected_row_id + 1:Int64) as $expr1, t._row_id, projected_row_id] }
       └─StreamHashJoin { type: Inner, predicate: t.arr IS NOT DISTINCT FROM t.arr, output: [t.x, t.arr, projected_row_id, t.arr, Unnest($0), t._row_id] }
         ├─StreamExchange { dist: HashShard(t.arr) }
-        │ └─StreamTableScan { table: t, columns: [t.x, t.arr, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+        │ └─StreamTableScan { table: t, columns: [t.x, t.arr, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
         └─StreamProjectSet { select_list: [$0, Unnest($0)] }
-          └─StreamProject { exprs: [t.arr] }
+          └─StreamProject { exprs: [t.arr], noop_update_hint: true }
             └─StreamHashAgg { group_key: [t.arr], aggs: [count] }
               └─StreamExchange { dist: HashShard(t.arr) }
-                └─StreamTableScan { table: t, columns: [t.arr, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+                └─StreamTableScan { table: t, columns: [t.arr, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: use alias columns explicitlity
   sql: |
     create table t(x int , arr int[]);
@@ -125,12 +125,12 @@
     └─StreamProject { exprs: [t.x, t.arr, Unnest($0), (projected_row_id + 1:Int64) as $expr1, t._row_id, projected_row_id] }
       └─StreamHashJoin { type: Inner, predicate: t.arr IS NOT DISTINCT FROM t.arr, output: [t.x, t.arr, projected_row_id, t.arr, Unnest($0), t._row_id] }
         ├─StreamExchange { dist: HashShard(t.arr) }
-        │ └─StreamTableScan { table: t, columns: [t.x, t.arr, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+        │ └─StreamTableScan { table: t, columns: [t.x, t.arr, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
         └─StreamProjectSet { select_list: [$0, Unnest($0)] }
-          └─StreamProject { exprs: [t.arr] }
+          └─StreamProject { exprs: [t.arr], noop_update_hint: true }
             └─StreamHashAgg { group_key: [t.arr], aggs: [count] }
               └─StreamExchange { dist: HashShard(t.arr) }
-                └─StreamTableScan { table: t, columns: [t.arr, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+                └─StreamTableScan { table: t, columns: [t.arr, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t(x int , arr int[]);
     select * from t cross join unnest(arr) WITH ORDINALITY as foo(a,ord,bar);
@@ -151,46 +151,34 @@
         │       └─BatchScan { table: t, columns: [t.arr], distribution: SomeShard }
         └─BatchProjectSet { select_list: [$0, Unnest($0)] }
           └─BatchHashAgg { group_key: [t.arr], aggs: [] }
-            └─BatchHashJoin { type: Inner, predicate: t.arr IS NOT DISTINCT FROM t.arr, output: [t.arr] }
-              ├─BatchExchange { order: [], dist: HashShard(t.arr) }
-              │ └─BatchScan { table: t, columns: [t.arr], distribution: SomeShard }
-              └─BatchProjectSet { select_list: [$0, Unnest($0)] }
-                └─BatchHashAgg { group_key: [t.arr], aggs: [] }
-                  └─BatchExchange { order: [], dist: HashShard(t.arr) }
-                    └─BatchScan { table: t, columns: [t.arr], distribution: SomeShard }
+            └─BatchExchange { order: [], dist: HashShard(t.arr) }
+              └─BatchScan { table: t, columns: [t.arr], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [x, arr, unnest, ordinality, arr_2, ordinality_2, t._row_id(hidden), projected_row_id(hidden), projected_row_id#1(hidden)], stream_key: [t._row_id, projected_row_id, arr, projected_row_id#1], pk_columns: [t._row_id, projected_row_id, arr, projected_row_id#1], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [t.x, t.arr, Unnest($0), $expr1, Unnest($0), (projected_row_id + 1:Int64) as $expr2, t._row_id, projected_row_id, projected_row_id] }
-      └─StreamHashJoin { type: Inner, predicate: t.arr IS NOT DISTINCT FROM t.arr, output: [t.x, t.arr, Unnest($0), $expr1, projected_row_id, t.arr, Unnest($0), t._row_id, projected_row_id] }
-        ├─StreamShare { id: 8 }
-        │ └─StreamProject { exprs: [t.x, t.arr, Unnest($0), (projected_row_id + 1:Int64) as $expr1, t._row_id, projected_row_id] }
-        │   └─StreamHashJoin { type: Inner, predicate: t.arr IS NOT DISTINCT FROM t.arr, output: [t.x, t.arr, projected_row_id, t.arr, Unnest($0), t._row_id] }
-        │     ├─StreamExchange { dist: HashShard(t.arr) }
-        │     │ └─StreamTableScan { table: t, columns: [t.x, t.arr, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
-        │     └─StreamProjectSet { select_list: [$0, Unnest($0)] }
-        │       └─StreamProject { exprs: [t.arr] }
-        │         └─StreamHashAgg { group_key: [t.arr], aggs: [count] }
-        │           └─StreamExchange { dist: HashShard(t.arr) }
-        │             └─StreamTableScan { table: t, columns: [t.arr, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+    └─StreamProject { exprs: [t.x, t.arr, Unnest($0), (projected_row_id + 1:Int64) as $expr1, Unnest($0), (projected_row_id + 1:Int64) as $expr2, t._row_id, projected_row_id, projected_row_id] }
+      └─StreamHashJoin { type: Inner, predicate: t.arr IS NOT DISTINCT FROM t.arr, output: [t.x, t.arr, projected_row_id, t.arr, Unnest($0), projected_row_id, t.arr, Unnest($0), t._row_id] }
+        ├─StreamHashJoin { type: Inner, predicate: t.arr IS NOT DISTINCT FROM t.arr, output: [t.x, t.arr, projected_row_id, t.arr, Unnest($0), t._row_id] }
+        │ ├─StreamExchange { dist: HashShard(t.arr) }
+        │ │ └─StreamTableScan { table: t, columns: [t.x, t.arr, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        │ └─StreamProjectSet { select_list: [$0, Unnest($0)] }
+        │   └─StreamProject { exprs: [t.arr], noop_update_hint: true }
+        │     └─StreamHashAgg { group_key: [t.arr], aggs: [count] }
+        │       └─StreamExchange { dist: HashShard(t.arr) }
+        │         └─StreamTableScan { table: t, columns: [t.arr, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
         └─StreamProjectSet { select_list: [$0, Unnest($0)] }
-          └─StreamProject { exprs: [t.arr] }
+          └─StreamProject { exprs: [t.arr], noop_update_hint: true }
             └─StreamHashAgg { group_key: [t.arr], aggs: [count] }
-              └─StreamShare { id: 8 }
-                └─StreamProject { exprs: [t.x, t.arr, Unnest($0), (projected_row_id + 1:Int64) as $expr1, t._row_id, projected_row_id] }
-                  └─StreamHashJoin { type: Inner, predicate: t.arr IS NOT DISTINCT FROM t.arr, output: [t.x, t.arr, projected_row_id, t.arr, Unnest($0), t._row_id] }
-                    ├─StreamExchange { dist: HashShard(t.arr) }
-                    │ └─StreamTableScan { table: t, columns: [t.x, t.arr, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
-                    └─StreamProjectSet { select_list: [$0, Unnest($0)] }
-                      └─StreamProject { exprs: [t.arr] }
-                        └─StreamHashAgg { group_key: [t.arr], aggs: [count] }
-                          └─StreamExchange { dist: HashShard(t.arr) }
-                            └─StreamTableScan { table: t, columns: [t.arr, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+              └─StreamExchange { dist: HashShard(t.arr) }
+                └─StreamTableScan { table: t, columns: [t.arr, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     select * from abs(1) WITH ORDINALITY;
-  batch_plan: 'BatchValues { rows: [[1:Int32, 1:Int64]] }'
+  batch_plan: |-
+    BatchProject { exprs: [, 1:Int64] }
+    └─BatchValues { rows: [[1:Int32]] }
   stream_plan: |-
     StreamMaterialize { columns: [abs, ordinality, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck }
-    └─StreamValues { rows: [[1:Int32, 1:Int64, 0:Int64]] }
+    └─StreamProject { exprs: [, 1:Int64, _row_id] }
+      └─StreamValues { rows: [[1:Int32, 0:Int64]] }
 - sql: |
     create table t(x int , arr int[]);
     select * from t, abs(x) WITH ORDINALITY;
@@ -210,4 +198,4 @@
   stream_error: |-
     Not supported: streaming nested-loop join
     HINT: The non-equal join in the query requires a nested-loop join executor, which could be very expensive to run. Consider rewriting the query to use dynamic filter as a substitute if possible.
-    See also: https://github.com/risingwavelabs/rfcs/blob/main/rfcs/0033-dynamic-filter.md
+    See also: https://docs.risingwave.com/docs/current/sql-pattern-dynamic-filters/

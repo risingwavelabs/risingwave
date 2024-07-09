@@ -7,10 +7,6 @@ auto-retry: &auto-retry
 steps:
   - label: "build"
     command: "ci/scripts/build.sh -p ci-release"
-    if: |
-      !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-build"
-      || build.env("CI_STEPS") =~ /(^|,)build(,|$$)/
     key: "build"
     plugins:
       - docker-compose#v5.1.0:
@@ -22,10 +18,6 @@ steps:
 
   - label: "build other components"
     command: "ci/scripts/build-other.sh"
-    if: |
-      !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-build-other"
-      || build.env("CI_STEPS") =~ /(^|,)build-other(,|$$)/
     key: "build-other"
     plugins:
       - seek-oss/aws-sm#v2.3.1:
@@ -42,10 +34,6 @@ steps:
 
   - label: "build simulation test"
     command: "ci/scripts/build-simulation.sh"
-    if: |
-      !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-build-simulation"
-      || build.env("CI_STEPS") =~ /(^|,)build-simulation(,|$$)/
     key: "build-simulation"
     plugins:
       - docker-compose#v5.1.0:
@@ -57,10 +45,6 @@ steps:
 
   - label: "docslt"
     command: "ci/scripts/docslt.sh"
-    if: |
-      !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-docslt"
-      || build.env("CI_STEPS") =~ /(^|,)docslt(,|$$)/
     key: "docslt"
     plugins:
       - docker-compose#v5.1.0:
@@ -74,7 +58,7 @@ steps:
     key: "e2e-test-release"
     command: "ci/scripts/cron-e2e-test.sh -p ci-release -m ci-3streaming-2serving-3fe"
     if: |
-      !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
+      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-e2e-test"
       || build.env("CI_STEPS") =~ /(^|,)e2e-tests?(,|$$)/
     depends_on:
@@ -87,14 +71,53 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 65
+    timeout_in_minutes: 15
+    retry: *auto-retry
+
+  - label: "slow end-to-end test (release)"
+    key: "slow-e2e-test-release"
+    command: "ci/scripts/slow-e2e-test.sh -p ci-release -m ci-3streaming-2serving-3fe"
+    if: |
+        !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
+        || build.pull_request.labels includes "ci/run-slow-e2e-tests"
+        || build.env("CI_STEPS") =~ /(^|,)slow-e2e-tests?(,|$$)/
+    depends_on:
+      - "build"
+      - "build-other"
+    plugins:
+      - docker-compose#v5.1.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 8
+    retry: *auto-retry
+
+  - label: "meta backup test (release)"
+    key: "e2e-meta-backup-test-release"
+    command: "ci/scripts/run-meta-backup-test.sh -p ci-release -m ci-3streaming-2serving-3fe"
+    if: |
+      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
+      || build.pull_request.labels includes "ci/run-e2e-meta-backup-test"
+      || build.env("CI_STEPS") =~ /(^|,)e2e-tests?(,|$$)/
+    depends_on:
+      - "build"
+      - "build-other"
+      - "docslt"
+    plugins:
+      - docker-compose#v5.1.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 45
     retry: *auto-retry
 
   - label: "end-to-end test (parallel) (release)"
     key: "e2e-test-release-parallel"
     command: "ci/scripts/e2e-test-parallel.sh -p ci-release"
     if: |
-      !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
+      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-e2e-parallel-tests"
       || build.env("CI_STEPS") =~ /(^|,)e2e-parallel-tests?(,|$$)/
     depends_on:
@@ -112,14 +135,14 @@ steps:
           files: "*-junit.xml"
           format: "junit"
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 10
+    timeout_in_minutes: 11
     retry: *auto-retry
 
   - label: "end-to-end test (parallel, in-memory) (release)"
     key: "e2e-test-release-parallel-memory"
     command: "ci/scripts/e2e-test-parallel-in-memory.sh -p ci-release"
     if: |
-      !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
+      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-e2e-parallel-in-memory-tests"
       || build.env("CI_STEPS") =~ /(^|,)e2e-parallel-in-memory-tests?(,|$$)/
     depends_on:
@@ -138,7 +161,7 @@ steps:
     key: "e2e-test-release-source"
     command: "ci/scripts/e2e-source-test.sh -p ci-release"
     if: |
-      !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
+      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-e2e-source-tests"
       || build.env("CI_STEPS") =~ /(^|,)e2e-source-tests?(,|$$)/
     depends_on:
@@ -157,7 +180,7 @@ steps:
     key: "e2e-test-release-sink"
     command: "ci/scripts/e2e-sink-test.sh -p ci-release"
     if: |
-      !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
+      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-e2e-sink-tests"
       || build.env("CI_STEPS") =~ /(^|,)e2e-sink-tests?(,|$$)/
     depends_on:
@@ -176,7 +199,7 @@ steps:
     key: "fuzz-test"
     command: "ci/scripts/cron-fuzz-test.sh -p ci-release"
     if: |
-      !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
+      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-sqlsmith-fuzzing-tests"
       || build.env("CI_STEPS") =~ /(^|,)sqlsmith-fuzzing-tests?(,|$$)/
     depends_on:
@@ -198,7 +221,7 @@ steps:
     key: "unit-test"
     command: "ci/scripts/unit-test.sh"
     if: |
-      !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
+      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-unit-test"
       || build.env("CI_STEPS") =~ /(^|,)unit-tests?(,|$$)/
     plugins:
@@ -216,9 +239,9 @@ steps:
 
   - label: "unit test (madsim)"
     key: "unit-test-deterministic"
-    command: "MADSIM_TEST_NUM=100 timeout 15m ci/scripts/deterministic-unit-test.sh"
+    command: "MADSIM_TEST_NUM=100 timeout 30m ci/scripts/deterministic-unit-test.sh"
     if: |
-      !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
+      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-unit-test-deterministic-simulation"
       || build.env("CI_STEPS") =~ /(^|,)unit-tests?-deterministic-simulation(,|$$)/
     plugins:
@@ -226,14 +249,14 @@ steps:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
-    timeout_in_minutes: 15
+    timeout_in_minutes: 30
     retry: *auto-retry
 
   - label: "integration test (madsim) - scale"
     key: "integration-test-deterministic-scale"
     command: "TEST_NUM=60 ci/scripts/deterministic-it-test.sh scale::"
     if: |
-      !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
+      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-integration-test-deterministic-simulation"
       || build.env("CI_STEPS") =~ /(^|,)integration-tests?-deterministic-simulation(,|$$)/
     depends_on: "build-simulation"
@@ -250,7 +273,7 @@ steps:
     key: "integration-test-deterministic-recovery"
     command: "TEST_NUM=60 ci/scripts/deterministic-it-test.sh recovery::"
     if: |
-      !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
+      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-integration-test-deterministic-simulation"
       || build.env("CI_STEPS") =~ /(^|,)integration-tests?-deterministic-simulation(,|$$)/
     depends_on: "build-simulation"
@@ -267,7 +290,7 @@ steps:
     key: "integration-test-deterministic-backfill"
     command: "TEST_NUM=30 ci/scripts/deterministic-it-test.sh backfill_tests::"
     if: |
-      !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
+      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-integration-test-deterministic-simulation"
       || build.env("CI_STEPS") =~ /(^|,)integration-tests?-deterministic-simulation(,|$$)/
     depends_on: "build-simulation"
@@ -284,7 +307,7 @@ steps:
     key: "integration-test-deterministic-storage"
     command: "TEST_NUM=30 ci/scripts/deterministic-it-test.sh storage::"
     if: |
-      !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
+      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-integration-test-deterministic-simulation"
       || build.env("CI_STEPS") =~ /(^|,)integration-tests?-deterministic-simulation(,|$$)/
     depends_on: "build-simulation"
@@ -301,7 +324,7 @@ steps:
     key: "integration-test-deterministic-sink"
     command: "TEST_NUM=30 ci/scripts/deterministic-it-test.sh sink::"
     if: |
-      !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
+      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-integration-test-deterministic-simulation"
       || build.env("CI_STEPS") =~ /(^|,)integration-tests?-deterministic-simulation(,|$$)/
     depends_on: "build-simulation"
@@ -316,9 +339,9 @@ steps:
 
   - label: "end-to-end test (madsim)"
     key: "e2e-test-deterministic"
-    command: "TEST_NUM=64 timeout 55m ci/scripts/deterministic-e2e-test.sh"
+    command: "TEST_NUM=64 timeout 75m ci/scripts/deterministic-e2e-test.sh"
     if: |
-      !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
+      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-e2e-test-deterministic-simulation"
       || build.env("CI_STEPS") =~ /(^|,)e2e-tests?-deterministic-simulation(,|$$)/
     depends_on: "build-simulation"
@@ -333,14 +356,14 @@ steps:
           environment:
             - GITHUB_TOKEN
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 60
+    timeout_in_minutes: 80
     retry: *auto-retry
 
   - label: "recovery test (madsim)"
     key: "recovery-test-deterministic"
-    command: "TEST_NUM=12 KILL_RATE=1.0 BACKGROUND_DDL_RATE=0.0 timeout 55m ci/scripts/deterministic-recovery-test.sh"
+    command: "TEST_NUM=12 KILL_RATE=1.0 BACKGROUND_DDL_RATE=0.0 timeout 65m ci/scripts/deterministic-recovery-test.sh"
     if: |
-      !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
+      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-recovery-test-deterministic-simulation"
       || build.env("CI_STEPS") =~ /(^|,)recovery-tests?-deterministic-simulation(,|$$)/
     depends_on: "build-simulation"
@@ -351,15 +374,15 @@ steps:
           mount-buildkite-agent: true
       # Only upload zipped files, otherwise the logs is too much.
       - ./ci/plugins/upload-failure-logs-zipped
-    timeout_in_minutes: 60
+    timeout_in_minutes: 70
     retry: *auto-retry
 
   # Ddl statements will randomly run with background_ddl.
   - label: "background_ddl, arrangement_backfill recovery test (madsim)"
     key: "background-ddl-arrangement-backfill-recovery-test-deterministic"
-    command: "TEST_NUM=12 KILL_RATE=1.0 BACKGROUND_DDL_RATE=0.8 USE_ARRANGEMENT_BACKFILL=--use-arrangement-backfill timeout 55m ci/scripts/deterministic-recovery-test.sh"
+    command: "TEST_NUM=12 KILL_RATE=1.0 BACKGROUND_DDL_RATE=0.8 USE_ARRANGEMENT_BACKFILL=--use-arrangement-backfill timeout 65m ci/scripts/deterministic-recovery-test.sh"
     if: |
-      !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
+      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-recovery-test-deterministic-simulation"
       || build.env("CI_STEPS") =~ /(^|,)recovery-tests?-deterministic-simulation(,|$$)/
     depends_on: "build-simulation"
@@ -370,33 +393,14 @@ steps:
           mount-buildkite-agent: true
       # Only upload zipped files, otherwise the logs is too much.
       - ./ci/plugins/upload-failure-logs-zipped
-    timeout_in_minutes: 60
-    retry: *auto-retry
-
-  # Ddl statements will randomly run with background_ddl.
-  - label: "background_ddl recovery test (madsim)"
-    key: "background-ddl-recovery-test-deterministic"
-    command: "TEST_NUM=12 KILL_RATE=1.0 BACKGROUND_DDL_RATE=0.8 timeout 55m ci/scripts/deterministic-recovery-test.sh"
-    if: |
-      !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-recovery-test-deterministic-simulation"
-      || build.env("CI_STEPS") =~ /(^|,)recovery-tests?-deterministic-simulation(,|$$)/
-    depends_on: "build-simulation"
-    plugins:
-      - docker-compose#v5.1.0:
-          run: rw-build-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
-      # Only upload zipped files, otherwise the logs is too much.
-      - ./ci/plugins/upload-failure-logs-zipped
-    timeout_in_minutes: 60
+    timeout_in_minutes: 70
     retry: *auto-retry
 
   - label: "end-to-end iceberg sink test (release)"
     key: "e2e-iceberg-sink-test"
     command: "ci/scripts/e2e-iceberg-sink-test.sh -p ci-release"
     if: |
-      !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
+      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-e2e-iceberg-sink-tests"
       || build.env("CI_STEPS") =~ /(^|,)e2e-iceberg-sink-tests?(,|$$)/
     depends_on:
@@ -416,7 +420,7 @@ steps:
     key: "e2e-iceberg-sink-v2-test"
     command: "ci/scripts/e2e-iceberg-sink-v2-test.sh -p ci-release"
     if: |
-      !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
+      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-e2e-iceberg-sink-v2-tests"
       || build.env("CI_STEPS") =~ /(^|,)e2e-iceberg-sink-v2-tests?(,|$$)/
     depends_on:
@@ -435,7 +439,7 @@ steps:
     key: "e2e-java-binding-tests"
     command: "ci/scripts/java-binding-test.sh -p ci-release"
     if: |
-      !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
+      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-e2e-java-binding-tests"
       || build.env("CI_STEPS") =~ /(^|,)e2e-java-binding-tests?(,|$$)/
     depends_on:
@@ -452,77 +456,11 @@ steps:
     timeout_in_minutes: 10
     retry: *auto-retry
 
-  - label: "S3 source check on AWS"
-    key: "s3-source-check-aws"
-    command: "ci/scripts/s3-source-test.sh -p ci-release -s run.py"
-    if: |
-      !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-s3-source-tests"
-      || build.env("CI_STEPS") =~ /(^|,)s3-source-tests?(,|$$)/
-    depends_on: build
-    plugins:
-      - seek-oss/aws-sm#v2.3.1:
-          env:
-            S3_SOURCE_TEST_CONF: ci_s3_source_test_aws
-      - docker-compose#v5.1.0:
-          run: rw-build-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
-          environment:
-            - S3_SOURCE_TEST_CONF
-      - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 20
-    retry: *auto-retry
-
-  - label: "S3 source check on AWS (json parser)"
-    key: "s3-source-check-aws-json-parser"
-    command: "ci/scripts/s3-source-test.sh -p ci-release -s json_file.py"
-    if: |
-      !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-s3-source-tests"
-      || build.env("CI_STEPS") =~ /(^|,)s3-source-tests?(,|$$)/
-    depends_on: build
-    plugins:
-      - seek-oss/aws-sm#v2.3.1:
-          env:
-            S3_SOURCE_TEST_CONF: ci_s3_source_test_aws
-      - docker-compose#v5.1.0:
-          run: rw-build-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
-          environment:
-            - S3_SOURCE_TEST_CONF
-      - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 25
-    retry: *auto-retry
-
-  - label: "S3 source check on AWS (csv parser)"
-    key: "s3-source-check-aws-csv-parser"
-    command: "ci/scripts/s3-source-test.sh -p ci-release -s run_csv.py"
-    if: |
-      !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-s3-source-tests"
-      || build.env("CI_STEPS") =~ /(^|,)s3-source-tests?(,|$$)/
-    depends_on: build
-    plugins:
-      - seek-oss/aws-sm#v2.3.1:
-          env:
-            S3_SOURCE_TEST_CONF: ci_s3_source_test_aws
-      - docker-compose#v5.1.0:
-          run: rw-build-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
-          environment:
-            - S3_SOURCE_TEST_CONF
-      - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 25
-    retry: *auto-retry
-
   - label: "S3_v2 source check on AWS (json parser)"
     key: "s3-v2-source-check-aws-json-parser"
-    command: "ci/scripts/s3-source-test.sh -p ci-release -s 'fs_source_v2.py json'"
+    command: "ci/scripts/s3-source-test.sh -p ci-release -s fs_source_v2.py -t json"
     if: |
-      !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
+      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-s3-source-tests"
       || build.env("CI_STEPS") =~ /(^|,)s3-source-tests?(,|$$)/
     depends_on: build
@@ -542,9 +480,9 @@ steps:
 
   - label: "S3_v2 source batch read on AWS (json parser)"
     key: "s3-v2-source-batch-read-check-aws-json-parser"
-    command: "ci/scripts/s3-source-test.sh -p ci-release -s 'fs_source_batch.py json'"
+    command: "ci/scripts/s3-source-test.sh -p ci-release -s fs_source_batch.py -t json"
     if: |
-      !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
+      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-s3-source-tests"
       || build.env("CI_STEPS") =~ /(^|,)s3-source-tests?(,|$$)/
     depends_on: build
@@ -564,9 +502,9 @@ steps:
 
   - label: "S3_v2 source check on AWS (csv parser)"
     key: "s3-v2-source-check-aws-csv-parser"
-    command: "ci/scripts/s3-source-test.sh -p ci-release -s 'fs_source_v2.py csv_without_header'"
+    command: "ci/scripts/s3-source-test.sh -p ci-release -s fs_source_v2.py -t csv_without_header"
     if: |
-      !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
+      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-s3-source-tests"
       || build.env("CI_STEPS") =~ /(^|,)s3-source-tests?(,|$$)/
     depends_on: build
@@ -586,9 +524,9 @@ steps:
 
   - label: "PosixFs source on OpenDAL fs engine (csv parser)"
     key: "s3-source-test-for-opendal-fs-engine-csv-parser"
-    command: "ci/scripts/s3-source-test.sh -p ci-release -s 'posix_fs_source.py csv_without_header'"
+    command: "ci/scripts/s3-source-test.sh -p ci-release -s posix_fs_source.py -t csv_without_header"
     if: |
-      !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
+      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-s3-source-tests"
       || build.env("CI_STEPS") =~ /(^|,)s3-source-tests?(,|$$)/
     depends_on: build
@@ -601,34 +539,12 @@ steps:
     timeout_in_minutes: 25
     retry: *auto-retry
 
-  - label: "S3 source on OpenDAL fs engine"
-    key: "s3-source-test-for-opendal-fs-engine"
-    command: "ci/scripts/s3-source-test-for-opendal-fs-engine.sh -p ci-release -s run.py"
-    if: |
-      !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-s3-source-tests"
-      || build.env("CI_STEPS") =~ /(^|,)s3-source-tests?(,|$$)/
-    depends_on: build
-    plugins:
-      - seek-oss/aws-sm#v2.3.1:
-          env:
-            S3_SOURCE_TEST_CONF: ci_s3_source_test_aws
-      - docker-compose#v5.1.0:
-          run: rw-build-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
-          environment:
-            - S3_SOURCE_TEST_CONF
-      - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 20
-    retry: *auto-retry
-
   # TODO(Kexiang): Enable this test after we have a GCS_SOURCE_TEST_CONF.
   # - label: "GCS source on OpenDAL fs engine"
   #   key: "s3-source-test-for-opendal-fs-engine"
   #   command: "ci/scripts/s3-source-test-for-opendal-fs-engine.sh -p ci-release -s gcs_source.py"
   #   if: |
-  #     !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
+  #     !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
   #     || build.pull_request.labels includes "ci/run-s3-source-tests"
   #     || build.env("CI_STEPS") =~ /(^|,)s3-source-tests?(,|$$)/
   #   depends_on: build
@@ -650,7 +566,7 @@ steps:
     key: "pulsar-source-tests"
     command: "ci/scripts/pulsar-source-test.sh -p ci-release"
     if: |
-      !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
+      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-pulsar-source-tests"
       || build.env("CI_STEPS") =~ /(^|,)pulsar-source-tests?(,|$$)/
     depends_on:
@@ -675,7 +591,7 @@ steps:
     key: "run-micro-benchmarks"
     command: "ci/scripts/run-micro-benchmarks.sh"
     if: |
-      !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
+      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-micro-benchmarks"
       || build.env("CI_STEPS") =~ /(^|,)micro-benchmarks?(,|$$)/
     plugins:
@@ -690,7 +606,7 @@ steps:
     key: "upload-micro-benchmarks"
     if: |
       build.branch == "main"
-      || !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
+      || !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-micro-benchmarks"
       || build.env("CI_STEPS") =~ /(^|,)micro-benchmarks?(,|$$)/
     command:
@@ -715,14 +631,14 @@ steps:
     key: "backwards-compat-tests"
     command: "VERSION_OFFSET={{matrix.version_offset}} RW_COMMIT=$BUILDKITE_COMMIT ci/scripts/backwards-compat-test.sh -p ci-release"
     if: |
-      !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
+      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-backwards-compat-tests"
       || build.env("CI_STEPS") =~ /(^|,)backwards?-compat-tests?(,|$$)/
     depends_on:
       - "build"
     plugins:
       - docker-compose#v5.1.0:
-          run: rw-build-env
+          run: source-test-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
@@ -749,7 +665,7 @@ steps:
     key: "sqlsmith-differential-tests"
     command: "ci/scripts/sqlsmith-differential-test.sh -p ci-release"
     if: |
-      !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
+      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-sqlsmith-differential-tests"
       || build.env("CI_STEPS") =~ /(^|,)sqlsmith-differential-tests?(,|$$)/
     depends_on:
@@ -765,14 +681,14 @@ steps:
     key: "backfill-tests"
     command: "BUILDKITE=${BUILDKITE:-} ci/scripts/backfill-test.sh -p ci-release"
     if: |
-      !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
+      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-backfill-tests"
       || build.env("CI_STEPS") =~ /(^|,)backfill-tests?(,|$$)/
     depends_on:
       - "build"
     plugins:
       - docker-compose#v5.1.0:
-          run: rw-build-env
+          run: source-test-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
@@ -783,7 +699,7 @@ steps:
     key: "e2e-standalone-binary-tests"
     command: "ci/scripts/e2e-test.sh -p ci-release -m standalone"
     if: |
-      !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
+      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-e2e-standalone-tests"
       || build.env("CI_STEPS") =~ /(^|,)e2e-standalone-tests?(,|$$)/
     depends_on:
@@ -803,7 +719,7 @@ steps:
     key: "e2e-single-node-binary-tests"
     command: "ci/scripts/e2e-test.sh -p ci-release -m single-node"
     if: |
-      !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
+      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-e2e-single-node-tests"
       || build.env("CI_STEPS") =~ /(^|,)e2e-single-node-tests?(,|$$)/
     depends_on:
@@ -823,7 +739,7 @@ steps:
     key: "e2e-test-opendal-parallel"
     command: "ci/scripts/e2e-test-parallel-for-opendal.sh -p ci-release"
     if: |
-      !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
+      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-e2e-parallel-tests-for-opendal"
       || build.env("CI_STEPS") =~ /(^|,)e2e-parallel-tests?-for-opendal(,|$$)/
     depends_on:
@@ -842,7 +758,7 @@ steps:
     key: "e2e-deltalake-sink-rust-tests"
     command: "ci/scripts/e2e-deltalake-sink-rust-test.sh -p ci-release"
     if: |
-      !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
+      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-e2e-deltalake-sink-rust-tests"
       || build.env("CI_STEPS") =~ /(^|,)e2e-deltalake-sink-rust-tests?(,|$$)/
     depends_on:
@@ -861,7 +777,7 @@ steps:
     key: "e2e-redis-sink-tests"
     command: "ci/scripts/e2e-redis-sink-test.sh -p ci-release"
     if: |
-      !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
+      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-e2e-redis-sink-tests"
       || build.env("CI_STEPS") =~ /(^|,)e2e-redis-sink-tests?(,|$$)/
     depends_on:
@@ -876,43 +792,30 @@ steps:
     timeout_in_minutes: 10
     retry: *auto-retry
 
-  # Causes ci error, close it first, fix it later
-  # - label: "set vm_max_map_count_2000000"
-  #   key: "set-vm_max_map_count"
-  #   if: |
-  #     !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
-  #     || build.pull_request.labels includes "ci/run-e2e-doris-sink-tests"
-  #     || build.env("CI_STEPS") =~ /(^|,)e2e-doris-sink-tests?(,|$$)/
-  #   command: "sudo sysctl -w vm.max_map_count=2000000"
-  #   depends_on:
-  #     - "build"
-  #     - "build-other"
-
-  # - label: "end-to-end doris sink test"
-  #   key: "e2e-doris-sink-tests"
-  #   command: "ci/scripts/e2e-doris-sink-test.sh -p ci-release"
-  #   if: |
-  #     !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
-  #     || build.pull_request.labels includes "ci/run-e2e-doris-sink-tests"
-  #     || build.env("CI_STEPS") =~ /(^|,)e2e-doris-sink-tests?(,|$$)/
-  #   depends_on:
-  #     - "build"
-  #     - "build-other"
-  #     - "set-vm_max_map_count"
-  #   plugins:
-  #     - docker-compose#v5.1.0:
-  #         run: sink-doris-env
-  #         config: ci/docker-compose.yml
-  #         mount-buildkite-agent: true
-  #     - ./ci/plugins/upload-failure-logs
-  #   timeout_in_minutes: 10
-  #   retry: *auto-retry
+  - label: "end-to-end doris sink test"
+    key: "e2e-doris-sink-tests"
+    command: "ci/scripts/e2e-doris-sink-test.sh -p ci-release"
+    if: |
+      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
+      || build.pull_request.labels includes "ci/run-e2e-doris-sink-tests"
+      || build.env("CI_STEPS") =~ /(^|,)e2e-doris-sink-tests?(,|$$)/
+    depends_on:
+      - "build"
+      - "build-other"
+    plugins:
+      - docker-compose#v5.1.0:
+          run: sink-test-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 10
+    retry: *auto-retry
 
   - label: "end-to-end starrocks sink test"
     key: "e2e-starrocks-sink-tests"
     command: "ci/scripts/e2e-starrocks-sink-test.sh -p ci-release"
     if: |
-      !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
+      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-e2e-starrocks-sink-tests"
       || build.env("CI_STEPS") =~ /(^|,)e2e-starrocks-sink-tests?(,|$$)/
     depends_on:
@@ -931,7 +834,7 @@ steps:
     key: "e2e-cassandra-sink-tests"
     command: "ci/scripts/e2e-cassandra-sink-test.sh -p ci-release"
     if: |
-      !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
+      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-e2e-cassandra-sink-tests"
       || build.env("CI_STEPS") =~ /(^|,)e2e-cassandra-sink-tests?(,|$$)/
     depends_on:
@@ -950,9 +853,28 @@ steps:
     key: "e2e-clickhouse-sink-tests"
     command: "ci/scripts/e2e-clickhouse-sink-test.sh -p ci-release"
     if: |
-      !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
+      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-e2e-clickhouse-sink-tests"
       || build.env("CI_STEPS") =~ /(^|,)e2e-clickhouse-sink-tests?(,|$$)/
+    depends_on:
+      - "build"
+      - "build-other"
+    plugins:
+      - docker-compose#v5.1.0:
+          run: sink-test-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 10
+    retry: *auto-retry
+
+  - label: "end-to-end sqlserver sink test"
+    key: "e2e-sqlserver-sink-tests"
+    command: "ci/scripts/e2e-sqlserver-sink-test.sh -p ci-release"
+    if: |
+      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
+      || build.pull_request.labels includes "ci/run-e2e-sqlserver-sink-tests"
+      || build.env("CI_STEPS") =~ /(^|,)e2e-sqlserver-sink-tests?(,|$$)/
     depends_on:
       - "build"
       - "build-other"
@@ -969,9 +891,47 @@ steps:
     key: "e2e-pulsar-sink-tests"
     command: "ci/scripts/e2e-pulsar-sink-test.sh -p ci-release"
     if: |
-      !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
+      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-e2e-pulsar-sink-tests"
       || build.env("CI_STEPS") =~ /(^|,)e2e-pulsar-sink-tests?(,|$$)/
+    depends_on:
+      - "build"
+      - "build-other"
+    plugins:
+      - docker-compose#v5.1.0:
+          run: sink-test-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 10
+    retry: *auto-retry
+
+  - label: "end-to-end mqtt sink test"
+    key: "e2e-mqtt-sink-tests"
+    command: "ci/scripts/e2e-mqtt-sink-test.sh -p ci-release"
+    if: |
+      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
+      || build.pull_request.labels includes "ci/run-e2e-mqtt-sink-tests"
+      || build.env("CI_STEPS") =~ /(^|,)e2e-mqtt-sink-tests?(,|$$)/
+    depends_on:
+      - "build"
+      - "build-other"
+    plugins:
+      - docker-compose#v5.1.0:
+          run: sink-test-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 10
+    retry: *auto-retry
+
+  - label: "end-to-end mongodb sink test"
+    key: "e2e-mongodb-sink-tests"
+    command: "ci/scripts/e2e-mongodb-sink-test.sh -p ci-release"
+    if: |
+      !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
+      || build.pull_request.labels includes "ci/run-e2e-mongodb-sink-tests"
+      || build.env("CI_STEPS") =~ /(^|,)e2e-mongodb-sink-tests?(,|$$)/
     depends_on:
       - "build"
       - "build-other"
@@ -988,7 +948,7 @@ steps:
     key: "connector-node-integration-test"
     command: "ci/scripts/connector-node-integration-test.sh -p ci-release -v {{matrix.java_version}}"
     if: |
-      !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
+      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-connector-node-integration-tests"
       || build.env("CI_STEPS") =~ /(^|,)connector-node-integration-tests?(,|$$)/
     depends_on:
@@ -1020,6 +980,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
           environment:
+            - BINARY_NAME
             - GITHUB_TOKEN
             - BUILDKITE_TAG
             - BUILDKITE_SOURCE
@@ -1038,6 +999,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
           environment:
+            - BINARY_NAME
             - GITHUB_TOKEN
             - BUILDKITE_TAG
             - BUILDKITE_SOURCE

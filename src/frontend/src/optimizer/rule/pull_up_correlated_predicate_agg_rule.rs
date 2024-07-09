@@ -24,7 +24,6 @@ use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef
 use crate::optimizer::plan_expr_visitor::Strong;
 use crate::optimizer::plan_node::generic::{Agg, GenericPlanNode, GenericPlanRef};
 use crate::optimizer::plan_visitor::{PlanCorrelatedIdFinder, PlanVisitor};
-use crate::optimizer::PlanRef;
 use crate::utils::{Condition, IndexSet};
 
 /// Pull up correlated predicates from the right agg side of Apply to the `on` clause of Join.

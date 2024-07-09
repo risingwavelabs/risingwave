@@ -13,7 +13,8 @@
 // limitations under the License.
 
 use bincode::{Decode, Encode};
-use risingwave_common::buffer::Bitmap;
+use foyer::CacheContext;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::util::epoch::EpochPair;
@@ -32,7 +33,6 @@ pub struct TracedPrefetchOptions {
 pub enum TracedCachePolicy {
     Disable,
     Fill(TracedCachePriority),
-    FileFileCache,
     NotFill,
 }
 
@@ -56,6 +56,24 @@ impl From<TracedCachePriority> for CachePriority {
         match value {
             TracedCachePriority::High => Self::High,
             TracedCachePriority::Low => Self::Low,
+        }
+    }
+}
+
+impl From<CacheContext> for TracedCachePriority {
+    fn from(value: CacheContext) -> Self {
+        match value {
+            CacheContext::Default => Self::High,
+            CacheContext::LowPriority => Self::Low,
+        }
+    }
+}
+
+impl From<TracedCachePriority> for CacheContext {
+    fn from(value: TracedCachePriority) -> Self {
+        match value {
+            TracedCachePriority::High => Self::Default,
+            TracedCachePriority::Low => Self::LowPriority,
         }
     }
 }

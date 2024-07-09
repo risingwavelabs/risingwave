@@ -44,8 +44,9 @@ impl Strong {
         Self { null_columns }
     }
 
-    /// Returns whether the analyzed expression will definitely return null if
+    /// Returns whether the analyzed expression will *definitely* return null if
     /// all of a given set of input columns are null.
+    /// Note: we could not assume any null-related property for the input expression if `is_null` returns false
     pub fn is_null(expr: &ExprImpl, null_columns: FixedBitSet) -> bool {
         let strong = Strong::new(null_columns);
         strong.is_null_visit(expr)
@@ -80,6 +81,7 @@ impl Strong {
             | ExprType::IsDistinctFrom
             | ExprType::IsNotDistinctFrom
             | ExprType::IsTrue
+            | ExprType::QuoteNullable
             | ExprType::IsNotTrue
             | ExprType::IsFalse
             | ExprType::IsNotFalse => false,
@@ -179,6 +181,7 @@ impl Strong {
             | ExprType::ToAscii
             | ExprType::ToHex
             | ExprType::QuoteIdent
+            | ExprType::QuoteLiteral
             | ExprType::Sin
             | ExprType::Cos
             | ExprType::Tan
@@ -284,7 +287,11 @@ impl Strong {
             | ExprType::JsonbPathMatch
             | ExprType::JsonbPathQueryArray
             | ExprType::JsonbPathQueryFirst
+            | ExprType::JsonbPopulateRecord
+            | ExprType::JsonbToRecord
+            | ExprType::JsonbSet
             | ExprType::Vnode
+            | ExprType::TestPaidTier
             | ExprType::Proctime
             | ExprType::PgSleep
             | ExprType::PgSleepFor
@@ -297,7 +304,13 @@ impl Strong {
             | ExprType::PgIndexesSize
             | ExprType::PgRelationSize
             | ExprType::PgGetSerialSequence
-            | ExprType::IcebergTransform => false,
+            | ExprType::PgIndexColumnHasProperty
+            | ExprType::IcebergTransform
+            | ExprType::HasTablePrivilege
+            | ExprType::HasAnyColumnPrivilege
+            | ExprType::HasSchemaPrivilege
+            | ExprType::InetAton
+            | ExprType::InetNtoa => false,
             ExprType::Unspecified => unreachable!(),
         }
     }

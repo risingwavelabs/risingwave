@@ -20,6 +20,7 @@ use risingwave_common::array::{DataChunk, Op, StreamChunk};
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::test_prelude::StreamChunkTestExt;
 use risingwave_common::types::{DataType, DefaultOrdered, ToText};
+use risingwave_common::util::epoch::test_epoch;
 use risingwave_stream::executor::test_utils::MessageSender;
 use risingwave_stream::executor::{BoxedMessageStream, Message};
 
@@ -146,7 +147,7 @@ where
     for mut event in inputs {
         match &mut event {
             SnapshotEvent::Barrier(epoch) => {
-                tx.push_barrier(*epoch, false);
+                tx.push_barrier(test_epoch(*epoch), false);
             }
             SnapshotEvent::Noop => unreachable!(),
             SnapshotEvent::Recovery => {
@@ -198,7 +199,9 @@ fn run_until_pending(
                 }
                 SnapshotEvent::Chunk(output)
             }
-            Message::Barrier(barrier) => SnapshotEvent::Barrier(barrier.epoch.curr),
+            // The epoch value in the input is randomly chosen (e.g., 1, 2, 3), but during the actual processing, it undergoes a left shift.
+            // In order to ensure consistency between the input and output when comparing with the script, the epoch value in the output needs to be correspondingly right-shifted.
+            Message::Barrier(barrier) => SnapshotEvent::Barrier(barrier.epoch.curr / test_epoch(1)),
             Message::Watermark(watermark) => SnapshotEvent::Watermark {
                 col_idx: watermark.col_idx,
                 val: watermark.val.as_scalar_ref_impl().to_text(),

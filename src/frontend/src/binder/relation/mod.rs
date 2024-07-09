@@ -19,17 +19,20 @@ use itertools::{EitherOrBoth, Itertools};
 use risingwave_common::bail;
 use risingwave_common::catalog::{Field, TableId, DEFAULT_SCHEMA_NAME};
 use risingwave_sqlparser::ast::{
-    Expr as ParserExpr, FunctionArg, FunctionArgExpr, Ident, ObjectName, TableAlias, TableFactor,
+    AsOf, Expr as ParserExpr, FunctionArg, FunctionArgExpr, Ident, ObjectName, TableAlias,
+    TableFactor,
 };
 use thiserror::Error;
 use thiserror_ext::AsReport;
 
 use super::bind_context::ColumnBinding;
 use super::statement::RewriteExprsRecursive;
+use crate::binder::bind_context::{BindingCte, BindingCteState};
 use crate::binder::Binder;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{ExprImpl, InputRef};
 
+mod cte_ref;
 mod join;
 mod share;
 mod subquery;
@@ -38,8 +41,9 @@ mod table_or_source;
 mod watermark;
 mod window_table_function;
 
+pub use cte_ref::BoundBackCteRef;
 pub use join::BoundJoin;
-pub use share::BoundShare;
+pub use share::{BoundShare, BoundShareInput};
 pub use subquery::BoundSubquery;
 pub use table_or_source::{BoundBaseTable, BoundSource, BoundSystemTable};
 pub use watermark::BoundWatermark;
@@ -64,7 +68,9 @@ pub enum Relation {
         with_ordinality: bool,
     },
     Watermark(Box<BoundWatermark>),
+    /// rcte is implicitly included in share
     Share(Box<BoundShare>),
+    BackCteRef(Box<BoundBackCteRef>),
 }
 
 impl RewriteExprsRecursive for Relation {
@@ -79,6 +85,7 @@ impl RewriteExprsRecursive for Relation {
             Relation::TableFunction { expr: inner, .. } => {
                 *inner = rewriter.rewrite_expr(inner.take())
             }
+            Relation::BackCteRef(inner) => inner.rewrite_exprs_recursive(rewriter),
             _ => {}
         }
     }
@@ -242,6 +249,11 @@ impl Binder {
         Self::resolve_single_name(name.0, "sink name")
     }
 
+    /// return the `subscription_name`
+    pub fn resolve_subscription_name(name: ObjectName) -> Result<String> {
+        Self::resolve_single_name(name.0, "subscription name")
+    }
+
     /// return the `table_name`
     pub fn resolve_table_name(name: ObjectName) -> Result<String> {
         Self::resolve_single_name(name.0, "table name")
@@ -284,7 +296,7 @@ impl Binder {
                     .map(|t| t.real_value())
                     .unwrap_or_else(|| field.name.to_string()),
             };
-            field.name = name.clone();
+            field.name.clone_from(&name);
             self.context.columns.push(ColumnBinding::new(
                 table_name.clone(),
                 begin + index,
@@ -328,16 +340,24 @@ impl Binder {
         &mut self,
         name: ObjectName,
         alias: Option<TableAlias>,
-        for_system_time_as_of_proctime: bool,
+        as_of: Option<AsOf>,
     ) -> Result<Relation> {
         let (schema_name, table_name) = Self::resolve_schema_qualified_name(&self.db_name, name)?;
+
         if schema_name.is_none()
+            // the `table_name` here is the name of the currently binding cte.
             && let Some(item) = self.context.cte_to_relation.get(&table_name)
         {
             // Handles CTE
 
-            let (share_id, query, mut original_alias) = item.deref().clone();
-            debug_assert_eq!(original_alias.name.real_value(), table_name); // The original CTE alias ought to be its table name.
+            let BindingCte {
+                share_id,
+                state: cte_state,
+                alias: mut original_alias,
+            } = item.deref().borrow().clone();
+
+            // The original CTE alias ought to be its table name.
+            debug_assert_eq!(original_alias.name.real_value(), table_name);
 
             if let Some(from_alias) = alias {
                 original_alias.name = from_alias.name;
@@ -349,34 +369,41 @@ impl Binder {
                     .collect();
             }
 
-            self.bind_table_to_context(
-                query
-                    .body
-                    .schema()
-                    .fields
-                    .iter()
-                    .map(|f| (false, f.clone())),
-                table_name.clone(),
-                Some(original_alias),
-            )?;
-
-            // Share the CTE.
-            let input_relation = Relation::Subquery(Box::new(BoundSubquery {
-                query,
-                lateral: false,
-            }));
-            let share_relation = Relation::Share(Box::new(BoundShare {
-                share_id,
-                input: input_relation,
-            }));
-            Ok(share_relation)
+            match cte_state {
+                BindingCteState::Init => {
+                    Err(ErrorCode::BindError("Base term of recursive CTE not found, consider writing it to left side of the `UNION ALL` operator".to_string()).into())
+                }
+                BindingCteState::BaseResolved { base } => {
+                    self.bind_table_to_context(
+                        base.schema().fields.iter().map(|f| (false, f.clone())),
+                        table_name.clone(),
+                        Some(original_alias),
+                    )?;
+                    Ok(Relation::BackCteRef(Box::new(BoundBackCteRef { share_id, base })))
+                }
+                BindingCteState::Bound { query } => {
+                    let input = BoundShareInput::Query(query);
+                    self.bind_table_to_context(
+                        input.fields()?,
+                        table_name.clone(),
+                        Some(original_alias),
+                    )?;
+                    // we could always share the cte,
+                    // no matter it's recursive or not.
+                    Ok(Relation::Share(Box::new(BoundShare { share_id, input})))
+                }
+                BindingCteState::ChangeLog { table } => {
+                    let input = BoundShareInput::ChangeLog(table);
+                    self.bind_table_to_context(
+                        input.fields()?,
+                        table_name.clone(),
+                        Some(original_alias),
+                    )?;
+                    Ok(Relation::Share(Box::new(BoundShare { share_id, input })))
+                },
+            }
         } else {
-            self.bind_relation_by_name_inner(
-                schema_name.as_deref(),
-                &table_name,
-                alias,
-                for_system_time_as_of_proctime,
-            )
+            self.bind_relation_by_name_inner(schema_name.as_deref(), &table_name, alias, as_of)
         }
     }
 
@@ -396,7 +423,7 @@ impl Binder {
         }?;
 
         Ok((
-            self.bind_relation_by_name(table_name.clone(), None, false)?,
+            self.bind_relation_by_name(table_name.clone(), None, None)?,
             table_name,
         ))
     }
@@ -446,16 +473,14 @@ impl Binder {
             .map_or(DEFAULT_SCHEMA_NAME.to_string(), |arg| arg.to_string());
 
         let table_name = self.catalog.get_table_name_by_id(table_id)?;
-        self.bind_relation_by_name_inner(Some(&schema), &table_name, alias, false)
+        self.bind_relation_by_name_inner(Some(&schema), &table_name, alias, None)
     }
 
     pub(super) fn bind_table_factor(&mut self, table_factor: TableFactor) -> Result<Relation> {
         match table_factor {
-            TableFactor::Table {
-                name,
-                alias,
-                for_system_time_as_of_proctime,
-            } => self.bind_relation_by_name(name, alias, for_system_time_as_of_proctime),
+            TableFactor::Table { name, alias, as_of } => {
+                self.bind_relation_by_name(name, alias, as_of)
+            }
             TableFactor::TableFunction {
                 name,
                 alias,

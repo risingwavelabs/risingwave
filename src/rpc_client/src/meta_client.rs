@@ -14,7 +14,6 @@
 
 use std::collections::HashMap;
 use std::fmt::{Debug, Display};
-use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, SystemTime};
@@ -24,9 +23,9 @@ use async_trait::async_trait;
 use either::Either;
 use futures::stream::BoxStream;
 use lru::LruCache;
-use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId, TableId};
+use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId, SecretId, TableId};
 use risingwave_common::config::{MetaConfig, MAX_CONNECTION_WINDOW_SIZE};
-use risingwave_common::hash::ParallelUnitMapping;
+use risingwave_common::hash::WorkerSlotMapping;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::telemetry::report::TelemetryInfoFetcher;
 use risingwave_common::util::addr::HostAddr;
@@ -38,14 +37,14 @@ use risingwave_common::RW_VERSION;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{
-    CompactionGroupId, HummockEpoch, HummockSstableObjectId, HummockVersionId, LocalSstableInfo,
-    SstObjectIdRange,
+    CompactionGroupId, HummockEpoch, HummockSstableObjectId, HummockVersionId, SstObjectIdRange,
+    SyncResult,
 };
 use risingwave_pb::backup_service::backup_service_client::BackupServiceClient;
 use risingwave_pb::backup_service::*;
 use risingwave_pb::catalog::{
-    Connection, PbComment, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable,
-    PbView, Table,
+    Connection, PbComment, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource,
+    PbSubscription, PbTable, PbView, Table,
 };
 use risingwave_pb::cloud_service::cloud_service_client::CloudServiceClient;
 use risingwave_pb::cloud_service::*;
@@ -66,7 +65,6 @@ use risingwave_pb::meta::add_worker_node_request::Property;
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
 use risingwave_pb::meta::event_log_service_client::EventLogServiceClient;
-use risingwave_pb::meta::get_reschedule_plan_request::PbPolicy;
 use risingwave_pb::meta::heartbeat_request::{extra_info, ExtraInfo};
 use risingwave_pb::meta::heartbeat_service_client::HeartbeatServiceClient;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
@@ -78,6 +76,7 @@ use risingwave_pb::meta::meta_member_service_client::MetaMemberServiceClient;
 use risingwave_pb::meta::notification_service_client::NotificationServiceClient;
 use risingwave_pb::meta::scale_service_client::ScaleServiceClient;
 use risingwave_pb::meta::serving_service_client::ServingServiceClient;
+use risingwave_pb::meta::session_param_service_client::SessionParamServiceClient;
 use risingwave_pb::meta::stream_manager_service_client::StreamManagerServiceClient;
 use risingwave_pb::meta::system_params_service_client::SystemParamsServiceClient;
 use risingwave_pb::meta::telemetry_info_service_client::TelemetryInfoServiceClient;
@@ -172,6 +171,25 @@ impl MetaClient {
         Ok(resp.version)
     }
 
+    pub async fn create_secret(
+        &self,
+        secret_name: String,
+        database_id: u32,
+        schema_id: u32,
+        owner_id: u32,
+        value: Vec<u8>,
+    ) -> Result<CatalogVersion> {
+        let request = CreateSecretRequest {
+            name: secret_name,
+            database_id,
+            schema_id,
+            owner_id,
+            value,
+        };
+        let resp = self.inner.create_secret(request).await?;
+        Ok(resp.version)
+    }
+
     pub async fn list_connections(&self, _name: Option<&str>) -> Result<Vec<Connection>> {
         let request = ListConnectionsRequest {};
         let resp = self.inner.list_connections(request).await?;
@@ -181,6 +199,14 @@ impl MetaClient {
     pub async fn drop_connection(&self, connection_id: ConnectionId) -> Result<CatalogVersion> {
         let request = DropConnectionRequest { connection_id };
         let resp = self.inner.drop_connection(request).await?;
+        Ok(resp.version)
+    }
+
+    pub async fn drop_secret(&self, secret_id: SecretId) -> Result<CatalogVersion> {
+        let request = DropSecretRequest {
+            secret_id: secret_id.into(),
+        };
+        let resp = self.inner.drop_secret(request).await?;
         Ok(resp.version)
     }
 
@@ -381,6 +407,18 @@ impl MetaClient {
         Ok(resp.version)
     }
 
+    pub async fn create_subscription(
+        &self,
+        subscription: PbSubscription,
+    ) -> Result<CatalogVersion> {
+        let request = CreateSubscriptionRequest {
+            subscription: Some(subscription),
+        };
+
+        let resp = self.inner.create_subscription(request).await?;
+        Ok(resp.version)
+    }
+
     pub async fn create_function(&self, function: PbFunction) -> Result<CatalogVersion> {
         let request = CreateFunctionRequest {
             function: Some(function),
@@ -489,6 +527,7 @@ impl MetaClient {
         table: PbTable,
         graph: StreamFragmentGraph,
         table_col_index_mapping: ColIndexMapping,
+        job_type: PbTableJobType,
     ) -> Result<CatalogVersion> {
         let request = ReplaceTablePlanRequest {
             plan: Some(ReplaceTablePlan {
@@ -496,6 +535,7 @@ impl MetaClient {
                 table: Some(table),
                 fragment_graph: Some(graph),
                 table_col_index_mapping: Some(table_col_index_mapping.to_protobuf()),
+                job_type: job_type as _,
             }),
         };
         let resp = self.inner.replace_table_plan(request).await?;
@@ -567,6 +607,34 @@ impl MetaClient {
         };
         let resp = self.inner.drop_sink(request).await?;
         Ok(resp.version)
+    }
+
+    pub async fn drop_subscription(
+        &self,
+        subscription_id: u32,
+        cascade: bool,
+    ) -> Result<CatalogVersion> {
+        let request = DropSubscriptionRequest {
+            subscription_id,
+            cascade,
+        };
+        let resp = self.inner.drop_subscription(request).await?;
+        Ok(resp.version)
+    }
+
+    pub async fn list_change_log_epochs(
+        &self,
+        table_id: u32,
+        min_epoch: u64,
+        max_count: u32,
+    ) -> Result<Vec<u64>> {
+        let request = ListChangeLogEpochsRequest {
+            table_id,
+            min_epoch,
+            max_count,
+        };
+        let resp = self.inner.list_change_log_epochs(request).await?;
+        Ok(resp.epochs)
     }
 
     pub async fn drop_index(&self, index_id: IndexId, cascade: bool) -> Result<CatalogVersion> {
@@ -665,13 +733,32 @@ impl MetaClient {
         Ok(resp.version)
     }
 
-    /// Unregister the current node to the cluster.
-    pub async fn unregister(&self, addr: HostAddr) -> Result<()> {
+    /// Unregister the current node from the cluster.
+    pub async fn unregister(&self) -> Result<()> {
         let request = DeleteWorkerNodeRequest {
-            host: Some(addr.to_protobuf()),
+            host: Some(self.host_addr.to_protobuf()),
         };
         self.inner.delete_worker_node(request).await?;
         Ok(())
+    }
+
+    /// Try to unregister the current worker from the cluster with best effort. Log the result.
+    pub async fn try_unregister(&self) {
+        match self.unregister().await {
+            Ok(_) => {
+                tracing::info!(
+                    worker_id = self.worker_id(),
+                    "successfully unregistered from meta service",
+                )
+            }
+            Err(e) => {
+                tracing::warn!(
+                    error = %e.as_report(),
+                    worker_id = self.worker_id(),
+                    "failed to unregister from meta service",
+                );
+            }
+        }
     }
 
     pub async fn update_schedulability(
@@ -771,6 +858,12 @@ impl MetaClient {
         Ok(())
     }
 
+    pub async fn recover(&self) -> Result<()> {
+        let request = RecoverRequest {};
+        self.inner.recover(request).await?;
+        Ok(())
+    }
+
     pub async fn cancel_creating_jobs(&self, jobs: PbJobs) -> Result<Vec<u32>> {
         let request = CancelCreatingJobsRequest { jobs: Some(jobs) };
         let resp = self.inner.cancel_creating_jobs(request).await?;
@@ -866,19 +959,6 @@ impl MetaClient {
         };
         let resp = self.inner.reschedule(request).await?;
         Ok((resp.success, resp.revision))
-    }
-
-    pub async fn get_reschedule_plan(
-        &self,
-        policy: PbPolicy,
-        revision: u64,
-    ) -> Result<GetReschedulePlanResponse> {
-        let request = GetReschedulePlanRequest {
-            revision,
-            policy: Some(policy),
-        };
-        let resp = self.inner.get_reschedule_plan(request).await?;
-        Ok(resp)
     }
 
     pub async fn risectl_get_pinned_versions_summary(
@@ -1084,6 +1164,18 @@ impl MetaClient {
         Ok(resp.params.map(SystemParamsReader::from))
     }
 
+    pub async fn get_session_params(&self) -> Result<String> {
+        let req = GetSessionParamsRequest {};
+        let resp = self.inner.get_session_params(req).await?;
+        Ok(resp.params)
+    }
+
+    pub async fn set_session_param(&self, param: String, value: Option<String>) -> Result<String> {
+        let req = SetSessionParamRequest { param, value };
+        let resp = self.inner.set_session_param(req).await?;
+        Ok(resp.param)
+    }
+
     pub async fn get_ddl_progress(&self) -> Result<Vec<DdlProgress>> {
         let req = GetDdlProgressRequest {};
         let resp = self.inner.get_ddl_progress(req).await?;
@@ -1113,11 +1205,11 @@ impl MetaClient {
 
     pub async fn list_serving_vnode_mappings(
         &self,
-    ) -> Result<HashMap<u32, (u32, ParallelUnitMapping)>> {
+    ) -> Result<HashMap<u32, (u32, WorkerSlotMapping)>> {
         let req = GetServingVnodeMappingsRequest {};
         let resp = self.inner.get_serving_vnode_mappings(req).await?;
         let mappings = resp
-            .mappings
+            .worker_slot_mappings
             .into_iter()
             .map(|p| {
                 (
@@ -1127,7 +1219,7 @@ impl MetaClient {
                             .get(&p.fragment_id)
                             .cloned()
                             .unwrap_or(0),
-                        ParallelUnitMapping::from_protobuf(p.mapping.as_ref().unwrap()),
+                        WorkerSlotMapping::from_protobuf(p.mapping.as_ref().unwrap()),
                     ),
                 )
             })
@@ -1347,11 +1439,7 @@ impl HummockMetaClient for MetaClient {
         Ok(SstObjectIdRange::new(resp.start_id, resp.end_id))
     }
 
-    async fn commit_epoch(
-        &self,
-        _epoch: HummockEpoch,
-        _sstables: Vec<LocalSstableInfo>,
-    ) -> Result<()> {
+    async fn commit_epoch(&self, _epoch: HummockEpoch, _sync_result: SyncResult) -> Result<()> {
         panic!("Only meta service can commit_epoch in production.")
     }
 
@@ -1474,6 +1562,7 @@ struct GrpcMetaClientCore {
     backup_client: BackupServiceClient<Channel>,
     telemetry_client: TelemetryInfoServiceClient<Channel>,
     system_params_client: SystemParamsServiceClient<Channel>,
+    session_params_client: SessionParamServiceClient<Channel>,
     serving_client: ServingServiceClient<Channel>,
     cloud_client: CloudServiceClient<Channel>,
     sink_coordinate_client: SinkCoordinationRpcClient,
@@ -1500,6 +1589,7 @@ impl GrpcMetaClientCore {
         let telemetry_client =
             TelemetryInfoServiceClient::new(channel.clone()).max_decoding_message_size(usize::MAX);
         let system_params_client = SystemParamsServiceClient::new(channel.clone());
+        let session_params_client = SessionParamServiceClient::new(channel.clone());
         let serving_client = ServingServiceClient::new(channel.clone());
         let cloud_client = CloudServiceClient::new(channel.clone());
         let sink_coordinate_client = SinkCoordinationServiceClient::new(channel.clone());
@@ -1518,6 +1608,7 @@ impl GrpcMetaClientCore {
             backup_client,
             telemetry_client,
             system_params_client,
+            session_params_client,
             serving_client,
             cloud_client,
             sink_coordinate_client,
@@ -1528,7 +1619,7 @@ impl GrpcMetaClientCore {
 
 /// Client to meta server. Cloning the instance is lightweight.
 ///
-/// It is a wrapper of tonic client. See [`crate::rpc_client_method_impl`].
+/// It is a wrapper of tonic client. See [`crate::meta_rpc_client_method_impl`].
 #[derive(Debug, Clone)]
 struct GrpcMetaClient {
     member_monitor_event_sender: mpsc::Sender<Sender<Result<()>>>,
@@ -1565,7 +1656,11 @@ impl MetaMemberManagement {
     async fn refresh_members(&mut self) -> Result<()> {
         let leader_addr = match self.members.as_mut() {
             Either::Left(client) => {
-                let resp = client.to_owned().members(MembersRequest {}).await?;
+                let resp = client
+                    .to_owned()
+                    .members(MembersRequest {})
+                    .await
+                    .map_err(RpcError::from_meta_status)?;
                 let resp = resp.into_inner();
                 resp.members.into_iter().find(|member| member.is_leader)
             }
@@ -1752,7 +1847,7 @@ impl GrpcMetaClient {
         let members = match strategy {
             MetaAddressStrategy::LoadBalance(_) => Either::Left(meta_member_client),
             MetaAddressStrategy::List(addrs) => {
-                let mut members = LruCache::new(NonZeroUsize::new(20).unwrap());
+                let mut members = LruCache::new(20);
                 for addr in addrs {
                     members.put(addr.clone(), None);
                 }
@@ -1857,6 +1952,7 @@ macro_rules! for_all_meta_rpc {
             ,{ stream_client, list_fragment_distribution, ListFragmentDistributionRequest, ListFragmentDistributionResponse }
             ,{ stream_client, list_actor_states, ListActorStatesRequest, ListActorStatesResponse }
             ,{ stream_client, list_object_dependencies, ListObjectDependenciesRequest, ListObjectDependenciesResponse }
+            ,{ stream_client, recover, RecoverRequest, RecoverResponse }
             ,{ ddl_client, create_table, CreateTableRequest, CreateTableResponse }
             ,{ ddl_client, alter_name, AlterNameRequest, AlterNameResponse }
             ,{ ddl_client, alter_owner, AlterOwnerRequest, AlterOwnerResponse }
@@ -1866,15 +1962,19 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, create_view, CreateViewRequest, CreateViewResponse }
             ,{ ddl_client, create_source, CreateSourceRequest, CreateSourceResponse }
             ,{ ddl_client, create_sink, CreateSinkRequest, CreateSinkResponse }
+            ,{ ddl_client, create_subscription, CreateSubscriptionRequest, CreateSubscriptionResponse }
             ,{ ddl_client, create_schema, CreateSchemaRequest, CreateSchemaResponse }
             ,{ ddl_client, create_database, CreateDatabaseRequest, CreateDatabaseResponse }
+             ,{ ddl_client, create_secret, CreateSecretRequest, CreateSecretResponse }
             ,{ ddl_client, create_index, CreateIndexRequest, CreateIndexResponse }
             ,{ ddl_client, create_function, CreateFunctionRequest, CreateFunctionResponse }
             ,{ ddl_client, drop_table, DropTableRequest, DropTableResponse }
             ,{ ddl_client, drop_materialized_view, DropMaterializedViewRequest, DropMaterializedViewResponse }
             ,{ ddl_client, drop_view, DropViewRequest, DropViewResponse }
             ,{ ddl_client, drop_source, DropSourceRequest, DropSourceResponse }
+             , {ddl_client, drop_secret, DropSecretRequest, DropSecretResponse}
             ,{ ddl_client, drop_sink, DropSinkRequest, DropSinkResponse }
+            ,{ ddl_client, drop_subscription, DropSubscriptionRequest, DropSubscriptionResponse }
             ,{ ddl_client, drop_database, DropDatabaseRequest, DropDatabaseResponse }
             ,{ ddl_client, drop_schema, DropSchemaRequest, DropSchemaResponse }
             ,{ ddl_client, drop_index, DropIndexRequest, DropIndexResponse }
@@ -1925,6 +2025,7 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, list_compact_task_assignment, ListCompactTaskAssignmentRequest, ListCompactTaskAssignmentResponse }
             ,{ hummock_client, list_compact_task_progress, ListCompactTaskProgressRequest, ListCompactTaskProgressResponse }
             ,{ hummock_client, cancel_compact_task, CancelCompactTaskRequest, CancelCompactTaskResponse}
+            ,{ hummock_client, list_change_log_epochs, ListChangeLogEpochsRequest, ListChangeLogEpochsResponse }
             ,{ user_client, create_user, CreateUserRequest, CreateUserResponse }
             ,{ user_client, update_user, UpdateUserRequest, UpdateUserResponse }
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }
@@ -1932,7 +2033,6 @@ macro_rules! for_all_meta_rpc {
             ,{ user_client, revoke_privilege, RevokePrivilegeRequest, RevokePrivilegeResponse }
             ,{ scale_client, get_cluster_info, GetClusterInfoRequest, GetClusterInfoResponse }
             ,{ scale_client, reschedule, RescheduleRequest, RescheduleResponse }
-            ,{ scale_client, get_reschedule_plan, GetReschedulePlanRequest, GetReschedulePlanResponse }
             ,{ notification_client, subscribe, SubscribeRequest, Streaming<SubscribeResponse> }
             ,{ backup_client, backup_meta, BackupMetaRequest, BackupMetaResponse }
             ,{ backup_client, get_backup_job_status, GetBackupJobStatusRequest, GetBackupJobStatusResponse }
@@ -1941,6 +2041,8 @@ macro_rules! for_all_meta_rpc {
             ,{ telemetry_client, get_telemetry_info, GetTelemetryInfoRequest, TelemetryInfoResponse}
             ,{ system_params_client, get_system_params, GetSystemParamsRequest, GetSystemParamsResponse }
             ,{ system_params_client, set_system_param, SetSystemParamRequest, SetSystemParamResponse }
+            ,{ session_params_client, get_session_params, GetSessionParamsRequest, GetSessionParamsResponse }
+            ,{ session_params_client, set_session_param, SetSessionParamRequest, SetSessionParamResponse }
             ,{ serving_client, get_serving_vnode_mappings, GetServingVnodeMappingsRequest, GetServingVnodeMappingsResponse }
             ,{ cloud_client, rw_cloud_validate_source, RwCloudValidateSourceRequest, RwCloudValidateSourceResponse }
             ,{ event_log_client, list_event_log, ListEventLogRequest, ListEventLogResponse }

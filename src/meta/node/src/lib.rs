@@ -32,18 +32,13 @@ use risingwave_meta::*;
 use risingwave_meta_service::*;
 pub use rpc::{ElectionClient, ElectionMember, EtcdElectionClient};
 use server::rpc_serve;
+pub use server::started::get as is_server_started;
 
 use crate::manager::MetaOpts;
 
 #[derive(Debug, Clone, Parser, OverrideConfig)]
 #[command(version, about = "The central metadata management service")]
 pub struct MetaNodeOpts {
-    #[clap(long, env = "RW_VPC_ID")]
-    pub vpc_id: Option<String>,
-
-    #[clap(long, env = "RW_VPC_SECURITY_GROUP_ID")]
-    pub security_group_id: Option<String>,
-
     // TODO: use `SocketAddr`
     #[clap(long, env = "RW_LISTEN_ADDR", default_value = "127.0.0.1:5690")]
     pub listen_addr: String,
@@ -53,7 +48,7 @@ pub struct MetaNodeOpts {
     /// or "identifying address".
     /// It will serve as a unique identifier in cluster
     /// membership and leader election. Must be specified for etcd backend.
-    #[clap(long, env = "RW_ADVERTISE_ADDR")]
+    #[clap(long, env = "RW_ADVERTISE_ADDR", default_value = "127.0.0.1:5690")]
     pub advertise_addr: String,
 
     #[clap(long, env = "RW_DASHBOARD_HOST")]
@@ -64,50 +59,60 @@ pub struct MetaNodeOpts {
     #[clap(long, env = "RW_PROMETHEUS_HOST", alias = "prometheus-host")]
     pub prometheus_listener_addr: Option<String>,
 
-    #[clap(long, env = "RW_ETCD_ENDPOINTS", default_value_t = String::from(""))]
+    #[clap(long, hide = true, env = "RW_ETCD_ENDPOINTS", default_value_t = String::from(""))]
     pub etcd_endpoints: String,
 
     /// Enable authentication with etcd. By default disabled.
-    #[clap(long, env = "RW_ETCD_AUTH")]
+    #[clap(long, hide = true, env = "RW_ETCD_AUTH")]
     pub etcd_auth: bool,
 
     /// Username of etcd, required when --etcd-auth is enabled.
-    #[clap(long, env = "RW_ETCD_USERNAME", default_value = "")]
+    #[clap(long, hide = true, env = "RW_ETCD_USERNAME", default_value = "")]
     pub etcd_username: String,
 
     /// Password of etcd, required when --etcd-auth is enabled.
-    #[clap(long, env = "RW_ETCD_PASSWORD", default_value = "")]
+    #[clap(long, hide = true, env = "RW_ETCD_PASSWORD", default_value = "")]
     pub etcd_password: Secret<String>,
 
     /// Endpoint of the SQL service, make it non-option when SQL service is required.
-    #[clap(long, env = "RW_SQL_ENDPOINT")]
-    pub sql_endpoint: Option<String>,
+    #[clap(long, hide = true, env = "RW_SQL_ENDPOINT")]
+    pub sql_endpoint: Option<Secret<String>>,
 
-    #[clap(long, env = "RW_DASHBOARD_UI_PATH")]
-    pub dashboard_ui_path: Option<String>,
+    /// Username of sql backend, required when meta backend set to MySQL or PostgreSQL.
+    #[clap(long, hide = true, env = "RW_SQL_USERNAME", default_value = "")]
+    pub sql_username: String,
+
+    /// Password of sql backend, required when meta backend set to MySQL or PostgreSQL.
+    #[clap(long, hide = true, env = "RW_SQL_PASSWORD", default_value = "")]
+    pub sql_password: Secret<String>,
+
+    /// Database of sql backend, required when meta backend set to MySQL or PostgreSQL.
+    #[clap(long, hide = true, env = "RW_SQL_DATABASE", default_value = "")]
+    pub sql_database: String,
 
     /// The HTTP REST-API address of the Prometheus instance associated to this cluster.
-    /// This address is used to serve PromQL queries to Prometheus.
+    /// This address is used to serve `PromQL` queries to Prometheus.
     /// It is also used by Grafana Dashboard Service to fetch metrics and visualize them.
     #[clap(long, env = "RW_PROMETHEUS_ENDPOINT")]
     pub prometheus_endpoint: Option<String>,
 
     /// The additional selector used when querying Prometheus.
     ///
-    /// The format is same as PromQL. Example: `instance="foo",namespace="bar"`
+    /// The format is same as `PromQL`. Example: `instance="foo",namespace="bar"`
     #[clap(long, env = "RW_PROMETHEUS_SELECTOR")]
     pub prometheus_selector: Option<String>,
-
-    /// Endpoint of the connector node, there will be a sidecar connector node
-    /// colocated with Meta node in the cloud environment
-    #[clap(long, env = "RW_CONNECTOR_RPC_ENDPOINT")]
-    pub connector_rpc_endpoint: Option<String>,
 
     /// Default tag for the endpoint created when creating a privatelink connection.
     /// Will be appended to the tags specified in the `tags` field in with clause in `create
     /// connection`.
-    #[clap(long, env = "RW_PRIVATELINK_ENDPOINT_DEFAULT_TAGS")]
+    #[clap(long, hide = true, env = "RW_PRIVATELINK_ENDPOINT_DEFAULT_TAGS")]
     pub privatelink_endpoint_default_tags: Option<String>,
+
+    #[clap(long, hide = true, env = "RW_VPC_ID")]
+    pub vpc_id: Option<String>,
+
+    #[clap(long, hide = true, env = "RW_VPC_SECURITY_GROUP_ID")]
+    pub security_group_id: Option<String>,
 
     /// The path of `risingwave.toml` configuration file.
     ///
@@ -115,59 +120,69 @@ pub struct MetaNodeOpts {
     #[clap(long, env = "RW_CONFIG_PATH", default_value = "")]
     pub config_path: String,
 
-    #[clap(long, env = "RW_BACKEND", value_enum)]
+    #[clap(long, hide = true, env = "RW_BACKEND", value_enum)]
     #[override_opts(path = meta.backend)]
     pub backend: Option<MetaBackend>,
 
     /// The interval of periodic barrier.
-    #[clap(long, env = "RW_BARRIER_INTERVAL_MS")]
+    #[clap(long, hide = true, env = "RW_BARRIER_INTERVAL_MS")]
     #[override_opts(path = system.barrier_interval_ms)]
     pub barrier_interval_ms: Option<u32>,
 
     /// Target size of the Sstable.
-    #[clap(long, env = "RW_SSTABLE_SIZE_MB")]
+    #[clap(long, hide = true, env = "RW_SSTABLE_SIZE_MB")]
     #[override_opts(path = system.sstable_size_mb)]
     pub sstable_size_mb: Option<u32>,
 
     /// Size of each block in bytes in SST.
-    #[clap(long, env = "RW_BLOCK_SIZE_KB")]
+    #[clap(long, hide = true, env = "RW_BLOCK_SIZE_KB")]
     #[override_opts(path = system.block_size_kb)]
     pub block_size_kb: Option<u32>,
 
     /// False positive probability of bloom filter.
-    #[clap(long, env = "RW_BLOOM_FALSE_POSITIVE")]
+    #[clap(long, hide = true, env = "RW_BLOOM_FALSE_POSITIVE")]
     #[override_opts(path = system.bloom_false_positive)]
     pub bloom_false_positive: Option<f64>,
 
     /// State store url
-    #[clap(long, env = "RW_STATE_STORE")]
+    #[clap(long, hide = true, env = "RW_STATE_STORE")]
     #[override_opts(path = system.state_store)]
     pub state_store: Option<String>,
 
     /// Remote directory for storing data and metadata objects.
-    #[clap(long, env = "RW_DATA_DIRECTORY")]
+    #[clap(long, hide = true, env = "RW_DATA_DIRECTORY")]
     #[override_opts(path = system.data_directory)]
     pub data_directory: Option<String>,
 
     /// Whether config object storage bucket lifecycle to purge stale data.
-    #[clap(long, env = "RW_DO_NOT_CONFIG_BUCKET_LIFECYCLE")]
+    #[clap(long, hide = true, env = "RW_DO_NOT_CONFIG_BUCKET_LIFECYCLE")]
     #[override_opts(path = meta.do_not_config_object_storage_lifecycle)]
     pub do_not_config_object_storage_lifecycle: Option<bool>,
 
     /// Remote storage url for storing snapshots.
-    #[clap(long, env = "RW_BACKUP_STORAGE_URL")]
+    #[clap(long, hide = true, env = "RW_BACKUP_STORAGE_URL")]
     #[override_opts(path = system.backup_storage_url)]
     pub backup_storage_url: Option<String>,
 
     /// Remote directory for storing snapshots.
-    #[clap(long, env = "RW_BACKUP_STORAGE_DIRECTORY")]
+    #[clap(long, hide = true, env = "RW_BACKUP_STORAGE_DIRECTORY")]
     #[override_opts(path = system.backup_storage_directory)]
     pub backup_storage_directory: Option<String>,
 
     /// Enable heap profile dump when memory usage is high.
-    #[clap(long, env = "RW_HEAP_PROFILING_DIR")]
+    #[clap(long, hide = true, env = "RW_HEAP_PROFILING_DIR")]
     #[override_opts(path = server.heap_profiling.dir)]
     pub heap_profiling_dir: Option<String>,
+
+    /// Exit if idle for a certain period of time.
+    #[clap(long, hide = true, env = "RW_DANGEROUS_MAX_IDLE_SECS")]
+    #[override_opts(path = meta.dangerous_max_idle_secs)]
+    pub dangerous_max_idle_secs: Option<u64>,
+
+    /// Endpoint of the connector node.
+    #[deprecated = "connector node has been deprecated."]
+    #[clap(long, hide = true, env = "RW_CONNECTOR_RPC_ENDPOINT")]
+    pub connector_rpc_endpoint: Option<String>,
 }
 
 impl risingwave_common::opts::Opts for MetaNodeOpts {
@@ -218,7 +233,41 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             },
             MetaBackend::Mem => MetaStoreBackend::Mem,
             MetaBackend::Sql => MetaStoreBackend::Sql {
-                endpoint: opts.sql_endpoint.expect("sql endpoint is required"),
+                endpoint: opts
+                    .sql_endpoint
+                    .expect("sql endpoint is required")
+                    .expose_secret()
+                    .to_string(),
+            },
+            MetaBackend::Sqlite => MetaStoreBackend::Sql {
+                endpoint: format!(
+                    "sqlite://{}?mode=rwc",
+                    opts.sql_endpoint
+                        .expect("sql endpoint is required")
+                        .expose_secret()
+                ),
+            },
+            MetaBackend::Postgres => MetaStoreBackend::Sql {
+                endpoint: format!(
+                    "postgres://{}:{}@{}/{}",
+                    opts.sql_username,
+                    opts.sql_password.expose_secret(),
+                    opts.sql_endpoint
+                        .expect("sql endpoint is required")
+                        .expose_secret(),
+                    opts.sql_database
+                ),
+            },
+            MetaBackend::Mysql => MetaStoreBackend::Sql {
+                endpoint: format!(
+                    "mysql://{}:{}@{}/{}",
+                    opts.sql_username,
+                    opts.sql_password.expose_secret(),
+                    opts.sql_endpoint
+                        .expect("sql endpoint is required")
+                        .expose_secret(),
+                    opts.sql_database
+                ),
             },
         };
 
@@ -249,30 +298,30 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             listen_addr,
             prometheus_addr,
             dashboard_addr,
-            ui_path: opts.dashboard_ui_path,
         };
 
         const MIN_TIMEOUT_INTERVAL_SEC: u64 = 20;
         let compaction_task_max_progress_interval_secs = {
-            (config
-                .storage
-                .object_store
-                .object_store_read_timeout_ms
-                .max(config.storage.object_store.object_store_upload_timeout_ms)
-                .max(
-                    config
-                        .storage
-                        .object_store
-                        .object_store_streaming_read_timeout_ms,
-                )
-                .max(
-                    config
-                        .storage
-                        .object_store
-                        .object_store_streaming_upload_timeout_ms,
-                )
-                .max(config.meta.compaction_task_max_progress_interval_secs * 1000))
-                / 1000
+            let retry_config = &config.storage.object_store.retry;
+            let max_streming_read_timeout_ms = (retry_config.streaming_read_attempt_timeout_ms
+                + retry_config.req_backoff_max_delay_ms)
+                * retry_config.streaming_read_retry_attempts as u64;
+            let max_streaming_upload_timeout_ms = (retry_config
+                .streaming_upload_attempt_timeout_ms
+                + retry_config.req_backoff_max_delay_ms)
+                * retry_config.streaming_upload_retry_attempts as u64;
+            let max_upload_timeout_ms = (retry_config.upload_attempt_timeout_ms
+                + retry_config.req_backoff_max_delay_ms)
+                * retry_config.upload_retry_attempts as u64;
+            let max_read_timeout_ms = (retry_config.read_attempt_timeout_ms
+                + retry_config.req_backoff_max_delay_ms)
+                * retry_config.read_retry_attempts as u64;
+            let max_timeout_ms = max_streming_read_timeout_ms
+                .max(max_upload_timeout_ms)
+                .max(max_streaming_upload_timeout_ms)
+                .max(max_read_timeout_ms)
+                .max(config.meta.compaction_task_max_progress_interval_secs * 1000);
+            max_timeout_ms / 1000
         } + MIN_TIMEOUT_INTERVAL_SEC;
 
         let (mut join_handle, leader_lost_handle, shutdown_send) = rpc_serve(
@@ -317,7 +366,6 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 prometheus_selector: opts.prometheus_selector,
                 vpc_id: opts.vpc_id,
                 security_group_id: opts.security_group_id,
-                connector_rpc_endpoint: opts.connector_rpc_endpoint,
                 privatelink_endpoint_default_tags,
                 periodic_space_reclaim_compaction_interval_sec: config
                     .meta
@@ -337,6 +385,12 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 table_write_throughput_threshold: config.meta.table_write_throughput_threshold,
                 min_table_split_write_throughput: config.meta.min_table_split_write_throughput,
                 partition_vnode_count: config.meta.partition_vnode_count,
+                compact_task_table_size_partition_threshold_low: config
+                    .meta
+                    .compact_task_table_size_partition_threshold_low,
+                compact_task_table_size_partition_threshold_high: config
+                    .meta
+                    .compact_task_table_size_partition_threshold_high,
                 do_not_config_object_storage_lifecycle: config
                     .meta
                     .do_not_config_object_storage_lifecycle,
@@ -346,7 +400,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 compaction_task_max_progress_interval_secs,
                 compaction_config: Some(config.meta.compaction_config),
                 cut_table_size_limit: config.meta.cut_table_size_limit,
-                hybird_partition_vnode_count: config.meta.hybird_partition_vnode_count,
+                hybrid_partition_node_count: config.meta.hybrid_partition_vnode_count,
                 event_log_enabled: config.meta.event_log_enabled,
                 event_log_channel_max_size: config.meta.event_log_channel_max_size,
                 advertise_addr: opts.advertise_addr,
@@ -361,8 +415,19 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                     .developer
                     .enable_check_task_level_overlap,
                 enable_dropped_column_reclaim: config.meta.enable_dropped_column_reclaim,
+                object_store_config: config.storage.object_store,
+                max_trivial_move_task_count_per_loop: config
+                    .meta
+                    .developer
+                    .max_trivial_move_task_count_per_loop,
+                max_get_task_probe_times: config.meta.developer.max_get_task_probe_times,
+                secret_store_private_key: config.meta.secret_store_private_key,
+                table_info_statistic_history_times: config
+                    .storage
+                    .table_info_statistic_history_times,
             },
             config.system.into_init_system_params(),
+            Default::default(),
         )
         .await
         .unwrap();

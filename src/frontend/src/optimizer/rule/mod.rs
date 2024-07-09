@@ -29,6 +29,8 @@ pub trait Description {
 
 pub(super) type BoxedRule = Box<dyn Rule>;
 
+mod logical_filter_expression_simplify_rule;
+pub use logical_filter_expression_simplify_rule::*;
 mod over_window_merge_rule;
 pub use over_window_merge_rule::*;
 mod project_join_merge_rule;
@@ -90,6 +92,7 @@ pub use top_n_on_index_rule::*;
 mod stream;
 pub use stream::bushy_tree_join_ordering_rule::*;
 pub use stream::filter_with_now_to_join_rule::*;
+pub use stream::generate_series_with_now_rule::*;
 pub use stream::split_now_and_rule::*;
 pub use stream::split_now_or_rule::*;
 pub use stream::stream_project_merge_rule::*;
@@ -155,9 +158,14 @@ pub use apply_hop_window_transpose_rule::*;
 mod agg_call_merge_rule;
 pub use agg_call_merge_rule::*;
 mod pull_up_correlated_predicate_agg_rule;
+mod source_to_iceberg_scan_rule;
+mod source_to_kafka_scan_rule;
 mod values_extract_project_rule;
+
 pub use batch::batch_push_limit_to_scan_rule::*;
 pub use pull_up_correlated_predicate_agg_rule::*;
+pub use source_to_iceberg_scan_rule::*;
+pub use source_to_kafka_scan_rule::*;
 pub use values_extract_project_rule::*;
 
 #[macro_export]
@@ -196,6 +204,7 @@ macro_rules! for_all_rules {
             , { SplitNowAndRule }
             , { SplitNowOrRule }
             , { FilterWithNowToJoinRule }
+            , { GenerateSeriesWithNowRule }
             , { TopNOnIndexRule }
             , { TrivialProjectToValuesRule }
             , { UnionInputValuesMergeRule }
@@ -204,6 +213,7 @@ macro_rules! for_all_rules {
             , { AlwaysFalseFilterRule }
             , { BushyTreeJoinOrderingRule }
             , { StreamProjectMergeRule }
+            , { LogicalFilterExpressionSimplifyRule }
             , { JoinProjectTransposeRule }
             , { LimitPushDownRule }
             , { PullUpHopRule }
@@ -230,6 +240,8 @@ macro_rules! for_all_rules {
             , { ValuesExtractProjectRule }
             , { BatchPushLimitToScanRule }
             , { PullUpCorrelatedPredicateAggRule }
+            , { SourceToKafkaScanRule }
+            , { SourceToIcebergScanRule }
         }
     };
 }

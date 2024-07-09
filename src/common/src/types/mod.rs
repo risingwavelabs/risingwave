@@ -17,7 +17,6 @@
 // NOTE: When adding or modifying data types, remember to update the type matrix in
 // src/expr/macro/src/types.rs
 
-use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::hash::Hash;
 use std::str::FromStr;
@@ -28,6 +27,7 @@ use itertools::Itertools;
 use parse_display::{Display, FromStr};
 use paste::paste;
 use postgres_types::{FromSql, IsNull, ToSql, Type};
+use risingwave_common_estimate_size::{EstimateSize, ZeroHeapSize};
 use risingwave_pb::data::data_type::PbTypeName;
 use risingwave_pb::data::PbDataType;
 use serde::{Deserialize, Serialize, Serializer};
@@ -40,15 +40,16 @@ use crate::array::{
 pub use crate::array::{ListRef, ListValue, StructRef, StructValue};
 use crate::cast::{str_to_bool, str_to_bytea};
 use crate::error::BoxedError;
-use crate::estimate_size::EstimateSize;
 use crate::{
     dispatch_data_types, dispatch_scalar_ref_variants, dispatch_scalar_variants,
     for_all_scalar_variants, for_all_type_pairs,
 };
 
+mod cow;
 mod datetime;
 mod decimal;
 mod fields;
+mod from_sql;
 mod interval;
 mod jsonb;
 mod macros;
@@ -72,6 +73,7 @@ mod with_data_type;
 pub use fields::Fields;
 pub use risingwave_fields_derive::Fields;
 
+pub use self::cow::DatumCow;
 pub use self::datetime::{Date, Time, Timestamp};
 pub use self::decimal::{Decimal, PowError as DecimalPowError};
 pub use self::interval::{test_utils, DateTimeField, Interval, IntervalDisplay};
@@ -174,6 +176,8 @@ impl std::str::FromStr for Box<DataType> {
         Ok(Box::new(DataType::from_str(s)?))
     }
 }
+
+impl ZeroHeapSize for DataType {}
 
 impl DataTypeName {
     pub fn is_scalar(&self) -> bool {
@@ -724,6 +728,8 @@ macro_rules! impl_convert {
 
             paste! {
                 impl ScalarImpl {
+                    /// # Panics
+                    /// If the scalar is not of the expected type.
                     pub fn [<as_ $suffix_name>](&self) -> &$scalar {
                         match self {
                             Self::$variant_name(ref scalar) => scalar,
@@ -731,6 +737,8 @@ macro_rules! impl_convert {
                         }
                     }
 
+                    /// # Panics
+                    /// If the scalar is not of the expected type.
                     pub fn [<into_ $suffix_name>](self) -> $scalar {
                         match self {
                             Self::$variant_name(scalar) => scalar,
@@ -740,7 +748,8 @@ macro_rules! impl_convert {
                 }
 
                 impl <'scalar> ScalarRefImpl<'scalar> {
-                    // Note that this conversion consume self.
+                    /// # Panics
+                    /// If the scalar is not of the expected type.
                     pub fn [<into_ $suffix_name>](self) -> $scalar_ref {
                         match self {
                             Self::$variant_name(inner) => inner,
@@ -794,6 +803,12 @@ impl TryFrom<ScalarImpl> for String {
                 other_scalar.get_ident()
             ),
         }
+    }
+}
+
+impl From<char> for ScalarImpl {
+    fn from(c: char) -> Self {
+        Self::Utf8(c.to_string().into())
     }
 }
 
@@ -986,8 +1001,8 @@ impl ScalarRefImpl<'_> {
             Self::Interval(v) => v.serialize(ser)?,
             Self::Date(v) => v.0.num_days_from_ce().serialize(ser)?,
             Self::Timestamp(v) => {
-                v.0.timestamp().serialize(&mut *ser)?;
-                v.0.timestamp_subsec_nanos().serialize(ser)?;
+                v.0.and_utc().timestamp().serialize(&mut *ser)?;
+                v.0.and_utc().timestamp_subsec_nanos().serialize(ser)?;
             }
             Self::Timestamptz(v) => v.serialize(ser)?,
             Self::Time(v) => {

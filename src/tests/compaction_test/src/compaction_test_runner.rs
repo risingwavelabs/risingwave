@@ -23,8 +23,7 @@ use std::time::Duration;
 use anyhow::anyhow;
 use bytes::{BufMut, Bytes, BytesMut};
 use clap::Parser;
-use futures::TryStreamExt;
-use risingwave_common::cache::CachePriority;
+use foyer::CacheContext;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::{
     extract_storage_memory_config, load_config, MetaConfig, NoOverride,
@@ -44,7 +43,7 @@ use risingwave_storage::monitor::{
 };
 use risingwave_storage::opts::StorageOpts;
 use risingwave_storage::store::{ReadOptions, StateStoreRead};
-use risingwave_storage::{StateStore, StateStoreImpl};
+use risingwave_storage::{StateStore, StateStoreImpl, StateStoreIter};
 
 const SST_ID_SHIFT_COUNT: u32 = 1000000;
 const CHECKPOINT_FREQ_FOR_REPLAY: u64 = 99999999;
@@ -70,9 +69,9 @@ impl CompactionTestMetrics {
 /// 1. Start the cluster with ci-compaction-test config: `./risedev d ci-compaction-test`
 /// 2. Ingest enough L0 SSTs, for example we can use the tpch-bench tool
 /// 3. Disable hummock manager commit new epochs: `./risedev ctl hummock disable-commit-epoch`, and
-/// it will print the current max committed epoch in Meta.
+///    it will print the current max committed epoch in Meta.
 /// 4. Use the test tool to replay hummock version deltas and trigger compactions:
-/// `./risedev compaction-test --state-store hummock+s3://your-bucket -t <table_id>`
+///    `./risedev compaction-test --state-store hummock+s3://your-bucket -t <table_id>`
 pub async fn compaction_test_main(
     _listen_addr: SocketAddr,
     advertise_addr: HostAddr,
@@ -603,8 +602,7 @@ async fn poll_compaction_tasks_status(
     (compaction_ok, cur_version)
 }
 
-type StateStoreIterType =
-    Pin<Box<<MonitoredStateStore<HummockStorage> as StateStoreRead>::IterStream>>;
+type StateStoreIterType = Pin<Box<<MonitoredStateStore<HummockStorage> as StateStoreRead>::Iter>>;
 
 async fn open_hummock_iters(
     hummock: &MonitoredStateStore<HummockStorage>,
@@ -633,7 +631,7 @@ async fn open_hummock_iters(
                 epoch,
                 ReadOptions {
                     table_id: TableId { table_id },
-                    cache_policy: CachePolicy::Fill(CachePriority::High),
+                    cache_policy: CachePolicy::Fill(CacheContext::Default),
                     ..Default::default()
                 },
             )
@@ -661,8 +659,6 @@ pub async fn check_compaction_results(
         let mut expect_cnt = 0;
         let mut actual_cnt = 0;
 
-        futures::pin_mut!(expect_iter);
-        futures::pin_mut!(actual_iter);
         while let Some(kv_expect) = expect_iter.try_next().await? {
             expect_cnt += 1;
             let ret = actual_iter.try_next().await?;
@@ -714,6 +710,8 @@ pub async fn create_hummock_store_with_metrics(
         metrics.object_store_metrics.clone(),
         metrics.storage_metrics.clone(),
         metrics.compactor_metrics.clone(),
+        None,
+        true,
     )
     .await?;
 

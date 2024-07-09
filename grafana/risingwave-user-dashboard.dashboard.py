@@ -49,6 +49,13 @@ def section_actor_info(outer_panels):
                     [panels.table_target(f"group({metric('table_info')}) by (table_id, table_name, table_type, materialized_view_id, fragment_id, compaction_group_id)")],
                     ["table_id", "table_name", "table_type", "materialized_view_id", "fragment_id", "compaction_group_id"],
                 ),
+                panels.table_info(
+                    "Actor Count (Group By Compute Node)",
+                    "Actor count per compute node",
+                    [panels.table_target(f"count({metric('actor_info')}) by (compute_node)")],
+                    ["table_id", "table_name", "table_type", "materialized_view_id", "fragment_id", "compaction_group_id"],
+                    dict.fromkeys(["Time"], True)
+                )
             ],
         )
     ]
@@ -113,7 +120,7 @@ def section_overview(panels):
             )
             + [
                 panels.target(
-                    f"rate({metric('meta_barrier_duration_seconds_sum')}[$__rate_interval]) / rate({metric('meta_barrier_duration_seconds_count')}[$__rate_interval])",
+                    f"rate({metric('meta_barrier_duration_seconds_sum')}[$__rate_interval]) / rate({metric('meta_barrier_duration_seconds_count')}[$__rate_interval]) > 0",
                     "barrier_latency_avg",
                 ),
             ],
@@ -409,35 +416,35 @@ def section_memory(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"(sum(rate({metric('stream_join_lookup_miss_count')}[$__rate_interval])) by (side, join_table_id, degree_table_id, actor_id) ) / (sum(rate({metric('stream_join_lookup_total_count')}[$__rate_interval])) by (side, join_table_id, degree_table_id, actor_id))",
+                            f"(sum(rate({metric('stream_join_lookup_miss_count')}[$__rate_interval])) by (side, join_table_id, degree_table_id, actor_id) ) / (sum(rate({metric('stream_join_lookup_total_count')}[$__rate_interval])) by (side, join_table_id, degree_table_id, actor_id)) >=0 ",
                             "join executor cache miss ratio - - {{side}} side, join_table_id {{join_table_id}} degree_table_id {{degree_table_id}} actor {{actor_id}}",
                         ),
                         panels.target(
-                            f"(sum(rate({metric('stream_agg_lookup_miss_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_agg_lookup_total_count')}[$__rate_interval])) by (table_id, actor_id))",
+                            f"(sum(rate({metric('stream_agg_lookup_miss_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_agg_lookup_total_count')}[$__rate_interval])) by (table_id, actor_id)) >=0 ",
                             "Agg cache miss ratio - table {{table_id}} actor {{actor_id}} ",
                         ),
                         panels.target(
-                            f"(sum(rate({metric('stream_agg_distinct_cache_miss_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_agg_distinct_total_cache_count')}[$__rate_interval])) by (table_id, actor_id))",
+                            f"(sum(rate({metric('stream_agg_distinct_cache_miss_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_agg_distinct_total_cache_count')}[$__rate_interval])) by (table_id, actor_id)) >=0",
                             "Distinct agg cache miss ratio - table {{table_id}} actor {{actor_id}} ",
                         ),
                         panels.target(
-                            f"(sum(rate({metric('stream_group_top_n_cache_miss_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_group_top_n_total_query_cache_count')}[$__rate_interval])) by (table_id, actor_id))",
+                            f"(sum(rate({metric('stream_group_top_n_cache_miss_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_group_top_n_total_query_cache_count')}[$__rate_interval])) by (table_id, actor_id)) >=0",
                             "Stream group top n cache miss ratio - table {{table_id}} actor {{actor_id}} ",
                         ),
                         panels.target(
-                            f"(sum(rate({metric('stream_group_top_n_appendonly_cache_miss_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_group_top_n_appendonly_total_query_cache_count')}[$__rate_interval])) by (table_id, actor_id))",
+                            f"(sum(rate({metric('stream_group_top_n_appendonly_cache_miss_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_group_top_n_appendonly_total_query_cache_count')}[$__rate_interval])) by (table_id, actor_id)) >=0",
                             "Stream group top n appendonly cache miss ratio - table {{table_id}} actor {{actor_id}} ",
                         ),
                         panels.target(
-                            f"(sum(rate({metric('stream_lookup_cache_miss_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_lookup_total_query_cache_count')}[$__rate_interval])) by (table_id, actor_id))",
+                            f"(sum(rate({metric('stream_lookup_cache_miss_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_lookup_total_query_cache_count')}[$__rate_interval])) by (table_id, actor_id)) >=0",
                             "Stream lookup cache miss ratio - table {{table_id}} actor {{actor_id}} ",
                         ),
                         panels.target(
-                            f"(sum(rate({metric('stream_temporal_join_cache_miss_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_temporal_join_total_query_cache_count')}[$__rate_interval])) by (table_id, actor_id))",
+                            f"(sum(rate({metric('stream_temporal_join_cache_miss_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_temporal_join_total_query_cache_count')}[$__rate_interval])) by (table_id, actor_id)) >=0",
                             "Stream temporal join cache miss ratio - table {{table_id}} actor {{actor_id}} ",
                         ),
                         panels.target(
-                            f"1 - (sum(rate({metric('stream_materialize_cache_hit_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_materialize_cache_total_count')}[$__rate_interval])) by (table_id, actor_id))",
+                            f"1 - (sum(rate({metric('stream_materialize_cache_hit_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_materialize_cache_total_count')}[$__rate_interval])) by (table_id, actor_id)) >=0",
                             "materialize executor cache miss ratio - table {{table_id}} - actor {{actor_id}}  {{%s}}"
                             % NODE_LABEL,
                         ),
@@ -648,7 +655,7 @@ def section_storage(outer_panels):
                             [50, 99],
                         ),
                         panels.target(
-                            f"sum by(le, {COMPONENT_LABEL}) (rate({metric('state_store_sync_size_sum')}[$__rate_interval])) / sum by(le, {COMPONENT_LABEL}) (rate({metric('state_store_sync_size_count')}[$__rate_interval]))",
+                            f"sum by(le, {COMPONENT_LABEL}) (rate({metric('state_store_sync_size_sum')}[$__rate_interval])) / sum by(le, {COMPONENT_LABEL}) (rate({metric('state_store_sync_size_count')}[$__rate_interval])) > 0",
                             "avg - {{%s}}" % COMPONENT_LABEL,
                         ),
                     ],
@@ -687,6 +694,16 @@ def section_streaming(outer_panels):
                             f"(sum by (source_id)(rate({metric('partition_input_bytes')}[$__rate_interval])))/(1000*1000)",
                             "source={{source_id}}",
                         )
+                    ],
+                ),
+                panels.timeseries_rowsps(
+                    "Source Backfill Throughput(rows/s)",
+                    "The figure shows the number of rows read by each source per second.",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('stream_source_backfill_rows_counts')}[$__rate_interval])) by (source_id, source_name, fragment_id)",
+                            "{{source_id}} {{source_name}} (fragment {{fragment_id}})",
+                        ),
                     ],
                 ),
                 panels.timeseries_rowsps(
@@ -775,17 +792,14 @@ def section_batch(outer_panels):
                     "Query Latency in Distributed Execution Mode",
                     "",
                     [
-                        panels.target(
-                            f"histogram_quantile(0.5, sum(rate({metric('distributed_query_latency_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
-                            "p50 - {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
-                        ),
-                        panels.target(
-                            f"histogram_quantile(0.9, sum(rate({metric('distributed_query_latency_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
-                            "p90 - {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
-                        ),
-                        panels.target(
-                            f"histogram_quantile(0.95, sum(rate({metric('distributed_query_latency_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
-                            "p99 - {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(rate({metric('distributed_query_latency_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
+                                f"p{legend}"
+                                + " - {{%s}} @ {{%s}}"
+                                % (COMPONENT_LABEL, NODE_LABEL),
+                            ),
+                            [50, 90, 99, "max"],
                         ),
                     ],
                 ),
@@ -793,17 +807,14 @@ def section_batch(outer_panels):
                     "Query Latency in Local Execution Mode",
                     "",
                     [
-                        panels.target(
-                            f"histogram_quantile(0.5, sum(rate({metric('frontend_latency_local_execution_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
-                            "p50 - {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
-                        ),
-                        panels.target(
-                            f"histogram_quantile(0.9, sum(rate({metric('frontend_latency_local_execution_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
-                            "p90 - {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
-                        ),
-                        panels.target(
-                            f"histogram_quantile(0.95, sum(rate({metric('frontend_latency_local_execution_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
-                            "p99 - {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(rate({metric('frontend_latency_local_execution_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
+                                f"p{legend}"
+                                + " - {{%s}} @ {{%s}}"
+                                % (COMPONENT_LABEL, NODE_LABEL),
+                            ),
+                            [50, 90, 99, "max"],
                         ),
                     ],
                 ),
@@ -969,6 +980,7 @@ dashboard = Dashboard(
     sharedCrosshair=True,
     templating=templating,
     version=dashboard_version,
+    refresh="",
     panels=[
         *section_actor_info(panels),
         *section_overview(panels),

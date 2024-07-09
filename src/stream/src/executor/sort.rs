@@ -12,19 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use futures::StreamExt;
-use futures_async_stream::try_stream;
 use risingwave_common::array::Op;
-use risingwave_common::catalog::Schema;
-use risingwave_storage::StateStore;
 
 use super::sort_buffer::SortBuffer;
-use super::{
-    expect_first_barrier, ActorContextRef, BoxedMessageStream, Execute, Executor, Message,
-    StreamExecutorError, Watermark,
-};
-use crate::common::table::state_table::StateTable;
-use crate::common::StreamChunkBuilder;
+use crate::executor::prelude::*;
 
 pub struct SortExecutor<S: StateStore> {
     input: Executor,
@@ -152,15 +143,13 @@ impl<S: StateStore> SortExecutor<S> {
 #[cfg(test)]
 mod tests {
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
-    use risingwave_common::array::StreamChunk;
-    use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
-    use risingwave_common::types::DataType;
+    use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, TableId};
+    use risingwave_common::util::epoch::test_epoch;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
 
     use super::*;
     use crate::executor::test_utils::{MessageSender, MockSource, StreamExecutorTestExt};
-    use crate::executor::{ActorContext, BoxedMessageStream, Execute};
 
     async fn create_executor<S: StateStore>(
         sort_column_index: usize,
@@ -211,7 +200,7 @@ mod tests {
         let (mut tx, mut sort_executor) = create_executor(sort_column_index, store).await;
 
         // Init barrier
-        tx.push_barrier(1, false);
+        tx.push_barrier(test_epoch(1), false);
 
         // Consume the barrier
         sort_executor.expect_barrier().await;
@@ -261,7 +250,7 @@ mod tests {
         ));
 
         // Push barrier
-        tx.push_barrier(2, false);
+        tx.push_barrier(test_epoch(2), false);
 
         // Consume the barrier
         sort_executor.expect_barrier().await;
@@ -296,7 +285,7 @@ mod tests {
         let (mut tx, mut sort_executor) = create_executor(sort_column_index, store.clone()).await;
 
         // Init barrier
-        tx.push_barrier(1, false);
+        tx.push_barrier(test_epoch(1), false);
 
         // Consume the barrier
         sort_executor.expect_barrier().await;
@@ -318,7 +307,7 @@ mod tests {
         ));
 
         // Push barrier
-        tx.push_barrier(2, false);
+        tx.push_barrier(test_epoch(2), false);
 
         // Consume the barrier
         sort_executor.expect_barrier().await;
@@ -328,7 +317,7 @@ mod tests {
             create_executor(sort_column_index, store).await;
 
         // Push barrier
-        recovered_tx.push_barrier(3, false);
+        recovered_tx.push_barrier(test_epoch(3), false);
 
         // Consume the barrier
         recovered_sort_executor.expect_barrier().await;

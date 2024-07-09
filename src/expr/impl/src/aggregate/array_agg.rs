@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use risingwave_common::array::ArrayBuilderImpl;
-use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::types::{Datum, ListValue, ScalarRefImpl};
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_expr::aggregate;
 use risingwave_expr::aggregate::AggStateDyn;
 use risingwave_expr::expr::Context;
@@ -64,7 +64,7 @@ mod tests {
             + 789",
         );
         let array_agg = build_append_only(&AggCall::from_pretty("(array_agg:int4[] $0:int4)"))?;
-        let mut state = array_agg.create_state();
+        let mut state = array_agg.create_state()?;
         array_agg.update(&mut state, &chunk).await?;
         let actual = array_agg.get_result(&state).await?;
         assert_eq!(actual, Some(ListValue::from_iter([123, 456, 789]).into()));
@@ -74,7 +74,7 @@ mod tests {
     #[tokio::test]
     async fn test_array_agg_empty() -> Result<()> {
         let array_agg = build_append_only(&AggCall::from_pretty("(array_agg:int4[] $0:int4)"))?;
-        let mut state = array_agg.create_state();
+        let mut state = array_agg.create_state()?;
 
         assert_eq!(array_agg.get_result(&state).await?, None);
 

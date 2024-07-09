@@ -24,6 +24,7 @@ use risingwave_frontend_macro::system_catalog;
     UNION ALL SELECT id, name, 'source' AS relation_type, schema_id, owner, definition, acl FROM rw_catalog.rw_sources
     UNION ALL SELECT id, name, 'index' AS relation_type, schema_id, owner, definition, acl FROM rw_catalog.rw_indexes
     UNION ALL SELECT id, name, 'sink' AS relation_type, schema_id, owner, definition, acl FROM rw_catalog.rw_sinks
+    UNION ALL SELECT id, name, 'subscription' AS relation_type, schema_id, owner, definition, acl FROM rw_catalog.rw_subscriptions
     UNION ALL SELECT id, name, 'materialized view' AS relation_type, schema_id, owner, definition, acl FROM rw_catalog.rw_materialized_views
     UNION ALL SELECT id, name, 'view' AS relation_type, schema_id, owner, definition, acl FROM rw_catalog.rw_views
     "

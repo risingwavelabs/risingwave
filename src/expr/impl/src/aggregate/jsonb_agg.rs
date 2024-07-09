@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::types::{Datum, JsonbVal};
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_expr::aggregate::AggStateDyn;
 use risingwave_expr::expr::Context;
 use risingwave_expr::{aggregate, ExprError, Result};

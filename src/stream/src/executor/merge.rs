@@ -18,18 +18,17 @@ use std::task::{Context, Poll};
 
 use anyhow::Context as _;
 use futures::stream::{FusedStream, FuturesUnordered, StreamFuture};
-use futures::{pin_mut, Stream, StreamExt};
-use futures_async_stream::try_stream;
+use prometheus::Histogram;
+use risingwave_common::config::MetricLevel;
+use risingwave_common::metrics::LabelGuardedMetric;
 use tokio::time::Instant;
 
-use super::error::StreamExecutorError;
 use super::exchange::input::BoxedInput;
 use super::watermark::*;
 use super::*;
 use crate::executor::exchange::input::new_input;
-use crate::executor::monitor::StreamingMetrics;
-use crate::executor::utils::ActorInputMetrics;
-use crate::task::{FragmentId, SharedContext};
+use crate::executor::prelude::*;
+use crate::task::SharedContext;
 
 /// `MergeExecutor` merges data from multiple channels. Dataflow from one channel
 /// will be stopped on barrier.
@@ -96,12 +95,28 @@ impl MergeExecutor {
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self: Box<Self>) {
+        let merge_barrier_align_duration = if self.metrics.level >= MetricLevel::Debug {
+            Some(
+                self.metrics
+                    .merge_barrier_align_duration
+                    .with_label_values(&[
+                        &self.actor_context.id.to_string(),
+                        &self.actor_context.fragment_id.to_string(),
+                    ]),
+            )
+        } else {
+            None
+        };
+
         // Futures of all active upstreams.
-        let select_all = SelectReceivers::new(self.actor_context.id, self.upstreams);
+        let select_all = SelectReceivers::new(
+            self.actor_context.id,
+            self.upstreams,
+            merge_barrier_align_duration.clone(),
+        );
         let actor_id = self.actor_context.id;
 
-        let mut metrics = ActorInputMetrics::new(
-            &self.metrics,
+        let mut metrics = self.metrics.new_actor_input_metrics(
             actor_id,
             self.fragment_id,
             self.upstream_fragment_id,
@@ -187,8 +202,11 @@ impl MergeExecutor {
 
                             // Poll the first barrier from the new upstreams. It must be the same as
                             // the one we polled from original upstreams.
-                            let mut select_new =
-                                SelectReceivers::new(self.actor_context.id, new_upstreams);
+                            let mut select_new = SelectReceivers::new(
+                                self.actor_context.id,
+                                new_upstreams,
+                                merge_barrier_align_duration.clone(),
+                            );
                             let new_barrier = expect_first_barrier(&mut select_new).await?;
                             assert_eq!(barrier, &new_barrier);
 
@@ -216,8 +234,7 @@ impl MergeExecutor {
                         }
 
                         self.upstream_fragment_id = new_upstream_fragment_id;
-                        metrics = ActorInputMetrics::new(
-                            &self.metrics,
+                        metrics = self.metrics.new_actor_input_metrics(
                             actor_id,
                             self.fragment_id,
                             self.upstream_fragment_id,
@@ -255,6 +272,8 @@ pub struct SelectReceivers {
     actor_id: u32,
     /// watermark column index -> `BufferedWatermarks`
     buffered_watermarks: BTreeMap<usize, BufferedWatermarks<ActorId>>,
+    /// If None, then we don't take `Instant::now()` and `observe` during `poll_next`
+    merge_barrier_align_duration: Option<LabelGuardedMetric<Histogram, 2>>,
 }
 
 impl Stream for SelectReceivers {
@@ -267,6 +286,7 @@ impl Stream for SelectReceivers {
             return Poll::Ready(None);
         }
 
+        let mut start = None;
         loop {
             match futures::ready!(self.active.poll_next_unpin(cx)) {
                 // Directly forward the error.
@@ -291,6 +311,11 @@ impl Stream for SelectReceivers {
                         }
                         Message::Barrier(barrier) => {
                             // Block this upstream by pushing it to `blocked`.
+                            if self.blocked.is_empty()
+                                && self.merge_barrier_align_duration.is_some()
+                            {
+                                start = Some(Instant::now());
+                            }
                             self.blocked.push(remaining);
                             if let Some(current_barrier) = self.barrier.as_ref() {
                                 if current_barrier.epoch != barrier.epoch {
@@ -307,17 +332,25 @@ impl Stream for SelectReceivers {
                         }
                     }
                 }
-                // If one upstream is finished, we finish the whole stream with an error. This
-                // should not happen normally as we use the barrier as the control message.
-                Some((None, r)) => {
-                    return Poll::Ready(Some(Err(StreamExecutorError::channel_closed(format!(
-                        "exchange from actor {} to actor {} closed unexpectedly",
-                        r.actor_id(),
-                        self.actor_id
-                    )))))
-                }
+                // We use barrier as the control message of the stream. That is, we always stop the
+                // actors actively when we receive a `Stop` mutation, instead of relying on the stream
+                // termination.
+                //
+                // Besides, in abnormal cases when the other side of the `Input` closes unexpectedly,
+                // we also yield an `Err(ExchangeChannelClosed)`, which will hit the `Err` arm above.
+                // So this branch will never be reached in all cases.
+                Some((None, _)) => unreachable!(),
                 // There's no active upstreams. Process the barrier and resume the blocked ones.
-                None => break,
+                None => {
+                    if let Some(start) = start
+                        && let Some(merge_barrier_align_duration) =
+                            &self.merge_barrier_align_duration
+                    {
+                        // Observe did a few atomic operation inside, we want to avoid the overhead.
+                        merge_barrier_align_duration.observe(start.elapsed().as_secs_f64())
+                    }
+                    break;
+                }
             }
         }
 
@@ -339,7 +372,11 @@ impl Stream for SelectReceivers {
 }
 
 impl SelectReceivers {
-    fn new(actor_id: u32, upstreams: Vec<BoxedInput>) -> Self {
+    fn new(
+        actor_id: u32,
+        upstreams: Vec<BoxedInput>,
+        merge_barrier_align_duration: Option<LabelGuardedMetric<Histogram, 2>>,
+    ) -> Self {
         assert!(!upstreams.is_empty());
         let upstream_actor_ids = upstreams.iter().map(|input| input.actor_id()).collect();
         let mut this = Self {
@@ -349,6 +386,7 @@ impl SelectReceivers {
             barrier: None,
             upstream_actor_ids,
             buffered_watermarks: Default::default(),
+            merge_barrier_align_duration,
         };
         this.extend_active(upstreams);
         this
@@ -416,16 +454,13 @@ impl SelectReceivers {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
     use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::Arc;
     use std::time::Duration;
 
     use assert_matches::assert_matches;
     use futures::FutureExt;
-    use itertools::Itertools;
-    use risingwave_common::array::{Op, StreamChunk};
-    use risingwave_common::types::ScalarImpl;
+    use risingwave_common::array::Op;
+    use risingwave_common::util::epoch::test_epoch;
     use risingwave_pb::stream_plan::StreamMessage;
     use risingwave_pb::task_service::exchange_service_server::{
         ExchangeService, ExchangeServiceServer,
@@ -441,8 +476,8 @@ mod tests {
     use super::*;
     use crate::executor::exchange::input::RemoteInput;
     use crate::executor::exchange::permit::channel_for_test;
-    use crate::executor::{Barrier, Execute, Mutation};
     use crate::task::test_utils::helper_make_local_actor;
+    use crate::task::LocalBarrierManager;
 
     fn build_test_chunk(epoch: u64) -> StreamChunk {
         // The number of items in `ops` is the epoch count.
@@ -482,13 +517,15 @@ mod tests {
                         .await
                         .unwrap();
                     }
-                    tx.send(Message::Barrier(Barrier::new_test_barrier(epoch)))
-                        .await
-                        .unwrap();
+                    tx.send(Message::Barrier(Barrier::new_test_barrier(test_epoch(
+                        epoch,
+                    ))))
+                    .await
+                    .unwrap();
                     sleep(Duration::from_millis(1)).await;
                 }
                 tx.send(Message::Barrier(
-                    Barrier::new_test_barrier(1000)
+                    Barrier::new_test_barrier(test_epoch(1000))
                         .with_mutation(Mutation::Stop(HashSet::default())),
                 ))
                 .await
@@ -515,7 +552,7 @@ mod tests {
             }
             // expect a barrier
             assert_matches!(merger.next().await.unwrap().unwrap(), Message::Barrier(Barrier{epoch:barrier_epoch,mutation:_,..}) => {
-                assert_eq!(barrier_epoch.curr, epoch);
+                assert_eq!(barrier_epoch.curr, test_epoch(epoch));
             });
         }
         assert_matches!(
@@ -614,14 +651,16 @@ mod tests {
             }
         };
 
-        let b1 = Barrier::new_test_barrier(1).with_mutation(Mutation::Update(UpdateMutation {
-            dispatchers: Default::default(),
-            merges: merge_updates,
-            vnode_bitmaps: Default::default(),
-            dropped_actors: Default::default(),
-            actor_splits: Default::default(),
-            actor_new_dispatchers: Default::default(),
-        }));
+        let b1 = Barrier::new_test_barrier(test_epoch(1)).with_mutation(Mutation::Update(
+            UpdateMutation {
+                dispatchers: Default::default(),
+                merges: merge_updates,
+                vnode_bitmaps: Default::default(),
+                dropped_actors: Default::default(),
+                actor_splits: Default::default(),
+                actor_new_dispatchers: Default::default(),
+            },
+        ));
         send!([untouched, old], Message::Barrier(b1.clone()));
         assert!(recv!().is_none()); // We should not receive the barrier, since merger is waiting for the new upstream new.
 
@@ -672,7 +711,7 @@ mod tests {
             .await
             .unwrap();
             // send barrier
-            let barrier = Barrier::new_test_barrier(12345);
+            let barrier = Barrier::new_test_barrier(test_epoch(1));
             tx.send(Ok(GetStreamResponse {
                 message: Some(StreamMessage {
                     stream_message: Some(
@@ -719,6 +758,7 @@ mod tests {
         let remote_input = {
             let pool = ComputeClientPool::default();
             RemoteInput::new(
+                LocalBarrierManager::for_test(),
                 pool,
                 addr.into(),
                 (0, 0),
@@ -737,7 +777,7 @@ mod tests {
             assert!(visibility.is_empty());
         });
         assert_matches!(remote_input.next().await.unwrap().unwrap(), Message::Barrier(Barrier { epoch: barrier_epoch, mutation: _, .. }) => {
-            assert_eq!(barrier_epoch.curr, 12345);
+            assert_eq!(barrier_epoch.curr, test_epoch(1));
         });
         assert!(rpc_called.load(Ordering::SeqCst));
 

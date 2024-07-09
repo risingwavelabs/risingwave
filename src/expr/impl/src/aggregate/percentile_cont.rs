@@ -15,9 +15,9 @@
 use std::ops::Range;
 
 use risingwave_common::array::*;
-use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::Row;
 use risingwave_common::types::*;
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_expr::aggregate::{AggCall, AggStateDyn, AggregateFunction, AggregateState};
 use risingwave_expr::{build_aggregate, Result};
 
@@ -91,8 +91,8 @@ impl AggregateFunction for PercentileCont {
         DataType::Float64
     }
 
-    fn create_state(&self) -> AggregateState {
-        AggregateState::Any(Box::<State>::default())
+    fn create_state(&self) -> Result<AggregateState> {
+        Ok(AggregateState::Any(Box::<State>::default()))
     }
 
     async fn update(&self, state: &mut AggregateState, input: &StreamChunk) -> Result<()> {

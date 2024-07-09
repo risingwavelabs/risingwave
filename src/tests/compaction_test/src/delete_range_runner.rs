@@ -15,20 +15,19 @@
 use std::future::Future;
 use std::ops::{Bound, RangeBounds};
 use std::pin::{pin, Pin};
-use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use bytes::Bytes;
-use futures::StreamExt;
+use foyer::{CacheContext, HybridCacheBuilder};
 use rand::rngs::StdRng;
 use rand::{RngCore, SeedableRng};
-use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::{
     extract_storage_memory_config, load_config, NoOverride, ObjectStoreConfig, RwConfig,
 };
 use risingwave_common::system_param::reader::SystemParamsRead;
+use risingwave_common::util::epoch::{test_epoch, EpochExt};
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::TableKey;
 use risingwave_hummock_test::get_notification_client_for_test;
@@ -52,7 +51,7 @@ use risingwave_storage::hummock::compactor::{
 use risingwave_storage::hummock::sstable_store::SstableStoreRef;
 use risingwave_storage::hummock::utils::cmp_delete_range_left_bounds;
 use risingwave_storage::hummock::{
-    CachePolicy, FileCache, HummockStorage, MemoryLimiter, SstableObjectIdManager, SstableStore,
+    CachePolicy, HummockStorage, MemoryLimiter, SstableObjectIdManager, SstableStore,
     SstableStoreConfig,
 };
 use risingwave_storage::monitor::{CompactorMetrics, HummockStateStoreMetrics};
@@ -60,7 +59,7 @@ use risingwave_storage::opts::StorageOpts;
 use risingwave_storage::store::{
     LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions, SealCurrentEpochOptions,
 };
-use risingwave_storage::StateStore;
+use risingwave_storage::{StateStore, StateStoreIter};
 
 use crate::CompactionTestOpts;
 pub fn start_delete_range(opts: CompactionTestOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
@@ -141,6 +140,7 @@ async fn compaction_test(
         value_indices: vec![],
         definition: "".to_string(),
         handle_pk_conflict_behavior: 0,
+        version_column_index: None,
         read_prefix_len_hint: 0,
         optional_associated_source_id: None,
         table_type: 0,
@@ -205,21 +205,31 @@ async fn compaction_test(
         state_store_type.strip_prefix("hummock+").unwrap(),
         object_store_metrics.clone(),
         "Hummock",
-        ObjectStoreConfig::default(),
+        Arc::new(ObjectStoreConfig::default()),
     )
     .await;
+    let meta_cache = HybridCacheBuilder::new()
+        .memory(storage_memory_config.meta_cache_capacity_mb * (1 << 20))
+        .with_shards(storage_memory_config.meta_cache_shard_num)
+        .storage()
+        .build()
+        .await?;
+    let block_cache = HybridCacheBuilder::new()
+        .memory(storage_memory_config.block_cache_capacity_mb * (1 << 20))
+        .with_shards(storage_memory_config.block_cache_shard_num)
+        .storage()
+        .build()
+        .await?;
     let sstable_store = Arc::new(SstableStore::new(SstableStoreConfig {
         store: Arc::new(remote_object_store),
         path: system_params.data_directory().to_string(),
-        block_cache_capacity: storage_memory_config.block_cache_capacity_mb * (1 << 20),
-        meta_cache_capacity: storage_memory_config.meta_cache_capacity_mb * (1 << 20),
-        high_priority_ratio: 0,
         prefetch_buffer_capacity: storage_memory_config.prefetch_buffer_capacity_mb * (1 << 20),
         max_prefetch_block_number: storage_opts.max_prefetch_block_number,
-        data_file_cache: FileCache::none(),
-        meta_file_cache: FileCache::none(),
         recent_filter: None,
         state_store_metrics: state_store_metrics.clone(),
+        use_new_object_prefix_strategy: system_params.use_new_object_prefix_strategy(),
+        meta_cache,
+        block_cache,
     }));
 
     let store = HummockStorage::new(
@@ -230,6 +240,7 @@ async fn compaction_test(
         Arc::new(RpcFilterKeyExtractorManager::default()),
         state_store_metrics.clone(),
         compactor_metrics.clone(),
+        None,
     )
     .await?;
     let sstable_object_id_manager = store.sstable_object_id_manager().clone();
@@ -301,7 +312,8 @@ async fn run_compare_result(
     test_count: u64,
     test_delete_ratio: u32,
 ) -> Result<(), String> {
-    let init_epoch = hummock.get_pinned_version().max_committed_epoch() + 1;
+    let init_epoch = test_epoch(hummock.get_pinned_version().max_committed_epoch() + 1);
+
     let mut normal = NormalState::new(hummock, 1, init_epoch).await;
     let mut delete_range = DeleteRangeState::new(hummock, 2, init_epoch).await;
     const RANGE_BASE: u64 = 4000;
@@ -315,7 +327,7 @@ async fn run_compare_result(
     let mut rng = StdRng::seed_from_u64(seed);
     let mut overlap_ranges = vec![];
     for epoch_idx in 0..test_count {
-        let epoch = init_epoch + epoch_idx;
+        let epoch = test_epoch(init_epoch / test_epoch(1) + epoch_idx);
         for idx in 0..1000 {
             let op = rng.next_u32() % 50;
             let key_number = rng.next_u64() % test_range;
@@ -364,16 +376,16 @@ async fn run_compare_result(
                 delete_range.insert(key.as_bytes(), val.as_bytes());
             }
         }
-        let next_epoch = epoch + 1;
+        let next_epoch = epoch.next_epoch();
         normal.commit(next_epoch).await?;
         delete_range.commit(next_epoch).await?;
         // let checkpoint = epoch % 10 == 0;
         let ret = hummock.seal_and_sync_epoch(epoch).await.unwrap();
         meta_client
-            .commit_epoch(epoch, ret.uncommitted_ssts)
+            .commit_epoch(epoch, ret)
             .await
             .map_err(|e| format!("{:?}", e))?;
-        if epoch % 200 == 0 {
+        if (epoch / test_epoch(1)) % 200 == 0 {
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
     }
@@ -438,7 +450,7 @@ impl NormalState {
                 ReadOptions {
                     ignore_range_tombstone,
                     table_id: self.table_id,
-                    cache_policy: CachePolicy::Fill(CachePriority::High),
+                    cache_policy: CachePolicy::Fill(CacheContext::Default),
                     ..Default::default()
                 },
             )
@@ -464,17 +476,17 @@ impl NormalState {
                     table_id: self.table_id,
                     read_version_from_backup: false,
                     prefetch_options: PrefetchOptions::default(),
-                    cache_policy: CachePolicy::Fill(CachePriority::High),
+                    cache_policy: CachePolicy::Fill(CacheContext::Default),
                     ..Default::default()
                 },
             )
             .await
             .unwrap(),);
         let mut ret = vec![];
-        while let Some(item) = iter.next().await {
-            let (full_key, val) = item.unwrap();
-            let tkey = full_key.user_key.table_key.0.clone();
-            ret.push((tkey, val));
+        while let Some(item) = iter.try_next().await.unwrap() {
+            let (full_key, val) = item;
+            let tkey = Bytes::copy_from_slice(full_key.user_key.table_key.0);
+            ret.push((tkey, Bytes::copy_from_slice(val)));
         }
         ret
     }
@@ -483,29 +495,31 @@ impl NormalState {
 #[async_trait::async_trait]
 impl CheckState for NormalState {
     async fn delete_range(&mut self, left: &[u8], right: &[u8]) {
-        let mut iter = Box::pin(
-            self.storage
-                .iter(
-                    (
-                        Bound::Included(Bytes::copy_from_slice(left)).map(TableKey),
-                        Bound::Excluded(Bytes::copy_from_slice(right)).map(TableKey),
-                    ),
-                    ReadOptions {
-                        ignore_range_tombstone: true,
-                        table_id: self.table_id,
-                        read_version_from_backup: false,
-                        prefetch_options: PrefetchOptions::default(),
-                        cache_policy: CachePolicy::Fill(CachePriority::High),
-                        ..Default::default()
-                    },
-                )
-                .await
-                .unwrap(),
-        );
+        let mut iter = self
+            .storage
+            .iter(
+                (
+                    Bound::Included(Bytes::copy_from_slice(left)).map(TableKey),
+                    Bound::Excluded(Bytes::copy_from_slice(right)).map(TableKey),
+                ),
+                ReadOptions {
+                    ignore_range_tombstone: true,
+                    table_id: self.table_id,
+                    read_version_from_backup: false,
+                    prefetch_options: PrefetchOptions::default(),
+                    cache_policy: CachePolicy::Fill(CacheContext::Default),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
         let mut delete_item = Vec::new();
-        while let Some(item) = iter.next().await {
-            let (full_key, value) = item.unwrap();
-            delete_item.push((full_key.user_key.table_key, value));
+        while let Some(item) = iter.try_next().await.unwrap() {
+            let (full_key, value) = item;
+            delete_item.push((
+                full_key.user_key.table_key.copy_into(),
+                Bytes::copy_from_slice(value),
+            ));
         }
         drop(iter);
         for (key, value) in delete_item {
@@ -591,24 +605,15 @@ fn run_compactor_thread(
 ) {
     let filter_key_extractor_manager =
         FilterKeyExtractorManager::RpcFilterKeyExtractorManager(filter_key_extractor_manager);
-
-    let compaction_executor = Arc::new(CompactionExecutor::new(Some(1)));
-    let max_task_parallelism = Arc::new(AtomicU32::new(
-        (compaction_executor.worker_num() as f32 * storage_opts.compactor_max_task_multiplier)
-            .ceil() as u32,
-    ));
     let compactor_context = CompactorContext {
         storage_opts,
         sstable_store,
         compactor_metrics,
         is_share_buffer_compact: false,
         compaction_executor: Arc::new(CompactionExecutor::new(None)),
-
         memory_limiter: MemoryLimiter::unlimit(),
         task_progress_manager: Default::default(),
         await_tree_reg: None,
-        running_task_parallelism: Arc::new(AtomicU32::new(0)),
-        max_task_parallelism,
     };
 
     start_compactor(

@@ -22,9 +22,9 @@ use nexmark::event::EventType;
 use nexmark::EventGenerator;
 use risingwave_common::array::stream_chunk_builder::StreamChunkBuilder;
 use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common_estimate_size::EstimateSize;
 use tokio::time::Instant;
 
 use crate::error::ConnectorResult;
@@ -41,6 +41,7 @@ use crate::source::{
 #[derive(Debug)]
 pub struct NexmarkSplitReader {
     generator: EventGenerator,
+    #[expect(dead_code)]
     assigned_split: NexmarkSplit,
     event_num: u64,
     event_type: Option<EventType>,
@@ -107,10 +108,10 @@ impl SplitReader for NexmarkSplitReader {
     }
 
     fn into_stream(self) -> BoxChunkSourceStream {
-        let actor_id = self.source_ctx.source_info.actor_id.to_string();
-        let fragment_id = self.source_ctx.source_info.fragment_id.to_string();
-        let source_id = self.source_ctx.source_info.source_id.to_string();
-        let source_name = self.source_ctx.source_info.source_name.to_string();
+        let actor_id = self.source_ctx.actor_id.to_string();
+        let fragment_id = self.source_ctx.fragment_id.to_string();
+        let source_id = self.source_ctx.source_id.to_string();
+        let source_name = self.source_ctx.source_name.to_string();
         let split_id = self.split_id.clone();
         let metrics = self.source_ctx.metrics.clone();
 
@@ -121,7 +122,7 @@ impl SplitReader for NexmarkSplitReader {
                 .inspect_ok(move |chunk: &StreamChunk| {
                     metrics
                         .partition_input_count
-                        .with_label_values(&[
+                        .with_guarded_label_values(&[
                             &actor_id,
                             &source_id,
                             &split_id,
@@ -131,7 +132,7 @@ impl SplitReader for NexmarkSplitReader {
                         .inc_by(chunk.cardinality() as u64);
                     metrics
                         .partition_input_bytes
-                        .with_label_values(&[
+                        .with_guarded_label_values(&[
                             &actor_id,
                             &source_id,
                             &split_id,
@@ -210,8 +211,8 @@ impl NexmarkSplitReader {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::source::nexmark::{NexmarkProperties, NexmarkSplitEnumerator};
-    use crate::source::{SourceEnumeratorContext, SplitEnumerator};
+    use crate::source::nexmark::NexmarkSplitEnumerator;
+    use crate::source::{SourceContext, SourceEnumeratorContext, SplitEnumerator};
 
     #[tokio::test]
     async fn test_nexmark_split_reader() -> crate::error::ConnectorResult<()> {
@@ -224,7 +225,7 @@ mod tests {
         };
 
         let mut enumerator =
-            NexmarkSplitEnumerator::new(props.clone(), SourceEnumeratorContext::default().into())
+            NexmarkSplitEnumerator::new(props.clone(), SourceEnumeratorContext::dummy().into())
                 .await?;
         let list_splits_resp: Vec<_> = enumerator.list_splits().await?.into_iter().collect();
 
@@ -236,7 +237,7 @@ mod tests {
                 props.clone(),
                 state,
                 Default::default(),
-                Default::default(),
+                SourceContext::dummy().into(),
                 None,
             )
             .await?
@@ -261,7 +262,7 @@ mod tests {
         };
 
         let mut enumerator =
-            NexmarkSplitEnumerator::new(props.clone(), SourceEnumeratorContext::default().into())
+            NexmarkSplitEnumerator::new(props.clone(), SourceEnumeratorContext::dummy().into())
                 .await?;
         let list_splits_resp: Vec<_> = enumerator.list_splits().await?.into_iter().collect();
 
@@ -271,7 +272,7 @@ mod tests {
                 props.clone(),
                 state,
                 Default::default(),
-                Default::default(),
+                SourceContext::dummy().into(),
                 None,
             )
             .await?

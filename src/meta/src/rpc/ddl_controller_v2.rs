@@ -204,14 +204,17 @@ impl DdlController {
 
         // create streaming jobs.
         let stream_job_id = streaming_job.id();
-        match streaming_job.create_type() {
-            CreateType::Unspecified | CreateType::Foreground => {
+        match (streaming_job.create_type(), streaming_job) {
+            (CreateType::Unspecified, _)
+            | (CreateType::Foreground, _)
+            // FIXME(kwannoel): Unify background stream's creation path with MV below.
+            | (CreateType::Background, StreamingJob::Sink(_, _)) => {
                 let replace_table_job_info = ctx.replace_table_job_info.as_ref().map(
                     |(streaming_job, ctx, table_fragments)| {
                         (
                             streaming_job.clone(),
                             ctx.merge_updates.clone(),
-                            table_fragments.table_id(),
+                            table_fragments.table_id().table_id(),
                         )
                     },
                 );
@@ -220,28 +223,14 @@ impl DdlController {
                     .create_streaming_job(table_fragments, ctx)
                     .await?;
 
-                let mut version = mgr
+                let version = mgr
                     .catalog_controller
-                    .finish_streaming_job(stream_job_id as _)
+                    .finish_streaming_job(stream_job_id as _, replace_table_job_info)
                     .await?;
-
-                if let Some((streaming_job, merge_updates, table_id)) = replace_table_job_info {
-                    version = mgr
-                        .catalog_controller
-                        .finish_replace_streaming_job(
-                            table_id.table_id as _,
-                            streaming_job,
-                            merge_updates,
-                            None,
-                            Some(stream_job_id),
-                            None,
-                        )
-                        .await?;
-                }
 
                 Ok(version)
             }
-            CreateType::Background => {
+            (CreateType::Background, _) => {
                 let ctrl = self.clone();
                 let mgr = mgr.clone();
                 let fut = async move {
@@ -254,7 +243,7 @@ impl DdlController {
                     if result.is_ok() {
                         let _ = mgr
                             .catalog_controller
-                            .finish_streaming_job(stream_job_id as _)
+                            .finish_streaming_job(stream_job_id as _, None)
                             .await.inspect_err(|err| {
                                 tracing::error!(id = stream_job_id, error = ?err.as_report(), "failed to finish background streaming job");
                             });
@@ -328,7 +317,7 @@ impl DdlController {
                     &streaming_job,
                     &stream_ctx,
                     table.get_version()?,
-                    &fragment_graph.default_parallelism(),
+                    &fragment_graph.specified_parallelism(),
                 )
                 .await? as u32;
 
@@ -389,17 +378,19 @@ impl DdlController {
         }
 
         let ReleaseContext {
+            streaming_job_ids,
             state_table_ids,
             source_ids,
             connections,
             source_fragments,
             removed_actors,
+            removed_fragments,
         } = release_ctx;
 
         // delete vpc endpoints.
         for conn in connections {
             let _ = self
-                .delete_vpc_endpoint_v2(conn.into_inner())
+                .delete_vpc_endpoint_v2(conn.to_protobuf())
                 .await
                 .inspect_err(|err| {
                     tracing::warn!(err = ?err.as_report(), "failed to delete vpc endpoint");
@@ -431,7 +422,9 @@ impl DdlController {
         self.stream_manager
             .drop_streaming_jobs_v2(
                 removed_actors.into_iter().map(|id| id as _).collect(),
-                state_table_ids.into_iter().map(|id| id as _).collect(),
+                streaming_job_ids,
+                state_table_ids,
+                removed_fragments.iter().map(|id| *id as _).collect(),
             )
             .await;
 
@@ -467,7 +460,7 @@ impl DdlController {
                 &streaming_job,
                 &ctx,
                 table.get_version()?,
-                &fragment_graph.default_parallelism(),
+                &fragment_graph.specified_parallelism(),
             )
             .await?;
 

@@ -13,18 +13,14 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
-use std::fmt::{Debug, Formatter};
 use std::future::Future;
 use std::iter::repeat_with;
 use std::ops::{Deref, DerefMut};
-use std::sync::Arc;
 
-use await_tree::InstrumentAwait;
-use futures::{Stream, StreamExt, TryStreamExt};
-use futures_async_stream::try_stream;
+use futures::TryStreamExt;
 use itertools::Itertools;
-use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::buffer::BitmapBuilder;
+use risingwave_common::array::Op;
+use risingwave_common::bitmap::BitmapBuilder;
 use risingwave_common::hash::{ActorMapping, ExpandedActorMapping, VirtualNode};
 use risingwave_common::metrics::LabelGuardedIntCounter;
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -35,11 +31,10 @@ use tokio::time::Instant;
 use tracing::{event, Instrument};
 
 use super::exchange::output::{new_output, BoxedOutput};
-use super::{AddMutation, Executor, UpdateMutation, Watermark};
-use crate::error::StreamResult;
-use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{Barrier, Message, Mutation, StreamConsumer};
-use crate::task::{ActorId, DispatcherId, SharedContext};
+use super::{AddMutation, TroublemakerExecutor, UpdateMutation};
+use crate::executor::prelude::*;
+use crate::executor::StreamConsumer;
+use crate::task::{DispatcherId, SharedContext};
 
 /// [`DispatchExecutor`] consumes messages and send them into downstream actors. Usually,
 /// data chunks will be dispatched with some specified policy, while control message
@@ -341,13 +336,22 @@ impl DispatchExecutorInner {
 
 impl DispatchExecutor {
     pub fn new(
-        input: Executor,
+        mut input: Executor,
         dispatchers: Vec<DispatcherImpl>,
         actor_id: u32,
         fragment_id: u32,
         context: Arc<SharedContext>,
         metrics: Arc<StreamingMetrics>,
+        chunk_size: usize,
     ) -> Self {
+        if crate::consistency::insane() {
+            // make some trouble before dispatching to avoid generating invalid dist key.
+            let mut info = input.info().clone();
+            info.identity = format!("{} (embedded trouble)", info.identity);
+            let troublemaker = TroublemakerExecutor::new(input, chunk_size);
+            input = (info, troublemaker).into();
+        }
+
         let actor_id_str = actor_id.to_string();
         let fragment_id_str = fragment_id.to_string();
         let actor_out_record_cnt = metrics
@@ -1025,24 +1029,21 @@ impl Dispatcher for SimpleDispatcher {
 #[cfg(test)]
 mod tests {
     use std::hash::{BuildHasher, Hasher};
-    use std::sync::{Arc, Mutex};
+    use std::sync::Mutex;
 
     use async_trait::async_trait;
-    use futures::{pin_mut, StreamExt};
-    use itertools::Itertools;
+    use futures::pin_mut;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
-    use risingwave_common::array::{Array, ArrayBuilder, I32ArrayBuilder, Op};
-    use risingwave_common::catalog::Schema;
-    use risingwave_common::hash::VirtualNode;
+    use risingwave_common::array::{Array, ArrayBuilder, I32ArrayBuilder};
+    use risingwave_common::config;
+    use risingwave_common::util::epoch::test_epoch;
     use risingwave_common::util::hash_util::Crc32FastBuilder;
-    use risingwave_common::util::iter_util::ZipEqFast;
     use risingwave_pb::stream_plan::DispatcherType;
 
     use super::*;
     use crate::executor::exchange::output::Output;
     use crate::executor::exchange::permit::channel_for_test;
     use crate::executor::receiver::ReceiverExecutor;
-    use crate::executor::Execute;
     use crate::task::test_utils::helper_make_local_actor;
 
     #[derive(Debug)]
@@ -1203,6 +1204,7 @@ mod tests {
             fragment_id,
             ctx.clone(),
             metrics,
+            config::default::developer::stream_chunk_size(),
         ))
         .execute();
         pin_mut!(executor);
@@ -1233,14 +1235,16 @@ mod tests {
                 hash_mapping: Default::default(),
             }]
         };
-        let b1 = Barrier::new_test_barrier(1).with_mutation(Mutation::Update(UpdateMutation {
-            dispatchers: dispatcher_updates,
-            merges: Default::default(),
-            vnode_bitmaps: Default::default(),
-            dropped_actors: Default::default(),
-            actor_splits: Default::default(),
-            actor_new_dispatchers: Default::default(),
-        }));
+        let b1 = Barrier::new_test_barrier(test_epoch(1)).with_mutation(Mutation::Update(
+            UpdateMutation {
+                dispatchers: dispatcher_updates,
+                merges: Default::default(),
+                vnode_bitmaps: Default::default(),
+                dropped_actors: Default::default(),
+                actor_splits: Default::default(),
+                actor_new_dispatchers: Default::default(),
+            },
+        ));
         tx.send(Message::Barrier(b1)).await.unwrap();
         executor.next().await.unwrap().unwrap();
 
@@ -1257,7 +1261,7 @@ mod tests {
         try_recv!(old_simple).unwrap().as_barrier().unwrap(); // Untouched.
 
         // 6. Send another barrier.
-        tx.send(Message::Barrier(Barrier::new_test_barrier(2)))
+        tx.send(Message::Barrier(Barrier::new_test_barrier(test_epoch(2))))
             .await
             .unwrap();
         executor.next().await.unwrap().unwrap();
@@ -1285,14 +1289,16 @@ mod tests {
                 hash_mapping: Default::default(),
             }]
         };
-        let b3 = Barrier::new_test_barrier(3).with_mutation(Mutation::Update(UpdateMutation {
-            dispatchers: dispatcher_updates,
-            merges: Default::default(),
-            vnode_bitmaps: Default::default(),
-            dropped_actors: Default::default(),
-            actor_splits: Default::default(),
-            actor_new_dispatchers: Default::default(),
-        }));
+        let b3 = Barrier::new_test_barrier(test_epoch(3)).with_mutation(Mutation::Update(
+            UpdateMutation {
+                dispatchers: dispatcher_updates,
+                merges: Default::default(),
+                vnode_bitmaps: Default::default(),
+                dropped_actors: Default::default(),
+                actor_splits: Default::default(),
+                actor_new_dispatchers: Default::default(),
+            },
+        ));
         tx.send(Message::Barrier(b3)).await.unwrap();
         executor.next().await.unwrap().unwrap();
 
@@ -1303,7 +1309,7 @@ mod tests {
         try_recv!(new_simple).unwrap().as_barrier().unwrap(); // Since it's just added, it won't receive the chunk.
 
         // 11. Send another barrier.
-        tx.send(Message::Barrier(Barrier::new_test_barrier(4)))
+        tx.send(Message::Barrier(Barrier::new_test_barrier(test_epoch(4))))
             .await
             .unwrap();
         executor.next().await.unwrap().unwrap();

@@ -14,7 +14,6 @@
 
 #![feature(allocator_api)]
 #![feature(bound_as_ref)]
-#![feature(bound_map)]
 #![feature(custom_test_frameworks)]
 #![feature(extract_if)]
 #![feature(coroutines)]
@@ -37,7 +36,6 @@
 #![recursion_limit = "256"]
 #![feature(error_generic_member_access)]
 #![feature(let_chains)]
-#![feature(associated_type_bounds)]
 #![feature(exclusive_range_pattern)]
 #![feature(impl_trait_in_assoc_type)]
 #![feature(maybe_uninit_uninit_array)]
@@ -62,10 +60,5 @@ pub mod mem_table;
 #[cfg(feature = "failpoints")]
 mod storage_failpoints;
 
-pub use store::{StateStore, StateStoreIter, StateStoreReadIterStream};
+pub use store::{StateStore, StateStoreIter, StateStoreReadIter};
 pub use store_impl::StateStoreImpl;
-
-pub enum TableScanOptions {
-    SequentialScan,
-    SparseIndexScan,
-}

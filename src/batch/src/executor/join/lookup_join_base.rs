@@ -26,6 +26,7 @@ use risingwave_common::types::{DataType, ToOwnedDatum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{cmp_datum_iter, OrderType};
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_expr::expr::BoxedExpression;
 
 use crate::error::BatchError;
@@ -34,7 +35,6 @@ use crate::executor::{
     utils, BoxedDataChunkListStream, BoxedExecutor, BufferChunkExecutor, EquiJoinParams,
     HashJoinExecutor, JoinHashMap, JoinType, LookupExecutorBuilder, RowId,
 };
-use crate::risingwave_common::estimate_size::EstimateSize;
 use crate::task::ShutdownToken;
 
 /// Lookup Join Base.
@@ -121,9 +121,9 @@ impl<K: HashKey> LookupJoinBase<K> {
             ]
             .concat();
 
-            // We need to temporary variable to record hash key heap size, since in each loop we
+            // We need to temporary variable to record heap size, since in each loop we
             // will free build side hash map, and the subtraction is not executed automatically.
-            let mut hash_key_heap_size = 0i64;
+            let mut tmp_heap_size = 0i64;
 
             let mut build_side = Vec::new_in(self.mem_ctx.global_allocator());
             let mut build_row_count = 0;
@@ -132,7 +132,9 @@ impl<K: HashKey> LookupJoinBase<K> {
                 let build_chunk = build_chunk?;
                 if build_chunk.cardinality() > 0 {
                     build_row_count += build_chunk.cardinality();
-                    self.mem_ctx.add(build_chunk.estimated_heap_size() as i64);
+                    let chunk_estimated_heap_size = build_chunk.estimated_heap_size() as i64;
+                    self.mem_ctx.add(chunk_estimated_heap_size);
+                    tmp_heap_size += chunk_estimated_heap_size;
                     build_side.push(build_chunk);
                 }
             }
@@ -160,8 +162,9 @@ impl<K: HashKey> LookupJoinBase<K> {
                     // restriction.
                     if build_key.null_bitmap().is_subset(&null_matched) {
                         let row_id = RowId::new(build_chunk_id, build_row_id);
-                        self.mem_ctx.add(build_key.estimated_heap_size() as i64);
-                        hash_key_heap_size += build_key.estimated_heap_size() as i64;
+                        let build_key_estimated_heap_size = build_key.estimated_heap_size() as i64;
+                        self.mem_ctx.add(build_key_estimated_heap_size);
+                        tmp_heap_size += build_key_estimated_heap_size;
                         next_build_row_with_same_key[row_id] = hash_map.insert(build_key, row_id);
                     }
                 }
@@ -230,7 +233,7 @@ impl<K: HashKey> LookupJoinBase<K> {
                 }
             }
 
-            self.mem_ctx.add(-hash_key_heap_size);
+            self.mem_ctx.add(-tmp_heap_size);
         }
     }
 }

@@ -19,6 +19,14 @@ enum TelemetryNodeType {
   TELEMETRY_NODE_TYPE_COMPACTOR = 4;
 }
 
+enum TelemetryClusterType {
+  TELEMETRY_CLUSTER_TYPE_UNSPECIFIED = 0;
+  TELEMETRY_CLUSTER_TYPE_SINGLE_NODE = 1;
+  TELEMETRY_CLUSTER_TYPE_DOCKER_COMPOSE = 2;
+  TELEMETRY_CLUSTER_TYPE_KUBERNETES = 3;
+  TELEMETRY_CLUSTER_TYPE_CLOUD_HOSTED = 4;
+}
+
 message SystemMemory {
   uint64 used = 1;
   uint64 total = 2;
@@ -69,6 +77,9 @@ message ReportBase {
   uint64 report_time = 5;
   // node_type is the node that creates the report
   TelemetryNodeType node_type = 6;
+  // mark the report is a test message
+  // if so, the backend do validations but not store it
+  bool is_test = 7;
 }
 
 message MetaReport {
@@ -82,6 +93,25 @@ message MetaReport {
   // This field represents the "number of running streaming jobs"
   // and is used to indicate whether the cluster is active.
   uint32 stream_job_count = 5;
+  // stream_jobs is the list of running streaming jobs
+  // and is used to collect the table_id, connector_name and table_optimizations
+  repeated StreamJobDesc stream_jobs = 6;
+
+  // How the cluster is deployed
+  TelemetryClusterType cluster_type = 7;
+
+  // The object store media type obtained from ObjectStore::store_media_type
+  string object_store_media_type = 8;
+}
+
+enum PlanOptimization {
+  TABLE_OPTIMIZATION_UNSPECIFIED = 0;
+}
+
+message StreamJobDesc {
+  int32 table_id = 1;
+  optional string connector_name = 2;
+  repeated PlanOptimization plan_optimizations = 3;
 }
 
 message ComputeReport {

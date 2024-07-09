@@ -1,0 +1,47 @@
+---
+services:
+  risingwave-standalone:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: risingwave-standalone
+  postgres-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: postgres-0
+  grafana-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: grafana-0
+  minio-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: minio-0
+  prometheus-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: prometheus-0
+  mongodb:
+    extends:
+      file: ../mongodb/docker-compose.yaml
+      service: mongodb
+  mongodb-setup:
+    extends:
+      file: ../mongodb/docker-compose.yaml
+      service: mongodb-setup
+  random_data_generator:
+    extends:
+      file: ../mongodb/docker-compose.yaml
+      service: random_data_generator
+
+volumes:
+  risingwave-standalone:
+    external: false
+  postgres-0:
+    external: false
+  grafana-0:
+    external: false
+  minio-0:
+    external: false
+  prometheus-0:
+    external: false
+name: risingwave-compose

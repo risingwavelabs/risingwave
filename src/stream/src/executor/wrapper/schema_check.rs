@@ -59,6 +59,7 @@ mod tests {
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
+    use risingwave_common::util::epoch::test_epoch;
 
     use super::*;
     use crate::executor::test_utils::MockSource;
@@ -80,7 +81,7 @@ mod tests {
             +  10  14.0
             +   4 300.0",
         ));
-        tx.push_barrier(1, false);
+        tx.push_barrier(test_epoch(1), false);
 
         let checked = schema_check(source.info().clone().into(), source.execute());
         pin_mut!(checked);
@@ -107,7 +108,7 @@ mod tests {
             +  10  14
             +   4 300",
         ));
-        tx.push_barrier(1, false);
+        tx.push_barrier(test_epoch(1), false);
 
         let checked = schema_check(source.info().clone().into(), source.execute());
         pin_mut!(checked);

@@ -36,7 +36,7 @@ pub fn handle_describe(handler_args: HandlerArgs, object_name: ObjectName) -> Re
 
     // Vec<ColumnCatalog>, Vec<ColumnDesc>, Vec<ColumnDesc>, Vec<Arc<IndexCatalog>>, String, Option<String>
     let (columns, pk_columns, dist_columns, indices, relname, description) =
-        if let Ok(relation) = binder.bind_relation_by_name(object_name.clone(), None, false) {
+        if let Ok(relation) = binder.bind_relation_by_name(object_name.clone(), None, None) {
             match relation {
                 Relation::Source(s) => {
                     let pk_column_catalogs = s

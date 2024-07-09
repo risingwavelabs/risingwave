@@ -32,6 +32,7 @@ macro_rules! for_all_classified_sources {
                 { Nexmark, $crate::source::nexmark::NexmarkProperties, $crate::source::nexmark::NexmarkSplit },
                 { Datagen, $crate::source::datagen::DatagenProperties, $crate::source::datagen::DatagenSplit },
                 { GooglePubsub, $crate::source::google_pubsub::PubsubProperties, $crate::source::google_pubsub::PubsubSplit },
+                { Mqtt, $crate::source::mqtt::MqttProperties, $crate::source::mqtt::split::MqttSplit },
                 { Nats, $crate::source::nats::NatsProperties, $crate::source::nats::split::NatsSplit },
                 { S3, $crate::source::filesystem::S3Properties, $crate::source::filesystem::FsSplit },
                 { Gcs, $crate::source::filesystem::opendal_source::GcsProperties , $crate::source::filesystem::OpendalFsSplit<$crate::source::filesystem::opendal_source::OpendalGcs> },
@@ -93,7 +94,9 @@ macro_rules! dispatch_source_enum_inner {
         match $impl {
             $(
                 $enum_name::$source_variant($inner_name) => {
+                    #[allow(dead_code)]
                     type $prop_type_name = $prop_name;
+                    #[allow(dead_code)]
                     type $split_type_name = $split;
                     {
                         $body
@@ -237,6 +240,7 @@ macro_rules! impl_cdc_source_type {
             }
         )*
 
+        #[derive(Clone)]
         pub enum CdcSourceType {
             $(
                 $cdc_source_type,

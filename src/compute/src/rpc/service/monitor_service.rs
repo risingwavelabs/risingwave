@@ -12,45 +12,58 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeMap;
 use std::ffi::CString;
 use std::fs;
 use std::path::Path;
 use std::time::Duration;
 
+use foyer::HybridCache;
 use itertools::Itertools;
 use prometheus::core::Collector;
 use risingwave_common::config::{MetricLevel, ServerConfig};
 use risingwave_common_heap_profiling::{AUTO_DUMP_SUFFIX, COLLAPSED_SUFFIX, MANUALLY_DUMP_SUFFIX};
+use risingwave_hummock_sdk::HummockSstableObjectId;
+use risingwave_jni_core::jvm_runtime::dump_jvm_stack_traces;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorService;
 use risingwave_pb::monitor_service::{
     AnalyzeHeapRequest, AnalyzeHeapResponse, BackPressureInfo, GetBackPressureRequest,
     GetBackPressureResponse, HeapProfilingRequest, HeapProfilingResponse, ListHeapProfilingRequest,
     ListHeapProfilingResponse, ProfilingRequest, ProfilingResponse, StackTraceRequest,
-    StackTraceResponse,
+    StackTraceResponse, TieredCacheTracingRequest, TieredCacheTracingResponse,
 };
 use risingwave_rpc_client::error::ToTonicStatus;
+use risingwave_storage::hummock::compactor::await_tree_key::Compaction;
+use risingwave_storage::hummock::{Block, Sstable, SstableBlockIndex};
 use risingwave_stream::executor::monitor::global_streaming_metrics;
+use risingwave_stream::task::await_tree_key::{Actor, BarrierAwait};
 use risingwave_stream::task::LocalStreamManager;
 use thiserror_ext::AsReport;
 use tonic::{Code, Request, Response, Status};
 
+type MetaCache = HybridCache<HummockSstableObjectId, Box<Sstable>>;
+type BlockCache = HybridCache<SstableBlockIndex, Box<Block>>;
+
 #[derive(Clone)]
 pub struct MonitorServiceImpl {
     stream_mgr: LocalStreamManager,
-    grpc_await_tree_reg: Option<AwaitTreeRegistryRef>,
     server_config: ServerConfig,
+    meta_cache: Option<MetaCache>,
+    block_cache: Option<BlockCache>,
 }
 
 impl MonitorServiceImpl {
     pub fn new(
         stream_mgr: LocalStreamManager,
-        grpc_await_tree_reg: Option<AwaitTreeRegistryRef>,
         server_config: ServerConfig,
+        meta_cache: Option<MetaCache>,
+        block_cache: Option<BlockCache>,
     ) -> Self {
         Self {
             stream_mgr,
-            grpc_await_tree_reg,
             server_config,
+            meta_cache,
+            block_cache,
         }
     }
 }
@@ -64,27 +77,68 @@ impl MonitorService for MonitorServiceImpl {
     ) -> Result<Response<StackTraceResponse>, Status> {
         let _req = request.into_inner();
 
-        let actor_traces = self
-            .stream_mgr
-            .get_actor_traces()
-            .into_iter()
-            .map(|(k, v)| (k, v.to_string()))
-            .collect();
-
-        let rpc_traces = if let Some(m) = &self.grpc_await_tree_reg {
-            m.lock()
-                .await
-                .iter()
-                .map(|(k, v)| (k.to_string(), v.to_string()))
+        let actor_traces = if let Some(reg) = self.stream_mgr.await_tree_reg() {
+            reg.collect::<Actor>()
+                .into_iter()
+                .map(|(k, v)| (k.0, v.to_string()))
                 .collect()
         } else {
             Default::default()
         };
 
+        let barrier_traces = if let Some(reg) = self.stream_mgr.await_tree_reg() {
+            reg.collect::<BarrierAwait>()
+                .into_iter()
+                .map(|(k, v)| (k.prev_epoch, v.to_string()))
+                .collect()
+        } else {
+            Default::default()
+        };
+
+        let rpc_traces = if let Some(reg) = self.stream_mgr.await_tree_reg() {
+            reg.collect::<GrpcCall>()
+                .into_iter()
+                .map(|(k, v)| (k.desc, v.to_string()))
+                .collect()
+        } else {
+            Default::default()
+        };
+
+        let compaction_task_traces = if let Some(hummock) =
+            self.stream_mgr.env.state_store().as_hummock()
+            && let Some(m) = hummock.compaction_await_tree_reg()
+        {
+            m.collect::<Compaction>()
+                .into_iter()
+                .map(|(k, v)| (format!("{k:?}"), v.to_string()))
+                .collect()
+        } else {
+            Default::default()
+        };
+
+        let barrier_worker_state = self.stream_mgr.inspect_barrier_state().await?;
+
+        let jvm_stack_traces = match dump_jvm_stack_traces() {
+            Ok(None) => None,
+            Err(err) => Some(err.as_report().to_string()),
+            Ok(Some(stack_traces)) => Some(stack_traces),
+        };
+
         Ok(Response::new(StackTraceResponse {
             actor_traces,
             rpc_traces,
-            compaction_task_traces: Default::default(),
+            compaction_task_traces,
+            inflight_barrier_traces: barrier_traces,
+            barrier_worker_state: BTreeMap::from_iter([(
+                self.stream_mgr.env.worker_id(),
+                barrier_worker_state,
+            )]),
+            jvm_stack_traces: match jvm_stack_traces {
+                Some(stack_traces) => {
+                    BTreeMap::from_iter([(self.stream_mgr.env.worker_id(), stack_traces)])
+                }
+                None => BTreeMap::new(),
+            },
         }))
     }
 
@@ -264,6 +318,66 @@ impl MonitorService for MonitorServiceImpl {
             back_pressure_infos,
         }))
     }
+
+    #[cfg_attr(coverage, coverage(off))]
+    async fn tiered_cache_tracing(
+        &self,
+        request: Request<TieredCacheTracingRequest>,
+    ) -> Result<Response<TieredCacheTracingResponse>, Status> {
+        let req = request.into_inner();
+
+        tracing::info!("Update tiered cache tracing config: {req:?}");
+
+        if let Some(cache) = &self.meta_cache {
+            if req.enable {
+                cache.enable_tracing();
+            } else {
+                cache.disable_tracing();
+            }
+            let config = cache.tracing_config();
+            if let Some(threshold) = req.record_hybrid_insert_threshold_ms {
+                config.set_record_hybrid_insert_threshold(Duration::from_millis(threshold as _));
+            }
+            if let Some(threshold) = req.record_hybrid_get_threshold_ms {
+                config.set_record_hybrid_get_threshold(Duration::from_millis(threshold as _));
+            }
+            if let Some(threshold) = req.record_hybrid_obtain_threshold_ms {
+                config.set_record_hybrid_obtain_threshold(Duration::from_millis(threshold as _));
+            }
+            if let Some(threshold) = req.record_hybrid_remove_threshold_ms {
+                config.set_record_hybrid_remove_threshold(Duration::from_millis(threshold as _));
+            }
+            if let Some(threshold) = req.record_hybrid_fetch_threshold_ms {
+                config.set_record_hybrid_fetch_threshold(Duration::from_millis(threshold as _));
+            }
+        }
+
+        if let Some(cache) = &self.block_cache {
+            if req.enable {
+                cache.enable_tracing();
+            } else {
+                cache.disable_tracing();
+            }
+            let config = cache.tracing_config();
+            if let Some(threshold) = req.record_hybrid_insert_threshold_ms {
+                config.set_record_hybrid_insert_threshold(Duration::from_millis(threshold as _));
+            }
+            if let Some(threshold) = req.record_hybrid_get_threshold_ms {
+                config.set_record_hybrid_get_threshold(Duration::from_millis(threshold as _));
+            }
+            if let Some(threshold) = req.record_hybrid_obtain_threshold_ms {
+                config.set_record_hybrid_obtain_threshold(Duration::from_millis(threshold as _));
+            }
+            if let Some(threshold) = req.record_hybrid_remove_threshold_ms {
+                config.set_record_hybrid_remove_threshold(Duration::from_millis(threshold as _));
+            }
+            if let Some(threshold) = req.record_hybrid_fetch_threshold_ms {
+                config.set_record_hybrid_fetch_threshold(Duration::from_millis(threshold as _));
+            }
+        }
+
+        Ok(Response::new(TieredCacheTracingResponse::default()))
+    }
 }
 
 pub use grpc_middleware::*;
@@ -276,12 +390,17 @@ pub mod grpc_middleware {
     use either::Either;
     use futures::Future;
     use hyper::Body;
-    use tokio::sync::Mutex;
     use tonic::transport::NamedService;
     use tower::{Layer, Service};
 
     /// Manages the await-trees of `gRPC` requests that are currently served by the compute node.
-    pub type AwaitTreeRegistryRef = Arc<Mutex<await_tree::Registry<String>>>;
+    pub type AwaitTreeRegistryRef = await_tree::Registry;
+
+    /// Await-tree key type for gRPC calls.
+    #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+    pub struct GrpcCall {
+        pub desc: String,
+    }
 
     #[derive(Clone)]
     pub struct AwaitTreeMiddlewareLayer {
@@ -345,14 +464,15 @@ pub mod grpc_middleware {
             let mut inner = std::mem::replace(&mut self.inner, clone);
 
             let id = self.next_id.fetch_add(1, Ordering::SeqCst);
-            let key = if let Some(authority) = req.uri().authority() {
+            let desc = if let Some(authority) = req.uri().authority() {
                 format!("{authority} - {id}")
             } else {
                 format!("?? - {id}")
             };
+            let key = GrpcCall { desc };
 
             Either::Right(async move {
-                let root = registry.lock().await.register(key, req.uri().path());
+                let root = registry.register(key, req.uri().path());
 
                 root.instrument(inner.call(req)).await
             })

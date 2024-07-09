@@ -38,7 +38,7 @@ struct PgStatActivity {
     application_name: String,
     /// IP address of the client connected to this backend.
     client_addr: String,
-    /// Host name of the connected client, as reported by a reverse DNS lookup of client_addr.
+    /// Host name of the connected client, as reported by a reverse DNS lookup of `client_addr`.
     client_hostname: String,
     /// TCP port number that the client is using for communication with this backend, or -1 if a Unix socket is used.
     client_port: i16,

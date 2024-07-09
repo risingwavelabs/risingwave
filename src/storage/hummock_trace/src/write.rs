@@ -103,7 +103,7 @@ impl<W: Write, S: Serializer<W>> Drop for TraceWriterImpl<W, S> {
 mod test {
     use std::io::Cursor;
 
-    use bincode::{config, decode_from_slice, encode_to_vec};
+    use bincode::{decode_from_slice, encode_to_vec};
     use byteorder::{BigEndian, ReadBytesExt};
     use bytes::Bytes;
 

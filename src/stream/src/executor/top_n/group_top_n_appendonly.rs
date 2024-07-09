@@ -12,28 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
-use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::Schema;
+use risingwave_common::array::Op;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash::HashKey;
 use risingwave_common::row::{RowDeserializer, RowExt};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common::util::sort_util::ColumnOrder;
-use risingwave_storage::StateStore;
 
 use super::group_top_n::GroupTopNCache;
 use super::top_n_cache::AppendOnlyTopNCacheTrait;
 use super::utils::*;
 use super::{ManagedTopNState, TopNCache};
 use crate::common::metrics::MetricsInfo;
-use crate::common::table::state_table::StateTable;
-use crate::error::StreamResult;
-use crate::executor::error::StreamExecutorResult;
-use crate::executor::{ActorContextRef, Executor, PkIndices, Watermark};
-use crate::task::AtomicU64Ref;
+use crate::executor::monitor::GroupTopNMetrics;
+use crate::executor::prelude::*;
 
 /// If the input is append-only, `AppendOnlyGroupTopNExecutor` does not need
 /// to keep all the rows seen. As long as a record
@@ -56,20 +49,17 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool>
         state_table: StateTable<S>,
         watermark_epoch: AtomicU64Ref,
     ) -> StreamResult<Self> {
-        Ok(TopNExecutorWrapper {
-            input,
-            ctx: ctx.clone(),
-            inner: InnerAppendOnlyGroupTopNExecutor::new(
-                schema,
-                storage_key,
-                offset_and_limit,
-                order_by,
-                group_by,
-                state_table,
-                watermark_epoch,
-                ctx,
-            )?,
-        })
+        let inner = InnerAppendOnlyGroupTopNExecutor::new(
+            schema,
+            storage_key,
+            offset_and_limit,
+            order_by,
+            group_by,
+            state_table,
+            watermark_epoch,
+            &ctx,
+        )?;
+        Ok(TopNExecutorWrapper { input, ctx, inner })
     }
 }
 
@@ -93,10 +83,10 @@ pub struct InnerAppendOnlyGroupTopNExecutor<K: HashKey, S: StateStore, const WIT
     /// group key -> cache for this group
     caches: GroupTopNCache<K, WITH_TIES>,
 
-    /// Used for serializing pk into CacheKey.
+    /// Used for serializing pk into `CacheKey`.
     cache_key_serde: CacheKeySerde,
 
-    ctx: ActorContextRef,
+    metrics: GroupTopNMetrics,
 }
 
 impl<K: HashKey, S: StateStore, const WITH_TIES: bool>
@@ -111,13 +101,18 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool>
         group_by: Vec<usize>,
         state_table: StateTable<S>,
         watermark_epoch: AtomicU64Ref,
-        ctx: ActorContextRef,
+        ctx: &ActorContext,
     ) -> StreamResult<Self> {
         let metrics_info = MetricsInfo::new(
             ctx.streaming_metrics.clone(),
             state_table.table_id(),
             ctx.id,
-            "GroupTopN",
+            "AppendOnlyGroupTopN",
+        );
+        let metrics = ctx.streaming_metrics.new_append_only_group_top_n_metrics(
+            state_table.table_id(),
+            ctx.id,
+            ctx.fragment_id,
         );
 
         let cache_key_serde = create_cache_key_serde(&storage_key, &schema, &order_by, &group_by);
@@ -132,7 +127,7 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool>
             group_by,
             caches: GroupTopNCache::new(watermark_epoch, metrics_info),
             cache_key_serde,
-            ctx,
+            metrics,
         })
     }
 }
@@ -149,9 +144,6 @@ where
 
         let data_types = self.schema.data_types();
         let row_deserializer = RowDeserializer::new(data_types.clone());
-        let table_id_str = self.managed_state.table().table_id().to_string();
-        let actor_id_str = self.ctx.id.to_string();
-        let fragment_id_str = self.ctx.fragment_id.to_string();
         for (r, group_cache_key) in chunk.rows_with_holes().zip_eq_debug(keys.iter()) {
             let Some((op, row_ref)) = r else {
                 continue;
@@ -161,19 +153,11 @@ where
             let cache_key = serialize_pk_to_cache_key(pk_row, &self.cache_key_serde);
 
             let group_key = row_ref.project(&self.group_by);
-            self.ctx
-                .streaming_metrics
-                .group_top_n_appendonly_total_query_cache_count
-                .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
-                .inc();
+            self.metrics.group_top_n_total_query_cache_count.inc();
             // If 'self.caches' does not already have a cache for the current group, create a new
             // cache for it and insert it into `self.caches`
             if !self.caches.contains(group_cache_key) {
-                self.ctx
-                    .streaming_metrics
-                    .group_top_n_appendonly_cache_miss_count
-                    .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
-                    .inc();
+                self.metrics.group_top_n_cache_miss_count.inc();
                 let mut topn_cache = TopNCache::new(self.offset, self.limit, data_types.clone());
                 self.managed_state
                     .init_topn_cache(Some(group_key), &mut topn_cache)
@@ -192,10 +176,8 @@ where
                 &row_deserializer,
             )?;
         }
-        self.ctx
-            .streaming_metrics
-            .group_top_n_appendonly_cached_entry_count
-            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
+        self.metrics
+            .group_top_n_cached_entry_count
             .set(self.caches.len() as i64);
         generate_output(res_rows, res_ops, &self.schema)
     }
@@ -217,10 +199,6 @@ where
 
     fn evict(&mut self) {
         self.caches.evict()
-    }
-
-    fn update_epoch(&mut self, epoch: u64) {
-        self.caches.update_epoch(epoch)
     }
 
     async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {

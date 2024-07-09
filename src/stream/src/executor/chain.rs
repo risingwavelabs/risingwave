@@ -12,12 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use futures::StreamExt;
-use futures_async_stream::try_stream;
-
-use super::error::StreamExecutorError;
-use super::{expect_first_barrier, Execute, Executor, Message};
-use crate::task::{ActorId, CreateMviewProgress};
+use crate::executor::prelude::*;
+use crate::task::CreateMviewProgress;
 
 /// [`ChainExecutor`] is an executor that enables synchronization between the existing stream and
 /// newly appended executors. Currently, [`ChainExecutor`] is mainly used to implement MV on MV
@@ -107,13 +103,13 @@ impl Execute for ChainExecutor {
 
 #[cfg(test)]
 mod test {
-    use std::default::Default;
 
     use futures::StreamExt;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
+    use risingwave_common::util::epoch::test_epoch;
     use risingwave_pb::stream_plan::Dispatcher;
 
     use super::ChainExecutor;
@@ -136,8 +132,8 @@ mod test {
         .into_executor(schema.clone(), PkIndices::new());
 
         let second = MockSource::with_messages(vec![
-            Message::Barrier(Barrier::new_test_barrier(1).with_mutation(Mutation::Add(
-                AddMutation {
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(1)).with_mutation(
+                Mutation::Add(AddMutation {
                     adds: maplit::hashmap! {
                         0 => vec![Dispatcher {
                             downstream_actor_id: vec![actor_id],
@@ -147,8 +143,8 @@ mod test {
                     added_actors: maplit::hashset! { actor_id },
                     splits: Default::default(),
                     pause: false,
-                },
-            ))),
+                }),
+            )),
             Message::Chunk(StreamChunk::from_pretty("I\n + 3")),
             Message::Chunk(StreamChunk::from_pretty("I\n + 4")),
         ])

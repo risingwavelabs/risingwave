@@ -1,0 +1,11 @@
+statement ok
+create table t1 (v1 int, v2 int);
+
+statement ok
+insert into t1 values (1,2);
+
+statement ok
+flush;
+
+statement ok
+create subscription sub from t1 with(retention = '1D');

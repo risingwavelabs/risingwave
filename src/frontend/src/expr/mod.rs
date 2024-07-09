@@ -17,7 +17,7 @@ use fixedbitset::FixedBitSet;
 use futures::FutureExt;
 use paste::paste;
 use risingwave_common::array::ListValue;
-use risingwave_common::types::{DataType, Datum, JsonbVal, Scalar};
+use risingwave_common::types::{DataType, Datum, JsonbVal, Scalar, ScalarImpl};
 use risingwave_expr::aggregate::AggKind;
 use risingwave_expr::expr::build_from_prost;
 use risingwave_pb::expr::expr_node::RexNode;
@@ -53,8 +53,8 @@ mod utils;
 pub use agg_call::AggCall;
 pub use correlated_input_ref::{CorrelatedId, CorrelatedInputRef, Depth};
 pub use expr_mutator::ExprMutator;
-pub use expr_rewriter::ExprRewriter;
-pub use expr_visitor::ExprVisitor;
+pub use expr_rewriter::{default_rewrite_expr, ExprRewriter};
+pub use expr_visitor::{default_visit_expr, ExprVisitor};
 pub use function_call::{is_row_function, FunctionCall, FunctionCallDisplay};
 pub use function_call_with_lambda::FunctionCallWithLambda;
 pub use input_ref::{input_ref_to_column_indices, InputRef, InputRefDisplay};
@@ -73,6 +73,10 @@ pub use type_inference::{
 pub use user_defined_function::UserDefinedFunction;
 pub use utils::*;
 pub use window_function::WindowFunction;
+
+const EXPR_DEPTH_THRESHOLD: usize = 30;
+const EXPR_TOO_DEEP_NOTICE: &str = "Some expression is too complicated. \
+Consider simplifying or splitting the query if you encounter any issues.";
 
 /// the trait of bound expressions
 pub trait Expr: Into<ExprImpl> {
@@ -200,6 +204,20 @@ impl ExprImpl {
         )
         .unwrap()
         .into()
+    }
+
+    /// Create a new expression by merging the given expressions by `And`.
+    ///
+    /// If `exprs` is empty, return a literal `true`.
+    pub fn and(exprs: impl IntoIterator<Item = ExprImpl>) -> Self {
+        merge_expr_by_logical(exprs, ExprType::And, ExprImpl::literal_bool(true))
+    }
+
+    /// Create a new expression by merging the given expressions by `Or`.
+    ///
+    /// If `exprs` is empty, return a literal `false`.
+    pub fn or(exprs: impl IntoIterator<Item = ExprImpl>) -> Self {
+        merge_expr_by_logical(exprs, ExprType::Or, ExprImpl::literal_bool(false))
     }
 
     /// Collect all `InputRef`s' indexes in the expression.
@@ -395,7 +413,7 @@ macro_rules! impl_has_variant {
     };
 }
 
-impl_has_variant! {InputRef, Literal, FunctionCall, FunctionCallWithLambda, AggCall, Subquery, TableFunction, WindowFunction}
+impl_has_variant! {InputRef, Literal, FunctionCall, FunctionCallWithLambda, AggCall, Subquery, TableFunction, WindowFunction, Now}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct InequalityInputPair {
@@ -403,7 +421,7 @@ pub struct InequalityInputPair {
     pub(crate) key_required_larger: usize,
     /// Input index of less side of inequality.
     pub(crate) key_required_smaller: usize,
-    /// greater >= less + delta_expression
+    /// greater >= less + `delta_expression`
     pub(crate) delta_expression: Option<(ExprType, ExprImpl)>,
 }
 
@@ -614,6 +632,7 @@ impl ExprImpl {
             struct HasOthers {
                 has_others: bool,
             }
+
             impl ExprVisitor for HasOthers {
                 fn visit_expr(&mut self, expr: &ExprImpl) {
                     match expr {
@@ -627,10 +646,36 @@ impl ExprImpl {
                         | ExprImpl::Parameter(_)
                         | ExprImpl::Now(_) => self.has_others = true,
                         ExprImpl::Literal(_inner) => {}
-                        ExprImpl::FunctionCall(inner) => self.visit_function_call(inner),
+                        ExprImpl::FunctionCall(inner) => {
+                            if !self.is_short_circuit(inner) {
+                                // only if the current `func_call` is *not* a short-circuit
+                                // expression, e.g., true or (...) | false and (...),
+                                // shall we proceed to visit it.
+                                self.visit_function_call(inner)
+                            }
+                        }
                         ExprImpl::FunctionCallWithLambda(inner) => {
                             self.visit_function_call_with_lambda(inner)
                         }
+                    }
+                }
+            }
+
+            impl HasOthers {
+                fn is_short_circuit(&self, func_call: &FunctionCall) -> bool {
+                    /// evaluate the first parameter of `Or` or `And` function call
+                    fn eval_first(e: &ExprImpl, expect: bool) -> bool {
+                        if let ExprImpl::Literal(l) = e {
+                            *l.get_data() == Some(ScalarImpl::Bool(expect))
+                        } else {
+                            false
+                        }
+                    }
+
+                    match func_call.func_type {
+                        ExprType::Or => eval_first(&func_call.inputs()[0], true),
+                        ExprType::And => eval_first(&func_call.inputs()[0], false),
+                        _ => false,
                     }
                 }
             }
@@ -1009,11 +1054,7 @@ impl ExprImpl {
 
 impl From<Condition> for ExprImpl {
     fn from(c: Condition) -> Self {
-        merge_expr_by_binary(
-            c.conjunctions.into_iter(),
-            ExprType::And,
-            ExprImpl::literal_bool(true),
-        )
+        ExprImpl::and(c.conjunctions)
     }
 }
 

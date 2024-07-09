@@ -1,3 +1,4 @@
+use icelake::io_v2::track_writer::TrackWriter;
 // Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -11,35 +12,31 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+use risingwave_common::{array::arrow::IcebergArrowConvert, bitmap::Bitmap};
 
 pub mod fs;
 pub mod gcs;
 pub mod opendal_sink;
 pub mod s3;
 use std::collections::HashMap;
+use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
 
-use anyhow::anyhow;
-use arrow_schema::{DataType as ArrowDataType, Field as ArrowField, SchemaRef};
+use arrow_schema_iceberg::SchemaRef;
 use async_trait::async_trait;
 use opendal::{Operator, Writer as OpendalWriter};
 use parquet::arrow::AsyncArrowWriter;
 use parquet::file::properties::WriterProperties;
-use risingwave_common::array::{to_record_batch_with_schema, Op, StreamChunk};
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
 
 use crate::sink::catalog::SinkEncode;
 use crate::sink::{Result, SinkError, SinkWriter};
 
-// Todo(wcy-fdu): upgrade to opendal 0.47.
-const SINK_WRITE_BUFFER_SIZE: usize = 16 * 1024 * 1024;
-
 pub struct OpenDalSinkWriter {
     schema: SchemaRef,
     operator: Operator,
     sink_writer: Option<FileWriterEnum>,
-    pk_indices: Vec<usize>,
     is_append_only: bool,
     write_path: String,
     epoch: Option<u64>,
@@ -61,8 +58,7 @@ pub struct OpenDalSinkWriter {
 ///
 /// The choice of writer used during the actual writing process depends on the encode type of the sink.
 enum FileWriterEnum {
-    ParquetFileWriter(AsyncArrowWriter<OpendalWriter>),
-    FileWriter(OpendalWriter),
+    ParquetFileWriter(AsyncArrowWriter<TrackWriter>),
 }
 
 #[async_trait]
@@ -102,7 +98,6 @@ impl SinkWriter for OpenDalSinkWriter {
                 FileWriterEnum::ParquetFileWriter(w) => {
                     let _ = w.close().await?;
                 }
-                FileWriterEnum::FileWriter(mut w) => w.close().await?,
             };
         }
 
@@ -119,7 +114,6 @@ impl OpenDalSinkWriter {
         operator: Operator,
         write_path: &str,
         rw_schema: Schema,
-        pk_indices: Vec<usize>,
         is_append_only: bool,
         executor_id: u64,
         encode_type: SinkEncode,
@@ -128,7 +122,6 @@ impl OpenDalSinkWriter {
         Ok(Self {
             schema: Arc::new(arrow_schema),
             write_path: write_path.to_string(),
-            pk_indices,
             operator,
             sink_writer: None,
             is_append_only,
@@ -155,7 +148,6 @@ impl OpenDalSinkWriter {
             .operator
             .writer_with(&object_name)
             .concurrent(8)
-            .buffer(SINK_WRITE_BUFFER_SIZE)
             .await?)
     }
 
@@ -164,11 +156,15 @@ impl OpenDalSinkWriter {
         match self.encode_type {
             SinkEncode::Parquet => {
                 let props = WriterProperties::builder();
+                let written_size = Arc::new(AtomicI64::new(0));
+                let track_writer = TrackWriter::new(
+                    object_writer.into_futures_async_write(),
+                    written_size.clone(),
+                );
                 self.sink_writer = Some(FileWriterEnum::ParquetFileWriter(
                     AsyncArrowWriter::try_new(
-                        object_writer,
+                        track_writer,
                         self.schema.clone(),
-                        SINK_WRITE_BUFFER_SIZE,
                         Some(props.build()),
                     )?,
                 ));
@@ -195,10 +191,10 @@ impl OpenDalSinkWriter {
             .ok_or_else(|| SinkError::File("Sink writer is not created.".to_string()))?
         {
             FileWriterEnum::ParquetFileWriter(w) => {
-                let batch = to_record_batch_with_schema(self.schema.clone(), &chunk.compact())?;
+                let batch =
+                    IcebergArrowConvert.to_record_batch(self.schema.clone(), &chunk.compact())?;
                 w.write(&batch).await?;
             }
-            FileWriterEnum::FileWriter(_w) => unimplemented!(),
         }
 
         Ok(())
@@ -207,7 +203,7 @@ impl OpenDalSinkWriter {
 
 fn convert_rw_schema_to_arrow_schema(
     rw_schema: risingwave_common::catalog::Schema,
-) -> anyhow::Result<arrow_schema::Schema> {
+) -> anyhow::Result<arrow_schema_iceberg::Schema> {
     let mut schema_fields = HashMap::new();
     rw_schema.fields.iter().for_each(|field| {
         let res = schema_fields.insert(&field.name, &field.data_type);
@@ -216,14 +212,11 @@ fn convert_rw_schema_to_arrow_schema(
     });
     let mut arrow_fields = vec![];
     for rw_field in &rw_schema.fields {
-        let converted_arrow_data_type =
-            ArrowDataType::try_from(rw_field.data_type.clone()).map_err(|e| anyhow!(e))?;
-        arrow_fields.push(ArrowField::new(
-            rw_field.name.clone(),
-            converted_arrow_data_type,
-            false,
-        ));
+        let arrow_field = IcebergArrowConvert
+            .to_arrow_field(&rw_field.name.clone(), &rw_field.data_type.clone())?;
+
+        arrow_fields.push(arrow_field);
     }
 
-    Ok(arrow_schema::Schema::new(arrow_fields))
+    Ok(arrow_schema_iceberg::Schema::new(arrow_fields))
 }

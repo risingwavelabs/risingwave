@@ -19,9 +19,9 @@ use std::ops::Range;
 
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::bail;
-use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::Row;
 use risingwave_common::types::*;
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_expr::aggregate::{AggCall, AggStateDyn, AggregateFunction, AggregateState};
 use risingwave_expr::{build_aggregate, ExprError, Result};
 
@@ -60,8 +60,8 @@ impl AggregateFunction for UpdatableApproxCountDistinct {
         DataType::Int64
     }
 
-    fn create_state(&self) -> AggregateState {
-        AggregateState::Any(Box::<UpdatableRegisters>::default())
+    fn create_state(&self) -> Result<AggregateState> {
+        Ok(AggregateState::Any(Box::<UpdatableRegisters>::default()))
     }
 
     async fn update(&self, state: &mut AggregateState, input: &StreamChunk) -> Result<()> {
@@ -122,8 +122,8 @@ impl AggregateFunction for AppendOnlyApproxCountDistinct {
         DataType::Int64
     }
 
-    fn create_state(&self) -> AggregateState {
-        AggregateState::Any(Box::<AppendOnlyRegisters>::default())
+    fn create_state(&self) -> Result<AggregateState> {
+        Ok(AggregateState::Any(Box::<AppendOnlyRegisters>::default()))
     }
 
     async fn update(&self, state: &mut AggregateState, input: &StreamChunk) -> Result<()> {
@@ -344,7 +344,7 @@ mod tests {
         for range in [0..20000, 20000..30000, 30000..35000] {
             let col = I32Array::from_iter(range.clone()).into_ref();
             let input = StreamChunk::from(DataChunk::new(vec![col], range.len()));
-            let mut state = approx_count_distinct.create_state();
+            let mut state = approx_count_distinct.create_state().unwrap();
             approx_count_distinct
                 .update(&mut state, &input)
                 .now_or_never()

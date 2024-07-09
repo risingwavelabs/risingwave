@@ -16,13 +16,14 @@ use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::PbSource;
 use sea_orm::entity::prelude::*;
 use sea_orm::ActiveValue::Set;
+use serde::{Deserialize, Serialize};
 
 use crate::{
-    ColumnCatalogArray, ConnectionId, I32Array, Property, SourceId, StreamSourceInfo, TableId,
-    WatermarkDescArray,
+    ColumnCatalogArray, ConnectionId, I32Array, Property, SecretRef, SourceId, StreamSourceInfo,
+    TableId, WatermarkDescArray,
 };
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize)]
 #[sea_orm(table_name = "source")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
@@ -38,6 +39,8 @@ pub struct Model {
     pub optional_associated_table_id: Option<TableId>,
     pub connection_id: Option<ConnectionId>,
     pub version: i64,
+    // `secret_ref` stores the mapping info mapping from property name to secret id and type.
+    pub secret_ref: Option<SecretRef>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -91,15 +94,16 @@ impl From<PbSource> for ActiveModel {
             source_id: Set(source.id as _),
             name: Set(source.name),
             row_id_index: Set(source.row_id_index.map(|x| x as _)),
-            columns: Set(ColumnCatalogArray(source.columns)),
+            columns: Set(ColumnCatalogArray::from(source.columns)),
             pk_column_ids: Set(I32Array(source.pk_column_ids)),
             with_properties: Set(Property(source.with_properties)),
             definition: Set(source.definition),
-            source_info: Set(source.info.map(StreamSourceInfo)),
-            watermark_descs: Set(WatermarkDescArray(source.watermark_descs)),
+            source_info: Set(source.info.as_ref().map(StreamSourceInfo::from)),
+            watermark_descs: Set(WatermarkDescArray::from(source.watermark_descs)),
             optional_associated_table_id: Set(optional_associated_table_id),
             connection_id: Set(source.connection_id.map(|id| id as _)),
             version: Set(source.version as _),
+            secret_ref: Set(Some(SecretRef::from(source.secret_refs))),
         }
     }
 }

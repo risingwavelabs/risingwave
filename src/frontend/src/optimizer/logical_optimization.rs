@@ -118,6 +118,14 @@ static DAG_TO_TREE: LazyLock<OptimizationStage> = LazyLock::new(|| {
     )
 });
 
+static STREAM_GENERATE_SERIES_WITH_NOW: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
+        "Convert GENERATE_SERIES Ends With NOW",
+        vec![GenerateSeriesWithNowRule::create()],
+        ApplyOrder::TopDown,
+    )
+});
+
 static TABLE_FUNCTION_TO_PROJECT_SET: LazyLock<OptimizationStage> = LazyLock::new(|| {
     OptimizationStage::new(
         "Table Function To Project Set",
@@ -172,7 +180,7 @@ static GENERAL_UNNESTING_TRANS_APPLY_WITH_SHARE: LazyLock<OptimizationStage> =
                 // can't handle a join with `output_indices`.
                 ProjectJoinSeparateRule::create(),
             ],
-            ApplyOrder::BottomUp,
+            ApplyOrder::TopDown,
         )
     });
 
@@ -186,7 +194,7 @@ static GENERAL_UNNESTING_TRANS_APPLY_WITHOUT_SHARE: LazyLock<OptimizationStage> 
                 // can't handle a join with `output_indices`.
                 ProjectJoinSeparateRule::create(),
             ],
-            ApplyOrder::BottomUp,
+            ApplyOrder::TopDown,
         )
     });
 
@@ -416,6 +424,25 @@ static COMMON_SUB_EXPR_EXTRACT: LazyLock<OptimizationStage> = LazyLock::new(|| {
     )
 });
 
+static LOGICAL_FILTER_EXPRESSION_SIMPLIFY: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
+        "Logical Filter Expression Simplify",
+        vec![LogicalFilterExpressionSimplifyRule::create()],
+        ApplyOrder::TopDown,
+    )
+});
+
+static REWRITE_SOURCE_FOR_BATCH: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
+        "Rewrite Source For Batch",
+        vec![
+            SourceToKafkaScanRule::create(),
+            SourceToIcebergScanRule::create(),
+        ],
+        ApplyOrder::TopDown,
+    )
+});
+
 impl LogicalOptimizer {
     pub fn predicate_pushdown(
         plan: PlanRef,
@@ -553,6 +580,9 @@ impl LogicalOptimizer {
         }
         plan = plan.optimize_by_rules(&SET_OPERATION_MERGE);
         plan = plan.optimize_by_rules(&SET_OPERATION_TO_JOIN);
+        // Convert `generate_series` ends with `now()` to a `Now` source. Only for streaming mode.
+        // Should be applied before converting table function to project set.
+        plan = plan.optimize_by_rules(&STREAM_GENERATE_SERIES_WITH_NOW);
         // In order to unnest a table function, we need to convert it into a `project_set` first.
         plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_PROJECT_SET);
 
@@ -563,6 +593,10 @@ impl LogicalOptimizer {
             // we raise a precise error here.
             bail!("Scalar subquery might produce more than one row.");
         }
+
+        // Same to batch plan optimization, this rule shall be applied before
+        // predicate push down
+        plan = plan.optimize_by_rules(&LOGICAL_FILTER_EXPRESSION_SIMPLIFY);
 
         // Predicate Push-down
         plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
@@ -649,6 +683,7 @@ impl LogicalOptimizer {
         // Convert the dag back to the tree, because we don't support DAG plan for batch.
         plan = plan.optimize_by_rules(&DAG_TO_TREE);
 
+        plan = plan.optimize_by_rules(&REWRITE_SOURCE_FOR_BATCH);
         plan = plan.optimize_by_rules(&GROUPING_SETS);
         plan = plan.optimize_by_rules(&REWRITE_LIKE_EXPR);
         plan = plan.optimize_by_rules(&SET_OPERATION_MERGE);
@@ -658,6 +693,11 @@ impl LogicalOptimizer {
         plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_PROJECT_SET);
 
         plan = Self::subquery_unnesting(plan, false, explain_trace, &ctx)?;
+
+        // Filter simplification must be applied before predicate push-down
+        // otherwise the filter for some nodes (e.g., `LogicalScan`)
+        // may not be properly applied.
+        plan = plan.optimize_by_rules(&LOGICAL_FILTER_EXPRESSION_SIMPLIFY);
 
         // Predicate Push-down
         let mut last_total_rule_applied_before_predicate_pushdown = ctx.total_rule_applied();
@@ -703,8 +743,8 @@ impl LogicalOptimizer {
         // Do a final column pruning and predicate pushing down to clean up the plan.
         plan = Self::column_pruning(plan, explain_trace, &ctx);
         if last_total_rule_applied_before_predicate_pushdown != ctx.total_rule_applied() {
-            #[allow(unused_assignments)]
-            last_total_rule_applied_before_predicate_pushdown = ctx.total_rule_applied();
+            (#[allow(unused_assignments)]
+            last_total_rule_applied_before_predicate_pushdown) = ctx.total_rule_applied();
             plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
         }
 

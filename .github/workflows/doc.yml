@@ -25,13 +25,13 @@ jobs:
           remove-docker-images: 'true'
           root-reserve-mb: 10240
           temp-reserve-mb: 10240
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Setup Rust toolchain
         run: rustup show
-      - name: Install dependencies
+      - name: Install dependencies for compiling RisingWave
         run: sudo apt-get update && sudo apt-get install -y make build-essential cmake protobuf-compiler curl openssl libssl-dev libsasl2-dev libcurl4-openssl-dev pkg-config postgresql-client tmux lld
       - name: Run sccache-cache
-        uses: mozilla-actions/sccache-action@v0.0.3
+        uses: mozilla-actions/sccache-action@v0.0.5
         with:
           version: "v0.5.2"
       - name: build rustdocs
@@ -39,14 +39,14 @@ jobs:
           cargo doc --workspace --no-deps --document-private-items
           cp docs/rustdoc/rust.css target/doc/rust.css
 
-          mkdir artifact
-          cp -R target/doc/* artifact
+          mkdir -p artifact/rustdoc
+          cp -R target/doc/* artifact/rustdoc
       - name: Show available storage
         run: df -h
-      - name: Install cargo-docset
+      - name: Install tools for building docs
         uses: taiki-e/install-action@v2
         with:
-          tool: cargo-docset
+          tool: cargo-docset,mdbook,mdbook-toc,mdbook-linkcheck
       - name: build docsets
         run: |
           cargo docset --no-clean --docset-name RisingWave
@@ -58,8 +58,13 @@ jobs:
           </entry>" > RisingWave.xml
 
           cp -t artifact "risingwave.docset.tgz" "RisingWave.xml"
+      - name: build developer doc
+        run: |
+          cd docs/dev
+          mdbook build
+          cp -R book/html/* ../../artifact
       - name: Upload artifacts
-        uses: actions/upload-pages-artifact@v1
+        uses: actions/upload-pages-artifact@v3
         with:
           path: artifact
       - name: Show available storage
@@ -76,4 +81,4 @@ jobs:
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v1
+        uses: actions/deploy-pages@v4

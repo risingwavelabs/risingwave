@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use futures::pin_mut;
+use futures::{pin_mut, StreamExt};
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
-use risingwave_common::row::OwnedRow;
+use risingwave_common::row::{self, OwnedRow, RowExt};
 use risingwave_common::types::DataType;
-use risingwave_common::util::epoch::EpochPair;
+use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
+use risingwave_common::util::epoch::{test_epoch, EpochPair};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_hummock_test::test_utils::prepare_hummock_test_env;
@@ -75,7 +76,7 @@ async fn test_storage_table_value_indices() {
         pk_indices,
         value_indices.into_iter().map(|v| v as usize).collect_vec(),
     );
-    let mut epoch = EpochPair::new_test_epoch(1);
+    let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
     state.init_epoch(epoch);
 
     state.insert(OwnedRow::new(vec![
@@ -108,7 +109,7 @@ async fn test_storage_table_value_indices() {
         Some("2222".to_string().into()),
     ]));
 
-    epoch.inc();
+    epoch.inc_for_test();
     state.commit(epoch).await.unwrap();
     test_env.commit_epoch(epoch.prev).await;
 
@@ -195,7 +196,7 @@ async fn test_shuffled_column_id_for_storage_table_get_row() {
         StateTable::from_table_catalog_inconsistent_op(&table, test_env.storage.clone(), None)
             .await;
 
-    let mut epoch = EpochPair::new_test_epoch(1);
+    let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
     state.init_epoch(epoch);
 
     let table = StorageTable::for_test(
@@ -221,7 +222,7 @@ async fn test_shuffled_column_id_for_storage_table_get_row() {
         Some(222_i32.into()),
     ]));
 
-    epoch.inc();
+    epoch.inc_for_test();
     state.commit(epoch).await.unwrap();
     test_env.commit_epoch(epoch.prev).await;
 
@@ -308,7 +309,7 @@ async fn test_row_based_storage_table_point_get_in_batch_mode() {
         pk_indices,
         value_indices,
     );
-    let mut epoch = EpochPair::new_test_epoch(1);
+    let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
     state.init_epoch(epoch);
 
     state.insert(OwnedRow::new(vec![Some(1_i32.into()), None, None]));
@@ -324,7 +325,7 @@ async fn test_row_based_storage_table_point_get_in_batch_mode() {
         None,
         Some(222_i32.into()),
     ]));
-    epoch.inc();
+    epoch.inc_for_test();
     state.commit(epoch).await.unwrap();
     test_env.commit_epoch(epoch.prev).await;
 
@@ -413,7 +414,7 @@ async fn test_batch_scan_with_value_indices() {
         pk_indices,
         value_indices,
     );
-    let mut epoch = EpochPair::new_test_epoch(1);
+    let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
     state.init_epoch(epoch);
 
     state.insert(OwnedRow::new(vec![
@@ -435,7 +436,7 @@ async fn test_batch_scan_with_value_indices() {
         Some(2222_i32.into()),
     ]));
 
-    epoch.inc();
+    epoch.inc_for_test();
     state.commit(epoch).await.unwrap();
     test_env.commit_epoch(epoch.prev).await;
 
@@ -459,4 +460,124 @@ async fn test_batch_scan_with_value_indices() {
 
     let res = iter.next_row().await.unwrap();
     assert!(res.is_none());
+}
+
+#[tokio::test]
+async fn test_batch_scan_chunk_with_value_indices() {
+    const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+    let test_env = prepare_hummock_test_env().await;
+
+    let order_types = vec![OrderType::ascending(), OrderType::descending()];
+    let column_ids = [
+        ColumnId::from(0),
+        ColumnId::from(1),
+        ColumnId::from(2),
+        ColumnId::from(3),
+    ];
+    let column_descs = vec![
+        ColumnDesc::unnamed(column_ids[0], DataType::Int32),
+        ColumnDesc::unnamed(column_ids[1], DataType::Int32),
+        ColumnDesc::unnamed(column_ids[2], DataType::Int32),
+        ColumnDesc::unnamed(column_ids[3], DataType::Int32),
+    ];
+    let pk_indices = vec![0_usize, 2_usize];
+    let value_indices: Vec<usize> = vec![1, 3];
+    let read_prefix_len_hint = 0;
+    let table = gen_prost_table_with_value_indices(
+        TEST_TABLE_ID,
+        column_descs.clone(),
+        order_types.clone(),
+        pk_indices.clone(),
+        read_prefix_len_hint,
+        value_indices.iter().map(|v| *v as i32).collect_vec(),
+    );
+
+    test_env.register_table(table.clone()).await;
+    let mut state =
+        StateTable::from_table_catalog_inconsistent_op(&table, test_env.storage.clone(), None)
+            .await;
+
+    let output_column_idx: Vec<usize> = vec![1, 2];
+    let column_ids_partial = output_column_idx
+        .iter()
+        .map(|i| ColumnId::from(*i as i32))
+        .collect_vec();
+
+    let table = StorageTable::for_test_with_partial_columns(
+        test_env.storage.clone(),
+        TEST_TABLE_ID,
+        column_descs.clone(),
+        column_ids_partial,
+        order_types.clone(),
+        pk_indices,
+        value_indices.clone(),
+    );
+    let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
+    state.init_epoch(epoch);
+
+    let gen_row = |i: i32, is_update: bool| {
+        let scale = if is_update { 10 } else { 1 };
+        OwnedRow::new(vec![
+            Some(i.into()),
+            Some((i * 10 * scale).into()),
+            Some((i * 100).into()),
+            Some((i * 1000 * scale).into()),
+        ])
+    };
+
+    let mut rows = vec![];
+    let insert_row_idx = (0..20).collect_vec();
+    let delete_row_idx = (0..5).map(|i| i * 2).collect_vec();
+    let updated_row_idx = (0..5).map(|i| i * 2 + 1).collect_vec();
+    for i in &insert_row_idx {
+        let row = gen_row(*i, false);
+        state.insert(row.clone());
+        rows.push(row);
+    }
+
+    for i in &updated_row_idx {
+        let row = gen_row(*i, true);
+        state.update(rows[*i as usize].clone(), row.clone());
+        rows[*i as usize] = row;
+    }
+
+    for i in &delete_row_idx {
+        let row = gen_row(*i, false);
+        state.delete(row);
+    }
+
+    let mut rows = rows
+        .into_iter()
+        .enumerate()
+        .filter(|(idx, _)| !delete_row_idx.contains(&(*idx as i32)))
+        .map(|(_, row)| row)
+        .collect_vec();
+
+    epoch.inc_for_test();
+    state.commit(epoch).await.unwrap();
+    test_env.commit_epoch(epoch.prev).await;
+
+    let chunk_size = 2;
+    let iter = table
+        .batch_chunk_iter_with_pk_bounds(
+            HummockReadEpoch::Committed(epoch.prev),
+            row::empty(),
+            ..,
+            false,
+            chunk_size,
+            Default::default(),
+        )
+        .await
+        .unwrap();
+    pin_mut!(iter);
+
+    let chunks: Vec<_> = iter.collect().await;
+    for (chunk, expected_rows) in chunks.into_iter().zip_eq(rows.chunks_mut(chunk_size)) {
+        let mut builder =
+            DataChunkBuilder::new(vec![DataType::Int32, DataType::Int32], 2 * chunk_size);
+        for row in expected_rows {
+            let _ = builder.append_one_row(row.clone().project(&output_column_idx));
+        }
+        assert_eq!(builder.consume_all().unwrap(), chunk.unwrap());
+    }
 }

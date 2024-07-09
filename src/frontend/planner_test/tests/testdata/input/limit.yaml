@@ -83,6 +83,7 @@
     create table t (a int);
     select count(*) from t order by 1 limit 1;
   expected_outputs:
+  - logical_plan
   - batch_plan
   - stream_plan
 - sql: |

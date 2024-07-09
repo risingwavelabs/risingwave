@@ -6,6 +6,7 @@ import (
 	"datagen/ad_ctr"
 	"datagen/cdn_metrics"
 	"datagen/clickstream"
+	"datagen/compatible_data"
 	"datagen/delivery"
 	"datagen/ecommerce"
 	"datagen/gen"
@@ -67,6 +68,8 @@ func newGen(cfg gen.GeneratorConfig) (gen.LoadGenerator, error) {
 		return livestream.NewLiveStreamMetricsGen(cfg), nil
 	} else if cfg.Mode == "nexmark" {
 		return nexmark.NewNexmarkGen(cfg), nil
+	} else if cfg.Mode == "compatible-data" {
+		return compatible_data.NewCompatibleDataGen(), nil
 	} else {
 		return nil, fmt.Errorf("invalid mode: %s", cfg.Mode)
 	}
@@ -147,6 +150,13 @@ func generateLoad(ctx context.Context, cfg gen.GeneratorConfig) error {
 				if err := sinkImpl.Flush(ctx); err != nil {
 					return err
 				}
+			}
+			if cfg.TotalEvents > 0 && count >= cfg.TotalEvents {
+				if err := sinkImpl.Flush(ctx); err != nil {
+					return err
+				}
+				log.Printf("Sent %d records in total (Elapsed: %s)", count, time.Since(initTime).String())
+				return nil
 			}
 		}
 	}

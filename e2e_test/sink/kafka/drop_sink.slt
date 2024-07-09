@@ -14,4 +14,7 @@ statement ok
 drop sink si_kafka_without_snapshot;
 
 statement ok
+drop sink sink_text_id;
+
+statement ok
 drop table t_kafka;

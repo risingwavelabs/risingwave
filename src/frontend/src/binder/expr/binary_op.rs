@@ -94,13 +94,13 @@ impl Binder {
             BinaryOperator::GtEq => ExprType::GreaterThanOrEqual,
             BinaryOperator::And => ExprType::And,
             BinaryOperator::Or => ExprType::Or,
-            BinaryOperator::Like => ExprType::Like,
-            BinaryOperator::NotLike => {
+            BinaryOperator::PGLikeMatch => ExprType::Like,
+            BinaryOperator::PGNotLikeMatch => {
                 func_types.push(ExprType::Not);
                 ExprType::Like
             }
-            BinaryOperator::ILike => ExprType::ILike,
-            BinaryOperator::NotILike => {
+            BinaryOperator::PGILikeMatch => ExprType::ILike,
+            BinaryOperator::PGNotILikeMatch => {
                 func_types.push(ExprType::Not);
                 ExprType::ILike
             }

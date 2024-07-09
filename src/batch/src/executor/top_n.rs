@@ -14,18 +14,16 @@
 
 use std::cmp::Ordering;
 use std::sync::Arc;
-use std::vec::Vec;
 
 use futures_async_stream::try_stream;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_common::estimate_size::collections::MemMonitoredHeap;
-use risingwave_common::estimate_size::EstimateSize;
-use risingwave_common::memory::MemoryContext;
+use risingwave_common::memory::{MemMonitoredHeap, MemoryContext};
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::memcmp_encoding::{encode_chunk, MemcmpEncoded};
 use risingwave_common::util::sort_util::ColumnOrder;
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use crate::error::{BatchError, Result};
@@ -245,10 +243,6 @@ impl HeapElem {
         }
     }
 
-    pub fn encoded_row(&self) -> &[u8] {
-        &self.encoded_row
-    }
-
     pub fn row(&self) -> impl Row + '_ {
         &self.row
     }
@@ -297,8 +291,8 @@ impl TopNExecutor {
 mod tests {
     use futures::stream::StreamExt;
     use itertools::Itertools;
-    use risingwave_common::array::{Array, DataChunk};
-    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::array::Array;
+    use risingwave_common::catalog::Field;
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;

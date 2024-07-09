@@ -32,9 +32,9 @@
 #![feature(impl_trait_in_assoc_type)]
 #![feature(result_flattening)]
 #![feature(error_generic_member_access)]
-#![feature(round_ties_even)]
 #![feature(iterator_try_collect)]
 #![feature(used_with_arg)]
+#![feature(entry_insert)]
 #![recursion_limit = "256"]
 
 #[cfg(test)]
@@ -42,6 +42,9 @@ risingwave_expr_impl::enable!();
 
 #[macro_use]
 mod catalog;
+
+use std::collections::HashSet;
+
 pub use catalog::TableCatalog;
 mod binder;
 pub use binder::{bind_data_type, Binder};
@@ -58,6 +61,7 @@ pub mod session;
 mod stream_fragmenter;
 use risingwave_common::config::{MetricLevel, OverrideConfig};
 use risingwave_common::util::meta_addr::MetaAddressStrategy;
+use risingwave_common::util::tokio_util::sync::CancellationToken;
 pub use stream_fragmenter::build_graph;
 mod utils;
 pub use utils::{explain_stream_graph, WithOptions};
@@ -89,19 +93,15 @@ pub struct FrontendOpts {
     // TODO: rename to listen_addr and separate out the port.
     /// The address that this service listens to.
     /// Usually the localhost + desired port.
-    #[clap(long, env = "RW_LISTEN_ADDR", default_value = "127.0.0.1:4566")]
+    #[clap(long, env = "RW_LISTEN_ADDR", default_value = "0.0.0.0:4566")]
     pub listen_addr: String,
 
     /// The address for contacting this instance of the service.
     /// This would be synonymous with the service's "public address"
     /// or "identifying address".
-    /// Optional, we will use listen_addr if not specified.
+    /// Optional, we will use `listen_addr` if not specified.
     #[clap(long, env = "RW_ADVERTISE_ADDR")]
     pub advertise_addr: Option<String>,
-
-    // TODO: This is currently unused.
-    #[clap(long, env = "RW_PORT")]
-    pub port: Option<u16>,
 
     /// The address via which we will attempt to connect to a leader meta node.
     #[clap(long, env = "RW_META_ADDR", default_value = "http://127.0.0.1:5690")]
@@ -135,11 +135,11 @@ pub struct FrontendOpts {
     /// Used for control the metrics level, similar to log level.
     /// 0 = disable metrics
     /// >0 = enable metrics
-    #[clap(long, env = "RW_METRICS_LEVEL")]
+    #[clap(long, hide = true, env = "RW_METRICS_LEVEL")]
     #[override_opts(path = server.metrics_level)]
     pub metrics_level: Option<MetricLevel>,
 
-    #[clap(long, env = "RW_ENABLE_BARRIER_READ")]
+    #[clap(long, hide = true, env = "RW_ENABLE_BARRIER_READ")]
     #[override_opts(path = batch.enable_barrier_read)]
     pub enable_barrier_read: Option<bool>,
 }
@@ -166,14 +166,33 @@ use std::pin::Pin;
 use pgwire::pg_protocol::TlsConfig;
 
 /// Start frontend
-pub fn start(opts: FrontendOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+pub fn start(
+    opts: FrontendOpts,
+    shutdown: CancellationToken,
+) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     // WARNING: don't change the function signature. Making it `async fn` will cause
     // slow compile in release mode.
     Box::pin(async move {
         let listen_addr = opts.listen_addr.clone();
-        let session_mgr = Arc::new(SessionManagerImpl::new(opts).await.unwrap());
-        pg_serve(&listen_addr, session_mgr, TlsConfig::new_default())
-            .await
-            .unwrap();
+        let session_mgr = SessionManagerImpl::new(opts).await.unwrap();
+        let redact_sql_option_keywords = Arc::new(
+            session_mgr
+                .env()
+                .batch_config()
+                .redact_sql_option_keywords
+                .iter()
+                .map(|s| s.to_lowercase())
+                .collect::<HashSet<_>>(),
+        );
+
+        pg_serve(
+            &listen_addr,
+            session_mgr,
+            TlsConfig::new_default(),
+            Some(redact_sql_option_keywords),
+            shutdown,
+        )
+        .await
+        .unwrap()
     })
 }

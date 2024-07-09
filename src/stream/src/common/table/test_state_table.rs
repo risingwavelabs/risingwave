@@ -16,19 +16,17 @@ use std::ops::Bound::{self, *};
 
 use futures::{pin_mut, StreamExt};
 use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
 use risingwave_common::row::{self, OwnedRow};
 use risingwave_common::types::{DataType, Scalar, Timestamptz};
-use risingwave_common::util::epoch::EpochPair;
+use risingwave_common::util::epoch::{test_epoch, EpochPair};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::BasicSerde;
 use risingwave_hummock_test::test_utils::prepare_hummock_test_env;
-use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::DEFAULT_VNODE;
-use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::{
     ReplicatedStateTable, StateTable, WatermarkCacheStateTable,
@@ -62,7 +60,7 @@ async fn test_state_table_update_insert() {
         StateTable::from_table_catalog_inconsistent_op(&table, test_env.storage.clone(), None)
             .await;
 
-    let mut epoch = EpochPair::new_test_epoch(1);
+    let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
     state_table.init_epoch(epoch);
 
     state_table.insert(OwnedRow::new(vec![
@@ -79,7 +77,7 @@ async fn test_state_table_update_insert() {
         None,
     ]));
 
-    epoch.inc();
+    epoch.inc_for_test();
     state_table.commit(epoch).await.unwrap();
 
     state_table.delete(OwnedRow::new(vec![
@@ -135,7 +133,7 @@ async fn test_state_table_update_insert() {
         ]))
     );
 
-    epoch.inc();
+    epoch.inc_for_test();
     state_table.commit(epoch).await.unwrap();
 
     let row6_commit = state_table
@@ -172,7 +170,7 @@ async fn test_state_table_update_insert() {
         Some(4_i32.into()),
     ]));
 
-    epoch.inc();
+    epoch.inc_for_test();
     state_table.commit(epoch).await.unwrap();
 
     // one epoch: delete (1, 2, 3, 4), insert (5, 6, 7, None), delete(5, 6, 7, None)
@@ -201,7 +199,7 @@ async fn test_state_table_update_insert() {
         .unwrap();
     assert_eq!(row1, None);
 
-    epoch.inc();
+    epoch.inc_for_test();
     state_table.commit(epoch).await.unwrap();
 
     let row1_commit = state_table
@@ -240,7 +238,7 @@ async fn test_state_table_iter_with_prefix() {
         StateTable::from_table_catalog_inconsistent_op(&table, test_env.storage.clone(), None)
             .await;
 
-    let mut epoch = EpochPair::new_test_epoch(1);
+    let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
     state_table.init_epoch(epoch);
 
     state_table.insert(OwnedRow::new(vec![
@@ -266,7 +264,7 @@ async fn test_state_table_iter_with_prefix() {
         Some(555_i32.into()),
     ]));
 
-    epoch.inc();
+    epoch.inc_for_test();
     state_table.commit(epoch).await.unwrap();
 
     state_table.insert(OwnedRow::new(vec![
@@ -369,7 +367,7 @@ async fn test_state_table_iter_with_pk_range() {
         StateTable::from_table_catalog_inconsistent_op(&table, test_env.storage.clone(), None)
             .await;
 
-    let mut epoch = EpochPair::new_test_epoch(1);
+    let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
     state_table.init_epoch(epoch);
 
     state_table.insert(OwnedRow::new(vec![
@@ -395,7 +393,7 @@ async fn test_state_table_iter_with_pk_range() {
         Some(555_i32.into()),
     ]));
 
-    epoch.inc();
+    epoch.inc_for_test();
     state_table.commit(epoch).await.unwrap();
 
     state_table.insert(OwnedRow::new(vec![
@@ -502,7 +500,7 @@ async fn test_mem_table_assertion() {
     let mut state_table =
         StateTable::from_table_catalog(&table, test_env.storage.clone(), None).await;
 
-    let epoch = EpochPair::new_test_epoch(1);
+    let epoch = EpochPair::new_test_epoch(test_epoch(1));
     state_table.init_epoch(epoch);
     state_table.insert(OwnedRow::new(vec![
         Some(1_i32.into()),
@@ -545,7 +543,7 @@ async fn test_state_table_iter_with_value_indices() {
         StateTable::from_table_catalog_inconsistent_op(&table, test_env.storage.clone(), None)
             .await;
 
-    let mut epoch = EpochPair::new_test_epoch(1);
+    let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
     state_table.init_epoch(epoch);
 
     state_table.insert(OwnedRow::new(vec![
@@ -600,7 +598,7 @@ async fn test_state_table_iter_with_value_indices() {
         assert_eq!(&OwnedRow::new(vec![Some(666_i32.into())]), res.as_ref());
     }
 
-    epoch.inc();
+    epoch.inc_for_test();
     state_table.commit(epoch).await.unwrap();
 
     // write [3, 33, 333], [4, 44, 444], [5, 55, 555], [7, 77, 777], [8, 88, 888]into mem_table,
@@ -712,7 +710,7 @@ async fn test_state_table_iter_with_shuffle_value_indices() {
         StateTable::from_table_catalog_inconsistent_op(&table, test_env.storage.clone(), None)
             .await;
 
-    let mut epoch = EpochPair::new_test_epoch(1);
+    let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
     state_table.init_epoch(epoch);
 
     state_table.insert(OwnedRow::new(vec![
@@ -788,7 +786,7 @@ async fn test_state_table_iter_with_shuffle_value_indices() {
         );
     }
 
-    epoch.inc();
+    epoch.inc_for_test();
     state_table.commit(epoch).await.unwrap();
 
     // write [3, 33, 333], [4, 44, 444], [5, 55, 555], [7, 77, 777], [8, 88, 888]into mem_table,
@@ -953,7 +951,7 @@ async fn test_state_table_write_chunk() {
         StateTable::from_table_catalog_inconsistent_op(&table, test_env.storage.clone(), None)
             .await;
 
-    let epoch = EpochPair::new_test_epoch(1);
+    let epoch = EpochPair::new_test_epoch(test_epoch(1));
     state_table.init_epoch(epoch);
 
     let chunk = StreamChunk::from_rows(
@@ -1082,7 +1080,7 @@ async fn test_state_table_write_chunk_visibility() {
         StateTable::from_table_catalog_inconsistent_op(&table, test_env.storage.clone(), None)
             .await;
 
-    let epoch = EpochPair::new_test_epoch(1);
+    let epoch = EpochPair::new_test_epoch(test_epoch(1));
     state_table.init_epoch(epoch);
 
     let chunk = StreamChunk::from_rows(
@@ -1206,7 +1204,7 @@ async fn test_state_table_write_chunk_value_indices() {
         StateTable::from_table_catalog_inconsistent_op(&table, test_env.storage.clone(), None)
             .await;
 
-    let epoch = EpochPair::new_test_epoch(1);
+    let epoch = EpochPair::new_test_epoch(test_epoch(1));
     state_table.init_epoch(epoch);
 
     let chunk = StreamChunk::from_rows(
@@ -1269,206 +1267,6 @@ async fn test_state_table_write_chunk_value_indices() {
     );
 }
 
-async fn check_may_exist<S>(
-    state_table: &StateTable<S>,
-    existent_prefix: Vec<i32>,
-    non_existent_prefix: Vec<i32>,
-) where
-    S: StateStore,
-{
-    for prefix in existent_prefix {
-        let pk_prefix = OwnedRow::new(vec![Some(prefix.into())]);
-        assert!(state_table.may_exist(&pk_prefix).await.unwrap());
-    }
-    for prefix in non_existent_prefix {
-        let pk_prefix = OwnedRow::new(vec![Some(prefix.into())]);
-        assert!(!state_table.may_exist(&pk_prefix).await.unwrap());
-    }
-}
-
-#[tokio::test]
-async fn test_state_table_may_exist() {
-    const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
-    let test_env = prepare_hummock_test_env().await;
-
-    // let pk_columns = vec![0, 1]; leave a message to indicate pk columns
-    let order_types = vec![OrderType::ascending(), OrderType::descending()];
-
-    let column_ids = [ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
-    let column_descs = vec![
-        ColumnDesc::unnamed(column_ids[0], DataType::Int32),
-        ColumnDesc::unnamed(column_ids[1], DataType::Int32),
-        ColumnDesc::unnamed(column_ids[2], DataType::Int32),
-    ];
-    let pk_index = vec![0_usize, 1_usize];
-    let read_prefix_len_hint = 1;
-    let table = gen_prost_table(
-        TEST_TABLE_ID,
-        column_descs,
-        order_types,
-        pk_index,
-        read_prefix_len_hint,
-    );
-
-    test_env.register_table(table.clone()).await;
-    let mut state_table =
-        StateTable::from_table_catalog_inconsistent_op(&table, test_env.storage.clone(), None)
-            .await;
-
-    let mut epoch = EpochPair::new_test_epoch(1);
-    state_table.init_epoch(epoch);
-
-    state_table.insert(OwnedRow::new(vec![
-        Some(1_i32.into()),
-        Some(11_i32.into()),
-        Some(111_i32.into()),
-    ]));
-    state_table.insert(OwnedRow::new(vec![
-        Some(1_i32.into()),
-        Some(22_i32.into()),
-        Some(222_i32.into()),
-    ]));
-
-    state_table.insert(OwnedRow::new(vec![
-        Some(4_i32.into()),
-        Some(44_i32.into()),
-        Some(444_i32.into()),
-    ]));
-
-    state_table.insert(OwnedRow::new(vec![
-        Some(1_i32.into()),
-        Some(55_i32.into()),
-        Some(555_i32.into()),
-    ]));
-
-    // test may_exist with data only in memtable (e1)
-    check_may_exist(&state_table, vec![1, 4], vec![2, 3, 6, 12]).await;
-
-    epoch.inc();
-    state_table.commit(epoch).await.unwrap();
-    let e1 = epoch.prev;
-
-    // test may_exist with data only in immutable memtable (e1)
-    check_may_exist(&state_table, vec![1, 4], vec![2, 3, 6, 12]).await;
-
-    let e1_res = test_env.storage.seal_and_sync_epoch(e1).await.unwrap();
-
-    // test may_exist with data only in uncommitted ssts (e1)
-    check_may_exist(&state_table, vec![1, 4], vec![2, 3, 6, 12]).await;
-
-    test_env
-        .meta_client
-        .commit_epoch(e1, e1_res.uncommitted_ssts)
-        .await
-        .unwrap();
-    test_env.storage.try_wait_epoch_for_test(e1).await;
-
-    // test may_exist with data only in committed ssts (e1)
-    check_may_exist(&state_table, vec![1, 4], vec![2, 3, 6, 12]).await;
-
-    state_table.insert(OwnedRow::new(vec![
-        Some(1_i32.into()),
-        Some(33_i32.into()),
-        Some(333_i32.into()),
-    ]));
-    state_table.insert(OwnedRow::new(vec![
-        Some(1_i32.into()),
-        Some(55_i32.into()),
-        Some(5555_i32.into()),
-    ]));
-    state_table.insert(OwnedRow::new(vec![
-        Some(6_i32.into()),
-        Some(66_i32.into()),
-        Some(666_i32.into()),
-    ]));
-
-    // test may_exist with data in memtable (e2), committed ssts (e1)
-    check_may_exist(&state_table, vec![1, 4, 6], vec![2, 3, 12]).await;
-
-    epoch.inc();
-    state_table.commit(epoch).await.unwrap();
-    let e2 = epoch.prev;
-
-    // test may_exist with data in immutable memtable (e2), committed ssts (e1)
-    check_may_exist(&state_table, vec![1, 4, 6], vec![2, 3, 12]).await;
-
-    state_table.insert(OwnedRow::new(vec![
-        Some(1_i32.into()),
-        Some(44_i32.into()),
-        Some(444_i32.into()),
-    ]));
-    state_table.insert(OwnedRow::new(vec![
-        Some(3_i32.into()),
-        Some(1_i32.into()),
-        Some(111_i32.into()),
-    ]));
-
-    // test may_exist with data in memtable (e3), immutable memtable (e2), committed ssts (e1)
-    check_may_exist(&state_table, vec![1, 3, 4, 6], vec![2, 12]).await;
-
-    let e2_res = test_env.storage.seal_and_sync_epoch(e2).await.unwrap();
-
-    // test may_exist with data in memtable (e3), uncommitted ssts (e2), committed ssts (e1)
-    check_may_exist(&state_table, vec![1, 3, 4, 6], vec![2, 12]).await;
-
-    epoch.inc();
-    state_table.commit(epoch).await.unwrap();
-    let e3 = epoch.prev;
-
-    // test may_exist with data in immutable memtable (e3), uncommitted ssts (e2), committed
-    // ssts (e1)
-    check_may_exist(&state_table, vec![1, 3, 4, 6], vec![2, 12]).await;
-
-    state_table.insert(OwnedRow::new(vec![
-        Some(1_i32.into()),
-        Some(55_i32.into()),
-        Some(555_i32.into()),
-    ]));
-    state_table.insert(OwnedRow::new(vec![
-        Some(2_i32.into()),
-        Some(1_i32.into()),
-        Some(111_i32.into()),
-    ]));
-
-    // test may_exist with data in memtable (e4), immutable memtable (e3), uncommitted ssts
-    // (e2), committed ssts (e1)
-    check_may_exist(&state_table, vec![1, 3, 4, 6], vec![12]).await;
-
-    test_env
-        .meta_client
-        .commit_epoch(e2, e2_res.uncommitted_ssts)
-        .await
-        .unwrap();
-    test_env.storage.try_wait_epoch_for_test(e2).await;
-
-    epoch.inc();
-    state_table.commit(epoch).await.unwrap();
-    let e4 = epoch.prev;
-
-    let e3_res = test_env.storage.seal_and_sync_epoch(e3).await.unwrap();
-    let e4_res = test_env.storage.seal_and_sync_epoch(e4).await.unwrap();
-
-    // test may_exist with data in uncommitted ssts (e3, e4), committed ssts (e1, e2, e3, e4)
-    check_may_exist(&state_table, vec![1, 3, 4, 6], vec![12]).await;
-
-    test_env
-        .meta_client
-        .commit_epoch(e3, e3_res.uncommitted_ssts)
-        .await
-        .unwrap();
-    test_env.storage.try_wait_epoch_for_test(e3).await;
-
-    test_env
-        .meta_client
-        .commit_epoch(e4, e4_res.uncommitted_ssts)
-        .await
-        .unwrap();
-    test_env.storage.try_wait_epoch_for_test(e4).await;
-
-    // test may_exist with data in committed ssts (e1, e2, e3, e4)
-    check_may_exist(&state_table, vec![1, 3, 4, 6], vec![12]).await;
-}
-
 // After NULL watermark col values are inserted & deleted, they should not appear in the state table
 // cache. Test for apply_batch.
 #[tokio::test]
@@ -1500,7 +1298,7 @@ async fn test_state_table_watermark_cache_ignore_null() {
     let mut state_table =
         WatermarkCacheStateTable::from_table_catalog(&table, test_env.storage.clone(), None).await;
 
-    let mut epoch = EpochPair::new_test_epoch(1);
+    let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
     state_table.init_epoch(epoch);
 
     let rows = vec![
@@ -1548,7 +1346,7 @@ async fn test_state_table_watermark_cache_ignore_null() {
     let watermark = Timestamptz::from_secs(2500).unwrap().to_scalar_value();
     state_table.update_watermark(watermark, true);
 
-    epoch.inc();
+    epoch.inc_for_test();
     state_table.commit(epoch).await.unwrap();
 
     let cache = state_table.get_watermark_cache();
@@ -1620,7 +1418,7 @@ async fn test_state_table_watermark_cache_write_chunk() {
     let mut state_table =
         WatermarkCacheStateTable::from_table_catalog(&table, test_env.storage.clone(), None).await;
 
-    let mut epoch = EpochPair::new_test_epoch(1);
+    let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
     state_table.init_epoch(epoch);
 
     let cache = state_table.get_watermark_cache();
@@ -1629,7 +1427,7 @@ async fn test_state_table_watermark_cache_write_chunk() {
     let watermark = Timestamptz::from_secs(0).unwrap().to_scalar_value();
     state_table.update_watermark(watermark, true);
 
-    epoch.inc();
+    epoch.inc_for_test();
     state_table.commit(epoch).await.unwrap();
 
     let inserts_1 = vec![
@@ -1738,7 +1536,7 @@ async fn test_state_table_watermark_cache_write_chunk() {
     let watermark = Timestamptz::from_secs(2500).unwrap().to_scalar_value();
     state_table.update_watermark(watermark, true);
 
-    epoch.inc();
+    epoch.inc_for_test();
     state_table.commit(epoch).await.unwrap();
 
     // After sync, we should scan all rows into watermark cache.
@@ -1786,7 +1584,7 @@ async fn test_state_table_watermark_cache_refill() {
     let mut state_table =
         WatermarkCacheStateTable::from_table_catalog(&table, test_env.storage.clone(), None).await;
 
-    let mut epoch = EpochPair::new_test_epoch(1);
+    let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
     state_table.init_epoch(epoch);
 
     let rows = vec![
@@ -1835,7 +1633,7 @@ async fn test_state_table_watermark_cache_refill() {
     let watermark = Timestamptz::from_secs(2500).unwrap().to_scalar_value();
     state_table.update_watermark(watermark, true);
 
-    epoch.inc();
+    epoch.inc_for_test();
     state_table.commit(epoch).await.unwrap();
 
     // After the first barrier, watermark cache won't be filled.
@@ -1876,7 +1674,7 @@ async fn test_state_table_iter_prefix_and_sub_range() {
     let mut state_table =
         StateTable::from_table_catalog_inconsistent_op(&table, test_env.storage.clone(), None)
             .await;
-    let mut epoch = EpochPair::new_test_epoch(1);
+    let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
     state_table.init_epoch(epoch);
 
     state_table.insert(OwnedRow::new(vec![
@@ -1901,7 +1699,7 @@ async fn test_state_table_iter_prefix_and_sub_range() {
         Some(444_i32.into()),
     ]));
 
-    epoch.inc();
+    epoch.inc_for_test();
     state_table.commit(epoch).await.unwrap();
 
     let pk_prefix = OwnedRow::new(vec![Some(1_i32.into())]);
@@ -2071,7 +1869,7 @@ async fn test_replicated_state_table_replication() {
         )
         .await;
 
-    let mut epoch = EpochPair::new_test_epoch(1);
+    let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
     state_table.init_epoch(epoch);
     replicated_state_table.init_epoch(epoch).await.unwrap();
 
@@ -2082,7 +1880,7 @@ async fn test_replicated_state_table_replication() {
         Some(111_i32.into()),
     ]));
 
-    epoch.inc();
+    epoch.inc_for_test();
     state_table.commit(epoch).await.unwrap();
     replicated_state_table.commit(epoch).await.unwrap();
     test_env.commit_epoch(epoch.prev).await;
@@ -2142,7 +1940,7 @@ async fn test_replicated_state_table_replication() {
         StreamChunk::from_rows(&replicate_chunk, &[DataType::Int32, DataType::Int32]);
     replicated_state_table.write_chunk(replicate_chunk);
 
-    epoch.inc();
+    epoch.inc_for_test();
     state_table.commit(epoch).await.unwrap();
     replicated_state_table.commit(epoch).await.unwrap();
 

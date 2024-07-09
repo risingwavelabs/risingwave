@@ -17,23 +17,27 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{valid_table_name, FunctionId, IndexId, TableId};
+use risingwave_common::catalog::{valid_table_name, FunctionId, IndexId, StreamJobStatus, TableId};
 use risingwave_common::types::DataType;
 use risingwave_connector::sink::catalog::SinkCatalog;
 pub use risingwave_expr::sig::*;
 use risingwave_pb::catalog::{
-    PbConnection, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView,
+    PbConnection, PbFunction, PbIndex, PbSchema, PbSecret, PbSink, PbSource, PbSubscription,
+    PbTable, PbView,
 };
+use risingwave_pb::user::grant_privilege::Object;
 
-use super::OwnedByUserCatalog;
+use super::subscription_catalog::SubscriptionCatalog;
+use super::{OwnedByUserCatalog, SubscriptionId};
 use crate::catalog::connection_catalog::ConnectionCatalog;
 use crate::catalog::function_catalog::FunctionCatalog;
 use crate::catalog::index_catalog::IndexCatalog;
+use crate::catalog::secret_catalog::SecretCatalog;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::system_catalog::SystemTableCatalog;
 use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::view_catalog::ViewCatalog;
-use crate::catalog::{ConnectionId, DatabaseId, SchemaId, SinkId, SourceId, ViewId};
+use crate::catalog::{ConnectionId, DatabaseId, SchemaId, SecretId, SinkId, SourceId, ViewId};
 use crate::expr::{infer_type_name, infer_type_with_sigmap, Expr, ExprImpl};
 use crate::user::UserId;
 
@@ -48,6 +52,8 @@ pub struct SchemaCatalog {
     source_by_id: HashMap<SourceId, Arc<SourceCatalog>>,
     sink_by_name: HashMap<String, Arc<SinkCatalog>>,
     sink_by_id: HashMap<SinkId, Arc<SinkCatalog>>,
+    subscription_by_name: HashMap<String, Arc<SubscriptionCatalog>>,
+    subscription_by_id: HashMap<SubscriptionId, Arc<SubscriptionCatalog>>,
     index_by_name: HashMap<String, Arc<IndexCatalog>>,
     index_by_id: HashMap<IndexId, Arc<IndexCatalog>>,
     indexes_by_table_id: HashMap<TableId, Vec<Arc<IndexCatalog>>>,
@@ -58,6 +64,11 @@ pub struct SchemaCatalog {
     function_by_id: HashMap<FunctionId, Arc<FunctionCatalog>>,
     connection_by_name: HashMap<String, Arc<ConnectionCatalog>>,
     connection_by_id: HashMap<ConnectionId, Arc<ConnectionCatalog>>,
+    secret_by_name: HashMap<String, Arc<SecretCatalog>>,
+    secret_by_id: HashMap<SecretId, Arc<SecretCatalog>>,
+
+    _secret_source_ref: HashMap<SecretId, Vec<SourceId>>,
+    _secret_sink_ref: HashMap<SecretId, Vec<SinkId>>,
 
     // This field is currently used only for `show connections`
     connection_source_ref: HashMap<ConnectionId, Vec<SourceId>>,
@@ -117,9 +128,11 @@ impl SchemaCatalog {
         let name = prost.name.clone();
         let id = prost.id.into();
         let old_index = self.index_by_id.get(&id).unwrap();
-        let index_table = self.get_table_by_id(&prost.index_table_id.into()).unwrap();
+        let index_table = self
+            .get_created_table_by_id(&prost.index_table_id.into())
+            .unwrap();
         let primary_table = self
-            .get_table_by_id(&prost.primary_table_id.into())
+            .get_created_table_by_id(&prost.primary_table_id.into())
             .unwrap();
         let index: IndexCatalog = IndexCatalog::build_from(prost, index_table, primary_table);
         let index_ref = Arc::new(index);
@@ -156,9 +169,11 @@ impl SchemaCatalog {
         let name = prost.name.clone();
         let id = prost.id.into();
 
-        let index_table = self.get_table_by_id(&prost.index_table_id.into()).unwrap();
+        let index_table = self
+            .get_created_table_by_id(&prost.index_table_id.into())
+            .unwrap();
         let primary_table = self
-            .get_table_by_id(&prost.primary_table_id.into())
+            .get_created_table_by_id(&prost.primary_table_id.into())
             .unwrap();
         let index: IndexCatalog = IndexCatalog::build_from(prost, index_table, primary_table);
         let index_ref = Arc::new(index);
@@ -289,6 +304,44 @@ impl SchemaCatalog {
 
         self.sink_by_name.insert(name, sink_ref.clone());
         self.sink_by_id.insert(id, sink_ref);
+    }
+
+    pub fn create_subscription(&mut self, prost: &PbSubscription) {
+        let name = prost.name.clone();
+        let id = prost.id;
+        let subscription_catalog = SubscriptionCatalog::from(prost);
+        let subscription_ref = Arc::new(subscription_catalog);
+
+        self.subscription_by_name
+            .try_insert(name, subscription_ref.clone())
+            .unwrap();
+        self.subscription_by_id
+            .try_insert(id, subscription_ref)
+            .unwrap();
+    }
+
+    pub fn drop_subscription(&mut self, id: SubscriptionId) {
+        let subscription_ref = self.subscription_by_id.remove(&id).unwrap();
+        self.subscription_by_name
+            .remove(&subscription_ref.name)
+            .unwrap();
+    }
+
+    pub fn update_subscription(&mut self, prost: &PbSubscription) {
+        let name = prost.name.clone();
+        let id = prost.id;
+        let subscription = SubscriptionCatalog::from(prost);
+        let subscription_ref = Arc::new(subscription);
+
+        let old_subscription = self.subscription_by_id.get(&id).unwrap();
+        // check if subscription name get updated.
+        if old_subscription.name != name {
+            self.subscription_by_name.remove(&old_subscription.name);
+        }
+
+        self.subscription_by_name
+            .insert(name, subscription_ref.clone());
+        self.subscription_by_id.insert(id, subscription_ref);
     }
 
     pub fn create_view(&mut self, prost: &PbView) {
@@ -442,6 +495,46 @@ impl SchemaCatalog {
             .expect("connection not found by name");
     }
 
+    pub fn create_secret(&mut self, prost: &PbSecret) {
+        let name = prost.name.clone();
+        let id = SecretId::new(prost.id);
+        let secret = SecretCatalog::from(prost);
+        let secret_ref = Arc::new(secret);
+
+        self.secret_by_id
+            .try_insert(id, secret_ref.clone())
+            .unwrap();
+        self.secret_by_name
+            .try_insert(name, secret_ref.clone())
+            .unwrap();
+    }
+
+    pub fn update_secret(&mut self, prost: &PbSecret) {
+        let name = prost.name.clone();
+        let id = SecretId::new(prost.id);
+        let secret = SecretCatalog::from(prost);
+        let secret_ref = Arc::new(secret);
+
+        let old_secret = self.secret_by_id.get(&id).unwrap();
+        // check if secret name get updated.
+        if old_secret.name != name {
+            self.secret_by_name.remove(&old_secret.name);
+        }
+
+        self.secret_by_name.insert(name, secret_ref.clone());
+        self.secret_by_id.insert(id, secret_ref);
+    }
+
+    pub fn drop_secret(&mut self, secret_id: SecretId) {
+        let secret_ref = self
+            .secret_by_id
+            .remove(&secret_id)
+            .expect("secret not found by id");
+        self.secret_by_name
+            .remove(&secret_ref.name)
+            .expect("secret not found by name");
+    }
+
     pub fn iter_all(&self) -> impl Iterator<Item = &Arc<TableCatalog>> {
         self.table_by_name.values()
     }
@@ -467,10 +560,10 @@ impl SchemaCatalog {
     }
 
     /// Iterate all materialized views, excluding the indices.
-    pub fn iter_mv(&self) -> impl Iterator<Item = &Arc<TableCatalog>> {
+    pub fn iter_created_mvs(&self) -> impl Iterator<Item = &Arc<TableCatalog>> {
         self.table_by_name
             .iter()
-            .filter(|(_, v)| v.is_mview() && valid_table_name(&v.name))
+            .filter(|(_, v)| v.is_mview() && valid_table_name(&v.name) && v.is_created())
             .map(|(_, v)| v)
     }
 
@@ -488,6 +581,10 @@ impl SchemaCatalog {
         self.sink_by_name.values()
     }
 
+    pub fn iter_subscription(&self) -> impl Iterator<Item = &Arc<SubscriptionCatalog>> {
+        self.subscription_by_name.values()
+    }
+
     pub fn iter_view(&self) -> impl Iterator<Item = &Arc<ViewCatalog>> {
         self.view_by_name.values()
     }
@@ -500,6 +597,10 @@ impl SchemaCatalog {
         self.connection_by_name.values()
     }
 
+    pub fn iter_secret(&self) -> impl Iterator<Item = &Arc<SecretCatalog>> {
+        self.secret_by_name.values()
+    }
+
     pub fn iter_system_tables(&self) -> impl Iterator<Item = &Arc<SystemTableCatalog>> {
         self.system_table_by_name.values()
     }
@@ -508,8 +609,20 @@ impl SchemaCatalog {
         self.table_by_name.get(table_name)
     }
 
+    pub fn get_created_table_by_name(&self, table_name: &str) -> Option<&Arc<TableCatalog>> {
+        self.table_by_name
+            .get(table_name)
+            .filter(|&table| table.stream_job_status == StreamJobStatus::Created)
+    }
+
     pub fn get_table_by_id(&self, table_id: &TableId) -> Option<&Arc<TableCatalog>> {
         self.table_by_id.get(table_id)
+    }
+
+    pub fn get_created_table_by_id(&self, table_id: &TableId) -> Option<&Arc<TableCatalog>> {
+        self.table_by_id
+            .get(table_id)
+            .filter(|&table| table.stream_job_status == StreamJobStatus::Created)
     }
 
     pub fn get_view_by_name(&self, view_name: &str) -> Option<&Arc<ViewCatalog>> {
@@ -534,6 +647,20 @@ impl SchemaCatalog {
 
     pub fn get_sink_by_id(&self, sink_id: &SinkId) -> Option<&Arc<SinkCatalog>> {
         self.sink_by_id.get(sink_id)
+    }
+
+    pub fn get_subscription_by_name(
+        &self,
+        subscription_name: &str,
+    ) -> Option<&Arc<SubscriptionCatalog>> {
+        self.subscription_by_name.get(subscription_name)
+    }
+
+    pub fn get_subscription_by_id(
+        &self,
+        subscription_id: &SubscriptionId,
+    ) -> Option<&Arc<SubscriptionCatalog>> {
+        self.subscription_by_id.get(subscription_id)
     }
 
     pub fn get_index_by_name(&self, index_name: &str) -> Option<&Arc<IndexCatalog>> {
@@ -627,6 +754,14 @@ impl SchemaCatalog {
         self.connection_by_name.get(connection_name)
     }
 
+    pub fn get_secret_by_name(&self, secret_name: &str) -> Option<&Arc<SecretCatalog>> {
+        self.secret_by_name.get(secret_name)
+    }
+
+    pub fn get_secret_by_id(&self, secret_id: &SecretId) -> Option<&Arc<SecretCatalog>> {
+        self.secret_by_id.get(secret_id)
+    }
+
     /// get all sources referencing the connection
     pub fn get_source_ids_by_connection(
         &self,
@@ -642,6 +777,23 @@ impl SchemaCatalog {
         self.connection_sink_ref
             .get(&connection_id)
             .map(|s| s.to_owned())
+    }
+
+    pub fn get_grant_object_by_oid(&self, oid: u32) -> Option<Object> {
+        #[allow(clippy::manual_map)]
+        if self.get_created_table_by_id(&TableId::new(oid)).is_some()
+            || self.get_index_by_id(&IndexId::new(oid)).is_some()
+        {
+            Some(Object::TableId(oid))
+        } else if self.get_source_by_id(&oid).is_some() {
+            Some(Object::SourceId(oid))
+        } else if self.get_sink_by_id(&oid).is_some() {
+            Some(Object::SinkId(oid))
+        } else if self.get_view_by_id(&oid).is_some() {
+            Some(Object::ViewId(oid))
+        } else {
+            None
+        }
     }
 
     pub fn id(&self) -> SchemaId {
@@ -687,8 +839,14 @@ impl From<&PbSchema> for SchemaCatalog {
             function_by_id: HashMap::new(),
             connection_by_name: HashMap::new(),
             connection_by_id: HashMap::new(),
+            secret_by_name: HashMap::new(),
+            secret_by_id: HashMap::new(),
+            _secret_source_ref: HashMap::new(),
+            _secret_sink_ref: HashMap::new(),
             connection_source_ref: HashMap::new(),
             connection_sink_ref: HashMap::new(),
+            subscription_by_name: HashMap::new(),
+            subscription_by_id: HashMap::new(),
         }
     }
 }

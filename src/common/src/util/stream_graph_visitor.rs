@@ -36,8 +36,8 @@ where
     visit_inner(stream_node, &mut f)
 }
 
-/// A utility for to accessing the [`StreamNode`]. The returned bool is used to determine whether the access needs to continue.
-pub fn visit_stream_node_cont<F>(stream_node: &mut StreamNode, mut f: F)
+/// A utility for to accessing the [`StreamNode`] mutably. The returned bool is used to determine whether the access needs to continue.
+pub fn visit_stream_node_cont_mut<F>(stream_node: &mut StreamNode, mut f: F)
 where
     F: FnMut(&mut StreamNode) -> bool,
 {
@@ -49,6 +49,26 @@ where
             return;
         }
         for input in &mut stream_node.input {
+            visit_inner(input, f);
+        }
+    }
+
+    visit_inner(stream_node, &mut f)
+}
+
+/// A utility for to accessing the [`StreamNode`] immutably. The returned bool is used to determine whether the access needs to continue.
+pub fn visit_stream_node_cont<F>(stream_node: &StreamNode, mut f: F)
+where
+    F: FnMut(&StreamNode) -> bool,
+{
+    fn visit_inner<F>(stream_node: &StreamNode, f: &mut F)
+    where
+        F: FnMut(&StreamNode) -> bool,
+    {
+        if !f(stream_node) {
+            return;
+        }
+        for input in &stream_node.input {
             visit_inner(input, f);
         }
     }
@@ -108,6 +128,9 @@ pub fn visit_stream_node_tables_inner<F>(
                 always!(node.left_degree_table, "HashJoinDegreeLeft");
                 always!(node.right_table, "HashJoinRight");
                 always!(node.right_degree_table, "HashJoinDegreeRight");
+            }
+            NodeBody::TemporalJoin(node) => {
+                optional!(node.memo_table, "TemporalJoinMemo");
             }
             NodeBody::DynamicFilter(node) => {
                 if node.condition_always_relax {
@@ -186,6 +209,9 @@ pub fn visit_stream_node_tables_inner<F>(
                 if let Some(source) = &mut node.node_inner {
                     always!(source.state_table, "FsFetch");
                 }
+            }
+            NodeBody::SourceBackfill(node) => {
+                always!(node.state_table, "SourceBackfill")
             }
 
             // Sink

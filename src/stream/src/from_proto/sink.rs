@@ -108,6 +108,8 @@ impl ExecutorBuilder for SinkExecutorBuilder {
         state_store: impl StateStore,
     ) -> StreamResult<Executor> {
         let [input_executor]: [_; 1] = params.input.try_into().unwrap();
+        let input_data_types = input_executor.info().schema.data_types();
+        let chunk_size = params.env.config().developer.chunk_size;
 
         let sink_desc = node.sink_desc.as_ref().unwrap();
         let sink_type = SinkType::from_proto(sink_desc.get_sink_type().unwrap());
@@ -181,7 +183,6 @@ impl ExecutorBuilder for SinkExecutorBuilder {
         );
 
         let sink_write_param = SinkWriterParam {
-            connector_params: params.env.connector_params(),
             executor_id: params.executor_id,
             vnode_bitmap: params.vnode_bitmap.clone(),
             meta_client: params.env.meta_client().map(SinkMetaClient::MetaClient),
@@ -207,6 +208,8 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                     sink_param,
                     columns,
                     factory,
+                    chunk_size,
+                    input_data_types,
                 )
                 .await?
                 .boxed()
@@ -214,7 +217,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             SinkLogStoreType::KvLogStore => {
                 let metrics = KvLogStoreMetrics::new(
                     &params.executor_stats,
-                    &sink_write_param,
+                    &params.info.identity,
                     &sink_param,
                     connector,
                 );
@@ -242,6 +245,8 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                     sink_param,
                     columns,
                     factory,
+                    chunk_size,
+                    input_data_types,
                 )
                 .await?
                 .boxed()

@@ -11,12 +11,14 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use futures::{Future, TryFutureExt, TryStreamExt};
-use futures_async_stream::try_stream;
-use risingwave_common::buffer::Bitmap;
+use futures::{Future, FutureExt};
+use risingwave_common::bitmap::Bitmap;
+use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_hummock_trace::{
@@ -25,12 +27,10 @@ use risingwave_hummock_trace::{
 };
 use thiserror_ext::AsReport;
 
-use super::identity;
-use crate::error::{StorageError, StorageResult};
+use crate::error::StorageResult;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{HummockStorage, SstableObjectIdManagerRef};
 use crate::store::*;
-use crate::StateStore;
 
 #[derive(Clone)]
 pub struct TracedStateStore<S> {
@@ -67,11 +67,11 @@ impl<S> TracedStateStore<S> {
         }
     }
 
-    async fn traced_iter<'a, St: StateStoreIterItemStream>(
+    async fn traced_iter<'a, St: StateStoreIter>(
         &'a self,
         iter_stream_future: impl Future<Output = StorageResult<St>> + 'a,
         span: MayTraceSpan,
-    ) -> StorageResult<TracedStateStoreIterStream<St>> {
+    ) -> StorageResult<TracedStateStoreIter<St>> {
         let res = iter_stream_future.await;
         if res.is_ok() {
             span.may_send_result(OperationResult::Iter(TraceResult::Ok(())));
@@ -79,7 +79,7 @@ impl<S> TracedStateStore<S> {
             span.may_send_result(OperationResult::Iter(TraceResult::Err));
         }
         let traced = TracedStateStoreIter::new(res?, span);
-        Ok(traced.into_stream())
+        Ok(traced)
     }
 
     async fn traced_get(
@@ -106,18 +106,9 @@ impl<S> TracedStateStore<S> {
     }
 }
 
-type TracedStateStoreIterStream<S: StateStoreIterItemStream> = impl StateStoreIterItemStream;
-
 impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
-    type IterStream<'a> = impl StateStoreIterItemStream + 'a;
-
-    fn may_exist(
-        &self,
-        key_range: TableKeyRange,
-        read_options: ReadOptions,
-    ) -> impl Future<Output = StorageResult<bool>> + Send + '_ {
-        self.inner.may_exist(key_range, read_options)
-    }
+    type Iter<'a> = impl StateStoreIter + 'a;
+    type RevIter<'a> = impl StateStoreIter + 'a;
 
     fn get(
         &self,
@@ -136,7 +127,7 @@ impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
         &self,
         key_range: TableKeyRange,
         read_options: ReadOptions,
-    ) -> impl Future<Output = StorageResult<Self::IterStream<'_>>> + Send + '_ {
+    ) -> impl Future<Output = StorageResult<Self::Iter<'_>>> + Send + '_ {
         let (l, r) = key_range.clone();
         let bytes_key_range = (l.map(|l| l.0), r.map(|r| r.0));
         let span = TraceSpan::new_iter_span(
@@ -146,7 +137,22 @@ impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
             self.storage_type,
         );
         self.traced_iter(self.inner.iter(key_range, read_options), span)
-            .map_ok(identity)
+    }
+
+    fn rev_iter(
+        &self,
+        key_range: TableKeyRange,
+        read_options: ReadOptions,
+    ) -> impl Future<Output = StorageResult<Self::RevIter<'_>>> + Send + '_ {
+        let (l, r) = key_range.clone();
+        let bytes_key_range = (l.map(|l| l.0), r.map(|r| r.0));
+        let span = TraceSpan::new_iter_span(
+            bytes_key_range,
+            None,
+            read_options.clone().into(),
+            self.storage_type,
+        );
+        self.traced_iter(self.inner.rev_iter(key_range, read_options), span)
     }
 
     fn insert(
@@ -241,15 +247,17 @@ impl<S: StateStore> StateStore for TracedStateStore<S> {
         res
     }
 
-    async fn sync(&self, epoch: u64) -> StorageResult<SyncResult> {
-        let span: MayTraceSpan = TraceSpan::new_sync_span(epoch, self.storage_type);
+    fn sync(&self, epoch: u64, table_ids: HashSet<TableId>) -> impl SyncFuture {
+        let span: MayTraceSpan = TraceSpan::new_sync_span(epoch, &table_ids, self.storage_type);
 
-        let sync_result = self.inner.sync(epoch).await;
+        let future = self.inner.sync(epoch, table_ids);
 
-        span.may_send_result(OperationResult::Sync(
-            sync_result.as_ref().map(|res| res.sync_size).into(),
-        ));
-        sync_result
+        future.map(move |sync_result| {
+            span.may_send_result(OperationResult::Sync(
+                sync_result.as_ref().map(|res| res.sync_size).into(),
+            ));
+            sync_result
+        })
     }
 
     fn seal_epoch(&self, epoch: u64, is_checkpoint: bool) {
@@ -277,7 +285,9 @@ impl<S: StateStore> StateStore for TracedStateStore<S> {
 }
 
 impl<S: StateStoreRead> StateStoreRead for TracedStateStore<S> {
-    type IterStream = impl StateStoreReadIterStream;
+    type ChangeLogIter = impl StateStoreReadChangeLogIter;
+    type Iter = impl StateStoreReadIter;
+    type RevIter = impl StateStoreReadIter;
 
     fn get(
         &self,
@@ -298,7 +308,7 @@ impl<S: StateStoreRead> StateStoreRead for TracedStateStore<S> {
         key_range: TableKeyRange,
         epoch: u64,
         read_options: ReadOptions,
-    ) -> impl Future<Output = StorageResult<Self::IterStream>> + '_ {
+    ) -> impl Future<Output = StorageResult<Self::Iter>> + '_ {
         let (l, r) = key_range.clone();
         let bytes_key_range = (l.map(|l| l.0), r.map(|r| r.0));
         let span = TraceSpan::new_iter_span(
@@ -308,7 +318,32 @@ impl<S: StateStoreRead> StateStoreRead for TracedStateStore<S> {
             self.storage_type,
         );
         self.traced_iter(self.inner.iter(key_range, epoch, read_options), span)
-            .map_ok(identity)
+    }
+
+    fn rev_iter(
+        &self,
+        key_range: TableKeyRange,
+        epoch: u64,
+        read_options: ReadOptions,
+    ) -> impl Future<Output = StorageResult<Self::RevIter>> + '_ {
+        let (l, r) = key_range.clone();
+        let bytes_key_range = (l.map(|l| l.0), r.map(|r| r.0));
+        let span = TraceSpan::new_iter_span(
+            bytes_key_range,
+            Some(epoch),
+            read_options.clone().into(),
+            self.storage_type,
+        );
+        self.traced_iter(self.inner.rev_iter(key_range, epoch, read_options), span)
+    }
+
+    fn iter_log(
+        &self,
+        epoch_range: (u64, u64),
+        key_range: TableKeyRange,
+        options: ReadLogOptions,
+    ) -> impl Future<Output = StorageResult<Self::ChangeLogIter>> + Send + '_ {
+        self.inner.iter_log(epoch_range, key_range, options)
     }
 }
 
@@ -347,13 +382,10 @@ impl<S> TracedStateStoreIter<S> {
     }
 }
 
-impl<S: StateStoreIterItemStream> TracedStateStoreIter<S> {
-    #[try_stream(ok = StateStoreIterItem, error = StorageError)]
-    async fn into_stream_inner(self) {
-        let inner = self.inner;
-        futures::pin_mut!(inner);
-
-        while let Some((key, value)) = inner
+impl<S: StateStoreIter> StateStoreIter for TracedStateStoreIter<S> {
+    async fn try_next(&mut self) -> StorageResult<Option<StateStoreIterItemRef<'_>>> {
+        if let Some((key, value)) = self
+            .inner
             .try_next()
             .await
             .inspect_err(|e| tracing::error!(error = %e.as_report(), "Failed in next"))?
@@ -362,14 +394,12 @@ impl<S: StateStoreIterItemStream> TracedStateStoreIter<S> {
             self.span
                 .may_send_result(OperationResult::IterNext(TraceResult::Ok(Some((
                     TracedBytes::from(key.user_key.table_key.to_vec()),
-                    TracedBytes::from(value.clone()),
+                    TracedBytes::from(Bytes::copy_from_slice(value)),
                 )))));
-            yield (key, value);
+            Ok(Some((key, value)))
+        } else {
+            Ok(None)
         }
-    }
-
-    fn into_stream(self) -> TracedStateStoreIterStream<S> {
-        Self::into_stream_inner(self)
     }
 }
 

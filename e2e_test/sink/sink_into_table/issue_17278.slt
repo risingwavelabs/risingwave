@@ -1,0 +1,34 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table t(
+    x int,
+    y timestamptz default now(),
+    z timestamptz default now() - interval '1 minute'
+) append only;
+
+statement ok
+create table s(x int) append only;
+
+statement ok
+create sink ss into t from s with (type = 'append-only');
+
+statement ok
+insert into s values (1), (2);
+
+query IT rowsort
+select x from t where y >= date '2021-01-01';
+----
+1
+2
+
+statement ok
+drop sink ss;
+
+statement ok
+drop table t;
+
+statement ok
+drop table s;
+

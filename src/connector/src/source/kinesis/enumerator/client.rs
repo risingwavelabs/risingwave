@@ -19,7 +19,7 @@ use aws_sdk_kinesis::Client as kinesis_client;
 use risingwave_common::bail;
 
 use crate::error::ConnectorResult as Result;
-use crate::source::kinesis::split::{KinesisOffset, KinesisSplit};
+use crate::source::kinesis::split::KinesisOffset;
 use crate::source::kinesis::*;
 use crate::source::{SourceEnumeratorContextRef, SplitEnumerator};
 

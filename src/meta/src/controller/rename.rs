@@ -17,9 +17,9 @@ use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::{ExprNode, FunctionCall, UserDefinedFunction};
 use risingwave_sqlparser::ast::{
-    Array, CreateSink, CreateSinkStatement, CreateSourceStatement, Distinct, Expr, Function,
-    FunctionArg, FunctionArgExpr, Ident, ObjectName, Query, SelectItem, SetExpr, Statement,
-    TableAlias, TableFactor, TableWithJoins,
+    Array, CreateSink, CreateSinkStatement, CreateSourceStatement, CreateSubscriptionStatement,
+    Distinct, Expr, Function, FunctionArg, FunctionArgExpr, Ident, ObjectName, Query, SelectItem,
+    SetExpr, Statement, TableAlias, TableFactor, TableWithJoins,
 };
 use risingwave_sqlparser::parser::Parser;
 
@@ -48,6 +48,13 @@ pub fn alter_relation_rename(definition: &str, new_name: &str) -> String {
             stmt: CreateSourceStatement {
                 source_name: name, ..
             },
+        }
+        | Statement::CreateSubscription {
+            stmt:
+                CreateSubscriptionStatement {
+                    subscription_name: name,
+                    ..
+                },
         }
         | Statement::CreateSink {
             stmt: CreateSinkStatement {
@@ -91,6 +98,12 @@ pub fn alter_relation_rename_refs(definition: &str, from: &str, to: &str) -> Str
             CreateSinkStatement {
                 sink_from: CreateSink::From(table_name),
                 into_table_name: None,
+                ..
+            },
+        }| Statement::CreateSubscription {
+            stmt:
+            CreateSubscriptionStatement {
+                subscription_from: table_name,
                 ..
             },
         } => replace_table_name(table_name, to),
@@ -140,7 +153,12 @@ impl QueryRewriter<'_> {
     fn visit_query(&self, query: &mut Query) {
         if let Some(with) = &mut query.with {
             for cte_table in &mut with.cte_tables {
-                self.visit_query(&mut cte_table.query);
+                match &mut cte_table.cte_inner {
+                    risingwave_sqlparser::ast::CteInner::Query(query) => self.visit_query(query),
+                    risingwave_sqlparser::ast::CteInner::ChangeLog(from) => {
+                        *from = Ident::new_unchecked(self.to)
+                    }
+                }
             }
         }
         self.visit_set_expr(&mut query.body);
@@ -157,7 +175,7 @@ impl QueryRewriter<'_> {
     ///
     /// So that we DON'T have to:
     /// 1. rewrite the select and expr part like `schema.table.column`, `table.column`,
-    /// `alias.column` etc.
+    ///    `alias.column` etc.
     /// 2. handle the case that the old name is used as alias.
     /// 3. handle the case that the new name is used as alias.
     fn visit_table_factor(&self, table_factor: &mut TableFactor) {
@@ -299,17 +317,23 @@ impl QueryRewriter<'_> {
                 self.visit_expr(low);
                 self.visit_expr(high);
             }
-            Expr::SimilarTo {
-                expr,
-                pat,
-                esc_text,
-                ..
+            Expr::Like {
+                expr, pattern: pat, ..
             } => {
                 self.visit_expr(expr);
                 self.visit_expr(pat);
-                if let Some(e) = esc_text {
-                    self.visit_expr(e);
-                }
+            }
+            Expr::ILike {
+                expr, pattern: pat, ..
+            } => {
+                self.visit_expr(expr);
+                self.visit_expr(pat);
+            }
+            Expr::SimilarTo {
+                expr, pattern: pat, ..
+            } => {
+                self.visit_expr(expr);
+                self.visit_expr(pat);
             }
 
             Expr::IsDistinctFrom(expr1, expr2)

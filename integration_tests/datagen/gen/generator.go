@@ -42,6 +42,9 @@ type GeneratorConfig struct {
 
 	// The topic to filter. If not specified, all topics will be used.
 	Topic string
+
+	// The total number of events to generate.
+	TotalEvents int64
 }
 
 type LoadGenerator interface {

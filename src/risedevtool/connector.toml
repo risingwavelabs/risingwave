@@ -3,7 +3,7 @@ extend = "common.toml"
 [env]
 # Look at the index for latest versions:
 # https://downloads.apache.org/maven/maven-3/
-MAVEN_VERSION = "3.9.3"
+MAVEN_VERSION = "3.9.6"
 MAVEN_DOWNLOAD_PATH = "${PREFIX_TMP}/maven.tar.gz"
 
 [tasks.download-maven]
@@ -17,7 +17,7 @@ script = '''
 
 set -euo pipefail
 
-if !(command -v javac &> /dev/null && [[ "$(javac -version 2>&1 | awk '{print $2}')" =~ ^(11|17|19|20|21) ]]); then
+if !(command -v javac &> /dev/null && [[ "$(javac -version 2>&1 | awk '{print $2}')" =~ ^(11|17|19|20|21|22) ]]); then
   echo "JDK 11+ is not installed. Please install JDK 11+ first."
   exit 1
 fi

@@ -12,10 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::VecDeque;
+
 use fixedbitset::FixedBitSet;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_pb::expr::expr_node::Type;
 
+use super::now::RewriteNowToProcTime;
 use super::{Expr, ExprImpl, ExprRewriter, ExprVisitor, FunctionCall, InputRef};
 use crate::expr::ExprType;
 
@@ -31,19 +34,30 @@ fn split_expr_by(expr: ExprImpl, op: ExprType, rets: &mut Vec<ExprImpl>) {
     }
 }
 
-pub fn merge_expr_by_binary<I>(mut exprs: I, op: ExprType, identity_elem: ExprImpl) -> ExprImpl
+/// Merge the given expressions by the logical operation.
+///
+/// The `op` must be commutative and associative, typically `And` or `Or`.
+pub(super) fn merge_expr_by_logical<I>(exprs: I, op: ExprType, identity_elem: ExprImpl) -> ExprImpl
 where
-    I: Iterator<Item = ExprImpl>,
+    I: IntoIterator<Item = ExprImpl>,
 {
-    if let Some(e) = exprs.next() {
-        let mut ret = e;
-        for expr in exprs {
-            ret = FunctionCall::new(op, vec![ret, expr]).unwrap().into();
+    let mut exprs: VecDeque<_> = exprs.into_iter().map(|e| (0usize, e)).collect();
+
+    while exprs.len() > 1 {
+        let (level, lhs) = exprs.pop_front().unwrap();
+        let rhs_level = exprs.front().unwrap().0;
+
+        // If there's one element left in the current level, move it to the end of the next level.
+        if level < rhs_level {
+            exprs.push_back((level, lhs));
+        } else {
+            let rhs = exprs.pop_front().unwrap().1;
+            let new_expr = FunctionCall::new(op, vec![lhs, rhs]).unwrap().into();
+            exprs.push_back((level + 1, new_expr));
         }
-        ret
-    } else {
-        identity_elem
     }
+
+    exprs.pop_front().map(|(_, e)| e).unwrap_or(identity_elem)
 }
 
 /// Transform a bool expression to Conjunctive form. e.g. given expression is
@@ -67,6 +81,85 @@ pub fn to_disjunctions(expr: ExprImpl) -> Vec<ExprImpl> {
 pub fn fold_boolean_constant(expr: ExprImpl) -> ExprImpl {
     let mut rewriter = BooleanConstantFolding {};
     rewriter.rewrite_expr(expr)
+}
+
+/// check `ColumnSelfEqualRewriter`'s comment below.
+pub fn column_self_eq_eliminate(expr: ExprImpl) -> ExprImpl {
+    ColumnSelfEqualRewriter::rewrite(expr)
+}
+
+/// for every `(col) == (col)`,
+/// transform to `IsNotNull(col)`
+/// since in the boolean context, `null = (...)` will always
+/// be treated as false.
+/// note: as always, only for *single column*.
+pub struct ColumnSelfEqualRewriter {}
+
+impl ColumnSelfEqualRewriter {
+    /// the exact copy from `logical_filter_expression_simplify_rule`
+    fn extract_column(expr: ExprImpl, columns: &mut Vec<ExprImpl>) {
+        match expr.clone() {
+            ExprImpl::FunctionCall(func_call) => {
+                // the functions that *never* return null will be ignored
+                if Self::is_not_null(func_call.func_type()) {
+                    return;
+                }
+                for sub_expr in func_call.inputs() {
+                    Self::extract_column(sub_expr.clone(), columns);
+                }
+            }
+            ExprImpl::InputRef(_) => {
+                if !columns.contains(&expr) {
+                    // only add the column if not exists
+                    columns.push(expr);
+                }
+            }
+            _ => (),
+        }
+    }
+
+    /// the exact copy from `logical_filter_expression_simplify_rule`
+    fn is_not_null(func_type: ExprType) -> bool {
+        func_type == ExprType::IsNull
+            || func_type == ExprType::IsNotNull
+            || func_type == ExprType::IsTrue
+            || func_type == ExprType::IsFalse
+            || func_type == ExprType::IsNotTrue
+            || func_type == ExprType::IsNotFalse
+    }
+
+    pub fn rewrite(expr: ExprImpl) -> ExprImpl {
+        let mut columns = vec![];
+        Self::extract_column(expr.clone(), &mut columns);
+        if columns.len() > 1 {
+            // leave it intact
+            return expr;
+        }
+
+        // extract the equal inputs with sanity check
+        let ExprImpl::FunctionCall(func_call) = expr.clone() else {
+            return expr;
+        };
+        if func_call.func_type() != ExprType::Equal || func_call.inputs().len() != 2 {
+            return expr;
+        }
+        assert_eq!(func_call.return_type(), DataType::Boolean);
+        let inputs = func_call.inputs();
+        let e1 = inputs[0].clone();
+        let e2 = inputs[1].clone();
+
+        if e1 == e2 {
+            if columns.is_empty() {
+                return ExprImpl::literal_bool(true);
+            }
+            let Ok(ret) = FunctionCall::new(ExprType::IsNotNull, vec![columns[0].clone()]) else {
+                return expr;
+            };
+            ret.into()
+        } else {
+            expr
+        }
+    }
 }
 
 /// Fold boolean constants in a expr
@@ -314,17 +407,7 @@ pub fn factorization_expr(expr: ExprImpl) -> Vec<ExprImpl> {
         disjunction.retain(|factor| !greatest_common_divider.contains(factor));
     }
     // now disjunctions == [[A, B], [B], [E]]
-    let remaining = merge_expr_by_binary(
-        disjunctions.into_iter().map(|conjunction| {
-            merge_expr_by_binary(
-                conjunction.into_iter(),
-                ExprType::And,
-                ExprImpl::literal_bool(true),
-            )
-        }),
-        ExprType::Or,
-        ExprImpl::literal_bool(false),
-    );
+    let remaining = ExprImpl::or(disjunctions.into_iter().map(ExprImpl::and));
     // now remaining is (A & B) | (B) | (E)
     // the result is C & D & ((A & B) | (B) | (E))
     greatest_common_divider
@@ -418,6 +501,11 @@ impl ExprVisitor for CountNow {
     fn visit_now(&mut self, _: &super::Now) {
         self.count += 1;
     }
+}
+
+pub fn rewrite_now_to_proctime(expr: ExprImpl) -> ExprImpl {
+    let mut r = RewriteNowToProcTime;
+    r.rewrite_expr(expr)
 }
 
 /// analyze if the expression can derive a watermark from some input watermark. If it can

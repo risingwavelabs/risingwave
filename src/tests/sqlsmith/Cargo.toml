@@ -16,8 +16,8 @@ normal = ["workspace-hack"]
 [dependencies]
 anyhow = "1"
 chrono = "0.4"
-clap = { version = "4", features = ["derive"] }
-itertools = "0.12"
+clap = { workspace = true }
+itertools = { workspace = true }
 rand = { version = "0.8", features = ["small_rng"] }
 rand_chacha = { version = "0.3.1" }
 regex = "1"
@@ -27,7 +27,7 @@ risingwave_expr_impl = { workspace = true }
 risingwave_frontend = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_sqlparser = { workspace = true }
-similar = "2.4.0"
+similar = "2.5.0"
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio" }
 tokio-postgres = "0.7"

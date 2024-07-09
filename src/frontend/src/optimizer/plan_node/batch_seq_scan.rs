@@ -36,14 +36,14 @@ use crate::scheduler::SchedulerResult;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchSeqScan {
     pub base: PlanBase<Batch>,
-    core: generic::Scan,
+    core: generic::TableScan,
     scan_ranges: Vec<ScanRange>,
     limit: Option<u64>,
 }
 
 impl BatchSeqScan {
     fn new_inner(
-        core: generic::Scan,
+        core: generic::TableScan,
         dist: Distribution,
         scan_ranges: Vec<ScanRange>,
         limit: Option<u64>,
@@ -77,13 +77,13 @@ impl BatchSeqScan {
         }
     }
 
-    pub fn new(core: generic::Scan, scan_ranges: Vec<ScanRange>, limit: Option<u64>) -> Self {
+    pub fn new(core: generic::TableScan, scan_ranges: Vec<ScanRange>, limit: Option<u64>) -> Self {
         // Use `Single` by default, will be updated later with `clone_with_dist`.
         Self::new_inner(core, Distribution::Single, scan_ranges, limit)
     }
 
     pub fn new_with_dist(
-        core: generic::Scan,
+        core: generic::TableScan,
         dist: Distribution,
         scan_ranges: Vec<ScanRange>,
         limit: Option<u64>,
@@ -123,7 +123,7 @@ impl BatchSeqScan {
 
     /// Get a reference to the batch seq scan's logical.
     #[must_use]
-    pub fn core(&self) -> &generic::Scan {
+    pub fn core(&self) -> &generic::TableScan {
         &self.core
     }
 

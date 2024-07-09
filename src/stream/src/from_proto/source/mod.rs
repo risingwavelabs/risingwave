@@ -13,7 +13,7 @@
 // limitations under the License.
 
 mod trad_source;
-pub use trad_source::SourceExecutorBuilder;
+pub use trad_source::{create_source_desc_builder, SourceExecutorBuilder};
 mod fs_fetch;
 pub use fs_fetch::FsFetchExecutorBuilder;
 

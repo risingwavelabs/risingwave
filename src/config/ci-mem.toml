@@ -1,12 +1,13 @@
 [meta]
 disable_recovery = true
-max_heartbeat_interval_secs = 600
+max_heartbeat_interval_secs = 60
 
 [streaming]
 in_flight_barrier_nums = 10
 
 [streaming.developer]
 stream_exchange_concurrent_barriers = 10
+stream_enable_arrangement_backfill = false
 
 [batch]
 enable_barrier_read = true

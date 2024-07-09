@@ -17,21 +17,22 @@ use std::collections::HashMap;
 use serde::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
 
-use crate::common::KafkaPrivateLinkCommon;
+use crate::connector_common::{AwsAuthProps, KafkaPrivateLinkCommon};
 
+mod client_context;
 pub mod enumerator;
 pub mod private_link;
 pub mod source;
 pub mod split;
 pub mod stats;
 
+pub use client_context::*;
 pub use enumerator::*;
-pub use private_link::*;
 pub use source::*;
 pub use split::*;
 use with_options::WithOptions;
 
-use crate::common::{KafkaCommon, RdKafkaPropertiesCommon};
+use crate::connector_common::{KafkaCommon, RdKafkaPropertiesCommon};
 use crate::source::SourceProperties;
 
 pub const KAFKA_CONNECTOR: &str = "kafka";
@@ -82,9 +83,11 @@ pub struct RdKafkaPropertiesConsumer {
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub fetch_max_bytes: Option<usize>,
 
-    /// Automatically and periodically commit offsets in the background.
-    /// Note: setting this to false does not prevent the consumer from fetching previously committed start offsets.
-    /// To circumvent this behaviour set specific start offsets per partition in the call to assign().
+    /// Whether to automatically and periodically commit offsets in the background.
+    ///
+    /// Note that RisingWave does NOT rely on committed offsets. Committing offset is only for exposing the
+    /// progress for monitoring. Setting this to false can avoid creating consumer groups.
+    ///
     /// default: true
     #[serde(rename = "properties.enable.auto.commit")]
     #[serde_as(as = "Option<DisplayFromStr>")]
@@ -117,7 +120,7 @@ pub struct KafkaProperties {
     )]
     pub time_offset: Option<String>,
 
-    /// This parameter is used to tell KafkaSplitReader to produce `UpsertMessage`s, which
+    /// This parameter is used to tell `KafkaSplitReader` to produce `UpsertMessage`s, which
     /// combine both key and value fields of the Kafka message.
     /// TODO: Currently, `Option<bool>` can not be parsed here.
     #[serde(rename = "upsert")]
@@ -134,6 +137,9 @@ pub struct KafkaProperties {
 
     #[serde(flatten)]
     pub privatelink_common: KafkaPrivateLinkCommon,
+
+    #[serde(flatten)]
+    pub aws_auth_props: AwsAuthProps,
 
     #[serde(flatten)]
     pub unknown_fields: HashMap<String, String>,
@@ -157,8 +163,6 @@ impl KafkaProperties {
     pub fn set_client(&self, c: &mut rdkafka::ClientConfig) {
         self.rdkafka_properties_common.set_client(c);
         self.rdkafka_properties_consumer.set_client(c);
-
-        tracing::info!("kafka client starts with: {:?}", c);
     }
 }
 
@@ -189,15 +193,15 @@ impl RdKafkaPropertiesConsumer {
 
 #[cfg(test)]
 mod test {
-    use std::collections::HashMap;
+    use std::collections::BTreeMap;
 
-    use maplit::hashmap;
+    use maplit::btreemap;
 
     use super::*;
 
     #[test]
     fn test_parse_config_consumer_common() {
-        let config: HashMap<String, String> = hashmap! {
+        let config: BTreeMap<String, String> = btreemap! {
             // common
             "properties.bootstrap.server".to_string() => "127.0.0.1:9092".to_string(),
             "topic".to_string() => "test".to_string(),
@@ -253,7 +257,7 @@ mod test {
             props.rdkafka_properties_consumer.fetch_queue_backoff_ms,
             Some(114514)
         );
-        let hashmap: HashMap<String, String> = hashmap! {
+        let hashmap: BTreeMap<String, String> = btreemap! {
             "broker1".to_string() => "10.0.0.1:8001".to_string()
         };
         assert_eq!(props.privatelink_common.broker_rewrite_map, Some(hashmap));

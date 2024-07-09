@@ -16,13 +16,13 @@ use std::fmt::Debug;
 use std::io::Write;
 use std::mem::size_of;
 
+use risingwave_common_estimate_size::{EstimateSize, ZeroHeapSize};
 use risingwave_pb::common::buffer::CompressionType;
 use risingwave_pb::common::Buffer;
 use risingwave_pb::data::{ArrayType, PbArray};
 
 use super::{Array, ArrayBuilder, ArrayImpl, ArrayResult};
-use crate::buffer::{Bitmap, BitmapBuilder};
-use crate::estimate_size::{EstimateSize, ZeroHeapSize};
+use crate::bitmap::{Bitmap, BitmapBuilder};
 use crate::for_all_native_types;
 use crate::types::*;
 
@@ -315,7 +315,6 @@ impl<T: PrimitiveArrayItemType> ArrayBuilder for PrimitiveArrayBuilder<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{F32, F64};
 
     fn helper_test_builder<T: PrimitiveArrayItemType>(data: Vec<Option<T>>) -> PrimitiveArray<T> {
         let mut builder = PrimitiveArrayBuilder::<T>::new(data.len());

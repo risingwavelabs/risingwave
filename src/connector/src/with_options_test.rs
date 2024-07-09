@@ -35,7 +35,17 @@ fn sink_mod_path() -> PathBuf {
 }
 
 fn common_mod_path() -> PathBuf {
-    connector_crate_path().join("src").join("common.rs")
+    connector_crate_path()
+        .join("src")
+        .join("connector_common")
+        .join("common.rs")
+}
+
+fn mqtt_common_mod_path() -> PathBuf {
+    connector_crate_path()
+        .join("src")
+        .join("connector_common")
+        .join("mqtt_common.rs")
 }
 
 pub fn generate_with_options_yaml_source() -> String {
@@ -53,7 +63,7 @@ pub fn generate_with_options_yaml_sink() -> String {
 /// the generated `yaml` might be inconsistent with the actual parsing logic.
 /// TODO: improve the test to check whether serde is used.
 ///
-/// - For sources, the parsing logic is in `TryFromHashMap`.
+/// - For sources, the parsing logic is in `TryFromBTreeMap`.
 /// - For sinks, the parsing logic is in `TryFrom<SinkParam>`.
 fn generate_with_options_yaml_inner(path: &Path) -> String {
     let mut structs = vec![];
@@ -63,6 +73,7 @@ fn generate_with_options_yaml_inner(path: &Path) -> String {
     for entry in walkdir::WalkDir::new(path)
         .into_iter()
         .chain(walkdir::WalkDir::new(common_mod_path()))
+        .chain(walkdir::WalkDir::new(mqtt_common_mod_path()))
     {
         let entry = entry.expect("Failed to read directory entry");
         if entry.path().extension() == Some("rs".as_ref()) {
@@ -158,8 +169,10 @@ fn generate_with_options_yaml_inner(path: &Path) -> String {
     let struct_infos = flatten_nested_options(struct_infos);
 
     // Generate the output
-    "# THIS FILE IS AUTO_GENERATED. DO NOT EDIT\n\n".to_string()
-        + &serde_yaml::to_string(&struct_infos).unwrap()
+    format!(
+        "# THIS FILE IS AUTO_GENERATED. DO NOT EDIT\n\n{}",
+        serde_yaml::to_string(&struct_infos).unwrap()
+    )
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -178,15 +191,15 @@ struct FieldInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     default: Option<String>,
 
-    #[serde(skip_serializing_if = "Option::is_none")]
-    alias: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    alias: Vec<String>,
 }
 
 #[derive(Default)]
 struct SerdeProperties {
     default_func: Option<String>,
     rename: Option<String>,
-    alias: Option<String>,
+    alias: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Default)]
@@ -257,7 +270,7 @@ fn extract_serde_properties(field: &Field) -> SerdeProperties {
                                 }
                             } else if path.is_ident("alias") {
                                 if let Lit::Str(lit_str) = lit {
-                                    serde_props.alias = Some(lit_str.value());
+                                    serde_props.alias.push(lit_str.value());
                                 }
                             } else if path.is_ident("default") {
                                 if let Lit::Str(lit_str) = lit {

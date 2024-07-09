@@ -272,7 +272,6 @@ impl Build for SomeAllExpression {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::array::DataChunk;
     use risingwave_common::row::Row;
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::types::ToOwnedDatum;

@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 
-use risingwave_common::config::BatchConfig;
+use risingwave_common::config::{BatchConfig, MetricLevel};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::worker_util::WorkerNodeId;
 use risingwave_connector::source::monitor::SourceMetrics;
@@ -22,7 +22,9 @@ use risingwave_dml::dml_manager::DmlManagerRef;
 use risingwave_rpc_client::ComputeClientPoolRef;
 use risingwave_storage::StateStoreImpl;
 
-use crate::monitor::{BatchExecutorMetrics, BatchManagerMetrics, BatchTaskMetrics};
+use crate::monitor::{
+    BatchExecutorMetrics, BatchManagerMetrics, BatchSpillMetrics, BatchTaskMetrics,
+};
 use crate::task::BatchManager;
 
 /// The global environment for task execution.
@@ -58,6 +60,11 @@ pub struct BatchEnvironment {
 
     /// Metrics for source.
     source_metrics: Arc<SourceMetrics>,
+
+    /// Batch spill metrics
+    spill_metrics: Arc<BatchSpillMetrics>,
+
+    metric_level: MetricLevel,
 }
 
 impl BatchEnvironment {
@@ -73,6 +80,8 @@ impl BatchEnvironment {
         client_pool: ComputeClientPoolRef,
         dml_manager: DmlManagerRef,
         source_metrics: Arc<SourceMetrics>,
+        spill_metrics: Arc<BatchSpillMetrics>,
+        metric_level: MetricLevel,
     ) -> Self {
         BatchEnvironment {
             server_addr,
@@ -85,6 +94,8 @@ impl BatchEnvironment {
             client_pool,
             dml_manager,
             source_metrics,
+            spill_metrics,
+            metric_level,
         }
     }
 
@@ -99,6 +110,7 @@ impl BatchEnvironment {
             task_manager: Arc::new(BatchManager::new(
                 BatchConfig::default(),
                 BatchManagerMetrics::for_test(),
+                u64::MAX,
             )),
             server_addr: "127.0.0.1:5688".parse().unwrap(),
             config: Arc::new(BatchConfig::default()),
@@ -111,6 +123,8 @@ impl BatchEnvironment {
             dml_manager: Arc::new(DmlManager::for_test()),
             source_metrics: Arc::new(SourceMetrics::default()),
             executor_metrics: Arc::new(BatchExecutorMetrics::for_test()),
+            spill_metrics: BatchSpillMetrics::for_test(),
+            metric_level: MetricLevel::Debug,
         }
     }
 
@@ -156,5 +170,13 @@ impl BatchEnvironment {
 
     pub fn source_metrics(&self) -> Arc<SourceMetrics> {
         self.source_metrics.clone()
+    }
+
+    pub fn spill_metrics(&self) -> Arc<BatchSpillMetrics> {
+        self.spill_metrics.clone()
+    }
+
+    pub fn metric_level(&self) -> MetricLevel {
+        self.metric_level
     }
 }

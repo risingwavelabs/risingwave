@@ -14,13 +14,12 @@
 
 use std::fmt::Debug;
 
-use anyhow::anyhow;
 use async_trait::async_trait;
 use await_tree::InstrumentAwait;
 use educe::Educe;
 use risingwave_common::util::addr::is_local_address;
-use tokio::sync::mpsc::error::SendError;
 
+use super::error::ExchangeChannelClosed;
 use super::permit::Sender;
 use crate::error::StreamResult;
 use crate::executor::Message;
@@ -74,14 +73,7 @@ impl Output for LocalOutput {
             .send(message)
             .verbose_instrument_await(self.span.clone())
             .await
-            .map_err(|SendError(message)| {
-                anyhow!(
-                    "failed to send message to actor {}: {:?}",
-                    self.actor_id,
-                    message
-                )
-                .into()
-            })
+            .map_err(|_| ExchangeChannelClosed::output(self.actor_id).into())
     }
 
     fn actor_id(&self) -> ActorId {
@@ -128,14 +120,7 @@ impl Output for RemoteOutput {
             .send(message)
             .verbose_instrument_await(self.span.clone())
             .await
-            .map_err(|SendError(message)| {
-                anyhow!(
-                    "failed to send message to actor {}: {:#?}",
-                    self.actor_id,
-                    message
-                )
-                .into()
-            })
+            .map_err(|_| ExchangeChannelClosed::output(self.actor_id).into())
     }
 
     fn actor_id(&self) -> ActorId {
