@@ -35,8 +35,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /** handler for starting a debezium source connectors for jni */
-
-/** handler for starting a debezium source connectors for jni */
 public class JniDbzSourceHandler {
     static final Logger LOG = LoggerFactory.getLogger(JniDbzSourceHandler.class);
 
@@ -56,10 +54,6 @@ public class JniDbzSourceHandler {
             throws Exception {
         var request =
                 ConnectorServiceProto.GetEventStreamRequest.parseFrom(getEventStreamRequestBytes);
-
-        // For jni.rs
-        java.lang.Thread.currentThread()
-                .setContextClassLoader(java.lang.ClassLoader.getSystemClassLoader());
         // userProps extracted from request, underlying implementation is UnmodifiableMap
         Map<String, String> mutableUserProps = new HashMap<>(request.getPropertiesMap());
         mutableUserProps.put("source.id", Long.toString(request.getSourceId()));

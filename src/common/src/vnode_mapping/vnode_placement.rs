@@ -20,7 +20,7 @@ use num_integer::Integer;
 use risingwave_common::hash::WorkerSlotId;
 use risingwave_pb::common::WorkerNode;
 
-use crate::buffer::{Bitmap, BitmapBuilder};
+use crate::bitmap::{Bitmap, BitmapBuilder};
 use crate::hash::{VirtualNode, WorkerSlotMapping};
 
 /// Calculate a new vnode mapping, keeping locality and balance on a best effort basis.
@@ -37,7 +37,7 @@ pub fn place_vnode(
         .iter()
         .filter(|w| w.property.as_ref().map_or(false, |p| p.is_serving))
         .sorted_by_key(|w| w.id)
-        .map(|w| (0..w.parallel_units.len()).map(|idx| WorkerSlotId::new(w.id, idx)))
+        .map(|w| (0..w.parallelism()).map(|idx| WorkerSlotId::new(w.id, idx)))
         .collect();
 
     // Set serving parallelism to the minimum of total number of worker slots, specified

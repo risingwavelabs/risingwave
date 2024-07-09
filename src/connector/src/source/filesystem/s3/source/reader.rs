@@ -124,7 +124,7 @@ impl S3FileReader {
                 source_ctx
                     .metrics
                     .partition_input_bytes
-                    .with_label_values(&[
+                    .with_guarded_label_values(&[
                         &actor_id,
                         &source_id,
                         &split_id,
@@ -141,7 +141,13 @@ impl S3FileReader {
             source_ctx
                 .metrics
                 .partition_input_bytes
-                .with_label_values(&[&actor_id, &source_id, &split_id, &source_name, &fragment_id])
+                .with_guarded_label_values(&[
+                    &actor_id,
+                    &source_id,
+                    &split_id,
+                    &source_name,
+                    &fragment_id,
+                ])
                 .inc_by(batch_size as u64);
             yield batch;
         }
@@ -250,6 +256,7 @@ mod tests {
         CommonParserConfig, CsvProperties, EncodingProperties, ProtocolProperties,
         SpecificParserConfig,
     };
+    use crate::source::filesystem::file_common::CompressionFormat;
     use crate::source::filesystem::s3::S3PropertiesCommon;
     use crate::source::filesystem::S3SplitEnumerator;
     use crate::source::{
@@ -266,6 +273,7 @@ mod tests {
             access: None,
             secret: None,
             endpoint_url: None,
+            compression_format: CompressionFormat::None,
         }
         .into();
         let mut enumerator =

@@ -214,9 +214,10 @@ impl SubscriptionCursor {
                     // Initiate a new batch query to continue fetching
                     match Self::get_next_rw_timestamp(
                         *seek_timestamp,
-                        self.dependent_table_id.table_id,
+                        &self.dependent_table_id,
                         *expected_timestamp,
                         handle_args.clone(),
+                        &self.subscription,
                     )
                     .await
                     {
@@ -343,15 +344,21 @@ impl SubscriptionCursor {
 
     async fn get_next_rw_timestamp(
         seek_timestamp: u64,
-        table_id: u32,
+        table_id: &TableId,
         expected_timestamp: Option<u64>,
         handle_args: HandlerArgs,
+        dependent_subscription: &SubscriptionCatalog,
     ) -> Result<(Option<u64>, Option<u64>)> {
+        let session = handle_args.session;
+        // Test subscription existence
+        session.get_subscription_by_schema_id_name(
+            dependent_subscription.schema_id,
+            &dependent_subscription.name,
+        )?;
+
         // The epoch here must be pulled every time, otherwise there will be cache consistency issues
-        let new_epochs = handle_args
-            .session
-            .catalog_writer()?
-            .list_change_log_epochs(table_id, seek_timestamp, 2)
+        let new_epochs = session
+            .list_change_log_epochs(table_id.table_id(), seek_timestamp, 2)
             .await?;
         if let Some(expected_timestamp) = expected_timestamp
             && (new_epochs.is_empty() || &expected_timestamp != new_epochs.first().unwrap())
@@ -525,9 +532,17 @@ impl CursorManager {
             handle_args,
         )
         .await?;
-        self.cursor_map
-            .lock()
-            .await
+        let mut cursor_map = self.cursor_map.lock().await;
+
+        cursor_map.retain(|_, v| {
+            if let Cursor::Subscription(cursor) = v {
+                !matches!(cursor.state, State::Invalid)
+            } else {
+                true
+            }
+        });
+
+        cursor_map
             .try_insert(cursor.cursor_name.clone(), Cursor::Subscription(cursor))
             .map_err(|_| {
                 ErrorCode::CatalogError(format!("cursor `{}` already exists", cursor_name).into())

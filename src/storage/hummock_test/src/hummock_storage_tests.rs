@@ -19,7 +19,7 @@ use bytes::{BufMut, Bytes};
 use foyer::CacheContext;
 use futures::TryStreamExt;
 use itertools::Itertools;
-use risingwave_common::buffer::BitmapBuilder;
+use risingwave_common::bitmap::BitmapBuilder;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::range::RangeBoundsExt;

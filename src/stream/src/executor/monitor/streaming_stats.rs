@@ -24,7 +24,7 @@ use risingwave_common::config::MetricLevel;
 use risingwave_common::metrics::{
     LabelGuardedGauge, LabelGuardedGaugeVec, LabelGuardedHistogramVec, LabelGuardedIntCounter,
     LabelGuardedIntCounterVec, LabelGuardedIntGauge, LabelGuardedIntGaugeVec,
-    RelabeledGuardedHistogramVec,
+    RelabeledGuardedHistogramVec, RelabeledGuardedIntCounterVec,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common::{
@@ -96,7 +96,7 @@ pub struct StreamingMetrics {
     pub join_matched_join_keys: RelabeledGuardedHistogramVec<3>,
 
     // Streaming Join, Streaming Dynamic Filter and Streaming Union
-    pub barrier_align_duration: RelabeledGuardedHistogramVec<4>,
+    pub barrier_align_duration: RelabeledGuardedIntCounterVec<4>,
 
     // Streaming Aggregation
     agg_lookup_miss_count: LabelGuardedIntCounterVec<3>,
@@ -465,19 +465,15 @@ impl StreamingMetrics {
         )
         .unwrap();
 
-        let opts = histogram_opts!(
-            "stream_barrier_align_duration",
+        let barrier_align_duration = register_guarded_int_counter_vec_with_registry!(
+            "stream_barrier_align_duration_ns",
             "Duration of join align barrier",
-            exponential_buckets(0.0001, 2.0, 21).unwrap() // max 104s
-        );
-        let barrier_align_duration = register_guarded_histogram_vec_with_registry!(
-            opts,
             &["actor_id", "fragment_id", "wait_side", "executor"],
             registry
         )
         .unwrap();
 
-        let barrier_align_duration = RelabeledGuardedHistogramVec::with_metric_level_relabel_n(
+        let barrier_align_duration = RelabeledGuardedIntCounterVec::with_metric_level_relabel_n(
             MetricLevel::Debug,
             barrier_align_duration,
             level,

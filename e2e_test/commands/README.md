@@ -6,3 +6,5 @@ They will be loaded in `PATH` by `risedev slt`, and thus function as kind of "bu
 
 Only general commands should be put here.
 If the script is ad-hoc (only used for one test), it's better to put next to the test file.
+
+See the [connector development guide](http://risingwavelabs.github.io/risingwave/connector/intro.html#end-to-end-tests) for more information about how to test.

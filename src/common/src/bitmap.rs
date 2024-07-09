@@ -425,7 +425,7 @@ impl Bitmap {
     ///
     /// # Example
     /// ```
-    /// use risingwave_common::buffer::Bitmap;
+    /// use risingwave_common::bitmap::Bitmap;
     /// let bitmap = Bitmap::from_range(200, 100..180);
     /// assert_eq!(bitmap.count_ones(), 80);
     /// for i in 0..200 {
