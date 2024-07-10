@@ -77,13 +77,13 @@ impl TableFunction {
             // s3 secret key
             // file location
             if args.len() != 6 {
-                return Err(BindError("FileScan function only accepts 6 arguments: file_scan('parquet', 's3', s3 region, s3 access key, s3 secret key, file location)".to_string()).into());
+                return Err(BindError("file_scan function only accepts 6 arguments: file_scan('parquet', 's3', s3 region, s3 access key, s3 secret key, file location)".to_string()).into());
             }
             let mut eval_args: Vec<String> = vec![];
             for arg in &args {
                 if arg.return_type() != DataType::Varchar {
                     return Err(BindError(
-                        "FileScan function only accepts string arguments".to_string(),
+                        "file_scan function only accepts string arguments".to_string(),
                     )
                     .into());
                 }
@@ -91,7 +91,7 @@ impl TableFunction {
                     Some(Ok(value)) => {
                         if value.is_none() {
                             return Err(BindError(
-                                "FileScan function does not accept null arguments".to_string(),
+                                "file_scan function does not accept null arguments".to_string(),
                             )
                             .into());
                         }
@@ -101,7 +101,7 @@ impl TableFunction {
                             }
                             _ => {
                                 return Err(BindError(
-                                    "FileScan function only accepts string arguments".to_string(),
+                                    "file_scan function only accepts string arguments".to_string(),
                                 )
                                 .into())
                             }
@@ -112,7 +112,7 @@ impl TableFunction {
                     }
                     None => {
                         return Err(BindError(
-                            "FileScan function only accepts constant arguments".to_string(),
+                            "file_scan function only accepts constant arguments".to_string(),
                         )
                         .into());
                     }
@@ -120,14 +120,14 @@ impl TableFunction {
             }
             if !"parquet".eq_ignore_ascii_case(&eval_args[0]) {
                 return Err(BindError(
-                    "FileScan function only accepts 'parquet' as file format".to_string(),
+                    "file_scan function only accepts 'parquet' as file format".to_string(),
                 )
                 .into());
             }
 
             if !"s3".eq_ignore_ascii_case(&eval_args[1]) {
                 return Err(BindError(
-                    "FileScan function only accepts 's3' as storage type".to_string(),
+                    "file_scan function only accepts 's3' as storage type".to_string(),
                 )
                 .into());
             }
