@@ -15,6 +15,9 @@
 use super::docker_service::{DockerService, DockerServiceConfig};
 use crate::SchemaRegistryConfig;
 
+// Schema Registry listener port in the container.
+const SCHEMA_REGISTRY_LISTENER_PORT: &str = "8081";
+
 impl DockerServiceConfig for SchemaRegistryConfig {
     fn id(&self) -> String {
         self.id.clone()
@@ -43,7 +46,7 @@ impl DockerServiceConfig for SchemaRegistryConfig {
             ("SCHEMA_REGISTRY_HOST_NAME".to_owned(), self.address.clone()),
             (
                 "SCHEMA_REGISTRY_LISTENERS".to_owned(),
-                format!("http://{}:{}", "0.0.0.0", "8081"),
+                format!("http://{}:{}", "0.0.0.0", SCHEMA_REGISTRY_LISTENER_PORT),
             ),
             (
                 "SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS".to_owned(),
@@ -53,7 +56,10 @@ impl DockerServiceConfig for SchemaRegistryConfig {
     }
 
     fn ports(&self) -> Vec<(String, String)> {
-        vec![(self.port.to_string(), "8081".to_owned())]
+        vec![(
+            self.port.to_string(),
+            SCHEMA_REGISTRY_LISTENER_PORT.to_owned(),
+        )]
     }
 
     fn data_path(&self) -> Option<String> {
