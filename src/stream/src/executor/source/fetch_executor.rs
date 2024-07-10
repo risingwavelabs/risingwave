@@ -321,8 +321,6 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                         }
                         // StreamChunk from FsSourceReader, and the reader reads only one file.
                         Either::Right(chunk) => {
-                            println!("WKXLOG fetch_executor into_stream chunk: {:?}", chunk);
-                            // println!("WKXLOG fetch_executor mapping: {:?}", mapping);
                             let mapping =
                                 get_split_offset_mapping_from_chunk(&chunk, split_idx, offset_idx)
                                     .unwrap();
