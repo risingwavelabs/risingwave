@@ -19,7 +19,7 @@ use std::mem::swap;
 use anyhow::Context;
 use itertools::Itertools;
 use risingwave_common::bail;
-use risingwave_common::hash::WorkerSlotId;
+use risingwave_common::hash::{ActorMapping, WorkerSlotId};
 use risingwave_common::util::stream_graph_visitor::visit_stream_node;
 use risingwave_meta_model_v2::actor::ActorStatus;
 use risingwave_meta_model_v2::fragment::DistributionType;
@@ -53,8 +53,9 @@ use sea_orm::{
 
 use crate::controller::catalog::{CatalogController, CatalogControllerInner};
 use crate::controller::utils::{
-    get_actor_dispatchers, get_fragment_mappings, rebuild_fragment_mapping_from_actors,
-    FragmentDesc, PartialActorLocation, PartialFragmentStateTables,
+    get_actor_dispatchers, get_all_fragment_actor_mappings, get_fragment_mappings,
+    rebuild_fragment_mapping_from_actors, FragmentDesc, PartialActorLocation,
+    PartialFragmentStateTables,
 };
 use crate::manager::{ActorInfos, InflightFragmentInfo, LocalNotification};
 use crate::model::{TableFragments, TableParallelism};
@@ -647,6 +648,13 @@ impl CatalogController {
             .all(&inner.db)
             .await?;
         Ok(job_states)
+    }
+
+    pub async fn list_fragment_actor_mapping(
+        &self,
+    ) -> MetaResult<HashMap<FragmentId, ActorMapping>> {
+        let inner = self.inner.read().await;
+        get_all_fragment_actor_mappings(&inner.db).await
     }
 
     /// Get all actor ids in the target streaming jobs.

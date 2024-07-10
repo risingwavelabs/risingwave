@@ -261,6 +261,12 @@ message ListActorStatesResponse {
   repeated ActorState states = 1;
 }
 
+message ListFragmentActorMappingsRequest {}
+
+message ListFragmentActorMappingsResponse {
+  map<uint32, stream_plan.ActorMapping> mappings = 1;
+}
+
 message ListObjectDependenciesRequest {}
 
 message ListObjectDependenciesResponse {
@@ -301,6 +307,7 @@ service StreamManagerService {
   rpc ListTableFragmentStates(ListTableFragmentStatesRequest) returns (ListTableFragmentStatesResponse);
   rpc ListFragmentDistribution(ListFragmentDistributionRequest) returns (ListFragmentDistributionResponse);
   rpc ListActorStates(ListActorStatesRequest) returns (ListActorStatesResponse);
+  rpc ListFragmentActorMappings(ListFragmentActorMappingsRequest) returns (ListFragmentActorMappingsResponse);
   rpc ListObjectDependencies(ListObjectDependenciesRequest) returns (ListObjectDependenciesResponse);
   rpc ApplyThrottle(ApplyThrottleRequest) returns (ApplyThrottleResponse);
   rpc Recover(RecoverRequest) returns (RecoverResponse);

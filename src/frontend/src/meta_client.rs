@@ -34,6 +34,7 @@ use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies
 use risingwave_pb::meta::list_table_fragment_states_response::TableFragmentState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::{EventLog, PbThrottleTarget};
+use risingwave_pb::stream_plan::PbActorMapping;
 use risingwave_rpc_client::error::Result;
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 
@@ -68,6 +69,8 @@ pub trait FrontendMetaClient: Send + Sync {
     async fn list_fragment_distribution(&self) -> Result<Vec<FragmentDistribution>>;
 
     async fn list_actor_states(&self) -> Result<Vec<ActorState>>;
+
+    async fn list_fragment_mappings(&self) -> Result<HashMap<u32, PbActorMapping>>;
 
     async fn list_object_dependencies(&self) -> Result<Vec<PbObjectDependencies>>;
 
@@ -184,6 +187,10 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn list_actor_states(&self) -> Result<Vec<ActorState>> {
         self.0.list_actor_states().await
+    }
+
+    async fn list_fragment_mappings(&self) -> Result<HashMap<u32, PbActorMapping>> {
+        self.0.list_fragment_actor_mappings().await
     }
 
     async fn list_object_dependencies(&self) -> Result<Vec<PbObjectDependencies>> {

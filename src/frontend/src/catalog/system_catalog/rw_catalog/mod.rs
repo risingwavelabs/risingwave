@@ -54,6 +54,7 @@ pub(super) mod rw_types;
 mod rw_user_secrets;
 mod rw_users;
 mod rw_views;
+mod rw_vnode_mappings;
 mod rw_worker_nodes;
 mod rw_worker_slots;
 

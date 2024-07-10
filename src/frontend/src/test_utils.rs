@@ -56,7 +56,7 @@ use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies
 use risingwave_pb::meta::list_table_fragment_states_response::TableFragmentState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::{EventLog, PbTableParallelism, PbThrottleTarget, SystemParams};
-use risingwave_pb::stream_plan::StreamFragmentGraph;
+use risingwave_pb::stream_plan::{PbActorMapping, StreamFragmentGraph};
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::{GrantPrivilege, UserInfo};
 use risingwave_rpc_client::error::Result as RpcResult;
@@ -1090,6 +1090,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         _min_epoch: u64,
         _max_count: u32,
     ) -> RpcResult<Vec<u64>> {
+        unimplemented!()
+    }
+
+    async fn list_fragment_mappings(&self) -> RpcResult<HashMap<u32, PbActorMapping>> {
         unimplemented!()
     }
 }

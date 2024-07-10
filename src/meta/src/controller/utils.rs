@@ -872,6 +872,87 @@ where
     Ok(rebuild_fragment_mapping_from_actors(job_actors))
 }
 
+/// `get_all_fragment_mappings` returns all fragment vnode mappings
+pub async fn get_all_fragment_actor_mappings<C>(
+    db: &C,
+) -> MetaResult<HashMap<FragmentId, ActorMapping>>
+where
+    C: ConnectionTrait,
+{
+    let job_actors: Vec<(
+        FragmentId,
+        DistributionType,
+        ActorId,
+        Option<VnodeBitmap>,
+        ActorStatus,
+    )> = Actor::find()
+        .select_only()
+        .columns([
+            fragment::Column::FragmentId,
+            fragment::Column::DistributionType,
+        ])
+        .columns([
+            actor::Column::ActorId,
+            actor::Column::VnodeBitmap,
+            actor::Column::Status,
+        ])
+        .join(JoinType::InnerJoin, actor::Relation::Fragment.def())
+        .into_tuple()
+        .all(db)
+        .await?;
+
+    let mut actor_bitmaps = HashMap::new();
+    let mut fragment_actors = HashMap::new();
+    let mut fragment_dist = HashMap::new();
+
+    for (fragment_id, dist, actor_id, bitmap, actor_status) in job_actors {
+        if actor_status == ActorStatus::Inactive {
+            continue;
+        }
+        actor_bitmaps.insert(actor_id, bitmap);
+        fragment_actors
+            .entry(fragment_id)
+            .or_insert_with(Vec::new)
+            .push(actor_id);
+        fragment_dist.insert(fragment_id, dist);
+    }
+
+    let mut result = HashMap::new();
+    for (fragment_id, dist) in fragment_dist {
+        let actor_mapping = match dist {
+            DistributionType::Single => {
+                let actor = fragment_actors
+                    .remove(&fragment_id)
+                    .unwrap()
+                    .into_iter()
+                    .exactly_one()
+                    .unwrap() as hash::ActorId;
+                ActorMapping::new_single(actor)
+            }
+            DistributionType::Hash => {
+                let actors = fragment_actors.remove(&fragment_id).unwrap();
+                let all_actor_bitmaps: HashMap<_, _> = actors
+                    .iter()
+                    .map(|actor_id| {
+                        let vnode_bitmap = actor_bitmaps
+                            .remove(actor_id)
+                            .flatten()
+                            .expect("actor bitmap shouldn't be none in hash fragment");
+                        (
+                            *actor_id as hash::ActorId,
+                            Bitmap::from(&vnode_bitmap.to_protobuf()),
+                        )
+                    })
+                    .collect();
+                ActorMapping::from_bitmaps(&all_actor_bitmaps)
+            }
+        };
+
+        result.insert(fragment_id, actor_mapping);
+    }
+    Ok(result)
+}
+
 pub fn rebuild_fragment_mapping_from_actors(
     job_actors: Vec<(
         FragmentId,

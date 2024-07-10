@@ -82,7 +82,7 @@ use risingwave_pb::meta::system_params_service_client::SystemParamsServiceClient
 use risingwave_pb::meta::telemetry_info_service_client::TelemetryInfoServiceClient;
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
 use risingwave_pb::meta::*;
-use risingwave_pb::stream_plan::StreamFragmentGraph;
+use risingwave_pb::stream_plan::{ActorMapping, StreamFragmentGraph};
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::user_service_client::UserServiceClient;
 use risingwave_pb::user::*;
@@ -895,6 +895,15 @@ impl MetaClient {
             .list_fragment_distribution(ListFragmentDistributionRequest {})
             .await?;
         Ok(resp.distributions)
+    }
+
+    pub async fn list_fragment_actor_mappings(&self) -> Result<HashMap<u32, ActorMapping>> {
+        let resp = self
+            .inner
+            .list_fragment_actor_mappings(ListFragmentActorMappingsRequest {})
+            .await?;
+
+        Ok(resp.mappings)
     }
 
     pub async fn list_actor_states(&self) -> Result<Vec<ActorState>> {
@@ -1951,6 +1960,7 @@ macro_rules! for_all_meta_rpc {
             ,{ stream_client, list_table_fragment_states, ListTableFragmentStatesRequest, ListTableFragmentStatesResponse }
             ,{ stream_client, list_fragment_distribution, ListFragmentDistributionRequest, ListFragmentDistributionResponse }
             ,{ stream_client, list_actor_states, ListActorStatesRequest, ListActorStatesResponse }
+            ,{ stream_client, list_fragment_actor_mappings, ListFragmentActorMappingsRequest, ListFragmentActorMappingsResponse }
             ,{ stream_client, list_object_dependencies, ListObjectDependenciesRequest, ListObjectDependenciesResponse }
             ,{ stream_client, recover, RecoverRequest, RecoverResponse }
             ,{ ddl_client, create_table, CreateTableRequest, CreateTableResponse }

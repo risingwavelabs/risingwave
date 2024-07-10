@@ -15,7 +15,9 @@
 use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
+use risingwave_common::hash::ActorMapping;
 use risingwave_meta::manager::{LocalNotification, MetadataManager};
 use risingwave_meta::model;
 use risingwave_meta::model::ActorId;
@@ -26,8 +28,10 @@ use risingwave_pb::meta::list_table_fragments_response::{
     ActorInfo, FragmentInfo, TableFragmentInfo,
 };
 use risingwave_pb::meta::stream_manager_service_server::StreamManagerService;
-use risingwave_pb::meta::table_fragments::actor_status::PbActorState;
-use risingwave_pb::meta::table_fragments::fragment::PbFragmentDistributionType;
+use risingwave_pb::meta::table_fragments::actor_status::{ActorState, PbActorState};
+use risingwave_pb::meta::table_fragments::fragment::{
+    FragmentDistributionType, PbFragmentDistributionType,
+};
 use risingwave_pb::meta::table_fragments::PbState;
 use risingwave_pb::meta::*;
 use tonic::{Request, Response, Status};
@@ -422,5 +426,60 @@ impl StreamManagerService for StreamServiceImpl {
             .notify_local_subscribers(LocalNotification::AdhocRecovery)
             .await;
         Ok(Response::new(RecoverResponse {}))
+    }
+
+    async fn list_fragment_actor_mappings(
+        &self,
+        _request: Request<ListFragmentActorMappingsRequest>,
+    ) -> Result<Response<ListFragmentActorMappingsResponse>, Status> {
+        let mappings = match &self.metadata_manager {
+            MetadataManager::V1(mgr) => {
+                let core = mgr.fragment_manager.get_fragment_read_guard().await;
+                core.table_fragments()
+                    .values()
+                    .flat_map(|tf| {
+                        tf.fragments().map(|fragment| {
+                            let actor_mapping = match fragment.get_distribution_type().unwrap() {
+                                FragmentDistributionType::Unspecified => unreachable!(),
+                                FragmentDistributionType::Single => {
+                                    let actor = fragment
+                                        .get_actors()
+                                        .iter()
+                                        .exactly_one()
+                                        .expect("single actor");
+                                    ActorMapping::new_single(actor.actor_id)
+                                }
+                                FragmentDistributionType::Hash => {
+                                    let mut actor_bitmaps = HashMap::new();
+                                    for actor in &fragment.actors {
+                                        let status = tf.actor_status.get(&actor.actor_id).unwrap();
+                                        if let ActorState::Inactive = status.state() {
+                                            continue;
+                                        }
+                                        actor_bitmaps.insert(
+                                            actor.actor_id as ActorId,
+                                            Bitmap::from(actor.vnode_bitmap.as_ref().unwrap()),
+                                        );
+                                    }
+                                    ActorMapping::from_bitmaps(&actor_bitmaps)
+                                }
+                            };
+
+                            (fragment.fragment_id, actor_mapping.to_protobuf())
+                        })
+                    })
+                    .collect()
+            }
+            MetadataManager::V2(mgr) => mgr
+                .catalog_controller
+                .list_fragment_actor_mapping()
+                .await?
+                .into_iter()
+                .map(|(fragment_id, mapping)| (fragment_id as u32, mapping.to_protobuf()))
+                .collect(),
+        };
+        Ok(Response::new(ListFragmentActorMappingsResponse {
+            mappings,
+        }))
     }
 }
