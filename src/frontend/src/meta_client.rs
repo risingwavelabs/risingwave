@@ -33,7 +33,7 @@ use risingwave_pb::meta::list_fragment_distribution_response::FragmentDistributi
 use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
 use risingwave_pb::meta::list_table_fragment_states_response::TableFragmentState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
-use risingwave_pb::meta::{EventLog, PbThrottleTarget};
+use risingwave_pb::meta::{EventLog, PbThrottleTarget, RecoveryStatus};
 use risingwave_rpc_client::error::Result;
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 
@@ -134,7 +134,7 @@ pub trait FrontendMetaClient: Send + Sync {
         max_count: u32,
     ) -> Result<Vec<u64>>;
 
-    async fn check_cluster_in_recovery(&self) -> Result<bool>;
+    async fn get_cluster_recovery_status(&self) -> Result<RecoveryStatus>;
 }
 
 pub struct FrontendMetaClientImpl(pub MetaClient);
@@ -339,7 +339,7 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
             .await
     }
 
-    async fn check_cluster_in_recovery(&self) -> Result<bool> {
-        self.0.check_cluster_in_recovery().await
+    async fn get_cluster_recovery_status(&self) -> Result<RecoveryStatus> {
+        self.0.get_cluster_recovery_status().await
     }
 }

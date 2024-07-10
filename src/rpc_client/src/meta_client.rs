@@ -940,12 +940,12 @@ impl MetaClient {
         Ok(resp)
     }
 
-    pub async fn check_cluster_in_recovery(&self) -> Result<bool> {
+    pub async fn get_cluster_recovery_status(&self) -> Result<RecoveryStatus> {
         let resp = self
             .inner
-            .check_cluster_in_recovery(CheckClusterInRecoveryRequest {})
+            .get_cluster_recovery_status(GetClusterRecoveryStatusRequest {})
             .await?;
-        Ok(resp.in_recovery)
+        Ok(resp.get_status().unwrap())
     }
 
     pub async fn get_cluster_info(&self) -> Result<GetClusterInfoResponse> {
@@ -1949,7 +1949,7 @@ macro_rules! for_all_meta_rpc {
             ,{ cluster_client, delete_worker_node, DeleteWorkerNodeRequest, DeleteWorkerNodeResponse }
             ,{ cluster_client, update_worker_node_schedulability, UpdateWorkerNodeSchedulabilityRequest, UpdateWorkerNodeSchedulabilityResponse }
             ,{ cluster_client, list_all_nodes, ListAllNodesRequest, ListAllNodesResponse }
-            ,{ cluster_client, check_cluster_in_recovery, CheckClusterInRecoveryRequest, CheckClusterInRecoveryResponse }
+            ,{ cluster_client, get_cluster_recovery_status, GetClusterRecoveryStatusRequest, GetClusterRecoveryStatusResponse }
             ,{ heartbeat_client, heartbeat, HeartbeatRequest, HeartbeatResponse }
             ,{ stream_client, flush, FlushRequest, FlushResponse }
             ,{ stream_client, pause, PauseRequest, PauseResponse }

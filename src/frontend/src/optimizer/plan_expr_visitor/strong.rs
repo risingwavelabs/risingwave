@@ -306,6 +306,7 @@ impl Strong {
             | ExprType::PgGetSerialSequence
             | ExprType::PgIndexColumnHasProperty
             | ExprType::PgIsInRecovery
+            | ExprType::RwRecoveryStatus
             | ExprType::IcebergTransform
             | ExprType::HasTablePrivilege
             | ExprType::HasAnyColumnPrivilege

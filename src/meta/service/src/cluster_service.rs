@@ -20,9 +20,10 @@ use risingwave_pb::common::HostAddress;
 use risingwave_pb::meta::cluster_service_server::ClusterService;
 use risingwave_pb::meta::{
     ActivateWorkerNodeRequest, ActivateWorkerNodeResponse, AddWorkerNodeRequest,
-    AddWorkerNodeResponse, CheckClusterInRecoveryRequest, CheckClusterInRecoveryResponse,
-    DeleteWorkerNodeRequest, DeleteWorkerNodeResponse, ListAllNodesRequest, ListAllNodesResponse,
-    UpdateWorkerNodeSchedulabilityRequest, UpdateWorkerNodeSchedulabilityResponse,
+    AddWorkerNodeResponse, DeleteWorkerNodeRequest, DeleteWorkerNodeResponse,
+    GetClusterRecoveryStatusRequest, GetClusterRecoveryStatusResponse, ListAllNodesRequest,
+    ListAllNodesResponse, UpdateWorkerNodeSchedulabilityRequest,
+    UpdateWorkerNodeSchedulabilityResponse,
 };
 use thiserror_ext::AsReport;
 use tonic::{Request, Response, Status};
@@ -182,13 +183,12 @@ impl ClusterService for ClusterServiceImpl {
         }))
     }
 
-    async fn check_cluster_in_recovery(
+    async fn get_cluster_recovery_status(
         &self,
-        _request: Request<CheckClusterInRecoveryRequest>,
-    ) -> Result<Response<CheckClusterInRecoveryResponse>, Status> {
-        Ok(Response::new(CheckClusterInRecoveryResponse {
-            status: None,
-            in_recovery: self.barrier_manager.check_status_running().is_err(),
+        _request: Request<GetClusterRecoveryStatusRequest>,
+    ) -> Result<Response<GetClusterRecoveryStatusResponse>, Status> {
+        Ok(Response::new(GetClusterRecoveryStatusResponse {
+            status: self.barrier_manager.get_recovery_status() as _,
         }))
     }
 }

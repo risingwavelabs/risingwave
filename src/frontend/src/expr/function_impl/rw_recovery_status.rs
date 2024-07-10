@@ -12,22 +12,41 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt::Write;
 use std::sync::Arc;
 
 use risingwave_expr::{capture_context, function, ExprError, Result};
+use risingwave_pb::meta::RecoveryStatus;
 
 use super::context::META_CLIENT;
 use crate::meta_client::FrontendMetaClient;
 
+#[function("rw_recovery_status() -> varchar", volatile)]
+async fn rw_recovery_status(writer: &mut impl Write) -> Result<()> {
+    writer
+        .write_str(
+            rw_recovery_status_impl_captured()
+                .await?
+                .as_str_name()
+                .strip_prefix("STATUS_")
+                .unwrap(),
+        )
+        .unwrap();
+    Ok(())
+}
+
 #[function("pg_is_in_recovery() -> boolean", volatile)]
 async fn pg_is_in_recovery() -> Result<bool> {
-    pg_is_in_recovery_impl_captured().await
+    let status = rw_recovery_status_impl_captured().await?;
+    Ok(status != RecoveryStatus::StatusRunning)
 }
 
 #[capture_context(META_CLIENT)]
-async fn pg_is_in_recovery_impl(meta_client: &Arc<dyn FrontendMetaClient>) -> Result<bool> {
+async fn rw_recovery_status_impl(
+    meta_client: &Arc<dyn FrontendMetaClient>,
+) -> Result<RecoveryStatus> {
     meta_client
-        .check_cluster_in_recovery()
+        .get_cluster_recovery_status()
         .await
         .map_err(|e| ExprError::Internal(e.into()))
 }
