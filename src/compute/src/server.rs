@@ -28,7 +28,7 @@ use risingwave_common::config::{
     MAX_CONNECTION_WINDOW_SIZE, STREAM_WINDOW_SIZE,
 };
 use risingwave_common::lru::init_global_sequencer_args;
-use risingwave_common::monitor::connection::{RouterExt, TcpConfig};
+use risingwave_common::monitor::{RouterExt, TcpConfig};
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::system_param::reader::SystemParamsRead;
@@ -39,9 +39,7 @@ use risingwave_common::util::pretty_bytes::convert;
 use risingwave_common::util::tokio_util::sync::CancellationToken;
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_heap_profiling::HeapProfiler;
-use risingwave_common_service::metrics_manager::MetricsManager;
-use risingwave_common_service::observer_manager::ObserverManager;
-use risingwave_common_service::tracing::TracingExtractLayer;
+use risingwave_common_service::{MetricsManager, ObserverManager, TracingExtractLayer};
 use risingwave_connector::source::monitor::GLOBAL_SOURCE_METRICS;
 use risingwave_dml::dml_manager::DmlManager;
 use risingwave_pb::common::WorkerType;

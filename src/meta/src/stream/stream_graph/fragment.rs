@@ -606,6 +606,27 @@ impl CompleteStreamFragmentGraph {
         )
     }
 
+    /// For replacing an existing table based on shared cdc source
+    pub fn with_upstreams_and_downstreams(
+        graph: StreamFragmentGraph,
+        upstream_root_fragments: HashMap<TableId, Fragment>,
+        original_table_fragment_id: FragmentId,
+        downstream_fragments: Vec<(DispatchStrategy, Fragment)>,
+        ddl_type: DdlType,
+    ) -> MetaResult<Self> {
+        Self::build_helper(
+            graph,
+            Some(FragmentGraphUpstreamContext {
+                upstream_root_fragments,
+            }),
+            Some(FragmentGraphDownstreamContext {
+                original_table_fragment_id,
+                downstream_fragments,
+            }),
+            ddl_type,
+        )
+    }
+
     /// The core logic of building a [`CompleteStreamFragmentGraph`], i.e., adding extra upstream/downstream fragments.
     fn build_helper(
         mut graph: StreamFragmentGraph,

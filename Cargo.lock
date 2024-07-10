@@ -910,9 +910,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "76cb6d108605c5489fff1ef9c520656946ad05ed0de3ea6d26d56bcb34bdb8c5"
 dependencies = [
  "anyhow",
- "arrow-array 50.0.0",
- "arrow-buffer 50.0.0",
- "arrow-schema 50.0.0",
+ "arrow-array 52.0.0",
+ "arrow-buffer 52.0.0",
+ "arrow-schema 52.0.0",
  "atomic-time",
  "rquickjs",
 ]
@@ -923,10 +923,10 @@ version = "0.0.1"
 source = "git+https://github.com/risingwavelabs/arrow-udf.git?rev=fa36365#fa3636559de986aa592da6e8b3fbfac7bdd4bb78"
 dependencies = [
  "anyhow",
- "arrow-array 50.0.0",
- "arrow-buffer 50.0.0",
- "arrow-data 50.0.0",
- "arrow-schema 50.0.0",
+ "arrow-array 52.0.0",
+ "arrow-buffer 52.0.0",
+ "arrow-data 52.0.0",
+ "arrow-schema 52.0.0",
  "arrow-udf-js-deno-runtime",
  "async-trait",
  "deno_core",
@@ -974,10 +974,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4506efc6fbc200c083add2a7ed4e3616a859941a745e922320ae7051d90d12ec"
 dependencies = [
  "anyhow",
- "arrow-array 50.0.0",
- "arrow-buffer 50.0.0",
- "arrow-ipc 50.0.0",
- "arrow-schema 50.0.0",
+ "arrow-array 52.0.0",
+ "arrow-buffer 52.0.0",
+ "arrow-ipc 52.0.0",
+ "arrow-schema 52.0.0",
  "lazy_static",
  "pyo3",
  "pyo3-build-config",
@@ -990,9 +990,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eb829e25925161d93617d4b053bae03fe51e708f2cce088d85df856011d4f369"
 dependencies = [
  "anyhow",
- "arrow-array 50.0.0",
- "arrow-ipc 50.0.0",
- "arrow-schema 50.0.0",
+ "arrow-array 52.0.0",
+ "arrow-ipc 52.0.0",
+ "arrow-schema 52.0.0",
  "async-trait",
  "base64 0.22.0",
  "genawaiter",
@@ -5373,9 +5373,9 @@ dependencies = [
 
 [[package]]
 name = "foyer"
-version = "0.10.0"
+version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cbfceb28a004d50b6110fd012db1d52d318d15f721dbb5b65eda261b821c1baa"
+checksum = "1b5f358e9b9492a9e9af905934ef4736a97a001fa19232f4a29f42974cf7a24c"
 dependencies = [
  "ahash 0.8.11",
  "anyhow",
@@ -5391,9 +5391,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-common"
-version = "0.8.0"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6ce1b903e1e142eafe8cd3183087fcd7ed6452e5dc8dfb5356a607ec2aa1c869"
+checksum = "e109f1fd012cc2f0785db5711c73c388fca2d2ac6e2aabb4eaa3a8af98b4dcdb"
 dependencies = [
  "bytes",
  "cfg-if",
@@ -5413,9 +5413,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-intrusive"
-version = "0.8.0"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f7883ac7a8a69115f5bd84072a0b98d4ba72feacddf9040c217a5012bb352ff"
+checksum = "2e7ad91ad11f2c94bb4b3b88acd447f3145224415d776f163d2b06a9ed24e63a"
 dependencies = [
  "foyer-common",
  "itertools 0.13.0",
@@ -5423,9 +5423,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-memory"
-version = "0.6.0"
+version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9fd7b0ce80867803c6b197db20cc1a49fcecc9d5070d2fb829660ec19acf9e72"
+checksum = "29273589433f89d61347b196754bfa22357420d1adbf815d354c23512106a194"
 dependencies = [
  "ahash 0.8.11",
  "bitflags 2.5.0",
@@ -5446,9 +5446,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-storage"
-version = "0.9.0"
+version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4205359a7ea9d05ff7525f0e55a5257a593c89b4e22ebfa07e06a84c2e163202"
+checksum = "79c20580e456ea337e4bdefa9fba7ff19b42cd87432bda3ef3579ef9e1057c7e"
 dependencies = [
  "ahash 0.8.11",
  "allocator-api2",
@@ -5909,7 +5909,7 @@ dependencies = [
  "http 0.2.9",
  "thiserror",
  "tokio",
- "tonic 0.10.2",
+ "tonic 0.11.0",
  "tower",
  "tracing",
  "trust-dns-resolver 0.23.2",
@@ -8880,38 +8880,6 @@ dependencies = [
 
 [[package]]
 name = "parquet"
-version = "50.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "547b92ebf0c1177e3892f44c8f79757ee62e678d564a9834189725f2c5b7a750"
-dependencies = [
- "ahash 0.8.11",
- "arrow-array 50.0.0",
- "arrow-buffer 50.0.0",
- "arrow-cast 50.0.0",
- "arrow-data 50.0.0",
- "arrow-ipc 50.0.0",
- "arrow-schema 50.0.0",
- "arrow-select 50.0.0",
- "base64 0.21.7",
- "brotli 3.5.0",
- "bytes",
- "chrono",
- "flate2",
- "half 2.3.1",
- "hashbrown 0.14.3",
- "lz4_flex",
- "num",
- "num-bigint",
- "paste",
- "seq-macro",
- "snap",
- "thrift",
- "twox-hash",
- "zstd 0.13.0",
-]
-
-[[package]]
-name = "parquet"
 version = "52.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29c3b5322cc1bbf67f11c079c42be41a55949099b78732f7dba9e15edde40eab"
@@ -10658,6 +10626,7 @@ dependencies = [
  "memcomparable",
  "opendal",
  "parking_lot 0.12.1",
+ "parquet 52.0.0",
  "paste",
  "prometheus",
  "prost 0.12.1",
@@ -11184,7 +11153,6 @@ dependencies = [
  "opendal",
  "openssl",
  "parking_lot 0.12.1",
- "parquet 50.0.0",
  "paste",
  "pg_bigdecimal",
  "postgres-openssl",
@@ -15422,7 +15390,10 @@ dependencies = [
  "percent-encoding",
  "pin-project",
  "prost 0.12.1",
+ "rustls-pemfile 2.1.1",
+ "rustls-pki-types",
  "tokio",
+ "tokio-rustls 0.25.0",
  "tokio-stream",
  "tower",
  "tower-layer",

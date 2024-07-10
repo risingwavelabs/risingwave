@@ -848,6 +848,9 @@ pub struct FileCacheConfig {
     #[serde(default = "default::file_cache::compression")]
     pub compression: String,
 
+    #[serde(default = "default::file_cache::flush_buffer_threshold_mb")]
+    pub flush_buffer_threshold_mb: Option<usize>,
+
     #[serde(default, flatten)]
     #[config_doc(omitted)]
     pub unrecognized: Unrecognized<Self>,
@@ -1584,6 +1587,14 @@ pub mod default {
         pub fn table_info_statistic_history_times() -> usize {
             240
         }
+
+        pub fn block_file_cache_flush_buffer_threshold_mb() -> usize {
+            256
+        }
+
+        pub fn meta_file_cache_flush_buffer_threshold_mb() -> usize {
+            64
+        }
     }
 
     pub mod streaming {
@@ -1643,6 +1654,10 @@ pub mod default {
 
         pub fn compression() -> String {
             "none".to_string()
+        }
+
+        pub fn flush_buffer_threshold_mb() -> Option<usize> {
+            None
         }
     }
 
@@ -2116,6 +2131,8 @@ pub struct StorageMemoryConfig {
     pub prefetch_buffer_capacity_mb: usize,
     pub block_cache_eviction_config: EvictionConfig,
     pub meta_cache_eviction_config: EvictionConfig,
+    pub block_file_cache_flush_buffer_threshold_mb: usize,
+    pub meta_file_cache_flush_buffer_threshold_mb: usize,
 }
 
 pub const MAX_META_CACHE_SHARD_BITS: usize = 4;
@@ -2227,6 +2244,17 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
                 }
             });
 
+    let block_file_cache_flush_buffer_threshold_mb = s
+        .storage
+        .data_file_cache
+        .flush_buffer_threshold_mb
+        .unwrap_or(default::storage::block_file_cache_flush_buffer_threshold_mb());
+    let meta_file_cache_flush_buffer_threshold_mb = s
+        .storage
+        .meta_file_cache
+        .flush_buffer_threshold_mb
+        .unwrap_or(default::storage::block_file_cache_flush_buffer_threshold_mb());
+
     StorageMemoryConfig {
         block_cache_capacity_mb,
         block_cache_shard_num,
@@ -2237,6 +2265,8 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
         prefetch_buffer_capacity_mb,
         block_cache_eviction_config,
         meta_cache_eviction_config,
+        block_file_cache_flush_buffer_threshold_mb,
+        meta_file_cache_flush_buffer_threshold_mb,
     }
 }
 

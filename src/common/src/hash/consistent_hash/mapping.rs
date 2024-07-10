@@ -26,14 +26,14 @@ use risingwave_pb::stream_plan::ActorMapping as ActorMappingProto;
 
 use super::bitmap::VnodeBitmapExt;
 use super::vnode::{ParallelUnitId, VirtualNode};
-use crate::buffer::{Bitmap, BitmapBuilder};
+use crate::bitmap::{Bitmap, BitmapBuilder};
 use crate::util::compress::compress_data;
 use crate::util::iter_util::ZipEqDebug;
 
 // TODO: find a better place for this.
 pub type ActorId = u32;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub struct WorkerSlotId(u64);
 
 impl WorkerSlotId {
@@ -63,6 +63,12 @@ impl From<u64> for WorkerSlotId {
 }
 
 impl Display for WorkerSlotId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!("[{}:{}]", self.worker_id(), self.slot_idx()))
+    }
+}
+
+impl Debug for WorkerSlotId {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.write_fmt(format_args!("[{}:{}]", self.worker_id(), self.slot_idx()))
     }

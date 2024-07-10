@@ -65,7 +65,7 @@ pub mod array;
 #[macro_use]
 pub mod util;
 pub mod acl;
-pub mod buffer;
+pub mod bitmap;
 pub mod cache;
 pub mod cast;
 pub mod catalog;

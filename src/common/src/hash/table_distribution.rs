@@ -21,7 +21,7 @@ use risingwave_pb::plan_common::StorageTableDesc;
 use tracing::warn;
 
 use crate::array::{Array, DataChunk, PrimitiveArray};
-use crate::buffer::{Bitmap, BitmapBuilder};
+use crate::bitmap::{Bitmap, BitmapBuilder};
 use crate::hash::VirtualNode;
 use crate::row::Row;
 use crate::util::iter_util::ZipEqFast;

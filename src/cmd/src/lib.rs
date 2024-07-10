@@ -44,8 +44,7 @@ pub fn compute(opts: ComputeNodeOpts) -> ! {
 
 pub fn meta(opts: MetaNodeOpts) -> ! {
     init_risingwave_logger(LoggerSettings::from_opts(&opts));
-    // TODO(shutdown): pass the shutdown token
-    main_okk(|_| risingwave_meta_node::start(opts));
+    main_okk(|shutdown| risingwave_meta_node::start(opts, shutdown));
 }
 
 pub fn frontend(opts: FrontendOpts) -> ! {
@@ -55,12 +54,10 @@ pub fn frontend(opts: FrontendOpts) -> ! {
 
 pub fn compactor(opts: CompactorOpts) -> ! {
     init_risingwave_logger(LoggerSettings::from_opts(&opts));
-    // TODO(shutdown): pass the shutdown token
-    main_okk(|_| risingwave_compactor::start(opts));
+    main_okk(|shutdown| risingwave_compactor::start(opts, shutdown));
 }
 
 pub fn ctl(opts: CtlOpts) -> ! {
     init_risingwave_logger(LoggerSettings::new("ctl").stderr(true));
-    // TODO(shutdown): pass the shutdown token
-    main_okk(|_| risingwave_ctl::start(opts));
+    main_okk(|shutdown| risingwave_ctl::start(opts, shutdown));
 }

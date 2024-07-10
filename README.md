@@ -150,4 +150,4 @@ RisingWave is distributed under the Apache License (Version 2.0). Please refer t
 
 ## Contributing
 
-Thanks for your interest in contributing to the project! Please refer to [contribution guidelines](CONTRIBUTING.md) for more information.
+Thanks for your interest in contributing to the project! Please refer to [RisingWave Developer Guide](https://risingwavelabs.github.io/risingwave/)for more information.

@@ -35,7 +35,7 @@ use plotlib::page::Page;
 use plotlib::repr::Plot;
 use plotlib::style::{LineJoin, LineStyle};
 use plotlib::view::ContinuousView;
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::ColumnId;
 use risingwave_connector::dispatch_sink;
 use risingwave_connector::parser::{

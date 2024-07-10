@@ -46,9 +46,7 @@ use risingwave_pb::meta::relation::PbRelationInfo;
 use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Info, Operation as NotificationOperation, Operation,
 };
-use risingwave_pb::meta::{
-    FragmentParallelUnitMapping, PbFragmentWorkerSlotMapping, PbRelation, PbRelationGroup,
-};
+use risingwave_pb::meta::{PbFragmentWorkerSlotMapping, PbRelation, PbRelationGroup};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::FragmentTypeFlag;
 use risingwave_pb::user::PbUserInfo;
@@ -61,15 +59,14 @@ use sea_orm::{
 };
 use tokio::sync::{RwLock, RwLockReadGuard};
 
-use super::utils::check_subscription_name_duplicate;
+use super::utils::{check_subscription_name_duplicate, get_fragment_ids_by_jobs};
 use crate::controller::rename::{alter_relation_rename, alter_relation_rename_refs};
 use crate::controller::utils::{
     check_connection_name_duplicate, check_database_name_duplicate,
     check_function_signature_duplicate, check_relation_name_duplicate, check_schema_name_duplicate,
     check_secret_name_duplicate, ensure_object_id, ensure_object_not_refer, ensure_schema_empty,
-    ensure_user_id, get_fragment_mappings_by_jobs, get_referring_objects,
-    get_referring_objects_cascade, get_user_privilege, list_user_info_by_ids,
-    resolve_source_register_info_for_jobs, PartialObject,
+    ensure_user_id, get_referring_objects, get_referring_objects_cascade, get_user_privilege,
+    list_user_info_by_ids, resolve_source_register_info_for_jobs, PartialObject,
 };
 use crate::controller::ObjectModel;
 use crate::manager::{Catalog, MetaSrvEnv, NotificationVersion, IGNORED_NOTIFICATION_VERSION};
@@ -281,15 +278,13 @@ impl CatalogController {
             .all(&txn)
             .await?;
 
-        let fragment_mappings = get_fragment_mappings_by_jobs(&txn, streaming_jobs.clone())
+        let fragment_mappings = get_fragment_ids_by_jobs(&txn, streaming_jobs.clone())
             .await?
             .into_iter()
-            .map(
-                |FragmentParallelUnitMapping { fragment_id, .. }| PbFragmentWorkerSlotMapping {
-                    fragment_id,
-                    mapping: None,
-                },
-            )
+            .map(|fragment_id| PbFragmentWorkerSlotMapping {
+                fragment_id: fragment_id as _,
+                mapping: None,
+            })
             .collect();
 
         // The schema and objects in the database will be delete cascade.
@@ -2093,8 +2088,7 @@ impl CatalogController {
         let (source_fragments, removed_actors, removed_fragments) =
             resolve_source_register_info_for_jobs(&txn, to_drop_streaming_jobs.clone()).await?;
 
-        let fragment_mappings =
-            get_fragment_mappings_by_jobs(&txn, to_drop_streaming_jobs.clone()).await?;
+        let fragment_ids = get_fragment_ids_by_jobs(&txn, to_drop_streaming_jobs.clone()).await?;
 
         // Find affect users with privileges on all this objects.
         let to_update_user_ids: Vec<UserId> = UserPrivilege::find()
@@ -2194,14 +2188,12 @@ impl CatalogController {
             )
             .await;
 
-        let fragment_mappings = fragment_mappings
+        let fragment_mappings = fragment_ids
             .into_iter()
-            .map(
-                |FragmentParallelUnitMapping { fragment_id, .. }| PbFragmentWorkerSlotMapping {
-                    fragment_id,
-                    mapping: None,
-                },
-            )
+            .map(|fragment_id| PbFragmentWorkerSlotMapping {
+                fragment_id: fragment_id as _,
+                mapping: None,
+            })
             .collect();
 
         self.notify_fragment_mapping(NotificationOperation::Delete, fragment_mappings)

@@ -32,7 +32,7 @@ use risingwave_connector::sink::{
     CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION, SINK_USER_FORCE_APPEND_ONLY_OPTION, SINK_WITHOUT_BACKFILL,
 };
 use risingwave_pb::catalog::{PbSource, Table};
-use risingwave_pb::ddl_service::ReplaceTablePlan;
+use risingwave_pb::ddl_service::{ReplaceTablePlan, TableJobType};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{DispatcherType, MergeNode, StreamFragmentGraph, StreamNode};
@@ -472,6 +472,7 @@ pub async fn handle_create_sink(
             table: Some(table),
             fragment_graph: Some(graph),
             table_col_index_mapping: None,
+            job_type: TableJobType::General as _,
         });
     }
 
@@ -640,7 +641,7 @@ pub(crate) async fn reparse_table_for_sink(
         panic!("unexpected statement type: {:?}", definition);
     };
 
-    let (graph, table, source) = generate_stream_graph_for_table(
+    let (graph, table, source, _) = generate_stream_graph_for_table(
         session,
         table_name,
         table_catalog,
@@ -654,6 +655,7 @@ pub(crate) async fn reparse_table_for_sink(
         append_only,
         on_conflict,
         with_version_column,
+        None,
     )
     .await?;
 

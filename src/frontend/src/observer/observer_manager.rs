@@ -23,7 +23,7 @@ use risingwave_common::hash::WorkerSlotMapping;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManagerRef;
-use risingwave_common_service::observer_manager::{ObserverState, SubscribeFrontend};
+use risingwave_common_service::ObserverState;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::meta::relation::RelationInfo;
@@ -51,7 +51,9 @@ pub struct FrontendObserverNode {
 }
 
 impl ObserverState for FrontendObserverNode {
-    type SubscribeType = SubscribeFrontend;
+    fn subscribe_type() -> risingwave_pb::meta::SubscribeType {
+        risingwave_pb::meta::SubscribeType::Frontend
+    }
 
     fn handle_notification(&mut self, resp: SubscribeResponse) {
         let Some(info) = resp.info.as_ref() else {

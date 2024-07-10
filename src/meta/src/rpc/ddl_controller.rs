@@ -67,9 +67,9 @@ use tracing::Instrument;
 
 use crate::barrier::BarrierManagerRef;
 use crate::manager::{
-    CatalogManagerRef, ConnectionId, DatabaseId, FragmentManagerRef, FunctionId, IdCategory,
-    IdCategoryType, IndexId, LocalNotification, MetaSrvEnv, MetadataManager, MetadataManagerV1,
-    NotificationVersion, RelationIdEnum, SchemaId, SecretId, SinkId, SourceId,
+    CatalogManagerRef, ConnectionId, DatabaseId, DdlType, FragmentManagerRef, FunctionId,
+    IdCategory, IdCategoryType, IndexId, LocalNotification, MetaSrvEnv, MetadataManager,
+    MetadataManagerV1, NotificationVersion, RelationIdEnum, SchemaId, SecretId, SinkId, SourceId,
     StreamingClusterInfo, StreamingJob, StreamingJobDiscriminants, SubscriptionId, TableId, UserId,
     ViewId, IGNORED_NOTIFICATION_VERSION,
 };
@@ -1908,6 +1908,14 @@ impl DdlController {
             .mview_fragment()
             .expect("mview fragment not found");
 
+        let ddl_type = DdlType::from(stream_job);
+        let DdlType::Table(table_job_type) = &ddl_type else {
+            bail!(
+                "only support replacing table streaming job, ddl_type: {:?}",
+                ddl_type
+            )
+        };
+
         // Map the column indices in the dispatchers with the given mapping.
         let downstream_fragments = self.metadata_manager.get_downstream_chain_fragments(id).await?
             .into_iter()
@@ -1925,12 +1933,33 @@ impl DdlController {
                 )
             })?;
 
-        let complete_graph = CompleteStreamFragmentGraph::with_downstreams(
-            fragment_graph,
-            original_table_fragment.fragment_id,
-            downstream_fragments,
-            stream_job.into(),
-        )?;
+        // build complete graph based on the table job type
+        let complete_graph = match table_job_type {
+            TableJobType::General => CompleteStreamFragmentGraph::with_downstreams(
+                fragment_graph,
+                original_table_fragment.fragment_id,
+                downstream_fragments,
+                ddl_type,
+            )?,
+
+            TableJobType::SharedCdcSource => {
+                // get the upstream fragment which should be the cdc source
+                let upstream_root_fragments = self
+                    .metadata_manager
+                    .get_upstream_root_fragments(fragment_graph.dependent_table_ids())
+                    .await?;
+                CompleteStreamFragmentGraph::with_upstreams_and_downstreams(
+                    fragment_graph,
+                    upstream_root_fragments,
+                    original_table_fragment.fragment_id,
+                    downstream_fragments,
+                    ddl_type,
+                )?
+            }
+            TableJobType::Unspecified => {
+                unreachable!()
+            }
+        };
 
         // 2. Build the actor graph.
         let cluster_info = self.metadata_manager.get_streaming_cluster_info().await?;
@@ -1950,7 +1979,11 @@ impl DdlController {
         } = actor_graph_builder
             .generate_graph(&self.env, stream_job, expr_context)
             .await?;
-        assert!(dispatchers.is_empty());
+
+        // general table job type does not have upstream job, so the dispatchers should be empty
+        if matches!(table_job_type, TableJobType::General) {
+            assert!(dispatchers.is_empty());
+        }
 
         // 3. Build the table fragments structure that will be persisted in the stream manager, and
         // the context that contains all information needed for building the actors on the compute

@@ -17,7 +17,7 @@ use std::ops::Bound::{self, *};
 use futures::stream;
 use risingwave_common::array::{Array, ArrayImpl, Op};
 use risingwave_common::bail;
-use risingwave_common::buffer::{Bitmap, BitmapBuilder};
+use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::row::{self, once, OwnedRow as RowData};
 use risingwave_common::types::{DefaultOrd, ToDatumRef, ToOwnedDatum};

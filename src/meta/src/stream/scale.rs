@@ -26,7 +26,7 @@ use itertools::Itertools;
 use num_integer::Integer;
 use num_traits::abs;
 use risingwave_common::bail;
-use risingwave_common::buffer::{Bitmap, BitmapBuilder};
+use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::{ActorMapping, ParallelUnitId, VirtualNode};
 use risingwave_common::util::iter_util::ZipEqDebug;

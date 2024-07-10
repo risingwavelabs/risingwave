@@ -13,7 +13,7 @@ TODO
 
 ## HashAggExecutor
 
-![aggregation components](./images/aggregation/agg-components.png)
+![aggregation components](../images/aggregation/agg-components.png)
 
 Within the `HashAggExecutor`, there are 4 main components:
 1. AggCalls.
@@ -40,7 +40,7 @@ For each of these aggregations, they have 1 state table (`AggStateStorage::Mater
 
 ### Initialization of `AggGroups`
 
-![init-agg-group](./images/aggregation/init-agg-group.png)
+![init-agg-group](../images/aggregation/init-agg-group.png)
 
 AggGroups are initialized when corresponding aggregation groups are not found in `AggGroupCache`.
 This could be either because the `AggGroupCache` got evicted,

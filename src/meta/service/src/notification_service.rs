@@ -193,19 +193,19 @@ impl NotificationServiceImpl {
         match &self.metadata_manager {
             MetadataManager::V1(mgr) => {
                 let fragment_guard = mgr.fragment_manager.get_fragment_read_guard().await;
-                let parallel_unit_mappings =
+                let worker_slot_mappings =
                     fragment_guard.all_running_fragment_mappings().collect_vec();
                 let notification_version = self.env.notification_manager().current_version().await;
-                Ok((parallel_unit_mappings, notification_version))
+                Ok((worker_slot_mappings, notification_version))
             }
             MetadataManager::V2(mgr) => {
                 let fragment_guard = mgr.catalog_controller.get_inner_read_guard().await;
-                let parallel_unit_mappings = fragment_guard
+                let worker_slot_mappings = fragment_guard
                     .all_running_fragment_mappings()
                     .await?
                     .collect_vec();
                 let notification_version = self.env.notification_manager().current_version().await;
-                Ok((parallel_unit_mappings, notification_version))
+                Ok((worker_slot_mappings, notification_version))
             }
         }
     }
