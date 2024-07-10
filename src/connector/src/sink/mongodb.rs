@@ -178,9 +178,8 @@ impl Sink for MongodbSink {
 
     fn is_sink_decouple(_desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
         match user_specified {
-            // Set default sink decouple to false, because mongodb sink writer only ensure delivery on checkpoint barrier
-            SinkDecouple::Default | SinkDecouple::Disable => Ok(false),
-            SinkDecouple::Enable => Ok(true),
+            SinkDecouple::Default | SinkDecouple::Enable => Ok(true),
+            SinkDecouple::Disable => Ok(false),
         }
     }
 

@@ -33,12 +33,14 @@ use maplit::hashmap;
 use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::row::Row as _;
+use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use risingwave_common::types::{DataType, ScalarRefImpl, ToText};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use serde_derive::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
 use with_options::WithOptions;
 
+use super::catalog::desc::SinkDesc;
 use super::log_store::DeliveryFutureManagerAddFuture;
 use super::writer::{
     AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriter, AsyncTruncateSinkWriterExt,
@@ -107,6 +109,13 @@ impl Sink for DynamoDbSink {
     type LogSinker = AsyncTruncateLogSinkerOf<DynamoDbSinkWriter>;
 
     const SINK_NAME: &'static str = DYNAMO_DB_SINK;
+
+    fn is_sink_decouple(_desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
+        match user_specified {
+            SinkDecouple::Default | SinkDecouple::Enable => Ok(true),
+            SinkDecouple::Disable => Ok(false),
+        }
+    }
 
     async fn validate(&self) -> Result<()> {
         let client = (self.config.build_client().await)
