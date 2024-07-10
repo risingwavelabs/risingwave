@@ -94,6 +94,7 @@ aws-config = { version = "1", default-features = false, features = [
 aws-credential-types = { version = "1", default-features = false, features = [
     "hardcoded-credentials",
 ] }
+aws-sdk-glue = "1"
 aws-sdk-kinesis = { version = "1", default-features = false, features = [
     "rt-tokio",
     "rustls",
