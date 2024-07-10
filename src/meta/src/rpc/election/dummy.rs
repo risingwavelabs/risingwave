@@ -50,10 +50,8 @@ impl ElectionClient for DummyElectionClient {
     }
 
     async fn run_once(&self, _ttl: i64, mut stop: Receiver<()>) -> MetaResult<()> {
-        tokio::select! {
-            _ = stop.changed() => {}
-            _ = futures::future::pending::<()>() => {}
-        }
+        // Only exit when the stop signal is received.
+        let _ = stop.changed().await;
         Ok(())
     }
 
