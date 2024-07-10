@@ -5,7 +5,7 @@ It covers what each metric measures, and what information we may derive from it.
 
 ## Barrier Latency
 
-Prerequisite: [Checkpoint](./checkpoint.md)
+Prerequisite: [Checkpoint](./design/checkpoint.md)
 
 This metric measures the duration from which a barrier is injected into **all** sources in the stream graph,
 to the barrier flown through all executors in the graph.

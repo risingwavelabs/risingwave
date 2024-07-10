@@ -41,7 +41,7 @@ A Data Chunk consists of multiple columns and a visibility array, as is shown in
 
 A Stream Chunk consists of columns, visibility array and an additional `ops` column, as is shown in the right subgraph below. The `ops` column marks the operation of row, which can be one of `Delete`, `Insert`, `UpdateDelete` and `UpdateInsert`.
 
-![chunk](./images/data-model-and-encoding/chunk.svg)
+![chunk](../images/data-model-and-encoding/chunk.svg)
 
 ## On-Disk Encoding
 
@@ -49,9 +49,6 @@ A Stream Chunk consists of columns, visibility array and an additional `ops` col
 
 RisingWave stores user data in shared key-value storage called 'Hummock'. Tables, materialized views and checkpoints of internal streaming operators are encoded into key-value entries. Every field of a row, a.k.a. cell, is encoded as a key-value entry, except that `NULL` values are omitted.
 
-![row-format](./images/data-model-and-encoding/row-format.svg)
+![row-format](../images/data-model-and-encoding/row-format.svg)
 
 Considering that ordering matters in some cases, e.g. result set of an order-by query, fields of keys must preserve the order of original values after being encoded into bytes. This is what `memcomparable` is used for. For example, integers must be encoded in big-endian and the sign bit must be flipped to preserve order. In contrast, the encoding of values does not need to preserve order.
-
-
-
