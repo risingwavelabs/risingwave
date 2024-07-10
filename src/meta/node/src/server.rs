@@ -796,6 +796,14 @@ pub async fn start_service_as_election_leader(
 
     // Wait for the shutdown signal.
     shutdown.cancelled().await;
+
+    if election_client.is_leader() {
+        let res = metadata_manager.wait_till_all_worker_nodes_exit().await;
+        if let Err(e) = res {
+            tracing::error!(error = %e.as_report(), "failed to wait for all worker nodes to exit, directly shutdown");
+        }
+    }
+
     // TODO(shutdown): may warn user if there's any other node still running in the cluster.
     // TODO(shutdown): do we have any other shutdown tasks?
     Ok(())

@@ -317,6 +317,37 @@ impl MetadataManager {
         }
     }
 
+    pub async fn wait_till_all_worker_nodes_exit(&self) -> MetaResult<()> {
+        let mut interval = tokio::time::interval(Duration::from_secs(1));
+        let mut last_remaining = 0;
+
+        loop {
+            interval.tick().await;
+
+            let remaining = self
+                .list_worker_node(None, Some(State::Running))
+                .await?
+                .into_iter()
+                .filter(|w| {
+                    matches!(
+                        w.r#type(),
+                        WorkerType::Frontend | WorkerType::ComputeNode | WorkerType::Compactor
+                    )
+                })
+                .count();
+
+            if remaining == 0 {
+                tracing::info!("all worker nodes exited");
+                return Ok(());
+            }
+
+            if remaining != last_remaining {
+                last_remaining = remaining;
+                warn!(remaining, "waiting for all worker nodes to exit");
+            }
+        }
+    }
+
     pub async fn subscribe_active_streaming_compute_nodes(
         &self,
     ) -> MetaResult<(Vec<WorkerNode>, UnboundedReceiver<LocalNotification>)> {
