@@ -21,13 +21,12 @@ use etcd_client::ConnectOptions;
 use futures::future::join_all;
 use otlp_embedded::TraceServiceServer;
 use regex::Regex;
-use risingwave_common::monitor::connection::{RouterExt, TcpConfig};
+use risingwave_common::monitor::{RouterExt, TcpConfig};
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::{report_scarf_enabled, report_to_scarf, telemetry_env_enabled};
-use risingwave_common_service::metrics_manager::MetricsManager;
-use risingwave_common_service::tracing::TracingExtractLayer;
+use risingwave_common_service::{MetricsManager, TracingExtractLayer};
 use risingwave_meta::barrier::StreamRpcManager;
 use risingwave_meta::controller::catalog::CatalogController;
 use risingwave_meta::controller::cluster::ClusterController;
@@ -478,6 +477,7 @@ pub async fn start_service_as_election_leader(
     )
     .await
     .unwrap();
+    let object_store_media_type = hummock_manager.object_store_media_type();
 
     let meta_member_srv = MetaMemberServiceImpl::new(match election_client.clone() {
         None => Either::Right(address_info.clone()),
@@ -742,6 +742,7 @@ pub async fn start_service_as_election_leader(
         Arc::new(MetaReportCreator::new(
             metadata_manager.clone(),
             env.meta_store().backend(),
+            object_store_media_type,
         )),
     );
 

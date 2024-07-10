@@ -64,8 +64,7 @@ use risingwave_common::util::resource_util;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_heap_profiling::HeapProfiler;
-use risingwave_common_service::observer_manager::ObserverManager;
-use risingwave_common_service::MetricsManager;
+use risingwave_common_service::{MetricsManager, ObserverManager};
 use risingwave_connector::source::monitor::{SourceMetrics, GLOBAL_SOURCE_METRICS};
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::health::health_server::HealthServer;
@@ -922,6 +921,27 @@ impl SessionImpl {
         Ok(connection.clone())
     }
 
+    pub fn get_subscription_by_schema_id_name(
+        &self,
+        schema_id: SchemaId,
+        subscription_name: &str,
+    ) -> Result<Arc<SubscriptionCatalog>> {
+        let db_name = self.database();
+
+        let catalog_reader = self.env().catalog_reader().read_guard();
+        let db_id = catalog_reader.get_database_by_name(db_name)?.id();
+        let schema = catalog_reader.get_schema_by_id(&db_id, &schema_id)?;
+        let subscription = schema
+            .get_subscription_by_name(subscription_name)
+            .ok_or_else(|| {
+                RwError::from(ErrorCode::ItemNotFound(format!(
+                    "subscription {} not found",
+                    subscription_name
+                )))
+            })?;
+        Ok(subscription.clone())
+    }
+
     pub fn get_subscription_by_name(
         &self,
         schema_name: Option<String>,
@@ -950,7 +970,7 @@ impl SessionImpl {
 
     pub fn get_table_by_id(&self, table_id: &TableId) -> Result<Arc<TableCatalog>> {
         let catalog_reader = self.env().catalog_reader().read_guard();
-        Ok(catalog_reader.get_table_by_id(table_id)?.clone())
+        Ok(catalog_reader.get_any_table_by_id(table_id)?.clone())
     }
 
     pub fn get_table_by_name(
@@ -962,7 +982,7 @@ impl SessionImpl {
         let catalog_reader = self.env().catalog_reader().read_guard();
         let table = catalog_reader
             .get_schema_by_id(&DatabaseId::from(db_id), &SchemaId::from(schema_id))?
-            .get_table_by_name(table_name)
+            .get_created_table_by_name(table_name)
             .ok_or_else(|| {
                 Error::new(
                     ErrorKind::InvalidInput,
@@ -978,10 +998,11 @@ impl SessionImpl {
         min_epoch: u64,
         max_count: u32,
     ) -> Result<Vec<u64>> {
-        self.env
-            .catalog_writer
+        Ok(self
+            .env
+            .meta_client()
             .list_change_log_epochs(table_id, min_epoch, max_count)
-            .await
+            .await?)
     }
 
     pub fn clear_cancel_query_flag(&self) {
@@ -1182,10 +1203,18 @@ impl SessionManager for SessionManagerImpl {
     fn end_session(&self, session: &Self::Session) {
         self.delete_session(&session.session_id());
     }
+
+    async fn shutdown(&self) {
+        // Clean up the session map.
+        self.env.sessions_map().write().clear();
+        // Unregister from the meta service.
+        self.env.meta_client().try_unregister().await;
+    }
 }
 
 impl SessionManagerImpl {
     pub async fn new(opts: FrontendOpts) -> Result<Self> {
+        // TODO(shutdown): only save join handles that **need** to be shutdown
         let (env, join_handles, shutdown_senders) = FrontendEnv::init(opts).await?;
         Ok(Self {
             env,

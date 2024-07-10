@@ -25,7 +25,7 @@ use itertools::Itertools;
 use more_asserts::assert_gt;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::is_max_epoch;
-use risingwave_common_service::observer_manager::{NotificationClient, ObserverManager};
+use risingwave_common_service::{NotificationClient, ObserverManager};
 use risingwave_hummock_sdk::key::{
     is_empty_key_range, vnode, vnode_range, TableKey, TableKeyRange,
 };
@@ -565,16 +565,14 @@ impl StateStore for HummockStorage {
 
     fn sync(&self, epoch: u64, table_ids: HashSet<TableId>) -> impl SyncFuture {
         let (tx, rx) = oneshot::channel();
-        self.hummock_event_sender
-            .send(HummockEvent::SyncEpoch {
-                new_sync_epoch: epoch,
-                sync_result_sender: tx,
-                table_ids,
-            })
-            .expect("should send success");
+        let _ = self.hummock_event_sender.send(HummockEvent::SyncEpoch {
+            new_sync_epoch: epoch,
+            sync_result_sender: tx,
+            table_ids,
+        });
         rx.map(|recv_result| {
             Ok(recv_result
-                .expect("should wait success")?
+                .map_err(|_| HummockError::other("failed to receive sync result"))??
                 .into_sync_result())
         })
     }

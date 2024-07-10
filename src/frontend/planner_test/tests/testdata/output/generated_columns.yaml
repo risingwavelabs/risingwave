@@ -26,6 +26,17 @@
 
     Caused by:
       Invalid input syntax: Function `PROCTIME()` is only allowed in CREATE TABLE/SOURCE. Is `NOW()` what you want?
+- name: proctime cast to with timezone
+  sql: |
+    explain create table t1 (proc_time TIMESTAMPTZ AS proctime());
+  explain_output: |
+    StreamMaterialize { columns: [proc_time, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: Overwrite, watermark_columns: [proc_time] }
+    └─StreamRowIdGen { row_id_index: 1 }
+      └─StreamUnion { all: true, output_watermarks: [$expr1] }
+        └─StreamExchange { dist: HashShard(_row_id) }
+          └─StreamProject { exprs: [Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
+            └─StreamDml { columns: [_row_id] }
+              └─StreamSource
 - name: proctime cast to without timezone
   sql: |
     explain create table t1 (proc_time TIMESTAMP AS proctime());

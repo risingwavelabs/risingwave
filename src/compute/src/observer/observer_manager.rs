@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::system_param::local_manager::LocalSystemParamsManagerRef;
-use risingwave_common_service::observer_manager::{ObserverState, SubscribeCompute};
+use risingwave_common_service::ObserverState;
 use risingwave_pb::meta::subscribe_response::Info;
 use risingwave_pb::meta::SubscribeResponse;
 
@@ -22,7 +22,9 @@ pub struct ComputeObserverNode {
 }
 
 impl ObserverState for ComputeObserverNode {
-    type SubscribeType = SubscribeCompute;
+    fn subscribe_type() -> risingwave_pb::meta::SubscribeType {
+        risingwave_pb::meta::SubscribeType::Compute
+    }
 
     fn handle_notification(&mut self, resp: SubscribeResponse) {
         let Some(info) = resp.info.as_ref() else {

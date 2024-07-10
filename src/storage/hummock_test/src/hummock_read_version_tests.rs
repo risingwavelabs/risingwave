@@ -19,7 +19,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use itertools::Itertools;
 use parking_lot::RwLock;
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::{test_epoch, EpochExt};

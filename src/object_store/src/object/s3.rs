@@ -53,7 +53,7 @@ use futures::{stream, Stream, StreamExt, TryStreamExt};
 use hyper::Body;
 use itertools::Itertools;
 use risingwave_common::config::ObjectStoreConfig;
-use risingwave_common::monitor::connection::monitor_connector;
+use risingwave_common::monitor::monitor_connector;
 use risingwave_common::range::RangeBoundsExt;
 use thiserror_ext::AsReport;
 use tokio::task::JoinHandle;

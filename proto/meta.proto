@@ -603,7 +603,6 @@ message ListStreamingJobResponse {
 service ScaleService {
   rpc GetClusterInfo(GetClusterInfoRequest) returns (GetClusterInfoResponse);
   rpc Reschedule(RescheduleRequest) returns (RescheduleResponse);
-  rpc GetReschedulePlan(GetReschedulePlanRequest) returns (GetReschedulePlanResponse);
   rpc UpdateStreamingJob(UpdateStreamingJobRequest) returns (UpdateStreamingJobResponse); 
   rpc ListStreamingJobs(ListStreamingJobsRequest) returns (ListStreamingJobResponse); 
 }

@@ -578,7 +578,7 @@ impl LocalQueryExecution {
     fn get_fragment_id(&self, table_id: &TableId) -> SchedulerResult<FragmentId> {
         let reader = self.front_env.catalog_reader().read_guard();
         reader
-            .get_table_by_id(table_id)
+            .get_any_table_by_id(table_id)
             .map(|table| table.fragment_id)
             .map_err(|e| SchedulerError::Internal(anyhow!(e)))
     }
@@ -591,7 +591,7 @@ impl LocalQueryExecution {
         let guard = self.front_env.catalog_reader().read_guard();
 
         let table = guard
-            .get_table_by_id(table_id)
+            .get_any_table_by_id(table_id)
             .map_err(|e| SchedulerError::Internal(anyhow!(e)))?;
 
         let fragment_id = match table.dml_fragment_id.as_ref() {
