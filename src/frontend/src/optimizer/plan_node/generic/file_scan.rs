@@ -29,7 +29,6 @@ pub enum StorageType {
     S3,
 }
 
-/// [`Source`] returns contents of a table or other equivalent object
 #[derive(Debug, Clone, Educe)]
 #[educe(PartialEq, Eq, Hash)]
 pub struct FileScan {
