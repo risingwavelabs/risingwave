@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 
-use risingwave_expr::{capture_context, function, Result};
+use risingwave_expr::{capture_context, function, ExprError, Result};
 
 use super::context::META_CLIENT;
 use crate::meta_client::FrontendMetaClient;
@@ -26,8 +26,8 @@ async fn pg_is_in_recovery() -> Result<bool> {
 
 #[capture_context(META_CLIENT)]
 async fn pg_is_in_recovery_impl(meta_client: &Arc<dyn FrontendMetaClient>) -> Result<bool> {
-    Ok(meta_client
+    meta_client
         .check_cluster_in_recovery()
         .await
-        .unwrap_or(true))
+        .map_err(|e| ExprError::Internal(e.into()))
 }

@@ -630,7 +630,8 @@ pub async fn start_service_as_election_leader(
         scale_controller.clone(),
     );
 
-    let cluster_srv = ClusterServiceImpl::new(metadata_manager.clone());
+    let cluster_srv =
+        ClusterServiceImpl::new(metadata_manager.clone(), barrier_manager.context().clone());
     let stream_srv = StreamServiceImpl::new(
         env.clone(),
         barrier_scheduler.clone(),

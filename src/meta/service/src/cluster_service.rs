@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_meta::barrier::BarrierManagerRef;
 use risingwave_meta::manager::MetadataManager;
 use risingwave_meta_model_v2::WorkerId;
 use risingwave_pb::common::worker_node::State;
@@ -31,11 +32,15 @@ use crate::MetaError;
 #[derive(Clone)]
 pub struct ClusterServiceImpl {
     metadata_manager: MetadataManager,
+    barrier_manager: BarrierManagerRef,
 }
 
 impl ClusterServiceImpl {
-    pub fn new(metadata_manager: MetadataManager) -> Self {
-        ClusterServiceImpl { metadata_manager }
+    pub fn new(metadata_manager: MetadataManager, barrier_manager: BarrierManagerRef) -> Self {
+        ClusterServiceImpl {
+            metadata_manager,
+            barrier_manager,
+        }
     }
 }
 
@@ -181,6 +186,9 @@ impl ClusterService for ClusterServiceImpl {
         &self,
         _request: Request<CheckClusterInRecoveryRequest>,
     ) -> Result<Response<CheckClusterInRecoveryResponse>, Status> {
-        todo!()
+        Ok(Response::new(CheckClusterInRecoveryResponse {
+            status: None,
+            in_recovery: self.barrier_manager.check_status_running().is_err(),
+        }))
     }
 }
