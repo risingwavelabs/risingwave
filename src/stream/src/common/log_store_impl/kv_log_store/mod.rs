@@ -1515,9 +1515,6 @@ mod tests {
         );
         let (mut reader, mut writer) = factory.build().await;
 
-        test_env
-            .storage
-            .start_epoch(epoch4, HashSet::from_iter([TableId::new(table.id)]));
         writer
             .init(EpochPair::new(epoch4, epoch3), false)
             .await

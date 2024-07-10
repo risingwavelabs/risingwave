@@ -662,7 +662,11 @@ impl TableUnsyncData {
             assert_gt!(epoch, prev_epoch)
         }
         let epochs = take_before_epoch(&mut self.unsync_epochs, epoch);
-        assert_eq!(*epochs.last_key_value().expect("non-empty").0, epoch);
+        assert_eq!(
+            *epochs.last_key_value().expect("non-empty").0,
+            epoch,
+            "{epochs:?} {epoch}"
+        );
         self.syncing_epochs.push_front(epoch);
         (
             self.instance_data
