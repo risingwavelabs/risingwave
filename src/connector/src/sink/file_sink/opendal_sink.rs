@@ -45,7 +45,7 @@ pub struct FileSink<S: OpendalSinkBackend> {
 }
 
 /// The `OpendalSinkBackend` trait unifies the behavior of various sink backends
-/// implemented through OpenDAL(`<https://github.com/apache/opendal>`).
+/// implemented through `OpenDAL`(`<https://github.com/apache/opendal>`).
 ///
 /// # Type Parameters
 ///
