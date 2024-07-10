@@ -1,16 +1,6 @@
 # An Overview of the RisingWave Streaming Engine
 
-- [An Overview of the RisingWave Streaming Engine](#an-overview-of-risingwave-streaming-engine)
-  - [Overview](#overview)
-  - [Architecture](#architecture)
-  - [Actors, executors, and states](#actors-executors-and-states)
-    - [Actors](#actors)
-    - [Executors](#executors)
-  - [Checkpoint, Consistency, and Fault tolerance](#checkpoint-consistency-and-fault-tolerance)
-    - [Barrier based checkpoint](#barrier-based-checkpoint)
-    - [Fault tolerance](#fault-tolerance)
-
-<!-- Created by https://github.com/ekalinin/github-markdown-toc -->
+<!-- toc -->
 
 ## Overview
 
