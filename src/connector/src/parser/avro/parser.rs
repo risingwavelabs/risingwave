@@ -24,7 +24,7 @@ use risingwave_connector_codec::decoder::avro::{
 };
 use risingwave_pb::plan_common::ColumnDesc;
 
-use super::ConfluentSchemaCache;
+use super::{ConfluentSchemaCache, GlueSchemaCache};
 use crate::error::ConnectorResult;
 use crate::parser::unified::AccessImpl;
 use crate::parser::util::bytes_from_url;
@@ -40,7 +40,7 @@ use crate::schema::schema_registry::{
 pub struct AvroAccessBuilder {
     schema: Arc<ResolvedAvroSchema>,
     /// Refer to [`AvroParserConfig::writer_schema_cache`].
-    pub writer_schema_cache: Option<Arc<ConfluentSchemaCache>>,
+    writer_schema_cache: WriterSchemaCache,
     value: Option<Value>,
 }
 
@@ -95,21 +95,27 @@ impl AvroAccessBuilder {
     async fn parse_avro_value(&self, payload: &[u8]) -> ConnectorResult<Option<Value>> {
         // parse payload to avro value
         // if use confluent schema, get writer schema from confluent schema registry
-        if let Some(resolver) = &self.writer_schema_cache {
-            let (schema_id, mut raw_payload) = extract_schema_id(payload)?;
-            let writer_schema = resolver.get_by_id(schema_id).await?;
-            Ok(Some(from_avro_datum(
-                writer_schema.as_ref(),
-                &mut raw_payload,
-                Some(&self.schema.original_schema),
-            )?))
-        } else {
-            // FIXME: we should not use `Reader` (file header) here. See comment above and https://github.com/risingwavelabs/risingwave/issues/12871
-            let mut reader = Reader::with_schema(&self.schema.original_schema, payload)?;
-            match reader.next() {
-                Some(Ok(v)) => Ok(Some(v)),
-                Some(Err(e)) => Err(e)?,
-                None => bail!("avro parse unexpected eof"),
+        match &self.writer_schema_cache {
+            WriterSchemaCache::Confluent(resolver) => {
+                let (schema_id, mut raw_payload) = extract_schema_id(payload)?;
+                let writer_schema = resolver.get_by_id(schema_id).await?;
+                Ok(Some(from_avro_datum(
+                    writer_schema.as_ref(),
+                    &mut raw_payload,
+                    Some(&self.schema.original_schema),
+                )?))
+            }
+            WriterSchemaCache::File => {
+                // FIXME: we should not use `Reader` (file header) here. See comment above and https://github.com/risingwavelabs/risingwave/issues/12871
+                let mut reader = Reader::with_schema(&self.schema.original_schema, payload)?;
+                match reader.next() {
+                    Some(Ok(v)) => Ok(Some(v)),
+                    Some(Err(e)) => Err(e)?,
+                    None => bail!("avro parse unexpected eof"),
+                }
+            }
+            WriterSchemaCache::Glue(resolver) => {
+                todo!()
             }
         }
     }
@@ -117,13 +123,20 @@ impl AvroAccessBuilder {
 
 #[derive(Debug, Clone)]
 pub struct AvroParserConfig {
-    pub schema: Arc<ResolvedAvroSchema>,
-    pub key_schema: Option<Arc<ResolvedAvroSchema>>,
+    schema: Arc<ResolvedAvroSchema>,
+    key_schema: Option<Arc<ResolvedAvroSchema>>,
     /// Writer schema is the schema used to write the data. When parsing Avro data, the exactly same schema
     /// must be used to decode the message, and then convert it with the reader schema.
-    pub writer_schema_cache: Option<Arc<ConfluentSchemaCache>>,
+    writer_schema_cache: WriterSchemaCache,
 
-    pub map_handling: Option<MapHandling>,
+    map_handling: Option<MapHandling>,
+}
+
+#[derive(Debug, Clone)]
+enum WriterSchemaCache {
+    Confluent(Arc<ConfluentSchemaCache>),
+    Glue(Arc<GlueSchemaCache>),
+    File,
 }
 
 impl AvroParserConfig {
@@ -178,7 +191,7 @@ impl AvroParserConfig {
                     } else {
                         None
                     },
-                    writer_schema_cache: Some(Arc::new(resolver)),
+                    writer_schema_cache: WriterSchemaCache::Confluent(Arc::new(resolver)),
                     map_handling,
                 })
             }
@@ -197,7 +210,7 @@ impl AvroParserConfig {
                 Ok(Self {
                     schema: Arc::new(ResolvedAvroSchema::create(Arc::new(schema))?),
                     key_schema: None,
-                    writer_schema_cache: None,
+                    writer_schema_cache: WriterSchemaCache::File,
                     map_handling,
                 })
             }
