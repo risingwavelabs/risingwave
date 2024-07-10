@@ -17,6 +17,7 @@ use pgwire::pg_response::StatementType;
 use risingwave_common::bail_not_implemented;
 use risingwave_sqlparser::ast::{ConnectorSchema, ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
+use thiserror_ext::AsReport;
 
 use super::alter_source_with_sr::alter_definition_format_encode;
 use super::alter_table_column::{
@@ -24,7 +25,7 @@ use super::alter_table_column::{
 };
 use super::util::SourceSchemaCompatExt;
 use super::{HandlerArgs, RwPgResponse};
-use crate::error::{ErrorCode, Result, RwError};
+use crate::error::{ErrorCode, Result};
 use crate::TableCatalog;
 
 fn get_connector_schema_from_table(table: &TableCatalog) -> Result<Option<ConnectorSchema>> {
@@ -47,13 +48,6 @@ pub async fn handle_refresh_schema(
 
     if !original_table.incoming_sinks.is_empty() {
         bail_not_implemented!("alter table with incoming sinks");
-    }
-
-    // TODO(yuhao): alter table with generated columns.
-    if original_table.has_generated_column() {
-        return Err(RwError::from(ErrorCode::BindError(
-            "Alter a table with generated column has not been implemented.".to_string(),
-        )));
     }
 
     let connector_schema = {
@@ -81,14 +75,34 @@ pub async fn handle_refresh_schema(
         .try_into()
         .unwrap();
 
-    replace_table_with_definition(
+    let result = replace_table_with_definition(
         &session,
         table_name,
         definition,
         &original_table,
         Some(connector_schema),
     )
-    .await?;
+    .await;
 
-    Ok(RwPgResponse::empty_result(StatementType::ALTER_TABLE))
+    match result {
+        Ok(_) => Ok(RwPgResponse::empty_result(StatementType::ALTER_TABLE)),
+        Err(e) => {
+            let report = e.to_report_string();
+            // This is a workaround for reporting errors when columns to drop is referenced by generated column.
+            // Finding the actual columns to drop requires generating `PbSource` from the sql definition
+            // and fetching schema from schema registry, which will cause a lot of unnecessary refactor.
+            // The only cause of those matched errors is the generated column referencing the column to drop.
+            if report.contains("Failed to bind expression")
+                && report.contains("Item not found: Invalid column")
+            {
+                Err(ErrorCode::PermissionDenied(format!(
+                    "columns to drop is referenced by generated columns: {}",
+                    report
+                ))
+                .into())
+            } else {
+                Err(e)
+            }
+        }
+    }
 }

@@ -30,7 +30,8 @@ use super::util::SourceSchemaCompatExt;
 use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::table_catalog::TableType;
-use crate::error::{ErrorCode, Result, RwError};
+use crate::error::{ErrorCode, Result};
+use crate::expr::ExprImpl;
 use crate::session::SessionImpl;
 use crate::{Binder, TableCatalog, WithOptions};
 
@@ -113,13 +114,6 @@ pub async fn handle_alter_table_column(
         bail_not_implemented!("alter table with incoming sinks");
     }
 
-    // TODO(yuhao): alter table with generated columns.
-    if original_catalog.has_generated_column() {
-        return Err(RwError::from(ErrorCode::BindError(
-            "Alter a table with generated column has not been implemented.".to_string(),
-        )));
-    }
-
     // Retrieve the original table definition and parse it to AST.
     let [mut definition]: [_; 1] = Parser::parse_sql(&original_catalog.definition)
         .context("unable to parse original table definition")?
@@ -191,6 +185,24 @@ pub async fn handle_alter_table_column(
         } => {
             if cascade {
                 bail_not_implemented!(issue = 6903, "drop column cascade");
+            }
+
+            // Check if the column to drop is referenced by any generated columns.
+            for column in original_catalog.columns() {
+                if let Some(expr) = column.generated_expr() {
+                    let expr = ExprImpl::from_expr_proto(expr)?;
+                    let refs = expr.collect_input_refs(original_catalog.columns().len());
+                    for idx in refs.ones() {
+                        let refed_column = &original_catalog.columns()[idx];
+                        if refed_column.name() == column_name.real_value() {
+                            Err(ErrorCode::PermissionDenied(format!(
+                                "cannot drop column \"{}\" because it's referenced by a generated column \"{}\"",
+                                column_name,
+                                column.name()
+                            )))?
+                        }
+                    }
+                }
             }
 
             // Locate the column by name and remove it.
