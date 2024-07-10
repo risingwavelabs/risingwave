@@ -36,7 +36,7 @@ use thiserror_ext::AsReport;
 use tokio::sync::mpsc;
 
 use super::progress::BackfillState;
-use super::BarrierCompleteResult;
+use super::{BarrierCompleteResult, SubscribeMutationItem};
 use crate::error::StreamResult;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{Barrier, Mutation};
@@ -184,9 +184,8 @@ impl Display for ManagedBarrierStateDebugInfo<'_> {
 
 #[derive(Default)]
 struct ActorMutationSubscribers {
-    #[expect(clippy::type_complexity)]
-    pending_subscribers: BTreeMap<u64, Vec<mpsc::UnboundedSender<(u64, Option<Arc<Mutation>>)>>>,
-    started_subscribers: Vec<mpsc::UnboundedSender<(u64, Option<Arc<Mutation>>)>>,
+    pending_subscribers: BTreeMap<u64, Vec<mpsc::UnboundedSender<SubscribeMutationItem>>>,
+    started_subscribers: Vec<mpsc::UnboundedSender<SubscribeMutationItem>>,
 }
 
 impl ActorMutationSubscribers {
@@ -201,7 +200,7 @@ pub(super) struct ManagedBarrierState {
     /// The key is `prev_epoch`, and the first value is `curr_epoch`
     epoch_barrier_state_map: BTreeMap<u64, BarrierState>,
 
-    mutation_subscrbers: HashMap<ActorId, ActorMutationSubscribers>,
+    mutation_subscribers: HashMap<ActorId, ActorMutationSubscribers>,
 
     /// Record the progress updates of creating mviews for each epoch of concurrent checkpoints.
     pub(super) create_mview_progress: HashMap<u64, HashMap<ActorId, BackfillState>>,
@@ -235,7 +234,7 @@ impl ManagedBarrierState {
     ) -> Self {
         Self {
             epoch_barrier_state_map: BTreeMap::default(),
-            mutation_subscrbers: Default::default(),
+            mutation_subscribers: Default::default(),
             create_mview_progress: Default::default(),
             state_store,
             streaming_metrics,
@@ -255,9 +254,9 @@ impl ManagedBarrierState {
         &mut self,
         actor_id: ActorId,
         start_prev_epoch: u64,
-        tx: mpsc::UnboundedSender<(u64, Option<Arc<Mutation>>)>,
+        tx: mpsc::UnboundedSender<SubscribeMutationItem>,
     ) {
-        let subscribers = self.mutation_subscrbers.entry(actor_id).or_default();
+        let subscribers = self.mutation_subscribers.entry(actor_id).or_default();
         if let Some(state) = self.epoch_barrier_state_map.get(&start_prev_epoch) {
             match &state.inner {
                 ManagedBarrierStateInner::Issued(issued_state) => {
@@ -539,7 +538,7 @@ impl ManagedBarrierState {
             }
         };
 
-        for (actor_id, subscribers) in &mut self.mutation_subscrbers {
+        for (actor_id, subscribers) in &mut self.mutation_subscribers {
             if actor_ids_to_collect.contains(actor_id) {
                 if let Some((first_epoch, _)) = subscribers.pending_subscribers.first_key_value() {
                     assert!(
@@ -575,7 +574,7 @@ impl ManagedBarrierState {
             }
         }
 
-        self.mutation_subscrbers
+        self.mutation_subscribers
             .retain(|_, subscribers| !subscribers.is_empty());
 
         self.epoch_barrier_state_map.insert(

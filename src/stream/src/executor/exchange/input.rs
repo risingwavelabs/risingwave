@@ -217,16 +217,9 @@ impl RemoteInput {
                                 .ok_or_else(|| {
                                     anyhow!("failed to receive mutation of barrier {:?}", barrier)
                                 })
-                                .and_then(|(prev_epoch, mutation)| {
-                                    if prev_epoch != barrier.epoch.prev {
-                                        Err(anyhow!(
-                                            "expect barrier {:?} but get epoch {}",
-                                            barrier,
-                                            prev_epoch
-                                        ))
-                                    } else {
-                                        Ok(mutation)
-                                    }
+                                .map(|(prev_epoch, mutation)| {
+                                    assert_eq!(prev_epoch, barrier.epoch.prev);
+                                    mutation
                                 })?;
                             barrier.mutation = mutation;
                         }

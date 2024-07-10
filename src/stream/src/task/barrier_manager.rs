@@ -188,6 +188,8 @@ impl CreateActorContext {
     }
 }
 
+pub(super) type SubscribeMutationItem = (u64, Option<Arc<Mutation>>);
+
 pub(super) enum LocalBarrierEvent {
     ReportActorCollected {
         actor_id: ActorId,
@@ -201,7 +203,7 @@ pub(super) enum LocalBarrierEvent {
     SubscribeBarrierMutation {
         actor_id: ActorId,
         epoch: EpochPair,
-        mutation_sender: mpsc::UnboundedSender<(u64, Option<Arc<Mutation>>)>,
+        mutation_sender: mpsc::UnboundedSender<SubscribeMutationItem>,
     },
     #[cfg(test)]
     Flush(oneshot::Sender<()>),
@@ -906,7 +908,7 @@ impl LocalBarrierManager {
         &self,
         actor_id: ActorId,
         first_barrier: &Barrier,
-    ) -> mpsc::UnboundedReceiver<(u64, Option<Arc<Mutation>>)> {
+    ) -> mpsc::UnboundedReceiver<SubscribeMutationItem> {
         let (tx, rx) = mpsc::unbounded_channel();
         self.send_event(LocalBarrierEvent::SubscribeBarrierMutation {
             actor_id,
