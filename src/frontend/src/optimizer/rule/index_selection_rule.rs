@@ -58,6 +58,7 @@ use risingwave_common::types::{
 };
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::plan_common::JoinType;
+use risingwave_sqlparser::ast::AsOf;
 
 use super::{BoxedRule, Rule};
 use crate::catalog::IndexCatalog;
@@ -540,9 +541,12 @@ impl IndexSelectionRule {
                 let condition = Condition {
                     conjunctions: conj.iter().map(|&x| x.to_owned()).collect(),
                 };
-                if let Some(index_access) =
-                    self.build_index_access(index.clone(), condition, logical_scan.ctx().clone())
-                {
+                if let Some(index_access) = self.build_index_access(
+                    index.clone(),
+                    condition,
+                    logical_scan.ctx().clone(),
+                    logical_scan.as_of().clone(),
+                ) {
                     result.push(index_access);
                 }
             }
@@ -570,7 +574,7 @@ impl IndexSelectionRule {
             Condition {
                 conjunctions: conjunctions.to_vec(),
             },
-            None,
+            logical_scan.as_of().clone(),
             logical_scan.table_cardinality(),
         );
 
@@ -585,6 +589,7 @@ impl IndexSelectionRule {
         index: Rc<IndexCatalog>,
         predicate: Condition,
         ctx: OptimizerContextRef,
+        as_of: Option<AsOf>,
     ) -> Option<PlanRef> {
         let mut rewriter = IndexPredicateRewriter::new(
             index.primary_to_secondary_mapping(),
@@ -610,7 +615,7 @@ impl IndexSelectionRule {
                 vec![],
                 ctx,
                 new_predicate,
-                None,
+                as_of,
                 index.index_table.cardinality,
             )
             .into(),

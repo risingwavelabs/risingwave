@@ -42,8 +42,8 @@ use risingwave_pb::plan_common::StorageTableDesc;
 
 use crate::error::Result;
 use crate::executor::{
-    AsOf, BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, DummyExecutor, Executor,
-    ExecutorBuilder, JoinType, LookupJoinBase,
+    unix_timestamp_sec_to_epoch, AsOf, BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder,
+    DummyExecutor, Executor, ExecutorBuilder, JoinType, LookupJoinBase,
 };
 use crate::task::{BatchTaskContext, ShutdownToken, TaskId};
 
@@ -298,6 +298,24 @@ impl BoxedExecutorBuilder for LocalLookupJoinExecutorBuilder {
             source.plan_node().get_node_body().unwrap(),
             NodeBody::LocalLookupJoin
         )?;
+        // as_of takes precedence
+        let as_of = lookup_join_node
+            .as_of
+            .as_ref()
+            .map(AsOf::try_from)
+            .transpose()?;
+        let query_epoch = as_of
+            .as_ref()
+            .map(|a| {
+                let epoch = unix_timestamp_sec_to_epoch(a.timestamp).0;
+                tracing::debug!(epoch, "time travel");
+                risingwave_pb::common::BatchQueryEpoch {
+                    epoch: Some(risingwave_pb::common::batch_query_epoch::Epoch::TimeTravel(
+                        epoch,
+                    )),
+                }
+            })
+            .unwrap_or_else(|| source.epoch());
 
         let join_type = JoinType::from_prost(lookup_join_node.get_join_type()?);
         let condition = match lookup_join_node.get_condition() {
@@ -390,12 +408,6 @@ impl BoxedExecutorBuilder for LocalLookupJoinExecutorBuilder {
             })
             .collect();
 
-        let as_of = lookup_join_node
-            .as_of
-            .as_ref()
-            .map(TryInto::try_into)
-            .transpose()?;
-
         let inner_side_builder = InnerSideExecutorBuilder {
             table_desc: table_desc.clone(),
             table_distribution: TableDistribution::new_from_storage_table_desc(
@@ -410,7 +422,7 @@ impl BoxedExecutorBuilder for LocalLookupJoinExecutorBuilder {
             lookup_prefix_len,
             context: source.context().clone(),
             task_id: source.task_id.clone(),
-            epoch: source.epoch(),
+            epoch: query_epoch,
             worker_slot_to_scan_range_mapping: HashMap::new(),
             chunk_size,
             shutdown_rx: source.shutdown_rx.clone(),
