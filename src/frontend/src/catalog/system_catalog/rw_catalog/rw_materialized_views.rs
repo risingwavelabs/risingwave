@@ -27,6 +27,7 @@ struct RwMaterializedView {
     schema_id: i32,
     owner: i32,
     definition: String,
+    append_only: bool,
     acl: String,
     initialized_at: Option<Timestamptz>,
     created_at: Option<Timestamptz>,
@@ -44,12 +45,13 @@ fn read_rw_materialized_views(reader: &SysCatalogReaderImpl) -> Result<Vec<RwMat
 
     Ok(schemas
         .flat_map(|schema| {
-            schema.iter_mv().map(|table| RwMaterializedView {
+            schema.iter_created_mvs().map(|table| RwMaterializedView {
                 id: table.id.table_id as i32,
                 name: table.name().into(),
                 schema_id: schema.id() as i32,
                 owner: table.owner as i32,
                 definition: table.create_sql(),
+                append_only: table.append_only,
                 acl: get_acl_items(
                     &Object::TableId(table.id.table_id),
                     true,

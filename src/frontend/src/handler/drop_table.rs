@@ -38,19 +38,19 @@ pub async fn handle_drop_table(
 
     let (source_id, table_id) = {
         let reader = session.env().catalog_reader().read_guard();
-        let (table, schema_name) = match reader.get_table_by_name(db_name, schema_path, &table_name)
-        {
-            Ok((t, s)) => (t, s),
-            Err(e) => {
-                return if if_exists {
-                    Ok(RwPgResponse::builder(StatementType::DROP_TABLE)
-                        .notice(format!("table \"{}\" does not exist, skipping", table_name))
-                        .into())
-                } else {
-                    Err(e.into())
+        let (table, schema_name) =
+            match reader.get_created_table_by_name(db_name, schema_path, &table_name) {
+                Ok((t, s)) => (t, s),
+                Err(e) => {
+                    return if if_exists {
+                        Ok(RwPgResponse::builder(StatementType::DROP_TABLE)
+                            .notice(format!("table \"{}\" does not exist, skipping", table_name))
+                            .into())
+                    } else {
+                        Err(e.into())
+                    }
                 }
-            }
-        };
+            };
 
         session.check_privilege_for_drop_alter(schema_name, &**table)?;
 
@@ -91,7 +91,8 @@ mod tests {
         let source = catalog_reader.get_source_by_name(DEFAULT_DATABASE_NAME, schema_path, "t");
         assert!(source.is_err());
 
-        let table = catalog_reader.get_table_by_name(DEFAULT_DATABASE_NAME, schema_path, "t");
+        let table =
+            catalog_reader.get_created_table_by_name(DEFAULT_DATABASE_NAME, schema_path, "t");
         assert!(table.is_err());
     }
 }

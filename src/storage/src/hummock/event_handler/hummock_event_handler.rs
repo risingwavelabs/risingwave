@@ -469,9 +469,9 @@ impl HummockEventHandler {
         table_ids: HashSet<TableId>,
     ) {
         debug!(
-            "awaiting for epoch to be synced: {}, max_synced_epoch: {}",
             new_sync_epoch,
-            self.uploader.max_synced_epoch()
+            ?table_ids,
+            "awaiting for epoch to be synced",
         );
         self.uploader
             .start_sync_epoch(new_sync_epoch, sync_result_sender, table_ids);
@@ -481,7 +481,6 @@ impl HummockEventHandler {
         info!(
             prev_epoch,
             max_committed_epoch = self.uploader.max_committed_epoch(),
-            max_synced_epoch = self.uploader.max_synced_epoch(),
             "handle clear event"
         );
 
@@ -598,14 +597,12 @@ impl HummockEventHandler {
                 let mut version_to_apply = pinned_version.version().clone();
                 for version_delta in &version_deltas {
                     assert_eq!(version_to_apply.id, version_delta.prev_id);
-                    if version_to_apply.max_committed_epoch == version_delta.max_committed_epoch {
-                        if let Some(sst_delta_infos) = &mut sst_delta_infos {
-                            sst_delta_infos.extend(
-                                version_to_apply
-                                    .build_sst_delta_infos(version_delta)
-                                    .into_iter(),
-                            );
-                        }
+                    if let Some(sst_delta_infos) = &mut sst_delta_infos {
+                        sst_delta_infos.extend(
+                            version_to_apply
+                                .build_sst_delta_infos(version_delta)
+                                .into_iter(),
+                        );
                     }
                     version_to_apply.apply_version_delta(version_delta);
                 }
@@ -926,7 +923,7 @@ mod tests {
 
     use futures::FutureExt;
     use parking_lot::Mutex;
-    use risingwave_common::buffer::BitmapBuilder;
+    use risingwave_common::bitmap::BitmapBuilder;
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::util::epoch::{test_epoch, EpochExt};
     use risingwave_hummock_sdk::version::HummockVersion;

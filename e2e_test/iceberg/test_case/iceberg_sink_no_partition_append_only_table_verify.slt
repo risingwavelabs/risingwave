@@ -7,7 +7,7 @@ WITH (
     s3.access.key = 'hummockadmin',
     s3.secret.key = 'hummockadmin',
     catalog.type = 'storage',
-    warehouse.path = 's3://icebergdata/demo',
+    warehouse.path = 's3a://icebergdata/demo',
     database.name = 'demo_db',
     table.name = 'no_partition_append_only_table',
 );

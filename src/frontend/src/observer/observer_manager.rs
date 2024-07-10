@@ -269,7 +269,7 @@ impl FrontendObserverNode {
                             ),
                             Operation::Update => {
                                 let old_fragment_id = catalog_guard
-                                    .get_table_by_id(&table.id.into())
+                                    .get_any_table_by_id(&table.id.into())
                                     .unwrap()
                                     .fragment_id;
                                 catalog_guard.update_table(table);
