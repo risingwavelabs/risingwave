@@ -99,7 +99,6 @@ fn convert_record_batch_to_stream_chunk(
                                 IcebergArrowConvert.to_arrow_field(rw_column_name, rw_data_type)?;
                             let converted_arrow_data_type: &arrow_schema_iceberg::DataType =
                                 arrow_field.data_type();
-
                             if converted_arrow_data_type == parquet_column.data_type() {
                                 let array_impl = IcebergArrowConvert
                                     .array_from_arrow_array(&arrow_field, parquet_column)?;
