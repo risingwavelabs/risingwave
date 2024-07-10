@@ -14,7 +14,7 @@ This page describes RisingWave's Data Source API and the architecture behind it.
 
 RisingWave's data source covers four parts: connectors, enumerators, ConnectorSource and SourceExecutor.
 
-![data source arch](../docs/images/data-source/data-source-arch.svg)
+![data source arch](../images/data-source/data-source-arch.svg)
 
 ### Connectors
 

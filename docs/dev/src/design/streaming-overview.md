@@ -26,7 +26,7 @@ In this document we give an overview of the RisingWave streaming engine.
 
 ## Architecture
 
-![streaming-architecture](./images/streaming-overview/streaming-architecture.svg)
+![streaming-architecture](../images/streaming-overview/streaming-architecture.svg)
 
 The overall architecture of RisingWave is depicted in the figure above. In brief, RisingWave streaming engine consists of three sets of nodes: frontend, compute nodes, and meta service. The frontend node consists of the serving layer, handling users' SQL requests concurrently. Underlying is the processing layer. Each compute node hosts a collection of long-running actors for stream processing. All actors access a shared persistence layer of storage (currently AWS S3) as its state storage. The meta service maintains all meta-information and coordinates the whole cluster.
 
@@ -38,7 +38,7 @@ When receiving a create materialized view statement at the frontend, a materiali
 4. Initializing the job at the backend. The meta service notifies all compute nodes to start serving streaming pipelines.
 ## Actors, executors, and states
 
-![streaming-executor](./images/streaming-overview/streaming-executor-and-compute-node.svg)
+![streaming-executor](../images/streaming-overview/streaming-executor-and-compute-node.svg)
 
 ### Actors
 
@@ -75,4 +75,3 @@ See more detailed descriptions on [Checkpoint](./checkpoint.md).
 ### Fault tolerance
 
 When the streaming engine crashes down, the system must globally rollback to a previous consistent snapshot. To achieve this, whenever the meta detects the failover of some certain compute node or any undergoing checkpoint procedure, it triggers a recovery process. After rebuilding the streaming pipeline, each executor will reset its local state from a consistent snapshot on the storage and recover its computation.
-
