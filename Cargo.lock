@@ -8916,38 +8916,6 @@ dependencies = [
 
 [[package]]
 name = "parquet"
-version = "50.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "547b92ebf0c1177e3892f44c8f79757ee62e678d564a9834189725f2c5b7a750"
-dependencies = [
- "ahash 0.8.11",
- "arrow-array 50.0.0",
- "arrow-buffer 50.0.0",
- "arrow-cast 50.0.0",
- "arrow-data 50.0.0",
- "arrow-ipc 50.0.0",
- "arrow-schema 50.0.0",
- "arrow-select 50.0.0",
- "base64 0.21.7",
- "brotli 3.5.0",
- "bytes",
- "chrono",
- "flate2",
- "half 2.3.1",
- "hashbrown 0.14.3",
- "lz4_flex",
- "num",
- "num-bigint",
- "paste",
- "seq-macro",
- "snap",
- "thrift",
- "twox-hash",
- "zstd 0.13.0",
-]
-
-[[package]]
-name = "parquet"
 version = "52.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29c3b5322cc1bbf67f11c079c42be41a55949099b78732f7dba9e15edde40eab"
@@ -10694,6 +10662,7 @@ dependencies = [
  "memcomparable",
  "opendal",
  "parking_lot 0.12.1",
+ "parquet 52.0.0",
  "paste",
  "prometheus",
  "prost 0.12.1",
@@ -11203,7 +11172,6 @@ dependencies = [
  "opendal",
  "openssl",
  "parking_lot 0.12.1",
- "parquet 50.0.0",
  "paste",
  "pg_bigdecimal",
  "postgres-openssl",

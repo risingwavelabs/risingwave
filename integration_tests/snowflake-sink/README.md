@@ -18,21 +18,11 @@ note: the required credentials including the following, i.e.,
 - `snowflake.aws_secret_access_key` (a.k.a. the `AWS_SECRET_KEY` in snowflake stage)
 
 ### 1.2 Snowflake setup
-
-users will then need to setup the snowflake, which includes, i.e.,
-- generate the key-value pair for later authentication
-- create a `role` and grant the appropriate permission
-- setup the credential for the user (e.g., `RSA_PUBLIC_KEY`), and retrieve the `snowflake.rsa_public_key_fp` which will later be used in risingwave
-- create a `table` to store the sink data from risingwave
-- create a `stage` to refer the external s3 bucket, which will be used internally by snowflake to load the corresponding data
-- create a `pipe` to actual receive loaded data from the pre-defined stage and copy the data to the snowflake table.
-
-ps.
-1. this assumes the users have already created their accounts and the corresponding databases in snowflake.
-2. for detailed authentication process, refer to [official authentication guide](https://docs.snowflake.com/en/developer-guide/sql-api/authenticating).
-3. for detailed commands, refer to [official reference](https://docs.snowflake.com/en/reference)
+You need to have a table ,a stage and a pipe. In the meantime you need to open s3's SQS queue
+You can complete the above setup by https://docs.snowflake.com/en/user-guide/data-load-snowpipe-auto-s3
 
 an example for snowflake setup commands could be checked at `snowflake_prep.sql`, this also corresponds to the following example sinking use case.
+
 
 ## 2. Begin to sink data
 
