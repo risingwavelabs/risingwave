@@ -12,12 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::Context;
 use apache_avro::from_avro_datum;
 use risingwave_connector_codec::decoder::avro::{
     avro_schema_to_column_descs, AvroAccess, AvroParseOptions, MapHandling, ResolvedAvroSchema,
 };
 use risingwave_connector_codec::decoder::Access;
 use risingwave_connector_codec::AvroSchema;
+use thiserror_ext::AsReport;
 
 use crate::utils::*;
 
@@ -42,6 +44,24 @@ struct Config {
     /// TODO: For one test data, we can test all possible config options.
     map_handling: Option<MapHandling>,
     data_encoding: TestDataEncoding,
+}
+
+fn avro_schema_str_to_risingwave_schema(
+    avro_schema: &str,
+    config: &Config,
+) -> anyhow::Result<(ResolvedAvroSchema, Vec<ColumnDesc>)> {
+    // manually implement some logic in AvroParserConfig::map_to_columns
+    let avro_schema = AvroSchema::parse_str(avro_schema).context("failed to parse Avro schema")?;
+    let resolved_schema =
+        ResolvedAvroSchema::create(avro_schema.into()).context("failed to resolve Avro schema")?;
+
+    let rw_schema =
+        avro_schema_to_column_descs(&resolved_schema.resolved_schema, config.map_handling)
+            .context("failed to convert Avro schema to RisingWave schema")?
+            .iter()
+            .map(ColumnDesc::from)
+            .collect_vec();
+    Ok((resolved_schema, rw_schema))
 }
 
 /// Data driven testing for converting Avro Schema to RisingWave Schema, and then converting Avro data into RisingWave data.
@@ -79,17 +99,15 @@ fn check(
     expected_risingwave_schema: expect_test::Expect,
     expected_risingwave_data: expect_test::Expect,
 ) {
-    // manually implement some logic in AvroParserConfig::map_to_columns
-    let avro_schema = AvroSchema::parse_str(avro_schema).expect("failed to parse Avro schema");
-    let resolved_schema =
-        ResolvedAvroSchema::create(avro_schema.into()).expect("failed to resolve Avro schema");
-
-    let rw_schema =
-        avro_schema_to_column_descs(&resolved_schema.resolved_schema, config.map_handling)
-            .expect("failed to convert Avro schema to RisingWave schema")
-            .iter()
-            .map(ColumnDesc::from)
-            .collect_vec();
+    let (resolved_schema, rw_schema) =
+        match avro_schema_str_to_risingwave_schema(avro_schema, &config) {
+            Ok(res) => res,
+            Err(e) => {
+                expected_risingwave_schema.assert_eq(&format!("{}", e.as_report()));
+                expected_risingwave_data.assert_eq("");
+                return;
+            }
+        };
     expected_risingwave_schema.assert_eq(&format!(
         "{:#?}",
         rw_schema.iter().map(ColumnDescTestDisplay).collect_vec()
@@ -552,5 +570,318 @@ fn test_1() {
             Owned(null)
             Owned(null)
             Owned(Float64(OrderedFloat(NaN)))"#]],
+    );
+}
+
+#[test]
+fn test_union() {
+    // A basic test
+    check(
+        r#"
+{
+  "type": "record",
+  "name": "Root",
+  "fields": [
+    {
+      "name": "unionType",
+      "type": ["int", "string"]
+    },
+    {
+      "name": "unionTypeComplex",
+      "type": [
+        "null",
+        {"type": "record", "name": "Email","fields": [{"name":"inner","type":"string"}]},
+        {"type": "record", "name": "Fax","fields": [{"name":"inner","type":"int"}]},
+        {"type": "record", "name": "Sms","fields": [{"name":"inner","type":"int"}]}
+      ]
+    },
+    {
+      "name": "nullableString",
+      "type": ["null", "string"]
+    }
+  ]
+}
+    "#,
+        &[
+            // {
+            //   "unionType": {"int": 114514},
+            //   "unionTypeComplex": {"Sms": {"inner":6}},
+            //   "nullableString": null
+            // }
+            "00a4fd0d060c00",
+            // {
+            //   "unionType": {"int": 114514},
+            //   "unionTypeComplex": {"Fax": {"inner":6}},
+            //   "nullableString": null
+            // }
+            "00a4fd0d040c00",
+            // {
+            //   "unionType": {"string": "oops"},
+            //   "unionTypeComplex": null,
+            //   "nullableString": {"string": "hello"}
+            // }
+            "02086f6f707300020a68656c6c6f",
+            // {
+            //   "unionType": {"string": "oops"},
+            //   "unionTypeComplex": {"Email": {"inner":"a@b.c"}},
+            //   "nullableString": null
+            // }
+            "02086f6f7073020a6140622e6300",
+        ],
+        Config {
+            map_handling: None,
+            data_encoding: TestDataEncoding::HexBinary,
+        },
+        // FIXME: why the struct type doesn't have field_descs? https://github.com/risingwavelabs/risingwave/issues/17128
+        expect![[r#"
+            failed to convert Avro schema to RisingWave schema: failed to convert Avro union to struct: Feature is not yet implemented: Avro named type used in Union type: Record(RecordSchema { name: Name { name: "Email", namespace: None }, aliases: None, doc: None, fields: [RecordField { name: "inner", doc: None, aliases: None, default: None, schema: String, order: Ascending, position: 0, custom_attributes: {} }], lookup: {"inner": 0}, attributes: {} })
+            Tracking issue: https://github.com/risingwavelabs/risingwave/issues/17632"#]],
+        expect![""],
+    );
+
+    // logicalType is currently rejected
+    // https://github.com/risingwavelabs/risingwave/issues/17616
+    check(
+        r#"
+{
+"type": "record",
+"name": "Root",
+"fields": [
+  {
+    "name": "unionLogical",
+    "type": ["int", {"type":"int", "logicalType": "date"}]
+  }
+]
+}
+  "#,
+        &[],
+        Config {
+            map_handling: None,
+            data_encoding: TestDataEncoding::HexBinary,
+        },
+        expect![[r#"
+            failed to convert Avro schema to RisingWave schema: failed to convert Avro union to struct: Feature is not yet implemented: Avro logicalType used in Union type: Date
+            Tracking issue: https://github.com/risingwavelabs/risingwave/issues/17616"#]],
+        expect![""],
+    );
+
+    // test named type. Consider namespace.
+    // https://avro.apache.org/docs/1.11.1/specification/_print/#names
+    // List of things to take care:
+    // - Record fields and enum symbols DO NOT have namespace.
+    // - If the name specified contains a dot, then it is assumed to be a fullname, and any namespace also specified is IGNORED.
+    // - If a name doesn't have its own namespace, it will look for its most tightly enclosing named schema.
+    check(
+        r#"
+{
+    "type": "record",
+    "name": "Root",
+    "namespace": "RootNamespace",
+    "fields": [
+        {
+            "name": "littleFieldToMakeNestingLooksBetter",
+            "type": ["null","int"], "default": null
+        },
+        {
+            "name": "recordField",
+            "type": ["null", "int", {
+                "type": "record",
+                "name": "my.name.spaced.record",
+                "namespace": "when.name.contains.dot.namespace.is.ignored",
+                "fields": [
+                    {"name": "hello", "type": {"type": "int", "default": 1}},
+                    {"name": "world", "type": {"type": "double", "default": 1}}
+                ]
+            }],
+            "default": null
+        },
+        {
+            "name": "enumField",
+            "type": ["null", "int", {
+                "type": "enum",
+                "name": "myEnum",
+                "namespace": "my.namespace",
+                "symbols": ["A", "B", "C", "D"]
+            }],
+            "default": null
+        },
+        {
+            "name": "anotherEnumFieldUsingRootNamespace",
+            "type": ["null", "int", {
+                "type": "enum",
+                "name": "myEnum",
+                "symbols": ["A", "B", "C", "D"]
+            }],
+            "default": null
+        }
+    ]
+}
+"#,
+        &[
+            // {
+            //   "enumField":{"my.namespace.myEnum":"A"},
+            //   "anotherEnumFieldUsingRootNamespace":{"RootNamespace.myEnum": "D"}
+            // }
+            "000004000406",
+        ],
+        Config {
+            map_handling: None,
+            data_encoding: TestDataEncoding::HexBinary,
+        },
+        expect![[r#"
+            failed to convert Avro schema to RisingWave schema: failed to convert Avro union to struct: Feature is not yet implemented: Avro named type used in Union type: Record(RecordSchema { name: Name { name: "record", namespace: Some("my.name.spaced") }, aliases: None, doc: None, fields: [RecordField { name: "hello", doc: None, aliases: None, default: None, schema: Int, order: Ascending, position: 0, custom_attributes: {} }, RecordField { name: "world", doc: None, aliases: None, default: None, schema: Double, order: Ascending, position: 1, custom_attributes: {} }], lookup: {"hello": 0, "world": 1}, attributes: {} })
+            Tracking issue: https://github.com/risingwavelabs/risingwave/issues/17632"#]],
+        expect![""],
+    );
+
+    // This is provided by a user https://github.com/risingwavelabs/risingwave/issues/16273#issuecomment-2051480710
+    check(
+        r#"
+{
+  "namespace": "com.abc.efg.mqtt",
+  "name": "also.DataMessage",
+  "type": "record",
+  "fields": [
+      {
+          "name": "metrics",
+          "type": {
+              "type": "array",
+              "items": {
+                  "name": "also_data_metric",
+                  "type": "record",
+                  "fields": [
+                      {
+                          "name": "id",
+                          "type": "string"
+                      },
+                      {
+                          "name": "name",
+                          "type": "string"
+                      },
+                      {
+                          "name": "norm_name",
+                          "type": [
+                              "null",
+                              "string"
+                          ],
+                          "default": null
+                      },
+                      {
+                          "name": "uom",
+                          "type": [
+                              "null",
+                              "string"
+                          ],
+                          "default": null
+                      },
+                      {
+                          "name": "data",
+                          "type": {
+                              "type": "array",
+                              "items": {
+                                  "name": "dataItem",
+                                  "type": "record",
+                                  "fields": [
+                                      {
+                                          "name": "ts",
+                                          "type": "string",
+                                          "doc": "Timestamp of the metric."
+                                      },
+                                      {
+                                          "name": "value",
+                                          "type": [
+                                              "null",
+                                              "boolean",
+                                              "double",
+                                              "string"
+                                          ],
+                                          "doc": "Value of the metric."
+                                      }
+                                  ]
+                              }
+                          },
+                          "doc": "The data message"
+                      }
+                  ],
+                  "doc": "A metric object"
+              }
+          },
+          "doc": "A list of metrics."
+      }
+  ]
+}
+          "#,
+        &[
+            // {
+            //   "metrics": [
+            //     {"id":"foo", "name":"a", "data": [] }
+            //   ]
+            // }
+            "0206666f6f026100000000",
+            // {
+            //   "metrics": [
+            //     {"id":"foo", "name":"a", "norm_name": null, "uom": {"string":"c"}, "data": [{"ts":"1", "value":null}, {"ts":"2", "value": {"boolean": true }}] }
+            //   ]
+            // }
+            "0206666f6f02610002026304023100023202010000",
+        ],
+        Config {
+            map_handling: None,
+            data_encoding: TestDataEncoding::HexBinary,
+        },
+        expect![[r#"
+            [
+                metrics(#1): List(
+                    Struct {
+                        id: Varchar,
+                        name: Varchar,
+                        norm_name: Varchar,
+                        uom: Varchar,
+                        data: List(
+                            Struct {
+                                ts: Varchar,
+                                value: Struct {
+                                    boolean: Boolean,
+                                    double: Float64,
+                                    string: Varchar,
+                                },
+                            },
+                        ),
+                    },
+                ),
+            ]"#]],
+        expect![[r#"
+            Owned([
+                StructValue(
+                    Utf8("foo"),
+                    Utf8("a"),
+                    null,
+                    null,
+                    [],
+                ),
+            ])
+            ----
+            Owned([
+                StructValue(
+                    Utf8("foo"),
+                    Utf8("a"),
+                    null,
+                    Utf8("c"),
+                    [
+                        StructValue(
+                            Utf8("1"),
+                            null,
+                        ),
+                        StructValue(
+                            Utf8("2"),
+                            StructValue(
+                                Bool(true),
+                                null,
+                                null,
+                            ),
+                        ),
+                    ],
+                ),
+            ])"#]],
     );
 }
