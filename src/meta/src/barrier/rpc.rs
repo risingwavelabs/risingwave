@@ -24,6 +24,7 @@ use futures::future::try_join_all;
 use futures::stream::{BoxStream, FuturesUnordered};
 use futures::{pin_mut, FutureExt, StreamExt};
 use itertools::Itertools;
+use risingwave_common::catalog::TableId;
 use risingwave_common::hash::ActorId;
 use risingwave_common::util::tracing::TracingContext;
 use risingwave_pb::common::{ActorInfo, WorkerNode};
@@ -247,6 +248,7 @@ impl ControlStreamManager {
     pub(super) fn inject_barrier(
         &mut self,
         command_context: Arc<CommandContext>,
+        table_ids_to_sync: HashSet<TableId>,
     ) -> MetaResult<HashSet<WorkerId>> {
         fail_point!("inject_barrier_err", |_| risingwave_common::bail!(
             "inject_barrier_err"
@@ -294,9 +296,7 @@ impl ControlStreamManager {
                                         barrier: Some(barrier),
                                         actor_ids_to_send,
                                         actor_ids_to_collect,
-                                        table_ids_to_sync: command_context
-                                            .info
-                                            .existing_table_ids()
+                                        table_ids_to_sync: table_ids_to_sync
                                             .iter()
                                             .map(|table_id| table_id.table_id)
                                             .collect(),

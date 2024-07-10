@@ -640,6 +640,7 @@ impl TableUnsyncData {
     }
 
     fn new_epoch(&mut self, epoch: HummockEpoch) {
+        debug!(table_id = ?self.table_id, epoch, "table new epoch");
         if let Some(latest_epoch) = self.max_epoch() {
             assert_gt!(epoch, latest_epoch);
         }
@@ -865,7 +866,7 @@ impl UploaderData {
         let epochs = take_before_epoch(&mut self.unsync_data.epochs, epoch);
         if cfg!(debug_assertions) {
             for epoch_table_ids in epochs.into_values() {
-                assert_eq!(epoch_table_ids, table_ids,);
+                assert_eq!(epoch_table_ids, table_ids);
             }
         }
 
@@ -874,13 +875,17 @@ impl UploaderData {
         let mut spilled_tasks = BTreeSet::new();
 
         let mut flush_payload = HashMap::new();
-        let mut table_ids_to_ack = HashSet::new();
-        for (table_id, table_data) in &mut self.unsync_data.table_data {
+        for (table_id, table_data) in &self.unsync_data.table_data {
             if !table_ids.contains(table_id) {
                 table_data.assert_after_epoch(epoch);
-                continue;
             }
-            table_ids_to_ack.insert(*table_id);
+        }
+        for table_id in &table_ids {
+            let table_data = self
+                .unsync_data
+                .table_data
+                .get_mut(table_id)
+                .expect("should exist");
             let (unflushed_payload, table_watermarks, task_ids) = table_data.sync(epoch);
             for (instance_id, payload) in unflushed_payload {
                 if !payload.is_empty() {
@@ -937,7 +942,6 @@ impl UploaderData {
             SyncingData {
                 sync_epoch: epoch,
                 table_ids,
-                table_ids_to_ack,
                 remaining_uploading_tasks: uploading_tasks,
                 uploaded,
                 table_watermarks: all_table_watermarks,
@@ -963,8 +967,6 @@ impl UnsyncData {
 struct SyncingData {
     sync_epoch: HummockEpoch,
     table_ids: HashSet<TableId>,
-    /// Subset of `table_ids` that has existing instance
-    table_ids_to_ack: HashSet<TableId>,
     remaining_uploading_tasks: HashSet<UploadingTaskId>,
     // newer data at the front
     uploaded: VecDeque<Arc<StagingSstableInfo>>,
@@ -1297,8 +1299,7 @@ impl UploaderData {
             let (_, syncing_data) = self.syncing_data.pop_first().expect("non-empty");
             let SyncingData {
                 sync_epoch,
-                table_ids: _table_ids,
-                table_ids_to_ack,
+                table_ids,
                 remaining_uploading_tasks: _,
                 uploaded,
                 table_watermarks,
@@ -1309,7 +1310,7 @@ impl UploaderData {
                 .uploader_syncing_epoch_count
                 .set(self.syncing_data.len() as _);
 
-            for table_id in table_ids_to_ack {
+            for table_id in table_ids {
                 if let Some(table_data) = self.unsync_data.table_data.get_mut(&table_id) {
                     table_data.ack_synced(sync_epoch);
                     if table_data.is_empty() {
