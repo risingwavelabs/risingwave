@@ -1,14 +1,6 @@
 # Storing State Using Relational Table
 
-- [Storing State Using Relational Table](#storing-state-using-relational-table)
-  - [Row-based Encoding](#row-based-encoding)
-  - [Relational Table Layer](#relational-table)
-    - [Write Path](#write-path)
-    - [Read Path](#read-path)
-
-
-
-<!-- Created by https://github.com/ekalinin/github-markdown-toc -->
+<!-- toc -->
 
 ## Row-based Encoding
 
@@ -75,10 +67,10 @@ In this doc, we will take HashAgg with extreme state (`max`, `min`) or value sta
 
 [Code](https://github.com/risingwavelabs/risingwave/blob/7f9ad2240712aa0cfe3edffb4535d43b42f32cc5/src/frontend/src/optimizer/plan_node/logical_agg.rs#L144)
 
-## Table id
+### Table id
 `table_id` is a globally unique id allocated in meta for each relational table object. Meta is responsible for traversing the Plan Tree and calculating the total number of Relational Tables needed. For example, the Hash Join Operator needs 2, one for the left table and one for the right table. The number of tables needed for Agg depends on the number of agg calls.
 
-## Value State (Sum, Count)
+### Value State (Sum, Count)
 Query example:
 ```sql
 select sum(v2), count(v3) from t group by v1
@@ -86,7 +78,7 @@ select sum(v2), count(v3) from t group by v1
 
 This query will need to initiate 2 Relational Tables. The schema is `table_id/group_key`.
 
-## Extreme State (Max, Min)
+### Extreme State (Max, Min)
 Query example:
 ```sql
 select max(v2), min(v3) from t group by v1
