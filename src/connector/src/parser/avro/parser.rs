@@ -28,7 +28,9 @@ use super::ConfluentSchemaCache;
 use crate::error::ConnectorResult;
 use crate::parser::unified::AccessImpl;
 use crate::parser::util::bytes_from_url;
-use crate::parser::{AccessBuilder, AvroProperties, EncodingProperties, EncodingType, MapHandling};
+use crate::parser::{
+    AccessBuilder, AvroProperties, EncodingProperties, EncodingType, MapHandling, SchemaLocation,
+};
 use crate::schema::schema_registry::{
     extract_schema_id, get_subject_by_strategy, handle_sr_list, Client,
 };
@@ -127,71 +129,84 @@ pub struct AvroParserConfig {
 impl AvroParserConfig {
     pub async fn new(encoding_properties: EncodingProperties) -> ConnectorResult<Self> {
         let AvroProperties {
-            use_schema_registry,
-            row_schema_location: schema_location,
-            client_config,
-            aws_auth_props,
-            topic,
+            schema_location,
             enable_upsert,
             record_name,
             key_record_name,
-            name_strategy,
             map_handling,
         } = try_match_expand!(encoding_properties, EncodingProperties::Avro)?;
-        let url = handle_sr_list(schema_location.as_str())?;
-        if use_schema_registry {
-            let client = Client::new(url, &client_config)?;
-            let resolver = ConfluentSchemaCache::new(client);
+        match schema_location {
+            SchemaLocation::Confluent {
+                urls: schema_location,
+                client_config,
+                name_strategy,
+                topic,
+            } => {
+                let url = handle_sr_list(schema_location.as_str())?;
+                let client = Client::new(url, &client_config)?;
+                let resolver = ConfluentSchemaCache::new(client);
 
-            let subject_key = if enable_upsert {
-                Some(get_subject_by_strategy(
+                let subject_key = if enable_upsert {
+                    Some(get_subject_by_strategy(
+                        &name_strategy,
+                        topic.as_str(),
+                        key_record_name.as_deref(),
+                        true,
+                    )?)
+                } else {
+                    if let Some(name) = &key_record_name {
+                        bail!("unused FORMAT ENCODE option: key.message='{name}'");
+                    }
+                    None
+                };
+                let subject_value = get_subject_by_strategy(
                     &name_strategy,
                     topic.as_str(),
-                    key_record_name.as_deref(),
-                    true,
-                )?)
-            } else {
-                if let Some(name) = &key_record_name {
-                    bail!("unused FORMAT ENCODE option: key.message='{name}'");
-                }
-                None
-            };
-            let subject_value = get_subject_by_strategy(
-                &name_strategy,
-                topic.as_str(),
-                record_name.as_deref(),
-                false,
-            )?;
-            tracing::debug!("infer key subject {subject_key:?}, value subject {subject_value}");
+                    record_name.as_deref(),
+                    false,
+                )?;
+                tracing::debug!("infer key subject {subject_key:?}, value subject {subject_value}");
 
-            Ok(Self {
-                schema: Arc::new(ResolvedAvroSchema::create(
-                    resolver.get_by_subject(&subject_value).await?,
-                )?),
-                key_schema: if let Some(subject_key) = subject_key {
-                    Some(Arc::new(ResolvedAvroSchema::create(
-                        resolver.get_by_subject(&subject_key).await?,
-                    )?))
-                } else {
-                    None
-                },
-                writer_schema_cache: Some(Arc::new(resolver)),
-                map_handling,
-            })
-        } else {
-            if enable_upsert {
-                bail!("avro upsert without schema registry is not supported");
+                Ok(Self {
+                    schema: Arc::new(ResolvedAvroSchema::create(
+                        resolver.get_by_subject(&subject_value).await?,
+                    )?),
+                    key_schema: if let Some(subject_key) = subject_key {
+                        Some(Arc::new(ResolvedAvroSchema::create(
+                            resolver.get_by_subject(&subject_key).await?,
+                        )?))
+                    } else {
+                        None
+                    },
+                    writer_schema_cache: Some(Arc::new(resolver)),
+                    map_handling,
+                })
             }
-            let url = url.first().unwrap();
-            let schema_content = bytes_from_url(url, aws_auth_props.as_ref()).await?;
-            let schema = Schema::parse_reader(&mut schema_content.as_slice())
-                .context("failed to parse avro schema")?;
-            Ok(Self {
-                schema: Arc::new(ResolvedAvroSchema::create(Arc::new(schema))?),
-                key_schema: None,
-                writer_schema_cache: None,
-                map_handling,
-            })
+            SchemaLocation::File {
+                url: schema_location,
+                aws_auth_props,
+            } => {
+                let url = handle_sr_list(schema_location.as_str())?;
+                if enable_upsert {
+                    bail!("avro upsert without schema registry is not supported");
+                }
+                let url = url.first().unwrap();
+                let schema_content = bytes_from_url(url, aws_auth_props.as_ref()).await?;
+                let schema = Schema::parse_reader(&mut schema_content.as_slice())
+                    .context("failed to parse avro schema")?;
+                Ok(Self {
+                    schema: Arc::new(ResolvedAvroSchema::create(Arc::new(schema))?),
+                    key_schema: None,
+                    writer_schema_cache: None,
+                    map_handling,
+                })
+            }
+            SchemaLocation::Glue {
+                schema_arn,
+                aws_auth_props,
+            } => {
+                todo!()
+            }
         }
     }
 
