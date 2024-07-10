@@ -159,7 +159,6 @@ pub(crate) mod tests {
         for epoch in &epochs {
             storage.start_epoch(*epoch, HashSet::from_iter([Default::default()]));
         }
-        storage.start_epoch(u64::MAX, HashSet::from_iter([Default::default()]));
         let mut local = storage
             .new_local(NewLocalOptions::for_test(TableId::default()))
             .await;

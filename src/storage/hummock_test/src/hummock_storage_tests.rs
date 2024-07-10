@@ -880,9 +880,6 @@ async fn test_delete_get() {
         )
         .await
         .unwrap();
-    test_env
-        .storage
-        .start_epoch(u64::MAX, HashSet::from_iter([TEST_TABLE_ID]));
     hummock_storage.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
     let res = test_env.storage.seal_and_sync_epoch(epoch2).await.unwrap();
     test_env
@@ -1819,9 +1816,6 @@ async fn test_get_with_min_epoch() {
         .await
         .unwrap();
 
-    test_env
-        .storage
-        .start_epoch(u64::MAX, HashSet::from_iter([TEST_TABLE_ID]));
     hummock_storage.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
 
     {

@@ -253,7 +253,6 @@ async fn test_basic_v2() {
         .await
         .unwrap();
 
-    hummock_storage.start_epoch(u64::MAX, HashSet::from_iter([Default::default()]));
     local.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
 
     // Get the value after flushing to remote.
@@ -515,7 +514,6 @@ async fn test_state_store_sync_v2() {
     //     hummock_storage.shared_buffer_manager().size() as u64
     // );
 
-    hummock_storage.start_epoch(u64::MAX, HashSet::from_iter([Default::default()]));
     local.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
 
     // trigger a sync
@@ -1076,7 +1074,6 @@ async fn test_delete_get_v2() {
         )
         .await
         .unwrap();
-    hummock_storage.start_epoch(u64::MAX, HashSet::from_iter([Default::default()]));
     local.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
     let res = hummock_storage.seal_and_sync_epoch(epoch2).await.unwrap();
     meta_client.commit_epoch(epoch2, res).await.unwrap();
@@ -1172,7 +1169,6 @@ async fn test_multiple_epoch_sync_v2() {
         )
         .await
         .unwrap();
-    hummock_storage.start_epoch(u64::MAX, HashSet::from_iter([Default::default()]));
     local.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
     let test_get = || {
         let hummock_storage_clone = &hummock_storage;
@@ -1310,7 +1306,6 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
             .min()
             .unwrap()
     };
-    hummock_storage.start_epoch(u64::MAX, HashSet::from_iter([Default::default()]));
     local_hummock_storage.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
     let sync_result1 = hummock_storage.seal_and_sync_epoch(epoch1).await.unwrap();
     let min_object_id_epoch1 = min_object_id(&sync_result1);

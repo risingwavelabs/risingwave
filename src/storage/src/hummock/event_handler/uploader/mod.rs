@@ -616,6 +616,10 @@ struct TableUnsyncData {
     )>,
     spill_tasks: BTreeMap<HummockEpoch, VecDeque<UploadingTaskId>>,
     unsync_epochs: BTreeMap<HummockEpoch, ()>,
+    // Initialized to be `None`. Transform to `Some(_)` when called
+    // `local_seal_epoch` with a non-existing epoch, to mark that
+    // the fragment of the table has stopped.
+    stopped_next_epoch: Option<HummockEpoch>,
     // newer epoch at the front
     syncing_epochs: VecDeque<HummockEpoch>,
     max_synced_epoch: Option<HummockEpoch>,
@@ -629,6 +633,7 @@ impl TableUnsyncData {
             table_watermarks: None,
             spill_tasks: Default::default(),
             unsync_epochs: Default::default(),
+            stopped_next_epoch: None,
             syncing_epochs: Default::default(),
             max_synced_epoch: committed_epoch,
         }
@@ -655,7 +660,8 @@ impl TableUnsyncData {
         if let Some(prev_epoch) = self.max_sync_epoch() {
             assert_gt!(epoch, prev_epoch)
         }
-        let _ = take_before_epoch(&mut self.unsync_epochs, epoch);
+        let epochs = take_before_epoch(&mut self.unsync_epochs, epoch);
+        assert_eq!(*epochs.last_key_value().expect("non-empty").0, epoch);
         self.syncing_epochs.push_front(epoch);
         (
             self.instance_data
@@ -814,7 +820,18 @@ impl UnsyncData {
             .get_mut(&instance_id)
             .expect("should exist");
         let epoch = instance_data.local_seal_epoch(next_epoch);
-        assert!(table_data.unsync_epochs.contains_key(&next_epoch));
+        // When drop/cancel a streaming job, for the barrier to stop actor, the
+        // local instance will call `local_seal_epoch`, but the `next_epoch` won't be
+        // called `start_epoch` because we have stopped writing on it.
+        if let Some(stopped_next_epoch) = table_data.stopped_next_epoch {
+            assert_eq!(stopped_next_epoch, next_epoch);
+        } else if !table_data.unsync_epochs.contains_key(&next_epoch) {
+            if let Some(max_epoch) = table_data.max_epoch() {
+                assert_gt!(next_epoch, max_epoch);
+            }
+            debug!(?table_id, epoch, next_epoch, "table data has stopped");
+            table_data.stopped_next_epoch = Some(next_epoch);
+        }
         if let Some((direction, table_watermarks)) = opts.table_watermarks {
             table_data.add_table_watermarks(epoch, table_watermarks, direction);
         }
@@ -848,12 +865,7 @@ impl UploaderData {
         let epochs = take_before_epoch(&mut self.unsync_data.epochs, epoch);
         if cfg!(debug_assertions) {
             for epoch_table_ids in epochs.into_values() {
-                assert!(
-                    epoch_table_ids.is_subset(&table_ids),
-                    "epoch_table_ids {:?} not a subset of sync_table_ids: {:?}",
-                    epoch_table_ids,
-                    table_ids
-                );
+                assert_eq!(epoch_table_ids, table_ids,);
             }
         }
 

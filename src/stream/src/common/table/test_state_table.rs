@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
 use std::ops::Bound::{self, *};
 
 use futures::{pin_mut, StreamExt};
@@ -1870,6 +1871,9 @@ async fn test_replicated_state_table_replication() {
         .await;
 
     let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
+    test_env
+        .storage
+        .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
     state_table.init_epoch(epoch);
     replicated_state_table.init_epoch(epoch).await.unwrap();
 
@@ -1881,6 +1885,9 @@ async fn test_replicated_state_table_replication() {
     ]));
 
     epoch.inc_for_test();
+    test_env
+        .storage
+        .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
     state_table.commit(epoch).await.unwrap();
     replicated_state_table.commit(epoch).await.unwrap();
     test_env.commit_epoch(epoch.prev).await;
@@ -1941,6 +1948,9 @@ async fn test_replicated_state_table_replication() {
     replicated_state_table.write_chunk(replicate_chunk);
 
     epoch.inc_for_test();
+    test_env
+        .storage
+        .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
     state_table.commit(epoch).await.unwrap();
     replicated_state_table.commit(epoch).await.unwrap();
 

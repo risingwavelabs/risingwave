@@ -218,7 +218,6 @@ async fn test_snapshot_inner(
         )
         .await
         .unwrap();
-    hummock_storage.start_epoch(u64::MAX, HashSet::from_iter([Default::default()]));
     local.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
     if enable_sync {
         let res = hummock_storage.seal_and_sync_epoch(epoch3).await.unwrap();
@@ -278,7 +277,6 @@ async fn test_snapshot_range_scan_inner(
         )
         .await
         .unwrap();
-    hummock_storage.start_epoch(u64::MAX, HashSet::from_iter([Default::default()]));
     local.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
     if enable_sync {
         let res = hummock_storage.seal_and_sync_epoch(epoch).await.unwrap();
