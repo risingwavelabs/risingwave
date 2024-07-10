@@ -115,6 +115,11 @@ impl AvroAccessBuilder {
                 }
             }
             WriterSchemaCache::Glue(resolver) => {
+                // <https://github.com/awslabs/aws-glue-schema-registry/blob/v1.1.20/common/src/main/java/com/amazonaws/services/schemaregistry/utils/AWSSchemaRegistryConstants.java#L59-L61>
+                // byte 0:      header version = 3
+                // byte 1:      compression: 0 = no compression; 5 = zlib (unsupported)
+                // byte 2..=17: 16-byte UUID as schema version id
+                // byte 18..:   raw avro payload
                 if payload.len() < 18 {
                     bail!("payload shorter than 18-byte glue header");
                 }
