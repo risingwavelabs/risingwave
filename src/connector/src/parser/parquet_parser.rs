@@ -20,9 +20,7 @@ use risingwave_common::array::{ArrayBuilderImpl, DataChunk, StreamChunk};
 use risingwave_common::types::{Datum, ScalarImpl};
 
 use crate::parser::ConnectorResult;
-use crate::source::filesystem::opendal_source::opendal_reader::ParquetFileReader;
 use crate::source::SourceColumnDesc;
-
 /// `ParquetParser` is responsible for converting the incoming `record_batch_stream`
 /// into a `streamChunk`.
 #[derive(Debug)]
@@ -39,7 +37,7 @@ impl ParquetParser {
     pub async fn into_stream(
         self,
         record_batch_stream: parquet::arrow::async_reader::ParquetRecordBatchStream<
-            ParquetFileReader,
+            tokio_util::compat::Compat<opendal::FuturesAsyncReader>,
         >,
         file_name: String,
     ) {
@@ -49,7 +47,7 @@ impl ParquetParser {
             // Convert each record batch into a stream chunk according to user defined schema.
             let chunk: StreamChunk = convert_record_batch_to_stream_chunk(
                 record_batch,
-                self.rw_columns.clone(),
+                &self.rw_columns,
                 file_name.clone(),
             )?;
             yield chunk;
@@ -81,7 +79,7 @@ impl ParquetParser {
 const MAX_HIDDEN_COLUMN_NUMS: usize = 3;
 fn convert_record_batch_to_stream_chunk(
     record_batch: RecordBatch,
-    source_columns: Vec<SourceColumnDesc>,
+    source_columns: &[SourceColumnDesc],
     file_name: String,
 ) -> Result<StreamChunk, crate::error::ConnectorError> {
     let size = source_columns.len();
@@ -91,11 +89,11 @@ fn convert_record_batch_to_stream_chunk(
             crate::source::SourceColumnType::Normal => {
                 match source_column.is_hidden_addition_col {
                     false => {
-                        let rw_data_type = source_column.data_type;
-                        let rw_column_name = source_column.name;
-                        if let Some(parquet_column) = record_batch.column_by_name(&rw_column_name) {
-                            let arrow_field = IcebergArrowConvert
-                                .to_arrow_field(&rw_column_name, &rw_data_type)?;
+                        let rw_data_type = &source_column.data_type;
+                        let rw_column_name = &source_column.name;
+                        if let Some(parquet_column) = record_batch.column_by_name(rw_column_name) {
+                            let arrow_field =
+                                IcebergArrowConvert.to_arrow_field(rw_column_name, rw_data_type)?;
                             let converted_arrow_data_type: &arrow_schema_iceberg::DataType =
                                 arrow_field.data_type();
 
@@ -107,7 +105,7 @@ fn convert_record_batch_to_stream_chunk(
                             } else {
                                 // data type mismatch, this column is set to null.
                                 let mut array_builder =
-                                    ArrayBuilderImpl::with_type(size, rw_data_type);
+                                    ArrayBuilderImpl::with_type(size, rw_data_type.clone());
 
                                 array_builder.append_n_null(record_batch.num_rows());
                                 let res = array_builder.finish();
@@ -116,7 +114,8 @@ fn convert_record_batch_to_stream_chunk(
                             }
                         } else {
                             // For columns defined in the source schema but not present in the Parquet file, null values are filled in.
-                            let mut array_builder = ArrayBuilderImpl::with_type(size, rw_data_type);
+                            let mut array_builder =
+                                ArrayBuilderImpl::with_type(size, rw_data_type.clone());
 
                             array_builder.append_n_null(record_batch.num_rows());
                             let res = array_builder.finish();
@@ -127,12 +126,12 @@ fn convert_record_batch_to_stream_chunk(
                     // handle hidden columns, for file source, the hidden columns are only `Offset` and `Filename`
                     true => {
                         if let Some(additional_column_type) =
-                            source_column.additional_column.column_type
+                            &source_column.additional_column.column_type
                         {
                             match additional_column_type{
                                 risingwave_pb::plan_common::additional_column::ColumnType::Offset(_) =>{
                                     let mut array_builder =
-                                    ArrayBuilderImpl::with_type(size, source_column.data_type);
+                                    ArrayBuilderImpl::with_type(size, source_column.data_type.clone());
                                     let datum: Datum =  Some(ScalarImpl::Utf8("0".into()));
                                     array_builder.append_n(record_batch.num_rows(), datum);
                                     let res = array_builder.finish();
@@ -142,7 +141,7 @@ fn convert_record_batch_to_stream_chunk(
                                 },
                                 risingwave_pb::plan_common::additional_column::ColumnType::Filename(_) => {
                                     let mut array_builder =
-                                    ArrayBuilderImpl::with_type(size, source_column.data_type);
+                                    ArrayBuilderImpl::with_type(size, source_column.data_type.clone());
                                     let datum: Datum =  Some(ScalarImpl::Utf8(file_name.clone().into()));
                                     array_builder.append_n(record_batch.num_rows(), datum);
                                     let res = array_builder.finish();
@@ -156,7 +155,8 @@ fn convert_record_batch_to_stream_chunk(
                 }
             }
             crate::source::SourceColumnType::RowId => {
-                let mut array_builder = ArrayBuilderImpl::with_type(size, source_column.data_type);
+                let mut array_builder =
+                    ArrayBuilderImpl::with_type(size, source_column.data_type.clone());
                 let datum: Datum = None;
                 array_builder.append_n(record_batch.num_rows(), datum);
                 let res = array_builder.finish();

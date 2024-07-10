@@ -13,24 +13,16 @@
 // limitations under the License.
 
 use std::future::IntoFuture;
-use std::ops::Range;
 use std::pin::Pin;
-use std::sync::Arc;
 
 use async_compression::tokio::bufread::GzipDecoder;
 use async_trait::async_trait;
-use futures::future::BoxFuture;
 use futures::TryStreamExt;
 use futures_async_stream::try_stream;
 use opendal::Operator;
-use parquet::arrow::async_reader::AsyncFileReader;
 use parquet::arrow::ParquetRecordBatchStreamBuilder;
-use parquet::errors::ParquetError;
-use parquet::file::footer::{decode_footer, decode_metadata};
-use parquet::file::metadata::ParquetMetaData;
-use parquet::file::FOOTER_SIZE;
 use risingwave_common::array::StreamChunk;
-use thiserror_ext::AsReport;
+use risingwave_common::util::tokio_util::compat::FuturesAsyncReadCompatExt;
 use tokio::io::{AsyncRead, BufReader};
 use tokio_util::io::{ReaderStream, StreamReader};
 
@@ -93,15 +85,21 @@ impl<Src: OpendalSource> OpendalReader<Src> {
             let msg_stream;
 
             if let EncodingProperties::Parquet = &self.parser_config.specific.encoding_config {
-                // If the format is "parquet", use `ParquetParser` to convert `record_batch` into stream chunk.
-                let file_reader = ParquetFileReader {
-                    op: self.connector.op.clone(),
-                    path: split.name.clone(),
-                };
+                // // If the format is "parquet", use `ParquetParser` to convert `record_batch` into stream chunk.
+                let reader: tokio_util::compat::Compat<opendal::FuturesAsyncReader> = self
+                    .connector
+                    .op
+                    .reader_with(&object_name)
+                    .into_future() // Unlike `rustc`, `try_stream` seems require manual `into_future`.
+                    .await?
+                    .into_futures_async_read(split.offset as u64..)
+                    .await?
+                    .compat();
 
-                let record_batch_stream = ParquetRecordBatchStreamBuilder::new(file_reader)
+                let record_batch_stream = ParquetRecordBatchStreamBuilder::new(reader)
                     .await?
                     .with_batch_size(self.source_ctx.source_ctrl_opts.chunk_size)
+                    .with_offset(split.offset)
                     .build()?;
 
                 let parquet_parser =
@@ -216,82 +214,5 @@ impl<Src: OpendalSource> OpendalReader<Src> {
                 .inc_by(batch_size as u64);
             yield batch;
         }
-    }
-}
-
-/// Since the `Reader` does not implement `tokio::io::AsyncRead` after `OpenDAL` 0.47, we construct a struct `ParquetFileReader` that implements `AsyncFileReader`, which is used as a parameter of `ParquetRecordBatchStreamBuilder`.
-/// The following code refers to <`https://github.com/icelake-io/icelake/blob/07d53893d7788b4e41fc11efad8a6be828405c31/icelake/src/io/scan.rs#L196`>, we can remove the following implementation after `ParquetFileReader` is changed to a public struct in icelake.
-pub struct ParquetFileReader {
-    op: Operator,
-    path: String,
-}
-
-impl AsyncFileReader for ParquetFileReader {
-    fn get_bytes(
-        &mut self,
-        range: Range<usize>,
-    ) -> BoxFuture<'_, parquet::errors::Result<bytes::Bytes>> {
-        Box::pin(async move {
-            self.op
-                .read_with(&self.path)
-                .range(range.start as u64..range.end as u64)
-                .await
-                .map(|data| data.to_bytes())
-                .map_err(|e| ParquetError::General(format!("{}", e.as_report())))
-        })
-    }
-
-    /// Get the metadata of the parquet file.
-    fn get_metadata(&mut self) -> BoxFuture<'_, parquet::errors::Result<Arc<ParquetMetaData>>> {
-        Box::pin(async {
-            let file_size = self
-                .op
-                .stat(&self.path)
-                .await
-                .map_err(|e| ParquetError::General(format!("{}", e.as_report())))?
-                .content_length();
-
-            if file_size < (FOOTER_SIZE as u64) {
-                return Err(ParquetError::General(
-                    "Invalid Parquet file. Size is smaller than footer".to_string(),
-                ));
-            }
-
-            let mut footer: [u8; FOOTER_SIZE] = [0; FOOTER_SIZE];
-            {
-                let footer_buffer = self
-                    .op
-                    .read_with(&self.path)
-                    .range((file_size - (FOOTER_SIZE as u64))..file_size)
-                    .await
-                    .map_err(|e| ParquetError::General(format!("{}", e.as_report())))?
-                    .to_bytes();
-
-                assert_eq!(footer_buffer.len(), FOOTER_SIZE);
-                footer.copy_from_slice(&footer_buffer);
-            }
-
-            let metadata_len = decode_footer(&footer)?;
-            let footer_metadata_len = FOOTER_SIZE + metadata_len;
-
-            if footer_metadata_len > file_size as usize {
-                return Err(ParquetError::General(format!(
-                    "Invalid Parquet file. Reported metadata length of {} + {} byte footer, but file is only {} bytes",
-                    metadata_len,
-                    FOOTER_SIZE,
-                    file_size
-                )));
-            }
-
-            let start = file_size - footer_metadata_len as u64;
-            let metadata_bytes = self
-                .op
-                .read_with(&self.path)
-                .range(start..(start + metadata_len as u64))
-                .await
-                .map_err(|e| ParquetError::General(format!("{}", e.as_report())))?
-                .to_bytes();
-            Ok(Arc::new(decode_metadata(&metadata_bytes)?))
-        })
     }
 }

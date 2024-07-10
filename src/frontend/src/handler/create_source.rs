@@ -442,12 +442,7 @@ pub(crate) async fn bind_columns_from_source(
 
             None
         }
-        (Format::Plain, Encode::Parquet) => {
-            // extract_parquet_table_schema();
-            // todo!();
-
-            None
-        }
+        (Format::Plain, Encode::Parquet) => None,
         (
             Format::Plain | Format::Upsert | Format::Maxwell | Format::Canal | Format::Debezium,
             Encode::Json,
