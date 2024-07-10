@@ -104,7 +104,8 @@ impl<Src: OpendalSource> OpendalReader<Src> {
 
                 let parquet_parser =
                     ParquetParser::new(self.parser_config.common.rw_columns.clone())?;
-                msg_stream = parquet_parser.into_stream(record_batch_stream, object_name);
+                msg_stream =
+                    parquet_parser.into_stream(record_batch_stream, object_name, split.offset);
             } else {
                 let data_stream = Self::stream_read_object(
                     self.connector.op.clone(),

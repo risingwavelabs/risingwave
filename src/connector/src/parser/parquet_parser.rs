@@ -40,6 +40,7 @@ impl ParquetParser {
             tokio_util::compat::Compat<opendal::FuturesAsyncReader>,
         >,
         file_name: String,
+        offset: usize,
     ) {
         #[for_await]
         for record_batch in record_batch_stream {
@@ -49,6 +50,7 @@ impl ParquetParser {
                 record_batch,
                 &self.rw_columns,
                 file_name.clone(),
+                offset,
             )?;
             yield chunk;
         }
@@ -81,6 +83,7 @@ fn convert_record_batch_to_stream_chunk(
     record_batch: RecordBatch,
     source_columns: &[SourceColumnDesc],
     file_name: String,
+    offset: usize,
 ) -> Result<StreamChunk, crate::error::ConnectorError> {
     let size = source_columns.len();
     let mut chunk_columns = Vec::with_capacity(source_columns.len() + MAX_HIDDEN_COLUMN_NUMS);
@@ -132,7 +135,7 @@ fn convert_record_batch_to_stream_chunk(
                                 risingwave_pb::plan_common::additional_column::ColumnType::Offset(_) =>{
                                     let mut array_builder =
                                     ArrayBuilderImpl::with_type(size, source_column.data_type.clone());
-                                    let datum: Datum =  Some(ScalarImpl::Utf8("0".into()));
+                                    let datum: Datum =  Some(ScalarImpl::Utf8(offset.to_string().into()));
                                     array_builder.append_n(record_batch.num_rows(), datum);
                                     let res = array_builder.finish();
                                     let column = Arc::new(res);
