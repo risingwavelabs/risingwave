@@ -43,7 +43,7 @@ impl DockerServiceConfig for SchemaRegistryConfig {
             ("SCHEMA_REGISTRY_HOST_NAME".to_owned(), self.address.clone()),
             (
                 "SCHEMA_REGISTRY_LISTENERS".to_owned(),
-                format!("http://{}:{}", self.address, self.port),
+                format!("http://{}:{}", "0.0.0.0", "8081"),
             ),
             (
                 "SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS".to_owned(),
