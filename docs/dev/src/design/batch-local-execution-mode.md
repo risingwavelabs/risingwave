@@ -17,14 +17,14 @@ requirement of point queries, and in this article we introduce local execution m
 
 ## Design
 
-![Frontend Flow](./images/batch-local-execution-mode/frontend-flow.svg)
+![Frontend Flow](../images/batch-local-execution-mode/frontend-flow.svg)
 
 ## Example 1: select a from t where b in (1, 2, 3, 4)
 
 Let's use the above SQL as an example:
 
 
-![Example 1](./images/batch-local-execution-mode/example1.svg)
+![Example 1](../images/batch-local-execution-mode/example1.svg)
 
 The key changes from the distributed mode:
 
@@ -36,7 +36,7 @@ The key changes from the distributed mode:
 Following is the plan and execution of above sql in local mode:
 
 
-![Example 2](./images/batch-local-execution-mode/example2.svg)
+![Example 2](../images/batch-local-execution-mode/example2.svg)
 
 As explained above, the lookup join/exchange phase will be executed directly on frontend. The pushdown(filter/table, both the build and probe side) will be issued by executors rather than scheduler.
 
