@@ -17,11 +17,11 @@ pub mod parquet_file_reader;
 use std::collections::HashMap;
 
 use anyhow::anyhow;
-pub use parquet_file_reader::*;
 use async_trait::async_trait;
 use futures::StreamExt;
 use iceberg::spec::{DataContentType, ManifestList};
 use itertools::Itertools;
+pub use parquet_file_reader::*;
 use risingwave_common::bail;
 use risingwave_common::types::JsonbVal;
 use serde::{Deserialize, Serialize};
