@@ -1,11 +1,6 @@
 # Data Model and Encoding
 
-- [Data Model and Encoding](#data-model-and-encoding)
-  - [Data Model](#data-model)
-  - [In-Memory Encoding](#in-memory-encoding)
-  - [On-Disk Encoding](#on-disk-encoding)
-
-<!-- Created by https://github.com/ekalinin/github-markdown-toc -->
+<!-- toc -->
 
 ## Data Model
 
@@ -26,7 +21,7 @@ Primitive data types:
 - Strings: `VARCHAR`
 - Temporals: `DATE`, `TIMESTAMP`, `TIMESTAMP WITH TIME ZONE`, `TIME`, `INTERVAL`
 
-Composite data types (WIP):
+Composite data types:
 
 - `Struct`: A structure with a list of named, strong-typed fields.
 - `List`: A variable-length list of values with same data type.
