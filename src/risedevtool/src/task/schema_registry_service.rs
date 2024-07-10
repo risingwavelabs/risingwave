@@ -15,7 +15,7 @@
 use super::docker_service::{DockerService, DockerServiceConfig};
 use crate::SchemaRegistryConfig;
 
-// Schema Registry listener port in the container.
+/// Schema Registry listener port in the container.
 const SCHEMA_REGISTRY_LISTENER_PORT: &str = "8081";
 
 impl DockerServiceConfig for SchemaRegistryConfig {
