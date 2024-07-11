@@ -75,6 +75,7 @@ impl MergeExecutor {
 
     #[cfg(test)]
     pub fn for_test(
+        actor_id: ActorId,
         inputs: Vec<super::exchange::permit::Receiver>,
         shared_context: Arc<SharedContext>,
     ) -> Self {
@@ -82,7 +83,7 @@ impl MergeExecutor {
         use crate::executor::exchange::input::Input;
 
         Self::new(
-            ActorContext::for_test(114),
+            ActorContext::for_test(actor_id),
             514,
             1919,
             inputs
@@ -92,7 +93,7 @@ impl MergeExecutor {
                     LocalInput::new(
                         input,
                         idx as ActorId,
-                        114,
+                        actor_id,
                         shared_context.local_barrier_manager.clone(),
                     )
                     .boxed_input()
@@ -508,7 +509,7 @@ mod tests {
             rxs.push(rx);
         }
         let barrier_test_env = LocalBarrierTestEnv::for_test().await;
-        let merger = MergeExecutor::for_test(rxs, barrier_test_env.shared_context.clone());
+        let merger = MergeExecutor::for_test(233, rxs, barrier_test_env.shared_context.clone());
         let actor_id = merger.actor_context.id;
         let mut handles = Vec::with_capacity(CHANNEL_NUMBER);
 

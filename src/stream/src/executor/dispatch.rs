@@ -1179,7 +1179,7 @@ mod tests {
         let barrier_test_env = LocalBarrierTestEnv::for_test().await;
         let input = Executor::new(
             Default::default(),
-            ReceiverExecutor::for_test(rx, barrier_test_env.shared_context.clone()).boxed(),
+            ReceiverExecutor::for_test(233, rx, barrier_test_env.shared_context.clone()).boxed(),
         );
         let ctx = Arc::new(SharedContext::for_test());
         let metrics = Arc::new(StreamingMetrics::unused());

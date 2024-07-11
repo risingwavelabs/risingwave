@@ -68,7 +68,8 @@ async fn test_merger_sum_aggr() {
                 pk_indices: PkIndices::new(),
                 identity: "ReceiverExecutor".to_string(),
             },
-            ReceiverExecutor::for_test(input_rx, barrier_test_env.shared_context.clone()).boxed(),
+            ReceiverExecutor::for_test(actor_id, input_rx, barrier_test_env.shared_context.clone())
+                .boxed(),
         );
         let agg_calls = vec![
             AggCall::from_pretty("(count:int8)"),
@@ -118,6 +119,7 @@ async fn test_merger_sum_aggr() {
 
     // create a round robin dispatcher, which dispatches messages to the actors
 
+    let actor_id = gen_next_actor_id();
     let (input, rx) = channel_for_test();
     let receiver_op = Executor::new(
         ExecutorInfo {
@@ -126,7 +128,7 @@ async fn test_merger_sum_aggr() {
             pk_indices: PkIndices::new(),
             identity: "ReceiverExecutor".to_string(),
         },
-        ReceiverExecutor::for_test(rx, barrier_test_env.shared_context.clone()).boxed(),
+        ReceiverExecutor::for_test(actor_id, rx, barrier_test_env.shared_context.clone()).boxed(),
     );
     let dispatcher = DispatchExecutor::new(
         receiver_op,
@@ -145,7 +147,7 @@ async fn test_merger_sum_aggr() {
         dispatcher,
         vec![],
         StreamingMetrics::unused().into(),
-        ActorContext::for_test(gen_next_actor_id()),
+        ActorContext::for_test(actor_id),
         expr_context.clone(),
         barrier_test_env
             .shared_context
@@ -167,7 +169,12 @@ async fn test_merger_sum_aggr() {
             pk_indices: PkIndices::new(),
             identity: "MergeExecutor".to_string(),
         },
-        MergeExecutor::for_test(outputs, barrier_test_env.shared_context.clone()).boxed(),
+        MergeExecutor::for_test(
+            actor_ctx.id,
+            outputs,
+            barrier_test_env.shared_context.clone(),
+        )
+        .boxed(),
     );
 
     // for global aggregator, we need to sum data and sum row count

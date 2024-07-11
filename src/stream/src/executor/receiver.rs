@@ -73,6 +73,7 @@ impl ReceiverExecutor {
 
     #[cfg(test)]
     pub fn for_test(
+        actor_id: ActorId,
         input: super::exchange::permit::Receiver,
         shared_context: Arc<SharedContext>,
     ) -> Self {
@@ -80,11 +81,16 @@ impl ReceiverExecutor {
         use crate::executor::exchange::input::Input;
 
         Self::new(
-            ActorContext::for_test(114),
+            ActorContext::for_test(actor_id),
             514,
             1919,
-            LocalInput::new(input, 0, 114, shared_context.local_barrier_manager.clone())
-                .boxed_input(),
+            LocalInput::new(
+                input,
+                0,
+                actor_id,
+                shared_context.local_barrier_manager.clone(),
+            )
+            .boxed_input(),
             shared_context,
             810,
             StreamingMetrics::unused().into(),
