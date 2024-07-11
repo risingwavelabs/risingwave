@@ -1080,6 +1080,7 @@ impl SpecificParserConfig {
         encoding_config: EncodingProperties::Json(JsonProperties {
             use_schema_registry: false,
             timestamptz_handling: None,
+            single_blob_column: None,
         }),
         protocol_config: ProtocolProperties::Plain,
     };
@@ -1122,6 +1123,7 @@ pub struct CsvProperties {
 pub struct JsonProperties {
     pub use_schema_registry: bool,
     pub timestamptz_handling: Option<TimestamptzHandling>,
+    pub single_blob_column: Option<String>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -1277,20 +1279,30 @@ impl SpecificParserConfig {
                 | SourceFormat::Debezium
                 | SourceFormat::Maxwell
                 | SourceFormat::Canal
-                | SourceFormat::Upsert
-                | SourceFormat::Dynamodb
-                | SourceFormat::DynamodbCdc,
+                | SourceFormat::Upsert,
                 SourceEncode::Json,
             ) => EncodingProperties::Json(JsonProperties {
                 use_schema_registry: info.use_schema_registry,
                 timestamptz_handling: TimestamptzHandling::from_options(
                     &info.format_encode_options,
                 )?,
+                single_blob_column: None,
             }),
+
+            (SourceFormat::Dynamodb | SourceFormat::DynamodbCdc, SourceEncode::Json) => {
+                EncodingProperties::Json(JsonProperties {
+                    use_schema_registry: info.use_schema_registry,
+                    timestamptz_handling: TimestamptzHandling::from_options(
+                        &info.format_encode_options,
+                    )?,
+                    single_blob_column: Some(info.json_single_blob_column.clone()),
+                })
+            }
             (SourceFormat::DebeziumMongo, SourceEncode::Json) => {
                 EncodingProperties::Json(JsonProperties {
                     use_schema_registry: false,
                     timestamptz_handling: None,
+                    single_blob_column: None,
                 })
             }
             (SourceFormat::Plain, SourceEncode::Bytes) => {

@@ -302,6 +302,7 @@ pub(crate) async fn bind_columns_from_source(
     const MESSAGE_NAME_KEY: &str = "message";
     const KEY_MESSAGE_NAME_KEY: &str = "key.message";
     const NAME_STRATEGY_KEY: &str = "schema.registry.name.strategy";
+    const JSON_SINGLE_BLOB_COLUMN_KEY: &str = "single_blob_column";
 
     let is_kafka: bool = with_properties.is_kafka_connector();
     let format_encode_options = WithOptions::try_from(source_schema.row_options())?.into_inner();
@@ -466,6 +467,13 @@ pub(crate) async fn bind_columns_from_source(
                     &mut format_encode_options_to_consume,
                     TimestamptzHandling::OPTION_KEY,
                 );
+            }
+
+            if let Some(ast_string) = try_consume_string_from_options(
+                &mut format_encode_options_to_consume,
+                JSON_SINGLE_BLOB_COLUMN_KEY,
+            ) {
+                stream_source_info.json_single_blob_column = ast_string.0;
             }
 
             let schema_config = get_json_schema_location(&mut format_encode_options_to_consume)?;
@@ -847,18 +855,7 @@ pub(crate) async fn bind_source_pk(
                     additional_column_names
                 ))));
             }
-            if !sql_defined_pk {
-                return Err(RwError::from(ProtocolError(
-                    "Primary key must be specified when creating source with FORMAT DYNAMODB."
-                        .to_string(),
-                )));
-            }
-            if sql_defined_pk_names.len() < 2 {
-                return Err(RwError::from(ProtocolError(
-                    "Primary key must include at least two columns when creating source with FORMAT DYNAMODB."
-                        .to_string(),
-                )));
-            }
+            validate_dynamodb_source(source_info, columns, &sql_defined_pk_names, "DYNAMODB")?;
             sql_defined_pk_names
         }
         (Format::DynamodbCdc, Encode::Json) => {
@@ -868,18 +865,7 @@ pub(crate) async fn bind_source_pk(
                     additional_column_names
                 ))));
             }
-            if !sql_defined_pk {
-                return Err(RwError::from(ProtocolError(
-                    "Primary key must be specified when creating source with FORMAT DYNAMODB_CDC."
-                        .to_string(),
-                )));
-            }
-            if sql_defined_pk_names.len() < 2 {
-                return Err(RwError::from(ProtocolError(
-                    "Primary key must include at least two columns when creating source with FORMAT DYNAMODB_CDC."
-                        .to_string(),
-                )));
-            }
+            validate_dynamodb_source(source_info, columns, &sql_defined_pk_names, "DYNAMODB_CDC")?;
             sql_defined_pk_names
         }
         (Format::Debezium, Encode::Avro) => {
@@ -1261,6 +1247,52 @@ pub(super) fn check_nexmark_schema(
         return Err(RwError::from(ProtocolError(format!(
             "The schema of the nexmark source must specify all columns in order:\n{cmp}",
         ))));
+    }
+    Ok(())
+}
+
+fn validate_dynamodb_source(
+    source_info: &StreamSourceInfo,
+    columns: &mut [ColumnCatalog],
+    sql_defined_pk_names: &Vec<String>,
+    format_string: &str,
+) -> Result<()> {
+    if sql_defined_pk_names.is_empty() {
+        return Err(RwError::from(ProtocolError(format!(
+            "Primary key must be specified when creating source with FORMAT {}.",
+            format_string
+        ))));
+    }
+    if source_info.json_single_blob_column.is_empty() {
+        return Err(RwError::from(ProtocolError(format!(
+            "Single blob column must be specified when creating source with FORMAT {}.",
+            format_string
+        ))));
+    }
+    if sql_defined_pk_names.len() + 1 != columns.len() {
+        return Err(RwError::from(ProtocolError(
+            format!("Primary key must include all columns except single blob column when creating source with FORMAT {}.", format_string
+                ),
+        )));
+    }
+    let single_blob_columns = columns
+        .iter()
+        .filter_map(|col| {
+            if sql_defined_pk_names.contains(&col.column_desc.name) {
+                None
+            } else {
+                Some((col.name().to_string(), col.data_type().clone()))
+            }
+        })
+        .collect_vec();
+    if single_blob_columns.len() != 1
+        || single_blob_columns[0].0 != source_info.json_single_blob_column
+        || single_blob_columns[0].1 != DataType::Jsonb
+    {
+        return Err(RwError::from(ProtocolError(
+            format!("Single blob column must be a jsonb column and not a part of primary keys when creating source with FORMAT {}.", format_string
+                ),
+        )));
     }
     Ok(())
 }

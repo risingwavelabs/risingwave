@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use assert_matches::assert_matches;
 use risingwave_common::types::{DataType, DatumCow, ScalarRefImpl, ToDatumRef};
 
 use crate::parser::dynamodb::map_rw_type_to_dynamodb_type;
@@ -85,6 +86,7 @@ use crate::source::SourceColumnDesc;
 // }
 pub struct DynamodbChangeEvent<A> {
     value_accessor: A,
+    single_blob_column: String,
 }
 
 const OLD_IMAGE: &str = "OldImage";
@@ -101,8 +103,11 @@ impl<A> DynamodbChangeEvent<A>
 where
     A: Access,
 {
-    pub fn new(value_accessor: A) -> Self {
-        Self { value_accessor }
+    pub fn new(value_accessor: A, single_blob_column: String) -> Self {
+        Self {
+            value_accessor,
+            single_blob_column,
+        }
     }
 }
 
@@ -111,16 +116,28 @@ where
     A: Access,
 {
     fn access_field(&self, desc: &SourceColumnDesc) -> crate::parser::AccessResult<DatumCow<'_>> {
-        let dynamodb_type = map_rw_type_to_dynamodb_type(&desc.data_type)?;
-        match self.op()? {
-            ChangeEventOperation::Delete => self.value_accessor.access(
-                &[DYNAMODB, OLD_IMAGE, &desc.name, dynamodb_type.as_str()],
-                &desc.data_type,
-            ),
-            ChangeEventOperation::Upsert => self.value_accessor.access(
-                &[DYNAMODB, NEW_IMAGE, &desc.name, dynamodb_type.as_str()],
-                &desc.data_type,
-            ),
+        if desc.name == self.single_blob_column {
+            assert_matches!(desc.data_type, DataType::Jsonb);
+            match self.op()? {
+                ChangeEventOperation::Delete => self
+                    .value_accessor
+                    .access(&[DYNAMODB, OLD_IMAGE], &desc.data_type),
+                ChangeEventOperation::Upsert => self
+                    .value_accessor
+                    .access(&[DYNAMODB, NEW_IMAGE], &desc.data_type),
+            }
+        } else {
+            let dynamodb_type = map_rw_type_to_dynamodb_type(&desc.data_type)?;
+            match self.op()? {
+                ChangeEventOperation::Delete => self.value_accessor.access(
+                    &[DYNAMODB, OLD_IMAGE, &desc.name, dynamodb_type.as_str()],
+                    &desc.data_type,
+                ),
+                ChangeEventOperation::Upsert => self.value_accessor.access(
+                    &[DYNAMODB, NEW_IMAGE, &desc.name, dynamodb_type.as_str()],
+                    &desc.data_type,
+                ),
+            }
         }
     }
 

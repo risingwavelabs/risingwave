@@ -27,11 +27,16 @@ use crate::parser::{AccessBuilderImpl, EncodingProperties, JsonAccessBuilder};
 
 pub(crate) async fn build_dynamodb_json_accessor_builder(
     config: EncodingProperties,
-) -> ConnectorResult<AccessBuilderImpl> {
+) -> ConnectorResult<(AccessBuilderImpl, String)> {
     match config {
-        EncodingProperties::Json(json_config) => Ok(AccessBuilderImpl::Json(
-            JsonAccessBuilder::new_for_dynamodb(json_config)?,
-        )),
+        EncodingProperties::Json(json_config) => {
+            assert!(json_config.single_blob_column.is_some());
+            let single_blob_column = json_config.single_blob_column.clone().unwrap();
+            Ok((
+                AccessBuilderImpl::Json(JsonAccessBuilder::new_for_dynamodb(json_config)?),
+                single_blob_column,
+            ))
+        }
         _ => bail!("unsupported encoding for Dynamodb"),
     }
 }

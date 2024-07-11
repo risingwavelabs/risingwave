@@ -27,6 +27,7 @@ pub struct DynamodbCdcJsonParser {
     payload_builder: AccessBuilderImpl,
     pub(crate) rw_columns: Vec<SourceColumnDesc>,
     source_ctx: SourceContextRef,
+    single_blob_column: String,
 }
 
 impl DynamodbCdcJsonParser {
@@ -36,11 +37,13 @@ impl DynamodbCdcJsonParser {
         source_ctx: SourceContextRef,
     ) -> ConnectorResult<Self> {
         // the key of Dynamodb CDC are embedded value of primary key and partition key, which is not used here.
-        let payload_builder = build_dynamodb_json_accessor_builder(props.encoding_config).await?;
+        let (payload_builder, single_blob_column) =
+            build_dynamodb_json_accessor_builder(props.encoding_config).await?;
         Ok(Self {
             payload_builder,
             rw_columns,
             source_ctx,
+            single_blob_column,
         })
     }
 
@@ -50,7 +53,7 @@ impl DynamodbCdcJsonParser {
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> ConnectorResult<()> {
         let payload_accessor = self.payload_builder.generate_accessor(payload).await?;
-        let row_op = DynamodbChangeEvent::new(payload_accessor);
+        let row_op = DynamodbChangeEvent::new(payload_accessor, self.single_blob_column.clone());
         match apply_row_operation_on_stream_chunk_writer(&row_op, &mut writer) {
             Ok(_) => Ok(()),
             Err(err) => Err(err)?,

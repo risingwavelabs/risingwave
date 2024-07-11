@@ -277,6 +277,7 @@ mod tests {
                 encoding_config: EncodingProperties::Json(crate::parser::JsonProperties {
                     use_schema_registry: false,
                     timestamptz_handling: None,
+                    single_blob_column: None,
                 }),
             },
             data_types,

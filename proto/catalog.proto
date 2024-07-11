@@ -87,6 +87,7 @@ message StreamSourceInfo {
   // Handle the source relies on any sceret. The key is the propertity name and the value is the secret id and type.
   // For format and encode options.
   map<string, secret.SecretRef> format_encode_secret_refs = 16;
+  string json_single_blob_column = 17;
 }
 
 message Source {

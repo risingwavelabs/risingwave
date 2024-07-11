@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use assert_matches::assert_matches;
+use risingwave_common::types::DataType;
 use risingwave_connector_codec::decoder::Access;
 
 use crate::error::ConnectorResult;
@@ -53,6 +55,7 @@ pub struct DynamodbJsonParser {
     payload_builder: AccessBuilderImpl,
     pub(crate) rw_columns: Vec<SourceColumnDesc>,
     source_ctx: SourceContextRef,
+    single_blob_column: String,
 }
 
 impl DynamodbJsonParser {
@@ -61,11 +64,13 @@ impl DynamodbJsonParser {
         rw_columns: Vec<SourceColumnDesc>,
         source_ctx: SourceContextRef,
     ) -> ConnectorResult<Self> {
-        let payload_builder = build_dynamodb_json_accessor_builder(props.encoding_config).await?;
+        let (payload_builder, single_blob_column) =
+            build_dynamodb_json_accessor_builder(props.encoding_config).await?;
         Ok(Self {
             payload_builder,
             rw_columns,
             source_ctx,
+            single_blob_column,
         })
     }
 
@@ -76,11 +81,16 @@ impl DynamodbJsonParser {
     ) -> ConnectorResult<()> {
         let payload_accessor = self.payload_builder.generate_accessor(payload).await?;
         writer.do_insert(|column| {
-            let dynamodb_type = map_rw_type_to_dynamodb_type(&column.data_type)?;
-            payload_accessor.access(
-                &[ITEM, &column.name, dynamodb_type.as_str()],
-                &column.data_type,
-            )
+            if column.name == self.single_blob_column {
+                assert_matches!(column.data_type, DataType::Jsonb);
+                payload_accessor.access(&[ITEM], &column.data_type)
+            } else {
+                let dynamodb_type = map_rw_type_to_dynamodb_type(&column.data_type)?;
+                payload_accessor.access(
+                    &[ITEM, &column.name, dynamodb_type.as_str()],
+                    &column.data_type,
+                )
+            }
         })?;
         Ok(())
     }
