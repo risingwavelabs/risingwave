@@ -798,9 +798,12 @@ pub async fn start_service_as_election_leader(
 
     // Wait for the shutdown signal.
     tokio::select! {
+        // Idle manager informs to shutdown. Do nothing else but directly return.
         _ = idle_shutdown.cancelled() => {}
 
+        // External shutdown signal.
         _ = shutdown.cancelled() => {
+            // Wait for all other workers to shutdown for gracefulness.
             if election_client.is_leader() {
                 let res = metadata_manager.wait_till_all_worker_nodes_exit().await;
                 if let Err(e) = res {
@@ -810,7 +813,6 @@ pub async fn start_service_as_election_leader(
                     );
                 }
             }
-
             server_shutdown.cancel();
         }
     }

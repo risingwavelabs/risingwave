@@ -175,6 +175,7 @@ pub fn parse_standalone_opt_args(opts: &StandaloneOpts) -> ParsedStandaloneOpts 
     }
 }
 
+/// A service under standalone mode.
 struct Service {
     name: &'static str,
     runtime: BackgroundShutdownRuntime,
@@ -183,6 +184,12 @@ struct Service {
 }
 
 impl Service {
+    /// Spawn a new tokio runtime and start a service in it.
+    ///
+    /// By using a separate runtime, we get better isolation between services. For example,
+    ///
+    /// - The logs in the main runtime of each service can be distinguished by the thread name.
+    /// - Each service can be shutdown cleanly by shutting down its runtime.
     fn spawn<F, Fut>(name: &'static str, f: F) -> Self
     where
         F: FnOnce(CancellationToken) -> Fut,
@@ -204,12 +211,17 @@ impl Service {
         }
     }
 
+    /// Shutdown the service and the runtime gracefully.
+    ///
+    /// As long as the main task of the service is resolved after signaling `shutdown`,
+    /// the service is considered stopped and the runtime will be shutdown. This follows
+    /// the same convention as described in `risingwave_rt::main_okk`.
     async fn shutdown(self) {
         tracing::info!("stopping {} service...", self.name);
 
         self.shutdown.cancel();
         let _ = self.main_task.await;
-        drop(self.runtime);
+        drop(self.runtime); // shutdown in background
 
         tracing::info!("{} service stopped", self.name);
     }
@@ -218,6 +230,10 @@ impl Service {
 /// For `standalone` mode, we can configure and start multiple services in one process.
 /// `standalone` mode is meant to be used by our cloud service and docker,
 /// where we can configure and start multiple services in one process.
+///
+/// Services are started in the order of `meta`, `compute`, `frontend`, then `compactor`.
+/// When the `shutdown` token is signaled, all services will be stopped gracefully in the
+/// reverse order.
 pub async fn standalone(
     ParsedStandaloneOpts {
         meta_opts,
@@ -225,7 +241,7 @@ pub async fn standalone(
         frontend_opts,
         compactor_opts,
     }: ParsedStandaloneOpts,
-    root_shutdown: CancellationToken,
+    shutdown: CancellationToken,
 ) {
     tracing::info!("launching Risingwave in standalone mode");
 
@@ -319,14 +335,17 @@ It SHOULD NEVER be used in benchmarks and production environment!!!"
         );
     }
 
-    // Wait for services to finish.
+    // Wait for shutdown signals.
     tokio::select! {
+        // Meta service stopped itself, typically due to leadership loss of idleness.
+        // Directly exit in this case.
         _ = meta.as_ref().unwrap().shutdown.cancelled(), if meta.is_some() => {
             tracing::info!("meta service is stopped, terminating...");
             return;
         }
 
-        _ = root_shutdown.cancelled() => {
+        // Shutdown requested by the user.
+        _ = shutdown.cancelled() => {
             for service in [compactor, frontend, compute, meta].into_iter().flatten() {
                 service.shutdown().await;
             }

@@ -456,8 +456,7 @@ pub async fn compute_node_serve(
     // Wait for the shutdown signal.
     shutdown.cancelled().await;
 
-    // TODO(shutdown): gracefully unregister from the meta service (need to be cautious since it may
-    // trigger auto-scaling)
+    // TODO(shutdown): how does this interact with auto-scaling?
     meta_client.try_unregister().await;
 
     // NOTE(shutdown): We can't simply join the tonic server here because it only returns when all
