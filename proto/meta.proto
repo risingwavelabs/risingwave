@@ -546,36 +546,6 @@ message TableParallelism {
   }
 }
 
-message GetReschedulePlanRequest {
-  uint64 revision = 1;
-
-  message WorkerChanges {
-    repeated uint32 include_worker_ids = 1;
-    repeated uint32 exclude_worker_ids = 2;
-    optional uint32 target_parallelism = 3;
-    optional uint32 target_parallelism_per_worker = 4;
-  }
-
-  message StableResizePolicy {
-    map<uint32, WorkerChanges> fragment_worker_changes = 1;
-  }
-
-  oneof policy {
-    // The StableResizePolicy will generate a stable ReschedulePlan, without altering the distribution on WorkerId that's not involved.
-    // Note that this "Stable" doesn't refer to the "determinacy" of the algorithm.
-    // Multiple repeated calls may yield different ReschedulePlan results.
-    StableResizePolicy stable_resize_policy = 2;
-  }
-}
-
-message GetReschedulePlanResponse {
-  uint64 revision = 1;
-  // reschedule plan for each fragment
-  map<uint32, Reschedule> reschedules = 2;
-  // todo, refactor needed
-  bool success = 3;
-}
-
 // overwrite the MV/table/sink with the given id
 // Change a streaming job in place. You cannot use this to create a new streaming job 
 message UpdateStreamingJobRequest {
@@ -590,6 +560,7 @@ message UpdateStreamingJobRequest {
 }
 
 // We do not need to add an explicit status field here, we can just use the RPC status
+// TODO: This has to include the labels that we need to apply to the CN. Controller needs to pass these labels to CN
 message UpdateStreamingJobResponse {}
 
 message ListStreamingJobsRequest {}
