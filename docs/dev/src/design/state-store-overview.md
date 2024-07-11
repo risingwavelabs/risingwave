@@ -1,18 +1,6 @@
 # An Overview of RisingWave State Store
 
-- [An Overview of RisingWave State Store](#an-overview-of-risingwave-state-store)
-  - [Overview](#overview)
-  - [Architecture](#architecture)
-  - [The Hummock User API](#the-hummock-user-api)
-  - [Hummock Internals](#hummock-internals)
-    - [Storage Format](#storage-format)
-    - [Write Path](#write-path)
-    - [Read Path](#read-path)
-    - [Compaction](#compaction)
-    - [Transaction Management with Hummock Manager](#transaction-management-with-hummock-manager)
-    - [Checkpointing in Streaming](#checkpointing-in-streaming)
-
-<!-- Created by https://github.com/ekalinin/github-markdown-toc -->
+<!-- toc -->
 
 ## Overview
 

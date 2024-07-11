@@ -26,29 +26,27 @@
 # Specialized topics
 
 - [Develop Connectors](./connector/intro.md)
+    - [Source](./connector/source.md)
 - [Continuous Integration](./ci.md)
 
 ---
 
 # Design docs
 
-<!-- TODO: perhapts we need to reorder/group these docs? -->
-
 - [Architecture Design](./design/architecture-design.md)
-- [An Overview of RisingWave Streaming Engine](./design/streaming-overview.md)
-- [An Overview of RisingWave State Store](./design/state-store-overview.md)
+- [Streaming Engine](./design/streaming-overview.md)
+    - [Checkpoint](./design/checkpoint.md)
+    - [Aggregation](./design/aggregation.md)
+    - [MView on Top of MView](./design/mv-on-mv.md)
+    - [Backfill](./design/backfill.md)
+- [State Store](./design/state-store-overview.md)
+    - [Shared Buffer](./design/shared-buffer.md)
+    - [Relational Table](./design/relational-table.md)
+    - [Multiple Object Storage Backends](./design/multi-object-store.md)
 - [Meta Service](./design/meta-service.md)
-- [Create MView on Top of MView](./design/mv-on-mv.md)
-- [Checkpoint](./design/checkpoint.md)
-- [Design of Data Source](./design/data-source.md)
 - [Data Model and Encoding](./design/data-model-and-encoding.md)
-- [Design of Batch Local Execution Mode](./design/batch-local-execution-mode.md)
+- [Batch Local Execution Mode](./design/batch-local-execution-mode.md)
 - [Consistent Hash](./design/consistent-hash.md)
-- [Build RisingWave with Multiple Object Storage Backends](./design/multi-object-store.md)
-- [Backfill](./design/backfill.md)
-- [Aggregation](./design/aggregation.md)
-- [Shared Buffer](./design/shared-buffer.md)
-- [Relational Table](./design/relational-table.md)
 - [Keys](./design/keys.md)
 <!--
 

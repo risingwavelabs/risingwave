@@ -400,6 +400,12 @@ impl HummockVersion {
     pub fn build_sst_delta_infos(&self, version_delta: &HummockVersionDelta) -> Vec<SstDeltaInfo> {
         let mut infos = vec![];
 
+        // Skip trivial move delta for refiller
+        // The trivial move task only changes the position of the sst in the lsm, it does not modify the object information corresponding to the sst, and does not need to re-execute the refill.
+        if version_delta.trivial_move {
+            return infos;
+        }
+
         for (group_id, group_deltas) in &version_delta.group_deltas {
             let mut info = SstDeltaInfo::default();
 
