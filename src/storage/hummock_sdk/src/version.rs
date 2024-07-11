@@ -401,7 +401,7 @@ pub struct HummockVersionDelta {
     pub prev_id: u64,
     pub group_deltas: HashMap<CompactionGroupId, PbGroupDeltas>,
     pub max_committed_epoch: u64,
-    pub safe_epoch: u64,
+    safe_epoch: u64,
     pub trivial_move: bool,
     pub new_table_watermarks: HashMap<TableId, TableWatermarks>,
     pub removed_table_ids: HashSet<TableId>,
@@ -536,5 +536,13 @@ impl HummockVersionDelta {
                     .chain(new_log.old_value.iter().map(|sst| sst.object_id))
             }))
             .collect()
+    }
+
+    pub fn visible_table_safe_epoch(&self) -> u64 {
+        self.safe_epoch
+    }
+
+    pub fn set_safe_epoch(&mut self, safe_epoch: u64) {
+        self.safe_epoch = safe_epoch;
     }
 }
