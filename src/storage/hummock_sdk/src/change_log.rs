@@ -15,8 +15,8 @@
 use std::collections::HashMap;
 
 use risingwave_common::catalog::TableId;
-use risingwave_pb::hummock::hummock_version_delta::ChangeLogDelta;
-use risingwave_pb::hummock::{PbEpochNewChangeLog, TableChangeLog as PbTableChangeLog};
+use risingwave_pb::hummock::hummock_version_delta::PbChangeLogDelta;
+use risingwave_pb::hummock::{PbEpochNewChangeLog, PbTableChangeLog};
 use tracing::warn;
 
 use crate::version::SstableInfo;
@@ -134,7 +134,7 @@ pub fn build_table_change_log_delta<'a>(
                 TableId::new(table_id),
                 ChangeLogDelta {
                     truncate_epoch,
-                    new_log: Some(PbEpochNewChangeLog {
+                    new_log: Some(EpochNewChangeLog {
                         new_value: vec![],
                         old_value: vec![],
                         epochs: epochs.clone(),
@@ -147,11 +147,7 @@ pub fn build_table_change_log_delta<'a>(
         for table_id in &sst.table_ids {
             match table_change_log.get_mut(&TableId::new(*table_id)) {
                 Some(log) => {
-                    log.new_log
-                        .as_mut()
-                        .unwrap()
-                        .old_value
-                        .push(sst.clone().into());
+                    log.new_log.as_mut().unwrap().old_value.push(sst.clone());
                 }
                 None => {
                     warn!(table_id, ?sst, "old value sst contains non-log-store table");
@@ -162,15 +158,52 @@ pub fn build_table_change_log_delta<'a>(
     for sst in new_value_ssts {
         for table_id in &sst.table_ids {
             if let Some(log) = table_change_log.get_mut(&TableId::new(*table_id)) {
-                log.new_log
-                    .as_mut()
-                    .unwrap()
-                    .new_value
-                    .push(sst.clone().into());
+                log.new_log.as_mut().unwrap().new_value.push(sst.clone());
             }
         }
     }
     table_change_log
+}
+
+pub struct ChangeLogDelta {
+    pub truncate_epoch: u64,
+    pub new_log: Option<EpochNewChangeLog>,
+}
+
+impl From<&ChangeLogDelta> for PbChangeLogDelta {
+    fn from(val: &ChangeLogDelta) -> Self {
+        Self {
+            truncate_epoch: val.truncate_epoch,
+            new_log: val.new_log.as_ref().map(|a| a.into()),
+        }
+    }
+}
+
+impl From<&PbChangeLogDelta> for ChangeLogDelta {
+    fn from(val: &PbChangeLogDelta) -> Self {
+        Self {
+            truncate_epoch: val.truncate_epoch,
+            new_log: val.new_log.as_ref().map(|a| a.into()),
+        }
+    }
+}
+
+impl From<ChangeLogDelta> for PbChangeLogDelta {
+    fn from(val: ChangeLogDelta) -> Self {
+        Self {
+            truncate_epoch: val.truncate_epoch,
+            new_log: val.new_log.map(|a| a.into()),
+        }
+    }
+}
+
+impl From<PbChangeLogDelta> for ChangeLogDelta {
+    fn from(val: PbChangeLogDelta) -> Self {
+        Self {
+            truncate_epoch: val.truncate_epoch,
+            new_log: val.new_log.map(|a| a.into()),
+        }
+    }
 }
 
 #[cfg(test)]

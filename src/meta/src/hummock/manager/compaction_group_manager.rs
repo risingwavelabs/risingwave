@@ -22,17 +22,15 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     get_compaction_group_ids, TableGroupInfo,
 };
 use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGroupId};
-use risingwave_hummock_sdk::version::ReportTask;
+use risingwave_hummock_sdk::version::{GroupDelta, GroupDeltas, ReportTask};
 use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_meta_model_v2::compaction_config;
 use risingwave_pb::hummock::compact_task::TaskStatus;
-use risingwave_pb::hummock::group_delta::DeltaType;
-use risingwave_pb::hummock::hummock_version_delta::GroupDeltas;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
-    compact_task, CompactionConfig, CompactionGroupInfo, CompatibilityVersion, GroupConstruct,
-    GroupDelta, GroupDestroy, StateTableInfoDelta,
+    compact_task, CompactionConfig, CompactionGroupInfo, CompatibilityVersion, PbGroupConstruct,
+    PbGroupDestroy, PbStateTableInfoDelta,
 };
 use tokio::sync::OnceCell;
 
@@ -252,20 +250,20 @@ impl HummockManager {
                             }
                         };
 
-                    group_deltas.push(GroupDelta {
-                        delta_type: Some(DeltaType::GroupConstruct(GroupConstruct {
-                            group_config: Some(config),
-                            group_id,
-                            ..Default::default()
-                        })),
+                    let group_delta = GroupDelta::GroupConstruct(PbGroupConstruct {
+                        group_config: Some(config),
+                        group_id,
+                        ..Default::default()
                     });
+
+                    group_deltas.push(group_delta);
                 }
             }
             assert!(new_version_delta
                 .state_table_info_delta
                 .insert(
                     TableId::new(*table_id),
-                    StateTableInfoDelta {
+                    PbStateTableInfoDelta {
                         committed_epoch: epoch,
                         safe_epoch: epoch,
                         compaction_group_id: *raw_group_id,
@@ -343,9 +341,9 @@ impl HummockManager {
                 .entry(*group_id)
                 .or_default()
                 .group_deltas;
-            group_deltas.push(GroupDelta {
-                delta_type: Some(DeltaType::GroupDestroy(GroupDestroy {})),
-            });
+
+            let group_delta = GroupDelta::GroupDestroy(PbGroupDestroy {});
+            group_deltas.push(group_delta);
         }
 
         for (group_id, max_level) in groups_to_remove {
@@ -532,16 +530,14 @@ impl HummockManager {
                 new_version_delta.group_deltas.insert(
                     new_compaction_group_id,
                     GroupDeltas {
-                        group_deltas: vec![GroupDelta {
-                            delta_type: Some(DeltaType::GroupConstruct(GroupConstruct {
-                                group_config: Some(config.clone()),
-                                group_id: new_compaction_group_id,
-                                parent_group_id,
-                                new_sst_start_id,
-                                table_ids: vec![],
-                                version: CompatibilityVersion::NoMemberTableIds as i32,
-                            })),
-                        }],
+                        group_deltas: vec![GroupDelta::GroupConstruct(PbGroupConstruct {
+                            group_config: Some(config.clone()),
+                            group_id: new_compaction_group_id,
+                            parent_group_id,
+                            new_sst_start_id,
+                            table_ids: vec![],
+                            version: CompatibilityVersion::NoMemberTableIds as i32,
+                        })],
                     },
                 );
                 ((new_compaction_group_id, config), new_compaction_group_id)
@@ -561,7 +557,7 @@ impl HummockManager {
                     .state_table_info_delta
                     .insert(
                         table_id,
-                        StateTableInfoDelta {
+                        PbStateTableInfoDelta {
                             committed_epoch: info.committed_epoch,
                             safe_epoch: info.safe_epoch,
                             compaction_group_id: new_compaction_group_id,

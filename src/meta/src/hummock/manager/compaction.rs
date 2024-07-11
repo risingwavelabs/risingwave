@@ -48,14 +48,14 @@ use risingwave_hummock_sdk::table_stats::{
     add_prost_table_stats_map, purge_prost_table_stats, PbTableStatsMap,
 };
 use risingwave_hummock_sdk::version::{
-    CompactTask, HummockVersion, InputLevel, Level, Levels, ReportTask, SstableInfo,
+    CompactTask, GroupDelta, HummockVersion, InputLevel, IntraLevelDelta, Level, Levels,
+    ReportTask, SstableInfo,
 };
 use risingwave_hummock_sdk::{
     compact_task_to_string, statistics_compact_task, CompactionGroupId, HummockCompactionTaskId,
     HummockVersionId,
 };
 use risingwave_pb::hummock::compact_task::{TaskStatus, TaskType};
-use risingwave_pb::hummock::group_delta::DeltaType;
 use risingwave_pb::hummock::subscribe_compaction_event_request::{
     self, Event as RequestEvent, HeartBeat, PullTask,
 };
@@ -63,9 +63,9 @@ use risingwave_pb::hummock::subscribe_compaction_event_response::{
     Event as ResponseEvent, PullTaskAck,
 };
 use risingwave_pb::hummock::{
-    compact_task, CompactStatus as PbCompactStatus, CompactTaskAssignment, CompactionConfig,
-    GroupDelta, IntraLevelDelta, PbCompactTaskAssignment, StateTableInfoDelta,
-    SubscribeCompactionEventRequest, TableOption, TableSchema,
+    compact_task, CompactTaskAssignment, CompactionConfig, PbCompactStatus,
+    PbCompactTaskAssignment, StateTableInfoDelta, SubscribeCompactionEventRequest, TableOption,
+    TableSchema,
 };
 use rw_futures_util::pending_on_none;
 use thiserror_ext::AsReport;
@@ -166,29 +166,25 @@ impl<'a> HummockVersionTransaction<'a> {
         }
 
         for (level_idx, removed_table_ids) in removed_table_ids_map {
-            let group_delta = GroupDelta {
-                delta_type: Some(DeltaType::IntraLevel(IntraLevelDelta {
-                    level_idx,
-                    removed_table_ids,
-                    ..Default::default()
-                })),
-            };
+            let group_delta = GroupDelta::IntraLevel(IntraLevelDelta::new(
+                level_idx,
+                0, // default
+                removed_table_ids,
+                vec![], // default
+                0,      // default
+            ));
+
             group_deltas.push(group_delta);
         }
 
-        let group_delta = GroupDelta {
-            delta_type: Some(DeltaType::IntraLevel(IntraLevelDelta {
-                level_idx: compact_task.target_level,
-                inserted_table_infos: compact_task
-                    .sorted_output_ssts
-                    .iter()
-                    .map(|sst| sst.into())
-                    .collect(),
-                l0_sub_level_id: compact_task.target_sub_level_id,
-                vnode_partition_count: compact_task.split_weight_by_vnode,
-                ..Default::default()
-            })),
-        };
+        let group_delta = GroupDelta::IntraLevel(IntraLevelDelta::new(
+            compact_task.target_level,
+            compact_task.target_sub_level_id,
+            vec![], // default
+            compact_task.sorted_output_ssts.clone(),
+            compact_task.split_weight_by_vnode,
+        ));
+
         group_deltas.push(group_delta);
         let new_visible_table_safe_epoch = std::cmp::max(
             version_delta.latest_version().visible_table_safe_epoch(),

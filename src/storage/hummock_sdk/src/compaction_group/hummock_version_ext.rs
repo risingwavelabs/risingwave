@@ -19,8 +19,6 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_pb::hummock::group_delta::DeltaType;
-use risingwave_pb::hummock::hummock_version_delta::GroupDeltas;
 use risingwave_pb::hummock::{
     CompactionConfig, CompatibilityVersion, GroupConstruct, GroupDestroy, GroupMetaChange,
     GroupTableChange, LevelType, PbLevelType,
@@ -33,7 +31,8 @@ use crate::compaction_group::StaticCompactionGroupId;
 use crate::key_range::KeyRangeCommon;
 use crate::table_watermark::TableWatermarks;
 use crate::version::{
-    HummockVersion, HummockVersionDelta, Level, Levels, OverlappingLevel, SstableInfo,
+    GroupDelta, GroupDeltas, HummockVersion, HummockVersionDelta, Level, Levels, OverlappingLevel,
+    SstableInfo,
 };
 use crate::{can_concat, CompactionGroupId, HummockSstableId, HummockSstableObjectId};
 
@@ -51,7 +50,7 @@ pub struct GroupDeltasSummary {
 }
 
 pub fn summarize_group_deltas(group_deltas: &GroupDeltas) -> GroupDeltasSummary {
-    let mut delete_sst_levels = Vec::with_capacity(group_deltas.group_deltas.len());
+    let mut delete_sst_levels = Vec::with_capacity(group_deltas.get_group_deltas().len());
     let mut delete_sst_ids_set = HashSet::new();
     let mut insert_sst_level_id = u32::MAX;
     let mut insert_sub_level_id = u64::MAX;
@@ -62,37 +61,33 @@ pub fn summarize_group_deltas(group_deltas: &GroupDeltas) -> GroupDeltasSummary 
     let mut group_table_change = None;
     let mut new_vnode_partition_count = 0;
 
-    for group_delta in &group_deltas.group_deltas {
-        match group_delta.get_delta_type().unwrap() {
-            DeltaType::IntraLevel(intra_level) => {
-                if !intra_level.removed_table_ids.is_empty() {
-                    delete_sst_levels.push(intra_level.level_idx);
-                    delete_sst_ids_set.extend(intra_level.removed_table_ids.iter().clone());
+    for group_delta in group_deltas.get_group_deltas() {
+        match group_delta {
+            GroupDelta::IntraLevel(intra_level) => {
+                if !intra_level.get_removed_table_ids().is_empty() {
+                    delete_sst_levels.push(intra_level.get_level_idx());
+                    delete_sst_ids_set.extend(intra_level.get_removed_table_ids().iter().clone());
                 }
-                if !intra_level.inserted_table_infos.is_empty() {
-                    insert_sst_level_id = intra_level.level_idx;
-                    insert_sub_level_id = intra_level.l0_sub_level_id;
-                    insert_table_infos.extend(
-                        intra_level
-                            .inserted_table_infos
-                            .iter()
-                            .map(SstableInfo::from),
-                    );
+                if !intra_level.get_inserted_table_infos().is_empty() {
+                    insert_sst_level_id = intra_level.get_level_idx();
+                    insert_sub_level_id = intra_level.get_l0_sub_level_id();
+                    insert_table_infos
+                        .extend(intra_level.get_inserted_table_infos().iter().cloned());
                 }
-                new_vnode_partition_count = intra_level.vnode_partition_count;
+                new_vnode_partition_count = intra_level.get_vnode_partition_count();
             }
-            DeltaType::GroupConstruct(construct_delta) => {
+            GroupDelta::GroupConstruct(construct_delta) => {
                 assert!(group_construct.is_none());
                 group_construct = Some(construct_delta.clone());
             }
-            DeltaType::GroupDestroy(destroy_delta) => {
+            GroupDelta::GroupDestroy(destroy_delta) => {
                 assert!(group_destroy.is_none());
                 group_destroy = Some(destroy_delta.clone());
             }
-            DeltaType::GroupMetaChange(meta_delta) => {
+            GroupDelta::GroupMetaChange(meta_delta) => {
                 group_meta_changes.push(meta_delta.clone());
             }
-            DeltaType::GroupTableChange(meta_delta) => {
+            GroupDelta::GroupTableChange(meta_delta) => {
                 group_table_change = Some(meta_delta.clone());
             }
         }
@@ -402,9 +397,9 @@ impl HummockVersion {
 
             // Build only if all deltas are intra level deltas.
             if !group_deltas
-                .group_deltas
+                .get_group_deltas()
                 .iter()
-                .all(|delta| matches!(delta.get_delta_type().unwrap(), DeltaType::IntraLevel(..)))
+                .all(|delta| matches!(delta, GroupDelta::IntraLevel(_)))
             {
                 continue;
             }
@@ -412,22 +407,28 @@ impl HummockVersion {
             // TODO(MrCroxx): At most one insert delta is allowed here. It's okay for now with the
             // current `hummock::manager::gen_version_delta` implementation. Better refactor the
             // struct to reduce conventions.
-            for group_delta in &group_deltas.group_deltas {
-                if let DeltaType::IntraLevel(delta) = group_delta.get_delta_type().unwrap() {
-                    if !delta.inserted_table_infos.is_empty() {
-                        info.insert_sst_level = delta.level_idx;
-                        info.insert_sst_infos
-                            .extend(delta.inserted_table_infos.iter().map(SstableInfo::from));
-                    }
-                    if !delta.removed_table_ids.is_empty() {
-                        for id in &delta.removed_table_ids {
-                            if delta.level_idx == 0 {
-                                removed_l0_ssts.insert(*id);
-                            } else {
-                                removed_ssts.entry(delta.level_idx).or_default().insert(*id);
+            for group_delta in group_deltas.get_group_deltas() {
+                match group_delta {
+                    GroupDelta::IntraLevel(intra_level) => {
+                        if !intra_level.get_inserted_table_infos().is_empty() {
+                            info.insert_sst_level = intra_level.get_level_idx();
+                            info.insert_sst_infos
+                                .extend(intra_level.get_inserted_table_infos().iter().cloned());
+                        }
+                        if !intra_level.get_removed_table_ids().is_empty() {
+                            for id in intra_level.get_removed_table_ids() {
+                                if intra_level.get_level_idx() == 0 {
+                                    removed_l0_ssts.insert(*id);
+                                } else {
+                                    removed_ssts
+                                        .entry(intra_level.get_level_idx())
+                                        .or_default()
+                                        .insert(*id);
+                                }
                             }
                         }
                     }
+                    _ => unreachable!(),
                 }
             }
 
@@ -1299,14 +1300,15 @@ mod tests {
     use std::collections::HashMap;
 
     use risingwave_pb::hummock::group_delta::DeltaType;
-    use risingwave_pb::hummock::hummock_version_delta::GroupDeltas;
+    use risingwave_pb::hummock::hummock_version_delta::PbGroupDeltas;
     use risingwave_pb::hummock::{
-        CompactionConfig, GroupConstruct, GroupDelta, GroupDestroy, IntraLevelDelta, LevelType,
+        CompactionConfig, GroupConstruct, GroupDestroy, LevelType, PbIntraLevelDelta,
     };
 
     use crate::compaction_group::hummock_version_ext::build_initial_compaction_group_levels;
     use crate::version::{
-        HummockVersion, HummockVersionDelta, Level, Levels, OverlappingLevel, SstableInfo,
+        GroupDelta, GroupDeltas, HummockVersion, HummockVersionDelta, IntraLevelDelta, Level,
+        Levels, OverlappingLevel, SstableInfo,
     };
 
     #[test]
@@ -1390,40 +1392,36 @@ mod tests {
             (
                 2,
                 GroupDeltas {
-                    group_deltas: vec![GroupDelta {
-                        delta_type: Some(DeltaType::GroupConstruct(GroupConstruct {
-                            group_config: Some(CompactionConfig {
-                                max_level: 6,
-                                ..Default::default()
-                            }),
+                    group_deltas: vec![GroupDelta::GroupConstruct(GroupConstruct {
+                        group_config: Some(CompactionConfig {
+                            max_level: 6,
                             ..Default::default()
-                        })),
-                    }],
+                        }),
+                        ..Default::default()
+                    })],
                 },
             ),
             (
                 0,
                 GroupDeltas {
-                    group_deltas: vec![GroupDelta {
-                        delta_type: Some(DeltaType::GroupDestroy(GroupDestroy {})),
-                    }],
+                    group_deltas: vec![GroupDelta::GroupDestroy(GroupDestroy {})],
                 },
             ),
             (
                 1,
                 GroupDeltas {
-                    group_deltas: vec![GroupDelta {
-                        delta_type: Some(DeltaType::IntraLevel(IntraLevelDelta {
-                            level_idx: 1,
-                            inserted_table_infos: vec![SstableInfo {
-                                object_id: 1,
-                                sst_id: 1,
-                                ..Default::default()
-                            }
-                            .into()],
+                    group_deltas: vec![GroupDelta::IntraLevel(IntraLevelDelta::new(
+                        1,
+                        0,
+                        vec![],
+                        vec![SstableInfo {
+                            object_id: 1,
+                            sst_id: 1,
                             ..Default::default()
-                        })),
-                    }],
+                        }
+                        .into()],
+                        0,
+                    ))],
                 },
             ),
         ]);

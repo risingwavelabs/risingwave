@@ -23,17 +23,17 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_pb::hummock::compact_task::{PbTaskStatus, PbTaskType, TaskStatus, TaskType};
-use risingwave_pb::hummock::group_delta::DeltaType;
+use risingwave_pb::hummock::group_delta::PbDeltaType;
 use risingwave_pb::hummock::hummock_version::PbLevels;
 use risingwave_pb::hummock::hummock_version_delta::{ChangeLogDelta, PbGroupDeltas};
 use risingwave_pb::hummock::subscribe_compaction_event_request::PbReportTask;
 use risingwave_pb::hummock::{
-    BloomFilterType, CompactionConfig, LevelType, PbCompactTask, PbHummockVersion,
-    PbHummockVersionDelta, PbInputLevel, PbKeyRange, PbLevel, PbLevelType, PbOverlappingLevel,
+    BloomFilterType, CompactionConfig, LevelType, PbCompactTask, PbGroupConstruct, PbGroupDelta,
+    PbGroupDestroy, PbGroupMetaChange, PbGroupTableChange, PbHummockVersion, PbHummockVersionDelta,
+    PbInputLevel, PbIntraLevelDelta, PbKeyRange, PbLevel, PbLevelType, PbOverlappingLevel,
     PbSstableInfo, PbStateTableInfo, PbTableStats, PbValidationTask, StateTableInfo,
     StateTableInfoDelta, TableOption, TableSchema,
 };
-use serde::Serialize;
 use tracing::warn;
 
 use crate::change_log::TableChangeLog;
@@ -43,7 +43,7 @@ use crate::key_range::KeyRange;
 use crate::table_watermark::TableWatermarks;
 use crate::{CompactionGroupId, HummockSstableObjectId, HummockVersionId, FIRST_VERSION_ID};
 
-#[derive(Debug, Clone, PartialEq, Default, Serialize)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct OverlappingLevel {
     pub sub_levels: Vec<Level>,
     pub total_file_size: u64,
@@ -123,7 +123,7 @@ impl OverlappingLevel {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Default, Serialize)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct Level {
     pub level_idx: u32,
     pub level_type: LevelType,
@@ -248,12 +248,14 @@ impl Level {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Default, Serialize)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct Levels {
     pub levels: Vec<Level>,
     pub l0: Option<OverlappingLevel>,
     pub group_id: u64,
     pub parent_group_id: u64,
+
+    #[expect(deprecated)]
     pub member_table_ids: Vec<u32>,
 }
 
@@ -264,6 +266,14 @@ impl Levels {
 }
 
 impl Levels {
+    pub fn from_protobuf(pb_levels: &PbLevels) -> Self {
+        Self::from(pb_levels)
+    }
+
+    pub fn to_protobuf(&self) -> PbLevels {
+        self.into()
+    }
+
     pub fn estimated_encode_len(&self) -> usize {
         let mut basic = self
             .levels
@@ -310,7 +320,7 @@ impl From<&Levels> for PbLevels {
             group_id: levels.group_id,
             parent_group_id: levels.parent_group_id,
             #[expect(deprecated)]
-            member_table_ids: Default::default(),
+            member_table_ids: levels.member_table_ids.clone(),
         }
     }
 }
@@ -326,6 +336,7 @@ impl From<PbLevels> for Levels {
             levels: pb_levels.levels.into_iter().map(Level::from).collect_vec(),
             group_id: pb_levels.group_id,
             parent_group_id: pb_levels.parent_group_id,
+            #[expect(deprecated)]
             member_table_ids: pb_levels.member_table_ids.clone(),
         }
     }
@@ -747,7 +758,7 @@ impl HummockVersion {
 pub struct HummockVersionDelta {
     pub id: u64,
     pub prev_id: u64,
-    pub group_deltas: HashMap<CompactionGroupId, PbGroupDeltas>,
+    pub group_deltas: HashMap<CompactionGroupId, GroupDeltas>,
     pub max_committed_epoch: u64,
     safe_epoch: u64,
     pub trivial_move: bool,
@@ -791,17 +802,17 @@ impl HummockVersionDelta {
             .values()
             .flat_map(|group_deltas| {
                 group_deltas.group_deltas.iter().flat_map(|group_delta| {
-                    group_delta.delta_type.iter().flat_map(|delta_type| {
-                        static EMPTY_VEC: Vec<PbSstableInfo> = Vec::new();
-                        let sst_slice = match delta_type {
-                            DeltaType::IntraLevel(level_delta) => &level_delta.inserted_table_infos,
-                            DeltaType::GroupConstruct(_)
-                            | DeltaType::GroupDestroy(_)
-                            | DeltaType::GroupMetaChange(_)
-                            | DeltaType::GroupTableChange(_) => &EMPTY_VEC,
-                        };
-                        sst_slice.iter().map(|sst| sst.object_id)
-                    })
+                    static EMPTY_VEC: Vec<SstableInfo> = Vec::new();
+                    let sst_slice = match group_delta {
+                        GroupDelta::IntraLevel(level_delta) => {
+                            level_delta.get_inserted_table_infos()
+                        }
+                        GroupDelta::GroupConstruct(_)
+                        | GroupDelta::GroupDestroy(_)
+                        | GroupDelta::GroupMetaChange(_)
+                        | GroupDelta::GroupTableChange(_) => &EMPTY_VEC,
+                    };
+                    sst_slice.iter().map(|sst| sst.object_id)
                 })
             })
             .chain(self.change_log_delta.values().flat_map(|delta| {
@@ -829,7 +840,13 @@ impl From<&PbHummockVersionDelta> for HummockVersionDelta {
         Self {
             id: pb_version_delta.id,
             prev_id: pb_version_delta.prev_id,
-            group_deltas: pb_version_delta.group_deltas.clone(),
+            group_deltas: pb_version_delta
+                .group_deltas
+                .iter()
+                .map(|(group_id, deltas)| {
+                    (*group_id as CompactionGroupId, GroupDeltas::from(deltas))
+                })
+                .collect(),
             max_committed_epoch: pb_version_delta.max_committed_epoch,
             safe_epoch: pb_version_delta.safe_epoch,
             trivial_move: pb_version_delta.trivial_move,
@@ -873,7 +890,11 @@ impl From<&HummockVersionDelta> for PbHummockVersionDelta {
         Self {
             id: version_delta.id,
             prev_id: version_delta.prev_id,
-            group_deltas: version_delta.group_deltas.clone(),
+            group_deltas: version_delta
+                .group_deltas
+                .iter()
+                .map(|(group_id, deltas)| (*group_id as _, deltas.into()))
+                .collect(),
             max_committed_epoch: version_delta.max_committed_epoch,
             safe_epoch: version_delta.safe_epoch,
             trivial_move: version_delta.trivial_move,
@@ -906,7 +927,11 @@ impl From<HummockVersionDelta> for PbHummockVersionDelta {
         Self {
             id: version_delta.id,
             prev_id: version_delta.prev_id,
-            group_deltas: version_delta.group_deltas,
+            group_deltas: version_delta
+                .group_deltas
+                .into_iter()
+                .map(|(group_id, deltas)| (group_id as _, deltas.into()))
+                .collect(),
             max_committed_epoch: version_delta.max_committed_epoch,
             safe_epoch: version_delta.safe_epoch,
             trivial_move: version_delta.trivial_move,
@@ -939,7 +964,11 @@ impl From<PbHummockVersionDelta> for HummockVersionDelta {
         Self {
             id: pb_version_delta.id,
             prev_id: pb_version_delta.prev_id,
-            group_deltas: pb_version_delta.group_deltas,
+            group_deltas: pb_version_delta
+                .group_deltas
+                .into_iter()
+                .map(|(group_id, deltas)| (group_id as CompactionGroupId, deltas.into()))
+                .collect(),
             max_committed_epoch: pb_version_delta.max_committed_epoch,
             safe_epoch: pb_version_delta.safe_epoch,
             trivial_move: pb_version_delta.trivial_move,
@@ -975,7 +1004,7 @@ impl From<PbHummockVersionDelta> for HummockVersionDelta {
     }
 }
 
-#[derive(Debug, PartialEq, Clone, Default, Serialize)]
+#[derive(Debug, PartialEq, Clone, Default)]
 pub struct SstableInfo {
     pub object_id: u64,
     pub sst_id: u64,
@@ -1163,7 +1192,7 @@ impl SstableInfo {
     }
 }
 
-#[derive(Clone, PartialEq, Default, Debug, Serialize)]
+#[derive(Clone, PartialEq, Default, Debug)]
 pub struct InputLevel {
     pub level_idx: u32,
     pub level_type: LevelType,
@@ -1265,7 +1294,7 @@ pub struct CompactTask {
     pub sorted_output_ssts: Vec<SstableInfo>,
     /// task id assigned by hummock storage service
     pub task_id: u64,
-    /// compaction output will be added to `target_level`` of LSM after compaction
+    /// compaction output will be added to `target_level` of LSM after compaction
     pub target_level: u32,
     pub gc_delete_keys: bool,
     /// Lbase in LSM
@@ -1283,7 +1312,7 @@ pub struct CompactTask {
     pub target_sub_level_id: u64,
     /// Identifies whether the task is `space_reclaim`, if the `compact_task_type` increases, it will be refactored to enum
     pub task_type: TaskType,
-    /// Deprecated. use table_vnode_partition instead;
+    /// Deprecated. use `table_vnode_partition` instead;
     pub split_by_state_table: bool,
     /// Compaction needs to cut the state table every time 1/weight of vnodes in the table have been processed.
     /// Deprecated. use `table_vnode_partition` instead;
@@ -1574,7 +1603,7 @@ impl CompactTask {
     }
 }
 
-#[derive(Clone, PartialEq, Default, Serialize)]
+#[derive(Clone, PartialEq, Default)]
 pub struct ValidationTask {
     pub sst_infos: Vec<SstableInfo>,
     pub sst_id_to_worker_id: HashMap<u64, u32>,
@@ -1655,5 +1684,294 @@ impl From<ReportTask> for PbCompactTask {
                 .collect_vec(),
             ..Default::default()
         }
+    }
+}
+
+// for version delta
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct IntraLevelDelta {
+    level_idx: u32,
+    l0_sub_level_id: u64,
+    removed_table_ids: Vec<u64>,
+    inserted_table_infos: Vec<SstableInfo>,
+    vnode_partition_count: u32,
+}
+
+impl IntraLevelDelta {
+    pub fn estimated_encode_len(&self) -> usize {
+        size_of::<u32>()
+            + size_of::<u64>()
+            + self.removed_table_ids.len() * size_of::<u32>()
+            + self
+                .inserted_table_infos
+                .iter()
+                .map(|sst| sst.estimated_encode_len())
+                .sum::<usize>()
+            + size_of::<u32>()
+    }
+}
+
+impl From<PbIntraLevelDelta> for IntraLevelDelta {
+    fn from(pb_intra_level_delta: PbIntraLevelDelta) -> Self {
+        Self {
+            level_idx: pb_intra_level_delta.level_idx,
+            l0_sub_level_id: pb_intra_level_delta.l0_sub_level_id,
+            removed_table_ids: pb_intra_level_delta.removed_table_ids.clone(),
+            inserted_table_infos: pb_intra_level_delta
+                .inserted_table_infos
+                .into_iter()
+                .map(SstableInfo::from)
+                .collect_vec(),
+            vnode_partition_count: pb_intra_level_delta.vnode_partition_count,
+        }
+    }
+}
+
+impl From<IntraLevelDelta> for PbIntraLevelDelta {
+    fn from(intra_level_delta: IntraLevelDelta) -> Self {
+        Self {
+            level_idx: intra_level_delta.level_idx,
+            l0_sub_level_id: intra_level_delta.l0_sub_level_id,
+            removed_table_ids: intra_level_delta.removed_table_ids.clone(),
+            inserted_table_infos: intra_level_delta
+                .inserted_table_infos
+                .into_iter()
+                .map(|sst| sst.into())
+                .collect_vec(),
+            vnode_partition_count: intra_level_delta.vnode_partition_count,
+        }
+    }
+}
+
+impl From<&IntraLevelDelta> for PbIntraLevelDelta {
+    fn from(intra_level_delta: &IntraLevelDelta) -> Self {
+        Self {
+            level_idx: intra_level_delta.level_idx,
+            l0_sub_level_id: intra_level_delta.l0_sub_level_id,
+            removed_table_ids: intra_level_delta.removed_table_ids.clone(),
+            inserted_table_infos: intra_level_delta
+                .inserted_table_infos
+                .iter()
+                .map(|sst| sst.into())
+                .collect_vec(),
+            vnode_partition_count: intra_level_delta.vnode_partition_count,
+        }
+    }
+}
+
+impl From<&PbIntraLevelDelta> for IntraLevelDelta {
+    fn from(pb_intra_level_delta: &PbIntraLevelDelta) -> Self {
+        Self {
+            level_idx: pb_intra_level_delta.level_idx,
+            l0_sub_level_id: pb_intra_level_delta.l0_sub_level_id,
+            removed_table_ids: pb_intra_level_delta.removed_table_ids.clone(),
+            inserted_table_infos: pb_intra_level_delta
+                .inserted_table_infos
+                .iter()
+                .map(SstableInfo::from)
+                .collect_vec(),
+            vnode_partition_count: pb_intra_level_delta.vnode_partition_count,
+        }
+    }
+}
+
+impl IntraLevelDelta {
+    pub fn get_level_idx(&self) -> u32 {
+        self.level_idx
+    }
+
+    pub fn get_l0_sub_level_id(&self) -> u64 {
+        self.l0_sub_level_id
+    }
+
+    pub fn get_removed_table_ids(&self) -> &Vec<u64> {
+        &self.removed_table_ids
+    }
+
+    pub fn get_inserted_table_infos(&self) -> &Vec<SstableInfo> {
+        &self.inserted_table_infos
+    }
+
+    pub fn get_vnode_partition_count(&self) -> u32 {
+        self.vnode_partition_count
+    }
+}
+
+impl IntraLevelDelta {
+    pub fn new(
+        level_idx: u32,
+        l0_sub_level_id: u64,
+        removed_table_ids: Vec<u64>,
+        inserted_table_infos: Vec<SstableInfo>,
+        vnode_partition_count: u32,
+    ) -> Self {
+        Self {
+            level_idx,
+            l0_sub_level_id,
+            removed_table_ids,
+            inserted_table_infos,
+            vnode_partition_count,
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum GroupDelta {
+    IntraLevel(IntraLevelDelta),
+    GroupConstruct(PbGroupConstruct),
+    GroupDestroy(PbGroupDestroy),
+    GroupMetaChange(PbGroupMetaChange),
+
+    #[allow(dead_code)]
+    GroupTableChange(PbGroupTableChange),
+}
+
+impl From<PbGroupDelta> for GroupDelta {
+    fn from(pb_group_delta: PbGroupDelta) -> Self {
+        match pb_group_delta.delta_type {
+            Some(PbDeltaType::IntraLevel(pb_intra_level_delta)) => {
+                GroupDelta::IntraLevel(IntraLevelDelta::from(pb_intra_level_delta))
+            }
+            Some(PbDeltaType::GroupConstruct(pb_group_construct)) => {
+                GroupDelta::GroupConstruct(pb_group_construct)
+            }
+            Some(PbDeltaType::GroupDestroy(pb_group_destroy)) => {
+                GroupDelta::GroupDestroy(pb_group_destroy)
+            }
+            Some(PbDeltaType::GroupMetaChange(pb_group_meta_change)) => {
+                GroupDelta::GroupMetaChange(pb_group_meta_change)
+            }
+            Some(PbDeltaType::GroupTableChange(pb_group_table_change)) => {
+                GroupDelta::GroupTableChange(pb_group_table_change)
+            }
+            None => panic!("delta_type is not set"),
+        }
+    }
+}
+
+impl From<GroupDelta> for PbGroupDelta {
+    fn from(group_delta: GroupDelta) -> Self {
+        match group_delta {
+            GroupDelta::IntraLevel(intra_level_delta) => PbGroupDelta {
+                delta_type: Some(PbDeltaType::IntraLevel(intra_level_delta.into())),
+            },
+            GroupDelta::GroupConstruct(pb_group_construct) => PbGroupDelta {
+                delta_type: Some(PbDeltaType::GroupConstruct(pb_group_construct)),
+            },
+            GroupDelta::GroupDestroy(pb_group_destroy) => PbGroupDelta {
+                delta_type: Some(PbDeltaType::GroupDestroy(pb_group_destroy)),
+            },
+            GroupDelta::GroupMetaChange(pb_group_meta_change) => PbGroupDelta {
+                delta_type: Some(PbDeltaType::GroupMetaChange(pb_group_meta_change)),
+            },
+            GroupDelta::GroupTableChange(pb_group_table_change) => PbGroupDelta {
+                delta_type: Some(PbDeltaType::GroupTableChange(pb_group_table_change)),
+            },
+        }
+    }
+}
+
+impl From<&GroupDelta> for PbGroupDelta {
+    fn from(group_delta: &GroupDelta) -> Self {
+        match group_delta {
+            GroupDelta::IntraLevel(intra_level_delta) => PbGroupDelta {
+                delta_type: Some(PbDeltaType::IntraLevel(intra_level_delta.into())),
+            },
+            GroupDelta::GroupConstruct(pb_group_construct) => PbGroupDelta {
+                delta_type: Some(PbDeltaType::GroupConstruct(pb_group_construct.clone())),
+            },
+            GroupDelta::GroupDestroy(pb_group_destroy) => PbGroupDelta {
+                delta_type: Some(PbDeltaType::GroupDestroy(pb_group_destroy.clone())),
+            },
+            GroupDelta::GroupMetaChange(pb_group_meta_change) => PbGroupDelta {
+                delta_type: Some(PbDeltaType::GroupMetaChange(pb_group_meta_change.clone())),
+            },
+            GroupDelta::GroupTableChange(pb_group_table_change) => PbGroupDelta {
+                delta_type: Some(PbDeltaType::GroupTableChange(pb_group_table_change.clone())),
+            },
+        }
+    }
+}
+
+impl From<&PbGroupDelta> for GroupDelta {
+    fn from(pb_group_delta: &PbGroupDelta) -> Self {
+        match &pb_group_delta.delta_type {
+            Some(PbDeltaType::IntraLevel(pb_intra_level_delta)) => {
+                GroupDelta::IntraLevel(IntraLevelDelta::from(pb_intra_level_delta))
+            }
+            Some(PbDeltaType::GroupConstruct(pb_group_construct)) => {
+                GroupDelta::GroupConstruct(pb_group_construct.clone())
+            }
+            Some(PbDeltaType::GroupDestroy(pb_group_destroy)) => {
+                GroupDelta::GroupDestroy(pb_group_destroy.clone())
+            }
+            Some(PbDeltaType::GroupMetaChange(pb_group_meta_change)) => {
+                GroupDelta::GroupMetaChange(pb_group_meta_change.clone())
+            }
+            Some(PbDeltaType::GroupTableChange(pb_group_table_change)) => {
+                GroupDelta::GroupTableChange(pb_group_table_change.clone())
+            }
+            None => panic!("delta_type is not set"),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Clone, Default)]
+pub struct GroupDeltas {
+    pub group_deltas: Vec<GroupDelta>,
+}
+
+impl From<PbGroupDeltas> for GroupDeltas {
+    fn from(pb_group_deltas: PbGroupDeltas) -> Self {
+        Self {
+            group_deltas: pb_group_deltas
+                .group_deltas
+                .into_iter()
+                .map(GroupDelta::from)
+                .collect_vec(),
+        }
+    }
+}
+
+impl From<GroupDeltas> for PbGroupDeltas {
+    fn from(group_deltas: GroupDeltas) -> Self {
+        Self {
+            group_deltas: group_deltas
+                .group_deltas
+                .into_iter()
+                .map(|group_delta| group_delta.into())
+                .collect_vec(),
+        }
+    }
+}
+
+impl From<&GroupDeltas> for PbGroupDeltas {
+    fn from(group_deltas: &GroupDeltas) -> Self {
+        Self {
+            group_deltas: group_deltas
+                .group_deltas
+                .iter()
+                .map(|group_delta| group_delta.into())
+                .collect_vec(),
+        }
+    }
+}
+
+impl From<&PbGroupDeltas> for GroupDeltas {
+    fn from(pb_group_deltas: &PbGroupDeltas) -> Self {
+        Self {
+            group_deltas: pb_group_deltas
+                .group_deltas
+                .iter()
+                .map(GroupDelta::from)
+                .collect_vec(),
+        }
+    }
+}
+
+impl GroupDeltas {
+    pub fn get_group_deltas(&self) -> &Vec<GroupDelta> {
+        &self.group_deltas
     }
 }

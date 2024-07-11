@@ -15,6 +15,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use risingwave_common::catalog::TableId;
+use risingwave_hummock_sdk::change_log::ChangeLogDelta;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::split_sst;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::table_stats::{
@@ -26,7 +27,6 @@ use risingwave_hummock_sdk::{
     CompactionGroupId, HummockContextId, HummockEpoch, HummockSstableObjectId, LocalSstableInfo,
 };
 use risingwave_pb::hummock::compact_task::{self};
-use risingwave_pb::hummock::hummock_version_delta::ChangeLogDelta;
 use risingwave_pb::hummock::HummockSnapshot;
 
 use crate::hummock::error::{Error, Result};
